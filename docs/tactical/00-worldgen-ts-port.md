@@ -69,8 +69,9 @@ mclone/
 - `5c201d1`: project scaffold landed (`pnpm`, Vitest, strict TS config, smoke test)
 - `2b1f527`: Java oracle harness landed under `oracle/`
 - Canonical PRNG fixtures now live under `test/fixtures/prng/` for seeds `0`, `1`, `12345`, and `2151901553968352745`
+- TypeScript `SimpleRandomSource` now matches the Java oracle for `nextInt()`, `nextLong()`, and `nextDouble()` across those fixture seeds
 - For MC 1.17.1, the relevant legacy LCG class is `net.minecraft.world.level.levelgen.SimpleRandomSource`; later Mojang mappings rename this to `LegacyRandomSource`
-- Next up: port the TS PRNG and validate it byte-for-byte against the Java fixtures
+- Next up: generate `ImprovedNoise` fixtures, then port `ImprovedNoise` and validate it against them
 
 ## Week 1 — concrete steps
 
