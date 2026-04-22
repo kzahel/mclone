@@ -61,4 +61,4 @@ Port the CPU-side texture ingestion stack that sits under Minecraft's block rend
 
 ## Next
 
-Tactical 13: block/state/property groundwork for model baking. `ResourceLocation` already landed here as a leaf dependency, so 13 now starts at `Block`, `BlockState`, `Property`, `BlockStateDefinition`, and a minimal `BlockGetter`.
+Tactical 13: [`13-block-state-groundwork.md`](13-block-state-groundwork.md) — block/state/property groundwork for model baking. `ResourceLocation` already landed here as a leaf dependency, so 13 now starts at `Block`, `BlockState`, `Property`, `BlockStateDefinition`, and a minimal `BlockGetter`.
