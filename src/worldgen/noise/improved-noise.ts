@@ -19,6 +19,7 @@ const GRADIENTS = [
 ] as const;
 
 export interface NoiseRandomSource {
+  nextInt(): number;
   nextDouble(): number;
   nextInt(bound: number): number;
 }

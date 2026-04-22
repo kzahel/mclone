@@ -34,7 +34,15 @@ The fixture stores:
 - the three coordinate axes
 - flattened `values` in `x-major,y-major,z-minor` order
 
+## PerlinNoise oracle
+
+`pnpm --silent oracle:gen noise --class PerlinNoise --seed 12345 --octaves -7,-6,-5,-4,-3,-2,-1,0 --samples test/fixtures/noise/_samples-3d.json > test/fixtures/noise/perlin-seed-12345-oct-m7-0.json`
+
+The shared sample grid in `test/fixtures/noise/_samples-3d.json` stores the `gridOrder` plus reusable `x`, `y`, and `z` axes. The dumper expands that into flattened `values` using the same `x-major,y-major,z-minor` order as the `ImprovedNoise` fixtures.
+
+Current tactical/01 slice covers the smaller `PerlinNoise` octave set `[-7..0]`. The wider `[-15..0]` range and the `SimplexNoise` / `BlendedNoise` fixtures come next.
+
 ## Wrappers
 
-- `oracle/build.sh`: compiles `oracle/java/*.java` into `oracle/classes`
-- `oracle/run.sh`: builds if needed, hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then runs `OracleDumper`
+- `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`
+- `oracle/run.sh`: builds if needed, then runs `OracleDumper`

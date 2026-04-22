@@ -125,6 +125,12 @@ export class SimpleRandomSource {
     return first * scale;
   }
 
+  public consumeCount(count: number): void {
+    for (let index = 0; index < count; index++) {
+      this.nextInt();
+    }
+  }
+
   private nextBits(bits: number): number {
     if (!Number.isInteger(bits) || bits < 1 || bits > 32) {
       throw new RangeError("bits must be between 1 and 32");

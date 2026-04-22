@@ -73,7 +73,7 @@ mclone/
 - Canonical `ImprovedNoise` fixtures now live under `test/fixtures/noise/` for the same seed set, sampled on a fixed 11x11x11 grid
 - TypeScript `ImprovedNoise` now matches the Java oracle across those fixed-grid samples
 - For MC 1.17.1, the relevant legacy LCG class is `net.minecraft.world.level.levelgen.SimpleRandomSource`; later Mojang mappings rename this to `LegacyRandomSource`
-- Next up: draft the tactical follow-up for octaved `PerlinNoise` and `NoiseSampler`
+- Tactical 00 is complete. Tactical 01 (`01-noise-octaves.md`) is now underway.
 
 ## Week 1 — concrete steps
 

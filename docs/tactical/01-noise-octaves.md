@@ -16,6 +16,12 @@ TS ports of `PerlinNoise`, `SimplexNoise`, and `BlendedNoise` — byte-identical
 
 Order matters: `PerlinNoise` is a prerequisite for `BlendedNoise`. `SimplexNoise` is independent and can be done in parallel.
 
+## Current status
+
+- Tactical 00 prerequisites are complete: oracle harness, `SimpleRandomSource`, and `ImprovedNoise`
+- First slice landed: shared 3D sample grid, `PerlinNoise` oracle support, committed `[-7..0]` fixtures for the canonical four seeds, and a TS `PerlinNoise` port validated against those fixtures
+- Next up: extend `PerlinNoise` coverage to `[-15..0]`, then move on to `SimplexNoise`
+
 ## Why these three
 
 `NoiseSampler.java` imports exactly these three classes from `synth/` (verified). Other `synth/` classes (`NormalNoise`, `SurfaceNoise`, `PerlinSimplexNoise`, `NoiseUtils`) aren't used by `NoiseSampler`; they're consumed by C&C Part 1 internals (`Cavifier`, `Aquifer`, `OreVeinifier`) and specific surface builders. Tactical 02 picks them up.
@@ -25,24 +31,26 @@ Order matters: `PerlinNoise` is a prerequisite for `BlendedNoise`. `SimplexNoise
 Extend the existing Java dumper with a `noise` subcommand. Shape:
 
 ```
-pnpm oracle:gen noise \
+pnpm --silent oracle:gen noise \
     --class PerlinNoise \
     --seed 12345 \
     --octaves -7,-6,-5,-4,-3,-2,-1,0 \
-    --samples grid.json \
+    --samples test/fixtures/noise/_samples-3d.json \
     > test/fixtures/noise/perlin-seed-12345-oct-m7-0.json
 ```
 
-Fixture JSON (proposed shape — finalize when writing the dumper):
+Fixture JSON (current shape):
 
 ```json
 {
-  "class": "PerlinNoise",
+  "noiseClass": "net.minecraft.world.level.levelgen.synth.PerlinNoise",
   "seed": "12345",
   "octaves": [-7,-6,-5,-4,-3,-2,-1,0],
-  "samples": [
-    { "x": 0.0, "y": 64.0, "z": 0.0, "value": 0.123456789 }
-  ]
+  "gridOrder": "x-major,y-major,z-minor",
+  "x": [0.0, 0.5],
+  "y": [64.0, 64.5],
+  "z": [0.0, 0.5],
+  "values": [0.123456789]
 }
 ```
 
@@ -80,10 +88,10 @@ oracle/java/
 
 ## Concrete steps
 
-1. **Extend the Java dumper** with a `noise` subcommand. Support `--class PerlinNoise|SimplexNoise|BlendedNoise`, seed, octave list (for Perlin), and a sample-point file (JSON list of `{x,y,z}`).
-2. **Generate canonical sample grids.** One small file per noise class: `test/fixtures/noise/_samples.json`. ≥1000 points per grid covering positive / negative / zero coordinates, including non-integer `x/y/z` (don't let integer-only samples hide bugs).
-3. **Emit fixtures** for each class × canonical seeds (the same four seeds as PRNG: `0`, `1`, `12345`, `2151901553968352745`). For `PerlinNoise`, additionally cover both canonical octave ranges used by `BlendedNoise`: `[-15..0]` and `[-7..0]`.
-4. **Port `PerlinNoise`** — validate against `[-7..0]` fixtures first (smaller, faster iteration), then `[-15..0]`.
+1. **Extend the Java dumper** with a `noise` subcommand. Support `--class PerlinNoise|SimplexNoise|BlendedNoise`, seed, octave list (for Perlin), and a reusable sample-grid file.
+2. **Generate canonical sample grids.** One shared 3D grid file currently lives at `test/fixtures/noise/_samples-3d.json`. It covers positive / negative / zero coordinates with non-integer `x/y/z`, and expands to 1331 samples.
+3. **Emit fixtures** for each class × canonical seeds (the same four seeds as PRNG: `0`, `1`, `12345`, `2151901553968352745`). `PerlinNoise` `[-7..0]` is done; `[-15..0]` is next.
+4. **Port `PerlinNoise`** — `[-7..0]` is done and fixture-backed. Next step is the wider `[-15..0]` range.
 5. **Port `SimplexNoise`** — independent, can be interleaved or parallel.
 6. **Port `BlendedNoise`** — glue over `PerlinNoise`; fixture validates that the combination + clamping works end-to-end.
 
