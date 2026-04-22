@@ -50,4 +50,4 @@ Port the first baked-block meshing path from Minecraft's client renderer: `Model
 
 ## Next
 
-Tactical 16: port the real core WGSL shader set for block rendering. Replace the stub `rendertype_solid` path with translated shader semantics, then add `cutout`, `translucent`, and `lines` so the first chunk-renderer slices can rely on the actual Minecraft shader contracts instead of placeholders.
+Tactical 16 is now documented in [`16-core-wgsl-shaders.md`](16-core-wgsl-shaders.md). The next slice after that is tactical 17: chunk/section compilation infrastructure (`RenderChunkRegion`, `ChunkBufferBuilderPack`, `VisGraph`, `ViewArea`, `ChunkRenderDispatcher`) so the renderer can move from one handcrafted smoke mesh to real section builds.

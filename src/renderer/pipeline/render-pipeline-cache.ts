@@ -1,5 +1,5 @@
 import { CompositeRenderType } from "../render-type";
-import { getShaderProgramDefinition, getStubShaderSource } from "../shader/shader-program-library";
+import { getShaderProgramDefinition, getShaderSource } from "../shader/shader-program-library";
 import { type ShaderProgramDefinition } from "../shader/shader-program";
 import { VertexFormat, VertexFormatMode } from "../vertex/vertex-format";
 import { VertexFormatElement } from "../vertex/vertex-format-element";
@@ -159,7 +159,7 @@ export class RenderPipelineCache {
     });
     const spec = createRenderPipelineDescriptorSpec(renderType, colorFormat, depthFormat);
     const module = this.device.createShaderModule({
-      code: getStubShaderSource(shaderName),
+      code: getShaderSource(shaderName),
     });
     const pipeline = this.device.createRenderPipeline({
       layout: pipelineLayout,

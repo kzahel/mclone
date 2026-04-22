@@ -58,6 +58,17 @@ const READBACK_FORMAT: GPUTextureFormat = "rgba8unorm";
 const DEPTH_FORMAT: GPUTextureFormat = "depth24plus";
 const WHITE_PIXEL = new Uint8Array([255, 255, 255, 255]);
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
+const VALIDATED_RENDER_TYPES = [
+  RenderType.solid(),
+  RenderType.cutoutMipped(),
+  RenderType.cutout(),
+  RenderType.translucent(),
+  RenderType.translucentMovingBlock(),
+  RenderType.translucentNoCrumbling(),
+  RenderType.tripwire(),
+  RenderType.lines(),
+  RenderType.lineStrip(),
+] as const;
 
 function uploadBuffer(device: GPUDevice, bytes: Uint8Array, usage: GPUBufferUsageFlags): GPUBuffer {
   const buffer = device.createBuffer({
@@ -194,6 +205,21 @@ function encodeDrawPass(
   pass.end();
 }
 
+function validateShaderPipelines(
+  pipelineCache: RenderPipelineCache,
+  colorFormat: GPUTextureFormat,
+  depthFormat: GPUTextureFormat,
+): void {
+  for (const renderType of VALIDATED_RENDER_TYPES) {
+    pipelineCache.getOrCreate(renderType, colorFormat, depthFormat);
+  }
+}
+
+async function popValidationError(device: GPUDevice, label: string): Promise<string | undefined> {
+  const error = await device.popErrorScope();
+  return error ? `${label}: ${error.message}` : undefined;
+}
+
 async function readCenterPixel(
   device: GPUDevice,
   texture: GPUTexture,
@@ -290,9 +316,16 @@ async function boot(): Promise<BootResult> {
     return { ok: false, reason: "render type format does not match the uploaded vertex format" };
   }
 
+  device.pushErrorScope("validation");
   const pipelineCache = new RenderPipelineCache(device);
+  validateShaderPipelines(pipelineCache, format, DEPTH_FORMAT);
   const canvasPipeline = pipelineCache.getOrCreate(renderType, format, DEPTH_FORMAT);
   const readbackPipeline = pipelineCache.getOrCreate(renderType, READBACK_FORMAT, DEPTH_FORMAT);
+  const pipelineError = await popValidationError(device, "WebGPU pipeline validation failed");
+  if (pipelineError) {
+    return { ok: false, reason: pipelineError };
+  }
+
   const sampler = device.createSampler({
     magFilter: "nearest",
     minFilter: "nearest",
@@ -329,11 +362,17 @@ async function boot(): Promise<BootResult> {
     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
   });
 
+  device.pushErrorScope("validation");
   const encoder = device.createCommandEncoder();
   encodeDrawPass(encoder, ctx.getCurrentTexture().createView(), canvasDepthView, canvasPipeline.pipeline, bindGroup, vertexBuffer);
   encodeDrawPass(encoder, readbackTexture.createView(), readbackDepthView, readbackPipeline.pipeline, bindGroup, vertexBuffer);
   device.queue.submit([encoder.finish()]);
   await device.queue.onSubmittedWorkDone();
+  const submissionError = await popValidationError(device, "WebGPU submission validation failed");
+  if (submissionError) {
+    return { ok: false, reason: submissionError };
+  }
+
   const centerPixel = await readCenterPixel(device, readbackTexture, canvas.width, canvas.height);
 
   const info = adapter.info ?? {};

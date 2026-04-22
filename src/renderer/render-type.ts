@@ -1,7 +1,7 @@
 import { DefaultVertexFormat } from "./vertex/default-vertex-format";
 import { BufferBuilder } from "./vertex/buffer-builder";
 import { VertexFormat, VertexFormatMode } from "./vertex/vertex-format";
-import { RenderStateShard, RenderStateShards, type CullStateShard, type DepthTestStateShard, type EmptyTextureStateShard, type LayeringStateShard, type LightmapStateShard, type LineStateShard, type OutputStateShard, type OverlayStateShard, type ShaderStateShard, type TexturingStateShard, type TransparencyStateShard, type WriteMaskStateShard } from "./render-state-shard";
+import { LineStateShard, RenderStateShard, RenderStateShards, type CullStateShard, type DepthTestStateShard, type EmptyTextureStateShard, type LayeringStateShard, type LightmapStateShard, type OutputStateShard, type OverlayStateShard, type ShaderStateShard, type TexturingStateShard, type TransparencyStateShard, type WriteMaskStateShard } from "./render-state-shard";
 
 export class RenderType extends RenderStateShard {
   private readonly asOptionalValue: RenderType | undefined;
@@ -98,6 +98,14 @@ export class RenderType extends RenderStateShard {
 
   public static lightning(): CompositeRenderType {
     return LIGHTNING;
+  }
+
+  public static lines(): CompositeRenderType {
+    return LINES;
+  }
+
+  public static lineStrip(): CompositeRenderType {
+    return LINE_STRIP;
   }
 
   public static chunkBufferLayers(): readonly RenderType[] {
@@ -357,6 +365,17 @@ function translucentState(shaderState: ShaderStateShard): RenderTypeCompositeSta
     .setShaderState(shaderState)
     .setTextureState(RenderStateShards.BLOCK_SHEET_MIPPED)
     .setTransparencyState(RenderStateShards.TRANSLUCENT_TRANSPARENCY)
+    .setOutputState(RenderStateShards.TRANSLUCENT_TARGET)
+    .createCompositeState(true);
+}
+
+function translucentMovingBlockState(): RenderTypeCompositeState {
+  return RenderTypeCompositeState.builder()
+    .setLightmapState(RenderStateShards.LIGHTMAP)
+    .setShaderState(RenderStateShards.RENDERTYPE_TRANSLUCENT_MOVING_BLOCK_SHADER)
+    .setTextureState(RenderStateShards.BLOCK_SHEET_MIPPED)
+    .setTransparencyState(RenderStateShards.TRANSLUCENT_TRANSPARENCY)
+    .setOutputState(RenderStateShards.ITEM_ENTITY_TARGET)
     .createCompositeState(true);
 }
 
@@ -366,6 +385,7 @@ function tripwireState(): RenderTypeCompositeState {
     .setShaderState(RenderStateShards.RENDERTYPE_TRIPWIRE_SHADER)
     .setTextureState(RenderStateShards.BLOCK_SHEET_MIPPED)
     .setTransparencyState(RenderStateShards.TRANSLUCENT_TRANSPARENCY)
+    .setOutputState(RenderStateShards.WEATHER_TARGET)
     .createCompositeState(true);
 }
 
@@ -428,7 +448,7 @@ const TRANSLUCENT_MOVING_BLOCK = RenderType.create(
   262_144,
   false,
   true,
-  translucentState(RenderStateShards.RENDERTYPE_TRANSLUCENT_MOVING_BLOCK_SHADER),
+  translucentMovingBlockState(),
 );
 
 const TRANSLUCENT_NO_CRUMBLING = RenderType.create(
@@ -462,5 +482,37 @@ const LIGHTNING = RenderType.create(
     .setShaderState(RenderStateShards.RENDERTYPE_LIGHTNING_SHADER)
     .setWriteMaskState(RenderStateShards.COLOR_DEPTH_WRITE)
     .setTransparencyState(RenderStateShards.LIGHTNING_TRANSPARENCY)
+    .createCompositeState(false),
+);
+
+const LINES = RenderType.create(
+  "lines",
+  DefaultVertexFormat.POSITION_COLOR_NORMAL,
+  VertexFormat.Mode.LINES,
+  256,
+  RenderTypeCompositeState.builder()
+    .setShaderState(RenderStateShards.RENDERTYPE_LINES_SHADER)
+    .setLineState(new LineStateShard())
+    .setLayeringState(RenderStateShards.VIEW_OFFSET_Z_LAYERING)
+    .setTransparencyState(RenderStateShards.TRANSLUCENT_TRANSPARENCY)
+    .setOutputState(RenderStateShards.ITEM_ENTITY_TARGET)
+    .setWriteMaskState(RenderStateShards.COLOR_DEPTH_WRITE)
+    .setCullState(RenderStateShards.NO_CULL)
+    .createCompositeState(false),
+);
+
+const LINE_STRIP = RenderType.create(
+  "line_strip",
+  DefaultVertexFormat.POSITION_COLOR_NORMAL,
+  VertexFormat.Mode.LINE_STRIP,
+  256,
+  RenderTypeCompositeState.builder()
+    .setShaderState(RenderStateShards.RENDERTYPE_LINES_SHADER)
+    .setLineState(new LineStateShard())
+    .setLayeringState(RenderStateShards.VIEW_OFFSET_Z_LAYERING)
+    .setTransparencyState(RenderStateShards.TRANSLUCENT_TRANSPARENCY)
+    .setOutputState(RenderStateShards.ITEM_ENTITY_TARGET)
+    .setWriteMaskState(RenderStateShards.COLOR_DEPTH_WRITE)
+    .setCullState(RenderStateShards.NO_CULL)
     .createCompositeState(false),
 );

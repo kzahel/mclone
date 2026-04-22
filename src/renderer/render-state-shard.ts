@@ -211,12 +211,13 @@ export class RenderStateShards {
   public static readonly POSITION_COLOR_SHADER = new ShaderStateShard("position_color");
   public static readonly POSITION_TEX_SHADER = new ShaderStateShard("position_tex");
   public static readonly RENDERTYPE_SOLID_SHADER = new ShaderStateShard("rendertype_solid");
-  public static readonly RENDERTYPE_CUTOUT_MIPPED_SHADER = new ShaderStateShard("rendertype_solid");
-  public static readonly RENDERTYPE_CUTOUT_SHADER = new ShaderStateShard("rendertype_solid");
-  public static readonly RENDERTYPE_TRANSLUCENT_SHADER = new ShaderStateShard("rendertype_solid");
-  public static readonly RENDERTYPE_TRANSLUCENT_MOVING_BLOCK_SHADER = new ShaderStateShard("rendertype_solid");
-  public static readonly RENDERTYPE_TRANSLUCENT_NO_CRUMBLING_SHADER = new ShaderStateShard("rendertype_solid");
-  public static readonly RENDERTYPE_TRIPWIRE_SHADER = new ShaderStateShard("rendertype_solid");
+  public static readonly RENDERTYPE_CUTOUT_MIPPED_SHADER = new ShaderStateShard("rendertype_cutout_mipped");
+  public static readonly RENDERTYPE_CUTOUT_SHADER = new ShaderStateShard("rendertype_cutout");
+  public static readonly RENDERTYPE_TRANSLUCENT_SHADER = new ShaderStateShard("rendertype_translucent");
+  public static readonly RENDERTYPE_TRANSLUCENT_MOVING_BLOCK_SHADER = new ShaderStateShard("rendertype_translucent_moving_block");
+  public static readonly RENDERTYPE_TRANSLUCENT_NO_CRUMBLING_SHADER = new ShaderStateShard("rendertype_translucent_no_crumbling");
+  public static readonly RENDERTYPE_TRIPWIRE_SHADER = new ShaderStateShard("rendertype_tripwire");
+  public static readonly RENDERTYPE_LINES_SHADER = new ShaderStateShard("rendertype_lines");
   public static readonly RENDERTYPE_LIGHTNING_SHADER = new ShaderStateShard("position_color");
 
   public static readonly BLOCK_SHEET_MIPPED = new TextureStateShard("minecraft:textures/atlas/blocks.png", false, true);
@@ -237,6 +238,10 @@ export class RenderStateShards {
   public static readonly COLOR_WRITE = new WriteMaskStateShard(true, false);
   public static readonly DEPTH_WRITE = new WriteMaskStateShard(false, true);
   public static readonly NO_LAYERING = new LayeringStateShard("no_layering");
+  public static readonly VIEW_OFFSET_Z_LAYERING = new LayeringStateShard("view_offset_z_layering");
   public static readonly MAIN_TARGET = new OutputStateShard("main_target");
+  public static readonly TRANSLUCENT_TARGET = new OutputStateShard("translucent_target");
+  public static readonly ITEM_ENTITY_TARGET = new OutputStateShard("item_entity_target");
+  public static readonly WEATHER_TARGET = new OutputStateShard("weather_target");
   public static readonly DEFAULT_LINE = new LineStateShard(1.0);
 }
