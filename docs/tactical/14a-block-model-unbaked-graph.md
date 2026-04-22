@@ -54,4 +54,4 @@ Port the JSON/model-loading half of Minecraft's block model stack: `BlockModel`,
 
 ## Next
 
-Tactical 14b: bake resolved block models into renderable quad data. Port the `ModelBakery` baking pass, `SimpleBakedModel`, `BakedQuad` int-array layout, and the `BlockModelShaper` lookup path so we can diff baked quads per blockstate before wiring them into the mesher.
+Tactical 14b: [`14b-block-model-baking.md`](14b-block-model-baking.md) — bake resolved block models into renderable quad data. Port the `ModelBakery` baking pass, `SimpleBakedModel`, `BakedQuad` int-array layout, and the `BlockModelShaper` lookup path so we can diff baked quads per blockstate before wiring them into the mesher.

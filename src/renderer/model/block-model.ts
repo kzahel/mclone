@@ -1,12 +1,20 @@
 import { ResourceLocation } from "../../core/resource-location";
 import { MissingTextureAtlasSprite } from "../texture/missing-texture-atlas-sprite";
+import { TextureAtlasSprite } from "../texture/texture-atlas-sprite";
 import { TextureAtlas } from "../texture/texture-atlas";
+import { type BakedModel } from "./baked-model";
 import { BlockElement } from "./block-element";
+import { BuiltInModel } from "./built-in-model";
+import { FaceBakery, rotateDirection } from "./face-bakery";
+import { ItemOverrides } from "./item-overrides";
 import { expectJsonObject, getAsBoolean, getAsJsonObject, getAsString, hasJsonValue, type JsonObject } from "./model-json-utils";
+import { type ModelBakery } from "./model-bakery";
+import { type ModelState } from "./model-state";
 import { ItemOverride } from "./item-override";
 import { ItemTransform } from "./item-transform";
 import { ItemTransforms, TransformType } from "./item-transforms";
 import { Material } from "./material";
+import { SimpleBakedModel } from "./simple-baked-model";
 import { type UnbakedModel } from "./unbaked-model";
 
 type TextureReference = { readonly kind: "reference"; readonly value: string };
@@ -59,6 +67,7 @@ export function guiLightLikeBlock(guiLight: GuiLight): boolean {
 }
 
 export class BlockModel implements UnbakedModel {
+  private static readonly FACE_BAKERY = new FaceBakery();
   public name = "";
 
   protected parent: BlockModel | undefined;
@@ -136,6 +145,57 @@ export class BlockModel implements UnbakedModel {
     }
 
     return dependencies;
+  }
+
+  private getItemOverrides(_bakery: ModelBakery, _model: BlockModel): ItemOverrides {
+    return ItemOverrides.EMPTY;
+  }
+
+  public bake(
+    bakery: ModelBakery,
+    spriteGetter: (material: Material) => TextureAtlasSprite,
+    modelState: ModelState,
+    location: ResourceLocation,
+  ): BakedModel {
+    return this.bakeModel(bakery, this, spriteGetter, modelState, location, true);
+  }
+
+  public bakeModel(
+    bakery: ModelBakery,
+    model: BlockModel,
+    spriteGetter: (material: Material) => TextureAtlasSprite,
+    modelState: ModelState,
+    _location: ResourceLocation,
+    isGui3d: boolean,
+  ): BakedModel {
+    const particle = spriteGetter(this.getMaterial("particle"));
+    if (bakery.isBlockEntityMarker(this)) {
+      return new BuiltInModel(this.getTransforms(), this.getItemOverrides(bakery, model), particle, guiLightLikeBlock(this.getGuiLight()));
+    }
+
+    const builder = new SimpleBakedModel.Builder(this, this.getItemOverrides(bakery, model), isGui3d).particle(particle);
+    for (const element of this.getElements()) {
+      for (const [direction, elementFace] of element.faces.entries()) {
+        const sprite = spriteGetter(this.getMaterial(elementFace.texture));
+        const quad = BlockModel.FACE_BAKERY.bakeQuad(
+          element.from,
+          element.to,
+          elementFace,
+          sprite,
+          direction,
+          modelState,
+          element.rotation,
+          element.shade,
+        );
+        if (elementFace.cullForDirection === undefined) {
+          builder.addUnculledFace(quad);
+        } else {
+          builder.addCulledFace(rotateDirection(modelState.getRotation().getMatrix(), elementFace.cullForDirection), quad);
+        }
+      }
+    }
+
+    return builder.build();
   }
 
   public hasTexture(name: string): boolean {

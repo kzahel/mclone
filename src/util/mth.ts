@@ -24,3 +24,15 @@ export function ceillog2(value: number): number {
 export function log2(value: number): number {
   return ceillog2(value) - (isPowerOfTwo(value) ? 0 : 1);
 }
+
+export function lerp(delta: number, start: number, end: number): number {
+  return start + (delta * (end - start));
+}
+
+export function equal(left: number, right: number): boolean {
+  return Math.abs(right - left) < 1.0e-5;
+}
+
+export function positiveModulo(value: number, modulus: number): number {
+  return ((value % modulus) + modulus) % modulus;
+}
