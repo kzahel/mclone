@@ -6,6 +6,17 @@ import java.util.Map;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import net.minecraft.SharedConstants;
+import net.minecraft.data.BuiltinRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
+import net.minecraft.world.level.levelgen.NoiseModifier;
+import net.minecraft.world.level.levelgen.NoiseSampler;
+import net.minecraft.world.level.levelgen.NoiseSettings;
+import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.SimpleRandomSource;
 import net.minecraft.world.level.levelgen.synth.BlendedNoise;
 import net.minecraft.world.level.levelgen.synth.ImprovedNoise;
@@ -20,10 +31,13 @@ public final class OracleDumper {
    private static final String RANDOM_SOURCE_ALIAS = "LegacyRandomSource";
    private static final String BLENDED_NOISE_CLASS = BlendedNoise.class.getName();
    private static final String IMPROVED_NOISE_CLASS = ImprovedNoise.class.getName();
+   private static final String NOISE_SAMPLER_CLASS = NoiseSampler.class.getName();
    private static final String NORMAL_NOISE_CLASS = NormalNoise.class.getName();
    private static final String PERLIN_NOISE_CLASS = PerlinNoise.class.getName();
    private static final String PERLIN_SIMPLEX_NOISE_CLASS = PerlinSimplexNoise.class.getName();
    private static final String SIMPLEX_NOISE_CLASS = SimplexNoise.class.getName();
+   private static final String WORLDGEN_RANDOM_CLASS = WorldgenRandom.class.getName();
+   private static final int[] NOISE_SAMPLER_PATTERN_AXIS = createIntAxis(-2, 1, 5);
    private static final Gson GSON = new Gson();
    private static final double[] NOISE_X_COORDS = createAxis(-2.5, 0.5, 11);
    private static final double[] NOISE_Y_COORDS = createAxis(-1.875, 0.375, 11);
@@ -34,6 +48,28 @@ public final class OracleDumper {
       blendedNoiseSampleParameters("overworld", new String[]{"overworld", "amplified"}, 0.9999999814507745, 0.9999999814507745, 80.0, 160.0),
       blendedNoiseSampleParameters("nether", new String[]{"nether", "caves"}, 1.0, 3.0, 80.0, 60.0),
       blendedNoiseSampleParameters("end", new String[]{"end", "floating_islands"}, 2.0, 1.0, 80.0, 160.0)
+   };
+   private static final BiomePatternSpec[] OVERWORLD_NOISE_SAMPLER_PATTERNS = new BiomePatternSpec[]{
+      new BiomePatternSpec(
+         "constantPlains",
+         new String[]{
+            "plains", "plains", "plains", "plains", "plains",
+            "plains", "plains", "plains", "plains", "plains",
+            "plains", "plains", "plains", "plains", "plains",
+            "plains", "plains", "plains", "plains", "plains",
+            "plains", "plains", "plains", "plains", "plains"
+         }
+      ),
+      new BiomePatternSpec(
+         "mixedOverworld",
+         new String[]{
+            "ocean", "plains", "forest", "mountains", "badlands",
+            "plains", "forest", "mountains", "badlands", "ocean",
+            "forest", "mountains", "badlands", "ocean", "plains",
+            "mountains", "badlands", "ocean", "plains", "forest",
+            "badlands", "ocean", "plains", "forest", "mountains"
+         }
+      )
    };
 
    private OracleDumper() {
@@ -178,6 +214,8 @@ public final class OracleDumper {
       }
 
       switch (className) {
+         case "NoiseSampler":
+            return dumpNoiseSampler(seed, requireOption(options, "preset"), loadSampleGrid2D(requireOption(options, "samples2d")));
          case "NormalNoise":
             return dumpNormalNoise(
                seed,
@@ -310,6 +348,78 @@ public final class OracleDumper {
       json.append("  \"values\": ");
       appendNoiseValueArray(json, sampleGrid, noise::getValue);
       json.append('\n');
+      json.append("}\n");
+      return json.toString();
+   }
+
+   private static String dumpNoiseSampler(long seed, String preset, SampleGrid2D sampleGrid2D) {
+      if (!"overworld".equals(preset)) {
+         throw new IllegalArgumentException("unsupported NoiseSampler preset '" + preset + "'");
+      }
+
+      SharedConstants.tryDetectVersion();
+      java.io.PrintStream originalOut = Bootstrap.STDOUT;
+      java.io.PrintStream originalErr = System.err;
+      Bootstrap.bootStrap();
+      System.setOut(originalOut);
+      System.setErr(originalErr);
+      NoiseGeneratorSettings generatorSettings = BuiltinRegistries.NOISE_GENERATOR_SETTINGS.getOrThrow(NoiseGeneratorSettings.OVERWORLD);
+      NoiseSettings noiseSettings = generatorSettings.noiseSettings();
+      int cellWidth = noiseSettings.noiseSizeHorizontal() * 4;
+      int cellHeight = noiseSettings.noiseSizeVertical() * 4;
+      int cellCountY = noiseSettings.height() / cellHeight;
+      int biomeY = generatorSettings.seaLevel();
+      int minCellY = Math.floorDiv(noiseSettings.minY(), cellHeight);
+      int columnValueCount = cellCountY + 1;
+      int[] sampleX = requireIntegerAxis(sampleGrid2D.x, "x");
+      int[] sampleZ = requireIntegerAxis(sampleGrid2D.z, "z");
+      int sampleCount = sampleX.length * sampleZ.length * columnValueCount;
+      StringBuilder json = new StringBuilder(4096 + OVERWORLD_NOISE_SAMPLER_PATTERNS.length * sampleCount * 28);
+      json.append("{\n");
+      appendField(json, 1, "module", "noise", true);
+      appendField(json, 1, "minecraftVersion", MINECRAFT_VERSION, true);
+      appendField(json, 1, "noiseClass", NOISE_SAMPLER_CLASS, true);
+      appendField(json, 1, "randomSourceClass", WORLDGEN_RANDOM_CLASS, true);
+      appendField(json, 1, "settingsPreset", preset, true);
+      appendField(json, 1, "noiseModifier", "PASSTHROUGH", true);
+      appendField(json, 1, "seed", Long.toString(seed), true);
+      appendNumberField(json, 1, "cellWidth", Integer.toString(cellWidth), true);
+      appendNumberField(json, 1, "cellHeight", Integer.toString(cellHeight), true);
+      appendNumberField(json, 1, "cellCountY", Integer.toString(cellCountY), true);
+      appendNumberField(json, 1, "biomeY", Integer.toString(biomeY), true);
+      appendNumberField(json, 1, "minCellY", Integer.toString(minCellY), true);
+      appendNumberField(json, 1, "columnValueCount", Integer.toString(columnValueCount), true);
+      json.append("  \"wireFormat\": {\n");
+      appendField(json, 2, "coordinates", "integer", true);
+      appendField(json, 2, "biomeKeys", "string", true);
+      appendField(json, 2, "biomeFactors", "number", true);
+      appendField(json, 2, "values", "number", false);
+      json.append("  },\n");
+      appendNoiseSettings(json, noiseSettings);
+      json.append(",\n");
+      json.append("  \"sampleSets\": {\n");
+
+      for (int index = 0; index < OVERWORLD_NOISE_SAMPLER_PATTERNS.length; index++) {
+         appendNoiseSamplerSampleSet(
+            json,
+            2,
+            OVERWORLD_NOISE_SAMPLER_PATTERNS[index],
+            seed,
+            noiseSettings,
+            cellWidth,
+            cellHeight,
+            cellCountY,
+            biomeY,
+            minCellY,
+            columnValueCount,
+            sampleX,
+            sampleZ,
+            sampleCount,
+            index < OVERWORLD_NOISE_SAMPLER_PATTERNS.length - 1
+         );
+      }
+
+      json.append("  }\n");
       json.append("}\n");
       return json.toString();
    }
@@ -511,7 +621,7 @@ public final class OracleDumper {
       appendNoiseValueArray(json, defaultNoiseSampleGrid(), noise::noise);
    }
 
-   private static void appendNoiseValueArray(StringBuilder json, SampleGrid sampleGrid, NoiseSampler noise) {
+   private static void appendNoiseValueArray(StringBuilder json, SampleGrid sampleGrid, NoiseValueSampler3D noise) {
       json.append('[');
       boolean first = true;
 
@@ -531,7 +641,7 @@ public final class OracleDumper {
       json.append(']');
    }
 
-   private static void appendNoiseValueArray(StringBuilder json, SampleGrid2D sampleGrid, NoiseSampler2D noise) {
+   private static void appendNoiseValueArray(StringBuilder json, SampleGrid2D sampleGrid, NoiseValueSampler2D noise) {
       json.append('[');
       boolean first = true;
 
@@ -591,7 +701,7 @@ public final class OracleDumper {
       return summary;
    }
 
-   private static void appendSampleSet2D(StringBuilder json, String name, String noiseMethod, SampleGrid2D sampleGrid, int sampleCount, NoiseSampler2D noise, boolean trailingComma) {
+   private static void appendSampleSet2D(StringBuilder json, String name, String noiseMethod, SampleGrid2D sampleGrid, int sampleCount, NoiseValueSampler2D noise, boolean trailingComma) {
       indent(json, 1);
       json.append('"');
       json.append(escapeJson(name));
@@ -620,7 +730,7 @@ public final class OracleDumper {
       json.append('\n');
    }
 
-   private static void appendSampleSet3D(StringBuilder json, String name, String noiseMethod, SampleGrid sampleGrid, int sampleCount, NoiseSampler noise, boolean trailingComma) {
+   private static void appendSampleSet3D(StringBuilder json, String name, String noiseMethod, SampleGrid sampleGrid, int sampleCount, NoiseValueSampler3D noise, boolean trailingComma) {
       indent(json, 1);
       json.append('"');
       json.append(escapeJson(name));
@@ -651,6 +761,206 @@ public final class OracleDumper {
       }
 
       json.append('\n');
+   }
+
+   private static void appendNoiseSettings(StringBuilder json, NoiseSettings noiseSettings) {
+      indent(json, 1);
+      json.append("\"noiseSettings\": {\n");
+      appendNumberField(json, 2, "minY", Integer.toString(noiseSettings.minY()), true);
+      appendNumberField(json, 2, "height", Integer.toString(noiseSettings.height()), true);
+      indent(json, 2);
+      json.append("\"sampling\": {\n");
+      appendNumberField(json, 3, "xzScale", Double.toString(noiseSettings.noiseSamplingSettings().xzScale()), true);
+      appendNumberField(json, 3, "yScale", Double.toString(noiseSettings.noiseSamplingSettings().yScale()), true);
+      appendNumberField(json, 3, "xzFactor", Double.toString(noiseSettings.noiseSamplingSettings().xzFactor()), true);
+      appendNumberField(json, 3, "yFactor", Double.toString(noiseSettings.noiseSamplingSettings().yFactor()), false);
+      indent(json, 2);
+      json.append("},\n");
+      indent(json, 2);
+      json.append("\"topSlide\": {\n");
+      appendNumberField(json, 3, "target", Integer.toString(noiseSettings.topSlideSettings().target()), true);
+      appendNumberField(json, 3, "size", Integer.toString(noiseSettings.topSlideSettings().size()), true);
+      appendNumberField(json, 3, "offset", Integer.toString(noiseSettings.topSlideSettings().offset()), false);
+      indent(json, 2);
+      json.append("},\n");
+      indent(json, 2);
+      json.append("\"bottomSlide\": {\n");
+      appendNumberField(json, 3, "target", Integer.toString(noiseSettings.bottomSlideSettings().target()), true);
+      appendNumberField(json, 3, "size", Integer.toString(noiseSettings.bottomSlideSettings().size()), true);
+      appendNumberField(json, 3, "offset", Integer.toString(noiseSettings.bottomSlideSettings().offset()), false);
+      indent(json, 2);
+      json.append("},\n");
+      appendNumberField(json, 2, "noiseSizeHorizontal", Integer.toString(noiseSettings.noiseSizeHorizontal()), true);
+      appendNumberField(json, 2, "noiseSizeVertical", Integer.toString(noiseSettings.noiseSizeVertical()), true);
+      appendNumberField(json, 2, "densityFactor", Double.toString(noiseSettings.densityFactor()), true);
+      appendNumberField(json, 2, "densityOffset", Double.toString(noiseSettings.densityOffset()), true);
+      appendNumberField(json, 2, "useSimplexSurfaceNoise", Boolean.toString(noiseSettings.useSimplexSurfaceNoise()), true);
+      appendNumberField(json, 2, "randomDensityOffset", Boolean.toString(noiseSettings.randomDensityOffset()), true);
+      appendNumberField(json, 2, "islandNoiseOverride", Boolean.toString(noiseSettings.islandNoiseOverride()), true);
+      appendNumberField(json, 2, "isAmplified", Boolean.toString(noiseSettings.isAmplified()), false);
+      indent(json, 1);
+      json.append("}");
+   }
+
+   private static void appendNoiseSamplerSampleSet(
+      StringBuilder json,
+      int indentLevel,
+      BiomePatternSpec pattern,
+      long seed,
+      NoiseSettings noiseSettings,
+      int cellWidth,
+      int cellHeight,
+      int cellCountY,
+      int biomeY,
+      int minCellY,
+      int columnValueCount,
+      int[] sampleX,
+      int[] sampleZ,
+      int sampleCount,
+      boolean trailingComma
+   ) {
+      ResolvedBiomePattern resolvedPattern = resolveBiomePattern(pattern);
+      NoiseSampler sampler = createOverworldNoiseSampler(seed, new RepeatingPatternBiomeSource(resolvedPattern.biomes), noiseSettings, cellWidth, cellHeight, cellCountY);
+      indent(json, indentLevel);
+      json.append('"');
+      json.append(escapeJson(pattern.name));
+      json.append("\": {\n");
+      appendBiomePattern(json, indentLevel + 1, resolvedPattern, true);
+      appendNoiseSamplerColumns(
+         json,
+         indentLevel + 1,
+         sampler,
+         noiseSettings,
+         biomeY,
+         minCellY,
+         cellCountY,
+         columnValueCount,
+         sampleX,
+         sampleZ,
+         sampleCount,
+         false
+      );
+      indent(json, indentLevel);
+      json.append('}');
+      if (trailingComma) {
+         json.append(',');
+      }
+
+      json.append('\n');
+   }
+
+   private static void appendBiomePattern(StringBuilder json, int indentLevel, ResolvedBiomePattern pattern, boolean trailingComma) {
+      indent(json, indentLevel);
+      json.append("\"biomePattern\": {\n");
+      appendField(json, indentLevel + 1, "gridOrder", "x-major,z-minor", true);
+      appendNumberField(json, indentLevel + 1, "sampleCount", Integer.toString(pattern.keys.length), true);
+      indent(json, indentLevel + 1);
+      json.append("\"x\": ");
+      appendIntArray(json, NOISE_SAMPLER_PATTERN_AXIS);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"z\": ");
+      appendIntArray(json, NOISE_SAMPLER_PATTERN_AXIS);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"keys\": ");
+      appendStringArray(json, pattern.keys);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"depths\": ");
+      appendDoubleArray(json, pattern.depths);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"scales\": ");
+      appendDoubleArray(json, pattern.scales);
+      json.append('\n');
+      indent(json, indentLevel);
+      json.append('}');
+      if (trailingComma) {
+         json.append(',');
+      }
+
+      json.append('\n');
+   }
+
+   private static void appendNoiseSamplerColumns(
+      StringBuilder json,
+      int indentLevel,
+      NoiseSampler sampler,
+      NoiseSettings noiseSettings,
+      int biomeY,
+      int minCellY,
+      int cellCountY,
+      int columnValueCount,
+      int[] sampleX,
+      int[] sampleZ,
+      int sampleCount,
+      boolean trailingComma
+   ) {
+      indent(json, indentLevel);
+      json.append("\"columns\": {\n");
+      appendField(
+         json,
+         indentLevel + 1,
+         "noiseMethod",
+         "fillNoiseColumn(noiseValues,cellX,cellZ,noiseSettings,biomeY,minCellY,cellCountY)",
+         true
+      );
+      appendField(json, indentLevel + 1, "gridOrder", "x-major,z-minor,y-minor", true);
+      appendNumberField(json, indentLevel + 1, "columnValueCount", Integer.toString(columnValueCount), true);
+      appendNumberField(json, indentLevel + 1, "sampleCount", Integer.toString(sampleCount), true);
+      indent(json, indentLevel + 1);
+      json.append("\"x\": ");
+      appendIntArray(json, sampleX);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"z\": ");
+      appendIntArray(json, sampleZ);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"values\": ");
+      appendNoiseSamplerColumnValueArray(json, sampler, noiseSettings, biomeY, minCellY, cellCountY, columnValueCount, sampleX, sampleZ);
+      json.append('\n');
+      indent(json, indentLevel);
+      json.append('}');
+      if (trailingComma) {
+         json.append(',');
+      }
+
+      json.append('\n');
+   }
+
+   private static void appendNoiseSamplerColumnValueArray(
+      StringBuilder json,
+      NoiseSampler sampler,
+      NoiseSettings noiseSettings,
+      int biomeY,
+      int minCellY,
+      int cellCountY,
+      int columnValueCount,
+      int[] sampleX,
+      int[] sampleZ
+   ) {
+      double[] column = new double[columnValueCount];
+      json.append('[');
+      boolean first = true;
+
+      for (int cellX : sampleX) {
+         for (int cellZ : sampleZ) {
+            sampler.fillNoiseColumn(column, cellX, cellZ, noiseSettings, biomeY, minCellY, cellCountY);
+
+            for (int index = 0; index < columnValueCount; index++) {
+               if (!first) {
+                  json.append(',');
+               }
+
+               first = false;
+               json.append(Double.toString(column[index]));
+            }
+         }
+      }
+
+      json.append(']');
    }
 
    private static void appendBlendedSampleSet(
@@ -812,6 +1122,58 @@ public final class OracleDumper {
       }
 
       return amplitudes;
+   }
+
+   private static int[] requireIntegerAxis(double[] values, String axisName) {
+      int[] axis = new int[values.length];
+
+      for (int index = 0; index < values.length; index++) {
+         double value = values[index];
+         if (value != Math.rint(value) || value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("NoiseSampler sample axis '" + axisName + "' must contain integers");
+         }
+
+         axis[index] = (int)value;
+      }
+
+      return axis;
+   }
+
+   private static NoiseSampler createOverworldNoiseSampler(
+      long seed,
+      BiomeSource biomeSource,
+      NoiseSettings noiseSettings,
+      int cellWidth,
+      int cellHeight,
+      int cellCountY
+   ) {
+      WorldgenRandom random = new WorldgenRandom(seed);
+      BlendedNoise blendedNoise = new BlendedNoise(random);
+      random.consumeCount(2620);
+      PerlinNoise depthNoise = new PerlinNoise(random, toIntegerList(BLENDED_LIMIT_OCTAVES));
+      return new NoiseSampler(biomeSource, cellWidth, cellHeight, cellCountY, noiseSettings, blendedNoise, null, depthNoise, NoiseModifier.PASSTHROUGH);
+   }
+
+   private static ResolvedBiomePattern resolveBiomePattern(BiomePatternSpec pattern) {
+      String[] keys = new String[pattern.biomeKeys.length];
+      double[] depths = new double[pattern.biomeKeys.length];
+      double[] scales = new double[pattern.biomeKeys.length];
+      Biome[] biomes = new Biome[pattern.biomeKeys.length];
+
+      for (int index = 0; index < pattern.biomeKeys.length; index++) {
+         ResourceLocation key = new ResourceLocation(pattern.biomeKeys[index]);
+         Biome biome = BuiltinRegistries.BIOME.get(key);
+         if (biome == null) {
+            throw new IllegalArgumentException("unknown biome key '" + key + "'");
+         }
+
+         biomes[index] = biome;
+         keys[index] = BuiltinRegistries.BIOME.getKey(biome).toString();
+         depths[index] = biome.getDepth();
+         scales[index] = biome.getScale();
+      }
+
+      return new ResolvedBiomePattern(keys, depths, scales, biomes);
    }
 
    private static List<Integer> toIntegerList(int[] values) {
@@ -990,6 +1352,7 @@ public final class OracleDumper {
       System.err.println("usage:");
       System.err.println("  oracle-dumper prng --seed <long> --count <positive-int>");
       System.err.println("  oracle-dumper noise --seed <long>");
+      System.err.println("  oracle-dumper noise --class NoiseSampler --seed <long> --preset overworld --samples2d <path>");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");
@@ -1000,13 +1363,63 @@ public final class OracleDumper {
    }
 
    @FunctionalInterface
-   private interface NoiseSampler {
+   private interface NoiseValueSampler3D {
       double sample(double x, double y, double z);
    }
 
    @FunctionalInterface
-   private interface NoiseSampler2D {
+   private interface NoiseValueSampler2D {
       double sample(double x, double z);
+   }
+
+    private static final class BiomePatternSpec {
+      final String name;
+      final String[] biomeKeys;
+
+      BiomePatternSpec(String name, String[] biomeKeys) {
+         this.name = name;
+         this.biomeKeys = biomeKeys;
+      }
+   }
+
+   private static final class ResolvedBiomePattern {
+      final String[] keys;
+      final double[] depths;
+      final double[] scales;
+      final Biome[] biomes;
+
+      ResolvedBiomePattern(String[] keys, double[] depths, double[] scales, Biome[] biomes) {
+         this.keys = keys;
+         this.depths = depths;
+         this.scales = scales;
+         this.biomes = biomes;
+      }
+   }
+
+   private static final class RepeatingPatternBiomeSource extends BiomeSource {
+      private final Biome[] pattern;
+
+      RepeatingPatternBiomeSource(Biome[] pattern) {
+         super(java.util.Arrays.asList(pattern));
+         this.pattern = pattern;
+      }
+
+      @Override
+      protected com.mojang.serialization.Codec<? extends BiomeSource> codec() {
+         throw new UnsupportedOperationException("oracle-only biome source");
+      }
+
+      @Override
+      public BiomeSource withSeed(long seed) {
+         return this;
+      }
+
+      @Override
+      public Biome getNoiseBiome(int x, int y, int z) {
+         int wrappedX = Math.floorMod(x, NOISE_SAMPLER_PATTERN_AXIS.length);
+         int wrappedZ = Math.floorMod(z, NOISE_SAMPLER_PATTERN_AXIS.length);
+         return this.pattern[wrappedX * NOISE_SAMPLER_PATTERN_AXIS.length + wrappedZ];
+      }
    }
 
    private static final class SampleGrid {

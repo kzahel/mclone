@@ -99,6 +99,29 @@ Current tactical/02 coverage is intentionally limited to the three `NormalNoise`
 - `waterLevelNoise`: `firstOctave=-3`, amplitudes `1.0,0.0,2.0`
 - `lavaNoise`: `firstOctave=-1`, amplitudes `1.0,0.0`
 
+## NoiseSampler oracle
+
+`pnpm --silent oracle:gen noise --class NoiseSampler --seed 12345 --preset overworld --samples2d test/fixtures/noise/_samples-cell-2d.json > test/fixtures/noise/noise-sampler-overworld-seed-12345.json`
+
+`NoiseSampler` fixtures are intentionally scoped to the default 1.17.1 overworld path:
+
+- built-in overworld `NoiseSettings`
+- `NoiseModifier.PASSTHROUGH`
+- no end-island override (`islandNoise == null`)
+
+Each fixture stores one seed plus two named sample sets:
+
+- `constantPlains`
+- `mixedOverworld`
+
+Each sample set includes:
+
+- a repeating 5x5 biome pattern serialized as biome keys plus depth/scale values
+- sampled density columns over `test/fixtures/noise/_samples-cell-2d.json`
+- column values flattened in `x-major,z-minor,y-minor` order
+
+This lets the TS side oracle-test biome weighting, random-density offset, blended-noise integration, and slide application before the real biome-source port lands.
+
 ## Wrappers
 
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`
