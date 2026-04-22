@@ -1,30 +1,31 @@
 import { BlockPos } from "../core/block-pos";
 import { Registry } from "../core/registry";
 import { ResourceLocation } from "../core/resource-location";
+import { AirBlock } from "../world/level/block/air-block";
 import { Block } from "../world/level/block/block";
-import { StaticBlockAndTintGetter } from "../world/level/static-block-and-tint-getter";
 import { BlockBehaviour } from "../world/level/block/state/block-behaviour";
 import type { BlockState } from "../world/level/block/state/block-state";
 import { Material as BlockMaterial } from "../world/level/material/material";
-import { Vector3f } from "./math/vector3f";
+import { StaticRenderLevel } from "../world/level/static-render-level";
+import { Vec3 } from "../world/phys/vec3";
 import { BlockColors } from "./block/block-colors";
 import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
-import { ModelBlockRenderer } from "./block/model-block-renderer";
+import { ChunkRenderDispatcher } from "./chunk/chunk-render-dispatcher";
+import { ChunkBufferBuilderPack } from "./chunk-buffer-builder-pack";
+import { Matrix4f } from "./math/matrix4f";
 import { BlockModelRepository } from "./model/block-model-repository";
 import { BlockModelShaper } from "./model/block-model-shaper";
 import { preloadBlockModelSource } from "./model/browser-block-model-source";
 import { ModelBakery } from "./model/model-bakery";
 import { ModelManager } from "./model/model-manager";
+import { LevelRenderer } from "./level-renderer";
 import { BrowserTextureAtlasSource, loadNativeImageFromUrl } from "./texture/browser-native-image-loader";
 import { NativeImage } from "./texture/native-image";
 import { TextureAtlas } from "./texture/texture-atlas";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
 import { RenderType } from "./render-type";
-import { PoseStack } from "./vertex/pose-stack";
-import { BufferBuilder } from "./vertex/buffer-builder";
-import { DefaultVertexFormat } from "./vertex/default-vertex-format";
 import { VertexBuffer } from "./vertex/vertex-buffer";
-import { VertexFormat } from "./vertex/vertex-format";
+import { ViewArea } from "./view-area";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
 const SMOKE_CENTER_BLOCK = new ResourceLocation("minecraft:orange_wool");
@@ -33,9 +34,9 @@ const SMOKE_CENTER_SPRITE = new ResourceLocation("minecraft:block/orange_wool");
 const SMOKE_VISUAL_SPRITE = new ResourceLocation("minecraft:block/stone");
 const SMOKE_BLOCKS = [SMOKE_CENTER_BLOCK, SMOKE_VISUAL_BLOCK] as const;
 const SMOKE_SPRITES = [SMOKE_CENTER_SPRITE, SMOKE_VISUAL_SPRITE] as const;
-const SMOKE_CENTER_POS = new BlockPos(0, 0, 0);
-const SMOKE_VISUAL_POS = new BlockPos(2, 0, 0);
 const SMOKE_CENTER_BRIGHTNESS = 0.8;
+const SMOKE_RENDER_DISTANCE = 1;
+const SMOKE_CAMERA_POSITION = new Vec3(8.5, 8.5, 0);
 
 export type BootResult =
   | {
@@ -69,6 +70,16 @@ const VALIDATED_RENDER_TYPES = [
   RenderType.lines(),
   RenderType.lineStrip(),
 ] as const;
+
+interface ChunkDrawEntry {
+  readonly vertexBuffer: VertexBuffer;
+  readonly chunkOffset: readonly [number, number, number];
+}
+
+interface ChunkPassResources {
+  readonly draw: ChunkDrawEntry;
+  readonly bindGroup: GPUBindGroup;
+}
 
 function uploadBuffer(device: GPUDevice, bytes: Uint8Array, usage: GPUBufferUsageFlags): GPUBuffer {
   const buffer = device.createBuffer({
@@ -120,59 +131,98 @@ function shadePixel(
 function createAirState(): BlockState {
   const properties = BlockBehaviour.Properties.of(BlockMaterial.AIR).noCollission().noOcclusion();
   properties.isAir = true;
-  return new Block(properties).defaultBlockState();
+  return new AirBlock(properties).defaultBlockState();
 }
 
-function renderSmokeBlock(
-  dispatcher: BlockRenderDispatcher,
-  level: StaticBlockAndTintGetter,
-  state: BlockState,
-  pos: BlockPos,
-  builder: BufferBuilder,
-  transform: (poseStack: PoseStack) => void,
-): void {
-  const poseStack = new PoseStack();
-  poseStack.pushPose();
-  transform(poseStack);
-  if (!dispatcher.renderBatched(state, pos, level, poseStack, builder, true)) {
-    throw new Error(`Smoke block ${state.getBlock()} at ${pos} did not render`);
+function fillBox(level: StaticRenderLevel, from: BlockPos, to: BlockPos, state: BlockState): void {
+  for (let z = from.getZ(); z <= to.getZ(); z++) {
+    for (let y = from.getY(); y <= to.getY(); y++) {
+      for (let x = from.getX(); x <= to.getX(); x++) {
+        level.setBlock(new BlockPos(x, y, z), state);
+      }
+    }
   }
-
-  poseStack.popPose();
 }
 
-function buildScene(
-  device: GPUDevice,
-  dispatcher: BlockRenderDispatcher,
-  level: StaticBlockAndTintGetter,
+function populateSmokeLevel(
+  level: StaticRenderLevel,
   centerState: BlockState,
   visualState: BlockState,
-): VertexBuffer {
-  const builder = new BufferBuilder(256);
-  builder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK);
-  ModelBlockRenderer.enableCaching();
-  try {
-    renderSmokeBlock(dispatcher, level, centerState, SMOKE_CENTER_POS, builder, (poseStack) => {
-      poseStack.translate(-0.4, -0.4, 0.1);
-      poseStack.scale(0.8, 0.8, 0.8);
-    });
-    renderSmokeBlock(dispatcher, level, visualState, SMOKE_VISUAL_POS, builder, (poseStack) => {
-      poseStack.translate(-0.9, -0.8, 0.2);
-      poseStack.scale(0.35, 0.35, 0.35);
-      poseStack.translate(0.5, 0.5, 0.5);
-      poseStack.mulPose(Vector3f.YP.rotationDegrees(-35));
-      poseStack.mulPose(Vector3f.XP.rotationDegrees(25));
-      poseStack.translate(-0.5, -0.5, -0.5);
-    });
-  } finally {
-    ModelBlockRenderer.clearCache();
+): void {
+  fillBox(level, new BlockPos(0, 0, 0), new BlockPos(15, 15, 0), centerState);
+  fillBox(level, new BlockPos(-12, 0, 0), new BlockPos(-5, 7, 7), visualState);
+  fillBox(level, new BlockPos(20, 2, 0), new BlockPos(27, 9, 5), visualState);
+}
+
+function createSmokeModelViewMatrix(): Float32Array {
+  const matrix = new Matrix4f();
+  matrix.setIdentity();
+  matrix.m00 = 1 / 24;
+  matrix.m11 = 1 / 12;
+  matrix.m22 = 1 / 32;
+  matrix.m03 = -8.5 / 24;
+  matrix.m13 = -8.5 / 12;
+  return matrix.toFloat32Array();
+}
+
+async function compileScene(
+  dispatcher: ChunkRenderDispatcher,
+  viewArea: ViewArea,
+  renderType: RenderType,
+): Promise<readonly ChunkDrawEntry[]> {
+  dispatcher.setCamera(SMOKE_CAMERA_POSITION);
+  viewArea.repositionCamera(SMOKE_CAMERA_POSITION.x, SMOKE_CAMERA_POSITION.z);
+  for (const chunk of viewArea.chunks) {
+    chunk.rebuildChunkAsync(dispatcher);
   }
 
-  builder.end();
+  await dispatcher.awaitAllTasks();
+  const draws: ChunkDrawEntry[] = [];
+  for (const chunk of viewArea.chunks) {
+    const compiledChunk = chunk.getCompiledChunk();
+    if (compiledChunk.isEmpty(renderType)) {
+      continue;
+    }
 
-  const vertexBuffer = new VertexBuffer(device);
-  vertexBuffer.upload(builder);
-  return vertexBuffer;
+    draws.push({
+      vertexBuffer: chunk.getBuffer(renderType),
+      chunkOffset: [chunk.getOrigin().getX(), chunk.getOrigin().getY(), chunk.getOrigin().getZ()],
+    });
+  }
+
+  return draws;
+}
+
+function createChunkBindGroup(
+  device: GPUDevice,
+  pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
+  sampler: GPUSampler,
+  atlasTexture: GPUTextureView,
+  whiteTexture: GPUTextureView,
+  modelViewMat: Float32Array,
+  chunkOffset: readonly [number, number, number],
+): GPUBindGroup {
+  const uniformBytes = pipeline.shaderProgram.createUniformBufferBytes({
+    ModelViewMat: Array.from(modelViewMat),
+    ProjMat: Array.from(IDENTITY_MATRIX),
+    ChunkOffset: chunkOffset,
+    ColorModulator: [1, 1, 1, 1],
+    FogStart: [1_000_000],
+    FogEnd: [1_000_001],
+    FogColor: [0, 0, 0, 0],
+  });
+  const uniformBuffer = uploadBuffer(device, uniformBytes, GPUBufferUsage.UNIFORM);
+  return pipeline.shaderProgram.createBindGroup(device, pipeline.bindGroupLayout, {
+    uniformBuffer,
+    samplers: {
+      Sampler0: sampler,
+      Sampler2: sampler,
+    },
+    textures: {
+      Sampler0: atlasTexture,
+      Sampler2: whiteTexture,
+    },
+  });
 }
 
 function encodeDrawPass(
@@ -180,8 +230,7 @@ function encodeDrawPass(
   view: GPUTextureView,
   depthView: GPUTextureView,
   pipeline: GPURenderPipeline,
-  bindGroup: GPUBindGroup,
-  vertexBuffer: VertexBuffer,
+  draws: readonly ChunkPassResources[],
 ): void {
   const pass = encoder.beginRenderPass({
     colorAttachments: [
@@ -200,8 +249,10 @@ function encodeDrawPass(
     },
   });
   pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  vertexBuffer.draw(pass);
+  for (const draw of draws) {
+    pass.setBindGroup(0, draw.bindGroup);
+    draw.draw.vertexBuffer.draw(pass);
+  }
   pass.end();
 }
 
@@ -303,17 +354,23 @@ async function boot(): Promise<BootResult> {
 
   const centerState = centerBlock.defaultBlockState();
   const visualState = visualBlock.defaultBlockState();
-  const level = new StaticBlockAndTintGetter(createAirState());
-  level.setBlock(SMOKE_CENTER_POS, centerState);
-  level.setBlock(SMOKE_VISUAL_POS, visualState);
-
-  const vertexBuffer = buildScene(device, new BlockRenderDispatcher(blockModelShaper, new BlockColors()), level, centerState, visualState);
-  const vertexFormat = vertexBuffer.getFormat();
-  if (!vertexFormat) return { ok: false, reason: "vertex buffer format missing after upload" };
+  const level = new StaticRenderLevel(createAirState());
+  populateSmokeLevel(level, centerState, visualState);
 
   const renderType = RenderType.solid();
-  if (renderType.format() !== vertexFormat) {
-    return { ok: false, reason: "render type format does not match the uploaded vertex format" };
+  const levelRenderer = new LevelRenderer();
+  const blockRenderer = new BlockRenderDispatcher(blockModelShaper, new BlockColors());
+  const chunkDispatcher = new ChunkRenderDispatcher(level, levelRenderer, blockRenderer, device, (task) => queueMicrotask(task), false, new ChunkBufferBuilderPack());
+  const viewArea = new ViewArea(chunkDispatcher, level, SMOKE_RENDER_DISTANCE, levelRenderer);
+  const draws = await compileScene(chunkDispatcher, viewArea, renderType);
+  if (draws.length === 0) {
+    return { ok: false, reason: "chunk dispatcher compiled no drawables for the smoke scene" };
+  }
+
+  for (const draw of draws) {
+    if (draw.vertexBuffer.getFormat() !== renderType.format()) {
+      return { ok: false, reason: "render type format does not match a compiled chunk vertex format" };
+    }
   }
 
   device.pushErrorScope("validation");
@@ -333,27 +390,15 @@ async function boot(): Promise<BootResult> {
   });
   const atlasTexture = atlas.getTextureView();
   const whiteTexture = createWhiteTexture(device);
-  const uniformBytes = canvasPipeline.shaderProgram.createUniformBufferBytes({
-    ModelViewMat: IDENTITY_MATRIX,
-    ProjMat: IDENTITY_MATRIX,
-    ChunkOffset: [0, 0, 0],
-    ColorModulator: [1, 1, 1, 1],
-    FogStart: [1_000_000],
-    FogEnd: [1_000_001],
-    FogColor: [0, 0, 0, 0],
-  });
-  const uniformBuffer = uploadBuffer(device, uniformBytes, GPUBufferUsage.UNIFORM);
-  const bindGroup = canvasPipeline.shaderProgram.createBindGroup(device, canvasPipeline.bindGroupLayout, {
-    uniformBuffer,
-    samplers: {
-      Sampler0: sampler,
-      Sampler2: sampler,
-    },
-    textures: {
-      Sampler0: atlasTexture,
-      Sampler2: whiteTexture,
-    },
-  });
+  const modelViewMat = createSmokeModelViewMatrix();
+  const canvasDraws = draws.map((draw) => ({
+    draw,
+    bindGroup: createChunkBindGroup(device, canvasPipeline, sampler, atlasTexture, whiteTexture, modelViewMat, draw.chunkOffset),
+  }));
+  const readbackDraws = draws.map((draw) => ({
+    draw,
+    bindGroup: createChunkBindGroup(device, readbackPipeline, sampler, atlasTexture, whiteTexture, modelViewMat, draw.chunkOffset),
+  }));
   const canvasDepthView = createDepthView(device, canvas.width, canvas.height);
   const readbackDepthView = createDepthView(device, canvas.width, canvas.height);
   const readbackTexture = device.createTexture({
@@ -364,8 +409,8 @@ async function boot(): Promise<BootResult> {
 
   device.pushErrorScope("validation");
   const encoder = device.createCommandEncoder();
-  encodeDrawPass(encoder, ctx.getCurrentTexture().createView(), canvasDepthView, canvasPipeline.pipeline, bindGroup, vertexBuffer);
-  encodeDrawPass(encoder, readbackTexture.createView(), readbackDepthView, readbackPipeline.pipeline, bindGroup, vertexBuffer);
+  encodeDrawPass(encoder, ctx.getCurrentTexture().createView(), canvasDepthView, canvasPipeline.pipeline, canvasDraws);
+  encodeDrawPass(encoder, readbackTexture.createView(), readbackDepthView, readbackPipeline.pipeline, readbackDraws);
   device.queue.submit([encoder.finish()]);
   await device.queue.onSubmittedWorkDone();
   const submissionError = await popValidationError(device, "WebGPU submission validation failed");

@@ -39,6 +39,14 @@ export function positiveModulo(value: number, modulus: number): number {
   return ((value % modulus) + modulus) % modulus;
 }
 
+export function floor(value: number): number {
+  return Math.floor(value);
+}
+
+export function intFloorDiv(dividend: number, divisor: number): number {
+  return Math.floor(dividend / divisor);
+}
+
 export function clamp(value: number, minValue: number, maxValue: number): number {
   if (value < minValue) {
     return minValue;

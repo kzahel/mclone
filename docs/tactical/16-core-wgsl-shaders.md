@@ -57,4 +57,4 @@ Port the first real Minecraft core shader set from GLSL to WGSL and wire those s
 
 ## Next
 
-Tactical 17: chunk/section compilation infrastructure. Port `RenderChunkRegion`, `ChunkBufferBuilderPack`, `VisGraph` / `VisibilitySet`, `ViewArea`, and the first `ChunkRenderDispatcher` path so we can compile and draw many block sections instead of the current single handcrafted smoke scene.
+Tactical 17 is now documented in [`17-chunk-section-compilation.md`](17-chunk-section-compilation.md). The next slice after that is tactical 18: `LevelRenderer`, `GameRenderer`, `Frustum`, `LightTexture`, and `FogRenderer` so compiled sections can be culled and submitted through a real camera-driven world frame.

@@ -22,4 +22,6 @@ export class LevelRenderer {
 
     return (sky << 20) | (block << 4);
   }
+
+  public updateGlobalBlockEntities(_removed: ReadonlySet<unknown>, _added: ReadonlySet<unknown>): void {}
 }
