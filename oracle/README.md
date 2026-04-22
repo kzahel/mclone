@@ -40,7 +40,18 @@ The fixture stores:
 
 The shared sample grid in `test/fixtures/noise/_samples-3d.json` stores the `gridOrder` plus reusable `x`, `y`, and `z` axes. The dumper expands that into flattened `values` using the same `x-major,y-major,z-minor` order as the `ImprovedNoise` fixtures.
 
-Current tactical/01 slice covers the smaller `PerlinNoise` octave set `[-7..0]`. The wider `[-15..0]` range and the `SimplexNoise` / `BlendedNoise` fixtures come next.
+Current tactical/01 coverage includes both `PerlinNoise` octave sets used downstream: `[-7..0]` and `[-15..0]`.
+
+## SimplexNoise oracle
+
+`pnpm --silent oracle:gen noise --class SimplexNoise --seed 12345 --samples2d test/fixtures/noise/_samples-2d.json --samples3d test/fixtures/noise/_samples-3d.json > test/fixtures/noise/simplex-seed-12345.json`
+
+The `SimplexNoise` fixture stores both overloads in one file:
+
+- `samples2d`: `getValue(x,z)` on the dedicated `test/fixtures/noise/_samples-2d.json` grid, flattened in `x-major,z-minor` order
+- `samples3d`: `getValue(x,y,z)` on the shared `test/fixtures/noise/_samples-3d.json` grid, flattened in `x-major,y-major,z-minor` order
+
+The top-level metadata also records constructor offsets `xo`, `yo`, and `zo`, so the TS side can assert that construction consumed the PRNG identically before checking sampled values.
 
 ## Wrappers
 

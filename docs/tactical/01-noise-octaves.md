@@ -19,8 +19,9 @@ Order matters: `PerlinNoise` is a prerequisite for `BlendedNoise`. `SimplexNoise
 ## Current status
 
 - Tactical 00 prerequisites are complete: oracle harness, `SimpleRandomSource`, and `ImprovedNoise`
-- `PerlinNoise` is now fixture-backed for both octave sets used downstream: `[-7..0]` and `[-15..0]`, across canonical seeds `0`, `1`, `12345`, and `2151901553968352745`
-- Next up: move on to `SimplexNoise`
+- `PerlinNoise` is fixture-backed for both octave sets used downstream: `[-7..0]` and `[-15..0]`, across canonical seeds `0`, `1`, `12345`, and `2151901553968352745`
+- `SimplexNoise` is now fixture-backed for both entry points: 2D `getValue(x,z)` on a dedicated shared `x/z` grid and 3D `getValue(x,y,z)` on the shared 3D grid, again across canonical seeds `0`, `1`, `12345`, and `2151901553968352745`
+- Next up: port and fixture-back `BlendedNoise`
 
 ## Why these three
 
@@ -92,8 +93,8 @@ oracle/java/
 2. **Generate canonical sample grids.** One shared 3D grid file currently lives at `test/fixtures/noise/_samples-3d.json`. It covers positive / negative / zero coordinates with non-integer `x/y/z`, and expands to 1331 samples.
 3. **Emit fixtures** for each class × canonical seeds (the same four seeds as PRNG: `0`, `1`, `12345`, `2151901553968352745`). `PerlinNoise` coverage is complete for both required octave sets: `[-7..0]` and `[-15..0]`.
 4. **Port `PerlinNoise`** — done and fixture-backed for both octave ranges used by `NoiseSampler` and `BlendedNoise`.
-5. **Port `SimplexNoise`** — independent, can be interleaved or parallel.
-6. **Port `BlendedNoise`** — glue over `PerlinNoise`; fixture validates that the combination + clamping works end-to-end.
+5. **Port `SimplexNoise`** — done and fixture-backed for both the 2D and 3D `getValue(...)` overloads.
+6. **Port `BlendedNoise`** — next up; glue over `PerlinNoise`, with fixture validation for the combination + clamping behavior end-to-end.
 
 ## Done when
 
@@ -114,5 +115,5 @@ oracle/java/
 
 ## Open questions
 
-- **Sample-point grid:** pin one shared grid across noise classes, or let each class define its own? Recommend one shared grid for `(x,y,z)`-based classes; fall back to per-class for oddball signatures (e.g. `SimplexNoise.getValue(x,z)` 2D overload).
+- **Sample-point grid:** resolved as "one shared 3D grid for `(x,y,z)` methods, plus dedicated per-signature grids when needed." `SimplexNoise` now uses `test/fixtures/noise/_samples-2d.json` for the 2D overload and the shared `test/fixtures/noise/_samples-3d.json` grid for 3D.
 - **`BlendedNoise` parameter coverage:** pick tuples from what `NoiseSampler` actually passes (read `NoiseSampler.fillNoiseColumn`). Don't test arbitrary scale combinations — test the ones downstream code will use.
