@@ -68,4 +68,4 @@ Port the CPU-side block/state/property layer that model loading and baking depen
 
 ## Next
 
-Tactical 14a: block model JSON parse and unbaked model graph. Port `BlockModel`, `BlockElement`, `BlockElementFace`, `BlockFaceUV`, parent-model resolution, and texture-variable resolution so model baking can consume real blockstate/model JSON.
+Tactical 14a: [`14a-block-model-unbaked-graph.md`](14a-block-model-unbaked-graph.md) — block model JSON parse and unbaked model graph. Port `BlockModel`, `BlockElement`, `BlockElementFace`, `BlockFaceUV`, parent-model resolution, and texture-variable resolution so model baking can consume real blockstate/model JSON.

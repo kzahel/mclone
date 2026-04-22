@@ -33,6 +33,8 @@ export class TextureAtlasPreparations {
 }
 
 export class TextureAtlas implements TextureAtlasUploadTarget {
+  public static readonly LOCATION_BLOCKS = new ResourceLocation("textures/atlas/blocks.png");
+
   private readonly animatedTextures: Tickable[] = [];
   private readonly sprites = new Set<string>();
   private readonly texturesByName = new Map<string, TextureAtlasSprite>();
