@@ -24,7 +24,7 @@ Pipeline sketch per chunk:
 
 JS ↔ WASM boundary is chunk-sized: pass chunk coords in, get packed block array + heightmap out. No per-voxel calls across the boundary.
 
-## References (outside this repo, in `~/code/reference/`)
+## References (repo-local, under `reference/` — gitignored)
 
 ### `cubiomes/`
 
@@ -63,6 +63,9 @@ client.txt          official Mojang Proguard mappings
 client-deobf.jar    remapped
 src/                ~4100 .java files, fully decompiled
 tools/              SpecialSource + Vineflower jars
+parchment/          Parchment zip cache (if --parchment was used)
+extracted/          filtered client.jar assets — textures, models,
+                    blockstates, structure NBTs (see docs/assets-plan.md)
 *.json              Mojang manifests (for re-running pipeline)
 ```
 
@@ -84,27 +87,31 @@ tools/              SpecialSource + Vineflower jars
 
 ## Setup scripts
 
-Everything in the "References" section above can be rebuilt from scratch using scripts in `mclone/scripts/`.
+Everything in the "References" section above can be rebuilt from scratch using scripts in `scripts/`. Outputs land in `<repo>/reference/` (gitignored).
 
 ```bash
-# cubiomes → ~/code/reference/cubiomes (shallow git clone)
-./mclone/scripts/fetch-cubiomes.sh
+# cubiomes → reference/cubiomes (shallow git clone)
+./scripts/fetch-cubiomes.sh
 
-# Minecraft 1.17.1 client, decompiled + Parchment param names applied
-#   → ~/code/reference/minecraft-1.17.1
-./mclone/scripts/decompile-mc.sh 1.17.1 --parchment
+# Minecraft 1.17.1 client: download + remap + decompile + Parchment +
+# asset extraction → reference/minecraft-1.17.1
+./scripts/decompile-mc.sh 1.17.1 --parchment
 
 # Other versions / server jar / custom output dir
-./mclone/scripts/decompile-mc.sh 1.16.5 --parchment
-./mclone/scripts/decompile-mc.sh 1.18.2 --server --parchment
-./mclone/scripts/decompile-mc.sh 1.17.1 --out /tmp/mc-scratch
-./mclone/scripts/decompile-mc.sh 1.17.1 --force          # redo all steps
+./scripts/decompile-mc.sh 1.16.5 --parchment
+./scripts/decompile-mc.sh 1.18.2 --server --parchment
+./scripts/decompile-mc.sh 1.17.1 --out /tmp/mc-scratch
+./scripts/decompile-mc.sh 1.17.1 --no-assets       # skip asset extraction
+./scripts/decompile-mc.sh 1.17.1 --force           # redo all steps
+
+# Standalone asset extraction (if you already ran decompile-mc.sh)
+./scripts/extract-assets.sh 1.17.1
 
 # Apply Parchment standalone to an existing tree
-./mclone/scripts/apply-parchment.py ~/code/reference/minecraft-1.17.1/src --mc 1.17.1
+./scripts/apply-parchment.py reference/minecraft-1.17.1/src --mc 1.17.1
 ```
 
-Prereqs: JDK 17+, `curl`, `jq`, `sha1sum`. `python3` for `--parchment`.
+Prereqs: JDK 17+, `curl`, `jq`, `sha1sum`, `unzip`. `python3` for `--parchment`.
 
 The decompile script is idempotent — each step (manifest fetch / jar download / remap / decompile) skips if its output already exists. Re-running just prints "Done". Use `--force` to redo. Official Mojang mappings are only available for **1.14.4+**; older versions need MCP.
 
@@ -116,6 +123,7 @@ Pipeline stages, for reference:
 4. Remap with **SpecialSource** (default direction, no `--reverse` — SpecialSource's Proguard parser expects `deobf -> obf` already)
 5. Decompile with **Vineflower**
 6. (Optional, `--parchment`) Download Parchment zip from `maven.parchmentmc.org` → parse `parchment.json` → rewrite `.java` files to replace `varN` method params with Parchment names
+7. (Client only, unless `--no-assets`) Extract filtered textures / models / blockstates / structures from `client.jar` into `extracted/` via `extract-assets.sh` (see `docs/assets-plan.md`)
 
 ## Community mappings (for parameter names and javadoc)
 

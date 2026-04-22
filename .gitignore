@@ -12,6 +12,10 @@ node_modules/
 **/*.zip
 parchment/
 tools/
+version_manifest_v2.json
+[0-9]*.json
+client.txt
+server.txt
 
 # Decompiled / generated source trees — never commit
 minecraft-*/

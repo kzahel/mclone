@@ -4,7 +4,7 @@
 # for decompilation. Idempotent: each step skips if its output already exists.
 #
 # Usage:
-#   ./decompile-mc.sh [VERSION] [--server] [--out DIR] [--force] [--parchment]
+#   ./decompile-mc.sh [VERSION] [--server] [--out DIR] [--force] [--parchment] [--no-assets]
 #
 # Args:
 #   VERSION      Minecraft version id, as listed in Mojang's version_manifest_v2.
@@ -12,12 +12,13 @@
 #
 # Flags:
 #   --server     Use server.jar + server mappings instead of client.
-#   --out DIR    Output directory. Default: ~/code/reference/minecraft-<VERSION>
+#   --out DIR    Output directory. Default: <repo>/reference/minecraft-<VERSION>
 #   --force      Redo steps even if outputs exist.
 #   --parchment  After decompile, apply Parchment parameter names (community
 #                mapping) via apply-parchment.py. Idempotent.
+#   --no-assets  Skip the asset extraction step (extract-assets.sh).
 #
-# Prereqs: java (17+ recommended), curl, jq, sha1sum. python3 if --parchment.
+# Prereqs: java (17+ recommended), curl, jq, sha1sum, unzip. python3 if --parchment.
 
 set -euo pipefail
 
@@ -30,6 +31,7 @@ SIDE="client"
 OUT_DIR=""
 FORCE=0
 PARCHMENT=0
+EXTRACT_ASSETS=1
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -38,6 +40,7 @@ while [ $# -gt 0 ]; do
         --out)       OUT_DIR="$2"; shift 2 ;;
         --force)     FORCE=1; shift ;;
         --parchment) PARCHMENT=1; shift ;;
+        --no-assets) EXTRACT_ASSETS=0; shift ;;
         -h|--help)
             sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
             exit 0 ;;
@@ -51,12 +54,18 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)
+
 VERSION="${VERSION:-1.17.1}"
-OUT_DIR="${OUT_DIR:-$HOME/code/reference/minecraft-${VERSION}}"
+OUT_DIR="${OUT_DIR:-$REPO_ROOT/reference/minecraft-${VERSION}}"
 
 for bin in java curl jq sha1sum; do
     command -v "$bin" >/dev/null 2>&1 || { echo "Missing prereq: $bin" >&2; exit 1; }
 done
+if [ "$EXTRACT_ASSETS" = 1 ] && [ "$SIDE" = "client" ]; then
+    command -v unzip >/dev/null 2>&1 || { echo "Missing prereq: unzip (needed for asset extraction — pass --no-assets to skip)" >&2; exit 1; }
+fi
 
 log()  { printf '[mc-decompile] %s\n' "$*"; }
 need() { [ "$FORCE" = 1 ] || [ ! -e "$1" ]; }
@@ -143,9 +152,16 @@ fi
 # 7. Optionally apply Parchment parameter names
 if [ "$PARCHMENT" = 1 ]; then
     command -v python3 >/dev/null 2>&1 || { echo "python3 required for --parchment" >&2; exit 1; }
-    SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
     log "Applying Parchment parameter mappings..."
     python3 "$SCRIPT_DIR/apply-parchment.py" "$OUT_DIR/$SRC_DIR" --mc "$VERSION"
+fi
+
+# 8. Extract renderer-bootstrap assets (client only). Idempotent.
+if [ "$EXTRACT_ASSETS" = 1 ] && [ "$SIDE" = "client" ]; then
+    log "Extracting assets..."
+    EXTRACT_ARGS=("$VERSION" "--out" "$OUT_DIR")
+    [ "$FORCE" = 1 ] && EXTRACT_ARGS+=("--force")
+    "$SCRIPT_DIR/extract-assets.sh" "${EXTRACT_ARGS[@]}"
 fi
 
 log ""

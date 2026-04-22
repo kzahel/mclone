@@ -2,11 +2,13 @@
 # Clone Cubitect/cubiomes into the reference dir.
 #
 # Usage: ./fetch-cubiomes.sh
-# Env:   REF_DIR (default: ~/code/reference)
+# Env:   REF_DIR (default: <repo>/reference)
 
 set -euo pipefail
 
-REF_DIR="${REF_DIR:-$HOME/code/reference}"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)
+REF_DIR="${REF_DIR:-$REPO_ROOT/reference}"
 DEST="$REF_DIR/cubiomes"
 
 if [ -d "$DEST/.git" ]; then
