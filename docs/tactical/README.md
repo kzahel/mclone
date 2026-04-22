@@ -13,8 +13,8 @@ Numbered, short-lived implementation plans. Each covers a cohesive group of modu
 | Doc | Modules | Oracle tier | Purpose |
 |---|---|---|---|
 | [`00-worldgen-ts-port.md`](00-worldgen-ts-port.md) | scaffold, `SimpleRandomSource`, `WorldgenRandom`, `ImprovedNoise` | unit | foundation numerics |
-| `01-noise-octaves.md` | `PerlinNoise`, `SimplexNoise`, `BlendedNoise` | unit | everything `NoiseSampler` consumes from `synth/` |
-| `02-` | `SurfaceNoise`, `PerlinSimplexNoise`, `NormalNoise`, `NoiseUtils` | unit | the remaining `synth/` utilities |
+| [`01-noise-octaves.md`](01-noise-octaves.md) | `PerlinNoise`, `SimplexNoise`, `BlendedNoise` | unit | everything `NoiseSampler` consumes from `synth/` |
+| [`02-remaining-synth.md`](02-remaining-synth.md) | `SurfaceNoise`, `PerlinSimplexNoise`, `NormalNoise`, `NoiseUtils` | unit | the remaining `synth/` utilities |
 | `03-` | `NoiseSampler` + settings (`NoiseSettings`, `NoiseSamplingSettings`) | unit | 3D density field from chunk coords |
 | `04-` | **Integration oracle harness**: server-jar runner, MCA reader, chunk-level fixture format | infra | stand up the server-oracle *before* we need to diff chunks |
 | `05-` | `BiomeSource` subset — biome IDs without cubiomes; settles the cubiomes-or-not question | unit + integration | |

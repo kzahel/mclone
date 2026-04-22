@@ -21,7 +21,8 @@ Order matters: `PerlinNoise` is a prerequisite for `BlendedNoise`. `SimplexNoise
 - Tactical 00 prerequisites are complete: oracle harness, `SimpleRandomSource`, and `ImprovedNoise`
 - `PerlinNoise` is fixture-backed for both octave sets used downstream: `[-7..0]` and `[-15..0]`, across canonical seeds `0`, `1`, `12345`, and `2151901553968352745`
 - `SimplexNoise` is now fixture-backed for both entry points: 2D `getValue(x,z)` on a dedicated shared `x/z` grid and 3D `getValue(x,y,z)` on the shared 3D grid, again across canonical seeds `0`, `1`, `12345`, and `2151901553968352745`
-- Next up: port and fixture-back `BlendedNoise`
+- `BlendedNoise` is now fixture-backed across the canonical seeds and the three real `NoiseSampler` sampling tuples: overworld/amplified, nether/caves, and end/floating-islands
+- Tactical `01` is complete; next up is [`02-remaining-synth.md`](02-remaining-synth.md)
 
 ## Why these three
 
@@ -94,7 +95,7 @@ oracle/java/
 3. **Emit fixtures** for each class × canonical seeds (the same four seeds as PRNG: `0`, `1`, `12345`, `2151901553968352745`). `PerlinNoise` coverage is complete for both required octave sets: `[-7..0]` and `[-15..0]`.
 4. **Port `PerlinNoise`** — done and fixture-backed for both octave ranges used by `NoiseSampler` and `BlendedNoise`.
 5. **Port `SimplexNoise`** — done and fixture-backed for both the 2D and 3D `getValue(...)` overloads.
-6. **Port `BlendedNoise`** — next up; glue over `PerlinNoise`, with fixture validation for the combination + clamping behavior end-to-end.
+6. **Port `BlendedNoise`** — done and fixture-backed against the three built-in sampling tuples that `NoiseSampler` actually derives from `NoiseGeneratorSettings`.
 
 ## Done when
 
@@ -102,9 +103,9 @@ oracle/java/
   - `PerlinNoise` matches Java fixture at ≥1000 sample points × 4 seeds × 2 octave ranges (zero f64 epsilon)
   - `SimplexNoise` matches at ≥1000 points × 4 seeds (zero f64 epsilon)
   - `BlendedNoise` matches at ≥1000 points × 4 seeds × a handful of `(hScale, vScale, mainH, mainV)` tuples (cover the common range `NoiseSampler` actually calls with)
-- `pnpm oracle:gen noise --class PerlinNoise ...` regenerates fixtures from scratch
+- `pnpm oracle:gen noise --class PerlinNoise ...`, `--class SimplexNoise ...`, and `--class BlendedNoise ...` regenerate fixtures from scratch
 - `oracle/README.md` is updated with the new subcommand
-- Next tactical doc (`02-…`) drafted — likely scope: `SurfaceNoise`, `PerlinSimplexNoise`, `NormalNoise`, `NoiseUtils`
+- Next tactical doc is drafted as [`02-remaining-synth.md`](02-remaining-synth.md)
 
 ## Out of scope for this doc
 
@@ -116,4 +117,4 @@ oracle/java/
 ## Open questions
 
 - **Sample-point grid:** resolved as "one shared 3D grid for `(x,y,z)` methods, plus dedicated per-signature grids when needed." `SimplexNoise` now uses `test/fixtures/noise/_samples-2d.json` for the 2D overload and the shared `test/fixtures/noise/_samples-3d.json` grid for 3D.
-- **`BlendedNoise` parameter coverage:** pick tuples from what `NoiseSampler` actually passes (read `NoiseSampler.fillNoiseColumn`). Don't test arbitrary scale combinations — test the ones downstream code will use.
+- **`BlendedNoise` parameter coverage:** resolved as the three unique tuples derived from built-in `NoiseGeneratorSettings`: overworld/amplified, nether/caves, and end/floating-islands. The oracle fixtures use those exact scale values plus a dedicated integer cell grid in `test/fixtures/noise/_samples-cell-3d.json`.

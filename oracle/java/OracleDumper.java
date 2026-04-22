@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import net.minecraft.world.level.levelgen.SimpleRandomSource;
+import net.minecraft.world.level.levelgen.synth.BlendedNoise;
 import net.minecraft.world.level.levelgen.synth.ImprovedNoise;
 import net.minecraft.world.level.levelgen.synth.PerlinNoise;
 import net.minecraft.world.level.levelgen.synth.SimplexNoise;
@@ -15,6 +16,7 @@ public final class OracleDumper {
    private static final String MINECRAFT_VERSION = "1.17.1";
    private static final String RANDOM_SOURCE_CLASS = "net.minecraft.world.level.levelgen.SimpleRandomSource";
    private static final String RANDOM_SOURCE_ALIAS = "LegacyRandomSource";
+   private static final String BLENDED_NOISE_CLASS = BlendedNoise.class.getName();
    private static final String IMPROVED_NOISE_CLASS = ImprovedNoise.class.getName();
    private static final String PERLIN_NOISE_CLASS = PerlinNoise.class.getName();
    private static final String SIMPLEX_NOISE_CLASS = SimplexNoise.class.getName();
@@ -22,6 +24,13 @@ public final class OracleDumper {
    private static final double[] NOISE_X_COORDS = createAxis(-2.5, 0.5, 11);
    private static final double[] NOISE_Y_COORDS = createAxis(-1.875, 0.375, 11);
    private static final double[] NOISE_Z_COORDS = createAxis(-3.125, 0.625, 11);
+   private static final int[] BLENDED_LIMIT_OCTAVES = createIntAxis(-15, 1, 16);
+   private static final int[] BLENDED_MAIN_OCTAVES = createIntAxis(-7, 1, 8);
+   private static final BlendedNoiseSampleParameters[] BLENDED_NOISE_SAMPLE_SETS = new BlendedNoiseSampleParameters[]{
+      blendedNoiseSampleParameters("overworld", new String[]{"overworld", "amplified"}, 0.9999999814507745, 0.9999999814507745, 80.0, 160.0),
+      blendedNoiseSampleParameters("nether", new String[]{"nether", "caves"}, 1.0, 3.0, 80.0, 60.0),
+      blendedNoiseSampleParameters("end", new String[]{"end", "floating_islands"}, 2.0, 1.0, 80.0, 160.0)
+   };
 
    private OracleDumper() {
    }
@@ -161,6 +170,8 @@ public final class OracleDumper {
             return dumpPerlinNoise(seed, parseOctaves(requireOption(options, "octaves")), loadSampleGrid(requireOption(options, "samples")));
          case "SimplexNoise":
             return dumpSimplexNoise(seed, loadSampleGrid2D(requireOption(options, "samples2d")), loadSampleGrid(requireOption(options, "samples3d")));
+         case "BlendedNoise":
+            return dumpBlendedNoise(seed, loadIntegerSampleGrid(requireOption(options, "samples")));
          default:
             throw new IllegalArgumentException("unsupported noise class '" + className + "'");
       }
@@ -270,6 +281,57 @@ public final class OracleDumper {
       return json.toString();
    }
 
+   private static String dumpBlendedNoise(long seed, IntegerSampleGrid sampleGrid) {
+      SimpleRandomSource random = new SimpleRandomSource(seed);
+      PerlinNoise minLimitNoise = new PerlinNoise(random, toIntegerList(BLENDED_LIMIT_OCTAVES));
+      PerlinNoise maxLimitNoise = new PerlinNoise(random, toIntegerList(BLENDED_LIMIT_OCTAVES));
+      PerlinNoise mainNoise = new PerlinNoise(random, toIntegerList(BLENDED_MAIN_OCTAVES));
+      BlendedNoise noise = new BlendedNoise(minLimitNoise, maxLimitNoise, mainNoise);
+      int sampleCount = sampleGrid.x.length * sampleGrid.y.length * sampleGrid.z.length;
+      StringBuilder json = new StringBuilder(4096 + BLENDED_NOISE_SAMPLE_SETS.length * sampleCount * 28);
+      json.append("{\n");
+      appendField(json, 1, "module", "noise", true);
+      appendField(json, 1, "minecraftVersion", MINECRAFT_VERSION, true);
+      appendField(json, 1, "noiseClass", BLENDED_NOISE_CLASS, true);
+      appendField(json, 1, "randomSourceClass", RANDOM_SOURCE_CLASS, true);
+      appendField(json, 1, "randomSourceAlias", RANDOM_SOURCE_ALIAS, true);
+      appendField(json, 1, "noiseMethod", "sampleAndClampNoise(x,y,z,limitHorizontalScale,limitVerticalScale,mainHorizontalScale,mainVerticalScale)", true);
+      appendField(json, 1, "seed", Long.toString(seed), true);
+      json.append("  \"octaves\": {\n");
+      indent(json, 2);
+      json.append("\"limit\": ");
+      appendIntArray(json, BLENDED_LIMIT_OCTAVES);
+      json.append(",\n");
+      indent(json, 2);
+      json.append("\"main\": ");
+      appendIntArray(json, BLENDED_MAIN_OCTAVES);
+      json.append('\n');
+      json.append("  },\n");
+      json.append("  \"wireFormat\": {\n");
+      appendField(json, 2, "coordinates", "integer", true);
+      appendField(json, 2, "parameters", "number", true);
+      appendField(json, 2, "values", "number", false);
+      json.append("  },\n");
+      json.append("  \"sampleSets\": {\n");
+
+      for (int index = 0; index < BLENDED_NOISE_SAMPLE_SETS.length; index++) {
+         appendBlendedSampleSet(
+            json,
+            2,
+            BLENDED_NOISE_SAMPLE_SETS[index],
+            sampleGrid,
+            sampleCount,
+            noise,
+            mainNoise,
+            index < BLENDED_NOISE_SAMPLE_SETS.length - 1
+         );
+      }
+
+      json.append("  }\n");
+      json.append("}\n");
+      return json.toString();
+   }
+
    private static void appendIntArray(StringBuilder json, long seed, int count) {
       SimpleRandomSource random = new SimpleRandomSource(seed);
       json.append('[');
@@ -345,6 +407,22 @@ public final class OracleDumper {
       json.append(']');
    }
 
+   private static void appendStringArray(StringBuilder json, String[] values) {
+      json.append('[');
+
+      for (int index = 0; index < values.length; index++) {
+         if (index > 0) {
+            json.append(',');
+         }
+
+         json.append('"');
+         json.append(escapeJson(values[index]));
+         json.append('"');
+      }
+
+      json.append(']');
+   }
+
    private static void appendNoiseValueArray(StringBuilder json, ImprovedNoise noise) {
       appendNoiseValueArray(json, defaultNoiseSampleGrid(), noise::noise);
    }
@@ -385,6 +463,48 @@ public final class OracleDumper {
       }
 
       json.append(']');
+   }
+
+   private static BlendFactorSummary appendBlendedNoiseValueArray(
+      StringBuilder json,
+      IntegerSampleGrid sampleGrid,
+      BlendedNoise noise,
+      PerlinNoise mainNoise,
+      BlendedNoiseSampleParameters params
+   ) {
+      BlendFactorSummary summary = new BlendFactorSummary();
+      json.append('[');
+      boolean first = true;
+
+      for (int x : sampleGrid.x) {
+         for (int y : sampleGrid.y) {
+            for (int z : sampleGrid.z) {
+               if (!first) {
+                  json.append(',');
+               }
+
+               first = false;
+               double blendFactor = computeBlendedNoiseFactor(x, y, z, params, mainNoise);
+               summary.record(blendFactor);
+               json.append(
+                  Double.toString(
+                     noise.sampleAndClampNoise(
+                        x,
+                        y,
+                        z,
+                        params.limitHorizontalScale,
+                        params.limitVerticalScale,
+                        params.mainHorizontalScale,
+                        params.mainVerticalScale
+                     )
+                  )
+               );
+            }
+         }
+      }
+
+      json.append(']');
+      return summary;
    }
 
    private static void appendSampleSet2D(StringBuilder json, String name, String noiseMethod, SampleGrid2D sampleGrid, int sampleCount, NoiseSampler2D noise, boolean trailingComma) {
@@ -449,6 +569,72 @@ public final class OracleDumper {
       json.append('\n');
    }
 
+   private static void appendBlendedSampleSet(
+      StringBuilder json,
+      int indentLevel,
+      BlendedNoiseSampleParameters params,
+      IntegerSampleGrid sampleGrid,
+      int sampleCount,
+      BlendedNoise noise,
+      PerlinNoise mainNoise,
+      boolean trailingComma
+   ) {
+      indent(json, indentLevel);
+      json.append('"');
+      json.append(escapeJson(params.name));
+      json.append("\": {\n");
+      appendField(json, indentLevel + 1, "gridOrder", sampleGrid.gridOrder, true);
+      appendNumberField(json, indentLevel + 1, "sampleCount", Integer.toString(sampleCount), true);
+      indent(json, indentLevel + 1);
+      json.append("\"settingsKeys\": ");
+      appendStringArray(json, params.settingsKeys);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"parameters\": {\n");
+      appendNumberField(json, indentLevel + 2, "limitHorizontalScale", Double.toString(params.limitHorizontalScale), true);
+      appendNumberField(json, indentLevel + 2, "limitVerticalScale", Double.toString(params.limitVerticalScale), true);
+      appendNumberField(json, indentLevel + 2, "mainHorizontalScale", Double.toString(params.mainHorizontalScale), true);
+      appendNumberField(json, indentLevel + 2, "mainVerticalScale", Double.toString(params.mainVerticalScale), false);
+      indent(json, indentLevel + 1);
+      json.append("},\n");
+      indent(json, indentLevel + 1);
+      json.append("\"x\": ");
+      appendIntArray(json, sampleGrid.x);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"y\": ");
+      appendIntArray(json, sampleGrid.y);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"z\": ");
+      appendIntArray(json, sampleGrid.z);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"values\": ");
+      BlendFactorSummary summary = appendBlendedNoiseValueArray(json, sampleGrid, noise, mainNoise, params);
+      json.append(",\n");
+      indent(json, indentLevel + 1);
+      json.append("\"blendFactorRange\": {\n");
+      appendNumberField(json, indentLevel + 2, "min", Double.toString(summary.min), true);
+      appendNumberField(json, indentLevel + 2, "max", Double.toString(summary.max), false);
+      indent(json, indentLevel + 1);
+      json.append("},\n");
+      indent(json, indentLevel + 1);
+      json.append("\"blendRegionCounts\": {\n");
+      appendNumberField(json, indentLevel + 2, "belowOrEqualZero", Integer.toString(summary.belowOrEqualZero), true);
+      appendNumberField(json, indentLevel + 2, "interior", Integer.toString(summary.interior), true);
+      appendNumberField(json, indentLevel + 2, "aboveOrEqualOne", Integer.toString(summary.aboveOrEqualOne), false);
+      indent(json, indentLevel + 1);
+      json.append("}\n");
+      indent(json, indentLevel);
+      json.append('}');
+      if (trailingComma) {
+         json.append(',');
+      }
+
+      json.append('\n');
+   }
+
    private static double[] createAxis(double start, double step, int count) {
       double[] values = new double[count];
 
@@ -457,6 +643,36 @@ public final class OracleDumper {
       }
 
       return values;
+   }
+
+   private static int[] createIntAxis(int start, int step, int count) {
+      int[] values = new int[count];
+
+      for (int index = 0; index < count; index++) {
+         values[index] = start + step * index;
+      }
+
+      return values;
+   }
+
+   private static BlendedNoiseSampleParameters blendedNoiseSampleParameters(
+      String name,
+      String[] settingsKeys,
+      double xzScale,
+      double yScale,
+      double xzFactor,
+      double yFactor
+   ) {
+      double limitHorizontalScale = 684.412 * xzScale;
+      double limitVerticalScale = 684.412 * yScale;
+      return new BlendedNoiseSampleParameters(
+         name,
+         settingsKeys,
+         limitHorizontalScale,
+         limitVerticalScale,
+         limitHorizontalScale / xzFactor,
+         limitVerticalScale / yFactor
+      );
    }
 
    private static int[] parseOctaves(String value) {
@@ -521,6 +737,17 @@ public final class OracleDumper {
       return sampleGrid;
    }
 
+   private static IntegerSampleGrid loadIntegerSampleGrid(String samplePath) throws java.io.IOException {
+      String json = Files.readString(Path.of(samplePath), StandardCharsets.UTF_8);
+      IntegerSampleGrid sampleGrid = GSON.fromJson(json, IntegerSampleGrid.class);
+      if (sampleGrid == null) {
+         throw new IllegalArgumentException("failed to parse sample grid '" + samplePath + "'");
+      }
+
+      validateIntegerSampleGrid(sampleGrid, samplePath);
+      return sampleGrid;
+   }
+
    private static SampleGrid defaultNoiseSampleGrid() {
       return new SampleGrid("x-major,y-major,z-minor", NOISE_X_COORDS, NOISE_Y_COORDS, NOISE_Z_COORDS);
    }
@@ -543,6 +770,39 @@ public final class OracleDumper {
       if (sampleGrid.x == null || sampleGrid.x.length == 0 || sampleGrid.z == null || sampleGrid.z.length == 0) {
          throw new IllegalArgumentException("sample grid '" + samplePath + "' must provide non-empty x/z arrays");
       }
+   }
+
+   private static void validateIntegerSampleGrid(IntegerSampleGrid sampleGrid, String samplePath) {
+      if (sampleGrid.gridOrder == null || sampleGrid.gridOrder.isEmpty()) {
+         throw new IllegalArgumentException("sample grid '" + samplePath + "' is missing gridOrder");
+      }
+
+      if (sampleGrid.x == null || sampleGrid.x.length == 0 || sampleGrid.y == null || sampleGrid.y.length == 0 || sampleGrid.z == null || sampleGrid.z.length == 0) {
+         throw new IllegalArgumentException("sample grid '" + samplePath + "' must provide non-empty x/y/z arrays");
+      }
+   }
+
+   private static double computeBlendedNoiseFactor(int x, int y, int z, BlendedNoiseSampleParameters params, PerlinNoise mainNoise) {
+      double value = 0.0;
+      double inputFactor = 1.0;
+
+      for (int octave = 0; octave < 8; octave++) {
+         ImprovedNoise noise = mainNoise.getOctaveNoise(octave);
+         if (noise != null) {
+            value += noise.noise(
+                  PerlinNoise.wrap(x * params.mainHorizontalScale * inputFactor),
+                  PerlinNoise.wrap(y * params.mainVerticalScale * inputFactor),
+                  PerlinNoise.wrap(z * params.mainHorizontalScale * inputFactor),
+                  params.mainVerticalScale * inputFactor,
+                  y * params.mainVerticalScale * inputFactor
+               )
+               / inputFactor;
+         }
+
+         inputFactor /= 2.0;
+      }
+
+      return (value / 10.0 + 1.0) / 2.0;
    }
 
    private static void appendField(StringBuilder json, int indentLevel, String name, String value, boolean trailingComma) {
@@ -624,6 +884,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper noise --seed <long>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class SimplexNoise --seed <long> --samples2d <path> --samples3d <path>");
+      System.err.println("  oracle-dumper noise --class BlendedNoise --seed <long> --samples <path>");
       System.err.println("dumps Minecraft " + MINECRAFT_VERSION + " oracle fixtures as JSON");
       System.err.println("note: 1.17.1 uses SimpleRandomSource; later mappings rename this legacy LCG to LegacyRandomSource");
    }
@@ -661,6 +922,61 @@ public final class OracleDumper {
       double[] z;
 
       SampleGrid2D() {
+      }
+   }
+
+   private static final class IntegerSampleGrid {
+      String gridOrder;
+      int[] x;
+      int[] y;
+      int[] z;
+
+      IntegerSampleGrid() {
+      }
+   }
+
+   private static final class BlendedNoiseSampleParameters {
+      final String name;
+      final String[] settingsKeys;
+      final double limitHorizontalScale;
+      final double limitVerticalScale;
+      final double mainHorizontalScale;
+      final double mainVerticalScale;
+
+      BlendedNoiseSampleParameters(
+         String name,
+         String[] settingsKeys,
+         double limitHorizontalScale,
+         double limitVerticalScale,
+         double mainHorizontalScale,
+         double mainVerticalScale
+      ) {
+         this.name = name;
+         this.settingsKeys = settingsKeys;
+         this.limitHorizontalScale = limitHorizontalScale;
+         this.limitVerticalScale = limitVerticalScale;
+         this.mainHorizontalScale = mainHorizontalScale;
+         this.mainVerticalScale = mainVerticalScale;
+      }
+   }
+
+   private static final class BlendFactorSummary {
+      double min = Double.POSITIVE_INFINITY;
+      double max = Double.NEGATIVE_INFINITY;
+      int belowOrEqualZero;
+      int interior;
+      int aboveOrEqualOne;
+
+      void record(double blendFactor) {
+         this.min = Math.min(this.min, blendFactor);
+         this.max = Math.max(this.max, blendFactor);
+         if (blendFactor <= 0.0) {
+            this.belowOrEqualZero++;
+         } else if (blendFactor >= 1.0) {
+            this.aboveOrEqualOne++;
+         } else {
+            this.interior++;
+         }
       }
    }
 }

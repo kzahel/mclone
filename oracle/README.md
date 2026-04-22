@@ -53,6 +53,25 @@ The `SimplexNoise` fixture stores both overloads in one file:
 
 The top-level metadata also records constructor offsets `xo`, `yo`, and `zo`, so the TS side can assert that construction consumed the PRNG identically before checking sampled values.
 
+## BlendedNoise oracle
+
+`pnpm --silent oracle:gen noise --class BlendedNoise --seed 12345 --samples test/fixtures/noise/_samples-cell-3d.json > test/fixtures/noise/blended-seed-12345.json`
+
+The `BlendedNoise` fixture uses a dedicated integer cell grid because `sampleAndClampNoise(...)` is called from `NoiseSampler` with cell coordinates, not arbitrary floating-point positions.
+
+Each fixture stores three named sample sets keyed by the real built-in `NoiseGeneratorSettings` tuples:
+
+- `overworld`: shared by overworld and amplified
+- `nether`: shared by nether and caves
+- `end`: shared by end and floating islands
+
+Each sample set records:
+
+- the exact `(limitHorizontalScale, limitVerticalScale, mainHorizontalScale, mainVerticalScale)` parameters derived from `NoiseSampler`
+- the integer `x`, `y`, `z` axes
+- flattened `values` in `x-major,y-major,z-minor` order
+- `blendFactorRange` and `blendRegionCounts`, so the TS tests can assert the fixture surface exercises both clamp short-circuit branches and the interior lerp path
+
 ## Wrappers
 
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`
