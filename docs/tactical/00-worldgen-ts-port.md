@@ -67,9 +67,10 @@ mclone/
 ## Current status
 
 - `5c201d1`: project scaffold landed (`pnpm`, Vitest, strict TS config, smoke test)
-- `2b1f527`: Java oracle harness landed under `oracle/`, plus the first PRNG fixture at `test/fixtures/prng/seed-12345.json`
+- `2b1f527`: Java oracle harness landed under `oracle/`
+- Canonical PRNG fixtures now live under `test/fixtures/prng/` for seeds `0`, `1`, `12345`, and `2151901553968352745`
 - For MC 1.17.1, the relevant legacy LCG class is `net.minecraft.world.level.levelgen.SimpleRandomSource`; later Mojang mappings rename this to `LegacyRandomSource`
-- Next up: finish the canonical PRNG fixtures (`0`, `1`, `2151901553968352745`), then port the TS PRNG and test against them
+- Next up: port the TS PRNG and validate it byte-for-byte against the Java fixtures
 
 ## Week 1 — concrete steps
 
