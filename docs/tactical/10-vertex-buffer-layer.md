@@ -52,4 +52,4 @@ Port the `com.mojang.blaze3d.vertex` CPU/GPU pipeline: vertex format definitions
 
 ## Next
 
-Tactical 11: `RenderType` + `RenderStateShard` → `GPURenderPipeline` cache + bind group layouts. Needs `VertexFormat` (this slice) to describe vertex buffer layouts to the pipeline descriptor.
+Tactical 11: [`11-render-pipeline-infrastructure.md`](11-render-pipeline-infrastructure.md) — `RenderType` + `RenderStateShard` → `GPURenderPipeline` cache + bind group layouts. Needs `VertexFormat` (this slice) to describe vertex buffer layouts to the pipeline descriptor.

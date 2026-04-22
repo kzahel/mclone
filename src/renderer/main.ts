@@ -1,5 +1,7 @@
 import { BufferBuilder } from "./vertex/buffer-builder";
 import { DefaultVertexFormat } from "./vertex/default-vertex-format";
+import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
+import { RenderType } from "./render-type";
 import { VertexBuffer } from "./vertex/vertex-buffer";
 import { VertexFormat } from "./vertex/vertex-format";
 
@@ -17,74 +19,39 @@ declare global {
 
 const CLEAR_COLOR: GPUColor = { r: 0, g: 128 / 255, b: 0, a: 1 };
 const READBACK_FORMAT: GPUTextureFormat = "rgba8unorm";
+const DEPTH_FORMAT: GPUTextureFormat = "depth24plus";
+const WHITE_PIXEL = new Uint8Array([255, 255, 255, 255]);
+const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
 
-const SHADER_SOURCE = `
-struct VertexOutput {
-  @builtin(position) position: vec4<f32>,
-  @location(0) color: vec4<f32>,
-};
-
-@vertex
-fn vs_main(
-  @location(0) position: vec3<f32>,
-  @location(1) color: vec4<f32>,
-) -> VertexOutput {
-  var output: VertexOutput;
-  output.position = vec4<f32>(position, 1.0);
-  output.color = color;
-  return output;
-}
-
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-  return input.color;
-}
-`;
-
-function createVertexLayout(format: VertexFormat): GPUVertexBufferLayout {
-  const names = format.getElementAttributeNames();
-  const offsets = format.getOffsets();
-  const attributes: GPUVertexAttribute[] = [];
-
-  for (let index = 0; index < names.length; index++) {
-    const name = names[index]!;
-    const offset = offsets[index]!;
-    if (name === "Position") {
-      attributes.push({ shaderLocation: 0, offset, format: "float32x3" });
-    } else if (name === "Color") {
-      attributes.push({ shaderLocation: 1, offset, format: "unorm8x4" });
-    }
-  }
-
-  return {
-    arrayStride: format.getVertexSize(),
-    attributes,
-  };
-}
-
-function createPipeline(
-  device: GPUDevice,
-  format: GPUTextureFormat,
-  vertexFormat: VertexFormat,
-  topology: GPUPrimitiveTopology,
-): GPURenderPipeline {
-  const shaderModule = device.createShaderModule({ code: SHADER_SOURCE });
-  return device.createRenderPipeline({
-    layout: "auto",
-    vertex: {
-      module: shaderModule,
-      entryPoint: "vs_main",
-      buffers: [createVertexLayout(vertexFormat)],
-    },
-    fragment: {
-      module: shaderModule,
-      entryPoint: "fs_main",
-      targets: [{ format }],
-    },
-    primitive: {
-      topology,
-    },
+function uploadBuffer(device: GPUDevice, bytes: Uint8Array, usage: GPUBufferUsageFlags): GPUBuffer {
+  const buffer = device.createBuffer({
+    size: Math.max(4, Math.ceil(bytes.byteLength / 4) * 4),
+    usage,
+    mappedAtCreation: true,
   });
+  new Uint8Array(buffer.getMappedRange()).set(bytes);
+  buffer.unmap();
+  return buffer;
+}
+
+function createWhiteTexture(device: GPUDevice): GPUTextureView {
+  const texture = device.createTexture({
+    size: { width: 1, height: 1 },
+    format: "rgba8unorm",
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+  device.queue.writeTexture({ texture }, WHITE_PIXEL, { bytesPerRow: 256 }, { width: 1, height: 1 });
+  return texture.createView();
+}
+
+function createDepthView(device: GPUDevice, width: number, height: number): GPUTextureView {
+  return device
+    .createTexture({
+      size: { width, height },
+      format: DEPTH_FORMAT,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    })
+    .createView();
 }
 
 function buildQuad(device: GPUDevice): VertexBuffer {
@@ -105,7 +72,9 @@ function buildQuad(device: GPUDevice): VertexBuffer {
 function encodeDrawPass(
   encoder: GPUCommandEncoder,
   view: GPUTextureView,
+  depthView: GPUTextureView,
   pipeline: GPURenderPipeline,
+  bindGroup: GPUBindGroup,
   vertexBuffer: VertexBuffer,
 ): void {
   const pass = encoder.beginRenderPass({
@@ -117,8 +86,15 @@ function encodeDrawPass(
         storeOp: "store",
       },
     ],
+    depthStencilAttachment: {
+      view: depthView,
+      depthClearValue: 1,
+      depthLoadOp: "clear",
+      depthStoreOp: "store",
+    },
   });
   pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
   vertexBuffer.draw(pass);
   pass.end();
 }
@@ -175,9 +151,42 @@ async function boot(): Promise<BootResult> {
   const vertexFormat = vertexBuffer.getFormat();
   if (!vertexFormat) return { ok: false, reason: "vertex buffer format missing after upload" };
 
-  const topology = vertexBuffer.getPrimitiveTopology();
-  const canvasPipeline = createPipeline(device, format, vertexFormat, topology);
-  const readbackPipeline = createPipeline(device, READBACK_FORMAT, vertexFormat, topology);
+  const renderType = RenderType.solid();
+  if (renderType.format() !== vertexFormat) {
+    return { ok: false, reason: "render type format does not match the uploaded vertex format" };
+  }
+
+  const pipelineCache = new RenderPipelineCache(device);
+  const canvasPipeline = pipelineCache.getOrCreate(renderType, format, DEPTH_FORMAT);
+  const readbackPipeline = pipelineCache.getOrCreate(renderType, READBACK_FORMAT, DEPTH_FORMAT);
+  const sampler = device.createSampler({
+    magFilter: "nearest",
+    minFilter: "nearest",
+  });
+  const whiteTexture = createWhiteTexture(device);
+  const uniformBytes = canvasPipeline.shaderProgram.createUniformBufferBytes({
+    ModelViewMat: IDENTITY_MATRIX,
+    ProjMat: IDENTITY_MATRIX,
+    ChunkOffset: [0, 0, 0],
+    ColorModulator: [1, 1, 1, 1],
+    FogStart: [1_000_000],
+    FogEnd: [1_000_001],
+    FogColor: [0, 0, 0, 0],
+  });
+  const uniformBuffer = uploadBuffer(device, uniformBytes, GPUBufferUsage.UNIFORM);
+  const bindGroup = canvasPipeline.shaderProgram.createBindGroup(device, canvasPipeline.bindGroupLayout, {
+    uniformBuffer,
+    samplers: {
+      Sampler0: sampler,
+      Sampler2: sampler,
+    },
+    textures: {
+      Sampler0: whiteTexture,
+      Sampler2: whiteTexture,
+    },
+  });
+  const canvasDepthView = createDepthView(device, canvas.width, canvas.height);
+  const readbackDepthView = createDepthView(device, canvas.width, canvas.height);
   const readbackTexture = device.createTexture({
     size: { width: canvas.width, height: canvas.height },
     format: READBACK_FORMAT,
@@ -185,8 +194,8 @@ async function boot(): Promise<BootResult> {
   });
 
   const encoder = device.createCommandEncoder();
-  encodeDrawPass(encoder, ctx.getCurrentTexture().createView(), canvasPipeline, vertexBuffer);
-  encodeDrawPass(encoder, readbackTexture.createView(), readbackPipeline, vertexBuffer);
+  encodeDrawPass(encoder, ctx.getCurrentTexture().createView(), canvasDepthView, canvasPipeline.pipeline, bindGroup, vertexBuffer);
+  encodeDrawPass(encoder, readbackTexture.createView(), readbackDepthView, readbackPipeline.pipeline, bindGroup, vertexBuffer);
   device.queue.submit([encoder.finish()]);
   await device.queue.onSubmittedWorkDone();
   const centerPixel = await readCenterPixel(device, readbackTexture, canvas.width, canvas.height);
