@@ -70,8 +70,10 @@ mclone/
 - `2b1f527`: Java oracle harness landed under `oracle/`
 - Canonical PRNG fixtures now live under `test/fixtures/prng/` for seeds `0`, `1`, `12345`, and `2151901553968352745`
 - TypeScript `SimpleRandomSource` now matches the Java oracle for `nextInt()`, `nextLong()`, and `nextDouble()` across those fixture seeds
+- Canonical `ImprovedNoise` fixtures now live under `test/fixtures/noise/` for the same seed set, sampled on a fixed 11x11x11 grid
+- TypeScript `ImprovedNoise` now matches the Java oracle across those fixed-grid samples
 - For MC 1.17.1, the relevant legacy LCG class is `net.minecraft.world.level.levelgen.SimpleRandomSource`; later Mojang mappings rename this to `LegacyRandomSource`
-- Next up: generate `ImprovedNoise` fixtures, then port `ImprovedNoise` and validate it against them
+- Next up: draft the tactical follow-up for octaved `PerlinNoise` and `NoiseSampler`
 
 ## Week 1 — concrete steps
 

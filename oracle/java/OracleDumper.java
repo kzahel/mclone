@@ -1,11 +1,16 @@
 import java.util.LinkedHashMap;
 import java.util.Map;
 import net.minecraft.world.level.levelgen.SimpleRandomSource;
+import net.minecraft.world.level.levelgen.synth.ImprovedNoise;
 
 public final class OracleDumper {
    private static final String MINECRAFT_VERSION = "1.17.1";
    private static final String RANDOM_SOURCE_CLASS = "net.minecraft.world.level.levelgen.SimpleRandomSource";
    private static final String RANDOM_SOURCE_ALIAS = "LegacyRandomSource";
+   private static final String IMPROVED_NOISE_CLASS = "net.minecraft.world.level.levelgen.synth.ImprovedNoise";
+   private static final double[] NOISE_X_COORDS = createAxis(-2.5, 0.5, 11);
+   private static final double[] NOISE_Y_COORDS = createAxis(-1.875, 0.375, 11);
+   private static final double[] NOISE_Z_COORDS = createAxis(-3.125, 0.625, 11);
 
    private OracleDumper() {
    }
@@ -33,12 +38,14 @@ public final class OracleDumper {
       String module = args[0];
       Map<String, String> options = parseOptions(args, 1);
       long seed = parseSeed(requireOption(options, "seed"));
-      int count = parseCount(requireOption(options, "count"));
 
       String json;
       switch (module) {
          case "prng":
-            json = dumpPrng(seed, count);
+            json = dumpPrng(seed, parseCount(requireOption(options, "count")));
+            break;
+         case "noise":
+            json = dumpNoise(seed);
             break;
          default:
             throw new IllegalArgumentException("unsupported module '" + module + "'");
@@ -132,6 +139,46 @@ public final class OracleDumper {
       return json.toString();
    }
 
+   private static String dumpNoise(long seed) {
+      SimpleRandomSource random = new SimpleRandomSource(seed);
+      ImprovedNoise noise = new ImprovedNoise(random);
+      int sampleCount = NOISE_X_COORDS.length * NOISE_Y_COORDS.length * NOISE_Z_COORDS.length;
+      StringBuilder json = new StringBuilder(2048 + sampleCount * 28);
+      json.append("{\n");
+      appendField(json, 1, "module", "noise", true);
+      appendField(json, 1, "minecraftVersion", MINECRAFT_VERSION, true);
+      appendField(json, 1, "noiseClass", IMPROVED_NOISE_CLASS, true);
+      appendField(json, 1, "randomSourceClass", RANDOM_SOURCE_CLASS, true);
+      appendField(json, 1, "randomSourceAlias", RANDOM_SOURCE_ALIAS, true);
+      appendField(json, 1, "noiseMethod", "noise(x,y,z)", true);
+      appendField(json, 1, "gridOrder", "x-major,y-major,z-minor", true);
+      appendField(json, 1, "seed", Long.toString(seed), true);
+      appendNumberField(json, 1, "sampleCount", Integer.toString(sampleCount), true);
+      json.append("  \"wireFormat\": {\n");
+      appendField(json, 2, "coordinates", "number", true);
+      appendField(json, 2, "values", "number", false);
+      json.append("  },\n");
+      json.append("  \"offsets\": {\n");
+      appendNumberField(json, 2, "xo", Double.toString(noise.xo), true);
+      appendNumberField(json, 2, "yo", Double.toString(noise.yo), true);
+      appendNumberField(json, 2, "zo", Double.toString(noise.zo), false);
+      json.append("  },\n");
+      json.append("  \"x\": ");
+      appendDoubleArray(json, NOISE_X_COORDS);
+      json.append(",\n");
+      json.append("  \"y\": ");
+      appendDoubleArray(json, NOISE_Y_COORDS);
+      json.append(",\n");
+      json.append("  \"z\": ");
+      appendDoubleArray(json, NOISE_Z_COORDS);
+      json.append(",\n");
+      json.append("  \"values\": ");
+      appendNoiseValueArray(json, noise);
+      json.append('\n');
+      json.append("}\n");
+      return json.toString();
+   }
+
    private static void appendIntArray(StringBuilder json, long seed, int count) {
       SimpleRandomSource random = new SimpleRandomSource(seed);
       json.append('[');
@@ -177,6 +224,50 @@ public final class OracleDumper {
       }
 
       json.append(']');
+   }
+
+   private static void appendDoubleArray(StringBuilder json, double[] values) {
+      json.append('[');
+
+      for (int index = 0; index < values.length; index++) {
+         if (index > 0) {
+            json.append(',');
+         }
+
+         json.append(Double.toString(values[index]));
+      }
+
+      json.append(']');
+   }
+
+   private static void appendNoiseValueArray(StringBuilder json, ImprovedNoise noise) {
+      json.append('[');
+      boolean first = true;
+
+      for (double x : NOISE_X_COORDS) {
+         for (double y : NOISE_Y_COORDS) {
+            for (double z : NOISE_Z_COORDS) {
+               if (!first) {
+                  json.append(',');
+               }
+
+               first = false;
+               json.append(Double.toString(noise.noise(x, y, z)));
+            }
+         }
+      }
+
+      json.append(']');
+   }
+
+   private static double[] createAxis(double start, double step, int count) {
+      double[] values = new double[count];
+
+      for (int index = 0; index < count; index++) {
+         values[index] = start + step * index;
+      }
+
+      return values;
    }
 
    private static void appendField(StringBuilder json, int indentLevel, String name, String value, boolean trailingComma) {
@@ -253,8 +344,10 @@ public final class OracleDumper {
    }
 
    private static void printUsage() {
-      System.err.println("usage: oracle-dumper prng --seed <long> --count <positive-int>");
-      System.err.println("dumps Minecraft " + MINECRAFT_VERSION + " PRNG fixtures as JSON");
+      System.err.println("usage:");
+      System.err.println("  oracle-dumper prng --seed <long> --count <positive-int>");
+      System.err.println("  oracle-dumper noise --seed <long>");
+      System.err.println("dumps Minecraft " + MINECRAFT_VERSION + " oracle fixtures as JSON");
       System.err.println("note: 1.17.1 uses SimpleRandomSource; later mappings rename this legacy LCG to LegacyRandomSource");
    }
 }
