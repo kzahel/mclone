@@ -1,4 +1,6 @@
 import { ResourceLocation } from "../../../core/resource-location";
+import { BlockPos } from "../../../core/block-pos";
+import { Direction } from "../../../core/direction";
 import type { BlockPlaceContext } from "../../item/context/block-place-context";
 import type { BlockGetter } from "../block-getter";
 import { RenderShape } from "./render-shape";
@@ -40,6 +42,15 @@ export class Block extends BlockBehaviour {
 
   public defaultBlockState(): BlockState {
     return this.defaultBlockStateValue;
+  }
+
+  public static shouldRenderFace(state: BlockState, level: BlockGetter, _pos: BlockPos, direction: Direction, neighborPos: BlockPos): boolean {
+    const adjacentState = level.getBlockState(neighborPos);
+    if (state.skipRendering(adjacentState, direction)) {
+      return false;
+    }
+
+    return !adjacentState.canOcclude();
   }
 
   public withPropertiesOf(state: BlockState): BlockState {
@@ -94,7 +105,7 @@ export class Block extends BlockBehaviour {
     return this.material.isReplaceable();
   }
 
-  public isSolidRender(_state: BlockState, _level: BlockGetter): boolean {
-    return this.defaultBlockState().canOcclude();
+  public isSolidRender(state: BlockState, _level: BlockGetter): boolean {
+    return state.canOcclude();
   }
 }

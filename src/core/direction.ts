@@ -240,6 +240,18 @@ export class Direction implements StringRepresentable {
     return this.normal;
   }
 
+  public getStepX(): number {
+    return this.normal.getX();
+  }
+
+  public getStepY(): number {
+    return this.normal.getY();
+  }
+
+  public getStepZ(): number {
+    return this.normal.getZ();
+  }
+
   public getSerializedName(): string {
     return this.name;
   }

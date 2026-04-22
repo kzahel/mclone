@@ -1,19 +1,41 @@
-import { BufferBuilder } from "./vertex/buffer-builder";
-import { DefaultVertexFormat } from "./vertex/default-vertex-format";
-import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
-import { RenderType } from "./render-type";
+import { BlockPos } from "../core/block-pos";
+import { Registry } from "../core/registry";
 import { ResourceLocation } from "../core/resource-location";
+import { Block } from "../world/level/block/block";
+import { StaticBlockAndTintGetter } from "../world/level/static-block-and-tint-getter";
+import { BlockBehaviour } from "../world/level/block/state/block-behaviour";
+import type { BlockState } from "../world/level/block/state/block-state";
+import { Material as BlockMaterial } from "../world/level/material/material";
+import { Vector3f } from "./math/vector3f";
+import { BlockColors } from "./block/block-colors";
+import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
+import { ModelBlockRenderer } from "./block/model-block-renderer";
+import { BlockModelRepository } from "./model/block-model-repository";
+import { BlockModelShaper } from "./model/block-model-shaper";
+import { preloadBlockModelSource } from "./model/browser-block-model-source";
+import { ModelBakery } from "./model/model-bakery";
+import { ModelManager } from "./model/model-manager";
 import { BrowserTextureAtlasSource, loadNativeImageFromUrl } from "./texture/browser-native-image-loader";
 import { NativeImage } from "./texture/native-image";
 import { TextureAtlas } from "./texture/texture-atlas";
-import type { TextureAtlasSprite } from "./texture/texture-atlas-sprite";
+import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
+import { RenderType } from "./render-type";
+import { PoseStack } from "./vertex/pose-stack";
+import { BufferBuilder } from "./vertex/buffer-builder";
+import { DefaultVertexFormat } from "./vertex/default-vertex-format";
 import { VertexBuffer } from "./vertex/vertex-buffer";
 import { VertexFormat } from "./vertex/vertex-format";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
+const SMOKE_CENTER_BLOCK = new ResourceLocation("minecraft:orange_wool");
+const SMOKE_VISUAL_BLOCK = new ResourceLocation("minecraft:stone");
 const SMOKE_CENTER_SPRITE = new ResourceLocation("minecraft:block/orange_wool");
-const SMOKE_VISUAL_SPRITE = new ResourceLocation("minecraft:block/grass_block_top");
+const SMOKE_VISUAL_SPRITE = new ResourceLocation("minecraft:block/stone");
+const SMOKE_BLOCKS = [SMOKE_CENTER_BLOCK, SMOKE_VISUAL_BLOCK] as const;
 const SMOKE_SPRITES = [SMOKE_CENTER_SPRITE, SMOKE_VISUAL_SPRITE] as const;
+const SMOKE_CENTER_POS = new BlockPos(0, 0, 0);
+const SMOKE_VISUAL_POS = new BlockPos(2, 0, 0);
+const SMOKE_CENTER_BRIGHTNESS = 0.8;
 
 export type BootResult =
   | {
@@ -72,25 +94,69 @@ function rgba8FromPixel(pixel: number): readonly [number, number, number, number
   return [NativeImage.getR(pixel), NativeImage.getG(pixel), NativeImage.getB(pixel), NativeImage.getA(pixel)];
 }
 
-function pushSpriteQuad(
-  builder: BufferBuilder,
-  sprite: TextureAtlasSprite,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-): void {
-  builder.vertex(x0, y0, 0, 1, 1, 1, 1, sprite.getU0(), sprite.getV1(), 0, 0, 0, 0, 1);
-  builder.vertex(x1, y0, 0, 1, 1, 1, 1, sprite.getU1(), sprite.getV1(), 0, 0, 0, 0, 1);
-  builder.vertex(x1, y1, 0, 1, 1, 1, 1, sprite.getU1(), sprite.getV0(), 0, 0, 0, 0, 1);
-  builder.vertex(x0, y1, 0, 1, 1, 1, 1, sprite.getU0(), sprite.getV0(), 0, 0, 0, 0, 1);
+function shadePixel(
+  pixel: readonly [number, number, number, number],
+  brightness: number,
+): readonly [number, number, number, number] {
+  return [
+    Math.round(pixel[0] * brightness),
+    Math.round(pixel[1] * brightness),
+    Math.round(pixel[2] * brightness),
+    pixel[3],
+  ];
 }
 
-function buildScene(device: GPUDevice, centerSprite: TextureAtlasSprite, visualSprite: TextureAtlasSprite): VertexBuffer {
+function createAirState(): BlockState {
+  const properties = BlockBehaviour.Properties.of(BlockMaterial.AIR).noCollission().noOcclusion();
+  properties.isAir = true;
+  return new Block(properties).defaultBlockState();
+}
+
+function renderSmokeBlock(
+  dispatcher: BlockRenderDispatcher,
+  level: StaticBlockAndTintGetter,
+  state: BlockState,
+  pos: BlockPos,
+  builder: BufferBuilder,
+  transform: (poseStack: PoseStack) => void,
+): void {
+  const poseStack = new PoseStack();
+  poseStack.pushPose();
+  transform(poseStack);
+  if (!dispatcher.renderBatched(state, pos, level, poseStack, builder, true)) {
+    throw new Error(`Smoke block ${state.getBlock()} at ${pos} did not render`);
+  }
+
+  poseStack.popPose();
+}
+
+function buildScene(
+  device: GPUDevice,
+  dispatcher: BlockRenderDispatcher,
+  level: StaticBlockAndTintGetter,
+  centerState: BlockState,
+  visualState: BlockState,
+): VertexBuffer {
   const builder = new BufferBuilder(256);
   builder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK);
-  pushSpriteQuad(builder, centerSprite, -0.5, -0.5, 0.5, 0.5);
-  pushSpriteQuad(builder, visualSprite, -0.95, -0.85, -0.55, -0.45);
+  ModelBlockRenderer.enableCaching();
+  try {
+    renderSmokeBlock(dispatcher, level, centerState, SMOKE_CENTER_POS, builder, (poseStack) => {
+      poseStack.translate(-0.4, -0.4, 0.1);
+      poseStack.scale(0.8, 0.8, 0.8);
+    });
+    renderSmokeBlock(dispatcher, level, visualState, SMOKE_VISUAL_POS, builder, (poseStack) => {
+      poseStack.translate(-0.9, -0.8, 0.2);
+      poseStack.scale(0.35, 0.35, 0.35);
+      poseStack.translate(0.5, 0.5, 0.5);
+      poseStack.mulPose(Vector3f.YP.rotationDegrees(-35));
+      poseStack.mulPose(Vector3f.XP.rotationDegrees(25));
+      poseStack.translate(-0.5, -0.5, -0.5);
+    });
+  } finally {
+    ModelBlockRenderer.clearCache();
+  }
+
   builder.end();
 
   const vertexBuffer = new VertexBuffer(device);
@@ -178,7 +244,7 @@ async function boot(): Promise<BootResult> {
 
   const atlasSource = new BrowserTextureAtlasSource();
   const centerSpriteImage = await loadNativeImageFromUrl(atlasSource.resolveTextureUrl(SMOKE_CENTER_SPRITE));
-  const expectedCenterPixel = rgba8FromPixel(centerSpriteImage.getPixelRGBA(8, 8));
+  const expectedCenterPixel = shadePixel(rgba8FromPixel(centerSpriteImage.getPixelRGBA(8, 8)), SMOKE_CENTER_BRIGHTNESS);
   centerSpriteImage.close();
 
   const atlas = new TextureAtlas(SMOKE_ATLAS_LOCATION, device.limits.maxTextureDimension2D);
@@ -195,7 +261,27 @@ async function boot(): Promise<BootResult> {
     return { ok: false, reason: `visual smoke sprite ${SMOKE_VISUAL_SPRITE} was missing from the stitched atlas` };
   }
 
-  const vertexBuffer = buildScene(device, centerSprite, visualSprite);
+  Registry.BLOCK.clear();
+  const centerBlock = new Block(BlockBehaviour.Properties.of(BlockMaterial.WOOL)).setLocation(SMOKE_CENTER_BLOCK);
+  const visualBlock = new Block(BlockBehaviour.Properties.of(BlockMaterial.STONE)).setLocation(SMOKE_VISUAL_BLOCK);
+  Registry.register(Registry.BLOCK, centerBlock.getLocation()!, centerBlock);
+  Registry.register(Registry.BLOCK, visualBlock.getLocation()!, visualBlock);
+
+  const modelSource = await preloadBlockModelSource(SMOKE_BLOCKS);
+  const repository = new BlockModelRepository(modelSource);
+  const bakery = new ModelBakery(repository, (material) => atlas.getSprite(material.texture()));
+  const modelManager = new ModelManager(bakery.getMissingBakedModel());
+  bakery.bakeTopLevelBlockModels(modelManager);
+  const blockModelShaper = new BlockModelShaper(modelManager);
+  blockModelShaper.rebuildCache();
+
+  const centerState = centerBlock.defaultBlockState();
+  const visualState = visualBlock.defaultBlockState();
+  const level = new StaticBlockAndTintGetter(createAirState());
+  level.setBlock(SMOKE_CENTER_POS, centerState);
+  level.setBlock(SMOKE_VISUAL_POS, visualState);
+
+  const vertexBuffer = buildScene(device, new BlockRenderDispatcher(blockModelShaper, new BlockColors()), level, centerState, visualState);
   const vertexFormat = vertexBuffer.getFormat();
   if (!vertexFormat) return { ok: false, reason: "vertex buffer format missing after upload" };
 

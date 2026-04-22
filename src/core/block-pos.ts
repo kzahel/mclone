@@ -1,7 +1,106 @@
 import { Vec3i } from "./vec3i";
+import { Direction } from "./direction";
+
+const PACKED_X_LENGTH = 1 + 25;
+const PACKED_Z_LENGTH = PACKED_X_LENGTH;
+const PACKED_Y_LENGTH = 64 - PACKED_X_LENGTH - PACKED_Z_LENGTH;
+const PACKED_X_MASK = (1n << BigInt(PACKED_X_LENGTH)) - 1n;
+const PACKED_Y_MASK = (1n << BigInt(PACKED_Y_LENGTH)) - 1n;
+const PACKED_Z_MASK = (1n << BigInt(PACKED_Z_LENGTH)) - 1n;
+const Z_OFFSET = PACKED_Y_LENGTH;
+const X_OFFSET = PACKED_Y_LENGTH + PACKED_Z_LENGTH;
 
 export class BlockPos extends Vec3i {
+  public static readonly ZERO = new BlockPos(0, 0, 0);
+
+  public constructor(x: number, y: number, z: number) {
+    super(x, y, z);
+  }
+
+  public asLong(): bigint {
+    return BlockPos.asLong(this.getX(), this.getY(), this.getZ());
+  }
+
+  public static asLong(x: number, y: number, z: number): bigint {
+    let packed = 0n;
+    packed |= (BigInt(x) & PACKED_X_MASK) << BigInt(X_OFFSET);
+    packed |= BigInt(y) & PACKED_Y_MASK;
+    packed |= (BigInt(z) & PACKED_Z_MASK) << BigInt(Z_OFFSET);
+    return BigInt.asIntN(64, packed);
+  }
+
+  public offset(x: number, y: number, z: number): BlockPos {
+    return x === 0 && y === 0 && z === 0 ? this : new BlockPos(this.getX() + x, this.getY() + y, this.getZ() + z);
+  }
+
+  public relative(direction: Direction, amount = 1): BlockPos {
+    return amount === 0
+      ? this
+      : new BlockPos(
+          this.getX() + (direction.getStepX() * amount),
+          this.getY() + (direction.getStepY() * amount),
+          this.getZ() + (direction.getStepZ() * amount),
+        );
+  }
+
   public below(): BlockPos {
-    return new BlockPos(this.getX(), this.getY() - 1, this.getZ());
+    return this.relative(Direction.DOWN);
+  }
+
+  public above(): BlockPos {
+    return this.relative(Direction.UP);
+  }
+
+  public north(): BlockPos {
+    return this.relative(Direction.NORTH);
+  }
+
+  public south(): BlockPos {
+    return this.relative(Direction.SOUTH);
+  }
+
+  public west(): BlockPos {
+    return this.relative(Direction.WEST);
+  }
+
+  public east(): BlockPos {
+    return this.relative(Direction.EAST);
+  }
+
+  public mutable(): BlockPos.MutableBlockPos {
+    return new BlockPos.MutableBlockPos(this.getX(), this.getY(), this.getZ());
+  }
+}
+
+export namespace BlockPos {
+  export class MutableBlockPos extends BlockPos {
+    public constructor(x = 0, y = 0, z = 0) {
+      super(x, y, z);
+    }
+
+    public set(x: number, y: number, z: number): MutableBlockPos {
+      this.xValue = Math.trunc(x);
+      this.yValue = Math.trunc(y);
+      this.zValue = Math.trunc(z);
+      return this;
+    }
+
+    public setWithOffset(pos: BlockPos, direction: Direction): MutableBlockPos {
+      return this.set(
+        pos.getX() + direction.getStepX(),
+        pos.getY() + direction.getStepY(),
+        pos.getZ() + direction.getStepZ(),
+      );
+    }
+
+    public move(direction: Direction): MutableBlockPos;
+    public move(dx: number, dy: number, dz: number): MutableBlockPos;
+    public move(first: Direction | number, second?: number, third?: number): MutableBlockPos {
+      if (first instanceof Direction) {
+        return this.set(this.getX() + first.getStepX(), this.getY() + first.getStepY(), this.getZ() + first.getStepZ());
+      }
+
+      return this.set(this.getX() + first, this.getY() + (second ?? 0), this.getZ() + (third ?? 0));
+    }
   }
 }

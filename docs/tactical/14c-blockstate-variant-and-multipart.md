@@ -45,4 +45,4 @@ Port the blockstate-loading half of Minecraft's model stack: `BlockModelDefiniti
 
 ## Next
 
-Tactical 15: `ModelBlockRenderer`, `BlockRenderDispatcher`, and the first real block tesselation path. That slice should take these baked models, emit AO/no-AO block vertices through `BufferBuilder`, and render a small block arrangement in the browser harness for immediate visual inspection.
+Tactical 15: [first block tesselation path](15-block-tesselation-path.md). Port `ModelBlockRenderer` and `BlockRenderDispatcher`, emit AO/no-AO block vertices through `BufferBuilder`, and render a small baked-block arrangement in the browser harness for immediate visual inspection.

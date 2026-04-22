@@ -1,5 +1,6 @@
 import type { BlockPos } from "../../../../core/block-pos";
 import { Direction } from "../../../../core/direction";
+import { getSeed } from "../../../../util/mth";
 import type { BlockGetter } from "../../block-getter";
 import type { Block } from "../block";
 import { type Mirror } from "../mirror";
@@ -11,6 +12,7 @@ import { MaterialColor } from "../../material/material-color";
 import { StateHolder } from "./state-holder";
 import type { BlockState } from "./block-state";
 import type { Property } from "./properties/property";
+import { Vec3 } from "../../../phys/vec3";
 
 export abstract class BlockBehaviour {
   public readonly material: Material;
@@ -41,6 +43,10 @@ export abstract class BlockBehaviour {
     return RenderShape.MODEL;
   }
 
+  public skipRendering(_state: BlockState, _adjacentState: BlockState, _direction: Direction): boolean {
+    return false;
+  }
+
   public rotate(state: BlockState, _rotation: Rotation): BlockState {
     return state;
   }
@@ -55,6 +61,26 @@ export abstract class BlockBehaviour {
 
   public defaultDestroyTime(): number {
     return this.properties.destroyTime;
+  }
+
+  public getSeed(_state: BlockState, pos: BlockPos): bigint {
+    return getSeed(pos);
+  }
+
+  public getLightBlock(state: BlockState, level: BlockGetter, pos: BlockPos): number {
+    return state.isSolidRender(level, pos) ? level.getMaxLightLevel() : (state.propagatesSkylightDown(level, pos) ? 0 : 1);
+  }
+
+  public getShadeBrightness(state: BlockState, level: BlockGetter, pos: BlockPos): number {
+    return state.isCollisionShapeFullBlock(level, pos) ? 0.2 : 1.0;
+  }
+
+  public isCollisionShapeFullBlock(state: BlockState, _level: BlockGetter, _pos: BlockPos): boolean {
+    return state.canOcclude();
+  }
+
+  public propagatesSkylightDown(state: BlockState, _level: BlockGetter, _pos: BlockPos): boolean {
+    return !state.canOcclude();
   }
 
   public getSoundType(_state: BlockState): SoundType {
@@ -76,6 +102,8 @@ export namespace BlockBehaviour {
     private readonly destroySpeed: number;
     private readonly requiresCorrectToolForDropsValue: boolean;
     private readonly canOccludeValue: boolean;
+    private readonly isViewBlockingValue: boolean;
+    private readonly emissiveRenderingValue: boolean;
 
     protected constructor(block: Block, values: ReadonlyMap<Property<unknown>, unknown>) {
       super(block, values);
@@ -88,6 +116,8 @@ export namespace BlockBehaviour {
       this.destroySpeed = properties.destroyTime;
       this.requiresCorrectToolForDropsValue = properties.requiresCorrectToolForDropsValue;
       this.canOccludeValue = properties.canOcclude;
+      this.isViewBlockingValue = this.canOccludeValue;
+      this.emissiveRenderingValue = false;
     }
 
     protected asState(): BlockState {
@@ -114,6 +144,10 @@ export namespace BlockBehaviour {
       return this.materialColor;
     }
 
+    public propagatesSkylightDown(level: BlockGetter, pos: BlockPos): boolean {
+      return this.getBlock().propagatesSkylightDown(this.asState(), level, pos);
+    }
+
     public rotate(rotation: Rotation): BlockState {
       return this.getBlock().rotate(this.asState(), rotation);
     }
@@ -126,12 +160,24 @@ export namespace BlockBehaviour {
       return this.getBlock().getRenderShape(this.asState());
     }
 
+    public emissiveRendering(_level: BlockGetter, _pos: BlockPos): boolean {
+      return this.emissiveRenderingValue;
+    }
+
+    public getShadeBrightness(level: BlockGetter, pos: BlockPos): number {
+      return this.getBlock().getShadeBrightness(this.asState(), level, pos);
+    }
+
     public getDestroySpeed(_level: BlockGetter, _pos: BlockPos): number {
       return this.destroySpeed;
     }
 
     public canOcclude(): boolean {
       return this.canOccludeValue;
+    }
+
+    public skipRendering(adjacentState: BlockState, direction: Direction): boolean {
+      return this.getBlock().skipRendering(this.asState(), adjacentState, direction);
     }
 
     public useShapeForLightOcclusion(): boolean {
@@ -144,6 +190,30 @@ export namespace BlockBehaviour {
 
     public isFaceSturdy(_level: BlockGetter, _pos: BlockPos, direction: Direction): boolean {
       return direction === Direction.UP && this.canOcclude();
+    }
+
+    public getLightBlock(level: BlockGetter, pos: BlockPos): number {
+      return this.getBlock().getLightBlock(this.asState(), level, pos);
+    }
+
+    public isSolidRender(level: BlockGetter, _pos: BlockPos): boolean {
+      return this.getBlock().isSolidRender(this.asState(), level);
+    }
+
+    public isViewBlocking(_level: BlockGetter, _pos: BlockPos): boolean {
+      return this.isViewBlockingValue;
+    }
+
+    public getOffset(_level: BlockGetter, _pos: BlockPos): Vec3 {
+      return Vec3.ZERO;
+    }
+
+    public getSeed(pos: BlockPos): bigint {
+      return this.getBlock().getSeed(this.asState(), pos);
+    }
+
+    public isCollisionShapeFullBlock(level: BlockGetter, pos: BlockPos): boolean {
+      return this.getBlock().isCollisionShapeFullBlock(this.asState(), level, pos);
     }
   }
 
