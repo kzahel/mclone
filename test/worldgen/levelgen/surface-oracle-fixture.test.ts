@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import integrationFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0.json";
 import surfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-surface-only.json";
+import sandSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-5-115-surface-only.json";
 import { CHUNK_BLOCK_NAMES, ChunkBlockId } from "../../../src/worldgen/chunk/chunk-block-buffer.ts";
 
 interface IntegrationChunkFixture {
@@ -29,6 +30,7 @@ interface SurfaceChunkOracleFixture {
 
 const fixture = integrationFixture as IntegrationFixture;
 const surfaceOracle = surfaceFixture as SurfaceChunkOracleFixture;
+const sandSurfaceOracle = sandSurfaceFixture as SurfaceChunkOracleFixture;
 
 describe("surface-stage oracle fixture", () => {
   test("pins the committed seed/chunk metadata and widened block-id palette", () => {
@@ -50,10 +52,18 @@ describe("surface-stage oracle fixture", () => {
   test("contains surface-stage material ids while staying within the widened numeric model", () => {
     expect(surfaceOracle.blocks).toContain(ChunkBlockId.GRASS_BLOCK);
     expect(surfaceOracle.blocks).toContain(ChunkBlockId.DIRT);
+    expect(sandSurfaceOracle.blocks).toContain(ChunkBlockId.SAND);
+    expect(sandSurfaceOracle.blocks).toContain(ChunkBlockId.GRAVEL);
 
-    for (const blockId of surfaceOracle.blocks) {
-      expect(blockId).toBeGreaterThanOrEqual(0);
-      expect(blockId).toBeLessThan(surfaceOracle.palette.length);
+    for (const oracle of [surfaceOracle, sandSurfaceOracle]) {
+      expect(oracle.module).toBe("surface-chunk");
+      expect(oracle.minecraftVersion).toBe("1.17.1");
+      expect(oracle.palette).toEqual([...CHUNK_BLOCK_NAMES]);
+
+      for (const blockId of oracle.blocks) {
+        expect(blockId).toBeGreaterThanOrEqual(0);
+        expect(blockId).toBeLessThan(oracle.palette.length);
+      }
     }
   });
 });

@@ -12,6 +12,7 @@ export const ChunkBlockId = {
   SAND: 6,
   GRAVEL: 7,
   SNOW: 8,
+  LAVA: 9,
 } as const;
 
 export type ChunkBlockId = (typeof ChunkBlockId)[keyof typeof ChunkBlockId];
@@ -26,6 +27,7 @@ export const CHUNK_BLOCK_NAMES = [
   "minecraft:sand",
   "minecraft:gravel",
   "minecraft:snow",
+  "minecraft:lava",
 ] as const;
 
 export const TERRAIN_STAGE_BLOCK_NAMES = [

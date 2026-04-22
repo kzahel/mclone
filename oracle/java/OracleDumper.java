@@ -29,6 +29,7 @@ import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.NoiseModifier;
 import net.minecraft.world.level.levelgen.NoiseSampler;
 import net.minecraft.world.level.levelgen.NoiseSettings;
+import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.SimpleRandomSource;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -134,6 +135,9 @@ public final class OracleDumper {
             break;
          case "surface-chunk":
             json = dumpSurfaceChunk(seed, parseInteger(requireOption(options, "chunk-x"), "chunk-x"), parseInteger(requireOption(options, "chunk-z"), "chunk-z"));
+            break;
+         case "carved-chunk":
+            json = dumpCarvedChunk(seed, parseInteger(requireOption(options, "chunk-x"), "chunk-x"), parseInteger(requireOption(options, "chunk-z"), "chunk-z"));
             break;
          default:
             throw new IllegalArgumentException("unsupported module '" + module + "'");
@@ -585,7 +589,60 @@ public final class OracleDumper {
             "minecraft:dirt",
             "minecraft:sand",
             "minecraft:gravel",
-            "minecraft:snow"
+            "minecraft:snow",
+            "minecraft:lava"
+         }
+      );
+      json.put("blocks", collectChunkBlocks(chunk, minY, height));
+      return GSON.toJson(json);
+   }
+
+   private static String dumpCarvedChunk(long seed, int chunkX, int chunkZ) {
+      SharedConstants.tryDetectVersion();
+      java.io.PrintStream originalOut = Bootstrap.STDOUT;
+      java.io.PrintStream originalErr = System.err;
+      Bootstrap.bootStrap();
+      System.setOut(originalOut);
+      System.setErr(originalErr);
+
+      OverworldBiomeSource biomeSource = new OverworldBiomeSource(seed, false, false, BuiltinRegistries.BIOME);
+      NoiseGeneratorSettings generatorSettings = BuiltinRegistries.NOISE_GENERATOR_SETTINGS.getOrThrow(NoiseGeneratorSettings.OVERWORLD);
+      NoiseBasedChunkGenerator generator = new NoiseBasedChunkGenerator(biomeSource, seed, () -> generatorSettings);
+      int minY = generator.getMinY();
+      int height = generator.getGenDepth();
+      ProtoChunk chunk = createProtoChunk(chunkX, chunkZ, minY, height);
+      BiomeManager biomeManager = new BiomeManager(biomeSource, BiomeManager.obfuscateSeed(seed), FuzzyOffsetConstantColumnBiomeZoomer.INSTANCE);
+
+      fillChunkFromBaseColumns(generator, chunk, minY, height);
+      chunk.setStatus(ChunkStatus.NOISE);
+      buildSurfaceAndBedrock(seed, biomeSource, generatorSettings, chunk);
+      chunk.setStatus(ChunkStatus.SURFACE);
+      generator.applyCarvers(seed, biomeManager, chunk, GenerationStep.Carving.AIR);
+      chunk.setStatus(ChunkStatus.CARVERS);
+
+      Map<String, Object> json = new LinkedHashMap<>();
+      json.put("module", "carved-chunk");
+      json.put("minecraftVersion", MINECRAFT_VERSION);
+      json.put("generatorClass", NoiseBasedChunkGenerator.class.getName());
+      json.put("seed", Long.toString(seed));
+      json.put("chunkX", chunkX);
+      json.put("chunkZ", chunkZ);
+      json.put("minY", minY);
+      json.put("height", height);
+      json.put("blockOrder", "y-major,z-major,x-minor");
+      json.put(
+         "palette",
+         new String[]{
+            "minecraft:air",
+            "minecraft:stone",
+            "minecraft:water",
+            "minecraft:bedrock",
+            "minecraft:grass_block",
+            "minecraft:dirt",
+            "minecraft:sand",
+            "minecraft:gravel",
+            "minecraft:snow",
+            "minecraft:lava"
          }
       );
       json.put("blocks", collectChunkBlocks(chunk, minY, height));
@@ -629,6 +686,8 @@ public final class OracleDumper {
             return 7;
          case "minecraft:snow":
             return 8;
+         case "minecraft:lava":
+            return 9;
          default:
             throw new IllegalStateException("unexpected surface-stage block from Java oracle: " + key);
       }

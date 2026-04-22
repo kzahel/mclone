@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import integrationFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0.json";
 import terrainFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-terrain-only.json";
+import surfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-surface-only.json";
+import carvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-carved-only.json";
+import sandSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-5-115-surface-only.json";
 import { OverworldBiomeSource } from "../../../src/worldgen/biome/overworld-biome-source.ts";
 import {
   ChunkBlockId,
@@ -47,8 +50,14 @@ interface TerrainChunkOracleFixture {
   readonly blocks: readonly number[];
 }
 
+interface SurfaceChunkOracleFixture extends TerrainChunkOracleFixture {}
+interface CarvedChunkOracleFixture extends TerrainChunkOracleFixture {}
+
 const fixture = integrationFixture as IntegrationFixture;
 const terrainOracle = terrainFixture as TerrainChunkOracleFixture;
+const surfaceOracle = surfaceFixture as SurfaceChunkOracleFixture;
+const carvedOracle = carvedFixture as CarvedChunkOracleFixture;
+const sandSurfaceOracle = sandSurfaceFixture as SurfaceChunkOracleFixture;
 
 function blockNameAt(section: TerrainChunkSection, index: number): string {
   return section.palette[section.blocks[index]!]!;
@@ -93,6 +102,31 @@ function assertHeightmap(name: string, actual: readonly number[], expected: read
   }
 }
 
+function terrainStageBlocksFromTerrainOracle(oracle: TerrainChunkOracleFixture): Uint8Array {
+  // Tactical 06's oracle captured terrain after the old bottom-bedrock pass. For
+  // the explicit 06a/07 staging boundary we compare the fill stage by removing
+  // only that deterministic bottom overlay.
+  return Uint8Array.from(oracle.blocks, (blockId) => (blockId === ChunkBlockId.BEDROCK ? ChunkBlockId.STONE : blockId));
+}
+
+function assertChunkParity(actualChunk: MutableChunkBlockBuffer, oracle: SurfaceChunkOracleFixture): void {
+  const actual = buildTerrainChunk(actualChunk);
+  const expected = buildTerrainChunk(
+    new MutableChunkBlockBuffer(
+      oracle.chunkX,
+      oracle.chunkZ,
+      oracle.minY,
+      oracle.height,
+      [],
+      Uint8Array.from(oracle.blocks),
+    ),
+  );
+
+  assertTerrainSections(actual.sections, expected.sections);
+  assertHeightmap("WORLD_SURFACE", actual.heightmaps.WORLD_SURFACE, expected.heightmaps.WORLD_SURFACE);
+  assertHeightmap("OCEAN_FLOOR", actual.heightmaps.OCEAN_FLOOR, expected.heightmaps.OCEAN_FLOOR);
+}
+
 describe("NoiseBasedChunkGenerator", () => {
   test("default overworld settings keep all dormant C&C Part 1 toggles disabled", () => {
     const settings = NoiseGeneratorSettings.overworld();
@@ -135,12 +169,11 @@ describe("NoiseBasedChunkGenerator", () => {
     expect(generated.blocks.includes(ChunkBlockId.BEDROCK)).toBe(true);
   });
 
-  test("fills chunk (0, 0) with the terrain-only Java oracle for the committed integration fixture seed/chunk", () => {
+  test("fills chunk (0, 0) with the terrain-only Java oracle once the old bottom-bedrock overlay is stripped", () => {
     const chunk = fixture.chunks[0]!;
     const biomeSource = new OverworldBiomeSource(BigInt(fixture.seed));
     const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(fixture.seed));
     const actualChunk = generator.fillFromNoise(chunk.chunkX, chunk.chunkZ);
-    generator.buildSurfaceAndBedrock(actualChunk);
 
     const actual = buildTerrainChunk(actualChunk);
     const expected = buildTerrainChunk(
@@ -150,7 +183,7 @@ describe("NoiseBasedChunkGenerator", () => {
         terrainOracle.minY,
         terrainOracle.height,
         chunk.biomes,
-        Uint8Array.from(terrainOracle.blocks),
+        terrainStageBlocksFromTerrainOracle(terrainOracle),
       ),
     );
 
@@ -164,5 +197,33 @@ describe("NoiseBasedChunkGenerator", () => {
         expect(CHUNK_BLOCK_NAMES).toContain(blockName);
       }
     }
+  });
+
+  test("matches the pinned surface-only oracle for chunk (0, 0)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(surfaceOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(surfaceOracle.seed));
+    const actualChunk = generator.fillFromNoise(surfaceOracle.chunkX, surfaceOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+
+    assertChunkParity(actualChunk, surfaceOracle);
+  });
+
+  test("matches the narrow sand-and-gravel surface oracle for chunk (5, 115)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(sandSurfaceOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(sandSurfaceOracle.seed));
+    const actualChunk = generator.fillFromNoise(sandSurfaceOracle.chunkX, sandSurfaceOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+
+    assertChunkParity(actualChunk, sandSurfaceOracle);
+  });
+
+  test("matches the pinned carved-only oracle for chunk (0, 0)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(carvedOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(carvedOracle.seed));
+    const actualChunk = generator.fillFromNoise(carvedOracle.chunkX, carvedOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+    generator.applyCarvers(actualChunk);
+
+    assertChunkParity(actualChunk, carvedOracle);
   });
 });

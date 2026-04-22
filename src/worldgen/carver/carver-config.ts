@@ -1,0 +1,108 @@
+import type { SimpleRandomSource } from "../prng/simple-random-source.ts";
+
+export interface CarverContext {
+  readonly minY: number;
+  readonly genDepth: number;
+}
+
+export interface VerticalAnchor {
+  resolveY(context: CarverContext): number;
+}
+
+export interface HeightProvider {
+  sample(random: SimpleRandomSource, context: CarverContext): number;
+}
+
+export interface FloatProvider {
+  sample(random: SimpleRandomSource): number;
+}
+
+export interface CarverConfiguration {
+  readonly probability: number;
+  readonly y: HeightProvider;
+  readonly yScale: FloatProvider;
+  readonly lavaLevel: VerticalAnchor;
+  readonly aquifersEnabled: boolean;
+}
+
+export interface CaveCarverConfiguration extends CarverConfiguration {
+  readonly horizontalRadiusMultiplier: FloatProvider;
+  readonly verticalRadiusMultiplier: FloatProvider;
+  readonly floorLevel: FloatProvider;
+}
+
+export interface CanyonShapeConfiguration {
+  readonly distanceFactor: FloatProvider;
+  readonly thickness: FloatProvider;
+  readonly widthSmoothness: number;
+  readonly horizontalRadiusFactor: FloatProvider;
+  readonly verticalRadiusDefaultFactor: number;
+  readonly verticalRadiusCenterFactor: number;
+}
+
+export interface CanyonCarverConfiguration extends CarverConfiguration {
+  readonly verticalRotation: FloatProvider;
+  readonly shape: CanyonShapeConfiguration;
+}
+
+function f32(value: number): number {
+  return Math.fround(value);
+}
+
+export function absolute(value: number): VerticalAnchor {
+  return {
+    resolveY: () => value,
+  };
+}
+
+export function aboveBottom(value: number): VerticalAnchor {
+  return {
+    resolveY: (context) => context.minY + value,
+  };
+}
+
+export function constantFloat(value: number): FloatProvider {
+  const sampled = f32(value);
+  return {
+    sample: () => sampled,
+  };
+}
+
+export function uniformFloat(minInclusive: number, maxExclusive: number): FloatProvider {
+  const minValue = f32(minInclusive);
+  const delta = f32(maxExclusive - minInclusive);
+  return {
+    sample: (random) => f32((random.nextFloat() * delta) + minValue),
+  };
+}
+
+export function trapezoidFloat(min: number, max: number, plateau: number): FloatProvider {
+  const minValue = f32(min);
+  const span = f32(max - min);
+  const plateauWidth = f32(plateau);
+  const slopeWidth = f32((span - plateauWidth) / 2.0);
+  const upperWidth = f32(span - slopeWidth);
+  return {
+    sample: (random) => f32(minValue + (random.nextFloat() * upperWidth) + (random.nextFloat() * slopeWidth)),
+  };
+}
+
+export function biasedToBottomHeight(
+  minInclusive: VerticalAnchor,
+  maxInclusive: VerticalAnchor,
+  inner: number,
+): HeightProvider {
+  return {
+    sample: (random, context) => {
+      const minValue = minInclusive.resolveY(context);
+      const maxValue = maxInclusive.resolveY(context);
+      const span = ((maxValue - minValue) - inner) + 1;
+      if (span <= 0) {
+        return minValue;
+      }
+
+      const bias = random.nextInt(span);
+      return random.nextInt(bias + inner) + minValue;
+    },
+  };
+}

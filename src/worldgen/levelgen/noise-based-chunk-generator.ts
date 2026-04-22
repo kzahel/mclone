@@ -1,5 +1,8 @@
 import { ChunkBiomeContainer } from "../biome/chunk-biome-container.ts";
+import { getBlockPositionBiome } from "../biome/biome-zoom.ts";
+import type { Biome } from "../biome/biome.ts";
 import type { NoiseBiomeSource } from "../biome/noise-biome-source.ts";
+import { applyOverworldAirCarvers } from "../carver/overworld-carvers.ts";
 import { MutableChunkBlockBuffer, CHUNK_WIDTH, ChunkBlockId, blockBufferIndex } from "../chunk/chunk-block-buffer.ts";
 import { buildChunkHeightmaps, type ChunkHeightmaps } from "../chunk/chunk-heightmaps.ts";
 import { buildChunkSections, type ChunkSection } from "../chunk/chunk-section-serialization.ts";
@@ -10,6 +13,7 @@ import { BlendedNoise } from "../noise/blended-noise.ts";
 import { SimplexNoise } from "../noise/simplex-noise.ts";
 import type { LongSeed } from "../prng/simple-random-source.ts";
 import { WorldgenRandom } from "../prng/worldgen-random.ts";
+import { applyOverworldSurface } from "../surface/surface-builders.ts";
 import { NoiseModifier } from "./noise-modifier.ts";
 import { NoiseGeneratorSettings } from "./noise-generator-settings.ts";
 import { NoiseSampler } from "./noise-sampler.ts";
@@ -170,8 +174,18 @@ export class NoiseBasedChunkGenerator {
 
   public buildSurfaceAndBedrock(chunk: MutableChunkBlockBuffer): void {
     this.assertCompatibleChunk(chunk);
-    void this.surfaceNoise;
-    this.setBedrock(chunk);
+    const random = new WorldgenRandom();
+    random.setBaseChunkSeed(chunk.chunkX, chunk.chunkZ);
+    this.buildSurface(chunk, random);
+    this.setBedrock(chunk, random);
+  }
+
+  public applyCarvers(chunk: MutableChunkBlockBuffer): void {
+    this.assertCompatibleChunk(chunk);
+    applyOverworldAirCarvers(this.seed, this.biomeSource, chunk, {
+      minY: this.minY,
+      genDepth: this.height,
+    });
   }
 
   private fillTerrainBlockBuffer(chunk: MutableChunkBlockBuffer): void {
@@ -272,10 +286,26 @@ export class NoiseBasedChunkGenerator {
     }
   }
 
-  private setBedrock(chunk: MutableChunkBlockBuffer): void {
-    const random = new WorldgenRandom();
-    random.setBaseChunkSeed(chunk.chunkX, chunk.chunkZ);
+  private buildSurface(chunk: MutableChunkBlockBuffer, random: WorldgenRandom): void {
+    const heightmaps = buildChunkHeightmaps(chunk);
+    const minBlockX = chunk.chunkX * CHUNK_WIDTH;
+    const minBlockZ = chunk.chunkZ * CHUNK_WIDTH;
+    const minSurfaceLevel = this.settings.getMinSurfaceLevel();
 
+    for (let localX = 0; localX < CHUNK_WIDTH; localX++) {
+      for (let localZ = 0; localZ < CHUNK_WIDTH; localZ++) {
+        const x = minBlockX + localX;
+        const z = minBlockZ + localZ;
+        const heightY = heightmaps.WORLD_SURFACE[(localZ << 4) | localX]!;
+        const surfaceValue =
+          this.surfaceNoise.getSurfaceNoiseValue(x * 0.0625, z * 0.0625, 0.0625, localX * 0.0625) * 15.0;
+        const biome = getBlockPositionBiome(this.seed, x, z, this.biomeSource) as Biome;
+        applyOverworldSurface(random, chunk, biome, x, z, heightY, surfaceValue, this.seaLevel, minSurfaceLevel);
+      }
+    }
+  }
+
+  private setBedrock(chunk: MutableChunkBlockBuffer, random: WorldgenRandom): void {
     const floorY = this.minY + this.settings.getBedrockFloorPosition();
     const roofY = (this.height - 1) + this.minY - this.settings.getBedrockRoofPosition();
     const minBuildHeight = this.minY;
