@@ -60,7 +60,14 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)
 VERSION="${VERSION:-1.17.1}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/reference/minecraft-${VERSION}}"
 
-for bin in java curl jq sha1sum; do
+# macOS ships a sha1sum that doesn't support -c; prefer shasum (always present on macOS)
+if echo "da39a3ee5e6b4b0d3255bfef95601890afd80709  /dev/null" | sha1sum -c >/dev/null 2>&1; then
+    SHA1SUM="sha1sum"
+else
+    SHA1SUM="shasum"
+fi
+
+for bin in java curl jq "$SHA1SUM"; do
     command -v "$bin" >/dev/null 2>&1 || { echo "Missing prereq: $bin" >&2; exit 1; }
 done
 if [ "$EXTRACT_ASSETS" = 1 ] && [ "$SIDE" = "client" ]; then
@@ -110,12 +117,12 @@ fi
 if need "${SIDE}.jar"; then
     log "Downloading ${SIDE}.jar..."
     curl -sSfL -o "${SIDE}.jar" "$JAR_URL"
-    echo "${JAR_SHA}  ${SIDE}.jar" | sha1sum -c
+    echo "${JAR_SHA}  ${SIDE}.jar" | $SHA1SUM -c
 fi
 if need "${SIDE}.txt"; then
     log "Downloading ${SIDE} mappings..."
     curl -sSfL -o "${SIDE}.txt" "$MAP_URL"
-    echo "${MAP_SHA}  ${SIDE}.txt" | sha1sum -c
+    echo "${MAP_SHA}  ${SIDE}.txt" | $SHA1SUM -c
 fi
 
 # 4. Tools

@@ -35,17 +35,19 @@ Direct port of MC 1.17.1's client rendering stack to raw WebGPU. Target and skip
 
 | Doc | Modules | Oracle tier | Purpose |
 |---|---|---|---|
-| `09-` | `BlockState` + property system, `ResourceLocation`, `BlockGetter`/`Level` view over our chunks, vanilla-jar asset extraction | unit | prereqs renderer needs that worldgen didn't |
-| [`09a-renderer-browser-harness.md`](09a-renderer-browser-harness.md) | Vite dev server, `@playwright/test` against system Chrome (`channel: "chrome"`), WebGPU smoke test, `src/renderer/main.ts` entry point | infra | browser-test harness every renderer slice from `10` onward builds on |
-| `10-` | `com.mojang.blaze3d` vertex layer (`BufferBuilder`, `VertexFormat`, `DefaultVertexFormat`, `VertexBuffer`, `PoseStack`) + WebGPU bootstrap (canvas, device, swapchain, clear frame) | unit + smoke (via `09a`) | CPU-side mesh building + a canvas that clears |
-| `11-` | Pipeline cache, `RenderType`/`RenderStateShard` → `GPURenderPipeline`, uniform buffers + bind group layouts | unit | WebGPU re-expression of MC's state system (replaces `GlStateManager` + `Uniform`) |
-| `12-` | `Stitcher` → `TextureAtlas` → `TextureAtlasSprite` → `MipmapGenerator` → `TextureManager`; asset-loading plumbing | unit + golden (via `09a`) | atlas UVs match an MC-dumped oracle byte-exact |
-| `13-` | `BlockModel` JSON parse → `UnbakedModel` → `ModelBakery` → `BakedModel` variants → `BlockModelShaper` | unit | baked-model quads match an MC-dumped oracle per blockstate |
-| `14-` | `ModelBlockRenderer`, `LiquidBlockRenderer`, `BlockRenderDispatcher`, `FaceInfo`, `ItemBlockRenderTypes`; chunk mesher with face culling + AO | golden (via `09a`) | single chunk renders and matches a reference screenshot |
-| `15-` | `RenderChunkRegion`, `ChunkBufferBuilderPack`, `VisGraph`/`VisibilitySet`, `ViewArea`, `ChunkRenderDispatcher` | golden (via `09a`) | section-level occlusion culling; many chunks at interactive rates |
-| `16-` | `LevelRenderer`, `GameRenderer`, `Frustum`, `LightTexture`, `FogRenderer`; WGSL port of `assets/minecraft/shaders/core/*` | golden (via `09a`) | **MVP renderer reached here** — fly around a generated world |
+| [`09a-renderer-browser-harness.md`](09a-renderer-browser-harness.md) | Vite dev server, `@playwright/test` against system Chrome (`channel: "chrome"`), WebGPU smoke test, `src/renderer/main.ts` entry point | infra | **done** — browser-test harness every renderer slice from `10` onward builds on |
+| [`10-vertex-buffer-layer.md`](10-vertex-buffer-layer.md) | `BufferBuilder`, `VertexFormat`, `DefaultVertexFormat`, `VertexBuffer`, `PoseStack`, `Matrix4f`/`Matrix3f` | unit + smoke | CPU-side mesh building; first non-trivial draw call (solid quad) |
+| `11-` | `RenderType`/`RenderStateShard` → `GPURenderPipelineDescriptor` mapping (blend, depth, cull, writeMask); bind group layouts; uniform buffer layout derived from MC shader JSON; stub WGSL to exercise pipeline creation end-to-end | unit + smoke | WebGPU pipeline infrastructure; stub shaders stand in until slice 16 |
+| `12-` | `Stitcher`, `TextureAtlas`, `TextureAtlasSprite` (u0/v0/u1/v1), `NativeImage`, `MipmapGenerator`, asset loading from extracted jar | unit + oracle | atlas UVs match MC-dumped oracle byte-exact; GPU texture upload |
+| `13-` | `ResourceLocation`, `Block`, `BlockState`, property system (`Property`, `BlockStateDefinition`), `BlockGetter` stub | unit | prereqs model baking needs; deferred from `09` since vertex layer and pipeline don't need them |
+| `14a-` | `BlockModel` JSON parse → `UnbakedModel`; `Element`, `Face`, `FaceUV`; parent model resolution; texture variable resolution | unit | unbaked model data structures, no baking machinery yet |
+| `14b-` | `ModelBakery` baking pass, `SimpleBakedModel`, `BakedQuad` int\[\] layout, `BlockModelShaper` | unit + oracle | baked-model quads match MC-dumped oracle per blockstate — first correctness gate on model output |
+| `15-` | `ModelBlockRenderer` (`tesselateWithAO`, `tesselateWithoutAO`), `FaceInfo`, `BlockRenderDispatcher`, `LiquidBlockRenderer` | golden (via `09a`) | single chunk renders textured with AO; first golden screenshot |
+| `16-` | WGSL ports of `assets/minecraft/shaders/core/` (rendertype\_solid, rendertype\_cutout, rendertype\_translucent, rendertype\_lines); wire into pipeline cache from `11` | golden (via `09a`) | proper MC shaders replace stub WGSL; textured lit blocks |
+| `17-` | `RenderChunkRegion`, `ChunkBufferBuilderPack`, `VisGraph`/`VisibilitySet`, `ViewArea`, `ChunkRenderDispatcher` (async compilation) | golden (via `09a`) | section-level occlusion culling; many chunks at interactive rates |
+| `18-` | `LevelRenderer`, `GameRenderer`, `Frustum`, `LightTexture`, `FogRenderer` | golden (via `09a`) | **MVP renderer reached here** — fly around a generated world |
 
-Slices 13 and 14 may split once we get there — `ModelBakery` and `ModelBlockRenderer` are both large. Numbering is fluid per the rule of thumb.
+Ordering rationale: `BlockState` prereqs (13) deferred until just before model baking (14a/b) since nothing before that needs them. WGSL shader ports (16) deferred until after the mesher (15) so we can verify geometry correctness with stub shaders first, then swap in real shaders. `ModelBakery` split from `BlockModel` parse (14a/b) because `ModelBakery` is one of the largest classes in the client and the data-loading and baking passes are independently testable.
 
 ## Renderer MVP definition
 
