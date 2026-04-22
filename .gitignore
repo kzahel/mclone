@@ -1,0 +1,37 @@
+# Build artifacts (once we start translating)
+target/
+build/
+dist/
+node_modules/
+*.wasm
+*.o
+*.a
+
+# Reference / downloaded artifacts if paths end up inside the repo
+**/*.jar
+**/*.zip
+parchment/
+tools/
+
+# Decompiled / generated source trees — never commit
+minecraft-*/
+src/net/minecraft/
+extracted/
+reference/
+
+# Language-specific
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+Cargo.lock
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
