@@ -10,6 +10,7 @@ import net.minecraft.world.level.levelgen.SimpleRandomSource;
 import net.minecraft.world.level.levelgen.synth.BlendedNoise;
 import net.minecraft.world.level.levelgen.synth.ImprovedNoise;
 import net.minecraft.world.level.levelgen.synth.PerlinNoise;
+import net.minecraft.world.level.levelgen.synth.PerlinSimplexNoise;
 import net.minecraft.world.level.levelgen.synth.SimplexNoise;
 
 public final class OracleDumper {
@@ -19,6 +20,7 @@ public final class OracleDumper {
    private static final String BLENDED_NOISE_CLASS = BlendedNoise.class.getName();
    private static final String IMPROVED_NOISE_CLASS = ImprovedNoise.class.getName();
    private static final String PERLIN_NOISE_CLASS = PerlinNoise.class.getName();
+   private static final String PERLIN_SIMPLEX_NOISE_CLASS = PerlinSimplexNoise.class.getName();
    private static final String SIMPLEX_NOISE_CLASS = SimplexNoise.class.getName();
    private static final Gson GSON = new Gson();
    private static final double[] NOISE_X_COORDS = createAxis(-2.5, 0.5, 11);
@@ -168,6 +170,8 @@ public final class OracleDumper {
       switch (className) {
          case "PerlinNoise":
             return dumpPerlinNoise(seed, parseOctaves(requireOption(options, "octaves")), loadSampleGrid(requireOption(options, "samples")));
+         case "PerlinSimplexNoise":
+            return dumpPerlinSimplexNoise(seed, parseOctaves(requireOption(options, "octaves")), loadSampleGrid2D(requireOption(options, "samples2d")));
          case "SimplexNoise":
             return dumpSimplexNoise(seed, loadSampleGrid2D(requireOption(options, "samples2d")), loadSampleGrid(requireOption(options, "samples3d")));
          case "BlendedNoise":
@@ -250,6 +254,30 @@ public final class OracleDumper {
       json.append("  \"values\": ");
       appendNoiseValueArray(json, sampleGrid, noise::getValue);
       json.append('\n');
+      json.append("}\n");
+      return json.toString();
+   }
+
+   private static String dumpPerlinSimplexNoise(long seed, int[] octaves, SampleGrid2D sampleGrid2D) {
+      PerlinSimplexNoise noise = new PerlinSimplexNoise(new SimpleRandomSource(seed), toIntegerList(octaves));
+      int sampleCount = sampleGrid2D.x.length * sampleGrid2D.z.length;
+      StringBuilder json = new StringBuilder(3072 + sampleCount * 56);
+      json.append("{\n");
+      appendField(json, 1, "module", "noise", true);
+      appendField(json, 1, "minecraftVersion", MINECRAFT_VERSION, true);
+      appendField(json, 1, "noiseClass", PERLIN_SIMPLEX_NOISE_CLASS, true);
+      appendField(json, 1, "randomSourceClass", RANDOM_SOURCE_CLASS, true);
+      appendField(json, 1, "randomSourceAlias", RANDOM_SOURCE_ALIAS, true);
+      appendField(json, 1, "seed", Long.toString(seed), true);
+      json.append("  \"octaves\": ");
+      appendIntArray(json, octaves);
+      json.append(",\n");
+      json.append("  \"wireFormat\": {\n");
+      appendField(json, 2, "coordinates", "number", true);
+      appendField(json, 2, "values", "number", false);
+      json.append("  },\n");
+      appendSampleSet2D(json, "samplesWithoutOffsets", "getValue(x,y,false)", sampleGrid2D, sampleCount, (x, y) -> noise.getValue(x, y, false), true);
+      appendSampleSet2D(json, "samplesWithOffsets", "getValue(x,y,true)", sampleGrid2D, sampleCount, (x, y) -> noise.getValue(x, y, true), false);
       json.append("}\n");
       return json.toString();
    }
@@ -883,6 +911,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper prng --seed <long> --count <positive-int>");
       System.err.println("  oracle-dumper noise --seed <long>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
+      System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");
       System.err.println("  oracle-dumper noise --class SimplexNoise --seed <long> --samples2d <path> --samples3d <path>");
       System.err.println("  oracle-dumper noise --class BlendedNoise --seed <long> --samples <path>");
       System.err.println("dumps Minecraft " + MINECRAFT_VERSION + " oracle fixtures as JSON");

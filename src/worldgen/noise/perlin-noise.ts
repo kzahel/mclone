@@ -1,8 +1,14 @@
 import { ImprovedNoise, type NoiseRandomSource } from "./improved-noise";
+import type { SurfaceNoise } from "./surface-noise";
 
 const ROUND_OFF = 33_554_432;
 
 function skipOctave(random: NoiseRandomSource): void {
+  if ("consumeCount" in random && typeof random.consumeCount === "function") {
+    random.consumeCount(262);
+    return;
+  }
+
   for (let index = 0; index < 262; index++) {
     random.nextInt();
   }
@@ -32,14 +38,42 @@ function makeAmplitudes(octaves: readonly number[]): { firstOctave: number; ampl
   };
 }
 
-export class PerlinNoise {
+function validateAmplitudeConfiguration(firstOctave: number, amplitudes: readonly number[]): { firstOctave: number; amplitudes: number[] } {
+  if (!Number.isInteger(firstOctave)) {
+    throw new RangeError("firstOctave must be an integer");
+  }
+
+  if (amplitudes.length === 0) {
+    throw new RangeError("Need some amplitudes!");
+  }
+
+  return {
+    firstOctave,
+    amplitudes: [...amplitudes],
+  };
+}
+
+export class PerlinNoise implements SurfaceNoise {
   private readonly noiseLevels: Array<ImprovedNoise | undefined>;
   private readonly amplitudes: number[];
   private readonly lowestFreqValueFactor: number;
   private readonly lowestFreqInputFactor: number;
 
-  public constructor(random: NoiseRandomSource, octaves: readonly number[]) {
-    const { firstOctave, amplitudes } = makeAmplitudes(octaves);
+  public constructor(random: NoiseRandomSource, octaves: readonly number[]);
+  public constructor(random: NoiseRandomSource, firstOctave: number, amplitudes: readonly number[]);
+  public constructor(
+    random: NoiseRandomSource,
+    octavesOrFirstOctave: readonly number[] | number,
+    amplitudesOverride?: readonly number[],
+  ) {
+    let configuration: { firstOctave: number; amplitudes: number[] };
+    if (typeof octavesOrFirstOctave === "number") {
+      configuration = validateAmplitudeConfiguration(octavesOrFirstOctave, amplitudesOverride ?? []);
+    } else {
+      configuration = makeAmplitudes(octavesOrFirstOctave);
+    }
+    const { firstOctave, amplitudes } = configuration;
+
     this.amplitudes = amplitudes;
 
     const baseNoise = new ImprovedNoise(random);
@@ -102,8 +136,16 @@ export class PerlinNoise {
     return value;
   }
 
+  public getSurfaceNoiseValue(x: number, y: number, z: number, yMax: number): number {
+    return this.getValue(x, y, 0, z, yMax, false);
+  }
+
   public getOctaveNoise(octave: number): ImprovedNoise | undefined {
     return this.noiseLevels[this.noiseLevels.length - 1 - octave];
+  }
+
+  public static create(random: NoiseRandomSource, firstOctave: number, amplitudes: readonly number[]): PerlinNoise {
+    return new PerlinNoise(random, firstOctave, amplitudes);
   }
 
   public static wrap(value: number): number {

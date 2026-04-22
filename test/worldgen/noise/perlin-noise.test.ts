@@ -97,4 +97,17 @@ describe("PerlinNoise", () => {
     const noise = new PerlinNoise(new SimpleRandomSource(12345), [-7, -6, -5, -4, -3, -2, -1, 0]);
     expect(noise.getValue(0.5, -0.75, 1.25)).toBe(noise.getValue(0.5, -0.75, 1.25, 0, 0, false));
   });
+
+  test("getSurfaceNoiseValue preserves Java's argument remapping", () => {
+    const noise = new PerlinNoise(new SimpleRandomSource(12345), [-7, -6, -5, -4, -3, -2, -1, 0]);
+    expect(noise.getSurfaceNoiseValue(0.5, -0.75, 1.25, 2.5)).toBe(noise.getValue(0.5, -0.75, 0, 1.25, 2.5, false));
+  });
+
+  test("create uses explicit amplitudes instead of octave presence", () => {
+    const seed = 12345n;
+    const explicit = PerlinNoise.create(new SimpleRandomSource(seed), -3, [1, 0, 2]);
+    const manual = new PerlinNoise(new SimpleRandomSource(seed), -3, [1, 0, 2]);
+
+    expect(explicit.getValue(0.25, -0.5, 0.75)).toBe(manual.getValue(0.25, -0.5, 0.75));
+  });
 });

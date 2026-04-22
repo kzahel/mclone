@@ -72,6 +72,17 @@ Each sample set records:
 - flattened `values` in `x-major,y-major,z-minor` order
 - `blendFactorRange` and `blendRegionCounts`, so the TS tests can assert the fixture surface exercises both clamp short-circuit branches and the interior lerp path
 
+## PerlinSimplexNoise oracle
+
+`pnpm --silent oracle:gen noise --class PerlinSimplexNoise --seed 12345 --octaves -3,-2,-1,0 --samples2d test/fixtures/noise/_samples-2d.json > test/fixtures/noise/perlin-simplex-seed-12345-oct-m3-0.json`
+
+Each `PerlinSimplexNoise` fixture stores one octave set for one seed and includes two 2D sample sets over `test/fixtures/noise/_samples-2d.json`:
+
+- `samplesWithoutOffsets`: `getValue(x,y,false)`
+- `samplesWithOffsets`: `getValue(x,y,true)`
+
+Both use `x-major,z-minor` flattening. The surface-noise wrapper is intentionally not serialized separately because `getSurfaceNoiseValue(x,y,z,yMax)` is just `getValue(x,y,true) * 0.55`; the TS tests assert that delegation directly.
+
 ## Wrappers
 
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`

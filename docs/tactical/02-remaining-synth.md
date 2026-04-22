@@ -6,6 +6,13 @@ Continuing from [`01-noise-octaves.md`](01-noise-octaves.md). This slice finishe
 
 TS ports of `SurfaceNoise`, `PerlinSimplexNoise`, `NormalNoise`, and `NoiseUtils`, plus whatever minimal `WorldgenRandom` / `PerlinNoise` API backfill those classes need, all validated against Java fixtures where behavior is stateful or numerically fragile.
 
+## Current status
+
+- `WorldgenRandom` now exists in TS with Java-matching seed helpers and `next(...)` call counting
+- `PerlinNoise` has the required tactical-02 backfill: `create(...)` and `getSurfaceNoiseValue(...)`
+- First tactical-02 slice landed: `PerlinSimplexNoise` is fixture-backed for the downstream octave sets `[-3..0]` and `[0]`, across canonical seeds `0`, `1`, `12345`, and `2151901553968352745`, validating both `useNoiseOffsets=false` and `useNoiseOffsets=true`
+- Next up: `NormalNoise`, then `NoiseUtils`
+
 ## Scope
 
 | # | Module | Depends on | Oracle input → expected |
@@ -64,13 +71,13 @@ Likewise for `NormalNoise`, keyed by:
 
 ## Concrete steps
 
-1. Port `WorldgenRandom` if the current TS tree still lacks it.
-2. Backfill `PerlinNoise.create(...)` and `PerlinNoise.getSurfaceNoiseValue(...)` on the existing port.
-3. Extend the oracle for `PerlinSimplexNoise`.
-4. Port and fixture-test `PerlinSimplexNoise`.
-5. Extend the oracle for `NormalNoise`.
-6. Port and fixture-test `NormalNoise`.
-7. Add direct unit coverage for `NoiseUtils` and the trivial `SurfaceNoise` implementations.
+1. Port `WorldgenRandom` if the current TS tree still lacks it. Done.
+2. Backfill `PerlinNoise.create(...)` and `PerlinNoise.getSurfaceNoiseValue(...)` on the existing port. Done.
+3. Extend the oracle for `PerlinSimplexNoise`. Done.
+4. Port and fixture-test `PerlinSimplexNoise`. Done.
+5. Extend the oracle for `NormalNoise`. Next.
+6. Port and fixture-test `NormalNoise`. Next.
+7. Add direct unit coverage for `NoiseUtils` and the trivial `SurfaceNoise` implementations. Pending after `NormalNoise`.
 
 ## Done when
 
