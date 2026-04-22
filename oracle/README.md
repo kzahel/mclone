@@ -83,6 +83,22 @@ Each `PerlinSimplexNoise` fixture stores one octave set for one seed and include
 
 Both use `x-major,z-minor` flattening. The surface-noise wrapper is intentionally not serialized separately because `getSurfaceNoiseValue(x,y,z,yMax)` is just `getValue(x,y,true) * 0.55`; the TS tests assert that delegation directly.
 
+## NormalNoise oracle
+
+`pnpm --silent oracle:gen noise --class NormalNoise --seed 12345 --first-octave -3 --amplitudes 1.0,0.0,2.0 --samples test/fixtures/noise/_samples-3d.json > test/fixtures/noise/normal-water-level-seed-12345.json`
+
+Each `NormalNoise` fixture stores one seed plus one explicit amplitude configuration over the shared `test/fixtures/noise/_samples-3d.json` grid:
+
+- `firstOctave`
+- `amplitudes`
+- flattened `values` from `getValue(x,y,z)` in `x-major,y-major,z-minor` order
+
+Current tactical/02 coverage is intentionally limited to the three `NormalNoise` allocations that still happen in default 1.17.1 `NoiseBasedChunkGenerator` construction:
+
+- `barrierNoise`: `firstOctave=-3`, amplitudes `1.0`
+- `waterLevelNoise`: `firstOctave=-3`, amplitudes `1.0,0.0,2.0`
+- `lavaNoise`: `firstOctave=-1`, amplitudes `1.0,0.0`
+
 ## Wrappers
 
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`

@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import net.minecraft.world.level.levelgen.SimpleRandomSource;
 import net.minecraft.world.level.levelgen.synth.BlendedNoise;
 import net.minecraft.world.level.levelgen.synth.ImprovedNoise;
+import net.minecraft.world.level.levelgen.synth.NormalNoise;
 import net.minecraft.world.level.levelgen.synth.PerlinNoise;
 import net.minecraft.world.level.levelgen.synth.PerlinSimplexNoise;
 import net.minecraft.world.level.levelgen.synth.SimplexNoise;
@@ -19,6 +20,7 @@ public final class OracleDumper {
    private static final String RANDOM_SOURCE_ALIAS = "LegacyRandomSource";
    private static final String BLENDED_NOISE_CLASS = BlendedNoise.class.getName();
    private static final String IMPROVED_NOISE_CLASS = ImprovedNoise.class.getName();
+   private static final String NORMAL_NOISE_CLASS = NormalNoise.class.getName();
    private static final String PERLIN_NOISE_CLASS = PerlinNoise.class.getName();
    private static final String PERLIN_SIMPLEX_NOISE_CLASS = PerlinSimplexNoise.class.getName();
    private static final String SIMPLEX_NOISE_CLASS = SimplexNoise.class.getName();
@@ -133,6 +135,14 @@ public final class OracleDumper {
       }
    }
 
+   private static int parseInteger(String value, String name) {
+      try {
+         return Integer.parseInt(value);
+      } catch (NumberFormatException error) {
+         throw new IllegalArgumentException("invalid " + name + " '" + value + "'");
+      }
+   }
+
    private static String dumpPrng(long seed, int count) {
       StringBuilder json = new StringBuilder(512 + count * 48);
       json.append("{\n");
@@ -168,6 +178,13 @@ public final class OracleDumper {
       }
 
       switch (className) {
+         case "NormalNoise":
+            return dumpNormalNoise(
+               seed,
+               parseInteger(requireOption(options, "first-octave"), "first-octave"),
+               parseAmplitudes(requireOption(options, "amplitudes")),
+               loadSampleGrid(requireOption(options, "samples"))
+            );
          case "PerlinNoise":
             return dumpPerlinNoise(seed, parseOctaves(requireOption(options, "octaves")), loadSampleGrid(requireOption(options, "samples")));
          case "PerlinSimplexNoise":
@@ -237,6 +254,45 @@ public final class OracleDumper {
       appendNumberField(json, 1, "sampleCount", Integer.toString(sampleCount), true);
       json.append("  \"octaves\": ");
       appendIntArray(json, octaves);
+      json.append(",\n");
+      json.append("  \"wireFormat\": {\n");
+      appendField(json, 2, "coordinates", "number", true);
+      appendField(json, 2, "values", "number", false);
+      json.append("  },\n");
+      json.append("  \"x\": ");
+      appendDoubleArray(json, sampleGrid.x);
+      json.append(",\n");
+      json.append("  \"y\": ");
+      appendDoubleArray(json, sampleGrid.y);
+      json.append(",\n");
+      json.append("  \"z\": ");
+      appendDoubleArray(json, sampleGrid.z);
+      json.append(",\n");
+      json.append("  \"values\": ");
+      appendNoiseValueArray(json, sampleGrid, noise::getValue);
+      json.append('\n');
+      json.append("}\n");
+      return json.toString();
+   }
+
+   private static String dumpNormalNoise(long seed, int firstOctave, double[] amplitudes, SampleGrid sampleGrid) {
+      NormalNoise noise = NormalNoise.create(new SimpleRandomSource(seed), firstOctave, amplitudes);
+      int sampleCount = sampleGrid.x.length * sampleGrid.y.length * sampleGrid.z.length;
+      StringBuilder json = new StringBuilder(2048 + sampleCount * 28);
+      json.append("{\n");
+      appendField(json, 1, "module", "noise", true);
+      appendField(json, 1, "minecraftVersion", MINECRAFT_VERSION, true);
+      appendField(json, 1, "noiseClass", NORMAL_NOISE_CLASS, true);
+      appendField(json, 1, "randomSourceClass", RANDOM_SOURCE_CLASS, true);
+      appendField(json, 1, "randomSourceAlias", RANDOM_SOURCE_ALIAS, true);
+      appendField(json, 1, "noiseMethod", "getValue(x,y,z)", true);
+      appendField(json, 1, "gridOrder", sampleGrid.gridOrder, true);
+      appendField(json, 1, "seed", Long.toString(seed), true);
+      appendNumberField(json, 1, "sampleCount", Integer.toString(sampleCount), true);
+      appendNumberField(json, 1, "firstOctave", Integer.toString(firstOctave), true);
+      indent(json, 1);
+      json.append("\"amplitudes\": ");
+      appendDoubleArray(json, amplitudes);
       json.append(",\n");
       json.append("  \"wireFormat\": {\n");
       appendField(json, 2, "coordinates", "number", true);
@@ -734,6 +790,30 @@ public final class OracleDumper {
       return java.util.Arrays.copyOf(octaves, uniqueCount);
    }
 
+   private static double[] parseAmplitudes(String value) {
+      String[] parts = value.split(",", -1);
+      double[] amplitudes = new double[parts.length];
+
+      for (int index = 0; index < parts.length; index++) {
+         String part = parts[index].trim();
+         if (part.isEmpty()) {
+            throw new IllegalArgumentException("empty amplitude entry");
+         }
+
+         try {
+            amplitudes[index] = Double.parseDouble(part);
+         } catch (NumberFormatException error) {
+            throw new IllegalArgumentException("invalid amplitude '" + part + "'");
+         }
+
+         if (!Double.isFinite(amplitudes[index])) {
+            throw new IllegalArgumentException("invalid amplitude '" + part + "'");
+         }
+      }
+
+      return amplitudes;
+   }
+
    private static List<Integer> toIntegerList(int[] values) {
       List<Integer> result = new ArrayList<>(values.length);
       for (int value : values) {
@@ -910,6 +990,7 @@ public final class OracleDumper {
       System.err.println("usage:");
       System.err.println("  oracle-dumper prng --seed <long> --count <positive-int>");
       System.err.println("  oracle-dumper noise --seed <long>");
+      System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");
       System.err.println("  oracle-dumper noise --class SimplexNoise --seed <long> --samples2d <path> --samples3d <path>");

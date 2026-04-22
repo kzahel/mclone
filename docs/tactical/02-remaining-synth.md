@@ -11,7 +11,8 @@ TS ports of `SurfaceNoise`, `PerlinSimplexNoise`, and the minimal `NormalNoise` 
 - `WorldgenRandom` now exists in TS with Java-matching seed helpers and `next(...)` call counting
 - `PerlinNoise` has the required tactical-02 backfill: `create(...)` and `getSurfaceNoiseValue(...)`
 - First tactical-02 slice landed: `PerlinSimplexNoise` is fixture-backed for the downstream octave sets `[-3..0]` and `[0]`, across canonical seeds `0`, `1`, `12345`, and `2151901553968352745`, validating both `useNoiseOffsets=false` and `useNoiseOffsets=true`
-- Next up: the minimal `NormalNoise` slice for default 1.17.1 generator parity
+- `NormalNoise` is fixture-backed for the built-in 1.17.1 generator allocations `barrierNoise`, `waterLevelNoise`, and `lavaNoise`, across the canonical seeds `0`, `1`, `12345`, and `2151901553968352745`
+- Tactical `02` is complete; next up is tactical `03` (`NoiseSampler` and settings)
 - Deferred: `NoiseUtils` and the dormant C&C Part 1 cave/aquifer/noodle/ore-vein stack, unless we explicitly expand the target beyond default 1.17.1 worldgen
 
 ## Scope
@@ -88,8 +89,8 @@ Use only the amplitude sets that default 1.17.1 `NoiseBasedChunkGenerator` actua
 2. Backfill `PerlinNoise.create(...)` and `PerlinNoise.getSurfaceNoiseValue(...)` on the existing port. Done.
 3. Extend the oracle for `PerlinSimplexNoise`. Done.
 4. Port and fixture-test `PerlinSimplexNoise`. Done.
-5. Extend the oracle for `NormalNoise`, limited to the built-in 1.17.1 allocations (`barrierNoise`, `waterLevelNoise`, `lavaNoise`). Next.
-6. Port and fixture-test `NormalNoise` for those built-in allocations. Next.
+5. Extend the oracle for `NormalNoise`, limited to the built-in 1.17.1 allocations (`barrierNoise`, `waterLevelNoise`, `lavaNoise`). Done.
+6. Port and fixture-test `NormalNoise` for those built-in allocations. Done.
 7. Stop there for the 1.17.1 target. `NoiseUtils` and the dormant C&C Part 1 consumers only move back into scope if we explicitly choose to translate that disabled path.
 
 ## Done when
