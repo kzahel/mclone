@@ -15,11 +15,11 @@ A TS implementation of MC 1.17.1's worldgen that produces byte-identical output 
 
 Build unit oracles first. The integration oracle only matters once we have enough modules wired to compare a whole chunk.
 
-## Translation order (this doc covers steps 1–3)
+## Translation order
 
 | # | Module | Unit-oracle input → expected |
 |---|---|---|
-| 1 | `LegacyRandomSource` (≈ `java.util.Random`) | seed `S` → first 10k `nextInt()` / `nextLong()` |
+| 1 | `SimpleRandomSource` (`LegacyRandomSource` in later mappings; ≈ `java.util.Random`) | seed `S` → first 10k `nextInt()` / `nextLong()` |
 | 2 | `WorldgenRandom` | seed + position → derived sequence |
 | 3 | `ImprovedNoise` (3D Perlin) | seed + sample points `(x,y,z)` → `f64` |
 | 4 | `PerlinNoise` (octaves) — *next tactical doc* | |
@@ -33,7 +33,7 @@ Build unit oracles first. The integration oracle only matters once we have enoug
 - **Test runner:** Vitest (Vite-native, fast watch, fixture-friendly)
 - **TS:** strict mode, ES2022 target
 - **Numerics:** hi/lo `Uint32` pair PRNG. If precision diverges or perf bites, WASM-PRNG is the fallback *and* a second reference impl.
-- **Oracle dumper:** small Java program in `oracle/` directory, depends on the mapped `client-deobf.jar` we already produce. Compiled + run via `pnpm oracle:gen`. Outputs JSON fixtures under `test/fixtures/`.
+- **Oracle dumper:** small Java program in `oracle/` directory, depends on the mapped `client-deobf.jar` we already produce. Compiled + run via `pnpm --silent oracle:gen`. Outputs JSON fixtures under `test/fixtures/`.
 - **Fixture format:** JSON for small numeric (PRNG, noise samples). Binary `.bin` + sidecar JSON for chunk-level later.
 
 ## Directory layout (proposed)
@@ -64,12 +64,19 @@ mclone/
   vitest.config.ts
 ```
 
+## Current status
+
+- `5c201d1`: project scaffold landed (`pnpm`, Vitest, strict TS config, smoke test)
+- `2b1f527`: Java oracle harness landed under `oracle/`, plus the first PRNG fixture at `test/fixtures/prng/seed-12345.json`
+- For MC 1.17.1, the relevant legacy LCG class is `net.minecraft.world.level.levelgen.SimpleRandomSource`; later Mojang mappings rename this to `LegacyRandomSource`
+- Next up: finish the canonical PRNG fixtures (`0`, `1`, `2151901553968352745`), then port the TS PRNG and test against them
+
 ## Week 1 — concrete steps
 
 1. **Project scaffold.** `pnpm init`, install `vitest` + `typescript`. Strict `tsconfig.json`. Single empty test that passes.
-2. **Oracle dumper skeleton.** Java program that takes a seed + module name on CLI, emits JSON to stdout. Wired through `pnpm oracle:gen prng --seed 12345 > test/fixtures/prng/seed-12345.json`. Classpath uses `reference/minecraft-1.17.1/client-deobf.jar`.
+2. **Oracle dumper skeleton.** Java program that takes a seed + module name on CLI, emits JSON to stdout. Wired through `pnpm --silent oracle:gen prng --seed 12345 --count 10000 > test/fixtures/prng/seed-12345.json`. Classpath uses `reference/minecraft-1.17.1/client-deobf.jar`.
 3. **Generate PRNG fixtures.** Dump first 10k `nextInt()`, `nextLong()`, `nextDouble()` for a handful of canonical seeds (`0`, `1`, `12345`, MC's own famous seed `2151901553968352745` — "Far Lands"-like coverage).
-4. **Port `LegacyRandomSource`.** Hi/lo `Uint32` pair. ~50 lines. Vitest assertion: byte-exact match against fixture.
+4. **Port `SimpleRandomSource` / legacy LCG.** Hi/lo `Uint32` pair. ~50 lines. Vitest assertion: byte-exact match against fixture.
 5. **Generate noise fixtures.** Dump `ImprovedNoise.getValue(x,y,z)` at a grid of sample points for several seeds.
 6. **Port `ImprovedNoise`.** Validate against fixture.
 
@@ -83,7 +90,7 @@ mclone/
 ## Done when
 
 - `pnpm test` runs and asserts:
-  - `LegacyRandomSource` matches the Java fixture for ≥3 seeds × 10k draws each
+  - `SimpleRandomSource` / legacy LCG matches the Java fixture for ≥3 seeds × 10k draws each
   - `ImprovedNoise.getValue` matches the Java fixture at ≥1000 sample points × 3 seeds (allow zero `f64` epsilon — should be exact)
 - `pnpm oracle:gen prng` and `pnpm oracle:gen noise` regenerate the fixtures from scratch
 - README in `oracle/` documents how to add a new fixture type
