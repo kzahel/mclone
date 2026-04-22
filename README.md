@@ -1,26 +1,30 @@
 # mclone
 
-Web-based Minecraft-inspired voxel sandbox. Not seed-compatible with Java Edition — aims for Minecraft *feel*, not bit-exact parity.
+Web-based Minecraft-inspired voxel sandbox. Private project — primary target is home/LAN use for my daughter to play with.
+
+See [`docs/strategy.md`](docs/strategy.md) for the two-phase plan (direct translation now, optional clean-room only if we ever want to distribute) and [`docs/assets-plan.md`](docs/assets-plan.md) for asset extraction. Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
 
 ## Stack
 
 - **Renderer:** WebGPU. Greedy-meshed chunks packed into instanced buffers.
-- **Worldgen / hot paths:** WASM (C or Rust). Terrain gen, meshing, lighting, chunk (de)serialization.
+- **Worldgen / hot paths:** WASM (Rust primary, C fallback). Terrain gen, meshing, lighting, chunk (de)serialization.
 - **Chunk storage:** IndexedDB (consider OPFS as alternative for large binary blobs).
 - **Host:** TypeScript + Vite, main thread handles input/UI, workers own worldgen + meshing.
 
 ## Worldgen strategy
 
-Port **cubiomes** to WASM for biome IDs + structure positions. Write our own 3D density + carvers on top, using **1.17 decompiled source** as reference. Skip reimplementing 1.18+ density functions / splines — way too much surface area, and we're not seed-compatible anyway.
+**Port cubiomes** (MIT) to WASM for biome IDs + structure positions — no translation-hygiene concerns, it's fair-use from day one.
 
-Pipeline sketch per chunk:
+**Directly translate** 1.17.1's terrain gen pipeline from the decomp: PRNG → noise → `NoiseSampler` → `NoiseBasedChunkGenerator` → carvers (`CaveWorldCarver`, `CanyonWorldCarver`) → surface rules → features. Oracle-test each layer against real MC output (see strategy doc). 1.17 specifically because it's pre-Caves-and-Cliffs — no density functions or splines to port.
 
-1. cubiomes → biome IDs, climate params (temperature/humidity/continentalness/erosion/weirdness), structure attempt positions
-2. Our 3D density field (simplex or adapted 1.17 `NoiseSampler`) → solid/air
-3. Carvers (worley-based or ported `CaveWorldCarver` / `CanyonWorldCarver`) → caves + ravines
-4. Surface rules (port of `SurfaceBuilder`) → grass/dirt/sand/stone per biome
-5. Ore veins + features (trees, flowers) — ported `OreFeature` / `TreeFeature` logic
-6. Structures populated from cubiomes positions
+Pipeline per chunk:
+
+1. cubiomes → biome IDs, climate params, structure attempt positions
+2. Our 3D density field (translated `NoiseSampler`) → solid/air
+3. Carvers (translated `CaveWorldCarver` / `CanyonWorldCarver`) → caves + ravines
+4. Surface rules (translated `SurfaceBuilder`) → grass/dirt/sand/stone per biome
+5. Ore veins + features (translated `OreFeature` / `TreeFeature`)
+6. Structures populated from cubiomes positions (block templates from extracted NBT)
 
 JS ↔ WASM boundary is chunk-sized: pass chunk coords in, get packed block array + heightmap out. No per-voxel calls across the boundary.
 
@@ -146,9 +150,11 @@ The main community mapping sets that fill these gaps:
 
 Neither Mojang, Yarn, nor Parchment can recover true **local variable names inside method bodies** — that information was never in the obfuscated jar. Those are decompiler-generated and will stay as `var1, var2…` regardless of mapping set.
 
-## Open questions
+## Open questions (original-work side only)
 
-- Which noise for 3D density: port 1.17's `NoiseSampler` (matches cubiomes' surface noise) vs. roll our own simplex-based one? Former is closer to Minecraft feel but more code.
-- Carver approach: port 1.17's random-walk carver vs. use a worley-based analytic field (no stored state, works great in a WASM shader-like kernel).
-- Meshing: greedy in WASM, emit indexed buffer directly. Investigate binary greedy meshing (bitwise tricks over 64-wide columns).
-- Lighting: flood-fill on chunk changes. Two passes (block + sky). Possibly deferred to GPU compute shader.
+Worldgen questions are settled by the direct-translation strategy — we mirror what MC does, then oracle-test against it. Open questions for parts we're writing from scratch:
+
+- **Meshing:** greedy in WASM, emit indexed buffer directly. Investigate binary greedy meshing (bitwise tricks over 64-wide columns).
+- **Lighting:** flood-fill on chunk changes. Two passes (block + sky). Possibly deferred to GPU compute shader.
+- **Chunk compression:** raw palette-encoded blocks → LZ4 or zstd before IndexedDB write? Trade-off between storage size and seek latency.
+- **Worker topology:** one worldgen worker per core? One shared, queued? Ownership of chunk memory across transfers.
