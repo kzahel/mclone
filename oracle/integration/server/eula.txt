@@ -1,0 +1,4 @@
+# mclone integration oracle — accepts Mojang EULA for headless server startup.
+# https://aka.ms/MinecraftEULA
+# Only used by the oracle harness; nothing ships with the rendered client.
+eula=true

@@ -17,11 +17,12 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
 
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
 
     "noEmit": true
   },
-  "include": ["src/**/*", "test/**/*", "vitest.config.ts"]
+  "include": ["src/**/*", "test/**/*", "oracle/integration/**/*.ts", "vitest.config.ts"]
 }

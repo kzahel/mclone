@@ -126,3 +126,38 @@ This lets the TS side oracle-test biome weighting, random-density offset, blende
 
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`
 - `oracle/run.sh`: builds if needed, then runs `OracleDumper`
+
+## Integration oracle (server-side)
+
+A second oracle tier runs the official 1.17.1 server jar headless against a pinned seed, then decodes the generated `region/*.mca` files into committed chunk fixtures. Used by upcoming tactical docs (starting with tactical `06`) to diff real Minecraft chunks against our TS port of `NoiseBasedChunkGenerator`.
+
+Pieces:
+
+- `scripts/fetch-server-jar.sh 1.17.1` — SHA1-verified download of the server jar (Mojang manifest). Idempotent. Writes to `reference/minecraft-1.17.1/server.jar`.
+- `oracle/integration/run-server.sh --seed <long>` — spawns the server with a pinned seed, waits for the `Done (` startup line, sends `stop`, and leaves the generated `world/region/*.mca` files on disk. Prints the working directory to stdout.
+- `oracle/integration/dump-chunks.ts` — Node CLI that reads region files and emits a committable JSON fixture. Requires Node 22.6+ (native TypeScript strip-types support).
+- `oracle/integration/gen-fixture.sh --seed <long> --chunks <x,z,x,z,...> --out <path>` — end-to-end orchestration: ensures the server jar exists, runs the server, and decodes the requested chunks.
+
+The reader + fixture builder live under `src/oracle/anvil/` and `src/oracle/integration/` so they get Vitest coverage (see `test/oracle/`).
+
+### Regenerating an integration fixture
+
+```bash
+./oracle/integration/gen-fixture.sh \
+    --seed 12345 \
+    --chunks 0,0 \
+    --out test/fixtures/integration/overworld-seed-12345-chunks-0-0.json
+```
+
+Fixtures are factual measurements and therefore safe to distribute even though the server jar itself isn't.
+
+### Fixture format
+
+Each fixture stores one seed + one generator configuration + one or more chunks. For each chunk:
+
+- `status` — always `"full"` in committed fixtures (partially-generated border chunks are rejected)
+- `sections[]` — each section records `y`, `palette` (resource keys only; 1.17.1 MVP drops block-state properties), and a decoded 4096-entry `blocks` array (palette indices, `y-major,z-major,x-minor`)
+- `heightmaps` — decoded `WORLD_SURFACE` / `OCEAN_FLOOR` / etc. as 16×16 arrays in `z-major,x-minor` row-major order
+- `biomes` — the native 4×4×4 biome grid 1.17.1 writes as 1024 ints
+
+See `docs/tactical/04-integration-oracle-harness.md` for the full shape and design rationale.
