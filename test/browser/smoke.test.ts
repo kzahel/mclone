@@ -1,18 +1,21 @@
 import { test, expect } from "@playwright/test";
-import type { BootResult } from "../../src/renderer/main.ts";
+import { QUAD_COLOR_RGBA8, type BootResult } from "../../src/renderer/main.ts";
 
 test("WebGPU boot succeeds on system Chrome", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(String(err)));
 
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "networkidle" });
+  await page.waitForFunction(() => typeof window.__mcloneReady !== "undefined");
 
   const result = (await page.evaluate(() => window.__mcloneReady)) as BootResult;
+  await page.locator("#renderer").screenshot({ path: test.info().outputPath("quad.png") });
 
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
   expect(result.ok, JSON.stringify(result)).toBe(true);
   if (result.ok) {
     expect(result.adapterInfo.length).toBeGreaterThan(0);
     expect(["bgra8unorm", "rgba8unorm"]).toContain(result.format);
+    expect(result.centerPixel).toEqual(QUAD_COLOR_RGBA8);
   }
 });
