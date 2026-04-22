@@ -2,14 +2,16 @@
 
 Web-based Minecraft-inspired voxel sandbox. Private project — primary target is home/LAN use for my daughter to play with.
 
-See [`docs/strategy.md`](docs/strategy.md) for the two-phase plan (direct translation now, optional clean-room only if we ever want to distribute) and [`docs/assets-plan.md`](docs/assets-plan.md) for asset extraction. Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
+See [`docs/strategy.md`](docs/strategy.md) for the two-phase plan (direct translation now, optional clean-room only if we ever want to distribute) and [`docs/assets-plan.md`](docs/assets-plan.md) for asset extraction. Implementation work is tracked in numbered tactical docs under [`docs/tactical/`](docs/tactical/). Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
 
 ## Stack
 
+- **Language:** TypeScript end-to-end — host, workers, worldgen, meshing. No Rust.
 - **Renderer:** WebGPU. Greedy-meshed chunks packed into instanced buffers.
-- **Worldgen / hot paths:** WASM (Rust primary, C fallback). Terrain gen, meshing, lighting, chunk (de)serialization.
+- **Worldgen:** TS translation of MC 1.17.1's pipeline; bit-exact seed parity is the correctness bar. See `docs/tactical/`.
 - **Chunk storage:** IndexedDB (consider OPFS as alternative for large binary blobs).
-- **Host:** TypeScript + Vite, main thread handles input/UI, workers own worldgen + meshing.
+- **Host:** Vite + workers. Main thread handles input/UI; workers own worldgen + meshing.
+- **Perf escape hatch:** any measured-hot module can move to WASM-from-C (not Rust). `cubiomes` already ships as C→WASM for biomes/structures — that's the only WASM in the default stack.
 
 ## Worldgen strategy
 
@@ -26,7 +28,7 @@ Pipeline per chunk:
 5. Ore veins + features (translated `OreFeature` / `TreeFeature`)
 6. Structures populated from cubiomes positions (block templates from extracted NBT)
 
-JS ↔ WASM boundary is chunk-sized: pass chunk coords in, get packed block array + heightmap out. No per-voxel calls across the boundary.
+Worker boundary is chunk-sized: pass chunk coords into a worldgen worker, get a packed block array + heightmap back. No per-voxel calls across thread boundaries. Same rule applies to the cubiomes WASM call, and to any future TS-module-migrated-to-WASM.
 
 ## References (repo-local, under `reference/` — gitignored)
 
@@ -154,7 +156,7 @@ Neither Mojang, Yarn, nor Parchment can recover true **local variable names insi
 
 Worldgen questions are settled by the direct-translation strategy — we mirror what MC does, then oracle-test against it. Open questions for parts we're writing from scratch:
 
-- **Meshing:** greedy in WASM, emit indexed buffer directly. Investigate binary greedy meshing (bitwise tricks over 64-wide columns).
+- **Meshing:** greedy in TS first, emit indexed buffer directly. Investigate binary greedy meshing (bitwise tricks over 64-wide `Uint32Array` columns). Move to C→WASM only if measured.
 - **Lighting:** flood-fill on chunk changes. Two passes (block + sky). Possibly deferred to GPU compute shader.
 - **Chunk compression:** raw palette-encoded blocks → LZ4 or zstd before IndexedDB write? Trade-off between storage size and seek latency.
 - **Worker topology:** one worldgen worker per core? One shared, queued? Ownership of chunk memory across transfers.
