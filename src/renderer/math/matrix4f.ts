@@ -146,6 +146,72 @@ export class Matrix4f {
     return new Matrix4f(this);
   }
 
+  public invert(): boolean {
+    const augmented = [
+      [this.m00, this.m01, this.m02, this.m03, 1, 0, 0, 0],
+      [this.m10, this.m11, this.m12, this.m13, 0, 1, 0, 0],
+      [this.m20, this.m21, this.m22, this.m23, 0, 0, 1, 0],
+      [this.m30, this.m31, this.m32, this.m33, 0, 0, 0, 1],
+    ];
+
+    for (let column = 0; column < 4; column++) {
+      let pivotRow = column;
+      for (let row = column + 1; row < 4; row++) {
+        if (Math.abs(augmented[row]![column]!) > Math.abs(augmented[pivotRow]![column]!)) {
+          pivotRow = row;
+        }
+      }
+
+      const pivot = augmented[pivotRow]![column]!;
+      if (Math.abs(pivot) <= 1.0e-6) {
+        return false;
+      }
+
+      if (pivotRow !== column) {
+        const swap = augmented[column]!;
+        augmented[column] = augmented[pivotRow]!;
+        augmented[pivotRow] = swap;
+      }
+
+      for (let index = 0; index < 8; index++) {
+        augmented[column]![index] = augmented[column]![index]! / pivot;
+      }
+
+      for (let row = 0; row < 4; row++) {
+        if (row === column) {
+          continue;
+        }
+
+        const factor = augmented[row]![column]!;
+        if (factor === 0) {
+          continue;
+        }
+
+        for (let index = 0; index < 8; index++) {
+          augmented[row]![index] = augmented[row]![index]! - (factor * augmented[column]![index]!);
+        }
+      }
+    }
+
+    this.m00 = augmented[0]![4]!;
+    this.m01 = augmented[0]![5]!;
+    this.m02 = augmented[0]![6]!;
+    this.m03 = augmented[0]![7]!;
+    this.m10 = augmented[1]![4]!;
+    this.m11 = augmented[1]![5]!;
+    this.m12 = augmented[1]![6]!;
+    this.m13 = augmented[1]![7]!;
+    this.m20 = augmented[2]![4]!;
+    this.m21 = augmented[2]![5]!;
+    this.m22 = augmented[2]![6]!;
+    this.m23 = augmented[2]![7]!;
+    this.m30 = augmented[3]![4]!;
+    this.m31 = augmented[3]![5]!;
+    this.m32 = augmented[3]![6]!;
+    this.m33 = augmented[3]![7]!;
+    return true;
+  }
+
   public multiplyWithTranslation(x: number, y: number, z: number): void {
     this.m03 = (((this.m00 * x) + (this.m01 * y)) + (this.m02 * z)) + this.m03;
     this.m13 = (((this.m10 * x) + (this.m11 * y)) + (this.m12 * z)) + this.m13;
@@ -180,6 +246,15 @@ export class Matrix4f {
     matrix.m11 = y;
     matrix.m22 = z;
     matrix.m33 = 1;
+    return matrix;
+  }
+
+  public static createTranslateMatrix(x: number, y: number, z: number): Matrix4f {
+    const matrix = new Matrix4f();
+    matrix.setIdentity();
+    matrix.m03 = x;
+    matrix.m13 = y;
+    matrix.m23 = z;
     return matrix;
   }
 }

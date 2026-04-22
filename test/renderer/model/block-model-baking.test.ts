@@ -28,6 +28,15 @@ class ExtractedAssetModelSource implements BlockModelSource {
       return undefined;
     }
   }
+
+  public getBlockStateJson(location: ResourceLocation): string | undefined {
+    const blockStatePath = path.join(ASSETS_ROOT, location.getNamespace(), "blockstates", `${location.getPath()}.json`);
+    try {
+      return readFileSync(blockStatePath, "utf8");
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 const DUMMY_ATLAS: TextureAtlasUploadTarget = {

@@ -186,6 +186,7 @@ export class BlockModel implements UnbakedModel {
           modelState,
           element.rotation,
           element.shade,
+          _location,
         );
         if (elementFace.cullForDirection === undefined) {
           builder.addUnculledFace(quad);

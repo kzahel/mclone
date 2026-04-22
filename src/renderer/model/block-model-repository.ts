@@ -30,6 +30,8 @@ const BUILTIN_MODELS = new Map<string, string>([["missing", MISSING_MODEL_MESH]]
 
 export interface BlockModelSource {
   getModelJson(location: ResourceLocation): string | undefined;
+
+  getBlockStateJson(location: ResourceLocation): string | undefined;
 }
 
 export class BlockModelRepository {
@@ -62,6 +64,10 @@ export class BlockModelRepository {
     const model = this.getBlockModel(location);
     this.resolveParents(location, model, new Set<string>());
     return model;
+  }
+
+  public getBlockStateJson(location: ResourceLocation): string | undefined {
+    return this.source.getBlockStateJson(location);
   }
 
   private resolveParents(location: ResourceLocation, model: BlockModel, resolving: Set<string>): void {

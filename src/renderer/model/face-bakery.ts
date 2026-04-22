@@ -1,15 +1,19 @@
 import { Direction } from "../../core/direction";
-import { equal, lerp } from "../../util/mth";
+import { equal, lerp, positiveModulo } from "../../util/mth";
 import { Matrix4f } from "../math/matrix4f";
+import { Matrix3f } from "../math/matrix3f";
 import { Vector3f } from "../math/vector3f";
+import { Vector4f } from "../math/vector4f";
 import { TextureAtlasSprite } from "../texture/texture-atlas-sprite";
 import { BakedQuad } from "./baked-quad";
+import { BlockMath } from "./block-math";
 import { BlockElementFace } from "./block-element-face";
 import { type BlockElementRotation } from "./block-element-rotation";
 import { BlockFaceUV } from "./block-face-uv";
 import { FaceInfo } from "./face-info";
 import { type ModelState } from "./model-state";
 import { Transformation } from "./transformation";
+import { ResourceLocation } from "../../core/resource-location";
 
 function transformVector(matrix: Matrix4f, vector: Vector3f, w: number): Vector3f {
   return new Vector3f(
@@ -53,10 +57,11 @@ export class FaceBakery {
     modelState: ModelState,
     elementRotation: BlockElementRotation | undefined,
     shade: boolean,
+    location: ResourceLocation,
   ): BakedQuad {
-    const uv = face.uv;
+    let uv = face.uv;
     if (modelState.isUvLocked()) {
-      throw new Error("UV lock is not implemented yet");
+      uv = FaceBakery.recomputeUVs(face.uv, direction, modelState.getRotation(), location);
     }
 
     const originalUvs = uv.uvs ? [...uv.uvs] : undefined;
@@ -81,6 +86,31 @@ export class FaceBakery {
     }
 
     return new BakedQuad(vertices, face.tintIndex, quadDirection, sprite, shade);
+  }
+
+  public static recomputeUVs(uv: BlockFaceUV, direction: Direction, transformation: Transformation, location: ResourceLocation): BlockFaceUV {
+    const matrix = BlockMath.getUVLockTransform(transformation, direction, () => `Unable to resolve UVLock for model: ${location}`).getMatrix();
+    const u0 = uv.getU(uv.getReverseIndex(0));
+    const v0 = uv.getV(uv.getReverseIndex(0));
+    const corner0 = new Vector4f(u0 / 16.0, v0 / 16.0, 0.0, 1.0);
+    corner0.transform(matrix);
+    const u1 = uv.getU(uv.getReverseIndex(2));
+    const v1 = uv.getV(uv.getReverseIndex(2));
+    const corner1 = new Vector4f(u1 / 16.0, v1 / 16.0, 0.0, 1.0);
+    corner1.transform(matrix);
+    const transformedU0 = 16.0 * corner0.x();
+    const transformedV0 = 16.0 * corner0.y();
+    const transformedU1 = 16.0 * corner1.x();
+    const transformedV1 = 16.0 * corner1.y();
+    const minU = Math.sign(u1 - u0) === Math.sign(transformedU1 - transformedU0) ? transformedU0 : transformedU1;
+    const maxU = Math.sign(u1 - u0) === Math.sign(transformedU1 - transformedU0) ? transformedU1 : transformedU0;
+    const minV = Math.sign(v1 - v0) === Math.sign(transformedV1 - transformedV0) ? transformedV0 : transformedV1;
+    const maxV = Math.sign(v1 - v0) === Math.sign(transformedV1 - transformedV0) ? transformedV1 : transformedV0;
+    const radians = (uv.rotation * Math.PI) / 180.0;
+    const directionVector = new Vector3f(Math.cos(radians), Math.sin(radians), 0.0);
+    directionVector.transform(new Matrix3f(matrix));
+    const rotation = positiveModulo(-Math.round((Math.atan2(directionVector.y(), directionVector.x()) * 180.0) / Math.PI / 90.0) * 90, 360);
+    return new BlockFaceUV([minU, minV, maxU, maxV], rotation);
   }
 
   private makeVertices(

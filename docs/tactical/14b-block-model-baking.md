@@ -56,4 +56,4 @@ Port the bake-time half of Minecraft's block model stack: `BakedQuad`, `BakedMod
 
 ## Next
 
-Tactical 14c: blockstate variant and multipart resolution. Port `BlockModelDefinition`, `MultiVariant`, multipart selectors, and the relevant `ModelBakery.loadModel(...)` path so real `BlockState -> ModelResourceLocation -> baked model` resolution works without manual cache population.
+Tactical 14c: [blockstate variant and multipart resolution](14c-blockstate-variant-and-multipart.md). Port `BlockModelDefinition`, `MultiVariant`, multipart selectors, and the relevant `ModelBakery.loadModel(...)` path so real `BlockState -> ModelResourceLocation -> baked model` resolution works without manual cache population.
