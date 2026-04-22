@@ -7,12 +7,18 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Registry;
 import net.minecraft.data.BuiltinRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.LevelHeightAccessor;
+import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.OverworldBiomeSource;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.NoiseModifier;
 import net.minecraft.world.level.levelgen.NoiseSampler;
@@ -111,6 +117,9 @@ public final class OracleDumper {
             break;
          case "noise":
             json = dumpNoise(seed, options);
+            break;
+         case "terrain-chunk":
+            json = dumpTerrainChunk(seed, parseInteger(requireOption(options, "chunk-x"), "chunk-x"), parseInteger(requireOption(options, "chunk-z"), "chunk-z"));
             break;
          default:
             throw new IllegalArgumentException("unsupported module '" + module + "'");
@@ -458,6 +467,99 @@ public final class OracleDumper {
       json.append("  }\n");
       json.append("}\n");
       return json.toString();
+   }
+
+   private static String dumpTerrainChunk(long seed, int chunkX, int chunkZ) {
+      SharedConstants.tryDetectVersion();
+      java.io.PrintStream originalOut = Bootstrap.STDOUT;
+      java.io.PrintStream originalErr = System.err;
+      Bootstrap.bootStrap();
+      System.setOut(originalOut);
+      System.setErr(originalErr);
+
+      OverworldBiomeSource biomeSource = new OverworldBiomeSource(seed, false, false, BuiltinRegistries.BIOME);
+      NoiseBasedChunkGenerator generator = new NoiseBasedChunkGenerator(
+         biomeSource,
+         seed,
+         () -> BuiltinRegistries.NOISE_GENERATOR_SETTINGS.getOrThrow(NoiseGeneratorSettings.OVERWORLD)
+      );
+      int minY = generator.getMinY();
+      int height = generator.getGenDepth();
+      int[] blocks = new int[height * 16 * 16];
+      int minBlockX = chunkX * 16;
+      int minBlockZ = chunkZ * 16;
+      BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+      LevelHeightAccessor level = new LevelHeightAccessor() {
+         @Override
+         public int getHeight() {
+            return height;
+         }
+
+         @Override
+         public int getMinBuildHeight() {
+            return minY;
+         }
+      };
+
+      for (int localZ = 0; localZ < 16; localZ++) {
+         for (int localX = 0; localX < 16; localX++) {
+            int x = minBlockX + localX;
+            int z = minBlockZ + localZ;
+            NoiseColumn column = generator.getBaseColumn(x, z, level);
+            for (int y = minY; y < minY + height; y++) {
+               BlockState state = column.getBlockState(pos.set(x, y, z));
+               blocks[((y - minY) << 8) | (localZ << 4) | localX] = terrainBlockId(state);
+            }
+         }
+      }
+
+      applyBottomBedrock(blocks, minY, chunkX, chunkZ);
+
+      Map<String, Object> json = new LinkedHashMap<>();
+      json.put("module", "terrain-chunk");
+      json.put("minecraftVersion", MINECRAFT_VERSION);
+      json.put("generatorClass", NoiseBasedChunkGenerator.class.getName());
+      json.put("seed", Long.toString(seed));
+      json.put("chunkX", chunkX);
+      json.put("chunkZ", chunkZ);
+      json.put("minY", minY);
+      json.put("height", height);
+      json.put("blockOrder", "y-major,z-major,x-minor");
+      json.put("palette", new String[]{"minecraft:air", "minecraft:stone", "minecraft:water", "minecraft:bedrock"});
+      json.put("blocks", blocks);
+      return GSON.toJson(json);
+   }
+
+   private static int terrainBlockId(BlockState state) {
+      String key = Registry.BLOCK.getKey(state.getBlock()).toString();
+      switch (key) {
+         case "minecraft:air":
+            return 0;
+         case "minecraft:stone":
+            return 1;
+         case "minecraft:water":
+            return 2;
+         case "minecraft:bedrock":
+            return 3;
+         default:
+            throw new IllegalStateException("unexpected terrain block from Java oracle: " + key);
+      }
+   }
+
+   private static void applyBottomBedrock(int[] blocks, int minY, int chunkX, int chunkZ) {
+      WorldgenRandom random = new WorldgenRandom();
+      random.setBaseChunkSeed(chunkX, chunkZ);
+
+      for (int localZ = 0; localZ < 16; localZ++) {
+         for (int localX = 0; localX < 16; localX++) {
+            for (int offset = 4; offset >= 0; offset--) {
+               if (offset <= random.nextInt(5)) {
+                  int y = minY + offset;
+                  blocks[((y - minY) << 8) | (localZ << 4) | localX] = 3;
+               }
+            }
+         }
+      }
    }
 
    private static String dumpOverworldBiomeSource(long seed, boolean legacyBiomeInitLayer, boolean largeBiomes, SampleGrid2D sampleGrid2D) {
@@ -1535,6 +1637,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper biome --class OverworldBiomeSource --seed <long> --samples2d <path> [--legacy-biome-init-layer <true|false>] [--large-biomes <true|false>]");
       System.err.println("  oracle-dumper noise --seed <long>");
       System.err.println("  oracle-dumper noise --class NoiseSampler --seed <long> --preset overworld --samples2d <path>");
+      System.err.println("  oracle-dumper terrain-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");
