@@ -33,13 +33,12 @@ Run `./scripts/decompile-mc.sh` if `reference/minecraft-1.17.1/src/` is missing.
 
 ## Visual validation — fail fast, don't batch
 
-For any slice that produces pixels (smoke tests, golden screenshots, canvas output), **run the browser tests and look at the result before moving on.** Do not finish a whole slice and then check. Check at the first drawable milestone — even a solid-color quad or a clear-color frame — then keep checking as complexity increases.
+For any slice that produces pixels, **capture a screenshot and look at it before moving on.** Do not finish a whole slice and then check. Check at the first drawable milestone — even a solid-color quad or a clear-color frame — then keep checking as complexity increases.
 
 Concretely:
-- After wiring up a new draw path, run `pnpm test:browser` and capture a screenshot. Read the screenshot file and describe what you see.
-- If the output looks wrong (wrong color, blank canvas, WebGPU validation errors in the console), stop and fix it before adding more code on top.
-- Unit tests (`pnpm test`) catch data-structure correctness. They do not catch GPU submission errors, wrong buffer layouts, or misconfigured pipelines. The browser test is the only oracle for those.
-- When a golden screenshot regresses, treat it as a blocker — do not proceed to the next sub-task.
+- After wiring up a new draw path, run `pnpm test:browser` and take a screenshot. Read the image and describe what you see. Does it look right? Are the shapes, colors, and positions what you expect?
+- If the output looks wrong (blank canvas, wrong color, garbage geometry, WebGPU validation errors in the console), stop and fix it before adding more code on top.
+- Unit tests (`pnpm test`) catch data-structure correctness. They do not catch GPU submission errors, wrong buffer layouts, or misconfigured pipelines. Actually looking at the rendered output is the only way to catch those.
 
 ## Target: Minecraft Java 1.17.1 vanilla overworld
 
