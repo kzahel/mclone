@@ -19,8 +19,8 @@ Order matters: `PerlinNoise` is a prerequisite for `BlendedNoise`. `SimplexNoise
 ## Current status
 
 - Tactical 00 prerequisites are complete: oracle harness, `SimpleRandomSource`, and `ImprovedNoise`
-- First slice landed: shared 3D sample grid, `PerlinNoise` oracle support, committed `[-7..0]` fixtures for the canonical four seeds, and a TS `PerlinNoise` port validated against those fixtures
-- Next up: extend `PerlinNoise` coverage to `[-15..0]`, then move on to `SimplexNoise`
+- `PerlinNoise` is now fixture-backed for both octave sets used downstream: `[-7..0]` and `[-15..0]`, across canonical seeds `0`, `1`, `12345`, and `2151901553968352745`
+- Next up: move on to `SimplexNoise`
 
 ## Why these three
 
@@ -90,8 +90,8 @@ oracle/java/
 
 1. **Extend the Java dumper** with a `noise` subcommand. Support `--class PerlinNoise|SimplexNoise|BlendedNoise`, seed, octave list (for Perlin), and a reusable sample-grid file.
 2. **Generate canonical sample grids.** One shared 3D grid file currently lives at `test/fixtures/noise/_samples-3d.json`. It covers positive / negative / zero coordinates with non-integer `x/y/z`, and expands to 1331 samples.
-3. **Emit fixtures** for each class × canonical seeds (the same four seeds as PRNG: `0`, `1`, `12345`, `2151901553968352745`). `PerlinNoise` `[-7..0]` is done; `[-15..0]` is next.
-4. **Port `PerlinNoise`** — `[-7..0]` is done and fixture-backed. Next step is the wider `[-15..0]` range.
+3. **Emit fixtures** for each class × canonical seeds (the same four seeds as PRNG: `0`, `1`, `12345`, `2151901553968352745`). `PerlinNoise` coverage is complete for both required octave sets: `[-7..0]` and `[-15..0]`.
+4. **Port `PerlinNoise`** — done and fixture-backed for both octave ranges used by `NoiseSampler` and `BlendedNoise`.
 5. **Port `SimplexNoise`** — independent, can be interleaved or parallel.
 6. **Port `BlendedNoise`** — glue over `PerlinNoise`; fixture validates that the combination + clamping works end-to-end.
 
