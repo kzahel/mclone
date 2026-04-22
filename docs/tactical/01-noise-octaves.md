@@ -26,7 +26,7 @@ Order matters: `PerlinNoise` is a prerequisite for `BlendedNoise`. `SimplexNoise
 
 ## Why these three
 
-`NoiseSampler.java` imports exactly these three classes from `synth/` (verified). Other `synth/` classes (`NormalNoise`, `SurfaceNoise`, `PerlinSimplexNoise`, `NoiseUtils`) aren't used by `NoiseSampler`; they're consumed by C&C Part 1 internals (`Cavifier`, `Aquifer`, `OreVeinifier`) and specific surface builders. Tactical 02 picks them up.
+`NoiseSampler.java` imports exactly these three classes from `synth/` (verified). The other `synth/` classes — `SurfaceNoise`, `PerlinSimplexNoise`, `NormalNoise`, `NoiseUtils` — are consumed outside `NoiseSampler`. Tactical 02 picks up only the pieces alive in default 1.17.1 worldgen: `SurfaceNoise` (interface), `PerlinSimplexNoise` (overworld surface noise + badlands/frozen-ocean surface builders), and `NormalNoise` scoped to the `barrier`/`waterLevel`/`lava` allocations in `NoiseBasedChunkGenerator`. `NoiseUtils` and the rest of the C&C Part 1 consumers (`Cavifier`, `NoodleCavifier`, `OreVeinifier`, active `Aquifer`) stay deferred — see [`AGENTS.md`](../../AGENTS.md).
 
 ## Oracle extension
 

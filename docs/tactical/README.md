@@ -14,10 +14,10 @@ Numbered, short-lived implementation plans. Each covers a cohesive group of modu
 |---|---|---|---|
 | [`00-worldgen-ts-port.md`](00-worldgen-ts-port.md) | scaffold, `SimpleRandomSource`, `WorldgenRandom`, `ImprovedNoise` | unit | foundation numerics |
 | [`01-noise-octaves.md`](01-noise-octaves.md) | `PerlinNoise`, `SimplexNoise`, `BlendedNoise` | unit | everything `NoiseSampler` consumes from `synth/` |
-| [`02-remaining-synth.md`](02-remaining-synth.md) | `SurfaceNoise`, `PerlinSimplexNoise`, `NormalNoise`, `NoiseUtils` | unit | the remaining `synth/` utilities |
+| [`02-remaining-synth.md`](02-remaining-synth.md) | `SurfaceNoise`, `PerlinSimplexNoise`, minimal `NormalNoise` | unit | remaining `synth/` pieces alive in default 1.17.1; `NoiseUtils` + C&C Part 1 consumers deferred (see [`../../AGENTS.md`](../../AGENTS.md)) |
 | `03-` | `NoiseSampler` + settings (`NoiseSettings`, `NoiseSamplingSettings`) | unit | 3D density field from chunk coords |
 | `04-` | **Integration oracle harness**: server-jar runner, MCA reader, chunk-level fixture format | infra | stand up the server-oracle *before* we need to diff chunks |
-| `05-` | `BiomeSource` subset — biome IDs without cubiomes; settles the cubiomes-or-not question | unit + integration | |
+| `05-` | `BiomeSource` subset — translated `OverworldBiomeSource` + climate layers → biome IDs | unit + integration | |
 | `06-` | `NoiseBasedChunkGenerator` (terrain-only: stone/air/water; no surface/caves/features) | **integration** | first end-to-end chunk diff — "does it look like MC?" moment |
 | `07-` | `SurfaceRules` / `SurfaceBuilder` — grass/dirt/sand per biome | integration | visual recognizability |
 | `08-` | Carvers: `CaveWorldCarver`, `CanyonWorldCarver` | integration | **MVP terrain gen reached here** |

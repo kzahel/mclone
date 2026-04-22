@@ -1,17 +1,18 @@
 # 02 — Remaining synth utilities
 
-Continuing from [`01-noise-octaves.md`](01-noise-octaves.md). This slice finishes the `synth/` classes that are not direct `NoiseSampler` inputs but are needed immediately afterwards by surface generation and the Caves & Cliffs Part 1 internals.
+Continuing from [`01-noise-octaves.md`](01-noise-octaves.md). This slice finishes the `synth/` classes still needed for **default Minecraft 1.17.1 terrain generation** after tactical `01`. It explicitly does **not** pull in the dormant Caves & Cliffs Part 1 cave stack that exists in the 1.17.1 jar but is disabled in the built-in generator settings we are targeting — see [`AGENTS.md`](../../AGENTS.md) for the canonical list of disabled flags and dead-code classes.
 
 ## Goal
 
-TS ports of `SurfaceNoise`, `PerlinSimplexNoise`, `NormalNoise`, and `NoiseUtils`, plus whatever minimal `WorldgenRandom` / `PerlinNoise` API backfill those classes need, all validated against Java fixtures where behavior is stateful or numerically fragile.
+TS ports of `SurfaceNoise`, `PerlinSimplexNoise`, and the minimal `NormalNoise` support still required for 1.17.1 generator construction and PRNG parity, plus whatever `WorldgenRandom` / `PerlinNoise` API backfill those classes need, all validated against Java fixtures where behavior is stateful or numerically fragile.
 
 ## Current status
 
 - `WorldgenRandom` now exists in TS with Java-matching seed helpers and `next(...)` call counting
 - `PerlinNoise` has the required tactical-02 backfill: `create(...)` and `getSurfaceNoiseValue(...)`
 - First tactical-02 slice landed: `PerlinSimplexNoise` is fixture-backed for the downstream octave sets `[-3..0]` and `[0]`, across canonical seeds `0`, `1`, `12345`, and `2151901553968352745`, validating both `useNoiseOffsets=false` and `useNoiseOffsets=true`
-- Next up: `NormalNoise`, then `NoiseUtils`
+- Next up: the minimal `NormalNoise` slice for default 1.17.1 generator parity
+- Deferred: `NoiseUtils` and the dormant C&C Part 1 cave/aquifer/noodle/ore-vein stack, unless we explicitly expand the target beyond default 1.17.1 worldgen
 
 ## Scope
 
@@ -19,21 +20,29 @@ TS ports of `SurfaceNoise`, `PerlinSimplexNoise`, `NormalNoise`, and `NoiseUtils
 |---|---|---|---|
 | 1 | `SurfaceNoise` | none | interface only; no direct oracle |
 | 2 | `PerlinSimplexNoise` | `SimplexNoise`, `WorldgenRandom` backfill | seed `S` + octave set + 2D sample points + `useNoiseOffsets` → `f64`; also `getSurfaceNoiseValue(x,y,z,yMax)` |
-| 3 | `NormalNoise` | `PerlinNoise.create(...)` backfill | seed `S` + first octave + amplitude list + sample points `(x,y,z)` → `f64` |
-| 4 | `NoiseUtils` | `NormalNoise` | pure math wrappers over `NormalNoise` output and range mapping |
+| 3 | `NormalNoise` | `PerlinNoise.create(...)` backfill | seed `S` + first octave + amplitude list + sample points `(x,y,z)` → `f64`, scoped to the built-in 1.17.1 allocations that still happen in `NoiseBasedChunkGenerator` |
 
-## Why these four
+## Why this subset
 
-`NoiseBasedChunkGenerator` constructs:
+For the actual 1.17.1 target, `NoiseBasedChunkGenerator` constructs:
 
 - `surfaceNoise` as either `PerlinSimplexNoise` or `PerlinNoise` via the `SurfaceNoise` interface
 - `barrierNoise`, `waterLevelNoise`, and `lavaNoise` as `NormalNoise`
 
-The C&C Part 1 internals then lean on the same set:
+That is enough to keep tactical `02` relevant for default 1.17.1 parity:
 
-- `Cavifier`, `NoodleCavifier`, `OreVeinifier`, `Aquifer`, and `GeodeFeature` all allocate `NormalNoise`
-- `NoiseUtils` is shared helper math for `Cavifier` and `NoodleCavifier`
 - biome surface builders such as badlands / frozen ocean allocate `PerlinSimplexNoise`
+- `NoiseBasedChunkGenerator` allocates the three `NormalNoise` instances unconditionally, so their constructor behavior and PRNG consumption still matter even though the built-in 1.17.1 presets never enable aquifers / noodle caves / ore veins / noise caves
+
+What is **not** needed for the 1.17.1 target:
+
+- `NoiseUtils`
+- `Cavifier`
+- `NoodleCavifier`
+- `OreVeinifier`
+- active `Aquifer` noise evaluation
+
+Those are all tied to the dormant C&C Part 1 path, not the default presets we are targeting.
 
 After this doc, tactical `03` can focus on `NoiseSampler` and settings instead of still backfilling `synth/`.
 
@@ -57,7 +66,11 @@ Likewise for `NormalNoise`, keyed by:
 - amplitude list
 - shared 3D sample grid
 
-`NoiseUtils` should stay mostly test-only unless the wrapper math turns out to be more stateful than expected.
+Use only the amplitude sets that default 1.17.1 `NoiseBasedChunkGenerator` actually allocates:
+
+- `barrierNoise`: `firstOctave=-3`, amplitudes `[1.0]`
+- `waterLevelNoise`: `firstOctave=-3`, amplitudes `[1.0, 0.0, 2.0]`
+- `lavaNoise`: `firstOctave=-1`, amplitudes `[1.0, 0.0]`
 
 ## Translation gotchas
 
@@ -67,7 +80,7 @@ Likewise for `NormalNoise`, keyed by:
 - **`NormalNoise` uses two Perlin chains.** Construction consumes PRNG twice, sequentially, from one source; sample-time uses the hard-coded `INPUT_FACTOR = 1.0181268882175227` on the second chain and scales the sum by a derived `valueFactor`.
 - **`valueFactor` depends on non-zero amplitudes only.** The expected deviation uses the min/max indices of non-zero amplitudes in the amplitude list, not simply the list length.
 - **`PerlinSimplexNoise.getSurfaceNoiseValue(...)` ignores half its signature.** It calls `getValue(x, y, true) * 0.55`; `z` and `yMax` are unused. Mirror the Java shape anyway so downstream interface calls stay honest.
-- **`NoiseUtils.sampleNoiseAndMapToRange(...)` is small but downstream-visible.** Keep it exact and give it direct unit tests so later cavifier bugs are not blamed on wrapper math.
+- **Default 1.17.1 does not actually enable the C&C Part 1 cave flags.** Don't let the presence of `Cavifier`, `NoodleCavifier`, `OreVeinifier`, `Aquifer`, or `NoiseUtils` in the decomp drag this tactical doc into 1.18-style scope.
 
 ## Concrete steps
 
@@ -75,9 +88,9 @@ Likewise for `NormalNoise`, keyed by:
 2. Backfill `PerlinNoise.create(...)` and `PerlinNoise.getSurfaceNoiseValue(...)` on the existing port. Done.
 3. Extend the oracle for `PerlinSimplexNoise`. Done.
 4. Port and fixture-test `PerlinSimplexNoise`. Done.
-5. Extend the oracle for `NormalNoise`. Next.
-6. Port and fixture-test `NormalNoise`. Next.
-7. Add direct unit coverage for `NoiseUtils` and the trivial `SurfaceNoise` implementations. Pending after `NormalNoise`.
+5. Extend the oracle for `NormalNoise`, limited to the built-in 1.17.1 allocations (`barrierNoise`, `waterLevelNoise`, `lavaNoise`). Next.
+6. Port and fixture-test `NormalNoise` for those built-in allocations. Next.
+7. Stop there for the 1.17.1 target. `NoiseUtils` and the dormant C&C Part 1 consumers only move back into scope if we explicitly choose to translate that disabled path.
 
 ## Done when
 
@@ -88,12 +101,10 @@ Likewise for `NormalNoise`, keyed by:
   - `barrierNoise`
   - `waterLevelNoise`
   - `lavaNoise`
-  - one representative cavifier/noodle/ore-vein configuration
-- `NoiseUtils` pure functions have direct TS unit coverage
 - `pnpm test` and `pnpm typecheck` stay green
 
 ## Out of scope for this doc
 
 - `NoiseSampler` and its settings objects — tactical `03`
-- cave density composition (`Cavifier`, `NoodleCavifier`, `OreVeinifier`, `Aquifer`) — later tactical docs once their noise primitives exist
+- dormant C&C Part 1 cave density composition (`Cavifier`, `NoodleCavifier`, `OreVeinifier`, `Aquifer`, `NoiseUtils`) — only revisit if we explicitly widen the target beyond default 1.17.1
 - biome or chunk integration

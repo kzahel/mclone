@@ -104,5 +104,4 @@ mclone/
 
 - Carvers, surface rules, features (later tactical docs)
 - Renderer, meshing, lighting (separate work stream)
-- Cubiomes WASM wire-up (parallel work stream, not blocking on this)
 - Integration oracle harness (deferred to the doc that introduces full-chunk testing)

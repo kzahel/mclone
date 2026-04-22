@@ -11,56 +11,30 @@ See [`docs/strategy.md`](docs/strategy.md) for the two-phase plan (direct transl
 - **Worldgen:** TS translation of MC 1.17.1's pipeline; bit-exact seed parity is the correctness bar. See `docs/tactical/`.
 - **Chunk storage:** IndexedDB (consider OPFS as alternative for large binary blobs).
 - **Host:** Vite + workers. Main thread handles input/UI; workers own worldgen + meshing.
-- **Perf escape hatch:** any measured-hot module can move to WASM-from-C (not Rust). `cubiomes` already ships as C→WASM for biomes/structures — that's the only WASM in the default stack.
+- **Perf escape hatch:** any measured-hot module can move to WASM-from-C (not Rust). Default stack is pure TS; no WASM unless measurement says so.
 
 ## Worldgen strategy
 
-**Port cubiomes** (MIT) to WASM for biome IDs + structure positions — no translation-hygiene concerns, it's fair-use from day one.
-
-**Directly translate** 1.17.1's terrain gen pipeline from the decomp: PRNG → noise → `NoiseSampler` → `NoiseBasedChunkGenerator` → carvers (`CaveWorldCarver`, `CanyonWorldCarver`) → surface rules → features. Oracle-test each layer against real MC output (see strategy doc). 1.17 specifically because it's pre-Caves-and-Cliffs — no density functions or splines to port.
+**Directly translate** 1.17.1's full worldgen pipeline from the decomp: PRNG → noise → biome source → `NoiseSampler` → `NoiseBasedChunkGenerator` → carvers (`CaveWorldCarver`, `CanyonWorldCarver`) → surface rules → features → structures. Oracle-test each layer against real MC output (see strategy doc). 1.17 specifically because it's pre-Caves-and-Cliffs — no density functions or splines to port.
 
 Pipeline per chunk:
 
-1. cubiomes → biome IDs, climate params, structure attempt positions
+1. Biome source (translated `OverworldBiomeSource` / `BiomeManager`) → biome IDs + climate params
 2. Our 3D density field (translated `NoiseSampler`) → solid/air
 3. Carvers (translated `CaveWorldCarver` / `CanyonWorldCarver`) → caves + ravines
 4. Surface rules (translated `SurfaceBuilder`) → grass/dirt/sand/stone per biome
 5. Ore veins + features (translated `OreFeature` / `TreeFeature`)
-6. Structures populated from cubiomes positions (block templates from extracted NBT)
+6. Structures (translated position finders + block templates from extracted NBT)
 
-Worker boundary is chunk-sized: pass chunk coords into a worldgen worker, get a packed block array + heightmap back. No per-voxel calls across thread boundaries. Same rule applies to the cubiomes WASM call, and to any future TS-module-migrated-to-WASM.
+Worker boundary is chunk-sized: pass chunk coords into a worldgen worker, get a packed block array + heightmap back. No per-voxel calls across thread boundaries. Same rule applies to any future TS-module-migrated-to-WASM.
 
 ## References (repo-local, under `reference/` — gitignored)
-
-### `cubiomes/`
-
-Cubitect's C library that mimics Minecraft biome/structure gen. Clean C, no deps, compiles to WASM cleanly.
-
-**Provides:**
-- `getBiomeAt(g, scale, x, y, z)` — biome ID at any point, MC 1.0–1.21
-- `genBiomes(g, cache, range)` — bulk biome volume
-- 1.18+ climate: `sampleBiomeNoise()` returns `temperature, humidity, continentalness, erosion, depth, weirdness`
-- `sampleSurfaceNoise(sn, x, y, z)` — pre-1.18 3D density field (octmin/octmax/octmain), genuinely 3D, supports overhangs in principle — `biomenoise.c:118`
-- `mapApproxHeight()` — surface heightmap approximation — `generator.c:610`
-- Structure positions + viability (`getStructurePos`, `isViableStructurePos`) — villages, strongholds, monuments, ancient cities, portals, mineshafts, etc.
-- Nether 3D biomes (`mapNether3D`), End islands (`mapEndSurfaceHeight`)
-- Stronghold iterator, spawn finder
-
-**Does NOT provide** (grep confirmed — zero hits):
-- Caves, carvers, spaghetti/noodle/cheese, aquifers, ravines
-- Ores, veins, dripstone, geodes (beyond position)
-- 1.18+ density function pipeline (continentalness→spline→final density)
-- Actual block placement (stone vs dirt vs grass, water fill, beaches)
-- Features/decoration (trees, foliage, snow)
-- Structure piece block templates (positions only, no NBT)
-
-Key headers: `generator.h`, `biomenoise.h`, `finders.h`, `noise.h`.
 
 ### `minecraft-1.17.1/`
 
 Decompiled Minecraft 1.17.1 client, for reference when writing our own carvers / surface / features.
 
-Why 1.17 specifically: pre-Caves-and-Cliffs full release, so the terrain pipeline is way simpler than 1.18+ (no density functions, no continentalness splines). Matches cubiomes' `sampleSurfaceNoise` cleanly. Bonus: 1.17.1 already ships Caves & Cliffs Part 1 internals (`Cavifier`, `NoodleCavifier`, `OreVeinifier`, `Aquifer`) that weren't enabled by default — so we get both systems to reference.
+Why 1.17 specifically: pre-Caves-and-Cliffs full release, so the terrain pipeline is way simpler than 1.18+ (no density functions, no continentalness splines). Bonus: 1.17.1 already ships Caves & Cliffs Part 1 internals (`Cavifier`, `NoodleCavifier`, `OreVeinifier`, `Aquifer`) that weren't enabled by default — so we get both systems to reference.
 
 **Layout:**
 ```
@@ -96,9 +70,6 @@ extracted/          filtered client.jar assets — textures, models,
 Everything in the "References" section above can be rebuilt from scratch using scripts in `scripts/`. Outputs land in `<repo>/reference/` (gitignored).
 
 ```bash
-# cubiomes → reference/cubiomes (shallow git clone)
-./scripts/fetch-cubiomes.sh
-
 # Minecraft 1.17.1 client: download + remap + decompile + Parchment +
 # asset extraction → reference/minecraft-1.17.1
 ./scripts/decompile-mc.sh 1.17.1 --parchment

@@ -34,8 +34,7 @@ Ground truth for tests is **real Minecraft**, not our Phase-1 translation.
 
 | Component | Approach |
 |---|---|
-| `cubiomes` (biome IDs + structure positions) | MIT-licensed C — compile directly to WASM, no translation needed |
-| 1.17.1 terrain gen (carvers, surface rules, features) | Direct translation from Java → TypeScript in Phase 1 |
+| 1.17.1 worldgen (PRNG, noise, biome source, terrain, carvers, surface, features, structure positions) | Direct translation from Java → TypeScript in Phase 1 |
 | 1.18+ density functions (if we go that route later) | Direct translation from 1.18 decomp (Java → TS) in Phase 1 |
 | Textures, block models, structure NBT | Use Minecraft's for dev (`docs/assets-plan.md`); replace for Phase 2 release |
 | Renderer, physics, UI, networking, chunk storage | Original work — no source to translate |
@@ -54,5 +53,5 @@ Ordered dependency chain for Phase 1 terrain gen:
 - [ ] Translate noise (`PerlinNoise`, `ImprovedNoise`) — validate against MC's Perlin output at specific sample points
 - [ ] Translate `NoiseSampler` + `NoiseBasedChunkGenerator` — produces block-level terrain
 - [ ] Translate carvers (`CaveWorldCarver`, `CanyonWorldCarver`)
-- [ ] Wire up cubiomes (C → WASM) for biome IDs
+- [ ] Translate biome source (`OverworldBiomeSource`, `BiomeManager`, climate layers) for biome IDs
 - [ ] Surface rules + feature placement
