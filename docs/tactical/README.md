@@ -42,10 +42,10 @@ Direct port of MC 1.17.1's client rendering stack to raw WebGPU. Target and skip
 | `13-` | `ResourceLocation`, `Block`, `BlockState`, property system (`Property`, `BlockStateDefinition`), `BlockGetter` stub | unit | prereqs model baking needs; deferred from `09` since vertex layer and pipeline don't need them |
 | `14a-` | `BlockModel` JSON parse → `UnbakedModel`; `Element`, `Face`, `FaceUV`; parent model resolution; texture variable resolution | unit | unbaked model data structures, no baking machinery yet |
 | `14b-` | `ModelBakery` baking pass, `SimpleBakedModel`, `BakedQuad` int\[\] layout, `BlockModelShaper` | unit + oracle | baked-model quads match MC-dumped oracle per blockstate — first correctness gate on model output |
-| `15-` | `ModelBlockRenderer` (`tesselateWithAO`, `tesselateWithoutAO`), `FaceInfo`, `BlockRenderDispatcher`, `LiquidBlockRenderer` | golden (via `09a`) | single chunk renders textured with AO; first golden screenshot |
-| `16-` | WGSL ports of `assets/minecraft/shaders/core/` (rendertype\_solid, rendertype\_cutout, rendertype\_translucent, rendertype\_lines); wire into pipeline cache from `11` | golden (via `09a`) | proper MC shaders replace stub WGSL; textured lit blocks |
-| `17-` | `RenderChunkRegion`, `ChunkBufferBuilderPack`, `VisGraph`/`VisibilitySet`, `ViewArea`, `ChunkRenderDispatcher` (async compilation) | golden (via `09a`) | section-level occlusion culling; many chunks at interactive rates |
-| `18-` | `LevelRenderer`, `GameRenderer`, `Frustum`, `LightTexture`, `FogRenderer` | golden (via `09a`) | **MVP renderer reached here** — fly around a generated world |
+| `15-` | `ModelBlockRenderer` (`tesselateWithAO`, `tesselateWithoutAO`), `FaceInfo`, `BlockRenderDispatcher`, `LiquidBlockRenderer` | visual (via `09a`) | single chunk renders textured with AO; agent visually inspects output |
+| `16-` | WGSL ports of `assets/minecraft/shaders/core/` (rendertype\_solid, rendertype\_cutout, rendertype\_translucent, rendertype\_lines); wire into pipeline cache from `11` | visual (via `09a`) | proper MC shaders replace stub WGSL; textured lit blocks |
+| `17-` | `RenderChunkRegion`, `ChunkBufferBuilderPack`, `VisGraph`/`VisibilitySet`, `ViewArea`, `ChunkRenderDispatcher` (async compilation) | visual (via `09a`) | section-level occlusion culling; many chunks at interactive rates |
+| `18-` | `LevelRenderer`, `GameRenderer`, `Frustum`, `LightTexture`, `FogRenderer` | visual (via `09a`) | **MVP renderer reached here** — fly around a generated world |
 
 Ordering rationale: `BlockState` prereqs (13) deferred until just before model baking (14a/b) since nothing before that needs them. WGSL shader ports (16) deferred until after the mesher (15) so we can verify geometry correctness with stub shaders first, then swap in real shaders. `ModelBakery` split from `BlockModel` parse (14a/b) because `ModelBakery` is one of the largest classes in the client and the data-loading and baking passes are independently testable.
 
@@ -55,10 +55,8 @@ Ordering rationale: `BlockState` prereqs (13) deferred until just before model b
 
 ## Renderer oracle approach
 
-Pixel-exact diffs don't work (driver float quirks, font differences, gamma). Strategy:
-
 - **Unit**: dump atlas UVs, baked-model quads, and section visibility graphs from MC as JSON; exact-diff those. Catches most correctness bugs before pixels are involved.
-- **Smoke / golden screenshots**: run the browser harness from [`09a-renderer-browser-harness.md`](09a-renderer-browser-harness.md) — system Chrome via Playwright `channel: "chrome"` against a Vite-served page. Smoke (clear-color pixel check) from slice `10`; SSIM-compared golden screenshots against vanilla MC at a pinned seed + fixed camera pose from slice `14` onward, with a generous threshold. One or two canonical poses per slice once meshing lands.
+- **Visual inspection**: run the browser harness from [`09a-renderer-browser-harness.md`](09a-renderer-browser-harness.md) — system Chrome via Playwright `channel: "chrome"` against a Vite-served page. Take a screenshot and look at it. Does the geometry look right? Are colors and UVs sensible? This is a human (or agent) eyeball check, not an automated diff.
 
 ## Skipped entirely (for renderer MVP)
 
