@@ -42,3 +42,9 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

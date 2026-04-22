@@ -36,13 +36,14 @@ Direct port of MC 1.17.1's client rendering stack to raw WebGPU. Target and skip
 | Doc | Modules | Oracle tier | Purpose |
 |---|---|---|---|
 | `09-` | `BlockState` + property system, `ResourceLocation`, `BlockGetter`/`Level` view over our chunks, vanilla-jar asset extraction | unit | prereqs renderer needs that worldgen didn't |
-| `10-` | `com.mojang.blaze3d` vertex layer (`BufferBuilder`, `VertexFormat`, `DefaultVertexFormat`, `VertexBuffer`, `PoseStack`) + WebGPU bootstrap (canvas, device, swapchain, clear frame) | unit + smoke | CPU-side mesh building + a canvas that clears |
+| [`09a-renderer-browser-harness.md`](09a-renderer-browser-harness.md) | Vite dev server, `@playwright/test` against system Chrome (`channel: "chrome"`), WebGPU smoke test, `src/renderer/main.ts` entry point | infra | browser-test harness every renderer slice from `10` onward builds on |
+| `10-` | `com.mojang.blaze3d` vertex layer (`BufferBuilder`, `VertexFormat`, `DefaultVertexFormat`, `VertexBuffer`, `PoseStack`) + WebGPU bootstrap (canvas, device, swapchain, clear frame) | unit + smoke (via `09a`) | CPU-side mesh building + a canvas that clears |
 | `11-` | Pipeline cache, `RenderType`/`RenderStateShard` → `GPURenderPipeline`, uniform buffers + bind group layouts | unit | WebGPU re-expression of MC's state system (replaces `GlStateManager` + `Uniform`) |
-| `12-` | `Stitcher` → `TextureAtlas` → `TextureAtlasSprite` → `MipmapGenerator` → `TextureManager`; asset-loading plumbing | unit + golden | atlas UVs match an MC-dumped oracle byte-exact |
+| `12-` | `Stitcher` → `TextureAtlas` → `TextureAtlasSprite` → `MipmapGenerator` → `TextureManager`; asset-loading plumbing | unit + golden (via `09a`) | atlas UVs match an MC-dumped oracle byte-exact |
 | `13-` | `BlockModel` JSON parse → `UnbakedModel` → `ModelBakery` → `BakedModel` variants → `BlockModelShaper` | unit | baked-model quads match an MC-dumped oracle per blockstate |
-| `14-` | `ModelBlockRenderer`, `LiquidBlockRenderer`, `BlockRenderDispatcher`, `FaceInfo`, `ItemBlockRenderTypes`; chunk mesher with face culling + AO | golden | single chunk renders and matches a reference screenshot |
-| `15-` | `RenderChunkRegion`, `ChunkBufferBuilderPack`, `VisGraph`/`VisibilitySet`, `ViewArea`, `ChunkRenderDispatcher` | golden | section-level occlusion culling; many chunks at interactive rates |
-| `16-` | `LevelRenderer`, `GameRenderer`, `Frustum`, `LightTexture`, `FogRenderer`; WGSL port of `assets/minecraft/shaders/core/*` | golden | **MVP renderer reached here** — fly around a generated world |
+| `14-` | `ModelBlockRenderer`, `LiquidBlockRenderer`, `BlockRenderDispatcher`, `FaceInfo`, `ItemBlockRenderTypes`; chunk mesher with face culling + AO | golden (via `09a`) | single chunk renders and matches a reference screenshot |
+| `15-` | `RenderChunkRegion`, `ChunkBufferBuilderPack`, `VisGraph`/`VisibilitySet`, `ViewArea`, `ChunkRenderDispatcher` | golden (via `09a`) | section-level occlusion culling; many chunks at interactive rates |
+| `16-` | `LevelRenderer`, `GameRenderer`, `Frustum`, `LightTexture`, `FogRenderer`; WGSL port of `assets/minecraft/shaders/core/*` | golden (via `09a`) | **MVP renderer reached here** — fly around a generated world |
 
 Slices 13 and 14 may split once we get there — `ModelBakery` and `ModelBlockRenderer` are both large. Numbering is fluid per the rule of thumb.
 
@@ -55,7 +56,7 @@ Slices 13 and 14 may split once we get there — `ModelBakery` and `ModelBlockRe
 Pixel-exact diffs don't work (driver float quirks, font differences, gamma). Strategy:
 
 - **Unit**: dump atlas UVs, baked-model quads, and section visibility graphs from MC as JSON; exact-diff those. Catches most correctness bugs before pixels are involved.
-- **Golden screenshots**: run vanilla MC at a pinned seed + fixed camera pose, compare our rendering via structural similarity (SSIM) with a generous threshold. One or two canonical poses per slice once meshing lands.
+- **Smoke / golden screenshots**: run the browser harness from [`09a-renderer-browser-harness.md`](09a-renderer-browser-harness.md) — system Chrome via Playwright `channel: "chrome"` against a Vite-served page. Smoke (clear-color pixel check) from slice `10`; SSIM-compared golden screenshots against vanilla MC at a pinned seed + fixed camera pose from slice `14` onward, with a generous threshold. One or two canonical poses per slice once meshing lands.
 
 ## Skipped entirely (for renderer MVP)
 

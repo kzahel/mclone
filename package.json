@@ -7,12 +7,17 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:browser": "playwright test",
+    "dev:browser": "vite",
     "typecheck": "tsc --noEmit",
     "oracle:gen": "bash ./oracle/run.sh"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^25.6.0",
+    "@webgpu/types": "^0.1.69",
     "typescript": "^5.7.2",
+    "vite": "^8.0.9",
     "vitest": "^2.1.8"
   },
   "engines": {

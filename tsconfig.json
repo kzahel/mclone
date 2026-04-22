@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["@webgpu/types"],
 
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -24,5 +25,12 @@
 
     "noEmit": true
   },
-  "include": ["src/**/*", "test/**/*", "oracle/integration/**/*.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*",
+    "test/**/*",
+    "oracle/integration/**/*.ts",
+    "vitest.config.ts",
+    "vite.config.ts",
+    "playwright.config.ts"
+  ]
 }
