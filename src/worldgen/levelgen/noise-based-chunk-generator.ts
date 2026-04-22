@@ -1,7 +1,11 @@
 import { ChunkBiomeContainer } from "../biome/chunk-biome-container.ts";
 import type { NoiseBiomeSource } from "../biome/noise-biome-source.ts";
+import { MutableChunkBlockBuffer, CHUNK_WIDTH, ChunkBlockId, blockBufferIndex } from "../chunk/chunk-block-buffer.ts";
+import { buildChunkHeightmaps, type ChunkHeightmaps } from "../chunk/chunk-heightmaps.ts";
+import { buildChunkSections, type ChunkSection } from "../chunk/chunk-section-serialization.ts";
 import { PerlinNoise } from "../noise/perlin-noise.ts";
 import { PerlinSimplexNoise } from "../noise/perlin-simplex-noise.ts";
+import type { SurfaceNoise } from "../noise/surface-noise.ts";
 import { BlendedNoise } from "../noise/blended-noise.ts";
 import { SimplexNoise } from "../noise/simplex-noise.ts";
 import type { LongSeed } from "../prng/simple-random-source.ts";
@@ -10,47 +14,18 @@ import { NoiseModifier } from "./noise-modifier.ts";
 import { NoiseGeneratorSettings } from "./noise-generator-settings.ts";
 import { NoiseSampler } from "./noise-sampler.ts";
 
-const CHUNK_WIDTH = 16;
-const SECTION_HEIGHT = 16;
-const BLOCKS_PER_SECTION = CHUNK_WIDTH * CHUNK_WIDTH * SECTION_HEIGHT;
 const SURFACE_NOISE_OCTAVES = [-3, -2, -1, 0] as const;
 const DEPTH_NOISE_OCTAVES = [-15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0] as const;
-
-export const TerrainBlockId = {
-  AIR: 0,
-  STONE: 1,
-  WATER: 2,
-  BEDROCK: 3,
-} as const;
-
-export type TerrainBlockId = (typeof TerrainBlockId)[keyof typeof TerrainBlockId];
-
-export const TERRAIN_BLOCK_NAMES = [
-  "minecraft:air",
-  "minecraft:stone",
-  "minecraft:water",
-  "minecraft:bedrock",
-] as const;
-
-export type TerrainBlockName = (typeof TERRAIN_BLOCK_NAMES)[number];
-
-export interface TerrainChunkSection {
-  readonly y: number;
-  readonly palette: readonly TerrainBlockName[];
-  readonly blockOrder: "y-major,z-major,x-minor";
-  readonly blocks: readonly number[];
-}
 
 export interface TerrainChunk {
   readonly chunkX: number;
   readonly chunkZ: number;
-  readonly sections: readonly TerrainChunkSection[];
-  readonly heightmaps: {
-    readonly OCEAN_FLOOR: readonly number[];
-    readonly WORLD_SURFACE: readonly number[];
-  };
+  readonly sections: readonly ChunkSection[];
+  readonly heightmaps: ChunkHeightmaps;
   readonly biomes: readonly number[];
 }
+
+export type TerrainChunkSection = ChunkSection;
 
 function normalizeLongSeed(seed: LongSeed): bigint {
   if (typeof seed === "bigint") {
@@ -107,119 +82,13 @@ function lerp3(
   );
 }
 
-function isMotionBlocking(blockId: TerrainBlockId): boolean {
-  return blockId === TerrainBlockId.STONE || blockId === TerrainBlockId.BEDROCK;
-}
-
-function blockBufferIndex(localX: number, localY: number, localZ: number): number {
-  return (localY << 8) | (localZ << 4) | localX;
-}
-
-export function terrainBlockNameForId(blockId: TerrainBlockId): TerrainBlockName {
-  return TERRAIN_BLOCK_NAMES[blockId]!;
-}
-
-export function buildTerrainSections(blocks: Uint8Array, minY: number, height: number): TerrainChunkSection[] {
-  const expectedLength = height * CHUNK_WIDTH * CHUNK_WIDTH;
-  if (blocks.length !== expectedLength) {
-    throw new RangeError(`terrain block buffer length ${blocks.length} did not match expected ${expectedLength}`);
-  }
-
-  const sectionCount = height / SECTION_HEIGHT;
-  const minSectionY = Math.floor(minY / SECTION_HEIGHT);
-  const sections: TerrainChunkSection[] = [];
-
-  for (let sectionOffset = 0; sectionOffset < sectionCount; sectionOffset++) {
-    const start = sectionOffset * BLOCKS_PER_SECTION;
-    let usedMask = 0;
-    for (let index = 0; index < BLOCKS_PER_SECTION; index++) {
-      usedMask |= 1 << blocks[start + index]!;
-    }
-
-    if (usedMask === (1 << TerrainBlockId.AIR)) {
-      continue;
-    }
-
-    const paletteIds: TerrainBlockId[] = [];
-    const paletteIndexByBlockId = new Int8Array(TERRAIN_BLOCK_NAMES.length).fill(-1);
-    for (let blockId = 0; blockId < TERRAIN_BLOCK_NAMES.length; blockId++) {
-      if ((usedMask & (1 << blockId)) !== 0) {
-        paletteIndexByBlockId[blockId] = paletteIds.length;
-        paletteIds.push(blockId as TerrainBlockId);
-      }
-    }
-
-    const paletteIndices = new Array<number>(BLOCKS_PER_SECTION);
-    for (let index = 0; index < BLOCKS_PER_SECTION; index++) {
-      paletteIndices[index] = paletteIndexByBlockId[blocks[start + index]!]!;
-    }
-
-    sections.push({
-      y: minSectionY + sectionOffset,
-      palette: paletteIds.map(terrainBlockNameForId),
-      blockOrder: "y-major,z-major,x-minor",
-      blocks: paletteIndices,
-    });
-  }
-
-  return sections;
-}
-
-export function buildTerrainHeightmaps(blocks: Uint8Array, minY: number, height: number): TerrainChunk["heightmaps"] {
-  const expectedLength = height * CHUNK_WIDTH * CHUNK_WIDTH;
-  if (blocks.length !== expectedLength) {
-    throw new RangeError(`terrain block buffer length ${blocks.length} did not match expected ${expectedLength}`);
-  }
-
-  const oceanFloor = new Array<number>(CHUNK_WIDTH * CHUNK_WIDTH).fill(minY);
-  const worldSurface = new Array<number>(CHUNK_WIDTH * CHUNK_WIDTH).fill(minY);
-  const maxY = minY + height - 1;
-
-  for (let localZ = 0; localZ < CHUNK_WIDTH; localZ++) {
-    for (let localX = 0; localX < CHUNK_WIDTH; localX++) {
-      const columnIndex = (localZ << 4) | localX;
-      let foundOceanFloor = false;
-      let foundWorldSurface = false;
-
-      for (let y = maxY; y >= minY; y--) {
-        const blockId = blocks[blockBufferIndex(localX, y - minY, localZ)]! as TerrainBlockId;
-        if (!foundWorldSurface && blockId !== TerrainBlockId.AIR) {
-          worldSurface[columnIndex] = y + 1;
-          foundWorldSurface = true;
-        }
-
-        if (!foundOceanFloor && isMotionBlocking(blockId)) {
-          oceanFloor[columnIndex] = y + 1;
-          foundOceanFloor = true;
-        }
-
-        if (foundWorldSurface && foundOceanFloor) {
-          break;
-        }
-      }
-    }
-  }
-
+export function buildTerrainChunk(chunk: MutableChunkBlockBuffer): TerrainChunk {
   return {
-    OCEAN_FLOOR: oceanFloor,
-    WORLD_SURFACE: worldSurface,
-  };
-}
-
-export function buildTerrainChunk(
-  chunkX: number,
-  chunkZ: number,
-  minY: number,
-  height: number,
-  blocks: Uint8Array,
-  biomes: readonly number[],
-): TerrainChunk {
-  return {
-    chunkX,
-    chunkZ,
-    sections: buildTerrainSections(blocks, minY, height),
-    heightmaps: buildTerrainHeightmaps(blocks, minY, height),
-    biomes: [...biomes],
+    chunkX: chunk.chunkX,
+    chunkZ: chunk.chunkZ,
+    sections: buildChunkSections(chunk),
+    heightmaps: buildChunkHeightmaps(chunk),
+    biomes: [...chunk.biomes],
   };
 }
 
@@ -234,6 +103,7 @@ export class NoiseBasedChunkGenerator {
   private readonly height: number;
   private readonly minCellY: number;
   private readonly seaLevel: number;
+  private readonly surfaceNoise: SurfaceNoise;
   private readonly sampler: NoiseSampler;
 
   public constructor(
@@ -265,10 +135,9 @@ export class NoiseBasedChunkGenerator {
 
     const random = new WorldgenRandom(this.seed);
     const blendedNoise = new BlendedNoise(random);
-    const surfaceNoise = noiseSettings.useSimplexSurfaceNoise()
+    this.surfaceNoise = noiseSettings.useSimplexSurfaceNoise()
       ? new PerlinSimplexNoise(random, SURFACE_NOISE_OCTAVES)
       : new PerlinNoise(random, SURFACE_NOISE_OCTAVES);
-    void surfaceNoise;
     random.consumeCount(2620);
     const depthNoise = new PerlinNoise(random, DEPTH_NOISE_OCTAVES);
 
@@ -292,16 +161,22 @@ export class NoiseBasedChunkGenerator {
     );
   }
 
-  public fillFromNoise(chunkX: number, chunkZ: number): TerrainChunk {
-    const blocks = this.fillTerrainBlockBuffer(chunkX, chunkZ);
-    this.setBedrock(blocks, chunkX, chunkZ);
+  public fillFromNoise(chunkX: number, chunkZ: number): MutableChunkBlockBuffer {
     const biomes = new ChunkBiomeContainer(this.minY, this.height, chunkX, chunkZ, this.biomeSource).writeBiomes();
-    return buildTerrainChunk(chunkX, chunkZ, this.minY, this.height, blocks, biomes);
+    const chunk = new MutableChunkBlockBuffer(chunkX, chunkZ, this.minY, this.height, biomes);
+    this.fillTerrainBlockBuffer(chunk);
+    return chunk;
   }
 
-  private fillTerrainBlockBuffer(chunkX: number, chunkZ: number): Uint8Array {
-    const noiseColumns = this.createNoiseColumns(chunkX, chunkZ);
-    const blocks = new Uint8Array(this.height * CHUNK_WIDTH * CHUNK_WIDTH);
+  public buildSurfaceAndBedrock(chunk: MutableChunkBlockBuffer): void {
+    this.assertCompatibleChunk(chunk);
+    void this.surfaceNoise;
+    this.setBedrock(chunk);
+  }
+
+  private fillTerrainBlockBuffer(chunk: MutableChunkBlockBuffer): void {
+    const noiseColumns = this.createNoiseColumns(chunk.chunkX, chunk.chunkZ);
+    const blocks = chunk.blocks;
 
     for (let cellX = 0; cellX < this.cellCountX; cellX++) {
       for (let cellZ = 0; cellZ < this.cellCountZ; cellZ++) {
@@ -340,7 +215,7 @@ export class NoiseBasedChunkGenerator {
                   x1z1y1,
                 );
                 const blockId = this.resolveTerrainBlock(blockY, density);
-                if (blockId !== TerrainBlockId.AIR) {
+                if (blockId !== ChunkBlockId.AIR) {
                   const localZ = (cellZ * this.cellWidth) + zOffset;
                   blocks[blockBufferIndex(localX, localY, localZ)] = blockId;
                 }
@@ -350,8 +225,6 @@ export class NoiseBasedChunkGenerator {
         }
       }
     }
-
-    return blocks;
   }
 
   private createNoiseColumns(chunkX: number, chunkZ: number): number[][][] {
@@ -381,19 +254,27 @@ export class NoiseBasedChunkGenerator {
     return columns;
   }
 
-  private resolveTerrainBlock(y: number, noise: number): TerrainBlockId {
+  private resolveTerrainBlock(y: number, noise: number): ChunkBlockId {
     let density = clamp(noise / 200, -1, 1);
     density = (density / 2) - ((density * density * density) / 24);
     if (density > 0) {
-      return TerrainBlockId.STONE;
+      return ChunkBlockId.STONE;
     }
 
-    return y >= this.seaLevel ? TerrainBlockId.AIR : TerrainBlockId.WATER;
+    return y >= this.seaLevel ? ChunkBlockId.AIR : ChunkBlockId.WATER;
   }
 
-  private setBedrock(blocks: Uint8Array, chunkX: number, chunkZ: number): void {
+  private assertCompatibleChunk(chunk: MutableChunkBlockBuffer): void {
+    if (chunk.minY !== this.minY || chunk.height !== this.height) {
+      throw new RangeError(
+        `chunk buffer minY/height (${chunk.minY}, ${chunk.height}) did not match generator (${this.minY}, ${this.height})`,
+      );
+    }
+  }
+
+  private setBedrock(chunk: MutableChunkBlockBuffer): void {
     const random = new WorldgenRandom();
-    random.setBaseChunkSeed(chunkX, chunkZ);
+    random.setBaseChunkSeed(chunk.chunkX, chunk.chunkZ);
 
     const floorY = this.minY + this.settings.getBedrockFloorPosition();
     const roofY = (this.height - 1) + this.minY - this.settings.getBedrockRoofPosition();
@@ -413,7 +294,7 @@ export class NoiseBasedChunkGenerator {
             if (offset <= random.nextInt(5)) {
               const localY = (roofY - offset) - this.minY;
               if (localY >= 0 && localY < this.height) {
-                blocks[blockBufferIndex(localX, localY, localZ)] = TerrainBlockId.BEDROCK;
+                chunk.blocks[blockBufferIndex(localX, localY, localZ)] = ChunkBlockId.BEDROCK;
               }
             }
           }
@@ -424,7 +305,7 @@ export class NoiseBasedChunkGenerator {
             if (offset <= random.nextInt(5)) {
               const localY = (floorY + offset) - this.minY;
               if (localY >= 0 && localY < this.height) {
-                blocks[blockBufferIndex(localX, localY, localZ)] = TerrainBlockId.BEDROCK;
+                chunk.blocks[blockBufferIndex(localX, localY, localZ)] = ChunkBlockId.BEDROCK;
               }
             }
           }

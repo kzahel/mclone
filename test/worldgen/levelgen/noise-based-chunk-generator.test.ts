@@ -3,9 +3,14 @@ import integrationFixture from "../../fixtures/integration/overworld-seed-12345-
 import terrainFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-terrain-only.json";
 import { OverworldBiomeSource } from "../../../src/worldgen/biome/overworld-biome-source.ts";
 import {
+  ChunkBlockId,
+  CHUNK_BLOCK_NAMES,
+  MutableChunkBlockBuffer,
+  TERRAIN_STAGE_BLOCK_NAMES,
+} from "../../../src/worldgen/chunk/chunk-block-buffer.ts";
+import {
   buildTerrainChunk,
   NoiseBasedChunkGenerator,
-  TERRAIN_BLOCK_NAMES,
   type TerrainChunkSection,
 } from "../../../src/worldgen/levelgen/noise-based-chunk-generator.ts";
 import { NoiseGeneratorSettings } from "../../../src/worldgen/levelgen/noise-generator-settings.ts";
@@ -111,24 +116,42 @@ describe("NoiseBasedChunkGenerator", () => {
     expect(terrainOracle.chunkX).toBe(chunk.chunkX);
     expect(terrainOracle.chunkZ).toBe(chunk.chunkZ);
     expect(terrainOracle.blockOrder).toBe("y-major,z-major,x-minor");
-    expect(terrainOracle.palette).toEqual([...TERRAIN_BLOCK_NAMES]);
+    expect(terrainOracle.palette).toEqual([...TERRAIN_STAGE_BLOCK_NAMES]);
     expect(terrainOracle.height).toBe(256);
     expect(terrainOracle.minY).toBe(0);
+  });
+
+  test("fillFromNoise keeps bedrock out of the terrain stage until buildSurfaceAndBedrock runs", () => {
+    const chunk = fixture.chunks[0]!;
+    const biomeSource = new OverworldBiomeSource(BigInt(fixture.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(fixture.seed));
+    const generated = generator.fillFromNoise(chunk.chunkX, chunk.chunkZ);
+
+    expect(generated).toBeInstanceOf(MutableChunkBlockBuffer);
+    expect(generated.blocks.includes(ChunkBlockId.BEDROCK)).toBe(false);
+
+    generator.buildSurfaceAndBedrock(generated);
+
+    expect(generated.blocks.includes(ChunkBlockId.BEDROCK)).toBe(true);
   });
 
   test("fills chunk (0, 0) with the terrain-only Java oracle for the committed integration fixture seed/chunk", () => {
     const chunk = fixture.chunks[0]!;
     const biomeSource = new OverworldBiomeSource(BigInt(fixture.seed));
     const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(fixture.seed));
+    const actualChunk = generator.fillFromNoise(chunk.chunkX, chunk.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
 
-    const actual = generator.fillFromNoise(chunk.chunkX, chunk.chunkZ);
+    const actual = buildTerrainChunk(actualChunk);
     const expected = buildTerrainChunk(
-      terrainOracle.chunkX,
-      terrainOracle.chunkZ,
-      terrainOracle.minY,
-      terrainOracle.height,
-      Uint8Array.from(terrainOracle.blocks),
-      chunk.biomes,
+      new MutableChunkBlockBuffer(
+        terrainOracle.chunkX,
+        terrainOracle.chunkZ,
+        terrainOracle.minY,
+        terrainOracle.height,
+        chunk.biomes,
+        Uint8Array.from(terrainOracle.blocks),
+      ),
     );
 
     expect(actual.biomes).toEqual(expected.biomes);
@@ -138,7 +161,7 @@ describe("NoiseBasedChunkGenerator", () => {
 
     for (const section of actual.sections) {
       for (const blockName of section.palette) {
-        expect(TERRAIN_BLOCK_NAMES).toContain(blockName);
+        expect(CHUNK_BLOCK_NAMES).toContain(blockName);
       }
     }
   });

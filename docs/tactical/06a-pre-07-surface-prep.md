@@ -13,6 +13,15 @@ Do the full prep set before porting overworld surface builders:
 
 This slice should make tactical `07` mostly about porting vanilla surface logic, not refactoring around the current terrain-only scaffolding.
 
+## Current status
+
+- Tactical `06a` is complete.
+- Mutable chunk storage, section serialization, and heightmap helpers now live under `src/worldgen/chunk/`.
+- `NoiseBasedChunkGenerator.fillFromNoise(...)` now stops at terrain density fill; `buildSurfaceAndBedrock(...)` owns the explicit post-fill mutation stage.
+- `oracle/java/OracleDumper.java` now supports a dedicated `surface-chunk` path.
+- The committed surface-stage oracle fixture is `test/fixtures/integration/overworld-seed-12345-chunks-0-0-surface-only.json`.
+- The current pinned surface fixture exercises `grass_block` and `dirt`; tactical `07` may need an additional narrow oracle chunk if `sand`, `gravel`, or `snow` are not reached by the first parity target.
+
 ## Why this exists
 
 Tactical `06` proved two things:

@@ -12,12 +12,18 @@ import net.minecraft.core.Registry;
 import net.minecraft.data.BuiltinRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.biome.FuzzyOffsetConstantColumnBiomeZoomer;
 import net.minecraft.world.level.biome.OverworldBiomeSource;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.NoiseModifier;
@@ -25,12 +31,16 @@ import net.minecraft.world.level.levelgen.NoiseSampler;
 import net.minecraft.world.level.levelgen.NoiseSettings;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.SimpleRandomSource;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.chunk.ProtoChunk;
+import net.minecraft.world.level.chunk.UpgradeData;
 import net.minecraft.world.level.levelgen.synth.BlendedNoise;
 import net.minecraft.world.level.levelgen.synth.ImprovedNoise;
 import net.minecraft.world.level.levelgen.synth.NormalNoise;
 import net.minecraft.world.level.levelgen.synth.PerlinNoise;
 import net.minecraft.world.level.levelgen.synth.PerlinSimplexNoise;
 import net.minecraft.world.level.levelgen.synth.SimplexNoise;
+import net.minecraft.world.level.levelgen.synth.SurfaceNoise;
 
 public final class OracleDumper {
    private static final String MINECRAFT_VERSION = "1.17.1";
@@ -50,6 +60,7 @@ public final class OracleDumper {
    private static final double[] NOISE_X_COORDS = createAxis(-2.5, 0.5, 11);
    private static final double[] NOISE_Y_COORDS = createAxis(-1.875, 0.375, 11);
    private static final double[] NOISE_Z_COORDS = createAxis(-3.125, 0.625, 11);
+   private static final int[] SURFACE_NOISE_OCTAVES = createIntAxis(-3, 1, 4);
    private static final int[] BLENDED_LIMIT_OCTAVES = createIntAxis(-15, 1, 16);
    private static final int[] BLENDED_MAIN_OCTAVES = createIntAxis(-7, 1, 8);
    private static final BlendedNoiseSampleParameters[] BLENDED_NOISE_SAMPLE_SETS = new BlendedNoiseSampleParameters[]{
@@ -120,6 +131,9 @@ public final class OracleDumper {
             break;
          case "terrain-chunk":
             json = dumpTerrainChunk(seed, parseInteger(requireOption(options, "chunk-x"), "chunk-x"), parseInteger(requireOption(options, "chunk-z"), "chunk-z"));
+            break;
+         case "surface-chunk":
+            json = dumpSurfaceChunk(seed, parseInteger(requireOption(options, "chunk-x"), "chunk-x"), parseInteger(requireOption(options, "chunk-z"), "chunk-z"));
             break;
          default:
             throw new IllegalArgumentException("unsupported module '" + module + "'");
@@ -530,6 +544,54 @@ public final class OracleDumper {
       return GSON.toJson(json);
    }
 
+   private static String dumpSurfaceChunk(long seed, int chunkX, int chunkZ) {
+      SharedConstants.tryDetectVersion();
+      java.io.PrintStream originalOut = Bootstrap.STDOUT;
+      java.io.PrintStream originalErr = System.err;
+      Bootstrap.bootStrap();
+      System.setOut(originalOut);
+      System.setErr(originalErr);
+
+      OverworldBiomeSource biomeSource = new OverworldBiomeSource(seed, false, false, BuiltinRegistries.BIOME);
+      NoiseGeneratorSettings generatorSettings = BuiltinRegistries.NOISE_GENERATOR_SETTINGS.getOrThrow(NoiseGeneratorSettings.OVERWORLD);
+      NoiseBasedChunkGenerator generator = new NoiseBasedChunkGenerator(biomeSource, seed, () -> generatorSettings);
+      int minY = generator.getMinY();
+      int height = generator.getGenDepth();
+      ProtoChunk chunk = createProtoChunk(chunkX, chunkZ, minY, height);
+
+      fillChunkFromBaseColumns(generator, chunk, minY, height);
+      chunk.setStatus(ChunkStatus.NOISE);
+      buildSurfaceAndBedrock(seed, biomeSource, generatorSettings, chunk);
+      chunk.setStatus(ChunkStatus.SURFACE);
+
+      Map<String, Object> json = new LinkedHashMap<>();
+      json.put("module", "surface-chunk");
+      json.put("minecraftVersion", MINECRAFT_VERSION);
+      json.put("generatorClass", NoiseBasedChunkGenerator.class.getName());
+      json.put("seed", Long.toString(seed));
+      json.put("chunkX", chunkX);
+      json.put("chunkZ", chunkZ);
+      json.put("minY", minY);
+      json.put("height", height);
+      json.put("blockOrder", "y-major,z-major,x-minor");
+      json.put(
+         "palette",
+         new String[]{
+            "minecraft:air",
+            "minecraft:stone",
+            "minecraft:water",
+            "minecraft:bedrock",
+            "minecraft:grass_block",
+            "minecraft:dirt",
+            "minecraft:sand",
+            "minecraft:gravel",
+            "minecraft:snow"
+         }
+      );
+      json.put("blocks", collectChunkBlocks(chunk, minY, height));
+      return GSON.toJson(json);
+   }
+
    private static int terrainBlockId(BlockState state) {
       String key = Registry.BLOCK.getKey(state.getBlock()).toString();
       switch (key) {
@@ -543,6 +605,32 @@ public final class OracleDumper {
             return 3;
          default:
             throw new IllegalStateException("unexpected terrain block from Java oracle: " + key);
+      }
+   }
+
+   private static int surfaceBlockId(BlockState state) {
+      String key = Registry.BLOCK.getKey(state.getBlock()).toString();
+      switch (key) {
+         case "minecraft:air":
+            return 0;
+         case "minecraft:stone":
+            return 1;
+         case "minecraft:water":
+            return 2;
+         case "minecraft:bedrock":
+            return 3;
+         case "minecraft:grass_block":
+            return 4;
+         case "minecraft:dirt":
+            return 5;
+         case "minecraft:sand":
+            return 6;
+         case "minecraft:gravel":
+            return 7;
+         case "minecraft:snow":
+            return 8;
+         default:
+            throw new IllegalStateException("unexpected surface-stage block from Java oracle: " + key);
       }
    }
 
@@ -560,6 +648,154 @@ public final class OracleDumper {
             }
          }
       }
+   }
+
+   private static ProtoChunk createProtoChunk(int chunkX, int chunkZ, int minY, int height) {
+      return new ProtoChunk(new ChunkPos(chunkX, chunkZ), UpgradeData.EMPTY, createLevelHeightAccessor(minY, height));
+   }
+
+   private static LevelHeightAccessor createLevelHeightAccessor(int minY, int height) {
+      return new LevelHeightAccessor() {
+         @Override
+         public int getHeight() {
+            return height;
+         }
+
+         @Override
+         public int getMinBuildHeight() {
+            return minY;
+         }
+      };
+   }
+
+   private static void fillChunkFromBaseColumns(NoiseBasedChunkGenerator generator, ProtoChunk chunk, int minY, int height) {
+      ChunkPos chunkPos = chunk.getPos();
+      int minBlockX = chunkPos.getMinBlockX();
+      int minBlockZ = chunkPos.getMinBlockZ();
+      BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+      LevelHeightAccessor level = createLevelHeightAccessor(minY, height);
+
+      for (int localZ = 0; localZ < 16; localZ++) {
+         for (int localX = 0; localX < 16; localX++) {
+            int x = minBlockX + localX;
+            int z = minBlockZ + localZ;
+            NoiseColumn column = generator.getBaseColumn(x, z, level);
+            for (int y = minY; y < minY + height; y++) {
+               BlockState state = column.getBlockState(pos.set(x, y, z));
+               if (!state.isAir()) {
+                  chunk.setBlockState(pos, state, false);
+               }
+            }
+         }
+      }
+   }
+
+   private static void buildSurfaceAndBedrock(long seed, OverworldBiomeSource biomeSource, NoiseGeneratorSettings generatorSettings, ProtoChunk chunk) {
+      WorldgenRandom random = new WorldgenRandom();
+      ChunkPos chunkPos = chunk.getPos();
+      random.setBaseChunkSeed(chunkPos.x, chunkPos.z);
+
+      SurfaceNoise surfaceNoise = createSurfaceNoise(seed, generatorSettings.noiseSettings());
+      BiomeManager biomeManager = new BiomeManager(biomeSource, BiomeManager.obfuscateSeed(seed), FuzzyOffsetConstantColumnBiomeZoomer.INSTANCE);
+      int minBlockX = chunkPos.getMinBlockX();
+      int minBlockZ = chunkPos.getMinBlockZ();
+      int seaLevel = generatorSettings.seaLevel();
+      int minSurfaceLevel = generatorSettings.getMinSurfaceLevel();
+      BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+
+      for (int localX = 0; localX < 16; localX++) {
+         for (int localZ = 0; localZ < 16; localZ++) {
+            int x = minBlockX + localX;
+            int z = minBlockZ + localZ;
+            int heightY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE_WG, localX, localZ) + 1;
+            double surfaceValue = surfaceNoise.getSurfaceNoiseValue(x * 0.0625, z * 0.0625, 0.0625, localX * 0.0625) * 15.0;
+            Biome biome = biomeManager.getBiome(pos.set(x, heightY, z));
+            biome.buildSurfaceAt(
+               random,
+               chunk,
+               x,
+               z,
+               heightY,
+               surfaceValue,
+               generatorSettings.getDefaultBlock(),
+               generatorSettings.getDefaultFluid(),
+               seaLevel,
+               minSurfaceLevel,
+               seed
+            );
+         }
+      }
+
+      applyBedrock(chunk, random, generatorSettings);
+   }
+
+   private static SurfaceNoise createSurfaceNoise(long seed, NoiseSettings noiseSettings) {
+      WorldgenRandom random = new WorldgenRandom(seed);
+      new BlendedNoise(random);
+      return noiseSettings.useSimplexSurfaceNoise()
+         ? new PerlinSimplexNoise(random, toIntegerList(SURFACE_NOISE_OCTAVES))
+         : new PerlinNoise(random, toIntegerList(SURFACE_NOISE_OCTAVES));
+   }
+
+   private static void applyBedrock(ChunkAccess chunk, WorldgenRandom random, NoiseGeneratorSettings generatorSettings) {
+      BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+      ChunkPos chunkPos = chunk.getPos();
+      int minBlockX = chunkPos.getMinBlockX();
+      int minBlockZ = chunkPos.getMinBlockZ();
+      int minY = generatorSettings.noiseSettings().minY();
+      int floorY = minY + generatorSettings.getBedrockFloorPosition();
+      int roofY = chunk.getHeight() - 1 + minY - generatorSettings.getBedrockRoofPosition();
+      int minBuildHeight = chunk.getMinBuildHeight();
+      int maxBuildHeight = chunk.getMaxBuildHeight();
+      boolean hasRoof = roofY + 5 - 1 >= minBuildHeight && roofY < maxBuildHeight;
+      boolean hasFloor = floorY + 5 - 1 >= minBuildHeight && floorY < maxBuildHeight;
+
+      if (!hasRoof && !hasFloor) {
+         return;
+      }
+
+      for (int localZ = 0; localZ < 16; localZ++) {
+         for (int localX = 0; localX < 16; localX++) {
+            int x = minBlockX + localX;
+            int z = minBlockZ + localZ;
+
+            if (hasRoof) {
+               for (int offset = 0; offset < 5; offset++) {
+                  if (offset <= random.nextInt(5)) {
+                     chunk.setBlockState(pos.set(x, roofY - offset, z), Blocks.BEDROCK.defaultBlockState(), false);
+                  }
+               }
+            }
+
+            if (hasFloor) {
+               for (int offset = 4; offset >= 0; offset--) {
+                  if (offset <= random.nextInt(5)) {
+                     chunk.setBlockState(pos.set(x, floorY + offset, z), Blocks.BEDROCK.defaultBlockState(), false);
+                  }
+               }
+            }
+         }
+      }
+   }
+
+   private static int[] collectChunkBlocks(ChunkAccess chunk, int minY, int height) {
+      int[] blocks = new int[height * 16 * 16];
+      ChunkPos chunkPos = chunk.getPos();
+      int minBlockX = chunkPos.getMinBlockX();
+      int minBlockZ = chunkPos.getMinBlockZ();
+      BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+
+      for (int localZ = 0; localZ < 16; localZ++) {
+         for (int localX = 0; localX < 16; localX++) {
+            int x = minBlockX + localX;
+            int z = minBlockZ + localZ;
+            for (int y = minY; y < minY + height; y++) {
+               blocks[((y - minY) << 8) | (localZ << 4) | localX] = surfaceBlockId(chunk.getBlockState(pos.set(x, y, z)));
+            }
+         }
+      }
+
+      return blocks;
    }
 
    private static String dumpOverworldBiomeSource(long seed, boolean legacyBiomeInitLayer, boolean largeBiomes, SampleGrid2D sampleGrid2D) {
@@ -1638,6 +1874,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper noise --seed <long>");
       System.err.println("  oracle-dumper noise --class NoiseSampler --seed <long> --preset overworld --samples2d <path>");
       System.err.println("  oracle-dumper terrain-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
+      System.err.println("  oracle-dumper surface-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");
