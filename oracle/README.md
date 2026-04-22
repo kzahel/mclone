@@ -122,6 +122,23 @@ Each sample set includes:
 
 This lets the TS side oracle-test biome weighting, random-density offset, blended-noise integration, and slide application before the real biome-source port lands.
 
+## OverworldBiomeSource oracle
+
+`pnpm --silent oracle:gen biome --class OverworldBiomeSource --seed 12345 --samples2d test/fixtures/biome/_samples-quart-2d.json > test/fixtures/biome/overworld-seed-12345.json`
+
+Each fixture stores one seed for the default 1.17.1 overworld layered biome source:
+
+- `legacyBiomeInitLayer=false`
+- `largeBiomes=false`
+- the Java `possibleBiomes()` list with exact registry IDs, resource keys, `depth`, and `scale`
+- sampled quart biomes over `test/fixtures/biome/_samples-quart-2d.json`, flattened in `x-major,z-minor` order
+
+This is the tactical/05 oracle for:
+
+- exact biome metadata parity
+- layered biome-source seed parity
+- chunk-biome container parity against committed integration fixtures
+
 ## Wrappers
 
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`

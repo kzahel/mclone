@@ -53,7 +53,7 @@ That means tactical `03` can stay narrowly focused on the live overworld path:
 
 What stays out of scope here:
 
-- real overworld biome generation (`OverworldBiomeSource`, cubiomes integration) — tactical `05`
+- real overworld biome generation (`OverworldBiomeSource` + layered biome pipeline) — tactical `05`
 - end-island density (`TheEndBiomeSource.getHeightValue(...)`) — not part of the target overworld path
 - nether/end presets
 - `Cavifier`, `NoodleCavifier`, `OreVeinifier`, active `Aquifer` noise — still deferred per [`AGENTS.md`](../../AGENTS.md)

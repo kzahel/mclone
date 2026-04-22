@@ -12,6 +12,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.biome.OverworldBiomeSource;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.NoiseModifier;
 import net.minecraft.world.level.levelgen.NoiseSampler;
@@ -33,6 +34,7 @@ public final class OracleDumper {
    private static final String IMPROVED_NOISE_CLASS = ImprovedNoise.class.getName();
    private static final String NOISE_SAMPLER_CLASS = NoiseSampler.class.getName();
    private static final String NORMAL_NOISE_CLASS = NormalNoise.class.getName();
+   private static final String OVERWORLD_BIOME_SOURCE_CLASS = OverworldBiomeSource.class.getName();
    private static final String PERLIN_NOISE_CLASS = PerlinNoise.class.getName();
    private static final String PERLIN_SIMPLEX_NOISE_CLASS = PerlinSimplexNoise.class.getName();
    private static final String SIMPLEX_NOISE_CLASS = SimplexNoise.class.getName();
@@ -103,6 +105,9 @@ public final class OracleDumper {
       switch (module) {
          case "prng":
             json = dumpPrng(seed, parseCount(requireOption(options, "count")));
+            break;
+         case "biome":
+            json = dumpBiome(seed, options);
             break;
          case "noise":
             json = dumpNoise(seed, options);
@@ -179,6 +184,23 @@ public final class OracleDumper {
       }
    }
 
+   private static boolean parseBooleanOption(Map<String, String> options, String name, boolean defaultValue) {
+      String value = options.get(name);
+      if (value == null) {
+         return defaultValue;
+      }
+
+      if ("true".equals(value)) {
+         return true;
+      }
+
+      if ("false".equals(value)) {
+         return false;
+      }
+
+      throw new IllegalArgumentException("invalid " + name + " '" + value + "'");
+   }
+
    private static String dumpPrng(long seed, int count) {
       StringBuilder json = new StringBuilder(512 + count * 48);
       json.append("{\n");
@@ -234,6 +256,20 @@ public final class OracleDumper {
          default:
             throw new IllegalArgumentException("unsupported noise class '" + className + "'");
       }
+   }
+
+   private static String dumpBiome(long seed, Map<String, String> options) throws Exception {
+      String className = options.get("class");
+      if (className == null || className.isEmpty() || "OverworldBiomeSource".equals(className)) {
+         return dumpOverworldBiomeSource(
+            seed,
+            parseBooleanOption(options, "legacy-biome-init-layer", false),
+            parseBooleanOption(options, "large-biomes", false),
+            loadSampleGrid2D(requireOption(options, "samples2d"))
+         );
+      }
+
+      throw new IllegalArgumentException("unsupported biome class '" + className + "'");
    }
 
    private static String dumpImprovedNoise(long seed) {
@@ -424,6 +460,69 @@ public final class OracleDumper {
       return json.toString();
    }
 
+   private static String dumpOverworldBiomeSource(long seed, boolean legacyBiomeInitLayer, boolean largeBiomes, SampleGrid2D sampleGrid2D) {
+      SharedConstants.tryDetectVersion();
+      java.io.PrintStream originalOut = Bootstrap.STDOUT;
+      java.io.PrintStream originalErr = System.err;
+      Bootstrap.bootStrap();
+      System.setOut(originalOut);
+      System.setErr(originalErr);
+
+      int[] sampleX = requireIntegerAxis(sampleGrid2D.x, "x");
+      int[] sampleZ = requireIntegerAxis(sampleGrid2D.z, "z");
+      int sampleCount = sampleX.length * sampleZ.length;
+      OverworldBiomeSource biomeSource = new OverworldBiomeSource(seed, legacyBiomeInitLayer, largeBiomes, BuiltinRegistries.BIOME);
+      List<Biome> possibleBiomes = biomeSource.possibleBiomes();
+      StringBuilder json = new StringBuilder(4096 + sampleCount * 96 + possibleBiomes.size() * 80);
+      json.append("{\n");
+      appendField(json, 1, "module", "biome", true);
+      appendField(json, 1, "minecraftVersion", MINECRAFT_VERSION, true);
+      appendField(json, 1, "biomeSourceClass", OVERWORLD_BIOME_SOURCE_CLASS, true);
+      appendField(json, 1, "seed", Long.toString(seed), true);
+      appendNumberField(json, 1, "legacyBiomeInitLayer", Boolean.toString(legacyBiomeInitLayer), true);
+      appendNumberField(json, 1, "largeBiomes", Boolean.toString(largeBiomes), true);
+      json.append("  \"wireFormat\": {\n");
+      appendField(json, 2, "coordinates", "integer", true);
+      appendField(json, 2, "biomeIds", "integer", true);
+      appendField(json, 2, "biomeKeys", "string", true);
+      appendField(json, 2, "biomeFactors", "number", false);
+      json.append("  },\n");
+      appendPossibleBiomes(json, possibleBiomes);
+      json.append(",\n");
+      json.append("  \"samples\": {\n");
+      appendField(json, 2, "biomeMethod", "getNoiseBiome(x,0,z)", true);
+      appendField(json, 2, "gridOrder", sampleGrid2D.gridOrder, true);
+      appendNumberField(json, 2, "sampleY", "0", true);
+      appendNumberField(json, 2, "sampleCount", Integer.toString(sampleCount), true);
+      indent(json, 2);
+      json.append("\"x\": ");
+      appendIntArray(json, sampleX);
+      json.append(",\n");
+      indent(json, 2);
+      json.append("\"z\": ");
+      appendIntArray(json, sampleZ);
+      json.append(",\n");
+      indent(json, 2);
+      json.append("\"ids\": ");
+      appendBiomeSourceIdArray(json, biomeSource, sampleX, sampleZ);
+      json.append(",\n");
+      indent(json, 2);
+      json.append("\"keys\": ");
+      appendBiomeSourceKeyArray(json, biomeSource, sampleX, sampleZ);
+      json.append(",\n");
+      indent(json, 2);
+      json.append("\"depths\": ");
+      appendBiomeSourceFactorArray(json, biomeSource, sampleX, sampleZ, true);
+      json.append(",\n");
+      indent(json, 2);
+      json.append("\"scales\": ");
+      appendBiomeSourceFactorArray(json, biomeSource, sampleX, sampleZ, false);
+      json.append('\n');
+      json.append("  }\n");
+      json.append("}\n");
+      return json.toString();
+   }
+
    private static String dumpPerlinSimplexNoise(long seed, int[] octaves, SampleGrid2D sampleGrid2D) {
       PerlinSimplexNoise noise = new PerlinSimplexNoise(new SimpleRandomSource(seed), toIntegerList(octaves));
       int sampleCount = sampleGrid2D.x.length * sampleGrid2D.z.length;
@@ -596,6 +695,88 @@ public final class OracleDumper {
          }
 
          json.append(Double.toString(values[index]));
+      }
+
+      json.append(']');
+   }
+
+   private static void appendPossibleBiomes(StringBuilder json, List<Biome> possibleBiomes) {
+      indent(json, 1);
+      json.append("\"possibleBiomes\": [\n");
+
+      for (int index = 0; index < possibleBiomes.size(); index++) {
+         Biome biome = possibleBiomes.get(index);
+         indent(json, 2);
+         json.append("{\n");
+         appendNumberField(json, 3, "id", Integer.toString(BuiltinRegistries.BIOME.getId(biome)), true);
+         appendField(json, 3, "key", BuiltinRegistries.BIOME.getKey(biome).toString(), true);
+         appendNumberField(json, 3, "depth", Double.toString(biome.getDepth()), true);
+         appendNumberField(json, 3, "scale", Double.toString(biome.getScale()), false);
+         indent(json, 2);
+         json.append('}');
+         if (index < possibleBiomes.size() - 1) {
+            json.append(',');
+         }
+
+         json.append('\n');
+      }
+
+      indent(json, 1);
+      json.append(']');
+   }
+
+   private static void appendBiomeSourceIdArray(StringBuilder json, OverworldBiomeSource biomeSource, int[] sampleX, int[] sampleZ) {
+      json.append('[');
+      boolean first = true;
+
+      for (int x : sampleX) {
+         for (int z : sampleZ) {
+            if (!first) {
+               json.append(',');
+            }
+
+            first = false;
+            json.append(BuiltinRegistries.BIOME.getId(biomeSource.getNoiseBiome(x, 0, z)));
+         }
+      }
+
+      json.append(']');
+   }
+
+   private static void appendBiomeSourceKeyArray(StringBuilder json, OverworldBiomeSource biomeSource, int[] sampleX, int[] sampleZ) {
+      json.append('[');
+      boolean first = true;
+
+      for (int x : sampleX) {
+         for (int z : sampleZ) {
+            if (!first) {
+               json.append(',');
+            }
+
+            first = false;
+            json.append('"');
+            json.append(escapeJson(BuiltinRegistries.BIOME.getKey(biomeSource.getNoiseBiome(x, 0, z)).toString()));
+            json.append('"');
+         }
+      }
+
+      json.append(']');
+   }
+
+   private static void appendBiomeSourceFactorArray(StringBuilder json, OverworldBiomeSource biomeSource, int[] sampleX, int[] sampleZ, boolean useDepth) {
+      json.append('[');
+      boolean first = true;
+
+      for (int x : sampleX) {
+         for (int z : sampleZ) {
+            if (!first) {
+               json.append(',');
+            }
+
+            first = false;
+            Biome biome = biomeSource.getNoiseBiome(x, 0, z);
+            json.append(Double.toString(useDepth ? biome.getDepth() : biome.getScale()));
+         }
       }
 
       json.append(']');
@@ -1351,6 +1532,7 @@ public final class OracleDumper {
    private static void printUsage() {
       System.err.println("usage:");
       System.err.println("  oracle-dumper prng --seed <long> --count <positive-int>");
+      System.err.println("  oracle-dumper biome --class OverworldBiomeSource --seed <long> --samples2d <path> [--legacy-biome-init-layer <true|false>] [--large-biomes <true|false>]");
       System.err.println("  oracle-dumper noise --seed <long>");
       System.err.println("  oracle-dumper noise --class NoiseSampler --seed <long> --preset overworld --samples2d <path>");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");

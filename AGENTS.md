@@ -28,7 +28,7 @@ Transitively, the following classes exist in the 1.17.1 decomp but are never exe
 - `net.minecraft.world.level.levelgen.Cavifier`
 - `net.minecraft.world.level.levelgen.NoodleCavifier`
 - `net.minecraft.world.level.levelgen.OreVeinifier`
-- `net.minecraft.world.level.levelgen.synth.NormalNoise` — only live consumers are the classes above, plus `GeodeFeature` (post-MVP feature) and `MultiNoiseBiomeSource` (nether/end — overworld uses cubiomes per `docs/strategy.md`)
+- `net.minecraft.world.level.levelgen.synth.NormalNoise` — only live consumers are the classes above, plus `GeodeFeature` (post-MVP feature) and `MultiNoiseBiomeSource` (nether/end — overworld uses the layered `OverworldBiomeSource` path)
 - `net.minecraft.world.level.levelgen.synth.NoiseUtils` — only consumers are `Cavifier` / `NoodleCavifier`
 - the deepslate path in `DepthBasedReplacingBaseStoneSource`
 

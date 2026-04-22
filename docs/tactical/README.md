@@ -17,7 +17,7 @@ Numbered, short-lived implementation plans. Each covers a cohesive group of modu
 | [`02-remaining-synth.md`](02-remaining-synth.md) | `SurfaceNoise`, `PerlinSimplexNoise`, minimal `NormalNoise` | unit | remaining `synth/` pieces alive in default 1.17.1; `NoiseUtils` + C&C Part 1 consumers deferred (see [`../../AGENTS.md`](../../AGENTS.md)) |
 | [`03-noise-sampler-settings.md`](03-noise-sampler-settings.md) | `NoiseSampler` + settings (`NoiseSettings`, `NoiseSamplingSettings`) | unit | 3D density field from chunk coords |
 | [`04-integration-oracle-harness.md`](04-integration-oracle-harness.md) | **Integration oracle harness**: server-jar runner, MCA reader, chunk-level fixture format | infra | stand up the server-oracle *before* we need to diff chunks |
-| `05-` | `BiomeSource` subset — translated `OverworldBiomeSource` + climate layers → biome IDs | unit + integration | |
+| [`05-overworld-biome-source.md`](05-overworld-biome-source.md) | `BiomeSource` subset — translated `OverworldBiomeSource` + layered climate pipeline → biome IDs | unit + integration | chunk biomes + `NoiseSampler` inputs now come from a real overworld biome source |
 | `06-` | `NoiseBasedChunkGenerator` (terrain-only: stone/air/water; no surface/caves/features) | **integration** | first end-to-end chunk diff — "does it look like MC?" moment |
 | `07-` | `SurfaceRules` / `SurfaceBuilder` — grass/dirt/sand per biome | integration | visual recognizability |
 | `08-` | Carvers: `CaveWorldCarver`, `CanyonWorldCarver` | integration | **MVP terrain gen reached here** |
