@@ -2,13 +2,27 @@ import { BufferBuilder } from "./vertex/buffer-builder";
 import { DefaultVertexFormat } from "./vertex/default-vertex-format";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
 import { RenderType } from "./render-type";
+import { ResourceLocation } from "../core/resource-location";
+import { BrowserTextureAtlasSource, loadNativeImageFromUrl } from "./texture/browser-native-image-loader";
+import { NativeImage } from "./texture/native-image";
+import { TextureAtlas } from "./texture/texture-atlas";
+import type { TextureAtlasSprite } from "./texture/texture-atlas-sprite";
 import { VertexBuffer } from "./vertex/vertex-buffer";
 import { VertexFormat } from "./vertex/vertex-format";
 
-export const QUAD_COLOR_RGBA8 = [224, 96, 48, 255] as const;
+const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
+const SMOKE_CENTER_SPRITE = new ResourceLocation("minecraft:block/orange_wool");
+const SMOKE_VISUAL_SPRITE = new ResourceLocation("minecraft:block/grass_block_top");
+const SMOKE_SPRITES = [SMOKE_CENTER_SPRITE, SMOKE_VISUAL_SPRITE] as const;
 
 export type BootResult =
-  | { ok: true; format: GPUTextureFormat; adapterInfo: string; centerPixel: readonly [number, number, number, number] }
+  | {
+      ok: true;
+      format: GPUTextureFormat;
+      adapterInfo: string;
+      centerPixel: readonly [number, number, number, number];
+      expectedCenterPixel: readonly [number, number, number, number];
+    }
   | { ok: false; reason: string };
 
 declare global {
@@ -54,14 +68,29 @@ function createDepthView(device: GPUDevice, width: number, height: number): GPUT
     .createView();
 }
 
-function buildQuad(device: GPUDevice): VertexBuffer {
+function rgba8FromPixel(pixel: number): readonly [number, number, number, number] {
+  return [NativeImage.getR(pixel), NativeImage.getG(pixel), NativeImage.getB(pixel), NativeImage.getA(pixel)];
+}
+
+function pushSpriteQuad(
+  builder: BufferBuilder,
+  sprite: TextureAtlasSprite,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): void {
+  builder.vertex(x0, y0, 0, 1, 1, 1, 1, sprite.getU0(), sprite.getV1(), 0, 0, 0, 0, 1);
+  builder.vertex(x1, y0, 0, 1, 1, 1, 1, sprite.getU1(), sprite.getV1(), 0, 0, 0, 0, 1);
+  builder.vertex(x1, y1, 0, 1, 1, 1, 1, sprite.getU1(), sprite.getV0(), 0, 0, 0, 0, 1);
+  builder.vertex(x0, y1, 0, 1, 1, 1, 1, sprite.getU0(), sprite.getV0(), 0, 0, 0, 0, 1);
+}
+
+function buildScene(device: GPUDevice, centerSprite: TextureAtlasSprite, visualSprite: TextureAtlasSprite): VertexBuffer {
   const builder = new BufferBuilder(256);
-  const color = QUAD_COLOR_RGBA8.map((channel) => channel / 255);
   builder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK);
-  builder.vertex(-0.5, -0.5, 0, color[0]!, color[1]!, color[2]!, color[3]!, 0, 0, 0, 0, 0, 0, 1);
-  builder.vertex(0.5, -0.5, 0, color[0]!, color[1]!, color[2]!, color[3]!, 1, 0, 0, 0, 0, 0, 1);
-  builder.vertex(0.5, 0.5, 0, color[0]!, color[1]!, color[2]!, color[3]!, 1, 1, 0, 0, 0, 0, 1);
-  builder.vertex(-0.5, 0.5, 0, color[0]!, color[1]!, color[2]!, color[3]!, 0, 1, 0, 0, 0, 0, 1);
+  pushSpriteQuad(builder, centerSprite, -0.5, -0.5, 0.5, 0.5);
+  pushSpriteQuad(builder, visualSprite, -0.95, -0.85, -0.55, -0.45);
   builder.end();
 
   const vertexBuffer = new VertexBuffer(device);
@@ -147,7 +176,26 @@ async function boot(): Promise<BootResult> {
   const format = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format, alphaMode: "opaque" });
 
-  const vertexBuffer = buildQuad(device);
+  const atlasSource = new BrowserTextureAtlasSource();
+  const centerSpriteImage = await loadNativeImageFromUrl(atlasSource.resolveTextureUrl(SMOKE_CENTER_SPRITE));
+  const expectedCenterPixel = rgba8FromPixel(centerSpriteImage.getPixelRGBA(8, 8));
+  centerSpriteImage.close();
+
+  const atlas = new TextureAtlas(SMOKE_ATLAS_LOCATION, device.limits.maxTextureDimension2D);
+  const preparations = await atlas.prepareToStitch(atlasSource, SMOKE_SPRITES, 0);
+  atlas.reload(device, preparations);
+
+  const centerSprite = atlas.getSprite(SMOKE_CENTER_SPRITE);
+  const visualSprite = atlas.getSprite(SMOKE_VISUAL_SPRITE);
+  if (!centerSprite.getName().equals(SMOKE_CENTER_SPRITE)) {
+    return { ok: false, reason: `center smoke sprite ${SMOKE_CENTER_SPRITE} was missing from the stitched atlas` };
+  }
+
+  if (!visualSprite.getName().equals(SMOKE_VISUAL_SPRITE)) {
+    return { ok: false, reason: `visual smoke sprite ${SMOKE_VISUAL_SPRITE} was missing from the stitched atlas` };
+  }
+
+  const vertexBuffer = buildScene(device, centerSprite, visualSprite);
   const vertexFormat = vertexBuffer.getFormat();
   if (!vertexFormat) return { ok: false, reason: "vertex buffer format missing after upload" };
 
@@ -162,7 +210,9 @@ async function boot(): Promise<BootResult> {
   const sampler = device.createSampler({
     magFilter: "nearest",
     minFilter: "nearest",
+    mipmapFilter: "nearest",
   });
+  const atlasTexture = atlas.getTextureView();
   const whiteTexture = createWhiteTexture(device);
   const uniformBytes = canvasPipeline.shaderProgram.createUniformBufferBytes({
     ModelViewMat: IDENTITY_MATRIX,
@@ -181,7 +231,7 @@ async function boot(): Promise<BootResult> {
       Sampler2: sampler,
     },
     textures: {
-      Sampler0: whiteTexture,
+      Sampler0: atlasTexture,
       Sampler2: whiteTexture,
     },
   });
@@ -205,7 +255,7 @@ async function boot(): Promise<BootResult> {
     .filter(Boolean)
     .join(" / ") || "unknown";
 
-  return { ok: true, format, adapterInfo, centerPixel };
+  return { ok: true, format, adapterInfo, centerPixel, expectedCenterPixel };
 }
 
 if (typeof window !== "undefined") {

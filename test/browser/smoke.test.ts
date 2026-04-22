@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { QUAD_COLOR_RGBA8, type BootResult } from "../../src/renderer/main.ts";
+import { type BootResult } from "../../src/renderer/main.ts";
 
 test("WebGPU boot succeeds on system Chrome", async ({ page }) => {
   const pageErrors: string[] = [];
@@ -16,6 +16,6 @@ test("WebGPU boot succeeds on system Chrome", async ({ page }) => {
   if (result.ok) {
     expect(result.adapterInfo.length).toBeGreaterThan(0);
     expect(["bgra8unorm", "rgba8unorm"]).toContain(result.format);
-    expect(result.centerPixel).toEqual(QUAD_COLOR_RGBA8);
+    expect(result.centerPixel).toEqual(result.expectedCenterPixel);
   }
 });

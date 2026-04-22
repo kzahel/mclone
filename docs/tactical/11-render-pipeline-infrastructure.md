@@ -53,4 +53,4 @@ Port the render-state/pipeline layer that sits on top of the vertex buffer stack
 
 ## Next
 
-Tactical 12: texture ingestion and atlas plumbing (`NativeImage`, `TextureAtlas`, `TextureAtlasSprite`, `Stitcher`, mip generation, GPU texture upload).
+Tactical 12: [`12-texture-atlas-plumbing.md`](12-texture-atlas-plumbing.md) — texture ingestion and atlas plumbing (`NativeImage`, `TextureAtlas`, `TextureAtlasSprite`, `Stitcher`, mip generation, GPU texture upload).
