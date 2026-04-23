@@ -1,0 +1,11 @@
+name = "mclone"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "mclone"
+
+[[routes]]
+pattern = "mclone.kzahel.com"
+custom_domain = true
