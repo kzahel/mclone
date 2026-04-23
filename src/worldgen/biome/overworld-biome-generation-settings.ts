@@ -193,6 +193,23 @@ function buildFlowerForestSettings(): BiomeGenerationSettings {
   return builder.build();
 }
 
+function buildDarkForestSettings(redMushroomBias: boolean): BiomeGenerationSettings {
+  const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
+  addDefaultLakes(builder);
+  builder.addFeature(
+    GenerationStep.Decoration.VEGETAL_DECORATION,
+    () => (redMushroomBias ? VegetationFeatures.DARK_FOREST_VEGETATION_RED : VegetationFeatures.DARK_FOREST_VEGETATION_BROWN),
+  );
+  addForestFlowers(builder);
+  addDefaultFlowers(builder);
+  addForestGrass(builder);
+  addDefaultMushrooms(builder);
+  addDefaultExtraVegetation(builder);
+  addDefaultSprings(builder);
+  return builder.build();
+}
+
 function buildBirchForestSettings(tall: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
@@ -244,6 +261,8 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:desert", buildDesertSettings()],
   ["minecraft:desert_hills", buildDesertSettings()],
   ["minecraft:desert_lakes", buildDesertSettings()],
+  ["minecraft:dark_forest", buildDarkForestSettings(false)],
+  ["minecraft:dark_forest_hills", buildDarkForestSettings(true)],
   ["minecraft:forest", buildForestSettings()],
   ["minecraft:flower_forest", buildFlowerForestSettings()],
   ["minecraft:mountains", buildMountainSettings(false)],

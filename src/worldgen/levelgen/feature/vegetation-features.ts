@@ -4,11 +4,13 @@ import { BiasedToBottomInt } from "../../../util/valueproviders/biased-to-bottom
 import { ClampedInt } from "../../../util/valueproviders/clamped-int";
 import { UniformInt } from "../../../util/valueproviders/uniform-int";
 import type { Block } from "../../../world/level/block/block";
+import { HugeMushroomBlock } from "../../../world/level/block/huge-mushroom-block";
 import { SweetBerryBushBlock } from "../../../world/level/block/sweet-berry-bush-block";
 import type { BlockState } from "../../../world/level/block/state/block-state";
 import { Heightmap } from "../heightmap";
 import { FrequencyWithExtraChanceDecoratorConfiguration } from "./configurations/frequency-with-extra-chance-decorator-configuration";
 import { HeightmapConfiguration } from "./configurations/heightmap-configuration";
+import { HugeMushroomFeatureConfiguration } from "./configurations/huge-mushroom-feature-configuration";
 import { NoiseDependantDecoratorConfiguration } from "./configurations/noise-dependant-decorator-configuration";
 import { ProbabilityFeatureConfiguration } from "./configurations/probability-feature-configuration";
 import { RandomFeatureConfiguration } from "./configurations/random-feature-configuration";
@@ -47,6 +49,9 @@ const PUMPKIN_LOCATION = new ResourceLocation("minecraft:pumpkin");
 const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
 const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 const CACTUS_LOCATION = new ResourceLocation("minecraft:cactus");
+const RED_MUSHROOM_BLOCK_LOCATION = new ResourceLocation("minecraft:red_mushroom_block");
+const BROWN_MUSHROOM_BLOCK_LOCATION = new ResourceLocation("minecraft:brown_mushroom_block");
+const MUSHROOM_STEM_LOCATION = new ResourceLocation("minecraft:mushroom_stem");
 
 function getRequiredState(location: ResourceLocation): BlockState {
   const block = Registry.BLOCK.get(location) as Block | undefined;
@@ -73,6 +78,10 @@ function heightmapWithTreeThreshold() {
 
 function heightmapWithTreeThresholdSquared() {
   return heightmapWithTreeThreshold().squared();
+}
+
+function darkOakDecorator() {
+  return heightmapWithTreeThreshold().decorated(FeatureDecorators.DARK_OAK_TREE.configured(NoneDecoratorConfiguration.INSTANCE));
 }
 
 function heightmapDoubleSquare() {
@@ -281,6 +290,34 @@ function createForestFlowerFeatures() {
   ] as const;
 }
 
+function createHugeBrownMushroomConfig(): HugeMushroomFeatureConfiguration {
+  return new HugeMushroomFeatureConfiguration(
+    new SimpleStateProvider(
+      getRequiredState(BROWN_MUSHROOM_BLOCK_LOCATION)
+        .setValue(HugeMushroomBlock.UP, true)
+        .setValue(HugeMushroomBlock.DOWN, false),
+    ),
+    new SimpleStateProvider(
+      getRequiredState(MUSHROOM_STEM_LOCATION)
+        .setValue(HugeMushroomBlock.UP, false)
+        .setValue(HugeMushroomBlock.DOWN, false),
+    ),
+    3,
+  );
+}
+
+function createHugeRedMushroomConfig(): HugeMushroomFeatureConfiguration {
+  return new HugeMushroomFeatureConfiguration(
+    new SimpleStateProvider(getRequiredState(RED_MUSHROOM_BLOCK_LOCATION).setValue(HugeMushroomBlock.DOWN, false)),
+    new SimpleStateProvider(
+      getRequiredState(MUSHROOM_STEM_LOCATION)
+        .setValue(HugeMushroomBlock.UP, false)
+        .setValue(HugeMushroomBlock.DOWN, false),
+    ),
+    2,
+  );
+}
+
 export class VegetationFeatures {
   public static get BROWN_MUSHROOM_NORMAL() {
     return Features.RANDOM_PATCH.configured(createBrownMushroomConfig()).decorated(heightmapDoubleSquare()).rarity(4);
@@ -442,6 +479,48 @@ export class VegetationFeatures {
       .decorated(spread32AboveDecorator())
       .decorated(heightmapSquare())
       .count(5);
+  }
+
+  public static get HUGE_BROWN_MUSHROOM() {
+    return Features.HUGE_BROWN_MUSHROOM.configured(createHugeBrownMushroomConfig());
+  }
+
+  public static get HUGE_RED_MUSHROOM() {
+    return Features.HUGE_RED_MUSHROOM.configured(createHugeRedMushroomConfig());
+  }
+
+  public static get DARK_OAK() {
+    return TreeFeatures.DARK_OAK;
+  }
+
+  public static get DARK_FOREST_VEGETATION_BROWN() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration(
+        [
+          VegetationFeatures.HUGE_BROWN_MUSHROOM.weighted(0.025),
+          VegetationFeatures.HUGE_RED_MUSHROOM.weighted(0.05),
+          VegetationFeatures.DARK_OAK.weighted(0.6666667),
+          TreeFeatures.BIRCH.weighted(0.2),
+          TreeFeatures.FANCY_OAK.weighted(0.1),
+        ],
+        TreeFeatures.OAK,
+      ),
+    ).decorated(darkOakDecorator());
+  }
+
+  public static get DARK_FOREST_VEGETATION_RED() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration(
+        [
+          VegetationFeatures.HUGE_RED_MUSHROOM.weighted(0.025),
+          VegetationFeatures.HUGE_BROWN_MUSHROOM.weighted(0.05),
+          VegetationFeatures.DARK_OAK.weighted(0.6666667),
+          TreeFeatures.BIRCH.weighted(0.2),
+          TreeFeatures.FANCY_OAK.weighted(0.1),
+        ],
+        TreeFeatures.OAK,
+      ),
+    ).decorated(darkOakDecorator());
   }
 
   public static get FOREST_FLOWER_TREES() {

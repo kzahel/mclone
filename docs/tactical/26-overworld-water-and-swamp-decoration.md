@@ -62,4 +62,4 @@ Port the real overworld water-feature bridge instead of relying on terrain-only 
 
 ## Next
 
-Tactical 27 is now [`27-biome-decoration-parity-follow-through.md`](27-biome-decoration-parity-follow-through.md): finish the missing flower-provider, dead-bush, seagrass, birch, and flower-forest bridge first. After the later carver parity follow-through in tacticals 28-32, the next broad biome-identity slice is dark forest.
+Tactical 27 is now [`27-biome-decoration-parity-follow-through.md`](27-biome-decoration-parity-follow-through.md): finish the missing flower-provider, dead-bush, seagrass, birch, and flower-forest bridge first. After the later carver parity follow-through in tacticals 28-32, that broader biome-identity follow-through landed as [`33-dark-forest-parity.md`](33-dark-forest-parity.md).

@@ -5,13 +5,16 @@ import type { BlockState } from "../../../world/level/block/state/block-state";
 import { ConstantInt } from "../../../util/valueproviders/constant-int";
 import { UniformInt } from "../../../util/valueproviders/uniform-int";
 import { BlobFoliagePlacer } from "./foliageplacers/blob-foliage-placer";
+import { DarkOakFoliagePlacer } from "./foliageplacers/dark-oak-foliage-placer";
 import { FancyFoliagePlacer } from "./foliageplacers/fancy-foliage-placer";
 import { PineFoliagePlacer } from "./foliageplacers/pine-foliage-placer";
 import { SpruceFoliagePlacer } from "./foliageplacers/spruce-foliage-placer";
 import { TreeConfiguration } from "./configurations/tree-configuration";
+import { ThreeLayersFeatureSize } from "./featuresize/three-layers-feature-size";
 import { TwoLayersFeatureSize } from "./featuresize/two-layers-feature-size";
 import { Features } from "./features";
 import { SimpleStateProvider } from "./stateproviders/simple-state-provider";
+import { DarkOakTrunkPlacer } from "./trunkplacers/dark-oak-trunk-placer";
 import { FancyTrunkPlacer } from "./trunkplacers/fancy-trunk-placer";
 import { StraightTrunkPlacer } from "./trunkplacers/straight-trunk-placer";
 
@@ -24,6 +27,9 @@ const SPRUCE_SAPLING_LOCATION = new ResourceLocation("minecraft:spruce_sapling")
 const BIRCH_LOG_LOCATION = new ResourceLocation("minecraft:birch_log");
 const BIRCH_LEAVES_LOCATION = new ResourceLocation("minecraft:birch_leaves");
 const BIRCH_SAPLING_LOCATION = new ResourceLocation("minecraft:birch_sapling");
+const DARK_OAK_LOG_LOCATION = new ResourceLocation("minecraft:dark_oak_log");
+const DARK_OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:dark_oak_leaves");
+const DARK_OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:dark_oak_sapling");
 
 function getRequiredState(location: ResourceLocation): BlockState {
   const block = Registry.BLOCK.get(location) as Block | undefined;
@@ -104,6 +110,21 @@ export class TreeFeatures {
         new SimpleStateProvider(getRequiredState(BIRCH_SAPLING_LOCATION)),
         new BlobFoliagePlacer(ConstantInt.of(2), ConstantInt.of(0), 3),
         new TwoLayersFeatureSize(1, 0, 1),
+      )
+        .ignoreVines()
+        .build(),
+    );
+  }
+
+  public static get DARK_OAK() {
+    return Features.TREE.configured(
+      new TreeConfiguration.TreeConfigurationBuilder(
+        new SimpleStateProvider(getRequiredState(DARK_OAK_LOG_LOCATION)),
+        new DarkOakTrunkPlacer(6, 2, 1),
+        new SimpleStateProvider(getRequiredState(DARK_OAK_LEAVES_LOCATION)),
+        new SimpleStateProvider(getRequiredState(DARK_OAK_SAPLING_LOCATION)),
+        new DarkOakFoliagePlacer(ConstantInt.of(0), ConstantInt.of(0)),
+        new ThreeLayersFeatureSize(1, 1, 0, 1, 2),
       )
         .ignoreVines()
         .build(),

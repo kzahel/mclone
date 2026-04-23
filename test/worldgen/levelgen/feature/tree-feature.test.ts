@@ -84,4 +84,41 @@ describe("TreeFeature", () => {
     expect(leafCount).toBeGreaterThan(0);
     expect(foundDistanceOneLeaf).toBe(true);
   });
+
+  test("dark oak placement uses the translated 2x2 trunk and dark-oak foliage path", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    const generator = createGenerator();
+    const feature = TreeFeatures.DARK_OAK;
+    const logState = getState("minecraft:dark_oak_log");
+    const leavesState = getState("minecraft:dark_oak_leaves");
+    const origin = new BlockPos(16, 11, 16);
+    const expectedHeight = feature.config.trunkPlacer.getTreeHeight(new WorldgenRandom(4321n));
+
+    expect(feature.place(level, generator, new WorldgenRandom(4321n), origin)).toBe(true);
+
+    expect(level.getBlockState(origin).is(logState.getBlock())).toBe(true);
+    expect(level.getBlockState(origin.east()).is(logState.getBlock())).toBe(true);
+    expect(level.getBlockState(origin.south()).is(logState.getBlock())).toBe(true);
+    expect(level.getBlockState(origin.east().south()).is(logState.getBlock())).toBe(true);
+
+    let logCount = 0;
+    let leafCount = 0;
+    for (let y = 10; y < 28; y++) {
+      for (let z = 8; z <= 24; z++) {
+        for (let x = 8; x <= 24; x++) {
+          const state = level.getBlockState(new BlockPos(x, y, z));
+          if (state.is(logState.getBlock())) {
+            logCount++;
+          } else if (state.is(leavesState.getBlock())) {
+            leafCount++;
+            expect(state.getValue(BlockStateProperties.DISTANCE)).toBeLessThan(7);
+          }
+        }
+      }
+    }
+
+    expect(logCount).toBeGreaterThanOrEqual(expectedHeight * 4);
+    expect(leafCount).toBeGreaterThan(0);
+  });
 });

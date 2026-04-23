@@ -16,6 +16,12 @@ export class BlockStateProperties {
   public static readonly PERSISTENT = BooleanProperty.create("persistent");
   public static readonly POWERED = BooleanProperty.create("powered");
   public static readonly SNOWY = BooleanProperty.create("snowy");
+  public static readonly NORTH = BooleanProperty.create("north");
+  public static readonly EAST = BooleanProperty.create("east");
+  public static readonly SOUTH = BooleanProperty.create("south");
+  public static readonly WEST = BooleanProperty.create("west");
+  public static readonly UP = BooleanProperty.create("up");
+  public static readonly DOWN = BooleanProperty.create("down");
   public static readonly AXIS = EnumProperty.create("axis", Direction.Axis);
   public static readonly DOUBLE_BLOCK_HALF = EnumProperty.create("half", DoubleBlockHalf);
   public static readonly HORIZONTAL_AXIS = EnumProperty.create("axis", Direction.Axis, Direction.Axis.X, Direction.Axis.Z);

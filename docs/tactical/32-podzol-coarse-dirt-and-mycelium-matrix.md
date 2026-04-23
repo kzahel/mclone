@@ -66,4 +66,4 @@ Still deferred on purpose:
 
 ## Next
 
-Tactical 33 should move back to biome identity instead of another surface-material catch-up pass: dark-forest parity via the missing dark-oak / huge-mushroom / minimal decorator stack, now that the current classic-carver material matrix is broad enough to stop blocking that biome.
+That broader biome-identity follow-through is now [`33-dark-forest-parity.md`](33-dark-forest-parity.md): dark forest landed through the translated dark-oak / huge-mushroom / minimal decorator stack once the current classic-carver material matrix stopped blocking it. The next broad biome-identity slice after that should be savanna parity.

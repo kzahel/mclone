@@ -23,6 +23,7 @@ const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
 const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
 const SPRUCE_LEAVES_LOCATION = new ResourceLocation("minecraft:spruce_leaves");
 const BIRCH_LEAVES_LOCATION = new ResourceLocation("minecraft:birch_leaves");
+const DARK_OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:dark_oak_leaves");
 const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 const WATER_LOCATION = new ResourceLocation("minecraft:water");
 
@@ -72,10 +73,12 @@ export class BlockColors {
     }
 
     const oakLeaves = Registry.BLOCK.get(OAK_LEAVES_LOCATION) as Block | undefined;
-    if (oakLeaves !== undefined) {
+    const darkOakLeaves = Registry.BLOCK.get(DARK_OAK_LEAVES_LOCATION) as Block | undefined;
+    const defaultFoliageBlocks = [oakLeaves, darkOakLeaves].filter((block): block is Block => block !== undefined);
+    if (defaultFoliageBlocks.length > 0) {
       blockColors.register(
         (_state, level, pos) => level !== null && pos !== null ? BiomeColors.getAverageFoliageColor(level, pos) : FoliageColor.getDefaultColor(),
-        oakLeaves,
+        ...defaultFoliageBlocks,
       );
     }
 

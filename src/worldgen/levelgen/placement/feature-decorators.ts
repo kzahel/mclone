@@ -13,6 +13,7 @@ import { ChanceDecorator } from "./chance-decorator";
 import { CountNoiseDecorator } from "./count-noise-decorator";
 import { CountDecorator } from "./count-decorator";
 import { CountWithExtraChanceDecorator } from "./count-with-extra-chance-decorator";
+import { DarkOakTreePlacementDecorator } from "./dark-oak-tree-placement-decorator";
 import { DecoratedDecorator } from "./decorated-decorator";
 import { FeatureDecorator } from "./feature-decorator";
 import { HeightmapDecorator } from "./heightmap-decorator";
@@ -31,6 +32,7 @@ export const FeatureDecorators = {
   NOPE: register("nope", new NopePlacementDecorator()),
   DECORATED: register("decorated", new DecoratedDecorator()),
   SQUARE: register("square", new SquareDecorator()),
+  DARK_OAK_TREE: register("dark_oak_tree", new DarkOakTreePlacementDecorator()),
   CHANCE: register("chance", new ChanceDecorator()),
   COUNT: register("count", new CountDecorator()),
   COUNT_NOISE: register("count_noise", new CountNoiseDecorator()),

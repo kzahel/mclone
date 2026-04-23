@@ -40,6 +40,18 @@ const FOREST_FLOWER_LOCATIONS = new Set([
   "minecraft:lily_of_the_valley",
 ]);
 
+const DARK_FOREST_OUTPUT_LOCATIONS = new Set([
+  "minecraft:oak_log",
+  "minecraft:oak_leaves",
+  "minecraft:birch_log",
+  "minecraft:birch_leaves",
+  "minecraft:dark_oak_log",
+  "minecraft:dark_oak_leaves",
+  "minecraft:brown_mushroom_block",
+  "minecraft:red_mushroom_block",
+  "minecraft:mushroom_stem",
+]);
+
 function getState(location: string): BlockState {
   const block = Registry.BLOCK.get(new ResourceLocation(location)) as Block | undefined;
   if (block === undefined) {
@@ -150,17 +162,52 @@ describe("Vegetation parity", () => {
     expect(swampPlacements.some((location) => location === "minecraft:seagrass" || location === "minecraft:tall_seagrass")).toBe(true);
   });
 
-  test("overworld biome settings wire the new swamp, flower-forest, and birch tables", () => {
+  test("huge mushroom and dark-forest vegetation paths place translated dark-oak and mushroom blocks", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const generator = createGenerator();
+
+    const brownMushroomLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    expect(VegetationFeatures.HUGE_BROWN_MUSHROOM.place(brownMushroomLevel, generator, new WorldgenRandom(123n), new BlockPos(16, 11, 16))).toBe(true);
+    const brownPlacements = collectPlacedLocations(brownMushroomLevel, 11, 24);
+    expect(brownPlacements).toContain("minecraft:brown_mushroom_block");
+    expect(brownPlacements).toContain("minecraft:mushroom_stem");
+
+    const redMushroomLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    expect(VegetationFeatures.HUGE_RED_MUSHROOM.place(redMushroomLevel, generator, new WorldgenRandom(456n), new BlockPos(16, 11, 16))).toBe(true);
+    const redPlacements = collectPlacedLocations(redMushroomLevel, 11, 24);
+    expect(redPlacements).toContain("minecraft:red_mushroom_block");
+    expect(redPlacements).toContain("minecraft:mushroom_stem");
+
+    const darkForestLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    expect(VegetationFeatures.DARK_FOREST_VEGETATION_BROWN.place(darkForestLevel, generator, new WorldgenRandom(789n), new BlockPos(0, 0, 0))).toBe(
+      true,
+    );
+    const darkForestPlacements = collectPlacedLocations(darkForestLevel, 11, 32);
+    expect(darkForestPlacements.length).toBeGreaterThan(0);
+    expect(darkForestPlacements.some((location) => DARK_FOREST_OUTPUT_LOCATIONS.has(location))).toBe(true);
+    for (const location of darkForestPlacements) {
+      expect(DARK_FOREST_OUTPUT_LOCATIONS.has(location)).toBe(true);
+    }
+  });
+
+  test("overworld biome settings wire the new swamp, flower-forest, birch, and dark-forest tables", () => {
     registerGeneratedRenderBlocks();
     const swampFeatures = getOverworldBiomeGenerationSettings("minecraft:swamp").features().flat().map((supplier) => getBaseFeature(supplier()));
     const swampHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:swamp_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
     const flowerForestFeatures = getOverworldBiomeGenerationSettings("minecraft:flower_forest").features().flat().map((supplier) => getBaseFeature(supplier()));
     const birchForestFeatures = getOverworldBiomeGenerationSettings("minecraft:birch_forest").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const darkForestFeatures = getOverworldBiomeGenerationSettings("minecraft:dark_forest").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const darkForestHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:dark_forest_hills")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
 
     expect(swampFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
     expect(swampHillsFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
     expect(flowerForestFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
     expect(flowerForestFeatures.some((feature) => feature === Features.SIMPLE_RANDOM_SELECTOR)).toBe(true);
     expect(birchForestFeatures.some((feature) => feature === Features.RANDOM_SELECTOR || feature === Features.TREE)).toBe(true);
+    expect(darkForestFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(darkForestHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
   });
 });

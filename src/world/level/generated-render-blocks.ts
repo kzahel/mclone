@@ -9,6 +9,7 @@ import { BushBlock } from "./block/bush-block";
 import { CactusBlock } from "./block/cactus-block";
 import { DeadBushBlock } from "./block/dead-bush-block";
 import { DoublePlantBlock } from "./block/double-plant-block";
+import { HugeMushroomBlock } from "./block/huge-mushroom-block";
 import { LeavesBlock } from "./block/leaves-block";
 import { LiquidBlock } from "./block/liquid-block";
 import { MushroomBlock } from "./block/mushroom-block";
@@ -45,6 +46,8 @@ const SPRUCE_LOG_LOCATION = new ResourceLocation("minecraft:spruce_log");
 const SPRUCE_LEAVES_LOCATION = new ResourceLocation("minecraft:spruce_leaves");
 const BIRCH_LOG_LOCATION = new ResourceLocation("minecraft:birch_log");
 const BIRCH_LEAVES_LOCATION = new ResourceLocation("minecraft:birch_leaves");
+const DARK_OAK_LOG_LOCATION = new ResourceLocation("minecraft:dark_oak_log");
+const DARK_OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:dark_oak_leaves");
 const GRASS_LOCATION = new ResourceLocation("minecraft:grass");
 const FERN_LOCATION = new ResourceLocation("minecraft:fern");
 const DANDELION_LOCATION = new ResourceLocation("minecraft:dandelion");
@@ -60,12 +63,16 @@ const CORNFLOWER_LOCATION = new ResourceLocation("minecraft:cornflower");
 const OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:oak_sapling");
 const SPRUCE_SAPLING_LOCATION = new ResourceLocation("minecraft:spruce_sapling");
 const BIRCH_SAPLING_LOCATION = new ResourceLocation("minecraft:birch_sapling");
+const DARK_OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:dark_oak_sapling");
 const LARGE_FERN_LOCATION = new ResourceLocation("minecraft:large_fern");
 const SWEET_BERRY_BUSH_LOCATION = new ResourceLocation("minecraft:sweet_berry_bush");
 const BROWN_MUSHROOM_LOCATION = new ResourceLocation("minecraft:brown_mushroom");
 const RED_MUSHROOM_LOCATION = new ResourceLocation("minecraft:red_mushroom");
 const BLUE_ORCHID_LOCATION = new ResourceLocation("minecraft:blue_orchid");
 const DEAD_BUSH_LOCATION = new ResourceLocation("minecraft:dead_bush");
+const BROWN_MUSHROOM_BLOCK_LOCATION = new ResourceLocation("minecraft:brown_mushroom_block");
+const RED_MUSHROOM_BLOCK_LOCATION = new ResourceLocation("minecraft:red_mushroom_block");
+const MUSHROOM_STEM_LOCATION = new ResourceLocation("minecraft:mushroom_stem");
 const SEAGRASS_LOCATION = new ResourceLocation("minecraft:seagrass");
 const TALL_SEAGRASS_LOCATION = new ResourceLocation("minecraft:tall_seagrass");
 const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
@@ -129,6 +136,8 @@ const GENERATED_BLOCK_LOCATIONS = [
   SPRUCE_LEAVES_LOCATION,
   BIRCH_LOG_LOCATION,
   BIRCH_LEAVES_LOCATION,
+  DARK_OAK_LOG_LOCATION,
+  DARK_OAK_LEAVES_LOCATION,
   GRASS_LOCATION,
   FERN_LOCATION,
   DANDELION_LOCATION,
@@ -144,12 +153,16 @@ const GENERATED_BLOCK_LOCATIONS = [
   OAK_SAPLING_LOCATION,
   SPRUCE_SAPLING_LOCATION,
   BIRCH_SAPLING_LOCATION,
+  DARK_OAK_SAPLING_LOCATION,
   LARGE_FERN_LOCATION,
   SWEET_BERRY_BUSH_LOCATION,
   BROWN_MUSHROOM_LOCATION,
   RED_MUSHROOM_LOCATION,
   BLUE_ORCHID_LOCATION,
   DEAD_BUSH_LOCATION,
+  BROWN_MUSHROOM_BLOCK_LOCATION,
+  RED_MUSHROOM_BLOCK_LOCATION,
+  MUSHROOM_STEM_LOCATION,
   SEAGRASS_LOCATION,
   TALL_SEAGRASS_LOCATION,
   LILY_PAD_LOCATION,
@@ -219,6 +232,9 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("birch_log"),
   blockTexture("birch_log_top"),
   blockTexture("birch_leaves"),
+  blockTexture("dark_oak_log"),
+  blockTexture("dark_oak_log_top"),
+  blockTexture("dark_oak_leaves"),
   blockTexture("grass"),
   blockTexture("fern"),
   blockTexture("dandelion"),
@@ -234,6 +250,7 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("oak_sapling"),
   blockTexture("spruce_sapling"),
   blockTexture("birch_sapling"),
+  blockTexture("dark_oak_sapling"),
   blockTexture("large_fern_bottom"),
   blockTexture("large_fern_top"),
   blockTexture("sweet_berry_bush_stage0"),
@@ -244,6 +261,9 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("red_mushroom"),
   blockTexture("blue_orchid"),
   blockTexture("dead_bush"),
+  blockTexture("brown_mushroom_block"),
+  blockTexture("red_mushroom_block"),
+  blockTexture("mushroom_stem"),
   blockTexture("seagrass"),
   blockTexture("tall_seagrass_bottom"),
   blockTexture("tall_seagrass_top"),
@@ -515,6 +535,14 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     BIRCH_LEAVES_LOCATION,
     new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
   );
+  registerBlock(
+    DARK_OAK_LOG_LOCATION,
+    new RotatedPillarBlock(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.COLOR_BROWN).strength(2.0).sound(SoundType.WOOD)),
+  );
+  registerBlock(
+    DARK_OAK_LEAVES_LOCATION,
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+  );
   const grassPlantState = registerBlock(
     GRASS_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
@@ -575,6 +603,10 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     BIRCH_SAPLING_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
+  const darkOakSaplingState = registerBlock(
+    DARK_OAK_SAPLING_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
   const largeFernState = registerBlock(
     LARGE_FERN_LOCATION,
     new DoublePlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
@@ -598,6 +630,18 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   const deadBushState = registerBlock(
     DEAD_BUSH_LOCATION,
     new DeadBushBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const brownMushroomBlockState = registerBlock(
+    BROWN_MUSHROOM_BLOCK_LOCATION,
+    new HugeMushroomBlock(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.COLOR_BROWN).strength(0.2).sound(SoundType.WOOD)),
+  ).defaultBlockState();
+  const redMushroomBlockState = registerBlock(
+    RED_MUSHROOM_BLOCK_LOCATION,
+    new HugeMushroomBlock(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.COLOR_RED).strength(0.2).sound(SoundType.WOOD)),
+  ).defaultBlockState();
+  const mushroomStemState = registerBlock(
+    MUSHROOM_STEM_LOCATION,
+    new HugeMushroomBlock(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.WOOL).strength(0.2).sound(SoundType.WOOD)),
   ).defaultBlockState();
   const seagrassState = registerBlock(
     SEAGRASS_LOCATION,
@@ -665,12 +709,16 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(oakSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(spruceSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(birchSaplingState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(darkOakSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(largeFernState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(sweetBerryBushState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(brownMushroomState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(redMushroomState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(blueOrchidState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(deadBushState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(brownMushroomBlockState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(redMushroomBlockState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(mushroomStemState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(seagrassState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(tallSeagrassState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(lilyPadState.getBlock(), RenderType.cutout());
