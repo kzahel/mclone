@@ -37,6 +37,10 @@ export type BootResult =
       sessionId?: string;
       playerId?: string;
       sessionRevision?: number;
+      playerInputSequence?: number;
+      playerStateRevision?: number;
+      playerTick?: number;
+      playerPosition?: readonly [number, number, number];
       format: GPUTextureFormat;
       adapterInfo: string;
       centerPixel: readonly [number, number, number, number];
@@ -95,6 +99,12 @@ function rgba8FromColor(color: readonly [number, number, number, number]): reado
     Math.round(color[2] * 255),
     Math.round(color[3] * 255),
   ];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function validateShaderPipelines(
@@ -191,6 +201,29 @@ async function boot(): Promise<BootResult> {
     return { ok: false, reason: "camera-driven level renderer produced no solid drawables for the generated terrain scene" };
   }
 
+  const initialPlayerState = scene.worldClient.getPlayerState();
+  if (initialPlayerState !== undefined) {
+    await scene.worldClient.setPlayerInput({
+      type: "set_player_input",
+      input: {
+        sequence: 1,
+        moveX: 1,
+        moveY: 0,
+        moveZ: 0,
+        yaw: 180,
+        pitch: 60,
+      },
+    });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await sleep(60);
+      await scene.worldClient.pollUpdates();
+      const updatedPlayerState = scene.worldClient.getPlayerState();
+      if (updatedPlayerState !== undefined && updatedPlayerState.revision > initialPlayerState.revision) {
+        break;
+      }
+    }
+  }
+
   scene.device.pushErrorScope("validation");
   validateShaderPipelines(scene.pipelineCache, scene.format, SCENE_DEPTH_FORMAT);
   const pipelineError = await popValidationError(scene.device, "WebGPU pipeline validation failed");
@@ -244,6 +277,7 @@ async function boot(): Promise<BootResult> {
     .filter(Boolean)
     .join(" / ") || "unknown";
   const sessionState = scene.worldClient.getSessionState();
+  const playerState = scene.worldClient.getPlayerState();
 
   return {
     ok: true,
@@ -253,6 +287,10 @@ async function boot(): Promise<BootResult> {
     sessionId: sessionState?.sessionId,
     playerId: sessionState?.playerId,
     sessionRevision: sessionState?.revision,
+    playerInputSequence: playerState?.acknowledgedInputSequence,
+    playerStateRevision: playerState?.revision,
+    playerTick: playerState?.tick,
+    playerPosition: playerState ? [playerState.position.x, playerState.position.y, playerState.position.z] : undefined,
     format: scene.format,
     adapterInfo,
     centerPixel,

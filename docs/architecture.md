@@ -301,6 +301,13 @@ That means:
 - baseline session/player state snapshots
 - shared dedicated-host chunk-interest management per save
 
+`R7` keeps that same transport rule but adds the first gameplay-state loop on top of it:
+
+- explicit `set_player_input` commands
+- authoritative `player_state` snapshots
+- queued `poll_world_updates` delivery for server-originated updates
+- dedicated-host shared-session ticking without moving the renderer back into ownership
+
 This avoids building two engines:
 
 - a shortcut local one
@@ -359,19 +366,19 @@ The codebase is materially closer to this target architecture now that the first
 
 Current gaps:
 
-- the remote protocol is still request/response around world-opening and chunk-view updates; there is no server-initiated update flow yet
-- session state is still only baseline transport/session metadata, not authoritative gameplay state
-- the dedicated host still is not running a real shared player/tick loop
+- the browser camera/input loop is still not bound to authoritative `player_state`
+- the remote update flow is still poll-driven HTTP, not a measured push-capable transport
+- the gameplay layer still stops at baseline player/session motion state rather than parity movement, entities, or interactions
 
-That is why gameplay-state delivery is now the architectural priority, not just transport cleanup.
+That is why browser control integration is now the architectural priority, not just protocol work.
 
 ## Immediate implications
 
 The next major refactor direction should be:
 
-1. Add authoritative player input/state/tick flow on top of the hardened session boundary.
-2. Decide whether remote gameplay updates still fit the current HTTP request/response path or need a push-capable transport once server-initiated updates exist.
-3. Decide whether the dedicated host needs worker-thread/job-pool offload after there is a concrete shared-session workload to measure.
+1. Bind the browser control/camera loop to authoritative `player_state` and `set_player_input`.
+2. Measure whether the new polled update path is sufficient before introducing a push-capable transport.
+3. Decide whether the dedicated host needs worker-thread/job-pool offload after there is a concrete shared-session gameplay workload to measure.
 
 ## Decision checklist
 

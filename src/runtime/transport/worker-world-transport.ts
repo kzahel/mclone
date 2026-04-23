@@ -1,6 +1,14 @@
 import type { ClientChunkCache } from "../../world/level/client-chunk-cache";
 import type { WorldHost } from "../protocol/world-host";
-import type { OpenWorldRequest, SetChunkViewRequest, WorldClientMessage, WorldHostMessage, WorldOpenedMessage } from "../protocol/world-messages";
+import type {
+  OpenWorldRequest,
+  PollWorldUpdatesRequest,
+  SetChunkViewRequest,
+  SetPlayerInputRequest,
+  WorldClientMessage,
+  WorldHostMessage,
+  WorldOpenedMessage,
+} from "../protocol/world-messages";
 import { TransportWorldClient, type WorldTransport } from "./local-world-transport";
 
 export interface WorldWorkerRequestEnvelope {
@@ -75,6 +83,22 @@ export function connectWorldWorkerSession(
 
           messages = await host.setChunkView(envelope.message);
           break;
+        case "set_player_input":
+          if (host === undefined) {
+            messages = [{ type: "world_error", message: "set_player_input received before open_world" }];
+            break;
+          }
+
+          messages = await host.setPlayerInput(envelope.message);
+          break;
+        case "poll_world_updates":
+          if (host === undefined) {
+            messages = [{ type: "world_error", message: "poll_world_updates received before open_world" }];
+            break;
+          }
+
+          messages = await host.pollUpdates(envelope.message);
+          break;
       }
     } catch (error) {
       messages = [{ type: "world_error", message: formatUnknownError(error) }];
@@ -123,6 +147,14 @@ export class WorkerWorldTransport implements WorldTransport {
   }
 
   public setChunkView(request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]> {
+    return this.send(request);
+  }
+
+  public setPlayerInput(request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]> {
+    return this.send(request);
+  }
+
+  public pollUpdates(request: PollWorldUpdatesRequest): Promise<readonly WorldHostMessage[]> {
     return this.send(request);
   }
 

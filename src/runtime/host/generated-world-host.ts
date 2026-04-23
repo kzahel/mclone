@@ -7,7 +7,24 @@ import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import type { WorldHost } from "../protocol/world-host";
-import type { OpenWorldPreset, OpenWorldRequest, SetChunkViewRequest, WorldHostMessage, WorldOpenedMessage } from "../protocol/world-messages";
+import type {
+  ClientPlayerState,
+  ClientSessionState,
+  OpenWorldPreset,
+  OpenWorldRequest,
+  PollWorldUpdatesRequest,
+  SetChunkViewRequest,
+  SetPlayerInputRequest,
+  SessionChunkViewState,
+  WorldHostMessage,
+  WorldOpenedMessage,
+} from "../protocol/world-messages";
+import {
+  anchorPlayerStateToChunkView,
+  createInitialPlayerState,
+  PLAYER_TICK_INTERVAL_MS,
+  tickPlayerState,
+} from "../session/player-loop";
 import {
   createWorldSaveMetadata,
   type OpenWorldStorageRequest,
@@ -54,6 +71,20 @@ export interface GeneratedWorldHostOptions {
   readonly worldStorage?: WorldStorage;
 }
 
+const LOCAL_WORLD_SESSION_ID = "local";
+
+function createSessionChunkViewState(request: SetChunkViewRequest | undefined): SessionChunkViewState | undefined {
+  if (request === undefined) {
+    return undefined;
+  }
+
+  return {
+    centerChunkX: request.centerChunkX,
+    centerChunkZ: request.centerChunkZ,
+    radius: request.radius,
+  };
+}
+
 export class GeneratedWorldHost implements WorldHost {
   private readonly biomeSource;
   private readonly generator;
@@ -61,6 +92,13 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly resolveBlockState;
   private storageSession: WorldStorageSession | undefined;
   private worldOpened: WorldOpenedMessage | undefined;
+  private sessionState: ClientSessionState | undefined;
+  private playerState: ClientPlayerState | undefined;
+  private playerInput: SetPlayerInputRequest["input"] | undefined;
+  private currentChunkView: SetChunkViewRequest | undefined;
+  private pendingMessages: WorldHostMessage[] = [];
+  private lastPlayerTickAtMs = Date.now();
+  private playerAnchoredToChunkView = false;
   private opened = false;
 
   public constructor(private readonly options: GeneratedWorldHostOptions) {
@@ -102,13 +140,21 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     this.opened = true;
-    return [this.worldOpened];
+    this.ensureLocalSessionState();
+    return [
+      this.worldOpened,
+      this.createSessionStateMessage(),
+      this.createPlayerStateMessage(),
+    ];
   }
 
   public async setChunkView(request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]> {
     if (!this.opened) {
       return [{ type: "world_error", message: "set_chunk_view received before open_world" }];
     }
+
+    this.ensureLocalSessionState();
+    this.tickPlayerLoop();
 
     const loadedBefore = new Map(this.level.getLoadedChunks().map((chunk) => [chunkKey(chunk.chunkX, chunk.chunkZ), chunk] as const));
     await this.preloadStoredChunks(request.centerChunkX, request.centerChunkZ, request.radius);
@@ -117,8 +163,24 @@ export class GeneratedWorldHost implements WorldHost {
       SectionPos.sectionToBlockCoord(request.centerChunkZ) + 8,
       request.radius,
     );
+    const chunkViewChanged = this.currentChunkView === undefined
+      || this.currentChunkView.centerChunkX !== request.centerChunkX
+      || this.currentChunkView.centerChunkZ !== request.centerChunkZ
+      || this.currentChunkView.radius !== request.radius;
+    this.currentChunkView = request;
+    if (chunkViewChanged) {
+      this.updateSessionState();
+    }
+
+    const messages: WorldHostMessage[] = [this.createSessionStateMessage()];
+    if (!this.playerAnchoredToChunkView) {
+      this.playerState = anchorPlayerStateToChunkView(this.playerState!, createSessionChunkViewState(request)!, this.playerState!.tick);
+      this.playerAnchoredToChunkView = true;
+      messages.push(this.createPlayerStateMessage());
+    }
+
     if (!changed) {
-      return [];
+      return messages;
     }
 
     this.options.mutateWorld?.(this.level);
@@ -126,7 +188,6 @@ export class GeneratedWorldHost implements WorldHost {
     const loadedAfter = this.level.getLoadedChunks();
     const loadedAfterKeys = new Set(loadedAfter.map((chunk) => chunkKey(chunk.chunkX, chunk.chunkZ)));
     await this.persistLoadedChunks(loadedAfter);
-    const messages: WorldHostMessage[] = [];
 
     for (const [key, chunk] of loadedBefore) {
       if (loadedAfterKeys.has(key)) {
@@ -160,6 +221,28 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     return messages;
+  }
+
+  public async setPlayerInput(request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]> {
+    if (!this.opened) {
+      return [{ type: "world_error", message: "set_player_input received before open_world" }];
+    }
+
+    this.ensureLocalSessionState();
+    this.tickPlayerLoop();
+    this.playerInput = request.input;
+    this.updateSessionState();
+    return [this.createSessionStateMessage()];
+  }
+
+  public async pollUpdates(request: PollWorldUpdatesRequest): Promise<readonly WorldHostMessage[]> {
+    if (!this.opened) {
+      return [{ type: "world_error", message: "poll_world_updates received before open_world" }];
+    }
+
+    this.ensureLocalSessionState();
+    this.tickPlayerLoop();
+    return this.drainPendingMessages(request.maxMessages);
   }
 
   private async preloadStoredChunks(centerChunkX: number, centerChunkZ: number, radius: number): Promise<void> {
@@ -205,5 +288,85 @@ export class GeneratedWorldHost implements WorldHost {
         ),
       );
     }
+  }
+
+  private ensureLocalSessionState(): void {
+    if (this.worldOpened === undefined) {
+      throw new Error("Local generated world session was accessed before openWorld()");
+    }
+
+    this.sessionState ??= {
+      sessionId: LOCAL_WORLD_SESSION_ID,
+      playerId: LOCAL_WORLD_SESSION_ID,
+      saveId: this.worldOpened.saveMetadata.saveId,
+      resumed: false,
+      revision: 0,
+      chunkView: undefined,
+    };
+    this.playerState ??= createInitialPlayerState(LOCAL_WORLD_SESSION_ID);
+  }
+
+  private updateSessionState(): void {
+    this.sessionState = {
+      ...this.sessionState!,
+      revision: this.sessionState!.revision + 1,
+      chunkView: createSessionChunkViewState(this.currentChunkView),
+    };
+  }
+
+  private createSessionStateMessage(): Extract<WorldHostMessage, { type: "session_state" }> {
+    return {
+      type: "session_state",
+      state: this.sessionState!,
+    };
+  }
+
+  private createPlayerStateMessage(): Extract<WorldHostMessage, { type: "player_state" }> {
+    return {
+      type: "player_state",
+      state: this.playerState!,
+    };
+  }
+
+  private tickPlayerLoop(nowMs = Date.now()): void {
+    if (this.playerState === undefined) {
+      return;
+    }
+
+    const dueTicks = Math.floor((nowMs - this.lastPlayerTickAtMs) / PLAYER_TICK_INTERVAL_MS);
+    if (dueTicks <= 0) {
+      return;
+    }
+
+    for (let tickIndex = 0; tickIndex < dueTicks; tickIndex++) {
+      const nextPlayerState = tickPlayerState(
+        this.playerState,
+        this.playerInput,
+        this.playerState.tick + 1,
+      );
+      if (nextPlayerState !== this.playerState) {
+        this.playerState = nextPlayerState;
+        this.enqueuePlayerStateMessage();
+      }
+    }
+
+    this.lastPlayerTickAtMs += dueTicks * PLAYER_TICK_INTERVAL_MS;
+  }
+
+  private enqueuePlayerStateMessage(): void {
+    this.pendingMessages = this.pendingMessages.filter((message) => message.type !== "player_state");
+    this.pendingMessages.push(this.createPlayerStateMessage());
+  }
+
+  private drainPendingMessages(maxMessages: number | undefined): readonly WorldHostMessage[] {
+    if (maxMessages === undefined || maxMessages >= this.pendingMessages.length) {
+      const drained = this.pendingMessages;
+      this.pendingMessages = [];
+      return drained;
+    }
+
+    const drained = this.pendingMessages.slice(0, maxMessages);
+    this.pendingMessages = this.pendingMessages.slice(maxMessages);
+    return drained;
   }
 }

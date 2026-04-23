@@ -5,11 +5,20 @@ import {
   serializeWorldClientMessage,
   WORLD_HTTP_PROTOCOL_VERSION,
   type OpenWorldSessionResponse,
+  type SessionPlayerInputResponse,
+  type SessionPollUpdatesResponse,
   type SessionChunkViewResponse,
   type WorldHttpErrorCode,
   type WorldHttpErrorResponse,
 } from "../protocol/world-http-protocol";
-import type { OpenWorldRequest, SetChunkViewRequest, WorldHostMessage, WorldOpenedMessage } from "../protocol/world-messages";
+import type {
+  OpenWorldRequest,
+  PollWorldUpdatesRequest,
+  SetChunkViewRequest,
+  SetPlayerInputRequest,
+  WorldHostMessage,
+  WorldOpenedMessage,
+} from "../protocol/world-messages";
 import { TransportWorldClient, type WorldTransport } from "./local-world-transport";
 
 export const DEFAULT_REMOTE_WORLD_HOST_URL = "http://127.0.0.1:4173";
@@ -76,6 +85,8 @@ export class RemoteWorldTransport implements WorldTransport {
   private readonly baseUrl: string;
   private readonly fetchImpl: FetchLike;
   private lastOpenWorldRequest: OpenWorldRequest | undefined;
+  private lastChunkViewRequest: SetChunkViewRequest | undefined;
+  private lastPlayerInputRequest: SetPlayerInputRequest | undefined;
 
   public constructor(
     baseUrl: string,
@@ -88,6 +99,8 @@ export class RemoteWorldTransport implements WorldTransport {
 
   public async openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
     this.lastOpenWorldRequest = request;
+    this.lastChunkViewRequest = undefined;
+    this.lastPlayerInputRequest = undefined;
     return await this.openWorldInternal(request, true);
   }
 
@@ -96,7 +109,25 @@ export class RemoteWorldTransport implements WorldTransport {
       throw new Error("RemoteWorldTransport.setChunkView() called before openWorld()");
     }
 
+    this.lastChunkViewRequest = request;
     return await this.setChunkViewInternal(request, true);
+  }
+
+  public async setPlayerInput(request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]> {
+    if (this.sessionId === undefined) {
+      throw new Error("RemoteWorldTransport.setPlayerInput() called before openWorld()");
+    }
+
+    this.lastPlayerInputRequest = request;
+    return await this.setPlayerInputInternal(request, true);
+  }
+
+  public async pollUpdates(request: PollWorldUpdatesRequest): Promise<readonly WorldHostMessage[]> {
+    if (this.sessionId === undefined) {
+      throw new Error("RemoteWorldTransport.pollUpdates() called before openWorld()");
+    }
+
+    return await this.pollUpdatesInternal(request, true);
   }
 
   public getSessionId(): string | undefined {
@@ -146,14 +177,73 @@ export class RemoteWorldTransport implements WorldTransport {
       return messages;
     } catch (error) {
       if (allowReconnect && error instanceof RemoteWorldTransportError && error.code === "unknown_session" && this.lastOpenWorldRequest !== undefined) {
-        this.sessionId = undefined;
-        const reopenMessages = await this.openWorldInternal(this.lastOpenWorldRequest, false);
-        const retryMessages = await this.setChunkViewInternal(request, false);
-        return [...reopenMessages, ...retryMessages];
+        return await this.restoreSession(false);
       }
 
       throw error;
     }
+  }
+
+  private async setPlayerInputInternal(request: SetPlayerInputRequest, allowReconnect: boolean): Promise<readonly WorldHostMessage[]> {
+    try {
+      const response = await this.fetchJson<SessionPlayerInputResponse>(
+        `${this.baseUrl}/api/world/session/${encodeURIComponent(this.sessionId!)}/player-input`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+            message: serializeWorldClientMessage(request),
+          }),
+        },
+      );
+      const messages = deserializeWorldHostMessages(response.messages);
+      this.sessionId = extractSessionId(messages);
+      return messages;
+    } catch (error) {
+      if (allowReconnect && error instanceof RemoteWorldTransportError && error.code === "unknown_session" && this.lastOpenWorldRequest !== undefined) {
+        return await this.restoreSession(false);
+      }
+
+      throw error;
+    }
+  }
+
+  private async pollUpdatesInternal(request: PollWorldUpdatesRequest, allowReconnect: boolean): Promise<readonly WorldHostMessage[]> {
+    try {
+      const response = await this.fetchJson<SessionPollUpdatesResponse>(
+        `${this.baseUrl}/api/world/session/${encodeURIComponent(this.sessionId!)}/updates/poll`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+            message: serializeWorldClientMessage(request),
+          }),
+        },
+      );
+      return deserializeWorldHostMessages(response.messages);
+    } catch (error) {
+      if (allowReconnect && error instanceof RemoteWorldTransportError && error.code === "unknown_session" && this.lastOpenWorldRequest !== undefined) {
+        return await this.restoreSession(false);
+      }
+
+      throw error;
+    }
+  }
+
+  private async restoreSession(allowResumeFallback: boolean): Promise<readonly WorldHostMessage[]> {
+    if (this.lastOpenWorldRequest === undefined) {
+      throw new Error("Remote world transport could not restore a missing session before openWorld()");
+    }
+
+    this.sessionId = undefined;
+    const messages: WorldHostMessage[] = [...await this.openWorldInternal(this.lastOpenWorldRequest, allowResumeFallback)];
+    if (this.lastChunkViewRequest !== undefined) {
+      messages.push(...await this.setChunkViewInternal(this.lastChunkViewRequest, false));
+    }
+    if (this.lastPlayerInputRequest !== undefined) {
+      messages.push(...await this.setPlayerInputInternal(this.lastPlayerInputRequest, false));
+    }
+    return messages;
   }
 
   private async fetchJson<T>(url: string, init: RequestInit): Promise<T> {

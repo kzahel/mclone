@@ -16,6 +16,25 @@ export interface SetChunkViewRequest {
   readonly radius: number;
 }
 
+export interface PlayerInputCommand {
+  readonly sequence: number;
+  readonly moveX: number;
+  readonly moveY: number;
+  readonly moveZ: number;
+  readonly yaw: number;
+  readonly pitch: number;
+}
+
+export interface SetPlayerInputRequest {
+  readonly type: "set_player_input";
+  readonly input: PlayerInputCommand;
+}
+
+export interface PollWorldUpdatesRequest {
+  readonly type: "poll_world_updates";
+  readonly maxMessages?: number;
+}
+
 export interface SessionChunkViewState {
   readonly centerChunkX: number;
   readonly centerChunkZ: number;
@@ -31,6 +50,22 @@ export interface ClientSessionState {
   readonly chunkView?: SessionChunkViewState;
 }
 
+export interface ClientPlayerState {
+  readonly playerId: string;
+  readonly position: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
+  readonly rotation: {
+    readonly yaw: number;
+    readonly pitch: number;
+  };
+  readonly acknowledgedInputSequence: number;
+  readonly tick: number;
+  readonly revision: number;
+}
+
 export interface WorldOpenedMessage {
   readonly type: "world_opened";
   readonly minBuildHeight: number;
@@ -41,6 +76,11 @@ export interface WorldOpenedMessage {
 export interface SessionStateMessage {
   readonly type: "session_state";
   readonly state: ClientSessionState;
+}
+
+export interface PlayerStateMessage {
+  readonly type: "player_state";
+  readonly state: ClientPlayerState;
 }
 
 export interface ChunkSnapshotMessage {
@@ -59,5 +99,11 @@ export interface WorldErrorMessage {
   readonly message: string;
 }
 
-export type WorldClientMessage = OpenWorldRequest | SetChunkViewRequest;
-export type WorldHostMessage = WorldOpenedMessage | SessionStateMessage | ChunkSnapshotMessage | ChunkUnloadMessage | WorldErrorMessage;
+export type WorldClientMessage = OpenWorldRequest | SetChunkViewRequest | SetPlayerInputRequest | PollWorldUpdatesRequest;
+export type WorldHostMessage =
+  | WorldOpenedMessage
+  | SessionStateMessage
+  | PlayerStateMessage
+  | ChunkSnapshotMessage
+  | ChunkUnloadMessage
+  | WorldErrorMessage;

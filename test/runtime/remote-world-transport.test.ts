@@ -10,6 +10,8 @@ import {
   WORLD_HTTP_PROTOCOL_VERSION,
   type OpenWorldSessionRequest,
   type SessionChunkViewRequest,
+  type SessionPlayerInputRequest,
+  type SessionPollUpdatesRequest,
   type WorldHttpErrorCode,
   type WorldHttpErrorResponse,
 } from "../../src/runtime/protocol/world-http-protocol";
@@ -129,6 +131,98 @@ function createServiceFetch(service: GeneratedWorldRemoteService): typeof fetch 
       }
     }
 
+    const sessionPlayerInputMatch = url.pathname.match(/^\/api\/world\/session\/([^/]+)\/player-input$/);
+    if (method === "POST" && sessionPlayerInputMatch !== null) {
+      const request = JSON.parse(body) as SessionPlayerInputRequest;
+      if (request.protocolVersion !== WORLD_HTTP_PROTOCOL_VERSION) {
+        return new Response(JSON.stringify({
+          protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+          error: {
+            code: "protocol_version_mismatch",
+            message: "protocol mismatch",
+            expectedProtocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+          },
+        } satisfies WorldHttpErrorResponse), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      const message = deserializeWorldClientMessage(request.message);
+      if (message.type !== "set_player_input") {
+        throw new Error(`Expected set_player_input message, got ${message.type}`);
+      }
+
+      try {
+        return new Response(JSON.stringify(await service.setPlayerInput(decodeURIComponent(sessionPlayerInputMatch[1]!), message)), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      } catch (error) {
+        if (error instanceof Error && "code" in error && "statusCode" in error) {
+          const remoteError = error as { code: WorldHttpErrorCode; statusCode: number };
+          return new Response(JSON.stringify({
+            protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+            error: {
+              code: remoteError.code,
+              message: error.message,
+            },
+          } satisfies WorldHttpErrorResponse), {
+            status: remoteError.statusCode,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        throw error;
+      }
+    }
+
+    const sessionPollUpdatesMatch = url.pathname.match(/^\/api\/world\/session\/([^/]+)\/updates\/poll$/);
+    if (method === "POST" && sessionPollUpdatesMatch !== null) {
+      const request = JSON.parse(body) as SessionPollUpdatesRequest;
+      if (request.protocolVersion !== WORLD_HTTP_PROTOCOL_VERSION) {
+        return new Response(JSON.stringify({
+          protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+          error: {
+            code: "protocol_version_mismatch",
+            message: "protocol mismatch",
+            expectedProtocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+          },
+        } satisfies WorldHttpErrorResponse), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      const message = deserializeWorldClientMessage(request.message);
+      if (message.type !== "poll_world_updates") {
+        throw new Error(`Expected poll_world_updates message, got ${message.type}`);
+      }
+
+      try {
+        return new Response(JSON.stringify(await service.pollUpdates(decodeURIComponent(sessionPollUpdatesMatch[1]!), message)), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      } catch (error) {
+        if (error instanceof Error && "code" in error && "statusCode" in error) {
+          const remoteError = error as { code: WorldHttpErrorCode; statusCode: number };
+          return new Response(JSON.stringify({
+            protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+            error: {
+              code: remoteError.code,
+              message: error.message,
+            },
+          } satisfies WorldHttpErrorResponse), {
+            status: remoteError.statusCode,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        throw error;
+      }
+    }
+
     return new Response(JSON.stringify({
       protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
       error: {
@@ -211,6 +305,57 @@ describe("RemoteWorld transport", () => {
     });
     expect(service.getSessionCount()).toBe(1);
     expect(service.getWorldCount()).toBe(1);
+  });
+
+  test("delivers authoritative player-state updates through the remote poll path", async () => {
+    const service = new GeneratedWorldRemoteService({
+      saveRoot: await createTempDirectory(),
+    });
+    const client = createRemoteWorldClient("http://127.0.0.1:4173", createServiceFetch(service));
+
+    await client.openWorld(OPEN_WORLD_REQUEST);
+    await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const initialPlayerState = client.getPlayerState();
+    expect(initialPlayerState).toBeDefined();
+
+    expect(await client.setPlayerInput({
+      type: "set_player_input",
+      input: {
+        sequence: 1,
+        moveX: 1,
+        moveY: 0,
+        moveZ: 0,
+        yaw: 90,
+        pitch: 10,
+      },
+    })).toBe(true);
+
+    service.forceTick();
+    expect(await client.pollUpdates()).toBe(true);
+
+    expect(client.getPlayerState()).toEqual({
+      playerId: expect.any(String),
+      position: {
+        x: expect.any(Number),
+        y: expect.any(Number),
+        z: expect.any(Number),
+      },
+      rotation: {
+        yaw: 90,
+        pitch: 10,
+      },
+      acknowledgedInputSequence: 1,
+      tick: 1,
+      revision: expect.any(Number),
+    });
+    expect(client.getPlayerState()!.position.x).toBeGreaterThan(initialPlayerState!.position.x);
+    expect(client.getPlayerState()!.revision).toBeGreaterThan(initialPlayerState!.revision);
   });
 
   test("supports two concurrent remote client sessions against one shared authoritative world", async () => {
@@ -313,5 +458,44 @@ describe("RemoteWorld transport", () => {
     expect(client.getLevel().getLoadedChunkCount()).toBe(25);
     expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
     expect(client.getSessionState()?.resumed).toBe(false);
+  });
+
+  test("restores player input and state when a polling session disappears", async () => {
+    const service = new GeneratedWorldRemoteService({
+      saveRoot: await createTempDirectory(),
+    });
+    const fetchImpl = createServiceFetch(service);
+    const client = createRemoteWorldClient("http://127.0.0.1:4173", fetchImpl);
+
+    await client.openWorld(OPEN_WORLD_REQUEST);
+    await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+    await client.setPlayerInput({
+      type: "set_player_input",
+      input: {
+        sequence: 2,
+        moveX: 0,
+        moveY: 0,
+        moveZ: 1,
+        yaw: 180,
+        pitch: 0,
+      },
+    });
+
+    const previousSessionId = client.getSessionState()?.sessionId;
+    expect(previousSessionId).toBeDefined();
+    service.dropSession(previousSessionId!);
+
+    expect(await client.pollUpdates()).toBe(true);
+    service.forceTick();
+    expect(await client.pollUpdates()).toBe(true);
+
+    expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
+    expect(client.getPlayerState()?.acknowledgedInputSequence).toBe(2);
+    expect(client.getPlayerState()?.tick).toBeGreaterThan(0);
   });
 });

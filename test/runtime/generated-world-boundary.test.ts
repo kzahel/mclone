@@ -203,4 +203,42 @@ describe("GeneratedWorld boundary", () => {
     expect(foundTree).toBe(true);
     expect(foundGroundPlant).toBe(true);
   });
+
+  test("applies authoritative player input through the local host/client boundary", async () => {
+    const client = createWorldClient();
+
+    await client.openWorld(OPEN_WORLD_REQUEST);
+    await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const initialPlayerState = client.getPlayerState();
+    expect(initialPlayerState).toBeDefined();
+
+    expect(await client.setPlayerInput({
+      type: "set_player_input",
+      input: {
+        sequence: 1,
+        moveX: 1,
+        moveY: 0,
+        moveZ: 0,
+        yaw: 90,
+        pitch: 15,
+      },
+    })).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(await client.pollUpdates()).toBe(true);
+
+    expect(client.getPlayerState()?.acknowledgedInputSequence).toBe(1);
+    expect(client.getPlayerState()?.rotation).toEqual({
+      yaw: 90,
+      pitch: 15,
+    });
+    expect(client.getPlayerState()!.position.x).toBeGreaterThan(initialPlayerState!.position.x);
+    expect(client.getPlayerState()!.revision).toBeGreaterThan(initialPlayerState!.revision);
+  });
 });

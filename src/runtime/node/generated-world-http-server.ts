@@ -17,17 +17,30 @@ import {
   type OpenWorldSessionResponse,
   type SessionChunkViewRequest,
   type SessionChunkViewResponse,
+  type SessionPlayerInputRequest,
+  type SessionPlayerInputResponse,
+  type SessionPollUpdatesRequest,
+  type SessionPollUpdatesResponse,
   type WorldHttpErrorCode,
   type WorldHttpErrorResponse,
 } from "../protocol/world-http-protocol";
 import type {
   ClientSessionState,
+  ClientPlayerState,
   OpenWorldRequest,
+  PollWorldUpdatesRequest,
+  SetPlayerInputRequest,
   SessionChunkViewState,
   SetChunkViewRequest,
   WorldHostMessage,
   WorldOpenedMessage,
 } from "../protocol/world-messages";
+import {
+  anchorPlayerStateToChunkView,
+  createInitialPlayerState,
+  PLAYER_TICK_INTERVAL_MS,
+  tickPlayerState,
+} from "../session/player-loop";
 import { FileWorldStorage } from "../storage/file-world-storage";
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -42,6 +55,7 @@ export interface GeneratedWorldHttpServerOptions {
 
 export interface GeneratedWorldRemoteServiceOptions {
   readonly saveRoot?: string;
+  readonly autoTick?: boolean;
 }
 
 interface GeneratedWorldHttpServerConfig {
@@ -71,6 +85,10 @@ type SessionRecord = {
   chunkView: SetChunkViewRequest | undefined;
   visibleChunks: Set<string>;
   revision: number;
+  playerState: ClientPlayerState;
+  playerInput: SetPlayerInputRequest["input"] | undefined;
+  pendingMessages: WorldHostMessage[];
+  playerAnchoredToChunkView: boolean;
 };
 
 type SharedWorldRecord = {
@@ -173,6 +191,30 @@ function createSessionStateMessage(
   };
 }
 
+function createPlayerStateMessage(session: SessionRecord): Extract<WorldHostMessage, { type: "player_state" }> {
+  return {
+    type: "player_state",
+    state: session.playerState,
+  };
+}
+
+function enqueuePlayerStateMessage(session: SessionRecord): void {
+  session.pendingMessages = session.pendingMessages.filter((message) => message.type !== "player_state");
+  session.pendingMessages.push(createPlayerStateMessage(session));
+}
+
+function drainPendingMessages(session: SessionRecord, maxMessages: number | undefined): readonly WorldHostMessage[] {
+  if (maxMessages === undefined || maxMessages >= session.pendingMessages.length) {
+    const drained = session.pendingMessages;
+    session.pendingMessages = [];
+    return drained;
+  }
+
+  const drained = session.pendingMessages.slice(0, maxMessages);
+  session.pendingMessages = session.pendingMessages.slice(maxMessages);
+  return drained;
+}
+
 function extractWorldOpened(messages: readonly WorldHostMessage[]): WorldOpenedMessage {
   const opened = messages.find((message) => message.type === "world_opened");
   if (opened === undefined) {
@@ -187,6 +229,7 @@ function applyAuthoritativeMessages(world: SharedWorldRecord, messages: readonly
     switch (message.type) {
       case "world_opened":
       case "session_state":
+      case "player_state":
         break;
       case "chunk_snapshot":
         world.loadedSnapshots.set(chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ), message.snapshot);
@@ -384,9 +427,19 @@ export class GeneratedWorldRemoteService {
   private readonly worlds = new Map<string, SharedWorldRecord>();
   private readonly pendingWorlds = new Map<string, Promise<SharedWorldRecord>>();
   private readonly sessions = new Map<string, SessionRecord>();
+  private readonly autoTick: boolean;
+  private readonly tickTimer: ReturnType<typeof setInterval> | undefined;
+  private currentTick = 0;
 
   public constructor(options: GeneratedWorldRemoteServiceOptions = {}) {
     this.worldStorage = new FileWorldStorage(path.resolve(options.saveRoot ?? DEFAULT_SAVE_ROOT));
+    this.autoTick = options.autoTick ?? false;
+    this.tickTimer = this.autoTick
+      ? setInterval(() => {
+        this.forceTick();
+      }, PLAYER_TICK_INTERVAL_MS)
+      : undefined;
+    this.tickTimer?.unref?.();
   }
 
   public async openWorld(request: OpenWorldRequest, resumeSessionId?: string): Promise<OpenWorldSessionResponse> {
@@ -404,6 +457,10 @@ export class GeneratedWorldRemoteService {
       chunkView: undefined,
       visibleChunks: new Set<string>(),
       revision: 0,
+      playerState: createInitialPlayerState(sessionId),
+      playerInput: undefined,
+      pendingMessages: [],
+      playerAnchoredToChunkView: false,
     };
     this.sessions.set(sessionId, session);
     world.sessionIds.add(sessionId);
@@ -412,6 +469,7 @@ export class GeneratedWorldRemoteService {
       messages: serializeWorldHostMessages([
         world.worldOpened,
         createSessionStateMessage(session, world, false),
+        createPlayerStateMessage(session),
       ]),
     };
   }
@@ -458,6 +516,15 @@ export class GeneratedWorldRemoteService {
 
       const visibleChunks = getSessionVisibleChunks(queuedSession.chunkView);
       const responseMessages: WorldHostMessage[] = [createSessionStateMessage(queuedSession, queuedWorld, false)];
+      if (!queuedSession.playerAnchoredToChunkView) {
+        queuedSession.playerState = anchorPlayerStateToChunkView(
+          queuedSession.playerState,
+          createSessionChunkViewState(request)!,
+          queuedSession.playerState.tick,
+        );
+        queuedSession.playerAnchoredToChunkView = true;
+        responseMessages.push(createPlayerStateMessage(queuedSession));
+      }
 
       for (const key of previousVisibleChunks) {
         if (!visibleChunks.has(key)) {
@@ -485,12 +552,83 @@ export class GeneratedWorldRemoteService {
     });
   }
 
+  public async setPlayerInput(sessionId: string, request: SetPlayerInputRequest): Promise<SessionPlayerInputResponse> {
+    const session = this.sessions.get(sessionId);
+    if (session === undefined) {
+      throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
+    }
+
+    const world = this.worlds.get(session.worldSaveId);
+    if (world === undefined) {
+      throw new GeneratedWorldRemoteServiceError(`Unknown world ${session.worldSaveId}`, "unknown_session", 404);
+    }
+
+    return await this.runWorldOperation(world, async () => {
+      const queuedSession = this.sessions.get(sessionId);
+      if (queuedSession === undefined) {
+        throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
+      }
+
+      const queuedWorld = this.worlds.get(queuedSession.worldSaveId);
+      if (queuedWorld === undefined) {
+        throw new GeneratedWorldRemoteServiceError(`Unknown world ${queuedSession.worldSaveId}`, "unknown_session", 404);
+      }
+
+      queuedSession.playerInput = request.input;
+      queuedSession.revision++;
+      return {
+        protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+        messages: serializeWorldHostMessages([
+          createSessionStateMessage(queuedSession, queuedWorld, false),
+        ]),
+      };
+    });
+  }
+
+  public async pollUpdates(sessionId: string, request: PollWorldUpdatesRequest): Promise<SessionPollUpdatesResponse> {
+    const session = this.sessions.get(sessionId);
+    if (session === undefined) {
+      throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
+    }
+
+    const world = this.worlds.get(session.worldSaveId);
+    if (world === undefined) {
+      throw new GeneratedWorldRemoteServiceError(`Unknown world ${session.worldSaveId}`, "unknown_session", 404);
+    }
+
+    return await this.runWorldOperation(world, async () => {
+      const queuedSession = this.sessions.get(sessionId);
+      if (queuedSession === undefined) {
+        throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
+      }
+
+      const responseMessages = drainPendingMessages(queuedSession, request.maxMessages);
+      return {
+        protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+        messages: serializeWorldHostMessages(responseMessages),
+      };
+    });
+  }
+
   public getSessionCount(): number {
     return this.sessions.size;
   }
 
   public getWorldCount(): number {
     return this.worlds.size;
+  }
+
+  public forceTick(tickCount = 1): void {
+    for (let tickIndex = 0; tickIndex < tickCount; tickIndex++) {
+      this.currentTick++;
+      for (const session of this.sessions.values()) {
+        const nextPlayerState = tickPlayerState(session.playerState, session.playerInput, this.currentTick);
+        if (nextPlayerState !== session.playerState) {
+          session.playerState = nextPlayerState;
+          enqueuePlayerStateMessage(session);
+        }
+      }
+    }
   }
 
   public dropSession(sessionId: string): void {
@@ -508,6 +646,12 @@ export class GeneratedWorldRemoteService {
     for (const world of this.worlds.values()) {
       world.sessionIds.clear();
       world.aggregateChunkView = undefined;
+    }
+  }
+
+  public dispose(): void {
+    if (this.tickTimer !== undefined) {
+      clearInterval(this.tickTimer);
     }
   }
 
@@ -533,6 +677,7 @@ export class GeneratedWorldRemoteService {
     const messages: WorldHostMessage[] = [
       world.worldOpened,
       createSessionStateMessage(session, world, true),
+      createPlayerStateMessage(session),
     ];
     for (const key of session.visibleChunks) {
       const snapshot = world.loadedSnapshots.get(key);
@@ -631,6 +776,7 @@ export class GeneratedWorldHttpServer {
     };
     this.service = new GeneratedWorldRemoteService({
       saveRoot: this.config.saveRoot,
+      autoTick: true,
     });
     this.server = createServer((request, response) => {
       void this.handleRequest(request, response);
@@ -649,6 +795,7 @@ export class GeneratedWorldHttpServer {
   }
 
   public async stop(): Promise<void> {
+    this.service.dispose();
     this.service.clearSessions();
     if (!this.server.listening) {
       return;
@@ -722,6 +869,34 @@ export class GeneratedWorldHttpServer {
         }
 
         sendJson(response, 200, await this.service.setChunkView(sessionId, chunkViewRequest));
+        return;
+      }
+
+      const sessionPlayerInputMatch = url.pathname.match(/^\/api\/world\/session\/([^/]+)\/player-input$/);
+      if (request.method === "POST" && sessionPlayerInputMatch !== null) {
+        const sessionId = decodeURIComponent(sessionPlayerInputMatch[1]!);
+        const body = await readJsonBody<SessionPlayerInputRequest>(request);
+        this.assertProtocolVersion(body.protocolVersion);
+        const playerInputRequest = deserializeWorldClientMessage(body.message);
+        if (playerInputRequest.type !== "set_player_input") {
+          throw new Error(`Expected set_player_input message, got ${playerInputRequest.type}`);
+        }
+
+        sendJson(response, 200, await this.service.setPlayerInput(sessionId, playerInputRequest));
+        return;
+      }
+
+      const sessionPollUpdatesMatch = url.pathname.match(/^\/api\/world\/session\/([^/]+)\/updates\/poll$/);
+      if (request.method === "POST" && sessionPollUpdatesMatch !== null) {
+        const sessionId = decodeURIComponent(sessionPollUpdatesMatch[1]!);
+        const body = await readJsonBody<SessionPollUpdatesRequest>(request);
+        this.assertProtocolVersion(body.protocolVersion);
+        const pollUpdatesRequest = deserializeWorldClientMessage(body.message);
+        if (pollUpdatesRequest.type !== "poll_world_updates") {
+          throw new Error(`Expected poll_world_updates message, got ${pollUpdatesRequest.type}`);
+        }
+
+        sendJson(response, 200, await this.service.pollUpdates(sessionId, pollUpdatesRequest));
         return;
       }
 
