@@ -5,6 +5,7 @@ import { JavaRandom } from "../../util/java-random";
 import { StaticRenderLevel } from "../../world/level/static-render-level";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import { RenderShape } from "../../world/level/block/render-shape";
+import { AABB } from "../../world/phys/aabb";
 import { Vec3 } from "../../world/phys/vec3";
 import { BlockRenderDispatcher } from "../block/block-render-dispatcher";
 import { ModelBlockRenderer } from "../block/model-block-renderer";
@@ -273,6 +274,7 @@ export namespace ChunkRenderDispatcher {
     private readonly origin = new BlockPos.MutableBlockPos(-1, -1, -1);
     private readonly relativeOrigins = Direction.values().map(() => new BlockPos.MutableBlockPos());
     private playerChanged = false;
+    public bb = new AABB(0, 0, 0, 16, 16, 16);
 
     public constructor(
       private readonly dispatcher: ChunkRenderDispatcher,
@@ -326,6 +328,7 @@ export namespace ChunkRenderDispatcher {
 
       this.reset();
       this.origin.set(x, y, z);
+      this.bb = new AABB(x, y, z, x + 16, y + 16, z + 16);
       for (const direction of Direction.values()) {
         this.relativeOrigins[direction.get3DDataValue()]!
           .set(x, y, z)

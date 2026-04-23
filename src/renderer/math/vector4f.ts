@@ -48,4 +48,27 @@ export class Vector4f {
     this.zValue = (((matrix.m20 * x) + (matrix.m21 * y)) + (matrix.m22 * z)) + (matrix.m23 * w);
     this.wValue = (((matrix.m30 * x) + (matrix.m31 * y)) + (matrix.m32 * z)) + (matrix.m33 * w);
   }
+
+  public normalize(): void {
+    const length = Math.sqrt(this.dot(this));
+    if (length < 1.0e-6) {
+      return;
+    }
+
+    this.xValue /= length;
+    this.yValue /= length;
+    this.zValue /= length;
+    this.wValue /= length;
+  }
+
+  public dot(other: Vector4f): number {
+    return (((this.xValue * other.xValue) + (this.yValue * other.yValue)) + (this.zValue * other.zValue)) + (this.wValue * other.wValue);
+  }
+
+  public perspectiveDivide(): void {
+    this.xValue /= this.wValue;
+    this.yValue /= this.wValue;
+    this.zValue /= this.wValue;
+    this.wValue = 1.0;
+  }
 }

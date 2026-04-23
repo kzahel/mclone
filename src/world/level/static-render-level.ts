@@ -5,6 +5,7 @@ import { type BlockAndTintGetter } from "./block-and-tint-getter";
 import { LightLayer } from "./light-layer";
 import { LevelChunk } from "./chunk/level-chunk";
 import { type BlockState } from "./block/state/block-state";
+import { Vec3 } from "../phys/vec3";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -19,6 +20,9 @@ export class StaticRenderLevel implements BlockAndTintGetter {
     private readonly blockLight = 15,
     private readonly minBuildHeight = 0,
     private readonly height = 16,
+    private readonly skyColor = new Vec3(0, 128 / 255, 0),
+    private readonly clearColorScale = 1,
+    private readonly ambientLight = 0,
   ) {}
 
   public setBlock(pos: BlockPos, state: BlockState): void {
@@ -92,5 +96,21 @@ export class StaticRenderLevel implements BlockAndTintGetter {
 
   public getHeight(): number {
     return this.height;
+  }
+
+  public getMaxBuildHeight(): number {
+    return this.minBuildHeight + this.height;
+  }
+
+  public getSkyColor(_pos: Vec3, _partialTick: number): Vec3 {
+    return this.skyColor;
+  }
+
+  public getClearColorScale(): number {
+    return this.clearColorScale;
+  }
+
+  public getAmbientLight(): number {
+    return this.ambientLight;
   }
 }

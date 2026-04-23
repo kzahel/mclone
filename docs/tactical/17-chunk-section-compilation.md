@@ -54,4 +54,4 @@ Port Minecraft's section compilation path so the renderer can build many block s
 
 ## Next
 
-Tactical 18: `LevelRenderer`, `GameRenderer`, `Frustum`, `LightTexture`, and `FogRenderer`, plus the first camera-driven world render loop so compiled sections can be culled and submitted like a real frame instead of a fixed smoke layout.
+Tactical 18 is now documented in [`18-camera-driven-world-frame.md`](18-camera-driven-world-frame.md). The next slice after that is tactical 19: bridge worldgen and the renderer so the camera-driven frame path stops drawing the static smoke level and starts moving across real generated chunk data.

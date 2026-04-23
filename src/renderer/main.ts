@@ -12,19 +12,19 @@ import { BlockColors } from "./block/block-colors";
 import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
 import { ChunkRenderDispatcher } from "./chunk/chunk-render-dispatcher";
 import { ChunkBufferBuilderPack } from "./chunk-buffer-builder-pack";
-import { Matrix4f } from "./math/matrix4f";
 import { BlockModelRepository } from "./model/block-model-repository";
 import { BlockModelShaper } from "./model/block-model-shaper";
 import { preloadBlockModelSource } from "./model/browser-block-model-source";
 import { ModelBakery } from "./model/model-bakery";
 import { ModelManager } from "./model/model-manager";
+import { GameRenderer } from "./game-renderer";
 import { LevelRenderer } from "./level-renderer";
+import { LightTexture } from "./light-texture";
 import { BrowserTextureAtlasSource, loadNativeImageFromUrl } from "./texture/browser-native-image-loader";
 import { NativeImage } from "./texture/native-image";
 import { TextureAtlas } from "./texture/texture-atlas";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
 import { RenderType } from "./render-type";
-import { VertexBuffer } from "./vertex/vertex-buffer";
 import { ViewArea } from "./view-area";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
@@ -36,7 +36,9 @@ const SMOKE_BLOCKS = [SMOKE_CENTER_BLOCK, SMOKE_VISUAL_BLOCK] as const;
 const SMOKE_SPRITES = [SMOKE_CENTER_SPRITE, SMOKE_VISUAL_SPRITE] as const;
 const SMOKE_CENTER_BRIGHTNESS = 0.8;
 const SMOKE_RENDER_DISTANCE = 1;
-const SMOKE_CAMERA_POSITION = new Vec3(8.5, 8.5, 0);
+const SMOKE_CAMERA_POSITION = new Vec3(8.5, 8.5, 32);
+const SMOKE_CAMERA_X_ROT = 0.0;
+const SMOKE_CAMERA_Y_ROT = 180.0;
 
 export type BootResult =
   | {
@@ -54,11 +56,8 @@ declare global {
   }
 }
 
-const CLEAR_COLOR: GPUColor = { r: 0, g: 128 / 255, b: 0, a: 1 };
 const READBACK_FORMAT: GPUTextureFormat = "rgba8unorm";
 const DEPTH_FORMAT: GPUTextureFormat = "depth24plus";
-const WHITE_PIXEL = new Uint8Array([255, 255, 255, 255]);
-const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
 const VALIDATED_RENDER_TYPES = [
   RenderType.solid(),
   RenderType.cutoutMipped(),
@@ -72,13 +71,18 @@ const VALIDATED_RENDER_TYPES = [
 ] as const;
 
 interface ChunkDrawEntry {
-  readonly vertexBuffer: VertexBuffer;
   readonly chunkOffset: readonly [number, number, number];
+  readonly vertexBuffer: import("./vertex/vertex-buffer").VertexBuffer;
 }
 
 interface ChunkPassResources {
   readonly draw: ChunkDrawEntry;
   readonly bindGroup: GPUBindGroup;
+}
+
+interface PassLayer {
+  readonly pipeline: GPURenderPipeline;
+  readonly draws: readonly ChunkPassResources[];
 }
 
 function uploadBuffer(device: GPUDevice, bytes: Uint8Array, usage: GPUBufferUsageFlags): GPUBuffer {
@@ -90,16 +94,6 @@ function uploadBuffer(device: GPUDevice, bytes: Uint8Array, usage: GPUBufferUsag
   new Uint8Array(buffer.getMappedRange()).set(bytes);
   buffer.unmap();
   return buffer;
-}
-
-function createWhiteTexture(device: GPUDevice): GPUTextureView {
-  const texture = device.createTexture({
-    size: { width: 1, height: 1 },
-    format: "rgba8unorm",
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-  });
-  device.queue.writeTexture({ texture }, WHITE_PIXEL, { bytesPerRow: 256 }, { width: 1, height: 1 });
-  return texture.createView();
 }
 
 function createDepthView(device: GPUDevice, width: number, height: number): GPUTextureView {
@@ -128,6 +122,18 @@ function shadePixel(
   ];
 }
 
+function modulatePixel(
+  pixel: readonly [number, number, number, number],
+  multiplier: readonly [number, number, number, number],
+): readonly [number, number, number, number] {
+  return [
+    Math.round((pixel[0] * multiplier[0]) / 255),
+    Math.round((pixel[1] * multiplier[1]) / 255),
+    Math.round((pixel[2] * multiplier[2]) / 255),
+    Math.round((pixel[3] * multiplier[3]) / 255),
+  ];
+}
+
 function createAirState(): BlockState {
   const properties = BlockBehaviour.Properties.of(BlockMaterial.AIR).noCollission().noOcclusion();
   properties.isAir = true;
@@ -152,45 +158,11 @@ function populateSmokeLevel(
   fillBox(level, new BlockPos(0, 0, 0), new BlockPos(15, 15, 0), centerState);
   fillBox(level, new BlockPos(-12, 0, 0), new BlockPos(-5, 7, 7), visualState);
   fillBox(level, new BlockPos(20, 2, 0), new BlockPos(27, 9, 5), visualState);
-}
-
-function createSmokeModelViewMatrix(): Float32Array {
-  const matrix = new Matrix4f();
-  matrix.setIdentity();
-  matrix.m00 = 1 / 24;
-  matrix.m11 = 1 / 12;
-  matrix.m22 = 1 / 32;
-  matrix.m03 = -8.5 / 24;
-  matrix.m13 = -8.5 / 12;
-  return matrix.toFloat32Array();
-}
-
-async function compileScene(
-  dispatcher: ChunkRenderDispatcher,
-  viewArea: ViewArea,
-  renderType: RenderType,
-): Promise<readonly ChunkDrawEntry[]> {
-  dispatcher.setCamera(SMOKE_CAMERA_POSITION);
-  viewArea.repositionCamera(SMOKE_CAMERA_POSITION.x, SMOKE_CAMERA_POSITION.z);
-  for (const chunk of viewArea.chunks) {
-    chunk.rebuildChunkAsync(dispatcher);
-  }
-
-  await dispatcher.awaitAllTasks();
-  const draws: ChunkDrawEntry[] = [];
-  for (const chunk of viewArea.chunks) {
-    const compiledChunk = chunk.getCompiledChunk();
-    if (compiledChunk.isEmpty(renderType)) {
-      continue;
+  for (let chunkX = -2; chunkX <= 2; chunkX++) {
+    for (let chunkZ = -1; chunkZ <= 2; chunkZ++) {
+      level.getChunk(chunkX, chunkZ);
     }
-
-    draws.push({
-      vertexBuffer: chunk.getBuffer(renderType),
-      chunkOffset: [chunk.getOrigin().getX(), chunk.getOrigin().getY(), chunk.getOrigin().getZ()],
-    });
   }
-
-  return draws;
 }
 
 function createChunkBindGroup(
@@ -198,18 +170,22 @@ function createChunkBindGroup(
   pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
   sampler: GPUSampler,
   atlasTexture: GPUTextureView,
-  whiteTexture: GPUTextureView,
+  lightTexture: GPUTextureView,
   modelViewMat: Float32Array,
+  projectionMat: Float32Array,
   chunkOffset: readonly [number, number, number],
+  fogStart: number,
+  fogEnd: number,
+  fogColor: readonly [number, number, number, number],
 ): GPUBindGroup {
   const uniformBytes = pipeline.shaderProgram.createUniformBufferBytes({
     ModelViewMat: Array.from(modelViewMat),
-    ProjMat: Array.from(IDENTITY_MATRIX),
+    ProjMat: Array.from(projectionMat),
     ChunkOffset: chunkOffset,
     ColorModulator: [1, 1, 1, 1],
-    FogStart: [1_000_000],
-    FogEnd: [1_000_001],
-    FogColor: [0, 0, 0, 0],
+    FogStart: [fogStart],
+    FogEnd: [fogEnd],
+    FogColor: fogColor,
   });
   const uniformBuffer = uploadBuffer(device, uniformBytes, GPUBufferUsage.UNIFORM);
   return pipeline.shaderProgram.createBindGroup(device, pipeline.bindGroupLayout, {
@@ -220,7 +196,7 @@ function createChunkBindGroup(
     },
     textures: {
       Sampler0: atlasTexture,
-      Sampler2: whiteTexture,
+      Sampler2: lightTexture,
     },
   });
 }
@@ -229,14 +205,14 @@ function encodeDrawPass(
   encoder: GPUCommandEncoder,
   view: GPUTextureView,
   depthView: GPUTextureView,
-  pipeline: GPURenderPipeline,
-  draws: readonly ChunkPassResources[],
+  clearColor: GPUColor,
+  layers: readonly PassLayer[],
 ): void {
   const pass = encoder.beginRenderPass({
     colorAttachments: [
       {
         view,
-        clearValue: CLEAR_COLOR,
+        clearValue: clearColor,
         loadOp: "clear",
         storeOp: "store",
       },
@@ -248,10 +224,12 @@ function encodeDrawPass(
       depthStoreOp: "store",
     },
   });
-  pass.setPipeline(pipeline);
-  for (const draw of draws) {
-    pass.setBindGroup(0, draw.bindGroup);
-    draw.draw.vertexBuffer.draw(pass);
+  for (const layer of layers) {
+    pass.setPipeline(layer.pipeline);
+    for (const draw of layer.draws) {
+      pass.setBindGroup(0, draw.bindGroup);
+      draw.draw.vertexBuffer.draw(pass);
+    }
   }
   pass.end();
 }
@@ -321,7 +299,7 @@ async function boot(): Promise<BootResult> {
 
   const atlasSource = new BrowserTextureAtlasSource();
   const centerSpriteImage = await loadNativeImageFromUrl(atlasSource.resolveTextureUrl(SMOKE_CENTER_SPRITE));
-  const expectedCenterPixel = shadePixel(rgba8FromPixel(centerSpriteImage.getPixelRGBA(8, 8)), SMOKE_CENTER_BRIGHTNESS);
+  const centerSpritePixel = rgba8FromPixel(centerSpriteImage.getPixelRGBA(8, 8));
   centerSpriteImage.close();
 
   const atlas = new TextureAtlas(SMOKE_ATLAS_LOCATION, device.limits.maxTextureDimension2D);
@@ -357,27 +335,29 @@ async function boot(): Promise<BootResult> {
   const level = new StaticRenderLevel(createAirState());
   populateSmokeLevel(level, centerState, visualState);
 
-  const renderType = RenderType.solid();
   const levelRenderer = new LevelRenderer();
   const blockRenderer = new BlockRenderDispatcher(blockModelShaper, new BlockColors());
   const chunkDispatcher = new ChunkRenderDispatcher(level, levelRenderer, blockRenderer, device, (task) => queueMicrotask(task), false, new ChunkBufferBuilderPack());
   const viewArea = new ViewArea(chunkDispatcher, level, SMOKE_RENDER_DISTANCE, levelRenderer);
-  const draws = await compileScene(chunkDispatcher, viewArea, renderType);
-  if (draws.length === 0) {
-    return { ok: false, reason: "chunk dispatcher compiled no drawables for the smoke scene" };
-  }
-
-  for (const draw of draws) {
-    if (draw.vertexBuffer.getFormat() !== renderType.format()) {
-      return { ok: false, reason: "render type format does not match a compiled chunk vertex format" };
-    }
+  levelRenderer.setLevel(level, chunkDispatcher, viewArea, SMOKE_RENDER_DISTANCE);
+  const gameRenderer = new GameRenderer(canvas.width, canvas.height, 64);
+  const lightTexture = new LightTexture(gameRenderer, level, device);
+  lightTexture.tick();
+  const frame = await gameRenderer.renderLevel(0.0, Number.MAX_SAFE_INTEGER, levelRenderer, lightTexture, {
+    position: SMOKE_CAMERA_POSITION,
+    xRot: SMOKE_CAMERA_X_ROT,
+    yRot: SMOKE_CAMERA_Y_ROT,
+  });
+  const lightmapPixel = rgba8FromPixel(lightTexture.samplePacked(LightTexture.FULL_BRIGHT));
+  const expectedCenterPixel = modulatePixel(shadePixel(centerSpritePixel, SMOKE_CENTER_BRIGHTNESS), lightmapPixel);
+  const solidDraws = frame.layerDraws.get(RenderType.solid()) ?? [];
+  if (solidDraws.length === 0) {
+    return { ok: false, reason: "camera-driven level renderer produced no solid drawables for the smoke scene" };
   }
 
   device.pushErrorScope("validation");
   const pipelineCache = new RenderPipelineCache(device);
   validateShaderPipelines(pipelineCache, format, DEPTH_FORMAT);
-  const canvasPipeline = pipelineCache.getOrCreate(renderType, format, DEPTH_FORMAT);
-  const readbackPipeline = pipelineCache.getOrCreate(renderType, READBACK_FORMAT, DEPTH_FORMAT);
   const pipelineError = await popValidationError(device, "WebGPU pipeline validation failed");
   if (pipelineError) {
     return { ok: false, reason: pipelineError };
@@ -389,16 +369,74 @@ async function boot(): Promise<BootResult> {
     mipmapFilter: "nearest",
   });
   const atlasTexture = atlas.getTextureView();
-  const whiteTexture = createWhiteTexture(device);
-  const modelViewMat = createSmokeModelViewMatrix();
-  const canvasDraws = draws.map((draw) => ({
-    draw,
-    bindGroup: createChunkBindGroup(device, canvasPipeline, sampler, atlasTexture, whiteTexture, modelViewMat, draw.chunkOffset),
-  }));
-  const readbackDraws = draws.map((draw) => ({
-    draw,
-    bindGroup: createChunkBindGroup(device, readbackPipeline, sampler, atlasTexture, whiteTexture, modelViewMat, draw.chunkOffset),
-  }));
+  const clearColor: GPUColor = {
+    r: frame.fogColor[0],
+    g: frame.fogColor[1],
+    b: frame.fogColor[2],
+    a: frame.fogColor[3],
+  };
+  const renderOrder = [
+    RenderType.solid(),
+    RenderType.cutoutMipped(),
+    RenderType.cutout(),
+    RenderType.translucent(),
+    RenderType.tripwire(),
+  ] as const;
+  const canvasLayers: PassLayer[] = [];
+  const readbackLayers: PassLayer[] = [];
+  for (const renderType of renderOrder) {
+    const drawEntries = frame.layerDraws.get(renderType);
+    if (drawEntries === undefined || drawEntries.length === 0) {
+      continue;
+    }
+
+    const canvasPipeline = pipelineCache.getOrCreate(renderType, format, DEPTH_FORMAT);
+    const readbackPipeline = pipelineCache.getOrCreate(renderType, READBACK_FORMAT, DEPTH_FORMAT);
+    for (const draw of drawEntries) {
+      if (draw.vertexBuffer.getFormat() !== renderType.format()) {
+        return { ok: false, reason: "render type format does not match a compiled chunk vertex format" };
+      }
+    }
+
+    canvasLayers.push({
+      pipeline: canvasPipeline.pipeline,
+      draws: drawEntries.map((draw) => ({
+        draw,
+        bindGroup: createChunkBindGroup(
+          device,
+          canvasPipeline,
+          sampler,
+          atlasTexture,
+          frame.lightTexture,
+          frame.modelViewMatrix,
+          frame.projectionMatrix,
+          draw.chunkOffset,
+          frame.fogStart,
+          frame.fogEnd,
+          frame.fogColor,
+        ),
+      })),
+    });
+    readbackLayers.push({
+      pipeline: readbackPipeline.pipeline,
+      draws: drawEntries.map((draw) => ({
+        draw,
+        bindGroup: createChunkBindGroup(
+          device,
+          readbackPipeline,
+          sampler,
+          atlasTexture,
+          frame.lightTexture,
+          frame.modelViewMatrix,
+          frame.projectionMatrix,
+          draw.chunkOffset,
+          frame.fogStart,
+          frame.fogEnd,
+          frame.fogColor,
+        ),
+      })),
+    });
+  }
   const canvasDepthView = createDepthView(device, canvas.width, canvas.height);
   const readbackDepthView = createDepthView(device, canvas.width, canvas.height);
   const readbackTexture = device.createTexture({
@@ -409,8 +447,8 @@ async function boot(): Promise<BootResult> {
 
   device.pushErrorScope("validation");
   const encoder = device.createCommandEncoder();
-  encodeDrawPass(encoder, ctx.getCurrentTexture().createView(), canvasDepthView, canvasPipeline.pipeline, canvasDraws);
-  encodeDrawPass(encoder, readbackTexture.createView(), readbackDepthView, readbackPipeline.pipeline, readbackDraws);
+  encodeDrawPass(encoder, ctx.getCurrentTexture().createView(), canvasDepthView, clearColor, canvasLayers);
+  encodeDrawPass(encoder, readbackTexture.createView(), readbackDepthView, clearColor, readbackLayers);
   device.queue.submit([encoder.finish()]);
   await device.queue.onSubmittedWorkDone();
   const submissionError = await popValidationError(device, "WebGPU submission validation failed");

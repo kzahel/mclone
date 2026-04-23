@@ -11,7 +11,11 @@ import { ChunkRenderDispatcher } from "../../../src/renderer/chunk/chunk-render-
 import { RenderChunkRegion } from "../../../src/renderer/chunk/render-chunk-region";
 import { VisGraph } from "../../../src/renderer/chunk/vis-graph";
 import { ChunkBufferBuilderPack } from "../../../src/renderer/chunk-buffer-builder-pack";
+import { Frustum } from "../../../src/renderer/culling/frustum";
+import { GameRenderer } from "../../../src/renderer/game-renderer";
 import { LevelRenderer } from "../../../src/renderer/level-renderer";
+import { LightTexture } from "../../../src/renderer/light-texture";
+import { Matrix4f } from "../../../src/renderer/math/matrix4f";
 import { BlockModelRepository, type BlockModelSource } from "../../../src/renderer/model/block-model-repository";
 import { BlockModelShaper } from "../../../src/renderer/model/block-model-shaper";
 import { Material } from "../../../src/renderer/model/material";
@@ -29,6 +33,7 @@ import { BlockBehaviour } from "../../../src/world/level/block/state/block-behav
 import type { BlockState } from "../../../src/world/level/block/state/block-state";
 import { Material as BlockMaterial } from "../../../src/world/level/material/material";
 import { StaticRenderLevel } from "../../../src/world/level/static-render-level";
+import { AABB } from "../../../src/world/phys/aabb";
 import { Vec3 } from "../../../src/world/phys/vec3";
 
 const ASSETS_ROOT = path.resolve(process.cwd(), "reference/minecraft-1.17.1/extracted/assets");
@@ -39,6 +44,10 @@ const ASSETS_ROOT = path.resolve(process.cwd(), "reference/minecraft-1.17.1/extr
   UNIFORM: 1 << 2,
   COPY_DST: 1 << 3,
   MAP_READ: 1 << 4,
+};
+(globalThis as unknown as { GPUTextureUsage?: Record<string, number> }).GPUTextureUsage ??= {
+  TEXTURE_BINDING: 1 << 0,
+  COPY_DST: 1 << 1,
 };
 
 class ExtractedAssetModelSource implements BlockModelSource {
@@ -125,6 +134,9 @@ function createDispatcher(): BlockRenderDispatcher {
 
 function createFakeDevice(): GPUDevice {
   return {
+    queue: {
+      writeTexture() {},
+    },
     createBuffer(descriptor: GPUBufferDescriptor) {
       const mappedRange = new ArrayBuffer(Number(descriptor.size));
       return {
@@ -135,7 +147,25 @@ function createFakeDevice(): GPUDevice {
         destroy() {},
       } as unknown as GPUBuffer;
     },
+    createTexture() {
+      return {
+        createView() {
+          return {} as GPUTextureView;
+        },
+        destroy() {},
+      } as unknown as GPUTexture;
+    },
   } as unknown as GPUDevice;
+}
+
+function fillBox(level: StaticRenderLevel, from: BlockPos, to: BlockPos, state: BlockState): void {
+  for (let z = from.getZ(); z <= to.getZ(); z++) {
+    for (let y = from.getY(); y <= to.getY(); y++) {
+      for (let x = from.getX(); x <= to.getX(); x++) {
+        level.setBlock(new BlockPos(x, y, z), state);
+      }
+    }
+  }
 }
 
 describe("Chunk render infrastructure", () => {
@@ -218,5 +248,53 @@ describe("Chunk render infrastructure", () => {
     expect(compiled.hasBlocks.has(RenderType.solid())).toBe(true);
     expect(renderChunk!.getBuffer(RenderType.solid()).getFormat()).toBe(DefaultVertexFormat.BLOCK);
     expect(compiled.facesCanSeeEachother(Direction.NORTH, Direction.SOUTH)).toBe(true);
+  });
+
+  test("Frustum accepts boxes in front of the camera and rejects boxes behind it", () => {
+    const modelView = new Matrix4f();
+    modelView.setIdentity();
+    const projection = Matrix4f.perspective(70, 1, 0.05, 64);
+    const frustum = new Frustum(modelView, projection);
+    frustum.prepare(0, 0, 0);
+
+    expect(frustum.isVisible(new AABB(-1, -1, -5, 1, 1, -3))).toBe(true);
+    expect(frustum.isVisible(new AABB(-1, -1, 3, 1, 1, 5))).toBe(false);
+  });
+
+  test("GameRenderer and LevelRenderer build a camera-driven frame with only front-facing solid chunk draws", async () => {
+    const airState = createAirState();
+    const stone = createBlock("minecraft:stone", BlockMaterial.STONE);
+    const level = new StaticRenderLevel(airState);
+    fillBox(level, new BlockPos(0, 0, 0), new BlockPos(15, 15, 0), stone.defaultBlockState());
+    fillBox(level, new BlockPos(0, 0, 40), new BlockPos(15, 15, 40), stone.defaultBlockState());
+    for (let chunkX = -2; chunkX <= 2; chunkX++) {
+      for (let chunkZ = -1; chunkZ <= 4; chunkZ++) {
+        level.getChunk(chunkX, chunkZ);
+      }
+    }
+
+    const levelRenderer = new LevelRenderer();
+    const device = createFakeDevice();
+    const chunkDispatcher = new ChunkRenderDispatcher(level, levelRenderer, createDispatcher(), device, (task) => task());
+    const viewArea = new ViewArea(chunkDispatcher, level, 2, levelRenderer);
+    levelRenderer.setLevel(level, chunkDispatcher, viewArea, 2);
+    const gameRenderer = new GameRenderer(800, 600, 64);
+    const lightTexture = new LightTexture(gameRenderer, level, device);
+    lightTexture.tick();
+
+    const frame = await gameRenderer.renderLevel(0, Number.MAX_SAFE_INTEGER, levelRenderer, lightTexture, {
+      position: new Vec3(8.5, 8.5, 20),
+      xRot: 0,
+      yRot: 180,
+    });
+
+    const solidDraws = frame.layerDraws.get(RenderType.solid()) ?? [];
+    expect(solidDraws.length).toBeGreaterThan(0);
+    expect(solidDraws.some((draw) => draw.chunkOffset[2] < 0)).toBe(true);
+    expect(solidDraws.some((draw) => draw.chunkOffset[2] > 0)).toBe(false);
+    expect(frame.fogEnd).toBeGreaterThan(frame.fogStart);
+    expect(LightTexture.FULL_BLOCK).toBe(240);
+    expect(LightTexture.block(LightTexture.FULL_BRIGHT)).toBe(15);
+    expect(LightTexture.sky(LightTexture.FULL_BRIGHT)).toBe(15);
   });
 });

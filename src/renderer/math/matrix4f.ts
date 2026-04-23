@@ -146,6 +146,27 @@ export class Matrix4f {
     return new Matrix4f(this);
   }
 
+  public transpose(): void {
+    let swap = this.m10;
+    this.m10 = this.m01;
+    this.m01 = swap;
+    swap = this.m20;
+    this.m20 = this.m02;
+    this.m02 = swap;
+    swap = this.m21;
+    this.m21 = this.m12;
+    this.m12 = swap;
+    swap = this.m30;
+    this.m30 = this.m03;
+    this.m03 = swap;
+    swap = this.m31;
+    this.m31 = this.m13;
+    this.m13 = swap;
+    swap = this.m32;
+    this.m32 = this.m23;
+    this.m23 = swap;
+  }
+
   public invert(): boolean {
     const augmented = [
       [this.m00, this.m01, this.m02, this.m03, 1, 0, 0, 0],
@@ -246,6 +267,32 @@ export class Matrix4f {
     matrix.m11 = y;
     matrix.m22 = z;
     matrix.m33 = 1;
+    return matrix;
+  }
+
+  public static perspective(fovDegrees: number, aspectRatio: number, nearPlane: number, farPlane: number): Matrix4f {
+    const scale = 1.0 / Math.tan((fovDegrees * (Math.PI / 180.0)) / 2.0);
+    const matrix = new Matrix4f();
+    matrix.m00 = scale / aspectRatio;
+    matrix.m11 = scale;
+    matrix.m22 = (farPlane + nearPlane) / (nearPlane - farPlane);
+    matrix.m32 = -1.0;
+    matrix.m23 = ((2.0 * farPlane) * nearPlane) / (nearPlane - farPlane);
+    return matrix;
+  }
+
+  public static orthographic(left: number, right: number, bottom: number, top: number, nearPlane: number, farPlane: number): Matrix4f {
+    const matrix = new Matrix4f();
+    const width = right - left;
+    const height = bottom - top;
+    const depth = farPlane - nearPlane;
+    matrix.m00 = 2.0 / width;
+    matrix.m11 = 2.0 / height;
+    matrix.m22 = -2.0 / depth;
+    matrix.m03 = -(right + left) / width;
+    matrix.m13 = -(bottom + top) / height;
+    matrix.m23 = -(farPlane + nearPlane) / depth;
+    matrix.m33 = 1.0;
     return matrix;
   }
 

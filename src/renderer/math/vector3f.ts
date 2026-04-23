@@ -46,6 +46,18 @@ export class Vector3f {
     this.zValue += z;
   }
 
+  public lerp(other: Vector3f, delta: number): void {
+    this.xValue += (other.xValue - this.xValue) * delta;
+    this.yValue += (other.yValue - this.yValue) * delta;
+    this.zValue += (other.zValue - this.zValue) * delta;
+  }
+
+  public map(mapper: (value: number) => number): void {
+    this.xValue = mapper(this.xValue);
+    this.yValue = mapper(this.yValue);
+    this.zValue = mapper(this.zValue);
+  }
+
   public sub(other: Vector3f): void {
     this.xValue -= other.xValue;
     this.yValue -= other.yValue;
