@@ -21,6 +21,8 @@ const LARGE_FERN_LOCATION = new ResourceLocation("minecraft:large_fern");
 const TALL_GRASS_LOCATION = new ResourceLocation("minecraft:tall_grass");
 const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
 const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
+const SPRUCE_LEAVES_LOCATION = new ResourceLocation("minecraft:spruce_leaves");
+const BIRCH_LEAVES_LOCATION = new ResourceLocation("minecraft:birch_leaves");
 const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 const WATER_LOCATION = new ResourceLocation("minecraft:water");
 
@@ -57,6 +59,16 @@ export class BlockColors {
         ...doubleGrassBlocks,
       );
       blockColors.addColoringState(DoublePlantBlock.HALF, ...doubleGrassBlocks);
+    }
+
+    const spruceLeaves = Registry.BLOCK.get(SPRUCE_LEAVES_LOCATION) as Block | undefined;
+    if (spruceLeaves !== undefined) {
+      blockColors.register((_state, _level, _pos) => FoliageColor.getEvergreenColor(), spruceLeaves);
+    }
+
+    const birchLeaves = Registry.BLOCK.get(BIRCH_LEAVES_LOCATION) as Block | undefined;
+    if (birchLeaves !== undefined) {
+      blockColors.register((_state, _level, _pos) => FoliageColor.getBirchColor(), birchLeaves);
     }
 
     const oakLeaves = Registry.BLOCK.get(OAK_LEAVES_LOCATION) as Block | undefined;

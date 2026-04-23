@@ -62,4 +62,4 @@ Port the real overworld water-feature bridge instead of relying on terrain-only 
 
 ## Next
 
-Tactical 27: biome-decoration parity follow-through. The water-feature bridge is in, but forest/plains/swamp decoration is still partial. Next should port the remaining plain/forest flower providers, `PATCH_DEAD_BUSH`, `SEAGRASS_SWAMP`, the first vine/dead-bush/seagrass consumers, and the broader forest/birch/dark-forest/plains tables so common overworld biomes stop falling back to the current reduced vegetation set.
+Tactical 28: dark-forest canopy and tree-decorator parity. Tactical 27 landed the missing flower-provider, dead-bush, seagrass, birch, and flower-forest bridge, but dark forest still needs its real dark-oak / huge-mushroom / decorator stack before that biome can stop falling back to the simplified tree mix.

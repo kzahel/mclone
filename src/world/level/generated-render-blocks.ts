@@ -7,15 +7,18 @@ import { AirBlock } from "./block/air-block";
 import { Block } from "./block/block";
 import { BushBlock } from "./block/bush-block";
 import { CactusBlock } from "./block/cactus-block";
+import { DeadBushBlock } from "./block/dead-bush-block";
 import { DoublePlantBlock } from "./block/double-plant-block";
 import { LeavesBlock } from "./block/leaves-block";
 import { LiquidBlock } from "./block/liquid-block";
 import { MushroomBlock } from "./block/mushroom-block";
 import { RotatedPillarBlock } from "./block/rotated-pillar-block";
+import { SeagrassBlock } from "./block/seagrass-block";
 import { SnowLayerBlock } from "./block/snow-layer-block";
 import { SnowyDirtBlock } from "./block/snowy-dirt-block";
 import { SugarCaneBlock } from "./block/sugar-cane-block";
 import { SweetBerryBushBlock } from "./block/sweet-berry-bush-block";
+import { TallSeagrassBlock } from "./block/tall-seagrass-block";
 import { WaterlilyBlock } from "./block/waterlily-block";
 import { SoundType } from "./block/sound-type";
 import { BlockBehaviour } from "./block/state/block-behaviour";
@@ -37,16 +40,31 @@ const OAK_LOG_LOCATION = new ResourceLocation("minecraft:oak_log");
 const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
 const SPRUCE_LOG_LOCATION = new ResourceLocation("minecraft:spruce_log");
 const SPRUCE_LEAVES_LOCATION = new ResourceLocation("minecraft:spruce_leaves");
+const BIRCH_LOG_LOCATION = new ResourceLocation("minecraft:birch_log");
+const BIRCH_LEAVES_LOCATION = new ResourceLocation("minecraft:birch_leaves");
 const GRASS_LOCATION = new ResourceLocation("minecraft:grass");
 const FERN_LOCATION = new ResourceLocation("minecraft:fern");
 const DANDELION_LOCATION = new ResourceLocation("minecraft:dandelion");
+const POPPY_LOCATION = new ResourceLocation("minecraft:poppy");
+const ALLIUM_LOCATION = new ResourceLocation("minecraft:allium");
+const AZURE_BLUET_LOCATION = new ResourceLocation("minecraft:azure_bluet");
+const RED_TULIP_LOCATION = new ResourceLocation("minecraft:red_tulip");
+const ORANGE_TULIP_LOCATION = new ResourceLocation("minecraft:orange_tulip");
+const WHITE_TULIP_LOCATION = new ResourceLocation("minecraft:white_tulip");
+const PINK_TULIP_LOCATION = new ResourceLocation("minecraft:pink_tulip");
+const OXEYE_DAISY_LOCATION = new ResourceLocation("minecraft:oxeye_daisy");
+const CORNFLOWER_LOCATION = new ResourceLocation("minecraft:cornflower");
 const OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:oak_sapling");
 const SPRUCE_SAPLING_LOCATION = new ResourceLocation("minecraft:spruce_sapling");
+const BIRCH_SAPLING_LOCATION = new ResourceLocation("minecraft:birch_sapling");
 const LARGE_FERN_LOCATION = new ResourceLocation("minecraft:large_fern");
 const SWEET_BERRY_BUSH_LOCATION = new ResourceLocation("minecraft:sweet_berry_bush");
 const BROWN_MUSHROOM_LOCATION = new ResourceLocation("minecraft:brown_mushroom");
 const RED_MUSHROOM_LOCATION = new ResourceLocation("minecraft:red_mushroom");
 const BLUE_ORCHID_LOCATION = new ResourceLocation("minecraft:blue_orchid");
+const DEAD_BUSH_LOCATION = new ResourceLocation("minecraft:dead_bush");
+const SEAGRASS_LOCATION = new ResourceLocation("minecraft:seagrass");
+const TALL_SEAGRASS_LOCATION = new ResourceLocation("minecraft:tall_seagrass");
 const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
 const TALL_GRASS_LOCATION = new ResourceLocation("minecraft:tall_grass");
 const LILAC_LOCATION = new ResourceLocation("minecraft:lilac");
@@ -74,16 +92,31 @@ const GENERATED_BLOCK_LOCATIONS = [
   OAK_LEAVES_LOCATION,
   SPRUCE_LOG_LOCATION,
   SPRUCE_LEAVES_LOCATION,
+  BIRCH_LOG_LOCATION,
+  BIRCH_LEAVES_LOCATION,
   GRASS_LOCATION,
   FERN_LOCATION,
   DANDELION_LOCATION,
+  POPPY_LOCATION,
+  ALLIUM_LOCATION,
+  AZURE_BLUET_LOCATION,
+  RED_TULIP_LOCATION,
+  ORANGE_TULIP_LOCATION,
+  WHITE_TULIP_LOCATION,
+  PINK_TULIP_LOCATION,
+  OXEYE_DAISY_LOCATION,
+  CORNFLOWER_LOCATION,
   OAK_SAPLING_LOCATION,
   SPRUCE_SAPLING_LOCATION,
+  BIRCH_SAPLING_LOCATION,
   LARGE_FERN_LOCATION,
   SWEET_BERRY_BUSH_LOCATION,
   BROWN_MUSHROOM_LOCATION,
   RED_MUSHROOM_LOCATION,
   BLUE_ORCHID_LOCATION,
+  DEAD_BUSH_LOCATION,
+  SEAGRASS_LOCATION,
+  TALL_SEAGRASS_LOCATION,
   LILY_PAD_LOCATION,
   TALL_GRASS_LOCATION,
   LILAC_LOCATION,
@@ -117,11 +150,24 @@ const GENERATED_SPRITE_LOCATIONS = [
   new ResourceLocation("minecraft:block/spruce_log"),
   new ResourceLocation("minecraft:block/spruce_log_top"),
   new ResourceLocation("minecraft:block/spruce_leaves"),
+  new ResourceLocation("minecraft:block/birch_log"),
+  new ResourceLocation("minecraft:block/birch_log_top"),
+  new ResourceLocation("minecraft:block/birch_leaves"),
   new ResourceLocation("minecraft:block/grass"),
   new ResourceLocation("minecraft:block/fern"),
   new ResourceLocation("minecraft:block/dandelion"),
+  new ResourceLocation("minecraft:block/poppy"),
+  new ResourceLocation("minecraft:block/allium"),
+  new ResourceLocation("minecraft:block/azure_bluet"),
+  new ResourceLocation("minecraft:block/red_tulip"),
+  new ResourceLocation("minecraft:block/orange_tulip"),
+  new ResourceLocation("minecraft:block/white_tulip"),
+  new ResourceLocation("minecraft:block/pink_tulip"),
+  new ResourceLocation("minecraft:block/oxeye_daisy"),
+  new ResourceLocation("minecraft:block/cornflower"),
   new ResourceLocation("minecraft:block/oak_sapling"),
   new ResourceLocation("minecraft:block/spruce_sapling"),
+  new ResourceLocation("minecraft:block/birch_sapling"),
   new ResourceLocation("minecraft:block/large_fern_bottom"),
   new ResourceLocation("minecraft:block/large_fern_top"),
   new ResourceLocation("minecraft:block/sweet_berry_bush_stage0"),
@@ -131,6 +177,10 @@ const GENERATED_SPRITE_LOCATIONS = [
   new ResourceLocation("minecraft:block/brown_mushroom"),
   new ResourceLocation("minecraft:block/red_mushroom"),
   new ResourceLocation("minecraft:block/blue_orchid"),
+  new ResourceLocation("minecraft:block/dead_bush"),
+  new ResourceLocation("minecraft:block/seagrass"),
+  new ResourceLocation("minecraft:block/tall_seagrass_bottom"),
+  new ResourceLocation("minecraft:block/tall_seagrass_top"),
   new ResourceLocation("minecraft:block/lily_pad"),
   new ResourceLocation("minecraft:block/tall_grass_bottom"),
   new ResourceLocation("minecraft:block/tall_grass_top"),
@@ -232,6 +282,14 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     SPRUCE_LEAVES_LOCATION,
     new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
   );
+  registerBlock(
+    BIRCH_LOG_LOCATION,
+    new RotatedPillarBlock(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.WOOD).strength(2.0).sound(SoundType.WOOD)),
+  );
+  registerBlock(
+    BIRCH_LEAVES_LOCATION,
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+  );
   const grassPlantState = registerBlock(
     GRASS_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
@@ -244,12 +302,52 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     DANDELION_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
+  const poppyState = registerBlock(
+    POPPY_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const alliumState = registerBlock(
+    ALLIUM_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const azureBluetState = registerBlock(
+    AZURE_BLUET_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const redTulipState = registerBlock(
+    RED_TULIP_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const orangeTulipState = registerBlock(
+    ORANGE_TULIP_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const whiteTulipState = registerBlock(
+    WHITE_TULIP_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const pinkTulipState = registerBlock(
+    PINK_TULIP_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const oxeyeDaisyState = registerBlock(
+    OXEYE_DAISY_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const cornflowerState = registerBlock(
+    CORNFLOWER_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
   const oakSaplingState = registerBlock(
     OAK_SAPLING_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
   const spruceSaplingState = registerBlock(
     SPRUCE_SAPLING_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const birchSaplingState = registerBlock(
+    BIRCH_SAPLING_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
   const largeFernState = registerBlock(
@@ -271,6 +369,18 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   const blueOrchidState = registerBlock(
     BLUE_ORCHID_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const deadBushState = registerBlock(
+    DEAD_BUSH_LOCATION,
+    new DeadBushBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const seagrassState = registerBlock(
+    SEAGRASS_LOCATION,
+    new SeagrassBlock(BlockBehaviour.Properties.of(Material.WATER_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const tallSeagrassState = registerBlock(
+    TALL_SEAGRASS_LOCATION,
+    new TallSeagrassBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_WATER_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
   const lilyPadState = registerBlock(
     LILY_PAD_LOCATION,
@@ -328,13 +438,26 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(grassPlantState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(fernState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(dandelionState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(poppyState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(alliumState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(azureBluetState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(redTulipState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(orangeTulipState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(whiteTulipState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(pinkTulipState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(oxeyeDaisyState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(cornflowerState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(oakSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(spruceSaplingState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(birchSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(largeFernState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(sweetBerryBushState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(brownMushroomState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(redMushroomState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(blueOrchidState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(deadBushState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(seagrassState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(tallSeagrassState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(lilyPadState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(tallGrassState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(lilacState.getBlock(), RenderType.cutout());

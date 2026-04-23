@@ -1,6 +1,8 @@
 import { Registry } from "../../../core/registry";
+import { DefaultFlowerFeature } from "./default-flower-feature";
 import { DecoratedFeature } from "./decorated-feature";
 import { LakeFeature } from "./lake-feature";
+import { ProbabilityFeatureConfiguration } from "./configurations/probability-feature-configuration";
 import { RandomFeatureConfiguration } from "./configurations/random-feature-configuration";
 import { DecoratedFeatureConfiguration } from "./configurations/decorated-feature-configuration";
 import { Feature } from "./feature";
@@ -8,6 +10,7 @@ import { BlockStateConfiguration } from "./configurations/block-state-configurat
 import { RandomPatchConfiguration } from "./configurations/random-patch-configuration";
 import { SimpleRandomFeatureConfiguration } from "./configurations/simple-random-feature-configuration";
 import { SimpleBlockConfiguration } from "./configurations/simple-block-configuration";
+import { SeagrassFeature } from "./seagrass-feature";
 import { SpringConfiguration } from "./configurations/spring-configuration";
 import { TreeConfiguration } from "./configurations/tree-configuration";
 import { RandomPatchFeature } from "./random-patch-feature";
@@ -24,6 +27,8 @@ function register<C extends FeatureConfiguration, F extends Feature<C>>(name: st
 
 export const Features = {
   TREE: register("tree", new TreeFeature()),
+  FLOWER: register("flower", new DefaultFlowerFeature()),
+  NO_BONEMEAL_FLOWER: register("no_bonemeal_flower", new DefaultFlowerFeature()),
   RANDOM_PATCH: register("random_patch", new RandomPatchFeature()),
   SIMPLE_BLOCK: register("simple_block", new SimpleBlockFeature()),
   DECORATED: register("decorated", new DecoratedFeature()),
@@ -31,6 +36,7 @@ export const Features = {
   SIMPLE_RANDOM_SELECTOR: register("simple_random_selector", new SimpleRandomSelectorFeature()),
   LAKE: register("lake", new LakeFeature()),
   SPRING: register("spring", new SpringFeature()),
+  SEAGRASS: register("seagrass", new SeagrassFeature()),
 } as const;
 
 export type SimpleVegetationFeature =
@@ -41,4 +47,5 @@ export type SimpleVegetationFeature =
   | Feature<RandomFeatureConfiguration>
   | Feature<SimpleRandomFeatureConfiguration>
   | Feature<BlockStateConfiguration>
-  | Feature<SpringConfiguration>;
+  | Feature<SpringConfiguration>
+  | Feature<ProbabilityFeatureConfiguration>;

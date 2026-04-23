@@ -10,6 +10,7 @@ import { Heightmap } from "../heightmap";
 import { FrequencyWithExtraChanceDecoratorConfiguration } from "./configurations/frequency-with-extra-chance-decorator-configuration";
 import { HeightmapConfiguration } from "./configurations/heightmap-configuration";
 import { NoiseDependantDecoratorConfiguration } from "./configurations/noise-dependant-decorator-configuration";
+import { ProbabilityFeatureConfiguration } from "./configurations/probability-feature-configuration";
 import { RandomFeatureConfiguration } from "./configurations/random-feature-configuration";
 import { RandomPatchConfiguration } from "./configurations/random-patch-configuration";
 import { SimpleRandomFeatureConfiguration } from "./configurations/simple-random-feature-configuration";
@@ -18,6 +19,8 @@ import { ColumnPlacer } from "./blockplacers/column-placer";
 import { DoublePlantPlacer } from "./blockplacers/double-plant-placer";
 import { SimpleBlockPlacer } from "./blockplacers/simple-block-placer";
 import { Features } from "./features";
+import { ForestFlowerProvider } from "./stateproviders/forest-flower-provider";
+import { PlainFlowerProvider } from "./stateproviders/plain-flower-provider";
 import { SimpleStateProvider } from "./stateproviders/simple-state-provider";
 import { WeightedStateProvider } from "./stateproviders/weighted-state-provider";
 import { TreeFeatures } from "./tree-features";
@@ -26,11 +29,14 @@ import { NoneDecoratorConfiguration } from "./configurations/none-decorator-conf
 
 const GRASS_LOCATION = new ResourceLocation("minecraft:grass");
 const FERN_LOCATION = new ResourceLocation("minecraft:fern");
+const DANDELION_LOCATION = new ResourceLocation("minecraft:dandelion");
 const LARGE_FERN_LOCATION = new ResourceLocation("minecraft:large_fern");
 const SWEET_BERRY_BUSH_LOCATION = new ResourceLocation("minecraft:sweet_berry_bush");
 const BROWN_MUSHROOM_LOCATION = new ResourceLocation("minecraft:brown_mushroom");
 const RED_MUSHROOM_LOCATION = new ResourceLocation("minecraft:red_mushroom");
 const BLUE_ORCHID_LOCATION = new ResourceLocation("minecraft:blue_orchid");
+const POPPY_LOCATION = new ResourceLocation("minecraft:poppy");
+const DEAD_BUSH_LOCATION = new ResourceLocation("minecraft:dead_bush");
 const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
 const TALL_GRASS_LOCATION = new ResourceLocation("minecraft:tall_grass");
 const LILAC_LOCATION = new ResourceLocation("minecraft:lilac");
@@ -75,6 +81,10 @@ function heightmapDoubleSquare() {
 
 function heightmapSquare() {
   return heightmapDecorator(Heightmap.Types.MOTION_BLOCKING).squared();
+}
+
+function heightmapTopSolidSquare() {
+  return heightmapDecorator(Heightmap.Types.OCEAN_FLOOR_WG).squared();
 }
 
 function heightmapOceanFloorDecorator() {
@@ -178,6 +188,27 @@ function createBlueOrchidConfig(): RandomPatchConfiguration {
     .build();
 }
 
+function createDefaultFlowerConfig(): RandomPatchConfiguration {
+  return RandomPatchConfiguration.grassConfigurationBuilder(
+    new WeightedStateProvider([
+      { state: getRequiredState(POPPY_LOCATION), weight: 2 },
+      { state: getRequiredState(DANDELION_LOCATION), weight: 1 },
+    ]),
+    SimpleBlockPlacer.INSTANCE,
+  )
+    .triesCount(64)
+    .build();
+}
+
+function createDeadBushConfig(): RandomPatchConfiguration {
+  return RandomPatchConfiguration.grassConfigurationBuilder(
+    new SimpleStateProvider(getRequiredState(DEAD_BUSH_LOCATION)),
+    SimpleBlockPlacer.INSTANCE,
+  )
+    .triesCount(4)
+    .build();
+}
+
 function createWaterlilyConfig(): RandomPatchConfiguration {
   return RandomPatchConfiguration.grassConfigurationBuilder(
     new SimpleStateProvider(getRequiredState(LILY_PAD_LOCATION)),
@@ -241,6 +272,15 @@ function createCactusConfig(): RandomPatchConfiguration {
     .build();
 }
 
+function createForestFlowerFeatures() {
+  return [
+    () => Features.RANDOM_PATCH.configured(createDoubleFlowerConfig(LILAC_LOCATION)),
+    () => Features.RANDOM_PATCH.configured(createDoubleFlowerConfig(ROSE_BUSH_LOCATION)),
+    () => Features.RANDOM_PATCH.configured(createDoubleFlowerConfig(PEONY_LOCATION)),
+    () => Features.NO_BONEMEAL_FLOWER.configured(createSimpleFlowerConfig(LILY_OF_THE_VALLEY_LOCATION)),
+  ] as const;
+}
+
 export class VegetationFeatures {
   public static get BROWN_MUSHROOM_NORMAL() {
     return Features.RANDOM_PATCH.configured(createBrownMushroomConfig()).decorated(heightmapDoubleSquare()).rarity(4);
@@ -272,6 +312,18 @@ export class VegetationFeatures {
 
   public static get PATCH_CACTUS_DESERT() {
     return VegetationFeatures.PATCH_CACTUS.decorated(heightmapDoubleSquare()).count(10);
+  }
+
+  public static get PATCH_DEAD_BUSH_2() {
+    return Features.RANDOM_PATCH.configured(createDeadBushConfig()).decorated(heightmapDoubleSquare()).count(2);
+  }
+
+  public static get PATCH_DEAD_BUSH() {
+    return Features.RANDOM_PATCH.configured(createDeadBushConfig()).decorated(heightmapDoubleSquare());
+  }
+
+  public static get PATCH_DEAD_BUSH_BADLANDS() {
+    return Features.RANDOM_PATCH.configured(createDeadBushConfig()).decorated(heightmapDoubleSquare()).count(20);
   }
 
   public static get PATCH_GRASS_BADLANDS() {
@@ -310,6 +362,10 @@ export class VegetationFeatures {
     return Features.RANDOM_PATCH.configured(createWaterlilyConfig()).decorated(heightmapDoubleSquare()).count(4);
   }
 
+  public static get SEAGRASS_SWAMP() {
+    return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.6)).count(64).decorated(heightmapTopSolidSquare());
+  }
+
   public static get PATCH_PUMPKIN() {
     return Features.RANDOM_PATCH.configured(createPumpkinConfig()).decorated(heightmapDoubleSquare()).rarity(32);
   }
@@ -342,23 +398,86 @@ export class VegetationFeatures {
     return VegetationFeatures.RED_MUSHROOM_TAIGA.count(8);
   }
 
+  public static get FLOWER_DEFAULT() {
+    return Features.FLOWER.configured(createDefaultFlowerConfig()).decorated(spread32AboveDecorator()).decorated(heightmapSquare()).count(2);
+  }
+
+  public static get FLOWER_FOREST() {
+    return Features.FLOWER.configured(
+      RandomPatchConfiguration.grassConfigurationBuilder(ForestFlowerProvider.INSTANCE, SimpleBlockPlacer.INSTANCE).triesCount(64).build(),
+    )
+      .decorated(spread32AboveDecorator())
+      .decorated(heightmapSquare())
+      .count(100);
+  }
+
   public static get FLOWER_SWAMP() {
-    return Features.RANDOM_PATCH.configured(createBlueOrchidConfig()).decorated(spread32AboveDecorator()).decorated(heightmapSquare());
+    return Features.FLOWER.configured(createBlueOrchidConfig()).decorated(spread32AboveDecorator()).decorated(heightmapSquare());
+  }
+
+  public static get FLOWER_PLAIN() {
+    return Features.FLOWER.configured(
+      RandomPatchConfiguration.grassConfigurationBuilder(PlainFlowerProvider.INSTANCE, SimpleBlockPlacer.INSTANCE).triesCount(64).build(),
+    );
+  }
+
+  public static get FLOWER_PLAIN_DECORATED() {
+    return VegetationFeatures.FLOWER_PLAIN.decorated(spread32AboveDecorator())
+      .decorated(heightmapDecorator(Heightmap.Types.MOTION_BLOCKING))
+      .squared()
+      .decorated(countNoiseDecorator(-0.8, 15, 4));
+  }
+
+  public static get FOREST_FLOWER_VEGETATION_COMMON() {
+    return Features.SIMPLE_RANDOM_SELECTOR.configured(new SimpleRandomFeatureConfiguration(createForestFlowerFeatures()))
+      .count(ClampedInt.of(UniformInt.of(-1, 3), 0, 3))
+      .decorated(spread32AboveDecorator())
+      .decorated(heightmapSquare())
+      .count(5);
   }
 
   public static get FOREST_FLOWER_VEGETATION() {
-    return Features.SIMPLE_RANDOM_SELECTOR.configured(
-      new SimpleRandomFeatureConfiguration([
-        () => Features.RANDOM_PATCH.configured(createDoubleFlowerConfig(LILAC_LOCATION)),
-        () => Features.RANDOM_PATCH.configured(createDoubleFlowerConfig(ROSE_BUSH_LOCATION)),
-        () => Features.RANDOM_PATCH.configured(createDoubleFlowerConfig(PEONY_LOCATION)),
-        () => Features.RANDOM_PATCH.configured(createSimpleFlowerConfig(LILY_OF_THE_VALLEY_LOCATION)),
-      ]),
-    )
+    return Features.SIMPLE_RANDOM_SELECTOR.configured(new SimpleRandomFeatureConfiguration(createForestFlowerFeatures()))
       .count(ClampedInt.of(UniformInt.of(-3, 1), 0, 1))
       .decorated(spread32AboveDecorator())
       .decorated(heightmapSquare())
       .count(5);
+  }
+
+  public static get FOREST_FLOWER_TREES() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration([TreeFeatures.BIRCH.weighted(0.2), TreeFeatures.FANCY_OAK.weighted(0.1)], TreeFeatures.OAK),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(6, 0.1, 1));
+  }
+
+  public static get BIRCH_TALL() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration([TreeFeatures.SUPER_BIRCH.weighted(0.5)], TreeFeatures.BIRCH),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(10, 0.1, 1));
+  }
+
+  public static get TREES_BIRCH() {
+    return TreeFeatures.BIRCH.decorated(heightmapWithTreeThresholdSquared()).decorated(countExtraDecorator(10, 0.1, 1));
+  }
+
+  public static get TREES_WATER() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration([TreeFeatures.FANCY_OAK.weighted(0.1)], TreeFeatures.OAK),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(0, 0.1, 1));
+  }
+
+  public static get BIRCH_OTHER() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration([TreeFeatures.BIRCH.weighted(0.2), TreeFeatures.FANCY_OAK.weighted(0.1)], TreeFeatures.OAK),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(10, 0.1, 1));
   }
 
   public static get PLAIN_VEGETATION() {

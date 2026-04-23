@@ -21,6 +21,9 @@ const OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:oak_sapling");
 const SPRUCE_LOG_LOCATION = new ResourceLocation("minecraft:spruce_log");
 const SPRUCE_LEAVES_LOCATION = new ResourceLocation("minecraft:spruce_leaves");
 const SPRUCE_SAPLING_LOCATION = new ResourceLocation("minecraft:spruce_sapling");
+const BIRCH_LOG_LOCATION = new ResourceLocation("minecraft:birch_log");
+const BIRCH_LEAVES_LOCATION = new ResourceLocation("minecraft:birch_leaves");
+const BIRCH_SAPLING_LOCATION = new ResourceLocation("minecraft:birch_sapling");
 
 function getRequiredState(location: ResourceLocation): BlockState {
   const block = Registry.BLOCK.get(location) as Block | undefined;
@@ -86,6 +89,36 @@ export class TreeFeatures {
         new SimpleStateProvider(getRequiredState(OAK_SAPLING_LOCATION)),
         new FancyFoliagePlacer(ConstantInt.of(2), ConstantInt.of(4), 4),
         new TwoLayersFeatureSize(0, 0, 0, 4),
+      )
+        .ignoreVines()
+        .build(),
+    );
+  }
+
+  public static get BIRCH() {
+    return Features.TREE.configured(
+      new TreeConfiguration.TreeConfigurationBuilder(
+        new SimpleStateProvider(getRequiredState(BIRCH_LOG_LOCATION)),
+        new StraightTrunkPlacer(5, 2, 0),
+        new SimpleStateProvider(getRequiredState(BIRCH_LEAVES_LOCATION)),
+        new SimpleStateProvider(getRequiredState(BIRCH_SAPLING_LOCATION)),
+        new BlobFoliagePlacer(ConstantInt.of(2), ConstantInt.of(0), 3),
+        new TwoLayersFeatureSize(1, 0, 1),
+      )
+        .ignoreVines()
+        .build(),
+    );
+  }
+
+  public static get SUPER_BIRCH() {
+    return Features.TREE.configured(
+      new TreeConfiguration.TreeConfigurationBuilder(
+        new SimpleStateProvider(getRequiredState(BIRCH_LOG_LOCATION)),
+        new StraightTrunkPlacer(5, 2, 6),
+        new SimpleStateProvider(getRequiredState(BIRCH_LEAVES_LOCATION)),
+        new SimpleStateProvider(getRequiredState(BIRCH_SAPLING_LOCATION)),
+        new BlobFoliagePlacer(ConstantInt.of(2), ConstantInt.of(0), 3),
+        new TwoLayersFeatureSize(1, 0, 1),
       )
         .ignoreVines()
         .build(),
