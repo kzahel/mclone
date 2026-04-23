@@ -8,6 +8,7 @@ import {
   initializeRendererScene,
   type RendererScene,
 } from "../scene-setup";
+import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "../browser-render-config";
 import { DebugInput } from "./debug-input";
 import {
   buildPlayerInputCommand,
@@ -19,7 +20,6 @@ import {
 } from "./debug-player-controls";
 
 const SEED = 12_345n;
-const VIEW_DISTANCE = 2;
 const LIGHT_TICK_INTERVAL_MS = 1000.0;
 const WORLD_POLL_INTERVAL_MS = 50.0;
 
@@ -40,6 +40,9 @@ interface DebugRuntimeState {
   chunkViewCenterX?: number;
   chunkViewCenterZ?: number;
   loadedChunkCount: number;
+  expectedLoadedChunkCount?: number;
+  viewDistance?: number;
+  renderDistance?: number;
   frameCount: number;
   error?: string;
 }
@@ -93,6 +96,12 @@ function readInitialCamera(): {
   };
 }
 
+function readPreserveInitialCamera(): boolean {
+  const url = new URL(window.location.href);
+  const value = url.searchParams.get("preserveInitialCamera");
+  return value === "1" || value === "true";
+}
+
 function createDebugRuntimeController(
   worldTransport: "worker" | "remote",
 ): {
@@ -124,6 +133,22 @@ function showOverlayMessage(message: string): void {
   if (overlay) overlay.textContent = message;
 }
 
+async function waitForLoadedChunkRing(scene: RendererScene, expectedLoadedChunkCount: number): Promise<boolean> {
+  if (scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount) {
+    return true;
+  }
+
+  for (let attempt = 0; attempt < 40; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, WORLD_POLL_INTERVAL_MS));
+    await scene.worldClient.pollUpdates();
+    if (scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount) {
+      return true;
+    }
+  }
+
+  return scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount;
+}
+
 async function boot(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
   if (!canvas) {
@@ -132,15 +157,20 @@ async function boot(): Promise<void> {
   }
 
   const runtimeConfig = readWorldTransport();
+  const renderConfig = readBrowserRenderConfig(new URL(window.location.href));
   const initialCamera = readInitialCamera();
+  const preserveInitialCamera = readPreserveInitialCamera();
   const debugRuntime = createDebugRuntimeController(runtimeConfig.worldTransport);
   window.__mcloneDebug = debugRuntime.controller;
 
   const sceneResult = await initializeRendererScene(canvas, {
     seed: SEED,
-    viewDistance: VIEW_DISTANCE,
+    viewDistance: renderConfig.viewDistance,
+    renderDistance: renderConfig.renderDistance,
     worldTransport: runtimeConfig.worldTransport,
     remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
+    skyColor: renderConfig.skyColor,
+    clearColorScale: renderConfig.clearColorScale,
   });
   if (!sceneResult.ok) {
     debugRuntime.controller.state.error = sceneResult.reason;
@@ -148,6 +178,8 @@ async function boot(): Promise<void> {
     return;
   }
   const scene: RendererScene = sceneResult.scene;
+  const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
+  debugRuntime.controller.state.expectedLoadedChunkCount = expectedLoadedChunkCount;
 
   const input = new DebugInput(canvas);
   const depthView = createSceneDepthView(scene.device, canvas.width, canvas.height);
@@ -195,14 +227,17 @@ async function boot(): Promise<void> {
       pitch: initialCamera.xRot,
     };
   }
-  await new Promise((resolve) => setTimeout(resolve, WORLD_POLL_INTERVAL_MS));
-  await scene.worldClient.pollUpdates();
-  const initialPlayerState = scene.worldClient.getPlayerState();
-  if (initialPlayerState !== undefined) {
-    camera = createCameraStateFromPlayerState(initialPlayerState);
+  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount)) {
+    debugRuntime.controller.state.error =
+      `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${scene.level.getLoadedChunkCount().toString()}`;
+    showOverlayMessage(`error: ${debugRuntime.controller.state.error}`);
+    return;
   }
   debugRuntime.controller.state.ready = true;
   debugRuntime.controller.state.saveId = scene.saveMetadata.saveId;
+  debugRuntime.controller.state.loadedChunkCount = scene.level.getLoadedChunkCount();
+  debugRuntime.controller.state.viewDistance = scene.viewDistance;
+  debugRuntime.controller.state.renderDistance = scene.gameRenderer.getRenderDistance();
 
   const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
   showOverlayMessage(
@@ -241,7 +276,9 @@ async function boot(): Promise<void> {
         }
       }
 
-      camera = createCameraStateFromPlayerState(playerState);
+      if (!preserveInitialCamera) {
+        camera = createCameraStateFromPlayerState(playerState);
+      }
       const chunkViewRequest = createChunkViewRequestForPlayerState(playerState, scene.viewDistance);
       if (await scene.worldClient.setChunkView(chunkViewRequest)) {
         scene.levelRenderer.allChanged();

@@ -30,6 +30,7 @@ import { TextureAtlas } from "./texture/texture-atlas";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
 import { RenderType } from "./render-type";
 import { ViewArea } from "./view-area";
+import { Vec3 } from "../world/phys/vec3";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
 const GRASS_COLORMAP_LOCATION = new ResourceLocation("minecraft:colormap/grass");
@@ -48,10 +49,13 @@ const RENDER_ORDER = [
 export interface SceneInitOptions {
   readonly seed: bigint;
   readonly viewDistance: number;
+  readonly renderDistance?: number;
   readonly fov?: number;
   readonly worldTransport?: "worker" | "remote";
   readonly remoteWorldHostUrl?: string;
   readonly preset?: OpenWorldPreset;
+  readonly skyColor?: Vec3;
+  readonly clearColorScale?: number;
 }
 
 export interface RendererScene {
@@ -95,6 +99,8 @@ function createWorldClient(
     biomeSource,
     biomeZoomSeed: options.seed,
     blockStateResolver,
+    skyColor: options.skyColor,
+    clearColorScale: options.clearColorScale,
   });
 
   if (options.worldTransport === "remote") {
@@ -188,7 +194,12 @@ export async function initializeRendererScene(
   const viewArea = new ViewArea(chunkDispatcher, level, options.viewDistance, levelRenderer);
   levelRenderer.setLevel(level, chunkDispatcher, viewArea, options.viewDistance);
 
-  const gameRenderer = new GameRenderer(canvas.width, canvas.height, 64, options.fov);
+  const gameRenderer = new GameRenderer(
+    canvas.width,
+    canvas.height,
+    options.renderDistance ?? Math.max(32, (options.viewDistance + 2) * 16),
+    options.fov,
+  );
   const lightTexture = new LightTexture(gameRenderer, level, device);
   lightTexture.tick();
 

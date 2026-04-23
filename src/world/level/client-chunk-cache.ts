@@ -8,6 +8,7 @@ import type { BlockState } from "./block/state/block-state";
 import { hydrateChunkFromSnapshot, type BlockStateResolver, type ChunkSnapshot } from "./chunk-snapshot";
 import { StaticRenderLevel } from "./static-render-level";
 import { type LevelChunk } from "./chunk/level-chunk";
+import { Vec3 } from "../phys/vec3";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -26,6 +27,8 @@ export interface ClientChunkCacheOptions {
   readonly blockStateResolver: BlockStateResolver;
   readonly skyLight?: number;
   readonly blockLight?: number;
+  readonly skyColor?: Vec3;
+  readonly clearColorScale?: number;
 }
 
 export class ClientChunkCache extends StaticRenderLevel implements NoiseBiomeSource {
@@ -36,7 +39,15 @@ export class ClientChunkCache extends StaticRenderLevel implements NoiseBiomeSou
   private readonly blockStateResolver: BlockStateResolver;
 
   public constructor(options: ClientChunkCacheOptions) {
-    super(options.airState, options.skyLight, options.blockLight, options.minBuildHeight, options.height);
+    super(
+      options.airState,
+      options.skyLight,
+      options.blockLight,
+      options.minBuildHeight,
+      options.height,
+      options.skyColor,
+      options.clearColorScale,
+    );
     this.biomeSource = options.biomeSource;
     this.biomeZoomSeed = options.biomeZoomSeed;
     this.blockStateResolver = options.blockStateResolver;

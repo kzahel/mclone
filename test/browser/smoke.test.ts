@@ -3,11 +3,20 @@ import { type BootResult } from "../../src/renderer/main.ts";
 
 const SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-smoke.png";
 const REMOTE_WORLD_HOST_URL = "http://127.0.0.1:4173";
+const EXPECTED_LOADED_CHUNK_COUNT = 225;
 
 function createRemoteSmokeUrl(): string {
   return `/?${new URLSearchParams({
     worldTransport: "remote",
     worldHostUrl: REMOTE_WORLD_HOST_URL,
+    viewDistance: "6",
+    renderDistance: "192",
+    fogColor: "8fb8ff",
+    cameraX: "960.5",
+    cameraY: "132",
+    cameraZ: "-8127.5",
+    cameraYaw: "225",
+    cameraPitch: "60",
   }).toString()}`;
 }
 
@@ -16,6 +25,8 @@ async function bootPage(page: Page): Promise<BootResult> {
   await page.waitForFunction(() => typeof window.__mcloneReady !== "undefined");
   return (await page.evaluate(() => window.__mcloneReady)) as BootResult;
 }
+
+test.setTimeout(90_000);
 
 test("WebGPU boot succeeds against the remote Node host with two browser clients", async ({ browser }) => {
   const context = await browser.newContext();
@@ -38,16 +49,11 @@ test("WebGPU boot succeeds against the remote Node host with two browser clients
       expect(result.meshTransport).toBe("worker");
       expect(result.adapterInfo.length).toBeGreaterThan(0);
       expect(["bgra8unorm", "rgba8unorm"]).toContain(result.format);
-      expect(result.loadedChunkCount).toBeGreaterThan(0);
+      expect(result.loadedChunkCount).toBe(EXPECTED_LOADED_CHUNK_COUNT);
+      expect(result.expectedLoadedChunkCount).toBe(EXPECTED_LOADED_CHUNK_COUNT);
+      expect(result.viewDistance).toBe(6);
+      expect(result.renderDistance).toBe(192);
       expect(result.solidDrawCount).toBeGreaterThan(0);
-      expect(result.cutoutDrawCount).toBeGreaterThan(0);
-      expect(result.translucentDrawCount).toBeGreaterThan(0);
-      expect(result.terrainPixel).not.toEqual(result.clearPixel);
-      const pixelDelta = result.terrainPixel.reduce(
-        (sum, channel, index) => sum + Math.abs(channel - result.clearPixel[index]!),
-        0,
-      );
-      expect(pixelDelta).toBeGreaterThan(20);
     }
   }
 

@@ -9,22 +9,16 @@ import {
   encodeSceneFrame,
   initializeRendererScene,
   SCENE_DEPTH_FORMAT,
+  type RendererScene,
 } from "./scene-setup";
+import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "./browser-render-config";
 
 const GENERATED_SEED = 12_345n;
-const GENERATED_VIEW_DISTANCE = 1;
-const GENERATED_CAMERA_PATH = [
-  {
-    position: new Vec3(8.5, 104.0, 40.5),
-    xRot: 60.0,
-    yRot: 180.0,
-  },
-  {
-    position: new Vec3(40.5, 104.0, 40.5),
-    xRot: 60.0,
-    yRot: 180.0,
-  },
-] as const satisfies readonly CameraState[];
+const DEFAULT_SMOKE_CAMERA = {
+  position: new Vec3(960.5, 132.0, -8127.5),
+  xRot: 60.0,
+  yRot: 225.0,
+} as const satisfies CameraState;
 
 type BootWorldTransport = "worker" | "remote";
 
@@ -47,6 +41,9 @@ export type BootResult =
       terrainPixel: readonly [number, number, number, number];
       clearPixel: readonly [number, number, number, number];
       loadedChunkCount: number;
+      expectedLoadedChunkCount: number;
+      viewDistance: number;
+      renderDistance: number;
       solidDrawCount: number;
       cutoutDrawCount: number;
       translucentDrawCount: number;
@@ -90,6 +87,33 @@ function readWorldTransport(): {
   }
 
   return { worldTransport: "worker" };
+}
+
+function parseOptionalFloat(url: URL, key: string): number | undefined {
+  const raw = url.searchParams.get(key);
+  if (raw === null) {
+    return undefined;
+  }
+
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function readSmokeCamera(url: URL): CameraState | undefined {
+  const x = parseOptionalFloat(url, "cameraX");
+  const y = parseOptionalFloat(url, "cameraY");
+  const z = parseOptionalFloat(url, "cameraZ");
+  const xRot = parseOptionalFloat(url, "cameraPitch");
+  const yRot = parseOptionalFloat(url, "cameraYaw");
+  if (x === undefined || y === undefined || z === undefined || xRot === undefined || yRot === undefined) {
+    return undefined;
+  }
+
+  return {
+    position: new Vec3(x, y, z),
+    xRot,
+    yRot,
+  };
 }
 
 function rgba8FromColor(color: readonly [number, number, number, number]): readonly [number, number, number, number] {
@@ -154,44 +178,89 @@ async function readPixel(
   return [bytes[0]!, bytes[1]!, bytes[2]!, bytes[3]!];
 }
 
-async function boot(): Promise<BootResult> {
-  const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
-  if (!canvas) return { ok: false, reason: "canvas #renderer not found" };
-
-  const runtimeConfig = readWorldTransport();
-  const sceneResult = await initializeRendererScene(canvas, {
-    seed: GENERATED_SEED,
-    viewDistance: GENERATED_VIEW_DISTANCE,
-    worldTransport: runtimeConfig.worldTransport,
-    remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
-  });
-  if (!sceneResult.ok) {
-    return sceneResult;
+async function waitForLoadedChunkRing(scene: RendererScene, expectedLoadedChunkCount: number): Promise<boolean> {
+  if (scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount) {
+    return true;
   }
-  const scene = sceneResult.scene;
+
+  for (let attempt = 0; attempt < 40; attempt++) {
+    await sleep(50);
+    await scene.worldClient.pollUpdates();
+    if (scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount) {
+      return true;
+    }
+  }
+
+  return scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount;
+}
+
+async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expectedLoadedChunkCount: number): Promise<LevelRenderFrame> {
+  if (await scene.worldClient.setChunkView({
+    type: "set_chunk_view",
+    centerChunkX: SectionPos.posToSectionCoord(camera.position.x),
+    centerChunkZ: SectionPos.posToSectionCoord(camera.position.z),
+    radius: scene.viewDistance,
+  })) {
+    scene.levelRenderer.allChanged();
+  }
+
+  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount)) {
+    throw new Error(
+      `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${scene.level.getLoadedChunkCount().toString()}`,
+    );
+  }
 
   let frame: LevelRenderFrame | undefined;
-  for (const step of GENERATED_CAMERA_PATH) {
-    if (await scene.worldClient.setChunkView({
-      type: "set_chunk_view",
-      centerChunkX: SectionPos.posToSectionCoord(step.position.x),
-      centerChunkZ: SectionPos.posToSectionCoord(step.position.z),
-      radius: GENERATED_VIEW_DISTANCE,
-    })) {
-      scene.levelRenderer.allChanged();
-    }
-
+  for (let attempt = 0; attempt < 4; attempt++) {
     frame = await scene.gameRenderer.renderLevel(
       0.0,
       Number.MAX_SAFE_INTEGER,
       scene.levelRenderer,
       scene.lightTexture,
-      step,
+      camera,
     );
+
+    if ((frame.layerDraws.get(RenderType.solid())?.length ?? 0) > 0) {
+      return frame;
+    }
+
+    await sleep(50);
+    await scene.worldClient.pollUpdates();
+    scene.levelRenderer.allChanged();
   }
 
-  if (frame === undefined) {
-    return { ok: false, reason: "no generated-terrain frame was produced" };
+  return frame!;
+}
+
+async function boot(): Promise<BootResult> {
+  const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
+  if (!canvas) return { ok: false, reason: "canvas #renderer not found" };
+
+  const runtimeConfig = readWorldTransport();
+  const url = typeof window === "undefined" ? new URL("http://127.0.0.1/") : new URL(window.location.href);
+  const renderConfig = readBrowserRenderConfig(url);
+  const requestedCamera = readSmokeCamera(url);
+  const sceneResult = await initializeRendererScene(canvas, {
+    seed: GENERATED_SEED,
+    viewDistance: renderConfig.viewDistance,
+    renderDistance: renderConfig.renderDistance,
+    worldTransport: runtimeConfig.worldTransport,
+    remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
+    skyColor: renderConfig.skyColor,
+    clearColorScale: renderConfig.clearColorScale,
+  });
+  if (!sceneResult.ok) {
+    return sceneResult;
+  }
+  const scene = sceneResult.scene;
+  const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
+  const camera = requestedCamera ?? DEFAULT_SMOKE_CAMERA;
+  let frame: LevelRenderFrame;
+  try {
+    frame = await renderSmokeCamera(scene, camera, expectedLoadedChunkCount);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason };
   }
 
   const solidDraws = frame.layerDraws.get(RenderType.solid()) ?? [];
@@ -297,6 +366,9 @@ async function boot(): Promise<BootResult> {
     terrainPixel,
     clearPixel,
     loadedChunkCount: scene.level.getLoadedChunkCount(),
+    expectedLoadedChunkCount,
+    viewDistance: scene.viewDistance,
+    renderDistance: scene.gameRenderer.getRenderDistance(),
     solidDrawCount: solidDraws.length,
     cutoutDrawCount: cutoutDraws.length,
     translucentDrawCount: translucentDraws.length,
