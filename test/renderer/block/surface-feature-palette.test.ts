@@ -56,6 +56,8 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:tall_grass"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_sapling"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:birch_sapling"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:bamboo_sapling"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:bamboo"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:sweet_berry_bush"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:dead_bush"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:seagrass"))).toBe(RenderType.cutout());

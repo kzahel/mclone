@@ -114,6 +114,10 @@ function heightmapTopSolidDecorator() {
   return heightmapDecorator(Heightmap.Types.OCEAN_FLOOR_WG);
 }
 
+function heightmapWorldSurfaceDecorator() {
+  return heightmapDecorator(Heightmap.Types.WORLD_SURFACE);
+}
+
 function heightmapOceanFloorDecorator() {
   return heightmapDecorator(Heightmap.Types.OCEAN_FLOOR);
 }
@@ -553,6 +557,17 @@ export class VegetationFeatures {
       .decorated(countNoiseBiasedDecorator(80, 80.0, 0.0));
   }
 
+  public static get BAMBOO_LIGHT() {
+    return Features.BAMBOO.configured(new ProbabilityFeatureConfiguration(0.0)).decorated(heightmapDoubleSquare()).count(16);
+  }
+
+  public static get BAMBOO() {
+    return Features.BAMBOO.configured(new ProbabilityFeatureConfiguration(0.2))
+      .decorated(heightmapWorldSurfaceDecorator())
+      .squared()
+      .decorated(countNoiseBiasedDecorator(160, 80.0, 0.3));
+  }
+
   public static get PATCH_PUMPKIN() {
     return Features.RANDOM_PATCH.configured(createPumpkinConfig()).decorated(heightmapDoubleSquare()).rarity(32);
   }
@@ -696,6 +711,17 @@ export class VegetationFeatures {
     )
       .decorated(heightmapWithTreeThresholdSquared())
       .decorated(countExtraDecorator(50, 0.1, 1));
+  }
+
+  public static get BAMBOO_VEGETATION() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration(
+        [TreeFeatures.FANCY_OAK.weighted(0.05), TreeFeatures.JUNGLE_BUSH.weighted(0.15), TreeFeatures.MEGA_JUNGLE_TREE.weighted(0.7)],
+        Features.RANDOM_PATCH.configured(createJungleGrassConfig()),
+      ),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(30, 0.1, 1));
   }
 
   public static get TREES_SAVANNA() {

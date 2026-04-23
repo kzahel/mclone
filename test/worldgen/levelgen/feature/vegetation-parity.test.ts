@@ -10,6 +10,7 @@ import { OverworldBiomeSource } from "../../../../src/worldgen/biome/overworld-b
 import { getOverworldBiomeGenerationSettings } from "../../../../src/worldgen/biome/overworld-biome-generation-settings";
 import { DecoratedFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorated-feature-configuration";
 import { CountConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/count-configuration";
+import { ProbabilityFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/probability-feature-configuration";
 import { Features } from "../../../../src/worldgen/levelgen/feature/features";
 import { TreeFeatures } from "../../../../src/worldgen/levelgen/feature/tree-features";
 import { VegetationFeatures } from "../../../../src/worldgen/levelgen/feature/vegetation-features";
@@ -69,6 +70,17 @@ const JUNGLE_TREE_OUTPUT_LOCATIONS = new Set([
   "minecraft:jungle_leaves",
   "minecraft:vine",
   "minecraft:cocoa",
+]);
+
+const BAMBOO_VEGETATION_OUTPUT_LOCATIONS = new Set([
+  "minecraft:oak_log",
+  "minecraft:oak_leaves",
+  "minecraft:jungle_log",
+  "minecraft:jungle_leaves",
+  "minecraft:vine",
+  "minecraft:cocoa",
+  "minecraft:grass",
+  "minecraft:fern",
 ]);
 
 const SNOWY_TREE_OUTPUT_LOCATIONS = new Set([
@@ -361,6 +373,50 @@ describe("Vegetation parity", () => {
     expect(collectPlacedLocations(vinesLevel, 12, 12)).toContain("minecraft:vine");
   });
 
+  test("bamboo feature and bamboo-jungle vegetation paths place translated bamboo and jungle-family blocks", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const generator = createGenerator();
+
+    const bambooLightLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    expect(
+      Features.BAMBOO.configured(new ProbabilityFeatureConfiguration(0.0)).place(bambooLightLevel, generator, new WorldgenRandom(21n), new BlockPos(8, 11, 8)),
+    ).toBe(true);
+    const bambooLightPlacements = collectPlacedLocations(bambooLightLevel, 11, 32);
+    expect(bambooLightPlacements).toContain("minecraft:bamboo");
+    expect(bambooLightPlacements).not.toContain("minecraft:podzol");
+
+    let bambooLevel: StaticRenderLevel | undefined;
+    for (let seed = 0n; seed < 128n; seed++) {
+      const candidate = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+      if (Features.BAMBOO.configured(new ProbabilityFeatureConfiguration(0.2)).place(candidate, generator, new WorldgenRandom(seed), new BlockPos(8, 11, 8))) {
+        bambooLevel = candidate;
+        if (collectPlacedLocations(candidate, 10, 32).includes("minecraft:podzol")) {
+          break;
+        }
+      }
+    }
+    expect(bambooLevel).toBeDefined();
+    const bambooPlacements = collectPlacedLocations(bambooLevel!, 10, 32);
+    expect(bambooPlacements).toContain("minecraft:bamboo");
+    expect(bambooPlacements).toContain("minecraft:podzol");
+
+    let bambooVegetationLevel: StaticRenderLevel | undefined;
+    for (let seed = 0n; seed < 64n; seed++) {
+      const candidate = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+      if (VegetationFeatures.BAMBOO_VEGETATION.place(candidate, generator, new WorldgenRandom(seed), new BlockPos(0, 0, 0))) {
+        bambooVegetationLevel = candidate;
+        break;
+      }
+    }
+    expect(bambooVegetationLevel).toBeDefined();
+    const bambooVegetationPlacements = collectPlacedLocations(bambooVegetationLevel!, 11, 40);
+    expect(bambooVegetationPlacements.length).toBeGreaterThan(0);
+    expect(bambooVegetationPlacements.some((location) => BAMBOO_VEGETATION_OUTPUT_LOCATIONS.has(location))).toBe(true);
+    for (const location of bambooVegetationPlacements) {
+      expect(BAMBOO_VEGETATION_OUTPUT_LOCATIONS.has(location)).toBe(true);
+    }
+  });
+
   test("snowy, giant-taiga, and mushroom-field feature paths place translated spruce, podzol, and huge-mushroom blocks", () => {
     const blocks = registerGeneratedRenderBlocks();
     const generator = createGenerator();
@@ -398,7 +454,7 @@ describe("Vegetation parity", () => {
     }
   });
 
-  test("overworld biome settings wire the shoreline, ocean, swamp, forest, savanna, jungle, snowy, giant-taiga, and mushroom tables", () => {
+  test("overworld biome settings wire the shoreline, ocean, swamp, forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, and mushroom tables", () => {
     registerGeneratedRenderBlocks();
     const beachFeatures = getOverworldBiomeGenerationSettings("minecraft:beach").features().flat().map((supplier) => getBaseFeature(supplier()));
     const stoneShoreFeatures = getOverworldBiomeGenerationSettings("minecraft:stone_shore").features().flat().map((supplier) => getBaseFeature(supplier()));
@@ -452,6 +508,14 @@ describe("Vegetation parity", () => {
     const jungleFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle").features().flat().map((supplier) => getBaseFeature(supplier()));
     const jungleHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
     const jungleEdgeFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle_edge").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const bambooJungleFeatures = getOverworldBiomeGenerationSettings("minecraft:bamboo_jungle")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const bambooJungleHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:bamboo_jungle_hills")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
     const snowyTundraFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_tundra").features().flat().map((supplier) => getBaseFeature(supplier()));
     const snowyMountainsFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_mountains").features().flat().map((supplier) => getBaseFeature(supplier()));
     const iceSpikesFeatures = getOverworldBiomeGenerationSettings("minecraft:ice_spikes").features().flat().map((supplier) => getBaseFeature(supplier()));
@@ -534,11 +598,20 @@ describe("Vegetation parity", () => {
     expect(shatteredSavannaFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
     expect(shatteredSavannaPlateauFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(jungleFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(jungleFeatures.some((feature) => feature === Features.BAMBOO)).toBe(true);
     expect(jungleFeatures.some((feature) => feature === Features.VINES)).toBe(true);
     expect(jungleHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(jungleHillsFeatures.some((feature) => feature === Features.BAMBOO)).toBe(true);
     expect(jungleHillsFeatures.some((feature) => feature === Features.VINES)).toBe(true);
     expect(jungleEdgeFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(jungleEdgeFeatures.some((feature) => feature === Features.BAMBOO)).toBe(false);
     expect(jungleEdgeFeatures.some((feature) => feature === Features.VINES)).toBe(true);
+    expect(bambooJungleFeatures.some((feature) => feature === Features.BAMBOO)).toBe(true);
+    expect(bambooJungleFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(bambooJungleFeatures.some((feature) => feature === Features.VINES)).toBe(true);
+    expect(bambooJungleHillsFeatures.some((feature) => feature === Features.BAMBOO)).toBe(true);
+    expect(bambooJungleHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(bambooJungleHillsFeatures.some((feature) => feature === Features.VINES)).toBe(true);
     expect(snowyTundraFeatures.some((feature) => feature === Features.TREE)).toBe(true);
     expect(snowyTundraFeatures.some((feature) => feature === Features.FREEZE_TOP_LAYER)).toBe(true);
     expect(snowyMountainsFeatures.some((feature) => feature === Features.TREE)).toBe(true);

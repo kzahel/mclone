@@ -26,6 +26,19 @@ export class BlockTag {
 }
 
 export class BlockTags {
+  public static readonly BAMBOO_PLANTABLE_ON = new BlockTag("minecraft:bamboo_plantable_on", [
+    "minecraft:sand",
+    "minecraft:red_sand",
+    "minecraft:dirt",
+    "minecraft:grass_block",
+    "minecraft:podzol",
+    "minecraft:coarse_dirt",
+    "minecraft:mycelium",
+    "minecraft:bamboo",
+    "minecraft:bamboo_sapling",
+    "minecraft:gravel",
+  ]);
+
   public static readonly CORAL_BLOCKS = new BlockTag("minecraft:coral_blocks", [
     "minecraft:tube_coral_block",
     "minecraft:brain_coral_block",

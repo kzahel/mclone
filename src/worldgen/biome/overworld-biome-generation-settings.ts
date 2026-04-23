@@ -205,6 +205,15 @@ function addJungleTrees(builder: BiomeGenerationSettings.Builder, edge: boolean)
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => (edge ? VegetationFeatures.TREES_JUNGLE_EDGE : VegetationFeatures.TREES_JUNGLE));
 }
 
+function addLightBambooVegetation(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BAMBOO_LIGHT);
+}
+
+function addBambooVegetation(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BAMBOO);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BAMBOO_VEGETATION);
+}
+
 function addJungleGrass(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_JUNGLE);
 }
@@ -453,11 +462,19 @@ function buildSavannaSettings(shattered: boolean): BiomeGenerationSettings {
   return builder.build();
 }
 
-function buildJungleSettings(edge: boolean): BiomeGenerationSettings {
+function buildJungleSettings(edge: boolean, bamboo = false): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
-  addJungleTrees(builder, edge);
+  if (bamboo) {
+    addBambooVegetation(builder);
+  } else {
+    if (!edge) {
+      addLightBambooVegetation(builder);
+    }
+
+    addJungleTrees(builder, edge);
+  }
   addWarmFlowers(builder);
   addJungleGrass(builder);
   addDefaultMushrooms(builder);
@@ -570,6 +587,8 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:flower_forest", buildFlowerForestSettings()],
   ["minecraft:frozen_ocean", buildOceanSettings("frozen", false)],
   ["minecraft:frozen_river", buildRiverSettings(true)],
+  ["minecraft:bamboo_jungle", buildJungleSettings(false, true)],
+  ["minecraft:bamboo_jungle_hills", buildJungleSettings(false, true)],
   ["minecraft:giant_spruce_taiga", buildGiantTaigaSettings(true)],
   ["minecraft:giant_spruce_taiga_hills", buildGiantTaigaSettings(true)],
   ["minecraft:giant_tree_taiga", buildGiantTaigaSettings(false)],

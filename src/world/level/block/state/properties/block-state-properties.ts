@@ -1,4 +1,5 @@
 import { Direction } from "../../../../../core/direction";
+import { BambooLeaves } from "./bamboo-leaves";
 import { BooleanProperty } from "./boolean-property";
 import { DoubleBlockHalf } from "./double-block-half";
 import { DirectionProperty } from "./direction-property";
@@ -6,9 +7,11 @@ import { EnumProperty } from "./enum-property";
 import { IntegerProperty } from "./integer-property";
 
 export class BlockStateProperties {
+  public static readonly AGE_1 = IntegerProperty.create("age", 0, 1);
   public static readonly AGE_2 = IntegerProperty.create("age", 0, 2);
   public static readonly AGE_3 = IntegerProperty.create("age", 0, 3);
   public static readonly AGE_15 = IntegerProperty.create("age", 0, 15);
+  public static readonly STAGE = IntegerProperty.create("stage", 0, 1);
   public static readonly DISTANCE = IntegerProperty.create("distance", 1, 7);
   public static readonly LAYERS = IntegerProperty.create("layers", 1, 8);
   public static readonly LIT = BooleanProperty.create("lit");
@@ -27,6 +30,7 @@ export class BlockStateProperties {
   public static readonly AXIS = EnumProperty.create("axis", Direction.Axis);
   public static readonly DOUBLE_BLOCK_HALF = EnumProperty.create("half", DoubleBlockHalf);
   public static readonly HORIZONTAL_AXIS = EnumProperty.create("axis", Direction.Axis, Direction.Axis.X, Direction.Axis.Z);
+  public static readonly BAMBOO_LEAVES = EnumProperty.create("leaves", BambooLeaves);
   public static readonly WATERLOGGED = BooleanProperty.create("waterlogged");
   public static readonly FACING = DirectionProperty.create(
     "facing",

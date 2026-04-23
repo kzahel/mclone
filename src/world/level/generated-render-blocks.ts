@@ -7,6 +7,8 @@ import { AirBlock } from "./block/air-block";
 import { BaseCoralFanBlock } from "./block/base-coral-fan-block";
 import { BaseCoralPlantBlock } from "./block/base-coral-plant-block";
 import { BaseCoralWallFanBlock } from "./block/base-coral-wall-fan-block";
+import { BambooBlock } from "./block/bamboo-block";
+import { BambooSaplingBlock } from "./block/bamboo-sapling-block";
 import { Block } from "./block/block";
 import { BushBlock } from "./block/bush-block";
 import { CactusBlock } from "./block/cactus-block";
@@ -82,6 +84,8 @@ const SPRUCE_SAPLING_LOCATION = new ResourceLocation("minecraft:spruce_sapling")
 const BIRCH_SAPLING_LOCATION = new ResourceLocation("minecraft:birch_sapling");
 const DARK_OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:dark_oak_sapling");
 const JUNGLE_SAPLING_LOCATION = new ResourceLocation("minecraft:jungle_sapling");
+const BAMBOO_SAPLING_LOCATION = new ResourceLocation("minecraft:bamboo_sapling");
+const BAMBOO_LOCATION = new ResourceLocation("minecraft:bamboo");
 const LARGE_FERN_LOCATION = new ResourceLocation("minecraft:large_fern");
 const SWEET_BERRY_BUSH_LOCATION = new ResourceLocation("minecraft:sweet_berry_bush");
 const BROWN_MUSHROOM_LOCATION = new ResourceLocation("minecraft:brown_mushroom");
@@ -208,6 +212,8 @@ const GENERATED_BLOCK_LOCATIONS = [
   BIRCH_SAPLING_LOCATION,
   DARK_OAK_SAPLING_LOCATION,
   JUNGLE_SAPLING_LOCATION,
+  BAMBOO_SAPLING_LOCATION,
+  BAMBOO_LOCATION,
   LARGE_FERN_LOCATION,
   SWEET_BERRY_BUSH_LOCATION,
   BROWN_MUSHROOM_LOCATION,
@@ -327,6 +333,10 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("birch_sapling"),
   blockTexture("dark_oak_sapling"),
   blockTexture("jungle_sapling"),
+  blockTexture("bamboo_stage0"),
+  blockTexture("bamboo_stalk"),
+  blockTexture("bamboo_small_leaves"),
+  blockTexture("bamboo_large_leaves"),
   blockTexture("large_fern_bottom"),
   blockTexture("large_fern_top"),
   blockTexture("sweet_berry_bush_stage0"),
@@ -724,6 +734,18 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     JUNGLE_SAPLING_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
+  const bambooSaplingState = registerBlock(
+    BAMBOO_SAPLING_LOCATION,
+    new BambooSaplingBlock(
+      BlockBehaviour.Properties.of(Material.BAMBOO_SAPLING).randomTicks().instabreak().noCollission().strength(1.0).sound(SoundType.BAMBOO_SAPLING),
+    ),
+  ).defaultBlockState();
+  const bambooState = registerBlock(
+    BAMBOO_LOCATION,
+    new BambooBlock(
+      BlockBehaviour.Properties.of(Material.BAMBOO, MaterialColor.PLANT).randomTicks().instabreak().strength(1.0).sound(SoundType.BAMBOO).noOcclusion().dynamicShape(),
+    ),
+  ).defaultBlockState();
   const largeFernState = registerBlock(
     LARGE_FERN_LOCATION,
     new DoublePlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
@@ -917,6 +939,8 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(birchSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(darkOakSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(jungleSaplingState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(bambooSaplingState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(bambooState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(largeFernState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(sweetBerryBushState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(brownMushroomState.getBlock(), RenderType.cutout());

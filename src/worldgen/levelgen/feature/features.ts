@@ -2,6 +2,7 @@ import { Registry } from "../../../core/registry";
 import { DefaultFlowerFeature } from "./default-flower-feature";
 import { DecoratedFeature } from "./decorated-feature";
 import { LakeFeature } from "./lake-feature";
+import { BambooFeature } from "./bamboo-feature";
 import { ProbabilityFeatureConfiguration } from "./configurations/probability-feature-configuration";
 import { RandomBooleanFeatureConfiguration } from "./configurations/random-boolean-feature-configuration";
 import { RandomFeatureConfiguration } from "./configurations/random-feature-configuration";
@@ -56,6 +57,7 @@ export const Features = {
   SPRING: register("spring", new SpringFeature()),
   SEAGRASS: register("seagrass", new SeagrassFeature()),
   KELP: register("kelp", new KelpFeature()),
+  BAMBOO: register("bamboo", new BambooFeature()),
   CORAL_TREE: register("coral_tree", new CoralTreeFeature()),
   CORAL_MUSHROOM: register("coral_mushroom", new CoralMushroomFeature()),
   CORAL_CLAW: register("coral_claw", new CoralClawFeature()),
