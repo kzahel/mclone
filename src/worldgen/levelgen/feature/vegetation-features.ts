@@ -1,5 +1,6 @@
 import { ResourceLocation } from "../../../core/resource-location";
 import { Registry } from "../../../core/registry";
+import { ConstantInt } from "../../../util/valueproviders/constant-int";
 import { BiasedToBottomInt } from "../../../util/valueproviders/biased-to-bottom-int";
 import { ClampedInt } from "../../../util/valueproviders/clamped-int";
 import { UniformInt } from "../../../util/valueproviders/uniform-int";
@@ -13,6 +14,7 @@ import { HeightmapConfiguration } from "./configurations/heightmap-configuration
 import { HugeMushroomFeatureConfiguration } from "./configurations/huge-mushroom-feature-configuration";
 import { NoiseCountFactorDecoratorConfiguration } from "./configurations/noise-count-factor-decorator-configuration";
 import { NoiseDependantDecoratorConfiguration } from "./configurations/noise-dependant-decorator-configuration";
+import { CountConfiguration } from "./configurations/count-configuration";
 import { DiskConfiguration } from "./configurations/disk-configuration";
 import { NoneFeatureConfiguration } from "./configurations/none-feature-configuration";
 import { ProbabilityFeatureConfiguration } from "./configurations/probability-feature-configuration";
@@ -106,6 +108,10 @@ function heightmapSquare() {
 
 function heightmapTopSolidSquare() {
   return heightmapDecorator(Heightmap.Types.OCEAN_FLOOR_WG).squared();
+}
+
+function heightmapTopSolidDecorator() {
+  return heightmapDecorator(Heightmap.Types.OCEAN_FLOOR_WG);
 }
 
 function heightmapOceanFloorDecorator() {
@@ -333,6 +339,14 @@ function createForestFlowerFeatures() {
   ] as const;
 }
 
+function createWarmOceanVegetationFeatures() {
+  return [
+    () => Features.CORAL_TREE.configured(NoneFeatureConfiguration.INSTANCE),
+    () => Features.CORAL_CLAW.configured(NoneFeatureConfiguration.INSTANCE),
+    () => Features.CORAL_MUSHROOM.configured(NoneFeatureConfiguration.INSTANCE),
+  ] as const;
+}
+
 function createHugeBrownMushroomConfig(): HugeMushroomFeatureConfiguration {
   return new HugeMushroomFeatureConfiguration(
     new SimpleStateProvider(
@@ -512,6 +526,17 @@ export class VegetationFeatures {
 
   public static get SEAGRASS_DEEP_WARM() {
     return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.8)).count(80).decorated(heightmapTopSolidSquare());
+  }
+
+  public static get SEA_PICKLE() {
+    return Features.SEA_PICKLE.configured(new CountConfiguration(ConstantInt.of(20))).decorated(heightmapTopSolidSquare()).rarity(16);
+  }
+
+  public static get WARM_OCEAN_VEGETATION() {
+    return Features.SIMPLE_RANDOM_SELECTOR.configured(new SimpleRandomFeatureConfiguration(createWarmOceanVegetationFeatures()))
+      .decorated(heightmapTopSolidDecorator())
+      .squared()
+      .decorated(countNoiseBiasedDecorator(20, 400.0, 0.0));
   }
 
   public static get KELP_COLD() {

@@ -9,11 +9,13 @@ import { StaticRenderLevel } from "../../../../src/world/level/static-render-lev
 import { OverworldBiomeSource } from "../../../../src/worldgen/biome/overworld-biome-source";
 import { getOverworldBiomeGenerationSettings } from "../../../../src/worldgen/biome/overworld-biome-generation-settings";
 import { DecoratedFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorated-feature-configuration";
+import { CountConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/count-configuration";
 import { Features } from "../../../../src/worldgen/levelgen/feature/features";
 import { TreeFeatures } from "../../../../src/worldgen/levelgen/feature/tree-features";
 import { VegetationFeatures } from "../../../../src/worldgen/levelgen/feature/vegetation-features";
 import { NoiseBasedChunkGenerator } from "../../../../src/worldgen/levelgen/noise-based-chunk-generator";
 import { WorldgenRandom } from "../../../../src/worldgen/prng/worldgen-random";
+import { ConstantInt } from "../../../../src/util/valueproviders/constant-int";
 
 const PLAIN_FLOWER_LOCATIONS = new Set([
   "minecraft:orange_tulip",
@@ -120,14 +122,23 @@ function createFlatLevel(airState: BlockState, floorState: BlockState): StaticRe
 
 function createWaterLevel(airState: BlockState, floorState: BlockState, waterState: BlockState): StaticRenderLevel {
   const level = createFlatLevel(airState, floorState);
+  return fillWater(level, waterState, 11, 12);
+}
+
+function fillWater(level: StaticRenderLevel, waterState: BlockState, minY: number, maxY: number): StaticRenderLevel {
   for (let z = 0; z < 32; z++) {
     for (let x = 0; x < 32; x++) {
-      level.setBlock(new BlockPos(x, 11, z), waterState);
-      level.setBlock(new BlockPos(x, 12, z), waterState);
+      for (let y = minY; y <= maxY; y++) {
+        level.setBlock(new BlockPos(x, y, z), waterState);
+      }
     }
   }
 
   return level;
+}
+
+function createDeepWaterLevel(airState: BlockState, floorState: BlockState, waterState: BlockState): StaticRenderLevel {
+  return fillWater(createFlatLevel(airState, floorState), waterState, 11, 24);
 }
 
 function collectPlacedLocations(level: StaticRenderLevel, yMin: number, yMax: number): string[] {
@@ -240,6 +251,32 @@ describe("Vegetation parity", () => {
     expect(kelpWarmPlacements.length).toBeGreaterThan(0);
     expect(kelpWarmPlacements.every((location) => AQUATIC_OUTPUT_LOCATIONS.has(location))).toBe(true);
     expect(kelpWarmPlacements.some((location) => location === "minecraft:kelp" || location === "minecraft:kelp_plant")).toBe(true);
+  });
+
+  test("warm-ocean vegetation and sea-pickle paths place translated coral and sea-pickle blocks", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const generator = createGenerator();
+
+    let warmOceanLevel: StaticRenderLevel | undefined;
+    for (let seed = 0n; seed < 256n; seed++) {
+      const candidate = createDeepWaterLevel(blocks.airState, getState("minecraft:stone"), getState("minecraft:water"));
+      if (VegetationFeatures.WARM_OCEAN_VEGETATION.place(candidate, generator, new WorldgenRandom(seed), new BlockPos(8, 0, 8))) {
+        warmOceanLevel = candidate;
+        break;
+      }
+    }
+    expect(warmOceanLevel).toBeDefined();
+    const warmOceanPlacements = collectPlacedLocations(warmOceanLevel!, 11, 24);
+    expect(warmOceanPlacements.length).toBeGreaterThan(0);
+    expect(warmOceanPlacements.every((location) => location.includes("coral") || location === "minecraft:sea_pickle")).toBe(true);
+
+    const seaPickleLevel = createDeepWaterLevel(blocks.airState, getState("minecraft:stone"), getState("minecraft:water"));
+    expect(
+      Features.SEA_PICKLE
+        .configured(new CountConfiguration(ConstantInt.of(20)))
+        .place(seaPickleLevel, generator, new WorldgenRandom(12345n), new BlockPos(8, 0, 8)),
+    ).toBe(true);
+    expect(collectPlacedLocations(seaPickleLevel, 11, 24)).toContain("minecraft:sea_pickle");
   });
 
   test("huge mushroom and dark-forest vegetation paths place translated dark-oak and mushroom blocks", () => {
@@ -380,6 +417,14 @@ describe("Vegetation parity", () => {
       .features()
       .flat()
       .map((supplier) => getBaseFeature(supplier()));
+    const warmOceanFeatures = getOverworldBiomeGenerationSettings("minecraft:warm_ocean")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const deepWarmOceanFeatures = getOverworldBiomeGenerationSettings("minecraft:deep_warm_ocean")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
     const frozenOceanFeatures = getOverworldBiomeGenerationSettings("minecraft:frozen_ocean")
       .features()
       .flat()
@@ -459,6 +504,14 @@ describe("Vegetation parity", () => {
     expect(lukewarmOceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
     expect(deepLukewarmOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
     expect(deepLukewarmOceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
+    expect(warmOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
+    expect(warmOceanFeatures.some((feature) => feature === Features.SIMPLE_RANDOM_SELECTOR)).toBe(true);
+    expect(warmOceanFeatures.some((feature) => feature === Features.SEA_PICKLE)).toBe(true);
+    expect(warmOceanFeatures.some((feature) => feature === Features.KELP)).toBe(false);
+    expect(deepWarmOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
+    expect(deepWarmOceanFeatures.some((feature) => feature === Features.SEA_PICKLE)).toBe(false);
+    expect(deepWarmOceanFeatures.some((feature) => feature === Features.SIMPLE_RANDOM_SELECTOR)).toBe(false);
+    expect(deepWarmOceanFeatures.some((feature) => feature === Features.KELP)).toBe(false);
     expect(frozenOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
     expect(frozenOceanFeatures.some((feature) => feature === Features.KELP)).toBe(false);
     expect(frozenOceanFeatures.some((feature) => feature === Features.RANDOM_SELECTOR || feature === Features.TREE)).toBe(true);

@@ -95,6 +95,14 @@ function addLukeWarmKelp(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.KELP_WARM);
 }
 
+function addWarmOceanVegetation(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.WARM_OCEAN_VEGETATION);
+}
+
+function addSeaPickles(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.SEA_PICKLE);
+}
+
 function addBadlandGrass(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_BADLANDS);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_DEAD_BUSH_BADLANDS);
@@ -490,7 +498,7 @@ function buildRiverSettings(frozen: boolean): BiomeGenerationSettings {
   return builder.build();
 }
 
-type OceanSettingsKind = "cold" | "normal" | "lukewarm" | "frozen";
+type OceanSettingsKind = "cold" | "normal" | "lukewarm" | "warm" | "frozen";
 
 function buildOceanSettings(kind: OceanSettingsKind, deep: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
@@ -524,6 +532,16 @@ function buildOceanSettings(kind: OceanSettingsKind, deep: boolean): BiomeGenera
       );
       addLukeWarmKelp(builder);
       break;
+    case "warm":
+      builder.addFeature(
+        GenerationStep.Decoration.VEGETAL_DECORATION,
+        () => (deep ? VegetationFeatures.SEAGRASS_DEEP_WARM : VegetationFeatures.SEAGRASS_WARM),
+      );
+      if (!deep) {
+        addWarmOceanVegetation(builder);
+        addSeaPickles(builder);
+      }
+      break;
     case "frozen":
       break;
   }
@@ -545,6 +563,7 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:dark_forest_hills", buildDarkForestSettings(true)],
   ["minecraft:deep_cold_ocean", buildOceanSettings("cold", true)],
   ["minecraft:deep_frozen_ocean", buildOceanSettings("frozen", true)],
+  ["minecraft:deep_warm_ocean", buildOceanSettings("warm", true)],
   ["minecraft:deep_lukewarm_ocean", buildOceanSettings("lukewarm", true)],
   ["minecraft:deep_ocean", buildOceanSettings("normal", true)],
   ["minecraft:forest", buildForestSettings()],
@@ -564,6 +583,7 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:mushroom_fields", buildMushroomFieldSettings()],
   ["minecraft:mushroom_field_shore", buildMushroomFieldSettings()],
   ["minecraft:ocean", buildOceanSettings("normal", false)],
+  ["minecraft:warm_ocean", buildOceanSettings("warm", false)],
   ["minecraft:wooded_mountains", buildMountainSettings(false)],
   ["minecraft:mountain_edge", buildMountainSettings(true)],
   ["minecraft:plains", buildPlainsSettings()],

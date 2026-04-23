@@ -19,7 +19,11 @@ import { HugeRedMushroomFeature } from "./huge-red-mushroom-feature";
 import { IcePatchFeature } from "./ice-patch-feature";
 import { IceSpikeFeature } from "./ice-spike-feature";
 import { KelpFeature } from "./kelp-feature";
+import { CoralClawFeature } from "./coral-claw-feature";
+import { CoralMushroomFeature } from "./coral-mushroom-feature";
+import { CoralTreeFeature } from "./coral-tree-feature";
 import { SeagrassFeature } from "./seagrass-feature";
+import { SeaPickleFeature } from "./sea-pickle-feature";
 import { SnowAndFreezeFeature } from "./snow-and-freeze-feature";
 import { SpringConfiguration } from "./configurations/spring-configuration";
 import { TreeConfiguration } from "./configurations/tree-configuration";
@@ -52,6 +56,10 @@ export const Features = {
   SPRING: register("spring", new SpringFeature()),
   SEAGRASS: register("seagrass", new SeagrassFeature()),
   KELP: register("kelp", new KelpFeature()),
+  CORAL_TREE: register("coral_tree", new CoralTreeFeature()),
+  CORAL_MUSHROOM: register("coral_mushroom", new CoralMushroomFeature()),
+  CORAL_CLAW: register("coral_claw", new CoralClawFeature()),
+  SEA_PICKLE: register("sea_pickle", new SeaPickleFeature()),
   HUGE_RED_MUSHROOM: register("huge_red_mushroom", new HugeRedMushroomFeature()),
   HUGE_BROWN_MUSHROOM: register("huge_brown_mushroom", new HugeBrownMushroomFeature()),
   ICE_SPIKE: register("ice_spike", new IceSpikeFeature()),

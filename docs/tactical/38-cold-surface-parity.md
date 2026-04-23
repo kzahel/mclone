@@ -26,7 +26,7 @@ Finish the next high-value cold-family slice behind shoreline parity by porting 
 ## Scope choice
 
 - Landed here: the minimal cold-surface parity slice that unlocks the visible `ice_spikes` family and removes the missing top-layer freeze path from the already-covered shoreline/frozen tables.
-- Kept intentionally narrow: no warm-ocean coral / `SEA_PICKLE` / `WARM_OCEAN_VEGETATION`, and no bamboo-jungle follow-through. Those remain the next broader biome-identity slices.
+- Kept intentionally narrow at landing time: no warm-ocean coral / `SEA_PICKLE` / `WARM_OCEAN_VEGETATION`, and no bamboo-jungle follow-through. Tactical 39 now covers the warm-ocean slice, and bamboo-jungle remains the next broader biome-identity follow-through after that.
 - Also kept honest: the `ice_spikes` browser frame now clearly shows packed-ice spires, while the refreshed `snowy_beach` frame mainly proves the corrected cold shoreline surface mix; the one-layer snow pass is still visually subtle under the current renderer.
 
 ## Oracle / done-when
@@ -51,4 +51,4 @@ Finish the next high-value cold-family slice behind shoreline parity by porting 
 
 ## Next
 
-Tactical 39 should be warm-ocean parity: `WARM_OCEAN_VEGETATION`, `SEA_PICKLE`, coral features, and the `warm_ocean` / `deep_warm_ocean` biome tables so the last major common ocean family stops falling back.
+The next numbered parity slice should be tactical 41, because [`40-debug-free-cam.md`](40-debug-free-cam.md) is already reserved for temporary debug tooling. That tactical should cover bamboo-jungle parity: the bamboo block / feature path plus the `bamboo_jungle` / `bamboo_jungle_hills` biome tables so the still-missing jungle-family identity stops falling back.

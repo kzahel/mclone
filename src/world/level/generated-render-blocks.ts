@@ -4,10 +4,17 @@ import { ItemBlockRenderTypes } from "../../renderer/item-block-render-types";
 import { RenderType } from "../../renderer/render-type";
 import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
 import { AirBlock } from "./block/air-block";
+import { BaseCoralFanBlock } from "./block/base-coral-fan-block";
+import { BaseCoralPlantBlock } from "./block/base-coral-plant-block";
+import { BaseCoralWallFanBlock } from "./block/base-coral-wall-fan-block";
 import { Block } from "./block/block";
 import { BushBlock } from "./block/bush-block";
 import { CactusBlock } from "./block/cactus-block";
 import { CocoaBlock } from "./block/cocoa-block";
+import { CoralBlock } from "./block/coral-block";
+import { CoralFanBlock } from "./block/coral-fan-block";
+import { CoralPlantBlock } from "./block/coral-plant-block";
+import { CoralWallFanBlock } from "./block/coral-wall-fan-block";
 import { DeadBushBlock } from "./block/dead-bush-block";
 import { DoublePlantBlock } from "./block/double-plant-block";
 import { HugeMushroomBlock } from "./block/huge-mushroom-block";
@@ -18,6 +25,7 @@ import { LiquidBlock } from "./block/liquid-block";
 import { MushroomBlock } from "./block/mushroom-block";
 import { RotatedPillarBlock } from "./block/rotated-pillar-block";
 import { SeagrassBlock } from "./block/seagrass-block";
+import { SeaPickleBlock } from "./block/sea-pickle-block";
 import { SnowLayerBlock } from "./block/snow-layer-block";
 import { SnowyDirtBlock } from "./block/snowy-dirt-block";
 import { SugarCaneBlock } from "./block/sugar-cane-block";
@@ -128,6 +136,31 @@ const PACKED_ICE_LOCATION = new ResourceLocation("minecraft:packed_ice");
 const RED_SAND_LOCATION = new ResourceLocation("minecraft:red_sand");
 const ICE_LOCATION = new ResourceLocation("minecraft:ice");
 const SNOW_BLOCK_LOCATION = new ResourceLocation("minecraft:snow_block");
+const SEA_PICKLE_LOCATION = new ResourceLocation("minecraft:sea_pickle");
+
+const CORAL_TYPES = ["tube", "brain", "bubble", "fire", "horn"] as const;
+type CoralType = (typeof CORAL_TYPES)[number];
+
+function coralLocation(path: string): ResourceLocation {
+  return new ResourceLocation(`minecraft:${path}`);
+}
+
+const LIVE_CORAL_BLOCK_LOCATIONS = CORAL_TYPES.map((type) => coralLocation(`${type}_coral_block`));
+const LIVE_CORAL_PLANT_LOCATIONS = CORAL_TYPES.map((type) => coralLocation(`${type}_coral`));
+const LIVE_CORAL_FAN_LOCATIONS = CORAL_TYPES.map((type) => coralLocation(`${type}_coral_fan`));
+const LIVE_CORAL_WALL_FAN_LOCATIONS = CORAL_TYPES.map((type) => coralLocation(`${type}_coral_wall_fan`));
+const DEAD_CORAL_BLOCK_LOCATIONS = CORAL_TYPES.map((type) => coralLocation(`dead_${type}_coral_block`));
+const DEAD_CORAL_PLANT_LOCATIONS = CORAL_TYPES.map((type) => coralLocation(`dead_${type}_coral`));
+const DEAD_CORAL_FAN_LOCATIONS = CORAL_TYPES.map((type) => coralLocation(`dead_${type}_coral_fan`));
+const DEAD_CORAL_WALL_FAN_LOCATIONS = CORAL_TYPES.map((type) => coralLocation(`dead_${type}_coral_wall_fan`));
+
+const CORAL_COLOR_BY_TYPE: Record<CoralType, MaterialColor> = {
+  tube: MaterialColor.COLOR_BLUE,
+  brain: MaterialColor.COLOR_PINK,
+  bubble: MaterialColor.COLOR_PURPLE,
+  fire: MaterialColor.COLOR_RED,
+  horn: MaterialColor.COLOR_YELLOW,
+};
 
 function blockTexture(path: string): ResourceLocation {
   return new ResourceLocation(`minecraft:block/${path}`);
@@ -229,6 +262,15 @@ const GENERATED_BLOCK_LOCATIONS = [
   RED_SAND_LOCATION,
   ICE_LOCATION,
   SNOW_BLOCK_LOCATION,
+  SEA_PICKLE_LOCATION,
+  ...DEAD_CORAL_BLOCK_LOCATIONS,
+  ...LIVE_CORAL_BLOCK_LOCATIONS,
+  ...DEAD_CORAL_PLANT_LOCATIONS,
+  ...LIVE_CORAL_PLANT_LOCATIONS,
+  ...DEAD_CORAL_FAN_LOCATIONS,
+  ...LIVE_CORAL_FAN_LOCATIONS,
+  ...DEAD_CORAL_WALL_FAN_LOCATIONS,
+  ...LIVE_CORAL_WALL_FAN_LOCATIONS,
 ] as const;
 
 const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
@@ -359,6 +401,15 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("packed_ice"),
   blockTexture("red_sand"),
   blockTexture("ice"),
+  blockTexture("sea_pickle"),
+  ...CORAL_TYPES.flatMap((type) => [
+    blockTexture(`${type}_coral_block`),
+    blockTexture(`${type}_coral`),
+    blockTexture(`${type}_coral_fan`),
+    blockTexture(`dead_${type}_coral_block`),
+    blockTexture(`dead_${type}_coral`),
+    blockTexture(`dead_${type}_coral_fan`),
+  ]),
 ];
 
 function registerBlock<T extends Block>(location: ResourceLocation, block: T): T {
@@ -725,6 +776,74 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     KELP_PLANT_LOCATION,
     new KelpPlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_WATER_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
+  const deadCoralPlantStates: BlockState[] = [];
+  const liveCoralPlantStates: BlockState[] = [];
+  const deadCoralFanStates: BlockState[] = [];
+  const liveCoralFanStates: BlockState[] = [];
+  const deadCoralWallFanStates: BlockState[] = [];
+  const liveCoralWallFanStates: BlockState[] = [];
+  const deadCoralBlockStates: BlockState[] = [];
+  const liveCoralBlockStates: BlockState[] = [];
+
+  for (const [index, type] of CORAL_TYPES.entries()) {
+    const color = CORAL_COLOR_BY_TYPE[type];
+    const deadCoralBlock = registerBlock(
+      DEAD_CORAL_BLOCK_LOCATIONS[index]!,
+      new Block(BlockBehaviour.Properties.of(Material.STONE, color).requiresCorrectToolForDrops().strength(1.5, 6.0).sound(SoundType.STONE)),
+    );
+    const liveCoralBlock = registerBlock(
+      LIVE_CORAL_BLOCK_LOCATIONS[index]!,
+      new CoralBlock(deadCoralBlock, BlockBehaviour.Properties.of(Material.STONE, color).requiresCorrectToolForDrops().strength(1.5, 6.0).sound(SoundType.STONE)),
+    );
+    const deadCoralPlant = registerBlock(
+      DEAD_CORAL_PLANT_LOCATIONS[index]!,
+      new BaseCoralPlantBlock(BlockBehaviour.Properties.of(Material.WATER_PLANT, color).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+    );
+    const liveCoralPlant = registerBlock(
+      LIVE_CORAL_PLANT_LOCATIONS[index]!,
+      new CoralPlantBlock(
+        deadCoralPlant,
+        BlockBehaviour.Properties.of(Material.WATER_PLANT, color).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion(),
+      ),
+    );
+    const deadCoralFan = registerBlock(
+      DEAD_CORAL_FAN_LOCATIONS[index]!,
+      new BaseCoralFanBlock(BlockBehaviour.Properties.of(Material.WATER_PLANT, color).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+    );
+    const liveCoralFan = registerBlock(
+      LIVE_CORAL_FAN_LOCATIONS[index]!,
+      new CoralFanBlock(
+        deadCoralFan,
+        BlockBehaviour.Properties.of(Material.WATER_PLANT, color).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion(),
+      ),
+    );
+    const deadCoralWallFan = registerBlock(
+      DEAD_CORAL_WALL_FAN_LOCATIONS[index]!,
+      new BaseCoralWallFanBlock(
+        BlockBehaviour.Properties.of(Material.WATER_PLANT, color).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion(),
+      ),
+    );
+    const liveCoralWallFan = registerBlock(
+      LIVE_CORAL_WALL_FAN_LOCATIONS[index]!,
+      new CoralWallFanBlock(
+        deadCoralWallFan,
+        BlockBehaviour.Properties.of(Material.WATER_PLANT, color).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion(),
+      ),
+    );
+
+    deadCoralBlockStates.push(deadCoralBlock.defaultBlockState());
+    liveCoralBlockStates.push(liveCoralBlock.defaultBlockState());
+    deadCoralPlantStates.push(deadCoralPlant.defaultBlockState());
+    liveCoralPlantStates.push(liveCoralPlant.defaultBlockState());
+    deadCoralFanStates.push(deadCoralFan.defaultBlockState());
+    liveCoralFanStates.push(liveCoralFan.defaultBlockState());
+    deadCoralWallFanStates.push(deadCoralWallFan.defaultBlockState());
+    liveCoralWallFanStates.push(liveCoralWallFan.defaultBlockState());
+  }
+  const seaPickleState = registerBlock(
+    SEA_PICKLE_LOCATION,
+    new SeaPickleBlock(BlockBehaviour.Properties.of(Material.WATER_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
   const lilyPadState = registerBlock(
     LILY_PAD_LOCATION,
     new WaterlilyBlock(BlockBehaviour.Properties.of(Material.PLANT).instabreak().sound(SoundType.GRASS).noOcclusion()),
@@ -811,6 +930,25 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(tallSeagrassState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(kelpState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(kelpPlantState.getBlock(), RenderType.cutout());
+  for (const state of deadCoralPlantStates) {
+    ItemBlockRenderTypes.setRenderLayer(state.getBlock(), RenderType.cutout());
+  }
+  for (const state of liveCoralPlantStates) {
+    ItemBlockRenderTypes.setRenderLayer(state.getBlock(), RenderType.cutout());
+  }
+  for (const state of deadCoralFanStates) {
+    ItemBlockRenderTypes.setRenderLayer(state.getBlock(), RenderType.cutout());
+  }
+  for (const state of liveCoralFanStates) {
+    ItemBlockRenderTypes.setRenderLayer(state.getBlock(), RenderType.cutout());
+  }
+  for (const state of deadCoralWallFanStates) {
+    ItemBlockRenderTypes.setRenderLayer(state.getBlock(), RenderType.cutout());
+  }
+  for (const state of liveCoralWallFanStates) {
+    ItemBlockRenderTypes.setRenderLayer(state.getBlock(), RenderType.cutout());
+  }
+  ItemBlockRenderTypes.setRenderLayer(seaPickleState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(lilyPadState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(tallGrassState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(lilacState.getBlock(), RenderType.cutout());

@@ -62,6 +62,10 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:tall_seagrass"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:kelp"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:kelp_plant"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:sea_pickle"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:tube_coral"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:tube_coral_fan"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:tube_coral_wall_fan"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:blue_orchid"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:poppy"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:cornflower"))).toBe(RenderType.cutout());

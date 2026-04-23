@@ -14,6 +14,7 @@ export class BlockStateProperties {
   public static readonly LIT = BooleanProperty.create("lit");
   public static readonly LEVEL = IntegerProperty.create("level", 0, 15);
   public static readonly OPEN = BooleanProperty.create("open");
+  public static readonly PICKLES = IntegerProperty.create("pickles", 1, 4);
   public static readonly PERSISTENT = BooleanProperty.create("persistent");
   public static readonly POWERED = BooleanProperty.create("powered");
   public static readonly SNOWY = BooleanProperty.create("snowy");
@@ -26,6 +27,7 @@ export class BlockStateProperties {
   public static readonly AXIS = EnumProperty.create("axis", Direction.Axis);
   public static readonly DOUBLE_BLOCK_HALF = EnumProperty.create("half", DoubleBlockHalf);
   public static readonly HORIZONTAL_AXIS = EnumProperty.create("axis", Direction.Axis, Direction.Axis.X, Direction.Axis.Z);
+  public static readonly WATERLOGGED = BooleanProperty.create("waterlogged");
   public static readonly FACING = DirectionProperty.create(
     "facing",
     Direction.NORTH,

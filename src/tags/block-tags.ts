@@ -26,6 +26,35 @@ export class BlockTag {
 }
 
 export class BlockTags {
+  public static readonly CORAL_BLOCKS = new BlockTag("minecraft:coral_blocks", [
+    "minecraft:tube_coral_block",
+    "minecraft:brain_coral_block",
+    "minecraft:bubble_coral_block",
+    "minecraft:fire_coral_block",
+    "minecraft:horn_coral_block",
+  ]);
+
+  public static readonly CORALS = new BlockTag("minecraft:corals", [
+    "minecraft:tube_coral",
+    "minecraft:brain_coral",
+    "minecraft:bubble_coral",
+    "minecraft:fire_coral",
+    "minecraft:horn_coral",
+    "minecraft:tube_coral_fan",
+    "minecraft:brain_coral_fan",
+    "minecraft:bubble_coral_fan",
+    "minecraft:fire_coral_fan",
+    "minecraft:horn_coral_fan",
+  ]);
+
+  public static readonly WALL_CORALS = new BlockTag("minecraft:wall_corals", [
+    "minecraft:tube_coral_wall_fan",
+    "minecraft:brain_coral_wall_fan",
+    "minecraft:bubble_coral_wall_fan",
+    "minecraft:fire_coral_wall_fan",
+    "minecraft:horn_coral_wall_fan",
+  ]);
+
   public static readonly DIRT = new BlockTag("minecraft:dirt", [
     "minecraft:dirt",
     "minecraft:grass_block",
