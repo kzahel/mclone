@@ -19,7 +19,7 @@ import { ModelManager } from "../model/model-manager";
 import { BrowserTextureAtlasSource } from "../texture/browser-native-image-loader";
 import { MissingTextureAtlasSprite } from "../texture/missing-texture-atlas-sprite";
 import type { TextureAtlasSprite } from "../texture/texture-atlas-sprite";
-import { TextureAtlas } from "../texture/texture-atlas";
+import { DEFAULT_BLOCK_ATLAS_MIP_LEVEL, TextureAtlas } from "../texture/texture-atlas";
 import {
   serializeSectionMeshBuild,
   type BuildSectionMeshRequest,
@@ -70,7 +70,7 @@ async function createMeshWorkerContext(request: InitializeMeshWorkerRequest): Pr
   await initializeBiomeColorTables(atlasSource);
 
   const atlas = new TextureAtlas(TextureAtlas.LOCATION_BLOCKS);
-  const preparations = await atlas.prepareToStitch(atlasSource, generatedBlocks.spriteLocations, 0);
+  const preparations = await atlas.prepareToStitch(atlasSource, generatedBlocks.spriteLocations, DEFAULT_BLOCK_ATLAS_MIP_LEVEL);
   const getSprite = createSpriteLookup(preparations.regions);
 
   const modelSource = await preloadBlockModelSource(generatedBlocks.blockLocations);

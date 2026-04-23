@@ -41,6 +41,7 @@ export class ChunkRenderDispatcher {
   private freeMeshWorkerSlots: number;
   private taskFailure: unknown;
   private camera = Vec3.ZERO;
+  private hasPendingUploads = false;
 
   public constructor(
     public level: StaticRenderLevel,
@@ -211,7 +212,14 @@ export class ChunkRenderDispatcher {
   }
 
   public uploadAllPendingUploads(): boolean {
-    return false;
+    // WebGPU: immediate uploads replace the GL upload queue with a one-bit "chunk data changed" signal.
+    const hadPendingUploads = this.hasPendingUploads;
+    this.hasPendingUploads = false;
+    return hadPendingUploads;
+  }
+
+  public notePendingUploads(): void {
+    this.hasPendingUploads = true;
   }
 
   public rebuildChunkSync(renderChunk: ChunkRenderDispatcher.RenderChunk): Promise<void> {
@@ -232,6 +240,7 @@ export class ChunkRenderDispatcher {
   public async uploadChunkLayer(bufferBuilder: import("../vertex/buffer-builder").BufferBuilder, vertexBuffer: VertexBuffer): Promise<void> {
     // WebGPU: section uploads happen immediately on the main thread instead of through the deferred GL upload queue.
     vertexBuffer.upload(bufferBuilder);
+    this.notePendingUploads();
   }
 
   public createSectionMeshInput(origin: BlockPos): SectionMeshInput | undefined {
@@ -558,6 +567,7 @@ export namespace ChunkRenderDispatcher {
         for (const layer of decoded.layers) {
           this.renderChunk.getBuffer(layer.renderType).uploadRaw(layer.drawState, layer.buffer);
         }
+        this.renderChunk.getDispatcher().notePendingUploads();
       } else {
         if (buffers === undefined) {
           throw new Error("Chunk rebuild task requires a ChunkBufferBuilderPack");
@@ -582,6 +592,8 @@ export namespace ChunkRenderDispatcher {
       }
 
       this.renderChunk.compiled.current = compiledChunk;
+      // WebGPU: immediate uploads still need the same post-upload visibility invalidation vanilla gets from its GL upload queue.
+      this.renderChunk.getDispatcher().renderer.requestUpdate();
       this.renderChunk.setNotDirty();
       return ChunkTaskResult.SUCCESSFUL;
     }

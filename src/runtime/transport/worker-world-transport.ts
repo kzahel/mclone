@@ -142,6 +142,10 @@ export class WorkerWorldTransport implements WorldTransport {
     endpoint.addEventListener("messageerror", this.onError);
   }
 
+  public supportsChunkViewDeduplication(): boolean {
+    return true;
+  }
+
   public openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
     return this.send(request);
   }

@@ -26,9 +26,9 @@ import { LevelRenderer, type LevelRenderFrame } from "./level-renderer";
 import { LightTexture } from "./light-texture";
 import { GameRenderer } from "./game-renderer";
 import { BrowserTextureAtlasSource } from "./texture/browser-native-image-loader";
-import { TextureAtlas } from "./texture/texture-atlas";
+import { DEFAULT_BLOCK_ATLAS_MIP_LEVEL, TextureAtlas } from "./texture/texture-atlas";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
-import { RenderType } from "./render-type";
+import { type CompositeRenderType, RenderType } from "./render-type";
 import { ViewArea } from "./view-area";
 import { Vec3 } from "../world/phys/vec3";
 import type { VertexBuffer } from "./vertex/vertex-buffer";
@@ -73,7 +73,8 @@ export interface RendererScene {
   readonly gameRenderer: GameRenderer;
   readonly lightTexture: LightTexture;
   readonly pipelineCache: RenderPipelineCache;
-  readonly sampler: GPUSampler;
+  readonly textureSamplers: ReadonlyMap<string, GPUSampler>;
+  readonly lightSampler: GPUSampler;
   readonly viewDistance: number;
   readonly chunkDrawResources: WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>;
 }
@@ -97,6 +98,11 @@ export interface CanvasResizeResult {
   readonly changed: boolean;
   readonly width: number;
   readonly height: number;
+}
+
+interface TextureSamplerState {
+  readonly blur: boolean;
+  readonly mipmap: boolean;
 }
 
 function clampCanvasSize(width: number, height: number, maxTextureDimension: number): {
@@ -178,6 +184,51 @@ async function initializeBiomeColorTables(atlasSource: BrowserTextureAtlasSource
   FoliageColor.init(foliagePixels);
 }
 
+function textureSamplerKey(state: TextureSamplerState): string {
+  return `${state.blur ? 1 : 0}:${state.mipmap ? 1 : 0}`;
+}
+
+// WebGPU: map Minecraft's GL min/mag/mipmap filter tuple onto an explicit sampler descriptor.
+function createTextureSampler(device: GPUDevice, state: TextureSamplerState): GPUSampler {
+  return device.createSampler({
+    magFilter: state.blur ? "linear" : "nearest",
+    minFilter: state.blur ? "linear" : "nearest",
+    mipmapFilter: state.mipmap ? "linear" : "nearest",
+  });
+}
+
+function createTextureSamplers(device: GPUDevice): ReadonlyMap<string, GPUSampler> {
+  const samplers = new Map<string, GPUSampler>();
+  for (const state of [
+    { blur: false, mipmap: false },
+    { blur: false, mipmap: true },
+    { blur: true, mipmap: false },
+    { blur: true, mipmap: true },
+  ] satisfies readonly TextureSamplerState[]) {
+    samplers.set(textureSamplerKey(state), createTextureSampler(device, state));
+  }
+
+  return samplers;
+}
+
+function getTextureSampler(scene: RendererScene, state: TextureSamplerState): GPUSampler {
+  const sampler = scene.textureSamplers.get(textureSamplerKey(state));
+  if (sampler === undefined) {
+    throw new Error(`Missing texture sampler for blur=${state.blur} mipmap=${state.mipmap}`);
+  }
+
+  return sampler;
+}
+
+function getAtlasSampler(scene: RendererScene, renderType: CompositeRenderType): GPUSampler {
+  const textureState = renderType.state().textureState.getTextures()[0];
+  if (textureState === undefined) {
+    return getTextureSampler(scene, { blur: false, mipmap: false });
+  }
+
+  return getTextureSampler(scene, textureState);
+}
+
 export async function initializeRendererScene(
   canvas: HTMLCanvasElement,
   options: SceneInitOptions,
@@ -199,7 +250,7 @@ export async function initializeRendererScene(
   const atlasSource = new BrowserTextureAtlasSource();
   await initializeBiomeColorTables(atlasSource);
   const atlas = new TextureAtlas(SMOKE_ATLAS_LOCATION, device.limits.maxTextureDimension2D);
-  const preparations = await atlas.prepareToStitch(atlasSource, generatedBlocks.spriteLocations, 0);
+  const preparations = await atlas.prepareToStitch(atlasSource, generatedBlocks.spriteLocations, DEFAULT_BLOCK_ATLAS_MIP_LEVEL);
   atlas.reload(device, preparations);
 
   const modelSource = await preloadBlockModelSource(generatedBlocks.blockLocations);
@@ -258,9 +309,10 @@ export async function initializeRendererScene(
   lightTexture.tick();
 
   const pipelineCache = new RenderPipelineCache(device);
-  const sampler = device.createSampler({
-    magFilter: "nearest",
-    minFilter: "nearest",
+  const textureSamplers = createTextureSamplers(device);
+  const lightSampler = device.createSampler({
+    magFilter: "linear",
+    minFilter: "linear",
     mipmapFilter: "nearest",
   });
 
@@ -280,7 +332,8 @@ export async function initializeRendererScene(
       gameRenderer,
       lightTexture,
       pipelineCache,
-      sampler,
+      textureSamplers,
+      lightSampler,
       viewDistance: options.viewDistance,
       chunkDrawResources: new WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>(),
     },
@@ -298,6 +351,8 @@ interface CachedChunkDrawResources {
   readonly bindGroup: GPUBindGroup;
   readonly atlasTexture: GPUTextureView;
   readonly lightTexture: GPUTextureView;
+  readonly atlasSampler: GPUSampler;
+  readonly lightSampler: GPUSampler;
 }
 
 interface PassLayer {
@@ -312,6 +367,8 @@ function createChunkDrawResources(
   pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
   atlasTexture: GPUTextureView,
   lightTexture: GPUTextureView,
+  atlasSampler: GPUSampler,
+  lightSampler: GPUSampler,
 ): CachedChunkDrawResources {
   const uniformBuffer = scene.device.createBuffer({
     size: Math.max(4, pipeline.shaderProgram.uniformBufferSize),
@@ -323,8 +380,8 @@ function createChunkDrawResources(
     bindGroup: pipeline.shaderProgram.createBindGroup(scene.device, pipeline.bindGroupLayout, {
       uniformBuffer,
       samplers: {
-        Sampler0: scene.sampler,
-        Sampler2: scene.sampler,
+        Sampler0: atlasSampler,
+        Sampler2: lightSampler,
       },
       textures: {
         Sampler0: atlasTexture,
@@ -333,6 +390,8 @@ function createChunkDrawResources(
     }),
     atlasTexture,
     lightTexture,
+    atlasSampler,
+    lightSampler,
   };
 }
 
@@ -342,6 +401,8 @@ function getChunkDrawResources(
   draw: import("./level-renderer").ChunkLayerDraw,
   atlasTexture: GPUTextureView,
   lightTexture: GPUTextureView,
+  atlasSampler: GPUSampler,
+  lightSampler: GPUSampler,
 ): CachedChunkDrawResources {
   let resourcesByLayout = scene.chunkDrawResources.get(draw.vertexBuffer);
   if (resourcesByLayout === undefined) {
@@ -350,11 +411,17 @@ function getChunkDrawResources(
   }
 
   const cached = resourcesByLayout.get(pipeline.bindGroupLayout);
-  if (cached !== undefined && cached.atlasTexture === atlasTexture && cached.lightTexture === lightTexture) {
+  if (
+    cached !== undefined &&
+    cached.atlasTexture === atlasTexture &&
+    cached.lightTexture === lightTexture &&
+    cached.atlasSampler === atlasSampler &&
+    cached.lightSampler === lightSampler
+  ) {
     return cached;
   }
 
-  const created = createChunkDrawResources(scene, pipeline, atlasTexture, lightTexture);
+  const created = createChunkDrawResources(scene, pipeline, atlasTexture, lightTexture, atlasSampler, lightSampler);
   resourcesByLayout.set(pipeline.bindGroupLayout, created);
   return created;
 }
@@ -383,9 +450,18 @@ function createChunkBindGroup(
   pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
   frame: LevelRenderFrame,
   draw: import("./level-renderer").ChunkLayerDraw,
+  renderType: CompositeRenderType,
   atlasTexture: GPUTextureView,
 ): GPUBindGroup {
-  const resources = getChunkDrawResources(scene, pipeline, draw, atlasTexture, frame.lightTexture);
+  const resources = getChunkDrawResources(
+    scene,
+    pipeline,
+    draw,
+    atlasTexture,
+    frame.lightTexture,
+    getAtlasSampler(scene, renderType),
+    scene.lightSampler,
+  );
   updateChunkUniforms(scene, pipeline, resources, frame, draw.chunkOffset);
   return resources.bindGroup;
 }
@@ -395,11 +471,12 @@ function createChunkBindGroupEntry(
   pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
   frame: LevelRenderFrame,
   draw: import("./level-renderer").ChunkLayerDraw,
+  renderType: CompositeRenderType,
   atlasTexture: GPUTextureView,
 ): ChunkDrawEntry {
   return {
     draw,
-    bindGroup: createChunkBindGroup(scene, pipeline, frame, draw, atlasTexture),
+    bindGroup: createChunkBindGroup(scene, pipeline, frame, draw, renderType, atlasTexture),
   };
 }
 
@@ -426,7 +503,7 @@ export function encodeSceneFrame(
     const pipeline = scene.pipelineCache.getOrCreate(renderType, target.format, SCENE_DEPTH_FORMAT);
     layers.push({
       pipeline: pipeline.pipeline,
-      draws: drawEntries.map((draw) => createChunkBindGroupEntry(scene, pipeline, frame, draw, atlasTexture)),
+      draws: drawEntries.map((draw) => createChunkBindGroupEntry(scene, pipeline, frame, draw, renderType, atlasTexture)),
     });
   }
 

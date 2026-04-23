@@ -73,6 +73,21 @@ export class LevelRenderer {
     this.chunksToCompile.clear();
   }
 
+  public requestUpdate(): void {
+    this.needsUpdate = true;
+  }
+
+  public countRenderedChunks(): number {
+    let count = 0;
+    for (const renderChunkInfo of this.renderChunks) {
+      if (!renderChunkInfo.chunk.getCompiledChunk().hasNoRenderableLayers()) {
+        count++;
+      }
+    }
+
+    return count;
+  }
+
   public static getLightColor(level: BlockAndTintGetter, pos: BlockPos): number {
     return LevelRenderer.getLightColorFromState(level, level.getBlockState(pos), pos);
   }
@@ -334,6 +349,7 @@ export class LevelRenderer {
   }
 
   private async compileChunksUntil(_deadlineNano: number): Promise<void> {
+    this.needsUpdate = this.needsUpdate || this.chunkRenderDispatcher!.uploadAllPendingUploads();
     if (this.chunksToCompile.size === 0) {
       return;
     }

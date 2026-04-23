@@ -119,7 +119,7 @@ describe("WorkerWorld transport", () => {
       height: 256,
       saveMetadata: {
         saveId: createGeneratedWorldSaveId(12345n, "default"),
-        storageVersion: 1,
+        storageVersion: 2,
         seed: "12345",
         preset: "default",
         minBuildHeight: 0,

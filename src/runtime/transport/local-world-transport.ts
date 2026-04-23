@@ -20,10 +20,16 @@ export interface WorldTransport {
   setPlayerInput(request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]>;
 
   pollUpdates(request: PollWorldUpdatesRequest): Promise<readonly WorldHostMessage[]>;
+
+  supportsChunkViewDeduplication?(): boolean;
 }
 
 export class LocalWorldTransport implements WorldTransport {
   public constructor(private readonly host: WorldHost) {}
+
+  public supportsChunkViewDeduplication(): boolean {
+    return true;
+  }
 
   public openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
     // Test/runtime fallback: direct calls exercise the same boundary without a worker hop.
@@ -84,6 +90,8 @@ export class TransportWorldClient implements WorldClient {
   public async setChunkView(request: SetChunkViewRequest): Promise<boolean> {
     this.getLevel();
     if (
+      this.transport.supportsChunkViewDeduplication?.() !== false
+      &&
       this.lastChunkView !== undefined
       && this.lastChunkView.centerChunkX === request.centerChunkX
       && this.lastChunkView.centerChunkZ === request.centerChunkZ

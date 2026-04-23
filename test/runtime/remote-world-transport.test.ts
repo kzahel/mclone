@@ -273,7 +273,7 @@ describe("RemoteWorld transport", () => {
       height: 256,
       saveMetadata: {
         saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
-        storageVersion: 1,
+        storageVersion: 2,
         seed: "12345",
         preset: "browser_smoke",
         minBuildHeight: 0,

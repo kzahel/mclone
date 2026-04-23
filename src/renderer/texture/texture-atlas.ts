@@ -9,6 +9,8 @@ function lowestOneBit(value: number): number {
   return value & -value;
 }
 
+export const DEFAULT_BLOCK_ATLAS_MIP_LEVEL = 4;
+
 export interface TextureAtlasSource {
   getBasicSpriteInfos(spriteNames: readonly ResourceLocation[]): Promise<readonly TextureAtlasSpriteInfo[]>;
   loadSprite(

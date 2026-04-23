@@ -97,6 +97,10 @@ export class RemoteWorldTransport implements WorldTransport {
     this.sessionId = options.sessionId;
   }
 
+  public supportsChunkViewDeduplication(): boolean {
+    return false;
+  }
+
   public async openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
     this.lastOpenWorldRequest = request;
     this.lastChunkViewRequest = undefined;

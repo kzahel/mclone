@@ -36,7 +36,8 @@ function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
 }
 
-export const GENERATED_WORLD_STORAGE_VERSION = 1;
+// Bump when generated chunk content changes in a way that makes older cached snapshots misleading.
+export const GENERATED_WORLD_STORAGE_VERSION = 2;
 
 export function createGeneratedWorldSaveId(seed: bigint, preset: OpenWorldPreset): string {
   return `generated-world-v${GENERATED_WORLD_STORAGE_VERSION.toString()}-${preset}-${seed.toString()}`;

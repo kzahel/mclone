@@ -211,7 +211,10 @@ async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expe
   }
 
   let frame: LevelRenderFrame | undefined;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  let bestFrame: LevelRenderFrame | undefined;
+  let bestRenderedChunkCount = -1;
+  let stablePasses = 0;
+  for (let attempt = 0; attempt < 12; attempt++) {
     frame = await scene.gameRenderer.renderLevel(
       0.0,
       Number.MAX_SAFE_INTEGER,
@@ -221,16 +224,25 @@ async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expe
       { waitForChunkTasks: true },
     );
 
-    if ((frame.layerDraws.get(RenderType.solid())?.length ?? 0) > 0) {
-      return frame;
+    const renderedChunkCount = scene.levelRenderer.countRenderedChunks();
+    if (renderedChunkCount > bestRenderedChunkCount) {
+      bestFrame = frame;
+      bestRenderedChunkCount = renderedChunkCount;
+      stablePasses = 0;
+    } else {
+      stablePasses++;
+    }
+
+    if ((frame.layerDraws.get(RenderType.solid())?.length ?? 0) > 0 && stablePasses >= 2) {
+      return bestFrame!;
     }
 
     await sleep(50);
     await scene.worldClient.pollUpdates();
-    scene.levelRenderer.allChanged();
+    scene.levelRenderer.requestUpdate();
   }
 
-  return frame!;
+  return bestFrame ?? frame!;
 }
 
 async function boot(): Promise<BootResult> {
