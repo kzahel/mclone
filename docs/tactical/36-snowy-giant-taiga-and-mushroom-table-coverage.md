@@ -50,4 +50,4 @@ Broaden biome-table coverage for the next high-value overworld families that wer
 
 ## Next
 
-Tactical 37 should move to shoreline and transition coverage: beach, river, and ocean biome-table follow-through first, with `snowy_beach`, `ice_spikes`, and bamboo-jungle still explicitly visible as remaining gaps rather than being folded into unrelated slices.
+Tactical 37 is now landed in [`37-shoreline-and-transition-parity.md`](./37-shoreline-and-transition-parity.md). The next follow-through should be the remaining visible cold-family cleanup: `FREEZE_TOP_LAYER`, `ICE_SPIKE`, and `ICE_PATCH`, with warm-ocean coral and bamboo-jungle still kept visible as separate work rather than being folded together.

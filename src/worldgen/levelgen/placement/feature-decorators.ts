@@ -6,12 +6,14 @@ import type { DecoratorConfiguration } from "../feature/configurations/decorator
 import { FrequencyWithExtraChanceDecoratorConfiguration } from "../feature/configurations/frequency-with-extra-chance-decorator-configuration";
 import { HeightmapConfiguration } from "../feature/configurations/heightmap-configuration";
 import { NoiseDependantDecoratorConfiguration } from "../feature/configurations/noise-dependant-decorator-configuration";
+import { NoiseCountFactorDecoratorConfiguration } from "../feature/configurations/noise-count-factor-decorator-configuration";
 import { NoneDecoratorConfiguration } from "../feature/configurations/none-decorator-configuration";
 import { RangeDecoratorConfiguration } from "../feature/configurations/range-decorator-configuration";
 import { WaterDepthThresholdConfiguration } from "../feature/configurations/water-depth-threshold-configuration";
 import { ChanceDecorator } from "./chance-decorator";
 import { CountNoiseDecorator } from "./count-noise-decorator";
 import { CountDecorator } from "./count-decorator";
+import { CountNoiseBiasedDecorator } from "./count-noise-biased-decorator";
 import { CountWithExtraChanceDecorator } from "./count-with-extra-chance-decorator";
 import { DarkOakTreePlacementDecorator } from "./dark-oak-tree-placement-decorator";
 import { DecoratedDecorator } from "./decorated-decorator";
@@ -36,6 +38,7 @@ export const FeatureDecorators = {
   CHANCE: register("chance", new ChanceDecorator()),
   COUNT: register("count", new CountDecorator()),
   COUNT_NOISE: register("count_noise", new CountNoiseDecorator()),
+  COUNT_NOISE_BIASED: register("count_noise_biased", new CountNoiseBiasedDecorator()),
   COUNT_EXTRA: register("count_extra", new CountWithExtraChanceDecorator()),
   HEIGHTMAP: register("heightmap", new HeightmapDecorator()),
   HEIGHTMAP_SPREAD_DOUBLE: register("heightmap_spread_double", new HeightmapSpreadDoubleDecorator()),
@@ -49,6 +52,7 @@ export type SimpleFeatureDecorator =
   | FeatureDecorator<ChanceDecoratorConfiguration>
   | FeatureDecorator<CountConfiguration>
   | FeatureDecorator<NoiseDependantDecoratorConfiguration>
+  | FeatureDecorator<NoiseCountFactorDecoratorConfiguration>
   | FeatureDecorator<FrequencyWithExtraChanceDecoratorConfiguration>
   | FeatureDecorator<HeightmapConfiguration>
   | FeatureDecorator<DecoratedDecoratorConfiguration>

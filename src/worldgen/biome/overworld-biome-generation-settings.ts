@@ -45,6 +45,10 @@ function addDefaultSprings(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => WaterFeatures.SPRING_WATER);
 }
 
+function addWaterTrees(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.TREES_WATER);
+}
+
 function addForestFlowers(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.FOREST_FLOWER_VEGETATION);
 }
@@ -77,6 +81,14 @@ function addDefaultMushrooms(builder: BiomeGenerationSettings.Builder): void {
 function addDefaultExtraVegetation(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_SUGAR_CANE);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_PUMPKIN);
+}
+
+function addColdOceanExtraVegetation(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.KELP_COLD);
+}
+
+function addLukeWarmKelp(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.KELP_WARM);
 }
 
 function addBadlandGrass(builder: BiomeGenerationSettings.Builder): void {
@@ -424,40 +436,121 @@ function buildJungleSettings(edge: boolean): BiomeGenerationSettings {
   return builder.build();
 }
 
+function buildBeachSettings(): BiomeGenerationSettings {
+  const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
+  addDefaultLakes(builder);
+  addDefaultFlowers(builder);
+  addDefaultGrass(builder);
+  addDefaultMushrooms(builder);
+  addDefaultExtraVegetation(builder);
+  addDefaultSprings(builder);
+  return builder.build();
+}
+
+function buildRiverSettings(frozen: boolean): BiomeGenerationSettings {
+  const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
+  addDefaultLakes(builder);
+  addWaterTrees(builder);
+  addDefaultFlowers(builder);
+  addDefaultGrass(builder);
+  addDefaultMushrooms(builder);
+  addDefaultExtraVegetation(builder);
+  addDefaultSprings(builder);
+  if (!frozen) {
+    builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.SEAGRASS_RIVER);
+  }
+  return builder.build();
+}
+
+type OceanSettingsKind = "cold" | "normal" | "lukewarm" | "frozen";
+
+function buildOceanSettings(kind: OceanSettingsKind, deep: boolean): BiomeGenerationSettings {
+  const builder = new BiomeGenerationSettings.Builder();
+  addOceanCarvers(builder);
+  addDefaultLakes(builder);
+  addWaterTrees(builder);
+  addDefaultFlowers(builder);
+  addDefaultGrass(builder);
+  addDefaultMushrooms(builder);
+  addDefaultExtraVegetation(builder);
+  addDefaultSprings(builder);
+  switch (kind) {
+    case "cold":
+      builder.addFeature(
+        GenerationStep.Decoration.VEGETAL_DECORATION,
+        () => (deep ? VegetationFeatures.SEAGRASS_DEEP_COLD : VegetationFeatures.SEAGRASS_COLD),
+      );
+      addColdOceanExtraVegetation(builder);
+      break;
+    case "normal":
+      builder.addFeature(
+        GenerationStep.Decoration.VEGETAL_DECORATION,
+        () => (deep ? VegetationFeatures.SEAGRASS_DEEP : VegetationFeatures.SEAGRASS_NORMAL),
+      );
+      addColdOceanExtraVegetation(builder);
+      break;
+    case "lukewarm":
+      builder.addFeature(
+        GenerationStep.Decoration.VEGETAL_DECORATION,
+        () => (deep ? VegetationFeatures.SEAGRASS_DEEP_WARM : VegetationFeatures.SEAGRASS_WARM),
+      );
+      addLukeWarmKelp(builder);
+      break;
+    case "frozen":
+      break;
+  }
+  return builder.build();
+}
+
 const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:badlands", buildBadlandsSettings()],
   ["minecraft:badlands_plateau", buildBadlandsSettings()],
+  ["minecraft:beach", buildBeachSettings()],
   ["minecraft:birch_forest", buildBirchForestSettings(false)],
   ["minecraft:birch_forest_hills", buildBirchForestSettings(false)],
+  ["minecraft:cold_ocean", buildOceanSettings("cold", false)],
   ["minecraft:desert", buildDesertSettings()],
   ["minecraft:desert_hills", buildDesertSettings()],
   ["minecraft:desert_lakes", buildDesertSettings()],
   ["minecraft:dark_forest", buildDarkForestSettings(false)],
   ["minecraft:dark_forest_hills", buildDarkForestSettings(true)],
+  ["minecraft:deep_cold_ocean", buildOceanSettings("cold", true)],
+  ["minecraft:deep_frozen_ocean", buildOceanSettings("frozen", true)],
+  ["minecraft:deep_lukewarm_ocean", buildOceanSettings("lukewarm", true)],
+  ["minecraft:deep_ocean", buildOceanSettings("normal", true)],
   ["minecraft:forest", buildForestSettings()],
   ["minecraft:flower_forest", buildFlowerForestSettings()],
+  ["minecraft:frozen_ocean", buildOceanSettings("frozen", false)],
+  ["minecraft:frozen_river", buildRiverSettings(true)],
   ["minecraft:giant_spruce_taiga", buildGiantTaigaSettings(true)],
   ["minecraft:giant_spruce_taiga_hills", buildGiantTaigaSettings(true)],
   ["minecraft:giant_tree_taiga", buildGiantTaigaSettings(false)],
   ["minecraft:giant_tree_taiga_hills", buildGiantTaigaSettings(false)],
+  ["minecraft:lukewarm_ocean", buildOceanSettings("lukewarm", false)],
   ["minecraft:mountains", buildMountainSettings(false)],
   ["minecraft:jungle", buildJungleSettings(false)],
   ["minecraft:jungle_edge", buildJungleSettings(true)],
   ["minecraft:jungle_hills", buildJungleSettings(false)],
   ["minecraft:mushroom_fields", buildMushroomFieldSettings()],
   ["minecraft:mushroom_field_shore", buildMushroomFieldSettings()],
+  ["minecraft:ocean", buildOceanSettings("normal", false)],
   ["minecraft:wooded_mountains", buildMountainSettings(false)],
   ["minecraft:mountain_edge", buildMountainSettings(true)],
   ["minecraft:plains", buildPlainsSettings()],
+  ["minecraft:river", buildRiverSettings(false)],
   ["minecraft:savanna", buildSavannaSettings(false)],
   ["minecraft:savanna_plateau", buildSavannaSettings(false)],
   ["minecraft:shattered_savanna", buildSavannaSettings(true)],
   ["minecraft:shattered_savanna_plateau", buildSavannaSettings(true)],
   ["minecraft:snowy_mountains", buildSnowyTundraSettings()],
+  ["minecraft:snowy_beach", buildBeachSettings()],
   ["minecraft:snowy_taiga", buildSnowyTaigaSettings()],
   ["minecraft:snowy_taiga_hills", buildSnowyTaigaSettings()],
   ["minecraft:snowy_taiga_mountains", buildSnowyTaigaSettings()],
   ["minecraft:snowy_tundra", buildSnowyTundraSettings()],
+  ["minecraft:stone_shore", buildBeachSettings()],
   ["minecraft:sunflower_plains", buildPlainsSettings()],
   ["minecraft:swamp", buildSwampSettings(false)],
   ["minecraft:swamp_hills", buildSwampSettings(true)],

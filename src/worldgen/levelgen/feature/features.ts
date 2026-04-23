@@ -14,6 +14,7 @@ import { SimpleRandomFeatureConfiguration } from "./configurations/simple-random
 import { SimpleBlockConfiguration } from "./configurations/simple-block-configuration";
 import { HugeBrownMushroomFeature } from "./huge-brown-mushroom-feature";
 import { HugeRedMushroomFeature } from "./huge-red-mushroom-feature";
+import { KelpFeature } from "./kelp-feature";
 import { SeagrassFeature } from "./seagrass-feature";
 import { SpringConfiguration } from "./configurations/spring-configuration";
 import { TreeConfiguration } from "./configurations/tree-configuration";
@@ -45,6 +46,7 @@ export const Features = {
   LAKE: register("lake", new LakeFeature()),
   SPRING: register("spring", new SpringFeature()),
   SEAGRASS: register("seagrass", new SeagrassFeature()),
+  KELP: register("kelp", new KelpFeature()),
   HUGE_RED_MUSHROOM: register("huge_red_mushroom", new HugeRedMushroomFeature()),
   HUGE_BROWN_MUSHROOM: register("huge_brown_mushroom", new HugeBrownMushroomFeature()),
   VINES: register("vines", new VinesFeature()),

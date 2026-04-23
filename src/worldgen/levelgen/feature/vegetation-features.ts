@@ -11,6 +11,7 @@ import { Heightmap } from "../heightmap";
 import { FrequencyWithExtraChanceDecoratorConfiguration } from "./configurations/frequency-with-extra-chance-decorator-configuration";
 import { HeightmapConfiguration } from "./configurations/heightmap-configuration";
 import { HugeMushroomFeatureConfiguration } from "./configurations/huge-mushroom-feature-configuration";
+import { NoiseCountFactorDecoratorConfiguration } from "./configurations/noise-count-factor-decorator-configuration";
 import { NoiseDependantDecoratorConfiguration } from "./configurations/noise-dependant-decorator-configuration";
 import { NoneFeatureConfiguration } from "./configurations/none-feature-configuration";
 import { ProbabilityFeatureConfiguration } from "./configurations/probability-feature-configuration";
@@ -114,6 +115,12 @@ function countExtraDecorator(count: number, extraChance: number, extraCount: num
 
 function countNoiseDecorator(noiseLevel: number, belowNoise: number, aboveNoise: number) {
   return FeatureDecorators.COUNT_NOISE.configured(new NoiseDependantDecoratorConfiguration(noiseLevel, belowNoise, aboveNoise));
+}
+
+function countNoiseBiasedDecorator(noiseToCountRatio: number, noiseFactor: number, noiseOffset: number) {
+  return FeatureDecorators.COUNT_NOISE_BIASED.configured(
+    new NoiseCountFactorDecoratorConfiguration(noiseToCountRatio, noiseFactor, noiseOffset),
+  );
 }
 
 function waterDepthThresholdDecorator(maxWaterDepth: number) {
@@ -453,6 +460,48 @@ export class VegetationFeatures {
 
   public static get SEAGRASS_SWAMP() {
     return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.6)).count(64).decorated(heightmapTopSolidSquare());
+  }
+
+  public static get SEAGRASS_COLD() {
+    return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.3)).count(32).decorated(heightmapTopSolidSquare());
+  }
+
+  public static get SEAGRASS_DEEP_COLD() {
+    return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.8)).count(40).decorated(heightmapTopSolidSquare());
+  }
+
+  public static get SEAGRASS_NORMAL() {
+    return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.3)).count(48).decorated(heightmapTopSolidSquare());
+  }
+
+  public static get SEAGRASS_RIVER() {
+    return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.4)).count(48).decorated(heightmapTopSolidSquare());
+  }
+
+  public static get SEAGRASS_DEEP() {
+    return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.8)).count(48).decorated(heightmapTopSolidSquare());
+  }
+
+  public static get SEAGRASS_WARM() {
+    return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.3)).count(80).decorated(heightmapTopSolidSquare());
+  }
+
+  public static get SEAGRASS_DEEP_WARM() {
+    return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.8)).count(80).decorated(heightmapTopSolidSquare());
+  }
+
+  public static get KELP_COLD() {
+    return Features.KELP.configured(NoneFeatureConfiguration.INSTANCE)
+      .decorated(heightmapDecorator(Heightmap.Types.OCEAN_FLOOR_WG))
+      .squared()
+      .decorated(countNoiseBiasedDecorator(120, 80.0, 0.0));
+  }
+
+  public static get KELP_WARM() {
+    return Features.KELP.configured(NoneFeatureConfiguration.INSTANCE)
+      .decorated(heightmapDecorator(Heightmap.Types.OCEAN_FLOOR_WG))
+      .squared()
+      .decorated(countNoiseBiasedDecorator(80, 80.0, 0.0));
   }
 
   public static get PATCH_PUMPKIN() {

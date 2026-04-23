@@ -86,6 +86,13 @@ const MUSHROOM_FIELD_OUTPUT_LOCATIONS = new Set([
   "minecraft:mushroom_stem",
 ]);
 
+const AQUATIC_OUTPUT_LOCATIONS = new Set([
+  "minecraft:seagrass",
+  "minecraft:tall_seagrass",
+  "minecraft:kelp",
+  "minecraft:kelp_plant",
+]);
+
 function getState(location: string): BlockState {
   const block = Registry.BLOCK.get(new ResourceLocation(location)) as Block | undefined;
   if (block === undefined) {
@@ -194,6 +201,45 @@ describe("Vegetation parity", () => {
     expect(VegetationFeatures.SEAGRASS_SWAMP.place(swampLevel, generator, new WorldgenRandom(7n), new BlockPos(8, 0, 8))).toBe(true);
     const swampPlacements = collectPlacedLocations(swampLevel, 11, 12);
     expect(swampPlacements.some((location) => location === "minecraft:seagrass" || location === "minecraft:tall_seagrass")).toBe(true);
+  });
+
+  test("river and ocean aquatic vegetation paths place translated seagrass and kelp blocks", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const generator = createGenerator();
+
+    const riverLevel = createWaterLevel(blocks.airState, getState("minecraft:stone"), getState("minecraft:water"));
+    expect(VegetationFeatures.SEAGRASS_RIVER.place(riverLevel, generator, new WorldgenRandom(17n), new BlockPos(8, 0, 8))).toBe(true);
+    const riverPlacements = collectPlacedLocations(riverLevel, 11, 16);
+    expect(riverPlacements.length).toBeGreaterThan(0);
+    expect(riverPlacements.every((location) => AQUATIC_OUTPUT_LOCATIONS.has(location))).toBe(true);
+
+    let kelpColdLevel: StaticRenderLevel | undefined;
+    for (let seed = 0n; seed < 64n; seed++) {
+      const candidate = createWaterLevel(blocks.airState, getState("minecraft:stone"), getState("minecraft:water"));
+      if (VegetationFeatures.KELP_COLD.place(candidate, generator, new WorldgenRandom(seed), new BlockPos(8, 0, 8))) {
+        kelpColdLevel = candidate;
+        break;
+      }
+    }
+    expect(kelpColdLevel).toBeDefined();
+    const kelpColdPlacements = collectPlacedLocations(kelpColdLevel!, 11, 24);
+    expect(kelpColdPlacements.length).toBeGreaterThan(0);
+    expect(kelpColdPlacements.every((location) => AQUATIC_OUTPUT_LOCATIONS.has(location))).toBe(true);
+    expect(kelpColdPlacements.some((location) => location === "minecraft:kelp" || location === "minecraft:kelp_plant")).toBe(true);
+
+    let kelpWarmLevel: StaticRenderLevel | undefined;
+    for (let seed = 0n; seed < 64n; seed++) {
+      const candidate = createWaterLevel(blocks.airState, getState("minecraft:stone"), getState("minecraft:water"));
+      if (VegetationFeatures.KELP_WARM.place(candidate, generator, new WorldgenRandom(seed), new BlockPos(8, 0, 8))) {
+        kelpWarmLevel = candidate;
+        break;
+      }
+    }
+    expect(kelpWarmLevel).toBeDefined();
+    const kelpWarmPlacements = collectPlacedLocations(kelpWarmLevel!, 11, 24);
+    expect(kelpWarmPlacements.length).toBeGreaterThan(0);
+    expect(kelpWarmPlacements.every((location) => AQUATIC_OUTPUT_LOCATIONS.has(location))).toBe(true);
+    expect(kelpWarmPlacements.some((location) => location === "minecraft:kelp" || location === "minecraft:kelp_plant")).toBe(true);
   });
 
   test("huge mushroom and dark-forest vegetation paths place translated dark-oak and mushroom blocks", () => {
@@ -315,8 +361,33 @@ describe("Vegetation parity", () => {
     }
   });
 
-  test("overworld biome settings wire the new swamp, flower-forest, birch, dark-forest, savanna, jungle, snowy, giant-taiga, and mushroom tables", () => {
+  test("overworld biome settings wire the shoreline, ocean, swamp, forest, savanna, jungle, snowy, giant-taiga, and mushroom tables", () => {
     registerGeneratedRenderBlocks();
+    const beachFeatures = getOverworldBiomeGenerationSettings("minecraft:beach").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const stoneShoreFeatures = getOverworldBiomeGenerationSettings("minecraft:stone_shore").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const snowyBeachFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_beach").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const riverFeatures = getOverworldBiomeGenerationSettings("minecraft:river").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const frozenRiverFeatures = getOverworldBiomeGenerationSettings("minecraft:frozen_river").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const oceanFeatures = getOverworldBiomeGenerationSettings("minecraft:ocean").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const deepOceanFeatures = getOverworldBiomeGenerationSettings("minecraft:deep_ocean").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const coldOceanFeatures = getOverworldBiomeGenerationSettings("minecraft:cold_ocean").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const deepColdOceanFeatures = getOverworldBiomeGenerationSettings("minecraft:deep_cold_ocean").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const lukewarmOceanFeatures = getOverworldBiomeGenerationSettings("minecraft:lukewarm_ocean")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const deepLukewarmOceanFeatures = getOverworldBiomeGenerationSettings("minecraft:deep_lukewarm_ocean")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const frozenOceanFeatures = getOverworldBiomeGenerationSettings("minecraft:frozen_ocean")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const deepFrozenOceanFeatures = getOverworldBiomeGenerationSettings("minecraft:deep_frozen_ocean")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
     const swampFeatures = getOverworldBiomeGenerationSettings("minecraft:swamp").features().flat().map((supplier) => getBaseFeature(supplier()));
     const swampHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:swamp_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
     const flowerForestFeatures = getOverworldBiomeGenerationSettings("minecraft:flower_forest").features().flat().map((supplier) => getBaseFeature(supplier()));
@@ -366,6 +437,30 @@ describe("Vegetation parity", () => {
       .flat()
       .map((supplier) => getBaseFeature(supplier()));
 
+    expect(beachFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(stoneShoreFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(snowyBeachFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(riverFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
+    expect(riverFeatures.some((feature) => feature === Features.RANDOM_SELECTOR || feature === Features.TREE)).toBe(true);
+    expect(frozenRiverFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
+    expect(oceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
+    expect(oceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
+    expect(deepOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
+    expect(deepOceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
+    expect(coldOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
+    expect(coldOceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
+    expect(deepColdOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
+    expect(deepColdOceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
+    expect(lukewarmOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
+    expect(lukewarmOceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
+    expect(deepLukewarmOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
+    expect(deepLukewarmOceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
+    expect(frozenOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
+    expect(frozenOceanFeatures.some((feature) => feature === Features.KELP)).toBe(false);
+    expect(frozenOceanFeatures.some((feature) => feature === Features.RANDOM_SELECTOR || feature === Features.TREE)).toBe(true);
+    expect(deepFrozenOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
+    expect(deepFrozenOceanFeatures.some((feature) => feature === Features.KELP)).toBe(false);
+    expect(deepFrozenOceanFeatures.some((feature) => feature === Features.RANDOM_SELECTOR || feature === Features.TREE)).toBe(true);
     expect(swampFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
     expect(swampHillsFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
     expect(flowerForestFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);

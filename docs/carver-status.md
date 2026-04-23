@@ -76,7 +76,7 @@ The highest-value sequence from here is:
 1. Decide whether recorded scheduled underwater ticks should stay a measured generation artifact or grow into a later runtime simulation requirement.
 2. If exhaustive carved-stage diffs remain a priority, widen the flattened numeric model / oracle mapping where vanilla block-state distinctions are still collapsed instead of continuing to hide that lossiness behind a single ID.
 3. Keep browser validation aimed at exposed cave mouths / ravines after each substantial carver change, and keep surface-family validation aimed at the widened matrix when the surface path changes.
-4. For broader overworld recognizability, classic carvers no longer need to stay above the next biome-table slice; with snowy / giant-taiga / mushroom-field coverage landed, the next broad follow-through is shoreline and transition table coverage (beach / river / ocean, with the remaining cold-family cleanup behind it) outside the narrower exhaustive-parity work.
+4. For broader overworld recognizability, classic carvers no longer need to stay above the next biome-table slice; shoreline and first ocean-table coverage are now landed, so the next broad follow-through is the remaining cold-family cleanup (`FREEZE_TOP_LAYER`, `ICE_SPIKE`, `ICE_PATCH`) or the later warm-ocean coral path outside the narrower exhaustive-parity work.
 
 ## Practical definition of “full parity”
 

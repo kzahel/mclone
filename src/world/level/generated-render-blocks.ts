@@ -11,6 +11,8 @@ import { CocoaBlock } from "./block/cocoa-block";
 import { DeadBushBlock } from "./block/dead-bush-block";
 import { DoublePlantBlock } from "./block/double-plant-block";
 import { HugeMushroomBlock } from "./block/huge-mushroom-block";
+import { KelpBlock } from "./block/kelp-block";
+import { KelpPlantBlock } from "./block/kelp-plant-block";
 import { LeavesBlock } from "./block/leaves-block";
 import { LiquidBlock } from "./block/liquid-block";
 import { MushroomBlock } from "./block/mushroom-block";
@@ -83,6 +85,8 @@ const RED_MUSHROOM_BLOCK_LOCATION = new ResourceLocation("minecraft:red_mushroom
 const MUSHROOM_STEM_LOCATION = new ResourceLocation("minecraft:mushroom_stem");
 const SEAGRASS_LOCATION = new ResourceLocation("minecraft:seagrass");
 const TALL_SEAGRASS_LOCATION = new ResourceLocation("minecraft:tall_seagrass");
+const KELP_LOCATION = new ResourceLocation("minecraft:kelp");
+const KELP_PLANT_LOCATION = new ResourceLocation("minecraft:kelp_plant");
 const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
 const TALL_GRASS_LOCATION = new ResourceLocation("minecraft:tall_grass");
 const LILAC_LOCATION = new ResourceLocation("minecraft:lilac");
@@ -182,6 +186,8 @@ const GENERATED_BLOCK_LOCATIONS = [
   MUSHROOM_STEM_LOCATION,
   SEAGRASS_LOCATION,
   TALL_SEAGRASS_LOCATION,
+  KELP_LOCATION,
+  KELP_PLANT_LOCATION,
   LILY_PAD_LOCATION,
   TALL_GRASS_LOCATION,
   LILAC_LOCATION,
@@ -295,6 +301,8 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("seagrass"),
   blockTexture("tall_seagrass_bottom"),
   blockTexture("tall_seagrass_top"),
+  blockTexture("kelp"),
+  blockTexture("kelp_plant"),
   blockTexture("lily_pad"),
   blockTexture("tall_grass_bottom"),
   blockTexture("tall_grass_top"),
@@ -709,6 +717,14 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     TALL_SEAGRASS_LOCATION,
     new TallSeagrassBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_WATER_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
+  const kelpState = registerBlock(
+    KELP_LOCATION,
+    new KelpBlock(BlockBehaviour.Properties.of(Material.WATER_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const kelpPlantState = registerBlock(
+    KELP_PLANT_LOCATION,
+    new KelpPlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_WATER_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
   const lilyPadState = registerBlock(
     LILY_PAD_LOCATION,
     new WaterlilyBlock(BlockBehaviour.Properties.of(Material.PLANT).instabreak().sound(SoundType.GRASS).noOcclusion()),
@@ -793,6 +809,8 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(mushroomStemState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(seagrassState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(tallSeagrassState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(kelpState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(kelpPlantState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(lilyPadState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(tallGrassState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(lilacState.getBlock(), RenderType.cutout());

@@ -26,7 +26,7 @@ The project is past the “terrain demo” phase. The renderer is already consum
 - translated surface material placement
 - translated classic air carvers
 - translated first-pass biome decoration
-- translated rendering for water, tint, dark-oak trees, acacia trees, jungle trees, mega spruce / mega pine conifers, huge mushrooms, grass, flowers, lily pads, seagrass, mushrooms, cactus, sugar cane, vine, cocoa, melon, and related surface features
+- translated rendering for water, tint, dark-oak trees, acacia trees, jungle trees, mega spruce / mega pine conifers, huge mushrooms, grass, flowers, lily pads, seagrass, kelp, mushrooms, cactus, sugar cane, vine, cocoa, melon, and related surface features
 
 Several later worldgen capabilities landed through renderer-driven tacticals rather than through the original worldgen arc, so this document should be treated as the authoritative status view when it disagrees with the older tactical sequence.
 
@@ -45,10 +45,10 @@ The main remaining gap is not foundational plumbing. It is breadth, parity, and 
 | Overworld biome source / layered biome pipeline | `90-95%` | Landed and driving terrain + decoration lookup | [`05`](./tactical/05-overworld-biome-source.md) |
 | Surface rules / bedrock / top materials | `88-92%` | Landed for the current overworld path, now including frozen-ocean, badlands, giant-tree-taiga, shattered-savanna, and mushroom follow-through | [`06a`](./tactical/06a-pre-07-surface-prep.md), [`07`](./tactical/07-surface-builders.md), [`31`](./tactical/31-frozen-and-badlands-material-matrix.md), [`32`](./tactical/32-podzol-coarse-dirt-and-mycelium-matrix.md) |
 | Classic carvers (`CaveWorldCarver`, `CanyonWorldCarver`) | `85-90%` | Implemented for the overworld AIR+LIQUID path, integrated, and now backed by widened desert/ocean/frozen/badlands/podzol/coarse-dirt/mycelium material coverage, scheduled-tick capture, and a broader carved-fixture matrix, but still below full vanilla parity | code: [`src/worldgen/carver/`](../src/worldgen/carver), tacticals: [`28`](./tactical/28-carver-material-parity-and-oracle-expansion.md), [`29`](./tactical/29-underwater-liquid-carver-parity.md), [`30`](./tactical/30-liquid-floor-oracle-and-tick-capture.md), [`31`](./tactical/31-frozen-and-badlands-material-matrix.md), [`32`](./tactical/32-podzol-coarse-dirt-and-mycelium-matrix.md), status: [`carver-status.md`](./carver-status.md), generator hook: [`noise-based-chunk-generator.ts`](../src/worldgen/levelgen/noise-based-chunk-generator.ts) |
-| Feature/decorator framework | `80-88%` | Enough for the current vegetation, water-feature, dark-forest, savanna, jungle, snowy, giant-taiga, and mushroom-field placement set | [`22`](./tactical/22-simple-feature-placement-bridge.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md) |
+| Feature/decorator framework | `82-90%` | Enough for the current vegetation, water-feature, dark-forest, savanna, jungle, snowy, giant-taiga, mushroom-field, shoreline, river, and first ocean placement set | [`22`](./tactical/22-simple-feature-placement-bridge.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md) |
 | Tree pipeline | `78-88%` | Oak / swamp oak / fancy oak / spruce / pine / mega pine / mega spruce / birch / dark oak / acacia / jungle / mega-jungle / huge-mushroom paths exist; bee and bamboo-related parity still does not | [`23`](./tactical/23-true-tree-feature-placement.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md) |
-| Surface vegetation + water decoration | `72-82%` | First substantial overworld set landed, now including dark-forest, savanna, jungle, snowy, giant-taiga, and mushroom-field vegetation identity | [`20`](./tactical/20-surface-special-blocks-and-biome-tint.md), [`21`](./tactical/21-surface-feature-palette-expansion.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md) |
-| Biome decoration table coverage | `60-70%` | A useful subset is real, now including dark forest, savanna, jungle, snowy, giant-taiga, and mushroom-field tables; many biome keys still fall back to carver-only generation settings without translated feature tables | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md) |
+| Surface vegetation + water decoration | `75-85%` | First substantial overworld set landed, now including dark-forest, savanna, jungle, snowy, giant-taiga, mushroom-field, shoreline, river, and first ocean vegetation identity | [`20`](./tactical/20-surface-special-blocks-and-biome-tint.md), [`21`](./tactical/21-surface-feature-palette-expansion.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md) |
+| Biome decoration table coverage | `68-78%` | A useful majority is real, now including dark forest, savanna, jungle, snowy, giant-taiga, mushroom-field, shoreline, river, and the first ocean-table families; remaining gaps are concentrated in warm-ocean and cold-surface follow-through plus a few still-empty biome keys | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md) |
 | Ore generation / underground decoration | `0-10%` | Not meaningfully started | target bucket only |
 | Structures | `0-5%` | Not meaningfully started | target bucket only |
 
@@ -76,9 +76,11 @@ The project now has translated support for:
 - `LakeFeature`
 - `SpringFeature`
 - `SeagrassFeature`
+- `KelpFeature`
 - `HugeBrownMushroomFeature`
 - `HugeRedMushroomFeature`
 - flower-provider-backed flower placement
+- ocean `count_noise_biased` decorator follow-through
 
 ### Current tree / plant / water feature families
 
@@ -88,6 +90,7 @@ The current worldgen path covers a meaningful first-pass overworld set:
 - huge vegetation: huge brown mushroom, huge red mushroom
 - plants: grass, tall grass, fern, large fern, flowers, double flowers, berry bushes, mushrooms, pumpkins, melon, cactus, sugar cane, dead bush, vine, cocoa
 - water/surface flora: lily pads, seagrass, tall seagrass
+- ocean flora: kelp, kelp plant
 - water features: water lakes and water springs
 
 ### Current biome-table coverage
@@ -101,7 +104,10 @@ The current worldgen path covers a meaningful first-pass overworld set:
 - dark forest, dark forest hills
 - giant tree taiga, giant tree taiga hills, giant spruce taiga, giant spruce taiga hills
 - jungle, jungle hills, jungle edge
+- beach, snowy beach, stone shore
 - mushroom fields, mushroom field shore
+- river, frozen river
+- ocean, deep ocean, cold ocean, deep cold ocean, lukewarm ocean, deep lukewarm ocean, frozen ocean, deep frozen ocean
 - plains, sunflower plains
 - savanna, savanna plateau, shattered savanna, shattered savanna plateau
 - snowy tundra, snowy mountains, snowy taiga, snowy taiga hills, snowy taiga mountains
@@ -109,18 +115,16 @@ The current worldgen path covers a meaningful first-pass overworld set:
 - mountains, wooded mountains, mountain edge
 - taiga, taiga hills, taiga mountains
 
-That is enough to produce varied generated scenes, but it is still a subset of the overworld biome matrix.
+That is enough to produce varied generated scenes, but it is still a subset of the overworld biome matrix. `warm_ocean` and `deep_warm_ocean` still fall back because the coral / sea-pickle path has not landed yet.
 
 ## What is still missing
 
 ### Common biome families still missing or thin
 
-Many biome keys still lack translated biome-specific feature tables. The current fallback keeps default AIR-step carvers live, but the biome-specific decoration pass is still absent or very reduced. Important gaps include:
+Several high-signal families still lack their final biome-specific follow-through. Important gaps now include:
 
-- `ice_spikes` and `snowy_beach` follow-through inside the broader cold-family coverage
-- beaches
-- rivers
-- most ocean variants beyond the biome ID layer itself
+- `warm_ocean` / `deep_warm_ocean` coral, sea-pickle, and warm-ocean vegetation
+- `FREEZE_TOP_LAYER`, `ICE_SPIKE`, and `ICE_PATCH`, which still make `snowy_beach` / `ice_spikes` visually incomplete even though the shoreline table itself is now wired
 - bamboo-jungle follow-through inside the broader jungle family
 
 ### Tree and decorator parity gaps
@@ -171,8 +175,8 @@ The next broad parity win is filling out the many biomes that still fall back to
 
 Highest-value families:
 
-- river / beach / ocean follow-through
-- `ice_spikes` / `snowy_beach` cleanup inside the broader cold-family coverage
+- `FREEZE_TOP_LAYER` / `ice_spikes` / cold-shoreline cleanup
+- `warm_ocean` / `deep_warm_ocean` coral and sea-pickle follow-through
 - bamboo-jungle and other still-reduced jungle follow-through
 
 This is a larger win than adding more variants inside already-covered forest/plains/swamp paths.
