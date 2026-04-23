@@ -21,6 +21,7 @@ const LARGE_FERN_LOCATION = new ResourceLocation("minecraft:large_fern");
 const TALL_GRASS_LOCATION = new ResourceLocation("minecraft:tall_grass");
 const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
 const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
+const ACACIA_LEAVES_LOCATION = new ResourceLocation("minecraft:acacia_leaves");
 const SPRUCE_LEAVES_LOCATION = new ResourceLocation("minecraft:spruce_leaves");
 const BIRCH_LEAVES_LOCATION = new ResourceLocation("minecraft:birch_leaves");
 const DARK_OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:dark_oak_leaves");
@@ -73,8 +74,9 @@ export class BlockColors {
     }
 
     const oakLeaves = Registry.BLOCK.get(OAK_LEAVES_LOCATION) as Block | undefined;
+    const acaciaLeaves = Registry.BLOCK.get(ACACIA_LEAVES_LOCATION) as Block | undefined;
     const darkOakLeaves = Registry.BLOCK.get(DARK_OAK_LEAVES_LOCATION) as Block | undefined;
-    const defaultFoliageBlocks = [oakLeaves, darkOakLeaves].filter((block): block is Block => block !== undefined);
+    const defaultFoliageBlocks = [oakLeaves, acaciaLeaves, darkOakLeaves].filter((block): block is Block => block !== undefined);
     if (defaultFoliageBlocks.length > 0) {
       blockColors.register(
         (_state, level, pos) => level !== null && pos !== null ? BiomeColors.getAverageFoliageColor(level, pos) : FoliageColor.getDefaultColor(),

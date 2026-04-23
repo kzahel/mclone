@@ -121,4 +121,42 @@ describe("TreeFeature", () => {
     expect(logCount).toBeGreaterThanOrEqual(expectedHeight * 4);
     expect(leafCount).toBeGreaterThan(0);
   });
+
+  test("acacia placement uses the translated forking trunk and acacia foliage path", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    const generator = createGenerator();
+    const feature = TreeFeatures.ACACIA;
+    const logState = getState("minecraft:acacia_log");
+    const leavesState = getState("minecraft:acacia_leaves");
+    const origin = new BlockPos(16, 11, 16);
+    const expectedHeight = feature.config.trunkPlacer.getTreeHeight(new WorldgenRandom(2468n));
+
+    expect(feature.place(level, generator, new WorldgenRandom(2468n), origin)).toBe(true);
+
+    let logCount = 0;
+    let leafCount = 0;
+    let foundOffsetLog = false;
+    for (let y = 10; y < 28; y++) {
+      for (let z = 8; z <= 24; z++) {
+        for (let x = 8; x <= 24; x++) {
+          const state = level.getBlockState(new BlockPos(x, y, z));
+          if (state.is(logState.getBlock())) {
+            logCount++;
+            if ((x !== origin.getX() || z !== origin.getZ()) && y > origin.getY()) {
+              foundOffsetLog = true;
+            }
+          } else if (state.is(leavesState.getBlock())) {
+            leafCount++;
+            expect(state.getValue(BlockStateProperties.DISTANCE)).toBeLessThan(7);
+          }
+        }
+      }
+    }
+
+    expect(level.getBlockState(origin).is(logState.getBlock())).toBe(true);
+    expect(logCount).toBeGreaterThanOrEqual(expectedHeight);
+    expect(foundOffsetLog).toBe(true);
+    expect(leafCount).toBeGreaterThan(0);
+  });
 });

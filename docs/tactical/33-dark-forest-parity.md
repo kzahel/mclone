@@ -54,4 +54,4 @@ Finish the first true dark-forest biome-identity slice now that the current carv
 
 ## Next
 
-Tactical 34 should stay with biome identity and move to savanna parity: port the missing acacia tree path and the savanna / savanna-plateau / shattered-savanna biome tables so those families stop falling back to the reduced generic tree mix the way dark forest used to.
+That next biome-identity follow-through is now [`34-savanna-parity.md`](34-savanna-parity.md): savanna landed through the translated acacia tree path and the savanna / shattered-savanna biome tables. The next slice after that should move to jungle parity.

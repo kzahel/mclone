@@ -10,6 +10,7 @@ import { OverworldBiomeSource } from "../../../../src/worldgen/biome/overworld-b
 import { getOverworldBiomeGenerationSettings } from "../../../../src/worldgen/biome/overworld-biome-generation-settings";
 import { DecoratedFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorated-feature-configuration";
 import { Features } from "../../../../src/worldgen/levelgen/feature/features";
+import { TreeFeatures } from "../../../../src/worldgen/levelgen/feature/tree-features";
 import { VegetationFeatures } from "../../../../src/worldgen/levelgen/feature/vegetation-features";
 import { NoiseBasedChunkGenerator } from "../../../../src/worldgen/levelgen/noise-based-chunk-generator";
 import { WorldgenRandom } from "../../../../src/worldgen/prng/worldgen-random";
@@ -50,6 +51,13 @@ const DARK_FOREST_OUTPUT_LOCATIONS = new Set([
   "minecraft:brown_mushroom_block",
   "minecraft:red_mushroom_block",
   "minecraft:mushroom_stem",
+]);
+
+const SAVANNA_OUTPUT_LOCATIONS = new Set([
+  "minecraft:oak_log",
+  "minecraft:oak_leaves",
+  "minecraft:acacia_log",
+  "minecraft:acacia_leaves",
 ]);
 
 function getState(location: string): BlockState {
@@ -190,7 +198,27 @@ describe("Vegetation parity", () => {
     }
   });
 
-  test("overworld biome settings wire the new swamp, flower-forest, birch, and dark-forest tables", () => {
+  test("savanna vegetation paths place translated acacia blocks and savanna settings are wired", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const generator = createGenerator();
+
+    const acaciaLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    expect(TreeFeatures.ACACIA.place(acaciaLevel, generator, new WorldgenRandom(2468n), new BlockPos(16, 11, 16))).toBe(true);
+    const acaciaPlacements = collectPlacedLocations(acaciaLevel, 11, 24);
+    expect(acaciaPlacements).toContain("minecraft:acacia_log");
+    expect(acaciaPlacements).toContain("minecraft:acacia_leaves");
+
+    const savannaLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    expect(VegetationFeatures.TREES_SAVANNA.place(savannaLevel, generator, new WorldgenRandom(1357n), new BlockPos(0, 0, 0))).toBe(true);
+    const savannaPlacements = collectPlacedLocations(savannaLevel, 11, 32);
+    expect(savannaPlacements.length).toBeGreaterThan(0);
+    expect(savannaPlacements.some((location) => SAVANNA_OUTPUT_LOCATIONS.has(location))).toBe(true);
+    for (const location of savannaPlacements) {
+      expect(SAVANNA_OUTPUT_LOCATIONS.has(location)).toBe(true);
+    }
+  });
+
+  test("overworld biome settings wire the new swamp, flower-forest, birch, dark-forest, and savanna tables", () => {
     registerGeneratedRenderBlocks();
     const swampFeatures = getOverworldBiomeGenerationSettings("minecraft:swamp").features().flat().map((supplier) => getBaseFeature(supplier()));
     const swampHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:swamp_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
@@ -198,6 +226,13 @@ describe("Vegetation parity", () => {
     const birchForestFeatures = getOverworldBiomeGenerationSettings("minecraft:birch_forest").features().flat().map((supplier) => getBaseFeature(supplier()));
     const darkForestFeatures = getOverworldBiomeGenerationSettings("minecraft:dark_forest").features().flat().map((supplier) => getBaseFeature(supplier()));
     const darkForestHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:dark_forest_hills")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const savannaFeatures = getOverworldBiomeGenerationSettings("minecraft:savanna").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const savannaPlateauFeatures = getOverworldBiomeGenerationSettings("minecraft:savanna_plateau").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const shatteredSavannaFeatures = getOverworldBiomeGenerationSettings("minecraft:shattered_savanna").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const shatteredSavannaPlateauFeatures = getOverworldBiomeGenerationSettings("minecraft:shattered_savanna_plateau")
       .features()
       .flat()
       .map((supplier) => getBaseFeature(supplier()));
@@ -209,5 +244,11 @@ describe("Vegetation parity", () => {
     expect(birchForestFeatures.some((feature) => feature === Features.RANDOM_SELECTOR || feature === Features.TREE)).toBe(true);
     expect(darkForestFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(darkForestHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(savannaFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(savannaFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(savannaPlateauFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(shatteredSavannaFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(shatteredSavannaFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(shatteredSavannaPlateauFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
   });
 });

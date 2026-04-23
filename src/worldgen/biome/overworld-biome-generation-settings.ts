@@ -61,6 +61,10 @@ function addDefaultFlowers(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.FLOWER_DEFAULT);
 }
 
+function addWarmFlowers(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.FLOWER_WARM);
+}
+
 function addDefaultMushrooms(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BROWN_MUSHROOM_NORMAL);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.RED_MUSHROOM_NORMAL);
@@ -111,6 +115,26 @@ function addPlainVegetation(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PLAIN_VEGETATION);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.FLOWER_PLAIN_DECORATED);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_PLAIN);
+}
+
+function addSavannaTrees(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.TREES_SAVANNA);
+}
+
+function addShatteredSavannaTrees(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.TREES_SHATTERED_SAVANNA);
+}
+
+function addSavannaGrass(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_TALL_GRASS);
+}
+
+function addShatteredSavannaGrass(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_NORMAL);
+}
+
+function addSavannaExtraGrass(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_SAVANNA);
 }
 
 function buildMountainSettings(edge: boolean): BiomeGenerationSettings {
@@ -253,6 +277,28 @@ function buildSwampSettings(swampHills: boolean): BiomeGenerationSettings {
   return builder.build();
 }
 
+function buildSavannaSettings(shattered: boolean): BiomeGenerationSettings {
+  const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
+  addDefaultLakes(builder);
+  if (!shattered) {
+    addSavannaGrass(builder);
+  }
+  if (shattered) {
+    addShatteredSavannaTrees(builder);
+    addDefaultFlowers(builder);
+    addShatteredSavannaGrass(builder);
+  } else {
+    addSavannaTrees(builder);
+    addWarmFlowers(builder);
+    addSavannaExtraGrass(builder);
+  }
+  addDefaultMushrooms(builder);
+  addDefaultExtraVegetation(builder);
+  addDefaultSprings(builder);
+  return builder.build();
+}
+
 const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:badlands", buildBadlandsSettings()],
   ["minecraft:badlands_plateau", buildBadlandsSettings()],
@@ -269,6 +315,10 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:wooded_mountains", buildMountainSettings(false)],
   ["minecraft:mountain_edge", buildMountainSettings(true)],
   ["minecraft:plains", buildPlainsSettings()],
+  ["minecraft:savanna", buildSavannaSettings(false)],
+  ["minecraft:savanna_plateau", buildSavannaSettings(false)],
+  ["minecraft:shattered_savanna", buildSavannaSettings(true)],
+  ["minecraft:shattered_savanna_plateau", buildSavannaSettings(true)],
   ["minecraft:sunflower_plains", buildPlainsSettings()],
   ["minecraft:swamp", buildSwampSettings(false)],
   ["minecraft:swamp_hills", buildSwampSettings(true)],

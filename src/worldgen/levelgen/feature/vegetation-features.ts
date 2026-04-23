@@ -375,6 +375,10 @@ export class VegetationFeatures {
     return Features.RANDOM_PATCH.configured(createDefaultGrassConfig()).decorated(heightmapDoubleSquare()).count(5);
   }
 
+  public static get PATCH_GRASS_SAVANNA() {
+    return Features.RANDOM_PATCH.configured(createDefaultGrassConfig()).decorated(heightmapDoubleSquare()).count(20);
+  }
+
   public static get PATCH_GRASS_PLAIN() {
     return Features.RANDOM_PATCH.configured(createDefaultGrassConfig()).decorated(heightmapDoubleSquare()).decorated(countNoiseDecorator(-0.8, 5, 10));
   }
@@ -393,6 +397,13 @@ export class VegetationFeatures {
       .decorated(heightmapDecorator(Heightmap.Types.MOTION_BLOCKING))
       .squared()
       .decorated(countNoiseDecorator(-0.8, 0, 7));
+  }
+
+  public static get PATCH_TALL_GRASS() {
+    return Features.RANDOM_PATCH.configured(createTallGrassConfig())
+      .decorated(spread32AboveDecorator())
+      .decorated(heightmapSquare())
+      .count(7);
   }
 
   public static get PATCH_WATERLILLY() {
@@ -437,6 +448,10 @@ export class VegetationFeatures {
 
   public static get FLOWER_DEFAULT() {
     return Features.FLOWER.configured(createDefaultFlowerConfig()).decorated(spread32AboveDecorator()).decorated(heightmapSquare()).count(2);
+  }
+
+  public static get FLOWER_WARM() {
+    return Features.FLOWER.configured(createDefaultFlowerConfig()).decorated(spread32AboveDecorator()).decorated(heightmapSquare()).count(4);
   }
 
   public static get FLOWER_FOREST() {
@@ -491,6 +506,22 @@ export class VegetationFeatures {
 
   public static get DARK_OAK() {
     return TreeFeatures.DARK_OAK;
+  }
+
+  public static get TREES_SHATTERED_SAVANNA() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration([TreeFeatures.ACACIA.weighted(0.8)], TreeFeatures.OAK),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(2, 0.1, 1));
+  }
+
+  public static get TREES_SAVANNA() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration([TreeFeatures.ACACIA.weighted(0.8)], TreeFeatures.OAK),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(1, 0.1, 1));
   }
 
   public static get DARK_FOREST_VEGETATION_BROWN() {

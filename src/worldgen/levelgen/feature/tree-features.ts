@@ -4,6 +4,7 @@ import type { Block } from "../../../world/level/block/block";
 import type { BlockState } from "../../../world/level/block/state/block-state";
 import { ConstantInt } from "../../../util/valueproviders/constant-int";
 import { UniformInt } from "../../../util/valueproviders/uniform-int";
+import { AcaciaFoliagePlacer } from "./foliageplacers/acacia-foliage-placer";
 import { BlobFoliagePlacer } from "./foliageplacers/blob-foliage-placer";
 import { DarkOakFoliagePlacer } from "./foliageplacers/dark-oak-foliage-placer";
 import { FancyFoliagePlacer } from "./foliageplacers/fancy-foliage-placer";
@@ -16,11 +17,15 @@ import { Features } from "./features";
 import { SimpleStateProvider } from "./stateproviders/simple-state-provider";
 import { DarkOakTrunkPlacer } from "./trunkplacers/dark-oak-trunk-placer";
 import { FancyTrunkPlacer } from "./trunkplacers/fancy-trunk-placer";
+import { ForkingTrunkPlacer } from "./trunkplacers/forking-trunk-placer";
 import { StraightTrunkPlacer } from "./trunkplacers/straight-trunk-placer";
 
 const OAK_LOG_LOCATION = new ResourceLocation("minecraft:oak_log");
 const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
 const OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:oak_sapling");
+const ACACIA_LOG_LOCATION = new ResourceLocation("minecraft:acacia_log");
+const ACACIA_LEAVES_LOCATION = new ResourceLocation("minecraft:acacia_leaves");
+const ACACIA_SAPLING_LOCATION = new ResourceLocation("minecraft:acacia_sapling");
 const SPRUCE_LOG_LOCATION = new ResourceLocation("minecraft:spruce_log");
 const SPRUCE_LEAVES_LOCATION = new ResourceLocation("minecraft:spruce_leaves");
 const SPRUCE_SAPLING_LOCATION = new ResourceLocation("minecraft:spruce_sapling");
@@ -50,6 +55,21 @@ export class TreeFeatures {
         new SimpleStateProvider(getRequiredState(OAK_SAPLING_LOCATION)),
         new BlobFoliagePlacer(ConstantInt.of(2), ConstantInt.of(0), 3),
         new TwoLayersFeatureSize(1, 0, 1),
+      )
+        .ignoreVines()
+        .build(),
+    );
+  }
+
+  public static get ACACIA() {
+    return Features.TREE.configured(
+      new TreeConfiguration.TreeConfigurationBuilder(
+        new SimpleStateProvider(getRequiredState(ACACIA_LOG_LOCATION)),
+        new ForkingTrunkPlacer(5, 2, 2),
+        new SimpleStateProvider(getRequiredState(ACACIA_LEAVES_LOCATION)),
+        new SimpleStateProvider(getRequiredState(ACACIA_SAPLING_LOCATION)),
+        new AcaciaFoliagePlacer(ConstantInt.of(2), ConstantInt.of(0)),
+        new TwoLayersFeatureSize(1, 0, 2),
       )
         .ignoreVines()
         .build(),

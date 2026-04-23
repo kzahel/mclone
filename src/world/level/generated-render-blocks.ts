@@ -42,6 +42,8 @@ const OBSIDIAN_LOCATION = new ResourceLocation("minecraft:obsidian");
 const MAGMA_BLOCK_LOCATION = new ResourceLocation("minecraft:magma_block");
 const OAK_LOG_LOCATION = new ResourceLocation("minecraft:oak_log");
 const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
+const ACACIA_LOG_LOCATION = new ResourceLocation("minecraft:acacia_log");
+const ACACIA_LEAVES_LOCATION = new ResourceLocation("minecraft:acacia_leaves");
 const SPRUCE_LOG_LOCATION = new ResourceLocation("minecraft:spruce_log");
 const SPRUCE_LEAVES_LOCATION = new ResourceLocation("minecraft:spruce_leaves");
 const BIRCH_LOG_LOCATION = new ResourceLocation("minecraft:birch_log");
@@ -61,6 +63,7 @@ const PINK_TULIP_LOCATION = new ResourceLocation("minecraft:pink_tulip");
 const OXEYE_DAISY_LOCATION = new ResourceLocation("minecraft:oxeye_daisy");
 const CORNFLOWER_LOCATION = new ResourceLocation("minecraft:cornflower");
 const OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:oak_sapling");
+const ACACIA_SAPLING_LOCATION = new ResourceLocation("minecraft:acacia_sapling");
 const SPRUCE_SAPLING_LOCATION = new ResourceLocation("minecraft:spruce_sapling");
 const BIRCH_SAPLING_LOCATION = new ResourceLocation("minecraft:birch_sapling");
 const DARK_OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:dark_oak_sapling");
@@ -132,6 +135,8 @@ const GENERATED_BLOCK_LOCATIONS = [
   MAGMA_BLOCK_LOCATION,
   OAK_LOG_LOCATION,
   OAK_LEAVES_LOCATION,
+  ACACIA_LOG_LOCATION,
+  ACACIA_LEAVES_LOCATION,
   SPRUCE_LOG_LOCATION,
   SPRUCE_LEAVES_LOCATION,
   BIRCH_LOG_LOCATION,
@@ -151,6 +156,7 @@ const GENERATED_BLOCK_LOCATIONS = [
   OXEYE_DAISY_LOCATION,
   CORNFLOWER_LOCATION,
   OAK_SAPLING_LOCATION,
+  ACACIA_SAPLING_LOCATION,
   SPRUCE_SAPLING_LOCATION,
   BIRCH_SAPLING_LOCATION,
   DARK_OAK_SAPLING_LOCATION,
@@ -226,6 +232,9 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("oak_log"),
   blockTexture("oak_log_top"),
   blockTexture("oak_leaves"),
+  blockTexture("acacia_log"),
+  blockTexture("acacia_log_top"),
+  blockTexture("acacia_leaves"),
   blockTexture("spruce_log"),
   blockTexture("spruce_log_top"),
   blockTexture("spruce_leaves"),
@@ -248,6 +257,7 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("oxeye_daisy"),
   blockTexture("cornflower"),
   blockTexture("oak_sapling"),
+  blockTexture("acacia_sapling"),
   blockTexture("spruce_sapling"),
   blockTexture("birch_sapling"),
   blockTexture("dark_oak_sapling"),
@@ -520,6 +530,14 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
   );
   registerBlock(
+    ACACIA_LOG_LOCATION,
+    new RotatedPillarBlock(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.COLOR_ORANGE).strength(2.0).sound(SoundType.WOOD)),
+  );
+  registerBlock(
+    ACACIA_LEAVES_LOCATION,
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+  );
+  registerBlock(
     SPRUCE_LOG_LOCATION,
     new RotatedPillarBlock(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.WOOD).strength(2.0).sound(SoundType.WOOD)),
   );
@@ -593,6 +611,10 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ).defaultBlockState();
   const oakSaplingState = registerBlock(
     OAK_SAPLING_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const acaciaSaplingState = registerBlock(
+    ACACIA_SAPLING_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
   const spruceSaplingState = registerBlock(
@@ -707,6 +729,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(oxeyeDaisyState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(cornflowerState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(oakSaplingState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(acaciaSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(spruceSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(birchSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(darkOakSaplingState.getBlock(), RenderType.cutout());
