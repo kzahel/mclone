@@ -290,7 +290,8 @@ The message model should be shared between local singleplayer and multiplayer.
 That means:
 
 - browser singleplayer uses the same command/update protocol shape over `postMessage`
-- remote multiplayer uses the same protocol shape over WebSocket
+- the first remote dedicated-host path uses the same serialized message shapes over HTTP request/response sessions
+- later push-driven remote transports can move those same shapes onto WebSocket or another persistent transport if the protocol actually needs server-initiated updates
 
 This avoids building two engines:
 
@@ -350,7 +351,7 @@ The codebase still does not fully match this target architecture, but the first 
 
 Current gaps:
 
-- there is no remote browser-client transport to the dedicated host yet
+- the current remote dedicated-host path still uses one authoritative generated-world host per remote client session
 - the host/client protocol is not yet hardened for reconnect/resync and versioning discipline
 
 That is why performance and future multiplayer support are now architectural priorities, not just implementation details.
@@ -359,8 +360,8 @@ That is why performance and future multiplayer support are now architectural pri
 
 The next major refactor direction should be:
 
-1. Add a remote browser-client transport to the dedicated Node host.
-2. Harden reconnect/resync, session state, and protocol versioning once that remote path is real.
+1. Harden reconnect/resync, session state, and protocol versioning now that the remote path is real.
+2. Add shared chunk-interest management and baseline player/session state so the dedicated host can move beyond one-host-per-remote-session.
 3. Decide whether the dedicated host needs worker-thread/job-pool offload after there is a concrete remote workload to measure.
 
 ## Decision checklist

@@ -160,7 +160,7 @@ Not every landed bucket has the same validation strength.
 
 This is the current recommended ordering for worldgen work.
 
-These priorities are only for parity-oriented worldgen work. The runtime/host arc already landed the browser-local authority, mesh-worker, browser-persistence, and headless-Node-host prerequisites (`R0` through `R4`), so parity work no longer has to wait on the old browser render-path coupling. Remaining runtime/host work still matters, but it now shifts toward remote-client transport and protocol hardening; see the runtime/host arc in [`tactical/README.md`](./tactical/README.md).
+These priorities are only for parity-oriented worldgen work. The runtime/host arc already landed the browser-local authority, mesh-worker, browser-persistence, headless-Node-host, and remote-browser-transport prerequisites (`R0` through `R5`), so parity work no longer has to wait on the old browser render-path coupling. Remaining runtime/host work still matters, but it now shifts toward protocol hardening and shared session/interest management; see the runtime/host arc in [`tactical/README.md`](./tactical/README.md).
 
 ### 1. Raise carvers to first-class status
 

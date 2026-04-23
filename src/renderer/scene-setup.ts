@@ -1,6 +1,10 @@
 import { ResourceLocation } from "../core/resource-location";
+import type { OpenWorldPreset } from "../runtime/protocol/world-messages";
 import type { WorldClient } from "../runtime/protocol/world-client";
-import { WorkerWorldClient, WorkerWorldTransport, createGeneratedWorldWorker } from "../runtime/transport/worker-world-transport";
+import type { WorldSaveMetadata } from "../runtime/storage/world-storage";
+import { RemoteWorldClient, RemoteWorldTransport } from "../runtime/transport/remote-world-transport";
+import { TransportWorldClient } from "../runtime/transport/local-world-transport";
+import { WorkerWorldTransport, createGeneratedWorldWorker } from "../runtime/transport/worker-world-transport";
 import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
 import { ChunkBlockId } from "../worldgen/chunk/chunk-block-buffer";
 import { ClientChunkCache } from "../world/level/client-chunk-cache";
@@ -45,6 +49,9 @@ export interface SceneInitOptions {
   readonly seed: bigint;
   readonly viewDistance: number;
   readonly fov?: number;
+  readonly worldTransport?: "worker" | "remote";
+  readonly remoteWorldHostUrl?: string;
+  readonly preset?: OpenWorldPreset;
 }
 
 export interface RendererScene {
@@ -53,6 +60,7 @@ export interface RendererScene {
   readonly format: GPUTextureFormat;
   readonly canvas: HTMLCanvasElement;
   readonly ctx: GPUCanvasContext;
+  readonly saveMetadata: WorldSaveMetadata;
   readonly atlas: TextureAtlas;
   readonly worldClient: WorldClient;
   readonly level: ClientChunkCache;
@@ -72,6 +80,34 @@ export interface DrawTarget {
   readonly view: GPUTextureView;
   readonly depthView: GPUTextureView;
   readonly format: GPUTextureFormat;
+}
+
+function createWorldClient(
+  options: SceneInitOptions,
+  airState: import("../world/level/block/state/block-state").BlockState,
+  biomeSource: OverworldBiomeSource,
+  blockStateResolver: ReturnType<typeof createBlockStateResolver>,
+): WorldClient {
+  const levelFactory = (worldOpened: import("../runtime/protocol/world-messages").WorldOpenedMessage) => new ClientChunkCache({
+    airState,
+    minBuildHeight: worldOpened.minBuildHeight,
+    height: worldOpened.height,
+    biomeSource,
+    biomeZoomSeed: options.seed,
+    blockStateResolver,
+  });
+
+  if (options.worldTransport === "remote") {
+    return new RemoteWorldClient(
+      new RemoteWorldTransport(options.remoteWorldHostUrl ?? "http://127.0.0.1:4173"),
+      levelFactory,
+    );
+  }
+
+  return new TransportWorldClient(
+    new WorkerWorldTransport(createGeneratedWorldWorker()),
+    levelFactory,
+  );
 }
 
 async function initializeBiomeColorTables(atlasSource: BrowserTextureAtlasSource): Promise<void> {
@@ -116,21 +152,11 @@ export async function initializeRendererScene(
 
   const biomeSource = new OverworldBiomeSource(options.seed);
   const blockStateResolver = createBlockStateResolver(generatedBlocks.airState);
-  const worldClient = new WorkerWorldClient(
-    new WorkerWorldTransport(createGeneratedWorldWorker()),
-    (worldOpened) => new ClientChunkCache({
-      airState: generatedBlocks.airState,
-      minBuildHeight: worldOpened.minBuildHeight,
-      height: worldOpened.height,
-      biomeSource,
-      biomeZoomSeed: options.seed,
-      blockStateResolver,
-      }),
-  );
+  const worldClient = createWorldClient(options, generatedBlocks.airState, biomeSource, blockStateResolver);
   const worldOpened = await worldClient.openWorld({
     type: "open_world",
     seed: options.seed,
-    preset: "browser_smoke",
+    preset: options.preset ?? "browser_smoke",
   });
   const level = worldClient.getLevel();
   const meshWorker = new ChunkMeshWorkerClient(createChunkMeshWorker());
@@ -181,6 +207,7 @@ export async function initializeRendererScene(
       format,
       canvas,
       ctx,
+      saveMetadata: worldOpened.saveMetadata,
       atlas,
       worldClient,
       level,

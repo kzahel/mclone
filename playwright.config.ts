@@ -13,11 +13,20 @@ export default defineConfig({
     },
     trace: "retain-on-failure",
   },
-  webServer: {
-    command: "pnpm dev:browser",
-    port: 5173,
-    reuseExistingServer: !process.env.CI,
-    stdout: "pipe",
-    stderr: "pipe",
-  },
+  webServer: [
+    {
+      command: "pnpm dev:browser",
+      port: 5173,
+      reuseExistingServer: !process.env.CI,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+    {
+      command: "pnpm host:remote -- --host 127.0.0.1 --port 4173 --save-root /tmp/mclone-remote-browser-smoke",
+      port: 4173,
+      reuseExistingServer: !process.env.CI,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  ],
 });

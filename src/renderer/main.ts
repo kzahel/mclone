@@ -26,11 +26,14 @@ const GENERATED_CAMERA_PATH = [
   },
 ] as const satisfies readonly CameraState[];
 
+type BootWorldTransport = "worker" | "remote";
+
 export type BootResult =
   | {
       ok: true;
-      worldTransport: "worker";
+      worldTransport: BootWorldTransport;
       meshTransport: "worker";
+      saveId: string;
       format: GPUTextureFormat;
       adapterInfo: string;
       centerPixel: readonly [number, number, number, number];
@@ -61,6 +64,26 @@ const VALIDATED_RENDER_TYPES = [
   RenderType.lines(),
   RenderType.lineStrip(),
 ] as const;
+
+function readWorldTransport(): {
+  readonly worldTransport: BootWorldTransport;
+  readonly remoteWorldHostUrl?: string;
+} {
+  if (typeof window === "undefined") {
+    return { worldTransport: "worker" };
+  }
+
+  const url = new URL(window.location.href);
+  const worldTransport = url.searchParams.get("worldTransport");
+  if (worldTransport === "remote") {
+    return {
+      worldTransport: "remote",
+      remoteWorldHostUrl: url.searchParams.get("worldHostUrl") ?? undefined,
+    };
+  }
+
+  return { worldTransport: "worker" };
+}
 
 function rgba8FromColor(color: readonly [number, number, number, number]): readonly [number, number, number, number] {
   return [
@@ -122,9 +145,12 @@ async function boot(): Promise<BootResult> {
   const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
   if (!canvas) return { ok: false, reason: "canvas #renderer not found" };
 
+  const runtimeConfig = readWorldTransport();
   const sceneResult = await initializeRendererScene(canvas, {
     seed: GENERATED_SEED,
     viewDistance: GENERATED_VIEW_DISTANCE,
+    worldTransport: runtimeConfig.worldTransport,
+    remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
   });
   if (!sceneResult.ok) {
     return sceneResult;
@@ -217,8 +243,9 @@ async function boot(): Promise<BootResult> {
 
   return {
     ok: true,
-    worldTransport: "worker",
+    worldTransport: runtimeConfig.worldTransport,
     meshTransport: "worker",
+    saveId: scene.saveMetadata.saveId,
     format: scene.format,
     adapterInfo,
     centerPixel,
