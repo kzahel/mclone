@@ -7,6 +7,7 @@ import type { BlockState } from "../../../../src/world/level/block/state/block-s
 import { registerGeneratedRenderBlocks } from "../../../../src/world/level/generated-render-blocks";
 import { StaticRenderLevel } from "../../../../src/world/level/static-render-level";
 import { Fluids } from "../../../../src/world/level/material/fluids";
+import { getLayeredBiomeByKey } from "../../../../src/worldgen/biome/biome-data";
 import { OverworldBiomeSource } from "../../../../src/worldgen/biome/overworld-biome-source";
 import { Features } from "../../../../src/worldgen/levelgen/feature/features";
 import { BlockStateConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/block-state-configuration";
@@ -31,12 +32,42 @@ function createGenerator(): NoiseBasedChunkGenerator {
   return new NoiseBasedChunkGenerator(biomeSource, 12345n);
 }
 
-function createStoneLevel(airState: BlockState, stoneState: BlockState): StaticRenderLevel {
-  const level = new StaticRenderLevel(airState, 15, 15, 0, 96);
-  for (let y = 0; y <= 24; y++) {
+function createStoneLevel(
+  airState: BlockState,
+  stoneState: BlockState,
+  options: {
+    readonly blockLight?: number;
+    readonly biomeKey?: string;
+    readonly upperState?: BlockState;
+    readonly upperStateMinY?: number;
+  } = {},
+): StaticRenderLevel {
+  const level = new StaticRenderLevel(
+    airState,
+    15,
+    options.blockLight ?? 15,
+    0,
+    96,
+    undefined,
+    undefined,
+    undefined,
+    getLayeredBiomeByKey(options.biomeKey ?? "minecraft:plains"),
+  );
+  const upperState = options.upperState ?? stoneState;
+  const upperStateMinY = options.upperStateMinY ?? 25;
+
+  for (let y = 0; y < upperStateMinY; y++) {
     for (let z = 0; z < 64; z++) {
       for (let x = 0; x < 64; x++) {
         level.setBlock(new BlockPos(x, y, z), stoneState);
+      }
+    }
+  }
+
+  for (let y = upperStateMinY; y <= 24; y++) {
+    for (let z = 0; z < 64; z++) {
+      for (let x = 0; x < 64; x++) {
+        level.setBlock(new BlockPos(x, y, z), upperState);
       }
     }
   }
@@ -94,6 +125,42 @@ describe("Water features", () => {
 
     expect(feature.place(level, generator, new WorldgenRandom(1n), origin)).toBe(true);
     expect(level.getBlockState(origin).is(waterState.getBlock())).toBe(true);
+  });
+
+  test("lake feature restores mushroom-field ceilings to mycelium instead of grass", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const stoneState = getState("minecraft:stone");
+    const dirtState = getState("minecraft:dirt");
+    const grassState = getState("minecraft:grass_block");
+    const myceliumState = getState("minecraft:mycelium");
+    const waterState = getState("minecraft:water");
+    const level = createStoneLevel(blocks.airState, stoneState, {
+      biomeKey: "minecraft:mushroom_fields",
+      upperState: dirtState,
+      upperStateMinY: 21,
+    });
+    const generator = createGenerator();
+    const feature = Features.LAKE.configured(new BlockStateConfiguration(waterState));
+
+    expect(feature.place(level, generator, new WorldgenRandom(1234n), new BlockPos(32, 30, 32))).toBe(true);
+
+    let myceliumCount = 0;
+    let grassCount = 0;
+    for (let y = 20; y < 28; y++) {
+      for (let z = 24; z < 40; z++) {
+        for (let x = 24; x < 40; x++) {
+          const state = level.getBlockState(new BlockPos(x, y, z));
+          if (state.is(myceliumState.getBlock())) {
+            myceliumCount++;
+          } else if (state.is(grassState.getBlock())) {
+            grassCount++;
+          }
+        }
+      }
+    }
+
+    expect(myceliumCount).toBeGreaterThan(0);
+    expect(grassCount).toBe(0);
   });
 
   test("waterlily vegetation survives on translated surface water", () => {

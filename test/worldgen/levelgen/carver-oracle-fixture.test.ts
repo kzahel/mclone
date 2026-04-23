@@ -5,6 +5,9 @@ import desertCarvedFixture from "../../fixtures/integration/overworld-seed-12345
 import badlandsCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--320-99-carved-only.json";
 import liquidOceanCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-117--128-liquid-carved.json";
 import liquidFloorCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--129--256-liquid-carved.json";
+import giantTaigaCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--9-68-carved-only.json";
+import shatteredSavannaCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-60-199-carved-only.json";
+import mushroomCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--446-387-carved-only.json";
 import { CHUNK_BLOCK_NAMES, ChunkBlockId } from "../../../src/worldgen/chunk/chunk-block-buffer.ts";
 
 interface CarvedChunkOracleFixture {
@@ -41,6 +44,9 @@ const desertCarvedOracle = desertCarvedFixture as CarvedChunkOracleFixture;
 const badlandsCarvedOracle = badlandsCarvedFixture as CarvedChunkOracleFixture;
 const liquidOceanCarvedOracle = liquidOceanCarvedFixture as CarvedChunkOracleFixture;
 const liquidFloorCarvedOracle = liquidFloorCarvedFixture as CarvedChunkOracleFixture;
+const giantTaigaCarvedOracle = giantTaigaCarvedFixture as CarvedChunkOracleFixture;
+const shatteredSavannaCarvedOracle = shatteredSavannaCarvedFixture as CarvedChunkOracleFixture;
+const mushroomCarvedOracle = mushroomCarvedFixture as CarvedChunkOracleFixture;
 
 function assertPinnedMetadata(
   oracle: CarvedChunkOracleFixture,
@@ -61,6 +67,28 @@ function assertPinnedMetadata(
   expect(oracle.blocks.length).toBe(16 * 16 * 256);
   expect(oracle.blockTicks).toBeDefined();
   expect(oracle.liquidTicks).toBeDefined();
+}
+
+function topColumnCounts(oracle: CarvedChunkOracleFixture): Readonly<Record<string, number>> {
+  const counts = new Map<string, number>();
+
+  for (let localX = 0; localX < 16; localX++) {
+    for (let localZ = 0; localZ < 16; localZ++) {
+      let topBlock = "minecraft:air";
+
+      for (let localY = oracle.height - 1; localY >= 0; localY--) {
+        const blockName = oracle.palette[oracle.blocks[(localY << 8) | (localZ << 4) | localX]!]!;
+        if (blockName !== "minecraft:air" && blockName !== "minecraft:water") {
+          topBlock = blockName;
+          break;
+        }
+      }
+
+      counts.set(topBlock, (counts.get(topBlock) ?? 0) + 1);
+    }
+  }
+
+  return Object.fromEntries([...counts.entries()].sort((left, right) => right[1] - left[1]));
 }
 
 describe("carved-stage oracle fixture", () => {
@@ -86,6 +114,18 @@ describe("carved-stage oracle fixture", () => {
 
   test("pins the committed air-plus-liquid carved-stage metadata for the underwater-floor oracle", () => {
     assertPinnedMetadata(liquidFloorCarvedOracle, -129, -256, "liquid-carved-chunk");
+  });
+
+  test("pins the committed carved-stage metadata and widened numeric palette for the giant-tree taiga oracle", () => {
+    assertPinnedMetadata(giantTaigaCarvedOracle, -9, 68, "carved-chunk");
+  });
+
+  test("pins the committed carved-stage metadata and widened numeric palette for the shattered-savanna oracle", () => {
+    assertPinnedMetadata(shatteredSavannaCarvedOracle, 60, 199, "carved-chunk");
+  });
+
+  test("pins the committed carved-stage metadata and widened numeric palette for the mushroom-fields oracle", () => {
+    assertPinnedMetadata(mushroomCarvedOracle, -446, 387, "carved-chunk");
   });
 
   test("spawn carved oracle contains air carving and lava-floor ids within the numeric model", () => {
@@ -132,6 +172,52 @@ describe("carved-stage oracle fixture", () => {
     for (const blockId of badlandsCarvedOracle.blocks) {
       expect(blockId).toBeGreaterThanOrEqual(0);
       expect(blockId).toBeLessThan(badlandsCarvedOracle.palette.length);
+    }
+  });
+
+  test("giant-tree taiga carved oracle preserves the podzol/coarse-dirt surface mix through AIR carving", () => {
+    expect(giantTaigaCarvedOracle.blocks).toContain(ChunkBlockId.PODZOL);
+    expect(giantTaigaCarvedOracle.blocks).toContain(ChunkBlockId.COARSE_DIRT);
+    expect(giantTaigaCarvedOracle.blocks).toContain(ChunkBlockId.AIR);
+    expect(giantTaigaCarvedOracle.blocks).toContain(ChunkBlockId.LAVA);
+    expect(topColumnCounts(giantTaigaCarvedOracle)).toEqual({
+      "minecraft:podzol": 225,
+      "minecraft:dirt": 27,
+      "minecraft:coarse_dirt": 4,
+    });
+
+    for (const blockId of giantTaigaCarvedOracle.blocks) {
+      expect(blockId).toBeGreaterThanOrEqual(0);
+      expect(blockId).toBeLessThan(giantTaigaCarvedOracle.palette.length);
+    }
+  });
+
+  test("shattered-savanna carved oracle preserves the coarse-dirt/stone surface mix through AIR carving", () => {
+    expect(shatteredSavannaCarvedOracle.blocks).toContain(ChunkBlockId.COARSE_DIRT);
+    expect(shatteredSavannaCarvedOracle.blocks).toContain(ChunkBlockId.AIR);
+    expect(shatteredSavannaCarvedOracle.blocks).toContain(ChunkBlockId.LAVA);
+    expect(topColumnCounts(shatteredSavannaCarvedOracle)).toEqual({
+      "minecraft:coarse_dirt": 193,
+      "minecraft:stone": 63,
+    });
+
+    for (const blockId of shatteredSavannaCarvedOracle.blocks) {
+      expect(blockId).toBeGreaterThanOrEqual(0);
+      expect(blockId).toBeLessThan(shatteredSavannaCarvedOracle.palette.length);
+    }
+  });
+
+  test("mushroom-fields carved oracle preserves the full mycelium surface cover through AIR carving", () => {
+    expect(mushroomCarvedOracle.blocks).toContain(ChunkBlockId.MYCELIUM);
+    expect(mushroomCarvedOracle.blocks).toContain(ChunkBlockId.AIR);
+    expect(mushroomCarvedOracle.blocks).toContain(ChunkBlockId.LAVA);
+    expect(topColumnCounts(mushroomCarvedOracle)).toEqual({
+      "minecraft:mycelium": 256,
+    });
+
+    for (const blockId of mushroomCarvedOracle.blocks) {
+      expect(blockId).toBeGreaterThanOrEqual(0);
+      expect(blockId).toBeLessThan(mushroomCarvedOracle.palette.length);
     }
   });
 

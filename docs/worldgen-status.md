@@ -43,8 +43,8 @@ The main remaining gap is not foundational plumbing. It is breadth, parity, and 
 | PRNG + core noise primitives | `95-100%` | Landed and well-covered | [`00`](./tactical/00-worldgen-ts-port.md), [`01`](./tactical/01-noise-octaves.md), [`02`](./tactical/02-remaining-synth.md) |
 | `NoiseSampler` + terrain density | `90-95%` | Landed and driving generated chunks | [`03`](./tactical/03-noise-sampler-settings.md), [`06`](./tactical/06-noise-based-chunk-generator.md) |
 | Overworld biome source / layered biome pipeline | `90-95%` | Landed and driving terrain + decoration lookup | [`05`](./tactical/05-overworld-biome-source.md) |
-| Surface rules / bedrock / top materials | `85-90%` | Landed for the current overworld path, now including frozen-ocean and badlands follow-through | [`06a`](./tactical/06a-pre-07-surface-prep.md), [`07`](./tactical/07-surface-builders.md), [`31`](./tactical/31-frozen-and-badlands-material-matrix.md) |
-| Classic carvers (`CaveWorldCarver`, `CanyonWorldCarver`) | `80-85%` | Implemented for the overworld AIR+LIQUID path, integrated, and now backed by widened desert/ocean/frozen/badlands material coverage, scheduled-tick capture, and a broader carved-fixture matrix, but still below full vanilla parity | code: [`src/worldgen/carver/`](../src/worldgen/carver), tacticals: [`28`](./tactical/28-carver-material-parity-and-oracle-expansion.md), [`29`](./tactical/29-underwater-liquid-carver-parity.md), [`30`](./tactical/30-liquid-floor-oracle-and-tick-capture.md), [`31`](./tactical/31-frozen-and-badlands-material-matrix.md), status: [`carver-status.md`](./carver-status.md), generator hook: [`noise-based-chunk-generator.ts`](../src/worldgen/levelgen/noise-based-chunk-generator.ts) |
+| Surface rules / bedrock / top materials | `88-92%` | Landed for the current overworld path, now including frozen-ocean, badlands, giant-tree-taiga, shattered-savanna, and mushroom follow-through | [`06a`](./tactical/06a-pre-07-surface-prep.md), [`07`](./tactical/07-surface-builders.md), [`31`](./tactical/31-frozen-and-badlands-material-matrix.md), [`32`](./tactical/32-podzol-coarse-dirt-and-mycelium-matrix.md) |
+| Classic carvers (`CaveWorldCarver`, `CanyonWorldCarver`) | `85-90%` | Implemented for the overworld AIR+LIQUID path, integrated, and now backed by widened desert/ocean/frozen/badlands/podzol/coarse-dirt/mycelium material coverage, scheduled-tick capture, and a broader carved-fixture matrix, but still below full vanilla parity | code: [`src/worldgen/carver/`](../src/worldgen/carver), tacticals: [`28`](./tactical/28-carver-material-parity-and-oracle-expansion.md), [`29`](./tactical/29-underwater-liquid-carver-parity.md), [`30`](./tactical/30-liquid-floor-oracle-and-tick-capture.md), [`31`](./tactical/31-frozen-and-badlands-material-matrix.md), [`32`](./tactical/32-podzol-coarse-dirt-and-mycelium-matrix.md), status: [`carver-status.md`](./carver-status.md), generator hook: [`noise-based-chunk-generator.ts`](../src/worldgen/levelgen/noise-based-chunk-generator.ts) |
 | Feature/decorator framework | `70-80%` | Enough for current vegetation and water feature set | [`22`](./tactical/22-simple-feature-placement-bridge.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md) |
 | Tree pipeline | `55-65%` | Oak / swamp oak / fancy oak / spruce / pine / birch paths exist; broader tree parity does not | [`23`](./tactical/23-true-tree-feature-placement.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md) |
 | Surface vegetation + water decoration | `55-65%` | First substantial overworld set landed | [`20`](./tactical/20-surface-special-blocks-and-biome-tint.md), [`21`](./tactical/21-surface-feature-palette-expansion.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md) |
@@ -60,7 +60,7 @@ If you compress all of that to one number, the project is roughly `60-70%` of th
 
 - `NoiseBasedChunkGenerator` is live and feeds the generated render level.
 - `OverworldBiomeSource` and the layered biome area pipeline are live.
-- Surface builders are live for the current overworld path, including badlands and frozen-ocean follow-through.
+- Surface builders are live for the current overworld path, including badlands, frozen-ocean, giant-tree-taiga, shattered-savanna, and mushroom follow-through.
 - Classic overworld AIR and LIQUID carvers are live and called from `NoiseBasedChunkGenerator.applyCarvers(...)`; see [`carver-status.md`](./carver-status.md) for the narrower parity/oracle breakdown.
 
 ### Feature plumbing
@@ -151,8 +151,8 @@ Not every landed bucket has the same validation strength.
 | Bucket | Confidence | Why |
 |---|---|---|
 | PRNG / noise / terrain sampling / biome source | High | These are the oldest and best-documented worldgen slices, with tactical docs and oracle-oriented work |
-| Surface path | Medium-high | Landed and visible in generated frames, with earlier tactical coverage |
-| Carvers | Medium-high | AIR and LIQUID classic overworld carvers are now integrated, scheduled underwater tick consequences are captured, and the oracle matrix is broader, but the remaining biome/material matrix is still not exhaustive |
+| Surface path | High | Landed and visible in generated frames, with committed fixture coverage for the major live surface families in the current overworld path |
+| Carvers | Medium-high | AIR and LIQUID classic overworld carvers are now integrated, scheduled underwater tick consequences are captured, and the live surface/material matrix is broad, but exhaustive parity still needs block-state/tick follow-through decisions |
 | Feature/decor framework | Medium | Good unit coverage on individual feature families, but not broad seed-parity coverage across many biome tables |
 | Biome decoration tables | Medium-low | Several important biomes are still empty or reduced, so coverage breadth is the main limitation |
 
@@ -162,24 +162,7 @@ This is the current recommended ordering for worldgen work.
 
 These priorities are only for parity-oriented worldgen work. The runtime/host arc already landed the browser-local authority, mesh-worker, browser-persistence, headless-Node-host, remote-browser-transport, protocol-hardening, first authoritative-player-loop, and browser-control integration prerequisites (`R0` through `R8`), so parity work no longer has to wait on the old browser render-path coupling. Remaining runtime/host work still matters, but it now shifts toward measuring whether polling remains sufficient under the live browser control path and then growing richer authoritative gameplay on top of the same boundary; see the runtime/host arc in [`tactical/README.md`](./tactical/README.md).
 
-### 1. Finish the remaining carver-relevant material families after the frozen/badlands expansion
-
-Classic carvers are already implemented for both default overworld steps, which means the priority is not “start carvers” but “finish the remaining material/oracle matrix broad enough to trust.”
-
-Why this is high priority:
-
-- carvers materially change terrain recognizability more than another incremental surface-decoration slice
-- the original tactical index still reads as if carvers were only an AIR-step MVP concern
-- current coverage is broader after frozen/badlands, but it is still too narrow for a subsystem this central to overworld shape
-
-What this means in practice:
-
-- use [`carver-status.md`](./carver-status.md) as the live tracker for the carver path
-- close the remaining podzol / coarse-dirt / mycelium surface-family gaps called out in the carver status doc
-- broaden chunk-level oracle coverage beyond the current AIR-only quartet plus the two LIQUID fixtures
-- capture browser shots that intentionally expose cave mouths / ravines rather than only surface vegetation
-
-### 2. Expand biome-table coverage for common overworld families
+### 1. Expand biome-table coverage for common overworld families
 
 The next broad parity win is filling out the many biomes that still fall back to carver-only generation settings without translated feature tables.
 
@@ -194,7 +177,7 @@ Highest-value families:
 
 This is a larger win than adding more variants inside already-covered forest/plains/swamp paths.
 
-### 3. Finish the missing tree/decorator ecosystems
+### 2. Finish the missing tree/decorator ecosystems
 
 The current vegetation set is already enough to make scenes legible. The next leverage point is the missing ecosystems that unlock whole biome identities:
 
@@ -202,6 +185,16 @@ The current vegetation set is already enough to make scenes legible. The next le
 - huge mushrooms
 - vines
 - bees
+
+### 3. Revisit exhaustive carver parity only where the current matrix is still intentionally lossy
+
+Classic carvers are now integrated and broadly covered across the current live surface families, so the remaining carver work is narrower and should stay driven by [`carver-status.md`](./carver-status.md) rather than by the old top-level blocker framing.
+
+What still matters there:
+
+- decide whether recorded scheduled underwater ticks stay a measured generation artifact or need later runtime execution
+- widen the flattened numeric/oracle block model if exhaustive carved-stage diffs remain a goal
+- keep ravine/cave-mouth browser validation whenever the carver path changes materially
 
 ### 4. Start ore and underground decoration
 

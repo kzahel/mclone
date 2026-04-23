@@ -65,4 +65,4 @@ Still deferred on purpose:
 
 ## Next
 
-Tactical 31 is now [`31-frozen-and-badlands-material-matrix.md`](31-frozen-and-badlands-material-matrix.md): port the missing frozen-ocean and badlands surface follow-through, widen the shared runtime/oracle/render palette for those material families, and add committed frozen/badlands fixtures before tackling the remaining podzol/mycelium-era carver surface families.
+Tactical 31 is now [`31-frozen-and-badlands-material-matrix.md`](31-frozen-and-badlands-material-matrix.md): port the missing frozen-ocean and badlands surface follow-through, widen the shared runtime/oracle/render palette for those material families, and add committed frozen/badlands fixtures before tactical 32 closes the remaining podzol/mycelium-era carver surface families.

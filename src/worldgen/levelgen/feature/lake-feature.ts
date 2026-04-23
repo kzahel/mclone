@@ -5,12 +5,16 @@ import { LightLayer } from "../../../world/level/light-layer";
 import type { Block } from "../../../world/level/block/block";
 import type { BlockState } from "../../../world/level/block/state/block-state";
 import { Material } from "../../../world/level/material/material";
+import { ChunkBlockId } from "../../chunk/chunk-block-buffer";
+import { getOverworldSurfaceTopMaterial } from "../../surface/surface-builders";
 import { Feature } from "./feature";
 import type { FeaturePlaceContext } from "./feature-place-context";
 import { BlockStateConfiguration } from "./configurations/block-state-configuration";
 
 const AIR_LOCATION = new ResourceLocation("minecraft:air");
 const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
+const MYCELIUM_LOCATION = new ResourceLocation("minecraft:mycelium");
+const ICE_LOCATION = new ResourceLocation("minecraft:ice");
 
 function getRequiredState(location: ResourceLocation): BlockState {
   const block = Registry.BLOCK.get(location) as Block | undefined;
@@ -49,6 +53,9 @@ export class LakeFeature extends Feature<BlockStateConfiguration> {
 
     origin = origin.below(4);
     const airState = getRequiredState(AIR_LOCATION);
+    const grassBlockState = getRequiredState(GRASS_BLOCK_LOCATION);
+    const myceliumState = getRequiredState(MYCELIUM_LOCATION);
+    const iceState = getRequiredState(ICE_LOCATION);
     const carveMask = new Array<boolean>(2048).fill(false);
     const ellipsoidCount = random.nextInt(4) + 4;
 
@@ -120,8 +127,8 @@ export class LakeFeature extends Feature<BlockStateConfiguration> {
 
           const pos = origin.offset(x, y - 1, z);
           if (Feature.isDirt(level.getBlockState(pos)) && level.getBrightness(LightLayer.SKY, origin.offset(x, y, z)) > 0) {
-            // TypeScript: mushroom-field top-material detection is deferred until surface-builder configs are ported.
-            level.setBlock(pos, getRequiredState(GRASS_BLOCK_LOCATION), 2);
+            const topMaterial = getOverworldSurfaceTopMaterial(level.getBiome(pos));
+            level.setBlock(pos, topMaterial === ChunkBlockId.MYCELIUM ? myceliumState : grassBlockState, 2);
           }
         }
       }
@@ -141,6 +148,17 @@ export class LakeFeature extends Feature<BlockStateConfiguration> {
             if (state.getMaterial().isSolid() && !state.is(BlockTags.LAVA_POOL_STONE_CANNOT_REPLACE)) {
               level.setBlock(pos, baseStoneSource.getBaseBlock(pos), 2);
             }
+          }
+        }
+      }
+    }
+
+    if (config.state.getMaterial() === Material.WATER) {
+      for (let x = 0; x < 16; x++) {
+        for (let z = 0; z < 16; z++) {
+          const pos = origin.offset(x, 4, z);
+          if (level.getBiome(pos).shouldFreeze(level, pos, false)) {
+            level.setBlock(pos, iceState, 2);
           }
         }
       }

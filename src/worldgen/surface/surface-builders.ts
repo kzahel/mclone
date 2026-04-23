@@ -15,6 +15,8 @@ type SurfaceBuilderKind =
   | "mountain"
   | "gravelly_mountain"
   | "swamp"
+  | "giant_tree_taiga"
+  | "shattered_savanna"
   | "badlands"
   | "wooded_badlands"
   | "eroded_badlands"
@@ -67,6 +69,24 @@ const CONFIG_FULL_SAND: SurfaceBuilderConfiguration = {
 const CONFIG_BADLANDS: SurfaceBuilderConfiguration = {
   topMaterial: ChunkBlockId.RED_SAND,
   underMaterial: ChunkBlockId.WHITE_TERRACOTTA,
+  underwaterMaterial: ChunkBlockId.GRAVEL,
+};
+
+const CONFIG_COARSE_DIRT: SurfaceBuilderConfiguration = {
+  topMaterial: ChunkBlockId.COARSE_DIRT,
+  underMaterial: ChunkBlockId.DIRT,
+  underwaterMaterial: ChunkBlockId.GRAVEL,
+};
+
+const CONFIG_PODZOL: SurfaceBuilderConfiguration = {
+  topMaterial: ChunkBlockId.PODZOL,
+  underMaterial: ChunkBlockId.DIRT,
+  underwaterMaterial: ChunkBlockId.GRAVEL,
+};
+
+const CONFIG_MYCELIUM: SurfaceBuilderConfiguration = {
+  topMaterial: ChunkBlockId.MYCELIUM,
+  underMaterial: ChunkBlockId.DIRT,
   underwaterMaterial: ChunkBlockId.GRAVEL,
 };
 
@@ -190,12 +210,22 @@ function resolveSurfaceBiomeDefinition(biome: Biome): SurfaceBiomeDefinition {
     case "minecraft:giant_tree_taiga_hills":
     case "minecraft:giant_spruce_taiga":
     case "minecraft:giant_spruce_taiga_hills":
+      return {
+        builder: "giant_tree_taiga",
+        config: CONFIG_GRASS,
+      };
     case "minecraft:shattered_savanna":
     case "minecraft:shattered_savanna_plateau":
-      throw new RangeError("This surface builder needs podzol/coarse-dirt support beyond the tactical 07 numeric model");
+      return {
+        builder: "shattered_savanna",
+        config: CONFIG_GRASS,
+      };
     case "minecraft:mushroom_fields":
     case "minecraft:mushroom_field_shore":
-      throw new RangeError("Mycelium surface mutation is still out of scope for tactical 07");
+      return {
+        builder: "default",
+        config: CONFIG_MYCELIUM,
+      };
     case "minecraft:stone_shore":
       return {
         builder: "default",
@@ -718,6 +748,34 @@ export function applyOverworldSurface(
         seaLevel,
         minSurfaceLevel,
         noise < -1.0 || noise > 2.0 ? CONFIG_GRAVEL : noise > 1.0 ? CONFIG_STONE : CONFIG_GRASS,
+      );
+      return;
+    case "giant_tree_taiga":
+      applyDefaultSurface(
+        random,
+        chunk,
+        biome,
+        worldX,
+        worldZ,
+        height,
+        noise,
+        seaLevel,
+        minSurfaceLevel,
+        noise > 1.75 ? CONFIG_COARSE_DIRT : noise > -0.95 ? CONFIG_PODZOL : CONFIG_GRASS,
+      );
+      return;
+    case "shattered_savanna":
+      applyDefaultSurface(
+        random,
+        chunk,
+        biome,
+        worldX,
+        worldZ,
+        height,
+        noise,
+        seaLevel,
+        minSurfaceLevel,
+        noise > 1.75 ? CONFIG_STONE : noise > -0.5 ? CONFIG_COARSE_DIRT : CONFIG_GRASS,
       );
       return;
     case "swamp":

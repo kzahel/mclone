@@ -70,4 +70,4 @@ Still deferred on purpose:
 
 ## Next
 
-Tactical 32 should finish the remaining carver-relevant surface/material families before the project declares classic carvers exhaustively covered: port giant-tree taiga / shattered savanna / mushroom surface follow-through, add one or two companion oracle fixtures for `podzol` / `coarse_dirt` / `mycelium`, and only then demote carver parity below the next biome-decoration slice.
+Tactical 32 is now [`32-podzol-coarse-dirt-and-mycelium-matrix.md`](32-podzol-coarse-dirt-and-mycelium-matrix.md): port giant-tree taiga / shattered savanna / mushroom surface follow-through, add companion oracle fixtures for `podzol` / `coarse_dirt` / `mycelium`, restore the matching `LakeFeature` follow-through, and only then demote carver parity below the next biome-decoration slice.

@@ -10,8 +10,14 @@ import sandSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-
 import desertSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-surface-only.json";
 import frozenSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks--247--247-surface-only.json";
 import badlandsSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks--320-99-surface-only.json";
+import giantTaigaSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks--9-68-surface-only.json";
+import shatteredSavannaSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-60-199-surface-only.json";
+import mushroomSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks--446-387-surface-only.json";
 import desertCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-carved-only.json";
 import badlandsCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--320-99-carved-only.json";
+import giantTaigaCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--9-68-carved-only.json";
+import shatteredSavannaCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-60-199-carved-only.json";
+import mushroomCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--446-387-carved-only.json";
 import { OverworldBiomeSource } from "../../../src/worldgen/biome/overworld-biome-source.ts";
 import {
   ChunkBlockId,
@@ -95,8 +101,14 @@ const sandSurfaceOracle = sandSurfaceFixture as SurfaceChunkOracleFixture;
 const desertSurfaceOracle = desertSurfaceFixture as SurfaceChunkOracleFixture;
 const frozenSurfaceOracle = frozenSurfaceFixture as SurfaceChunkOracleFixture;
 const badlandsSurfaceOracle = badlandsSurfaceFixture as SurfaceChunkOracleFixture;
+const giantTaigaSurfaceOracle = giantTaigaSurfaceFixture as SurfaceChunkOracleFixture;
+const shatteredSavannaSurfaceOracle = shatteredSavannaSurfaceFixture as SurfaceChunkOracleFixture;
+const mushroomSurfaceOracle = mushroomSurfaceFixture as SurfaceChunkOracleFixture;
 const desertCarvedOracle = desertCarvedFixture as CarvedChunkOracleFixture;
 const badlandsCarvedOracle = badlandsCarvedFixture as CarvedChunkOracleFixture;
+const giantTaigaCarvedOracle = giantTaigaCarvedFixture as CarvedChunkOracleFixture;
+const shatteredSavannaCarvedOracle = shatteredSavannaCarvedFixture as CarvedChunkOracleFixture;
+const mushroomCarvedOracle = mushroomCarvedFixture as CarvedChunkOracleFixture;
 
 function blockNameAt(section: TerrainChunkSection, index: number): string {
   return section.palette[section.blocks[index]!]!;
@@ -299,6 +311,33 @@ describe("NoiseBasedChunkGenerator", () => {
     assertChunkParity(actualChunk, badlandsSurfaceOracle);
   });
 
+  test("matches the widened giant-tree taiga surface oracle for chunk (-9, 68)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(giantTaigaSurfaceOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(giantTaigaSurfaceOracle.seed));
+    const actualChunk = generator.fillFromNoise(giantTaigaSurfaceOracle.chunkX, giantTaigaSurfaceOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+
+    assertChunkParity(actualChunk, giantTaigaSurfaceOracle);
+  });
+
+  test("matches the widened shattered-savanna surface oracle for chunk (60, 199)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(shatteredSavannaSurfaceOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(shatteredSavannaSurfaceOracle.seed));
+    const actualChunk = generator.fillFromNoise(shatteredSavannaSurfaceOracle.chunkX, shatteredSavannaSurfaceOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+
+    assertChunkParity(actualChunk, shatteredSavannaSurfaceOracle);
+  });
+
+  test("matches the widened mushroom-fields surface oracle for chunk (-446, 387)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(mushroomSurfaceOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(mushroomSurfaceOracle.seed));
+    const actualChunk = generator.fillFromNoise(mushroomSurfaceOracle.chunkX, mushroomSurfaceOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+
+    assertChunkParity(actualChunk, mushroomSurfaceOracle);
+  });
+
   test("matches the pinned carved-only oracle for chunk (0, 0)", () => {
     const biomeSource = new OverworldBiomeSource(BigInt(carvedOracle.seed));
     const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(carvedOracle.seed));
@@ -341,6 +380,39 @@ describe("NoiseBasedChunkGenerator", () => {
 
     assertChunkParity(actualChunk, badlandsCarvedOracle);
     assertScheduledTickParity(actualChunk, badlandsCarvedOracle);
+  });
+
+  test("matches the pinned carved-only giant-tree taiga oracle for chunk (-9, 68)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(giantTaigaCarvedOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(giantTaigaCarvedOracle.seed));
+    const actualChunk = generator.fillFromNoise(giantTaigaCarvedOracle.chunkX, giantTaigaCarvedOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+    generator.applyCarvers(actualChunk, GenerationStep.Carving.AIR);
+
+    assertChunkParity(actualChunk, giantTaigaCarvedOracle);
+    assertScheduledTickParity(actualChunk, giantTaigaCarvedOracle);
+  });
+
+  test("matches the pinned carved-only shattered-savanna oracle for chunk (60, 199)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(shatteredSavannaCarvedOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(shatteredSavannaCarvedOracle.seed));
+    const actualChunk = generator.fillFromNoise(shatteredSavannaCarvedOracle.chunkX, shatteredSavannaCarvedOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+    generator.applyCarvers(actualChunk, GenerationStep.Carving.AIR);
+
+    assertChunkParity(actualChunk, shatteredSavannaCarvedOracle);
+    assertScheduledTickParity(actualChunk, shatteredSavannaCarvedOracle);
+  });
+
+  test("matches the pinned carved-only mushroom-fields oracle for chunk (-446, 387)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(mushroomCarvedOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(mushroomCarvedOracle.seed));
+    const actualChunk = generator.fillFromNoise(mushroomCarvedOracle.chunkX, mushroomCarvedOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+    generator.applyCarvers(actualChunk, GenerationStep.Carving.AIR);
+
+    assertChunkParity(actualChunk, mushroomCarvedOracle);
+    assertScheduledTickParity(actualChunk, mushroomCarvedOracle);
   });
 
   test("matches the pinned air-plus-liquid carved ocean oracle for chunk (117, -128)", () => {

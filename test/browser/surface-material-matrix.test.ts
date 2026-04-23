@@ -2,6 +2,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 const FROZEN_SCREENSHOT_PATH = "/tmp/mclone-debug-frozen-ocean.png";
 const BADLANDS_SCREENSHOT_PATH = "/tmp/mclone-debug-badlands.png";
+const GIANT_TAIGA_SCREENSHOT_PATH = "/tmp/mclone-debug-giant-taiga.png";
+const SHATTERED_SAVANNA_SCREENSHOT_PATH = "/tmp/mclone-debug-shattered-savanna.png";
+const MUSHROOM_SCREENSHOT_PATH = "/tmp/mclone-debug-mushroom-fields.png";
 
 interface DebugRuntimeState {
   readonly ready: boolean;
@@ -48,6 +51,39 @@ const SURFACE_FRAMES: readonly SurfaceFrame[] = [
     cameraPitch: "50",
     expectedChunkX: -320,
     expectedChunkZ: 99,
+  },
+  {
+    name: "giant taiga",
+    screenshotPath: GIANT_TAIGA_SCREENSHOT_PATH,
+    cameraX: "-138.5",
+    cameraY: "126",
+    cameraZ: "1093.5",
+    cameraYaw: "225",
+    cameraPitch: "55",
+    expectedChunkX: -9,
+    expectedChunkZ: 68,
+  },
+  {
+    name: "shattered savanna",
+    screenshotPath: SHATTERED_SAVANNA_SCREENSHOT_PATH,
+    cameraX: "965.5",
+    cameraY: "168",
+    cameraZ: "3189.5",
+    cameraYaw: "225",
+    cameraPitch: "55",
+    expectedChunkX: 60,
+    expectedChunkZ: 199,
+  },
+  {
+    name: "mushroom fields",
+    screenshotPath: MUSHROOM_SCREENSHOT_PATH,
+    cameraX: "-7130.5",
+    cameraY: "96",
+    cameraZ: "6197.5",
+    cameraYaw: "225",
+    cameraPitch: "72",
+    expectedChunkX: -446,
+    expectedChunkZ: 387,
   },
 ] as const;
 

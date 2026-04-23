@@ -36,7 +36,7 @@ Port the real overworld water-feature bridge instead of relying on terrain-only 
 - Landed here: the water-feature path and the first biome tables that make those features matter visually in generated chunks.
 - Kept narrow on purpose: only `LAKE_WATER` and `SPRING_WATER` from this family. Lava lakes, lava springs, and the rest of the range/height-provider zoo still stay out of the bridge.
 - Also deferred: `PATCH_DEAD_BUSH`, `SEAGRASS_SWAMP`, `FLOWER_PLAIN_DECORATED`, `FOREST_FLOWER_VEGETATION_COMMON`, vine-decorated swamp oaks, and the broader birch/dark-forest/plains parity tables. Those need more plant providers, decorators, or block palette before they are worth landing.
-- Known simplifications: the current lake port still skips the structure-start village rejection and the mycelium/ice follow-up paths because the bridge does not yet carry structure starts, mycelium, or ice through the generated render palette.
+- Known simplifications: the current lake port still skips the structure-start village rejection because the bridge still has no structure-start pipeline to consult. The later mycelium/ice follow-up paths are now landed through the widened surface/render path and targeted tests.
 
 ## Oracle / done-when
 
@@ -62,4 +62,4 @@ Port the real overworld water-feature bridge instead of relying on terrain-only 
 
 ## Next
 
-Tactical 28: dark-forest canopy and tree-decorator parity. Tactical 27 landed the missing flower-provider, dead-bush, seagrass, birch, and flower-forest bridge, but dark forest still needs its real dark-oak / huge-mushroom / decorator stack before that biome can stop falling back to the simplified tree mix.
+Tactical 27 is now [`27-biome-decoration-parity-follow-through.md`](27-biome-decoration-parity-follow-through.md): finish the missing flower-provider, dead-bush, seagrass, birch, and flower-forest bridge first. After the later carver parity follow-through in tacticals 28-32, the next broad biome-identity slice is dark forest.
