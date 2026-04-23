@@ -231,6 +231,14 @@ Recommended shape:
 
 The dedicated server should be headless and should not depend on renderer code, browser globals, or IndexedDB assumptions.
 
+The first dedicated-host slice is now landed in that shape:
+
+- `FileWorldStorage` provides the initial file-backed persistence adapter behind `WorldStorage`
+- `src/runtime/node/headless-generated-world-host.ts` provides a local CLI/config bootstrap for the authoritative runtime
+- the browser worker and the Node host now share the same generated-world host construction path
+
+What is still missing is remote client connectivity, not a separate server runtime core.
+
 ## Data boundaries
 
 The architecture should revolve around stable engine-level data contracts, not around direct object sharing across unrelated layers.
@@ -342,8 +350,7 @@ The codebase still does not fully match this target architecture, but the first 
 
 Current gaps:
 
-- there is no headless Node host yet
-- there is no remote browser-client transport to a dedicated host yet
+- there is no remote browser-client transport to the dedicated host yet
 - the host/client protocol is not yet hardened for reconnect/resync and versioning discipline
 
 That is why performance and future multiplayer support are now architectural priorities, not just implementation details.
@@ -352,10 +359,9 @@ That is why performance and future multiplayer support are now architectural pri
 
 The next major refactor direction should be:
 
-1. Stand up a headless Node host that reuses the same authoritative runtime core.
-2. Add a file-backed storage adapter behind the same persistence interfaces.
-3. Add a remote browser-client transport to that dedicated host.
-4. Harden reconnect/resync, session state, and protocol versioning once the dedicated-host path is real.
+1. Add a remote browser-client transport to the dedicated Node host.
+2. Harden reconnect/resync, session state, and protocol versioning once that remote path is real.
+3. Decide whether the dedicated host needs worker-thread/job-pool offload after there is a concrete remote workload to measure.
 
 ## Decision checklist
 

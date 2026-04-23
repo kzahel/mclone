@@ -9,6 +9,7 @@
     "test:watch": "vitest",
     "test:browser": "playwright test",
     "dev:browser": "vite",
+    "host:node": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/headless-generated-world-host.ts",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "oracle:gen": "bash ./oracle/run.sh"
