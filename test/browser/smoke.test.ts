@@ -18,6 +18,8 @@ test("WebGPU boot succeeds on system Chrome", async ({ page }) => {
     expect(["bgra8unorm", "rgba8unorm"]).toContain(result.format);
     expect(result.loadedChunkCount).toBeGreaterThan(0);
     expect(result.solidDrawCount).toBeGreaterThan(0);
+    expect(result.cutoutDrawCount).toBeGreaterThan(0);
+    expect(result.translucentDrawCount).toBeGreaterThan(0);
     expect(result.terrainPixel).not.toEqual(result.clearPixel);
     const pixelDelta = result.terrainPixel.reduce(
       (sum, channel, index) => sum + Math.abs(channel - result.clearPixel[index]!),

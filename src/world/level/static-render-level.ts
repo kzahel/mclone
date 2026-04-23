@@ -2,10 +2,12 @@ import { BlockPos } from "../../core/block-pos";
 import { SectionPos } from "../../core/section-pos";
 import { Direction } from "../../core/direction";
 import { type BlockAndTintGetter } from "./block-and-tint-getter";
+import type { ColorResolver } from "./color-resolver";
 import { LightLayer } from "./light-layer";
 import { LevelChunk } from "./chunk/level-chunk";
 import { type BlockState } from "./block/state/block-state";
 import { Vec3 } from "../phys/vec3";
+import type { FluidState } from "./material/fluid-state";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -72,6 +74,10 @@ export class StaticRenderLevel implements BlockAndTintGetter {
     return this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()))!.getBlockState(pos);
   }
 
+  public getFluidState(pos: BlockPos): FluidState {
+    return this.getBlockState(pos).getFluidState();
+  }
+
   public getMaxLightLevel(): number {
     return 15;
   }
@@ -101,7 +107,7 @@ export class StaticRenderLevel implements BlockAndTintGetter {
     return layer === LightLayer.SKY ? this.skyLight : this.blockLight;
   }
 
-  public getBlockTint(_pos: BlockPos, _resolver?: unknown): number {
+  public getBlockTint(_pos: BlockPos, _resolver?: ColorResolver): number {
     return -1;
   }
 

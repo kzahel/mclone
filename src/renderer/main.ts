@@ -1,8 +1,12 @@
 import { ResourceLocation } from "../core/resource-location";
+import { BlockPos } from "../core/block-pos";
 import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
 import { NoiseBasedChunkGenerator } from "../worldgen/levelgen/noise-based-chunk-generator";
+import { ChunkBlockId } from "../worldgen/chunk/chunk-block-buffer";
 import { GeneratedRenderLevel } from "../world/level/generated-render-level";
 import { registerGeneratedRenderBlocks } from "../world/level/generated-render-blocks";
+import { FoliageColor } from "../world/level/foliage-color";
+import { GrassColor } from "../world/level/grass-color";
 import { Vec3 } from "../world/phys/vec3";
 import { BlockColors } from "./block/block-colors";
 import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
@@ -23,6 +27,8 @@ import { RenderType } from "./render-type";
 import { ViewArea } from "./view-area";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
+const GRASS_COLORMAP_LOCATION = new ResourceLocation("minecraft:colormap/grass");
+const FOLIAGE_COLORMAP_LOCATION = new ResourceLocation("minecraft:colormap/foliage");
 const GENERATED_SEED = 12_345n;
 const GENERATED_VIEW_DISTANCE = 1;
 const GENERATED_CAMERA_PATH = [
@@ -48,6 +54,8 @@ export type BootResult =
       clearPixel: readonly [number, number, number, number];
       loadedChunkCount: number;
       solidDrawCount: number;
+      cutoutDrawCount: number;
+      translucentDrawCount: number;
     }
   | { ok: false; reason: string };
 
@@ -114,6 +122,34 @@ function rgba8FromColor(color: readonly [number, number, number, number]): reado
     Math.round(color[2] * 255),
     Math.round(color[3] * 255),
   ];
+}
+
+async function initializeBiomeColorTables(atlasSource: BrowserTextureAtlasSource): Promise<void> {
+  const [grassPixels, foliagePixels] = await Promise.all([
+    atlasSource.loadColorMap(GRASS_COLORMAP_LOCATION),
+    atlasSource.loadColorMap(FOLIAGE_COLORMAP_LOCATION),
+  ]);
+  GrassColor.init(grassPixels);
+  FoliageColor.init(foliagePixels);
+}
+
+function decorateSmokeScene(
+  level: GeneratedRenderLevel,
+  generatedBlocks: ReturnType<typeof registerGeneratedRenderBlocks>,
+): void {
+  const waterState = generatedBlocks.blockStateById[ChunkBlockId.WATER]!;
+  const snowState = generatedBlocks.blockStateById[ChunkBlockId.SNOW]!;
+  for (let z = 35; z <= 39; z++) {
+    for (let x = 42; x <= 47; x++) {
+      level.setBlock(new BlockPos(x, 84, z), waterState);
+    }
+  }
+
+  for (let z = 30; z <= 34; z++) {
+    for (let x = 41; x <= 45; x++) {
+      level.setBlock(new BlockPos(x, 84, z), snowState);
+    }
+  }
 }
 
 function createChunkBindGroup(
@@ -250,6 +286,7 @@ async function boot(): Promise<BootResult> {
 
   const generatedBlocks = registerGeneratedRenderBlocks();
   const atlasSource = new BrowserTextureAtlasSource();
+  await initializeBiomeColorTables(atlasSource);
   const atlas = new TextureAtlas(SMOKE_ATLAS_LOCATION, device.limits.maxTextureDimension2D);
   const preparations = await atlas.prepareToStitch(atlasSource, generatedBlocks.spriteLocations, 0);
   atlas.reload(device, preparations);
@@ -264,10 +301,16 @@ async function boot(): Promise<BootResult> {
 
   const biomeSource = new OverworldBiomeSource(GENERATED_SEED);
   const generator = new NoiseBasedChunkGenerator(biomeSource, GENERATED_SEED);
-  const level = new GeneratedRenderLevel(generatedBlocks.airState, generator, generatedBlocks.blockStateById);
+  const level = new GeneratedRenderLevel(generatedBlocks.airState, generator, biomeSource, GENERATED_SEED, generatedBlocks.blockStateById);
 
   const levelRenderer = new LevelRenderer();
-  const blockRenderer = new BlockRenderDispatcher(blockModelShaper, new BlockColors());
+  const blockRenderer = new BlockRenderDispatcher(
+    blockModelShaper,
+    BlockColors.createDefault(),
+    (location) => atlas.getSprite(location),
+    generatedBlocks.blockStateById[ChunkBlockId.WATER]!,
+    generatedBlocks.blockStateById[ChunkBlockId.LAVA]!,
+  );
   const chunkDispatcher = new ChunkRenderDispatcher(level, levelRenderer, blockRenderer, device, (task) => queueMicrotask(task), false, new ChunkBufferBuilderPack());
   const viewArea = new ViewArea(chunkDispatcher, level, GENERATED_VIEW_DISTANCE, levelRenderer);
   levelRenderer.setLevel(level, chunkDispatcher, viewArea, GENERATED_VIEW_DISTANCE);
@@ -278,6 +321,7 @@ async function boot(): Promise<BootResult> {
   let frame: LevelRenderFrame | undefined;
   for (const step of GENERATED_CAMERA_PATH) {
     if (level.ensureChunksForCamera(step.position.x, step.position.z, GENERATED_VIEW_DISTANCE)) {
+      decorateSmokeScene(level, generatedBlocks);
       levelRenderer.allChanged();
     }
 
@@ -295,6 +339,8 @@ async function boot(): Promise<BootResult> {
   }
 
   const solidDraws = frame.layerDraws.get(RenderType.solid()) ?? [];
+  const cutoutDraws = frame.layerDraws.get(RenderType.cutout()) ?? [];
+  const translucentDraws = frame.layerDraws.get(RenderType.translucent()) ?? [];
   if (solidDraws.length === 0) {
     return { ok: false, reason: "camera-driven level renderer produced no solid drawables for the generated terrain scene" };
   }
@@ -418,6 +464,8 @@ async function boot(): Promise<BootResult> {
     clearPixel,
     loadedChunkCount: level.getLoadedChunkCount(),
     solidDrawCount: solidDraws.length,
+    cutoutDrawCount: cutoutDraws.length,
+    translucentDrawCount: translucentDraws.length,
   };
 }
 

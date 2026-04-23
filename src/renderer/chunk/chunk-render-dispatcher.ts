@@ -503,8 +503,23 @@ export namespace ChunkRenderDispatcher {
               for (let x = origin.getX(); x <= end.getX(); x++) {
                 const pos = new BlockPos(x, y, z);
                 const state: BlockState = region.getBlockState(pos);
+                const fluidState = state.getFluidState();
                 if (state.isSolidRender(region, pos)) {
                   visibilityGraph.setOpaque(pos);
+                }
+
+                if (!fluidState.isEmpty()) {
+                  const renderType = ItemBlockRenderTypes.getRenderLayer(fluidState);
+                  const builder = buffers.builder(renderType);
+                  if (!compiledChunk.hasLayer.has(renderType)) {
+                    compiledChunk.hasLayer.add(renderType);
+                    this.renderChunk.beginLayer(builder);
+                  }
+
+                  if (blockRenderer.renderLiquid(pos, region, builder, fluidState)) {
+                    compiledChunk.isCompletelyEmpty = false;
+                    compiledChunk.hasBlocks.add(renderType);
+                  }
                 }
 
                 if (state.getRenderShape() === RenderShape.INVISIBLE) {

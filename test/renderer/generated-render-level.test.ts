@@ -50,7 +50,7 @@ function createGeneratedLevel(): GeneratedRenderLevel {
   const blocks = registerGeneratedRenderBlocks();
   const biomeSource = new OverworldBiomeSource(12345n);
   const generator = new NoiseBasedChunkGenerator(biomeSource, 12345n);
-  return new GeneratedRenderLevel(blocks.airState, generator, blocks.blockStateById);
+  return new GeneratedRenderLevel(blocks.airState, generator, biomeSource, 12345n, blocks.blockStateById);
 }
 
 describe("GeneratedRenderLevel", () => {

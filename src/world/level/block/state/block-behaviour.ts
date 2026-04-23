@@ -13,6 +13,7 @@ import { StateHolder } from "./state-holder";
 import type { BlockState } from "./block-state";
 import type { Property } from "./properties/property";
 import { Vec3 } from "../../../phys/vec3";
+import type { FluidState } from "../../material/fluid-state";
 
 export abstract class BlockBehaviour {
   public readonly material: Material;
@@ -142,6 +143,10 @@ export namespace BlockBehaviour {
 
     public getMapColor(_level: BlockGetter, _pos: BlockPos): MaterialColor {
       return this.materialColor;
+    }
+
+    public getFluidState(): FluidState {
+      return this.getBlock().getFluidState(this.asState());
     }
 
     public propagatesSkylightDown(level: BlockGetter, pos: BlockPos): boolean {

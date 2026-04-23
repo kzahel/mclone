@@ -6,6 +6,8 @@ import { StaticRenderLevel } from "../../world/level/static-render-level";
 import { LevelChunk } from "../../world/level/chunk/level-chunk";
 import { type BlockState } from "../../world/level/block/state/block-state";
 import { Direction } from "../../core/direction";
+import type { FluidState } from "../../world/level/material/fluid-state";
+import type { ColorResolver } from "../../world/level/color-resolver";
 
 export class RenderChunkRegion implements BlockAndTintGetter {
   public static createIfNotEmpty(
@@ -101,6 +103,10 @@ export class RenderChunkRegion implements BlockAndTintGetter {
     return this.blockStates[this.index(pos)]!;
   }
 
+  public getFluidState(pos: BlockPos): FluidState {
+    return this.getBlockState(pos).getFluidState();
+  }
+
   public getMaxLightLevel(): number {
     return this.level.getMaxLightLevel();
   }
@@ -113,7 +119,7 @@ export class RenderChunkRegion implements BlockAndTintGetter {
     return this.level.getBrightness(layer, pos);
   }
 
-  public getBlockTint(pos: BlockPos, resolver?: unknown): number {
+  public getBlockTint(pos: BlockPos, resolver?: ColorResolver): number {
     return this.level.getBlockTint(pos, resolver);
   }
 

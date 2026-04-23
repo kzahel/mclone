@@ -29,12 +29,16 @@ import { DefaultVertexFormat } from "../../../src/renderer/vertex/default-vertex
 import { ViewArea } from "../../../src/renderer/view-area";
 import { AirBlock } from "../../../src/world/level/block/air-block";
 import { Block } from "../../../src/world/level/block/block";
+import { LiquidBlock } from "../../../src/world/level/block/liquid-block";
 import { BlockBehaviour } from "../../../src/world/level/block/state/block-behaviour";
 import type { BlockState } from "../../../src/world/level/block/state/block-state";
+import { Fluids } from "../../../src/world/level/material/fluids";
 import { Material as BlockMaterial } from "../../../src/world/level/material/material";
+import { registerGeneratedRenderBlocks } from "../../../src/world/level/generated-render-blocks";
 import { StaticRenderLevel } from "../../../src/world/level/static-render-level";
 import { AABB } from "../../../src/world/phys/aabb";
 import { Vec3 } from "../../../src/world/phys/vec3";
+import { ChunkBlockId } from "../../../src/worldgen/chunk/chunk-block-buffer";
 
 const ASSETS_ROOT = path.resolve(process.cwd(), "reference/minecraft-1.17.1/extracted/assets");
 
@@ -93,18 +97,25 @@ class TestSprite extends TextureAtlasSprite {
   }
 }
 
-function createSpriteGetter(): (material: Material) => TextureAtlasSprite {
+function createSpriteCache(): {
+  readonly getByMaterial: (material: Material) => TextureAtlasSprite;
+  readonly getByLocation: (location: ResourceLocation) => TextureAtlasSprite;
+} {
   const sprites = new Map<string, TextureAtlasSprite>();
-  return (material) => {
-    const key = material.texture().toString();
+  const getByLocation = (location: ResourceLocation): TextureAtlasSprite => {
+    const key = location.toString();
     const cached = sprites.get(key);
     if (cached !== undefined) {
       return cached;
     }
 
-    const sprite = new TestSprite(material.texture());
+    const sprite = new TestSprite(location);
     sprites.set(key, sprite);
     return sprite;
+  };
+  return {
+    getByMaterial: (material) => getByLocation(material.texture()),
+    getByLocation,
   };
 }
 
@@ -122,14 +133,28 @@ function createBlock(location: string, material: BlockMaterial, configure?: (pro
   return block;
 }
 
+function createFluidBlock(location: string, fluid: typeof Fluids.WATER, material: BlockMaterial): BlockState {
+  const existing = Registry.BLOCK.get(new ResourceLocation(location)) as Block | undefined;
+  if (existing !== undefined) {
+    return existing.defaultBlockState();
+  }
+
+  const block = new LiquidBlock(fluid, BlockBehaviour.Properties.of(material).noCollission()).setLocation(new ResourceLocation(location));
+  Registry.register(Registry.BLOCK, block.getLocation()!, block);
+  return block.defaultBlockState();
+}
+
 function createDispatcher(): BlockRenderDispatcher {
+  const spriteCache = createSpriteCache();
+  const waterState = createFluidBlock("minecraft:water", Fluids.WATER, BlockMaterial.WATER);
+  const lavaState = createFluidBlock("minecraft:lava", Fluids.LAVA, BlockMaterial.LAVA);
   const repository = new BlockModelRepository(new ExtractedAssetModelSource());
-  const bakery = new ModelBakery(repository, createSpriteGetter());
+  const bakery = new ModelBakery(repository, spriteCache.getByMaterial);
   const modelManager = new ModelManager(bakery.getMissingBakedModel());
   bakery.bakeTopLevelBlockModels(modelManager);
   const shaper = new BlockModelShaper(modelManager);
   shaper.rebuildCache();
-  return new BlockRenderDispatcher(shaper, new BlockColors());
+  return new BlockRenderDispatcher(shaper, BlockColors.createDefault(), spriteCache.getByLocation, waterState, lavaState);
 }
 
 function createFakeDevice(): GPUDevice {
@@ -248,6 +273,32 @@ describe("Chunk render infrastructure", () => {
     expect(compiled.hasBlocks.has(RenderType.solid())).toBe(true);
     expect(renderChunk!.getBuffer(RenderType.solid()).getFormat()).toBe(DefaultVertexFormat.BLOCK);
     expect(compiled.facesCanSeeEachother(Direction.NORTH, Direction.SOUTH)).toBe(true);
+  });
+
+  test("ChunkRenderDispatcher routes snow and water into cutout and translucent layers", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = new StaticRenderLevel(blocks.airState);
+    level.setBlock(new BlockPos(0, 0, 0), blocks.blockStateById[ChunkBlockId.WATER]!);
+    level.setBlock(new BlockPos(1, 0, 0), blocks.blockStateById[ChunkBlockId.SNOW]!);
+    level.getChunk(-1, 0);
+    level.getChunk(1, 0);
+    level.getChunk(0, -1);
+    level.getChunk(0, 1);
+
+    const levelRenderer = new LevelRenderer();
+    const chunkDispatcher = new ChunkRenderDispatcher(level, levelRenderer, createDispatcher(), createFakeDevice(), (task) => task());
+    const viewArea = new ViewArea(chunkDispatcher, level, 1, levelRenderer);
+    chunkDispatcher.setCamera(new Vec3(8, 8, 0));
+    viewArea.repositionCamera(8, 0);
+
+    const renderChunk = viewArea.getRenderChunkAt(new BlockPos(0, 0, 0));
+    expect(renderChunk).not.toBeNull();
+    renderChunk!.rebuildChunkAsync(chunkDispatcher);
+    await chunkDispatcher.awaitAllTasks();
+
+    const compiled = renderChunk!.getCompiledChunk();
+    expect(compiled.hasBlocks.has(RenderType.cutout())).toBe(true);
+    expect(compiled.hasBlocks.has(RenderType.translucent())).toBe(true);
   });
 
   test("Frustum accepts boxes in front of the camera and rejects boxes behind it", () => {

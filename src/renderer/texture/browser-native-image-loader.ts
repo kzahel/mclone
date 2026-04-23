@@ -37,6 +37,15 @@ export async function loadNativeImageFromUrl(url: string): Promise<NativeImage> 
   }
 }
 
+export async function loadColorMapPixels(url: string): Promise<readonly number[]> {
+  const image = await loadNativeImageFromUrl(url);
+  try {
+    return image.makePixelArray();
+  } finally {
+    image.close();
+  }
+}
+
 function copyImage(image: NativeImage): NativeImage {
   const copy = new NativeImage(image.getWidth(), image.getHeight(), false);
   copy.copyFrom(image);
@@ -50,6 +59,10 @@ export class BrowserTextureAtlasSource {
 
   public resolveTextureUrl(location: ResourceLocation): string {
     return `${this.assetRoot}/${location.getNamespace()}/textures/${location.getPath()}.png`;
+  }
+
+  public loadColorMap(location: ResourceLocation): Promise<readonly number[]> {
+    return loadColorMapPixels(this.resolveTextureUrl(location));
   }
 
   private loadImage(location: ResourceLocation): Promise<NativeImage> {

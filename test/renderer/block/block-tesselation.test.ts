@@ -19,9 +19,11 @@ import { PoseStack } from "../../../src/renderer/vertex/pose-stack";
 import { VertexFormat } from "../../../src/renderer/vertex/vertex-format";
 import { StaticBlockAndTintGetter } from "../../../src/world/level/static-block-and-tint-getter";
 import { Block } from "../../../src/world/level/block/block";
+import { LiquidBlock } from "../../../src/world/level/block/liquid-block";
 import { BlockBehaviour } from "../../../src/world/level/block/state/block-behaviour";
 import type { BlockState } from "../../../src/world/level/block/state/block-state";
 import { BlockModelShaper } from "../../../src/renderer/model/block-model-shaper";
+import { Fluids } from "../../../src/world/level/material/fluids";
 import { Material as BlockMaterial } from "../../../src/world/level/material/material";
 
 const ASSETS_ROOT = path.resolve(process.cwd(), "reference/minecraft-1.17.1/extracted/assets");
@@ -69,18 +71,25 @@ class TestSprite extends TextureAtlasSprite {
   }
 }
 
-function createSpriteGetter(): (material: Material) => TextureAtlasSprite {
+function createSpriteCache(): {
+  readonly getByMaterial: (material: Material) => TextureAtlasSprite;
+  readonly getByLocation: (location: ResourceLocation) => TextureAtlasSprite;
+} {
   const sprites = new Map<string, TextureAtlasSprite>();
-  return (material) => {
-    const key = material.texture().toString();
+  const getByLocation = (location: ResourceLocation): TextureAtlasSprite => {
+    const key = location.toString();
     const cached = sprites.get(key);
     if (cached !== undefined) {
       return cached;
     }
 
-    const sprite = new TestSprite(material.texture());
+    const sprite = new TestSprite(location);
     sprites.set(key, sprite);
     return sprite;
+  };
+  return {
+    getByMaterial: (material) => getByLocation(material.texture()),
+    getByLocation,
   };
 }
 
@@ -98,14 +107,28 @@ function createBlock(location: string, material: BlockMaterial, configure?: (pro
   return block;
 }
 
+function createFluidBlock(location: string, fluid: typeof Fluids.WATER, material: BlockMaterial): BlockState {
+  const existing = Registry.BLOCK.get(new ResourceLocation(location)) as Block | undefined;
+  if (existing !== undefined) {
+    return existing.defaultBlockState();
+  }
+
+  const block = new LiquidBlock(fluid, BlockBehaviour.Properties.of(material).noCollission()).setLocation(new ResourceLocation(location));
+  Registry.register(Registry.BLOCK, block.getLocation()!, block);
+  return block.defaultBlockState();
+}
+
 function createDispatcher(): BlockRenderDispatcher {
+  const spriteCache = createSpriteCache();
+  const waterState = createFluidBlock("minecraft:water", Fluids.WATER, BlockMaterial.WATER);
+  const lavaState = createFluidBlock("minecraft:lava", Fluids.LAVA, BlockMaterial.LAVA);
   const repository = new BlockModelRepository(new ExtractedAssetModelSource());
-  const bakery = new ModelBakery(repository, createSpriteGetter());
+  const bakery = new ModelBakery(repository, spriteCache.getByMaterial);
   const modelManager = new ModelManager(bakery.getMissingBakedModel());
   bakery.bakeTopLevelBlockModels(modelManager);
   const shaper = new BlockModelShaper(modelManager);
   shaper.rebuildCache();
-  return new BlockRenderDispatcher(shaper, new BlockColors());
+  return new BlockRenderDispatcher(shaper, BlockColors.createDefault(), spriteCache.getByLocation, waterState, lavaState);
 }
 
 function renderBlock(

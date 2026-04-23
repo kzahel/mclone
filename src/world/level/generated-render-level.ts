@@ -1,7 +1,13 @@
 import { BlockPos } from "../../core/block-pos";
 import { SectionPos } from "../../core/section-pos";
+import type { ColorResolver } from "./color-resolver";
+import type { Biome } from "../../worldgen/biome/biome";
+import { getBlockPositionBiome } from "../../worldgen/biome/biome-zoom";
+import type { NoiseBiomeSource } from "../../worldgen/biome/noise-biome-source";
+import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
 import { MutableChunkBlockBuffer } from "../../worldgen/chunk/chunk-block-buffer";
 import { NoiseBasedChunkGenerator } from "../../worldgen/levelgen/noise-based-chunk-generator";
+import { BlockStateProperties } from "./block/state/properties/block-state-properties";
 import { type BlockState } from "./block/state/block-state";
 import { LevelChunk } from "./chunk/level-chunk";
 import { StaticRenderLevel } from "./static-render-level";
@@ -14,6 +20,8 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   public constructor(
     airState: BlockState,
     private readonly generator: NoiseBasedChunkGenerator,
+    private readonly biomeSource: NoiseBiomeSource,
+    private readonly biomeZoomSeed: bigint,
     private readonly blockStateById: readonly BlockState[],
     skyLight = 15,
     blockLight = 15,
@@ -70,6 +78,15 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     return changed;
   }
 
+  public override getBlockTint(pos: BlockPos, resolver?: ColorResolver): number {
+    if (resolver === undefined) {
+      return -1;
+    }
+
+    const biome = getBlockPositionBiome(this.biomeZoomSeed, pos.getX(), pos.getZ(), this.biomeSource) as Biome;
+    return resolver.getColor(biome, pos.getX(), pos.getZ());
+  }
+
   private inRange(chunkX: number, chunkZ: number): boolean {
     return Math.abs(chunkX - this.viewCenterX) <= this.chunkRadius && Math.abs(chunkZ - this.viewCenterZ) <= this.chunkRadius;
   }
@@ -91,9 +108,14 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     for (let y = generated.minY; y < generated.minY + generated.height; y++) {
       for (let z = 0; z < 16; z++) {
         for (let x = 0; x < 16; x++) {
-          const state = this.blockStateById[generated.blocks[index++]!] ?? this.blockStateById[0]!;
+          const blockId = generated.blocks[index++]!;
+          let state = this.blockStateById[blockId] ?? this.blockStateById[0]!;
           if (state.isAir()) {
             continue;
+          }
+
+          if (blockId === ChunkBlockId.GRASS_BLOCK && y + 1 < generated.minY + generated.height && generated.getBlockAtY(x, y + 1, z) === ChunkBlockId.SNOW) {
+            state = state.setValue(BlockStateProperties.SNOWY, true);
           }
 
           pos.set(worldX + x, y, worldZ + z);

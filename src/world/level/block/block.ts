@@ -9,6 +9,8 @@ import { BlockBehaviour } from "./state/block-behaviour";
 import { BlockState } from "./state/block-state";
 import { StateDefinition } from "./state/state-definition";
 import type { Property } from "./state/properties/property";
+import { Fluids } from "../material/fluids";
+import type { FluidState } from "../material/fluid-state";
 
 function copyProperty<T>(from: BlockState, to: BlockState, property: Property<T>): BlockState {
   return to.setValue(property, from.getValue(property));
@@ -74,6 +76,10 @@ export class Block extends BlockBehaviour {
 
   public useShapeForLightOcclusion(_state: BlockState): boolean {
     return false;
+  }
+
+  public getFluidState(_state: BlockState): FluidState {
+    return Fluids.EMPTY.defaultFluidState();
   }
 
   public setLocation(location: ResourceLocation): this {

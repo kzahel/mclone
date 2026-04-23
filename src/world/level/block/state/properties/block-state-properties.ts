@@ -2,9 +2,12 @@ import { Direction } from "../../../../../core/direction";
 import { BooleanProperty } from "./boolean-property";
 import { DirectionProperty } from "./direction-property";
 import { EnumProperty } from "./enum-property";
+import { IntegerProperty } from "./integer-property";
 
 export class BlockStateProperties {
+  public static readonly LAYERS = IntegerProperty.create("layers", 1, 8);
   public static readonly LIT = BooleanProperty.create("lit");
+  public static readonly LEVEL = IntegerProperty.create("level", 0, 15);
   public static readonly OPEN = BooleanProperty.create("open");
   public static readonly POWERED = BooleanProperty.create("powered");
   public static readonly SNOWY = BooleanProperty.create("snowy");

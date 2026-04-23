@@ -1,12 +1,17 @@
 import { Registry } from "../../core/registry";
 import { ResourceLocation } from "../../core/resource-location";
+import { ItemBlockRenderTypes } from "../../renderer/item-block-render-types";
+import { RenderType } from "../../renderer/render-type";
 import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
 import { AirBlock } from "./block/air-block";
 import { Block } from "./block/block";
+import { LiquidBlock } from "./block/liquid-block";
+import { SnowLayerBlock } from "./block/snow-layer-block";
 import { SnowyDirtBlock } from "./block/snowy-dirt-block";
 import { SoundType } from "./block/sound-type";
 import { BlockBehaviour } from "./block/state/block-behaviour";
 import type { BlockState } from "./block/state/block-state";
+import { Fluids } from "./material/fluids";
 import { Material } from "./material/material";
 import { MaterialColor } from "./material/material-color";
 
@@ -16,6 +21,9 @@ const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
 const DIRT_LOCATION = new ResourceLocation("minecraft:dirt");
 const SAND_LOCATION = new ResourceLocation("minecraft:sand");
 const GRAVEL_LOCATION = new ResourceLocation("minecraft:gravel");
+const WATER_LOCATION = new ResourceLocation("minecraft:water");
+const LAVA_LOCATION = new ResourceLocation("minecraft:lava");
+const SNOW_LOCATION = new ResourceLocation("minecraft:snow");
 
 const GENERATED_BLOCK_LOCATIONS = [
   STONE_LOCATION,
@@ -24,6 +32,9 @@ const GENERATED_BLOCK_LOCATIONS = [
   DIRT_LOCATION,
   SAND_LOCATION,
   GRAVEL_LOCATION,
+  WATER_LOCATION,
+  LAVA_LOCATION,
+  SNOW_LOCATION,
 ] as const;
 
 const GENERATED_SPRITE_LOCATIONS = [
@@ -36,6 +47,12 @@ const GENERATED_SPRITE_LOCATIONS = [
   new ResourceLocation("minecraft:block/dirt"),
   new ResourceLocation("minecraft:block/sand"),
   new ResourceLocation("minecraft:block/gravel"),
+  new ResourceLocation("minecraft:block/water_still"),
+  new ResourceLocation("minecraft:block/water_flow"),
+  new ResourceLocation("minecraft:block/water_overlay"),
+  new ResourceLocation("minecraft:block/lava_still"),
+  new ResourceLocation("minecraft:block/lava_flow"),
+  new ResourceLocation("minecraft:block/snow"),
 ] as const;
 
 function registerBlock<T extends Block>(location: ResourceLocation, block: T): T {
@@ -83,19 +100,43 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     GRAVEL_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.SAND, MaterialColor.STONE).strength(0.6).sound(SoundType.GRAVEL)),
   ).defaultBlockState();
+  const waterState = registerBlock(
+    WATER_LOCATION,
+    new LiquidBlock(Fluids.WATER, BlockBehaviour.Properties.of(Material.WATER).noCollission().strength(100.0)),
+  ).defaultBlockState();
+  const lavaState = registerBlock(
+    LAVA_LOCATION,
+    new LiquidBlock(Fluids.LAVA, BlockBehaviour.Properties.of(Material.LAVA).noCollission().randomTicks().strength(100.0).lightLevel(() => 15)),
+  ).defaultBlockState();
+  const snowState = registerBlock(
+    SNOW_LOCATION,
+    // WebGPU: partial-block occlusion stays disabled until voxel-shape-based meshing is ported.
+    new SnowLayerBlock(
+      BlockBehaviour.Properties.of(Material.TOP_SNOW)
+        .randomTicks()
+        .strength(0.1)
+        .requiresCorrectToolForDrops()
+        .sound(SoundType.SNOW)
+        .noOcclusion(),
+    ),
+  ).defaultBlockState();
+
+  ItemBlockRenderTypes.setRenderLayer(grassState.getBlock(), RenderType.cutoutMipped());
+  ItemBlockRenderTypes.setRenderLayer(snowState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(waterState.getBlock(), RenderType.translucent());
+  ItemBlockRenderTypes.setFluidRenderLayer(Fluids.WATER, RenderType.translucent());
 
   const blockStateById = new Array<BlockState>(10);
   blockStateById[ChunkBlockId.AIR] = airState;
   blockStateById[ChunkBlockId.STONE] = stoneState;
-  // WebGPU: fluids and snow layers still render through later dedicated paths, so the generated terrain bridge omits them from the block-model cache for now.
-  blockStateById[ChunkBlockId.WATER] = airState;
+  blockStateById[ChunkBlockId.WATER] = waterState;
   blockStateById[ChunkBlockId.BEDROCK] = bedrockState;
   blockStateById[ChunkBlockId.GRASS_BLOCK] = grassState;
   blockStateById[ChunkBlockId.DIRT] = dirtState;
   blockStateById[ChunkBlockId.SAND] = sandState;
   blockStateById[ChunkBlockId.GRAVEL] = gravelState;
-  blockStateById[ChunkBlockId.SNOW] = airState;
-  blockStateById[ChunkBlockId.LAVA] = airState;
+  blockStateById[ChunkBlockId.SNOW] = snowState;
+  blockStateById[ChunkBlockId.LAVA] = lavaState;
 
   return {
     airState,

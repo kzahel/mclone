@@ -1,14 +1,43 @@
+import { Registry } from "../../core/registry";
+import { ResourceLocation } from "../../core/resource-location";
 import type { BlockPos } from "../../core/block-pos";
 import type { BlockAndTintGetter } from "../../world/level/block-and-tint-getter";
+import { GrassColor } from "../../world/level/grass-color";
 import type { Block } from "../../world/level/block/block";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { Property } from "../../world/level/block/state/properties/property";
+import { BiomeColors } from "../biome-colors";
 
 export type BlockColor = (state: BlockState, level: BlockAndTintGetter | null, pos: BlockPos | null, tintIndex: number) => number;
+
+const EMPTY_PROPERTIES = new Set<Property<unknown>>();
+const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
+const WATER_LOCATION = new ResourceLocation("minecraft:water");
 
 export class BlockColors {
   private readonly blockColors = new WeakMap<Block, BlockColor>();
   private readonly coloringStates = new WeakMap<Block, ReadonlySet<Property<unknown>>>();
+
+  public static createDefault(): BlockColors {
+    const blockColors = new BlockColors();
+    const grassBlock = Registry.BLOCK.get(GRASS_BLOCK_LOCATION) as Block | undefined;
+    if (grassBlock !== undefined) {
+      blockColors.register(
+        (_state, level, pos) => level !== null && pos !== null ? BiomeColors.getAverageGrassColor(level, pos) : GrassColor.get(0.5, 1.0),
+        grassBlock,
+      );
+    }
+
+    const waterBlock = Registry.BLOCK.get(WATER_LOCATION) as Block | undefined;
+    if (waterBlock !== undefined) {
+      blockColors.register(
+        (_state, level, pos) => level !== null && pos !== null ? BiomeColors.getAverageWaterColor(level, pos) : -1,
+        waterBlock,
+      );
+    }
+
+    return blockColors;
+  }
 
   public getColor(state: BlockState, level: BlockAndTintGetter | null, pos: BlockPos | null, tintIndex: number): number {
     const blockColor = this.blockColors.get(state.getBlock());
@@ -22,6 +51,6 @@ export class BlockColors {
   }
 
   public getColoringProperties(block: Block): ReadonlySet<Property<unknown>> {
-    return this.coloringStates.get(block) ?? new Set<Property<unknown>>();
+    return this.coloringStates.get(block) ?? EMPTY_PROPERTIES;
   }
 }

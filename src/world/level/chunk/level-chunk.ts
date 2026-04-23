@@ -1,5 +1,6 @@
 import { BlockPos } from "../../../core/block-pos";
 import type { BlockState } from "../block/state/block-state";
+import type { FluidState } from "../material/fluid-state";
 
 type ChunkEntry = {
   readonly pos: BlockPos;
@@ -17,6 +18,10 @@ export class LevelChunk {
 
   public getBlockState(pos: BlockPos): BlockState {
     return this.states.get(pos.asLong())?.state ?? this.airState;
+  }
+
+  public getFluidState(pos: BlockPos): FluidState {
+    return this.getBlockState(pos).getFluidState();
   }
 
   public setBlockState(pos: BlockPos, state: BlockState): void {

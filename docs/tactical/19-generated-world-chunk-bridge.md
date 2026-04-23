@@ -51,4 +51,4 @@ Replace the static smoke scene with real chunk data from the translated overworl
 
 ## Next
 
-Tactical 20: surface-special blocks and biome tint. The generator bridge currently drops water, lava, and snow-layer output from the model path and renders grass without biome color. The next slice should port the minimal `BlockColors` / biome-tint path plus the first non-cube surface-special renderers so generated terrain looks like overworld terrain instead of a stone-heavy fallback.
+Tactical 20 is now complete in [`20-surface-special-blocks-and-biome-tint.md`](20-surface-special-blocks-and-biome-tint.md). The generated-world bridge now keeps biome tint, snow layers, and the first liquid path instead of dropping those surface-special cases on the floor.
