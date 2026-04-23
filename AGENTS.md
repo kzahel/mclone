@@ -19,6 +19,25 @@ Every class we port has a 1:1 counterpart in `reference/minecraft-1.17.1/src/`. 
 
 Everything else — vertex formats, buffer builders, atlas stitching, model baking, chunk meshing, noise math, PRNG, biome layering — is a straight port. If you find yourself writing logic that isn't in the source, stop and re-read the source.
 
+## Architectural choices and divergence review
+
+Runtime architecture does not have to transliterate class-for-class from Minecraft, but architectural choices still need to be weighed against the reference source.
+
+Before making an architectural divergence, explicitly determine:
+
+1. What the reference Minecraft source does today
+2. Why that shape is a poor fit for browser / WebGPU / worker / Node constraints
+3. The exact scope of the divergence
+4. Whether the divergence makes future parity work easier, neutral, or harder
+
+Do not make architectural changes on the basis of convenience alone. Prefer the reference shape when it still fits. When diverging, keep the divergence intentional, narrow, and documented.
+
+The main rule is:
+
+- simulation/content parity is the default
+- runtime orchestration may diverge when platform constraints require it
+- any such divergence must preserve a clear path for future parity work instead of making it opaque or harder to recover
+
 ### Callout convention
 
 When a method diverges from its Java counterpart, add a one-line comment:

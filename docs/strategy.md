@@ -2,6 +2,8 @@
 
 Two-phase approach. Optimize for "it works at home" now; worry about distribution later only if we want to.
 
+For runtime boundaries that are intentionally not a 1:1 translation of Minecraft's host architecture, see [`architecture.md`](./architecture.md).
+
 ## Phase 1 — direct translation (now)
 
 - **Goal:** working terrain gen + voxel engine running on the LAN for personal use (my daughter's laptop).
