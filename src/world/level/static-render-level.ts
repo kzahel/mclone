@@ -82,6 +82,10 @@ export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
     return this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()))?.getBlockState(pos) ?? this.airState;
   }
 
+  public isStateAtPosition(pos: BlockPos, predicate: (state: BlockState) => boolean): boolean {
+    return predicate(this.getBlockState(pos));
+  }
+
   public getFluidState(pos: BlockPos): FluidState {
     return this.getBlockState(pos).getFluidState();
   }

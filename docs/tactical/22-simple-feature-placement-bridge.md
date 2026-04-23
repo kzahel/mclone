@@ -67,4 +67,4 @@ Port the narrow 1.17.1 worldgen feature path needed to stop hand-placing smoke-s
 
 ## Next
 
-Tactical 23: true tree feature placement. Port the narrowest real oak path needed for smoke-scene parity: `TreeFeature`, `TreeConfiguration`, the first trunk placer and foliage placer set, plus the post-placement leaf-distance/update work so the harness can drop the remaining manual canopy and generated scenes can start consuming translated tree output end to end.
+Tactical 23 is now [`23-true-tree-feature-placement.md`](23-true-tree-feature-placement.md): the real oak path (`TreeFeature`, `TreeConfiguration`, the first trunk/foliage placer set, and leaf-distance post-processing) replaced the smoke scene’s last handwritten canopy.

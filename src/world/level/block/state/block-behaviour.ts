@@ -15,6 +15,7 @@ import type { BlockState } from "./block-state";
 import type { Property } from "./properties/property";
 import { Vec3 } from "../../../phys/vec3";
 import type { FluidState } from "../../material/fluid-state";
+import { BlockTag } from "../../../../tags/block-tags";
 
 export abstract class BlockBehaviour {
   public readonly material: Material;
@@ -47,6 +48,17 @@ export abstract class BlockBehaviour {
 
   public skipRendering(_state: BlockState, _adjacentState: BlockState, _direction: Direction): boolean {
     return false;
+  }
+
+  public updateShape(
+    state: BlockState,
+    _direction: Direction,
+    _neighborState: BlockState,
+    _level: WorldGenLevel,
+    _pos: BlockPos,
+    _neighborPos: BlockPos,
+  ): BlockState {
+    return state;
   }
 
   public rotate(state: BlockState, _rotation: Rotation): BlockState {
@@ -130,8 +142,10 @@ export namespace BlockBehaviour {
       return this.owner;
     }
 
-    public is(block: Block): boolean {
-      return this.getBlock() === block;
+    public is(block: Block): boolean;
+    public is(tag: BlockTag): boolean;
+    public is(blockOrTag: Block | BlockTag): boolean {
+      return blockOrTag instanceof BlockTag ? blockOrTag.contains(this.getBlock()) : this.getBlock() === blockOrTag;
     }
 
     public getMaterial(): Material {
@@ -152,6 +166,10 @@ export namespace BlockBehaviour {
 
     public getFluidState(): FluidState {
       return this.getBlock().getFluidState(this.asState());
+    }
+
+    public updateShape(direction: Direction, neighborState: BlockState, level: WorldGenLevel, pos: BlockPos, neighborPos: BlockPos): BlockState {
+      return this.getBlock().updateShape(this.asState(), direction, neighborState, level, pos, neighborPos);
     }
 
     public propagatesSkylightDown(level: BlockGetter, pos: BlockPos): boolean {

@@ -32,6 +32,19 @@ class DirectionAxisValue implements StringRepresentable {
     return this.name;
   }
 
+  public choose<T>(x: T, y: T, z: T): T {
+    switch (this) {
+      case AXIS_X:
+        return x;
+      case AXIS_Y:
+        return y;
+      case AXIS_Z:
+        return z;
+      default:
+        throw new Error(`Unknown axis ${this}`);
+    }
+  }
+
   public toString(): string {
     return this.name;
   }

@@ -83,6 +83,17 @@ export class Block extends BlockBehaviour {
     return Fluids.EMPTY.defaultFluidState();
   }
 
+  public override updateShape(
+    state: BlockState,
+    _direction: Direction,
+    _neighborState: BlockState,
+    _level: WorldGenLevel,
+    _pos: BlockPos,
+    _neighborPos: BlockPos,
+  ): BlockState {
+    return state;
+  }
+
   public setLocation(location: ResourceLocation): this {
     this.locationValue = location;
     return this;
