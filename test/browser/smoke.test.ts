@@ -16,6 +16,13 @@ test("WebGPU boot succeeds on system Chrome", async ({ page }) => {
   if (result.ok) {
     expect(result.adapterInfo.length).toBeGreaterThan(0);
     expect(["bgra8unorm", "rgba8unorm"]).toContain(result.format);
-    expect(result.centerPixel).toEqual(result.expectedCenterPixel);
+    expect(result.loadedChunkCount).toBeGreaterThan(0);
+    expect(result.solidDrawCount).toBeGreaterThan(0);
+    expect(result.terrainPixel).not.toEqual(result.clearPixel);
+    const pixelDelta = result.terrainPixel.reduce(
+      (sum, channel, index) => sum + Math.abs(channel - result.clearPixel[index]!),
+      0,
+    );
+    expect(pixelDelta).toBeGreaterThan(20);
   }
 });

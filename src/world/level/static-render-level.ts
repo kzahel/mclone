@@ -45,6 +45,29 @@ export class StaticRenderLevel implements BlockAndTintGetter {
     return created;
   }
 
+  public setChunk(chunk: LevelChunk): void {
+    this.chunks.set(chunkKey(chunk.chunkX, chunk.chunkZ), chunk);
+  }
+
+  public removeChunk(chunkX: number, chunkZ: number): LevelChunk | undefined {
+    const key = chunkKey(chunkX, chunkZ);
+    const chunk = this.chunks.get(key);
+    this.chunks.delete(key);
+    return chunk;
+  }
+
+  public hasChunk(chunkX: number, chunkZ: number): boolean {
+    return this.chunks.has(chunkKey(chunkX, chunkZ));
+  }
+
+  public getLoadedChunks(): readonly LevelChunk[] {
+    return [...this.chunks.values()];
+  }
+
+  public getLoadedChunkCount(): number {
+    return this.chunks.size;
+  }
+
   public getBlockState(pos: BlockPos): BlockState {
     return this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()))!.getBlockState(pos);
   }

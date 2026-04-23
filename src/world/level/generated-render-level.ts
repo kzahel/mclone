@@ -1,0 +1,107 @@
+import { BlockPos } from "../../core/block-pos";
+import { SectionPos } from "../../core/section-pos";
+import { MutableChunkBlockBuffer } from "../../worldgen/chunk/chunk-block-buffer";
+import { NoiseBasedChunkGenerator } from "../../worldgen/levelgen/noise-based-chunk-generator";
+import { type BlockState } from "./block/state/block-state";
+import { LevelChunk } from "./chunk/level-chunk";
+import { StaticRenderLevel } from "./static-render-level";
+
+export class GeneratedRenderLevel extends StaticRenderLevel {
+  private viewCenterX = Number.MIN_SAFE_INTEGER;
+  private viewCenterZ = Number.MIN_SAFE_INTEGER;
+  private chunkRadius = -1;
+
+  public constructor(
+    airState: BlockState,
+    private readonly generator: NoiseBasedChunkGenerator,
+    private readonly blockStateById: readonly BlockState[],
+    skyLight = 15,
+    blockLight = 15,
+    minBuildHeight = 0,
+    height = 256,
+  ) {
+    super(airState, skyLight, blockLight, minBuildHeight, height);
+  }
+
+  public override getChunk(chunkX: number, chunkZ: number, create = true): LevelChunk | null {
+    const existing = super.getChunk(chunkX, chunkZ, false);
+    if (existing !== null) {
+      return existing;
+    }
+
+    if (!create || !this.inRange(chunkX, chunkZ)) {
+      return null;
+    }
+
+    const generated = this.generateChunk(chunkX, chunkZ);
+    super.setChunk(generated);
+    return generated;
+  }
+
+  public ensureChunksForCamera(cameraX: number, cameraZ: number, viewDistance: number): boolean {
+    const nextCenterX = SectionPos.posToSectionCoord(cameraX);
+    const nextCenterZ = SectionPos.posToSectionCoord(cameraZ);
+    const nextRadius = Math.max(1, viewDistance) + 1;
+    let changed =
+      nextCenterX !== this.viewCenterX ||
+      nextCenterZ !== this.viewCenterZ ||
+      nextRadius !== this.chunkRadius;
+
+    this.viewCenterX = nextCenterX;
+    this.viewCenterZ = nextCenterZ;
+    this.chunkRadius = nextRadius;
+
+    for (const chunk of this.getLoadedChunks()) {
+      if (!this.inRange(chunk.chunkX, chunk.chunkZ)) {
+        super.removeChunk(chunk.chunkX, chunk.chunkZ);
+        changed = true;
+      }
+    }
+
+    for (let chunkZ = this.viewCenterZ - this.chunkRadius; chunkZ <= this.viewCenterZ + this.chunkRadius; chunkZ++) {
+      for (let chunkX = this.viewCenterX - this.chunkRadius; chunkX <= this.viewCenterX + this.chunkRadius; chunkX++) {
+        if (super.getChunk(chunkX, chunkZ, false) === null) {
+          this.getChunk(chunkX, chunkZ, true);
+          changed = true;
+        }
+      }
+    }
+
+    return changed;
+  }
+
+  private inRange(chunkX: number, chunkZ: number): boolean {
+    return Math.abs(chunkX - this.viewCenterX) <= this.chunkRadius && Math.abs(chunkZ - this.viewCenterZ) <= this.chunkRadius;
+  }
+
+  private generateChunk(chunkX: number, chunkZ: number): LevelChunk {
+    const generated = this.generator.fillFromNoise(chunkX, chunkZ);
+    this.generator.buildSurfaceAndBedrock(generated);
+    this.generator.applyCarvers(generated);
+    return this.copyGeneratedChunk(chunkX, chunkZ, generated);
+  }
+
+  private copyGeneratedChunk(chunkX: number, chunkZ: number, generated: MutableChunkBlockBuffer): LevelChunk {
+    const chunk = new LevelChunk(chunkX, chunkZ, this.blockStateById[0]!);
+    const worldX = SectionPos.sectionToBlockCoord(chunkX);
+    const worldZ = SectionPos.sectionToBlockCoord(chunkZ);
+    const pos = new BlockPos.MutableBlockPos();
+    let index = 0;
+
+    for (let y = generated.minY; y < generated.minY + generated.height; y++) {
+      for (let z = 0; z < 16; z++) {
+        for (let x = 0; x < 16; x++) {
+          const state = this.blockStateById[generated.blocks[index++]!] ?? this.blockStateById[0]!;
+          if (state.isAir()) {
+            continue;
+          }
+
+          pos.set(worldX + x, y, worldZ + z);
+          chunk.setBlockState(pos, state);
+        }
+      }
+    }
+
+    return chunk;
+  }
+}

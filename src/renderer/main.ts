@@ -1,12 +1,8 @@
-import { BlockPos } from "../core/block-pos";
-import { Registry } from "../core/registry";
 import { ResourceLocation } from "../core/resource-location";
-import { AirBlock } from "../world/level/block/air-block";
-import { Block } from "../world/level/block/block";
-import { BlockBehaviour } from "../world/level/block/state/block-behaviour";
-import type { BlockState } from "../world/level/block/state/block-state";
-import { Material as BlockMaterial } from "../world/level/material/material";
-import { StaticRenderLevel } from "../world/level/static-render-level";
+import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
+import { NoiseBasedChunkGenerator } from "../worldgen/levelgen/noise-based-chunk-generator";
+import { GeneratedRenderLevel } from "../world/level/generated-render-level";
+import { registerGeneratedRenderBlocks } from "../world/level/generated-render-blocks";
 import { Vec3 } from "../world/phys/vec3";
 import { BlockColors } from "./block/block-colors";
 import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
@@ -17,28 +13,30 @@ import { BlockModelShaper } from "./model/block-model-shaper";
 import { preloadBlockModelSource } from "./model/browser-block-model-source";
 import { ModelBakery } from "./model/model-bakery";
 import { ModelManager } from "./model/model-manager";
-import { GameRenderer } from "./game-renderer";
-import { LevelRenderer } from "./level-renderer";
+import { LevelRenderer, type LevelRenderFrame } from "./level-renderer";
 import { LightTexture } from "./light-texture";
-import { BrowserTextureAtlasSource, loadNativeImageFromUrl } from "./texture/browser-native-image-loader";
-import { NativeImage } from "./texture/native-image";
+import { type CameraState, GameRenderer } from "./game-renderer";
+import { BrowserTextureAtlasSource } from "./texture/browser-native-image-loader";
 import { TextureAtlas } from "./texture/texture-atlas";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
 import { RenderType } from "./render-type";
 import { ViewArea } from "./view-area";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
-const SMOKE_CENTER_BLOCK = new ResourceLocation("minecraft:orange_wool");
-const SMOKE_VISUAL_BLOCK = new ResourceLocation("minecraft:stone");
-const SMOKE_CENTER_SPRITE = new ResourceLocation("minecraft:block/orange_wool");
-const SMOKE_VISUAL_SPRITE = new ResourceLocation("minecraft:block/stone");
-const SMOKE_BLOCKS = [SMOKE_CENTER_BLOCK, SMOKE_VISUAL_BLOCK] as const;
-const SMOKE_SPRITES = [SMOKE_CENTER_SPRITE, SMOKE_VISUAL_SPRITE] as const;
-const SMOKE_CENTER_BRIGHTNESS = 0.8;
-const SMOKE_RENDER_DISTANCE = 1;
-const SMOKE_CAMERA_POSITION = new Vec3(8.5, 8.5, 32);
-const SMOKE_CAMERA_X_ROT = 0.0;
-const SMOKE_CAMERA_Y_ROT = 180.0;
+const GENERATED_SEED = 12_345n;
+const GENERATED_VIEW_DISTANCE = 1;
+const GENERATED_CAMERA_PATH = [
+  {
+    position: new Vec3(8.5, 104.0, 40.5),
+    xRot: 60.0,
+    yRot: 180.0,
+  },
+  {
+    position: new Vec3(40.5, 104.0, 40.5),
+    xRot: 60.0,
+    yRot: 180.0,
+  },
+] as const satisfies readonly CameraState[];
 
 export type BootResult =
   | {
@@ -46,7 +44,10 @@ export type BootResult =
       format: GPUTextureFormat;
       adapterInfo: string;
       centerPixel: readonly [number, number, number, number];
-      expectedCenterPixel: readonly [number, number, number, number];
+      terrainPixel: readonly [number, number, number, number];
+      clearPixel: readonly [number, number, number, number];
+      loadedChunkCount: number;
+      solidDrawCount: number;
     }
   | { ok: false; reason: string };
 
@@ -106,63 +107,13 @@ function createDepthView(device: GPUDevice, width: number, height: number): GPUT
     .createView();
 }
 
-function rgba8FromPixel(pixel: number): readonly [number, number, number, number] {
-  return [NativeImage.getR(pixel), NativeImage.getG(pixel), NativeImage.getB(pixel), NativeImage.getA(pixel)];
-}
-
-function shadePixel(
-  pixel: readonly [number, number, number, number],
-  brightness: number,
-): readonly [number, number, number, number] {
+function rgba8FromColor(color: readonly [number, number, number, number]): readonly [number, number, number, number] {
   return [
-    Math.round(pixel[0] * brightness),
-    Math.round(pixel[1] * brightness),
-    Math.round(pixel[2] * brightness),
-    pixel[3],
+    Math.round(color[0] * 255),
+    Math.round(color[1] * 255),
+    Math.round(color[2] * 255),
+    Math.round(color[3] * 255),
   ];
-}
-
-function modulatePixel(
-  pixel: readonly [number, number, number, number],
-  multiplier: readonly [number, number, number, number],
-): readonly [number, number, number, number] {
-  return [
-    Math.round((pixel[0] * multiplier[0]) / 255),
-    Math.round((pixel[1] * multiplier[1]) / 255),
-    Math.round((pixel[2] * multiplier[2]) / 255),
-    Math.round((pixel[3] * multiplier[3]) / 255),
-  ];
-}
-
-function createAirState(): BlockState {
-  const properties = BlockBehaviour.Properties.of(BlockMaterial.AIR).noCollission().noOcclusion();
-  properties.isAir = true;
-  return new AirBlock(properties).defaultBlockState();
-}
-
-function fillBox(level: StaticRenderLevel, from: BlockPos, to: BlockPos, state: BlockState): void {
-  for (let z = from.getZ(); z <= to.getZ(); z++) {
-    for (let y = from.getY(); y <= to.getY(); y++) {
-      for (let x = from.getX(); x <= to.getX(); x++) {
-        level.setBlock(new BlockPos(x, y, z), state);
-      }
-    }
-  }
-}
-
-function populateSmokeLevel(
-  level: StaticRenderLevel,
-  centerState: BlockState,
-  visualState: BlockState,
-): void {
-  fillBox(level, new BlockPos(0, 0, 0), new BlockPos(15, 15, 0), centerState);
-  fillBox(level, new BlockPos(-12, 0, 0), new BlockPos(-5, 7, 7), visualState);
-  fillBox(level, new BlockPos(20, 2, 0), new BlockPos(27, 9, 5), visualState);
-  for (let chunkX = -2; chunkX <= 2; chunkX++) {
-    for (let chunkZ = -1; chunkZ <= 2; chunkZ++) {
-      level.getChunk(chunkX, chunkZ);
-    }
-  }
 }
 
 function createChunkBindGroup(
@@ -249,11 +200,11 @@ async function popValidationError(device: GPUDevice, label: string): Promise<str
   return error ? `${label}: ${error.message}` : undefined;
 }
 
-async function readCenterPixel(
+async function readPixel(
   device: GPUDevice,
   texture: GPUTexture,
-  width: number,
-  height: number,
+  x: number,
+  y: number,
 ): Promise<readonly [number, number, number, number]> {
   const readback = device.createBuffer({
     size: 256,
@@ -263,7 +214,7 @@ async function readCenterPixel(
   encoder.copyTextureToBuffer(
     {
       texture,
-      origin: { x: Math.floor(width / 2), y: Math.floor(height / 2) },
+      origin: { x, y },
     },
     {
       buffer: readback,
@@ -297,32 +248,13 @@ async function boot(): Promise<BootResult> {
   const format = navigator.gpu.getPreferredCanvasFormat();
   ctx.configure({ device, format, alphaMode: "opaque" });
 
+  const generatedBlocks = registerGeneratedRenderBlocks();
   const atlasSource = new BrowserTextureAtlasSource();
-  const centerSpriteImage = await loadNativeImageFromUrl(atlasSource.resolveTextureUrl(SMOKE_CENTER_SPRITE));
-  const centerSpritePixel = rgba8FromPixel(centerSpriteImage.getPixelRGBA(8, 8));
-  centerSpriteImage.close();
-
   const atlas = new TextureAtlas(SMOKE_ATLAS_LOCATION, device.limits.maxTextureDimension2D);
-  const preparations = await atlas.prepareToStitch(atlasSource, SMOKE_SPRITES, 0);
+  const preparations = await atlas.prepareToStitch(atlasSource, generatedBlocks.spriteLocations, 0);
   atlas.reload(device, preparations);
 
-  const centerSprite = atlas.getSprite(SMOKE_CENTER_SPRITE);
-  const visualSprite = atlas.getSprite(SMOKE_VISUAL_SPRITE);
-  if (!centerSprite.getName().equals(SMOKE_CENTER_SPRITE)) {
-    return { ok: false, reason: `center smoke sprite ${SMOKE_CENTER_SPRITE} was missing from the stitched atlas` };
-  }
-
-  if (!visualSprite.getName().equals(SMOKE_VISUAL_SPRITE)) {
-    return { ok: false, reason: `visual smoke sprite ${SMOKE_VISUAL_SPRITE} was missing from the stitched atlas` };
-  }
-
-  Registry.BLOCK.clear();
-  const centerBlock = new Block(BlockBehaviour.Properties.of(BlockMaterial.WOOL)).setLocation(SMOKE_CENTER_BLOCK);
-  const visualBlock = new Block(BlockBehaviour.Properties.of(BlockMaterial.STONE)).setLocation(SMOKE_VISUAL_BLOCK);
-  Registry.register(Registry.BLOCK, centerBlock.getLocation()!, centerBlock);
-  Registry.register(Registry.BLOCK, visualBlock.getLocation()!, visualBlock);
-
-  const modelSource = await preloadBlockModelSource(SMOKE_BLOCKS);
+  const modelSource = await preloadBlockModelSource(generatedBlocks.blockLocations);
   const repository = new BlockModelRepository(modelSource);
   const bakery = new ModelBakery(repository, (material) => atlas.getSprite(material.texture()));
   const modelManager = new ModelManager(bakery.getMissingBakedModel());
@@ -330,29 +262,41 @@ async function boot(): Promise<BootResult> {
   const blockModelShaper = new BlockModelShaper(modelManager);
   blockModelShaper.rebuildCache();
 
-  const centerState = centerBlock.defaultBlockState();
-  const visualState = visualBlock.defaultBlockState();
-  const level = new StaticRenderLevel(createAirState());
-  populateSmokeLevel(level, centerState, visualState);
+  const biomeSource = new OverworldBiomeSource(GENERATED_SEED);
+  const generator = new NoiseBasedChunkGenerator(biomeSource, GENERATED_SEED);
+  const level = new GeneratedRenderLevel(generatedBlocks.airState, generator, generatedBlocks.blockStateById);
 
   const levelRenderer = new LevelRenderer();
   const blockRenderer = new BlockRenderDispatcher(blockModelShaper, new BlockColors());
   const chunkDispatcher = new ChunkRenderDispatcher(level, levelRenderer, blockRenderer, device, (task) => queueMicrotask(task), false, new ChunkBufferBuilderPack());
-  const viewArea = new ViewArea(chunkDispatcher, level, SMOKE_RENDER_DISTANCE, levelRenderer);
-  levelRenderer.setLevel(level, chunkDispatcher, viewArea, SMOKE_RENDER_DISTANCE);
+  const viewArea = new ViewArea(chunkDispatcher, level, GENERATED_VIEW_DISTANCE, levelRenderer);
+  levelRenderer.setLevel(level, chunkDispatcher, viewArea, GENERATED_VIEW_DISTANCE);
   const gameRenderer = new GameRenderer(canvas.width, canvas.height, 64);
   const lightTexture = new LightTexture(gameRenderer, level, device);
   lightTexture.tick();
-  const frame = await gameRenderer.renderLevel(0.0, Number.MAX_SAFE_INTEGER, levelRenderer, lightTexture, {
-    position: SMOKE_CAMERA_POSITION,
-    xRot: SMOKE_CAMERA_X_ROT,
-    yRot: SMOKE_CAMERA_Y_ROT,
-  });
-  const lightmapPixel = rgba8FromPixel(lightTexture.samplePacked(LightTexture.FULL_BRIGHT));
-  const expectedCenterPixel = modulatePixel(shadePixel(centerSpritePixel, SMOKE_CENTER_BRIGHTNESS), lightmapPixel);
+
+  let frame: LevelRenderFrame | undefined;
+  for (const step of GENERATED_CAMERA_PATH) {
+    if (level.ensureChunksForCamera(step.position.x, step.position.z, GENERATED_VIEW_DISTANCE)) {
+      levelRenderer.allChanged();
+    }
+
+    frame = await gameRenderer.renderLevel(
+      0.0,
+      Number.MAX_SAFE_INTEGER,
+      levelRenderer,
+      lightTexture,
+      step,
+    );
+  }
+
+  if (frame === undefined) {
+    return { ok: false, reason: "no generated-terrain frame was produced" };
+  }
+
   const solidDraws = frame.layerDraws.get(RenderType.solid()) ?? [];
   if (solidDraws.length === 0) {
-    return { ok: false, reason: "camera-driven level renderer produced no solid drawables for the smoke scene" };
+    return { ok: false, reason: "camera-driven level renderer produced no solid drawables for the generated terrain scene" };
   }
 
   device.pushErrorScope("validation");
@@ -456,14 +400,25 @@ async function boot(): Promise<BootResult> {
     return { ok: false, reason: submissionError };
   }
 
-  const centerPixel = await readCenterPixel(device, readbackTexture, canvas.width, canvas.height);
+  const centerPixel = await readPixel(device, readbackTexture, Math.floor(canvas.width / 2), Math.floor(canvas.height / 2));
+  const terrainPixel = await readPixel(device, readbackTexture, Math.floor(canvas.width / 2), Math.floor((canvas.height * 3) / 4));
+  const clearPixel = rgba8FromColor(frame.fogColor);
 
   const info = adapter.info ?? {};
   const adapterInfo = [info.vendor, info.architecture, info.device, info.description]
     .filter(Boolean)
     .join(" / ") || "unknown";
 
-  return { ok: true, format, adapterInfo, centerPixel, expectedCenterPixel };
+  return {
+    ok: true,
+    format,
+    adapterInfo,
+    centerPixel,
+    terrainPixel,
+    clearPixel,
+    loadedChunkCount: level.getLoadedChunkCount(),
+    solidDrawCount: solidDraws.length,
+  };
 }
 
 if (typeof window !== "undefined") {

@@ -52,4 +52,4 @@ Port the first camera-owned world frame path from Minecraft's client renderer so
 
 ## Next
 
-Tactical 19: bridge worldgen and the renderer. Replace the static smoke level with real chunk data from the translated world pipeline, add a minimal chunk source / section cache that `LevelRenderer` can move across, and keep compiling/drawing sections as the camera moves.
+Tactical 19 is now documented in [`19-generated-world-chunk-bridge.md`](19-generated-world-chunk-bridge.md). The next slice after that is tactical 20: surface-special blocks and biome tint so the generated-world bridge can stop dropping fluids/snow and start rendering grass with biome color.
