@@ -293,6 +293,14 @@ That means:
 - the first remote dedicated-host path uses the same serialized message shapes over HTTP request/response sessions
 - later push-driven remote transports can move those same shapes onto WebSocket or another persistent transport if the protocol actually needs server-initiated updates
 
+`R6` landed the first hardening pass on that rule:
+
+- protocol-versioned remote envelopes
+- stable remote error codes
+- resumable remote sessions
+- baseline session/player state snapshots
+- shared dedicated-host chunk-interest management per save
+
 This avoids building two engines:
 
 - a shortcut local one
@@ -347,22 +355,23 @@ The important design rule is that these remain server-authoritative systems with
 
 ## Current mismatch in the repo
 
-The codebase still does not fully match this target architecture, but the first browser-runtime boundary fixes are now in place.
+The codebase is materially closer to this target architecture now that the first remote hardening pass is landed, but it still does not fully match the long-term shape.
 
 Current gaps:
 
-- the current remote dedicated-host path still uses one authoritative generated-world host per remote client session
-- the host/client protocol is not yet hardened for reconnect/resync and versioning discipline
+- the remote protocol is still request/response around world-opening and chunk-view updates; there is no server-initiated update flow yet
+- session state is still only baseline transport/session metadata, not authoritative gameplay state
+- the dedicated host still is not running a real shared player/tick loop
 
-That is why performance and future multiplayer support are now architectural priorities, not just implementation details.
+That is why gameplay-state delivery is now the architectural priority, not just transport cleanup.
 
 ## Immediate implications
 
 The next major refactor direction should be:
 
-1. Harden reconnect/resync, session state, and protocol versioning now that the remote path is real.
-2. Add shared chunk-interest management and baseline player/session state so the dedicated host can move beyond one-host-per-remote-session.
-3. Decide whether the dedicated host needs worker-thread/job-pool offload after there is a concrete remote workload to measure.
+1. Add authoritative player input/state/tick flow on top of the hardened session boundary.
+2. Decide whether remote gameplay updates still fit the current HTTP request/response path or need a push-capable transport once server-initiated updates exist.
+3. Decide whether the dedicated host needs worker-thread/job-pool offload after there is a concrete shared-session workload to measure.
 
 ## Decision checklist
 

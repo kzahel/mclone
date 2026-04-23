@@ -2,6 +2,7 @@ import type { ClientChunkCache } from "../../world/level/client-chunk-cache";
 import type { WorldClient } from "../protocol/world-client";
 import type { WorldHost } from "../protocol/world-host";
 import {
+  type ClientSessionState,
   type OpenWorldRequest,
   type SetChunkViewRequest,
   type WorldHostMessage,
@@ -30,6 +31,7 @@ export class LocalWorldTransport implements WorldTransport {
 
 export class TransportWorldClient implements WorldClient {
   private level: ClientChunkCache | undefined;
+  private sessionState: ClientSessionState | undefined;
 
   public constructor(
     private readonly transport: WorldTransport,
@@ -42,6 +44,10 @@ export class TransportWorldClient implements WorldClient {
     }
 
     return this.level;
+  }
+
+  public getSessionState(): ClientSessionState | undefined {
+    return this.sessionState;
   }
 
   public async openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage> {
@@ -71,6 +77,9 @@ export class TransportWorldClient implements WorldClient {
         case "world_opened":
           worldOpened = message;
           this.level ??= this.levelFactory(message);
+          break;
+        case "session_state":
+          this.sessionState = message.state;
           break;
         case "chunk_snapshot":
           this.getLevel().applyChunkSnapshot(message.snapshot);

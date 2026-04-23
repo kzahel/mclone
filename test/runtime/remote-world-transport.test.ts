@@ -7,8 +7,11 @@ import { createGeneratedWorldSaveId } from "../../src/runtime/host/generated-wor
 import { GeneratedWorldRemoteService } from "../../src/runtime/node/generated-world-http-server";
 import {
   deserializeWorldClientMessage,
+  WORLD_HTTP_PROTOCOL_VERSION,
   type OpenWorldSessionRequest,
   type SessionChunkViewRequest,
+  type WorldHttpErrorCode,
+  type WorldHttpErrorResponse,
 } from "../../src/runtime/protocol/world-http-protocol";
 import { RemoteWorldClient, RemoteWorldTransport } from "../../src/runtime/transport/remote-world-transport";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
@@ -37,43 +40,113 @@ function createServiceFetch(service: GeneratedWorldRemoteService): typeof fetch 
 
     if (method === "POST" && url.pathname === "/api/world/session") {
       const request = JSON.parse(body) as OpenWorldSessionRequest;
+      if (request.protocolVersion !== WORLD_HTTP_PROTOCOL_VERSION) {
+        return new Response(JSON.stringify({
+          protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+          error: {
+            code: "protocol_version_mismatch",
+            message: "protocol mismatch",
+            expectedProtocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+          },
+        } satisfies WorldHttpErrorResponse), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
       const message = deserializeWorldClientMessage(request.message);
       if (message.type !== "open_world") {
         throw new Error(`Expected open_world message, got ${message.type}`);
       }
 
-      return new Response(JSON.stringify(await service.openWorld(message)), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      try {
+        return new Response(JSON.stringify(await service.openWorld(message, request.resumeSessionId)), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      } catch (error) {
+        if (error instanceof Error && "code" in error && "statusCode" in error) {
+          const remoteError = error as { code: WorldHttpErrorCode; statusCode: number };
+          return new Response(JSON.stringify({
+            protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+            error: {
+              code: remoteError.code,
+              message: error.message,
+            },
+          } satisfies WorldHttpErrorResponse), {
+            status: remoteError.statusCode,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        throw error;
+      }
     }
 
     const sessionChunkMatch = url.pathname.match(/^\/api\/world\/session\/([^/]+)\/chunk-view$/);
     if (method === "POST" && sessionChunkMatch !== null) {
       const request = JSON.parse(body) as SessionChunkViewRequest;
+      if (request.protocolVersion !== WORLD_HTTP_PROTOCOL_VERSION) {
+        return new Response(JSON.stringify({
+          protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+          error: {
+            code: "protocol_version_mismatch",
+            message: "protocol mismatch",
+            expectedProtocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+          },
+        } satisfies WorldHttpErrorResponse), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
       const message = deserializeWorldClientMessage(request.message);
       if (message.type !== "set_chunk_view") {
         throw new Error(`Expected set_chunk_view message, got ${message.type}`);
       }
 
-      return new Response(JSON.stringify(await service.setChunkView(decodeURIComponent(sessionChunkMatch[1]!), message)), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      try {
+        return new Response(JSON.stringify(await service.setChunkView(decodeURIComponent(sessionChunkMatch[1]!), message)), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      } catch (error) {
+        if (error instanceof Error && "code" in error && "statusCode" in error) {
+          const remoteError = error as { code: WorldHttpErrorCode; statusCode: number };
+          return new Response(JSON.stringify({
+            protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+            error: {
+              code: remoteError.code,
+              message: error.message,
+            },
+          } satisfies WorldHttpErrorResponse), {
+            status: remoteError.statusCode,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        throw error;
+      }
     }
 
-    return new Response(JSON.stringify({ error: `Unhandled route ${method} ${url.pathname}` }), {
+    return new Response(JSON.stringify({
+      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+      error: {
+        code: "world_request_mismatch",
+        message: `Unhandled route ${method} ${url.pathname}`,
+      },
+    } satisfies WorldHttpErrorResponse), {
       status: 404,
       headers: { "content-type": "application/json" },
     });
   };
 }
 
-function createRemoteWorldClient(baseUrl: string, fetchImpl: typeof fetch): RemoteWorldClient {
+function createRemoteWorldClient(baseUrl: string, fetchImpl: typeof fetch, sessionId?: string): RemoteWorldClient {
   const blocks = registerGeneratedRenderBlocks();
   const biomeSource = new OverworldBiomeSource(12345n);
   return new RemoteWorldClient(
-    new RemoteWorldTransport(baseUrl, fetchImpl),
+    new RemoteWorldTransport(baseUrl, { fetchImpl, sessionId }),
     (worldOpened) => new ClientChunkCache({
       airState: blocks.airState,
       minBuildHeight: worldOpened.minBuildHeight,
@@ -86,12 +159,8 @@ function createRemoteWorldClient(baseUrl: string, fetchImpl: typeof fetch): Remo
 }
 
 describe("RemoteWorld transport", () => {
-  const services: GeneratedWorldRemoteService[] = [];
-
   afterEach(async () => {
     Registry.BLOCK.clear();
-
-    services.length = 0;
 
     while (TEMP_DIRECTORIES.length > 0) {
       await rm(TEMP_DIRECTORIES.pop()!, { recursive: true, force: true });
@@ -102,7 +171,6 @@ describe("RemoteWorld transport", () => {
     const service = new GeneratedWorldRemoteService({
       saveRoot: await createTempDirectory(),
     });
-    services.push(service);
 
     const client = createRemoteWorldClient("http://127.0.0.1:4173", createServiceFetch(service));
     await expect(client.openWorld(OPEN_WORLD_REQUEST)).resolves.toEqual({
@@ -129,14 +197,26 @@ describe("RemoteWorld transport", () => {
     })).toBe(true);
 
     expect(client.getLevel().getLoadedChunkCount()).toBe(25);
+    expect(client.getSessionState()).toEqual({
+      sessionId: expect.any(String),
+      playerId: expect.any(String),
+      saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
+      resumed: false,
+      revision: 1,
+      chunkView: {
+        centerChunkX: 0,
+        centerChunkZ: 0,
+        radius: 1,
+      },
+    });
     expect(service.getSessionCount()).toBe(1);
+    expect(service.getWorldCount()).toBe(1);
   });
 
-  test("supports two concurrent remote client sessions against one Node host", async () => {
+  test("supports two concurrent remote client sessions against one shared authoritative world", async () => {
     const service = new GeneratedWorldRemoteService({
       saveRoot: await createTempDirectory(),
     });
-    services.push(service);
     const fetchImpl = createServiceFetch(service);
 
     const firstClient = createRemoteWorldClient("http://127.0.0.1:4173", fetchImpl);
@@ -165,5 +245,73 @@ describe("RemoteWorld transport", () => {
     expect(firstClient.getLevel().getLoadedChunkCount()).toBe(25);
     expect(secondClient.getLevel().getLoadedChunkCount()).toBe(25);
     expect(service.getSessionCount()).toBe(2);
+    expect(service.getWorldCount()).toBe(1);
+  });
+
+  test("resumes an existing remote session and resyncs its visible chunks", async () => {
+    const service = new GeneratedWorldRemoteService({
+      saveRoot: await createTempDirectory(),
+    });
+    const fetchImpl = createServiceFetch(service);
+
+    const firstClient = createRemoteWorldClient("http://127.0.0.1:4173", fetchImpl);
+    await firstClient.openWorld(OPEN_WORLD_REQUEST);
+    await firstClient.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const sessionId = firstClient.getSessionState()?.sessionId;
+    expect(sessionId).toBeDefined();
+
+    const resumedClient = createRemoteWorldClient("http://127.0.0.1:4173", fetchImpl, sessionId);
+    await resumedClient.openWorld(OPEN_WORLD_REQUEST);
+
+    expect(resumedClient.getLevel().getLoadedChunkCount()).toBe(25);
+    expect(resumedClient.getSessionState()).toEqual({
+      sessionId,
+      playerId: sessionId,
+      saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
+      resumed: true,
+      revision: 1,
+      chunkView: {
+        centerChunkX: 0,
+        centerChunkZ: 0,
+        radius: 1,
+      },
+    });
+  });
+
+  test("reopens and resyncs automatically when a remote session disappears", async () => {
+    const service = new GeneratedWorldRemoteService({
+      saveRoot: await createTempDirectory(),
+    });
+    const fetchImpl = createServiceFetch(service);
+    const client = createRemoteWorldClient("http://127.0.0.1:4173", fetchImpl);
+
+    await client.openWorld(OPEN_WORLD_REQUEST);
+    await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const previousSessionId = client.getSessionState()?.sessionId;
+    expect(previousSessionId).toBeDefined();
+    service.dropSession(previousSessionId!);
+
+    expect(await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    })).toBe(true);
+
+    expect(client.getLevel().getLoadedChunkCount()).toBe(25);
+    expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
+    expect(client.getSessionState()?.resumed).toBe(false);
   });
 });

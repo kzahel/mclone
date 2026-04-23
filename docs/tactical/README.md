@@ -78,7 +78,7 @@ The first three runtime prerequisites are now landed, and they should generally 
 - browser singleplayer runs behind an authoritative local host boundary
 - chunk meshing no longer stalls the main thread
 
-Those conditions are now satisfied by `R0` through `R5`. The next runtime/host priority is hardening that remote host/client boundary so future gameplay and true shared sessions can accumulate on top of it.
+Those conditions are now satisfied by `R0` through `R6`. The next runtime/host priority is putting real authoritative player/tick traffic on top of that hardened boundary so gameplay can accumulate without reopening the transport or authority split again.
 
 WebRTC is intentionally deferred. The preferred path is:
 
@@ -96,8 +96,9 @@ WebRTC is intentionally deferred. The preferred path is:
 | [`R3-browser-persistence.md`](R3-browser-persistence.md) | persistence interfaces plus browser adapter: `WorldStorage`, `ChunkStorage`, save metadata, IndexedDB-backed implementation, load/evict policy hooks | unit + browser smoke | **done** — browser singleplayer now persists authoritative save metadata and chunk snapshots through a worker-owned IndexedDB adapter behind engine-native storage contracts |
 | [`R4-node-host.md`](R4-node-host.md) | headless Node host: authoritative server runtime bootstrap, file-backed storage adapter, CLI/config entry point, local integration harness | integration | **done** — the same authoritative generated-world host/runtime core now boots in Node with a file-backed storage adapter and a spawned CLI/config harness |
 | [`R5-remote-browser-transport.md`](R5-remote-browser-transport.md) | remote browser-client transport to dedicated host: network transport adapter, connection/session bootstrap, browser client consuming remote chunk/state stream, two-client local smoke | integration + 2-client smoke | **done** — browser clients now consume the authoritative chunk/state stream from a dedicated Node host over a remote HTTP session transport, and the browser smoke runs two pages against that host |
-| `R6-` | protocol hardening: reconnect/resync, chunk interest management, baseline player/session state sync, error handling and versioning discipline | integration | make the host/client boundary robust enough that future gameplay systems can accumulate on top of it |
-| `R7-` | optional browser-hosted peer/server transport: WebRTC/WebTransport-style adapter reusing the same protocol and host boundary | integration | slot in a browser-hosted server mode later without redesigning the engine around it up front |
+| [`R6-protocol-hardening.md`](R6-protocol-hardening.md) | protocol hardening: reconnect/resync, chunk interest management, baseline player/session state sync, error handling and versioning discipline | integration | **done** — the remote path now has versioned envelopes, resumable sessions, per-session chunk interest, and shared dedicated-host authority per save instead of one host per remote session |
+| `R7-` | authoritative player/session loop: player input commands, authoritative player-state snapshots, server-driven update flow, dedicated-host shared-session ticking | integration + browser smoke | put real gameplay traffic on top of the hardened host/client boundary |
+| `R8-` | optional browser-hosted peer/server transport: WebRTC/WebTransport-style adapter reusing the same protocol and host boundary | integration | slot in a browser-hosted server mode later without redesigning the engine around it up front |
 
 The first tactical to plan in detail from this arc should be `R0-`, not `R7-`. If `R0-` and `R1-` are not real, every later runtime mode becomes a special case.
 

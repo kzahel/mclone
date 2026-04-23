@@ -16,11 +16,31 @@ export interface SetChunkViewRequest {
   readonly radius: number;
 }
 
+export interface SessionChunkViewState {
+  readonly centerChunkX: number;
+  readonly centerChunkZ: number;
+  readonly radius: number;
+}
+
+export interface ClientSessionState {
+  readonly sessionId: string;
+  readonly playerId: string;
+  readonly saveId: string;
+  readonly resumed: boolean;
+  readonly revision: number;
+  readonly chunkView?: SessionChunkViewState;
+}
+
 export interface WorldOpenedMessage {
   readonly type: "world_opened";
   readonly minBuildHeight: number;
   readonly height: number;
   readonly saveMetadata: WorldSaveMetadata;
+}
+
+export interface SessionStateMessage {
+  readonly type: "session_state";
+  readonly state: ClientSessionState;
 }
 
 export interface ChunkSnapshotMessage {
@@ -40,4 +60,4 @@ export interface WorldErrorMessage {
 }
 
 export type WorldClientMessage = OpenWorldRequest | SetChunkViewRequest;
-export type WorldHostMessage = WorldOpenedMessage | ChunkSnapshotMessage | ChunkUnloadMessage | WorldErrorMessage;
+export type WorldHostMessage = WorldOpenedMessage | SessionStateMessage | ChunkSnapshotMessage | ChunkUnloadMessage | WorldErrorMessage;

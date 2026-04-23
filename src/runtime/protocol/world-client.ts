@@ -1,5 +1,5 @@
 import type { ClientChunkCache } from "../../world/level/client-chunk-cache";
-import type { OpenWorldRequest, SetChunkViewRequest, WorldOpenedMessage } from "./world-messages";
+import type { ClientSessionState, OpenWorldRequest, SetChunkViewRequest, WorldOpenedMessage } from "./world-messages";
 
 export interface WorldClient {
   openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage>;
@@ -7,4 +7,6 @@ export interface WorldClient {
   setChunkView(request: SetChunkViewRequest): Promise<boolean>;
 
   getLevel(): ClientChunkCache;
+
+  getSessionState(): ClientSessionState | undefined;
 }

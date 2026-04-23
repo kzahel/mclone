@@ -42,7 +42,7 @@ function createStorageOpenRequest(
   };
 }
 
-function getViewChunkRadius(radius: number): number {
+export function getGeneratedWorldViewChunkRadius(radius: number): number {
   return Math.max(1, radius) + 1;
 }
 
@@ -167,7 +167,7 @@ export class GeneratedWorldHost implements WorldHost {
       return;
     }
 
-    const viewRadius = getViewChunkRadius(radius);
+    const viewRadius = getGeneratedWorldViewChunkRadius(radius);
     for (let chunkZ = centerChunkZ - viewRadius; chunkZ <= centerChunkZ + viewRadius; chunkZ++) {
       for (let chunkX = centerChunkX - viewRadius; chunkX <= centerChunkX + viewRadius; chunkX++) {
         if (this.level.getChunk(chunkX, chunkZ, false) !== null) {

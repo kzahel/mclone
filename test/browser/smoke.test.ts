@@ -54,5 +54,12 @@ test("WebGPU boot succeeds against the remote Node host with two browser clients
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
   if (firstResult.ok && secondResult.ok) {
     expect(firstResult.saveId).toBe(secondResult.saveId);
+    expect(firstResult.sessionId).toBeDefined();
+    expect(secondResult.sessionId).toBeDefined();
+    expect(firstResult.sessionId).not.toBe(secondResult.sessionId);
+    expect(firstResult.playerId).toBe(firstResult.sessionId);
+    expect(secondResult.playerId).toBe(secondResult.sessionId);
+    expect(firstResult.sessionRevision).toBeGreaterThan(0);
+    expect(secondResult.sessionRevision).toBeGreaterThan(0);
   }
 });

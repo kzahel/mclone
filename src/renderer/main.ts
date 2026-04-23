@@ -34,6 +34,9 @@ export type BootResult =
       worldTransport: BootWorldTransport;
       meshTransport: "worker";
       saveId: string;
+      sessionId?: string;
+      playerId?: string;
+      sessionRevision?: number;
       format: GPUTextureFormat;
       adapterInfo: string;
       centerPixel: readonly [number, number, number, number];
@@ -240,12 +243,16 @@ async function boot(): Promise<BootResult> {
   const adapterInfo = [info.vendor, info.architecture, info.device, info.description]
     .filter(Boolean)
     .join(" / ") || "unknown";
+  const sessionState = scene.worldClient.getSessionState();
 
   return {
     ok: true,
     worldTransport: runtimeConfig.worldTransport,
     meshTransport: "worker",
     saveId: scene.saveMetadata.saveId,
+    sessionId: sessionState?.sessionId,
+    playerId: sessionState?.playerId,
+    sessionRevision: sessionState?.revision,
     format: scene.format,
     adapterInfo,
     centerPixel,

@@ -1,5 +1,12 @@
 import type { OpenWorldPreset, SetChunkViewRequest, WorldClientMessage, WorldHostMessage } from "./world-messages";
 
+export const WORLD_HTTP_PROTOCOL_VERSION = 1;
+
+export type WorldHttpErrorCode =
+  | "protocol_version_mismatch"
+  | "unknown_session"
+  | "world_request_mismatch";
+
 export interface SerializedOpenWorldRequest {
   readonly type: "open_world";
   readonly seed: string;
@@ -11,20 +18,33 @@ export type SerializedWorldClientMessage = SerializedOpenWorldRequest | Serializ
 export type SerializedWorldHostMessage = WorldHostMessage;
 
 export interface OpenWorldSessionRequest {
+  readonly protocolVersion: number;
+  readonly resumeSessionId?: string;
   readonly message: SerializedOpenWorldRequest;
 }
 
 export interface OpenWorldSessionResponse {
-  readonly sessionId: string;
+  readonly protocolVersion: number;
   readonly messages: readonly SerializedWorldHostMessage[];
 }
 
 export interface SessionChunkViewRequest {
+  readonly protocolVersion: number;
   readonly message: SerializedSetChunkViewRequest;
 }
 
 export interface SessionChunkViewResponse {
+  readonly protocolVersion: number;
   readonly messages: readonly SerializedWorldHostMessage[];
+}
+
+export interface WorldHttpErrorResponse {
+  readonly protocolVersion: number;
+  readonly error: {
+    readonly code: WorldHttpErrorCode;
+    readonly message: string;
+    readonly expectedProtocolVersion?: number;
+  };
 }
 
 export function serializeWorldClientMessage(message: WorldClientMessage): SerializedWorldClientMessage {
