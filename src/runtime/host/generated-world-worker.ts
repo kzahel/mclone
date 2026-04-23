@@ -1,6 +1,7 @@
 import { BlockPos } from "../../core/block-pos";
 import type { OpenWorldRequest } from "../protocol/world-messages";
 import { connectWorldWorkerSession, type WorldWorkerHostEndpoint } from "../transport/worker-world-transport";
+import { IndexedDbWorldStorage } from "../storage/indexeddb-world-storage";
 import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
 import { registerGeneratedRenderBlocks } from "../../world/level/generated-render-blocks";
 import type { BlockState } from "../../world/level/block/state/block-state";
@@ -22,6 +23,7 @@ function createGeneratedWorldHost(request: OpenWorldRequest): GeneratedWorldHost
     seed: request.seed,
     airState: generatedBlocks.airState,
     blockStateById: generatedBlocks.blockStateById,
+    worldStorage: typeof indexedDB === "undefined" ? undefined : new IndexedDbWorldStorage(indexedDB),
     mutateWorld:
       request.preset === "browser_smoke"
         ? (level) => applySmokeWorldMutations(level, generatedBlocks.blockStateById[ChunkBlockId.WATER]!)

@@ -1,3 +1,4 @@
+import type { WorldSaveMetadata } from "../storage/world-storage";
 import type { ChunkSnapshot } from "../../world/level/chunk-snapshot";
 
 export type OpenWorldPreset = "default" | "browser_smoke";
@@ -19,6 +20,7 @@ export interface WorldOpenedMessage {
   readonly type: "world_opened";
   readonly minBuildHeight: number;
   readonly height: number;
+  readonly saveMetadata: WorldSaveMetadata;
 }
 
 export interface ChunkSnapshotMessage {

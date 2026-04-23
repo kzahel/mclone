@@ -3,7 +3,7 @@ import surfaceFixture from "../fixtures/integration/overworld-seed-12345-chunks-
 import { BlockPos } from "../../src/core/block-pos";
 import { Registry } from "../../src/core/registry";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
-import { GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
+import { createGeneratedWorldSaveId, GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
 import { LocalWorldClient, LocalWorldTransport } from "../../src/runtime/transport/local-world-transport";
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
@@ -109,6 +109,16 @@ describe("GeneratedWorld boundary", () => {
       type: "world_opened",
       minBuildHeight: 0,
       height: 256,
+      saveMetadata: {
+        saveId: createGeneratedWorldSaveId(12345n, "default"),
+        storageVersion: 1,
+        seed: "12345",
+        preset: "default",
+        minBuildHeight: 0,
+        height: 256,
+        createdAtMs: expect.any(Number),
+        lastOpenedAtMs: expect.any(Number),
+      },
     });
     expect(
       await client.setChunkView({

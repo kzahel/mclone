@@ -78,7 +78,7 @@ The first three runtime prerequisites are now landed, and they should generally 
 - browser singleplayer runs behind an authoritative local host boundary
 - chunk meshing no longer stalls the main thread
 
-Those conditions are now satisfied by `R0` through `R2`. The next runtime/host priority is persistence plus proving the same host/runtime core outside the browser.
+Those conditions are now satisfied by `R0` through `R3`. The next runtime/host priority is proving the same host/runtime core outside the browser with a headless Node host.
 
 WebRTC is intentionally deferred. The preferred path is:
 
@@ -93,7 +93,7 @@ WebRTC is intentionally deferred. The preferred path is:
 | [`R0-authoritative-world-boundary.md`](R0-authoritative-world-boundary.md) | shared client/server contracts: `WorldHost`, `WorldClient`, chunk subscription/view commands, `ChunkSnapshot` / unload / delta message shapes, local transport abstraction | unit + browser smoke | **done** — the browser smoke now runs through a local authoritative host/client boundary and a read-only client chunk cache instead of calling worldgen directly |
 | `R1-` | browser singleplayer local-server worker: worker bootstrap, local transport adapter, worker-owned chunk service, render-path conversion to a read-only client chunk cache | browser smoke + perf probe | **done** — browser singleplayer now runs the authoritative generated-world host behind a module worker and reuses the same client/cache protocol shape from `R0` |
 | `R2-` | client mesh worker pipeline: section-meshing jobs, worker-facing mesh input/output records, render-thread upload handoff, chunk rebuild scheduling cleanup | browser smoke + perf probe | **done** — browser chunk rebuilds now send snapshot-backed section-mesh jobs to a client mesh worker and only perform GPU uploads on the render thread |
-| `R3-` | persistence interfaces plus browser adapter: `WorldStorage`, `ChunkStorage`, save metadata, IndexedDB-backed implementation, load/evict policy hooks | unit + browser smoke | make browser singleplayer durable without baking IndexedDB assumptions into simulation code |
+| [`R3-browser-persistence.md`](R3-browser-persistence.md) | persistence interfaces plus browser adapter: `WorldStorage`, `ChunkStorage`, save metadata, IndexedDB-backed implementation, load/evict policy hooks | unit + browser smoke | **done** — browser singleplayer now persists authoritative save metadata and chunk snapshots through a worker-owned IndexedDB adapter behind engine-native storage contracts |
 | `R4-` | headless Node host: authoritative server runtime bootstrap, file-backed storage adapter, CLI/config entry point, local integration harness | integration | prove the same server/runtime core works outside the browser |
 | `R5-` | remote browser-client transport to dedicated host: network transport adapter, connection/session bootstrap, browser client consuming remote chunk/state stream, two-client local smoke | integration + 2-client smoke | reach the first practical multiplayer shape with the simpler dedicated-host path |
 | `R6-` | protocol hardening: reconnect/resync, chunk interest management, baseline player/session state sync, error handling and versioning discipline | integration | make the host/client boundary robust enough that future gameplay systems can accumulate on top of it |

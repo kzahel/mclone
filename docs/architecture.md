@@ -342,8 +342,6 @@ The codebase still does not fully match this target architecture, but the first 
 
 Current gaps:
 
-- there is no real storage abstraction yet
-- there is no durable browser save/load path yet
 - there is no headless Node host yet
 - there is no remote browser-client transport to a dedicated host yet
 - the host/client protocol is not yet hardened for reconnect/resync and versioning discipline
@@ -354,11 +352,10 @@ That is why performance and future multiplayer support are now architectural pri
 
 The next major refactor direction should be:
 
-1. Define persistence interfaces before implementing browser and Node adapters.
-2. Add a browser storage adapter so local singleplayer can persist world state.
-3. Stand up a headless Node host that reuses the same authoritative runtime core.
-4. Add a remote browser-client transport to that dedicated host.
-5. Harden reconnect/resync, session state, and protocol versioning once the dedicated-host path is real.
+1. Stand up a headless Node host that reuses the same authoritative runtime core.
+2. Add a file-backed storage adapter behind the same persistence interfaces.
+3. Add a remote browser-client transport to that dedicated host.
+4. Harden reconnect/resync, session state, and protocol versioning once the dedicated-host path is real.
 
 ## Decision checklist
 
