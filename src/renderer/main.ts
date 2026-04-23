@@ -1,8 +1,11 @@
+import { Registry } from "../core/registry";
 import { ResourceLocation } from "../core/resource-location";
 import { BlockPos } from "../core/block-pos";
 import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
 import { NoiseBasedChunkGenerator } from "../worldgen/levelgen/noise-based-chunk-generator";
 import { ChunkBlockId } from "../worldgen/chunk/chunk-block-buffer";
+import type { Block } from "../world/level/block/block";
+import type { BlockState } from "../world/level/block/state/block-state";
 import { GeneratedRenderLevel } from "../world/level/generated-render-level";
 import { registerGeneratedRenderBlocks } from "../world/level/generated-render-blocks";
 import { FoliageColor } from "../world/level/foliage-color";
@@ -29,6 +32,14 @@ import { ViewArea } from "./view-area";
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
 const GRASS_COLORMAP_LOCATION = new ResourceLocation("minecraft:colormap/grass");
 const FOLIAGE_COLORMAP_LOCATION = new ResourceLocation("minecraft:colormap/foliage");
+const OAK_LOG_LOCATION = new ResourceLocation("minecraft:oak_log");
+const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
+const GRASS_LOCATION = new ResourceLocation("minecraft:grass");
+const FERN_LOCATION = new ResourceLocation("minecraft:fern");
+const DANDELION_LOCATION = new ResourceLocation("minecraft:dandelion");
+const OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:oak_sapling");
+const CACTUS_LOCATION = new ResourceLocation("minecraft:cactus");
+const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 const GENERATED_SEED = 12_345n;
 const GENERATED_VIEW_DISTANCE = 1;
 const GENERATED_CAMERA_PATH = [
@@ -133,12 +144,75 @@ async function initializeBiomeColorTables(atlasSource: BrowserTextureAtlasSource
   FoliageColor.init(foliagePixels);
 }
 
+function getRegisteredBlockState(location: ResourceLocation): BlockState {
+  const block = Registry.BLOCK.get(location) as Block | undefined;
+  if (block === undefined) {
+    throw new Error(`Missing registered block ${location}`);
+  }
+
+  return block.defaultBlockState();
+}
+
+function findSurfaceY(level: GeneratedRenderLevel, x: number, z: number): number {
+  for (let y = level.getMaxBuildHeight() - 1; y >= level.getMinBuildHeight(); y--) {
+    const pos = new BlockPos(x, y, z);
+    const state = level.getBlockState(pos);
+    if (!state.isAir() && state.getFluidState().isEmpty()) {
+      return y;
+    }
+  }
+
+  return level.getMinBuildHeight();
+}
+
+function placeColumn(level: GeneratedRenderLevel, x: number, y: number, z: number, state: BlockState, height: number): void {
+  for (let offsetY = 0; offsetY < height; offsetY++) {
+    level.setBlock(new BlockPos(x, y + offsetY, z), state);
+  }
+}
+
+function placeOakTree(level: GeneratedRenderLevel, x: number, z: number, logState: BlockState, leavesState: BlockState): void {
+  const groundY = findSurfaceY(level, x, z);
+  placeColumn(level, x, groundY + 1, z, logState, 4);
+  for (let offsetY = 3; offsetY <= 4; offsetY++) {
+    for (let offsetZ = -2; offsetZ <= 2; offsetZ++) {
+      for (let offsetX = -2; offsetX <= 2; offsetX++) {
+        if (Math.abs(offsetX) === 2 && Math.abs(offsetZ) === 2) {
+          continue;
+        }
+
+        level.setBlock(new BlockPos(x + offsetX, groundY + offsetY, z + offsetZ), leavesState);
+      }
+    }
+  }
+
+  for (const [offsetX, offsetZ] of [
+    [0, 0],
+    [-1, 0],
+    [1, 0],
+    [0, -1],
+    [0, 1],
+  ] as const) {
+    level.setBlock(new BlockPos(x + offsetX, groundY + 5, z + offsetZ), leavesState);
+  }
+}
+
 function decorateSmokeScene(
   level: GeneratedRenderLevel,
   generatedBlocks: ReturnType<typeof registerGeneratedRenderBlocks>,
 ): void {
   const waterState = generatedBlocks.blockStateById[ChunkBlockId.WATER]!;
   const snowState = generatedBlocks.blockStateById[ChunkBlockId.SNOW]!;
+  const sandState = generatedBlocks.blockStateById[ChunkBlockId.SAND]!;
+  const oakLogState = getRegisteredBlockState(OAK_LOG_LOCATION);
+  const oakLeavesState = getRegisteredBlockState(OAK_LEAVES_LOCATION);
+  const grassPlantState = getRegisteredBlockState(GRASS_LOCATION);
+  const fernState = getRegisteredBlockState(FERN_LOCATION);
+  const dandelionState = getRegisteredBlockState(DANDELION_LOCATION);
+  const oakSaplingState = getRegisteredBlockState(OAK_SAPLING_LOCATION);
+  const cactusState = getRegisteredBlockState(CACTUS_LOCATION);
+  const sugarCaneState = getRegisteredBlockState(SUGAR_CANE_LOCATION);
+
   for (let z = 35; z <= 39; z++) {
     for (let x = 42; x <= 47; x++) {
       level.setBlock(new BlockPos(x, 84, z), waterState);
@@ -149,6 +223,37 @@ function decorateSmokeScene(
     for (let x = 41; x <= 45; x++) {
       level.setBlock(new BlockPos(x, 84, z), snowState);
     }
+  }
+
+  placeOakTree(level, 26, 37, oakLogState, oakLeavesState);
+  placeOakTree(level, 33, 34, oakLogState, oakLeavesState);
+
+  for (const [x, z, state] of [
+    [22, 34, grassPlantState],
+    [24, 35, fernState],
+    [28, 34, dandelionState],
+    [31, 33, oakSaplingState],
+  ] as const) {
+    const groundY = findSurfaceY(level, x, z);
+    level.setBlock(new BlockPos(x, groundY + 1, z), state);
+  }
+
+  for (const [x, z] of [
+    [41, 39],
+    [46, 37],
+  ] as const) {
+    const groundY = findSurfaceY(level, x, z);
+    level.setBlock(new BlockPos(x, groundY, z), sandState);
+    placeColumn(level, x, groundY + 1, z, sugarCaneState, 2);
+  }
+
+  for (const [x, z, height] of [
+    [45, 44, 3],
+    [47, 43, 2],
+  ] as const) {
+    const groundY = findSurfaceY(level, x, z);
+    level.setBlock(new BlockPos(x, groundY, z), sandState);
+    placeColumn(level, x, groundY + 1, z, cactusState, height);
   }
 }
 

@@ -56,4 +56,4 @@ Keep the generated-world bridge from tactical 19, but stop dropping the first ov
 
 ## Next
 
-Tactical 21: surface-feature palette expansion. The generated world is now tint-correct and no longer drops water/snow, but it is still mostly bare terrain. The next slice should port the first vegetation/feature render consumers and supporting block palette (`leaves`, `logs`, simple plants, cactus/sugar cane`) so generated overworld scenes stop looking like terrain-only heightmaps.
+Tactical 21 is now complete in [`21-surface-feature-palette-expansion.md`](21-surface-feature-palette-expansion.md). The generated-world smoke frame now renders the first vegetation/simple-feature block palette (`oak_log`, `oak_leaves`, plants, cactus, sugar cane) on top of generated terrain instead of only terrain blocks.

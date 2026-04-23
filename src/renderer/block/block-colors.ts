@@ -2,6 +2,7 @@ import { Registry } from "../../core/registry";
 import { ResourceLocation } from "../../core/resource-location";
 import type { BlockPos } from "../../core/block-pos";
 import type { BlockAndTintGetter } from "../../world/level/block-and-tint-getter";
+import { FoliageColor } from "../../world/level/foliage-color";
 import { GrassColor } from "../../world/level/grass-color";
 import type { Block } from "../../world/level/block/block";
 import type { BlockState } from "../../world/level/block/state/block-state";
@@ -12,6 +13,10 @@ export type BlockColor = (state: BlockState, level: BlockAndTintGetter | null, p
 
 const EMPTY_PROPERTIES = new Set<Property<unknown>>();
 const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
+const GRASS_LOCATION = new ResourceLocation("minecraft:grass");
+const FERN_LOCATION = new ResourceLocation("minecraft:fern");
+const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
+const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 const WATER_LOCATION = new ResourceLocation("minecraft:water");
 
 export class BlockColors {
@@ -28,11 +33,34 @@ export class BlockColors {
       );
     }
 
+    const grass = Registry.BLOCK.get(GRASS_LOCATION) as Block | undefined;
+    const fern = Registry.BLOCK.get(FERN_LOCATION) as Block | undefined;
+    blockColors.register(
+      (_state, level, pos) => level !== null && pos !== null ? BiomeColors.getAverageGrassColor(level, pos) : GrassColor.get(0.5, 1.0),
+      ...[grass, fern].filter((block): block is Block => block !== undefined),
+    );
+
+    const oakLeaves = Registry.BLOCK.get(OAK_LEAVES_LOCATION) as Block | undefined;
+    if (oakLeaves !== undefined) {
+      blockColors.register(
+        (_state, level, pos) => level !== null && pos !== null ? BiomeColors.getAverageFoliageColor(level, pos) : FoliageColor.getDefaultColor(),
+        oakLeaves,
+      );
+    }
+
     const waterBlock = Registry.BLOCK.get(WATER_LOCATION) as Block | undefined;
     if (waterBlock !== undefined) {
       blockColors.register(
         (_state, level, pos) => level !== null && pos !== null ? BiomeColors.getAverageWaterColor(level, pos) : -1,
         waterBlock,
+      );
+    }
+
+    const sugarCane = Registry.BLOCK.get(SUGAR_CANE_LOCATION) as Block | undefined;
+    if (sugarCane !== undefined) {
+      blockColors.register(
+        (_state, level, pos) => level !== null && pos !== null ? BiomeColors.getAverageGrassColor(level, pos) : -1,
+        sugarCane,
       );
     }
 

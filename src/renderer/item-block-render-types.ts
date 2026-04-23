@@ -1,4 +1,5 @@
 import type { Block } from "../world/level/block/block";
+import { LeavesBlock } from "../world/level/block/leaves-block";
 import type { BlockState } from "../world/level/block/state/block-state";
 import type { Fluid } from "../world/level/material/fluid";
 import type { FluidState } from "../world/level/material/fluid-state";
@@ -6,6 +7,7 @@ import { RenderType } from "./render-type";
 
 const TYPE_BY_BLOCK = new Map<Block, RenderType>();
 const TYPE_BY_FLUID = new Map<Fluid, RenderType>();
+let renderCutout = false;
 
 export class ItemBlockRenderTypes {
   public static setRenderLayer(block: Block, renderType: RenderType): void {
@@ -17,10 +19,18 @@ export class ItemBlockRenderTypes {
   }
 
   public static getChunkRenderType(state: BlockState): RenderType {
+    if (state.getBlock() instanceof LeavesBlock) {
+      return renderCutout ? RenderType.cutoutMipped() : RenderType.solid();
+    }
+
     return TYPE_BY_BLOCK.get(state.getBlock()) ?? RenderType.solid();
   }
 
   public static getRenderLayer(state: FluidState): RenderType {
     return TYPE_BY_FLUID.get(state.getType()) ?? RenderType.solid();
+  }
+
+  public static setFancy(value: boolean): void {
+    renderCutout = value;
   }
 }

@@ -5,9 +5,14 @@ import { RenderType } from "../../renderer/render-type";
 import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
 import { AirBlock } from "./block/air-block";
 import { Block } from "./block/block";
+import { BushBlock } from "./block/bush-block";
+import { CactusBlock } from "./block/cactus-block";
+import { LeavesBlock } from "./block/leaves-block";
 import { LiquidBlock } from "./block/liquid-block";
+import { RotatedPillarBlock } from "./block/rotated-pillar-block";
 import { SnowLayerBlock } from "./block/snow-layer-block";
 import { SnowyDirtBlock } from "./block/snowy-dirt-block";
+import { SugarCaneBlock } from "./block/sugar-cane-block";
 import { SoundType } from "./block/sound-type";
 import { BlockBehaviour } from "./block/state/block-behaviour";
 import type { BlockState } from "./block/state/block-state";
@@ -24,6 +29,14 @@ const GRAVEL_LOCATION = new ResourceLocation("minecraft:gravel");
 const WATER_LOCATION = new ResourceLocation("minecraft:water");
 const LAVA_LOCATION = new ResourceLocation("minecraft:lava");
 const SNOW_LOCATION = new ResourceLocation("minecraft:snow");
+const OAK_LOG_LOCATION = new ResourceLocation("minecraft:oak_log");
+const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
+const GRASS_LOCATION = new ResourceLocation("minecraft:grass");
+const FERN_LOCATION = new ResourceLocation("minecraft:fern");
+const DANDELION_LOCATION = new ResourceLocation("minecraft:dandelion");
+const OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:oak_sapling");
+const CACTUS_LOCATION = new ResourceLocation("minecraft:cactus");
+const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 
 const GENERATED_BLOCK_LOCATIONS = [
   STONE_LOCATION,
@@ -35,6 +48,14 @@ const GENERATED_BLOCK_LOCATIONS = [
   WATER_LOCATION,
   LAVA_LOCATION,
   SNOW_LOCATION,
+  OAK_LOG_LOCATION,
+  OAK_LEAVES_LOCATION,
+  GRASS_LOCATION,
+  FERN_LOCATION,
+  DANDELION_LOCATION,
+  OAK_SAPLING_LOCATION,
+  CACTUS_LOCATION,
+  SUGAR_CANE_LOCATION,
 ] as const;
 
 const GENERATED_SPRITE_LOCATIONS = [
@@ -53,6 +74,17 @@ const GENERATED_SPRITE_LOCATIONS = [
   new ResourceLocation("minecraft:block/lava_still"),
   new ResourceLocation("minecraft:block/lava_flow"),
   new ResourceLocation("minecraft:block/snow"),
+  new ResourceLocation("minecraft:block/oak_log"),
+  new ResourceLocation("minecraft:block/oak_log_top"),
+  new ResourceLocation("minecraft:block/oak_leaves"),
+  new ResourceLocation("minecraft:block/grass"),
+  new ResourceLocation("minecraft:block/fern"),
+  new ResourceLocation("minecraft:block/dandelion"),
+  new ResourceLocation("minecraft:block/oak_sapling"),
+  new ResourceLocation("minecraft:block/cactus_side"),
+  new ResourceLocation("minecraft:block/cactus_top"),
+  new ResourceLocation("minecraft:block/cactus_bottom"),
+  new ResourceLocation("minecraft:block/sugar_cane"),
 ] as const;
 
 function registerBlock<T extends Block>(location: ResourceLocation, block: T): T {
@@ -120,10 +152,49 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
         .noOcclusion(),
     ),
   ).defaultBlockState();
+  registerBlock(
+    OAK_LOG_LOCATION,
+    new RotatedPillarBlock(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.WOOD).strength(2.0).sound(SoundType.WOOD)),
+  );
+  registerBlock(
+    OAK_LEAVES_LOCATION,
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+  );
+  const grassPlantState = registerBlock(
+    GRASS_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const fernState = registerBlock(
+    FERN_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const dandelionState = registerBlock(
+    DANDELION_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const oakSaplingState = registerBlock(
+    OAK_SAPLING_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const cactusState = registerBlock(
+    CACTUS_LOCATION,
+    new CactusBlock(BlockBehaviour.Properties.of(Material.CACTUS, MaterialColor.PLANT).randomTicks().strength(0.4).sound(SoundType.WOOD).noOcclusion()),
+  ).defaultBlockState();
+  const sugarCaneState = registerBlock(
+    SUGAR_CANE_LOCATION,
+    new SugarCaneBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
 
+  ItemBlockRenderTypes.setFancy(true);
   ItemBlockRenderTypes.setRenderLayer(grassState.getBlock(), RenderType.cutoutMipped());
   ItemBlockRenderTypes.setRenderLayer(snowState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(waterState.getBlock(), RenderType.translucent());
+  ItemBlockRenderTypes.setRenderLayer(grassPlantState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(fernState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(dandelionState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(oakSaplingState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(cactusState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(sugarCaneState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setFluidRenderLayer(Fluids.WATER, RenderType.translucent());
 
   const blockStateById = new Array<BlockState>(10);
