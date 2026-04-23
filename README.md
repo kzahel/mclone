@@ -15,6 +15,8 @@ Runtime/host arc status: `R0` authoritative world boundary, `R1` browser singlep
 - **Host:** Vite + workers. Main thread handles input/UI; workers own worldgen + meshing.
 - **Perf escape hatch:** any measured-hot module can move to WASM-from-C (not Rust). Default stack is pure TS; no WASM unless measurement says so.
 
+[`docs/native-target.md`](docs/native-target.md) is an exploratory architecture note only. It does not change the current TS-first roadmap or imply committed native-host work.
+
 ## Worldgen strategy
 
 **Directly translate** 1.17.1's full worldgen pipeline from the decomp: PRNG → noise → biome source → `NoiseSampler` → `NoiseBasedChunkGenerator` → carvers (`CaveWorldCarver`, `CanyonWorldCarver`) → surface rules → features → structures. Oracle-test each layer against real MC output (see strategy doc). 1.17 specifically because it's pre-Caves-and-Cliffs — no density functions or splines to port.
