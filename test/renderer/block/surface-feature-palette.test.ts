@@ -48,8 +48,12 @@ describe("Surface feature palette", () => {
 
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_leaves"))).toBe(RenderType.cutoutMipped());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:grass"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:large_fern"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_sapling"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:sweet_berry_bush"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:brown_mushroom"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:cactus"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_log"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:pumpkin"))).toBe(RenderType.solid());
   });
 });

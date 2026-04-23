@@ -24,8 +24,15 @@ const DECORATION_BLOCKS = new Set([
   "minecraft:spruce_leaves",
   "minecraft:grass",
   "minecraft:fern",
+  "minecraft:large_fern",
   "minecraft:oak_sapling",
   "minecraft:spruce_sapling",
+  "minecraft:sweet_berry_bush",
+  "minecraft:brown_mushroom",
+  "minecraft:red_mushroom",
+  "minecraft:sugar_cane",
+  "minecraft:cactus",
+  "minecraft:pumpkin",
 ]);
 
 function oracleBlockNameAt(localX: number, y: number, localZ: number): string {

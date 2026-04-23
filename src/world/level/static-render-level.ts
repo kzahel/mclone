@@ -123,6 +123,11 @@ export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
     return layer === LightLayer.SKY ? this.skyLight : this.blockLight;
   }
 
+  public getRawBrightness(pos: BlockPos, amount: number): number {
+    const sky = this.isSkyVisible(pos) ? this.skyLight : this.ambientLight;
+    return Math.max(0, sky - amount);
+  }
+
   public getBlockTint(_pos: BlockPos, _resolver?: ColorResolver): number {
     return -1;
   }
@@ -174,5 +179,15 @@ export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
 
   public getAmbientLight(): number {
     return this.ambientLight;
+  }
+
+  private isSkyVisible(pos: BlockPos): boolean {
+    for (let y = pos.getY() + 1; y < this.getMaxBuildHeight(); y++) {
+      if (!this.getBlockState(new BlockPos(pos.getX(), y, pos.getZ())).isAir()) {
+        return false;
+      }
+    }
+
+    return true;
   }
 }

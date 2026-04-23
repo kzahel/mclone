@@ -1,5 +1,8 @@
 import { BlockPos } from "../../../core/block-pos";
+import { ConstantInt } from "../../../util/valueproviders/constant-int";
 import type { IntProvider } from "../../../util/valueproviders/int-provider";
+import { UniformInt } from "../../../util/valueproviders/uniform-int";
+import { ChanceDecoratorConfiguration } from "../feature/configurations/chance-decorator-configuration";
 import { CountConfiguration } from "../feature/configurations/count-configuration";
 import { DecoratedDecoratorConfiguration } from "../feature/configurations/decorated-decorator-configuration";
 import type { DecoratorConfiguration } from "../feature/configurations/decorator-configuration";
@@ -24,7 +27,15 @@ export class ConfiguredDecorator<DC extends DecoratorConfiguration> {
   }
 
   public count(count: number | IntProvider): ConfiguredDecorator<DecoratedDecoratorConfiguration> {
-    return this.decorated(FeatureDecorators.COUNT.configured(new CountConfiguration(count)));
+    return this.decorated(FeatureDecorators.COUNT.configured(new CountConfiguration(typeof count === "number" ? ConstantInt.of(count) : count)));
+  }
+
+  public countRandom(maxInclusive: number): ConfiguredDecorator<DecoratedDecoratorConfiguration> {
+    return this.count(UniformInt.of(0, maxInclusive));
+  }
+
+  public rarity(chance: number): ConfiguredDecorator<DecoratedDecoratorConfiguration> {
+    return this.decorated(FeatureDecorators.CHANCE.configured(new ChanceDecoratorConfiguration(chance)));
   }
 
   public squared(): ConfiguredDecorator<DecoratedDecoratorConfiguration> {

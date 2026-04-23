@@ -2,9 +2,15 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { BlockPos } from "../../../../src/core/block-pos";
 import { Registry } from "../../../../src/core/registry";
 import { ResourceLocation } from "../../../../src/core/resource-location";
+import { BiasedToBottomInt } from "../../../../src/util/valueproviders/biased-to-bottom-int";
 import { OverworldBiomeSource } from "../../../../src/worldgen/biome/overworld-biome-source";
 import { NoiseBasedChunkGenerator } from "../../../../src/worldgen/levelgen/noise-based-chunk-generator";
+import { DoublePlantBlock } from "../../../../src/world/level/block/double-plant-block";
+import { SweetBerryBushBlock } from "../../../../src/world/level/block/sweet-berry-bush-block";
+import { DoubleBlockHalf } from "../../../../src/world/level/block/state/properties/double-block-half";
 import { Heightmap } from "../../../../src/worldgen/levelgen/heightmap";
+import { ColumnPlacer } from "../../../../src/worldgen/levelgen/feature/blockplacers/column-placer";
+import { DoublePlantPlacer } from "../../../../src/worldgen/levelgen/feature/blockplacers/double-plant-placer";
 import { SimpleBlockPlacer } from "../../../../src/worldgen/levelgen/feature/blockplacers/simple-block-placer";
 import { CountConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/count-configuration";
 import type { DecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorator-configuration";
@@ -140,5 +146,133 @@ describe("Feature placement", () => {
     dryLevel.setBlock(new BlockPos(8, 10, 8), sandState);
 
     expect(feature.place(dryLevel, generator, new WorldgenRandom(3n), new BlockPos(8, 11, 8))).toBe(false);
+  });
+
+  test("large fern vegetation places lower and upper halves through the translated double-plant path", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    const generator = createGenerator();
+    const largeFernState = getState("minecraft:large_fern");
+    const feature = Features.RANDOM_PATCH.configured(
+      new RandomPatchConfiguration(
+        new SimpleStateProvider(largeFernState),
+        DoublePlantPlacer.INSTANCE,
+        new Set(),
+        new Set(),
+        1,
+        0,
+        0,
+        0,
+        false,
+        false,
+        false,
+      ),
+    );
+
+    expect(feature.place(level, generator, new WorldgenRandom(12345n), new BlockPos(8, 11, 8))).toBe(true);
+
+    let foundFern = false;
+    for (let z = 0; z < 32; z++) {
+      for (let x = 0; x < 32; x++) {
+        const lower = level.getBlockState(new BlockPos(x, 11, z));
+        const upper = level.getBlockState(new BlockPos(x, 12, z));
+        if (!lower.is(largeFernState.getBlock())) {
+          continue;
+        }
+
+        expect(lower.getValue(DoublePlantBlock.HALF)).toBe(DoubleBlockHalf.LOWER);
+        expect(upper.is(lower.getBlock())).toBe(true);
+        expect(upper.getValue(DoublePlantBlock.HALF)).toBe(DoubleBlockHalf.UPPER);
+        foundFern = true;
+      }
+    }
+
+    expect(foundFern).toBe(true);
+  });
+
+  test("berry and sugar cane vegetation use the translated age and column configs", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    const generator = createGenerator();
+    const sandState = getState("minecraft:sand");
+    const waterState = getState("minecraft:water");
+    const berryState = getState("minecraft:sweet_berry_bush").setValue(SweetBerryBushBlock.AGE, 3);
+    const sugarCaneState = getState("minecraft:sugar_cane");
+
+    const berryFeature = Features.RANDOM_PATCH.configured(
+      new RandomPatchConfiguration(
+        new SimpleStateProvider(berryState),
+        SimpleBlockPlacer.INSTANCE,
+        new Set([getState("minecraft:grass_block").getBlock()]),
+        new Set(),
+        1,
+        0,
+        0,
+        0,
+        false,
+        false,
+        false,
+      ),
+    );
+    const sugarCaneFeature = Features.RANDOM_PATCH.configured(
+      new RandomPatchConfiguration(
+        new SimpleStateProvider(sugarCaneState),
+        new ColumnPlacer(BiasedToBottomInt.of(2, 4)),
+        new Set(),
+        new Set(),
+        1,
+        0,
+        0,
+        0,
+        false,
+        false,
+        true,
+      ),
+    );
+
+    for (let z = 0; z < 48; z++) {
+      for (let x = 24; x < 48; x++) {
+        level.setBlock(new BlockPos(x, 10, z), sandState);
+      }
+    }
+
+    for (let z = 0; z < 48; z++) {
+      level.setBlock(new BlockPos(31, 10, z), waterState);
+    }
+
+    expect(berryFeature.place(level, generator, new WorldgenRandom(9876n), new BlockPos(8, 11, 8))).toBe(true);
+    expect(sugarCaneFeature.place(level, generator, new WorldgenRandom(4321n), new BlockPos(30, 11, 8))).toBe(true);
+
+    let foundBerry = false;
+    let tallestSugarCane = 0;
+    for (let z = 0; z < 32; z++) {
+      for (let x = 0; x < 32; x++) {
+        const pos = new BlockPos(x, 11, z);
+        const placedBerryState = level.getBlockState(pos);
+        if (placedBerryState.is(berryState.getBlock())) {
+          expect(placedBerryState.getValue(SweetBerryBushBlock.AGE)).toBe(3);
+          foundBerry = true;
+        }
+      }
+    }
+
+    for (let z = 0; z < 48; z++) {
+      for (let x = 24; x < 48; x++) {
+        const basePos = new BlockPos(x, 11, z);
+        if (!level.getBlockState(basePos).is(sugarCaneState.getBlock())) {
+          continue;
+        }
+
+        let height = 0;
+        while (level.getBlockState(basePos.above(height)).is(sugarCaneState.getBlock())) {
+          height++;
+        }
+
+        tallestSugarCane = Math.max(tallestSugarCane, height);
+      }
+    }
+
+    expect(foundBerry).toBe(true);
+    expect(tallestSugarCane).toBeGreaterThan(1);
   });
 });

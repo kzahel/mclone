@@ -36,6 +36,13 @@ export class BlockTags {
     "minecraft:moss_block",
   ]);
 
+  public static readonly MUSHROOM_GROW_BLOCK = new BlockTag("minecraft:mushroom_grow_block", [
+    "minecraft:mycelium",
+    "minecraft:podzol",
+    "minecraft:crimson_nylium",
+    "minecraft:warped_nylium",
+  ]);
+
   public static readonly LOGS = new BlockTag("minecraft:logs", [
     "minecraft:oak_log",
     "minecraft:spruce_log",

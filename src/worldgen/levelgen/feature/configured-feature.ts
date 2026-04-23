@@ -1,4 +1,5 @@
 import { BlockPos } from "../../../core/block-pos";
+import { ConstantInt } from "../../../util/valueproviders/constant-int";
 import type { WorldGenLevel } from "../../../world/level/world-gen-level";
 import type { SimpleRandomSource } from "../../prng/simple-random-source";
 import type { NoiseBasedChunkGenerator } from "../noise-based-chunk-generator";
@@ -6,6 +7,8 @@ import { DecorationContext } from "../placement/decoration-context";
 import { ConfiguredDecorator } from "../placement/configured-decorator";
 import { FeatureDecorators } from "../placement/feature-decorators";
 import type { IntProvider } from "../../../util/valueproviders/int-provider";
+import { UniformInt } from "../../../util/valueproviders/uniform-int";
+import { ChanceDecoratorConfiguration } from "./configurations/chance-decorator-configuration";
 import { CountConfiguration } from "./configurations/count-configuration";
 import { DecoratedFeatureConfiguration } from "./configurations/decorated-feature-configuration";
 import type { DecoratorConfiguration } from "./configurations/decorator-configuration";
@@ -50,7 +53,15 @@ export class ConfiguredFeature<FC extends FeatureConfiguration, F extends Placea
   }
 
   public count(count: number | IntProvider): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {
-    return this.decorated(FeatureDecorators.COUNT.configured(new CountConfiguration(count)));
+    return this.decorated(FeatureDecorators.COUNT.configured(new CountConfiguration(typeof count === "number" ? ConstantInt.of(count) : count)));
+  }
+
+  public countRandom(maxInclusive: number): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {
+    return this.count(UniformInt.of(0, maxInclusive));
+  }
+
+  public rarity(chance: number): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {
+    return this.decorated(FeatureDecorators.CHANCE.configured(new ChanceDecoratorConfiguration(chance)));
   }
 
   public squared(): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {

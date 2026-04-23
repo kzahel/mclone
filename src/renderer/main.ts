@@ -1,5 +1,4 @@
 import { ResourceLocation } from "../core/resource-location";
-import { BlockPos } from "../core/block-pos";
 import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
 import { NoiseBasedChunkGenerator } from "../worldgen/levelgen/noise-based-chunk-generator";
 import { ChunkBlockId } from "../worldgen/chunk/chunk-block-buffer";
@@ -33,13 +32,13 @@ const GENERATED_SEED = 12_345n;
 const GENERATED_VIEW_DISTANCE = 1;
 const GENERATED_CAMERA_PATH = [
   {
-    position: new Vec3(8.5, 104.0, 40.5),
-    xRot: 60.0,
+    position: new Vec3(184.5, 92.0, -215.5),
+    xRot: 52.0,
     yRot: 180.0,
   },
   {
-    position: new Vec3(40.5, 104.0, 40.5),
-    xRot: 60.0,
+    position: new Vec3(200.5, 92.0, -215.5),
+    xRot: 52.0,
     yRot: 180.0,
   },
 ] as const satisfies readonly CameraState[];
@@ -92,14 +91,6 @@ interface ChunkPassResources {
 interface PassLayer {
   readonly pipeline: GPURenderPipeline;
   readonly draws: readonly ChunkPassResources[];
-}
-
-function primeSmokeWaterPatch(level: GeneratedRenderLevel, waterState: import("../world/level/block/state/block-state").BlockState): void {
-  for (let z = 35; z <= 39; z++) {
-    for (let x = 42; x <= 47; x++) {
-      level.setBlock(new BlockPos(x, 84, z), waterState);
-    }
-  }
 }
 
 function uploadBuffer(device: GPUDevice, bytes: Uint8Array, usage: GPUBufferUsageFlags): GPUBuffer {
@@ -310,7 +301,6 @@ async function boot(): Promise<BootResult> {
   let frame: LevelRenderFrame | undefined;
   for (const step of GENERATED_CAMERA_PATH) {
     if (level.ensureChunksForCamera(step.position.x, step.position.z, GENERATED_VIEW_DISTANCE)) {
-      primeSmokeWaterPatch(level, generatedBlocks.blockStateById[ChunkBlockId.WATER]!);
       levelRenderer.allChanged();
     }
 
