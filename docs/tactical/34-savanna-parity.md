@@ -51,4 +51,4 @@ Finish the next broad biome-identity slice after dark forest by porting the miss
 
 ## Next
 
-Tactical 35 should move to jungle parity: port the missing jungle tree/decorator ecosystem, especially the first vine and cocoa consumers, plus the jungle / jungle hills / jungle edge biome tables so that family stops falling back to the reduced generic tree mix the way dark forest and savanna used to.
+Tactical 35 is now landed as [`35-jungle-parity.md`](35-jungle-parity.md). The next broad biome-table win after that is tactical 36: snowy / giant-tree-taiga / mushroom-field follow-through, with bamboo-jungle still waiting behind that broader table-coverage work.

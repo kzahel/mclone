@@ -23,6 +23,8 @@ import { SimpleRandomSelectorFeature } from "./simple-random-selector-feature";
 import { SpringFeature } from "./spring-feature";
 import { TreeFeature } from "./tree-feature";
 import type { FeatureConfiguration } from "./configurations/feature-configuration";
+import { NoneFeatureConfiguration } from "./configurations/none-feature-configuration";
+import { VinesFeature } from "./vines-feature";
 
 function register<C extends FeatureConfiguration, F extends Feature<C>>(name: string, feature: F): F {
   return Registry.register(Registry.FEATURE, name, feature) as F;
@@ -42,6 +44,7 @@ export const Features = {
   SEAGRASS: register("seagrass", new SeagrassFeature()),
   HUGE_RED_MUSHROOM: register("huge_red_mushroom", new HugeRedMushroomFeature()),
   HUGE_BROWN_MUSHROOM: register("huge_brown_mushroom", new HugeBrownMushroomFeature()),
+  VINES: register("vines", new VinesFeature()),
 } as const;
 
 export type SimpleVegetationFeature =
@@ -54,4 +57,5 @@ export type SimpleVegetationFeature =
   | Feature<SimpleRandomFeatureConfiguration>
   | Feature<BlockStateConfiguration>
   | Feature<SpringConfiguration>
-  | Feature<ProbabilityFeatureConfiguration>;
+  | Feature<ProbabilityFeatureConfiguration>
+  | Feature<NoneFeatureConfiguration>;

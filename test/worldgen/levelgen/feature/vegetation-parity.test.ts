@@ -60,6 +60,15 @@ const SAVANNA_OUTPUT_LOCATIONS = new Set([
   "minecraft:acacia_leaves",
 ]);
 
+const JUNGLE_TREE_OUTPUT_LOCATIONS = new Set([
+  "minecraft:oak_log",
+  "minecraft:oak_leaves",
+  "minecraft:jungle_log",
+  "minecraft:jungle_leaves",
+  "minecraft:vine",
+  "minecraft:cocoa",
+]);
+
 function getState(location: string): BlockState {
   const block = Registry.BLOCK.get(new ResourceLocation(location)) as Block | undefined;
   if (block === undefined) {
@@ -218,7 +227,41 @@ describe("Vegetation parity", () => {
     }
   });
 
-  test("overworld biome settings wire the new swamp, flower-forest, birch, dark-forest, and savanna tables", () => {
+  test("jungle vegetation paths place translated jungle, melon, and vine blocks", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const generator = createGenerator();
+
+    const jungleLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    expect(VegetationFeatures.TREES_JUNGLE.place(jungleLevel, generator, new WorldgenRandom(16n), new BlockPos(0, 0, 0))).toBe(true);
+    const junglePlacements = collectPlacedLocations(jungleLevel, 11, 40);
+    expect(junglePlacements.length).toBeGreaterThan(0);
+    expect(junglePlacements.some((location) => JUNGLE_TREE_OUTPUT_LOCATIONS.has(location))).toBe(true);
+    for (const location of junglePlacements) {
+      expect(JUNGLE_TREE_OUTPUT_LOCATIONS.has(location)).toBe(true);
+    }
+
+    const melonLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    let melonPlaced = false;
+    for (let seed = 0n; seed < 128n; seed++) {
+      if (VegetationFeatures.PATCH_MELON.place(melonLevel, generator, new WorldgenRandom(seed), new BlockPos(8, 11, 8))) {
+        melonPlaced = true;
+        break;
+      }
+    }
+    expect(melonPlaced).toBe(true);
+    expect(collectPlacedLocations(melonLevel, 11, 11)).toContain("minecraft:melon");
+
+    const vinesLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    for (let z = 0; z < 32; z++) {
+      for (let x = 0; x < 32; x++) {
+        vinesLevel.setBlock(new BlockPos(x, 13, z), getState("minecraft:jungle_log"));
+      }
+    }
+    expect(VegetationFeatures.VINES.place(vinesLevel, generator, new WorldgenRandom(5n), new BlockPos(0, 12, 0))).toBe(true);
+    expect(collectPlacedLocations(vinesLevel, 12, 12)).toContain("minecraft:vine");
+  });
+
+  test("overworld biome settings wire the new swamp, flower-forest, birch, dark-forest, savanna, and jungle tables", () => {
     registerGeneratedRenderBlocks();
     const swampFeatures = getOverworldBiomeGenerationSettings("minecraft:swamp").features().flat().map((supplier) => getBaseFeature(supplier()));
     const swampHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:swamp_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
@@ -236,6 +279,9 @@ describe("Vegetation parity", () => {
       .features()
       .flat()
       .map((supplier) => getBaseFeature(supplier()));
+    const jungleFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const jungleHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const jungleEdgeFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle_edge").features().flat().map((supplier) => getBaseFeature(supplier()));
 
     expect(swampFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
     expect(swampHillsFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
@@ -250,5 +296,11 @@ describe("Vegetation parity", () => {
     expect(shatteredSavannaFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(shatteredSavannaFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
     expect(shatteredSavannaPlateauFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(jungleFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(jungleFeatures.some((feature) => feature === Features.VINES)).toBe(true);
+    expect(jungleHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(jungleHillsFeatures.some((feature) => feature === Features.VINES)).toBe(true);
+    expect(jungleEdgeFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(jungleEdgeFeatures.some((feature) => feature === Features.VINES)).toBe(true);
   });
 });

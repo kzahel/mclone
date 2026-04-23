@@ -25,7 +25,9 @@ const ACACIA_LEAVES_LOCATION = new ResourceLocation("minecraft:acacia_leaves");
 const SPRUCE_LEAVES_LOCATION = new ResourceLocation("minecraft:spruce_leaves");
 const BIRCH_LEAVES_LOCATION = new ResourceLocation("minecraft:birch_leaves");
 const DARK_OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:dark_oak_leaves");
+const JUNGLE_LEAVES_LOCATION = new ResourceLocation("minecraft:jungle_leaves");
 const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
+const VINE_LOCATION = new ResourceLocation("minecraft:vine");
 const WATER_LOCATION = new ResourceLocation("minecraft:water");
 
 export class BlockColors {
@@ -76,7 +78,9 @@ export class BlockColors {
     const oakLeaves = Registry.BLOCK.get(OAK_LEAVES_LOCATION) as Block | undefined;
     const acaciaLeaves = Registry.BLOCK.get(ACACIA_LEAVES_LOCATION) as Block | undefined;
     const darkOakLeaves = Registry.BLOCK.get(DARK_OAK_LEAVES_LOCATION) as Block | undefined;
-    const defaultFoliageBlocks = [oakLeaves, acaciaLeaves, darkOakLeaves].filter((block): block is Block => block !== undefined);
+    const jungleLeaves = Registry.BLOCK.get(JUNGLE_LEAVES_LOCATION) as Block | undefined;
+    const vine = Registry.BLOCK.get(VINE_LOCATION) as Block | undefined;
+    const defaultFoliageBlocks = [oakLeaves, acaciaLeaves, darkOakLeaves, jungleLeaves, vine].filter((block): block is Block => block !== undefined);
     if (defaultFoliageBlocks.length > 0) {
       blockColors.register(
         (_state, level, pos) => level !== null && pos !== null ? BiomeColors.getAverageFoliageColor(level, pos) : FoliageColor.getDefaultColor(),

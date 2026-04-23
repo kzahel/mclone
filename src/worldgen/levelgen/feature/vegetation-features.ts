@@ -12,6 +12,7 @@ import { FrequencyWithExtraChanceDecoratorConfiguration } from "./configurations
 import { HeightmapConfiguration } from "./configurations/heightmap-configuration";
 import { HugeMushroomFeatureConfiguration } from "./configurations/huge-mushroom-feature-configuration";
 import { NoiseDependantDecoratorConfiguration } from "./configurations/noise-dependant-decorator-configuration";
+import { NoneFeatureConfiguration } from "./configurations/none-feature-configuration";
 import { ProbabilityFeatureConfiguration } from "./configurations/probability-feature-configuration";
 import { RandomFeatureConfiguration } from "./configurations/random-feature-configuration";
 import { RandomPatchConfiguration } from "./configurations/random-patch-configuration";
@@ -46,7 +47,9 @@ const ROSE_BUSH_LOCATION = new ResourceLocation("minecraft:rose_bush");
 const PEONY_LOCATION = new ResourceLocation("minecraft:peony");
 const LILY_OF_THE_VALLEY_LOCATION = new ResourceLocation("minecraft:lily_of_the_valley");
 const PUMPKIN_LOCATION = new ResourceLocation("minecraft:pumpkin");
+const MELON_LOCATION = new ResourceLocation("minecraft:melon");
 const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
+const PODZOL_LOCATION = new ResourceLocation("minecraft:podzol");
 const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 const CACTUS_LOCATION = new ResourceLocation("minecraft:cactus");
 const RED_MUSHROOM_BLOCK_LOCATION = new ResourceLocation("minecraft:red_mushroom_block");
@@ -133,6 +136,19 @@ function createTaigaGrassConfig(): RandomPatchConfiguration {
     ]),
     SimpleBlockPlacer.INSTANCE,
   )
+    .triesCount(32)
+    .build();
+}
+
+function createJungleGrassConfig(): RandomPatchConfiguration {
+  return RandomPatchConfiguration.grassConfigurationBuilder(
+    new WeightedStateProvider([
+      { state: getRequiredState(GRASS_LOCATION), weight: 3 },
+      { state: getRequiredState(FERN_LOCATION), weight: 1 },
+    ]),
+    SimpleBlockPlacer.INSTANCE,
+  )
+    .blacklistSet(new Set([getRequiredState(PODZOL_LOCATION)]))
     .triesCount(32)
     .build();
 }
@@ -253,6 +269,18 @@ function createPumpkinConfig(): RandomPatchConfiguration {
   )
     .triesCount(64)
     .whitelistSet(new Set([getRequiredState(GRASS_BLOCK_LOCATION).getBlock()]))
+    .noProjection()
+    .build();
+}
+
+function createMelonConfig(): RandomPatchConfiguration {
+  return RandomPatchConfiguration.grassConfigurationBuilder(
+    new SimpleStateProvider(getRequiredState(MELON_LOCATION)),
+    SimpleBlockPlacer.INSTANCE,
+  )
+    .triesCount(64)
+    .whitelistSet(new Set([getRequiredState(GRASS_BLOCK_LOCATION).getBlock()]))
+    .canReplaceBlocks()
     .noProjection()
     .build();
 }
@@ -383,6 +411,10 @@ export class VegetationFeatures {
     return Features.RANDOM_PATCH.configured(createDefaultGrassConfig()).decorated(heightmapDoubleSquare()).decorated(countNoiseDecorator(-0.8, 5, 10));
   }
 
+  public static get PATCH_GRASS_JUNGLE() {
+    return Features.RANDOM_PATCH.configured(createJungleGrassConfig()).decorated(heightmapDoubleSquare()).count(25);
+  }
+
   public static get PATCH_GRASS_TAIGA_2() {
     return Features.RANDOM_PATCH.configured(createTaigaGrassConfig()).decorated(heightmapDoubleSquare());
   }
@@ -416,6 +448,10 @@ export class VegetationFeatures {
 
   public static get PATCH_PUMPKIN() {
     return Features.RANDOM_PATCH.configured(createPumpkinConfig()).decorated(heightmapDoubleSquare()).rarity(32);
+  }
+
+  public static get PATCH_MELON() {
+    return Features.RANDOM_PATCH.configured(createMelonConfig()).decorated(heightmapDoubleSquare());
   }
 
   public static get PATCH_SUGAR_CANE() {
@@ -504,6 +540,10 @@ export class VegetationFeatures {
     return Features.HUGE_RED_MUSHROOM.configured(createHugeRedMushroomConfig());
   }
 
+  public static get VINES() {
+    return Features.VINES.configured(NoneFeatureConfiguration.INSTANCE).squared().count(50);
+  }
+
   public static get DARK_OAK() {
     return TreeFeatures.DARK_OAK;
   }
@@ -514,6 +554,25 @@ export class VegetationFeatures {
     )
       .decorated(heightmapWithTreeThresholdSquared())
       .decorated(countExtraDecorator(2, 0.1, 1));
+  }
+
+  public static get TREES_JUNGLE_EDGE() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration([TreeFeatures.FANCY_OAK.weighted(0.1), TreeFeatures.JUNGLE_BUSH.weighted(0.5)], TreeFeatures.JUNGLE_TREE),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(2, 0.1, 1));
+  }
+
+  public static get TREES_JUNGLE() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration(
+        [TreeFeatures.FANCY_OAK.weighted(0.1), TreeFeatures.JUNGLE_BUSH.weighted(0.5), TreeFeatures.MEGA_JUNGLE_TREE.weighted(0.33333334)],
+        TreeFeatures.JUNGLE_TREE,
+      ),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(50, 0.1, 1));
   }
 
   public static get TREES_SAVANNA() {

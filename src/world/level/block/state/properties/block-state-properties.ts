@@ -6,6 +6,7 @@ import { EnumProperty } from "./enum-property";
 import { IntegerProperty } from "./integer-property";
 
 export class BlockStateProperties {
+  public static readonly AGE_2 = IntegerProperty.create("age", 0, 2);
   public static readonly AGE_3 = IntegerProperty.create("age", 0, 3);
   public static readonly AGE_15 = IntegerProperty.create("age", 0, 15);
   public static readonly DISTANCE = IntegerProperty.create("distance", 1, 7);

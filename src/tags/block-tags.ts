@@ -70,6 +70,13 @@ export class BlockTags {
     "minecraft:stripped_dark_oak_wood",
   ]);
 
+  public static readonly JUNGLE_LOGS = new BlockTag("minecraft:jungle_logs", [
+    "minecraft:jungle_log",
+    "minecraft:jungle_wood",
+    "minecraft:stripped_jungle_log",
+    "minecraft:stripped_jungle_wood",
+  ]);
+
   public static readonly LEAVES = new BlockTag("minecraft:leaves", [
     "minecraft:oak_leaves",
     "minecraft:spruce_leaves",

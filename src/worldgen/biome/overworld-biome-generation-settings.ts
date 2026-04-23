@@ -137,6 +137,19 @@ function addSavannaExtraGrass(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_SAVANNA);
 }
 
+function addJungleTrees(builder: BiomeGenerationSettings.Builder, edge: boolean): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => (edge ? VegetationFeatures.TREES_JUNGLE_EDGE : VegetationFeatures.TREES_JUNGLE));
+}
+
+function addJungleGrass(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_JUNGLE);
+}
+
+function addJungleExtraVegetation(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_MELON);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.VINES);
+}
+
 function buildMountainSettings(edge: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
@@ -299,6 +312,20 @@ function buildSavannaSettings(shattered: boolean): BiomeGenerationSettings {
   return builder.build();
 }
 
+function buildJungleSettings(edge: boolean): BiomeGenerationSettings {
+  const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
+  addDefaultLakes(builder);
+  addJungleTrees(builder, edge);
+  addWarmFlowers(builder);
+  addJungleGrass(builder);
+  addDefaultMushrooms(builder);
+  addDefaultExtraVegetation(builder);
+  addDefaultSprings(builder);
+  addJungleExtraVegetation(builder);
+  return builder.build();
+}
+
 const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:badlands", buildBadlandsSettings()],
   ["minecraft:badlands_plateau", buildBadlandsSettings()],
@@ -312,6 +339,9 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:forest", buildForestSettings()],
   ["minecraft:flower_forest", buildFlowerForestSettings()],
   ["minecraft:mountains", buildMountainSettings(false)],
+  ["minecraft:jungle", buildJungleSettings(false)],
+  ["minecraft:jungle_edge", buildJungleSettings(true)],
+  ["minecraft:jungle_hills", buildJungleSettings(false)],
   ["minecraft:wooded_mountains", buildMountainSettings(false)],
   ["minecraft:mountain_edge", buildMountainSettings(true)],
   ["minecraft:plains", buildPlainsSettings()],

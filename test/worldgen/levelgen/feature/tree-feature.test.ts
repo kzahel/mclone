@@ -159,4 +159,45 @@ describe("TreeFeature", () => {
     expect(foundOffsetLog).toBe(true);
     expect(leafCount).toBeGreaterThan(0);
   });
+
+  test("jungle placement uses the translated cocoa and vine decorators", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    const generator = createGenerator();
+    const feature = TreeFeatures.JUNGLE_TREE;
+    const logState = getState("minecraft:jungle_log");
+    const leavesState = getState("minecraft:jungle_leaves");
+    const vineState = getState("minecraft:vine");
+    const cocoaState = getState("minecraft:cocoa");
+    const origin = new BlockPos(16, 11, 16);
+
+    expect(feature.place(level, generator, new WorldgenRandom(16n), origin)).toBe(true);
+
+    let logCount = 0;
+    let leafCount = 0;
+    let vineCount = 0;
+    let cocoaCount = 0;
+    for (let y = 10; y < 40; y++) {
+      for (let z = 0; z < 32; z++) {
+        for (let x = 0; x < 32; x++) {
+          const state = level.getBlockState(new BlockPos(x, y, z));
+          if (state.is(logState.getBlock())) {
+            logCount++;
+          } else if (state.is(leavesState.getBlock())) {
+            leafCount++;
+            expect(state.getValue(BlockStateProperties.DISTANCE)).toBeLessThan(7);
+          } else if (state.is(vineState.getBlock())) {
+            vineCount++;
+          } else if (state.is(cocoaState.getBlock())) {
+            cocoaCount++;
+          }
+        }
+      }
+    }
+
+    expect(logCount).toBeGreaterThan(0);
+    expect(leafCount).toBeGreaterThan(0);
+    expect(vineCount).toBeGreaterThan(0);
+    expect(cocoaCount).toBeGreaterThan(0);
+  });
 });
