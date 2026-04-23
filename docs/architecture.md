@@ -338,16 +338,15 @@ The important design rule is that these remain server-authoritative systems with
 
 ## Current mismatch in the repo
 
-Today, the codebase does not yet match this target architecture.
+The codebase still does not fully match this target architecture, but the first browser-runtime boundary fixes are now in place.
 
 Current gaps:
 
-- generated chunks are created synchronously from the browser path
-- the renderer can trigger chunk generation directly
-- chunk meshing is still effectively main-thread work
 - there is no real storage abstraction yet
-- there is no transport abstraction yet
-- there is no authoritative world host boundary yet
+- there is no durable browser save/load path yet
+- there is no headless Node host yet
+- there is no remote browser-client transport to a dedicated host yet
+- the host/client protocol is not yet hardened for reconnect/resync and versioning discipline
 
 That is why performance and future multiplayer support are now architectural priorities, not just implementation details.
 
@@ -355,12 +354,11 @@ That is why performance and future multiplayer support are now architectural pri
 
 The next major refactor direction should be:
 
-1. Introduce an authoritative chunk/world service boundary.
-2. Stop letting renderer-owned code call generation directly.
-3. Move browser singleplayer world ownership into a worker.
-4. Move client chunk meshing into one or more workers.
-5. Define persistence interfaces before implementing browser and Node adapters.
-6. Define a shared local/remote message protocol before building multiplayer-specific shortcuts.
+1. Define persistence interfaces before implementing browser and Node adapters.
+2. Add a browser storage adapter so local singleplayer can persist world state.
+3. Stand up a headless Node host that reuses the same authoritative runtime core.
+4. Add a remote browser-client transport to that dedicated host.
+5. Harden reconnect/resync, session state, and protocol versioning once the dedicated-host path is real.
 
 ## Decision checklist
 

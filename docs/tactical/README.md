@@ -72,11 +72,13 @@ Ordering rationale: `BlockState` prereqs (13) deferred until just before model b
 
 This arc is intentionally separate from the numbered worldgen and renderer translation arcs above. It is about correcting the current execution model so the engine can support browser singleplayer without main-thread stalls, browser multiplayer clients, and a headless Node host.
 
-Because generated chunks and chunk rebuild work still run too close to the render path today, this arc should generally take precedence over additional parity slices until:
+The first three runtime prerequisites are now landed, and they should generally take precedence over additional parity slices until:
 
 - the renderer no longer owns chunk generation
 - browser singleplayer runs behind an authoritative local host boundary
 - chunk meshing no longer stalls the main thread
+
+Those conditions are now satisfied by `R0` through `R2`. The next runtime/host priority is persistence plus proving the same host/runtime core outside the browser.
 
 WebRTC is intentionally deferred. The preferred path is:
 
@@ -90,7 +92,7 @@ WebRTC is intentionally deferred. The preferred path is:
 |---|---|---|---|
 | [`R0-authoritative-world-boundary.md`](R0-authoritative-world-boundary.md) | shared client/server contracts: `WorldHost`, `WorldClient`, chunk subscription/view commands, `ChunkSnapshot` / unload / delta message shapes, local transport abstraction | unit + browser smoke | **done** — the browser smoke now runs through a local authoritative host/client boundary and a read-only client chunk cache instead of calling worldgen directly |
 | `R1-` | browser singleplayer local-server worker: worker bootstrap, local transport adapter, worker-owned chunk service, render-path conversion to a read-only client chunk cache | browser smoke + perf probe | **done** — browser singleplayer now runs the authoritative generated-world host behind a module worker and reuses the same client/cache protocol shape from `R0` |
-| `R2-` | client mesh worker pipeline: section-meshing jobs, worker-facing mesh input/output records, render-thread upload handoff, chunk rebuild scheduling cleanup | browser smoke + perf probe | remove the remaining main-thread stalls caused by chunk rebuild/meshing work |
+| `R2-` | client mesh worker pipeline: section-meshing jobs, worker-facing mesh input/output records, render-thread upload handoff, chunk rebuild scheduling cleanup | browser smoke + perf probe | **done** — browser chunk rebuilds now send snapshot-backed section-mesh jobs to a client mesh worker and only perform GPU uploads on the render thread |
 | `R3-` | persistence interfaces plus browser adapter: `WorldStorage`, `ChunkStorage`, save metadata, IndexedDB-backed implementation, load/evict policy hooks | unit + browser smoke | make browser singleplayer durable without baking IndexedDB assumptions into simulation code |
 | `R4-` | headless Node host: authoritative server runtime bootstrap, file-backed storage adapter, CLI/config entry point, local integration harness | integration | prove the same server/runtime core works outside the browser |
 | `R5-` | remote browser-client transport to dedicated host: network transport adapter, connection/session bootstrap, browser client consuming remote chunk/state stream, two-client local smoke | integration + 2-client smoke | reach the first practical multiplayer shape with the simpler dedicated-host path |

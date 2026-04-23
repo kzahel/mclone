@@ -113,6 +113,10 @@ export class VertexBuffer {
 
   public upload(bufferBuilder: BufferBuilder): void {
     const { drawState, buffer } = bufferBuilder.popNextBuffer();
+    this.uploadRaw(drawState, buffer);
+  }
+
+  public uploadRaw(drawState: BufferBuilderDrawState, buffer: Uint8Array): void {
     const actualBuffer = buffer.subarray(0, drawState.bufferSize());
     const vertexByteLength = drawState.vertexBufferSize();
     const vertexBytes = actualBuffer.subarray(0, vertexByteLength);

@@ -30,6 +30,7 @@ export type BootResult =
   | {
       ok: true;
       worldTransport: "worker";
+      meshTransport: "worker";
       format: GPUTextureFormat;
       adapterInfo: string;
       centerPixel: readonly [number, number, number, number];
@@ -217,6 +218,7 @@ async function boot(): Promise<BootResult> {
   return {
     ok: true,
     worldTransport: "worker",
+    meshTransport: "worker",
     format: scene.format,
     adapterInfo,
     centerPixel,

@@ -1,25 +1,20 @@
 import { BlockPos } from "../../core/block-pos";
 import { Direction } from "../../core/direction";
 import { SectionPos } from "../../core/section-pos";
-import { JavaRandom } from "../../util/java-random";
+import { ClientChunkCache } from "../../world/level/client-chunk-cache";
 import { StaticRenderLevel } from "../../world/level/static-render-level";
-import type { BlockState } from "../../world/level/block/state/block-state";
-import { RenderShape } from "../../world/level/block/render-shape";
 import { AABB } from "../../world/phys/aabb";
 import { Vec3 } from "../../world/phys/vec3";
 import { BlockRenderDispatcher } from "../block/block-render-dispatcher";
-import { ModelBlockRenderer } from "../block/model-block-renderer";
 import { ChunkBufferBuilderPack } from "../chunk-buffer-builder-pack";
-import { ItemBlockRenderTypes } from "../item-block-render-types";
 import { LevelRenderer } from "../level-renderer";
 import { RenderType } from "../render-type";
 import { BufferBuilderSortState } from "../vertex/buffer-builder";
-import { DefaultVertexFormat } from "../vertex/default-vertex-format";
-import { PoseStack } from "../vertex/pose-stack";
 import { VertexBuffer } from "../vertex/vertex-buffer";
-import { VertexFormat } from "../vertex/vertex-format";
+import { buildSectionMeshInput, decodeSectionMeshResult, withSectionMeshCamera, type SectionMeshInput } from "./chunk-mesh-protocol";
+import { ChunkMeshWorkerClient } from "./mesh-worker-client";
 import { RenderChunkRegion } from "./render-chunk-region";
-import { VisGraph } from "./vis-graph";
+import { beginChunkRenderLayer, buildSectionMesh } from "./section-mesh-compiler";
 import { VisibilitySet } from "./visibility-set";
 
 type Executor = (task: () => void) => void;
@@ -27,6 +22,11 @@ type Executor = (task: () => void) => void;
 function sortTasks(left: ChunkRenderDispatcher.ChunkCompileTask, right: ChunkRenderDispatcher.ChunkCompileTask): number {
   return left.compareTo(right);
 }
+
+type RunnableTask = {
+  readonly task: ChunkRenderDispatcher.ChunkCompileTask;
+  readonly buffers: ChunkBufferBuilderPack | undefined;
+};
 
 export class ChunkRenderDispatcher {
   private readonly toBatch: ChunkRenderDispatcher.ChunkCompileTask[] = [];
@@ -38,6 +38,7 @@ export class ChunkRenderDispatcher {
   }> = [];
   private toBatchCount = 0;
   private freeBufferCount = 0;
+  private freeMeshWorkerSlots: number;
   private taskFailure: unknown;
   private camera = Vec3.ZERO;
 
@@ -49,6 +50,7 @@ export class ChunkRenderDispatcher {
     private readonly executor: Executor = (task) => queueMicrotask(task),
     useAllCores = false,
     public readonly fixedBuffers = new ChunkBufferBuilderPack(),
+    private readonly meshWorker?: ChunkMeshWorkerClient,
   ) {
     // WebGPU: Promise scheduling replaces ProcessorMailbox worker orchestration.
     const workerBufferCount = useAllCores ? 2 : 1;
@@ -58,6 +60,7 @@ export class ChunkRenderDispatcher {
     }
 
     this.freeBufferCount = this.freeBuffers.length;
+    this.freeMeshWorkerSlots = meshWorker?.concurrency ?? 0;
   }
 
   public setLevel(level: StaticRenderLevel): void {
@@ -68,29 +71,70 @@ export class ChunkRenderDispatcher {
     return new ChunkRenderDispatcher.RenderChunk(this, index);
   }
 
-  private runTask(): void {
-    while (this.freeBuffers.length > 0 && this.toBatch.length > 0) {
-      const task = this.toBatch.shift()!;
-      const buffers = this.freeBuffers.shift()!;
+  private takeNextRunnableTask(): RunnableTask | undefined {
+    for (let index = 0; index < this.toBatch.length; index++) {
+      const task = this.toBatch[index]!;
+      if (task.usesBuilderPack() && this.freeBuffers.length === 0) {
+        continue;
+      }
+
+      if (task.usesMeshWorker() && this.freeMeshWorkerSlots === 0) {
+        continue;
+      }
+
+      this.toBatch.splice(index, 1);
       this.toBatchCount = this.toBatch.length;
-      this.freeBufferCount = this.freeBuffers.length;
+
+      let buffers: ChunkBufferBuilderPack | undefined;
+      if (task.usesBuilderPack()) {
+        buffers = this.freeBuffers.shift()!;
+        this.freeBufferCount = this.freeBuffers.length;
+      }
+
+      if (task.usesMeshWorker()) {
+        this.freeMeshWorkerSlots--;
+      }
+
+      return { task, buffers };
+    }
+
+    return undefined;
+  }
+
+  private runTask(): void {
+    while (true) {
+      const runnable = this.takeNextRunnableTask();
+      if (runnable === undefined) {
+        break;
+      }
 
       let taskPromise: Promise<void>;
       taskPromise = this.executorTurn()
-        .then(() => task.doTask(buffers))
+        .then(() => runnable.task.doTask(runnable.buffers))
         .then((result) => {
+          if (runnable.buffers === undefined) {
+            return;
+          }
+
           if (result === ChunkRenderDispatcher.ChunkTaskResult.SUCCESSFUL) {
-            buffers.clearAll();
+            runnable.buffers.clearAll();
           } else {
-            buffers.discardAll();
+            runnable.buffers.discardAll();
           }
         })
         .catch((error) => {
           this.taskFailure = error;
         })
         .finally(() => {
-          this.freeBuffers.push(buffers);
-          this.freeBufferCount = this.freeBuffers.length;
+          if (runnable.buffers !== undefined) {
+            this.freeBuffers.push(runnable.buffers);
+            this.freeBufferCount = this.freeBuffers.length;
+          }
+
+          if (runnable.task.usesMeshWorker()) {
+            this.freeMeshWorkerSlots++;
+          }
+
           this.activeTasks.delete(taskPromise);
           this.runTask();
           this.resolveIdleWaiters();
@@ -190,6 +234,27 @@ export class ChunkRenderDispatcher {
     vertexBuffer.upload(bufferBuilder);
   }
 
+  public createSectionMeshInput(origin: BlockPos): SectionMeshInput | undefined {
+    if (this.meshWorker === undefined || !(this.level instanceof ClientChunkCache)) {
+      return undefined;
+    }
+
+    try {
+      return buildSectionMeshInput(this.level, origin);
+    } catch (error) {
+      console.warn("Mesh worker section input build failed; falling back to main-thread compilation", error);
+      return undefined;
+    }
+  }
+
+  public async runMeshWorkerBuild(meshInput: SectionMeshInput, camera: Vec3): Promise<import("./chunk-mesh-protocol").SectionMeshResult> {
+    if (this.meshWorker === undefined) {
+      throw new Error("Mesh worker was not configured for this chunk render dispatcher");
+    }
+
+    return this.meshWorker.buildSectionMesh(withSectionMeshCamera(meshInput, camera));
+  }
+
   private clearBatchQueue(): void {
     while (this.toBatch.length > 0) {
       this.toBatch.shift()!.cancel();
@@ -204,6 +269,7 @@ export class ChunkRenderDispatcher {
 
   public dispose(): void {
     this.clearBatchQueue();
+    this.meshWorker?.close();
     this.freeBuffers.length = 0;
   }
 }
@@ -253,7 +319,15 @@ export namespace ChunkRenderDispatcher {
       protected readonly distAtCreation: number,
     ) {}
 
-    public abstract doTask(buffers: ChunkBufferBuilderPack): Promise<ChunkTaskResult>;
+    public abstract doTask(buffers?: ChunkBufferBuilderPack): Promise<ChunkTaskResult>;
+
+    public usesBuilderPack(): boolean {
+      return true;
+    }
+
+    public usesMeshWorker(): boolean {
+      return false;
+    }
 
     public abstract cancel(): void;
 
@@ -345,7 +419,7 @@ export namespace ChunkRenderDispatcher {
     }
 
     public beginLayer(builder: import("../vertex/buffer-builder").BufferBuilder): void {
-      builder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK);
+      beginChunkRenderLayer(builder);
     }
 
     public getCompiledChunk(): CompiledChunk {
@@ -414,8 +488,11 @@ export namespace ChunkRenderDispatcher {
     public createCompileTask(): ChunkCompileTask {
       this.cancelTasks();
       const origin = new BlockPos(this.origin.getX(), this.origin.getY(), this.origin.getZ());
-      const region = RenderChunkRegion.createIfNotEmpty(this.dispatcher.level, origin.offset(-1, -1, -1), origin.offset(16, 16, 16), 1);
-      this.lastRebuildTask = new RebuildTask(this, this.getDistToPlayerSqr(), region);
+      const meshInput = this.dispatcher.createSectionMeshInput(origin);
+      const region = meshInput === undefined
+        ? RenderChunkRegion.createIfNotEmpty(this.dispatcher.level, origin.offset(-1, -1, -1), origin.offset(16, 16, 16), 1)
+        : null;
+      this.lastRebuildTask = new RebuildTask(this, this.getDistToPlayerSqr(), region, meshInput);
       return this.lastRebuildTask;
     }
 
@@ -437,11 +514,20 @@ export namespace ChunkRenderDispatcher {
       renderChunk: RenderChunk,
       distAtCreation: number,
       private region: RenderChunkRegion | null,
+      private readonly meshInput?: SectionMeshInput,
     ) {
       super(renderChunk, distAtCreation);
     }
 
-    public override async doTask(buffers: ChunkBufferBuilderPack): Promise<ChunkTaskResult> {
+    public override usesBuilderPack(): boolean {
+      return this.meshInput === undefined;
+    }
+
+    public override usesMeshWorker(): boolean {
+      return this.meshInput !== undefined;
+    }
+
+    public override async doTask(buffers?: ChunkBufferBuilderPack): Promise<ChunkTaskResult> {
       if (this.isCancelled) {
         return ChunkTaskResult.CANCELLED;
       }
@@ -454,15 +540,41 @@ export namespace ChunkRenderDispatcher {
       }
 
       const camera = this.renderChunk.getDispatcher().getCameraPosition();
+      const origin = new BlockPos(
+        this.renderChunk.getOrigin().getX(),
+        this.renderChunk.getOrigin().getY(),
+        this.renderChunk.getOrigin().getZ(),
+      );
       const compiledChunk = new CompiledChunk();
-      const globalBlockEntities = this.compile(camera.x, camera.y, camera.z, compiledChunk, buffers);
-      this.renderChunk.updateGlobalBlockEntities(new Set<unknown>(), globalBlockEntities);
-      if (this.isCancelled) {
-        return ChunkTaskResult.CANCELLED;
-      }
 
-      for (const renderType of compiledChunk.hasLayer) {
-        await this.renderChunk.getDispatcher().uploadChunkLayer(buffers.builder(renderType), this.renderChunk.getBuffer(renderType));
+      if (this.meshInput !== undefined) {
+        const decoded = decodeSectionMeshResult(await this.renderChunk.getDispatcher().runMeshWorkerBuild(this.meshInput, camera));
+        this.applyCompiledState(compiledChunk, decoded);
+        this.renderChunk.updateGlobalBlockEntities(new Set<unknown>(), new Set<unknown>());
+        if (this.isCancelled) {
+          return ChunkTaskResult.CANCELLED;
+        }
+
+        for (const layer of decoded.layers) {
+          this.renderChunk.getBuffer(layer.renderType).uploadRaw(layer.drawState, layer.buffer);
+        }
+      } else {
+        if (buffers === undefined) {
+          throw new Error("Chunk rebuild task requires a ChunkBufferBuilderPack");
+        }
+
+        const region = this.region;
+        this.region = null;
+        const build = buildSectionMesh(origin, camera, region, this.renderChunk.getDispatcher().blockRenderer, buffers);
+        this.applyCompiledState(compiledChunk, build);
+        this.renderChunk.updateGlobalBlockEntities(new Set<unknown>(), build.globalBlockEntities);
+        if (this.isCancelled) {
+          return ChunkTaskResult.CANCELLED;
+        }
+
+        for (const renderType of compiledChunk.hasLayer) {
+          await this.renderChunk.getDispatcher().uploadChunkLayer(buffers.builder(renderType), this.renderChunk.getBuffer(renderType));
+        }
       }
 
       if (this.isCancelled) {
@@ -474,96 +586,26 @@ export namespace ChunkRenderDispatcher {
       return ChunkTaskResult.SUCCESSFUL;
     }
 
-    private compile(
-      cameraX: number,
-      cameraY: number,
-      cameraZ: number,
+    private applyCompiledState(
       compiledChunk: CompiledChunk,
-      buffers: ChunkBufferBuilderPack,
-    ): ReadonlySet<unknown> {
-      const origin = new BlockPos(
-        this.renderChunk.getOrigin().getX(),
-        this.renderChunk.getOrigin().getY(),
-        this.renderChunk.getOrigin().getZ(),
-      );
-      const end = origin.offset(15, 15, 15);
-      const visibilityGraph = new VisGraph();
-      const globalBlockEntities = new Set<unknown>();
-      const region = this.region;
-      this.region = null;
-      const poseStack = new PoseStack();
-
-      if (region !== null) {
-        ModelBlockRenderer.enableCaching();
-        try {
-          const random = new JavaRandom();
-          const blockRenderer = this.renderChunk.getDispatcher().blockRenderer;
-          for (let z = origin.getZ(); z <= end.getZ(); z++) {
-            for (let y = origin.getY(); y <= end.getY(); y++) {
-              for (let x = origin.getX(); x <= end.getX(); x++) {
-                const pos = new BlockPos(x, y, z);
-                const state: BlockState = region.getBlockState(pos);
-                const fluidState = state.getFluidState();
-                if (state.isSolidRender(region, pos)) {
-                  visibilityGraph.setOpaque(pos);
-                }
-
-                if (!fluidState.isEmpty()) {
-                  const renderType = ItemBlockRenderTypes.getRenderLayer(fluidState);
-                  const builder = buffers.builder(renderType);
-                  if (!compiledChunk.hasLayer.has(renderType)) {
-                    compiledChunk.hasLayer.add(renderType);
-                    this.renderChunk.beginLayer(builder);
-                  }
-
-                  if (blockRenderer.renderLiquid(pos, region, builder, fluidState)) {
-                    compiledChunk.isCompletelyEmpty = false;
-                    compiledChunk.hasBlocks.add(renderType);
-                  }
-                }
-
-                if (state.getRenderShape() === RenderShape.INVISIBLE) {
-                  continue;
-                }
-
-                const renderType = ItemBlockRenderTypes.getChunkRenderType(state);
-                const builder = buffers.builder(renderType);
-                if (!compiledChunk.hasLayer.has(renderType)) {
-                  compiledChunk.hasLayer.add(renderType);
-                  this.renderChunk.beginLayer(builder);
-                }
-
-                poseStack.pushPose();
-                poseStack.translate(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15);
-                if (blockRenderer.renderBatched(state, pos, region, poseStack, builder, true, random)) {
-                  compiledChunk.isCompletelyEmpty = false;
-                  compiledChunk.hasBlocks.add(renderType);
-                }
-                poseStack.popPose();
-              }
-            }
-          }
-
-          if (compiledChunk.hasBlocks.has(RenderType.translucent())) {
-            const translucentBuilder = buffers.builder(RenderType.translucent());
-            translucentBuilder.setQuadSortOrigin(
-              cameraX - origin.getX(),
-              cameraY - origin.getY(),
-              cameraZ - origin.getZ(),
-            );
-            compiledChunk.transparencyState = translucentBuilder.getSortState();
-          }
-
-          for (const renderType of compiledChunk.hasLayer) {
-            buffers.builder(renderType).end();
-          }
-        } finally {
-          ModelBlockRenderer.clearCache();
-        }
+      state: {
+        readonly hasBlocks: ReadonlySet<RenderType>;
+        readonly hasLayers: ReadonlySet<RenderType>;
+        readonly isCompletelyEmpty: boolean;
+        readonly visibilitySet: VisibilitySet;
+        readonly transparencyState: BufferBuilderSortState | undefined;
+      },
+    ): void {
+      compiledChunk.isCompletelyEmpty = state.isCompletelyEmpty;
+      compiledChunk.visibilitySet = state.visibilitySet;
+      compiledChunk.transparencyState = state.transparencyState;
+      for (const renderType of state.hasBlocks) {
+        compiledChunk.hasBlocks.add(renderType);
       }
 
-      compiledChunk.visibilitySet = visibilityGraph.resolve();
-      return globalBlockEntities;
+      for (const renderType of state.hasLayers) {
+        compiledChunk.hasLayer.add(renderType);
+      }
     }
 
     public override cancel(): void {
@@ -584,10 +626,14 @@ export namespace ChunkRenderDispatcher {
       super(renderChunk, distAtCreation);
     }
 
-    public override async doTask(buffers: ChunkBufferBuilderPack): Promise<ChunkTaskResult> {
+    public override async doTask(buffers?: ChunkBufferBuilderPack): Promise<ChunkTaskResult> {
       if (this.isCancelled || !this.renderChunk.hasAllNeighbors()) {
         this.isCancelled = true;
         return ChunkTaskResult.CANCELLED;
+      }
+
+      if (buffers === undefined) {
+        throw new Error("Transparency resort task requires a ChunkBufferBuilderPack");
       }
 
       const sortState = this.compiledChunk.transparencyState;

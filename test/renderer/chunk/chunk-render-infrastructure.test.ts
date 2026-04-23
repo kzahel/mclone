@@ -8,7 +8,9 @@ import { ResourceLocation } from "../../../src/core/resource-location";
 import { BlockColors } from "../../../src/renderer/block/block-colors";
 import { BlockRenderDispatcher } from "../../../src/renderer/block/block-render-dispatcher";
 import { ChunkRenderDispatcher } from "../../../src/renderer/chunk/chunk-render-dispatcher";
+import { buildSectionMeshInput, decodeSectionMeshResult, serializeSectionMeshBuild } from "../../../src/renderer/chunk/chunk-mesh-protocol";
 import { RenderChunkRegion } from "../../../src/renderer/chunk/render-chunk-region";
+import { buildSectionMesh } from "../../../src/renderer/chunk/section-mesh-compiler";
 import { VisGraph } from "../../../src/renderer/chunk/vis-graph";
 import { ChunkBufferBuilderPack } from "../../../src/renderer/chunk-buffer-builder-pack";
 import { Frustum } from "../../../src/renderer/culling/frustum";
@@ -27,11 +29,15 @@ import { NativeImage } from "../../../src/renderer/texture/native-image";
 import { TextureAtlasSprite, TextureAtlasSpriteInfo, type TextureAtlasUploadTarget } from "../../../src/renderer/texture/texture-atlas-sprite";
 import { DefaultVertexFormat } from "../../../src/renderer/vertex/default-vertex-format";
 import { ViewArea } from "../../../src/renderer/view-area";
+import { OverworldBiomeSource } from "../../../src/worldgen/biome/overworld-biome-source";
+import { ChunkBiomeContainer } from "../../../src/worldgen/biome/chunk-biome-container";
+import { ClientChunkCache } from "../../../src/world/level/client-chunk-cache";
 import { AirBlock } from "../../../src/world/level/block/air-block";
 import { Block } from "../../../src/world/level/block/block";
 import { LiquidBlock } from "../../../src/world/level/block/liquid-block";
 import { BlockBehaviour } from "../../../src/world/level/block/state/block-behaviour";
 import type { BlockState } from "../../../src/world/level/block/state/block-state";
+import { buildChunkSnapshot, createBlockStateResolver } from "../../../src/world/level/chunk-snapshot";
 import { Fluids } from "../../../src/world/level/material/fluids";
 import { Material as BlockMaterial } from "../../../src/world/level/material/material";
 import { registerGeneratedRenderBlocks } from "../../../src/world/level/generated-render-blocks";
@@ -299,6 +305,57 @@ describe("Chunk render infrastructure", () => {
     const compiled = renderChunk!.getCompiledChunk();
     expect(compiled.hasBlocks.has(RenderType.cutout())).toBe(true);
     expect(compiled.hasBlocks.has(RenderType.translucent())).toBe(true);
+  });
+
+  test("worker-facing section mesh payloads round-trip chunk snapshots into uploadable layer data", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const biomeSource = new OverworldBiomeSource(12345n);
+    const level = new StaticRenderLevel(blocks.airState, 15, 15, 0, 16);
+    for (let chunkX = -1; chunkX <= 1; chunkX++) {
+      for (let chunkZ = -1; chunkZ <= 1; chunkZ++) {
+        level.getChunk(chunkX, chunkZ);
+      }
+    }
+
+    level.setBlock(new BlockPos(0, 0, 0), blocks.blockStateById[ChunkBlockId.STONE]!);
+
+    const cache = new ClientChunkCache({
+      airState: blocks.airState,
+      minBuildHeight: 0,
+      height: 16,
+      biomeSource,
+      biomeZoomSeed: 12345n,
+      blockStateResolver: createBlockStateResolver(blocks.airState),
+    });
+    for (let chunkX = -1; chunkX <= 1; chunkX++) {
+      for (let chunkZ = -1; chunkZ <= 1; chunkZ++) {
+        cache.applyChunkSnapshot(
+          buildChunkSnapshot(
+            level.getChunk(chunkX, chunkZ, false)!,
+            new ChunkBiomeContainer(0, 16, chunkX, chunkZ, biomeSource).writeBiomes(),
+            0,
+            16,
+          ),
+        );
+      }
+    }
+
+    const origin = new BlockPos(0, 0, 0);
+    const meshInput = buildSectionMeshInput(cache, origin);
+    expect(meshInput.snapshots).toHaveLength(9);
+    expect(cache.getChunkSnapshot(0, 0)).toBeDefined();
+
+    const region = RenderChunkRegion.createIfNotEmpty(cache, origin.offset(-1, -1, -1), origin.offset(16, 16, 16), 1);
+    const buffers = new ChunkBufferBuilderPack();
+    const build = buildSectionMesh(origin, new Vec3(8, 8, 0), region, createDispatcher(), buffers);
+    const decoded = decodeSectionMeshResult(serializeSectionMeshBuild(build, buffers));
+
+    expect(decoded.hasBlocks.has(RenderType.solid())).toBe(true);
+    expect(decoded.hasLayers.has(RenderType.solid())).toBe(true);
+    expect(decoded.layers).toHaveLength(1);
+    expect(decoded.layers[0]!.renderType).toBe(RenderType.solid());
+    expect(decoded.layers[0]!.drawState.format()).toBe(DefaultVertexFormat.BLOCK);
+    expect(decoded.visibilitySet.visibilityBetween(Direction.NORTH, Direction.SOUTH)).toBe(true);
   });
 
   test("Frustum accepts boxes in front of the camera and rejects boxes behind it", () => {

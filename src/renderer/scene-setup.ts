@@ -11,6 +11,7 @@ import { GrassColor } from "../world/level/grass-color";
 import { BlockColors } from "./block/block-colors";
 import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
 import { ChunkRenderDispatcher } from "./chunk/chunk-render-dispatcher";
+import { ChunkMeshWorkerClient, createChunkMeshWorker } from "./chunk/mesh-worker-client";
 import { ChunkBufferBuilderPack } from "./chunk-buffer-builder-pack";
 import { BlockModelRepository } from "./model/block-model-repository";
 import { BlockModelShaper } from "./model/block-model-shaper";
@@ -124,14 +125,21 @@ export async function initializeRendererScene(
       biomeSource,
       biomeZoomSeed: options.seed,
       blockStateResolver,
-    }),
+      }),
   );
-  await worldClient.openWorld({
+  const worldOpened = await worldClient.openWorld({
     type: "open_world",
     seed: options.seed,
     preset: "browser_smoke",
   });
   const level = worldClient.getLevel();
+  const meshWorker = new ChunkMeshWorkerClient(createChunkMeshWorker());
+  await meshWorker.initialize({
+    type: "initialize_mesh_worker",
+    seed: options.seed,
+    minBuildHeight: worldOpened.minBuildHeight,
+    height: worldOpened.height,
+  });
 
   const levelRenderer = new LevelRenderer();
   const blockRenderer = new BlockRenderDispatcher(
@@ -149,6 +157,7 @@ export async function initializeRendererScene(
     (task) => queueMicrotask(task),
     false,
     new ChunkBufferBuilderPack(),
+    meshWorker,
   );
   const viewArea = new ViewArea(chunkDispatcher, level, options.viewDistance, levelRenderer);
   levelRenderer.setLevel(level, chunkDispatcher, viewArea, options.viewDistance);

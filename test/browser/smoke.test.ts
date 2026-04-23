@@ -17,6 +17,7 @@ test("WebGPU boot succeeds on system Chrome", async ({ page }) => {
   expect(result.ok, JSON.stringify(result)).toBe(true);
   if (result.ok) {
     expect(result.worldTransport).toBe("worker");
+    expect(result.meshTransport).toBe("worker");
     expect(result.adapterInfo.length).toBeGreaterThan(0);
     expect(["bgra8unorm", "rgba8unorm"]).toContain(result.format);
     expect(result.loadedChunkCount).toBeGreaterThan(0);

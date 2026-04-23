@@ -30,6 +30,7 @@ export interface ClientChunkCacheOptions {
 
 export class ClientChunkCache extends StaticRenderLevel implements NoiseBiomeSource {
   private readonly biomeContainers = new Map<string, ChunkBiomeContainer>();
+  private readonly snapshots = new Map<string, ChunkSnapshot>();
   private readonly biomeSource: NoiseBiomeSource;
   private readonly biomeZoomSeed: bigint;
   private readonly blockStateResolver: BlockStateResolver;
@@ -51,6 +52,7 @@ export class ClientChunkCache extends StaticRenderLevel implements NoiseBiomeSou
 
   public applyChunkSnapshot(snapshot: ChunkSnapshot): void {
     super.setChunk(hydrateChunkFromSnapshot(snapshot, this.airState, this.blockStateResolver));
+    this.snapshots.set(chunkKey(snapshot.chunkX, snapshot.chunkZ), snapshot);
     this.biomeContainers.set(
       chunkKey(snapshot.chunkX, snapshot.chunkZ),
       new ChunkBiomeContainer(
@@ -65,8 +67,13 @@ export class ClientChunkCache extends StaticRenderLevel implements NoiseBiomeSou
   }
 
   public applyChunkUnload(chunkX: number, chunkZ: number): boolean {
+    this.snapshots.delete(chunkKey(chunkX, chunkZ));
     this.biomeContainers.delete(chunkKey(chunkX, chunkZ));
     return super.removeChunk(chunkX, chunkZ) !== undefined;
+  }
+
+  public getChunkSnapshot(chunkX: number, chunkZ: number): ChunkSnapshot | undefined {
+    return this.snapshots.get(chunkKey(chunkX, chunkZ));
   }
 
   public override getBlockTint(pos: BlockPos, resolver?: ColorResolver): number {

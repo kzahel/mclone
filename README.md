@@ -4,7 +4,7 @@ Web-based Minecraft-inspired voxel sandbox. Private project — primary target i
 
 See [`docs/strategy.md`](docs/strategy.md) for the two-phase plan (direct translation now, optional clean-room only if we ever want to distribute), [`docs/architecture.md`](docs/architecture.md) for the runtime/host split, [`docs/worldgen-status.md`](docs/worldgen-status.md) for the living worldgen status/prioritization view, and [`docs/assets-plan.md`](docs/assets-plan.md) for asset extraction. Implementation work is tracked in numbered tactical docs under [`docs/tactical/`](docs/tactical/). Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
 
-Runtime/host arc status: `R0` authoritative world boundary and `R1` browser singleplayer worker host are landed; `R2` moves chunk meshing off the render thread.
+Runtime/host arc status: `R0` authoritative world boundary, `R1` browser singleplayer worker host, and `R2` client mesh worker offload are landed.
 
 ## Stack
 
