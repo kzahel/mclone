@@ -1,8 +1,20 @@
+import { Direction } from "../../core/direction.ts";
+import { SectionPos } from "../../core/section-pos.ts";
 import type { Biome } from "../biome/biome.ts";
 import { ChunkBlockId, MutableChunkBlockBuffer } from "../chunk/chunk-block-buffer.ts";
 import { SimpleRandomSource } from "../prng/simple-random-source.ts";
 import type { CarverConfiguration, CarverContext, CaveCarverConfiguration } from "./carver-config.ts";
 import { CaveWorldCarver } from "./cave-world-carver.ts";
+
+const MAGMA_BLOCK_TARGET = "minecraft:magma_block";
+const WATER_TARGET = "minecraft:water";
+const POSSIBLE_FLOW_DIRECTIONS = [
+  Direction.DOWN,
+  Direction.SOUTH,
+  Direction.NORTH,
+  Direction.EAST,
+  Direction.WEST,
+] as const;
 
 function localCoordinate(worldCoordinate: number): number {
   return worldCoordinate & 15;
@@ -15,7 +27,8 @@ export class UnderwaterCaveWorldCarver extends CaveWorldCarver {
       blockId === ChunkBlockId.GRAVEL ||
       blockId === ChunkBlockId.WATER ||
       blockId === ChunkBlockId.LAVA ||
-      blockId === ChunkBlockId.OBSIDIAN;
+      blockId === ChunkBlockId.OBSIDIAN ||
+      blockId === ChunkBlockId.PACKED_ICE;
   }
 
   protected override hasDisallowedLiquid(
@@ -80,12 +93,11 @@ export class UnderwaterCaveWorldCarver extends CaveWorldCarver {
     }
 
     if (worldY === 10) {
-      chunk.setBlockAtY(
-        localX,
-        worldY,
-        localZ,
-        random.nextFloat() < 0.25 ? ChunkBlockId.MAGMA_BLOCK : ChunkBlockId.OBSIDIAN,
-      );
+      const blockId = random.nextFloat() < 0.25 ? ChunkBlockId.MAGMA_BLOCK : ChunkBlockId.OBSIDIAN;
+      chunk.setBlockAtY(localX, worldY, localZ, blockId);
+      if (blockId === ChunkBlockId.MAGMA_BLOCK) {
+        chunk.scheduleBlockTick(worldX, worldY, worldZ, MAGMA_BLOCK_TARGET, 0);
+      }
       return true;
     }
 
@@ -95,6 +107,19 @@ export class UnderwaterCaveWorldCarver extends CaveWorldCarver {
     }
 
     chunk.setBlockAtY(localX, worldY, localZ, ChunkBlockId.WATER);
+    for (const direction of POSSIBLE_FLOW_DIRECTIONS) {
+      const neighborWorldX = worldX + direction.getStepX();
+      const neighborWorldY = worldY + direction.getStepY();
+      const neighborWorldZ = worldZ + direction.getStepZ();
+      if (
+        SectionPos.blockToSectionCoord(neighborWorldX) !== chunk.chunkX ||
+        SectionPos.blockToSectionCoord(neighborWorldZ) !== chunk.chunkZ ||
+        chunk.getBlockAtY(localCoordinate(neighborWorldX), neighborWorldY, localCoordinate(neighborWorldZ)) === ChunkBlockId.AIR
+      ) {
+        chunk.scheduleLiquidTick(worldX, worldY, worldZ, WATER_TARGET, 0);
+        break;
+      }
+    }
     return true;
   }
 }

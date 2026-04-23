@@ -1,3 +1,10 @@
+import { BlockPos } from "../../core/block-pos";
+import {
+  cloneScheduledTickSnapshot,
+  createScheduledTickSnapshot,
+  type ScheduledTickSnapshot,
+} from "../../world/level/scheduled-tick";
+
 export const CHUNK_WIDTH = 16;
 export const SECTION_HEIGHT = 16;
 export const BLOCKS_PER_SECTION = CHUNK_WIDTH * CHUNK_WIDTH * SECTION_HEIGHT;
@@ -147,6 +154,8 @@ export function isMotionBlockingBlock(blockId: ChunkBlockId): boolean {
 
 export class MutableChunkBlockBuffer {
   public readonly blocks: Uint8Array;
+  private readonly blockTicks: ScheduledTickSnapshot[] = [];
+  private readonly liquidTicks: ScheduledTickSnapshot[] = [];
 
   public constructor(
     public readonly chunkX: number,
@@ -182,5 +191,33 @@ export class MutableChunkBlockBuffer {
 
   public setBlockAtY(localX: number, y: number, localZ: number, blockId: ChunkBlockId): void {
     this.setBlock(localX, y - this.minY, localZ, blockId);
+  }
+
+  public scheduleBlockTick(worldX: number, y: number, worldZ: number, target: string, delay: number): void {
+    this.blockTicks.push(createScheduledTickSnapshot(new BlockPos(worldX, y, worldZ), target, delay));
+  }
+
+  public scheduleLiquidTick(worldX: number, y: number, worldZ: number, target: string, delay: number): void {
+    this.liquidTicks.push(createScheduledTickSnapshot(new BlockPos(worldX, y, worldZ), target, delay));
+  }
+
+  public getScheduledBlockTicks(): readonly ScheduledTickSnapshot[] {
+    return this.blockTicks;
+  }
+
+  public getScheduledLiquidTicks(): readonly ScheduledTickSnapshot[] {
+    return this.liquidTicks;
+  }
+
+  public appendBlockTicks(ticks: readonly ScheduledTickSnapshot[]): void {
+    for (const tick of ticks) {
+      this.blockTicks.push(cloneScheduledTickSnapshot(tick));
+    }
+  }
+
+  public appendLiquidTicks(ticks: readonly ScheduledTickSnapshot[]): void {
+    for (const tick of ticks) {
+      this.liquidTicks.push(cloneScheduledTickSnapshot(tick));
+    }
   }
 }

@@ -12,9 +12,10 @@ import { Heightmap } from "../../worldgen/levelgen/heightmap";
 import type { WorldGenLevel } from "./world-gen-level";
 import { getLayeredBiomeByKey } from "../../worldgen/biome/biome-data";
 import type { Biome } from "../../worldgen/biome/biome";
-import { BlackholeTickAccess } from "./tick-access";
+import { RecordingTickAccess } from "./tick-access";
 import type { Fluid } from "./material/fluid";
 import type { Block } from "./block/block";
+import { serializeBlockTickTarget, serializeFluidTickTarget } from "./scheduled-tick";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -22,8 +23,20 @@ function chunkKey(chunkX: number, chunkZ: number): string {
 
 export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
   private readonly chunks = new Map<string, LevelChunk>();
-  private readonly blockTicks = new BlackholeTickAccess<Block>();
-  private readonly liquidTicks = new BlackholeTickAccess<Fluid>();
+  private readonly blockTicks = new RecordingTickAccess<Block>((pos, target, delay) => {
+    this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()))?.recordBlockTick(
+      pos,
+      serializeBlockTickTarget(target),
+      delay,
+    );
+  });
+  private readonly liquidTicks = new RecordingTickAccess<Fluid>((pos, target, delay) => {
+    this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()))?.recordLiquidTick(
+      pos,
+      serializeFluidTickTarget(target),
+      delay,
+    );
+  });
 
   public constructor(
     protected readonly airState: BlockState,
@@ -193,11 +206,11 @@ export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
     return this.ambientLight;
   }
 
-  public getBlockTicks(): BlackholeTickAccess<Block> {
+  public getBlockTicks(): RecordingTickAccess<Block> {
     return this.blockTicks;
   }
 
-  public getLiquidTicks(): BlackholeTickAccess<Fluid> {
+  public getLiquidTicks(): RecordingTickAccess<Fluid> {
     return this.liquidTicks;
   }
 

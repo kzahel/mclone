@@ -5,6 +5,7 @@ import surfaceFixture from "../../fixtures/integration/overworld-seed-12345-chun
 import carvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-carved-only.json";
 import oceanCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json";
 import liquidOceanCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-117--128-liquid-carved.json";
+import liquidFloorCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--129--256-liquid-carved.json";
 import sandSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-5-115-surface-only.json";
 import desertSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-surface-only.json";
 import desertCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-carved-only.json";
@@ -53,6 +54,28 @@ interface TerrainChunkOracleFixture {
   readonly blockOrder: "y-major,z-major,x-minor";
   readonly palette: readonly string[];
   readonly blocks: readonly number[];
+  readonly blockTicks?: readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly target: string;
+    readonly delay: number;
+  }[];
+  readonly liquidTicks?: readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly target: string;
+    readonly delay: number;
+  }[];
+}
+
+interface ScheduledTickFixture {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly target: string;
+  readonly delay: number;
 }
 
 interface SurfaceChunkOracleFixture extends TerrainChunkOracleFixture {}
@@ -64,6 +87,7 @@ const surfaceOracle = surfaceFixture as SurfaceChunkOracleFixture;
 const carvedOracle = carvedFixture as CarvedChunkOracleFixture;
 const oceanCarvedOracle = oceanCarvedFixture as CarvedChunkOracleFixture;
 const liquidOceanCarvedOracle = liquidOceanCarvedFixture as CarvedChunkOracleFixture;
+const liquidFloorCarvedOracle = liquidFloorCarvedFixture as CarvedChunkOracleFixture;
 const sandSurfaceOracle = sandSurfaceFixture as SurfaceChunkOracleFixture;
 const desertSurfaceOracle = desertSurfaceFixture as SurfaceChunkOracleFixture;
 const desertCarvedOracle = desertCarvedFixture as CarvedChunkOracleFixture;
@@ -134,6 +158,22 @@ function assertChunkParity(actualChunk: MutableChunkBlockBuffer, oracle: Surface
   assertTerrainSections(actual.sections, expected.sections);
   assertHeightmap("WORLD_SURFACE", actual.heightmaps.WORLD_SURFACE, expected.heightmaps.WORLD_SURFACE);
   assertHeightmap("OCEAN_FLOOR", actual.heightmaps.OCEAN_FLOOR, expected.heightmaps.OCEAN_FLOOR);
+}
+
+function sortScheduledTicks(ticks: readonly ScheduledTickFixture[]): readonly ScheduledTickFixture[] {
+  return [...ticks].sort(
+    (left, right) =>
+      left.x - right.x ||
+      left.z - right.z ||
+      left.y - right.y ||
+      left.target.localeCompare(right.target) ||
+      left.delay - right.delay,
+  );
+}
+
+function assertScheduledTickParity(actualChunk: MutableChunkBlockBuffer, oracle: TerrainChunkOracleFixture): void {
+  expect(sortScheduledTicks(actualChunk.getScheduledBlockTicks())).toEqual(sortScheduledTicks(oracle.blockTicks ?? []));
+  expect(sortScheduledTicks(actualChunk.getScheduledLiquidTicks())).toEqual(sortScheduledTicks(oracle.liquidTicks ?? []));
 }
 
 describe("NoiseBasedChunkGenerator", () => {
@@ -243,6 +283,7 @@ describe("NoiseBasedChunkGenerator", () => {
     generator.applyCarvers(actualChunk, GenerationStep.Carving.AIR);
 
     assertChunkParity(actualChunk, carvedOracle);
+    assertScheduledTickParity(actualChunk, carvedOracle);
   });
 
   test("matches the pinned carved-only ocean oracle for chunk (117, -128)", () => {
@@ -253,6 +294,7 @@ describe("NoiseBasedChunkGenerator", () => {
     generator.applyCarvers(actualChunk, GenerationStep.Carving.AIR);
 
     assertChunkParity(actualChunk, oceanCarvedOracle);
+    assertScheduledTickParity(actualChunk, oceanCarvedOracle);
   });
 
   test("matches the pinned carved-only desert oracle for chunk (96, -64)", () => {
@@ -263,6 +305,7 @@ describe("NoiseBasedChunkGenerator", () => {
     generator.applyCarvers(actualChunk, GenerationStep.Carving.AIR);
 
     assertChunkParity(actualChunk, desertCarvedOracle);
+    assertScheduledTickParity(actualChunk, desertCarvedOracle);
   });
 
   test("matches the pinned air-plus-liquid carved ocean oracle for chunk (117, -128)", () => {
@@ -273,5 +316,17 @@ describe("NoiseBasedChunkGenerator", () => {
     generator.applyCarvers(actualChunk);
 
     assertChunkParity(actualChunk, liquidOceanCarvedOracle);
+    assertScheduledTickParity(actualChunk, liquidOceanCarvedOracle);
+  });
+
+  test("matches the pinned air-plus-liquid carved underwater-floor oracle for chunk (-129, -256)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(liquidFloorCarvedOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(liquidFloorCarvedOracle.seed));
+    const actualChunk = generator.fillFromNoise(liquidFloorCarvedOracle.chunkX, liquidFloorCarvedOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+    generator.applyCarvers(actualChunk);
+
+    assertChunkParity(actualChunk, liquidFloorCarvedOracle);
+    assertScheduledTickParity(actualChunk, liquidFloorCarvedOracle);
   });
 });

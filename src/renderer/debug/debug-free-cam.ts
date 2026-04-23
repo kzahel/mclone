@@ -23,9 +23,9 @@ const VIEW_DISTANCE = 2;
 const LIGHT_TICK_INTERVAL_MS = 1000.0;
 const WORLD_POLL_INTERVAL_MS = 50.0;
 
-const INITIAL_POSITION = new Vec3(8.5, 104.0, 40.5);
-const INITIAL_X_ROT = 30.0;
-const INITIAL_Y_ROT = 180.0;
+const DEFAULT_INITIAL_POSITION = new Vec3(8.5, 104.0, 40.5);
+const DEFAULT_INITIAL_X_ROT = 30.0;
+const DEFAULT_INITIAL_Y_ROT = 180.0;
 
 interface DebugRuntimeState {
   ready: boolean;
@@ -70,6 +70,29 @@ function readWorldTransport(): {
   return { worldTransport: "worker" };
 }
 
+function readInitialCamera(): {
+  readonly position: Vec3;
+  readonly xRot: number;
+  readonly yRot: number;
+} {
+  const url = new URL(window.location.href);
+  const x = Number.parseFloat(url.searchParams.get("cameraX") ?? "");
+  const y = Number.parseFloat(url.searchParams.get("cameraY") ?? "");
+  const z = Number.parseFloat(url.searchParams.get("cameraZ") ?? "");
+  const xRot = Number.parseFloat(url.searchParams.get("cameraPitch") ?? "");
+  const yRot = Number.parseFloat(url.searchParams.get("cameraYaw") ?? "");
+
+  return {
+    position: new Vec3(
+      Number.isFinite(x) ? x : DEFAULT_INITIAL_POSITION.x,
+      Number.isFinite(y) ? y : DEFAULT_INITIAL_POSITION.y,
+      Number.isFinite(z) ? z : DEFAULT_INITIAL_POSITION.z,
+    ),
+    xRot: Number.isFinite(xRot) ? xRot : DEFAULT_INITIAL_X_ROT,
+    yRot: Number.isFinite(yRot) ? yRot : DEFAULT_INITIAL_Y_ROT,
+  };
+}
+
 function createDebugRuntimeController(
   worldTransport: "worker" | "remote",
 ): {
@@ -109,6 +132,7 @@ async function boot(): Promise<void> {
   }
 
   const runtimeConfig = readWorldTransport();
+  const initialCamera = readInitialCamera();
   const debugRuntime = createDebugRuntimeController(runtimeConfig.worldTransport);
   window.__mcloneDebug = debugRuntime.controller;
 
@@ -129,9 +153,9 @@ async function boot(): Promise<void> {
   const depthView = createSceneDepthView(scene.device, canvas.width, canvas.height);
 
   let camera = {
-    position: INITIAL_POSITION,
-    xRot: INITIAL_X_ROT,
-    yRot: INITIAL_Y_ROT,
+    position: initialCamera.position,
+    xRot: initialCamera.xRot,
+    yRot: initialCamera.yRot,
   };
   let lastFrameMs = performance.now();
   let lastLightTickMs = lastFrameMs;
@@ -145,8 +169,8 @@ async function boot(): Promise<void> {
   // Prime chunks at the start so the first frame has something to draw.
   if (await scene.worldClient.setChunkView({
     type: "set_chunk_view",
-    centerChunkX: SectionPos.posToSectionCoord(INITIAL_POSITION.x),
-    centerChunkZ: SectionPos.posToSectionCoord(INITIAL_POSITION.z),
+    centerChunkX: SectionPos.posToSectionCoord(initialCamera.position.x),
+    centerChunkZ: SectionPos.posToSectionCoord(initialCamera.position.z),
     radius: scene.viewDistance,
   })) {
     scene.levelRenderer.allChanged();
@@ -158,8 +182,8 @@ async function boot(): Promise<void> {
       moveX: 0,
       moveY: 0,
       moveZ: 0,
-      yaw: INITIAL_Y_ROT,
-      pitch: INITIAL_X_ROT,
+      yaw: initialCamera.yRot,
+      pitch: initialCamera.xRot,
     },
   })) {
     lastSentInput = {
@@ -167,8 +191,8 @@ async function boot(): Promise<void> {
       moveX: 0,
       moveY: 0,
       moveZ: 0,
-      yaw: INITIAL_Y_ROT,
-      pitch: INITIAL_X_ROT,
+      yaw: initialCamera.yRot,
+      pitch: initialCamera.xRot,
     };
   }
   await new Promise((resolve) => setTimeout(resolve, WORLD_POLL_INTERVAL_MS));

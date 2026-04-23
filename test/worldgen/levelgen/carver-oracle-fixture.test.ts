@@ -3,6 +3,7 @@ import carvedFixture from "../../fixtures/integration/overworld-seed-12345-chunk
 import oceanCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json";
 import desertCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-carved-only.json";
 import liquidOceanCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-117--128-liquid-carved.json";
+import liquidFloorCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--129--256-liquid-carved.json";
 import { CHUNK_BLOCK_NAMES, ChunkBlockId } from "../../../src/worldgen/chunk/chunk-block-buffer.ts";
 
 interface CarvedChunkOracleFixture {
@@ -17,12 +18,27 @@ interface CarvedChunkOracleFixture {
   readonly blockOrder: "y-major,z-major,x-minor";
   readonly palette: readonly string[];
   readonly blocks: readonly number[];
+  readonly blockTicks: readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly target: string;
+    readonly delay: number;
+  }[];
+  readonly liquidTicks: readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+    readonly target: string;
+    readonly delay: number;
+  }[];
 }
 
 const carvedOracle = carvedFixture as CarvedChunkOracleFixture;
 const oceanCarvedOracle = oceanCarvedFixture as CarvedChunkOracleFixture;
 const desertCarvedOracle = desertCarvedFixture as CarvedChunkOracleFixture;
 const liquidOceanCarvedOracle = liquidOceanCarvedFixture as CarvedChunkOracleFixture;
+const liquidFloorCarvedOracle = liquidFloorCarvedFixture as CarvedChunkOracleFixture;
 
 function assertPinnedMetadata(
   oracle: CarvedChunkOracleFixture,
@@ -41,6 +57,8 @@ function assertPinnedMetadata(
   expect(oracle.blockOrder).toBe("y-major,z-major,x-minor");
   expect(oracle.palette).toEqual([...CHUNK_BLOCK_NAMES]);
   expect(oracle.blocks.length).toBe(16 * 16 * 256);
+  expect(oracle.blockTicks).toBeDefined();
+  expect(oracle.liquidTicks).toBeDefined();
 }
 
 describe("carved-stage oracle fixture", () => {
@@ -58,6 +76,10 @@ describe("carved-stage oracle fixture", () => {
 
   test("pins the committed air-plus-liquid carved-stage metadata for the ocean oracle", () => {
     assertPinnedMetadata(liquidOceanCarvedOracle, 117, -128, "liquid-carved-chunk");
+  });
+
+  test("pins the committed air-plus-liquid carved-stage metadata for the underwater-floor oracle", () => {
+    assertPinnedMetadata(liquidFloorCarvedOracle, -129, -256, "liquid-carved-chunk");
   });
 
   test("spawn carved oracle contains air carving and lava-floor ids within the numeric model", () => {
@@ -105,6 +127,24 @@ describe("carved-stage oracle fixture", () => {
     for (const blockId of liquidOceanCarvedOracle.blocks) {
       expect(blockId).toBeGreaterThanOrEqual(0);
       expect(blockId).toBeLessThan(liquidOceanCarvedOracle.palette.length);
+    }
+
+    expect(liquidOceanCarvedOracle.blockTicks).toEqual([]);
+    expect(liquidOceanCarvedOracle.liquidTicks.length).toBeGreaterThan(0);
+    expect(liquidOceanCarvedOracle.liquidTicks.every((tick) => tick.target === "minecraft:water")).toBe(true);
+  });
+
+  test("liquid-carved underwater-floor oracle commits obsidian, magma, and their scheduled tick consequences", () => {
+    expect(liquidFloorCarvedOracle.blocks).toContain(ChunkBlockId.OBSIDIAN);
+    expect(liquidFloorCarvedOracle.blocks).toContain(ChunkBlockId.MAGMA_BLOCK);
+    expect(liquidFloorCarvedOracle.blockTicks.length).toBeGreaterThan(0);
+    expect(liquidFloorCarvedOracle.blockTicks.every((tick) => tick.target === "minecraft:magma_block")).toBe(true);
+    expect(liquidFloorCarvedOracle.liquidTicks.length).toBeGreaterThan(0);
+    expect(liquidFloorCarvedOracle.liquidTicks.every((tick) => tick.target === "minecraft:water")).toBe(true);
+
+    for (const blockId of liquidFloorCarvedOracle.blocks) {
+      expect(blockId).toBeGreaterThanOrEqual(0);
+      expect(blockId).toBeLessThan(liquidFloorCarvedOracle.palette.length);
     }
   });
 });

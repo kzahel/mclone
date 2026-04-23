@@ -13,6 +13,7 @@ export class UnderwaterCanyonWorldCarver extends CanyonWorldCarver {
       blockId === ChunkBlockId.WATER ||
       blockId === ChunkBlockId.LAVA ||
       blockId === ChunkBlockId.OBSIDIAN ||
+      blockId === ChunkBlockId.PACKED_ICE ||
       blockId === ChunkBlockId.AIR;
   }
 

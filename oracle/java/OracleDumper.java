@@ -3,6 +3,7 @@ import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,6 +16,8 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
+import net.minecraft.world.level.TickList;
+import net.minecraft.world.level.TickPriority;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
@@ -42,6 +45,7 @@ import net.minecraft.world.level.levelgen.synth.PerlinNoise;
 import net.minecraft.world.level.levelgen.synth.PerlinSimplexNoise;
 import net.minecraft.world.level.levelgen.synth.SimplexNoise;
 import net.minecraft.world.level.levelgen.synth.SurfaceNoise;
+import net.minecraft.world.level.material.Fluid;
 
 public final class OracleDumper {
    private static final String MINECRAFT_VERSION = "1.17.1";
@@ -672,6 +676,8 @@ public final class OracleDumper {
       json.put("blockOrder", "y-major,z-major,x-minor");
       json.put("palette", SURFACE_AND_CARVED_PALETTE);
       json.put("blocks", collectChunkBlocks(chunk, minY, height));
+      json.put("blockTicks", collectScheduledBlockTicks(chunk));
+      json.put("liquidTicks", collectScheduledLiquidTicks(chunk));
       return GSON.toJson(json);
    }
 
@@ -937,6 +943,57 @@ public final class OracleDumper {
       }
 
       return blocks;
+   }
+
+   private static List<Map<String, Object>> collectScheduledBlockTicks(ProtoChunk chunk) {
+      ScheduledTickCollector<net.minecraft.world.level.block.Block> collector = new ScheduledTickCollector<>(Registry.BLOCK::getKey);
+      chunk.getBlockTicks().copyOut(collector, pos -> chunk.getBlockState(pos).getBlock());
+      return collector.toJson();
+   }
+
+   private static List<Map<String, Object>> collectScheduledLiquidTicks(ProtoChunk chunk) {
+      ScheduledTickCollector<Fluid> collector = new ScheduledTickCollector<>(Registry.FLUID::getKey);
+      chunk.getLiquidTicks().copyOut(collector, pos -> chunk.getFluidState(pos).getType());
+      return collector.toJson();
+   }
+
+   private static final class ScheduledTickCollector<T> implements TickList<T> {
+      private final Function<T, ResourceLocation> toId;
+      private final List<Map<String, Object>> ticks = new ArrayList<>();
+
+      private ScheduledTickCollector(Function<T, ResourceLocation> toId) {
+         this.toId = toId;
+      }
+
+      @Override
+      public boolean hasScheduledTick(BlockPos pos, T target) {
+         return false;
+      }
+
+      @Override
+      public void scheduleTick(BlockPos pos, T target, int delay, TickPriority priority) {
+         Map<String, Object> tick = new LinkedHashMap<>();
+         tick.put("x", pos.getX());
+         tick.put("y", pos.getY());
+         tick.put("z", pos.getZ());
+         tick.put("target", this.toId.apply(target).toString());
+         tick.put("delay", delay);
+         this.ticks.add(tick);
+      }
+
+      @Override
+      public boolean willTickThisTick(BlockPos pos, T target) {
+         return false;
+      }
+
+      @Override
+      public int size() {
+         return this.ticks.size();
+      }
+
+      private List<Map<String, Object>> toJson() {
+         return this.ticks;
+      }
    }
 
    private static String dumpOverworldBiomeSource(long seed, boolean legacyBiomeInitLayer, boolean largeBiomes, SampleGrid2D sampleGrid2D) {

@@ -145,6 +145,9 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       }
     }
 
+    chunk.appendBlockTicks(generated.getScheduledBlockTicks());
+    chunk.appendLiquidTicks(generated.getScheduledLiquidTicks());
+
     return chunk;
   }
 }

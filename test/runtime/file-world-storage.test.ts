@@ -20,6 +20,8 @@ const CHUNK_SNAPSHOT: ChunkSnapshot = {
   chunkZ: 0,
   biomes: [0],
   sections: [],
+  blockTicks: [],
+  liquidTicks: [],
 };
 
 async function createTempDirectory(): Promise<string> {

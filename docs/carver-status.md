@@ -8,7 +8,7 @@ This doc is narrower than [`worldgen-status.md`](./worldgen-status.md): it only 
 
 - Target: vanilla Java `1.17.1` overworld carver parity.
 - In scope: classic overworld `GenerationStep.Carving.AIR` plus `GenerationStep.Carving.LIQUID` behavior for the default 1.17.1 overworld path, plus the biome/config/oracle plumbing needed to verify both steps.
-- Still out of scope in the current TS port: underwater scheduled tick parity, aquifer-enabled carving, and the disabled Caves & Cliffs Part 1 cave systems called out in [`../AGENTS.md`](../AGENTS.md).
+- Still out of scope in the current TS port: broader post-generation fluid simulation, aquifer-enabled carving, and the disabled Caves & Cliffs Part 1 cave systems called out in [`../AGENTS.md`](../AGENTS.md).
 
 ## Current state
 
@@ -19,6 +19,7 @@ The repo now has a real, integrated classic-overworld carver path for both live 
 - translated built-in overworld configured carvers in [`overworld-configured-carvers.ts`](../src/worldgen/carver/overworld-configured-carvers.ts), including ocean `LIQUID` entries
 - chunk-generator integration in [`NoiseBasedChunkGenerator.applyCarvers(...)`](../src/worldgen/levelgen/noise-based-chunk-generator.ts), with explicit per-step application for oracle tests and AIR+LIQUID application for runtime generation
 - generated-world integration in [`GeneratedRenderLevel.generateChunk(...)`](../src/world/level/generated-render-level.ts)
+- scheduled block/liquid tick capture across [`chunk-block-buffer.ts`](../src/worldgen/chunk/chunk-block-buffer.ts), [`level-chunk.ts`](../src/world/level/chunk/level-chunk.ts), and [`chunk-snapshot.ts`](../src/world/level/chunk-snapshot.ts)
 - biome-driven AIR/LIQUID carver selection through [`BiomeGenerationSettings`](../src/worldgen/biome/biome-generation-settings.ts) and [`overworld-biome-generation-settings.ts`](../src/worldgen/biome/overworld-biome-generation-settings.ts)
 
 That is enough to truthfully say classic overworld carvers are implemented and integrated.
@@ -29,10 +30,10 @@ It is not enough to call the path full parity yet.
 
 These are the highest-signal gaps between the current TS port and the 1.17.1 reference behavior.
 
-- Underwater scheduled tick parity is still missing. Vanilla underwater carvers schedule magma-block ticks and some water-fluid updates; the TS chunk-buffer/oracle path currently verifies block output only.
+- Underwater scheduled tick consequences are now captured and oracled at generation time, but the runtime still only records them; it does not execute the later fluid/block updates that a full server tick loop would consume.
 - The replaceable-block set in [`world-carver.ts`](../src/worldgen/carver/world-carver.ts) is now much closer for the live overworld AIR-step surface families, but it is still narrower than full vanilla `WorldCarver`. Mojang also covers additional families such as later badlands/frozen follow-through materials, tuff, and several ore/deepslate variants that this repo still does not exercise or model exhaustively.
 - The numeric chunk/oracle palette in [`chunk-block-buffer.ts`](../src/worldgen/chunk/chunk-block-buffer.ts) now includes underwater-floor outputs (`obsidian`, `magma_block`) on top of the earlier widened surface families, but it still does not cover every remaining biome-specific surface mutation needed for exhaustive badlands / frozen / mushroom follow-through.
-- The current carved-stage oracle matrix is still too small. Three committed AIR-only carved chunks plus one AIR-plus-LIQUID ocean chunk are useful smoke coverage, not exhaustive parity coverage.
+- The current carved-stage oracle matrix is still too small. Three committed AIR-only carved chunks plus two AIR-plus-LIQUID chunks are useful targeted coverage, not exhaustive parity coverage.
 - The TS path still collapses some vanilla block-state distinctions in the carved-stage numeric model, which is acceptable for narrow chunk diffs but not the final form of exhaustive parity work.
 
 ## Current oracle coverage
@@ -43,13 +44,16 @@ Current carver verification is real but still intentionally narrow:
   [`overworld-seed-12345-chunks-0-0-carved-only.json`](../test/fixtures/integration/overworld-seed-12345-chunks-0-0-carved-only.json)
   , [`overworld-seed-12345-chunks-117--128-carved-only.json`](../test/fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json),
   and [`overworld-seed-12345-chunks-96--64-carved-only.json`](../test/fixtures/integration/overworld-seed-12345-chunks-96--64-carved-only.json)
-- one committed AIR-plus-LIQUID ocean fixture:
+- two committed AIR-plus-LIQUID fixtures:
   [`overworld-seed-12345-chunks-117--128-liquid-carved.json`](../test/fixtures/integration/overworld-seed-12345-chunks-117--128-liquid-carved.json)
+  and [`overworld-seed-12345-chunks--129--256-liquid-carved.json`](../test/fixtures/integration/overworld-seed-12345-chunks--129--256-liquid-carved.json)
 - chunk-level parity assertion in [`noise-based-chunk-generator.test.ts`](../test/worldgen/levelgen/noise-based-chunk-generator.test.ts)
 - fixture-shape pinning in [`carver-oracle-fixture.test.ts`](../test/worldgen/levelgen/carver-oracle-fixture.test.ts)
 - explicit replaceable-material parity tests in [`world-carver-material-parity.test.ts`](../test/worldgen/carver/world-carver-material-parity.test.ts)
 - explicit underwater branch tests in [`underwater-carver.test.ts`](../test/worldgen/carver/underwater-carver.test.ts)
+- snapshot/tick round-trip coverage in [`chunk-snapshot.test.ts`](../test/world/chunk-snapshot.test.ts)
 - biome/carver wiring tests in [`overworld-carver-wiring.test.ts`](../test/worldgen/carver/overworld-carver-wiring.test.ts)
+- targeted ravine browser validation in [`test/browser/cave-mouth.test.ts`](../test/browser/cave-mouth.test.ts)
 
 That supports “partially oracled,” not “exhaustively covered.”
 
@@ -57,10 +61,10 @@ That supports “partially oracled,” not “exhaustively covered.”
 
 The highest-value sequence from here is:
 
-1. Broaden LIQUID-stage oracle coverage beyond the current one-ocean-fixture water-fill case into a chunk that actually commits `obsidian` / `magma_block` floor output.
-2. Capture scheduled underwater tick consequences explicitly if we want to describe the LIQUID path as full parity rather than block-output parity.
-3. Broaden carved-stage oracle coverage beyond the current spawn/ocean/desert matrix into additional land material families once their pre-carve surface mutations are represented cleanly.
-4. Add browser validation aimed at exposed cave mouths / ravines after each substantial carver change, not only vegetation-heavy smoke frames.
+1. Broaden carved-stage oracle coverage beyond the current spawn/ocean/desert/floor matrix into additional land material families once their pre-carve surface mutations are represented cleanly.
+2. Widen the carved-stage numeric/state model for the remaining frozen / badlands / mushroom follow-through materials that vanilla `WorldCarver` still treats as live.
+3. Decide whether recorded scheduled underwater ticks should stay a measured generation artifact or grow into a later runtime simulation requirement.
+4. Keep browser validation aimed at exposed cave mouths / ravines after each substantial carver change, not only vegetation-heavy smoke frames.
 
 ## Practical definition of “full parity”
 
@@ -69,6 +73,6 @@ For this repo, carvers should only be described as full-parity when all of the f
 - AIR and LIQUID carver steps are both ported for the 1.17.1 overworld target.
 - Per-biome configured-carver selection matches vanilla through biome generation settings rather than ad hoc fallback logic.
 - The carveable/replaceable material set matches vanilla for the current target.
-- Underwater scheduled water/magma tick behavior is either modeled or intentionally measured and documented as an accepted divergence.
+- Underwater scheduled water/magma tick behavior is either executed later in runtime or intentionally measured, stored, and documented as an accepted generation-stage boundary.
 - The carved-stage oracle suite covers multiple biome/material families, not just one chunk near spawn.
 - Generated browser frames have been manually inspected for cave mouths/ravines after each substantial carver change.

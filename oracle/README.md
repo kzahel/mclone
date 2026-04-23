@@ -146,8 +146,9 @@ The Java oracle harness also emits pinned chunk snapshots for the translated ter
 - `pnpm --silent oracle:gen surface-chunk --seed 12345 --chunk-x 0 --chunk-z 0 > test/fixtures/integration/overworld-seed-12345-chunks-0-0-surface-only.json`
 - `pnpm --silent oracle:gen carved-chunk --seed 12345 --chunk-x 117 --chunk-z -128 > test/fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json`
 - `pnpm --silent oracle:gen liquid-carved-chunk --seed 12345 --chunk-x 117 --chunk-z -128 > test/fixtures/integration/overworld-seed-12345-chunks-117--128-liquid-carved.json`
+- `pnpm --silent oracle:gen liquid-carved-chunk --seed 12345 --chunk-x -129 --chunk-z -256 > test/fixtures/integration/overworld-seed-12345-chunks--129--256-liquid-carved.json`
 
-`carved-chunk` stays intentionally AIR-step-only so the older carved fixtures remain stable and step-scoped. `liquid-carved-chunk` applies AIR and LIQUID sequentially and is the committed oracle path for full classic-ocean carved-stage parity checks.
+`carved-chunk` stays intentionally AIR-step-only so the older carved fixtures remain stable and step-scoped. `liquid-carved-chunk` applies AIR and LIQUID sequentially and is the committed oracle path for full classic-ocean carved-stage parity checks. Carved and liquid-carved fixtures now also include `blockTicks` / `liquidTicks`, which pin the generation-stage scheduled tick consequences alongside the carved block palette.
 
 ## Wrappers
 

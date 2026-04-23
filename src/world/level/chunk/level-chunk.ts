@@ -1,6 +1,11 @@
 import { BlockPos } from "../../../core/block-pos";
 import type { BlockState } from "../block/state/block-state";
 import type { FluidState } from "../material/fluid-state";
+import {
+  cloneScheduledTickSnapshot,
+  createScheduledTickSnapshot,
+  type ScheduledTickSnapshot,
+} from "../scheduled-tick";
 
 type ChunkEntry = {
   readonly pos: BlockPos;
@@ -9,6 +14,8 @@ type ChunkEntry = {
 
 export class LevelChunk {
   private readonly states = new Map<bigint, ChunkEntry>();
+  private readonly blockTicks: ScheduledTickSnapshot[] = [];
+  private readonly liquidTicks: ScheduledTickSnapshot[] = [];
 
   public constructor(
     public readonly chunkX: number,
@@ -46,5 +53,33 @@ export class LevelChunk {
     }
 
     return true;
+  }
+
+  public recordBlockTick(pos: BlockPos, target: string, delay: number): void {
+    this.blockTicks.push(createScheduledTickSnapshot(pos, target, delay));
+  }
+
+  public recordLiquidTick(pos: BlockPos, target: string, delay: number): void {
+    this.liquidTicks.push(createScheduledTickSnapshot(pos, target, delay));
+  }
+
+  public appendBlockTicks(ticks: readonly ScheduledTickSnapshot[]): void {
+    for (const tick of ticks) {
+      this.blockTicks.push(cloneScheduledTickSnapshot(tick));
+    }
+  }
+
+  public appendLiquidTicks(ticks: readonly ScheduledTickSnapshot[]): void {
+    for (const tick of ticks) {
+      this.liquidTicks.push(cloneScheduledTickSnapshot(tick));
+    }
+  }
+
+  public getScheduledBlockTicks(): readonly ScheduledTickSnapshot[] {
+    return this.blockTicks;
+  }
+
+  public getScheduledLiquidTicks(): readonly ScheduledTickSnapshot[] {
+    return this.liquidTicks;
   }
 }

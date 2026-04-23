@@ -7,6 +7,12 @@ import { LevelChunk } from "./chunk/level-chunk";
 import type { Block } from "./block/block";
 import type { BlockState } from "./block/state/block-state";
 import type { Property } from "./block/state/properties/property";
+import {
+  cloneScheduledTickSnapshot,
+  resolveBlockTickTarget,
+  resolveFluidTickTarget,
+  type ScheduledTickSnapshot,
+} from "./scheduled-tick";
 
 const AIR_BLOCK_NAME = "minecraft:air";
 const CHUNK_SNAPSHOT_BLOCK_ORDER = "y-major,z-major,x-minor";
@@ -28,6 +34,8 @@ export interface ChunkSnapshot {
   readonly chunkZ: number;
   readonly biomes: readonly number[];
   readonly sections: readonly ChunkSectionSnapshot[];
+  readonly blockTicks: readonly ScheduledTickSnapshot[];
+  readonly liquidTicks: readonly ScheduledTickSnapshot[];
 }
 
 export type BlockStateResolver = (snapshot: BlockStateSnapshot) => BlockState;
@@ -166,6 +174,8 @@ export function buildChunkSnapshot(
     chunkZ: chunk.chunkZ,
     biomes: [...biomes],
     sections,
+    blockTicks: chunk.getScheduledBlockTicks().map(cloneScheduledTickSnapshot),
+    liquidTicks: chunk.getScheduledLiquidTicks().map(cloneScheduledTickSnapshot),
   };
 }
 
@@ -213,6 +223,16 @@ export function hydrateChunkFromSnapshot(
         }
       }
     }
+  }
+
+  for (const tick of snapshot.blockTicks ?? []) {
+    resolveBlockTickTarget(tick.target);
+    chunk.recordBlockTick(new BlockPos(tick.x, tick.y, tick.z), tick.target, tick.delay);
+  }
+
+  for (const tick of snapshot.liquidTicks ?? []) {
+    resolveFluidTickTarget(tick.target);
+    chunk.recordLiquidTick(new BlockPos(tick.x, tick.y, tick.z), tick.target, tick.delay);
   }
 
   return chunk;
