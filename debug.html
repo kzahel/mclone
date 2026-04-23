@@ -2,10 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
     <title>mclone — debug free-cam</title>
     <style>
-      body { margin: 0; background: #111; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #ccc; }
-      canvas { display: block; }
+      html, body { margin: 0; height: 100%; background: #111; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #ccc; overscroll-behavior: none; }
+      body { touch-action: none; }
+      canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
       #debug-overlay {
         position: fixed;
         top: 8px;
@@ -17,12 +19,60 @@
         line-height: 1.4;
         pointer-events: none;
         white-space: pre;
+        max-width: calc(100vw - 16px);
+      }
+      .joystick-el {
+        position: fixed;
+        left: 0;
+        top: 0;
+        border-radius: 50%;
+        background: #fff;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        opacity: 0;
+        transition: opacity 80ms linear;
+        will-change: left, top, opacity;
+      }
+      #joystick-base { width: 120px; height: 120px; }
+      #joystick-knob { width: 56px; height: 56px; }
+      #joystick-base.active { opacity: 0.25; }
+      #joystick-knob.active { opacity: 0.4; }
+      .fly-btn {
+        position: fixed;
+        right: 16px;
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        color: #eee;
+        font-size: 28px;
+        line-height: 64px;
+        text-align: center;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: none;
+      }
+      .fly-btn.active { background: rgba(255, 255, 255, 0.28); }
+      .fly-btn.text { font-size: 14px; font-weight: 600; letter-spacing: 0.5px; }
+      #move-fwd { bottom: 272px; }
+      #move-back { bottom: 192px; }
+      #fly-up { bottom: 112px; }
+      #fly-down { bottom: 32px; }
+      @media (hover: hover) and (pointer: fine) {
+        .fly-btn { display: none; }
       }
     </style>
   </head>
   <body>
     <canvas id="renderer" width="800" height="600"></canvas>
     <div id="debug-overlay">loading...</div>
+    <div id="joystick-base" class="joystick-el"></div>
+    <div id="joystick-knob" class="joystick-el"></div>
+    <div id="move-fwd" class="fly-btn text">FWD</div>
+    <div id="move-back" class="fly-btn text">BACK</div>
+    <div id="fly-up" class="fly-btn">&#x25B2;</div>
+    <div id="fly-down" class="fly-btn">&#x25BC;</div>
     <script type="module" src="/src/renderer/debug/debug-free-cam.ts"></script>
   </body>
 </html>

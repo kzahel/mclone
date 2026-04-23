@@ -15,6 +15,7 @@ const VIEW_DISTANCE = 2;
 const SPEED_BASE = 20.0;
 const SPEED_BOOST = 4.0;
 const MOUSE_SENS_DEG_PER_PIXEL = 0.15;
+const JOYSTICK_LOOK_DEG_PER_SEC = 120.0;
 const MAX_PITCH = 89.0;
 const LIGHT_TICK_INTERVAL_MS = 1000.0;
 
@@ -60,14 +61,26 @@ function applyInputToCamera(
   frame: import("./debug-input").DebugInputFrame,
   dtSeconds: number,
 ): CameraState {
-  let xRot = camera.xRot + frame.mouseDeltaY * MOUSE_SENS_DEG_PER_PIXEL;
+  const yawDelta =
+    frame.mouseDeltaX * MOUSE_SENS_DEG_PER_PIXEL
+    + frame.joystickX * JOYSTICK_LOOK_DEG_PER_SEC * dtSeconds;
+  const pitchDelta =
+    frame.mouseDeltaY * MOUSE_SENS_DEG_PER_PIXEL
+    - frame.joystickY * JOYSTICK_LOOK_DEG_PER_SEC * dtSeconds;
+
+  let xRot = camera.xRot + pitchDelta;
   if (xRot > MAX_PITCH) xRot = MAX_PITCH;
   if (xRot < -MAX_PITCH) xRot = -MAX_PITCH;
-  const yRot = camera.yRot + frame.mouseDeltaX * MOUSE_SENS_DEG_PER_PIXEL;
+  const yRot = camera.yRot + yawDelta;
 
-  const forwardAxis = (frame.heldKeys.has("KeyW") ? 1 : 0) - (frame.heldKeys.has("KeyS") ? 1 : 0);
-  const rightAxis = (frame.heldKeys.has("KeyD") ? 1 : 0) - (frame.heldKeys.has("KeyA") ? 1 : 0);
-  const upAxis = (frame.heldKeys.has("Space") ? 1 : 0) - (frame.heldKeys.has("ShiftLeft") || frame.heldKeys.has("ShiftRight") ? 1 : 0);
+  const forwardAxis =
+    (frame.heldKeys.has("KeyW") || frame.moveForward ? 1 : 0)
+    - (frame.heldKeys.has("KeyS") || frame.moveBack ? 1 : 0);
+  const rightAxis =
+    (frame.heldKeys.has("KeyD") ? 1 : 0) - (frame.heldKeys.has("KeyA") ? 1 : 0);
+  const upAxis =
+    (frame.heldKeys.has("Space") || frame.flyUp ? 1 : 0)
+    - (frame.heldKeys.has("ShiftLeft") || frame.heldKeys.has("ShiftRight") || frame.flyDown ? 1 : 0);
 
   if (forwardAxis === 0 && rightAxis === 0 && upAxis === 0) {
     return { position: camera.position, xRot, yRot };
@@ -132,7 +145,12 @@ async function boot(): Promise<void> {
     scene.levelRenderer.allChanged();
   }
 
-  showOverlayMessage("click to capture mouse — WASD + mouse, Space/Shift for up/down, Ctrl to boost, Esc to release");
+  const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+  showOverlayMessage(
+    isTouch
+      ? "joystick: look · FWD/BACK: move · ▲/▼: fly"
+      : "click to capture mouse — WASD + mouse, Space/Shift for up/down, Ctrl to boost, Esc to release",
+  );
 
   async function tick(): Promise<void> {
     const now = performance.now();
@@ -207,5 +225,17 @@ async function boot(): Promise<void> {
 }
 
 if (typeof window !== "undefined") {
-  void boot();
+  boot().catch((err: unknown) => {
+    const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    showOverlayMessage(`error: ${message}`);
+    // eslint-disable-next-line no-console
+    console.error(err);
+  });
+  window.addEventListener("error", (ev) => {
+    showOverlayMessage(`error: ${ev.message}`);
+  });
+  window.addEventListener("unhandledrejection", (ev) => {
+    const reason = ev.reason instanceof Error ? ev.reason.message : String(ev.reason);
+    showOverlayMessage(`error: ${reason}`);
+  });
 }
