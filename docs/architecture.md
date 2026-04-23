@@ -2,6 +2,8 @@
 
 Runtime architecture for `mclone`.
 
+For rough sequencing of the runtime/host refactor work, see the runtime/host arc in [`tactical/README.md`](./tactical/README.md).
+
 This document exists to answer a different question than [`strategy.md`](./strategy.md) and [`worldgen-status.md`](./worldgen-status.md):
 
 - `strategy.md`: how we translate Minecraft 1.17.1 into TypeScript

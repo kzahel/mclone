@@ -1,6 +1,6 @@
 # Tactical docs
 
-Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md).
+Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For the runtime/host boundaries these tacticals are expected to converge toward, see [`../architecture.md`](../architecture.md).
 
 ## Rule of thumb
 
@@ -67,6 +67,37 @@ Ordering rationale: `BlockState` prereqs (13) deferred until just before model b
 
 - **Unit**: dump atlas UVs, baked-model quads, and section visibility graphs from MC as JSON; exact-diff those. Catches most correctness bugs before pixels are involved.
 - **Visual inspection**: run the browser harness from [`09a-renderer-browser-harness.md`](09a-renderer-browser-harness.md) — system Chrome via Playwright `channel: "chrome"` against a Vite-served page. Take a screenshot and look at it. Does the geometry look right? Are colors and UVs sensible? This is a human (or agent) eyeball check, not an automated diff.
+
+## Runtime / host arc (rough, cross-cutting)
+
+This arc is intentionally separate from the numbered worldgen and renderer translation arcs above. It is about correcting the current execution model so the engine can support browser singleplayer without main-thread stalls, browser multiplayer clients, and a headless Node host.
+
+Because generated chunks and chunk rebuild work still run too close to the render path today, this arc should generally take precedence over additional parity slices until:
+
+- the renderer no longer owns chunk generation
+- browser singleplayer runs behind an authoritative local host boundary
+- chunk meshing no longer stalls the main thread
+
+WebRTC is intentionally deferred. The preferred path is:
+
+1. shared protocol shapes
+2. local worker transport
+3. dedicated Node host
+4. browser clients talking to that host
+5. optional WebRTC transport later if it still buys something
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| [`R0-authoritative-world-boundary.md`](R0-authoritative-world-boundary.md) | shared client/server contracts: `WorldHost`, `WorldClient`, chunk subscription/view commands, `ChunkSnapshot` / unload / delta message shapes, local transport abstraction | unit + browser smoke | establish the authoritative world boundary so the renderer stops calling worldgen directly |
+| `R1-` | browser singleplayer local-server worker: worker bootstrap, local transport adapter, worker-owned chunk service, render-path conversion to a read-only client chunk cache | browser smoke + perf probe | get terrain generation off the main thread without introducing a separate singleplayer-only engine |
+| `R2-` | client mesh worker pipeline: section-meshing jobs, worker-facing mesh input/output records, render-thread upload handoff, chunk rebuild scheduling cleanup | browser smoke + perf probe | remove the remaining main-thread stalls caused by chunk rebuild/meshing work |
+| `R3-` | persistence interfaces plus browser adapter: `WorldStorage`, `ChunkStorage`, save metadata, IndexedDB-backed implementation, load/evict policy hooks | unit + browser smoke | make browser singleplayer durable without baking IndexedDB assumptions into simulation code |
+| `R4-` | headless Node host: authoritative server runtime bootstrap, file-backed storage adapter, CLI/config entry point, local integration harness | integration | prove the same server/runtime core works outside the browser |
+| `R5-` | remote browser-client transport to dedicated host: network transport adapter, connection/session bootstrap, browser client consuming remote chunk/state stream, two-client local smoke | integration + 2-client smoke | reach the first practical multiplayer shape with the simpler dedicated-host path |
+| `R6-` | protocol hardening: reconnect/resync, chunk interest management, baseline player/session state sync, error handling and versioning discipline | integration | make the host/client boundary robust enough that future gameplay systems can accumulate on top of it |
+| `R7-` | optional browser-hosted peer/server transport: WebRTC/WebTransport-style adapter reusing the same protocol and host boundary | integration | slot in a browser-hosted server mode later without redesigning the engine around it up front |
+
+The first tactical to plan in detail from this arc should be `R0-`, not `R7-`. If `R0-` and `R1-` are not real, every later runtime mode becomes a special case.
 
 ## Skipped entirely (for renderer MVP)
 

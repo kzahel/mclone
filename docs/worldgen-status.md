@@ -160,6 +160,8 @@ Not every landed bucket has the same validation strength.
 
 This is the current recommended ordering for worldgen work.
 
+These priorities are only for parity-oriented worldgen work. Cross-cutting runtime/host work now has higher overall priority until chunk generation and meshing are no longer effectively tied to the browser render path; see the runtime/host arc in [`tactical/README.md`](./tactical/README.md).
+
 ### 1. Raise carvers to first-class status
 
 Carvers are already implemented, which means the priority is not “start carvers” but “treat carvers as a major terrain milestone instead of a hidden side-path.”
