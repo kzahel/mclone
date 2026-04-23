@@ -38,7 +38,11 @@ export class GeneratedWorldHost implements WorldHost {
     );
   }
 
-  public async openWorld(_request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
+  public async openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
+    if (request.seed !== this.options.seed) {
+      return [{ type: "world_error", message: `open_world seed ${request.seed} did not match host seed ${this.options.seed}` }];
+    }
+
     this.opened = true;
     return [
       {

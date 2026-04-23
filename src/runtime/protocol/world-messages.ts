@@ -1,7 +1,11 @@
 import type { ChunkSnapshot } from "../../world/level/chunk-snapshot";
 
+export type OpenWorldPreset = "default" | "browser_smoke";
+
 export interface OpenWorldRequest {
   readonly type: "open_world";
+  readonly seed: bigint;
+  readonly preset: OpenWorldPreset;
 }
 
 export interface SetChunkViewRequest {

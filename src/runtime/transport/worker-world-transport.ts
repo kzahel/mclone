@@ -1,0 +1,161 @@
+import type { ClientChunkCache } from "../../world/level/client-chunk-cache";
+import type { WorldHost } from "../protocol/world-host";
+import type { OpenWorldRequest, SetChunkViewRequest, WorldClientMessage, WorldHostMessage, WorldOpenedMessage } from "../protocol/world-messages";
+import { TransportWorldClient, type WorldTransport } from "./local-world-transport";
+
+export interface WorldWorkerRequestEnvelope {
+  readonly requestId: number;
+  readonly message: WorldClientMessage;
+}
+
+export interface WorldWorkerResponseEnvelope {
+  readonly requestId: number;
+  readonly messages: readonly WorldHostMessage[];
+}
+
+export interface WorldWorkerMessageEvent<T> {
+  readonly data: T;
+}
+
+export type WorldWorkerMessageListener<T> = (event: WorldWorkerMessageEvent<T>) => void;
+type WorldWorkerErrorListener = (event: unknown) => void;
+
+export interface WorldWorkerMessageEndpoint<TOutgoing, TIncoming> {
+  postMessage(message: TOutgoing): void;
+  addEventListener(type: "message", listener: WorldWorkerMessageListener<TIncoming>): void;
+  removeEventListener(type: "message", listener: WorldWorkerMessageListener<TIncoming>): void;
+  start?(): void;
+  close?(): void;
+}
+
+export interface WorldWorkerClientEndpoint extends WorldWorkerMessageEndpoint<WorldWorkerRequestEnvelope, WorldWorkerResponseEnvelope> {
+  addEventListener(type: "message", listener: WorldWorkerMessageListener<WorldWorkerResponseEnvelope>): void;
+  addEventListener(type: "error", listener: WorldWorkerErrorListener): void;
+  addEventListener(type: "messageerror", listener: WorldWorkerErrorListener): void;
+  removeEventListener(type: "message", listener: WorldWorkerMessageListener<WorldWorkerResponseEnvelope>): void;
+  removeEventListener(type: "error", listener: WorldWorkerErrorListener): void;
+  removeEventListener(type: "messageerror", listener: WorldWorkerErrorListener): void;
+  terminate?(): void;
+}
+
+export interface WorldWorkerHostEndpoint extends WorldWorkerMessageEndpoint<WorldWorkerResponseEnvelope, WorldWorkerRequestEnvelope> {}
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+export function connectWorldWorkerSession(
+  endpoint: WorldWorkerHostEndpoint,
+  hostFactory: (request: OpenWorldRequest) => WorldHost,
+): void {
+  let host: WorldHost | undefined;
+
+  const onMessage: WorldWorkerMessageListener<WorldWorkerRequestEnvelope> = (event) => {
+    void handleMessage(event.data);
+  };
+
+  async function handleMessage(envelope: WorldWorkerRequestEnvelope): Promise<void> {
+    let messages: readonly WorldHostMessage[];
+
+    try {
+      switch (envelope.message.type) {
+        case "open_world":
+          host ??= hostFactory(envelope.message);
+          messages = await host.openWorld(envelope.message);
+          break;
+        case "set_chunk_view":
+          if (host === undefined) {
+            messages = [{ type: "world_error", message: "set_chunk_view received before open_world" }];
+            break;
+          }
+
+          messages = await host.setChunkView(envelope.message);
+          break;
+      }
+    } catch (error) {
+      messages = [{ type: "world_error", message: formatUnknownError(error) }];
+    }
+
+    endpoint.postMessage({
+      requestId: envelope.requestId,
+      messages,
+    });
+  }
+
+  endpoint.addEventListener("message", onMessage);
+  endpoint.start?.();
+}
+
+export class WorkerWorldTransport implements WorldTransport {
+  private nextRequestId = 1;
+  private readonly pending = new Map<number, {
+    resolve: (messages: readonly WorldHostMessage[]) => void;
+    reject: (error: unknown) => void;
+  }>();
+
+  private readonly onMessage: WorldWorkerMessageListener<WorldWorkerResponseEnvelope> = (event) => {
+    const pending = this.pending.get(event.data.requestId);
+    if (pending === undefined) {
+      return;
+    }
+
+    this.pending.delete(event.data.requestId);
+    pending.resolve(event.data.messages);
+  };
+
+  private readonly onError: WorldWorkerErrorListener = (event) => {
+    const error = typeof ErrorEvent !== "undefined" && event instanceof ErrorEvent ? event.error ?? event.message : event;
+    this.rejectAllPending(formatUnknownError(error));
+  };
+
+  public constructor(private readonly endpoint: WorldWorkerClientEndpoint) {
+    endpoint.addEventListener("message", this.onMessage);
+    endpoint.addEventListener("error", this.onError);
+    endpoint.addEventListener("messageerror", this.onError);
+  }
+
+  public openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
+    return this.send(request);
+  }
+
+  public setChunkView(request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]> {
+    return this.send(request);
+  }
+
+  private send(message: WorldClientMessage): Promise<readonly WorldHostMessage[]> {
+    const requestId = this.nextRequestId++;
+    return new Promise((resolve, reject) => {
+      this.pending.set(requestId, { resolve, reject });
+      this.endpoint.postMessage({ requestId, message });
+    });
+  }
+
+  private rejectAllPending(error: string): void {
+    for (const pending of this.pending.values()) {
+      pending.reject(new Error(error));
+    }
+
+    this.pending.clear();
+  }
+}
+
+export class WorkerWorldClient extends TransportWorldClient {
+  public constructor(
+    transport: WorkerWorldTransport,
+    levelFactory: (worldOpened: WorldOpenedMessage) => ClientChunkCache,
+  ) {
+    super(transport, levelFactory);
+  }
+}
+
+export function createGeneratedWorldWorker(): Worker {
+  // Browser runtime: a module worker replaces vanilla's integrated singleplayer server thread here.
+  return new Worker(new URL("../host/generated-world-worker.ts", import.meta.url), {
+    type: "module",
+    name: "mclone-generated-world-host",
+  });
+}

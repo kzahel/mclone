@@ -19,6 +19,11 @@ interface SurfaceChunkOracleFixture {
 }
 
 const oracle = surfaceFixture as SurfaceChunkOracleFixture;
+const OPEN_WORLD_REQUEST = {
+  type: "open_world",
+  seed: 12345n,
+  preset: "default",
+} as const;
 const DECORATION_BLOCKS = new Set([
   "minecraft:oak_log",
   "minecraft:oak_leaves",
@@ -100,7 +105,7 @@ describe("GeneratedWorld boundary", () => {
   test("loads the oracle chunk through the local host/client boundary", async () => {
     const client = createWorldClient();
 
-    await expect(client.openWorld()).resolves.toEqual({
+    await expect(client.openWorld(OPEN_WORLD_REQUEST)).resolves.toEqual({
       type: "world_opened",
       minBuildHeight: 0,
       height: 256,
@@ -130,7 +135,7 @@ describe("GeneratedWorld boundary", () => {
   test("slides the client chunk cache when the chunk view moves", async () => {
     const client = createWorldClient();
 
-    await client.openWorld();
+    await client.openWorld(OPEN_WORLD_REQUEST);
     await client.setChunkView({
       type: "set_chunk_view",
       centerChunkX: 0,
@@ -157,7 +162,7 @@ describe("GeneratedWorld boundary", () => {
   test("preserves biome decoration when authoritative chunks are snapshotted to the client cache", async () => {
     const client = createWorldClient();
 
-    await client.openWorld();
+    await client.openWorld(OPEN_WORLD_REQUEST);
     await client.setChunkView({
       type: "set_chunk_view",
       centerChunkX: 2,

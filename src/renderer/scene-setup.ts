@@ -1,8 +1,6 @@
-import { BlockPos } from "../core/block-pos";
 import { ResourceLocation } from "../core/resource-location";
-import { GeneratedWorldHost } from "../runtime/host/generated-world-host";
 import type { WorldClient } from "../runtime/protocol/world-client";
-import { LocalWorldClient, LocalWorldTransport } from "../runtime/transport/local-world-transport";
+import { WorkerWorldClient, WorkerWorldTransport, createGeneratedWorldWorker } from "../runtime/transport/worker-world-transport";
 import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
 import { ChunkBlockId } from "../worldgen/chunk/chunk-block-buffer";
 import { ClientChunkCache } from "../world/level/client-chunk-cache";
@@ -10,8 +8,6 @@ import { createBlockStateResolver } from "../world/level/chunk-snapshot";
 import { registerGeneratedRenderBlocks } from "../world/level/generated-render-blocks";
 import { FoliageColor } from "../world/level/foliage-color";
 import { GrassColor } from "../world/level/grass-color";
-import type { WorldGenLevel } from "../world/level/world-gen-level";
-import type { BlockState } from "../world/level/block/state/block-state";
 import { BlockColors } from "./block/block-colors";
 import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
 import { ChunkRenderDispatcher } from "./chunk/chunk-render-dispatcher";
@@ -86,14 +82,6 @@ async function initializeBiomeColorTables(atlasSource: BrowserTextureAtlasSource
   FoliageColor.init(foliagePixels);
 }
 
-function applySmokeWorldMutations(level: WorldGenLevel, waterState: BlockState): void {
-  for (let z = 35; z <= 39; z++) {
-    for (let x = 42; x <= 47; x++) {
-      level.setBlock(new BlockPos(x, 84, z), waterState);
-    }
-  }
-}
-
 export async function initializeRendererScene(
   canvas: HTMLCanvasElement,
   options: SceneInitOptions,
@@ -127,15 +115,8 @@ export async function initializeRendererScene(
 
   const biomeSource = new OverworldBiomeSource(options.seed);
   const blockStateResolver = createBlockStateResolver(generatedBlocks.airState);
-  const worldClient = new LocalWorldClient(
-    new LocalWorldTransport(
-      new GeneratedWorldHost({
-        seed: options.seed,
-        airState: generatedBlocks.airState,
-        blockStateById: generatedBlocks.blockStateById,
-        mutateWorld: (level) => applySmokeWorldMutations(level, generatedBlocks.blockStateById[ChunkBlockId.WATER]!),
-      }),
-    ),
+  const worldClient = new WorkerWorldClient(
+    new WorkerWorldTransport(createGeneratedWorldWorker()),
     (worldOpened) => new ClientChunkCache({
       airState: generatedBlocks.airState,
       minBuildHeight: worldOpened.minBuildHeight,
@@ -145,7 +126,11 @@ export async function initializeRendererScene(
       blockStateResolver,
     }),
   );
-  await worldClient.openWorld();
+  await worldClient.openWorld({
+    type: "open_world",
+    seed: options.seed,
+    preset: "browser_smoke",
+  });
   const level = worldClient.getLevel();
 
   const levelRenderer = new LevelRenderer();

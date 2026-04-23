@@ -8,25 +8,31 @@ import {
   type WorldOpenedMessage,
 } from "../protocol/world-messages";
 
-export class LocalWorldTransport {
+export interface WorldTransport {
+  openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]>;
+
+  setChunkView(request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]>;
+}
+
+export class LocalWorldTransport implements WorldTransport {
   public constructor(private readonly host: WorldHost) {}
 
   public openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
-    // Browser runtime: in-process transport stands in for the worker/socket boundary until R1.
+    // Test/runtime fallback: direct calls exercise the same boundary without a worker hop.
     return this.host.openWorld(request);
   }
 
   public setChunkView(request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]> {
-    // Browser runtime: in-process transport stands in for the worker/socket boundary until R1.
+    // Test/runtime fallback: direct calls exercise the same boundary without a worker hop.
     return this.host.setChunkView(request);
   }
 }
 
-export class LocalWorldClient implements WorldClient {
+export class TransportWorldClient implements WorldClient {
   private level: ClientChunkCache | undefined;
 
   public constructor(
-    private readonly transport: LocalWorldTransport,
+    private readonly transport: WorldTransport,
     private readonly levelFactory: (worldOpened: WorldOpenedMessage) => ClientChunkCache,
   ) {}
 
@@ -38,7 +44,7 @@ export class LocalWorldClient implements WorldClient {
     return this.level;
   }
 
-  public async openWorld(request: OpenWorldRequest = { type: "open_world" }): Promise<WorldOpenedMessage> {
+  public async openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage> {
     const result = this.applyHostMessages(await this.transport.openWorld(request));
     if (result.worldOpened === undefined) {
       throw new Error("World host did not acknowledge open_world");
@@ -79,5 +85,14 @@ export class LocalWorldClient implements WorldClient {
     }
 
     return { worldOpened, chunkChanged };
+  }
+}
+
+export class LocalWorldClient extends TransportWorldClient {
+  public constructor(
+    transport: LocalWorldTransport,
+    levelFactory: (worldOpened: WorldOpenedMessage) => ClientChunkCache,
+  ) {
+    super(transport, levelFactory);
   }
 }
