@@ -53,4 +53,4 @@ Keep the generated-world bridge from tactical 20, but broaden the renderer-visib
 
 ## Next
 
-Tactical 22: translated feature placement bridge. The renderer can now draw the first vegetation/simple-feature blocks, but the browser frame still places them manually in the smoke harness. The next slice should port the narrowest real worldgen feature path needed to replace those harness decorations with translated placement output, starting with a minimal `Feature` / `ConfiguredFeature` / `PlacedFeature` bridge for trees and simple vegetation.
+Tactical 22: simple feature placement bridge. The renderer can now draw the first vegetation/simple-feature blocks, but the browser frame still places them manually in the smoke harness. The next slice should port the narrowest real 1.17.1 feature path needed to replace those harness decorations with translated placement output, starting with `Feature` / `ConfiguredFeature` plus the matching `DecoratedFeature` / decorator bridge for simple vegetation and column-style plants. True `TreeFeature` can stay separate once that narrower seam is in place.

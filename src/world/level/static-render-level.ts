@@ -8,16 +8,18 @@ import { LevelChunk } from "./chunk/level-chunk";
 import { type BlockState } from "./block/state/block-state";
 import { Vec3 } from "../phys/vec3";
 import type { FluidState } from "./material/fluid-state";
+import { Heightmap } from "../../worldgen/levelgen/heightmap";
+import type { WorldGenLevel } from "./world-gen-level";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
 }
 
-export class StaticRenderLevel implements BlockAndTintGetter {
+export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
   private readonly chunks = new Map<string, LevelChunk>();
 
   public constructor(
-    private readonly airState: BlockState,
+    protected readonly airState: BlockState,
     private readonly skyLight = 15,
     private readonly blockLight = 15,
     private readonly minBuildHeight = 0,
@@ -27,8 +29,14 @@ export class StaticRenderLevel implements BlockAndTintGetter {
     private readonly ambientLight = 0,
   ) {}
 
-  public setBlock(pos: BlockPos, state: BlockState): void {
-    this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()))!.setBlockState(pos, state);
+  public setBlock(pos: BlockPos, state: BlockState, _flags = 3): boolean {
+    const chunk = this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()));
+    if (chunk === null) {
+      return false;
+    }
+
+    chunk.setBlockState(pos, state);
+    return true;
   }
 
   public getChunk(chunkX: number, chunkZ: number, create = true): LevelChunk | null {
@@ -71,11 +79,15 @@ export class StaticRenderLevel implements BlockAndTintGetter {
   }
 
   public getBlockState(pos: BlockPos): BlockState {
-    return this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()))!.getBlockState(pos);
+    return this.getChunk(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getZ()))?.getBlockState(pos) ?? this.airState;
   }
 
   public getFluidState(pos: BlockPos): FluidState {
     return this.getBlockState(pos).getFluidState();
+  }
+
+  public isEmptyBlock(pos: BlockPos): boolean {
+    return this.getBlockState(pos).isAir();
   }
 
   public getMaxLightLevel(): number {
@@ -123,12 +135,29 @@ export class StaticRenderLevel implements BlockAndTintGetter {
     return this.minBuildHeight;
   }
 
-  public getHeight(): number {
-    return this.height;
+  public getHeight(): number;
+  public getHeight(type: Heightmap.Types, x: number, z: number): number;
+  public getHeight(type?: Heightmap.Types, x?: number, z?: number): number {
+    if (type === undefined || x === undefined || z === undefined) {
+      return this.height;
+    }
+
+    for (let y = this.getMaxBuildHeight() - 1; y >= this.getMinBuildHeight(); y--) {
+      const pos = new BlockPos(x, y, z);
+      if (type.isOpaque(this.getBlockState(pos))) {
+        return y + 1;
+      }
+    }
+
+    return this.getMinBuildHeight();
   }
 
   public getMaxBuildHeight(): number {
     return this.minBuildHeight + this.height;
+  }
+
+  public getHeightmapPos(type: Heightmap.Types, pos: BlockPos): BlockPos {
+    return new BlockPos(pos.getX(), this.getHeight(type, pos.getX(), pos.getZ()), pos.getZ());
   }
 
   public getSkyColor(_pos: Vec3, _partialTick: number): Vec3 {

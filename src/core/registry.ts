@@ -29,6 +29,10 @@ class SimpleRegistry<T extends object> implements Iterable<T> {
 
 export class Registry {
   public static readonly BLOCK = new SimpleRegistry<object>();
+  public static readonly FEATURE = new SimpleRegistry<object>();
+  public static readonly DECORATOR = new SimpleRegistry<object>();
+  public static readonly BLOCKSTATE_PROVIDER_TYPE = new SimpleRegistry<object>();
+  public static readonly BLOCK_PLACER_TYPE = new SimpleRegistry<object>();
 
   public static register<T extends object>(registry: SimpleRegistry<T>, key: ResourceLocation | string, value: T): T {
     return registry.register(key instanceof ResourceLocation ? key : new ResourceLocation(key), value);

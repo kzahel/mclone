@@ -2,6 +2,7 @@ import type { BlockPos } from "../../../../core/block-pos";
 import { Direction } from "../../../../core/direction";
 import { getSeed } from "../../../../util/mth";
 import type { BlockGetter } from "../../block-getter";
+import type { WorldGenLevel } from "../../world-gen-level";
 import type { Block } from "../block";
 import { type Mirror } from "../mirror";
 import { RenderShape } from "../render-shape";
@@ -129,6 +130,10 @@ export namespace BlockBehaviour {
       return this.owner;
     }
 
+    public is(block: Block): boolean {
+      return this.getBlock() === block;
+    }
+
     public getMaterial(): Material {
       return this.material;
     }
@@ -175,6 +180,10 @@ export namespace BlockBehaviour {
 
     public getDestroySpeed(_level: BlockGetter, _pos: BlockPos): number {
       return this.destroySpeed;
+    }
+
+    public canSurvive(level: WorldGenLevel, pos: BlockPos): boolean {
+      return this.getBlock().canSurvive(this.asState(), level, pos);
     }
 
     public canOcclude(): boolean {

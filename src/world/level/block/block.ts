@@ -3,6 +3,7 @@ import { BlockPos } from "../../../core/block-pos";
 import { Direction } from "../../../core/direction";
 import type { BlockPlaceContext } from "../../item/context/block-place-context";
 import type { BlockGetter } from "../block-getter";
+import type { WorldGenLevel } from "../world-gen-level";
 import { RenderShape } from "./render-shape";
 import { SoundType } from "./sound-type";
 import { BlockBehaviour } from "./state/block-behaviour";
@@ -109,6 +110,10 @@ export class Block extends BlockBehaviour {
 
   public canBeReplaced(_state: BlockState, _context: BlockPlaceContext): boolean {
     return this.material.isReplaceable();
+  }
+
+  public canSurvive(_state: BlockState, _level: WorldGenLevel, _pos: BlockPos): boolean {
+    return true;
   }
 
   public isSolidRender(state: BlockState, _level: BlockGetter): boolean {

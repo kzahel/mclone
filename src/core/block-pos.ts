@@ -43,12 +43,12 @@ export class BlockPos extends Vec3i {
         );
   }
 
-  public below(): BlockPos {
-    return this.relative(Direction.DOWN);
+  public below(amount = 1): BlockPos {
+    return this.relative(Direction.DOWN, amount);
   }
 
-  public above(): BlockPos {
-    return this.relative(Direction.UP);
+  public above(amount = 1): BlockPos {
+    return this.relative(Direction.UP, amount);
   }
 
   public north(): BlockPos {
@@ -85,11 +85,21 @@ export namespace BlockPos {
       return this;
     }
 
-    public setWithOffset(pos: BlockPos, direction: Direction): MutableBlockPos {
+    public setWithOffset(pos: BlockPos, direction: Direction): MutableBlockPos;
+    public setWithOffset(pos: BlockPos, dx: number, dy: number, dz: number): MutableBlockPos;
+    public setWithOffset(pos: BlockPos, second: Direction | number, third?: number, fourth?: number): MutableBlockPos {
+      if (second instanceof Direction) {
+        return this.set(
+          pos.getX() + second.getStepX(),
+          pos.getY() + second.getStepY(),
+          pos.getZ() + second.getStepZ(),
+        );
+      }
+
       return this.set(
-        pos.getX() + direction.getStepX(),
-        pos.getY() + direction.getStepY(),
-        pos.getZ() + direction.getStepZ(),
+        pos.getX() + second,
+        pos.getY() + (third ?? 0),
+        pos.getZ() + (fourth ?? 0),
       );
     }
 
