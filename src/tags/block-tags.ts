@@ -80,4 +80,6 @@ export class BlockTags {
     "minecraft:azalea_leaves",
     "minecraft:flowering_azalea_leaves",
   ]);
+
+  public static readonly LAVA_POOL_STONE_CANNOT_REPLACE = new BlockTag("minecraft:lava_pool_stone_cannot_replace", []);
 }

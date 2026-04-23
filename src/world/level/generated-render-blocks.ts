@@ -16,6 +16,7 @@ import { SnowLayerBlock } from "./block/snow-layer-block";
 import { SnowyDirtBlock } from "./block/snowy-dirt-block";
 import { SugarCaneBlock } from "./block/sugar-cane-block";
 import { SweetBerryBushBlock } from "./block/sweet-berry-bush-block";
+import { WaterlilyBlock } from "./block/waterlily-block";
 import { SoundType } from "./block/sound-type";
 import { BlockBehaviour } from "./block/state/block-behaviour";
 import type { BlockState } from "./block/state/block-state";
@@ -45,9 +46,19 @@ const LARGE_FERN_LOCATION = new ResourceLocation("minecraft:large_fern");
 const SWEET_BERRY_BUSH_LOCATION = new ResourceLocation("minecraft:sweet_berry_bush");
 const BROWN_MUSHROOM_LOCATION = new ResourceLocation("minecraft:brown_mushroom");
 const RED_MUSHROOM_LOCATION = new ResourceLocation("minecraft:red_mushroom");
+const BLUE_ORCHID_LOCATION = new ResourceLocation("minecraft:blue_orchid");
+const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
+const TALL_GRASS_LOCATION = new ResourceLocation("minecraft:tall_grass");
+const LILAC_LOCATION = new ResourceLocation("minecraft:lilac");
+const ROSE_BUSH_LOCATION = new ResourceLocation("minecraft:rose_bush");
+const PEONY_LOCATION = new ResourceLocation("minecraft:peony");
+const LILY_OF_THE_VALLEY_LOCATION = new ResourceLocation("minecraft:lily_of_the_valley");
 const PUMPKIN_LOCATION = new ResourceLocation("minecraft:pumpkin");
 const CACTUS_LOCATION = new ResourceLocation("minecraft:cactus");
 const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
+const GRANITE_LOCATION = new ResourceLocation("minecraft:granite");
+const DIORITE_LOCATION = new ResourceLocation("minecraft:diorite");
+const ANDESITE_LOCATION = new ResourceLocation("minecraft:andesite");
 
 const GENERATED_BLOCK_LOCATIONS = [
   STONE_LOCATION,
@@ -72,6 +83,13 @@ const GENERATED_BLOCK_LOCATIONS = [
   SWEET_BERRY_BUSH_LOCATION,
   BROWN_MUSHROOM_LOCATION,
   RED_MUSHROOM_LOCATION,
+  BLUE_ORCHID_LOCATION,
+  LILY_PAD_LOCATION,
+  TALL_GRASS_LOCATION,
+  LILAC_LOCATION,
+  ROSE_BUSH_LOCATION,
+  PEONY_LOCATION,
+  LILY_OF_THE_VALLEY_LOCATION,
   PUMPKIN_LOCATION,
   CACTUS_LOCATION,
   SUGAR_CANE_LOCATION,
@@ -112,6 +130,17 @@ const GENERATED_SPRITE_LOCATIONS = [
   new ResourceLocation("minecraft:block/sweet_berry_bush_stage3"),
   new ResourceLocation("minecraft:block/brown_mushroom"),
   new ResourceLocation("minecraft:block/red_mushroom"),
+  new ResourceLocation("minecraft:block/blue_orchid"),
+  new ResourceLocation("minecraft:block/lily_pad"),
+  new ResourceLocation("minecraft:block/tall_grass_bottom"),
+  new ResourceLocation("minecraft:block/tall_grass_top"),
+  new ResourceLocation("minecraft:block/lilac_bottom"),
+  new ResourceLocation("minecraft:block/lilac_top"),
+  new ResourceLocation("minecraft:block/rose_bush_bottom"),
+  new ResourceLocation("minecraft:block/rose_bush_top"),
+  new ResourceLocation("minecraft:block/peony_bottom"),
+  new ResourceLocation("minecraft:block/peony_top"),
+  new ResourceLocation("minecraft:block/lily_of_the_valley"),
   new ResourceLocation("minecraft:block/pumpkin_top"),
   new ResourceLocation("minecraft:block/pumpkin_side"),
   new ResourceLocation("minecraft:block/cactus_side"),
@@ -169,10 +198,12 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     WATER_LOCATION,
     new LiquidBlock(Fluids.WATER, BlockBehaviour.Properties.of(Material.WATER).noCollission().strength(100.0)),
   ).defaultBlockState();
+  Fluids.WATER.setLegacyBlock(waterState);
   const lavaState = registerBlock(
     LAVA_LOCATION,
     new LiquidBlock(Fluids.LAVA, BlockBehaviour.Properties.of(Material.LAVA).noCollission().randomTicks().strength(100.0).lightLevel(() => 15)),
   ).defaultBlockState();
+  Fluids.LAVA.setLegacyBlock(lavaState);
   const snowState = registerBlock(
     SNOW_LOCATION,
     // WebGPU: partial-block occlusion stays disabled until voxel-shape-based meshing is ported.
@@ -237,6 +268,34 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     RED_MUSHROOM_LOCATION,
     new MushroomBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
+  const blueOrchidState = registerBlock(
+    BLUE_ORCHID_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const lilyPadState = registerBlock(
+    LILY_PAD_LOCATION,
+    new WaterlilyBlock(BlockBehaviour.Properties.of(Material.PLANT).instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const tallGrassState = registerBlock(
+    TALL_GRASS_LOCATION,
+    new DoublePlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const lilacState = registerBlock(
+    LILAC_LOCATION,
+    new DoublePlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const roseBushState = registerBlock(
+    ROSE_BUSH_LOCATION,
+    new DoublePlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const peonyState = registerBlock(
+    PEONY_LOCATION,
+    new DoublePlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const lilyOfTheValleyState = registerBlock(
+    LILY_OF_THE_VALLEY_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
   const pumpkinState = registerBlock(
     PUMPKIN_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.VEGETABLE, MaterialColor.COLOR_ORANGE).strength(1.0).sound(SoundType.WOOD)),
@@ -249,6 +308,18 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     SUGAR_CANE_LOCATION,
     new SugarCaneBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
+  registerBlock(
+    GRANITE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.DIRT).requiresCorrectToolForDrops().strength(1.5, 6.0)),
+  );
+  registerBlock(
+    DIORITE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.QUARTZ).requiresCorrectToolForDrops().strength(1.5, 6.0)),
+  );
+  registerBlock(
+    ANDESITE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.STONE).requiresCorrectToolForDrops().strength(1.5, 6.0)),
+  );
 
   ItemBlockRenderTypes.setFancy(true);
   ItemBlockRenderTypes.setRenderLayer(grassState.getBlock(), RenderType.cutoutMipped());
@@ -263,6 +334,13 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(sweetBerryBushState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(brownMushroomState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(redMushroomState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(blueOrchidState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(lilyPadState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(tallGrassState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(lilacState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(roseBushState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(peonyState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(lilyOfTheValleyState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(pumpkinState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(cactusState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(sugarCaneState.getBlock(), RenderType.cutout());

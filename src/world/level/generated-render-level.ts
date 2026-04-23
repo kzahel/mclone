@@ -94,6 +94,10 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     return resolver.getColor(biome, pos.getX(), pos.getZ());
   }
 
+  public override getBiome(pos: BlockPos): Biome {
+    return getBlockPositionBiome(this.biomeZoomSeed, pos.getX(), pos.getZ(), this.biomeSource) as Biome;
+  }
+
   private inRange(chunkX: number, chunkZ: number): boolean {
     return Math.abs(chunkX - this.viewCenterX) <= this.chunkRadius && Math.abs(chunkZ - this.viewCenterZ) <= this.chunkRadius;
   }

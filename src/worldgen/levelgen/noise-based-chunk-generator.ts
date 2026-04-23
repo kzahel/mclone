@@ -3,7 +3,10 @@ import { getBlockPositionBiome } from "../biome/biome-zoom.ts";
 import type { Biome } from "../biome/biome.ts";
 import type { NoiseBiomeSource } from "../biome/noise-biome-source.ts";
 import { BlockPos } from "../../core/block-pos.ts";
+import { Registry } from "../../core/registry.ts";
+import { ResourceLocation } from "../../core/resource-location.ts";
 import type { WorldGenLevel } from "../../world/level/world-gen-level.ts";
+import type { Block } from "../../world/level/block/block.ts";
 import { applyOverworldAirCarvers } from "../carver/overworld-carvers.ts";
 import { MutableChunkBlockBuffer, CHUNK_WIDTH, ChunkBlockId, blockBufferIndex } from "../chunk/chunk-block-buffer.ts";
 import { buildChunkHeightmaps, type ChunkHeightmaps } from "../chunk/chunk-heightmaps.ts";
@@ -16,12 +19,14 @@ import { SimplexNoise } from "../noise/simplex-noise.ts";
 import type { LongSeed } from "../prng/simple-random-source.ts";
 import { WorldgenRandom } from "../prng/worldgen-random.ts";
 import { applyOverworldSurface } from "../surface/surface-builders.ts";
+import { type BaseStoneSource, SingleBaseStoneSource } from "./base-stone-source.ts";
 import { NoiseModifier } from "./noise-modifier.ts";
 import { NoiseGeneratorSettings } from "./noise-generator-settings.ts";
 import { NoiseSampler } from "./noise-sampler.ts";
 
 const SURFACE_NOISE_OCTAVES = [-3, -2, -1, 0] as const;
 const DEPTH_NOISE_OCTAVES = [-15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0] as const;
+const STONE_LOCATION = new ResourceLocation("minecraft:stone");
 
 export interface TerrainChunk {
   readonly chunkX: number;
@@ -111,6 +116,7 @@ export class NoiseBasedChunkGenerator {
   private readonly seaLevel: number;
   private readonly surfaceNoise: SurfaceNoise;
   private readonly sampler: NoiseSampler;
+  private baseStoneSource: BaseStoneSource | undefined;
 
   public constructor(
     private readonly biomeSource: NoiseBiomeSource,
@@ -198,6 +204,19 @@ export class NoiseBasedChunkGenerator {
     const random = new WorldgenRandom();
     const decorationSeed = random.setDecorationSeed(this.seed, minBlockX, minBlockZ);
     biome.generate(this, level, decorationSeed, random, origin);
+  }
+
+  public getBaseStoneSource(): BaseStoneSource {
+    if (this.baseStoneSource === undefined) {
+      const stone = Registry.BLOCK.get(STONE_LOCATION) as Block | undefined;
+      if (stone === undefined) {
+        throw new Error(`Missing registered block ${STONE_LOCATION}`);
+      }
+
+      this.baseStoneSource = new SingleBaseStoneSource(stone.defaultBlockState());
+    }
+
+    return this.baseStoneSource;
   }
 
   private fillTerrainBlockBuffer(chunk: MutableChunkBlockBuffer): void {

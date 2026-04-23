@@ -2,6 +2,7 @@ import { BlockPos } from "../../../core/block-pos";
 import type { BlockGetter } from "../block-getter";
 import type { Fluid } from "./fluid";
 import { Vec3 } from "../../phys/vec3";
+import type { BlockState } from "../block/state/block-state";
 
 export class FluidState {
   public constructor(private readonly owner: Fluid) {}
@@ -46,5 +47,9 @@ export class FluidState {
 
   public getFlow(level: BlockGetter, pos: BlockPos): Vec3 {
     return this.owner.getFlow(level, pos, this);
+  }
+
+  public createLegacyBlock(): BlockState {
+    return this.owner.createLegacyBlock();
   }
 }

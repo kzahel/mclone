@@ -5,10 +5,13 @@ import { FoliageColor } from "../../world/level/foliage-color";
 import { GrassColor } from "../../world/level/grass-color";
 import { BlockPos } from "../../core/block-pos";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
+import { LightLayer } from "../../world/level/light-layer";
 import { GenerationStep } from "../levelgen/generation-step";
 import type { NoiseBasedChunkGenerator } from "../levelgen/noise-based-chunk-generator";
 import { PerlinSimplexNoise } from "../noise/perlin-simplex-noise";
 import { WorldgenRandom } from "../prng/worldgen-random";
+import { Fluids } from "../../world/level/material/fluids";
+import { LiquidBlock } from "../../world/level/block/liquid-block";
 
 export interface BiomeDefinition {
   id: number;
@@ -91,6 +94,20 @@ export class Biome implements NoiseBiome {
 
   public getWaterColor(): number {
     return this.waterColor;
+  }
+
+  public shouldFreeze(level: WorldGenLevel, pos: BlockPos, _mustBeAtEdge = true): boolean {
+    if (this.temperature >= 0.15) {
+      return false;
+    }
+
+    if (pos.getY() < level.getMinBuildHeight() || pos.getY() >= level.getMaxBuildHeight() || level.getBrightness(LightLayer.BLOCK, pos) >= 10) {
+      return false;
+    }
+
+    const state = level.getBlockState(pos);
+    const fluidState = level.getFluidState(pos);
+    return fluidState.getType().isSame(Fluids.WATER) && state.getBlock() instanceof LiquidBlock;
   }
 
   public getGenerationSettings(): BiomeGenerationSettings {

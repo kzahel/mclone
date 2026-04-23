@@ -61,6 +61,20 @@ export function aboveBottom(value: number): VerticalAnchor {
   };
 }
 
+export function belowTop(value: number): VerticalAnchor {
+  return {
+    resolveY: (context) => context.minY + context.genDepth - 1 - value,
+  };
+}
+
+export function bottom(): VerticalAnchor {
+  return aboveBottom(0);
+}
+
+export function top(): VerticalAnchor {
+  return belowTop(0);
+}
+
 export function constantFloat(value: number): FloatProvider {
   const sampled = f32(value);
   return {
@@ -103,6 +117,16 @@ export function biasedToBottomHeight(
 
       const bias = random.nextInt(span);
       return random.nextInt(bias + inner) + minValue;
+    },
+  };
+}
+
+export function uniformHeight(minInclusive: VerticalAnchor, maxInclusive: VerticalAnchor): HeightProvider {
+  return {
+    sample: (random, context) => {
+      const minValue = minInclusive.resolveY(context);
+      const maxValue = maxInclusive.resolveY(context);
+      return minValue + random.nextInt((maxValue - minValue) + 1);
     },
   };
 }

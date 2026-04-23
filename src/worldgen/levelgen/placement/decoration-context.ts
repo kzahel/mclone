@@ -22,6 +22,14 @@ export class DecorationContext {
     return this.level.getMinBuildHeight();
   }
 
+  public getMaxBuildHeight(): number {
+    return this.level.getMaxBuildHeight();
+  }
+
+  public getGenDepth(): number {
+    return this.getMaxBuildHeight() - this.getMinBuildHeight();
+  }
+
   public getLevel(): WorldGenLevel {
     return this.level;
   }

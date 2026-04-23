@@ -32,14 +32,14 @@ const GENERATED_SEED = 12_345n;
 const GENERATED_VIEW_DISTANCE = 1;
 const GENERATED_CAMERA_PATH = [
   {
-    position: new Vec3(184.5, 92.0, -215.5),
-    xRot: 52.0,
-    yRot: 180.0,
+    position: new Vec3(-258.5, 70.0, -1004.5),
+    xRot: 50.0,
+    yRot: 0.0,
   },
   {
-    position: new Vec3(200.5, 92.0, -215.5),
-    xRot: 52.0,
-    yRot: 180.0,
+    position: new Vec3(-242.5, 70.0, -1004.5),
+    xRot: 50.0,
+    yRot: 0.0,
   },
 ] as const satisfies readonly CameraState[];
 

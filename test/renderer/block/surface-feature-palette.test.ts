@@ -39,6 +39,8 @@ describe("Surface feature palette", () => {
 
     expect(colors.getColor(getState("minecraft:grass"), null, null, 0)).toBe(TEST_GRASS_COLOR);
     expect(colors.getColor(getState("minecraft:fern"), null, null, 0)).toBe(TEST_GRASS_COLOR);
+    expect(colors.getColor(getState("minecraft:tall_grass"), null, null, 0)).toBe(-1);
+    expect(colors.getColor(getState("minecraft:lily_pad"), null, null, 0)).toBe(0x71c35c);
     expect(colors.getColor(getState("minecraft:oak_leaves"), null, null, 0)).toBe(FoliageColor.getDefaultColor());
     expect(colors.getColor(getState("minecraft:sugar_cane"), null, null, 0)).toBe(-1);
   });
@@ -49,8 +51,11 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_leaves"))).toBe(RenderType.cutoutMipped());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:grass"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:large_fern"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:tall_grass"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_sapling"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:sweet_berry_bush"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:blue_orchid"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:lily_pad"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:brown_mushroom"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:cactus"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_log"))).toBe(RenderType.solid());

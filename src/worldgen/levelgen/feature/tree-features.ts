@@ -91,4 +91,17 @@ export class TreeFeatures {
         .build(),
     );
   }
+
+  public static get SWAMP_OAK() {
+    return Features.TREE.configured(
+      new TreeConfiguration.TreeConfigurationBuilder(
+        new SimpleStateProvider(getRequiredState(OAK_LOG_LOCATION)),
+        new StraightTrunkPlacer(5, 3, 0),
+        new SimpleStateProvider(getRequiredState(OAK_LEAVES_LOCATION)),
+        new SimpleStateProvider(getRequiredState(OAK_SAPLING_LOCATION)),
+        new BlobFoliagePlacer(ConstantInt.of(3), ConstantInt.of(0), 3),
+        new TwoLayersFeatureSize(1, 0, 1),
+      ).build(),
+    );
+  }
 }

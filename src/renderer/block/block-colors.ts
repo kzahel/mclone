@@ -18,6 +18,8 @@ const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
 const GRASS_LOCATION = new ResourceLocation("minecraft:grass");
 const FERN_LOCATION = new ResourceLocation("minecraft:fern");
 const LARGE_FERN_LOCATION = new ResourceLocation("minecraft:large_fern");
+const TALL_GRASS_LOCATION = new ResourceLocation("minecraft:tall_grass");
+const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
 const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
 const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 const WATER_LOCATION = new ResourceLocation("minecraft:water");
@@ -44,15 +46,17 @@ export class BlockColors {
     );
 
     const largeFern = Registry.BLOCK.get(LARGE_FERN_LOCATION) as Block | undefined;
-    if (largeFern !== undefined) {
+    const tallGrass = Registry.BLOCK.get(TALL_GRASS_LOCATION) as Block | undefined;
+    const doubleGrassBlocks = [largeFern, tallGrass].filter((block): block is Block => block !== undefined);
+    if (doubleGrassBlocks.length > 0) {
       blockColors.register(
         (state, level, pos) =>
           level !== null && pos !== null
             ? BiomeColors.getAverageGrassColor(level, state.getValue(DoublePlantBlock.HALF) === DoubleBlockHalf.UPPER ? pos.below() : pos)
             : -1,
-        largeFern,
+        ...doubleGrassBlocks,
       );
-      blockColors.addColoringState(DoublePlantBlock.HALF, largeFern);
+      blockColors.addColoringState(DoublePlantBlock.HALF, ...doubleGrassBlocks);
     }
 
     const oakLeaves = Registry.BLOCK.get(OAK_LEAVES_LOCATION) as Block | undefined;
@@ -77,6 +81,11 @@ export class BlockColors {
         (_state, level, pos) => level !== null && pos !== null ? BiomeColors.getAverageGrassColor(level, pos) : -1,
         sugarCane,
       );
+    }
+
+    const lilyPad = Registry.BLOCK.get(LILY_PAD_LOCATION) as Block | undefined;
+    if (lilyPad !== undefined) {
+      blockColors.register((_state, level, pos) => level !== null && pos !== null ? 2_129_968 : 7_455_580, lilyPad);
     }
 
     return blockColors;

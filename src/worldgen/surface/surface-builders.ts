@@ -1,4 +1,4 @@
-import type { Biome } from "../biome/biome.ts";
+import { Biome } from "../biome/biome.ts";
 import { CHUNK_WIDTH, ChunkBlockId, type ChunkBlockId as BlockId, MutableChunkBlockBuffer } from "../chunk/chunk-block-buffer.ts";
 import { WorldgenRandom } from "../prng/worldgen-random.ts";
 
@@ -8,7 +8,7 @@ interface SurfaceBuilderConfiguration {
   readonly underwaterMaterial: BlockId;
 }
 
-type SurfaceBuilderKind = "default" | "mountain" | "gravelly_mountain";
+type SurfaceBuilderKind = "default" | "mountain" | "gravelly_mountain" | "swamp";
 
 interface SurfaceBiomeDefinition {
   readonly builder: SurfaceBuilderKind;
@@ -128,7 +128,11 @@ function resolveSurfaceBiomeDefinition(biome: Biome): SurfaceBiomeDefinition {
       };
     case "minecraft:swamp":
     case "minecraft:swamp_hills":
-      throw new RangeError("Swamp surface mutation is still out of scope for tactical 07");
+      return {
+        builder: "swamp",
+        baseTemperature: 0.8,
+        config: CONFIG_GRASS,
+      };
     case "minecraft:frozen_ocean":
     case "minecraft:deep_frozen_ocean":
       throw new RangeError("Frozen-ocean surface mutation needs ice/snow-block support beyond the tactical 07 numeric model");
@@ -326,6 +330,36 @@ export function applyOverworldSurface(
         minSurfaceLevel,
         definition.baseTemperature,
         noise < -1.0 || noise > 2.0 ? CONFIG_GRAVEL : noise > 1.0 ? CONFIG_STONE : CONFIG_GRASS,
+      );
+      return;
+    case "swamp":
+      if (Biome.BIOME_INFO_NOISE.getValue(worldX * 0.25, worldZ * 0.25, false) > 0.0) {
+        const localX = localCoord(worldX);
+        const localZ = localCoord(worldZ);
+        for (let y = height; y >= minSurfaceLevel; y--) {
+          const blockId = getBlockAtYOrAir(chunk, localX, y, localZ);
+          if (blockId === ChunkBlockId.AIR) {
+            continue;
+          }
+
+          if (y === 62 && blockId !== DEFAULT_FLUID) {
+            setBlockAtYIfInside(chunk, localX, y, localZ, DEFAULT_FLUID);
+          }
+          break;
+        }
+      }
+
+      applyDefaultSurface(
+        random,
+        chunk,
+        worldX,
+        worldZ,
+        height,
+        noise,
+        seaLevel,
+        minSurfaceLevel,
+        definition.baseTemperature,
+        definition.config,
       );
       return;
   }

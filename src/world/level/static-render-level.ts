@@ -10,6 +10,11 @@ import { Vec3 } from "../phys/vec3";
 import type { FluidState } from "./material/fluid-state";
 import { Heightmap } from "../../worldgen/levelgen/heightmap";
 import type { WorldGenLevel } from "./world-gen-level";
+import { getLayeredBiomeByKey } from "../../worldgen/biome/biome-data";
+import type { Biome } from "../../worldgen/biome/biome";
+import { BlackholeTickAccess } from "./tick-access";
+import type { Fluid } from "./material/fluid";
+import type { Block } from "./block/block";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -17,6 +22,8 @@ function chunkKey(chunkX: number, chunkZ: number): string {
 
 export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
   private readonly chunks = new Map<string, LevelChunk>();
+  private readonly blockTicks = new BlackholeTickAccess<Block>();
+  private readonly liquidTicks = new BlackholeTickAccess<Fluid>();
 
   public constructor(
     protected readonly airState: BlockState,
@@ -27,6 +34,7 @@ export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
     private readonly skyColor = new Vec3(0, 128 / 255, 0),
     private readonly clearColorScale = 1,
     private readonly ambientLight = 0,
+    private readonly defaultBiome: Biome = getLayeredBiomeByKey("minecraft:plains"),
   ) {}
 
   public setBlock(pos: BlockPos, state: BlockState, _flags = 3): boolean {
@@ -123,6 +131,10 @@ export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
     return layer === LightLayer.SKY ? this.skyLight : this.blockLight;
   }
 
+  public getBiome(_pos: BlockPos): Biome {
+    return this.defaultBiome;
+  }
+
   public getRawBrightness(pos: BlockPos, amount: number): number {
     const sky = this.isSkyVisible(pos) ? this.skyLight : this.ambientLight;
     return Math.max(0, sky - amount);
@@ -179,6 +191,14 @@ export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
 
   public getAmbientLight(): number {
     return this.ambientLight;
+  }
+
+  public getBlockTicks(): BlackholeTickAccess<Block> {
+    return this.blockTicks;
+  }
+
+  public getLiquidTicks(): BlackholeTickAccess<Fluid> {
+    return this.liquidTicks;
   }
 
   private isSkyVisible(pos: BlockPos): boolean {

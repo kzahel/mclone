@@ -58,4 +58,4 @@ Expand the translated biome-decoration palette beyond the first mountain/taiga t
 
 ## Next
 
-Tactical 26: water-feature and remaining biome-parity bridge. The smoke now proves natural translucent rendering by framing an existing taiga shoreline, but the translated worldgen still lacks the actual overworld water/decor surface feature path. The next slice should port `LakeFeature`, `SpringFeature`, the supporting block/configuration types, and the first swamp/forest/plains biome tables plus swamp surface mutation so natural water, lily pads, and the remaining common vegetation no longer depend on camera-picked terrain.
+Tactical 26: overworld water and swamp decoration. The next slice should replace the shoreline-only workaround with translated `LakeFeature` / `SpringFeature`, port swamp surface mutation, add lily pads and the remaining forest/plains/swamp decoration consumers, and move the browser smoke to a real swamp frame.

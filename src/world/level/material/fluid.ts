@@ -2,9 +2,11 @@ import type { BlockGetter } from "../block-getter";
 import { BlockPos } from "../../../core/block-pos";
 import { Vec3 } from "../../phys/vec3";
 import { FluidState } from "./fluid-state";
+import type { BlockState } from "../block/state/block-state";
 
 export abstract class Fluid {
   private readonly defaultFluidStateValue: FluidState;
+  private legacyBlockValue: BlockState | undefined;
 
   protected constructor() {
     this.defaultFluidStateValue = new FluidState(this);
@@ -40,5 +42,17 @@ export abstract class Fluid {
 
   public getFlow(_level: BlockGetter, _pos: BlockPos, _state: FluidState): Vec3 {
     return Vec3.ZERO;
+  }
+
+  public setLegacyBlock(state: BlockState): void {
+    this.legacyBlockValue = state;
+  }
+
+  public createLegacyBlock(): BlockState {
+    if (this.legacyBlockValue === undefined) {
+      throw new Error(`No legacy block has been registered for fluid ${this.constructor.name}`);
+    }
+
+    return this.legacyBlockValue;
   }
 }
