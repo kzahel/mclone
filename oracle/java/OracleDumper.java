@@ -106,7 +106,10 @@ public final class OracleDumper {
       "minecraft:red_sandstone",
       "minecraft:packed_ice",
       "minecraft:obsidian",
-      "minecraft:magma_block"
+      "minecraft:magma_block",
+      "minecraft:red_sand",
+      "minecraft:ice",
+      "minecraft:snow_block"
    };
    private static final BlendedNoiseSampleParameters[] BLENDED_NOISE_SAMPLE_SETS = new BlendedNoiseSampleParameters[]{
       blendedNoiseSampleParameters("overworld", new String[]{"overworld", "amplified"}, 0.9999999814507745, 0.9999999814507745, 80.0, 160.0),
@@ -776,6 +779,12 @@ public final class OracleDumper {
             return 36;
          case "minecraft:magma_block":
             return 37;
+         case "minecraft:red_sand":
+            return 38;
+         case "minecraft:ice":
+            return 39;
+         case "minecraft:snow_block":
+            return 40;
          default:
             throw new IllegalStateException("unexpected surface-stage block from Java oracle: " + key);
       }

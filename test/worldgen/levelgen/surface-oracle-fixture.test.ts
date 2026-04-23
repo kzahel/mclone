@@ -3,6 +3,8 @@ import integrationFixture from "../../fixtures/integration/overworld-seed-12345-
 import surfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-surface-only.json";
 import sandSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-5-115-surface-only.json";
 import desertSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-surface-only.json";
+import frozenSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks--247--247-surface-only.json";
+import badlandsSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks--320-99-surface-only.json";
 import { CHUNK_BLOCK_NAMES, ChunkBlockId } from "../../../src/worldgen/chunk/chunk-block-buffer.ts";
 
 interface IntegrationChunkFixture {
@@ -33,6 +35,8 @@ const fixture = integrationFixture as IntegrationFixture;
 const surfaceOracle = surfaceFixture as SurfaceChunkOracleFixture;
 const sandSurfaceOracle = sandSurfaceFixture as SurfaceChunkOracleFixture;
 const desertSurfaceOracle = desertSurfaceFixture as SurfaceChunkOracleFixture;
+const frozenSurfaceOracle = frozenSurfaceFixture as SurfaceChunkOracleFixture;
+const badlandsSurfaceOracle = badlandsSurfaceFixture as SurfaceChunkOracleFixture;
 
 function assertPinnedMetadata(oracle: SurfaceChunkOracleFixture, chunkX: number, chunkZ: number, seed: string): void {
   expect(oracle.module).toBe("surface-chunk");
@@ -58,6 +62,14 @@ describe("surface-stage oracle fixture", () => {
     assertPinnedMetadata(desertSurfaceOracle, 96, -64, "12345");
   });
 
+  test("pins the committed widened palette for the frozen-ocean surface oracle", () => {
+    assertPinnedMetadata(frozenSurfaceOracle, -247, -247, "12345");
+  });
+
+  test("pins the committed widened palette for the badlands surface oracle", () => {
+    assertPinnedMetadata(badlandsSurfaceOracle, -320, 99, "12345");
+  });
+
   test("contains surface-stage material ids while staying within the widened numeric model", () => {
     expect(surfaceOracle.blocks).toContain(ChunkBlockId.GRASS_BLOCK);
     expect(surfaceOracle.blocks).toContain(ChunkBlockId.DIRT);
@@ -65,8 +77,14 @@ describe("surface-stage oracle fixture", () => {
     expect(sandSurfaceOracle.blocks).toContain(ChunkBlockId.GRAVEL);
     expect(desertSurfaceOracle.blocks).toContain(ChunkBlockId.SAND);
     expect(desertSurfaceOracle.blocks).toContain(ChunkBlockId.SANDSTONE);
+    expect(frozenSurfaceOracle.blocks).toContain(ChunkBlockId.PACKED_ICE);
+    expect(frozenSurfaceOracle.blocks).toContain(ChunkBlockId.SNOW_BLOCK);
+    expect(badlandsSurfaceOracle.blocks).toContain(ChunkBlockId.RED_SAND);
+    expect(badlandsSurfaceOracle.blocks).toContain(ChunkBlockId.TERRACOTTA);
+    expect(badlandsSurfaceOracle.blocks).toContain(ChunkBlockId.ORANGE_TERRACOTTA);
+    expect(badlandsSurfaceOracle.blocks).toContain(ChunkBlockId.LIGHT_GRAY_TERRACOTTA);
 
-    for (const oracle of [surfaceOracle, sandSurfaceOracle, desertSurfaceOracle]) {
+    for (const oracle of [surfaceOracle, sandSurfaceOracle, desertSurfaceOracle, frozenSurfaceOracle, badlandsSurfaceOracle]) {
       expect(oracle.module).toBe("surface-chunk");
       expect(oracle.minecraftVersion).toBe("1.17.1");
       expect(oracle.palette).toEqual([...CHUNK_BLOCK_NAMES]);

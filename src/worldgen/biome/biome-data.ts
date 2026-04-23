@@ -1,4 +1,4 @@
-import { Biome, GrassColorModifier, type BiomeDefinition } from "./biome";
+import { Biome, GrassColorModifier, TemperatureModifier, type BiomeDefinition } from "./biome";
 import { getOverworldBiomeGenerationSettings } from "./overworld-biome-generation-settings";
 
 function visuals(
@@ -53,7 +53,7 @@ function ocean(id: number, key: string, depth: number, scale: number, waterColor
 }
 
 function frozenOcean(id: number, key: string, depth: number, scale: number, deep: boolean): BiomeDefinition {
-  return visuals(id, key, depth, scale, deep ? 0.5 : 0.0, 0.5, 3_750_089);
+  return { ...visuals(id, key, depth, scale, deep ? 0.5 : 0.0, 0.5, 3_750_089), temperatureModifier: TemperatureModifier.FROZEN };
 }
 
 function tundra(id: number, key: string, depth: number, scale: number): BiomeDefinition {
@@ -172,6 +172,7 @@ const ALL_OVERWORLD_LAYERED_BIOMES = ALL_OVERWORLD_LAYERED_BIOME_DEFINITIONS.map
       definition.foliageColorOverride,
       definition.grassColorOverride,
       definition.grassColorModifier,
+      definition.temperatureModifier,
       getOverworldBiomeGenerationSettings(definition.key),
     ),
 );

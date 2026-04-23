@@ -2,18 +2,17 @@ import { Registry } from "../../../core/registry";
 import { ResourceLocation } from "../../../core/resource-location";
 import { BlockTags } from "../../../tags/block-tags";
 import { LightLayer } from "../../../world/level/light-layer";
-import { AirBlock } from "../../../world/level/block/air-block";
 import type { Block } from "../../../world/level/block/block";
-import { BlockBehaviour } from "../../../world/level/block/state/block-behaviour";
+import type { BlockState } from "../../../world/level/block/state/block-state";
 import { Material } from "../../../world/level/material/material";
 import { Feature } from "./feature";
 import type { FeaturePlaceContext } from "./feature-place-context";
 import { BlockStateConfiguration } from "./configurations/block-state-configuration";
 
-const AIR = new AirBlock(BlockBehaviour.Properties.of(Material.AIR).noCollission().noOcclusion().air()).defaultBlockState();
+const AIR_LOCATION = new ResourceLocation("minecraft:air");
 const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
 
-function getRequiredState(location: ResourceLocation) {
+function getRequiredState(location: ResourceLocation): BlockState {
   const block = Registry.BLOCK.get(location) as Block | undefined;
   if (block === undefined) {
     throw new Error(`Missing registered block ${location}`);
@@ -49,6 +48,7 @@ export class LakeFeature extends Feature<BlockStateConfiguration> {
     }
 
     origin = origin.below(4);
+    const airState = getRequiredState(AIR_LOCATION);
     const carveMask = new Array<boolean>(2048).fill(false);
     const ellipsoidCount = random.nextInt(4) + 4;
 
@@ -103,9 +103,9 @@ export class LakeFeature extends Feature<BlockStateConfiguration> {
 
           const pos = origin.offset(x, y, z);
           const upperHalf = y >= 4;
-          level.setBlock(pos, upperHalf ? AIR : config.state, 2);
+          level.setBlock(pos, upperHalf ? airState : config.state, 2);
           if (upperHalf) {
-            level.getBlockTicks().scheduleTick(pos, AIR.getBlock(), 0);
+            level.getBlockTicks().scheduleTick(pos, airState.getBlock(), 0);
           }
         }
       }

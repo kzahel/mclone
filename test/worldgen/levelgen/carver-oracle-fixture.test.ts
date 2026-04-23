@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import carvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-carved-only.json";
 import oceanCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json";
 import desertCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-carved-only.json";
+import badlandsCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--320-99-carved-only.json";
 import liquidOceanCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-117--128-liquid-carved.json";
 import liquidFloorCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--129--256-liquid-carved.json";
 import { CHUNK_BLOCK_NAMES, ChunkBlockId } from "../../../src/worldgen/chunk/chunk-block-buffer.ts";
@@ -37,6 +38,7 @@ interface CarvedChunkOracleFixture {
 const carvedOracle = carvedFixture as CarvedChunkOracleFixture;
 const oceanCarvedOracle = oceanCarvedFixture as CarvedChunkOracleFixture;
 const desertCarvedOracle = desertCarvedFixture as CarvedChunkOracleFixture;
+const badlandsCarvedOracle = badlandsCarvedFixture as CarvedChunkOracleFixture;
 const liquidOceanCarvedOracle = liquidOceanCarvedFixture as CarvedChunkOracleFixture;
 const liquidFloorCarvedOracle = liquidFloorCarvedFixture as CarvedChunkOracleFixture;
 
@@ -72,6 +74,10 @@ describe("carved-stage oracle fixture", () => {
 
   test("pins the committed carved-stage metadata and widened numeric palette for the desert oracle", () => {
     assertPinnedMetadata(desertCarvedOracle, 96, -64, "carved-chunk");
+  });
+
+  test("pins the committed carved-stage metadata and widened numeric palette for the badlands oracle", () => {
+    assertPinnedMetadata(badlandsCarvedOracle, -320, 99, "carved-chunk");
   });
 
   test("pins the committed air-plus-liquid carved-stage metadata for the ocean oracle", () => {
@@ -112,6 +118,20 @@ describe("carved-stage oracle fixture", () => {
     for (const blockId of desertCarvedOracle.blocks) {
       expect(blockId).toBeGreaterThanOrEqual(0);
       expect(blockId).toBeLessThan(desertCarvedOracle.palette.length);
+    }
+  });
+
+  test("badlands carved oracle contains red sand, terracotta bands, air carving, and lava-floor ids", () => {
+    expect(badlandsCarvedOracle.blocks).toContain(ChunkBlockId.RED_SAND);
+    expect(badlandsCarvedOracle.blocks).toContain(ChunkBlockId.TERRACOTTA);
+    expect(badlandsCarvedOracle.blocks).toContain(ChunkBlockId.ORANGE_TERRACOTTA);
+    expect(badlandsCarvedOracle.blocks).toContain(ChunkBlockId.RED_TERRACOTTA);
+    expect(badlandsCarvedOracle.blocks).toContain(ChunkBlockId.AIR);
+    expect(badlandsCarvedOracle.blocks).toContain(ChunkBlockId.LAVA);
+
+    for (const blockId of badlandsCarvedOracle.blocks) {
+      expect(blockId).toBeGreaterThanOrEqual(0);
+      expect(blockId).toBeLessThan(badlandsCarvedOracle.palette.length);
     }
   });
 

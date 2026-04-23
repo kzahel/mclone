@@ -345,7 +345,7 @@ export class NoiseBasedChunkGenerator {
         const surfaceValue =
           this.surfaceNoise.getSurfaceNoiseValue(x * 0.0625, z * 0.0625, 0.0625, localX * 0.0625) * 15.0;
         const biome = getBlockPositionBiome(this.seed, x, z, this.biomeSource) as Biome;
-        applyOverworldSurface(random, chunk, biome, x, z, heightY, surfaceValue, this.seaLevel, minSurfaceLevel);
+        applyOverworldSurface(random, chunk, biome, x, z, heightY, surfaceValue, this.seaLevel, minSurfaceLevel, this.seed);
       }
     }
   }

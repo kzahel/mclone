@@ -8,7 +8,10 @@ import liquidOceanCarvedFixture from "../../fixtures/integration/overworld-seed-
 import liquidFloorCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--129--256-liquid-carved.json";
 import sandSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-5-115-surface-only.json";
 import desertSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-surface-only.json";
+import frozenSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks--247--247-surface-only.json";
+import badlandsSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks--320-99-surface-only.json";
 import desertCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-carved-only.json";
+import badlandsCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks--320-99-carved-only.json";
 import { OverworldBiomeSource } from "../../../src/worldgen/biome/overworld-biome-source.ts";
 import {
   ChunkBlockId,
@@ -90,7 +93,10 @@ const liquidOceanCarvedOracle = liquidOceanCarvedFixture as CarvedChunkOracleFix
 const liquidFloorCarvedOracle = liquidFloorCarvedFixture as CarvedChunkOracleFixture;
 const sandSurfaceOracle = sandSurfaceFixture as SurfaceChunkOracleFixture;
 const desertSurfaceOracle = desertSurfaceFixture as SurfaceChunkOracleFixture;
+const frozenSurfaceOracle = frozenSurfaceFixture as SurfaceChunkOracleFixture;
+const badlandsSurfaceOracle = badlandsSurfaceFixture as SurfaceChunkOracleFixture;
 const desertCarvedOracle = desertCarvedFixture as CarvedChunkOracleFixture;
+const badlandsCarvedOracle = badlandsCarvedFixture as CarvedChunkOracleFixture;
 
 function blockNameAt(section: TerrainChunkSection, index: number): string {
   return section.palette[section.blocks[index]!]!;
@@ -275,6 +281,24 @@ describe("NoiseBasedChunkGenerator", () => {
     assertChunkParity(actualChunk, desertSurfaceOracle);
   });
 
+  test("matches the widened frozen-ocean surface oracle for chunk (-247, -247)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(frozenSurfaceOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(frozenSurfaceOracle.seed));
+    const actualChunk = generator.fillFromNoise(frozenSurfaceOracle.chunkX, frozenSurfaceOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+
+    assertChunkParity(actualChunk, frozenSurfaceOracle);
+  });
+
+  test("matches the widened badlands surface oracle for chunk (-320, 99)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(badlandsSurfaceOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(badlandsSurfaceOracle.seed));
+    const actualChunk = generator.fillFromNoise(badlandsSurfaceOracle.chunkX, badlandsSurfaceOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+
+    assertChunkParity(actualChunk, badlandsSurfaceOracle);
+  });
+
   test("matches the pinned carved-only oracle for chunk (0, 0)", () => {
     const biomeSource = new OverworldBiomeSource(BigInt(carvedOracle.seed));
     const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(carvedOracle.seed));
@@ -306,6 +330,17 @@ describe("NoiseBasedChunkGenerator", () => {
 
     assertChunkParity(actualChunk, desertCarvedOracle);
     assertScheduledTickParity(actualChunk, desertCarvedOracle);
+  });
+
+  test("matches the pinned carved-only badlands oracle for chunk (-320, 99)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(badlandsCarvedOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(badlandsCarvedOracle.seed));
+    const actualChunk = generator.fillFromNoise(badlandsCarvedOracle.chunkX, badlandsCarvedOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+    generator.applyCarvers(actualChunk, GenerationStep.Carving.AIR);
+
+    assertChunkParity(actualChunk, badlandsCarvedOracle);
+    assertScheduledTickParity(actualChunk, badlandsCarvedOracle);
   });
 
   test("matches the pinned air-plus-liquid carved ocean oracle for chunk (117, -128)", () => {

@@ -28,6 +28,7 @@ import { Material } from "./material/material";
 import { MaterialColor } from "./material/material-color";
 
 const STONE_LOCATION = new ResourceLocation("minecraft:stone");
+const AIR_LOCATION = new ResourceLocation("minecraft:air");
 const BEDROCK_LOCATION = new ResourceLocation("minecraft:bedrock");
 const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
 const DIRT_LOCATION = new ResourceLocation("minecraft:dirt");
@@ -79,6 +80,36 @@ const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 const GRANITE_LOCATION = new ResourceLocation("minecraft:granite");
 const DIORITE_LOCATION = new ResourceLocation("minecraft:diorite");
 const ANDESITE_LOCATION = new ResourceLocation("minecraft:andesite");
+const COARSE_DIRT_LOCATION = new ResourceLocation("minecraft:coarse_dirt");
+const PODZOL_LOCATION = new ResourceLocation("minecraft:podzol");
+const MYCELIUM_LOCATION = new ResourceLocation("minecraft:mycelium");
+const TERRACOTTA_LOCATION = new ResourceLocation("minecraft:terracotta");
+const WHITE_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:white_terracotta");
+const ORANGE_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:orange_terracotta");
+const MAGENTA_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:magenta_terracotta");
+const LIGHT_BLUE_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:light_blue_terracotta");
+const YELLOW_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:yellow_terracotta");
+const LIME_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:lime_terracotta");
+const PINK_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:pink_terracotta");
+const GRAY_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:gray_terracotta");
+const LIGHT_GRAY_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:light_gray_terracotta");
+const CYAN_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:cyan_terracotta");
+const PURPLE_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:purple_terracotta");
+const BLUE_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:blue_terracotta");
+const BROWN_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:brown_terracotta");
+const GREEN_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:green_terracotta");
+const RED_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:red_terracotta");
+const BLACK_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:black_terracotta");
+const SANDSTONE_LOCATION = new ResourceLocation("minecraft:sandstone");
+const RED_SANDSTONE_LOCATION = new ResourceLocation("minecraft:red_sandstone");
+const PACKED_ICE_LOCATION = new ResourceLocation("minecraft:packed_ice");
+const RED_SAND_LOCATION = new ResourceLocation("minecraft:red_sand");
+const ICE_LOCATION = new ResourceLocation("minecraft:ice");
+const SNOW_BLOCK_LOCATION = new ResourceLocation("minecraft:snow_block");
+
+function blockTexture(path: string): ResourceLocation {
+  return new ResourceLocation(`minecraft:block/${path}`);
+}
 
 const GENERATED_BLOCK_LOCATIONS = [
   STONE_LOCATION,
@@ -130,80 +161,143 @@ const GENERATED_BLOCK_LOCATIONS = [
   PUMPKIN_LOCATION,
   CACTUS_LOCATION,
   SUGAR_CANE_LOCATION,
+  GRANITE_LOCATION,
+  DIORITE_LOCATION,
+  ANDESITE_LOCATION,
+  COARSE_DIRT_LOCATION,
+  PODZOL_LOCATION,
+  MYCELIUM_LOCATION,
+  TERRACOTTA_LOCATION,
+  WHITE_TERRACOTTA_LOCATION,
+  ORANGE_TERRACOTTA_LOCATION,
+  MAGENTA_TERRACOTTA_LOCATION,
+  LIGHT_BLUE_TERRACOTTA_LOCATION,
+  YELLOW_TERRACOTTA_LOCATION,
+  LIME_TERRACOTTA_LOCATION,
+  PINK_TERRACOTTA_LOCATION,
+  GRAY_TERRACOTTA_LOCATION,
+  LIGHT_GRAY_TERRACOTTA_LOCATION,
+  CYAN_TERRACOTTA_LOCATION,
+  PURPLE_TERRACOTTA_LOCATION,
+  BLUE_TERRACOTTA_LOCATION,
+  BROWN_TERRACOTTA_LOCATION,
+  GREEN_TERRACOTTA_LOCATION,
+  RED_TERRACOTTA_LOCATION,
+  BLACK_TERRACOTTA_LOCATION,
+  SANDSTONE_LOCATION,
+  RED_SANDSTONE_LOCATION,
+  PACKED_ICE_LOCATION,
+  RED_SAND_LOCATION,
+  ICE_LOCATION,
+  SNOW_BLOCK_LOCATION,
 ] as const;
 
-const GENERATED_SPRITE_LOCATIONS = [
-  new ResourceLocation("minecraft:block/stone"),
-  new ResourceLocation("minecraft:block/bedrock"),
-  new ResourceLocation("minecraft:block/grass_block_top"),
-  new ResourceLocation("minecraft:block/grass_block_side"),
-  new ResourceLocation("minecraft:block/grass_block_side_overlay"),
-  new ResourceLocation("minecraft:block/grass_block_snow"),
-  new ResourceLocation("minecraft:block/dirt"),
-  new ResourceLocation("minecraft:block/sand"),
-  new ResourceLocation("minecraft:block/gravel"),
-  new ResourceLocation("minecraft:block/water_still"),
-  new ResourceLocation("minecraft:block/water_flow"),
-  new ResourceLocation("minecraft:block/water_overlay"),
-  new ResourceLocation("minecraft:block/lava_still"),
-  new ResourceLocation("minecraft:block/lava_flow"),
-  new ResourceLocation("minecraft:block/snow"),
-  new ResourceLocation("minecraft:block/obsidian"),
-  new ResourceLocation("minecraft:block/magma"),
-  new ResourceLocation("minecraft:block/oak_log"),
-  new ResourceLocation("minecraft:block/oak_log_top"),
-  new ResourceLocation("minecraft:block/oak_leaves"),
-  new ResourceLocation("minecraft:block/spruce_log"),
-  new ResourceLocation("minecraft:block/spruce_log_top"),
-  new ResourceLocation("minecraft:block/spruce_leaves"),
-  new ResourceLocation("minecraft:block/birch_log"),
-  new ResourceLocation("minecraft:block/birch_log_top"),
-  new ResourceLocation("minecraft:block/birch_leaves"),
-  new ResourceLocation("minecraft:block/grass"),
-  new ResourceLocation("minecraft:block/fern"),
-  new ResourceLocation("minecraft:block/dandelion"),
-  new ResourceLocation("minecraft:block/poppy"),
-  new ResourceLocation("minecraft:block/allium"),
-  new ResourceLocation("minecraft:block/azure_bluet"),
-  new ResourceLocation("minecraft:block/red_tulip"),
-  new ResourceLocation("minecraft:block/orange_tulip"),
-  new ResourceLocation("minecraft:block/white_tulip"),
-  new ResourceLocation("minecraft:block/pink_tulip"),
-  new ResourceLocation("minecraft:block/oxeye_daisy"),
-  new ResourceLocation("minecraft:block/cornflower"),
-  new ResourceLocation("minecraft:block/oak_sapling"),
-  new ResourceLocation("minecraft:block/spruce_sapling"),
-  new ResourceLocation("minecraft:block/birch_sapling"),
-  new ResourceLocation("minecraft:block/large_fern_bottom"),
-  new ResourceLocation("minecraft:block/large_fern_top"),
-  new ResourceLocation("minecraft:block/sweet_berry_bush_stage0"),
-  new ResourceLocation("minecraft:block/sweet_berry_bush_stage1"),
-  new ResourceLocation("minecraft:block/sweet_berry_bush_stage2"),
-  new ResourceLocation("minecraft:block/sweet_berry_bush_stage3"),
-  new ResourceLocation("minecraft:block/brown_mushroom"),
-  new ResourceLocation("minecraft:block/red_mushroom"),
-  new ResourceLocation("minecraft:block/blue_orchid"),
-  new ResourceLocation("minecraft:block/dead_bush"),
-  new ResourceLocation("minecraft:block/seagrass"),
-  new ResourceLocation("minecraft:block/tall_seagrass_bottom"),
-  new ResourceLocation("minecraft:block/tall_seagrass_top"),
-  new ResourceLocation("minecraft:block/lily_pad"),
-  new ResourceLocation("minecraft:block/tall_grass_bottom"),
-  new ResourceLocation("minecraft:block/tall_grass_top"),
-  new ResourceLocation("minecraft:block/lilac_bottom"),
-  new ResourceLocation("minecraft:block/lilac_top"),
-  new ResourceLocation("minecraft:block/rose_bush_bottom"),
-  new ResourceLocation("minecraft:block/rose_bush_top"),
-  new ResourceLocation("minecraft:block/peony_bottom"),
-  new ResourceLocation("minecraft:block/peony_top"),
-  new ResourceLocation("minecraft:block/lily_of_the_valley"),
-  new ResourceLocation("minecraft:block/pumpkin_top"),
-  new ResourceLocation("minecraft:block/pumpkin_side"),
-  new ResourceLocation("minecraft:block/cactus_side"),
-  new ResourceLocation("minecraft:block/cactus_top"),
-  new ResourceLocation("minecraft:block/cactus_bottom"),
-  new ResourceLocation("minecraft:block/sugar_cane"),
-] as const;
+const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
+  blockTexture("stone"),
+  blockTexture("bedrock"),
+  blockTexture("grass_block_top"),
+  blockTexture("grass_block_side"),
+  blockTexture("grass_block_side_overlay"),
+  blockTexture("grass_block_snow"),
+  blockTexture("dirt"),
+  blockTexture("sand"),
+  blockTexture("gravel"),
+  blockTexture("water_still"),
+  blockTexture("water_flow"),
+  blockTexture("water_overlay"),
+  blockTexture("lava_still"),
+  blockTexture("lava_flow"),
+  blockTexture("snow"),
+  blockTexture("obsidian"),
+  blockTexture("magma"),
+  blockTexture("oak_log"),
+  blockTexture("oak_log_top"),
+  blockTexture("oak_leaves"),
+  blockTexture("spruce_log"),
+  blockTexture("spruce_log_top"),
+  blockTexture("spruce_leaves"),
+  blockTexture("birch_log"),
+  blockTexture("birch_log_top"),
+  blockTexture("birch_leaves"),
+  blockTexture("grass"),
+  blockTexture("fern"),
+  blockTexture("dandelion"),
+  blockTexture("poppy"),
+  blockTexture("allium"),
+  blockTexture("azure_bluet"),
+  blockTexture("red_tulip"),
+  blockTexture("orange_tulip"),
+  blockTexture("white_tulip"),
+  blockTexture("pink_tulip"),
+  blockTexture("oxeye_daisy"),
+  blockTexture("cornflower"),
+  blockTexture("oak_sapling"),
+  blockTexture("spruce_sapling"),
+  blockTexture("birch_sapling"),
+  blockTexture("large_fern_bottom"),
+  blockTexture("large_fern_top"),
+  blockTexture("sweet_berry_bush_stage0"),
+  blockTexture("sweet_berry_bush_stage1"),
+  blockTexture("sweet_berry_bush_stage2"),
+  blockTexture("sweet_berry_bush_stage3"),
+  blockTexture("brown_mushroom"),
+  blockTexture("red_mushroom"),
+  blockTexture("blue_orchid"),
+  blockTexture("dead_bush"),
+  blockTexture("seagrass"),
+  blockTexture("tall_seagrass_bottom"),
+  blockTexture("tall_seagrass_top"),
+  blockTexture("lily_pad"),
+  blockTexture("tall_grass_bottom"),
+  blockTexture("tall_grass_top"),
+  blockTexture("lilac_bottom"),
+  blockTexture("lilac_top"),
+  blockTexture("rose_bush_bottom"),
+  blockTexture("rose_bush_top"),
+  blockTexture("peony_bottom"),
+  blockTexture("peony_top"),
+  blockTexture("lily_of_the_valley"),
+  blockTexture("pumpkin_top"),
+  blockTexture("pumpkin_side"),
+  blockTexture("cactus_side"),
+  blockTexture("cactus_top"),
+  blockTexture("cactus_bottom"),
+  blockTexture("sugar_cane"),
+  blockTexture("granite"),
+  blockTexture("diorite"),
+  blockTexture("andesite"),
+  blockTexture("coarse_dirt"),
+  blockTexture("podzol_top"),
+  blockTexture("podzol_side"),
+  blockTexture("mycelium_top"),
+  blockTexture("mycelium_side"),
+  blockTexture("terracotta"),
+  blockTexture("white_terracotta"),
+  blockTexture("orange_terracotta"),
+  blockTexture("magenta_terracotta"),
+  blockTexture("light_blue_terracotta"),
+  blockTexture("yellow_terracotta"),
+  blockTexture("lime_terracotta"),
+  blockTexture("pink_terracotta"),
+  blockTexture("gray_terracotta"),
+  blockTexture("light_gray_terracotta"),
+  blockTexture("cyan_terracotta"),
+  blockTexture("purple_terracotta"),
+  blockTexture("blue_terracotta"),
+  blockTexture("brown_terracotta"),
+  blockTexture("green_terracotta"),
+  blockTexture("red_terracotta"),
+  blockTexture("black_terracotta"),
+  blockTexture("sandstone_top"),
+  blockTexture("sandstone_bottom"),
+  blockTexture("sandstone"),
+  blockTexture("red_sandstone_top"),
+  blockTexture("red_sandstone_bottom"),
+  blockTexture("red_sandstone"),
+  blockTexture("packed_ice"),
+  blockTexture("red_sand"),
+  blockTexture("ice"),
+];
 
 function registerBlock<T extends Block>(location: ResourceLocation, block: T): T {
   block.setLocation(location);
@@ -226,6 +320,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   Registry.BLOCK.clear();
 
   const airState = createAirState();
+  registerBlock(AIR_LOCATION, airState.getBlock());
   const stoneState = registerBlock(
     STONE_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.STONE).requiresCorrectToolForDrops().strength(1.5, 6.0)),
@@ -250,6 +345,10 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     GRAVEL_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.SAND, MaterialColor.STONE).strength(0.6).sound(SoundType.GRAVEL)),
   ).defaultBlockState();
+  const redSandState = registerBlock(
+    RED_SAND_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.SAND, MaterialColor.COLOR_ORANGE).strength(0.5).sound(SoundType.GRAVEL)),
+  ).defaultBlockState();
   const waterState = registerBlock(
     WATER_LOCATION,
     new LiquidBlock(Fluids.WATER, BlockBehaviour.Properties.of(Material.WATER).noCollission().strength(100.0)),
@@ -271,6 +370,118 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
         .sound(SoundType.SNOW)
         .noOcclusion(),
     ),
+  ).defaultBlockState();
+  const snowBlockState = registerBlock(
+    SNOW_BLOCK_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.SNOW, MaterialColor.SNOW).strength(0.2).sound(SoundType.SNOW)),
+  ).defaultBlockState();
+  const iceState = registerBlock(
+    ICE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.ICE, MaterialColor.ICE).strength(0.5)),
+  ).defaultBlockState();
+  const packedIceState = registerBlock(
+    PACKED_ICE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.ICE_SOLID, MaterialColor.ICE).strength(0.5).sound(SoundType.STONE)),
+  ).defaultBlockState();
+  const graniteState = registerBlock(
+    GRANITE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.DIRT).requiresCorrectToolForDrops().strength(1.5, 6.0)),
+  ).defaultBlockState();
+  const dioriteState = registerBlock(
+    DIORITE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.QUARTZ).requiresCorrectToolForDrops().strength(1.5, 6.0)),
+  ).defaultBlockState();
+  const andesiteState = registerBlock(
+    ANDESITE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.STONE).requiresCorrectToolForDrops().strength(1.5, 6.0)),
+  ).defaultBlockState();
+  const coarseDirtState = registerBlock(
+    COARSE_DIRT_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.DIRT, MaterialColor.DIRT).strength(0.5).sound(SoundType.GRAVEL)),
+  ).defaultBlockState();
+  const podzolState = registerBlock(
+    PODZOL_LOCATION,
+    new SnowyDirtBlock(BlockBehaviour.Properties.of(Material.DIRT, MaterialColor.PODZOL).strength(0.5).sound(SoundType.GRAVEL)),
+  ).defaultBlockState();
+  const myceliumState = registerBlock(
+    MYCELIUM_LOCATION,
+    new SnowyDirtBlock(BlockBehaviour.Properties.of(Material.GRASS, MaterialColor.COLOR_PURPLE).randomTicks().strength(0.6).sound(SoundType.GRASS)),
+  ).defaultBlockState();
+  const terracottaState = registerBlock(
+    TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_WHITE).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const whiteTerracottaState = registerBlock(
+    WHITE_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_WHITE).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const orangeTerracottaState = registerBlock(
+    ORANGE_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_ORANGE).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const magentaTerracottaState = registerBlock(
+    MAGENTA_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_MAGENTA).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const lightBlueTerracottaState = registerBlock(
+    LIGHT_BLUE_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_LIGHT_BLUE).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const yellowTerracottaState = registerBlock(
+    YELLOW_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_YELLOW).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const limeTerracottaState = registerBlock(
+    LIME_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_LIGHT_GREEN).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const pinkTerracottaState = registerBlock(
+    PINK_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_PINK).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const grayTerracottaState = registerBlock(
+    GRAY_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_GRAY).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const lightGrayTerracottaState = registerBlock(
+    LIGHT_GRAY_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_LIGHT_GRAY).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const cyanTerracottaState = registerBlock(
+    CYAN_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_CYAN).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const purpleTerracottaState = registerBlock(
+    PURPLE_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_PURPLE).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const blueTerracottaState = registerBlock(
+    BLUE_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_BLUE).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const brownTerracottaState = registerBlock(
+    BROWN_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_BROWN).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const greenTerracottaState = registerBlock(
+    GREEN_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_GREEN).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const redTerracottaState = registerBlock(
+    RED_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_RED).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const blackTerracottaState = registerBlock(
+    BLACK_TERRACOTTA_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_BLACK).requiresCorrectToolForDrops().strength(1.25, 4.2)),
+  ).defaultBlockState();
+  const sandstoneState = registerBlock(
+    SANDSTONE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.SAND).requiresCorrectToolForDrops().strength(0.8)),
+  ).defaultBlockState();
+  const redSandstoneState = registerBlock(
+    RED_SANDSTONE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.COLOR_ORANGE).requiresCorrectToolForDrops().strength(0.8)),
   ).defaultBlockState();
   const obsidianState = registerBlock(
     OBSIDIAN_LOCATION,
@@ -432,22 +643,10 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     SUGAR_CANE_LOCATION,
     new SugarCaneBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
-  registerBlock(
-    GRANITE_LOCATION,
-    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.DIRT).requiresCorrectToolForDrops().strength(1.5, 6.0)),
-  );
-  registerBlock(
-    DIORITE_LOCATION,
-    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.QUARTZ).requiresCorrectToolForDrops().strength(1.5, 6.0)),
-  );
-  registerBlock(
-    ANDESITE_LOCATION,
-    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.STONE).requiresCorrectToolForDrops().strength(1.5, 6.0)),
-  );
-
   ItemBlockRenderTypes.setFancy(true);
   ItemBlockRenderTypes.setRenderLayer(grassState.getBlock(), RenderType.cutoutMipped());
   ItemBlockRenderTypes.setRenderLayer(snowState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(iceState.getBlock(), RenderType.translucent());
   ItemBlockRenderTypes.setRenderLayer(obsidianState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(magmaBlockState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(waterState.getBlock(), RenderType.translucent());
@@ -485,7 +684,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(sugarCaneState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setFluidRenderLayer(Fluids.WATER, RenderType.translucent());
 
-  const blockStateById = new Array<BlockState>(ChunkBlockId.MAGMA_BLOCK + 1);
+  const blockStateById = new Array<BlockState>(ChunkBlockId.SNOW_BLOCK + 1);
   blockStateById[ChunkBlockId.AIR] = airState;
   blockStateById[ChunkBlockId.STONE] = stoneState;
   blockStateById[ChunkBlockId.WATER] = waterState;
@@ -496,8 +695,37 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   blockStateById[ChunkBlockId.GRAVEL] = gravelState;
   blockStateById[ChunkBlockId.SNOW] = snowState;
   blockStateById[ChunkBlockId.LAVA] = lavaState;
+  blockStateById[ChunkBlockId.GRANITE] = graniteState;
+  blockStateById[ChunkBlockId.DIORITE] = dioriteState;
+  blockStateById[ChunkBlockId.ANDESITE] = andesiteState;
+  blockStateById[ChunkBlockId.COARSE_DIRT] = coarseDirtState;
+  blockStateById[ChunkBlockId.PODZOL] = podzolState;
+  blockStateById[ChunkBlockId.MYCELIUM] = myceliumState;
+  blockStateById[ChunkBlockId.TERRACOTTA] = terracottaState;
+  blockStateById[ChunkBlockId.WHITE_TERRACOTTA] = whiteTerracottaState;
+  blockStateById[ChunkBlockId.ORANGE_TERRACOTTA] = orangeTerracottaState;
+  blockStateById[ChunkBlockId.MAGENTA_TERRACOTTA] = magentaTerracottaState;
+  blockStateById[ChunkBlockId.LIGHT_BLUE_TERRACOTTA] = lightBlueTerracottaState;
+  blockStateById[ChunkBlockId.YELLOW_TERRACOTTA] = yellowTerracottaState;
+  blockStateById[ChunkBlockId.LIME_TERRACOTTA] = limeTerracottaState;
+  blockStateById[ChunkBlockId.PINK_TERRACOTTA] = pinkTerracottaState;
+  blockStateById[ChunkBlockId.GRAY_TERRACOTTA] = grayTerracottaState;
+  blockStateById[ChunkBlockId.LIGHT_GRAY_TERRACOTTA] = lightGrayTerracottaState;
+  blockStateById[ChunkBlockId.CYAN_TERRACOTTA] = cyanTerracottaState;
+  blockStateById[ChunkBlockId.PURPLE_TERRACOTTA] = purpleTerracottaState;
+  blockStateById[ChunkBlockId.BLUE_TERRACOTTA] = blueTerracottaState;
+  blockStateById[ChunkBlockId.BROWN_TERRACOTTA] = brownTerracottaState;
+  blockStateById[ChunkBlockId.GREEN_TERRACOTTA] = greenTerracottaState;
+  blockStateById[ChunkBlockId.RED_TERRACOTTA] = redTerracottaState;
+  blockStateById[ChunkBlockId.BLACK_TERRACOTTA] = blackTerracottaState;
+  blockStateById[ChunkBlockId.SANDSTONE] = sandstoneState;
+  blockStateById[ChunkBlockId.RED_SANDSTONE] = redSandstoneState;
+  blockStateById[ChunkBlockId.PACKED_ICE] = packedIceState;
   blockStateById[ChunkBlockId.OBSIDIAN] = obsidianState;
   blockStateById[ChunkBlockId.MAGMA_BLOCK] = magmaBlockState;
+  blockStateById[ChunkBlockId.RED_SAND] = redSandState;
+  blockStateById[ChunkBlockId.ICE] = iceState;
+  blockStateById[ChunkBlockId.SNOW_BLOCK] = snowBlockState;
 
   return {
     airState,

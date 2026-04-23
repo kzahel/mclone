@@ -3,6 +3,7 @@ import surfaceFixture from "../fixtures/integration/overworld-seed-12345-chunks-
 import { BlockPos } from "../../src/core/block-pos";
 import { Registry } from "../../src/core/registry";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
+import { ChunkBlockId } from "../../src/worldgen/chunk/chunk-block-buffer";
 import { NoiseBasedChunkGenerator } from "../../src/worldgen/levelgen/noise-based-chunk-generator";
 import { GeneratedRenderLevel } from "../../src/world/level/generated-render-level";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
@@ -77,6 +78,25 @@ function createGeneratedLevel(): GeneratedRenderLevel {
 describe("GeneratedRenderLevel", () => {
   afterEach(() => {
     Registry.BLOCK.clear();
+  });
+
+  test("registers render states for widened frozen and badlands terrain ids", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const expected = [
+      [ChunkBlockId.RED_SAND, "minecraft:red_sand"],
+      [ChunkBlockId.TERRACOTTA, "minecraft:terracotta"],
+      [ChunkBlockId.ORANGE_TERRACOTTA, "minecraft:orange_terracotta"],
+      [ChunkBlockId.PACKED_ICE, "minecraft:packed_ice"],
+      [ChunkBlockId.ICE, "minecraft:ice"],
+      [ChunkBlockId.SNOW_BLOCK, "minecraft:snow_block"],
+    ] as const;
+
+    for (const [blockId, key] of expected) {
+      const state = blocks.blockStateById[blockId];
+      expect(state).toBeDefined();
+      expect(state!.isAir()).toBe(false);
+      expect(Registry.BLOCK.getKey(state!.getBlock() as unknown as object)?.toString()).toBe(key);
+    }
   });
 
   test("loads the oracle chunk into the camera-centered cache with matching top surfaces", () => {

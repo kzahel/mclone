@@ -24,6 +24,7 @@ export interface BiomeDefinition {
   foliageColorOverride?: number;
   grassColorOverride?: number;
   grassColorModifier?: GrassColorModifier;
+  temperatureModifier?: TemperatureModifier;
 }
 
 export enum GrassColorModifier {
@@ -32,8 +33,16 @@ export enum GrassColorModifier {
   SWAMP = "swamp",
 }
 
+export enum TemperatureModifier {
+  NONE = "none",
+  FROZEN = "frozen",
+}
+
 export class Biome implements NoiseBiome {
+  private static readonly TEMPERATURE_NOISE = new PerlinSimplexNoise(new WorldgenRandom(1234n), [0]);
+  private static readonly FROZEN_TEMPERATURE_NOISE = new PerlinSimplexNoise(new WorldgenRandom(3456n), [-2, -1, 0]);
   public static readonly BIOME_INFO_NOISE = new PerlinSimplexNoise(new WorldgenRandom(2345n), [0]);
+  private readonly temperatureCache = new Map<bigint, number>();
 
   public constructor(
     private readonly id: number,
@@ -46,6 +55,7 @@ export class Biome implements NoiseBiome {
     private readonly foliageColorOverride?: number,
     private readonly grassColorOverride?: number,
     private readonly grassColorModifier: GrassColorModifier = GrassColorModifier.NONE,
+    private readonly temperatureModifier: TemperatureModifier = TemperatureModifier.NONE,
     private readonly generationSettings: BiomeGenerationSettings = BiomeGenerationSettings.EMPTY,
   ) {}
 
@@ -67,6 +77,30 @@ export class Biome implements NoiseBiome {
 
   public getBaseTemperature(): number {
     return this.temperature;
+  }
+
+  public getTemperature(pos: BlockPos): number {
+    const key = pos.asLong();
+    const cached = this.temperatureCache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    let temperature = this.modifyTemperature(pos, this.temperature);
+    if (pos.getY() > 64) {
+      const noise = Biome.TEMPERATURE_NOISE.getValue(pos.getX() / 8.0, pos.getZ() / 8.0, false) * 4.0;
+      temperature -= ((noise + pos.getY()) - 64.0) * (0.05 / 30.0);
+    }
+
+    if (this.temperatureCache.size >= 1024) {
+      const oldest = this.temperatureCache.keys().next();
+      if (!oldest.done) {
+        this.temperatureCache.delete(oldest.value);
+      }
+    }
+
+    this.temperatureCache.set(key, temperature);
+    return temperature;
   }
 
   public getDownfall(): number {
@@ -97,7 +131,7 @@ export class Biome implements NoiseBiome {
   }
 
   public shouldFreeze(level: WorldGenLevel, pos: BlockPos, _mustBeAtEdge = true): boolean {
-    if (this.temperature >= 0.15) {
+    if (this.getTemperature(pos) >= 0.15) {
       return false;
     }
 
@@ -148,5 +182,25 @@ export class Biome implements NoiseBiome {
     const temperature = clamp(this.temperature, 0.0, 1.0);
     const downfall = clamp(this.downfall, 0.0, 1.0);
     return FoliageColor.get(temperature, downfall);
+  }
+
+  private modifyTemperature(pos: BlockPos, baseTemperature: number): number {
+    switch (this.temperatureModifier) {
+      case TemperatureModifier.FROZEN: {
+        const frozenNoise = Biome.FROZEN_TEMPERATURE_NOISE.getValue(pos.getX() * 0.05, pos.getZ() * 0.05, false) * 7.0;
+        const biomeNoise = Biome.BIOME_INFO_NOISE.getValue(pos.getX() * 0.2, pos.getZ() * 0.2, false);
+        if ((frozenNoise + biomeNoise) < 0.3) {
+          const detailNoise = Biome.BIOME_INFO_NOISE.getValue(pos.getX() * 0.09, pos.getZ() * 0.09, false);
+          if (detailNoise < 0.8) {
+            return 0.2;
+          }
+        }
+
+        return baseTemperature;
+      }
+      case TemperatureModifier.NONE:
+      default:
+        return baseTemperature;
+    }
   }
 }

@@ -65,4 +65,4 @@ Still deferred on purpose:
 
 ## Next
 
-Tactical 31 should broaden the carved-stage material/state matrix beyond the current spawn/desert/ocean/floor set, with the first likely targets being frozen and badlands-style follow-through materials that vanilla `WorldCarver` still handles and this repo still does not model exhaustively.
+Tactical 31 is now [`31-frozen-and-badlands-material-matrix.md`](31-frozen-and-badlands-material-matrix.md): port the missing frozen-ocean and badlands surface follow-through, widen the shared runtime/oracle/render palette for those material families, and add committed frozen/badlands fixtures before tackling the remaining podzol/mycelium-era carver surface families.
