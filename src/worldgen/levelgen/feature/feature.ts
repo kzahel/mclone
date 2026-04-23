@@ -34,5 +34,9 @@ export abstract class Feature<FC extends FeatureConfiguration> {
     }
   }
 
+  protected markAboveForPostProcessing(_level: WorldGenLevel, _pos: BlockPos): void {
+    // TypeScript: chunk post-processing queues are not modeled in the simplified worldgen path yet.
+  }
+
   public abstract place(context: FeaturePlaceContext<FC>): boolean;
 }

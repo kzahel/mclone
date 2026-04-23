@@ -50,4 +50,4 @@ Broaden biome-table coverage for the next high-value overworld families that wer
 
 ## Next
 
-Tactical 37 is now landed in [`37-shoreline-and-transition-parity.md`](./37-shoreline-and-transition-parity.md). The next follow-through should be the remaining visible cold-family cleanup: `FREEZE_TOP_LAYER`, `ICE_SPIKE`, and `ICE_PATCH`, with warm-ocean coral and bamboo-jungle still kept visible as separate work rather than being folded together.
+Tactical 37 is now landed in [`37-shoreline-and-transition-parity.md`](./37-shoreline-and-transition-parity.md), and tactical 38 is now landed in [`38-cold-surface-parity.md`](./38-cold-surface-parity.md). The next broad follow-through after those two shoreline/cold slices is warm-ocean parity: coral, sea pickles, and the `warm_ocean` / `deep_warm_ocean` biome tables, with bamboo-jungle still visible as a separate ecosystem slice behind it.

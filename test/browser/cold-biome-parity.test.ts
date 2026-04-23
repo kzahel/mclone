@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const SNOWY_TAIGA_SCREENSHOT_PATH = "/tmp/mclone-debug-snowy-taiga.png";
+const ICE_SPIKES_SCREENSHOT_PATH = "/tmp/mclone-debug-ice-spikes.png";
 const GIANT_TAIGA_SCREENSHOT_PATH = "/tmp/mclone-debug-giant-taiga-parity.png";
 const MUSHROOM_FIELDS_SCREENSHOT_PATH = "/tmp/mclone-debug-mushroom-fields-parity.png";
 
@@ -40,6 +41,17 @@ const COLD_BIOME_FRAMES: readonly ColdBiomeFrame[] = [
     expectedChunkZ: -400,
   },
   {
+    name: "ice spikes",
+    screenshotPath: ICE_SPIKES_SCREENSHOT_PATH,
+    cameraX: "-1311.5",
+    cameraY: "148",
+    cameraZ: "-7711.5",
+    cameraYaw: "225",
+    cameraPitch: "58",
+    expectedChunkX: -82,
+    expectedChunkZ: -482,
+  },
+  {
     name: "giant taiga",
     screenshotPath: GIANT_TAIGA_SCREENSHOT_PATH,
     cameraX: "-138.5",
@@ -66,6 +78,7 @@ const COLD_BIOME_FRAMES: readonly ColdBiomeFrame[] = [
 function createFrameUrl(frame: ColdBiomeFrame): string {
   return `/debug.html?${new URLSearchParams({
     worldTransport: "worker",
+    preserveInitialCamera: "1",
     cameraX: frame.cameraX,
     cameraY: frame.cameraY,
     cameraZ: frame.cameraZ,

@@ -53,4 +53,4 @@ Fill the next high-value biome-table gap after snowy / giant-taiga / mushroom co
 
 ## Next
 
-Tactical 38 should finish the visible cold-family cleanup that now stands out behind shoreline parity: `FREEZE_TOP_LAYER`, `ICE_SPIKE`, and `ICE_PATCH`, plus the browser follow-through that makes `snowy_beach` and `ice_spikes` read correctly instead of only being biome-table-complete.
+Tactical 38 is now landed as [`38-cold-surface-parity.md`](38-cold-surface-parity.md): the missing `FREEZE_TOP_LAYER`, `ICE_SPIKE`, and `ICE_PATCH` paths are translated, `ice_spikes` now has a real biome table and surface definition, and the browser suite captures a dedicated `ice_spikes` frame. The next broad biome-identity gap after that is warm-ocean parity: coral, sea pickles, and the `warm_ocean` / `deep_warm_ocean` table follow-through.

@@ -55,13 +55,13 @@ const SHORELINE_FRAMES: readonly ShorelineFrame[] = [
   {
     name: "snowy beach",
     screenshotPath: SNOWY_BEACH_SCREENSHOT_PATH,
-    cameraX: "-927.5",
-    cameraY: "108",
-    cameraZ: "-8095.5",
+    cameraX: "-863.5",
+    cameraY: "100",
+    cameraZ: "-8231.5",
     cameraYaw: "225",
-    cameraPitch: "68",
-    expectedChunkX: -58,
-    expectedChunkZ: -506,
+    cameraPitch: "58",
+    expectedChunkX: -54,
+    expectedChunkZ: -515,
   },
   {
     name: "frozen ocean shoreline",
@@ -90,6 +90,7 @@ const SHORELINE_FRAMES: readonly ShorelineFrame[] = [
 function createFrameUrl(frame: ShorelineFrame): string {
   return `/debug.html?${new URLSearchParams({
     worldTransport: "worker",
+    preserveInitialCamera: "1",
     cameraX: frame.cameraX,
     cameraY: frame.cameraY,
     cameraZ: frame.cameraZ,

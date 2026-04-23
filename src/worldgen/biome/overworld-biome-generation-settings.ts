@@ -45,6 +45,10 @@ function addDefaultSprings(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => WaterFeatures.SPRING_WATER);
 }
 
+function addSurfaceFreezing(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.TOP_LAYER_MODIFICATION, () => VegetationFeatures.FREEZE_TOP_LAYER);
+}
+
 function addWaterTrees(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.TREES_WATER);
 }
@@ -220,6 +224,7 @@ function buildMountainSettings(edge: boolean): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -234,19 +239,25 @@ function buildTaigaSettings(): BiomeGenerationSettings {
   addDefaultExtraVegetation(builder);
   addSparseBerryBushes(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
-function buildSnowyTundraSettings(): BiomeGenerationSettings {
+function buildSnowyTundraSettings(iceSpikes = false): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  if (iceSpikes) {
+    builder.addFeature(GenerationStep.Decoration.SURFACE_STRUCTURES, () => VegetationFeatures.ICE_SPIKE);
+    builder.addFeature(GenerationStep.Decoration.SURFACE_STRUCTURES, () => VegetationFeatures.ICE_PATCH);
+  }
   addSnowyTrees(builder);
   addDefaultFlowers(builder);
   addDefaultGrass(builder);
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -261,6 +272,7 @@ function buildSnowyTaigaSettings(): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   addBerryBushes(builder);
   return builder.build();
 }
@@ -277,6 +289,7 @@ function buildGiantTaigaSettings(giantSpruce: boolean): BiomeGenerationSettings 
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
   addSparseBerryBushes(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -288,6 +301,7 @@ function buildMushroomFieldSettings(): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -299,6 +313,7 @@ function buildDesertSettings(): BiomeGenerationSettings {
   addDesertVegetation(builder);
   addDesertExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -309,6 +324,7 @@ function buildBadlandsSettings(): BiomeGenerationSettings {
   addBadlandGrass(builder);
   addBadlandExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -323,6 +339,7 @@ function buildForestSettings(): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -337,6 +354,7 @@ function buildFlowerForestSettings(): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -354,6 +372,7 @@ function buildDarkForestSettings(redMushroomBias: boolean): BiomeGenerationSetti
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -371,6 +390,7 @@ function buildBirchForestSettings(tall: boolean): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -383,6 +403,7 @@ function buildPlainsSettings(): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -397,6 +418,7 @@ function buildSwampSettings(swampHills: boolean): BiomeGenerationSettings {
   if (!swampHills) {
     builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.SEAGRASS_SWAMP);
   }
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -419,6 +441,7 @@ function buildSavannaSettings(shattered: boolean): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -433,6 +456,7 @@ function buildJungleSettings(edge: boolean): BiomeGenerationSettings {
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
   addJungleExtraVegetation(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -445,6 +469,7 @@ function buildBeachSettings(): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -461,6 +486,7 @@ function buildRiverSettings(frozen: boolean): BiomeGenerationSettings {
   if (!frozen) {
     builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.SEAGRASS_RIVER);
   }
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -501,6 +527,7 @@ function buildOceanSettings(kind: OceanSettingsKind, deep: boolean): BiomeGenera
     case "frozen":
       break;
   }
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -528,6 +555,7 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:giant_spruce_taiga_hills", buildGiantTaigaSettings(true)],
   ["minecraft:giant_tree_taiga", buildGiantTaigaSettings(false)],
   ["minecraft:giant_tree_taiga_hills", buildGiantTaigaSettings(false)],
+  ["minecraft:ice_spikes", buildSnowyTundraSettings(true)],
   ["minecraft:lukewarm_ocean", buildOceanSettings("lukewarm", false)],
   ["minecraft:mountains", buildMountainSettings(false)],
   ["minecraft:jungle", buildJungleSettings(false)],

@@ -13,6 +13,7 @@ import { HeightmapConfiguration } from "./configurations/heightmap-configuration
 import { HugeMushroomFeatureConfiguration } from "./configurations/huge-mushroom-feature-configuration";
 import { NoiseCountFactorDecoratorConfiguration } from "./configurations/noise-count-factor-decorator-configuration";
 import { NoiseDependantDecoratorConfiguration } from "./configurations/noise-dependant-decorator-configuration";
+import { DiskConfiguration } from "./configurations/disk-configuration";
 import { NoneFeatureConfiguration } from "./configurations/none-feature-configuration";
 import { ProbabilityFeatureConfiguration } from "./configurations/probability-feature-configuration";
 import { RandomBooleanFeatureConfiguration } from "./configurations/random-boolean-feature-configuration";
@@ -51,7 +52,13 @@ const LILY_OF_THE_VALLEY_LOCATION = new ResourceLocation("minecraft:lily_of_the_
 const PUMPKIN_LOCATION = new ResourceLocation("minecraft:pumpkin");
 const MELON_LOCATION = new ResourceLocation("minecraft:melon");
 const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
+const DIRT_LOCATION = new ResourceLocation("minecraft:dirt");
 const PODZOL_LOCATION = new ResourceLocation("minecraft:podzol");
+const COARSE_DIRT_LOCATION = new ResourceLocation("minecraft:coarse_dirt");
+const MYCELIUM_LOCATION = new ResourceLocation("minecraft:mycelium");
+const PACKED_ICE_LOCATION = new ResourceLocation("minecraft:packed_ice");
+const SNOW_BLOCK_LOCATION = new ResourceLocation("minecraft:snow_block");
+const ICE_LOCATION = new ResourceLocation("minecraft:ice");
 const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 const CACTUS_LOCATION = new ResourceLocation("minecraft:cactus");
 const RED_MUSHROOM_BLOCK_LOCATION = new ResourceLocation("minecraft:red_mushroom_block");
@@ -354,6 +361,23 @@ function createHugeRedMushroomConfig(): HugeMushroomFeatureConfiguration {
   );
 }
 
+function createIcePatchConfig(): DiskConfiguration {
+  return new DiskConfiguration(
+    getRequiredState(PACKED_ICE_LOCATION),
+    UniformInt.of(2, 3),
+    1,
+    [
+      getRequiredState(DIRT_LOCATION),
+      getRequiredState(GRASS_BLOCK_LOCATION),
+      getRequiredState(PODZOL_LOCATION),
+      getRequiredState(COARSE_DIRT_LOCATION),
+      getRequiredState(MYCELIUM_LOCATION),
+      getRequiredState(SNOW_BLOCK_LOCATION),
+      getRequiredState(ICE_LOCATION),
+    ],
+  );
+}
+
 export class VegetationFeatures {
   public static get BROWN_MUSHROOM_NORMAL() {
     return Features.RANDOM_PATCH.configured(createBrownMushroomConfig()).decorated(heightmapDoubleSquare()).rarity(4);
@@ -600,6 +624,18 @@ export class VegetationFeatures {
 
   public static get HUGE_RED_MUSHROOM() {
     return Features.HUGE_RED_MUSHROOM.configured(createHugeRedMushroomConfig());
+  }
+
+  public static get ICE_SPIKE() {
+    return Features.ICE_SPIKE.configured(NoneFeatureConfiguration.INSTANCE).decorated(heightmapSquare()).count(3);
+  }
+
+  public static get ICE_PATCH() {
+    return Features.ICE_PATCH.configured(createIcePatchConfig()).decorated(heightmapSquare()).count(2);
+  }
+
+  public static get FREEZE_TOP_LAYER() {
+    return Features.FREEZE_TOP_LAYER.configured(NoneFeatureConfiguration.INSTANCE);
   }
 
   public static get VINES() {

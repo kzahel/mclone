@@ -8,14 +8,19 @@ import { RandomFeatureConfiguration } from "./configurations/random-feature-conf
 import { DecoratedFeatureConfiguration } from "./configurations/decorated-feature-configuration";
 import { Feature } from "./feature";
 import { BlockStateConfiguration } from "./configurations/block-state-configuration";
+import { DiskConfiguration } from "./configurations/disk-configuration";
 import { HugeMushroomFeatureConfiguration } from "./configurations/huge-mushroom-feature-configuration";
 import { RandomPatchConfiguration } from "./configurations/random-patch-configuration";
 import { SimpleRandomFeatureConfiguration } from "./configurations/simple-random-feature-configuration";
 import { SimpleBlockConfiguration } from "./configurations/simple-block-configuration";
+import { DiskReplaceFeature } from "./disk-replace-feature";
 import { HugeBrownMushroomFeature } from "./huge-brown-mushroom-feature";
 import { HugeRedMushroomFeature } from "./huge-red-mushroom-feature";
+import { IcePatchFeature } from "./ice-patch-feature";
+import { IceSpikeFeature } from "./ice-spike-feature";
 import { KelpFeature } from "./kelp-feature";
 import { SeagrassFeature } from "./seagrass-feature";
+import { SnowAndFreezeFeature } from "./snow-and-freeze-feature";
 import { SpringConfiguration } from "./configurations/spring-configuration";
 import { TreeConfiguration } from "./configurations/tree-configuration";
 import { RandomPatchFeature } from "./random-patch-feature";
@@ -49,7 +54,11 @@ export const Features = {
   KELP: register("kelp", new KelpFeature()),
   HUGE_RED_MUSHROOM: register("huge_red_mushroom", new HugeRedMushroomFeature()),
   HUGE_BROWN_MUSHROOM: register("huge_brown_mushroom", new HugeBrownMushroomFeature()),
+  ICE_SPIKE: register("ice_spike", new IceSpikeFeature()),
+  FREEZE_TOP_LAYER: register("freeze_top_layer", new SnowAndFreezeFeature()),
   VINES: register("vines", new VinesFeature()),
+  DISK: register("disk", new DiskReplaceFeature()),
+  ICE_PATCH: register("ice_patch", new IcePatchFeature()),
 } as const;
 
 export type SimpleVegetationFeature =
@@ -62,6 +71,7 @@ export type SimpleVegetationFeature =
   | Feature<RandomFeatureConfiguration>
   | Feature<SimpleRandomFeatureConfiguration>
   | Feature<BlockStateConfiguration>
+  | Feature<DiskConfiguration>
   | Feature<SpringConfiguration>
   | Feature<ProbabilityFeatureConfiguration>
   | Feature<NoneFeatureConfiguration>;

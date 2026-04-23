@@ -1,6 +1,8 @@
 import type { NoiseBiome } from "./noise-biome";
 import { BiomeGenerationSettings } from "./biome-generation-settings";
 import { clamp } from "../../util/mth";
+import { Registry } from "../../core/registry";
+import { ResourceLocation } from "../../core/resource-location";
 import { FoliageColor } from "../../world/level/foliage-color";
 import { GrassColor } from "../../world/level/grass-color";
 import { BlockPos } from "../../core/block-pos";
@@ -12,6 +14,9 @@ import { PerlinSimplexNoise } from "../noise/perlin-simplex-noise";
 import { WorldgenRandom } from "../prng/worldgen-random";
 import { Fluids } from "../../world/level/material/fluids";
 import { LiquidBlock } from "../../world/level/block/liquid-block";
+import type { Block } from "../../world/level/block/block";
+
+const SNOW_LOCATION = new ResourceLocation("minecraft:snow");
 
 export interface BiomeDefinition {
   id: number;
@@ -130,7 +135,7 @@ export class Biome implements NoiseBiome {
     return this.waterColor;
   }
 
-  public shouldFreeze(level: WorldGenLevel, pos: BlockPos, _mustBeAtEdge = true): boolean {
+  public shouldFreeze(level: WorldGenLevel, pos: BlockPos, mustBeAtEdge = true): boolean {
     if (this.getTemperature(pos) >= 0.15) {
       return false;
     }
@@ -141,7 +146,42 @@ export class Biome implements NoiseBiome {
 
     const state = level.getBlockState(pos);
     const fluidState = level.getFluidState(pos);
-    return fluidState.getType().isSame(Fluids.WATER) && state.getBlock() instanceof LiquidBlock;
+    if (!fluidState.getType().isSame(Fluids.WATER) || !(state.getBlock() instanceof LiquidBlock)) {
+      return false;
+    }
+
+    if (!mustBeAtEdge) {
+      return true;
+    }
+
+    const fullySurroundedByWater =
+      Biome.isWaterAt(level, pos.west())
+      && Biome.isWaterAt(level, pos.east())
+      && Biome.isWaterAt(level, pos.north())
+      && Biome.isWaterAt(level, pos.south());
+    return !fullySurroundedByWater;
+  }
+
+  public isColdEnoughToSnow(pos: BlockPos): boolean {
+    return this.getTemperature(pos) < 0.15;
+  }
+
+  public shouldSnow(level: WorldGenLevel, pos: BlockPos): boolean {
+    if (!this.isColdEnoughToSnow(pos)) {
+      return false;
+    }
+
+    if (pos.getY() < level.getMinBuildHeight() || pos.getY() >= level.getMaxBuildHeight() || level.getBrightness(LightLayer.BLOCK, pos) >= 10) {
+      return false;
+    }
+
+    const snowBlock = Registry.BLOCK.get(SNOW_LOCATION) as Block | undefined;
+    if (snowBlock === undefined) {
+      throw new Error(`Missing registered block ${SNOW_LOCATION}`);
+    }
+
+    const state = level.getBlockState(pos);
+    return state.isAir() && snowBlock.defaultBlockState().canSurvive(level, pos);
   }
 
   public getGenerationSettings(): BiomeGenerationSettings {
@@ -202,5 +242,11 @@ export class Biome implements NoiseBiome {
       default:
         return baseTemperature;
     }
+  }
+
+  private static isWaterAt(level: WorldGenLevel, pos: BlockPos): boolean {
+    const state = level.getBlockState(pos);
+    const fluidState = level.getFluidState(pos);
+    return fluidState.getType().isSame(Fluids.WATER) && state.getBlock() instanceof LiquidBlock;
   }
 }

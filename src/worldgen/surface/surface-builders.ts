@@ -90,6 +90,12 @@ const CONFIG_MYCELIUM: SurfaceBuilderConfiguration = {
   underwaterMaterial: ChunkBlockId.GRAVEL,
 };
 
+const CONFIG_ICE_SPIKES: SurfaceBuilderConfiguration = {
+  topMaterial: ChunkBlockId.SNOW_BLOCK,
+  underMaterial: ChunkBlockId.DIRT,
+  underwaterMaterial: ChunkBlockId.GRAVEL,
+};
+
 const BADLANDS_BAND_LENGTH = 64;
 const BADLANDS_PILLAR_OCTAVES = [-3, -2, -1, 0] as const;
 const BADLANDS_BAND_OFFSET_OCTAVES = [0] as const;
@@ -152,6 +158,7 @@ function resolveSurfaceBiomeDefinition(biome: Biome): SurfaceBiomeDefinition {
     case "minecraft:desert_hills":
     case "minecraft:desert_lakes":
     case "minecraft:beach":
+    case "minecraft:snowy_beach":
       return {
         builder: "default",
         config: CONFIG_DESERT,
@@ -225,6 +232,11 @@ function resolveSurfaceBiomeDefinition(biome: Biome): SurfaceBiomeDefinition {
       return {
         builder: "default",
         config: CONFIG_MYCELIUM,
+      };
+    case "minecraft:ice_spikes":
+      return {
+        builder: "default",
+        config: CONFIG_ICE_SPIKES,
       };
     case "minecraft:stone_shore":
       return {

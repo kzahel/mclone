@@ -409,6 +409,7 @@ describe("Vegetation parity", () => {
     const jungleEdgeFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle_edge").features().flat().map((supplier) => getBaseFeature(supplier()));
     const snowyTundraFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_tundra").features().flat().map((supplier) => getBaseFeature(supplier()));
     const snowyMountainsFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_mountains").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const iceSpikesFeatures = getOverworldBiomeGenerationSettings("minecraft:ice_spikes").features().flat().map((supplier) => getBaseFeature(supplier()));
     const snowyTaigaFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_taiga").features().flat().map((supplier) => getBaseFeature(supplier()));
     const snowyTaigaHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_taiga_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
     const snowyTaigaMountainsFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_taiga_mountains")
@@ -440,11 +441,14 @@ describe("Vegetation parity", () => {
     expect(beachFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
     expect(stoneShoreFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
     expect(snowyBeachFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(snowyBeachFeatures.some((feature) => feature === Features.FREEZE_TOP_LAYER)).toBe(true);
     expect(riverFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
     expect(riverFeatures.some((feature) => feature === Features.RANDOM_SELECTOR || feature === Features.TREE)).toBe(true);
     expect(frozenRiverFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
+    expect(frozenRiverFeatures.some((feature) => feature === Features.FREEZE_TOP_LAYER)).toBe(true);
     expect(oceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
     expect(oceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
+    expect(oceanFeatures.some((feature) => feature === Features.FREEZE_TOP_LAYER)).toBe(true);
     expect(deepOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
     expect(deepOceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
     expect(coldOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
@@ -458,9 +462,11 @@ describe("Vegetation parity", () => {
     expect(frozenOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
     expect(frozenOceanFeatures.some((feature) => feature === Features.KELP)).toBe(false);
     expect(frozenOceanFeatures.some((feature) => feature === Features.RANDOM_SELECTOR || feature === Features.TREE)).toBe(true);
+    expect(frozenOceanFeatures.some((feature) => feature === Features.FREEZE_TOP_LAYER)).toBe(true);
     expect(deepFrozenOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
     expect(deepFrozenOceanFeatures.some((feature) => feature === Features.KELP)).toBe(false);
     expect(deepFrozenOceanFeatures.some((feature) => feature === Features.RANDOM_SELECTOR || feature === Features.TREE)).toBe(true);
+    expect(deepFrozenOceanFeatures.some((feature) => feature === Features.FREEZE_TOP_LAYER)).toBe(true);
     expect(swampFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
     expect(swampHillsFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
     expect(flowerForestFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
@@ -481,8 +487,14 @@ describe("Vegetation parity", () => {
     expect(jungleEdgeFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(jungleEdgeFeatures.some((feature) => feature === Features.VINES)).toBe(true);
     expect(snowyTundraFeatures.some((feature) => feature === Features.TREE)).toBe(true);
+    expect(snowyTundraFeatures.some((feature) => feature === Features.FREEZE_TOP_LAYER)).toBe(true);
     expect(snowyMountainsFeatures.some((feature) => feature === Features.TREE)).toBe(true);
+    expect(snowyMountainsFeatures.some((feature) => feature === Features.FREEZE_TOP_LAYER)).toBe(true);
+    expect(iceSpikesFeatures.some((feature) => feature === Features.ICE_SPIKE)).toBe(true);
+    expect(iceSpikesFeatures.some((feature) => feature === Features.ICE_PATCH)).toBe(true);
+    expect(iceSpikesFeatures.some((feature) => feature === Features.FREEZE_TOP_LAYER)).toBe(true);
     expect(snowyTaigaFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(snowyTaigaFeatures.some((feature) => feature === Features.FREEZE_TOP_LAYER)).toBe(true);
     expect(snowyTaigaHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(snowyTaigaMountainsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(giantTaigaFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
