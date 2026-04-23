@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import carvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-carved-only.json";
+import oceanCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json";
+import desertCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-carved-only.json";
 import { CHUNK_BLOCK_NAMES, ChunkBlockId } from "../../../src/worldgen/chunk/chunk-block-buffer.ts";
 
 interface CarvedChunkOracleFixture {
@@ -17,29 +19,66 @@ interface CarvedChunkOracleFixture {
 }
 
 const carvedOracle = carvedFixture as CarvedChunkOracleFixture;
+const oceanCarvedOracle = oceanCarvedFixture as CarvedChunkOracleFixture;
+const desertCarvedOracle = desertCarvedFixture as CarvedChunkOracleFixture;
+
+function assertPinnedMetadata(oracle: CarvedChunkOracleFixture, chunkX: number, chunkZ: number): void {
+  expect(oracle.module).toBe("carved-chunk");
+  expect(oracle.minecraftVersion).toBe("1.17.1");
+  expect(oracle.generatorClass).toBe("net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator");
+  expect(oracle.seed).toBe("12345");
+  expect(oracle.chunkX).toBe(chunkX);
+  expect(oracle.chunkZ).toBe(chunkZ);
+  expect(oracle.minY).toBe(0);
+  expect(oracle.height).toBe(256);
+  expect(oracle.blockOrder).toBe("y-major,z-major,x-minor");
+  expect(oracle.palette).toEqual([...CHUNK_BLOCK_NAMES]);
+  expect(oracle.blocks.length).toBe(16 * 16 * 256);
+}
 
 describe("carved-stage oracle fixture", () => {
-  test("pins the committed carved-stage metadata and widened numeric palette", () => {
-    expect(carvedOracle.module).toBe("carved-chunk");
-    expect(carvedOracle.minecraftVersion).toBe("1.17.1");
-    expect(carvedOracle.generatorClass).toBe("net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator");
-    expect(carvedOracle.seed).toBe("12345");
-    expect(carvedOracle.chunkX).toBe(0);
-    expect(carvedOracle.chunkZ).toBe(0);
-    expect(carvedOracle.minY).toBe(0);
-    expect(carvedOracle.height).toBe(256);
-    expect(carvedOracle.blockOrder).toBe("y-major,z-major,x-minor");
-    expect(carvedOracle.palette).toEqual([...CHUNK_BLOCK_NAMES]);
-    expect(carvedOracle.blocks.length).toBe(16 * 16 * 256);
+  test("pins the committed carved-stage metadata and widened numeric palette for the spawn oracle", () => {
+    assertPinnedMetadata(carvedOracle, 0, 0);
   });
 
-  test("contains air carving and lava-floor ids within the numeric model", () => {
+  test("pins the committed carved-stage metadata and widened numeric palette for the ocean oracle", () => {
+    assertPinnedMetadata(oceanCarvedOracle, 117, -128);
+  });
+
+  test("pins the committed carved-stage metadata and widened numeric palette for the desert oracle", () => {
+    assertPinnedMetadata(desertCarvedOracle, 96, -64);
+  });
+
+  test("spawn carved oracle contains air carving and lava-floor ids within the numeric model", () => {
     expect(carvedOracle.blocks).toContain(ChunkBlockId.AIR);
     expect(carvedOracle.blocks).toContain(ChunkBlockId.LAVA);
 
     for (const blockId of carvedOracle.blocks) {
       expect(blockId).toBeGreaterThanOrEqual(0);
       expect(blockId).toBeLessThan(carvedOracle.palette.length);
+    }
+  });
+
+  test("ocean carved oracle contains air carving, retained water, and lava-floor ids", () => {
+    expect(oceanCarvedOracle.blocks).toContain(ChunkBlockId.AIR);
+    expect(oceanCarvedOracle.blocks).toContain(ChunkBlockId.WATER);
+    expect(oceanCarvedOracle.blocks).toContain(ChunkBlockId.LAVA);
+
+    for (const blockId of oceanCarvedOracle.blocks) {
+      expect(blockId).toBeGreaterThanOrEqual(0);
+      expect(blockId).toBeLessThan(oceanCarvedOracle.palette.length);
+    }
+  });
+
+  test("desert carved oracle contains sand, sandstone, air carving, and lava-floor ids", () => {
+    expect(desertCarvedOracle.blocks).toContain(ChunkBlockId.SAND);
+    expect(desertCarvedOracle.blocks).toContain(ChunkBlockId.SANDSTONE);
+    expect(desertCarvedOracle.blocks).toContain(ChunkBlockId.AIR);
+    expect(desertCarvedOracle.blocks).toContain(ChunkBlockId.LAVA);
+
+    for (const blockId of desertCarvedOracle.blocks) {
+      expect(blockId).toBeGreaterThanOrEqual(0);
+      expect(blockId).toBeLessThan(desertCarvedOracle.palette.length);
     }
   });
 });

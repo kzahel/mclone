@@ -271,7 +271,8 @@ function applyDefaultSurface(
     remainingDepth--;
     setBlockAtYIfInside(chunk, localX, y, localZ, underMaterial);
     if (remainingDepth === 0 && underMaterial === ChunkBlockId.SAND && surfaceDepth > 1) {
-      throw new RangeError("Sand surface mutation needs sandstone support beyond the tactical 07 numeric model");
+      remainingDepth = random.nextInt(4) + Math.max(0, y - seaLevel);
+      underMaterial = ChunkBlockId.SANDSTONE;
     }
   }
 }

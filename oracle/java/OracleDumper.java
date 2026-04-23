@@ -64,6 +64,44 @@ public final class OracleDumper {
    private static final int[] SURFACE_NOISE_OCTAVES = createIntAxis(-3, 1, 4);
    private static final int[] BLENDED_LIMIT_OCTAVES = createIntAxis(-15, 1, 16);
    private static final int[] BLENDED_MAIN_OCTAVES = createIntAxis(-7, 1, 8);
+   private static final String[] SURFACE_AND_CARVED_PALETTE = new String[]{
+      "minecraft:air",
+      "minecraft:stone",
+      "minecraft:water",
+      "minecraft:bedrock",
+      "minecraft:grass_block",
+      "minecraft:dirt",
+      "minecraft:sand",
+      "minecraft:gravel",
+      "minecraft:snow",
+      "minecraft:lava",
+      "minecraft:granite",
+      "minecraft:diorite",
+      "minecraft:andesite",
+      "minecraft:coarse_dirt",
+      "minecraft:podzol",
+      "minecraft:mycelium",
+      "minecraft:terracotta",
+      "minecraft:white_terracotta",
+      "minecraft:orange_terracotta",
+      "minecraft:magenta_terracotta",
+      "minecraft:light_blue_terracotta",
+      "minecraft:yellow_terracotta",
+      "minecraft:lime_terracotta",
+      "minecraft:pink_terracotta",
+      "minecraft:gray_terracotta",
+      "minecraft:light_gray_terracotta",
+      "minecraft:cyan_terracotta",
+      "minecraft:purple_terracotta",
+      "minecraft:blue_terracotta",
+      "minecraft:brown_terracotta",
+      "minecraft:green_terracotta",
+      "minecraft:red_terracotta",
+      "minecraft:black_terracotta",
+      "minecraft:sandstone",
+      "minecraft:red_sandstone",
+      "minecraft:packed_ice"
+   };
    private static final BlendedNoiseSampleParameters[] BLENDED_NOISE_SAMPLE_SETS = new BlendedNoiseSampleParameters[]{
       blendedNoiseSampleParameters("overworld", new String[]{"overworld", "amplified"}, 0.9999999814507745, 0.9999999814507745, 80.0, 160.0),
       blendedNoiseSampleParameters("nether", new String[]{"nether", "caves"}, 1.0, 3.0, 80.0, 60.0),
@@ -578,21 +616,7 @@ public final class OracleDumper {
       json.put("minY", minY);
       json.put("height", height);
       json.put("blockOrder", "y-major,z-major,x-minor");
-      json.put(
-         "palette",
-         new String[]{
-            "minecraft:air",
-            "minecraft:stone",
-            "minecraft:water",
-            "minecraft:bedrock",
-            "minecraft:grass_block",
-            "minecraft:dirt",
-            "minecraft:sand",
-            "minecraft:gravel",
-            "minecraft:snow",
-            "minecraft:lava"
-         }
-      );
+      json.put("palette", SURFACE_AND_CARVED_PALETTE);
       json.put("blocks", collectChunkBlocks(chunk, minY, height));
       return GSON.toJson(json);
    }
@@ -630,21 +654,7 @@ public final class OracleDumper {
       json.put("minY", minY);
       json.put("height", height);
       json.put("blockOrder", "y-major,z-major,x-minor");
-      json.put(
-         "palette",
-         new String[]{
-            "minecraft:air",
-            "minecraft:stone",
-            "minecraft:water",
-            "minecraft:bedrock",
-            "minecraft:grass_block",
-            "minecraft:dirt",
-            "minecraft:sand",
-            "minecraft:gravel",
-            "minecraft:snow",
-            "minecraft:lava"
-         }
-      );
+      json.put("palette", SURFACE_AND_CARVED_PALETTE);
       json.put("blocks", collectChunkBlocks(chunk, minY, height));
       return GSON.toJson(json);
    }
@@ -688,6 +698,58 @@ public final class OracleDumper {
             return 8;
          case "minecraft:lava":
             return 9;
+         case "minecraft:granite":
+            return 10;
+         case "minecraft:diorite":
+            return 11;
+         case "minecraft:andesite":
+            return 12;
+         case "minecraft:coarse_dirt":
+            return 13;
+         case "minecraft:podzol":
+            return 14;
+         case "minecraft:mycelium":
+            return 15;
+         case "minecraft:terracotta":
+            return 16;
+         case "minecraft:white_terracotta":
+            return 17;
+         case "minecraft:orange_terracotta":
+            return 18;
+         case "minecraft:magenta_terracotta":
+            return 19;
+         case "minecraft:light_blue_terracotta":
+            return 20;
+         case "minecraft:yellow_terracotta":
+            return 21;
+         case "minecraft:lime_terracotta":
+            return 22;
+         case "minecraft:pink_terracotta":
+            return 23;
+         case "minecraft:gray_terracotta":
+            return 24;
+         case "minecraft:light_gray_terracotta":
+            return 25;
+         case "minecraft:cyan_terracotta":
+            return 26;
+         case "minecraft:purple_terracotta":
+            return 27;
+         case "minecraft:blue_terracotta":
+            return 28;
+         case "minecraft:brown_terracotta":
+            return 29;
+         case "minecraft:green_terracotta":
+            return 30;
+         case "minecraft:red_terracotta":
+            return 31;
+         case "minecraft:black_terracotta":
+            return 32;
+         case "minecraft:sandstone":
+            return 33;
+         case "minecraft:red_sandstone":
+            return 34;
+         case "minecraft:packed_ice":
+            return 35;
          default:
             throw new IllegalStateException("unexpected surface-stage block from Java oracle: " + key);
       }

@@ -1,4 +1,14 @@
 export namespace GenerationStep {
+  export enum Carving {
+    AIR,
+    LIQUID,
+  }
+
+  export const CARVING_VALUES = [
+    Carving.AIR,
+    Carving.LIQUID,
+  ] as const;
+
   export enum Decoration {
     RAW_GENERATION,
     LAKES,

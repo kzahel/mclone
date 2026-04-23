@@ -3,7 +3,10 @@ import integrationFixture from "../../fixtures/integration/overworld-seed-12345-
 import terrainFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-terrain-only.json";
 import surfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-surface-only.json";
 import carvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-0-0-carved-only.json";
+import oceanCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json";
 import sandSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-5-115-surface-only.json";
+import desertSurfaceFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-surface-only.json";
+import desertCarvedFixture from "../../fixtures/integration/overworld-seed-12345-chunks-96--64-carved-only.json";
 import { OverworldBiomeSource } from "../../../src/worldgen/biome/overworld-biome-source.ts";
 import {
   ChunkBlockId,
@@ -57,7 +60,10 @@ const fixture = integrationFixture as IntegrationFixture;
 const terrainOracle = terrainFixture as TerrainChunkOracleFixture;
 const surfaceOracle = surfaceFixture as SurfaceChunkOracleFixture;
 const carvedOracle = carvedFixture as CarvedChunkOracleFixture;
+const oceanCarvedOracle = oceanCarvedFixture as CarvedChunkOracleFixture;
 const sandSurfaceOracle = sandSurfaceFixture as SurfaceChunkOracleFixture;
+const desertSurfaceOracle = desertSurfaceFixture as SurfaceChunkOracleFixture;
+const desertCarvedOracle = desertCarvedFixture as CarvedChunkOracleFixture;
 
 function blockNameAt(section: TerrainChunkSection, index: number): string {
   return section.palette[section.blocks[index]!]!;
@@ -217,6 +223,15 @@ describe("NoiseBasedChunkGenerator", () => {
     assertChunkParity(actualChunk, sandSurfaceOracle);
   });
 
+  test("matches the widened sandstone surface oracle for chunk (96, -64)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(desertSurfaceOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(desertSurfaceOracle.seed));
+    const actualChunk = generator.fillFromNoise(desertSurfaceOracle.chunkX, desertSurfaceOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+
+    assertChunkParity(actualChunk, desertSurfaceOracle);
+  });
+
   test("matches the pinned carved-only oracle for chunk (0, 0)", () => {
     const biomeSource = new OverworldBiomeSource(BigInt(carvedOracle.seed));
     const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(carvedOracle.seed));
@@ -225,5 +240,25 @@ describe("NoiseBasedChunkGenerator", () => {
     generator.applyCarvers(actualChunk);
 
     assertChunkParity(actualChunk, carvedOracle);
+  });
+
+  test("matches the pinned carved-only ocean oracle for chunk (117, -128)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(oceanCarvedOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(oceanCarvedOracle.seed));
+    const actualChunk = generator.fillFromNoise(oceanCarvedOracle.chunkX, oceanCarvedOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+    generator.applyCarvers(actualChunk);
+
+    assertChunkParity(actualChunk, oceanCarvedOracle);
+  });
+
+  test("matches the pinned carved-only desert oracle for chunk (96, -64)", () => {
+    const biomeSource = new OverworldBiomeSource(BigInt(desertCarvedOracle.seed));
+    const generator = new NoiseBasedChunkGenerator(biomeSource, BigInt(desertCarvedOracle.seed));
+    const actualChunk = generator.fillFromNoise(desertCarvedOracle.chunkX, desertCarvedOracle.chunkZ);
+    generator.buildSurfaceAndBedrock(actualChunk);
+    generator.applyCarvers(actualChunk);
+
+    assertChunkParity(actualChunk, desertCarvedOracle);
   });
 });

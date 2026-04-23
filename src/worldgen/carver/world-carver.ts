@@ -62,13 +62,43 @@ export abstract class WorldCarver<C extends CarverConfiguration> {
   protected canReplaceBlock(blockId: ChunkBlockId): boolean {
     switch (blockId) {
       case ChunkBlockId.STONE:
+      case ChunkBlockId.GRANITE:
+      case ChunkBlockId.DIORITE:
+      case ChunkBlockId.ANDESITE:
       case ChunkBlockId.DIRT:
+      case ChunkBlockId.COARSE_DIRT:
+      case ChunkBlockId.PODZOL:
       case ChunkBlockId.GRASS_BLOCK:
+      case ChunkBlockId.MYCELIUM:
+      case ChunkBlockId.TERRACOTTA:
+      case ChunkBlockId.WHITE_TERRACOTTA:
+      case ChunkBlockId.ORANGE_TERRACOTTA:
+      case ChunkBlockId.MAGENTA_TERRACOTTA:
+      case ChunkBlockId.LIGHT_BLUE_TERRACOTTA:
+      case ChunkBlockId.YELLOW_TERRACOTTA:
+      case ChunkBlockId.LIME_TERRACOTTA:
+      case ChunkBlockId.PINK_TERRACOTTA:
+      case ChunkBlockId.GRAY_TERRACOTTA:
+      case ChunkBlockId.LIGHT_GRAY_TERRACOTTA:
+      case ChunkBlockId.CYAN_TERRACOTTA:
+      case ChunkBlockId.PURPLE_TERRACOTTA:
+      case ChunkBlockId.BLUE_TERRACOTTA:
+      case ChunkBlockId.BROWN_TERRACOTTA:
+      case ChunkBlockId.GREEN_TERRACOTTA:
+      case ChunkBlockId.RED_TERRACOTTA:
+      case ChunkBlockId.BLACK_TERRACOTTA:
+      case ChunkBlockId.SANDSTONE:
+      case ChunkBlockId.RED_SANDSTONE:
       case ChunkBlockId.SNOW:
+      case ChunkBlockId.PACKED_ICE:
         return true;
       default:
         return false;
     }
+  }
+
+  protected isSurfaceTopBlock(blockId: ChunkBlockId): boolean {
+    return blockId === ChunkBlockId.GRASS_BLOCK || blockId === ChunkBlockId.MYCELIUM;
   }
 
   protected canReplaceBlockWithAbove(blockId: ChunkBlockId, aboveBlockId: ChunkBlockId): boolean {
@@ -140,7 +170,7 @@ export abstract class WorldCarver<C extends CarverConfiguration> {
           }
 
           const currentBlock = chunk.getBlockAtY(localBlockX, worldY, localBlockZ);
-          if (currentBlock === ChunkBlockId.GRASS_BLOCK) {
+          if (this.isSurfaceTopBlock(currentBlock)) {
             reachedSurface = true;
           }
 

@@ -15,20 +15,20 @@ describe("MutableChunkBlockBuffer helpers", () => {
   test("stores widened numeric block ids and supports local or absolute-Y writes", () => {
     const chunk = new MutableChunkBlockBuffer(0, 0, 0, 32);
 
-    chunk.setBlock(1, 2, 3, ChunkBlockId.GRASS_BLOCK);
-    chunk.setBlockAtY(4, 17, 5, ChunkBlockId.SAND);
+    chunk.setBlock(1, 2, 3, ChunkBlockId.MYCELIUM);
+    chunk.setBlockAtY(4, 17, 5, ChunkBlockId.SANDSTONE);
 
-    expect(chunk.getBlock(1, 2, 3)).toBe(ChunkBlockId.GRASS_BLOCK);
-    expect(chunk.getBlockAtY(4, 17, 5)).toBe(ChunkBlockId.SAND);
-    expect(chunk.blocks[blockBufferIndex(4, 17, 5)]).toBe(ChunkBlockId.SAND);
+    expect(chunk.getBlock(1, 2, 3)).toBe(ChunkBlockId.MYCELIUM);
+    expect(chunk.getBlockAtY(4, 17, 5)).toBe(ChunkBlockId.SANDSTONE);
+    expect(chunk.blocks[blockBufferIndex(4, 17, 5)]).toBe(ChunkBlockId.SANDSTONE);
   });
 
   test("serializes only non-empty sections and compacts each section palette independently", () => {
     const chunk = new MutableChunkBlockBuffer(0, 0, 0, 48);
 
     chunk.setBlock(2, 1, 3, ChunkBlockId.STONE);
-    chunk.setBlock(4, 34, 5, ChunkBlockId.GRASS_BLOCK);
-    chunk.setBlock(6, 35, 7, ChunkBlockId.SNOW);
+    chunk.setBlock(4, 34, 5, ChunkBlockId.MYCELIUM);
+    chunk.setBlock(6, 35, 7, ChunkBlockId.PACKED_ICE);
 
     const sections = buildChunkSections(chunk);
 
@@ -42,7 +42,7 @@ describe("MutableChunkBlockBuffer helpers", () => {
     });
     expect(sections[1]).toEqual({
       y: 2,
-      palette: ["minecraft:air", "minecraft:grass_block", "minecraft:snow"],
+      palette: ["minecraft:air", "minecraft:mycelium", "minecraft:packed_ice"],
       blockOrder: "y-major,z-major,x-minor",
       blocks: expect.any(Array),
     });

@@ -1,7 +1,33 @@
 import { GenerationStep } from "../levelgen/generation-step";
+import { DEFAULT_OVERWORLD_AIR_CARVERS, OCEAN_OVERWORLD_AIR_CARVERS } from "../carver/overworld-configured-carvers";
 import { BiomeGenerationSettings } from "./biome-generation-settings";
 import { VegetationFeatures } from "../levelgen/feature/vegetation-features";
 import { WaterFeatures } from "../levelgen/feature/water-features";
+
+const OCEAN_BIOME_KEYS = new Set([
+  "minecraft:ocean",
+  "minecraft:deep_ocean",
+  "minecraft:warm_ocean",
+  "minecraft:deep_warm_ocean",
+  "minecraft:lukewarm_ocean",
+  "minecraft:deep_lukewarm_ocean",
+  "minecraft:cold_ocean",
+  "minecraft:deep_cold_ocean",
+  "minecraft:frozen_ocean",
+  "minecraft:deep_frozen_ocean",
+]);
+
+function addDefaultCarvers(builder: BiomeGenerationSettings.Builder): void {
+  for (const carver of DEFAULT_OVERWORLD_AIR_CARVERS) {
+    builder.addCarver(GenerationStep.Carving.AIR, carver);
+  }
+}
+
+function addOceanCarvers(builder: BiomeGenerationSettings.Builder): void {
+  for (const carver of OCEAN_OVERWORLD_AIR_CARVERS) {
+    builder.addCarver(GenerationStep.Carving.AIR, carver);
+  }
+}
 
 function addDefaultLakes(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.LAKES, () => WaterFeatures.LAKE_WATER);
@@ -81,6 +107,7 @@ function addPlainVegetation(builder: BiomeGenerationSettings.Builder): void {
 
 function buildMountainSettings(edge: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
   addDefaultLakes(builder);
   builder.addFeature(
     GenerationStep.Decoration.VEGETAL_DECORATION,
@@ -95,6 +122,7 @@ function buildMountainSettings(edge: boolean): BiomeGenerationSettings {
 
 function buildTaigaSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
   addDefaultLakes(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.TAIGA_VEGETATION);
@@ -110,6 +138,7 @@ function buildTaigaSettings(): BiomeGenerationSettings {
 
 function buildDesertSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
   addDefaultLakes(builder);
   addDefaultMushrooms(builder);
   addDesertVegetation(builder);
@@ -120,6 +149,7 @@ function buildDesertSettings(): BiomeGenerationSettings {
 
 function buildBadlandsSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
   addDefaultLakes(builder);
   addBadlandGrass(builder);
   addBadlandExtraVegetation(builder);
@@ -129,6 +159,7 @@ function buildBadlandsSettings(): BiomeGenerationSettings {
 
 function buildForestSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
   addDefaultLakes(builder);
   addForestFlowers(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BIRCH_OTHER);
@@ -142,6 +173,7 @@ function buildForestSettings(): BiomeGenerationSettings {
 
 function buildFlowerForestSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
   addDefaultLakes(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.FOREST_FLOWER_VEGETATION_COMMON);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.FOREST_FLOWER_TREES);
@@ -155,6 +187,7 @@ function buildFlowerForestSettings(): BiomeGenerationSettings {
 
 function buildBirchForestSettings(tall: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
   addDefaultLakes(builder);
   addForestFlowers(builder);
   builder.addFeature(
@@ -171,6 +204,7 @@ function buildBirchForestSettings(tall: boolean): BiomeGenerationSettings {
 
 function buildPlainsSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
   addDefaultLakes(builder);
   addPlainGrass(builder);
   addPlainVegetation(builder);
@@ -182,6 +216,7 @@ function buildPlainsSettings(): BiomeGenerationSettings {
 
 function buildSwampSettings(swampHills: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
   addDefaultLakes(builder);
   addSwampVegetation(builder);
   addDefaultMushrooms(builder);
@@ -218,6 +253,18 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:wooded_hills", buildForestSettings()],
 ]);
 
+const DEFAULT_CARVER_ONLY_SETTINGS = (() => {
+  const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
+  return builder.build();
+})();
+
+const OCEAN_CARVER_ONLY_SETTINGS = (() => {
+  const builder = new BiomeGenerationSettings.Builder();
+  addOceanCarvers(builder);
+  return builder.build();
+})();
+
 export function getOverworldBiomeGenerationSettings(key: string): BiomeGenerationSettings {
-  return SETTINGS_BY_KEY.get(key) ?? BiomeGenerationSettings.EMPTY;
+  return SETTINGS_BY_KEY.get(key) ?? (OCEAN_BIOME_KEYS.has(key) ? OCEAN_CARVER_ONLY_SETTINGS : DEFAULT_CARVER_ONLY_SETTINGS);
 }

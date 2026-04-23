@@ -53,4 +53,4 @@ Finish the missing flower / dead-bush / seagrass vegetation path now that lakes,
 
 ## Next
 
-Tactical 28: dark-forest canopy and tree-decorator parity. Port `DarkOakTrunkPlacer`, `DarkOakFoliagePlacer`, `ThreeLayersFeatureSize`, the first huge-mushroom feature path, and the narrow bee/vine decorator set needed to stop dark-forest and bee-bearing forest tables from falling back to the current simplified tree mix.
+Tactical 28 is now [`28-carver-material-parity-and-oracle-expansion.md`](28-carver-material-parity-and-oracle-expansion.md): finish the next classic-carver parity slice by widening the carved material model, aligning `WorldCarver`'s replaceable-material set, and broadening carved-stage oracle coverage beyond spawn-plus-ocean.
