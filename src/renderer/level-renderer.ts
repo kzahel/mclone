@@ -11,7 +11,7 @@ import { Camera } from "./camera";
 import { ChunkRenderDispatcher } from "./chunk/chunk-render-dispatcher";
 import { Frustum } from "./culling/frustum";
 import { FogMode, FogRenderer } from "./fog-renderer";
-import { GameRenderer } from "./game-renderer";
+import { GameRenderer, type RenderLevelOptions } from "./game-renderer";
 import { LightTexture } from "./light-texture";
 import { Matrix4f } from "./math/matrix4f";
 import { RenderType } from "./render-type";
@@ -109,6 +109,7 @@ export class LevelRenderer {
     gameRenderer: GameRenderer,
     lightTexture: LightTexture,
     projectionMatrix: Matrix4f,
+    options: RenderLevelOptions = {},
   ): Promise<LevelRenderFrame> {
     const level = this.level!;
     const frustum = this.cullingFrustum!;
@@ -116,7 +117,7 @@ export class LevelRenderer {
     FogRenderer.setupFog(camera, FogMode.FOG_TERRAIN, Math.max(gameRenderer.getRenderDistance() - 16.0, 32.0), false);
     this.setupRender(camera, frustum, false, this.frameId++, false);
     await this.compileChunksUntil(finishTimeNano);
-    if (this.chunkRenderDispatcher !== undefined && !this.chunkRenderDispatcher.isQueueEmpty()) {
+    if (options.waitForChunkTasks && this.chunkRenderDispatcher !== undefined && !this.chunkRenderDispatcher.isQueueEmpty()) {
       await this.chunkRenderDispatcher.awaitAllTasks();
     }
 

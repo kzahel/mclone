@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, test } from "vitest";
+import { BlockPos } from "../../../src/core/block-pos";
+import { Direction } from "../../../src/core/direction";
 import { Registry } from "../../../src/core/registry";
 import { ResourceLocation } from "../../../src/core/resource-location";
 import { BlockColors } from "../../../src/renderer/block/block-colors";
 import { ItemBlockRenderTypes } from "../../../src/renderer/item-block-render-types";
 import { RenderType } from "../../../src/renderer/render-type";
-import type { Block } from "../../../src/world/level/block/block";
+import { Block } from "../../../src/world/level/block/block";
+import { StaticBlockAndTintGetter } from "../../../src/world/level/static-block-and-tint-getter";
 import { FoliageColor } from "../../../src/world/level/foliage-color";
 import { GrassColor } from "../../../src/world/level/grass-color";
 import { registerGeneratedRenderBlocks } from "../../../src/world/level/generated-render-blocks";
@@ -77,5 +80,21 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_log"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:birch_leaves"))).toBe(RenderType.cutoutMipped());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:pumpkin"))).toBe(RenderType.solid());
+  });
+
+  test("leaves stay non-occluding so adjacent terrain faces are not culled", () => {
+    registerGeneratedRenderBlocks();
+
+    const dirtPos = new BlockPos(0, 0, 0);
+    const leavesPos = dirtPos.east();
+    const level = new StaticBlockAndTintGetter(getState("minecraft:air"));
+    const dirt = getState("minecraft:dirt");
+    const leaves = getState("minecraft:oak_leaves");
+
+    level.setBlock(dirtPos, dirt);
+    level.setBlock(leavesPos, leaves);
+
+    expect(leaves.canOcclude()).toBe(false);
+    expect(Block.shouldRenderFace(dirt, level, dirtPos, Direction.EAST, leavesPos)).toBe(true);
   });
 });

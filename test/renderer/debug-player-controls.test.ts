@@ -6,16 +6,10 @@ import {
 } from "../../src/renderer/debug/debug-player-controls";
 
 describe("debug player controls", () => {
-  test("builds player input commands from authoritative rotation and forward input", () => {
+  test("builds player input commands from baseline rotation and forward input", () => {
     const command = buildPlayerInputCommand(
-      {
-        playerId: "player",
-        position: { x: 8.5, y: 104, z: 40.5 },
-        rotation: { yaw: 180, pitch: 30 },
-        acknowledgedInputSequence: 0,
-        tick: 1,
-        revision: 1,
-      },
+      180,
+      30,
       {
         heldKeys: new Set(["KeyW"]),
         mouseDeltaX: 0,

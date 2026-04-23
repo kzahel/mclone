@@ -1,16 +1,17 @@
 const FLOAT_BYTES = 4;
 const SHADER_VISIBILITY = 0x1 | 0x2;
+type ShaderUniformValues = ArrayLike<number>;
 
 function alignTo(value: number, alignment: number): number {
   return Math.ceil(value / alignment) * alignment;
 }
 
-function expandValues(count: number, values: readonly number[]): number[] {
+function expandValues(count: number, values: ShaderUniformValues): number[] {
   if (values.length !== count && values.length > 1) {
     throw new Error(`Invalid amount of values specified (expected ${count}, found ${values.length})`);
   }
 
-  const expanded = values.slice();
+  const expanded = Array.from(values);
   if (count > 1 && values.length === 1) {
     while (expanded.length < count) {
       expanded.push(values[0]!);
@@ -316,14 +317,22 @@ export class ShaderProgramDefinition {
     return this.uniforms.find((uniform) => uniform.spec.name === name);
   }
 
-  public createUniformBufferBytes(overrides: Readonly<Record<string, readonly number[]>> = {}): Uint8Array {
-    const bytes = new Uint8Array(this.uniformBufferSize);
-    const dataView = new DataView(bytes.buffer);
+  public writeUniformBufferBytes(bytes: Uint8Array, overrides: Readonly<Record<string, ShaderUniformValues>> = {}): void {
+    if (bytes.byteLength < this.uniformBufferSize) {
+      throw new Error(`Uniform byte buffer too small for shader ${this.name}`);
+    }
+
+    bytes.fill(0, 0, this.uniformBufferSize);
+    const dataView = new DataView(bytes.buffer, bytes.byteOffset, this.uniformBufferSize);
     for (const uniform of this.uniforms) {
       const value = overrides[uniform.spec.name] ?? uniform.spec.values;
       writeUniformValue(dataView, uniform, expandValues(uniform.spec.count, value));
     }
+  }
 
+  public createUniformBufferBytes(overrides: Readonly<Record<string, ShaderUniformValues>> = {}): Uint8Array {
+    const bytes = new Uint8Array(this.uniformBufferSize);
+    this.writeUniformBufferBytes(bytes, overrides);
     return bytes;
   }
 

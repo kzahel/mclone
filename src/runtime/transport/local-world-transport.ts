@@ -48,6 +48,7 @@ export class TransportWorldClient implements WorldClient {
   private level: ClientChunkCache | undefined;
   private sessionState: ClientSessionState | undefined;
   private playerState: ClientPlayerState | undefined;
+  private lastChunkView: SetChunkViewRequest | undefined;
 
   public constructor(
     private readonly transport: WorldTransport,
@@ -76,12 +77,23 @@ export class TransportWorldClient implements WorldClient {
       throw new Error("World host did not acknowledge open_world");
     }
 
+    this.lastChunkView = undefined;
     return result.worldOpened;
   }
 
   public async setChunkView(request: SetChunkViewRequest): Promise<boolean> {
     this.getLevel();
+    if (
+      this.lastChunkView !== undefined
+      && this.lastChunkView.centerChunkX === request.centerChunkX
+      && this.lastChunkView.centerChunkZ === request.centerChunkZ
+      && this.lastChunkView.radius === request.radius
+    ) {
+      return false;
+    }
+
     const result = this.applyHostMessages(await this.transport.setChunkView(request));
+    this.lastChunkView = request;
     return result.chunkChanged;
   }
 

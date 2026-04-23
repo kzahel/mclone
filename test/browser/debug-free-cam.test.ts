@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const REMOTE_WORLD_HOST_URL = "http://127.0.0.1:4173";
 const DEBUG_SCREENSHOT_PATH = "/tmp/mclone-debug-free-cam.png";
+const DEBUG_TALL_SCREENSHOT_PATH = "/tmp/mclone-debug-free-cam-tall.png";
 const EXPECTED_LOADED_CHUNK_COUNT = 225;
 
 interface DebugRuntimeState {
@@ -17,7 +18,16 @@ interface DebugRuntimeState {
   readonly expectedLoadedChunkCount?: number;
   readonly viewDistance?: number;
   readonly renderDistance?: number;
+  readonly frameCount: number;
   readonly error?: string;
+}
+
+interface CanvasMetrics {
+  readonly width: number;
+  readonly height: number;
+  readonly clientWidth: number;
+  readonly clientHeight: number;
+  readonly devicePixelRatio: number;
 }
 
 function createDebugUrl(): string {
@@ -40,14 +50,35 @@ async function readDebugState(page: Page): Promise<DebugRuntimeState> {
   return await page.evaluate(() => window.__mcloneDebug!.state as DebugRuntimeState);
 }
 
-test("debug free-cam follows authoritative player_state and moves chunk interest with remote input", async ({ page }) => {
-  await page.goto(createDebugUrl(), { waitUntil: "load" });
-  await page.waitForFunction(() => typeof window.__mcloneDebug !== "undefined", undefined, { timeout: 10_000 });
+async function readCanvasMetrics(page: Page): Promise<CanvasMetrics> {
+  return await page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
+    if (!canvas) {
+      throw new Error("canvas #renderer not found");
+    }
+
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      clientWidth: canvas.clientWidth,
+      clientHeight: canvas.clientHeight,
+      devicePixelRatio: window.devicePixelRatio,
+    };
+  });
+}
+
+async function waitForDebugReady(page: Page): Promise<void> {
+  await page.waitForFunction(() => typeof window.__mcloneDebug !== "undefined", undefined, { timeout: 20_000 });
   await page.waitForFunction(
     () => window.__mcloneDebug!.state.ready === true || window.__mcloneDebug!.state.error !== undefined,
     undefined,
-    { timeout: 10_000 },
+    { timeout: 20_000 },
   );
+}
+
+test("debug free-cam follows authoritative player_state and moves chunk interest with remote input", async ({ page }) => {
+  await page.goto(createDebugUrl(), { waitUntil: "load" });
+  await waitForDebugReady(page);
   await page.waitForFunction(
     (expectedLoadedChunkCount) => {
       const state = window.__mcloneDebug?.state;
@@ -105,4 +136,34 @@ test("debug free-cam follows authoritative player_state and moves chunk interest
   expect(movedState.playerChunkX).toBe(movedState.chunkViewCenterX);
   expect(movedState.playerChunkZ).toBe(movedState.chunkViewCenterZ);
   expect(movedState.loadedChunkCount).toBe(EXPECTED_LOADED_CHUNK_COUNT);
+});
+
+test("debug free-cam keeps the backing buffer aligned with a tall viewport after resize", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(createDebugUrl(), { waitUntil: "load" });
+  await waitForDebugReady(page);
+  await page.waitForFunction(() => (window.__mcloneDebug?.state.frameCount ?? 0) >= 10, undefined, { timeout: 20_000 });
+
+  await page.setViewportSize({ width: 430, height: 932 });
+  await page.waitForFunction(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
+    if (!canvas) {
+      return false;
+    }
+
+    return canvas.clientHeight > canvas.clientWidth
+      && Math.abs(canvas.width - Math.round(canvas.clientWidth * window.devicePixelRatio)) <= 1
+      && Math.abs(canvas.height - Math.round(canvas.clientHeight * window.devicePixelRatio)) <= 1
+      && (window.__mcloneDebug?.state.frameCount ?? 0) >= 20;
+  }, undefined, { timeout: 20_000 });
+
+  const state = await readDebugState(page);
+  const metrics = await readCanvasMetrics(page);
+  await page.locator("#renderer").screenshot({ path: DEBUG_TALL_SCREENSHOT_PATH });
+
+  expect(state.error).toBeUndefined();
+  expect(metrics.clientHeight).toBeGreaterThan(metrics.clientWidth);
+  expect(Math.abs(metrics.width - Math.round(metrics.clientWidth * metrics.devicePixelRatio))).toBeLessThanOrEqual(1);
+  expect(Math.abs(metrics.height - Math.round(metrics.clientHeight * metrics.devicePixelRatio))).toBeLessThanOrEqual(1);
+  expect(Math.abs((metrics.width / metrics.height) - (metrics.clientWidth / metrics.clientHeight))).toBeLessThan(0.01);
 });

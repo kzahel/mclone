@@ -31,6 +31,7 @@ import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
 import { RenderType } from "./render-type";
 import { ViewArea } from "./view-area";
 import { Vec3 } from "../world/phys/vec3";
+import type { VertexBuffer } from "./vertex/vertex-buffer";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
 const GRASS_COLORMAP_LOCATION = new ResourceLocation("minecraft:colormap/grass");
@@ -74,6 +75,7 @@ export interface RendererScene {
   readonly pipelineCache: RenderPipelineCache;
   readonly sampler: GPUSampler;
   readonly viewDistance: number;
+  readonly chunkDrawResources: WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>;
 }
 
 export type SceneInitResult =
@@ -84,6 +86,57 @@ export interface DrawTarget {
   readonly view: GPUTextureView;
   readonly depthView: GPUTextureView;
   readonly format: GPUTextureFormat;
+}
+
+export interface SceneDepthTarget {
+  readonly texture: GPUTexture;
+  readonly view: GPUTextureView;
+}
+
+export interface CanvasResizeResult {
+  readonly changed: boolean;
+  readonly width: number;
+  readonly height: number;
+}
+
+function clampCanvasSize(width: number, height: number, maxTextureDimension: number): {
+  readonly width: number;
+  readonly height: number;
+} {
+  if (width <= maxTextureDimension && height <= maxTextureDimension) {
+    return { width, height };
+  }
+
+  const scale = Math.min(maxTextureDimension / width, maxTextureDimension / height);
+  return {
+    width: Math.max(1, Math.floor(width * scale)),
+    height: Math.max(1, Math.floor(height * scale)),
+  };
+}
+
+export function resizeCanvasToDisplaySize(
+  canvas: HTMLCanvasElement,
+  maxTextureDimension: number = Number.MAX_SAFE_INTEGER,
+): CanvasResizeResult {
+  const devicePixelRatio = typeof window === "undefined" ? 1 : Math.max(1, window.devicePixelRatio || 1);
+  const clientWidth = Math.max(1, Math.floor(canvas.clientWidth || canvas.width));
+  const clientHeight = Math.max(1, Math.floor(canvas.clientHeight || canvas.height));
+  const clamped = clampCanvasSize(
+    Math.max(1, Math.round(clientWidth * devicePixelRatio)),
+    Math.max(1, Math.round(clientHeight * devicePixelRatio)),
+    maxTextureDimension,
+  );
+  const changed = canvas.width !== clamped.width || canvas.height !== clamped.height;
+  if (changed) {
+    canvas.width = clamped.width;
+    canvas.height = clamped.height;
+  }
+
+  return {
+    changed,
+    width: clamped.width,
+    height: clamped.height,
+  };
 }
 
 function createWorldClient(
@@ -135,6 +188,7 @@ export async function initializeRendererScene(
   if (!adapter) return { ok: false, reason: "requestAdapter returned null" };
 
   const device = await adapter.requestDevice();
+  resizeCanvasToDisplaySize(canvas, device.limits.maxTextureDimension2D);
   const ctx = canvas.getContext("webgpu");
   if (!ctx) return { ok: false, reason: "canvas.getContext('webgpu') returned null" };
 
@@ -228,6 +282,7 @@ export async function initializeRendererScene(
       pipelineCache,
       sampler,
       viewDistance: options.viewDistance,
+      chunkDrawResources: new WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>(),
     },
   };
 }
@@ -237,56 +292,115 @@ interface ChunkDrawEntry {
   readonly bindGroup: GPUBindGroup;
 }
 
+interface CachedChunkDrawResources {
+  readonly uniformBuffer: GPUBuffer;
+  readonly uniformBytes: Uint8Array;
+  readonly bindGroup: GPUBindGroup;
+  readonly atlasTexture: GPUTextureView;
+  readonly lightTexture: GPUTextureView;
+}
+
 interface PassLayer {
   readonly pipeline: GPURenderPipeline;
   readonly draws: readonly ChunkDrawEntry[];
 }
 
-function uploadBuffer(device: GPUDevice, bytes: Uint8Array, usage: GPUBufferUsageFlags): GPUBuffer {
-  const buffer = device.createBuffer({
-    size: Math.max(4, Math.ceil(bytes.byteLength / 4) * 4),
-    usage,
-    mappedAtCreation: true,
+const COLOR_MODULATOR = [1, 1, 1, 1] as const;
+
+function createChunkDrawResources(
+  scene: RendererScene,
+  pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
+  atlasTexture: GPUTextureView,
+  lightTexture: GPUTextureView,
+): CachedChunkDrawResources {
+  const uniformBuffer = scene.device.createBuffer({
+    size: Math.max(4, pipeline.shaderProgram.uniformBufferSize),
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
-  new Uint8Array(buffer.getMappedRange()).set(bytes);
-  buffer.unmap();
-  return buffer;
+  return {
+    uniformBuffer,
+    uniformBytes: new Uint8Array(pipeline.shaderProgram.uniformBufferSize),
+    bindGroup: pipeline.shaderProgram.createBindGroup(scene.device, pipeline.bindGroupLayout, {
+      uniformBuffer,
+      samplers: {
+        Sampler0: scene.sampler,
+        Sampler2: scene.sampler,
+      },
+      textures: {
+        Sampler0: atlasTexture,
+        Sampler2: lightTexture,
+      },
+    }),
+    atlasTexture,
+    lightTexture,
+  };
+}
+
+function getChunkDrawResources(
+  scene: RendererScene,
+  pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
+  draw: import("./level-renderer").ChunkLayerDraw,
+  atlasTexture: GPUTextureView,
+  lightTexture: GPUTextureView,
+): CachedChunkDrawResources {
+  let resourcesByLayout = scene.chunkDrawResources.get(draw.vertexBuffer);
+  if (resourcesByLayout === undefined) {
+    resourcesByLayout = new Map<GPUBindGroupLayout, CachedChunkDrawResources>();
+    scene.chunkDrawResources.set(draw.vertexBuffer, resourcesByLayout);
+  }
+
+  const cached = resourcesByLayout.get(pipeline.bindGroupLayout);
+  if (cached !== undefined && cached.atlasTexture === atlasTexture && cached.lightTexture === lightTexture) {
+    return cached;
+  }
+
+  const created = createChunkDrawResources(scene, pipeline, atlasTexture, lightTexture);
+  resourcesByLayout.set(pipeline.bindGroupLayout, created);
+  return created;
+}
+
+function updateChunkUniforms(
+  scene: RendererScene,
+  pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
+  resources: CachedChunkDrawResources,
+  frame: LevelRenderFrame,
+  chunkOffset: readonly [number, number, number],
+): void {
+  pipeline.shaderProgram.writeUniformBufferBytes(resources.uniformBytes, {
+    ModelViewMat: frame.modelViewMatrix,
+    ProjMat: frame.projectionMatrix,
+    ChunkOffset: chunkOffset,
+    ColorModulator: COLOR_MODULATOR,
+    FogStart: [frame.fogStart],
+    FogEnd: [frame.fogEnd],
+    FogColor: frame.fogColor,
+  });
+  scene.device.queue.writeBuffer(resources.uniformBuffer, 0, resources.uniformBytes as Uint8Array<ArrayBuffer>);
 }
 
 function createChunkBindGroup(
-  device: GPUDevice,
+  scene: RendererScene,
   pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
-  sampler: GPUSampler,
+  frame: LevelRenderFrame,
+  draw: import("./level-renderer").ChunkLayerDraw,
   atlasTexture: GPUTextureView,
-  lightTexture: GPUTextureView,
-  modelViewMat: Float32Array,
-  projectionMat: Float32Array,
-  chunkOffset: readonly [number, number, number],
-  fogStart: number,
-  fogEnd: number,
-  fogColor: readonly [number, number, number, number],
 ): GPUBindGroup {
-  const uniformBytes = pipeline.shaderProgram.createUniformBufferBytes({
-    ModelViewMat: Array.from(modelViewMat),
-    ProjMat: Array.from(projectionMat),
-    ChunkOffset: chunkOffset,
-    ColorModulator: [1, 1, 1, 1],
-    FogStart: [fogStart],
-    FogEnd: [fogEnd],
-    FogColor: fogColor,
-  });
-  const uniformBuffer = uploadBuffer(device, uniformBytes, GPUBufferUsage.UNIFORM);
-  return pipeline.shaderProgram.createBindGroup(device, pipeline.bindGroupLayout, {
-    uniformBuffer,
-    samplers: {
-      Sampler0: sampler,
-      Sampler2: sampler,
-    },
-    textures: {
-      Sampler0: atlasTexture,
-      Sampler2: lightTexture,
-    },
-  });
+  const resources = getChunkDrawResources(scene, pipeline, draw, atlasTexture, frame.lightTexture);
+  updateChunkUniforms(scene, pipeline, resources, frame, draw.chunkOffset);
+  return resources.bindGroup;
+}
+
+function createChunkBindGroupEntry(
+  scene: RendererScene,
+  pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
+  frame: LevelRenderFrame,
+  draw: import("./level-renderer").ChunkLayerDraw,
+  atlasTexture: GPUTextureView,
+): ChunkDrawEntry {
+  return {
+    draw,
+    bindGroup: createChunkBindGroup(scene, pipeline, frame, draw, atlasTexture),
+  };
 }
 
 export function encodeSceneFrame(
@@ -312,22 +426,7 @@ export function encodeSceneFrame(
     const pipeline = scene.pipelineCache.getOrCreate(renderType, target.format, SCENE_DEPTH_FORMAT);
     layers.push({
       pipeline: pipeline.pipeline,
-      draws: drawEntries.map((draw) => ({
-        draw,
-        bindGroup: createChunkBindGroup(
-          scene.device,
-          pipeline,
-          scene.sampler,
-          atlasTexture,
-          frame.lightTexture,
-          frame.modelViewMatrix,
-          frame.projectionMatrix,
-          draw.chunkOffset,
-          frame.fogStart,
-          frame.fogEnd,
-          frame.fogColor,
-        ),
-      })),
+      draws: drawEntries.map((draw) => createChunkBindGroupEntry(scene, pipeline, frame, draw, atlasTexture)),
     });
   }
 
@@ -364,11 +463,17 @@ export function encodeSceneFrame(
 }
 
 export function createSceneDepthView(device: GPUDevice, width: number, height: number): GPUTextureView {
-  return device
-    .createTexture({
-      size: { width, height },
-      format: SCENE_DEPTH_FORMAT,
-      usage: GPUTextureUsage.RENDER_ATTACHMENT,
-    })
-    .createView();
+  return createSceneDepthTarget(device, width, height).view;
+}
+
+export function createSceneDepthTarget(device: GPUDevice, width: number, height: number): SceneDepthTarget {
+  const texture = device.createTexture({
+    size: { width, height },
+    format: SCENE_DEPTH_FORMAT,
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  });
+  return {
+    texture,
+    view: texture.createView(),
+  };
 }

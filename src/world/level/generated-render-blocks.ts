@@ -620,7 +620,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   );
   registerBlock(
     OAK_LEAVES_LOCATION,
-    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS).noOcclusion()),
   );
   registerBlock(
     ACACIA_LOG_LOCATION,
@@ -628,7 +628,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   );
   registerBlock(
     ACACIA_LEAVES_LOCATION,
-    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS).noOcclusion()),
   );
   registerBlock(
     SPRUCE_LOG_LOCATION,
@@ -636,7 +636,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   );
   registerBlock(
     SPRUCE_LEAVES_LOCATION,
-    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS).noOcclusion()),
   );
   registerBlock(
     BIRCH_LOG_LOCATION,
@@ -644,7 +644,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   );
   registerBlock(
     BIRCH_LEAVES_LOCATION,
-    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS).noOcclusion()),
   );
   registerBlock(
     DARK_OAK_LOG_LOCATION,
@@ -652,7 +652,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   );
   registerBlock(
     DARK_OAK_LEAVES_LOCATION,
-    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS).noOcclusion()),
   );
   registerBlock(
     JUNGLE_LOG_LOCATION,
@@ -660,7 +660,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   );
   registerBlock(
     JUNGLE_LEAVES_LOCATION,
-    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS).noOcclusion()),
   );
   const grassPlantState = registerBlock(
     GRASS_LOCATION,

@@ -3,9 +3,10 @@
 import { SectionPos } from "../../core/section-pos";
 import { Vec3 } from "../../world/phys/vec3";
 import {
-  createSceneDepthView,
+  createSceneDepthTarget,
   encodeSceneFrame,
   initializeRendererScene,
+  resizeCanvasToDisplaySize,
   type RendererScene,
 } from "../scene-setup";
 import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "../browser-render-config";
@@ -155,6 +156,7 @@ async function boot(): Promise<void> {
     showOverlayMessage("error: canvas #renderer not found");
     return;
   }
+  const rendererCanvas = canvas;
 
   const runtimeConfig = readWorldTransport();
   const renderConfig = readBrowserRenderConfig(new URL(window.location.href));
@@ -163,7 +165,7 @@ async function boot(): Promise<void> {
   const debugRuntime = createDebugRuntimeController(runtimeConfig.worldTransport);
   window.__mcloneDebug = debugRuntime.controller;
 
-  const sceneResult = await initializeRendererScene(canvas, {
+  const sceneResult = await initializeRendererScene(rendererCanvas, {
     seed: SEED,
     viewDistance: renderConfig.viewDistance,
     renderDistance: renderConfig.renderDistance,
@@ -181,8 +183,21 @@ async function boot(): Promise<void> {
   const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
   debugRuntime.controller.state.expectedLoadedChunkCount = expectedLoadedChunkCount;
 
-  const input = new DebugInput(canvas);
-  const depthView = createSceneDepthView(scene.device, canvas.width, canvas.height);
+  const input = new DebugInput(rendererCanvas);
+  let depthTarget: ReturnType<typeof createSceneDepthTarget> | undefined;
+
+  function resizeViewport(): void {
+    const resized = resizeCanvasToDisplaySize(rendererCanvas, scene.device.limits.maxTextureDimension2D);
+    if (!resized.changed && depthTarget !== undefined) {
+      return;
+    }
+
+    depthTarget?.texture.destroy();
+    depthTarget = createSceneDepthTarget(scene.device, resized.width, resized.height);
+    scene.gameRenderer.resize(resized.width, resized.height);
+  }
+
+  resizeViewport();
 
   let camera = {
     position: initialCamera.position,
@@ -250,6 +265,7 @@ async function boot(): Promise<void> {
     const now = performance.now();
     const dtSeconds = Math.min(0.1, (now - lastFrameMs) / 1000.0);
     lastFrameMs = now;
+    resizeViewport();
 
     const inputFrame = mergeDebugInputFrame(input.consumeFrame(), debugRuntime.getInjectedInput());
 
@@ -265,7 +281,12 @@ async function boot(): Promise<void> {
 
     const playerState = scene.worldClient.getPlayerState();
     if (playerState !== undefined) {
-      const playerInput = buildPlayerInputCommand(playerState, inputFrame, dtSeconds, nextInputSequence);
+      // Client-side rotation prediction: accumulate from our last-sent yaw/pitch,
+      // not the server-echoed state (which lags behind). Otherwise input between
+      // server echoes gets overwritten and higher framerates lose more rotation.
+      const baseYaw = lastSentInput?.yaw ?? playerState.rotation.yaw;
+      const basePitch = lastSentInput?.pitch ?? playerState.rotation.pitch;
+      const playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence);
       if (!isSamePlayerInput(lastSentInput, playerInput)) {
         if (await scene.worldClient.setPlayerInput({
           type: "set_player_input",
@@ -304,6 +325,7 @@ async function boot(): Promise<void> {
           scene.levelRenderer,
           scene.lightTexture,
           camera,
+          { waitForChunkTasks: false },
         );
         const encoder = scene.device.createCommandEncoder();
         encodeSceneFrame(
@@ -311,7 +333,7 @@ async function boot(): Promise<void> {
           renderedFrame,
           {
             view: scene.ctx.getCurrentTexture().createView(),
-            depthView,
+            depthView: depthTarget!.view,
             format: scene.format,
           },
           encoder,

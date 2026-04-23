@@ -12,6 +12,10 @@ export type CameraState = {
   readonly yRot: number;
 };
 
+export interface RenderLevelOptions {
+  readonly waitForChunkTasks?: boolean;
+}
+
 export class GameRenderer {
   private readonly mainCamera = new Camera();
   private readonly projectionMatrix = new Matrix4f();
@@ -61,6 +65,7 @@ export class GameRenderer {
     levelRenderer: LevelRenderer,
     lightTexture: LightTexture,
     cameraState: CameraState,
+    options: RenderLevelOptions = {},
   ): Promise<LevelRenderFrame> {
     lightTexture.updateLightTexture(partialTick);
     this.mainCamera.setup(cameraState.position, cameraState.xRot, cameraState.yRot);
@@ -70,6 +75,16 @@ export class GameRenderer {
     poseStack.mulPose(Vector3f.XP.rotationDegrees(this.mainCamera.getXRot()));
     poseStack.mulPose(Vector3f.YP.rotationDegrees(this.mainCamera.getYRot() + 180.0));
     levelRenderer.prepareCullFrustum(poseStack, this.mainCamera.getPosition(), projectionMatrix.copy());
-    return levelRenderer.renderLevel(poseStack, partialTick, finishTimeNano, false, this.mainCamera, this, lightTexture, projectionMatrix);
+    return levelRenderer.renderLevel(
+      poseStack,
+      partialTick,
+      finishTimeNano,
+      false,
+      this.mainCamera,
+      this,
+      lightTexture,
+      projectionMatrix,
+      options,
+    );
   }
 }

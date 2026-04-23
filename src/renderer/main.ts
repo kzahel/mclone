@@ -218,6 +218,7 @@ async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expe
       scene.levelRenderer,
       scene.lightTexture,
       camera,
+      { waitForChunkTasks: true },
     );
 
     if ((frame.layerDraws.get(RenderType.solid())?.length ?? 0) > 0) {

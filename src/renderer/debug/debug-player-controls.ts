@@ -102,7 +102,8 @@ export function createChunkViewRequestForPlayerState(playerState: ClientPlayerSt
 }
 
 export function buildPlayerInputCommand(
-  playerState: ClientPlayerState,
+  baseYaw: number,
+  basePitch: number,
   frame: DebugInputFrame,
   dtSeconds: number,
   sequence: number,
@@ -114,8 +115,8 @@ export function buildPlayerInputCommand(
     frame.mouseDeltaY * MOUSE_SENS_DEG_PER_PIXEL
     - frame.joystickY * JOYSTICK_LOOK_DEG_PER_SEC * dtSeconds;
 
-  const yaw = playerState.rotation.yaw + yawDelta;
-  const pitch = clampPitch(playerState.rotation.pitch + pitchDelta);
+  const yaw = baseYaw + yawDelta;
+  const pitch = clampPitch(basePitch + pitchDelta);
   const forwardAxis =
     (frame.heldKeys.has("KeyW") || frame.moveForward ? 1 : 0)
     - (frame.heldKeys.has("KeyS") || frame.moveBack ? 1 : 0);

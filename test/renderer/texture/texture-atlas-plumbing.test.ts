@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { ResourceLocation } from "../../../src/core/resource-location";
 import { AnimationMetadataSection } from "../../../src/renderer/texture/animation-metadata-section";
+import {
+  createSpriteInfo,
+  parseAnimationMetadataResponseText,
+  parseAnimationMetadataSection,
+} from "../../../src/renderer/texture/browser-native-image-loader";
 import { MipmapGenerator } from "../../../src/renderer/texture/mipmap-generator";
 import { NativeImage } from "../../../src/renderer/texture/native-image";
 import { Stitcher } from "../../../src/renderer/texture/stitcher";
@@ -23,7 +28,10 @@ function rgba8(pixel: number): readonly [number, number, number, number] {
 }
 
 class MemoryTextureAtlasSource implements TextureAtlasSource {
-  public constructor(private readonly images: ReadonlyMap<string, NativeImage>) {}
+  public constructor(
+    private readonly images: ReadonlyMap<string, NativeImage>,
+    private readonly metadataByName: ReadonlyMap<string, AnimationMetadataSection> = new Map(),
+  ) {}
 
   public async getBasicSpriteInfos(spriteNames: readonly ResourceLocation[]): Promise<readonly TextureAtlasSpriteInfo[]> {
     return spriteNames.map((location) => {
@@ -32,7 +40,8 @@ class MemoryTextureAtlasSource implements TextureAtlasSource {
         throw new Error(`Missing test sprite ${location}`);
       }
 
-      return new TextureAtlasSpriteInfo(location, image.getWidth(), image.getHeight(), AnimationMetadataSection.EMPTY);
+      const metadata = this.metadataByName.get(location.toString()) ?? AnimationMetadataSection.EMPTY;
+      return createSpriteInfo(location, image, metadata);
     });
   }
 
@@ -106,5 +115,53 @@ describe("Texture atlas plumbing", () => {
     expect(sprite?.getU1()).toBe(0.5);
     expect(sprite?.getV0()).toBe(0);
     expect(sprite?.getV1()).toBe(1);
+  });
+
+  test("animated water-strip metadata resolves to frame-sized sprite info", () => {
+    const spriteLocation = new ResourceLocation("minecraft:block/water_still");
+    const image = solidImage(16, 512, NativeImage.combine(0xff, 0x80, 0x80, 0x80));
+    const metadata = parseAnimationMetadataSection({
+      animation: {
+        frametime: 2,
+      },
+    });
+
+    const info = createSpriteInfo(spriteLocation, image, metadata);
+
+    expect(info.width()).toBe(16);
+    expect(info.height()).toBe(16);
+    expect(metadata.getDefaultFrameTime()).toBe(2);
+  });
+
+  test("HTML fallback animation metadata is treated as absent metadata", () => {
+    const metadata = parseAnimationMetadataResponseText(
+      "<!doctype html><html><body>Not JSON</body></html>",
+      "text/html; charset=utf-8",
+    );
+
+    expect(metadata).toBe(AnimationMetadataSection.EMPTY);
+  });
+
+  test("TextureAtlas.prepareToStitch packs animated strips at frame size instead of full image height", async () => {
+    const spriteLocation = new ResourceLocation("minecraft:block/water_still");
+    const metadata = parseAnimationMetadataSection({
+      animation: {
+        frametime: 2,
+      },
+    });
+    const atlas = new TextureAtlas(new ResourceLocation("minecraft:textures/atlas/blocks.png"), 64);
+    const source = new MemoryTextureAtlasSource(
+      new Map([[spriteLocation.toString(), solidImage(16, 512, NativeImage.combine(0xff, 0x80, 0x80, 0x80))]]),
+      new Map([[spriteLocation.toString(), metadata]]),
+    );
+
+    const preparations = await atlas.prepareToStitch(source, [spriteLocation], 0);
+    const sprite = preparations.regions.find((entry) => entry.getName().equals(spriteLocation));
+
+    expect(preparations.width).toBe(32);
+    expect(preparations.height).toBe(16);
+    expect(sprite?.getWidth()).toBe(16);
+    expect(sprite?.getHeight()).toBe(16);
+    expect(sprite?.getAnimationTicker()).toBeDefined();
   });
 });

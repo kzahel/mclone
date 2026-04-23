@@ -5,10 +5,11 @@ import { ChunkBiomeContainer } from "../../worldgen/biome/chunk-biome-container"
 import type { NoiseBiomeSource } from "../../worldgen/biome/noise-biome-source";
 import type { ColorResolver } from "./color-resolver";
 import type { BlockState } from "./block/state/block-state";
-import { hydrateChunkFromSnapshot, type BlockStateResolver, type ChunkSnapshot } from "./chunk-snapshot";
+import { type BlockStateResolver, type ChunkSnapshot } from "./chunk-snapshot";
 import { StaticRenderLevel } from "./static-render-level";
 import { type LevelChunk } from "./chunk/level-chunk";
 import { Vec3 } from "../phys/vec3";
+import { SnapshotLevelChunk } from "./chunk/snapshot-level-chunk";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -62,7 +63,7 @@ export class ClientChunkCache extends StaticRenderLevel implements NoiseBiomeSou
   }
 
   public applyChunkSnapshot(snapshot: ChunkSnapshot): void {
-    super.setChunk(hydrateChunkFromSnapshot(snapshot, this.airState, this.blockStateResolver));
+    super.setChunk(SnapshotLevelChunk.fromSnapshot(snapshot, this.airState, this.blockStateResolver));
     this.snapshots.set(chunkKey(snapshot.chunkX, snapshot.chunkZ), snapshot);
     this.biomeContainers.set(
       chunkKey(snapshot.chunkX, snapshot.chunkZ),

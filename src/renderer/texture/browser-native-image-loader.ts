@@ -1,4 +1,5 @@
 import { ResourceLocation } from "../../core/resource-location";
+import { AnimationFrame } from "./animation-frame";
 import { AnimationMetadataSection } from "./animation-metadata-section";
 import { NativeImage } from "./native-image";
 import { TextureAtlas } from "./texture-atlas";
@@ -52,13 +53,94 @@ function copyImage(image: NativeImage): NativeImage {
   return copy;
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function looksLikeHtmlDocument(value: string): boolean {
+  const trimmed = value.trimStart().toLowerCase();
+  return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+}
+
+function getInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : undefined;
+}
+
+function parseAnimationFrame(value: unknown): AnimationFrame | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new AnimationFrame(Math.trunc(value));
+  }
+
+  if (!isObject(value)) {
+    return undefined;
+  }
+
+  const index = getInteger(value.index);
+  if (index === undefined) {
+    return undefined;
+  }
+
+  const time = getInteger(value.time);
+  return time === undefined ? new AnimationFrame(index) : new AnimationFrame(index, time);
+}
+
+export function parseAnimationMetadataSection(json: unknown): AnimationMetadataSection {
+  if (!isObject(json) || !isObject(json.animation)) {
+    return AnimationMetadataSection.EMPTY;
+  }
+
+  const animation = json.animation;
+  const frames: AnimationFrame[] = [];
+  if (Array.isArray(animation.frames)) {
+    for (const frame of animation.frames) {
+      const parsed = parseAnimationFrame(frame);
+      if (parsed !== undefined) {
+        frames.push(parsed);
+      }
+    }
+  }
+
+  return new AnimationMetadataSection(
+    frames,
+    getInteger(animation.width) ?? AnimationMetadataSection.UNKNOWN_SIZE,
+    getInteger(animation.height) ?? AnimationMetadataSection.UNKNOWN_SIZE,
+    getInteger(animation.frametime) ?? AnimationMetadataSection.DEFAULT_FRAME_TIME,
+    animation.interpolate === true,
+  );
+}
+
+export function parseAnimationMetadataResponseText(
+  value: string,
+  contentType: string | null,
+): AnimationMetadataSection {
+  if (looksLikeHtmlDocument(value) || contentType?.toLowerCase().includes("text/html") === true) {
+    return AnimationMetadataSection.EMPTY;
+  }
+
+  return parseAnimationMetadataSection(JSON.parse(value) as unknown);
+}
+
+export function createSpriteInfo(
+  location: ResourceLocation,
+  image: NativeImage,
+  metadata: AnimationMetadataSection,
+): TextureAtlasSpriteInfo {
+  const [frameWidth, frameHeight] = metadata.getFrameSize(image.getWidth(), image.getHeight());
+  return new TextureAtlasSpriteInfo(location, frameWidth, frameHeight, metadata);
+}
+
 export class BrowserTextureAtlasSource {
   private readonly cache = new Map<string, Promise<NativeImage>>();
+  private readonly metadataCache = new Map<string, Promise<AnimationMetadataSection>>();
 
   public constructor(private readonly assetRoot: string = "/reference/minecraft-1.17.1/extracted/assets") {}
 
   public resolveTextureUrl(location: ResourceLocation): string {
     return `${this.assetRoot}/${location.getNamespace()}/textures/${location.getPath()}.png`;
+  }
+
+  public resolveAnimationMetadataUrl(location: ResourceLocation): string {
+    return `${this.resolveTextureUrl(location)}.mcmeta`;
   }
 
   public loadColorMap(location: ResourceLocation): Promise<readonly number[]> {
@@ -76,11 +158,36 @@ export class BrowserTextureAtlasSource {
     return image;
   }
 
+  private loadAnimationMetadata(location: ResourceLocation): Promise<AnimationMetadataSection> {
+    const key = location.toString();
+    let metadata = this.metadataCache.get(key);
+    if (!metadata) {
+      metadata = (async () => {
+        const response = await fetch(this.resolveAnimationMetadataUrl(location));
+        if (response.status === 404) {
+          return AnimationMetadataSection.EMPTY;
+        }
+
+        if (!response.ok) {
+          throw new Error(`Unable to load animation metadata ${location}: ${response.status} ${response.statusText}`);
+        }
+
+        return parseAnimationMetadataResponseText(
+          await response.text(),
+          response.headers.get("content-type"),
+        );
+      })();
+      this.metadataCache.set(key, metadata);
+    }
+
+    return metadata;
+  }
+
   public async getBasicSpriteInfos(spriteNames: readonly ResourceLocation[]): Promise<readonly TextureAtlasSpriteInfo[]> {
     const infos = await Promise.all(
       spriteNames.map(async (location) => {
-        const image = await this.loadImage(location);
-        return new TextureAtlasSpriteInfo(location, image.getWidth(), image.getHeight(), AnimationMetadataSection.EMPTY);
+        const [image, metadata] = await Promise.all([this.loadImage(location), this.loadAnimationMetadata(location)]);
+        return createSpriteInfo(location, image, metadata);
       }),
     );
     return infos;
