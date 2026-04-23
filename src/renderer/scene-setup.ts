@@ -1,11 +1,16 @@
+import { BlockPos } from "../core/block-pos";
 import { ResourceLocation } from "../core/resource-location";
+import { GeneratedWorldHost } from "../runtime/host/generated-world-host";
+import type { WorldClient } from "../runtime/protocol/world-client";
+import { LocalWorldClient, LocalWorldTransport } from "../runtime/transport/local-world-transport";
 import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
-import { NoiseBasedChunkGenerator } from "../worldgen/levelgen/noise-based-chunk-generator";
 import { ChunkBlockId } from "../worldgen/chunk/chunk-block-buffer";
-import { GeneratedRenderLevel } from "../world/level/generated-render-level";
+import { ClientChunkCache } from "../world/level/client-chunk-cache";
+import { createBlockStateResolver } from "../world/level/chunk-snapshot";
 import { registerGeneratedRenderBlocks } from "../world/level/generated-render-blocks";
 import { FoliageColor } from "../world/level/foliage-color";
 import { GrassColor } from "../world/level/grass-color";
+import type { WorldGenLevel } from "../world/level/world-gen-level";
 import type { BlockState } from "../world/level/block/state/block-state";
 import { BlockColors } from "./block/block-colors";
 import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
@@ -52,13 +57,13 @@ export interface RendererScene {
   readonly canvas: HTMLCanvasElement;
   readonly ctx: GPUCanvasContext;
   readonly atlas: TextureAtlas;
-  readonly level: GeneratedRenderLevel;
+  readonly worldClient: WorldClient;
+  readonly level: ClientChunkCache;
   readonly levelRenderer: LevelRenderer;
   readonly gameRenderer: GameRenderer;
   readonly lightTexture: LightTexture;
   readonly pipelineCache: RenderPipelineCache;
   readonly sampler: GPUSampler;
-  readonly waterState: BlockState;
   readonly viewDistance: number;
 }
 
@@ -79,6 +84,14 @@ async function initializeBiomeColorTables(atlasSource: BrowserTextureAtlasSource
   ]);
   GrassColor.init(grassPixels);
   FoliageColor.init(foliagePixels);
+}
+
+function applySmokeWorldMutations(level: WorldGenLevel, waterState: BlockState): void {
+  for (let z = 35; z <= 39; z++) {
+    for (let x = 42; x <= 47; x++) {
+      level.setBlock(new BlockPos(x, 84, z), waterState);
+    }
+  }
 }
 
 export async function initializeRendererScene(
@@ -113,14 +126,27 @@ export async function initializeRendererScene(
   blockModelShaper.rebuildCache();
 
   const biomeSource = new OverworldBiomeSource(options.seed);
-  const generator = new NoiseBasedChunkGenerator(biomeSource, options.seed);
-  const level = new GeneratedRenderLevel(
-    generatedBlocks.airState,
-    generator,
-    biomeSource,
-    options.seed,
-    generatedBlocks.blockStateById,
+  const blockStateResolver = createBlockStateResolver(generatedBlocks.airState);
+  const worldClient = new LocalWorldClient(
+    new LocalWorldTransport(
+      new GeneratedWorldHost({
+        seed: options.seed,
+        airState: generatedBlocks.airState,
+        blockStateById: generatedBlocks.blockStateById,
+        mutateWorld: (level) => applySmokeWorldMutations(level, generatedBlocks.blockStateById[ChunkBlockId.WATER]!),
+      }),
+    ),
+    (worldOpened) => new ClientChunkCache({
+      airState: generatedBlocks.airState,
+      minBuildHeight: worldOpened.minBuildHeight,
+      height: worldOpened.height,
+      biomeSource,
+      biomeZoomSeed: options.seed,
+      blockStateResolver,
+    }),
   );
+  await worldClient.openWorld();
+  const level = worldClient.getLevel();
 
   const levelRenderer = new LevelRenderer();
   const blockRenderer = new BlockRenderDispatcher(
@@ -162,13 +188,13 @@ export async function initializeRendererScene(
       canvas,
       ctx,
       atlas,
+      worldClient,
       level,
       levelRenderer,
       gameRenderer,
       lightTexture,
       pipelineCache,
       sampler,
-      waterState: generatedBlocks.blockStateById[ChunkBlockId.WATER]!,
       viewDistance: options.viewDistance,
     },
   };

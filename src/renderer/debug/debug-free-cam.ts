@@ -1,5 +1,6 @@
 // Debug tooling — see tactical 40. Throwaway when real Player/Input lands.
 
+import { SectionPos } from "../../core/section-pos";
 import { Vec3 } from "../../world/phys/vec3";
 import {
   createSceneDepthView,
@@ -122,8 +123,14 @@ async function boot(): Promise<void> {
   let lastFpsReportMs = lastFrameMs;
 
   // Prime chunks at the start so the first frame has something to draw.
-  scene.level.ensureChunksForCamera(camera.position.x, camera.position.z, scene.viewDistance);
-  scene.levelRenderer.allChanged();
+  if (await scene.worldClient.setChunkView({
+    type: "set_chunk_view",
+    centerChunkX: SectionPos.posToSectionCoord(camera.position.x),
+    centerChunkZ: SectionPos.posToSectionCoord(camera.position.z),
+    radius: scene.viewDistance,
+  })) {
+    scene.levelRenderer.allChanged();
+  }
 
   showOverlayMessage("click to capture mouse — WASD + mouse, Space/Shift for up/down, Ctrl to boost, Esc to release");
 
@@ -142,7 +149,12 @@ async function boot(): Promise<void> {
       lastLightTickMs = now;
     }
 
-    if (scene.level.ensureChunksForCamera(camera.position.x, camera.position.z, scene.viewDistance)) {
+    if (await scene.worldClient.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: SectionPos.posToSectionCoord(camera.position.x),
+      centerChunkZ: SectionPos.posToSectionCoord(camera.position.z),
+      radius: scene.viewDistance,
+    })) {
       scene.levelRenderer.allChanged();
     }
 

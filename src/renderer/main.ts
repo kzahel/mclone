@@ -1,6 +1,4 @@
-import { BlockPos } from "../core/block-pos";
-import { GeneratedRenderLevel } from "../world/level/generated-render-level";
-import type { BlockState } from "../world/level/block/state/block-state";
+import { SectionPos } from "../core/section-pos";
 import { Vec3 } from "../world/phys/vec3";
 import { type LevelRenderFrame } from "./level-renderer";
 import { type CameraState } from "./game-renderer";
@@ -61,14 +59,6 @@ const VALIDATED_RENDER_TYPES = [
   RenderType.lines(),
   RenderType.lineStrip(),
 ] as const;
-
-function primeSmokeWaterPatch(level: GeneratedRenderLevel, waterState: BlockState): void {
-  for (let z = 35; z <= 39; z++) {
-    for (let x = 42; x <= 47; x++) {
-      level.setBlock(new BlockPos(x, 84, z), waterState);
-    }
-  }
-}
 
 function rgba8FromColor(color: readonly [number, number, number, number]): readonly [number, number, number, number] {
   return [
@@ -141,8 +131,12 @@ async function boot(): Promise<BootResult> {
 
   let frame: LevelRenderFrame | undefined;
   for (const step of GENERATED_CAMERA_PATH) {
-    if (scene.level.ensureChunksForCamera(step.position.x, step.position.z, GENERATED_VIEW_DISTANCE)) {
-      primeSmokeWaterPatch(scene.level, scene.waterState);
+    if (await scene.worldClient.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: SectionPos.posToSectionCoord(step.position.x),
+      centerChunkZ: SectionPos.posToSectionCoord(step.position.z),
+      radius: GENERATED_VIEW_DISTANCE,
+    })) {
       scene.levelRenderer.allChanged();
     }
 

@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { type BootResult } from "../../src/renderer/main.ts";
 
+const SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-smoke.png";
+
 test("WebGPU boot succeeds on system Chrome", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(String(err)));
@@ -9,7 +11,7 @@ test("WebGPU boot succeeds on system Chrome", async ({ page }) => {
   await page.waitForFunction(() => typeof window.__mcloneReady !== "undefined");
 
   const result = (await page.evaluate(() => window.__mcloneReady)) as BootResult;
-  await page.locator("#renderer").screenshot({ path: test.info().outputPath("quad.png") });
+  await page.locator("#renderer").screenshot({ path: SMOKE_SCREENSHOT_PATH });
 
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
   expect(result.ok, JSON.stringify(result)).toBe(true);

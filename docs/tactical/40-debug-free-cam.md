@@ -32,7 +32,7 @@ A single parallel entry point that shares world setup with the existing smoke bu
 |---|---|---|
 | 1 | `src/renderer/debug/scene-setup.ts` | Extract the shared init block out of `main.ts` (atlas, models, world, dispatchers, `GameRenderer`, `LightTexture`) into one helper returning the assembled scene. `main.ts` and the new debug entry both consume it. |
 | 2 | `src/renderer/debug/debug-input.ts` | Pointer-lock request on click, keydown/keyup → key-state set, mouse-delta → yaw/pitch accumulators. Plain object, no classes that mimic `Input`. |
-| 3 | `src/renderer/debug/debug-free-cam.ts` | Browser entry. Calls scene-setup, installs input listeners, runs `requestAnimationFrame` loop: read input → update `position`/`xRot`/`yRot` → `level.ensureChunksForCamera(...)` → `gameRenderer.renderLevel(...)` → encode draws (ported from `main.ts`'s one-shot draw path). |
+| 3 | `src/renderer/debug/debug-free-cam.ts` | Browser entry. Calls scene-setup, installs input listeners, runs `requestAnimationFrame` loop: read input → update `position`/`xRot`/`yRot` → `worldClient.setChunkView(...)` → `gameRenderer.renderLevel(...)` → encode draws (ported from `main.ts`'s one-shot draw path). |
 | 4 | `debug.html` | Sibling of `index.html`. `<canvas id="renderer">` + `<script type="module" src="/src/renderer/debug/debug-free-cam.ts">`. Instructions overlay ("click to capture, WASD + mouse, Esc to release"). |
 | 5 | `package.json` script | `"dev:free-cam": "vite"` pointing at `debug.html` — or just document navigating to `http://localhost:5173/debug.html` under `pnpm dev:browser`. Prefer the latter (less surface). |
 
@@ -53,7 +53,7 @@ Suggested starting values: `SPEED = 20` blocks/sec, `SENS = 0.15°/px`, Ctrl hel
 
 ## Chunk loading
 
-The existing `GeneratedRenderLevel.ensureChunksForCamera(x, z, viewDistance)` already streams chunks around a camera. Call it every frame (or only when the camera crosses a chunk boundary, if that turns out to cost something). When it returns `true` (new chunks loaded), call `levelRenderer.allChanged()`.
+Post-`R0`, the debug camera should not reach into worldgen ownership directly. It should drive the same local host/client boundary as the smoke harness: call `worldClient.setChunkView({ centerChunkX, centerChunkZ, radius })` every frame (or only when the camera crosses a chunk boundary, if that turns out to cost something). When it returns `true` (new chunks loaded or old ones unloaded), call `levelRenderer.allChanged()`.
 
 Leave `GENERATED_VIEW_DISTANCE` at `1` initially so the user can watch chunks pop in while debugging decoration work — bump it later if wanted.
 
