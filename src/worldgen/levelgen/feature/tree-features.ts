@@ -10,6 +10,7 @@ import { BushFoliagePlacer } from "./foliageplacers/bush-foliage-placer";
 import { DarkOakFoliagePlacer } from "./foliageplacers/dark-oak-foliage-placer";
 import { FancyFoliagePlacer } from "./foliageplacers/fancy-foliage-placer";
 import { MegaJungleFoliagePlacer } from "./foliageplacers/mega-jungle-foliage-placer";
+import { MegaPineFoliagePlacer } from "./foliageplacers/mega-pine-foliage-placer";
 import { PineFoliagePlacer } from "./foliageplacers/pine-foliage-placer";
 import { SpruceFoliagePlacer } from "./foliageplacers/spruce-foliage-placer";
 import { TreeConfiguration } from "./configurations/tree-configuration";
@@ -17,12 +18,14 @@ import { ThreeLayersFeatureSize } from "./featuresize/three-layers-feature-size"
 import { TwoLayersFeatureSize } from "./featuresize/two-layers-feature-size";
 import { Features } from "./features";
 import { SimpleStateProvider } from "./stateproviders/simple-state-provider";
+import { AlterGroundDecorator } from "./treedecorators/alter-ground-decorator";
 import { CocoaDecorator } from "./treedecorators/cocoa-decorator";
 import { LeaveVineDecorator } from "./treedecorators/leave-vine-decorator";
 import { TrunkVineDecorator } from "./treedecorators/trunk-vine-decorator";
 import { DarkOakTrunkPlacer } from "./trunkplacers/dark-oak-trunk-placer";
 import { FancyTrunkPlacer } from "./trunkplacers/fancy-trunk-placer";
 import { ForkingTrunkPlacer } from "./trunkplacers/forking-trunk-placer";
+import { GiantTrunkPlacer } from "./trunkplacers/giant-trunk-placer";
 import { MegaJungleTrunkPlacer } from "./trunkplacers/mega-jungle-trunk-placer";
 import { StraightTrunkPlacer } from "./trunkplacers/straight-trunk-placer";
 
@@ -44,6 +47,7 @@ const DARK_OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:dark_oak_sapli
 const JUNGLE_LOG_LOCATION = new ResourceLocation("minecraft:jungle_log");
 const JUNGLE_LEAVES_LOCATION = new ResourceLocation("minecraft:jungle_leaves");
 const JUNGLE_SAPLING_LOCATION = new ResourceLocation("minecraft:jungle_sapling");
+const PODZOL_LOCATION = new ResourceLocation("minecraft:podzol");
 
 function getRequiredState(location: ResourceLocation): BlockState {
   const block = Registry.BLOCK.get(location) as Block | undefined;
@@ -172,6 +176,36 @@ export class TreeFeatures {
         new TwoLayersFeatureSize(1, 1, 2),
       )
         .decorators([TrunkVineDecorator.INSTANCE, LeaveVineDecorator.INSTANCE])
+        .build(),
+    );
+  }
+
+  public static get MEGA_SPRUCE() {
+    return Features.TREE.configured(
+      new TreeConfiguration.TreeConfigurationBuilder(
+        new SimpleStateProvider(getRequiredState(SPRUCE_LOG_LOCATION)),
+        new GiantTrunkPlacer(13, 2, 14),
+        new SimpleStateProvider(getRequiredState(SPRUCE_LEAVES_LOCATION)),
+        new SimpleStateProvider(getRequiredState(SPRUCE_SAPLING_LOCATION)),
+        new MegaPineFoliagePlacer(ConstantInt.of(0), ConstantInt.of(0), UniformInt.of(13, 17)),
+        new TwoLayersFeatureSize(1, 1, 2),
+      )
+        .decorators([new AlterGroundDecorator(new SimpleStateProvider(getRequiredState(PODZOL_LOCATION)))])
+        .build(),
+    );
+  }
+
+  public static get MEGA_PINE() {
+    return Features.TREE.configured(
+      new TreeConfiguration.TreeConfigurationBuilder(
+        new SimpleStateProvider(getRequiredState(SPRUCE_LOG_LOCATION)),
+        new GiantTrunkPlacer(13, 2, 14),
+        new SimpleStateProvider(getRequiredState(SPRUCE_LEAVES_LOCATION)),
+        new SimpleStateProvider(getRequiredState(SPRUCE_SAPLING_LOCATION)),
+        new MegaPineFoliagePlacer(ConstantInt.of(0), ConstantInt.of(0), UniformInt.of(3, 7)),
+        new TwoLayersFeatureSize(1, 1, 2),
+      )
+        .decorators([new AlterGroundDecorator(new SimpleStateProvider(getRequiredState(PODZOL_LOCATION)))])
         .build(),
     );
   }

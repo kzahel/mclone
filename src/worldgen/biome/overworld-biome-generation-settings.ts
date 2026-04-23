@@ -65,6 +65,10 @@ function addWarmFlowers(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.FLOWER_WARM);
 }
 
+function addDefaultGrass(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_BADLANDS);
+}
+
 function addDefaultMushrooms(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BROWN_MUSHROOM_NORMAL);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.RED_MUSHROOM_NORMAL);
@@ -137,6 +141,42 @@ function addSavannaExtraGrass(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_SAVANNA);
 }
 
+function addSnowyTrees(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.TREES_SNOWY);
+}
+
+function addTaigaTrees(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.TAIGA_VEGETATION);
+}
+
+function addTaigaGrass(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_TAIGA_2);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BROWN_MUSHROOM_TAIGA);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.RED_MUSHROOM_TAIGA);
+}
+
+function addBerryBushes(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_BERRY_DECORATED);
+}
+
+function addSparseBerryBushes(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_BERRY_SPARSE);
+}
+
+function addGiantTaigaTrees(builder: BiomeGenerationSettings.Builder, giantSpruce: boolean): void {
+  builder.addFeature(
+    GenerationStep.Decoration.VEGETAL_DECORATION,
+    () => (giantSpruce ? VegetationFeatures.TREES_GIANT_SPRUCE : VegetationFeatures.TREES_GIANT),
+  );
+}
+
+function addGiantTaigaVegetation(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_TAIGA);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_DEAD_BUSH);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BROWN_MUSHROOM_GIANT);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.RED_MUSHROOM_GIANT);
+}
+
 function addJungleTrees(builder: BiomeGenerationSettings.Builder, edge: boolean): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => (edge ? VegetationFeatures.TREES_JUNGLE_EDGE : VegetationFeatures.TREES_JUNGLE));
 }
@@ -148,6 +188,12 @@ function addJungleGrass(builder: BiomeGenerationSettings.Builder): void {
 function addJungleExtraVegetation(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_MELON);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.VINES);
+}
+
+function addMushroomFieldVegetation(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.MUSHROOM_FIELD_VEGETATION);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BROWN_MUSHROOM_TAIGA);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.RED_MUSHROOM_TAIGA);
 }
 
 function buildMountainSettings(edge: boolean): BiomeGenerationSettings {
@@ -170,13 +216,65 @@ function buildTaigaSettings(): BiomeGenerationSettings {
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
-  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.TAIGA_VEGETATION);
-  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_TAIGA_2);
-  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BROWN_MUSHROOM_TAIGA);
-  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.RED_MUSHROOM_TAIGA);
+  addTaigaTrees(builder);
+  addTaigaGrass(builder);
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
-  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_BERRY_SPARSE);
+  addSparseBerryBushes(builder);
+  addDefaultSprings(builder);
+  return builder.build();
+}
+
+function buildSnowyTundraSettings(): BiomeGenerationSettings {
+  const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
+  addDefaultLakes(builder);
+  addSnowyTrees(builder);
+  addDefaultFlowers(builder);
+  addDefaultGrass(builder);
+  addDefaultMushrooms(builder);
+  addDefaultExtraVegetation(builder);
+  addDefaultSprings(builder);
+  return builder.build();
+}
+
+function buildSnowyTaigaSettings(): BiomeGenerationSettings {
+  const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
+  addDefaultLakes(builder);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
+  addTaigaTrees(builder);
+  addDefaultFlowers(builder);
+  addTaigaGrass(builder);
+  addDefaultMushrooms(builder);
+  addDefaultExtraVegetation(builder);
+  addDefaultSprings(builder);
+  addBerryBushes(builder);
+  return builder.build();
+}
+
+function buildGiantTaigaSettings(giantSpruce: boolean): BiomeGenerationSettings {
+  const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
+  addDefaultLakes(builder);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
+  addGiantTaigaTrees(builder, giantSpruce);
+  addDefaultFlowers(builder);
+  addGiantTaigaVegetation(builder);
+  addDefaultMushrooms(builder);
+  addDefaultExtraVegetation(builder);
+  addDefaultSprings(builder);
+  addSparseBerryBushes(builder);
+  return builder.build();
+}
+
+function buildMushroomFieldSettings(): BiomeGenerationSettings {
+  const builder = new BiomeGenerationSettings.Builder();
+  addDefaultCarvers(builder);
+  addDefaultLakes(builder);
+  addMushroomFieldVegetation(builder);
+  addDefaultMushrooms(builder);
+  addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
   return builder.build();
 }
@@ -338,10 +436,16 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:dark_forest_hills", buildDarkForestSettings(true)],
   ["minecraft:forest", buildForestSettings()],
   ["minecraft:flower_forest", buildFlowerForestSettings()],
+  ["minecraft:giant_spruce_taiga", buildGiantTaigaSettings(true)],
+  ["minecraft:giant_spruce_taiga_hills", buildGiantTaigaSettings(true)],
+  ["minecraft:giant_tree_taiga", buildGiantTaigaSettings(false)],
+  ["minecraft:giant_tree_taiga_hills", buildGiantTaigaSettings(false)],
   ["minecraft:mountains", buildMountainSettings(false)],
   ["minecraft:jungle", buildJungleSettings(false)],
   ["minecraft:jungle_edge", buildJungleSettings(true)],
   ["minecraft:jungle_hills", buildJungleSettings(false)],
+  ["minecraft:mushroom_fields", buildMushroomFieldSettings()],
+  ["minecraft:mushroom_field_shore", buildMushroomFieldSettings()],
   ["minecraft:wooded_mountains", buildMountainSettings(false)],
   ["minecraft:mountain_edge", buildMountainSettings(true)],
   ["minecraft:plains", buildPlainsSettings()],
@@ -349,6 +453,11 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:savanna_plateau", buildSavannaSettings(false)],
   ["minecraft:shattered_savanna", buildSavannaSettings(true)],
   ["minecraft:shattered_savanna_plateau", buildSavannaSettings(true)],
+  ["minecraft:snowy_mountains", buildSnowyTundraSettings()],
+  ["minecraft:snowy_taiga", buildSnowyTaigaSettings()],
+  ["minecraft:snowy_taiga_hills", buildSnowyTaigaSettings()],
+  ["minecraft:snowy_taiga_mountains", buildSnowyTaigaSettings()],
+  ["minecraft:snowy_tundra", buildSnowyTundraSettings()],
   ["minecraft:sunflower_plains", buildPlainsSettings()],
   ["minecraft:swamp", buildSwampSettings(false)],
   ["minecraft:swamp_hills", buildSwampSettings(true)],

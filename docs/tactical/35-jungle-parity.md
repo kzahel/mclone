@@ -57,4 +57,4 @@ Finish the next broad biome-identity slice after savanna by porting the missing 
 
 ## Next
 
-Tactical 36 should broaden biome-table coverage for the already-partially-landed overworld families that still fall back to reduced settings: snowy biomes, giant-tree-taiga variants, and mushroom fields first, with bamboo-jungle follow-through still queued behind that broader table-coverage work.
+Tactical 36 is now landed as [`36-snowy-giant-taiga-and-mushroom-table-coverage.md`](36-snowy-giant-taiga-and-mushroom-table-coverage.md). The next broad table-coverage win after that is shoreline and transition parity: beach, river, and ocean follow-through first, with `snowy_beach`, `ice_spikes`, and bamboo-jungle still queued behind it.

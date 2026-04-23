@@ -69,6 +69,23 @@ const JUNGLE_TREE_OUTPUT_LOCATIONS = new Set([
   "minecraft:cocoa",
 ]);
 
+const SNOWY_TREE_OUTPUT_LOCATIONS = new Set([
+  "minecraft:spruce_log",
+  "minecraft:spruce_leaves",
+]);
+
+const GIANT_TAIGA_OUTPUT_LOCATIONS = new Set([
+  "minecraft:spruce_log",
+  "minecraft:spruce_leaves",
+  "minecraft:podzol",
+]);
+
+const MUSHROOM_FIELD_OUTPUT_LOCATIONS = new Set([
+  "minecraft:brown_mushroom_block",
+  "minecraft:red_mushroom_block",
+  "minecraft:mushroom_stem",
+]);
+
 function getState(location: string): BlockState {
   const block = Registry.BLOCK.get(new ResourceLocation(location)) as Block | undefined;
   if (block === undefined) {
@@ -261,7 +278,44 @@ describe("Vegetation parity", () => {
     expect(collectPlacedLocations(vinesLevel, 12, 12)).toContain("minecraft:vine");
   });
 
-  test("overworld biome settings wire the new swamp, flower-forest, birch, dark-forest, savanna, and jungle tables", () => {
+  test("snowy, giant-taiga, and mushroom-field feature paths place translated spruce, podzol, and huge-mushroom blocks", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const generator = createGenerator();
+
+    const snowyLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    expect(TreeFeatures.SPRUCE.place(snowyLevel, generator, new WorldgenRandom(321n), new BlockPos(16, 11, 16))).toBe(true);
+    const snowyPlacements = collectPlacedLocations(snowyLevel, 11, 40);
+    expect(snowyPlacements.length).toBeGreaterThan(0);
+    for (const location of snowyPlacements) {
+      expect(SNOWY_TREE_OUTPUT_LOCATIONS.has(location)).toBe(true);
+    }
+
+    const giantTaigaLevel = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    expect(VegetationFeatures.TREES_GIANT.place(giantTaigaLevel, generator, new WorldgenRandom(123n), new BlockPos(0, 0, 0))).toBe(true);
+    const giantTaigaPlacements = collectPlacedLocations(giantTaigaLevel, 10, 40);
+    expect(giantTaigaPlacements.length).toBeGreaterThan(0);
+    expect(giantTaigaPlacements.some((location) => GIANT_TAIGA_OUTPUT_LOCATIONS.has(location))).toBe(true);
+    for (const location of giantTaigaPlacements) {
+      expect(GIANT_TAIGA_OUTPUT_LOCATIONS.has(location)).toBe(true);
+    }
+
+    let mushroomFieldLevel: StaticRenderLevel | undefined;
+    for (let seed = 0n; seed < 32n; seed++) {
+      const candidate = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+      if (VegetationFeatures.MUSHROOM_FIELD_VEGETATION.place(candidate, generator, new WorldgenRandom(seed), new BlockPos(0, 0, 0))) {
+        mushroomFieldLevel = candidate;
+        break;
+      }
+    }
+    expect(mushroomFieldLevel).toBeDefined();
+    const mushroomFieldPlacements = collectPlacedLocations(mushroomFieldLevel!, 11, 24);
+    expect(mushroomFieldPlacements.length).toBeGreaterThan(0);
+    for (const location of mushroomFieldPlacements) {
+      expect(MUSHROOM_FIELD_OUTPUT_LOCATIONS.has(location)).toBe(true);
+    }
+  });
+
+  test("overworld biome settings wire the new swamp, flower-forest, birch, dark-forest, savanna, jungle, snowy, giant-taiga, and mushroom tables", () => {
     registerGeneratedRenderBlocks();
     const swampFeatures = getOverworldBiomeGenerationSettings("minecraft:swamp").features().flat().map((supplier) => getBaseFeature(supplier()));
     const swampHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:swamp_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
@@ -282,6 +336,35 @@ describe("Vegetation parity", () => {
     const jungleFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle").features().flat().map((supplier) => getBaseFeature(supplier()));
     const jungleHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
     const jungleEdgeFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle_edge").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const snowyTundraFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_tundra").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const snowyMountainsFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_mountains").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const snowyTaigaFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_taiga").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const snowyTaigaHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_taiga_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const snowyTaigaMountainsFeatures = getOverworldBiomeGenerationSettings("minecraft:snowy_taiga_mountains")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const giantTaigaFeatures = getOverworldBiomeGenerationSettings("minecraft:giant_tree_taiga").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const giantTaigaHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:giant_tree_taiga_hills")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const giantSpruceTaigaFeatures = getOverworldBiomeGenerationSettings("minecraft:giant_spruce_taiga")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const giantSpruceTaigaHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:giant_spruce_taiga_hills")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const mushroomFieldFeatures = getOverworldBiomeGenerationSettings("minecraft:mushroom_fields")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const mushroomFieldShoreFeatures = getOverworldBiomeGenerationSettings("minecraft:mushroom_field_shore")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
 
     expect(swampFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
     expect(swampHillsFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(false);
@@ -302,5 +385,16 @@ describe("Vegetation parity", () => {
     expect(jungleHillsFeatures.some((feature) => feature === Features.VINES)).toBe(true);
     expect(jungleEdgeFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(jungleEdgeFeatures.some((feature) => feature === Features.VINES)).toBe(true);
+    expect(snowyTundraFeatures.some((feature) => feature === Features.TREE)).toBe(true);
+    expect(snowyMountainsFeatures.some((feature) => feature === Features.TREE)).toBe(true);
+    expect(snowyTaigaFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(snowyTaigaHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(snowyTaigaMountainsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(giantTaigaFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(giantTaigaHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(giantSpruceTaigaFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(giantSpruceTaigaHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(mushroomFieldFeatures.some((feature) => feature === Features.RANDOM_BOOLEAN_SELECTOR)).toBe(true);
+    expect(mushroomFieldShoreFeatures.some((feature) => feature === Features.RANDOM_BOOLEAN_SELECTOR)).toBe(true);
   });
 });

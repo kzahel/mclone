@@ -14,6 +14,7 @@ import { HugeMushroomFeatureConfiguration } from "./configurations/huge-mushroom
 import { NoiseDependantDecoratorConfiguration } from "./configurations/noise-dependant-decorator-configuration";
 import { NoneFeatureConfiguration } from "./configurations/none-feature-configuration";
 import { ProbabilityFeatureConfiguration } from "./configurations/probability-feature-configuration";
+import { RandomBooleanFeatureConfiguration } from "./configurations/random-boolean-feature-configuration";
 import { RandomFeatureConfiguration } from "./configurations/random-feature-configuration";
 import { RandomPatchConfiguration } from "./configurations/random-patch-configuration";
 import { SimpleRandomFeatureConfiguration } from "./configurations/simple-random-feature-configuration";
@@ -359,6 +360,10 @@ export class VegetationFeatures {
     return VegetationFeatures.BROWN_MUSHROOM_TAIGA.count(8);
   }
 
+  public static get BROWN_MUSHROOM_GIANT() {
+    return VegetationFeatures.BROWN_MUSHROOM_TAIGA.count(3);
+  }
+
   public static get PATCH_BERRY_DECORATED() {
     return Features.RANDOM_PATCH.configured(createSweetBerryBushConfig()).decorated(heightmapDoubleSquare()).rarity(12);
   }
@@ -417,6 +422,10 @@ export class VegetationFeatures {
 
   public static get PATCH_GRASS_TAIGA_2() {
     return Features.RANDOM_PATCH.configured(createTaigaGrassConfig()).decorated(heightmapDoubleSquare());
+  }
+
+  public static get PATCH_GRASS_TAIGA() {
+    return Features.RANDOM_PATCH.configured(createTaigaGrassConfig()).decorated(heightmapDoubleSquare()).count(7);
   }
 
   public static get PATCH_LARGE_FERN() {
@@ -480,6 +489,10 @@ export class VegetationFeatures {
 
   public static get RED_MUSHROOM_SWAMP() {
     return VegetationFeatures.RED_MUSHROOM_TAIGA.count(8);
+  }
+
+  public static get RED_MUSHROOM_GIANT() {
+    return VegetationFeatures.RED_MUSHROOM_TAIGA.count(3);
   }
 
   public static get FLOWER_DEFAULT() {
@@ -583,6 +596,10 @@ export class VegetationFeatures {
       .decorated(countExtraDecorator(1, 0.1, 1));
   }
 
+  public static get TREES_SNOWY() {
+    return TreeFeatures.SPRUCE.decorated(heightmapWithTreeThresholdSquared()).decorated(countExtraDecorator(0, 0.1, 1));
+  }
+
   public static get DARK_FOREST_VEGETATION_BROWN() {
     return Features.RANDOM_SELECTOR.configured(
       new RandomFeatureConfiguration(
@@ -624,6 +641,29 @@ export class VegetationFeatures {
   public static get BIRCH_TALL() {
     return Features.RANDOM_SELECTOR.configured(
       new RandomFeatureConfiguration([TreeFeatures.SUPER_BIRCH.weighted(0.5)], TreeFeatures.BIRCH),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(10, 0.1, 1));
+  }
+
+  public static get TREES_GIANT_SPRUCE() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration([TreeFeatures.MEGA_SPRUCE.weighted(0.33333334), TreeFeatures.PINE.weighted(0.33333334)], TreeFeatures.SPRUCE),
+    )
+      .decorated(heightmapWithTreeThresholdSquared())
+      .decorated(countExtraDecorator(10, 0.1, 1));
+  }
+
+  public static get TREES_GIANT() {
+    return Features.RANDOM_SELECTOR.configured(
+      new RandomFeatureConfiguration(
+        [
+          TreeFeatures.MEGA_SPRUCE.weighted(0.025641026),
+          TreeFeatures.MEGA_PINE.weighted(0.30769232),
+          TreeFeatures.PINE.weighted(0.33333334),
+        ],
+        TreeFeatures.SPRUCE,
+      ),
     )
       .decorated(heightmapWithTreeThresholdSquared())
       .decorated(countExtraDecorator(10, 0.1, 1));
@@ -686,5 +726,11 @@ export class VegetationFeatures {
     )
       .decorated(heightmapWithTreeThresholdSquared())
       .decorated(countExtraDecorator(3, 0.1, 1));
+  }
+
+  public static get MUSHROOM_FIELD_VEGETATION() {
+    return Features.RANDOM_BOOLEAN_SELECTOR.configured(
+      new RandomBooleanFeatureConfiguration(() => VegetationFeatures.HUGE_RED_MUSHROOM, () => VegetationFeatures.HUGE_BROWN_MUSHROOM),
+    ).decorated(heightmapSquare());
   }
 }

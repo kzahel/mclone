@@ -51,4 +51,4 @@ Finish the next broad biome-identity slice after dark forest by porting the miss
 
 ## Next
 
-Tactical 35 is now landed as [`35-jungle-parity.md`](35-jungle-parity.md). The next broad biome-table win after that is tactical 36: snowy / giant-tree-taiga / mushroom-field follow-through, with bamboo-jungle still waiting behind that broader table-coverage work.
+Tactical 35 is now landed as [`35-jungle-parity.md`](35-jungle-parity.md), and tactical 36 is now landed as [`36-snowy-giant-taiga-and-mushroom-table-coverage.md`](36-snowy-giant-taiga-and-mushroom-table-coverage.md). The next broad biome-table win after that is shoreline and transition parity: beach, river, and ocean follow-through first, with `snowy_beach`, `ice_spikes`, and bamboo-jungle still waiting behind it.

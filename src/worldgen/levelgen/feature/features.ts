@@ -3,6 +3,7 @@ import { DefaultFlowerFeature } from "./default-flower-feature";
 import { DecoratedFeature } from "./decorated-feature";
 import { LakeFeature } from "./lake-feature";
 import { ProbabilityFeatureConfiguration } from "./configurations/probability-feature-configuration";
+import { RandomBooleanFeatureConfiguration } from "./configurations/random-boolean-feature-configuration";
 import { RandomFeatureConfiguration } from "./configurations/random-feature-configuration";
 import { DecoratedFeatureConfiguration } from "./configurations/decorated-feature-configuration";
 import { Feature } from "./feature";
@@ -17,6 +18,7 @@ import { SeagrassFeature } from "./seagrass-feature";
 import { SpringConfiguration } from "./configurations/spring-configuration";
 import { TreeConfiguration } from "./configurations/tree-configuration";
 import { RandomPatchFeature } from "./random-patch-feature";
+import { RandomBooleanSelectorFeature } from "./random-boolean-selector-feature";
 import { RandomSelectorFeature } from "./random-selector-feature";
 import { SimpleBlockFeature } from "./simple-block-feature";
 import { SimpleRandomSelectorFeature } from "./simple-random-selector-feature";
@@ -37,6 +39,7 @@ export const Features = {
   RANDOM_PATCH: register("random_patch", new RandomPatchFeature()),
   SIMPLE_BLOCK: register("simple_block", new SimpleBlockFeature()),
   DECORATED: register("decorated", new DecoratedFeature()),
+  RANDOM_BOOLEAN_SELECTOR: register("random_boolean_selector", new RandomBooleanSelectorFeature()),
   RANDOM_SELECTOR: register("random_selector", new RandomSelectorFeature()),
   SIMPLE_RANDOM_SELECTOR: register("simple_random_selector", new SimpleRandomSelectorFeature()),
   LAKE: register("lake", new LakeFeature()),
@@ -53,6 +56,7 @@ export type SimpleVegetationFeature =
   | Feature<SimpleBlockConfiguration>
   | Feature<RandomPatchConfiguration>
   | Feature<DecoratedFeatureConfiguration>
+  | Feature<RandomBooleanFeatureConfiguration>
   | Feature<RandomFeatureConfiguration>
   | Feature<SimpleRandomFeatureConfiguration>
   | Feature<BlockStateConfiguration>

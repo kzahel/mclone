@@ -160,6 +160,53 @@ describe("TreeFeature", () => {
     expect(leafCount).toBeGreaterThan(0);
   });
 
+  test("mega spruce and mega pine placement use the translated giant-trunk, mega-pine foliage, and podzol ground decorator paths", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const generator = createGenerator();
+    const logState = getState("minecraft:spruce_log");
+    const leavesState = getState("minecraft:spruce_leaves");
+    const podzolState = getState("minecraft:podzol");
+
+    for (const [feature, seed] of [
+      [TreeFeatures.MEGA_SPRUCE, 97531n],
+      [TreeFeatures.MEGA_PINE, 86420n],
+    ] as const) {
+      const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+      const origin = new BlockPos(16, 11, 16);
+      const expectedHeight = feature.config.trunkPlacer.getTreeHeight(new WorldgenRandom(seed));
+
+      expect(feature.place(level, generator, new WorldgenRandom(seed), origin)).toBe(true);
+
+      expect(level.getBlockState(origin).is(logState.getBlock())).toBe(true);
+      expect(level.getBlockState(origin.east()).is(logState.getBlock())).toBe(true);
+      expect(level.getBlockState(origin.south()).is(logState.getBlock())).toBe(true);
+      expect(level.getBlockState(origin.east().south()).is(logState.getBlock())).toBe(true);
+
+      let logCount = 0;
+      let leafCount = 0;
+      let podzolCount = 0;
+      for (let y = 10; y < 40; y++) {
+        for (let z = 6; z <= 26; z++) {
+          for (let x = 6; x <= 26; x++) {
+            const state = level.getBlockState(new BlockPos(x, y, z));
+            if (state.is(logState.getBlock())) {
+              logCount++;
+            } else if (state.is(leavesState.getBlock())) {
+              leafCount++;
+              expect(state.getValue(BlockStateProperties.DISTANCE)).toBeLessThan(7);
+            } else if (state.is(podzolState.getBlock())) {
+              podzolCount++;
+            }
+          }
+        }
+      }
+
+      expect(logCount).toBeGreaterThanOrEqual((expectedHeight * 2) + 1);
+      expect(leafCount).toBeGreaterThan(0);
+      expect(podzolCount).toBeGreaterThan(0);
+    }
+  });
+
   test("jungle placement uses the translated cocoa and vine decorators", () => {
     const blocks = registerGeneratedRenderBlocks();
     const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
