@@ -70,4 +70,4 @@ The current repo already proves that the AIR-step carver path is integrated, but
 
 ## Next
 
-Tactical 29: `GenerationStep.Carving.LIQUID` underwater cave/canyon parity, plus dedicated ocean/liquid carved fixtures and browser validation aimed at exposed cave mouths / ravines rather than vegetation frames.
+Tactical 29 is now [`29-underwater-liquid-carver-parity.md`](29-underwater-liquid-carver-parity.md): port `GenerationStep.Carving.LIQUID` underwater cave/canyon parity, add a dedicated AIR-plus-LIQUID ocean oracle fixture, and keep the AIR-only carved fixtures stable for step-scoped parity tests.

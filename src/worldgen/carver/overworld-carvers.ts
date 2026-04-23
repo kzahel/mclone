@@ -12,11 +12,12 @@ function biomeAccessor(seed: bigint, biomeSource: NoiseBiomeSource) {
     getBlockPositionBiome(seed, worldX, worldZ, biomeSource) as Biome;
 }
 
-export function applyOverworldAirCarvers(
+export function applyOverworldCarvers(
   seed: bigint,
   biomeSource: NoiseBiomeSource,
   chunk: MutableChunkBlockBuffer,
   context: CarverContext,
+  step: GenerationStep.Carving,
 ): void {
   const random = new WorldgenRandom();
   const chunkPos: ChunkPosLike = {
@@ -31,7 +32,7 @@ export function applyOverworldAirCarvers(
       const sourceChunkX = chunkPos.chunkX + offsetX;
       const sourceChunkZ = chunkPos.chunkZ + offsetZ;
       const sourceBiome = biomeSource.getNoiseBiome(sourceChunkX << 2, 0, sourceChunkZ << 2) as Biome;
-      const carvers = sourceBiome.getGenerationSettings().carvers(GenerationStep.Carving.AIR);
+      const carvers = sourceBiome.getGenerationSettings().carvers(step);
 
       for (let carverIndex = 0; carverIndex < carvers.length; carverIndex++) {
         const configuredCarver = carvers[carverIndex]!();
@@ -50,4 +51,13 @@ export function applyOverworldAirCarvers(
       }
     }
   }
+}
+
+export function applyOverworldAirCarvers(
+  seed: bigint,
+  biomeSource: NoiseBiomeSource,
+  chunk: MutableChunkBlockBuffer,
+  context: CarverContext,
+): void {
+  applyOverworldCarvers(seed, biomeSource, chunk, context, GenerationStep.Carving.AIR);
 }

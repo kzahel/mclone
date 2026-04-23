@@ -39,6 +39,8 @@ export const ChunkBlockId = {
   SANDSTONE: 33,
   RED_SANDSTONE: 34,
   PACKED_ICE: 35,
+  OBSIDIAN: 36,
+  MAGMA_BLOCK: 37,
 } as const;
 
 export type ChunkBlockId = (typeof ChunkBlockId)[keyof typeof ChunkBlockId];
@@ -80,6 +82,8 @@ export const CHUNK_BLOCK_NAMES = [
   "minecraft:sandstone",
   "minecraft:red_sandstone",
   "minecraft:packed_ice",
+  "minecraft:obsidian",
+  "minecraft:magma_block",
 ] as const;
 
 export const TERRAIN_STAGE_BLOCK_NAMES = [
@@ -133,6 +137,8 @@ export function isMotionBlockingBlock(blockId: ChunkBlockId): boolean {
     case ChunkBlockId.SANDSTONE:
     case ChunkBlockId.RED_SANDSTONE:
     case ChunkBlockId.PACKED_ICE:
+    case ChunkBlockId.OBSIDIAN:
+    case ChunkBlockId.MAGMA_BLOCK:
       return true;
     default:
       return false;

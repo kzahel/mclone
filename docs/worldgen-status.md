@@ -152,7 +152,7 @@ Not every landed bucket has the same validation strength.
 |---|---|---|
 | PRNG / noise / terrain sampling / biome source | High | These are the oldest and best-documented worldgen slices, with tactical docs and oracle-oriented work |
 | Surface path | Medium-high | Landed and visible in generated frames, with earlier tactical coverage |
-| Carvers | Medium-high | The code is present, biome-driven for the AIR step, and backed by three carved-stage oracle chunks plus explicit replaceable-material tests, but LIQUID carvers and a wider biome/material oracle matrix are still missing |
+| Carvers | Medium-high | AIR and LIQUID classic overworld carvers are now integrated and partially oracled, but scheduled underwater ticks and a wider biome/material oracle matrix are still missing |
 | Feature/decor framework | Medium | Good unit coverage on individual feature families, but not broad seed-parity coverage across many biome tables |
 | Biome decoration tables | Medium-low | Several important biomes are still empty or reduced, so coverage breadth is the main limitation |
 
@@ -162,21 +162,21 @@ This is the current recommended ordering for worldgen work.
 
 These priorities are only for parity-oriented worldgen work. The runtime/host arc already landed the browser-local authority, mesh-worker, browser-persistence, headless-Node-host, remote-browser-transport, protocol-hardening, first authoritative-player-loop, and browser-control integration prerequisites (`R0` through `R8`), so parity work no longer has to wait on the old browser render-path coupling. Remaining runtime/host work still matters, but it now shifts toward measuring whether polling remains sufficient under the live browser control path and then growing richer authoritative gameplay on top of the same boundary; see the runtime/host arc in [`tactical/README.md`](./tactical/README.md).
 
-### 1. Finish carver parity and broaden carver oracle coverage
+### 1. Broaden carver oracle coverage and close the remaining LIQUID-step gaps
 
-Carvers are already implemented for the default overworld AIR-step path, which means the priority is not “start carvers” but “finish the missing parity pieces and make coverage broad enough to trust.”
+Classic carvers are already implemented for both default overworld steps, which means the priority is not “start carvers” but “make the LIQUID path and the carved oracle matrix broad enough to trust.”
 
 Why this is high priority:
 
 - carvers materially change terrain recognizability more than another incremental surface-decoration slice
-- the original tactical index still reads as if carvers are the missing MVP terrain step
+- the original tactical index still reads as if carvers were only an AIR-step MVP concern
 - current coverage is still too narrow for a subsystem this central to overworld shape
 
 What this means in practice:
 
 - use [`carver-status.md`](./carver-status.md) as the live tracker for the carver path
-- broaden chunk-level oracle coverage beyond the three committed carved chunks
-- finish the missing LIQUID-carver and remaining material/surface-family gaps called out in the carver status doc
+- broaden chunk-level oracle coverage beyond the current AIR-only trio plus the single LIQUID ocean chunk
+- close the remaining scheduled-tick and material/surface-family gaps called out in the carver status doc
 - capture browser shots that intentionally expose cave mouths / ravines rather than only surface vegetation
 
 ### 2. Expand biome-table coverage for common overworld families

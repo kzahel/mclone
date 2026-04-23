@@ -36,6 +36,8 @@ const GRAVEL_LOCATION = new ResourceLocation("minecraft:gravel");
 const WATER_LOCATION = new ResourceLocation("minecraft:water");
 const LAVA_LOCATION = new ResourceLocation("minecraft:lava");
 const SNOW_LOCATION = new ResourceLocation("minecraft:snow");
+const OBSIDIAN_LOCATION = new ResourceLocation("minecraft:obsidian");
+const MAGMA_BLOCK_LOCATION = new ResourceLocation("minecraft:magma_block");
 const OAK_LOG_LOCATION = new ResourceLocation("minecraft:oak_log");
 const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
 const SPRUCE_LOG_LOCATION = new ResourceLocation("minecraft:spruce_log");
@@ -88,6 +90,8 @@ const GENERATED_BLOCK_LOCATIONS = [
   WATER_LOCATION,
   LAVA_LOCATION,
   SNOW_LOCATION,
+  OBSIDIAN_LOCATION,
+  MAGMA_BLOCK_LOCATION,
   OAK_LOG_LOCATION,
   OAK_LEAVES_LOCATION,
   SPRUCE_LOG_LOCATION,
@@ -144,6 +148,8 @@ const GENERATED_SPRITE_LOCATIONS = [
   new ResourceLocation("minecraft:block/lava_still"),
   new ResourceLocation("minecraft:block/lava_flow"),
   new ResourceLocation("minecraft:block/snow"),
+  new ResourceLocation("minecraft:block/obsidian"),
+  new ResourceLocation("minecraft:block/magma"),
   new ResourceLocation("minecraft:block/oak_log"),
   new ResourceLocation("minecraft:block/oak_log_top"),
   new ResourceLocation("minecraft:block/oak_leaves"),
@@ -265,6 +271,14 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
         .sound(SoundType.SNOW)
         .noOcclusion(),
     ),
+  ).defaultBlockState();
+  const obsidianState = registerBlock(
+    OBSIDIAN_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.COLOR_BLACK).requiresCorrectToolForDrops().strength(50.0, 1200.0)),
+  ).defaultBlockState();
+  const magmaBlockState = registerBlock(
+    MAGMA_BLOCK_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.NETHER).lightLevel(() => 3).strength(0.5).sound(SoundType.STONE)),
   ).defaultBlockState();
   registerBlock(
     OAK_LOG_LOCATION,
@@ -434,6 +448,8 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setFancy(true);
   ItemBlockRenderTypes.setRenderLayer(grassState.getBlock(), RenderType.cutoutMipped());
   ItemBlockRenderTypes.setRenderLayer(snowState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(obsidianState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(magmaBlockState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(waterState.getBlock(), RenderType.translucent());
   ItemBlockRenderTypes.setRenderLayer(grassPlantState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(fernState.getBlock(), RenderType.cutout());
@@ -469,7 +485,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(sugarCaneState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setFluidRenderLayer(Fluids.WATER, RenderType.translucent());
 
-  const blockStateById = new Array<BlockState>(10);
+  const blockStateById = new Array<BlockState>(ChunkBlockId.MAGMA_BLOCK + 1);
   blockStateById[ChunkBlockId.AIR] = airState;
   blockStateById[ChunkBlockId.STONE] = stoneState;
   blockStateById[ChunkBlockId.WATER] = waterState;
@@ -480,6 +496,8 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   blockStateById[ChunkBlockId.GRAVEL] = gravelState;
   blockStateById[ChunkBlockId.SNOW] = snowState;
   blockStateById[ChunkBlockId.LAVA] = lavaState;
+  blockStateById[ChunkBlockId.OBSIDIAN] = obsidianState;
+  blockStateById[ChunkBlockId.MAGMA_BLOCK] = magmaBlockState;
 
   return {
     airState,

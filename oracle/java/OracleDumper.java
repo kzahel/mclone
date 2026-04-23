@@ -100,7 +100,9 @@ public final class OracleDumper {
       "minecraft:black_terracotta",
       "minecraft:sandstone",
       "minecraft:red_sandstone",
-      "minecraft:packed_ice"
+      "minecraft:packed_ice",
+      "minecraft:obsidian",
+      "minecraft:magma_block"
    };
    private static final BlendedNoiseSampleParameters[] BLENDED_NOISE_SAMPLE_SETS = new BlendedNoiseSampleParameters[]{
       blendedNoiseSampleParameters("overworld", new String[]{"overworld", "amplified"}, 0.9999999814507745, 0.9999999814507745, 80.0, 160.0),
@@ -176,6 +178,9 @@ public final class OracleDumper {
             break;
          case "carved-chunk":
             json = dumpCarvedChunk(seed, parseInteger(requireOption(options, "chunk-x"), "chunk-x"), parseInteger(requireOption(options, "chunk-z"), "chunk-z"));
+            break;
+         case "liquid-carved-chunk":
+            json = dumpLiquidCarvedChunk(seed, parseInteger(requireOption(options, "chunk-x"), "chunk-x"), parseInteger(requireOption(options, "chunk-z"), "chunk-z"));
             break;
          default:
             throw new IllegalArgumentException("unsupported module '" + module + "'");
@@ -622,6 +627,14 @@ public final class OracleDumper {
    }
 
    private static String dumpCarvedChunk(long seed, int chunkX, int chunkZ) {
+      return dumpCarvedChunk(seed, chunkX, chunkZ, false, "carved-chunk");
+   }
+
+   private static String dumpLiquidCarvedChunk(long seed, int chunkX, int chunkZ) {
+      return dumpCarvedChunk(seed, chunkX, chunkZ, true, "liquid-carved-chunk");
+   }
+
+   private static String dumpCarvedChunk(long seed, int chunkX, int chunkZ, boolean includeLiquidStep, String moduleName) {
       SharedConstants.tryDetectVersion();
       java.io.PrintStream originalOut = Bootstrap.STDOUT;
       java.io.PrintStream originalErr = System.err;
@@ -642,10 +655,13 @@ public final class OracleDumper {
       buildSurfaceAndBedrock(seed, biomeSource, generatorSettings, chunk);
       chunk.setStatus(ChunkStatus.SURFACE);
       generator.applyCarvers(seed, biomeManager, chunk, GenerationStep.Carving.AIR);
+      if (includeLiquidStep) {
+         generator.applyCarvers(seed, biomeManager, chunk, GenerationStep.Carving.LIQUID);
+      }
       chunk.setStatus(ChunkStatus.CARVERS);
 
       Map<String, Object> json = new LinkedHashMap<>();
-      json.put("module", "carved-chunk");
+      json.put("module", moduleName);
       json.put("minecraftVersion", MINECRAFT_VERSION);
       json.put("generatorClass", NoiseBasedChunkGenerator.class.getName());
       json.put("seed", Long.toString(seed));
@@ -750,6 +766,10 @@ public final class OracleDumper {
             return 34;
          case "minecraft:packed_ice":
             return 35;
+         case "minecraft:obsidian":
+            return 36;
+         case "minecraft:magma_block":
+            return 37;
          default:
             throw new IllegalStateException("unexpected surface-stage block from Java oracle: " + key);
       }
@@ -1996,6 +2016,8 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper noise --class NoiseSampler --seed <long> --preset overworld --samples2d <path>");
       System.err.println("  oracle-dumper terrain-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper surface-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
+      System.err.println("  oracle-dumper carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
+      System.err.println("  oracle-dumper liquid-carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");

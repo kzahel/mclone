@@ -7,7 +7,7 @@ import { Registry } from "../../core/registry.ts";
 import { ResourceLocation } from "../../core/resource-location.ts";
 import type { WorldGenLevel } from "../../world/level/world-gen-level.ts";
 import type { Block } from "../../world/level/block/block.ts";
-import { applyOverworldAirCarvers } from "../carver/overworld-carvers.ts";
+import { applyOverworldCarvers } from "../carver/overworld-carvers.ts";
 import { MutableChunkBlockBuffer, CHUNK_WIDTH, ChunkBlockId, blockBufferIndex } from "../chunk/chunk-block-buffer.ts";
 import { buildChunkHeightmaps, type ChunkHeightmaps } from "../chunk/chunk-heightmaps.ts";
 import { buildChunkSections, type ChunkSection } from "../chunk/chunk-section-serialization.ts";
@@ -20,6 +20,7 @@ import type { LongSeed } from "../prng/simple-random-source.ts";
 import { WorldgenRandom } from "../prng/worldgen-random.ts";
 import { applyOverworldSurface } from "../surface/surface-builders.ts";
 import { type BaseStoneSource, SingleBaseStoneSource } from "./base-stone-source.ts";
+import { GenerationStep } from "./generation-step.ts";
 import { NoiseModifier } from "./noise-modifier.ts";
 import { NoiseGeneratorSettings } from "./noise-generator-settings.ts";
 import { NoiseSampler } from "./noise-sampler.ts";
@@ -188,12 +189,21 @@ export class NoiseBasedChunkGenerator {
     this.setBedrock(chunk, random);
   }
 
-  public applyCarvers(chunk: MutableChunkBlockBuffer): void {
+  public applyCarvers(chunk: MutableChunkBlockBuffer, step?: GenerationStep.Carving): void {
     this.assertCompatibleChunk(chunk);
-    applyOverworldAirCarvers(this.seed, this.biomeSource, chunk, {
+    const context = {
       minY: this.minY,
       genDepth: this.height,
-    });
+      seaLevel: this.seaLevel,
+    };
+    if (step !== undefined) {
+      applyOverworldCarvers(this.seed, this.biomeSource, chunk, context, step);
+      return;
+    }
+
+    for (const carvingStep of GenerationStep.CARVING_VALUES) {
+      applyOverworldCarvers(this.seed, this.biomeSource, chunk, context, carvingStep);
+    }
   }
 
   public applyBiomeDecoration(level: WorldGenLevel, chunkX: number, chunkZ: number): void {

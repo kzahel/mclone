@@ -3,6 +3,7 @@ import type { SimpleRandomSource } from "../prng/simple-random-source.ts";
 export interface CarverContext {
   readonly minY: number;
   readonly genDepth: number;
+  readonly seaLevel?: number;
 }
 
 export interface VerticalAnchor {

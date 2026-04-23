@@ -1,5 +1,9 @@
 import { GenerationStep } from "../levelgen/generation-step";
-import { DEFAULT_OVERWORLD_AIR_CARVERS, OCEAN_OVERWORLD_AIR_CARVERS } from "../carver/overworld-configured-carvers";
+import {
+  DEFAULT_OVERWORLD_AIR_CARVERS,
+  OCEAN_OVERWORLD_AIR_CARVERS,
+  OCEAN_OVERWORLD_LIQUID_CARVERS,
+} from "../carver/overworld-configured-carvers";
 import { BiomeGenerationSettings } from "./biome-generation-settings";
 import { VegetationFeatures } from "../levelgen/feature/vegetation-features";
 import { WaterFeatures } from "../levelgen/feature/water-features";
@@ -26,6 +30,10 @@ function addDefaultCarvers(builder: BiomeGenerationSettings.Builder): void {
 function addOceanCarvers(builder: BiomeGenerationSettings.Builder): void {
   for (const carver of OCEAN_OVERWORLD_AIR_CARVERS) {
     builder.addCarver(GenerationStep.Carving.AIR, carver);
+  }
+
+  for (const carver of OCEAN_OVERWORLD_LIQUID_CARVERS) {
+    builder.addCarver(GenerationStep.Carving.LIQUID, carver);
   }
 }
 

@@ -139,6 +139,16 @@ This is the tactical/05 oracle for:
 - layered biome-source seed parity
 - chunk-biome container parity against committed integration fixtures
 
+## Staged chunk oracles
+
+The Java oracle harness also emits pinned chunk snapshots for the translated terrain/surface/carver stages:
+
+- `pnpm --silent oracle:gen surface-chunk --seed 12345 --chunk-x 0 --chunk-z 0 > test/fixtures/integration/overworld-seed-12345-chunks-0-0-surface-only.json`
+- `pnpm --silent oracle:gen carved-chunk --seed 12345 --chunk-x 117 --chunk-z -128 > test/fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json`
+- `pnpm --silent oracle:gen liquid-carved-chunk --seed 12345 --chunk-x 117 --chunk-z -128 > test/fixtures/integration/overworld-seed-12345-chunks-117--128-liquid-carved.json`
+
+`carved-chunk` stays intentionally AIR-step-only so the older carved fixtures remain stable and step-scoped. `liquid-carved-chunk` applies AIR and LIQUID sequentially and is the committed oracle path for full classic-ocean carved-stage parity checks.
+
 ## Wrappers
 
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`
