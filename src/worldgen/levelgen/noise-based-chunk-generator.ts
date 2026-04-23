@@ -2,6 +2,8 @@ import { ChunkBiomeContainer } from "../biome/chunk-biome-container.ts";
 import { getBlockPositionBiome } from "../biome/biome-zoom.ts";
 import type { Biome } from "../biome/biome.ts";
 import type { NoiseBiomeSource } from "../biome/noise-biome-source.ts";
+import { BlockPos } from "../../core/block-pos.ts";
+import type { WorldGenLevel } from "../../world/level/world-gen-level.ts";
 import { applyOverworldAirCarvers } from "../carver/overworld-carvers.ts";
 import { MutableChunkBlockBuffer, CHUNK_WIDTH, ChunkBlockId, blockBufferIndex } from "../chunk/chunk-block-buffer.ts";
 import { buildChunkHeightmaps, type ChunkHeightmaps } from "../chunk/chunk-heightmaps.ts";
@@ -188,6 +190,16 @@ export class NoiseBasedChunkGenerator {
     });
   }
 
+  public applyBiomeDecoration(level: WorldGenLevel, chunkX: number, chunkZ: number): void {
+    const minBlockX = chunkX * CHUNK_WIDTH;
+    const minBlockZ = chunkZ * CHUNK_WIDTH;
+    const origin = new BlockPos(minBlockX, level.getMinBuildHeight(), minBlockZ);
+    const biome = this.getPrimaryBiome(chunkX, chunkZ);
+    const random = new WorldgenRandom();
+    const decorationSeed = random.setDecorationSeed(this.seed, minBlockX, minBlockZ);
+    biome.generate(this, level, decorationSeed, random, origin);
+  }
+
   private fillTerrainBlockBuffer(chunk: MutableChunkBlockBuffer): void {
     const noiseColumns = this.createNoiseColumns(chunk.chunkX, chunk.chunkZ);
     const blocks = chunk.blocks;
@@ -284,6 +296,10 @@ export class NoiseBasedChunkGenerator {
         `chunk buffer minY/height (${chunk.minY}, ${chunk.height}) did not match generator (${this.minY}, ${this.height})`,
       );
     }
+  }
+
+  private getPrimaryBiome(chunkX: number, chunkZ: number): Biome {
+    return this.biomeSource.getNoiseBiome((chunkX << 2) + 2, 0, (chunkZ << 2) + 2) as Biome;
   }
 
   private buildSurface(chunk: MutableChunkBlockBuffer, random: WorldgenRandom): void {

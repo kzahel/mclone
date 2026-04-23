@@ -1,7 +1,12 @@
 import type { NoiseBiome } from "./noise-biome";
+import { BiomeGenerationSettings } from "./biome-generation-settings";
 import { clamp } from "../../util/mth";
 import { FoliageColor } from "../../world/level/foliage-color";
 import { GrassColor } from "../../world/level/grass-color";
+import { BlockPos } from "../../core/block-pos";
+import type { WorldGenLevel } from "../../world/level/world-gen-level";
+import { GenerationStep } from "../levelgen/generation-step";
+import type { NoiseBasedChunkGenerator } from "../levelgen/noise-based-chunk-generator";
 import { PerlinSimplexNoise } from "../noise/perlin-simplex-noise";
 import { WorldgenRandom } from "../prng/worldgen-random";
 
@@ -38,6 +43,7 @@ export class Biome implements NoiseBiome {
     private readonly foliageColorOverride?: number,
     private readonly grassColorOverride?: number,
     private readonly grassColorModifier: GrassColorModifier = GrassColorModifier.NONE,
+    private readonly generationSettings: BiomeGenerationSettings = BiomeGenerationSettings.EMPTY,
   ) {}
 
   public getId(): number {
@@ -85,6 +91,34 @@ export class Biome implements NoiseBiome {
 
   public getWaterColor(): number {
     return this.waterColor;
+  }
+
+  public getGenerationSettings(): BiomeGenerationSettings {
+    return this.generationSettings;
+  }
+
+  public generate(
+    chunkGenerator: NoiseBasedChunkGenerator,
+    level: WorldGenLevel,
+    decorationSeed: bigint,
+    random: WorldgenRandom,
+    origin: BlockPos,
+  ): void {
+    const features = this.generationSettings.features();
+    // TypeScript: structure placement stays deferred here; only configured features run during biome decoration.
+    for (let stepIndex = 0; stepIndex < GenerationStep.DECORATION_VALUES.length; stepIndex++) {
+      if (features.length <= stepIndex) {
+        continue;
+      }
+
+      let featureIndex = 0;
+      for (const featureSupplier of features[stepIndex]!) {
+        const feature = featureSupplier();
+        random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
+        feature.place(level, chunkGenerator, random, origin);
+        featureIndex++;
+      }
+    }
   }
 
   private getGrassColorFromTexture(): number {

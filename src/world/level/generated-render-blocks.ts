@@ -31,10 +31,13 @@ const LAVA_LOCATION = new ResourceLocation("minecraft:lava");
 const SNOW_LOCATION = new ResourceLocation("minecraft:snow");
 const OAK_LOG_LOCATION = new ResourceLocation("minecraft:oak_log");
 const OAK_LEAVES_LOCATION = new ResourceLocation("minecraft:oak_leaves");
+const SPRUCE_LOG_LOCATION = new ResourceLocation("minecraft:spruce_log");
+const SPRUCE_LEAVES_LOCATION = new ResourceLocation("minecraft:spruce_leaves");
 const GRASS_LOCATION = new ResourceLocation("minecraft:grass");
 const FERN_LOCATION = new ResourceLocation("minecraft:fern");
 const DANDELION_LOCATION = new ResourceLocation("minecraft:dandelion");
 const OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:oak_sapling");
+const SPRUCE_SAPLING_LOCATION = new ResourceLocation("minecraft:spruce_sapling");
 const CACTUS_LOCATION = new ResourceLocation("minecraft:cactus");
 const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 
@@ -50,10 +53,13 @@ const GENERATED_BLOCK_LOCATIONS = [
   SNOW_LOCATION,
   OAK_LOG_LOCATION,
   OAK_LEAVES_LOCATION,
+  SPRUCE_LOG_LOCATION,
+  SPRUCE_LEAVES_LOCATION,
   GRASS_LOCATION,
   FERN_LOCATION,
   DANDELION_LOCATION,
   OAK_SAPLING_LOCATION,
+  SPRUCE_SAPLING_LOCATION,
   CACTUS_LOCATION,
   SUGAR_CANE_LOCATION,
 ] as const;
@@ -77,10 +83,14 @@ const GENERATED_SPRITE_LOCATIONS = [
   new ResourceLocation("minecraft:block/oak_log"),
   new ResourceLocation("minecraft:block/oak_log_top"),
   new ResourceLocation("minecraft:block/oak_leaves"),
+  new ResourceLocation("minecraft:block/spruce_log"),
+  new ResourceLocation("minecraft:block/spruce_log_top"),
+  new ResourceLocation("minecraft:block/spruce_leaves"),
   new ResourceLocation("minecraft:block/grass"),
   new ResourceLocation("minecraft:block/fern"),
   new ResourceLocation("minecraft:block/dandelion"),
   new ResourceLocation("minecraft:block/oak_sapling"),
+  new ResourceLocation("minecraft:block/spruce_sapling"),
   new ResourceLocation("minecraft:block/cactus_side"),
   new ResourceLocation("minecraft:block/cactus_top"),
   new ResourceLocation("minecraft:block/cactus_bottom"),
@@ -160,6 +170,14 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     OAK_LEAVES_LOCATION,
     new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
   );
+  registerBlock(
+    SPRUCE_LOG_LOCATION,
+    new RotatedPillarBlock(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.WOOD).strength(2.0).sound(SoundType.WOOD)),
+  );
+  registerBlock(
+    SPRUCE_LEAVES_LOCATION,
+    new LeavesBlock(BlockBehaviour.Properties.of(Material.LEAVES, MaterialColor.PLANT).strength(0.2).randomTicks().sound(SoundType.GRASS)),
+  );
   const grassPlantState = registerBlock(
     GRASS_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
@@ -174,6 +192,10 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ).defaultBlockState();
   const oakSaplingState = registerBlock(
     OAK_SAPLING_LOCATION,
+    new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
+  const spruceSaplingState = registerBlock(
+    SPRUCE_SAPLING_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
   const cactusState = registerBlock(
@@ -193,6 +215,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(fernState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(dandelionState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(oakSaplingState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(spruceSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(cactusState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(sugarCaneState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setFluidRenderLayer(Fluids.WATER, RenderType.translucent());

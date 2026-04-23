@@ -60,4 +60,4 @@ Port the narrow 1.17.1 oak tree path needed to remove the remaining handwritten 
 
 ## Next
 
-Tactical 24: biome vegetation decoration bridge. The renderer can now draw real oak output from translated `TreeFeature`, but generated terrain still only gets trees and plants from the smoke harness. The next slice should port the narrow biome-decoration path needed to run translated vegetation features against generated chunks, starting with the first `RandomFeature` / selector consumers and the biome feature lists that place surface trees and simple plants in the overworld.
+Tactical 24 is now [`24-biome-vegetation-decoration-bridge.md`](24-biome-vegetation-decoration-bridge.md): generated chunks now run the first translated mountain/taiga biome-decoration path directly, so trees and ground plants come from chunk-owned biome features instead of the old smoke harness.

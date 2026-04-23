@@ -17,6 +17,16 @@ interface SurfaceChunkOracleFixture {
 }
 
 const oracle = surfaceFixture as SurfaceChunkOracleFixture;
+const DECORATION_BLOCKS = new Set([
+  "minecraft:oak_log",
+  "minecraft:oak_leaves",
+  "minecraft:spruce_log",
+  "minecraft:spruce_leaves",
+  "minecraft:grass",
+  "minecraft:fern",
+  "minecraft:oak_sapling",
+  "minecraft:spruce_sapling",
+]);
 
 function oracleBlockNameAt(localX: number, y: number, localZ: number): string {
   const index = ((y - oracle.minY) << 8) | (localZ << 4) | localX;
@@ -34,11 +44,15 @@ function oracleSurfaceAt(localX: number, localZ: number): { readonly name: strin
   throw new Error(`oracle chunk (${oracle.chunkX}, ${oracle.chunkZ}) had no surface block at (${localX}, ${localZ})`);
 }
 
-function runtimeSurfaceAt(level: GeneratedRenderLevel, worldX: number, worldZ: number): { readonly name: string; readonly y: number } {
+function runtimeGroundSurfaceAt(level: GeneratedRenderLevel, worldX: number, worldZ: number): { readonly name: string; readonly y: number } {
   for (let y = level.getMaxBuildHeight() - 1; y >= level.getMinBuildHeight(); y--) {
     const state = level.getBlockState(new BlockPos(worldX, y, worldZ));
     if (!state.isAir()) {
       const name = Registry.BLOCK.getKey(state.getBlock() as unknown as object)?.toString();
+      if (name !== undefined && DECORATION_BLOCKS.has(name)) {
+        continue;
+      }
+
       return { name: name ?? "unregistered", y };
     }
   }
@@ -71,7 +85,7 @@ describe("GeneratedRenderLevel", () => {
       [15, 15],
     ] as const) {
       const expected = oracleSurfaceAt(localX, localZ);
-      const actual = runtimeSurfaceAt(level, localX, localZ);
+      const actual = runtimeGroundSurfaceAt(level, localX, localZ);
       expect(actual).toEqual(expected);
     }
   });
@@ -88,5 +102,33 @@ describe("GeneratedRenderLevel", () => {
     expect(level.getChunk(-2, 0, false)).toBeNull();
     expect(level.getChunk(0, 0, false)).not.toBeNull();
     expect(level.getChunk(4, 0, false)).not.toBeNull();
+  });
+
+  test("generated chunks gain biome-driven tree and ground vegetation blocks", () => {
+    const level = createGeneratedLevel();
+
+    expect(level.ensureChunksForCamera(40.5, 40.5, 1)).toBe(true);
+
+    let foundTree = false;
+    let foundGroundPlant = false;
+    for (const chunk of level.getLoadedChunks()) {
+      const minX = chunk.chunkX * 16;
+      const minZ = chunk.chunkZ * 16;
+      for (let y = level.getMinBuildHeight(); y < level.getMaxBuildHeight(); y++) {
+        for (let localZ = 0; localZ < 16; localZ++) {
+          for (let localX = 0; localX < 16; localX++) {
+            const name = Registry.BLOCK.getKey(level.getBlockState(new BlockPos(minX + localX, y, minZ + localZ)).getBlock() as unknown as object)?.toString();
+            if (name === "minecraft:spruce_log" || name === "minecraft:oak_log") {
+              foundTree = true;
+            } else if (name === "minecraft:grass" || name === "minecraft:fern") {
+              foundGroundPlant = true;
+            }
+          }
+        }
+      }
+    }
+
+    expect(foundTree).toBe(true);
+    expect(foundGroundPlant).toBe(true);
   });
 });

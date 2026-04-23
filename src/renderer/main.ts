@@ -1,7 +1,7 @@
 import { ResourceLocation } from "../core/resource-location";
+import { BlockPos } from "../core/block-pos";
 import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
 import { NoiseBasedChunkGenerator } from "../worldgen/levelgen/noise-based-chunk-generator";
-import { decorateSmokeSceneWithFeatures } from "../worldgen/levelgen/smoke-feature-placement";
 import { ChunkBlockId } from "../worldgen/chunk/chunk-block-buffer";
 import { GeneratedRenderLevel } from "../world/level/generated-render-level";
 import { registerGeneratedRenderBlocks } from "../world/level/generated-render-blocks";
@@ -92,6 +92,14 @@ interface ChunkPassResources {
 interface PassLayer {
   readonly pipeline: GPURenderPipeline;
   readonly draws: readonly ChunkPassResources[];
+}
+
+function primeSmokeWaterPatch(level: GeneratedRenderLevel, waterState: import("../world/level/block/state/block-state").BlockState): void {
+  for (let z = 35; z <= 39; z++) {
+    for (let x = 42; x <= 47; x++) {
+      level.setBlock(new BlockPos(x, 84, z), waterState);
+    }
+  }
 }
 
 function uploadBuffer(device: GPUDevice, bytes: Uint8Array, usage: GPUBufferUsageFlags): GPUBuffer {
@@ -302,7 +310,7 @@ async function boot(): Promise<BootResult> {
   let frame: LevelRenderFrame | undefined;
   for (const step of GENERATED_CAMERA_PATH) {
     if (level.ensureChunksForCamera(step.position.x, step.position.z, GENERATED_VIEW_DISTANCE)) {
-      decorateSmokeSceneWithFeatures(level, generatedBlocks, generator, GENERATED_SEED);
+      primeSmokeWaterPatch(level, generatedBlocks.blockStateById[ChunkBlockId.WATER]!);
       levelRenderer.allChanged();
     }
 

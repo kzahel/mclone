@@ -12,10 +12,15 @@ import { type BlockState } from "./block/state/block-state";
 import { LevelChunk } from "./chunk/level-chunk";
 import { StaticRenderLevel } from "./static-render-level";
 
+function decoratedChunkKey(chunkX: number, chunkZ: number): string {
+  return `${chunkX},${chunkZ}`;
+}
+
 export class GeneratedRenderLevel extends StaticRenderLevel {
   private viewCenterX = Number.MIN_SAFE_INTEGER;
   private viewCenterZ = Number.MIN_SAFE_INTEGER;
   private chunkRadius = -1;
+  private readonly decoratedChunks = new Set<string>();
 
   public constructor(
     airState: BlockState,
@@ -43,6 +48,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
 
     const generated = this.generateChunk(chunkX, chunkZ);
     super.setChunk(generated);
+    this.decorateChunk(chunkX, chunkZ);
     return generated;
   }
 
@@ -62,6 +68,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     for (const chunk of this.getLoadedChunks()) {
       if (!this.inRange(chunk.chunkX, chunk.chunkZ)) {
         super.removeChunk(chunk.chunkX, chunk.chunkZ);
+        this.decoratedChunks.delete(decoratedChunkKey(chunk.chunkX, chunk.chunkZ));
         changed = true;
       }
     }
@@ -96,6 +103,16 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     this.generator.buildSurfaceAndBedrock(generated);
     this.generator.applyCarvers(generated);
     return this.copyGeneratedChunk(chunkX, chunkZ, generated);
+  }
+
+  private decorateChunk(chunkX: number, chunkZ: number): void {
+    const key = decoratedChunkKey(chunkX, chunkZ);
+    if (this.decoratedChunks.has(key)) {
+      return;
+    }
+
+    this.decoratedChunks.add(key);
+    this.generator.applyBiomeDecoration(this, chunkX, chunkZ);
   }
 
   private copyGeneratedChunk(chunkX: number, chunkZ: number, generated: MutableChunkBlockBuffer): LevelChunk {

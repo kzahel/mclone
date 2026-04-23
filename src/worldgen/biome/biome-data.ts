@@ -1,4 +1,5 @@
 import { Biome, GrassColorModifier, type BiomeDefinition } from "./biome";
+import { getOverworldBiomeGenerationSettings } from "./overworld-biome-generation-settings";
 
 function visuals(
   id: number,
@@ -171,6 +172,7 @@ const ALL_OVERWORLD_LAYERED_BIOMES = ALL_OVERWORLD_LAYERED_BIOME_DEFINITIONS.map
       definition.foliageColorOverride,
       definition.grassColorOverride,
       definition.grassColorModifier,
+      getOverworldBiomeGenerationSettings(definition.key),
     ),
 );
 

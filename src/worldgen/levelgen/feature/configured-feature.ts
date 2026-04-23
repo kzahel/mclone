@@ -4,10 +4,15 @@ import type { SimpleRandomSource } from "../../prng/simple-random-source";
 import type { NoiseBasedChunkGenerator } from "../noise-based-chunk-generator";
 import { DecorationContext } from "../placement/decoration-context";
 import { ConfiguredDecorator } from "../placement/configured-decorator";
+import { FeatureDecorators } from "../placement/feature-decorators";
+import type { IntProvider } from "../../../util/valueproviders/int-provider";
+import { CountConfiguration } from "./configurations/count-configuration";
 import { DecoratedFeatureConfiguration } from "./configurations/decorated-feature-configuration";
 import type { DecoratorConfiguration } from "./configurations/decorator-configuration";
 import type { FeatureConfiguration } from "./configurations/feature-configuration";
+import { NoneDecoratorConfiguration } from "./configurations/none-decorator-configuration";
 import { FeaturePlaceContext } from "./feature-place-context";
+import { WeightedConfiguredFeature } from "./weighted-configured-feature";
 
 interface PlaceableFeature<FC extends FeatureConfiguration> {
   place(context: FeaturePlaceContext<FC>): boolean;
@@ -42,6 +47,18 @@ export class ConfiguredFeature<FC extends FeatureConfiguration, F extends Placea
     decorator: ConfiguredDecorator<DecoratorConfiguration>,
   ): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {
     return new ConfiguredFeature(DECORATED_FEATURE, new DecoratedFeatureConfiguration(() => this as never, decorator));
+  }
+
+  public count(count: number | IntProvider): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {
+    return this.decorated(FeatureDecorators.COUNT.configured(new CountConfiguration(count)));
+  }
+
+  public squared(): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {
+    return this.decorated(FeatureDecorators.SQUARE.configured(NoneDecoratorConfiguration.INSTANCE));
+  }
+
+  public weighted(chance: number): WeightedConfiguredFeature {
+    return new WeightedConfiguredFeature(this as unknown as ConfiguredFeature<any, any>, chance);
   }
 
   public place(level: WorldGenLevel, chunkGenerator: NoiseBasedChunkGenerator, random: SimpleRandomSource, origin: BlockPos): boolean {
