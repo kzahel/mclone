@@ -39,6 +39,7 @@ Concretely:
 - After wiring up a new draw path, run `pnpm test:browser` and take a screenshot. Read the image and describe what you see. Does it look right? Are the shapes, colors, and positions what you expect?
 - If the output looks wrong (blank canvas, wrong color, garbage geometry, WebGPU validation errors in the console), stop and fix it before adding more code on top.
 - Unit tests (`pnpm test`) catch data-structure correctness. They do not catch GPU submission errors, wrong buffer layouts, or misconfigured pipelines. Actually looking at the rendered output is the only way to catch those.
+- **Always save debug, smoke, and probe screenshots to `/tmp`** (e.g. `/tmp/mclone-debug-freecam.png`). Never write screenshots into the repo, into `test-results/`, or anywhere that risks getting committed. `/tmp` is also clickable in the chat UI per the global file-path convention.
 
 ## Target: Minecraft Java 1.17.1 vanilla overworld
 
