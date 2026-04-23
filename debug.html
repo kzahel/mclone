@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>mclone — debug free-cam</title>
+    <style>
+      body { margin: 0; background: #111; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #ccc; }
+      canvas { display: block; }
+      #debug-overlay {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        padding: 6px 10px;
+        background: rgba(0, 0, 0, 0.55);
+        border-radius: 4px;
+        font-size: 12px;
+        line-height: 1.4;
+        pointer-events: none;
+        white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="renderer" width="800" height="600"></canvas>
+    <div id="debug-overlay">loading...</div>
+    <script type="module" src="/src/renderer/debug/debug-free-cam.ts"></script>
+  </body>
+</html>
