@@ -308,6 +308,13 @@ That means:
 - queued `poll_world_updates` delivery for server-originated updates
 - dedicated-host shared-session ticking without moving the renderer back into ownership
 
+`R8` closes the first real browser-control ownership gap on top of that:
+
+- the live browser debug/control path now derives camera state from authoritative `player_state`
+- browser input is translated into `set_player_input` instead of mutating a renderer-owned camera directly
+- chunk-interest updates now follow authoritative player position in the live browser loop
+- the renderer remains a presentation consumer over host-owned player/world state
+
 This avoids building two engines:
 
 - a shortcut local one
@@ -362,23 +369,22 @@ The important design rule is that these remain server-authoritative systems with
 
 ## Current mismatch in the repo
 
-The codebase is materially closer to this target architecture now that the first remote hardening pass is landed, but it still does not fully match the long-term shape.
+The codebase is materially closer to this target architecture now that the first live browser-control pass is landed, but it still does not fully match the long-term shape.
 
 Current gaps:
 
-- the browser camera/input loop is still not bound to authoritative `player_state`
 - the remote update flow is still poll-driven HTTP, not a measured push-capable transport
 - the gameplay layer still stops at baseline player/session motion state rather than parity movement, entities, or interactions
 
-That is why browser control integration is now the architectural priority, not just protocol work.
+That is why transport efficiency and richer authoritative gameplay are now the architectural priorities, not more ownership-split work.
 
 ## Immediate implications
 
 The next major refactor direction should be:
 
-1. Bind the browser control/camera loop to authoritative `player_state` and `set_player_input`.
-2. Measure whether the new polled update path is sufficient before introducing a push-capable transport.
-3. Decide whether the dedicated host needs worker-thread/job-pool offload after there is a concrete shared-session gameplay workload to measure.
+1. Measure whether the live browser control path still fits within the current polled update transport.
+2. If it does not, add a push-capable transport without changing the world host/client authority model.
+3. Grow the authoritative gameplay layer beyond baseline player/session motion state without moving ownership back into the renderer.
 
 ## Decision checklist
 

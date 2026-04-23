@@ -78,7 +78,7 @@ The first three runtime prerequisites are now landed, and they should generally 
 - browser singleplayer runs behind an authoritative local host boundary
 - chunk meshing no longer stalls the main thread
 
-Those conditions are now satisfied by `R0` through `R7`. The next runtime/host priority is binding the live browser control/camera loop to that authority without letting the renderer retake ownership of world or player state.
+Those conditions are now satisfied by `R0` through `R8`. The next runtime/host priority is deciding whether the now-live browser control path still fits within the current poll-based remote transport, without reopening the host/client authority split.
 
 WebRTC is intentionally deferred. The preferred path is:
 
@@ -98,7 +98,7 @@ WebRTC is intentionally deferred. The preferred path is:
 | [`R5-remote-browser-transport.md`](R5-remote-browser-transport.md) | remote browser-client transport to dedicated host: network transport adapter, connection/session bootstrap, browser client consuming remote chunk/state stream, two-client local smoke | integration + 2-client smoke | **done** — browser clients now consume the authoritative chunk/state stream from a dedicated Node host over a remote HTTP session transport, and the browser smoke runs two pages against that host |
 | [`R6-protocol-hardening.md`](R6-protocol-hardening.md) | protocol hardening: reconnect/resync, chunk interest management, baseline player/session state sync, error handling and versioning discipline | integration | **done** — the remote path now has versioned envelopes, resumable sessions, per-session chunk interest, and shared dedicated-host authority per save instead of one host per remote session |
 | [`R7-authoritative-player-loop.md`](R7-authoritative-player-loop.md) | authoritative player/session loop: player input commands, authoritative player-state snapshots, server-driven update flow, dedicated-host shared-session ticking | integration + browser smoke | **done** — the host/client boundary now carries player input, authoritative player-state snapshots, and polled server-originated updates on top of shared session authority |
-| `R8-` | authoritative browser control/camera integration: bind debug/browser camera to `player_state`, translate browser input to `set_player_input`, schedule live update polling, keep renderer presentation-only | browser smoke + live debug path | make the browser actually consume the new player/session authority instead of only validating it in the smoke harness |
+| [`R8-authoritative-browser-control-integration.md`](R8-authoritative-browser-control-integration.md) | authoritative browser control/camera integration: bind debug/browser camera to `player_state`, translate browser input to `set_player_input`, schedule live update polling, keep renderer presentation-only | browser smoke + live debug path | **done** — the live browser debug path now drives authoritative player input/state against the same host boundary as remote clients, and chunk interest follows authoritative player state instead of a renderer-owned free-cam |
 | `R9-` | optional browser-hosted peer/server or push-capable transport: WebSocket/WebTransport/WebRTC-style adapter reusing the same protocol and host boundary if polling stops fitting | integration | slot in a different transport later without redesigning the engine around it up front |
 
 The first tactical to plan in detail from this arc should be `R0-`, not `R7-`. If `R0-` and `R1-` are not real, every later runtime mode becomes a special case.
