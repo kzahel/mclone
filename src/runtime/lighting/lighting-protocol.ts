@@ -79,6 +79,8 @@ export type LightingCommandRequest =
   | RequestInitialLightRequest
   | LightBlockChangeBatchRequest;
 
+export type LightingCommandType = LightingCommandRequest["type"];
+
 export type LightingWorkerRequest = LightingCommandRequest | PollLightingResultsRequest;
 
 export interface ChunkLightReadyResult extends LightingChunkRevision {
@@ -97,6 +99,17 @@ export interface LightBlockChangeBatchCompleteResult {
   readonly chunkViewRevision: number;
   readonly changeCount: number;
   readonly chunkRevisions: readonly LightingChunkRevision[];
+}
+
+export interface LightPerformanceResult {
+  readonly type: "light_performance";
+  readonly commandType: LightingCommandType;
+  readonly durationMs: number;
+  readonly propagationSliceCount: number;
+  readonly propagationTotalMs: number;
+  readonly maxPropagationSliceMs: number;
+  readonly queuedCommandCount: number;
+  readonly queuedResultCount: number;
 }
 
 export interface LightProgressResult {
@@ -123,8 +136,26 @@ export type LightingResult =
   | ChunkLightReadyResult
   | ChunkLightDeltaResult
   | LightBlockChangeBatchCompleteResult
+  | LightPerformanceResult
   | LightProgressResult
   | LightErrorResult;
+
+export interface LightingServicePerformanceCounters {
+  readonly requestCount: number;
+  readonly requestCountsByType: Readonly<Record<string, number>>;
+  readonly maxRequestRoundTripMs: number;
+  readonly pollCount: number;
+  readonly maxResultsPerPoll: number;
+  readonly maxPendingResultsAfterPoll: number;
+  readonly resultCount: number;
+  readonly resultCountsByType: Readonly<Record<string, number>>;
+  readonly workerCommandCount: number;
+  readonly workerCommandCountsByType: Readonly<Record<string, number>>;
+  readonly maxWorkerCommandDurationMs: number;
+  readonly propagationSliceCount: number;
+  readonly propagationTotalMs: number;
+  readonly maxPropagationSliceMs: number;
+}
 
 export interface LightingAckResponse {
   readonly type: "lighting_ack";
@@ -151,6 +182,8 @@ export interface LightingService {
   requestInitialLight(request: RequestInitialLightRequest): Promise<void>;
   enqueueBlockChanges(request: LightBlockChangeBatchRequest): Promise<void>;
   pollResults(request: PollLightingResultsRequest): Promise<LightingResultBatch>;
+  getPerformanceCounters?(): LightingServicePerformanceCounters;
+  close?(): void;
 }
 
 export function collectLightingRequestTransferables(request: LightingWorkerRequest): Transferable[] {
@@ -182,6 +215,7 @@ export function collectLightingResultTransferables(result: LightingResult): Tran
       }
       break;
     case "block_light_update_complete":
+    case "light_performance":
     case "light_progress":
     case "light_error":
       break;

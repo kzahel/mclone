@@ -19,6 +19,7 @@ import {
   type LightBlockChangeBatchRequest,
   type LightErrorResult,
   type LightProgressResult,
+  type LightingCommandType,
   type LightingCommandRequest,
   type LightingChunkRevision,
   type LightingResult,
@@ -46,8 +47,18 @@ interface LightingWorkerState {
   readonly chunkRevisions: Map<string, number>;
 }
 
+interface LightingWorkerCommandMetrics {
+  propagationSliceCount: number;
+  propagationTotalMs: number;
+  maxPropagationSliceMs: number;
+}
+
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
+}
+
+function nowMs(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
 
 function yieldMailboxTurn(): Promise<void> {
@@ -149,7 +160,11 @@ class LightingWorkerWorld {
       && this.level.getChunk(request.chunkX, request.chunkZ, false) !== null;
   }
 
-  public async computeInitialLight(request: RequestInitialLightRequest, yieldStep: () => Promise<void>): Promise<ChunkLightReadyResult> {
+  public async computeInitialLight(
+    request: RequestInitialLightRequest,
+    yieldStep: () => Promise<void>,
+    metrics: LightingWorkerCommandMetrics,
+  ): Promise<ChunkLightReadyResult> {
     const dependencies = [
       { chunkX: request.chunkX, chunkZ: request.chunkZ },
       ...request.neighbors.map((neighbor) => ({ chunkX: neighbor.chunkX, chunkZ: neighbor.chunkZ })),
@@ -178,7 +193,7 @@ class LightingWorkerWorld {
     }
 
     if (queuedWork || this.lightEngine.hasLightWork()) {
-      await this.runLightingUntilIdle(yieldStep);
+      await this.runLightingUntilIdle(yieldStep, metrics);
     }
 
     this.lightCorrectChunks.add(chunkKey(request.chunkX, request.chunkZ));
@@ -197,7 +212,11 @@ class LightingWorkerWorld {
     };
   }
 
-  public async applyBlockChanges(request: LightBlockChangeBatchRequest, yieldStep: () => Promise<void>): Promise<readonly ChunkLightDeltaResult[]> {
+  public async applyBlockChanges(
+    request: LightBlockChangeBatchRequest,
+    yieldStep: () => Promise<void>,
+    metrics: LightingWorkerCommandMetrics,
+  ): Promise<readonly ChunkLightDeltaResult[]> {
     for (const change of request.changes) {
       const pos = new BlockPos(change.x, change.y, change.z);
       const chunkX = SectionPos.blockToSectionCoord(change.x);
@@ -215,7 +234,7 @@ class LightingWorkerWorld {
     }
 
     if (this.lightEngine.hasLightWork()) {
-      await this.runLightingUntilIdle(yieldStep);
+      await this.runLightingUntilIdle(yieldStep, metrics);
     }
 
     for (const revision of request.chunkRevisions) {
@@ -323,13 +342,21 @@ class LightingWorkerWorld {
     }
   }
 
-  private async runLightingUntilIdle(yieldStep: () => Promise<void>): Promise<void> {
+  private async runLightingUntilIdle(
+    yieldStep: () => Promise<void>,
+    metrics: LightingWorkerCommandMetrics,
+  ): Promise<void> {
     for (let iteration = 0; iteration < 10_000; iteration++) {
       if (!this.lightEngine.hasLightWork()) {
         return;
       }
 
+      const startedAtMs = nowMs();
       this.lightEngine.runUpdates(262_144, true, true);
+      const durationMs = nowMs() - startedAtMs;
+      metrics.propagationSliceCount++;
+      metrics.propagationTotalMs += durationMs;
+      metrics.maxPropagationSliceMs = Math.max(metrics.maxPropagationSliceMs, durationMs);
       await yieldStep();
     }
 
@@ -482,11 +509,18 @@ class LightingWorkerMailbox {
     try {
       while (this.queuedCommands.length > 0) {
         const command = this.queuedCommands.shift()!;
+        const startedAtMs = nowMs();
+        const metrics: LightingWorkerCommandMetrics = {
+          propagationSliceCount: 0,
+          propagationTotalMs: 0,
+          maxPropagationSliceMs: 0,
+        };
         try {
-          await this.processCommand(command);
+          await this.processCommand(command, metrics);
         } catch (error) {
           this.enqueueResult(lightError(error instanceof Error ? error.message : String(error)));
         } finally {
+          this.enqueuePerformanceResult(command.type, nowMs() - startedAtMs, metrics);
           this.activeCommandCount--;
         }
 
@@ -503,7 +537,7 @@ class LightingWorkerMailbox {
     }
   }
 
-  private async processCommand(command: LightingCommandRequest): Promise<void> {
+  private async processCommand(command: LightingCommandRequest, metrics: LightingWorkerCommandMetrics): Promise<void> {
     switch (command.type) {
       case "configure_light_world":
         this.state.configuredWorld = command;
@@ -522,10 +556,10 @@ class LightingWorkerMailbox {
         this.processRemoveChunk(command);
         break;
       case "request_initial_light":
-        await this.processInitialLightRequest(command);
+        await this.processInitialLightRequest(command, metrics);
         break;
       case "block_light_update_batch":
-        await this.processBlockLightUpdateBatch(command);
+        await this.processBlockLightUpdateBatch(command, metrics);
         break;
     }
   }
@@ -544,7 +578,10 @@ class LightingWorkerMailbox {
     }
   }
 
-  private async processInitialLightRequest(command: RequestInitialLightRequest): Promise<void> {
+  private async processInitialLightRequest(
+    command: RequestInitialLightRequest,
+    metrics: LightingWorkerCommandMetrics,
+  ): Promise<void> {
     const world = this.state.world;
     if (world === undefined) {
       this.enqueueResult(lightError("request_initial_light received before configure_light_world", command));
@@ -576,17 +613,20 @@ class LightingWorkerMailbox {
       return;
     }
 
-    this.enqueueResult(await world.computeInitialLight(command, yieldMailboxTurn));
+    this.enqueueResult(await world.computeInitialLight(command, yieldMailboxTurn, metrics));
   }
 
-  private async processBlockLightUpdateBatch(command: LightBlockChangeBatchRequest): Promise<void> {
+  private async processBlockLightUpdateBatch(
+    command: LightBlockChangeBatchRequest,
+    metrics: LightingWorkerCommandMetrics,
+  ): Promise<void> {
     const world = this.state.world;
     if (world === undefined) {
       this.enqueueResult(lightError("block_light_update_batch received before configure_light_world"));
       return;
     }
 
-    for (const delta of await world.applyBlockChanges(command, yieldMailboxTurn)) {
+    for (const delta of await world.applyBlockChanges(command, yieldMailboxTurn, metrics)) {
       this.enqueueResult(delta);
     }
     for (const revision of command.chunkRevisions) {
@@ -621,6 +661,23 @@ class LightingWorkerMailbox {
     }
 
     this.resultQueue.push(result);
+  }
+
+  private enqueuePerformanceResult(
+    commandType: LightingCommandType,
+    durationMs: number,
+    metrics: LightingWorkerCommandMetrics,
+  ): void {
+    this.enqueueResult({
+      type: "light_performance",
+      commandType,
+      durationMs,
+      propagationSliceCount: metrics.propagationSliceCount,
+      propagationTotalMs: metrics.propagationTotalMs,
+      maxPropagationSliceMs: metrics.maxPropagationSliceMs,
+      queuedCommandCount: this.activeCommandCount,
+      queuedResultCount: this.resultQueue.length,
+    });
   }
 }
 

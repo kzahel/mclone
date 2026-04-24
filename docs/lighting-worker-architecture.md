@@ -50,6 +50,7 @@ interface LightingService {
   requestInitialLight(request: InitialLightRequest): Promise<void>;
   enqueueBlockChanges(request: LightBlockChangeBatch): Promise<void>;
   pollResults(request: PollLightingResults): Promise<LightingResultBatch>;
+  getPerformanceCounters?(): LightingServicePerformanceCounters;
 }
 ```
 
@@ -68,11 +69,13 @@ Landed:
 - `GeneratedWorldHost` no longer constructs `LevelLightEngine`; vanilla lighting mode requires a worker-backed `LightingService`.
 - Initial chunk publication now packs light inputs, requests `chunk_light_ready`, validates chunk revisions, and publishes snapshots with accepted worker light.
 - Live block/liquid mutations now coalesce into `block_light_update_batch` requests. The worker applies the block-state changes, drains propagation, returns revisioned `chunk_light_delta` section replacements, and finishes with `block_light_update_complete` so the host can update its accepted light cache before publishing dirty snapshots.
+- Worker-side command timing and propagation-slice timing now flow through `light_performance` results, `LightingServicePerformanceCounters`, host `world_perf` snapshots, the debug runtime state, and the D5 traversal report.
+- D5 traversal schema `3` now has regression gates for host responsiveness, lighting worker command/slice budgets, render-world ingest, and main-thread GPU uploads.
 
 Still pending:
 
 - Add sharper dependency tracking for accepted light when neighbor revisions change; the current host invalidates a conservative 3x3 chunk window.
-- Add D5 traversal performance gates for host responsiveness, lighting worker budget, render-world ingestion, and GPU uploads.
+- Run and record the first post-lighting D5 baseline with the schema `3` gates after any follow-up responsiveness fixes.
 
 ## Protocol Shape
 
@@ -102,6 +105,7 @@ Worker results:
 - `chunk_light_ready`: full initial `ChunkLightSnapshot` for a chunk.
 - `chunk_light_delta`: section-level replacements for already published chunks.
 - `block_light_update_complete`: revisioned completion marker for a live block-change batch.
+- `light_performance`: worker-side command duration, propagation-slice duration, and mailbox/result backlog counters.
 - `light_progress`: optional progress/backpressure diagnostics.
 - `light_error`: fatal worker error with the triggering revision.
 
@@ -263,7 +267,8 @@ Backpressure rules:
 4. Done: track authoritative chunk revisions and reject stale initial light and live light results.
 5. Done: route liquid/block updates through batched light update requests and publish accepted deltas.
 6. Split load radius from publish radius if needed for halo-only lighting work.
-7. Add D5 traversal performance gates for host-worker responsiveness, lighting worker budget, render-world ingestion, and main-thread GPU uploads.
+7. Done: add D5 traversal performance gates for host-worker responsiveness, lighting worker budget, render-world ingestion, and main-thread GPU uploads.
+8. Run and record the first post-lighting D5 baseline. Use failures to choose the next bottleneck slice instead of loosening the gate after the fact.
 
 ## Tests
 
@@ -276,4 +281,4 @@ Minimum coverage before enabling the worker path by default:
 - liquid boundary ticks do not read missing chunks as air.
 - player input/session polling continues while lighting worker has pending propagation.
 - render-world ingestion batches stay bounded during chunk traversal.
-- browser D5 traversal does not regress frame time while loading new chunks.
+- browser D5 traversal schema `3` gates stay green while loading new chunks.

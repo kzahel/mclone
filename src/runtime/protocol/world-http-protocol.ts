@@ -13,6 +13,7 @@ import type {
   WorldClientMessage,
   WorldEngineConfig,
   WorldHostMessage,
+  WorldPerformanceMessage,
   WorldProgressMessage,
 } from "./world-messages";
 import {
@@ -67,6 +68,7 @@ export type SerializedWorldHostMessage =
   | SerializedChunkLightDeltaMessage
   | ChunkUnloadMessage
   | WorldProgressMessage
+  | WorldPerformanceMessage
   | WorldErrorMessage;
 
 export interface OpenWorldSessionRequest {
@@ -163,6 +165,7 @@ export function serializeWorldHostMessages(messages: readonly WorldHostMessage[]
       case "player_state":
       case "chunk_unload":
       case "world_progress":
+      case "world_perf":
       case "world_error":
         return message;
       case "chunk_snapshot":
@@ -189,6 +192,7 @@ export function deserializeWorldHostMessages(messages: readonly SerializedWorldH
       case "player_state":
       case "chunk_unload":
       case "world_progress":
+      case "world_perf":
       case "world_error":
         return message;
       case "chunk_snapshot":

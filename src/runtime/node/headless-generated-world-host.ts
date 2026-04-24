@@ -265,6 +265,7 @@ function expectWorldOpened(messages: readonly WorldHostMessage[]): WorldOpenedMe
       case "session_state":
       case "player_state":
       case "world_progress":
+      case "world_perf":
         break;
     }
   }
@@ -299,6 +300,7 @@ function summarizeChunkViewMessages(
       case "session_state":
       case "player_state":
       case "world_progress":
+      case "world_perf":
         break;
     }
   }
@@ -325,25 +327,29 @@ export async function runHeadlessGeneratedWorldHost(
     worldStorage,
     lightingService: createNodeLightingService(),
   });
-  const opened = expectWorldOpened(await host.openWorld(openWorldRequest));
-  const viewResults: HeadlessGeneratedWorldHostViewResult[] = [];
+  try {
+    const opened = expectWorldOpened(await host.openWorld(openWorldRequest));
+    const viewResults: HeadlessGeneratedWorldHostViewResult[] = [];
 
-  for (const chunkView of config.chunkViews) {
-    const request = {
-      type: "set_chunk_view",
-      centerChunkX: chunkView.centerChunkX,
-      centerChunkZ: chunkView.centerChunkZ,
-      radius: chunkView.radius,
-    } as const;
-    viewResults.push(summarizeChunkViewMessages(request, await host.setChunkView(request)));
+    for (const chunkView of config.chunkViews) {
+      const request = {
+        type: "set_chunk_view",
+        centerChunkX: chunkView.centerChunkX,
+        centerChunkZ: chunkView.centerChunkZ,
+        radius: chunkView.radius,
+      } as const;
+      viewResults.push(summarizeChunkViewMessages(request, await host.setChunkView(request)));
+    }
+
+    return {
+      saveId: opened.saveMetadata.saveId,
+      saveDirectory: getFileWorldSaveDirectory(config.saveRoot, opened.saveMetadata.saveId),
+      opened,
+      viewResults,
+    };
+  } finally {
+    host.close();
   }
-
-  return {
-    saveId: opened.saveMetadata.saveId,
-    saveDirectory: getFileWorldSaveDirectory(config.saveRoot, opened.saveMetadata.saveId),
-    opened,
-    viewResults,
-  };
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {

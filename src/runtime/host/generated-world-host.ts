@@ -56,6 +56,7 @@ import {
   type NormalizedWorldEngineConfig,
   type WorldHostMessage,
   type WorldOpenedMessage,
+  type WorldPerformanceMessage,
   type WorldProgressMessage,
 } from "../protocol/world-messages";
 import {
@@ -512,6 +513,10 @@ export class GeneratedWorldHost implements WorldHost {
 
     await this.tickWorldLoop();
     return this.drainPendingMessages(request.maxMessages);
+  }
+
+  public close(): void {
+    this.lightingService?.close?.();
   }
 
   private async preloadStoredChunks(centerChunkX: number, centerChunkZ: number, radius: number): Promise<void> {
@@ -1178,11 +1183,11 @@ export class GeneratedWorldHost implements WorldHost {
             this.acceptLightDeltaResult(result, chunkViewRevision);
             break;
           case "block_light_update_complete":
+          case "light_progress":
+          case "light_performance":
             break;
           case "light_error":
             this.handleLightError(result, chunkViewRevision);
-            break;
-          case "light_progress":
             break;
         }
       }
@@ -1623,6 +1628,15 @@ export class GeneratedWorldHost implements WorldHost {
   private drainPendingMessages(maxMessages: number | undefined): readonly WorldHostMessage[] {
     const drained = drainWorldHostMessages(this.pendingMessages, maxMessages);
     this.pendingMessages = drained.remaining;
-    return drained.messages;
+    return [...drained.messages, this.createWorldPerformanceMessage()];
+  }
+
+  private createWorldPerformanceMessage(): WorldPerformanceMessage {
+    return {
+      type: "world_perf",
+      performance: {
+        lighting: this.lightingService?.getPerformanceCounters?.(),
+      },
+    };
   }
 }

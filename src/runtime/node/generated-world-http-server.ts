@@ -245,6 +245,7 @@ function applyAuthoritativeMessages(world: SharedWorldRecord, messages: readonly
       case "session_state":
       case "player_state":
       case "world_progress":
+      case "world_perf":
         break;
       case "chunk_snapshot":
         world.loadedSnapshots.set(chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ), message.snapshot);
@@ -661,6 +662,9 @@ export class GeneratedWorldRemoteService {
     if (this.tickTimer !== undefined) {
       clearInterval(this.tickTimer);
     }
+    for (const world of this.worlds.values()) {
+      world.host.close?.();
+    }
   }
 
   private async resumeWorld(request: OpenWorldRequest, sessionId: string): Promise<OpenWorldSessionResponse> {
@@ -795,6 +799,12 @@ export class GeneratedWorldRemoteService {
         case "world_progress":
           for (const session of this.getWorldSessions(world)) {
             session.pendingMessages = session.pendingMessages.filter((pending) => pending.type !== "world_progress");
+            session.pendingMessages.push(message);
+          }
+          break;
+        case "world_perf":
+          for (const session of this.getWorldSessions(world)) {
+            session.pendingMessages = session.pendingMessages.filter((pending) => pending.type !== "world_perf");
             session.pendingMessages.push(message);
           }
           break;

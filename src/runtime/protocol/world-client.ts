@@ -1,5 +1,13 @@
 import type { ClientChunkCache } from "../../world/level/client-chunk-cache";
-import type { ClientPlayerState, ClientSessionState, OpenWorldRequest, SetChunkViewRequest, SetPlayerInputRequest, WorldOpenedMessage } from "./world-messages";
+import type {
+  ClientPlayerState,
+  ClientSessionState,
+  OpenWorldRequest,
+  SetChunkViewRequest,
+  SetPlayerInputRequest,
+  WorldOpenedMessage,
+  WorldPerformanceSnapshot,
+} from "./world-messages";
 
 export interface WorldClient {
   openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage>;
@@ -15,4 +23,6 @@ export interface WorldClient {
   getSessionState(): ClientSessionState | undefined;
 
   getPlayerState(): ClientPlayerState | undefined;
+
+  getPerformanceSnapshot(): WorldPerformanceSnapshot | undefined;
 }

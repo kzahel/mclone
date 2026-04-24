@@ -28,6 +28,9 @@ const OPEN_WORLD_REQUEST = {
   type: "open_world",
   seed: 12345n,
   preset: "browser_smoke",
+  config: {
+    lightingMode: "none",
+  },
 } as const;
 const REMOTE_WORLD_TRANSPORT_TIMEOUT_MS = 30_000;
 

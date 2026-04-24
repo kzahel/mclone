@@ -13,6 +13,7 @@ import {
   type SetPlayerInputRequest,
   type WorldHostMessage,
   type WorldOpenedMessage,
+  type WorldPerformanceSnapshot,
   type WorldProgressMessage,
 } from "../protocol/world-messages";
 
@@ -75,6 +76,7 @@ export class TransportWorldClient implements WorldClient {
   private level: ClientChunkCache | undefined;
   private sessionState: ClientSessionState | undefined;
   private playerState: ClientPlayerState | undefined;
+  private performanceSnapshot: WorldPerformanceSnapshot | undefined;
   private lastChunkView: SetChunkViewRequest | undefined;
   private chunkUpdateSink: RenderWorldUpdateSink | undefined;
   private mirrorChunkUpdatesToLevel: boolean;
@@ -114,6 +116,10 @@ export class TransportWorldClient implements WorldClient {
 
   public getPlayerState(): ClientPlayerState | undefined {
     return this.playerState;
+  }
+
+  public getPerformanceSnapshot(): WorldPerformanceSnapshot | undefined {
+    return this.performanceSnapshot;
   }
 
   public async openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage> {
@@ -225,6 +231,9 @@ export class TransportWorldClient implements WorldClient {
         case "world_progress":
           this.worldProgressSink?.(message);
           messageChanged = true;
+          break;
+        case "world_perf":
+          this.performanceSnapshot = message.performance;
           break;
         case "world_error":
           await flushChunkUpdates();

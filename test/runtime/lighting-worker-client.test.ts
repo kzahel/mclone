@@ -9,6 +9,7 @@ import {
   type LightingWorkerResponseEnvelope,
 } from "../../src/runtime/lighting/lighting-worker-client";
 import type { LightingResult } from "../../src/runtime/lighting/lighting-protocol";
+import { createNodeLightingService } from "../../src/runtime/lighting/node-lighting-worker-client";
 import { createLightingWorkerHandler } from "../../src/runtime/lighting/lighting-worker";
 import { ChunkBlockId } from "../../src/worldgen/chunk/chunk-block-buffer";
 
@@ -163,6 +164,14 @@ describe("Lighting worker client", () => {
         lightCorrect: true,
       },
     });
+
+    const counters = client.getPerformanceCounters();
+    expect(counters.requestCountsByType.configure_light_world).toBe(1);
+    expect(counters.requestCountsByType.request_initial_light).toBe(1);
+    expect(counters.resultCountsByType.light_performance).toBeGreaterThan(0);
+    expect(counters.workerCommandCountsByType.request_initial_light).toBe(1);
+    expect(counters.maxWorkerCommandDurationMs).toBeGreaterThanOrEqual(0);
+    expect(counters.maxPropagationSliceMs).toBeGreaterThanOrEqual(0);
   });
 
   test("applies revisioned block light update batches and reports completion after deltas", async () => {
@@ -286,4 +295,32 @@ describe("Lighting worker client", () => {
 
     await expect(request).rejects.toThrow("lighting worker failed");
   });
+
+  test("boots the Node lighting worker thread with the TypeScript loader", async () => {
+    const client = createNodeLightingService();
+    try {
+      await client.configureWorld({
+        type: "configure_light_world",
+        seed: 12345n,
+        minBuildHeight: 0,
+        height: 256,
+        blockRegistryVersion: 1,
+      });
+
+      const batch = await client.pollResults({
+        type: "poll_light_results",
+        maxResults: 16,
+      });
+
+      expect(batch.results).toContainEqual({
+        type: "light_progress",
+        stage: "configured",
+        current: 1,
+        total: 1,
+      });
+      expect(client.getPerformanceCounters().workerCommandCountsByType.configure_light_world).toBe(1);
+    } finally {
+      client.close();
+    }
+  }, 10_000);
 });

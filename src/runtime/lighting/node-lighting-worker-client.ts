@@ -1,3 +1,5 @@
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { Worker as NodeWorker } from "node:worker_threads";
 import {
   LightingWorkerClient,
@@ -79,9 +81,30 @@ class NodeLightingWorkerClientEndpoint implements LightingWorkerClientEndpoint {
 }
 
 export function createNodeLightingWorker(): NodeWorker {
-  return new NodeWorker(new URL("./node-lighting-worker-thread.ts", import.meta.url));
+  return new NodeWorker(new URL("./node-lighting-worker-thread.ts", import.meta.url), {
+    execArgv: createNodeLightingWorkerExecArgv(),
+  });
 }
 
 export function createNodeLightingService(worker: NodeWorker = createNodeLightingWorker()): LightingWorkerClient {
   return new LightingWorkerClient(new NodeLightingWorkerClientEndpoint(worker));
+}
+
+const NODE_TS_LOADER_PATH = fileURLToPath(new URL("../../../scripts/node-ts-loader.mjs", import.meta.url));
+
+function createNodeLightingWorkerExecArgv(): string[] {
+  const execArgv = [...process.execArgv];
+  if (!execArgv.some((arg) => arg === "--disable-warning=ExperimentalWarning" || arg.startsWith("--disable-warning="))) {
+    execArgv.push("--disable-warning=ExperimentalWarning");
+  }
+
+  if (!execArgv.includes("--experimental-transform-types")) {
+    execArgv.push("--experimental-transform-types");
+  }
+
+  if (!execArgv.some((arg) => arg === "--experimental-loader" || arg.startsWith("--experimental-loader="))) {
+    execArgv.push("--experimental-loader", NODE_TS_LOADER_PATH);
+  }
+
+  return execArgv;
 }

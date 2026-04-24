@@ -1,4 +1,7 @@
-export const D5_TRAVERSAL_REPORT_SCHEMA_VERSION = 2;
+import type { LightingServicePerformanceCounters } from "../../src/runtime/lighting/lighting-protocol";
+import type { WorldPerformanceSnapshot } from "../../src/runtime/protocol/world-messages";
+
+export const D5_TRAVERSAL_REPORT_SCHEMA_VERSION = 3;
 
 export type D5TransportCommand =
   | "open_world"
@@ -75,6 +78,7 @@ export interface D5DebugStateSnapshot {
   readonly expectedLoadedChunkCount?: number;
   readonly renderWorldCounters?: D5RenderWorldCounters;
   readonly renderQueueStats?: D5RenderQueueStats;
+  readonly worldPerformance?: WorldPerformanceSnapshot;
 }
 
 export interface D5LongTaskRecord {
@@ -200,8 +204,49 @@ export interface D5MainThreadSummary {
   readonly maxRenderedChunkCount: number;
 }
 
+export interface D5LightingWorkerSummary {
+  readonly start?: LightingServicePerformanceCounters;
+  readonly end?: LightingServicePerformanceCounters;
+  readonly delta?: LightingServicePerformanceCounters;
+  readonly maxWorkerCommandDurationMs: number;
+  readonly maxPropagationSliceMs: number;
+}
+
+export interface D5GateThresholds {
+  readonly maxFrameGapMs: number;
+  readonly maxLongTaskCount: number;
+  readonly maxSetChunkViewAckP95Ms: number;
+  readonly maxSetPlayerInputP95Ms: number;
+  readonly maxPollWorldUpdatesP99Ms: number;
+  readonly maxPollWorldUpdatesWithChunksP99Ms: number;
+  readonly maxPlayerSampledTickGapP99Ms: number;
+  readonly maxLightingWorkerCommandDurationMs: number;
+  readonly maxLightingWorkerPropagationSliceMs: number;
+  readonly maxPendingVisibleChunkCompileCount: number;
+  readonly maxQueuedChunkBuildCount: number;
+  readonly maxActiveChunkBuildCount: number;
+  readonly minRenderWorldIngestBatchCount: number;
+  readonly minMainThreadGpuUploadCount: number;
+}
+
+export interface D5GateResult {
+  readonly name: string;
+  readonly status: "pass" | "fail";
+  readonly value: number;
+  readonly threshold: number;
+  readonly comparator: "<=" | ">=";
+  readonly details?: string;
+}
+
+export interface D5GateSummary {
+  readonly passed: boolean;
+  readonly thresholds: D5GateThresholds;
+  readonly results: readonly D5GateResult[];
+  readonly failures: readonly string[];
+}
+
 export interface D5Decision {
-  readonly status: "first_slice_only";
+  readonly status: "first_slice_only" | "regression_gate";
   readonly nextAction: string;
   readonly notes: readonly string[];
 }
@@ -218,9 +263,13 @@ export interface D5TraversalReport {
   readonly transport: D5TransportSummary;
   readonly renderWorld: D5RenderWorldSummary;
   readonly mainThread: D5MainThreadSummary;
+  readonly lightingWorker: D5LightingWorkerSummary;
+  readonly gates: D5GateSummary;
   readonly samples: readonly D5DebugStateSnapshot[];
   readonly decision: D5Decision;
 }
+
+export type D5TraversalReportWithoutGates = Omit<D5TraversalReport, "gates">;
 
 function percentile(sortedValues: readonly number[], percentileValue: number): number {
   if (sortedValues.length === 0) {
@@ -304,6 +353,67 @@ export function diffRenderWorldCounters(
     meshNotReadyResponseCount: end.meshNotReadyResponseCount - start.meshNotReadyResponseCount,
     meshCompletionCount: end.meshCompletionCount - start.meshCompletionCount,
     mainThreadGpuUploadCount: end.mainThreadGpuUploadCount - start.mainThreadGpuUploadCount,
+  };
+}
+
+function diffCountsByType(
+  start: Readonly<Record<string, number>>,
+  end: Readonly<Record<string, number>>,
+): Readonly<Record<string, number>> {
+  const keys = new Set([...Object.keys(start), ...Object.keys(end)]);
+  const diff: Record<string, number> = {};
+  for (const key of keys) {
+    const value = (end[key] ?? 0) - (start[key] ?? 0);
+    if (value !== 0) {
+      diff[key] = value;
+    }
+  }
+
+  return diff;
+}
+
+export function diffLightingServicePerformanceCounters(
+  start: LightingServicePerformanceCounters | undefined,
+  end: LightingServicePerformanceCounters | undefined,
+): LightingServicePerformanceCounters | undefined {
+  if (start === undefined || end === undefined) {
+    return undefined;
+  }
+
+  return {
+    requestCount: end.requestCount - start.requestCount,
+    requestCountsByType: diffCountsByType(start.requestCountsByType, end.requestCountsByType),
+    maxRequestRoundTripMs: end.maxRequestRoundTripMs,
+    pollCount: end.pollCount - start.pollCount,
+    maxResultsPerPoll: end.maxResultsPerPoll,
+    maxPendingResultsAfterPoll: end.maxPendingResultsAfterPoll,
+    resultCount: end.resultCount - start.resultCount,
+    resultCountsByType: diffCountsByType(start.resultCountsByType, end.resultCountsByType),
+    workerCommandCount: end.workerCommandCount - start.workerCommandCount,
+    workerCommandCountsByType: diffCountsByType(start.workerCommandCountsByType, end.workerCommandCountsByType),
+    maxWorkerCommandDurationMs: end.maxWorkerCommandDurationMs,
+    propagationSliceCount: end.propagationSliceCount - start.propagationSliceCount,
+    propagationTotalMs: end.propagationTotalMs - start.propagationTotalMs,
+    maxPropagationSliceMs: end.maxPropagationSliceMs,
+  };
+}
+
+export function summarizeLightingWorker(
+  samples: readonly D5DebugStateSnapshot[],
+): D5LightingWorkerSummary {
+  const lightingSamples = samples.flatMap((sample) => (
+    sample.worldPerformance?.lighting === undefined ? [] : [sample.worldPerformance.lighting]
+  ));
+  const start = lightingSamples[0];
+  const end = lightingSamples[lightingSamples.length - 1];
+  const delta = diffLightingServicePerformanceCounters(start, end);
+
+  return {
+    start,
+    end,
+    delta,
+    maxWorkerCommandDurationMs: Math.max(0, ...lightingSamples.map((sample) => sample.maxWorkerCommandDurationMs)),
+    maxPropagationSliceMs: Math.max(0, ...lightingSamples.map((sample) => sample.maxPropagationSliceMs)),
   };
 }
 
@@ -392,5 +502,102 @@ export function summarizeHostResponsiveness(
       sampledTickDelta: summarizeNumbers(sampledTickDeltas),
       maxSampledWallGapWithoutTickAdvanceMs,
     },
+  };
+}
+
+function gate(
+  name: string,
+  value: number,
+  threshold: number,
+  comparator: "<=" | ">=",
+  details?: string,
+): D5GateResult {
+  const passed = comparator === "<=" ? value <= threshold : value >= threshold;
+  return {
+    name,
+    status: passed ? "pass" : "fail",
+    value,
+    threshold,
+    comparator,
+    details,
+  };
+}
+
+export function evaluateD5Gates(
+  report: D5TraversalReportWithoutGates,
+  thresholds: D5GateThresholds,
+): D5GateSummary {
+  const results: D5GateResult[] = [
+    gate("frame.max_gap_ms", report.framePacing.max, thresholds.maxFrameGapMs, "<="),
+    gate("frame.long_task_count", report.framePacing.longTaskCount, thresholds.maxLongTaskCount, "<="),
+    gate("host.set_chunk_view_ack_p95_ms", report.hostResponsiveness.setChunkViewAckLatencyMs.p95, thresholds.maxSetChunkViewAckP95Ms, "<="),
+    gate("host.set_player_input_p95_ms", report.hostResponsiveness.setPlayerInputLatencyMs.p95, thresholds.maxSetPlayerInputP95Ms, "<="),
+    gate("host.poll_world_updates_p99_ms", report.hostResponsiveness.pollWorldUpdatesLatencyMs.p99, thresholds.maxPollWorldUpdatesP99Ms, "<="),
+    gate(
+      "host.poll_world_updates_with_chunks_p99_ms",
+      report.hostResponsiveness.pollWorldUpdatesWithChunksLatencyMs.p99,
+      thresholds.maxPollWorldUpdatesWithChunksP99Ms,
+      "<=",
+    ),
+    gate(
+      "host.player_sampled_tick_gap_p99_ms",
+      report.hostResponsiveness.playerTickDelivery.sampledTickGapMs.p99,
+      thresholds.maxPlayerSampledTickGapP99Ms,
+      "<=",
+    ),
+    gate(
+      "lighting.worker_command_max_ms",
+      report.lightingWorker.maxWorkerCommandDurationMs,
+      thresholds.maxLightingWorkerCommandDurationMs,
+      "<=",
+      "largest worker-side lighting command wall time observed through light_performance",
+    ),
+    gate(
+      "lighting.propagation_slice_max_ms",
+      report.lightingWorker.maxPropagationSliceMs,
+      thresholds.maxLightingWorkerPropagationSliceMs,
+      "<=",
+      "largest LevelLightEngine.runUpdates slice observed inside the lighting worker",
+    ),
+    gate(
+      "render_world.ingest_batches",
+      report.renderWorld.delta?.ingestBatchCount ?? 0,
+      thresholds.minRenderWorldIngestBatchCount,
+      ">=",
+    ),
+    gate(
+      "main_thread.gpu_uploads",
+      report.renderWorld.delta?.mainThreadGpuUploadCount ?? 0,
+      thresholds.minMainThreadGpuUploadCount,
+      ">=",
+    ),
+    gate(
+      "main_thread.pending_visible_chunk_compiles",
+      report.mainThread.maxPendingVisibleChunkCompileCount,
+      thresholds.maxPendingVisibleChunkCompileCount,
+      "<=",
+    ),
+    gate(
+      "main_thread.queued_chunk_builds",
+      report.mainThread.maxQueuedChunkBuildCount,
+      thresholds.maxQueuedChunkBuildCount,
+      "<=",
+    ),
+    gate(
+      "main_thread.active_chunk_builds",
+      report.mainThread.maxActiveChunkBuildCount,
+      thresholds.maxActiveChunkBuildCount,
+      "<=",
+    ),
+  ];
+  const failures = results
+    .filter((result) => result.status === "fail")
+    .map((result) => `${result.name}: ${result.value.toFixed(1)} ${result.comparator} ${result.threshold.toFixed(1)}`);
+
+  return {
+    passed: failures.length === 0,
+    thresholds,
+    results,
+    failures,
   };
 }

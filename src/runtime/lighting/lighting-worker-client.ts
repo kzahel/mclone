@@ -3,6 +3,7 @@ import {
   collectLightingResponseTransferables,
   type ConfigureLightingWorldRequest,
   type LightBlockChangeBatchRequest,
+  type LightingServicePerformanceCounters,
   type LightingService,
   type LightingWorkerRequest,
   type LightingWorkerResponse,
@@ -81,6 +82,14 @@ async function expectAck(message: Promise<LightingWorkerResponse>, requestType: 
   }
 }
 
+function nowMs(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function incrementCount(counts: Record<string, number>, key: string, amount = 1): void {
+  counts[key] = (counts[key] ?? 0) + amount;
+}
+
 export function connectLightingWorkerSession(
   endpoint: LightingWorkerHostEndpoint,
   handler: LightingWorkerHandler,
@@ -116,7 +125,26 @@ export class LightingWorkerClient implements LightingService {
   private readonly pending = new Map<number, {
     resolve: (message: LightingWorkerResponse) => void;
     reject: (error: unknown) => void;
+    requestType: string;
+    startMs: number;
   }>();
+
+  private readonly performanceCounters = {
+    requestCount: 0,
+    requestCountsByType: {} as Record<string, number>,
+    maxRequestRoundTripMs: 0,
+    pollCount: 0,
+    maxResultsPerPoll: 0,
+    maxPendingResultsAfterPoll: 0,
+    resultCount: 0,
+    resultCountsByType: {} as Record<string, number>,
+    workerCommandCount: 0,
+    workerCommandCountsByType: {} as Record<string, number>,
+    maxWorkerCommandDurationMs: 0,
+    propagationSliceCount: 0,
+    propagationTotalMs: 0,
+    maxPropagationSliceMs: 0,
+  };
 
   private readonly onMessage: LightingWorkerMessageListener<LightingWorkerResponseEnvelope> = (event) => {
     const pending = this.pending.get(event.data.requestId);
@@ -125,6 +153,7 @@ export class LightingWorkerClient implements LightingService {
     }
 
     this.pending.delete(event.data.requestId);
+    this.recordRequestRoundTrip(pending.requestType, nowMs() - pending.startMs);
     pending.resolve(event.data.message);
   };
 
@@ -170,7 +199,27 @@ export class LightingWorkerClient implements LightingService {
       throw new Error(`Expected lighting_result_batch, received ${response.type}`);
     }
 
+    this.recordResultBatch(response);
     return response;
+  }
+
+  public getPerformanceCounters(): LightingServicePerformanceCounters {
+    return {
+      requestCount: this.performanceCounters.requestCount,
+      requestCountsByType: { ...this.performanceCounters.requestCountsByType },
+      maxRequestRoundTripMs: this.performanceCounters.maxRequestRoundTripMs,
+      pollCount: this.performanceCounters.pollCount,
+      maxResultsPerPoll: this.performanceCounters.maxResultsPerPoll,
+      maxPendingResultsAfterPoll: this.performanceCounters.maxPendingResultsAfterPoll,
+      resultCount: this.performanceCounters.resultCount,
+      resultCountsByType: { ...this.performanceCounters.resultCountsByType },
+      workerCommandCount: this.performanceCounters.workerCommandCount,
+      workerCommandCountsByType: { ...this.performanceCounters.workerCommandCountsByType },
+      maxWorkerCommandDurationMs: this.performanceCounters.maxWorkerCommandDurationMs,
+      propagationSliceCount: this.performanceCounters.propagationSliceCount,
+      propagationTotalMs: this.performanceCounters.propagationTotalMs,
+      maxPropagationSliceMs: this.performanceCounters.maxPropagationSliceMs,
+    };
   }
 
   public close(): void {
@@ -185,12 +234,59 @@ export class LightingWorkerClient implements LightingService {
   private send(message: LightingWorkerRequest): Promise<LightingWorkerResponse> {
     const requestId = this.nextRequestId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(requestId, { resolve, reject });
+      this.pending.set(requestId, {
+        resolve,
+        reject,
+        requestType: message.type,
+        startMs: nowMs(),
+      });
       this.endpoint.postMessage(
         { requestId, message },
         collectLightingRequestTransferables(message),
       );
     });
+  }
+
+  private recordRequestRoundTrip(requestType: string, durationMs: number): void {
+    this.performanceCounters.requestCount++;
+    incrementCount(this.performanceCounters.requestCountsByType, requestType);
+    this.performanceCounters.maxRequestRoundTripMs = Math.max(
+      this.performanceCounters.maxRequestRoundTripMs,
+      durationMs,
+    );
+  }
+
+  private recordResultBatch(batch: Extract<LightingWorkerResponse, { type: "lighting_result_batch" }>): void {
+    this.performanceCounters.pollCount++;
+    this.performanceCounters.maxResultsPerPoll = Math.max(
+      this.performanceCounters.maxResultsPerPoll,
+      batch.results.length,
+    );
+    this.performanceCounters.maxPendingResultsAfterPoll = Math.max(
+      this.performanceCounters.maxPendingResultsAfterPoll,
+      batch.pendingResultCount,
+    );
+
+    for (const result of batch.results) {
+      this.performanceCounters.resultCount++;
+      incrementCount(this.performanceCounters.resultCountsByType, result.type);
+      if (result.type !== "light_performance") {
+        continue;
+      }
+
+      this.performanceCounters.workerCommandCount++;
+      incrementCount(this.performanceCounters.workerCommandCountsByType, result.commandType);
+      this.performanceCounters.maxWorkerCommandDurationMs = Math.max(
+        this.performanceCounters.maxWorkerCommandDurationMs,
+        result.durationMs,
+      );
+      this.performanceCounters.propagationSliceCount += result.propagationSliceCount;
+      this.performanceCounters.propagationTotalMs += result.propagationTotalMs;
+      this.performanceCounters.maxPropagationSliceMs = Math.max(
+        this.performanceCounters.maxPropagationSliceMs,
+        result.maxPropagationSliceMs,
+      );
+    }
   }
 
   private rejectAllPending(error: string): void {

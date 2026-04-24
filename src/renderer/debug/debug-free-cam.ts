@@ -1,7 +1,7 @@
 // Debug tooling — see tactical 40. Throwaway when real Player/Input lands.
 
 import { SectionPos } from "../../core/section-pos";
-import type { PlayerInputCommand, SetChunkViewRequest } from "../../runtime/protocol/world-messages";
+import type { PlayerInputCommand, SetChunkViewRequest, WorldPerformanceSnapshot } from "../../runtime/protocol/world-messages";
 import { deleteIndexedDbWorldStorage } from "../../runtime/storage/indexeddb-world-storage";
 import { Vec3 } from "../../world/phys/vec3";
 import {
@@ -76,6 +76,7 @@ interface DebugRuntimeState {
   frameCount: number;
   renderWorldCounters?: RenderWorldPerformanceCounters;
   renderQueueStats?: RenderSceneQueueStats;
+  worldPerformance?: WorldPerformanceSnapshot;
   loadingStage?: string;
   loadingDetail?: string;
   loadingProgress?: number;
@@ -474,6 +475,7 @@ async function boot(): Promise<void> {
   debugRuntime.controller.state.loadedChunkCount = getSceneLoadedChunkCount(scene);
   debugRuntime.controller.state.renderWorldCounters = getSceneRenderWorldPerformanceCounters(scene);
   debugRuntime.controller.state.renderQueueStats = getSceneRenderQueueStats(scene);
+  debugRuntime.controller.state.worldPerformance = scene.worldClient.getPerformanceSnapshot();
   debugRuntime.controller.state.viewDistance = scene.viewDistance;
   debugRuntime.controller.state.renderDistance = scene.gameRenderer.getRenderDistance();
   debugRuntime.controller.state.lightingMode = renderConfig.lightingMode;
@@ -549,6 +551,7 @@ async function boot(): Promise<void> {
       debugRuntime.controller.state.loadedChunkCount = getSceneLoadedChunkCount(scene);
       debugRuntime.controller.state.renderWorldCounters = getSceneRenderWorldPerformanceCounters(scene);
       debugRuntime.controller.state.renderQueueStats = getSceneRenderQueueStats(scene);
+      debugRuntime.controller.state.worldPerformance = scene.worldClient.getPerformanceSnapshot();
     }
 
     if (!renderInFlight) {
@@ -579,6 +582,7 @@ async function boot(): Promise<void> {
         debugRuntime.controller.state.frameCount = totalFrameCount;
         debugRuntime.controller.state.renderWorldCounters = getSceneRenderWorldPerformanceCounters(scene);
         debugRuntime.controller.state.renderQueueStats = getSceneRenderQueueStats(scene);
+        debugRuntime.controller.state.worldPerformance = scene.worldClient.getPerformanceSnapshot();
         if (now - lastFpsReportMs >= 1000.0) {
           const fps = (fpsFrameCount * 1000.0) / (now - lastFpsReportMs);
           const playerStateForOverlay = scene.worldClient.getPlayerState();

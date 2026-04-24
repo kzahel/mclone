@@ -409,9 +409,9 @@ For initial MVP generated terrain, it is acceptable for a chunk job to generate 
 
 ### Worker Boundary
 
-The current browser implementation runs generation, world ticks, persistence, and light propagation inside the generated-world worker. That is a tactical simplification, not the target architecture. It prevents main-thread stalls, but lighting can still starve the authoritative world worker and delay chunk publication, water ticks, and player-state responses.
+The earlier browser implementation ran generation, world ticks, persistence, and light propagation inside the generated-world worker. That in-process lighting path was a tactical simplification, not the target architecture. It prevented main-thread stalls, but lighting could still starve the authoritative world worker and delay chunk publication, water ticks, and player-state responses.
 
-The target architecture is a dedicated lighting service/worker owned by the authoritative host. The worker-backed service now owns `LevelLightEngine`; `GeneratedWorldHost` packs light inputs, requests initial light, accepts revisioned `chunk_light_ready` results, and publishes normal chunk snapshots with accepted worker light. See [`lighting-worker-architecture.md`](lighting-worker-architecture.md) for the full worker boundary, protocol, mailbox, revisioning, neighbor readiness, and migration plan. The core rule is that normal terrain chunks should be published once with initial light included; do not publish unlit geometry as a loading shortcut.
+The target architecture is a dedicated lighting service/worker owned by the authoritative host, and normal `vanilla17` lighting now uses that boundary. The worker-backed service owns `LevelLightEngine`; `GeneratedWorldHost` packs light inputs, requests initial light, accepts revisioned `chunk_light_ready` results, and publishes normal chunk snapshots with accepted worker light. See [`lighting-worker-architecture.md`](lighting-worker-architecture.md) for the full worker boundary, protocol, mailbox, revisioning, neighbor readiness, and migration plan. The core rule is that normal terrain chunks should be published once with initial light included; do not publish unlit geometry as a loading shortcut.
 
 ## Interaction With Meshing
 
@@ -527,6 +527,7 @@ Browser validation:
 - Save screenshots to `/tmp`.
 - Inspect daylight terrain, shadowed caves, an open skylight shaft, and a torch-lit enclosed room.
 - Verify the main thread does not run light propagation in the performance trace.
+- Run `pnpm perf:d5` after lighting/runtime scheduling changes; schema `3` gates host responsiveness, worker-side lighting command/slice duration, render-world ingest, and GPU upload behavior during chunk traversal.
 
 ## Known Risks
 

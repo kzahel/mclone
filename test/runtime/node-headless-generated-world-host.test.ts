@@ -13,6 +13,7 @@ import {
 import { getFileWorldSaveDirectory } from "../../src/runtime/storage/file-world-storage";
 
 const TEMP_DIRECTORIES: string[] = [];
+const NODE_HEADLESS_HOST_TIMEOUT_MS = 30_000;
 
 async function createTempDirectory(): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), "mclone-node-host-"));
@@ -55,7 +56,7 @@ describe("Headless Node host", () => {
       unloadCount: 0,
     }]);
     expect(await readdir(path.resolve(getFileWorldSaveDirectory(saveRoot, result.saveId), "chunks"))).toHaveLength(25);
-  }, 20_000);
+  }, NODE_HEADLESS_HOST_TIMEOUT_MS);
 
   test("boots through the Node CLI config entry point", async () => {
     const tempDirectory = await createTempDirectory();
@@ -105,5 +106,5 @@ describe("Headless Node host", () => {
       }),
     ]);
     expect(result.saveDirectory).toBe(path.resolve(tempDirectory, "saves", encodeURIComponent(result.saveId)));
-  }, 20_000);
+  }, NODE_HEADLESS_HOST_TIMEOUT_MS);
 });

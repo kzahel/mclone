@@ -8,4 +8,6 @@ export interface WorldHost {
   setPlayerInput(request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]>;
 
   pollUpdates(request: PollWorldUpdatesRequest): Promise<readonly WorldHostMessage[]>;
+
+  close?(): void;
 }

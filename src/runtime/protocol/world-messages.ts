@@ -1,4 +1,5 @@
 import type { WorldSaveMetadata } from "../storage/world-storage";
+import type { LightingServicePerformanceCounters } from "../lighting/lighting-protocol";
 import type { PackedChunkLightDelta, PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 
 export type OpenWorldPreset = "default" | "browser_smoke";
@@ -134,6 +135,15 @@ export interface WorldProgressMessage {
   readonly total: number;
 }
 
+export interface WorldPerformanceSnapshot {
+  readonly lighting?: LightingServicePerformanceCounters;
+}
+
+export interface WorldPerformanceMessage {
+  readonly type: "world_perf";
+  readonly performance: WorldPerformanceSnapshot;
+}
+
 export interface WorldErrorMessage {
   readonly type: "world_error";
   readonly message: string;
@@ -148,4 +158,5 @@ export type WorldHostMessage =
   | ChunkLightDeltaMessage
   | ChunkUnloadMessage
   | WorldProgressMessage
+  | WorldPerformanceMessage
   | WorldErrorMessage;

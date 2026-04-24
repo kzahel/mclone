@@ -7,8 +7,10 @@ import { expect, test, type Page } from "./remote-world-host-fixture";
 import {
   D5_TRAVERSAL_REPORT_SCHEMA_VERSION,
   diffRenderWorldCounters,
+  evaluateD5Gates,
   summarizeFramePacing,
   summarizeHostResponsiveness,
+  summarizeLightingWorker,
   summarizeNumbers,
   type D5Artifacts,
   type D5DebugStateSnapshot,
@@ -22,6 +24,7 @@ import {
   type D5TransportSummary,
   type D5TraversalConfig,
   type D5TraversalReport,
+  type D5TraversalReportWithoutGates,
 } from "./d5-traversal-report";
 
 const START_SCREENSHOT_PATH = "/tmp/mclone-d5-start.png";
@@ -53,6 +56,23 @@ const D5_CONFIG = {
   },
 } as const satisfies D5TraversalConfig;
 
+const D5_GATE_THRESHOLDS = {
+  maxFrameGapMs: 100,
+  maxLongTaskCount: 0,
+  maxSetChunkViewAckP95Ms: 50,
+  maxSetPlayerInputP95Ms: 50,
+  maxPollWorldUpdatesP99Ms: 250,
+  maxPollWorldUpdatesWithChunksP99Ms: 250,
+  maxPlayerSampledTickGapP99Ms: 250,
+  maxLightingWorkerCommandDurationMs: 5_000,
+  maxLightingWorkerPropagationSliceMs: 100,
+  maxPendingVisibleChunkCompileCount: 3_000,
+  maxQueuedChunkBuildCount: 3_000,
+  maxActiveChunkBuildCount: 16,
+  minRenderWorldIngestBatchCount: 1,
+  minMainThreadGpuUploadCount: 1,
+} as const;
+
 interface DebugRuntimeState {
   readonly ready: boolean;
   readonly worldTransport: "worker" | "remote";
@@ -69,6 +89,7 @@ interface DebugRuntimeState {
   readonly frameCount: number;
   readonly renderWorldCounters?: D5RenderWorldCounters;
   readonly renderQueueStats?: D5RenderQueueStats;
+  readonly worldPerformance?: D5DebugStateSnapshot["worldPerformance"];
   readonly error?: string;
 }
 
@@ -122,7 +143,10 @@ interface TraceEvent {
 }
 
 test.skip(process.env.MCLONE_RUN_D5 !== "1", "run with pnpm perf:d5");
-test.setTimeout(180_000);
+test.setTimeout(300_000);
+
+const DEBUG_READY_TIMEOUT_MS = 90_000;
+const SETTLED_FRAME_TIMEOUT_MS = 120_000;
 
 function createDebugUrl(remoteWorldHostUrl: string): string {
   return `/debug.html?${new URLSearchParams({
@@ -183,6 +207,7 @@ function createSnapshot(atMs: number, state: DebugRuntimeState): D5DebugStateSna
     expectedLoadedChunkCount: state.expectedLoadedChunkCount,
     renderWorldCounters: state.renderWorldCounters,
     renderQueueStats: state.renderQueueStats,
+    worldPerformance: state.worldPerformance,
   };
 }
 
@@ -207,11 +232,11 @@ async function readDebugState(page: Page): Promise<DebugRuntimeState> {
 }
 
 async function waitForDebugReady(page: Page): Promise<void> {
-  await page.waitForFunction(() => (window as DebugWindow).__mcloneDebug !== undefined, undefined, { timeout: 30_000 });
+  await page.waitForFunction(() => (window as DebugWindow).__mcloneDebug !== undefined, undefined, { timeout: DEBUG_READY_TIMEOUT_MS });
   await page.waitForFunction(() => {
     const state = (window as DebugWindow).__mcloneDebug?.state;
     return state?.ready === true || state?.error !== undefined;
-  }, undefined, { timeout: 30_000 });
+  }, undefined, { timeout: DEBUG_READY_TIMEOUT_MS });
 }
 
 async function waitForLoadedSettledFrame(page: Page, expectedLoadedChunkCount: number): Promise<DebugRuntimeState> {
@@ -228,7 +253,7 @@ async function waitForLoadedSettledFrame(page: Page, expectedLoadedChunkCount: n
       && stats.pendingVisibleChunkCompileCount === 0
       && stats.queuedChunkBuildCount === 0
       && stats.activeChunkBuildCount === 0;
-  }, expectedLoadedChunkCount, { timeout: 45_000 });
+  }, expectedLoadedChunkCount, { timeout: SETTLED_FRAME_TIMEOUT_MS });
 
   const state = await readDebugState(page);
   expect(state.error).toBeUndefined();
@@ -590,6 +615,10 @@ function createTraceEvents(
       chunkViewChanges: report.traversal.chunkViewChanges,
       frameGapP95Ms: report.framePacing.p95,
       frameGapMaxMs: report.framePacing.max,
+      gatePassed: report.gates.passed,
+      gateFailures: report.gates.failures,
+      lightingMaxCommandMs: report.lightingWorker.maxWorkerCommandDurationMs,
+      lightingMaxPropagationSliceMs: report.lightingWorker.maxPropagationSliceMs,
     },
   }];
 
@@ -769,7 +798,7 @@ test("D5 remote traversal measurement harness", async ({ page, remoteWorldHostUr
   expect(consoleErrors.filter(isWebGpuConsoleError)).toEqual([]);
 
   const traversalDurationMs = traversalEndMs - traversalStartMs;
-  const report: D5TraversalReport = {
+  const reportWithoutGates: D5TraversalReportWithoutGates = {
     schemaVersion: D5_TRAVERSAL_REPORT_SCHEMA_VERSION,
     commit,
     config: D5_CONFIG,
@@ -798,20 +827,27 @@ test("D5 remote traversal measurement harness", async ({ page, remoteWorldHostUr
       delta: renderWorldDelta,
     },
     mainThread: summarizeMainThread(samples, startState, endState),
+    lightingWorker: summarizeLightingWorker(samples),
     samples,
     decision: {
-      status: "first_slice_only",
-      nextAction: "Add deeper host/render-world/GPU phase timers, then run the D5 baseline three times before choosing the D6 path.",
+      status: "regression_gate",
+      nextAction: "Use this gate for future loading/lighting changes, and add deeper phase timers only when a gate fails without an obvious owner.",
       notes: [
-        "This first slice measures the live remote traversal path and existing counters only.",
+        "This run measures the live remote traversal path and fails if responsiveness, lighting-worker slices, render-world ingest, or GPU upload behavior crosses the configured gate.",
         "The scripted input holds Space with KeyW so the current debug flight controls do not drive the camera below the world while pitched down.",
         "It intentionally does not start push transport, SharedArrayBuffer, or render-world subworkers.",
       ],
     },
+  };
+  const gates = evaluateD5Gates(reportWithoutGates, D5_GATE_THRESHOLDS);
+  const report: D5TraversalReport = {
+    ...reportWithoutGates,
+    gates,
   };
 
   await writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   await writeFile(TRACE_PATH, `${JSON.stringify({
     traceEvents: createTraceEvents(report, probe, traversalStartMs, traversalEndMs),
   }, null, 2)}\n`, "utf8");
+  expect(gates.failures).toEqual([]);
 });

@@ -319,9 +319,9 @@ Before considering worker pooling, the baseline should satisfy:
 - chunk snapshots are published once with correct initial light in normal mode
 - render-world ingest and mesh completions are bounded enough to avoid GPU upload spikes
 - stale generation/light/render results are rejected by revision
-- D5 traversal reports identify the remaining bottleneck before a pool or shared-buffer slice is started
+- D5 traversal schema `3` gates for host responsiveness, lighting worker budget, render-world ingest, and GPU upload behavior pass or identify the next bottleneck before a pool or shared-buffer slice is started
 
-The lighting ownership baseline is landed: worker-backed browser/Node service shells, protocol types, a bounded mailbox, worker-owned `LevelLightEngine`, initial `chunk_light_ready` publication, and live `block_light_update_batch` / `chunk_light_delta` routing exist under `src/runtime/lighting/`. The baseline is not complete until D5 traversal gates confirm host responsiveness under chunk loading and remaining render/upload bottlenecks are measured.
+The lighting ownership baseline is landed: worker-backed browser/Node service shells, protocol types, a bounded mailbox, worker-owned `LevelLightEngine`, initial `chunk_light_ready` publication, live `block_light_update_batch` / `chunk_light_delta` routing, and D5 lighting-worker telemetry exist under `src/runtime/lighting/`. The D5 gate is now executable; the baseline is not accepted until a post-lighting traversal run records whether host responsiveness and render/upload budgets still hold under chunk loading.
 
 ## Related Docs
 

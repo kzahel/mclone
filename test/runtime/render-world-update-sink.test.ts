@@ -203,4 +203,29 @@ describe("RenderWorld update sink", () => {
     expect(recordingLevel.lightDeltas).toEqual([{ type: "chunk_light_delta", chunkX: 0, chunkZ: 0, light: LIGHT_DELTA }]);
     expect(recordingLevel.unloads).toEqual([{ chunkX: 1, chunkZ: -1 }]);
   });
+
+  test("stores world performance snapshots without reporting visible world changes", async () => {
+    const recordingLevel = createRecordingLevel();
+    const client = new TransportWorldClient(
+      new StaticWorldTransport([
+        {
+          type: "world_perf",
+          performance: {},
+        },
+      ]),
+      () => recordingLevel.level,
+    );
+
+    await client.openWorld({ type: "open_world", seed: 12345n, preset: "default" });
+
+    await expect(client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    })).resolves.toBe(false);
+
+    expect(client.getPerformanceSnapshot()).toEqual({});
+    expect(recordingLevel.snapshots).toEqual([]);
+  });
 });

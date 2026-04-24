@@ -249,7 +249,7 @@ Suggested top-level shape:
 
 ```ts
 interface D5TraversalReport {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly commit: string;
   readonly config: D5TraversalConfig;
   readonly environment: D5Environment;
@@ -269,6 +269,8 @@ interface D5TraversalReport {
   readonly transport: D5TransportSummary;
   readonly renderWorld: D5RenderWorldSummary;
   readonly mainThread: D5MainThreadSummary;
+  readonly lightingWorker: D5LightingWorkerSummary;
+  readonly gates: D5GateSummary;
   readonly decision: D5Decision;
 }
 ```
@@ -290,6 +292,17 @@ These thresholds are the first D5 bar for local Chrome on the development machin
 | visual result | start/end screenshots show populated terrain, no obvious chunk holes caused by late async work |
 | WebGPU validation | no validation errors |
 | main-thread chunk ownership | no raw chunk snapshot decode or mesh-neighborhood gathering on the live browser path |
+
+The schema `3` harness also has machine-enforced gates for:
+
+- max warmed traversal frame gap
+- warmed traversal long-task count
+- `set_chunk_view`, `set_player_input`, and `poll_world_updates` response latency
+- sampled authoritative player tick gaps
+- lighting worker max command duration and max propagation-slice duration
+- render-world ingest batch presence
+- main-thread GPU upload presence
+- pending visible chunk compile count, queued chunk builds, and active chunk builds
 
 If the run misses a threshold, D5 can still complete, but only by identifying the bottleneck and writing the correct D6 tactical. A failed threshold with no bottleneck is not a completed D5.
 
@@ -503,6 +516,38 @@ Visual inspection: the start screenshot shows a filled cliff/cave face, and the 
 Interpretation: the measured bottleneck was host chunk scheduling, not push transport, `SharedArrayBuffer`, or render-world subworkers. The phase split brought traversal `poll_world_updates` p99 from the prior `238.7 ms` to `19.8 ms` and chunk-bearing poll p99 to `23.8 ms`.
 
 Manual validation on `debug.html?viewDistance=1`: walking behavior is much improved, and no stalls were noticed. D5's decision is to accept the current polling/packed-snapshot/render-world architecture for now, with the D6 cooperative host scheduler as the fix for the measured stutter. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction from this result.
+
+## Post-lighting regression gate update - 2026-04-24
+
+The dedicated lighting worker migration upgraded the D5 report to schema `3` and turned the traversal harness into a regression gate.
+
+What changed:
+
+- lighting worker commands emit `light_performance` records with worker-side command duration, propagation-slice counts/totals/max, queued command count, and queued result count
+- `LightingWorkerClient` accumulates service counters for request round trips, polled result batches, result types, worker command types, and propagation slices
+- `GeneratedWorldHost` publishes those counters through `world_perf` snapshots, and the debug runtime samples them during traversal
+- the report now includes `lightingWorker` start/end/delta counters plus max worker command and propagation-slice timings
+- `evaluateD5Gates(...)` fails the harness when host responsiveness, lighting budget, render-world ingest, GPU upload, or main-thread queue thresholds are crossed
+- the harness warmup timeouts allow the initial lit view to settle before the measured traversal window starts
+
+This slice adds the gate but does not yet record a new measured post-lighting baseline in this doc. The next D5 run should use the existing artifact paths:
+
+- `/tmp/mclone-d5-start.png`
+- `/tmp/mclone-d5-end.png`
+- `/tmp/mclone-d5-traversal-report.json`
+- `/tmp/mclone-d5-traversal-trace.json`
+
+If the gate fails, treat the failure as the next bottleneck signal. Do not loosen thresholds after seeing a failure without first documenting why the original threshold was wrong.
+
+First attempted post-lighting run:
+
+| Metric | Observed |
+|---|---:|
+| debug page ready state | did not become ready within `90 s` |
+| traversal window | not reached |
+| failure phase | initial lit-view warmup |
+
+Interpretation: this is not a push transport, `SharedArrayBuffer`, render-world subworker, or GPU-upload signal. The host currently gathers the full publish job set, sends the lighting work, waits for all publish candidates to have accepted initial light, and only then starts publishing snapshots. With view distance `6`, that means the D5 page can wait on the whole lit ring before the first settled frame. The next slice should stream initial lit chunks incrementally: request lighting as chunks become dependency-ready, accept `chunk_light_ready` per chunk, and publish each chunk once its own current light is available instead of waiting for the entire publish batch.
 
 ## Implementation sequence
 
