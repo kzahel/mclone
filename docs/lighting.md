@@ -278,6 +278,8 @@ export type RenderLightingMode = "vanilla_lightmap" | "fullbright" | "raytraced"
 - `vanilla17`: default; runs the ported `LevelLightEngine`, persists light sections, and exposes `getBrightness(...)` for simulation.
 - `none`: debug/custom profile only; no vanilla light parity, no vanilla light-sensitive gameplay guarantees.
 
+The generated-world host currently exposes this as `lightingMode?: "vanilla17" | "none"`. The default is `vanilla17`; `none` is only for debug/custom profiles and future backend experiments.
+
 `RenderLightingMode` controls presentation:
 
 - `vanilla_lightmap`: default raster path; mesh workers bake packed sky/block light into vertices and the main thread samples `LightTexture`.
@@ -444,15 +446,16 @@ Suggested sequence:
 
    The current block-state layer still lacks full vanilla voxel face-shape APIs, so the solver preserves opacity/emission behavior and carries a narrow shape-occlusion approximation until those APIs are ported.
 
-3. Add initial chunk lighting:
+3. Implement [`L3-initial-chunk-lighting.md`](tactical/L3-initial-chunk-lighting.md). Done:
    - scan generated chunks for emitting blocks
    - enable sky sources
    - run initial lighting before publishing snapshots
    - store `lightCorrect`
 
+   The generated-world host now owns a default vanilla 1.17 `LevelLightEngine`, activates generated sections, scans non-air chunk entries for emitters, drains initial propagation before snapshot packing, and publishes `ChunkSnapshot.light` / packed light bytes with `lightCorrect`.
+
 4. Extend storage/protocol/render-world:
-   - packed chunk snapshots carry light
-   - remote wire codec serializes 2048-byte light sections
+   - trust and hydrate persisted packed chunk light where available
    - render-world worker applies light snapshots
    - dirty sections are emitted for mesh rebuild
 

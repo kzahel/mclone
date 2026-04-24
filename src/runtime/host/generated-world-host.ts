@@ -1,13 +1,25 @@
+import { BlockPos } from "../../core/block-pos";
 import { SectionPos } from "../../core/section-pos";
 import { OverworldBiomeSource } from "../../worldgen/biome/overworld-biome-source";
 import { ChunkBiomeContainer } from "../../worldgen/biome/chunk-biome-container";
 import { NoiseBasedChunkGenerator } from "../../worldgen/levelgen/noise-based-chunk-generator";
-import { buildChunkSnapshot, createBlockStateResolver, hydrateChunkFromSnapshot } from "../../world/level/chunk-snapshot";
+import {
+  buildChunkSnapshot,
+  createBlockStateResolver,
+  hydrateChunkFromSnapshot,
+  type ChunkLightSectionSnapshot,
+  type ChunkLightSnapshot,
+} from "../../world/level/chunk-snapshot";
 import { packChunkSnapshot, unpackChunkSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
+import { DataLayer } from "../../world/level/chunk/data-layer";
+import type { LightChunkGetter } from "../../world/level/chunk/light-chunk-getter";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
+import type { BlockGetter } from "../../world/level/block-getter";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
+import { LightLayer } from "../../world/level/light-layer";
+import { LevelLightEngine } from "../../world/level/lighting/level-light-engine";
 import type { WorldHost } from "../protocol/world-host";
 import { drainWorldHostMessages } from "../protocol/world-message-queue";
 import type {
@@ -67,11 +79,14 @@ export function getGeneratedWorldViewChunkRadius(radius: number): number {
   return Math.max(1, radius) + 1;
 }
 
+export type GeneratedWorldLightingMode = "vanilla17" | "none";
+
 export interface GeneratedWorldHostOptions {
   readonly seed: bigint;
   readonly airState: BlockState;
   readonly blockStateById: readonly BlockState[];
   readonly blockStateIds: BlockStateIdMap;
+  readonly lightingMode?: GeneratedWorldLightingMode;
   readonly chunkViewScheduling?: "synchronous" | "cooperative";
   readonly mutateWorld?: (level: WorldGenLevel) => void;
   readonly worldStorage?: WorldStorage;
@@ -84,6 +99,18 @@ interface ChunkViewJobRecord {
   readonly chunkX: number;
   readonly chunkZ: number;
   loadedFromStorage: boolean;
+}
+
+class GeneratedWorldLightChunkGetter implements LightChunkGetter {
+  public constructor(private readonly level: GeneratedRenderLevel) {}
+
+  public getChunkForLighting(chunkX: number, chunkZ: number): BlockGetter | null {
+    return this.level.getChunk(chunkX, chunkZ, false);
+  }
+
+  public getLevel(): GeneratedRenderLevel {
+    return this.level;
+  }
 }
 
 function monotonicNowMs(): number {
@@ -143,6 +170,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly biomeSource;
   private readonly generator;
   private readonly level;
+  private readonly lightEngine: LevelLightEngine | undefined;
   private readonly resolveBlockState;
   private storageSession: WorldStorageSession | undefined;
   private worldOpened: WorldOpenedMessage | undefined;
@@ -154,6 +182,8 @@ export class GeneratedWorldHost implements WorldHost {
   private lastPlayerTickAtMs = Date.now();
   private playerAnchoredToChunkView = false;
   private readonly publishedChunkSnapshots = new Set<string>();
+  private readonly lightInitializedChunks = new Set<string>();
+  private readonly lightCorrectChunks = new Set<string>();
   private opened = false;
 
   public constructor(private readonly options: GeneratedWorldHostOptions) {
@@ -167,6 +197,9 @@ export class GeneratedWorldHost implements WorldHost {
       options.seed,
       options.blockStateById,
     );
+    this.lightEngine = options.lightingMode === "none"
+      ? undefined
+      : new LevelLightEngine(new GeneratedWorldLightChunkGetter(this.level), true, true);
   }
 
   public async openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
@@ -245,6 +278,7 @@ export class GeneratedWorldHost implements WorldHost {
 
     const loadedAfter = this.level.getLoadedChunks();
     const loadedAfterKeys = new Set(loadedAfter.map((chunk) => chunkKey(chunk.chunkX, chunk.chunkZ)));
+    this.ensureLightingForLoadedChunks(loadedAfter);
     await this.persistLoadedChunks(loadedAfter);
 
     for (const [key, chunk] of loadedBefore) {
@@ -253,6 +287,7 @@ export class GeneratedWorldHost implements WorldHost {
       }
 
       await this.storageSession?.chunks.evictChunk(chunk.chunkX, chunk.chunkZ);
+      this.discardChunkLighting(chunk.chunkX, chunk.chunkZ);
       messages.push({
         type: "chunk_unload",
         chunkX: chunk.chunkX,
@@ -291,6 +326,7 @@ export class GeneratedWorldHost implements WorldHost {
     for (const chunk of update.unloadedChunks) {
       this.queueStorageSideEffect(this.storageSession?.chunks.evictChunk(chunk.chunkX, chunk.chunkZ));
       this.publishedChunkSnapshots.delete(chunkKey(chunk.chunkX, chunk.chunkZ));
+      this.discardChunkLighting(chunk.chunkX, chunk.chunkZ);
       messages.push({
         type: "chunk_unload",
         chunkX: chunk.chunkX,
@@ -477,6 +513,8 @@ export class GeneratedWorldHost implements WorldHost {
 
       this.options.mutateWorld?.(this.level);
       await yieldStep();
+      this.ensureLightingForLoadedChunks(this.level.getLoadedChunks());
+      await yieldStep();
       const snapshot = this.buildPackedChunkSnapshot(chunk);
       await this.persistPackedChunkSnapshot(snapshot);
       if (!this.isChunkInCurrentView(job.chunkX, job.chunkZ) || this.publishedChunkSnapshots.has(key)) {
@@ -512,22 +550,158 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private buildPackedChunkSnapshot(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): PackedChunkSnapshot {
-    return packChunkSnapshot(
-      buildChunkSnapshot(
-        chunk,
-        new ChunkBiomeContainer(
-          this.level.getMinBuildHeight(),
-          this.level.getHeight(),
-          chunk.chunkX,
-          chunk.chunkZ,
-          this.biomeSource,
-        ).writeBiomes(),
+    this.ensureLightingForLoadedChunks([chunk]);
+    const snapshot = buildChunkSnapshot(
+      chunk,
+      new ChunkBiomeContainer(
         this.level.getMinBuildHeight(),
         this.level.getHeight(),
-      ),
+        chunk.chunkX,
+        chunk.chunkZ,
+        this.biomeSource,
+      ).writeBiomes(),
+      this.level.getMinBuildHeight(),
+      this.level.getHeight(),
+    );
+    const light = this.buildChunkLightSnapshot(chunk);
+
+    return packChunkSnapshot(
+      light === undefined ? snapshot : { ...snapshot, light },
       this.options.blockStateIds,
       this.resolveBlockState,
     );
+  }
+
+  private ensureLightingForLoadedChunks(chunks: readonly ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number][]): void {
+    const lightEngine = this.lightEngine;
+    if (lightEngine === undefined) {
+      return;
+    }
+
+    let queuedWork = false;
+    for (const chunk of chunks) {
+      const key = chunkKey(chunk.chunkX, chunk.chunkZ);
+      if (this.lightInitializedChunks.has(key)) {
+        continue;
+      }
+
+      this.initializeChunkLighting(lightEngine, chunk);
+      this.lightInitializedChunks.add(key);
+      queuedWork = true;
+    }
+
+    if (queuedWork || lightEngine.hasLightWork()) {
+      this.runLightingUntilIdle(lightEngine);
+      for (const chunk of chunks) {
+        this.lightCorrectChunks.add(chunkKey(chunk.chunkX, chunk.chunkZ));
+      }
+    }
+  }
+
+  private initializeChunkLighting(
+    lightEngine: LevelLightEngine,
+    chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number],
+  ): void {
+    const nonEmptySections = new Set<number>();
+    const lightEmitters: Array<{ readonly pos: BlockPos; readonly lightEmission: number }> = [];
+    for (const entry of chunk.getBlockEntries()) {
+      nonEmptySections.add(SectionPos.blockToSectionCoord(entry.pos.getY()));
+      const lightEmission = entry.state.getLightEmission();
+      if (lightEmission > 0) {
+        lightEmitters.push({ pos: entry.pos, lightEmission });
+      }
+    }
+
+    const minSection = this.level.getMinSection();
+    const sectionCount = this.level.getSectionsCount();
+    for (let sectionOffset = 0; sectionOffset < sectionCount; sectionOffset++) {
+      const sectionY = minSection + sectionOffset;
+      lightEngine.updateSectionStatus(
+        SectionPos.of(chunk.chunkX, sectionY, chunk.chunkZ),
+        !nonEmptySections.has(sectionY),
+      );
+    }
+
+    lightEngine.enableLightSources({ x: chunk.chunkX, z: chunk.chunkZ }, true);
+    for (const emitter of lightEmitters) {
+      lightEngine.onBlockEmissionIncrease(emitter.pos, emitter.lightEmission);
+    }
+  }
+
+  private discardChunkLighting(chunkX: number, chunkZ: number): void {
+    const key = chunkKey(chunkX, chunkZ);
+    this.lightInitializedChunks.delete(key);
+    this.lightCorrectChunks.delete(key);
+    const lightEngine = this.lightEngine;
+    if (lightEngine === undefined) {
+      return;
+    }
+
+    lightEngine.retainData({ x: chunkX, z: chunkZ }, false);
+    lightEngine.enableLightSources({ x: chunkX, z: chunkZ }, false);
+
+    for (let sectionY = lightEngine.getMinLightSection(); sectionY < lightEngine.getMaxLightSection(); sectionY++) {
+      const section = SectionPos.of(chunkX, sectionY, chunkZ);
+      lightEngine.queueSectionData(LightLayer.BLOCK, section, undefined, true);
+      lightEngine.queueSectionData(LightLayer.SKY, section, undefined, true);
+    }
+
+    const minSection = this.level.getMinSection();
+    const sectionCount = this.level.getSectionsCount();
+    for (let sectionOffset = 0; sectionOffset < sectionCount; sectionOffset++) {
+      lightEngine.updateSectionStatus(SectionPos.of(chunkX, minSection + sectionOffset, chunkZ), true);
+    }
+  }
+
+  private runLightingUntilIdle(lightEngine: LevelLightEngine): void {
+    for (let iteration = 0; iteration < 100; iteration++) {
+      if (!lightEngine.hasLightWork()) {
+        return;
+      }
+
+      lightEngine.runUpdates(1_000_000, true, true);
+    }
+
+    throw new Error("Generated world light engine did not become idle");
+  }
+
+  private buildChunkLightSnapshot(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): ChunkLightSnapshot | undefined {
+    const lightEngine = this.lightEngine;
+    if (lightEngine === undefined) {
+      return undefined;
+    }
+
+    return {
+      sky: this.collectChunkLightSections(lightEngine, LightLayer.SKY, chunk),
+      block: this.collectChunkLightSections(lightEngine, LightLayer.BLOCK, chunk),
+      lightCorrect: this.lightCorrectChunks.has(chunkKey(chunk.chunkX, chunk.chunkZ)),
+    };
+  }
+
+  private collectChunkLightSections(
+    lightEngine: LevelLightEngine,
+    layer: LightLayer,
+    chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number],
+  ): ChunkLightSectionSnapshot[] {
+    const listener = lightEngine.getLayerListener(layer);
+    const sections: ChunkLightSectionSnapshot[] = [];
+    for (let sectionY = lightEngine.getMinLightSection(); sectionY < lightEngine.getMaxLightSection(); sectionY++) {
+      const dataLayer = listener.getDataLayerData(SectionPos.of(chunk.chunkX, sectionY, chunk.chunkZ));
+      if (dataLayer === undefined) {
+        continue;
+      }
+
+      sections.push({
+        y: sectionY,
+        data: this.copyDataLayerBytes(dataLayer),
+      });
+    }
+
+    return sections;
+  }
+
+  private copyDataLayerBytes(dataLayer: DataLayer): Uint8Array {
+    return new Uint8Array(dataLayer.getData());
   }
 
   private ensureLocalSessionState(): void {

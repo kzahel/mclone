@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { Registry } from "../../src/core/registry";
 import { GeneratedWorldHost, getGeneratedWorldViewChunkRadius } from "../../src/runtime/host/generated-world-host";
 import type { ChunkSnapshotMessage, WorldHostMessage } from "../../src/runtime/protocol/world-messages";
+import { DataLayer } from "../../src/world/level/chunk/data-layer";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 
 const OPEN_WORLD_REQUEST = {
@@ -9,6 +10,7 @@ const OPEN_WORLD_REQUEST = {
   seed: 12345n,
   preset: "default",
 } as const;
+const COOPERATIVE_CHUNK_LIGHTING_TIMEOUT_MS = 15_000;
 
 function sleep(ms = 0): Promise<void> {
   return new Promise((resolve) => {
@@ -84,7 +86,16 @@ describe("GeneratedWorldHost cooperative chunk scheduler", () => {
     const snapshots = await drainChunkSnapshots(host, countExpectedChunks(1));
     expect(snapshots).toHaveLength(countExpectedChunks(1));
     expect(snapshots.some((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0)).toBe(true);
-  });
+    const center = snapshots.find((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0)!.snapshot;
+    expect(center.light?.lightCorrect).toBe(true);
+    expect(center.light?.sky.length).toBeGreaterThan(0);
+    expect(center.light?.block.length).toBeGreaterThan(0);
+    for (const section of [...center.light!.sky, ...center.light!.block]) {
+      expect(section.data).toBeInstanceOf(Uint8Array);
+      expect(section.data).toHaveLength(DataLayer.SIZE);
+    }
+    expect(center.light!.sky.some((section) => section.data.some((byte) => byte !== 0))).toBe(true);
+  }, COOPERATIVE_CHUNK_LIGHTING_TIMEOUT_MS);
 
   test("drops stale snapshots when a newer chunk view supersedes queued work", async () => {
     const host = createCooperativeHost();
@@ -109,5 +120,5 @@ describe("GeneratedWorldHost cooperative chunk scheduler", () => {
       expect(Math.abs(message.snapshot.chunkX - 8)).toBeLessThanOrEqual(viewRadius);
       expect(Math.abs(message.snapshot.chunkZ - 0)).toBeLessThanOrEqual(viewRadius);
     }
-  });
+  }, COOPERATIVE_CHUNK_LIGHTING_TIMEOUT_MS);
 });

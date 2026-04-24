@@ -7,7 +7,7 @@ import {
   type ScheduledTickSnapshot,
 } from "../scheduled-tick";
 
-type ChunkEntry = {
+export type ChunkEntry = {
   readonly pos: BlockPos;
   readonly state: BlockState;
 };
@@ -29,6 +29,10 @@ export class LevelChunk {
 
   public getFluidState(pos: BlockPos): FluidState {
     return this.getBlockState(pos).getFluidState();
+  }
+
+  public getMaxLightLevel(): number {
+    return 15;
   }
 
   public setBlockState(pos: BlockPos, state: BlockState): void {
@@ -53,6 +57,10 @@ export class LevelChunk {
     }
 
     return true;
+  }
+
+  public getBlockEntries(): Iterable<ChunkEntry> {
+    return this.states.values();
   }
 
   public recordBlockTick(pos: BlockPos, target: string, delay: number): void {

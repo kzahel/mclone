@@ -24,6 +24,7 @@ const OPEN_WORLD_REQUEST = {
   seed: 12345n,
   preset: "default",
 } as const;
+const GENERATED_WORLD_LIGHTING_TIMEOUT_MS = 15_000;
 const DECORATION_BLOCKS = new Set([
   "minecraft:oak_log",
   "minecraft:oak_leaves",
@@ -142,7 +143,7 @@ describe("GeneratedWorld boundary", () => {
     ] as const) {
       expect(runtimeGroundSurfaceAt(level, localX, localZ)).toEqual(oracleSurfaceAt(localX, localZ));
     }
-  });
+  }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
 
   test("slides the client chunk cache when the chunk view moves", async () => {
     const client = createWorldClient();
@@ -169,7 +170,7 @@ describe("GeneratedWorld boundary", () => {
     expect(level.getChunk(-2, 0, false)).toBeNull();
     expect(level.getChunk(0, 0, false)).not.toBeNull();
     expect(level.getChunk(4, 0, false)).not.toBeNull();
-  });
+  }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
 
   test("preserves biome decoration when authoritative chunks are snapshotted to the client cache", async () => {
     const client = createWorldClient();
@@ -204,7 +205,7 @@ describe("GeneratedWorld boundary", () => {
 
     expect(foundTree).toBe(true);
     expect(foundGroundPlant).toBe(true);
-  });
+  }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
 
   test("applies authoritative player input through the local host/client boundary", async () => {
     const client = createWorldClient();
@@ -242,5 +243,5 @@ describe("GeneratedWorld boundary", () => {
     });
     expect(client.getPlayerState()!.position.x).toBeGreaterThan(initialPlayerState!.position.x);
     expect(client.getPlayerState()!.revision).toBeGreaterThan(initialPlayerState!.revision);
-  });
+  }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
 });

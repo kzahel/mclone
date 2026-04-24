@@ -86,6 +86,7 @@ Lighting is both simulation data and renderer input. Use [`../lighting.md`](../l
 | [`L0-lighting-oracle-foundation.md`](L0-lighting-oracle-foundation.md) | Anvil `BlockLight` / `SkyLight` decode, light fixture shape, byte-exact comparison helpers, first committed server light fixture | unit + server oracle | **done** — persisted vanilla light bytes now ride in the pinned integration fixture and comparison helpers are ready for solver tests |
 | [`L1-light-data-foundation.md`](L1-light-data-foundation.md) | `DataLayer`, `LightLayer`, light-section padding helpers, packed snapshot/wire light payloads | unit + L0 fixture roundtrip | **done** — runtime snapshots can now carry vanilla sky/block light bytes without interpreting propagation yet |
 | [`L2-light-solver-foundation.md`](L2-light-solver-foundation.md) | `DynamicGraphMinFixedPoint`, section storage, block/sky engines, `LevelLightEngine`, `LightChunkGetter` adapter | unit | **done** — synthetic levels now compute stored block and sky light before host snapshot wiring |
+| [`L3-initial-chunk-lighting.md`](L3-initial-chunk-lighting.md) | generated-world host light initialization, section activation, sky sources, emitter scan, lit packed snapshots | runtime + unit | **done** — authoritative generated chunks now publish vanilla stored sky/block light bytes with `lightCorrect` |
 
 ## Liquid Simulation Arc
 
