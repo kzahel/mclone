@@ -12,6 +12,7 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `protocol.md`: the logical host/client message model and transport-codec boundaries
 - `loading-persistence.md`: world creation/open/join flow, chunk lifecycle, and save/eviction policy
 - `authoritative-host-scheduling.md`: how player/session authority stays responsive while chunk jobs run
+- `worker-ownership.md`: concrete worker/cache ownership and the no-hangs baseline for UI/GPU and host ticks
 - this document: how the engine should be split across simulation, rendering, storage, workers, and multiplayer hosts
 
 The central decision is simple:
@@ -200,6 +201,8 @@ The render thread should remain responsible for:
 - GPU resource creation
 - buffer uploads
 - pass submission
+
+For the current worker/cache ownership baseline, including the dedicated lighting worker and the decision to defer worldgen/decor pools until measurement, see [`worker-ownership.md`](./worker-ownership.md).
 
 ## Host modes
 

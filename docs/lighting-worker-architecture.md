@@ -2,9 +2,11 @@
 
 Target design for moving vanilla-style lighting out of the generated-world host worker.
 
+This document is the lighting-specific service design. The broader worker/cache ownership baseline lives in [`worker-ownership.md`](worker-ownership.md).
+
 ## Decision
 
-Lighting should run as a dedicated service owned by the authoritative world host. In the browser that service should be a separate module worker. In Node it can be a worker thread or an in-process implementation behind the same interface.
+Lighting should run as a dedicated service owned by the authoritative world host, but outside the host worker. In browser runtimes it should be a separate module worker. In Node runtimes it should be a worker thread. Do not add a host-facing in-process `LightingService`; that makes the no-hangs contract optional and lets lighting regress back onto the authoritative tick path.
 
 The generated-world host stays authoritative for chunks, ticks, storage, sessions, and player state. The lighting service is authoritative only for derived sky/block light data.
 
@@ -37,7 +39,7 @@ The lighting worker must not call back into live host chunks. It receives immuta
 
 ## Host Service Interface
 
-The host should use an interface first, then back it with a worker transport:
+The host should use an interface whose host implementation is worker-backed:
 
 ```ts
 interface LightingService {
@@ -51,7 +53,9 @@ interface LightingService {
 }
 ```
 
-The host can keep using the same interface for oracle tests, browser workers, Node hosts, and future remote server work.
+Browser and Node hosts should use the same worker-backed interface. Command promises should mean "accepted/enqueued", not "lighting completed"; completed light data returns through bounded result polling.
+
+Solver unit tests and Java-oracle comparisons may instantiate the ported lighting classes directly below this service boundary. They should not provide a synchronous host-facing `LightingService`, because that hides accidental host-tick lighting work.
 
 ## Protocol Shape
 
@@ -147,8 +151,8 @@ For each chunk-view revision:
 2. Host generates/decorates missing chunks in priority order.
 3. Host assigns or increments `chunkRevision` for each authoritative chunk mutation.
 4. Host sends `upsert_light_chunk` for center and halo chunks.
-5. Once a publish candidate has a current 3x3 light-input neighborhood, host sends `request_initial_light`.
-6. Lighting worker processes the request in mailbox order and returns `chunk_light_ready`.
+5. Once a publish candidate appears to have a current 3x3 light-input neighborhood, host sends `request_initial_light`.
+6. Lighting worker validates the required neighbor revisions, keeps the request pending if inputs are missing or stale, processes ready work in mailbox order, and returns `chunk_light_ready`.
 7. Host accepts the result only if chunk-view revision and all relevant chunk revisions are still current.
 8. Host builds one `chunk_snapshot` that includes the accepted light data.
 9. Render-world worker ingests the lit snapshot and meshes once.
@@ -234,15 +238,14 @@ Backpressure rules:
 
 ## Migration Plan
 
-1. Add the `LightingService` interface and keep an in-process implementation using the existing `LevelLightEngine`.
-2. Move current host light initialization behind that interface without changing externally visible behavior.
-3. Add revision tracking for authoritative chunk mutations and neighbor dependency sets.
-4. Add browser worker transport for `LightingService`.
-5. Move `LevelLightEngine` ownership into the lighting worker.
-6. Change cooperative chunk jobs to request initial light and publish only after `chunk_light_ready`.
-7. Route liquid/block updates through batched light update requests and publish accepted deltas.
-8. Split load radius from publish radius if needed for halo-only lighting work.
-9. Add D5 traversal performance gates for host-worker responsiveness, lighting worker budget, render-world ingestion, and main-thread GPU uploads.
+1. Add `LightingService` protocol types and the browser module-worker transport shell.
+2. Move `LevelLightEngine` ownership into the lighting worker shell before routing host chunk publication through the service.
+3. Add Node worker-thread transport for dedicated/headless hosts.
+4. Add revision tracking for authoritative chunk mutations and neighbor dependency sets.
+5. Change cooperative chunk jobs to request initial light and publish only after `chunk_light_ready`.
+6. Route liquid/block updates through batched light update requests and publish accepted deltas.
+7. Split load radius from publish radius if needed for halo-only lighting work.
+8. Add D5 traversal performance gates for host-worker responsiveness, lighting worker budget, render-world ingestion, and main-thread GPU uploads.
 
 ## Tests
 

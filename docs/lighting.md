@@ -10,7 +10,7 @@ This document is a reference for the future lighting implementation. It is not a
 - Keep the light solver authoritative-host owned, not renderer owned.
 - Feed meshing workers with packed light facts so `ModelBlockRenderer` and `LiquidBlockRenderer` stop using constant sky/block light.
 - Keep browser main-thread work limited to GPU upload, frame submission, and lightmap texture updates.
-- Preserve one logical shape for browser singleplayer, remote browser clients, Node hosts, storage, and oracle tests.
+- Preserve one logical worker protocol shape for browser singleplayer, remote browser clients, Node hosts, and storage; oracle tests may exercise the solver below the host service boundary.
 - Leave room for alternate render lighting backends without making vanilla stored light a renderer-only feature.
 
 ## Reference Source Map
@@ -174,9 +174,9 @@ internal source cost = 15 - getLightEmission(pos)
 stored source value = getLightEmission(pos)
 ```
 
-For neighbor propagation:
+For neighbor propagation inside the solver:
 
-- missing chunks behave as opaque/dark.
+- missing chunks behave as opaque/dark as an internal fallback, not as final publishable lighting for a normal chunk snapshot.
 - if the target block opacity is `>= 15`, propagation stops.
 - if adjacent face occlusion shapes block the face, propagation stops.
 - otherwise cost increases by `max(1, targetOpacity)`.
@@ -508,7 +508,7 @@ Unit tests:
 - sky light stays full in an open vertical shaft.
 - sky light decays sideways into a cave mouth.
 - section boundary propagation works in all six directions.
-- missing neighbor chunks behave like opaque/dark until present.
+- missing neighbor chunks are not published as final transparent light; boundary publication waits for neighbor inputs or explicitly tests a non-final opaque/dark fallback.
 
 Oracle tests:
 
