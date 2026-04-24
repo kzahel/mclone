@@ -14,7 +14,7 @@ Add:
 
 Do not add:
 
-- vanilla-parity movement, collision, or prediction
+- vanilla-parity movement, collision, or rollback/replay-grade prediction
 - push-capable transports such as WebSocket or WebRTC
 - new gameplay/entity systems beyond the existing single authoritative player state
 - renderer ownership of player/world state
@@ -39,14 +39,14 @@ Even with those simplifications, the ownership rule now matches the intended arc
 
 ### Authoritative live browser camera
 
-The debug browser path no longer integrates its own free-cam position. Instead it:
+The debug browser path no longer owns gameplay state. Instead it:
 
 - polls the world client for authoritative updates on a fixed cadence
-- reads the latest `player_state`
-- derives the render camera from that authoritative state
-- derives chunk-view requests from the authoritative player position
+- keeps a presentation-only predicted camera for immediate local view response
+- reconciles that camera from `player_state` once the latest local input is acknowledged
+- derives chunk-view requests from the predicted camera position for interactive use, while fixed validation shots can still preserve their initial camera
 
-That means the visible chunk window now follows host-owned player state rather than a renderer-local camera position.
+That means the renderer still treats host state as authority, while local presentation can move smoothly between authoritative snapshots.
 
 ### Browser input translated at the client boundary
 
@@ -55,7 +55,7 @@ That means the visible chunk window now follows host-owned player state rather t
 The new `debug-player-controls` helper:
 
 - converts mouse/touch/keyboard input into `set_player_input`
-- applies yaw/pitch deltas relative to the latest authoritative rotation
+- applies yaw/pitch deltas relative to the predicted presentation camera
 - converts camera-relative movement into world-space `moveX` / `moveY` / `moveZ`
 - supports injected input so browser tests can drive the live page without special renderer hooks
 

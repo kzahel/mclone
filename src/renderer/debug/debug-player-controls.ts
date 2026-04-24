@@ -1,4 +1,5 @@
 import { SectionPos } from "../../core/section-pos";
+import { PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND } from "../../runtime/session/player-loop";
 import type { PlayerInputCommand, SetChunkViewRequest } from "../../runtime/protocol/world-messages";
 import type { ClientPlayerState } from "../../runtime/protocol/world-messages";
 import { Vec3 } from "../../world/phys/vec3";
@@ -89,6 +90,48 @@ export function createCameraStateFromPlayerState(playerState: ClientPlayerState)
     ),
     xRot: playerState.rotation.pitch,
     yRot: playerState.rotation.yaw,
+  };
+}
+
+export function reconcilePredictedCameraState(
+  camera: DebugCameraState,
+  playerState: ClientPlayerState,
+  lastInputCommand: PlayerInputCommand | undefined,
+): DebugCameraState {
+  if (lastInputCommand !== undefined && playerState.acknowledgedInputSequence < lastInputCommand.sequence) {
+    return camera;
+  }
+
+  return createCameraStateFromPlayerState(playerState);
+}
+
+export function applyPredictedCameraInput(
+  camera: DebugCameraState,
+  input: PlayerInputCommand,
+  dtSeconds: number,
+): DebugCameraState {
+  const moveMagnitude = Math.hypot(input.moveX, input.moveY, input.moveZ);
+  const moveScale = moveMagnitude > 1.0
+    ? (PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND * dtSeconds) / moveMagnitude
+    : PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND * dtSeconds;
+
+  return {
+    position: new Vec3(
+      camera.position.x + input.moveX * moveScale,
+      camera.position.y + input.moveY * moveScale,
+      camera.position.z + input.moveZ * moveScale,
+    ),
+    xRot: input.pitch,
+    yRot: input.yaw,
+  };
+}
+
+export function createChunkViewRequestForCameraState(camera: DebugCameraState, radius: number): SetChunkViewRequest {
+  return {
+    type: "set_chunk_view",
+    centerChunkX: SectionPos.posToSectionCoord(camera.position.x),
+    centerChunkZ: SectionPos.posToSectionCoord(camera.position.z),
+    radius,
   };
 }
 

@@ -1,6 +1,7 @@
 // Debug tooling — see tactical 40. Throwaway when real Player/Input lands.
 
 import { SectionPos } from "../../core/section-pos";
+import type { PlayerInputCommand, SetChunkViewRequest } from "../../runtime/protocol/world-messages";
 import { Vec3 } from "../../world/phys/vec3";
 import {
   applyRenderWorldDirtySections,
@@ -20,11 +21,13 @@ import {
 import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "../browser-render-config";
 import { DebugInput } from "./debug-input";
 import {
+  applyPredictedCameraInput,
   buildPlayerInputCommand,
-  createCameraStateFromPlayerState,
+  createChunkViewRequestForCameraState,
   createChunkViewRequestForPlayerState,
   isSamePlayerInput,
   mergeDebugInputFrame,
+  reconcilePredictedCameraState,
   type DebugInjectedInput,
 } from "./debug-player-controls";
 
@@ -44,6 +47,9 @@ interface DebugRuntimeState {
   playerId?: string;
   playerTick?: number;
   playerPosition?: readonly [number, number, number];
+  cameraPosition?: readonly [number, number, number];
+  cameraYaw?: number;
+  cameraPitch?: number;
   playerChunkX?: number;
   playerChunkZ?: number;
   chunkViewCenterX?: number;
@@ -144,6 +150,20 @@ function showOverlayMessage(message: string): void {
   if (overlay) overlay.textContent = message;
 }
 
+function formatUnknownError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function isSameChunkViewRequest(
+  left: SetChunkViewRequest | undefined,
+  right: SetChunkViewRequest,
+): boolean {
+  return left !== undefined
+    && left.centerChunkX === right.centerChunkX
+    && left.centerChunkZ === right.centerChunkZ
+    && left.radius === right.radius;
+}
+
 async function boot(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
   if (!canvas) {
@@ -206,37 +226,76 @@ async function boot(): Promise<void> {
   let fpsFrameCount = 0;
   let lastFpsReportMs = lastFrameMs;
   let nextInputSequence = 1;
-  let lastSentInput: import("../../runtime/protocol/world-messages").PlayerInputCommand | undefined;
+  let lastInputCommand: PlayerInputCommand | undefined;
+  let queuedPlayerInput: PlayerInputCommand | undefined;
+  let playerInputSendInFlight = false;
+  let lastChunkViewRequest: SetChunkViewRequest | undefined;
+
+  async function flushPlayerInputQueue(): Promise<void> {
+    if (playerInputSendInFlight) {
+      return;
+    }
+
+    playerInputSendInFlight = true;
+    try {
+      while (queuedPlayerInput !== undefined) {
+        const inputCommand = queuedPlayerInput;
+        queuedPlayerInput = undefined;
+        await scene.worldClient.setPlayerInput({
+          type: "set_player_input",
+          input: inputCommand,
+        });
+      }
+    } catch (error) {
+      const message = formatUnknownError(error);
+      debugRuntime.controller.state.error = message;
+      showOverlayMessage(`error: ${message}`);
+      // eslint-disable-next-line no-console
+      console.error(error);
+    } finally {
+      playerInputSendInFlight = false;
+      if (queuedPlayerInput !== undefined) {
+        void flushPlayerInputQueue();
+      }
+    }
+  }
+
+  function queuePlayerInput(inputCommand: PlayerInputCommand): void {
+    if (isSamePlayerInput(lastInputCommand, inputCommand)) {
+      return;
+    }
+
+    lastInputCommand = inputCommand;
+    nextInputSequence++;
+    queuedPlayerInput = inputCommand;
+    void flushPlayerInputQueue();
+  }
 
   // Prime chunks at the start so the first frame has something to draw.
-  if (await scene.worldClient.setChunkView({
+  const initialChunkViewRequest: SetChunkViewRequest = {
     type: "set_chunk_view",
     centerChunkX: SectionPos.posToSectionCoord(initialCamera.position.x),
     centerChunkZ: SectionPos.posToSectionCoord(initialCamera.position.z),
     radius: scene.viewDistance,
-  })) {
+  };
+  if (await scene.worldClient.setChunkView(initialChunkViewRequest)) {
     applyRenderWorldDirtySections(scene);
     scene.levelRenderer.allChanged();
   }
+  lastChunkViewRequest = initialChunkViewRequest;
+  const initialInputCommand: PlayerInputCommand = {
+    sequence: nextInputSequence++,
+    moveX: 0,
+    moveY: 0,
+    moveZ: 0,
+    yaw: initialCamera.yRot,
+    pitch: initialCamera.xRot,
+  };
   if (await scene.worldClient.setPlayerInput({
     type: "set_player_input",
-    input: {
-      sequence: nextInputSequence++,
-      moveX: 0,
-      moveY: 0,
-      moveZ: 0,
-      yaw: initialCamera.yRot,
-      pitch: initialCamera.xRot,
-    },
+    input: initialInputCommand,
   })) {
-    lastSentInput = {
-      sequence: nextInputSequence - 1,
-      moveX: 0,
-      moveY: 0,
-      moveZ: 0,
-      yaw: initialCamera.yRot,
-      pitch: initialCamera.xRot,
-    };
+    lastInputCommand = initialInputCommand;
   }
   if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount)) {
     debugRuntime.controller.state.error =
@@ -303,36 +362,37 @@ async function boot(): Promise<void> {
 
     const playerState = scene.worldClient.getPlayerState();
     if (playerState !== undefined) {
-      // Client-side rotation prediction: accumulate from our last-sent yaw/pitch,
-      // not the server-echoed state (which lags behind). Otherwise input between
-      // server echoes gets overwritten and higher framerates lose more rotation.
-      const baseYaw = lastSentInput?.yaw ?? playerState.rotation.yaw;
-      const basePitch = lastSentInput?.pitch ?? playerState.rotation.pitch;
-      const playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence);
-      if (!isSamePlayerInput(lastSentInput, playerInput)) {
-        if (await scene.worldClient.setPlayerInput({
-          type: "set_player_input",
-          input: playerInput,
-        })) {
-          lastSentInput = playerInput;
-          nextInputSequence++;
-        }
-      }
-
       if (!preserveInitialCamera) {
-        camera = createCameraStateFromPlayerState(playerState);
+        camera = reconcilePredictedCameraState(camera, playerState, lastInputCommand);
       }
-      const chunkViewRequest = createChunkViewRequestForPlayerState(playerState, scene.viewDistance);
-      if (await scene.worldClient.setChunkView(chunkViewRequest)) {
-        applyRenderWorldDirtySections(scene);
+      const baseYaw = preserveInitialCamera ? (lastInputCommand?.yaw ?? playerState.rotation.yaw) : camera.yRot;
+      const basePitch = preserveInitialCamera ? (lastInputCommand?.pitch ?? playerState.rotation.pitch) : camera.xRot;
+      const playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence);
+      if (!preserveInitialCamera) {
+        camera = applyPredictedCameraInput(camera, playerInput, dtSeconds);
       }
+      queuePlayerInput(playerInput);
+
+      const chunkViewRequest = preserveInitialCamera
+        ? createChunkViewRequestForPlayerState(playerState, scene.viewDistance)
+        : createChunkViewRequestForCameraState(camera, scene.viewDistance);
+      if (!isSameChunkViewRequest(lastChunkViewRequest, chunkViewRequest)) {
+        if (await scene.worldClient.setChunkView(chunkViewRequest)) {
+          applyRenderWorldDirtySections(scene);
+        }
+        lastChunkViewRequest = chunkViewRequest;
+      }
+      const playerChunkViewRequest = createChunkViewRequestForPlayerState(playerState, scene.viewDistance);
       const sessionState = scene.worldClient.getSessionState();
       debugRuntime.controller.state.sessionId = sessionState?.sessionId;
       debugRuntime.controller.state.playerId = sessionState?.playerId;
       debugRuntime.controller.state.playerTick = playerState.tick;
       debugRuntime.controller.state.playerPosition = [playerState.position.x, playerState.position.y, playerState.position.z];
-      debugRuntime.controller.state.playerChunkX = chunkViewRequest.centerChunkX;
-      debugRuntime.controller.state.playerChunkZ = chunkViewRequest.centerChunkZ;
+      debugRuntime.controller.state.cameraPosition = [camera.position.x, camera.position.y, camera.position.z];
+      debugRuntime.controller.state.cameraYaw = camera.yRot;
+      debugRuntime.controller.state.cameraPitch = camera.xRot;
+      debugRuntime.controller.state.playerChunkX = playerChunkViewRequest.centerChunkX;
+      debugRuntime.controller.state.playerChunkZ = playerChunkViewRequest.centerChunkZ;
       debugRuntime.controller.state.chunkViewCenterX = sessionState?.chunkView?.centerChunkX;
       debugRuntime.controller.state.chunkViewCenterZ = sessionState?.chunkView?.centerChunkZ;
       debugRuntime.controller.state.loadedChunkCount = getSceneLoadedChunkCount(scene);
@@ -363,7 +423,6 @@ async function boot(): Promise<void> {
           encoder,
         );
         scene.device.queue.submit([encoder.finish()]);
-        await scene.device.queue.onSubmittedWorkDone();
         totalFrameCount++;
         fpsFrameCount++;
         debugRuntime.controller.state.frameCount = totalFrameCount;
@@ -374,7 +433,7 @@ async function boot(): Promise<void> {
           const playerStateForOverlay = scene.worldClient.getPlayerState();
           if (playerStateForOverlay !== undefined) {
             showOverlayMessage(
-              `fps ${fps.toFixed(0)}  pos ${playerStateForOverlay.position.x.toFixed(1)}, ${playerStateForOverlay.position.y.toFixed(1)}, ${playerStateForOverlay.position.z.toFixed(1)}  yaw ${playerStateForOverlay.rotation.yaw.toFixed(0)}  pitch ${playerStateForOverlay.rotation.pitch.toFixed(0)}  tick ${playerStateForOverlay.tick.toString()}`,
+              `fps ${fps.toFixed(0)}  pos ${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}  yaw ${camera.yRot.toFixed(0)}  pitch ${camera.xRot.toFixed(0)}  tick ${playerStateForOverlay.tick.toString()}`,
             );
           }
           fpsFrameCount = 0;

@@ -2,8 +2,10 @@ import { SectionPos } from "../../core/section-pos";
 import type { ClientPlayerState, PlayerInputCommand, SessionChunkViewState } from "../protocol/world-messages";
 
 export const PLAYER_TICK_INTERVAL_MS = 50;
+export const PLAYER_MOVE_SPEED_BLOCKS_PER_TICK = 0.4;
+export const PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND =
+  PLAYER_MOVE_SPEED_BLOCKS_PER_TICK * (1000.0 / PLAYER_TICK_INTERVAL_MS);
 const DEFAULT_PLAYER_Y = 104.0;
-const PLAYER_MOVE_SPEED_BLOCKS_PER_TICK = 0.4;
 
 function clampAxis(value: number): number {
   return Math.max(-1.0, Math.min(1.0, value));
