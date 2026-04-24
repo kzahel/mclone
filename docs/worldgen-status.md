@@ -26,7 +26,7 @@ The project is past the “terrain demo” phase. The renderer is already consum
 - translated surface material placement
 - translated classic air carvers
 - translated first-pass biome decoration
-- translated common overworld ore generation
+- translated common overworld ore generation and the active underground variety material blobs
 - translated rendering for water, tint, dark-oak trees, acacia trees, jungle trees, bamboo, mega spruce / mega pine conifers, huge mushrooms, grass, flowers, lily pads, seagrass, kelp, coral, sea pickles, mushrooms, cactus, sugar cane, vine, cocoa, melon, and related surface features
 
 Several later worldgen capabilities landed through renderer-driven tacticals rather than through the original worldgen arc, so this document should be treated as the authoritative status view when it disagrees with the older tactical sequence.
@@ -50,7 +50,7 @@ The main remaining gap is not foundational plumbing. It is breadth, parity, and 
 | Tree pipeline | `80-90%` | Oak / swamp oak / fancy oak / spruce / pine / mega pine / mega spruce / birch / dark oak / acacia / jungle / mega-jungle / bamboo-jungle / huge-mushroom paths exist; bee-related parity still does not | [`23`](./tactical/23-true-tree-feature-placement.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
 | Surface vegetation + water decoration | `82-90%` | First substantial overworld set landed, now including dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, and cold-surface identity | [`20`](./tactical/20-surface-special-blocks-and-biome-tint.md), [`21`](./tactical/21-surface-feature-palette-expansion.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
 | Biome decoration table coverage | `80-88%` | A useful majority is real, now including dark forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, the cold-surface follow-through, and the default common-ore pass; remaining gaps are concentrated in still-empty biome keys plus the not-yet-broadened underground phase | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md) |
-| Ore generation / underground decoration | `20-25%` | Common overworld ore foundation is live: `OreFeature`, target-rule plumbing, default configured ore entries, render palette coverage, and biome-table wiring landed; underground variety, biome-specific extras, and stronger oracle coverage are still missing | [`42`](./tactical/42-ore-and-underground-decoration-foundation.md) |
+| Ore generation / underground decoration | `30-35%` | Common overworld ore generation and the active underground variety material blobs are live: `OreFeature`, target-rule plumbing, default configured entries, tuff/deepslate palette coverage, and biome-table wiring landed; biome-specific extras, the remaining underground tail, soft disks, and stronger oracle coverage are still missing | [`42`](./tactical/42-ore-and-underground-decoration-foundation.md) |
 | Structures | `0-5%` | Not meaningfully started | target bucket only |
 
 If you compress all of that to one number, the project is roughly `60-70%` of the way to “recognizable vanilla-overworld worldgen,” but much less complete than that for broad biome/decor/structure parity.
@@ -94,6 +94,7 @@ The project now has translated support for:
 - warm-ocean coral / sea-pickle selector follow-through
 - bamboo-jungle bamboo / podzol / selector follow-through
 - common overworld ore target lists and default ore configured features
+- active `addDefaultUndergroundVariety(...)` material blobs: dirt, gravel, granite, diorite, andesite, tuff, and deepslate
 
 ### Current tree / plant / water feature families
 
@@ -131,7 +132,7 @@ The current worldgen path covers a meaningful first-pass overworld set:
 - mountains, wooded mountains, mountain edge
 - taiga, taiga hills, taiga mountains
 
-That is enough to produce varied generated scenes, but it is still a subset of the overworld biome matrix. The last big common ocean-family and jungle-family fallbacks are gone; the remaining broad gaps now tilt toward still-empty biome keys and the entirely-missing underground/ore phase.
+That is enough to produce varied generated scenes, but it is still a subset of the overworld biome matrix. The last big common ocean-family and jungle-family fallbacks are gone; the remaining broad gaps now tilt toward still-empty biome keys and the not-yet-finished underground/ore phase.
 
 ## What is still missing
 
@@ -150,11 +151,12 @@ The current tree system is enough to render believable forests, but not enough f
 
 ### Underground content gaps
 
-The project now has a first common-ore foundation, but underground parity is still far from complete:
+The project now has the common-ore foundation and the active underground variety material blobs, but underground parity is still far from complete:
 
-- `addDefaultUndergroundVariety(...)` material blobs and the remaining active underground material path
+- the remaining active `addDefaultUndergroundVariety(...)` tail, especially glow lichen / rare dripstone follow-through if we choose to keep broadening that vanilla helper
 - biome-specific underground extras such as badlands extra gold, mountain emeralds, and infested stone
 - non-ore underground feature families
+- soft disks and related replace-material underground feature families
 - stronger ore-stage oracle coverage beyond focused unit tests and browser validation
 
 ### Structures
@@ -189,7 +191,7 @@ The next broad parity win is moving past surface-only breadth into chunk-content
 
 Highest-value families:
 
-- underground variety and biome-specific extras on top of the landed common-ore foundation from [`42`](./tactical/42-ore-and-underground-decoration-foundation.md)
+- biome-specific underground extras and the remaining active underground tail on top of the landed common-ore + underground-variety foundation from [`42`](./tactical/42-ore-and-underground-decoration-foundation.md)
 - the remaining still-empty biome keys once underground content is no longer entirely absent
 - only after that, narrower ocean-table exactness like `deep_warm_ocean` `SEAGRASS_SIMPLE` if it still matters
 
@@ -214,7 +216,7 @@ What still matters there:
 
 ### 4. Broaden ore and underground decoration after the foundation
 
-Tactical 42 landed the common-ore foundation. The next underground work should broaden into underground variety, soft disks, biome-specific extras, and any oracle gaps the foundation slice exposed.
+Tactical 42 landed the common-ore foundation and the first underground variety follow-through. The next underground work should move into biome-specific extras, the remaining active underground tail, soft disks, and any oracle gaps the widened slice exposed.
 
 ### 5. Structures after the terrain/decor core is stable
 

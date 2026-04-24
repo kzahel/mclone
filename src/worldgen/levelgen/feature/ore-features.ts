@@ -1,11 +1,18 @@
 import { Registry } from "../../../core/registry";
 import { ResourceLocation } from "../../../core/resource-location";
-import { absolute, bottom } from "../../carver/carver-config";
+import { absolute, bottom, top } from "../../carver/carver-config";
 import type { Block } from "../../../world/level/block/block";
 import type { BlockState } from "../../../world/level/block/state/block-state";
 import { OreConfiguration } from "./configurations/ore-configuration";
 import { Features } from "./features";
 
+const DIRT_LOCATION = new ResourceLocation("minecraft:dirt");
+const GRAVEL_LOCATION = new ResourceLocation("minecraft:gravel");
+const GRANITE_LOCATION = new ResourceLocation("minecraft:granite");
+const DIORITE_LOCATION = new ResourceLocation("minecraft:diorite");
+const ANDESITE_LOCATION = new ResourceLocation("minecraft:andesite");
+const TUFF_LOCATION = new ResourceLocation("minecraft:tuff");
+const DEEPSLATE_LOCATION = new ResourceLocation("minecraft:deepslate");
 const COAL_ORE_LOCATION = new ResourceLocation("minecraft:coal_ore");
 const DEEPSLATE_COAL_ORE_LOCATION = new ResourceLocation("minecraft:deepslate_coal_ore");
 const IRON_ORE_LOCATION = new ResourceLocation("minecraft:iron_ore");
@@ -31,6 +38,55 @@ function getRequiredState(location: ResourceLocation): BlockState {
 }
 
 export class OreFeatures {
+  public static get ORE_DIRT() {
+    return Features.ORE.configured(new OreConfiguration(OreConfiguration.Predicates.NATURAL_STONE, getRequiredState(DIRT_LOCATION), 33))
+      .rangeUniform(absolute(0), top())
+      .squared()
+      .count(10);
+  }
+
+  public static get ORE_GRAVEL() {
+    return Features.ORE.configured(new OreConfiguration(OreConfiguration.Predicates.NATURAL_STONE, getRequiredState(GRAVEL_LOCATION), 33))
+      .rangeUniform(absolute(0), top())
+      .squared()
+      .count(8);
+  }
+
+  public static get ORE_GRANITE() {
+    return Features.ORE.configured(new OreConfiguration(OreConfiguration.Predicates.NATURAL_STONE, getRequiredState(GRANITE_LOCATION), 33))
+      .rangeUniform(absolute(0), absolute(79))
+      .squared()
+      .count(10);
+  }
+
+  public static get ORE_DIORITE() {
+    return Features.ORE.configured(new OreConfiguration(OreConfiguration.Predicates.NATURAL_STONE, getRequiredState(DIORITE_LOCATION), 33))
+      .rangeUniform(absolute(0), absolute(79))
+      .squared()
+      .count(10);
+  }
+
+  public static get ORE_ANDESITE() {
+    return Features.ORE.configured(new OreConfiguration(OreConfiguration.Predicates.NATURAL_STONE, getRequiredState(ANDESITE_LOCATION), 33))
+      .rangeUniform(absolute(0), absolute(79))
+      .squared()
+      .count(10);
+  }
+
+  public static get ORE_TUFF() {
+    return Features.ORE.configured(new OreConfiguration(OreConfiguration.Predicates.NATURAL_STONE, getRequiredState(TUFF_LOCATION), 33))
+      .rangeUniform(absolute(0), absolute(16))
+      .squared()
+      .count(1);
+  }
+
+  public static get ORE_DEEPSLATE() {
+    return Features.ORE.configured(new OreConfiguration(OreConfiguration.Predicates.NATURAL_STONE, getRequiredState(DEEPSLATE_LOCATION), 64))
+      .rangeUniform(absolute(0), absolute(16))
+      .squared()
+      .count(2);
+  }
+
   public static get ORE_IRON_TARGET_LIST(): readonly OreConfiguration.TargetBlockState[] {
     return [
       OreConfiguration.target(OreConfiguration.Predicates.STONE_ORE_REPLACEABLES, getRequiredState(IRON_ORE_LOCATION)),

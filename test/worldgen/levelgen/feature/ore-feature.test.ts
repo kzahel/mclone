@@ -23,8 +23,7 @@ import { OreFeatures } from "../../../../src/worldgen/levelgen/feature/ore-featu
 import { WorldgenRandom } from "../../../../src/worldgen/prng/worldgen-random";
 
 interface OreFeatureDescription {
-  readonly primaryState: string;
-  readonly secondaryState: string;
+  readonly states: readonly string[];
   readonly size: number;
   readonly discardChanceOnAirExposure: number;
   readonly count: number;
@@ -34,8 +33,7 @@ interface OreFeatureDescription {
 
 const EXPECTED_COMMON_ORES: readonly OreFeatureDescription[] = [
   {
-    primaryState: "minecraft:coal_ore",
-    secondaryState: "minecraft:deepslate_coal_ore",
+    states: ["minecraft:coal_ore", "minecraft:deepslate_coal_ore"],
     size: 17,
     discardChanceOnAirExposure: 0,
     count: 20,
@@ -43,8 +41,7 @@ const EXPECTED_COMMON_ORES: readonly OreFeatureDescription[] = [
     hasSquare: true,
   },
   {
-    primaryState: "minecraft:iron_ore",
-    secondaryState: "minecraft:deepslate_iron_ore",
+    states: ["minecraft:iron_ore", "minecraft:deepslate_iron_ore"],
     size: 9,
     discardChanceOnAirExposure: 0,
     count: 20,
@@ -52,8 +49,7 @@ const EXPECTED_COMMON_ORES: readonly OreFeatureDescription[] = [
     hasSquare: true,
   },
   {
-    primaryState: "minecraft:gold_ore",
-    secondaryState: "minecraft:deepslate_gold_ore",
+    states: ["minecraft:gold_ore", "minecraft:deepslate_gold_ore"],
     size: 9,
     discardChanceOnAirExposure: 0,
     count: 2,
@@ -61,8 +57,7 @@ const EXPECTED_COMMON_ORES: readonly OreFeatureDescription[] = [
     hasSquare: true,
   },
   {
-    primaryState: "minecraft:redstone_ore",
-    secondaryState: "minecraft:deepslate_redstone_ore",
+    states: ["minecraft:redstone_ore", "minecraft:deepslate_redstone_ore"],
     size: 8,
     discardChanceOnAirExposure: 0,
     count: 8,
@@ -70,8 +65,7 @@ const EXPECTED_COMMON_ORES: readonly OreFeatureDescription[] = [
     hasSquare: true,
   },
   {
-    primaryState: "minecraft:diamond_ore",
-    secondaryState: "minecraft:deepslate_diamond_ore",
+    states: ["minecraft:diamond_ore", "minecraft:deepslate_diamond_ore"],
     size: 8,
     discardChanceOnAirExposure: 0,
     count: 1,
@@ -79,8 +73,7 @@ const EXPECTED_COMMON_ORES: readonly OreFeatureDescription[] = [
     hasSquare: true,
   },
   {
-    primaryState: "minecraft:lapis_ore",
-    secondaryState: "minecraft:deepslate_lapis_ore",
+    states: ["minecraft:lapis_ore", "minecraft:deepslate_lapis_ore"],
     size: 7,
     discardChanceOnAirExposure: 0,
     count: 1,
@@ -88,8 +81,7 @@ const EXPECTED_COMMON_ORES: readonly OreFeatureDescription[] = [
     hasSquare: true,
   },
   {
-    primaryState: "minecraft:copper_ore",
-    secondaryState: "minecraft:deepslate_copper_ore",
+    states: ["minecraft:copper_ore", "minecraft:deepslate_copper_ore"],
     size: 10,
     discardChanceOnAirExposure: 0,
     count: 6,
@@ -97,6 +89,67 @@ const EXPECTED_COMMON_ORES: readonly OreFeatureDescription[] = [
     hasSquare: true,
   },
 ] as const;
+
+const EXPECTED_UNDERGROUND_VARIETY: readonly OreFeatureDescription[] = [
+  {
+    states: ["minecraft:dirt"],
+    size: 33,
+    discardChanceOnAirExposure: 0,
+    count: 10,
+    hasRange: true,
+    hasSquare: true,
+  },
+  {
+    states: ["minecraft:gravel"],
+    size: 33,
+    discardChanceOnAirExposure: 0,
+    count: 8,
+    hasRange: true,
+    hasSquare: true,
+  },
+  {
+    states: ["minecraft:granite"],
+    size: 33,
+    discardChanceOnAirExposure: 0,
+    count: 10,
+    hasRange: true,
+    hasSquare: true,
+  },
+  {
+    states: ["minecraft:diorite"],
+    size: 33,
+    discardChanceOnAirExposure: 0,
+    count: 10,
+    hasRange: true,
+    hasSquare: true,
+  },
+  {
+    states: ["minecraft:andesite"],
+    size: 33,
+    discardChanceOnAirExposure: 0,
+    count: 10,
+    hasRange: true,
+    hasSquare: true,
+  },
+  {
+    states: ["minecraft:tuff"],
+    size: 33,
+    discardChanceOnAirExposure: 0,
+    count: 1,
+    hasRange: true,
+    hasSquare: true,
+  },
+  {
+    states: ["minecraft:deepslate"],
+    size: 64,
+    discardChanceOnAirExposure: 0,
+    count: 2,
+    hasRange: true,
+    hasSquare: true,
+  },
+] as const;
+
+const EXPECTED_DEFAULT_UNDERGROUND_ORES = [...EXPECTED_UNDERGROUND_VARIETY, ...EXPECTED_COMMON_ORES] as const;
 
 function getState(location: string): BlockState {
   const block = Registry.BLOCK.get(new ResourceLocation(location)) as Block | undefined;
@@ -162,8 +215,7 @@ function describeConfiguredOreFeature(feature: ConfiguredFeature<any, any>): Ore
   );
 
   return {
-    primaryState: config.targetStates[0]!.state.getBlock().getLocation()!.toString(),
-    secondaryState: config.targetStates[1]!.state.getBlock().getLocation()!.toString(),
+    states: config.targetStates.map((targetState) => targetState.state.getBlock().getLocation()!.toString()),
     size: config.size,
     discardChanceOnAirExposure: config.discardChanceOnAirExposure,
     count: countConfig?.count().sample(new WorldgenRandom(0n)) ?? 1,
@@ -224,6 +276,16 @@ describe("Ore feature", () => {
     ).toBe(false);
   });
 
+  test("natural stone predicate matches stone, tuff, and deepslate", () => {
+    registerGeneratedRenderBlocks();
+    const random = new WorldgenRandom(0n);
+
+    expect(OreConfiguration.Predicates.NATURAL_STONE.test(getState("minecraft:stone"), random)).toBe(true);
+    expect(OreConfiguration.Predicates.NATURAL_STONE.test(getState("minecraft:tuff"), random)).toBe(true);
+    expect(OreConfiguration.Predicates.NATURAL_STONE.test(getState("minecraft:deepslate"), random)).toBe(true);
+    expect(OreConfiguration.Predicates.NATURAL_STONE.test(getState("minecraft:dirt"), random)).toBe(false);
+  });
+
   test("place is deterministic for the same seed and stone volume", () => {
     const blocks = registerGeneratedRenderBlocks();
     const stoneState = getState("minecraft:stone");
@@ -264,7 +326,23 @@ describe("Ore feature", () => {
     const plains = getOverworldBiomeGenerationSettings("minecraft:plains").features()[GenerationStep.Decoration.UNDERGROUND_ORES]!;
     const ocean = getOverworldBiomeGenerationSettings("minecraft:ocean").features()[GenerationStep.Decoration.UNDERGROUND_ORES]!;
 
-    expect(plains.map((feature) => describeConfiguredOreFeature(feature()))).toEqual(EXPECTED_COMMON_ORES);
-    expect(ocean.map((feature) => describeConfiguredOreFeature(feature()))).toEqual(EXPECTED_COMMON_ORES);
+    expect(plains.map((feature) => describeConfiguredOreFeature(feature()))).toEqual(EXPECTED_DEFAULT_UNDERGROUND_ORES);
+    expect(ocean.map((feature) => describeConfiguredOreFeature(feature()))).toEqual(EXPECTED_DEFAULT_UNDERGROUND_ORES);
+  });
+
+  test("underground variety features match the vanilla-shaped defaults", () => {
+    registerGeneratedRenderBlocks();
+
+    const configuredDefaults = [
+      OreFeatures.ORE_DIRT,
+      OreFeatures.ORE_GRAVEL,
+      OreFeatures.ORE_GRANITE,
+      OreFeatures.ORE_DIORITE,
+      OreFeatures.ORE_ANDESITE,
+      OreFeatures.ORE_TUFF,
+      OreFeatures.ORE_DEEPSLATE,
+    ].map(describeConfiguredOreFeature);
+
+    expect(configuredDefaults).toEqual(EXPECTED_UNDERGROUND_VARIETY);
   });
 });

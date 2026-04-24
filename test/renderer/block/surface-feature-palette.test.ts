@@ -7,6 +7,7 @@ import { BlockColors } from "../../../src/renderer/block/block-colors";
 import { ItemBlockRenderTypes } from "../../../src/renderer/item-block-render-types";
 import { RenderType } from "../../../src/renderer/render-type";
 import { Block } from "../../../src/world/level/block/block";
+import { BlockStateProperties } from "../../../src/world/level/block/state/properties/block-state-properties";
 import { StaticBlockAndTintGetter } from "../../../src/world/level/static-block-and-tint-getter";
 import { FoliageColor } from "../../../src/world/level/foliage-color";
 import { GrassColor } from "../../../src/world/level/grass-color";
@@ -77,12 +78,15 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:lily_pad"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:brown_mushroom"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:cactus"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:tuff"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:coal_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate_redstone_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:copper_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_log"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:birch_leaves"))).toBe(RenderType.cutoutMipped());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:pumpkin"))).toBe(RenderType.solid());
+    expect(getState("minecraft:deepslate").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
   });
 
   test("leaves stay non-occluding so adjacent terrain faces are not culled", () => {

@@ -115,6 +115,8 @@ const COCOA_LOCATION = new ResourceLocation("minecraft:cocoa");
 const GRANITE_LOCATION = new ResourceLocation("minecraft:granite");
 const DIORITE_LOCATION = new ResourceLocation("minecraft:diorite");
 const ANDESITE_LOCATION = new ResourceLocation("minecraft:andesite");
+const TUFF_LOCATION = new ResourceLocation("minecraft:tuff");
+const DEEPSLATE_LOCATION = new ResourceLocation("minecraft:deepslate");
 const COAL_ORE_LOCATION = new ResourceLocation("minecraft:coal_ore");
 const DEEPSLATE_COAL_ORE_LOCATION = new ResourceLocation("minecraft:deepslate_coal_ore");
 const IRON_ORE_LOCATION = new ResourceLocation("minecraft:iron_ore");
@@ -268,6 +270,8 @@ const GENERATED_BLOCK_LOCATIONS = [
   GRANITE_LOCATION,
   DIORITE_LOCATION,
   ANDESITE_LOCATION,
+  TUFF_LOCATION,
+  DEEPSLATE_LOCATION,
   COAL_ORE_LOCATION,
   DEEPSLATE_COAL_ORE_LOCATION,
   IRON_ORE_LOCATION,
@@ -420,6 +424,9 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("granite"),
   blockTexture("diorite"),
   blockTexture("andesite"),
+  blockTexture("tuff"),
+  blockTexture("deepslate"),
+  blockTexture("deepslate_top"),
   blockTexture("coal_ore"),
   blockTexture("deepslate_coal_ore"),
   blockTexture("iron_ore"),
@@ -575,6 +582,18 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   const andesiteState = registerBlock(
     ANDESITE_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.STONE).requiresCorrectToolForDrops().strength(1.5, 6.0)),
+  ).defaultBlockState();
+  const tuffState = registerBlock(
+    TUFF_LOCATION,
+    new Block(
+      BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_GRAY).sound(SoundType.TUFF).requiresCorrectToolForDrops().strength(1.5, 6.0),
+    ),
+  ).defaultBlockState();
+  const deepslateState = registerBlock(
+    DEEPSLATE_LOCATION,
+    new RotatedPillarBlock(
+      BlockBehaviour.Properties.of(Material.STONE, MaterialColor.DEEPSLATE).requiresCorrectToolForDrops().strength(3.0, 6.0).sound(SoundType.DEEPSLATE),
+    ),
   ).defaultBlockState();
   const coalOreState = registerBlock(COAL_ORE_LOCATION, new Block(stoneOreProperties())).defaultBlockState();
   const deepslateCoalOreState = registerBlock(DEEPSLATE_COAL_ORE_LOCATION, new Block(deepslateOreProperties())).defaultBlockState();
@@ -1057,6 +1076,8 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(sugarCaneState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(vineState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(cocoaState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(tuffState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(deepslateState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(coalOreState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(deepslateCoalOreState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(ironOreState.getBlock(), RenderType.solid());
