@@ -27,6 +27,7 @@ function createWorldClient(storage: MemoryWorldStorage, mutateWorld?: (level: Wo
         seed: 12345n,
         airState: blocks.airState,
         blockStateById: blocks.blockStateById,
+        blockStateIds: blocks.blockStateIds,
         worldStorage: storage,
         mutateWorld,
       }),
@@ -38,6 +39,7 @@ function createWorldClient(storage: MemoryWorldStorage, mutateWorld?: (level: Wo
       biomeSource,
       biomeZoomSeed: 12345n,
       blockStateResolver: createBlockStateResolver(blocks.airState),
+      blockStateIds: blocks.blockStateIds,
     }),
   );
 }

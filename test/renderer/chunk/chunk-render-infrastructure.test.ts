@@ -326,6 +326,7 @@ describe("Chunk render infrastructure", () => {
       biomeSource,
       biomeZoomSeed: 12345n,
       blockStateResolver: createBlockStateResolver(blocks.airState),
+      blockStateIds: blocks.blockStateIds,
     });
     for (let chunkX = -1; chunkX <= 1; chunkX++) {
       for (let chunkZ = -1; chunkZ <= 1; chunkZ++) {

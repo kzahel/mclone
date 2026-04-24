@@ -1,6 +1,11 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ChunkSnapshot } from "../../world/level/chunk-snapshot";
+import type { PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import {
+  deserializePackedChunkSnapshot,
+  serializePackedChunkSnapshot,
+  type SerializedPackedChunkSnapshot,
+} from "../protocol/packed-chunk-wire";
 import {
   createWorldSaveMetadata,
   isWorldSaveMetadataCompatible,
@@ -14,12 +19,14 @@ import {
 
 const WORLD_METADATA_FILENAME = "world.json";
 const CHUNKS_DIRECTORY_NAME = "chunks";
+export const FILE_CHUNK_RECORD_SCHEMA_VERSION = 1;
 
 interface FileChunkRecord {
+  readonly schemaVersion: typeof FILE_CHUNK_RECORD_SCHEMA_VERSION;
   readonly saveId: string;
   readonly chunkX: number;
   readonly chunkZ: number;
-  readonly snapshot: ChunkSnapshot;
+  readonly snapshot: SerializedPackedChunkSnapshot;
   readonly savedAtMs: number;
   readonly lastLoadedAtMs?: number;
   readonly lastEvictedAtMs?: number;
@@ -74,28 +81,32 @@ class FileChunkStorage implements ChunkStorage {
     private readonly now: () => number,
   ) {}
 
-  public async loadChunk(chunkX: number, chunkZ: number): Promise<ChunkSnapshot | undefined> {
+  public async loadChunk(chunkX: number, chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
     const filePath = getFileChunkRecordPath(this.rootDirectory, this.saveId, chunkX, chunkZ);
     const record = await readJsonFile<FileChunkRecord>(filePath);
     if (record === undefined) {
       return undefined;
+    }
+    if (record.schemaVersion !== FILE_CHUNK_RECORD_SCHEMA_VERSION) {
+      throw new Error(`Unsupported file chunk record schemaVersion ${String(record.schemaVersion)} in ${filePath}`);
     }
 
     await writeJsonFile(filePath, {
       ...record,
       lastLoadedAtMs: this.now(),
     } satisfies FileChunkRecord);
-    return record.snapshot;
+    return deserializePackedChunkSnapshot(record.snapshot);
   }
 
-  public async saveChunk(snapshot: ChunkSnapshot): Promise<void> {
+  public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
     await writeJsonFile(
       getFileChunkRecordPath(this.rootDirectory, this.saveId, snapshot.chunkX, snapshot.chunkZ),
       {
+        schemaVersion: FILE_CHUNK_RECORD_SCHEMA_VERSION,
         saveId: this.saveId,
         chunkX: snapshot.chunkX,
         chunkZ: snapshot.chunkZ,
-        snapshot,
+        snapshot: serializePackedChunkSnapshot(snapshot),
         savedAtMs: this.now(),
       } satisfies FileChunkRecord,
     );
@@ -106,6 +117,9 @@ class FileChunkStorage implements ChunkStorage {
     const record = await readJsonFile<FileChunkRecord>(filePath);
     if (record === undefined) {
       return;
+    }
+    if (record.schemaVersion !== FILE_CHUNK_RECORD_SCHEMA_VERSION) {
+      throw new Error(`Unsupported file chunk record schemaVersion ${String(record.schemaVersion)} in ${filePath}`);
     }
 
     await writeJsonFile(filePath, {

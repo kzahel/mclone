@@ -37,6 +37,7 @@ import { VineBlock } from "./block/vine-block";
 import { WaterlilyBlock } from "./block/waterlily-block";
 import { SoundType } from "./block/sound-type";
 import { BlockBehaviour } from "./block/state/block-behaviour";
+import { buildBlockStateIdMap, type BlockStateIdMap } from "./block/state/block-state-id";
 import type { BlockState } from "./block/state/block-state";
 import { Fluids } from "./material/fluids";
 import { Material } from "./material/material";
@@ -431,6 +432,7 @@ function registerBlock<T extends Block>(location: ResourceLocation, block: T): T
 export interface GeneratedRenderBlockPalette {
   readonly airState: BlockState;
   readonly blockStateById: readonly BlockState[];
+  readonly blockStateIds: BlockStateIdMap;
   readonly blockLocations: readonly ResourceLocation[];
   readonly spriteLocations: readonly ResourceLocation[];
 }
@@ -1033,6 +1035,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   return {
     airState,
     blockStateById,
+    blockStateIds: buildBlockStateIdMap(Registry.BLOCK as Iterable<Block>),
     blockLocations: GENERATED_BLOCK_LOCATIONS,
     spriteLocations: GENERATED_SPRITE_LOCATIONS,
   };

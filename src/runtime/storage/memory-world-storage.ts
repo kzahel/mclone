@@ -1,4 +1,4 @@
-import type { ChunkSnapshot } from "../../world/level/chunk-snapshot";
+import { clonePackedChunkSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 import {
   createWorldSaveMetadata,
   isWorldSaveMetadataCompatible,
@@ -15,7 +15,7 @@ function chunkKey(chunkX: number, chunkZ: number): string {
 }
 
 type MemoryChunkRecord = {
-  snapshot: ChunkSnapshot;
+  snapshot: PackedChunkSnapshot;
   savedAtMs: number;
   lastLoadedAtMs?: number;
   lastEvictedAtMs?: number;
@@ -32,21 +32,21 @@ class MemoryChunkStorage implements ChunkStorage {
     private readonly now: () => number,
   ) {}
 
-  public async loadChunk(chunkX: number, chunkZ: number): Promise<ChunkSnapshot | undefined> {
+  public async loadChunk(chunkX: number, chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
     const record = this.world.chunks.get(chunkKey(chunkX, chunkZ));
     if (record === undefined) {
       return undefined;
     }
 
     record.lastLoadedAtMs = this.now();
-    return record.snapshot;
+    return clonePackedChunkSnapshot(record.snapshot);
   }
 
-  public async saveChunk(snapshot: ChunkSnapshot): Promise<void> {
+  public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
     this.world.chunks.set(
       chunkKey(snapshot.chunkX, snapshot.chunkZ),
       {
-        snapshot,
+        snapshot: clonePackedChunkSnapshot(snapshot),
         savedAtMs: this.now(),
       },
     );

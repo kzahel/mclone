@@ -29,6 +29,7 @@ export function createGeneratedWorldHostForRequest(
     seed: request.seed,
     airState: generatedBlocks.airState,
     blockStateById: generatedBlocks.blockStateById,
+    blockStateIds: generatedBlocks.blockStateIds,
     worldStorage: options.worldStorage,
     mutateWorld:
       request.preset === "browser_smoke"

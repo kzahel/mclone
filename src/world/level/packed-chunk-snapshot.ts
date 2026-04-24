@@ -26,6 +26,34 @@ export interface PackedChunkSnapshot {
   readonly liquidTicks: readonly ScheduledTickSnapshot[];
 }
 
+export function clonePackedChunkSection(section: PackedChunkSection): PackedChunkSection {
+  return {
+    y: section.y,
+    paletteStateIds: new Uint32Array(section.paletteStateIds),
+    bitsPerBlock: section.bitsPerBlock,
+    packedBlockIndices: new BigInt64Array(section.packedBlockIndices),
+  };
+}
+
+export function clonePackedChunkSnapshot(snapshot: PackedChunkSnapshot): PackedChunkSnapshot {
+  return {
+    chunkX: snapshot.chunkX,
+    chunkZ: snapshot.chunkZ,
+    biomes: [...snapshot.biomes],
+    sections: snapshot.sections.map(clonePackedChunkSection),
+    blockTicks: snapshot.blockTicks.map(cloneScheduledTickSnapshot),
+    liquidTicks: snapshot.liquidTicks.map(cloneScheduledTickSnapshot),
+  };
+}
+
+export function collectPackedChunkSnapshotTransferables(snapshot: PackedChunkSnapshot): Transferable[] {
+  const transferables: Transferable[] = [];
+  for (const section of snapshot.sections) {
+    transferables.push(section.paletteStateIds.buffer, section.packedBlockIndices.buffer);
+  }
+  return transferables;
+}
+
 export function packChunkSnapshot(
   snapshot: ChunkSnapshot,
   stateIds: BlockStateIdMap,

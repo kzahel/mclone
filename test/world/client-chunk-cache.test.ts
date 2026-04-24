@@ -44,6 +44,7 @@ describe("ClientChunkCache", () => {
       biomeSource,
       biomeZoomSeed: 12345n,
       blockStateResolver: createBlockStateResolver(blocks.airState),
+      blockStateIds: blocks.blockStateIds,
     });
 
     cache.applyChunkSnapshot(

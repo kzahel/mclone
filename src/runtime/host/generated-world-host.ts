@@ -3,8 +3,10 @@ import { OverworldBiomeSource } from "../../worldgen/biome/overworld-biome-sourc
 import { ChunkBiomeContainer } from "../../worldgen/biome/chunk-biome-container";
 import { NoiseBasedChunkGenerator } from "../../worldgen/levelgen/noise-based-chunk-generator";
 import { buildChunkSnapshot, createBlockStateResolver, hydrateChunkFromSnapshot } from "../../world/level/chunk-snapshot";
+import { packChunkSnapshot, unpackChunkSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
 import type { BlockState } from "../../world/level/block/state/block-state";
+import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import type { WorldHost } from "../protocol/world-host";
 import type {
@@ -37,7 +39,7 @@ function chunkKey(chunkX: number, chunkZ: number): string {
 }
 
 // Bump when generated chunk content changes in a way that makes older cached snapshots misleading.
-export const GENERATED_WORLD_STORAGE_VERSION = 2;
+export const GENERATED_WORLD_STORAGE_VERSION = 3;
 
 export function createGeneratedWorldSaveId(seed: bigint, preset: OpenWorldPreset): string {
   return `generated-world-v${GENERATED_WORLD_STORAGE_VERSION.toString()}-${preset}-${seed.toString()}`;
@@ -68,6 +70,7 @@ export interface GeneratedWorldHostOptions {
   readonly seed: bigint;
   readonly airState: BlockState;
   readonly blockStateById: readonly BlockState[];
+  readonly blockStateIds: BlockStateIdMap;
   readonly mutateWorld?: (level: WorldGenLevel) => void;
   readonly worldStorage?: WorldStorage;
 }
@@ -206,18 +209,7 @@ export class GeneratedWorldHost implements WorldHost {
     for (const chunk of loadedAfter) {
       messages.push({
         type: "chunk_snapshot",
-        snapshot: buildChunkSnapshot(
-          chunk,
-          new ChunkBiomeContainer(
-            this.level.getMinBuildHeight(),
-            this.level.getHeight(),
-            chunk.chunkX,
-            chunk.chunkZ,
-            this.biomeSource,
-          ).writeBiomes(),
-          this.level.getMinBuildHeight(),
-          this.level.getHeight(),
-        ),
+        snapshot: this.buildPackedChunkSnapshot(chunk),
       });
     }
 
@@ -263,7 +255,11 @@ export class GeneratedWorldHost implements WorldHost {
           continue;
         }
 
-        this.level.setChunk(hydrateChunkFromSnapshot(snapshot, this.options.airState, this.resolveBlockState));
+        this.level.setChunk(hydrateChunkFromSnapshot(
+          unpackChunkSnapshot(snapshot, this.options.blockStateIds),
+          this.options.airState,
+          this.resolveBlockState,
+        ));
       }
     }
   }
@@ -274,21 +270,27 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     for (const chunk of chunks) {
-      await this.storageSession.chunks.saveChunk(
-        buildChunkSnapshot(
-          chunk,
-          new ChunkBiomeContainer(
-            this.level.getMinBuildHeight(),
-            this.level.getHeight(),
-            chunk.chunkX,
-            chunk.chunkZ,
-            this.biomeSource,
-          ).writeBiomes(),
+      await this.storageSession.chunks.saveChunk(this.buildPackedChunkSnapshot(chunk));
+    }
+  }
+
+  private buildPackedChunkSnapshot(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): PackedChunkSnapshot {
+    return packChunkSnapshot(
+      buildChunkSnapshot(
+        chunk,
+        new ChunkBiomeContainer(
           this.level.getMinBuildHeight(),
           this.level.getHeight(),
-        ),
-      );
-    }
+          chunk.chunkX,
+          chunk.chunkZ,
+          this.biomeSource,
+        ).writeBiomes(),
+        this.level.getMinBuildHeight(),
+        this.level.getHeight(),
+      ),
+      this.options.blockStateIds,
+      this.resolveBlockState,
+    );
   }
 
   private ensureLocalSessionState(): void {

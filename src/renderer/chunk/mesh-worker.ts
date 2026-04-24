@@ -5,6 +5,7 @@ import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
 import { ClientChunkCache } from "../../world/level/client-chunk-cache";
 import { createBlockStateResolver, type BlockStateResolver, type ChunkSnapshot } from "../../world/level/chunk-snapshot";
 import type { BlockState } from "../../world/level/block/state/block-state";
+import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
 import { FoliageColor } from "../../world/level/foliage-color";
 import { registerGeneratedRenderBlocks } from "../../world/level/generated-render-blocks";
 import { GrassColor } from "../../world/level/grass-color";
@@ -42,6 +43,7 @@ interface MeshWorkerContext {
   readonly airState: BlockState;
   readonly biomeSource: OverworldBiomeSource;
   readonly blockStateResolver: BlockStateResolver;
+  readonly blockStateIds: BlockStateIdMap;
   readonly blockRenderer: BlockRenderDispatcher;
 }
 
@@ -88,6 +90,7 @@ async function createMeshWorkerContext(request: InitializeMeshWorkerRequest): Pr
     airState: generatedBlocks.airState,
     biomeSource: new OverworldBiomeSource(request.seed),
     blockStateResolver: createBlockStateResolver(generatedBlocks.airState),
+    blockStateIds: generatedBlocks.blockStateIds,
     blockRenderer: new BlockRenderDispatcher(
       blockModelShaper,
       BlockColors.createDefault(),
@@ -106,6 +109,7 @@ function createJobLevel(context: MeshWorkerContext, snapshots: readonly ChunkSna
     biomeSource: context.biomeSource,
     biomeZoomSeed: context.seed,
     blockStateResolver: context.blockStateResolver,
+    blockStateIds: context.blockStateIds,
   });
 
   for (const snapshot of snapshots) {

@@ -20,12 +20,14 @@ class TestMessageEndpoint<TOutgoing, TIncoming> {
   private peer?: TestMessageEndpoint<TIncoming, TOutgoing>;
   private readonly messageListeners = new Set<WorldWorkerMessageListener<TIncoming>>();
   private readonly errorListeners = new Set<(event: unknown) => void>();
+  private readonly transfers: Transferable[][] = [];
 
   public connect(peer: TestMessageEndpoint<TIncoming, TOutgoing>): void {
     this.peer = peer;
   }
 
-  public postMessage(message: TOutgoing): void {
+  public postMessage(message: TOutgoing, transfer: readonly Transferable[] = []): void {
+    this.transfers.push([...transfer]);
     queueMicrotask(() => {
       this.peer?.dispatchMessage(message);
     });
@@ -55,6 +57,10 @@ class TestMessageEndpoint<TOutgoing, TIncoming> {
     }
   }
 
+  public getTransfers(): readonly (readonly Transferable[])[] {
+    return this.transfers;
+  }
+
   private dispatchMessage(message: TIncoming): void {
     for (const listener of this.messageListeners) {
       listener({ data: message });
@@ -66,6 +72,7 @@ function createEndpointPair(): {
   readonly clientEndpoint: WorldWorkerClientEndpoint;
   readonly hostEndpoint: WorldWorkerHostEndpoint;
   readonly rawClientEndpoint: TestMessageEndpoint<WorldWorkerRequestEnvelope, WorldWorkerResponseEnvelope>;
+  readonly rawHostEndpoint: TestMessageEndpoint<WorldWorkerResponseEnvelope, WorldWorkerRequestEnvelope>;
 } {
   const rawClientEndpoint = new TestMessageEndpoint<WorldWorkerRequestEnvelope, WorldWorkerResponseEnvelope>();
   const rawHostEndpoint = new TestMessageEndpoint<WorldWorkerResponseEnvelope, WorldWorkerRequestEnvelope>();
@@ -75,6 +82,7 @@ function createEndpointPair(): {
     clientEndpoint: rawClientEndpoint as unknown as WorldWorkerClientEndpoint,
     hostEndpoint: rawHostEndpoint as unknown as WorldWorkerHostEndpoint,
     rawClientEndpoint,
+    rawHostEndpoint,
   };
 }
 
@@ -85,7 +93,7 @@ describe("WorkerWorld transport", () => {
 
   test("streams generated chunks through a message-based worker session", async () => {
     const generatedBlocks = registerGeneratedRenderBlocks();
-    const { clientEndpoint, hostEndpoint } = createEndpointPair();
+    const { clientEndpoint, hostEndpoint, rawHostEndpoint } = createEndpointPair();
 
     connectWorldWorkerSession(
       hostEndpoint,
@@ -93,6 +101,7 @@ describe("WorkerWorld transport", () => {
         seed: request.seed,
         airState: generatedBlocks.airState,
         blockStateById: generatedBlocks.blockStateById,
+        blockStateIds: generatedBlocks.blockStateIds,
       }),
     );
 
@@ -106,6 +115,7 @@ describe("WorkerWorld transport", () => {
         biomeSource,
         biomeZoomSeed: 12345n,
         blockStateResolver: createBlockStateResolver(generatedBlocks.airState),
+        blockStateIds: generatedBlocks.blockStateIds,
       }),
     );
 
@@ -119,7 +129,7 @@ describe("WorkerWorld transport", () => {
       height: 256,
       saveMetadata: {
         saveId: createGeneratedWorldSaveId(12345n, "default"),
-        storageVersion: 2,
+        storageVersion: 3,
         seed: "12345",
         preset: "default",
         minBuildHeight: 0,
@@ -139,6 +149,7 @@ describe("WorkerWorld transport", () => {
     const level = client.getLevel();
     expect(level.getLoadedChunkCount()).toBe(25);
     expect(level.getChunk(0, 0, false)).not.toBeNull();
+    expect(rawHostEndpoint.getTransfers().some((transfer) => transfer.length > 0)).toBe(true);
   });
 
   test("rejects pending client requests when the worker endpoint errors", async () => {
@@ -154,6 +165,7 @@ describe("WorkerWorld transport", () => {
         biomeSource,
         biomeZoomSeed: 12345n,
         blockStateResolver: createBlockStateResolver(generatedBlocks.airState),
+        blockStateIds: generatedBlocks.blockStateIds,
       }),
     );
 

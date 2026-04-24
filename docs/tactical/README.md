@@ -153,7 +153,7 @@ Recommended sequence:
 | `D0-` | durable architecture consolidation | docs review | **done by the architecture docs above**; keep future tacticals short and refer back to durable decisions |
 | [`D1-block-state-id-and-bitstorage-foundation.md`](D1-block-state-id-and-bitstorage-foundation.md) | shared `BlockStateId` table and runtime `BitStorage` helper | unit | **landed** foundation for packed sections without changing ownership or protocol |
 | [`D2-packed-section-codecs.md`](D2-packed-section-codecs.md) | packed section codecs and chunk snapshot model | unit + fixture roundtrip | **landed** vanilla-shaped packed section records behind compatibility adapters |
-| [`D3-packed-chunk-storage-protocol.md`](D3-packed-chunk-storage-protocol.md) | storage/protocol rollout for packed chunk facts | unit + integration | move authoritative chunk snapshots through packed records across worker, remote, IndexedDB, and file adapters |
+| [`D3-packed-chunk-storage-protocol.md`](D3-packed-chunk-storage-protocol.md) | storage/protocol rollout for packed chunk facts | unit + integration | **landed** authoritative chunk snapshots move through packed records across worker, remote, IndexedDB, and file adapters |
 | `D4-` | browser render-world ownership | perf probe + browser visual | move client chunk cache and meshing inputs off the main thread while preserving host authority |
 | `D5-` | transport measurement and push/SAB decision | perf probe + deployment check | decide from data whether HTTP polling, worker transfer, or buffer sharing needs replacement |
 

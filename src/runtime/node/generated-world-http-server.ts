@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
-import type { ChunkSnapshot } from "../../world/level/chunk-snapshot";
+import type { PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 import { createGeneratedWorldHostForRequest } from "../host/generated-world-host-factory";
 import { createGeneratedWorldSaveId, getGeneratedWorldViewChunkRadius } from "../host/generated-world-host";
 import type { WorldHost } from "../protocol/world-host";
@@ -96,7 +96,7 @@ type SharedWorldRecord = {
   readonly host: WorldHost;
   readonly worldOpened: WorldOpenedMessage;
   readonly sessionIds: Set<string>;
-  readonly loadedSnapshots: Map<string, ChunkSnapshot>;
+  readonly loadedSnapshots: Map<string, PackedChunkSnapshot>;
   aggregateChunkView: SetChunkViewRequest | undefined;
   pendingOperation: Promise<void>;
 };
@@ -715,7 +715,7 @@ export class GeneratedWorldRemoteService {
         host,
         worldOpened: extractWorldOpened(messages),
         sessionIds: new Set<string>(),
-        loadedSnapshots: new Map<string, ChunkSnapshot>(),
+        loadedSnapshots: new Map<string, PackedChunkSnapshot>(),
         aggregateChunkView: undefined,
         pendingOperation: Promise.resolve(),
       };

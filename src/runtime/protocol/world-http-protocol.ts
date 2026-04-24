@@ -1,11 +1,22 @@
 import type {
+  ChunkSnapshotMessage,
+  ChunkUnloadMessage,
+  PlayerStateMessage,
+  SessionStateMessage,
+  WorldErrorMessage,
   OpenWorldPreset,
   PollWorldUpdatesRequest,
   SetChunkViewRequest,
   SetPlayerInputRequest,
+  WorldOpenedMessage,
   WorldClientMessage,
   WorldHostMessage,
 } from "./world-messages";
+import {
+  deserializePackedChunkSnapshot,
+  serializePackedChunkSnapshot,
+  type SerializedPackedChunkSnapshot,
+} from "./packed-chunk-wire";
 
 export const WORLD_HTTP_PROTOCOL_VERSION = 2;
 
@@ -28,7 +39,19 @@ export type SerializedWorldClientMessage =
   | SerializedSetChunkViewRequest
   | SerializedSetPlayerInputRequest
   | SerializedPollWorldUpdatesRequest;
-export type SerializedWorldHostMessage = WorldHostMessage;
+
+export interface SerializedChunkSnapshotMessage {
+  readonly type: "chunk_snapshot";
+  readonly snapshot: SerializedPackedChunkSnapshot;
+}
+
+export type SerializedWorldHostMessage =
+  | WorldOpenedMessage
+  | SessionStateMessage
+  | PlayerStateMessage
+  | SerializedChunkSnapshotMessage
+  | ChunkUnloadMessage
+  | WorldErrorMessage;
 
 export interface OpenWorldSessionRequest {
   readonly protocolVersion: number;
@@ -115,9 +138,37 @@ export function deserializeWorldClientMessage(message: SerializedWorldClientMess
 }
 
 export function serializeWorldHostMessages(messages: readonly WorldHostMessage[]): readonly SerializedWorldHostMessage[] {
-  return messages;
+  return messages.map((message) => {
+    switch (message.type) {
+      case "world_opened":
+      case "session_state":
+      case "player_state":
+      case "chunk_unload":
+      case "world_error":
+        return message;
+      case "chunk_snapshot":
+        return {
+          type: "chunk_snapshot",
+          snapshot: serializePackedChunkSnapshot(message.snapshot),
+        };
+    }
+  });
 }
 
 export function deserializeWorldHostMessages(messages: readonly SerializedWorldHostMessage[]): readonly WorldHostMessage[] {
-  return messages;
+  return messages.map((message) => {
+    switch (message.type) {
+      case "world_opened":
+      case "session_state":
+      case "player_state":
+      case "chunk_unload":
+      case "world_error":
+        return message;
+      case "chunk_snapshot":
+        return {
+          type: "chunk_snapshot",
+          snapshot: deserializePackedChunkSnapshot(message.snapshot),
+        } satisfies ChunkSnapshotMessage;
+    }
+  });
 }

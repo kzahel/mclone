@@ -10,6 +10,8 @@ import { StaticRenderLevel } from "./static-render-level";
 import { type LevelChunk } from "./chunk/level-chunk";
 import { Vec3 } from "../phys/vec3";
 import { SnapshotLevelChunk } from "./chunk/snapshot-level-chunk";
+import type { BlockStateIdMap } from "./block/state/block-state-id";
+import { unpackChunkSnapshot, type PackedChunkSnapshot } from "./packed-chunk-snapshot";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -26,6 +28,7 @@ export interface ClientChunkCacheOptions {
   readonly biomeSource: NoiseBiomeSource;
   readonly biomeZoomSeed: bigint;
   readonly blockStateResolver: BlockStateResolver;
+  readonly blockStateIds: BlockStateIdMap;
   readonly skyLight?: number;
   readonly blockLight?: number;
   readonly skyColor?: Vec3;
@@ -38,6 +41,7 @@ export class ClientChunkCache extends StaticRenderLevel implements NoiseBiomeSou
   private readonly biomeSource: NoiseBiomeSource;
   private readonly biomeZoomSeed: bigint;
   private readonly blockStateResolver: BlockStateResolver;
+  private readonly blockStateIds: BlockStateIdMap;
 
   public constructor(options: ClientChunkCacheOptions) {
     super(
@@ -52,6 +56,7 @@ export class ClientChunkCache extends StaticRenderLevel implements NoiseBiomeSou
     this.biomeSource = options.biomeSource;
     this.biomeZoomSeed = options.biomeZoomSeed;
     this.blockStateResolver = options.blockStateResolver;
+    this.blockStateIds = options.blockStateIds;
   }
 
   public override getChunk(chunkX: number, chunkZ: number, _create = true): LevelChunk | null {
@@ -76,6 +81,10 @@ export class ClientChunkCache extends StaticRenderLevel implements NoiseBiomeSou
         snapshot.biomes,
       ),
     );
+  }
+
+  public applyPackedChunkSnapshot(snapshot: PackedChunkSnapshot): void {
+    this.applyChunkSnapshot(unpackChunkSnapshot(snapshot, this.blockStateIds));
   }
 
   public applyChunkUnload(chunkX: number, chunkZ: number): boolean {

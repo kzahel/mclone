@@ -139,7 +139,7 @@ export class TransportWorldClient implements WorldClient {
           messageChanged = true;
           break;
         case "chunk_snapshot":
-          this.getLevel().applyChunkSnapshot(message.snapshot);
+          this.getLevel().applyPackedChunkSnapshot(message.snapshot);
           chunkChanged = true;
           messageChanged = true;
           break;

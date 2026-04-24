@@ -84,6 +84,7 @@ function createWorldClient(): LocalWorldClient {
         seed: 12345n,
         airState: blocks.airState,
         blockStateById: blocks.blockStateById,
+        blockStateIds: blocks.blockStateIds,
       }),
     ),
     (worldOpened) => new ClientChunkCache({
@@ -93,6 +94,7 @@ function createWorldClient(): LocalWorldClient {
       biomeSource,
       biomeZoomSeed: 12345n,
       blockStateResolver: createBlockStateResolver(blocks.airState),
+      blockStateIds: blocks.blockStateIds,
     }),
   );
 }
@@ -111,7 +113,7 @@ describe("GeneratedWorld boundary", () => {
       height: 256,
       saveMetadata: {
         saveId: createGeneratedWorldSaveId(12345n, "default"),
-        storageVersion: 2,
+        storageVersion: 3,
         seed: "12345",
         preset: "default",
         minBuildHeight: 0,

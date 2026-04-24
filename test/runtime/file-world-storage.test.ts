@@ -2,8 +2,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { FileWorldStorage, getFileChunkRecordPath, getFileWorldMetadataPath } from "../../src/runtime/storage/file-world-storage";
-import type { ChunkSnapshot } from "../../src/world/level/chunk-snapshot";
+import { FILE_CHUNK_RECORD_SCHEMA_VERSION, FileWorldStorage, getFileChunkRecordPath, getFileWorldMetadataPath } from "../../src/runtime/storage/file-world-storage";
+import { serializePackedChunkSnapshot } from "../../src/runtime/protocol/packed-chunk-wire";
+import type { PackedChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
 
 const TEMP_DIRECTORIES: string[] = [];
 const STORAGE_REQUEST = {
@@ -15,11 +16,16 @@ const STORAGE_REQUEST = {
   height: 256,
   openedAtMs: 1_000,
 } as const;
-const CHUNK_SNAPSHOT: ChunkSnapshot = {
+const CHUNK_SNAPSHOT: PackedChunkSnapshot = {
   chunkX: 0,
   chunkZ: 0,
   biomes: [0],
-  sections: [],
+  sections: [{
+    y: 0,
+    paletteStateIds: new Uint32Array([0, 1]),
+    bitsPerBlock: 4,
+    packedBlockIndices: new BigInt64Array([0x0123456789ABCDEFn, -1n]),
+  }],
   blockTicks: [],
   liquidTicks: [],
 };
@@ -79,14 +85,16 @@ describe("FileWorldStorage", () => {
       lastOpenedAtMs: 2_000,
     });
     expect(await readJsonFile(getFileChunkRecordPath(saveRoot, STORAGE_REQUEST.saveId, 0, 0))).toEqual({
+      schemaVersion: FILE_CHUNK_RECORD_SCHEMA_VERSION,
       saveId: STORAGE_REQUEST.saveId,
       chunkX: 0,
       chunkZ: 0,
-      snapshot: CHUNK_SNAPSHOT,
+      snapshot: serializePackedChunkSnapshot(CHUNK_SNAPSHOT),
       savedAtMs: 1_000,
       lastLoadedAtMs: 2_000,
       lastEvictedAtMs: 2_000,
     });
+    expect(JSON.stringify(await readJsonFile(getFileChunkRecordPath(saveRoot, STORAGE_REQUEST.saveId, 0, 0)))).not.toContain("properties");
   });
 
   test("resets incompatible saves and clears stale chunk records", async () => {

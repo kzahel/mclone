@@ -12,7 +12,7 @@ Make packed chunk facts the authoritative boundary payload for storage and proto
 - local direct, worker, and remote HTTP transports carry the same logical chunk payload through transport-specific codecs
 - current client cache and hydration code can still unpack to `ChunkSnapshot` as a compatibility adapter
 
-At the end of `D3`, object-heavy `{ name, properties }` block-state snapshots should no longer cross storage or protocol boundaries for hot chunk payloads.
+`D3` landed this boundary migration. Object-heavy `{ name, properties }` block-state snapshots no longer cross storage or protocol boundaries for hot chunk payloads.
 
 ## Why this slice exists
 
@@ -88,6 +88,26 @@ This divergence should make future parity easier: the logical section facts are 
 | 7 | Remote HTTP carrier | JSON control envelopes use an explicit JSON-safe packed chunk wire codec |
 | 8 | Remote fan-out cache | remote service stores loaded packed snapshots and filters them per session |
 | 9 | Tests | storage, local, worker, remote, persistence, and boundary tests prove behavior is unchanged |
+
+## Landed implementation
+
+| Module | Result |
+|---|---|
+| `src/runtime/protocol/world-messages.ts` | `chunk_snapshot.snapshot` is now `PackedChunkSnapshot` |
+| `src/runtime/protocol/world-http-protocol.ts` | remote host messages serialize/deserialize packed chunk snapshots explicitly |
+| `src/runtime/protocol/packed-chunk-wire.ts` | JSON-safe packed chunk codec stores palette ids as numbers and packed 64-bit words as little-endian base64 |
+| `src/runtime/storage/world-storage.ts` | storage adapters load/save `PackedChunkSnapshot` |
+| `src/runtime/storage/memory-world-storage.ts` | memory storage clones packed snapshots on save/load |
+| `src/runtime/storage/file-world-storage.ts` | file storage writes schema-versioned packed records and rejects unsupported chunk record schemas |
+| `src/runtime/storage/indexeddb-world-storage.ts` | IndexedDB storage stores cloned packed records through structured clone |
+| `src/runtime/host/generated-world-host.ts` | host packs generated chunks for protocol/storage, unpacks stored chunks only for current `LevelChunk` hydration, and bumps generated-world storage version to `3` |
+| `src/runtime/node/generated-world-http-server.ts` | remote multi-session fan-out cache stores packed snapshots |
+| `src/runtime/transport/local-world-transport.ts` | client applies packed chunk snapshots through the compatibility adapter |
+| `src/runtime/transport/worker-world-transport.ts` | worker responses include transfer lists for packed palette/index buffers without `SharedArrayBuffer` |
+| `src/world/level/client-chunk-cache.ts` | current renderer cache keeps `ChunkSnapshot` internally but adds `applyPackedChunkSnapshot(...)` as the D3 boundary adapter |
+| `src/world/level/packed-chunk-snapshot.ts` | packed snapshot clone and transferable collection helpers support storage/worker carriers |
+
+The remaining `ChunkSnapshot` uses are compatibility surfaces for current hydration, client cache, and mesh-worker input. Those move in `D4`, not `D3`.
 
 ## Explicit non-goals
 

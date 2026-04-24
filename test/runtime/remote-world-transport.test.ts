@@ -248,6 +248,7 @@ function createRemoteWorldClient(baseUrl: string, fetchImpl: typeof fetch, sessi
       biomeSource,
       biomeZoomSeed: 12345n,
       blockStateResolver: createBlockStateResolver(blocks.airState),
+      blockStateIds: blocks.blockStateIds,
     }),
   );
 }
@@ -273,7 +274,7 @@ describe("RemoteWorld transport", () => {
       height: 256,
       saveMetadata: {
         saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
-        storageVersion: 2,
+        storageVersion: 3,
         seed: "12345",
         preset: "browser_smoke",
         minBuildHeight: 0,

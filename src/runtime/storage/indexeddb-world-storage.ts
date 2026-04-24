@@ -1,4 +1,4 @@
-import type { ChunkSnapshot } from "../../world/level/chunk-snapshot";
+import { clonePackedChunkSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 import {
   createWorldSaveMetadata,
   isWorldSaveMetadataCompatible,
@@ -20,7 +20,7 @@ type IndexedDbChunkRecord = {
   readonly saveId: string;
   readonly chunkX: number;
   readonly chunkZ: number;
-  readonly snapshot: ChunkSnapshot;
+  readonly snapshot: PackedChunkSnapshot;
   readonly savedAtMs: number;
   readonly lastLoadedAtMs?: number;
   readonly lastEvictedAtMs?: number;
@@ -81,7 +81,7 @@ class IndexedDbChunkStorage implements ChunkStorage {
     private readonly now: () => number,
   ) {}
 
-  public async loadChunk(chunkX: number, chunkZ: number): Promise<ChunkSnapshot | undefined> {
+  public async loadChunk(chunkX: number, chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
     const transaction = this.database.transaction(CHUNKS_STORE, "readwrite");
     const store = transaction.objectStore(CHUNKS_STORE);
     const key = [this.saveId, chunkX, chunkZ];
@@ -94,16 +94,16 @@ class IndexedDbChunkStorage implements ChunkStorage {
     }
 
     await waitForTransaction(transaction);
-    return record?.snapshot;
+    return record === undefined ? undefined : clonePackedChunkSnapshot(record.snapshot);
   }
 
-  public async saveChunk(snapshot: ChunkSnapshot): Promise<void> {
+  public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
     const transaction = this.database.transaction(CHUNKS_STORE, "readwrite");
     transaction.objectStore(CHUNKS_STORE).put({
       saveId: this.saveId,
       chunkX: snapshot.chunkX,
       chunkZ: snapshot.chunkZ,
-      snapshot,
+      snapshot: clonePackedChunkSnapshot(snapshot),
       savedAtMs: this.now(),
     } satisfies IndexedDbChunkRecord);
     await waitForTransaction(transaction);

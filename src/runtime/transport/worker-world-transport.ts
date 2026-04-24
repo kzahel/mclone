@@ -1,4 +1,5 @@
 import type { ClientChunkCache } from "../../world/level/client-chunk-cache";
+import { clonePackedChunkSnapshot, collectPackedChunkSnapshotTransferables } from "../../world/level/packed-chunk-snapshot";
 import type { WorldHost } from "../protocol/world-host";
 import type {
   OpenWorldRequest,
@@ -29,7 +30,7 @@ export type WorldWorkerMessageListener<T> = (event: WorldWorkerMessageEvent<T>) 
 type WorldWorkerErrorListener = (event: unknown) => void;
 
 export interface WorldWorkerMessageEndpoint<TOutgoing, TIncoming> {
-  postMessage(message: TOutgoing): void;
+  postMessage(message: TOutgoing, transfer?: readonly Transferable[]): void;
   addEventListener(type: "message", listener: WorldWorkerMessageListener<TIncoming>): void;
   removeEventListener(type: "message", listener: WorldWorkerMessageListener<TIncoming>): void;
   start?(): void;
@@ -54,6 +55,27 @@ function formatUnknownError(error: unknown): string {
   }
 
   return String(error);
+}
+
+function cloneHostMessagesForTransfer(messages: readonly WorldHostMessage[]): {
+  readonly messages: readonly WorldHostMessage[];
+  readonly transfer: readonly Transferable[];
+} {
+  const transfer: Transferable[] = [];
+  const cloned = messages.map((message) => {
+    if (message.type !== "chunk_snapshot") {
+      return message;
+    }
+
+    const snapshot = clonePackedChunkSnapshot(message.snapshot);
+    transfer.push(...collectPackedChunkSnapshotTransferables(snapshot));
+    return {
+      type: "chunk_snapshot",
+      snapshot,
+    } satisfies WorldHostMessage;
+  });
+
+  return { messages: cloned, transfer };
 }
 
 export function connectWorldWorkerSession(
@@ -104,10 +126,11 @@ export function connectWorldWorkerSession(
       messages = [{ type: "world_error", message: formatUnknownError(error) }];
     }
 
+    const prepared = cloneHostMessagesForTransfer(messages);
     endpoint.postMessage({
       requestId: envelope.requestId,
-      messages,
-    });
+      messages: prepared.messages,
+    }, prepared.transfer);
   }
 
   endpoint.addEventListener("message", onMessage);

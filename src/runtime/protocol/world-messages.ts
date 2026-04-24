@@ -1,5 +1,5 @@
 import type { WorldSaveMetadata } from "../storage/world-storage";
-import type { ChunkSnapshot } from "../../world/level/chunk-snapshot";
+import type { PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 
 export type OpenWorldPreset = "default" | "browser_smoke";
 
@@ -85,7 +85,7 @@ export interface PlayerStateMessage {
 
 export interface ChunkSnapshotMessage {
   readonly type: "chunk_snapshot";
-  readonly snapshot: ChunkSnapshot;
+  readonly snapshot: PackedChunkSnapshot;
 }
 
 export interface ChunkUnloadMessage {

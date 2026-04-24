@@ -150,6 +150,7 @@ function createWorldClient(
   airState: import("../world/level/block/state/block-state").BlockState,
   biomeSource: OverworldBiomeSource,
   blockStateResolver: ReturnType<typeof createBlockStateResolver>,
+  blockStateIds: import("../world/level/block/state/block-state-id").BlockStateIdMap,
 ): WorldClient {
   const levelFactory = (worldOpened: import("../runtime/protocol/world-messages").WorldOpenedMessage) => new ClientChunkCache({
     airState,
@@ -158,6 +159,7 @@ function createWorldClient(
     biomeSource,
     biomeZoomSeed: options.seed,
     blockStateResolver,
+    blockStateIds,
     skyColor: options.skyColor,
     clearColorScale: options.clearColorScale,
   });
@@ -263,7 +265,7 @@ export async function initializeRendererScene(
 
   const biomeSource = new OverworldBiomeSource(options.seed);
   const blockStateResolver = createBlockStateResolver(generatedBlocks.airState);
-  const worldClient = createWorldClient(options, generatedBlocks.airState, biomeSource, blockStateResolver);
+  const worldClient = createWorldClient(options, generatedBlocks.airState, biomeSource, blockStateResolver, generatedBlocks.blockStateIds);
   const worldOpened = await worldClient.openWorld({
     type: "open_world",
     seed: options.seed,
