@@ -14,7 +14,7 @@ Finish the remaining broad jungle-family follow-through by porting the bamboo bl
 | `reference/.../src/data/minecraft/tags/blocks/bamboo_plantable_on.json` | `src/tags/block-tags.ts` |
 | `reference/.../src/assets/minecraft/{blockstates,models,textures}/**/*bamboo*` | `src/world/level/generated-render-blocks.ts` |
 | `reference/.../src/net/minecraft/client/renderer/ItemBlockRenderTypes.java` | `src/world/level/generated-render-blocks.ts`, `test/renderer/block/surface-feature-palette.test.ts` |
-| `test/worldgen/levelgen/feature/vegetation-parity.test.ts`, `test/renderer/block/surface-feature-palette.test.ts`, `test/browser/bamboo-jungle-parity.test.ts` | same |
+| `test/worldgen/levelgen/feature/vegetation-parity.test.ts`, `test/renderer/block/surface-feature-palette.test.ts`, `test/browser/probes/bamboo-jungle-parity.probe.ts` | same |
 
 ## What landed
 
@@ -40,14 +40,14 @@ Finish the remaining broad jungle-family follow-through by porting the bamboo bl
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/bamboo-jungle-parity.test.ts` passes.
+- `pnpm probe:browser -- test/browser/probes/bamboo-jungle-parity.probe.ts` passes.
 - `/tmp/mclone-debug-bamboo-jungle.png` is manually inspected and reads as a dense bamboo-jungle slope rather than generic jungle canopy.
 
 ## Done when
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for bamboo-jungle vegetation and render-palette coverage
-- `pnpm test:browser -- test/browser/bamboo-jungle-parity.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/bamboo-jungle-parity.probe.ts` passes
 - `docs/tactical/README.md`, `docs/worldgen-status.md`, and `docs/carver-status.md` stop listing bamboo-jungle as the next missing broad parity slice
 
 ## Next

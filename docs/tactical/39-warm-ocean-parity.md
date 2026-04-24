@@ -12,7 +12,7 @@ Finish the last major common ocean-family fallback by porting the warm-ocean cor
 | `reference/.../src/net/minecraft/world/level/block/{CoralBlock,BaseCoralPlantTypeBlock,BaseCoralPlantBlock,BaseCoralFanBlock,BaseCoralWallFanBlock,CoralPlantBlock,CoralFanBlock,CoralWallFanBlock,SeaPickleBlock}.java` | `src/world/level/block/{coral-block,base-coral-plant-type-block,base-coral-plant-block,base-coral-fan-block,base-coral-wall-fan-block,coral-plant-block,coral-fan-block,coral-wall-fan-block,sea-pickle-block}.ts` |
 | `reference/.../src/data/minecraft/tags/blocks/{corals,wall_corals,coral_blocks,coral_plants}.json` | `src/tags/block-tags.ts` |
 | `reference/.../assets/minecraft/{blockstates,models,textures}/**/*coral*`, `**/sea_pickle*` | `src/world/level/generated-render-blocks.ts` |
-| `test/worldgen/levelgen/feature/vegetation-parity.test.ts`, `test/renderer/block/surface-feature-palette.test.ts`, `test/browser/warm-ocean-parity.test.ts` | same |
+| `test/worldgen/levelgen/feature/vegetation-parity.test.ts`, `test/renderer/block/surface-feature-palette.test.ts`, `test/browser/probes/warm-ocean-parity.probe.ts` | same |
 
 ## What landed
 
@@ -38,14 +38,14 @@ Finish the last major common ocean-family fallback by porting the warm-ocean cor
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/warm-ocean-parity.test.ts` passes.
+- `pnpm probe:browser -- test/browser/probes/warm-ocean-parity.probe.ts` passes.
 - `/tmp/mclone-debug-warm-ocean.png` is manually inspected and reads as a warm-ocean shallow shelf rather than the old generic ocean mix, even though the coral / sea-pickle placements are subtler than the tall vegetation in the current renderer.
 
 ## Done when
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for warm-ocean vegetation and render-palette coverage
-- `pnpm test:browser -- test/browser/warm-ocean-parity.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/warm-ocean-parity.probe.ts` passes
 - `docs/tactical/README.md`, `docs/worldgen-status.md`, and `docs/carver-status.md` stop listing warm-ocean parity as the next missing slice
 
 ## Next

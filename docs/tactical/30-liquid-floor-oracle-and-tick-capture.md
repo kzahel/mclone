@@ -12,7 +12,7 @@ Finish the LIQUID-step follow-through that tactical 29 intentionally deferred. T
 | `src/world/level/{static-render-level,generated-render-level}.ts` | same |
 | `src/renderer/debug/debug-free-cam.ts` | same |
 | `test/worldgen/levelgen/{carver-oracle-fixture,noise-based-chunk-generator}.test.ts` | same |
-| `test/world/chunk-snapshot.test.ts`, `test/browser/cave-mouth.test.ts` | same |
+| `test/world/chunk-snapshot.test.ts`, `test/browser/probes/cave-mouth.probe.ts` | same |
 
 ## What landed
 
@@ -20,7 +20,7 @@ Finish the LIQUID-step follow-through that tactical 29 intentionally deferred. T
 - snapshot persistence for scheduled ticks in [`chunk-snapshot.ts`](../../src/world/level/chunk-snapshot.ts), with a round-trip test in [`test/world/chunk-snapshot.test.ts`](../../test/world/chunk-snapshot.test.ts)
 - exact underwater LIQUID scheduling branches in [`underwater-cave-world-carver.ts`](../../src/worldgen/carver/underwater-cave-world-carver.ts): magma-block tick at `y=10`, water-fluid tick when vanilla’s `POSSIBLE_FLOW_DIRECTIONS` rule says the fluid can escape the local chunk or reach air
 - Java carved fixtures now include `blockTicks` / `liquidTicks`, and a second committed LIQUID oracle at [`overworld-seed-12345-chunks--129--256-liquid-carved.json`](../../test/fixtures/integration/overworld-seed-12345-chunks--129--256-liquid-carved.json) captures the real underwater-floor `obsidian` / `magma_block` branch
-- targeted browser validation through [`test/browser/cave-mouth.test.ts`](../../test/browser/cave-mouth.test.ts), which saves `/tmp/mclone-debug-cave-mouth.png` from a ravine-focused remote debug frame instead of the generic terrain smoke
+- targeted browser validation through [`test/browser/probes/cave-mouth.probe.ts`](../../test/browser/probes/cave-mouth.probe.ts), which saves `/tmp/mclone-debug-cave-mouth.png` from a ravine-focused remote debug frame instead of the generic terrain smoke
 
 ## Scope choice
 
@@ -53,14 +53,14 @@ Still deferred on purpose:
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/cave-mouth.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/cave-mouth.probe.ts` passes
 - `/tmp/mclone-debug-cave-mouth.png` has been manually inspected for a ravine-focused frame rather than generic surface vegetation
 
 ## Done when
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for snapshot, runtime storage, underwater carver, carved oracle, and chunk-generator parity suites
-- `pnpm test:browser -- test/browser/cave-mouth.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/cave-mouth.probe.ts` passes
 - `docs/carver-status.md`, `docs/worldgen-status.md`, and `oracle/README.md` describe scheduled underwater tick capture and the widened LIQUID oracle matrix accurately
 
 ## Next

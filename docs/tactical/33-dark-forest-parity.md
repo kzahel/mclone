@@ -15,7 +15,7 @@ Finish the first true dark-forest biome-identity slice now that the current carv
 | `reference/.../src/net/minecraft/data/worldgen/{Features,BiomeDefaultFeatures}.java` | `src/worldgen/levelgen/feature/{features,tree-features,vegetation-features}.ts`, `src/worldgen/biome/overworld-biome-generation-settings.ts` |
 | `reference/.../src/net/minecraft/data/worldgen/biome/VanillaBiomes.java` (`darkForestBiome`) | `src/worldgen/biome/overworld-biome-generation-settings.ts` |
 | `reference/.../extracted/assets/minecraft/blockstates/{dark_oak_log,dark_oak_leaves,dark_oak_sapling,brown_mushroom_block,red_mushroom_block,mushroom_stem}.json` | `src/world/level/generated-render-blocks.ts`, `src/renderer/block/block-colors.ts` |
-| `test/worldgen/levelgen/feature/{tree-feature,vegetation-parity}.test.ts`, `test/browser/dark-forest-parity.test.ts` | same |
+| `test/worldgen/levelgen/feature/{tree-feature,vegetation-parity}.test.ts`, `test/browser/probes/dark-forest-parity.probe.ts` | same |
 
 ## What landed
 
@@ -42,14 +42,14 @@ Finish the first true dark-forest biome-identity slice now that the current carv
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/dark-forest-parity.test.ts` passes.
+- `pnpm probe:browser -- test/browser/probes/dark-forest-parity.probe.ts` passes.
 - `/tmp/mclone-debug-dark-forest.png` is manually inspected for a dark canopy with the translated dark-oak / huge-mushroom block set present in the generated frame.
 
 ## Done when
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for the dark-oak / huge-mushroom / generated-render-level suites
-- `pnpm test:browser -- test/browser/dark-forest-parity.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/dark-forest-parity.probe.ts` passes
 - `docs/tactical/README.md`, `docs/worldgen-status.md`, and `docs/carver-status.md` all stop describing dark forest as upcoming work
 
 ## Next

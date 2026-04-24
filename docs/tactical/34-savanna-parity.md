@@ -13,7 +13,7 @@ Finish the next broad biome-identity slice after dark forest by porting the miss
 | `reference/.../src/net/minecraft/data/worldgen/biome/VanillaBiomes.java` (`baseSavannaBiome`, `savannaBiome`, `savanaPlateauBiome`) | `src/worldgen/biome/overworld-biome-generation-settings.ts` |
 | `reference/.../src/net/minecraft/world/level/block/Blocks.java` (`ACACIA_LOG`, `ACACIA_LEAVES`, `ACACIA_SAPLING`) | `src/world/level/generated-render-blocks.ts`, `src/renderer/block/block-colors.ts` |
 | `reference/.../extracted/assets/minecraft/blockstates/{acacia_log,acacia_leaves,acacia_sapling}.json` | `src/world/level/generated-render-blocks.ts` |
-| `test/worldgen/levelgen/feature/{tree-feature,vegetation-parity}.test.ts`, `test/renderer/generated-render-level.test.ts`, `test/browser/savanna-parity.test.ts` | same |
+| `test/worldgen/levelgen/feature/{tree-feature,vegetation-parity}.test.ts`, `test/renderer/generated-render-level.test.ts`, `test/browser/probes/savanna-parity.probe.ts` | same |
 
 ## What landed
 
@@ -39,14 +39,14 @@ Finish the next broad biome-identity slice after dark forest by porting the miss
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/savanna-parity.test.ts` passes.
+- `pnpm probe:browser -- test/browser/probes/savanna-parity.probe.ts` passes.
 - `/tmp/mclone-debug-savanna.png` is manually inspected for a warm brown-green savanna frame with the translated acacia vegetation path present in the generated world.
 
 ## Done when
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for the acacia / savanna / generated-render-level suites
-- `pnpm test:browser -- test/browser/savanna-parity.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/savanna-parity.probe.ts` passes
 - `docs/tactical/README.md`, `docs/worldgen-status.md`, and `docs/carver-status.md` all stop listing savanna or acacia as the next missing biome-identity slice
 
 ## Next

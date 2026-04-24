@@ -64,8 +64,8 @@ Current carver verification is real but still intentionally narrow:
 - explicit underwater branch tests in [`underwater-carver.test.ts`](../test/worldgen/carver/underwater-carver.test.ts)
 - snapshot/tick round-trip coverage in [`chunk-snapshot.test.ts`](../test/world/chunk-snapshot.test.ts)
 - biome/carver wiring tests in [`overworld-carver-wiring.test.ts`](../test/worldgen/carver/overworld-carver-wiring.test.ts)
-- targeted ravine browser validation in [`test/browser/cave-mouth.test.ts`](../test/browser/cave-mouth.test.ts)
-- targeted frozen/badlands/podzol/coarse-dirt/mycelium surface validation in [`test/browser/surface-material-matrix.test.ts`](../test/browser/surface-material-matrix.test.ts)
+- targeted ravine browser validation in [`test/browser/probes/cave-mouth.probe.ts`](../test/browser/probes/cave-mouth.probe.ts)
+- targeted frozen/badlands/podzol/coarse-dirt/mycelium surface validation in [`test/browser/probes/surface-material-matrix.probe.ts`](../test/browser/probes/surface-material-matrix.probe.ts)
 
 That supports “partially oracled,” not “exhaustively covered.”
 

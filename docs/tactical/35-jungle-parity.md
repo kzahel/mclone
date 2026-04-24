@@ -18,7 +18,7 @@ Finish the next broad biome-identity slice after savanna by porting the missing 
 | `reference/.../src/net/minecraft/world/level/block/{VineBlock,CocoaBlock}.java` | `src/world/level/block/{vine-block,cocoa-block}.ts` |
 | `reference/.../src/net/minecraft/world/level/block/Blocks.java` (`JUNGLE_LOG`, `JUNGLE_LEAVES`, `JUNGLE_SAPLING`, `VINE`, `COCOA`, `MELON`) | `src/world/level/generated-render-blocks.ts`, `src/renderer/block/block-colors.ts` |
 | `reference/.../extracted/assets/minecraft/blockstates/{jungle_log,jungle_leaves,jungle_sapling,vine,cocoa,melon}.json` | `src/world/level/generated-render-blocks.ts` |
-| `test/worldgen/levelgen/feature/{tree-feature,vegetation-parity}.test.ts`, `test/renderer/generated-render-level.test.ts`, `test/browser/jungle-parity.test.ts` | same |
+| `test/worldgen/levelgen/feature/{tree-feature,vegetation-parity}.test.ts`, `test/renderer/generated-render-level.test.ts`, `test/browser/probes/jungle-parity.probe.ts` | same |
 
 ## What landed
 
@@ -45,14 +45,14 @@ Finish the next broad biome-identity slice after savanna by porting the missing 
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/jungle-parity.test.ts` passes.
+- `pnpm probe:browser -- test/browser/probes/jungle-parity.probe.ts` passes.
 - `/tmp/mclone-debug-jungle.png` is manually inspected for a dense jungle canopy frame in the worker-generated world, even though the repo’s current green fog/clear setup still dominates the distant background.
 
 ## Done when
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for the jungle / generated-render-level suites
-- `pnpm test:browser -- test/browser/jungle-parity.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/jungle-parity.probe.ts` passes
 - `docs/tactical/README.md`, `docs/worldgen-status.md`, and `docs/carver-status.md` all stop listing jungle core parity as the next missing biome-identity slice
 
 ## Next

@@ -9,7 +9,7 @@ Finish the remaining live surface/material families that classic 1.17.1 overworl
 | `reference/.../src/net/minecraft/world/level/levelgen/surfacebuilders/{GiantTreeTaigaSurfaceBuilder,ShatteredSavanaSurfaceBuilder}.java` | `src/worldgen/surface/surface-builders.ts` |
 | `reference/.../src/net/minecraft/world/level/levelgen/feature/LakeFeature.java` | `src/worldgen/levelgen/feature/lake-feature.ts` |
 | `test/worldgen/levelgen/{surface-oracle-fixture,carver-oracle-fixture,noise-based-chunk-generator}.test.ts` | same |
-| `test/worldgen/levelgen/feature/water-feature.test.ts`, `test/browser/surface-material-matrix.test.ts` | same |
+| `test/worldgen/levelgen/feature/water-feature.test.ts`, `test/browser/probes/surface-material-matrix.probe.ts` | same |
 | `docs/{carver-status,worldgen-status}.md`, `docs/tactical/README.md` | same |
 
 ## What landed
@@ -54,14 +54,14 @@ Still deferred on purpose:
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/surface-material-matrix.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/surface-material-matrix.probe.ts` passes
 - `/tmp/mclone-debug-giant-taiga.png`, `/tmp/mclone-debug-shattered-savanna.png`, and `/tmp/mclone-debug-mushroom-fields.png` are manually inspected for the intended top-material families
 
 ## Done when
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for surface-oracle, carved-oracle, chunk-generator parity, and water-feature suites
-- `pnpm test:browser -- test/browser/surface-material-matrix.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/surface-material-matrix.probe.ts` passes
 - `docs/tactical/README.md`, `docs/carver-status.md`, and `docs/worldgen-status.md` describe the widened podzol/coarse-dirt/mycelium matrix accurately
 
 ## Next

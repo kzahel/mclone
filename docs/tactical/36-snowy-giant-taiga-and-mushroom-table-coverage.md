@@ -13,7 +13,7 @@ Broaden biome-table coverage for the next high-value overworld families that wer
 | `reference/.../src/net/minecraft/data/worldgen/Features.java` (`MEGA_SPRUCE`, `MEGA_PINE`, `PATCH_GRASS_TAIGA`, `BROWN_MUSHROOM_GIANT`, `RED_MUSHROOM_GIANT`, `TREES_SNOWY`, `TREES_GIANT`, `TREES_GIANT_SPRUCE`, `MUSHROOM_FIELD_VEGETATION`) | `src/worldgen/levelgen/feature/{tree-features,vegetation-features,features}.ts` |
 | `reference/.../src/net/minecraft/data/worldgen/BiomeDefaultFeatures.java` (`addSnowyTrees`, `addGiantTaigaVegetation`, `addMushroomFieldVegetation`, `addTaigaGrass`) | `src/worldgen/biome/overworld-biome-generation-settings.ts` |
 | `reference/.../src/net/minecraft/data/worldgen/biome/{VanillaBiomes,Biomes}.java` (`tundraBiome`, `taigaBiome`, `giantTreeTaiga`, `mushroomFieldsBiome`) | `src/worldgen/biome/overworld-biome-generation-settings.ts` |
-| `test/worldgen/levelgen/feature/{tree-feature,vegetation-parity}.test.ts`, `test/browser/cold-biome-parity.test.ts` | same |
+| `test/worldgen/levelgen/feature/{tree-feature,vegetation-parity}.test.ts`, `test/browser/probes/cold-biome-parity.probe.ts` | same |
 
 ## What landed
 
@@ -38,14 +38,14 @@ Broaden biome-table coverage for the next high-value overworld families that wer
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/cold-biome-parity.test.ts` passes.
+- `pnpm probe:browser -- test/browser/probes/cold-biome-parity.probe.ts` passes.
 - `/tmp/mclone-debug-snowy-taiga.png`, `/tmp/mclone-debug-giant-taiga-parity.png`, and `/tmp/mclone-debug-mushroom-fields-parity.png` are manually inspected for snowy spruce canopy, podzol-heavy giant-taiga ground cover, and visible huge mushrooms in the worker-generated world.
 
 ## Done when
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for the tree / vegetation parity suites
-- `pnpm test:browser -- test/browser/cold-biome-parity.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/cold-biome-parity.probe.ts` passes
 - `docs/tactical/README.md`, `docs/worldgen-status.md`, and `docs/carver-status.md` all stop listing snowy / giant-taiga / mushroom-field coverage as the next missing biome-table slice
 
 ## Next

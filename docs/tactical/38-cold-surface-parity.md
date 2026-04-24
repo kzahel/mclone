@@ -12,7 +12,7 @@ Finish the next high-value cold-family slice behind shoreline parity by porting 
 | `reference/.../src/net/minecraft/world/level/block/SnowLayerBlock.java` (`canSurvive`) | `src/world/level/block/snow-layer-block.ts` |
 | `reference/.../src/net/minecraft/data/worldgen/{Features,SurfaceBuilders,BiomeDefaultFeatures}.java` | `src/worldgen/levelgen/feature/{features,vegetation-features}.ts`, `src/worldgen/surface/surface-builders.ts`, `src/worldgen/biome/overworld-biome-generation-settings.ts` |
 | `reference/.../src/net/minecraft/data/worldgen/biome/VanillaBiomes.java` (`tundraBiome`, `beachBiome`, `riverBiome`, `oceanBiome`, `coldOceanBiome`, `lukeWarmOceanBiome`, `frozenOceanBiome`, `swampBiome`) | `src/worldgen/biome/overworld-biome-generation-settings.ts` |
-| `test/worldgen/levelgen/feature/{vegetation-parity,cold-surface-feature}.test.ts`, `test/browser/{shoreline-parity,cold-biome-parity}.test.ts` | same |
+| `test/worldgen/levelgen/feature/{vegetation-parity,cold-surface-feature}.test.ts`, `test/browser/probes/{shoreline-parity,cold-biome-parity}.probe.ts` | same |
 
 ## What landed
 
@@ -38,7 +38,7 @@ Finish the next high-value cold-family slice behind shoreline parity by porting 
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/shoreline-parity.test.ts test/browser/cold-biome-parity.test.ts` passes.
+- `pnpm probe:browser -- test/browser/probes/shoreline-parity.probe.ts test/browser/probes/cold-biome-parity.probe.ts` passes.
 - `/tmp/mclone-debug-ice-spikes.png` is manually inspected and clearly reads as packed-ice spires over snowy terrain.
 - `/tmp/mclone-debug-snowy-beach.png` is manually inspected and at least reads as the corrected cold shoreline surface family rather than the old generic grass fallback, even though the snow-layer pass is still visually subdued.
 
@@ -46,7 +46,7 @@ Finish the next high-value cold-family slice behind shoreline parity by porting 
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for cold-surface feature and biome-table coverage
-- `pnpm test:browser -- test/browser/shoreline-parity.test.ts test/browser/cold-biome-parity.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/shoreline-parity.probe.ts test/browser/probes/cold-biome-parity.probe.ts` passes
 - `docs/tactical/README.md`, `docs/worldgen-status.md`, and `docs/carver-status.md` stop listing cold-surface cleanup as the next missing slice
 
 ## Next

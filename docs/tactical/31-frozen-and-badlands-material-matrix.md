@@ -13,7 +13,7 @@ Broaden the carved-stage material/state matrix beyond the spawn/desert/ocean/flo
 | `src/worldgen/chunk/chunk-block-buffer.ts` | same |
 | `src/world/level/generated-render-blocks.ts` | same |
 | `test/worldgen/levelgen/{surface-oracle-fixture,carver-oracle-fixture,noise-based-chunk-generator}.test.ts` | same |
-| `test/renderer/generated-render-level.test.ts`, `test/browser/surface-material-matrix.test.ts` | same |
+| `test/renderer/generated-render-level.test.ts`, `test/browser/probes/surface-material-matrix.probe.ts` | same |
 
 ## What landed
 
@@ -58,14 +58,14 @@ Still deferred on purpose:
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/surface-material-matrix.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/surface-material-matrix.probe.ts` passes
 - `/tmp/mclone-debug-frozen-ocean.png` and `/tmp/mclone-debug-badlands.png` are manually inspected for the intended surface families
 
 ## Done when
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for chunk-buffer, surface-oracle, carved-oracle, chunk-generator parity, and generated-render-level suites
-- `pnpm test:browser -- test/browser/surface-material-matrix.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/surface-material-matrix.probe.ts` passes
 - `docs/tactical/README.md`, `docs/carver-status.md`, and `docs/worldgen-status.md` describe the widened frozen/badlands matrix accurately
 
 ## Next

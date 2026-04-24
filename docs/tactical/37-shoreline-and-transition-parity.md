@@ -14,7 +14,7 @@ Fill the next high-value biome-table gap after snowy / giant-taiga / mushroom co
 | `reference/.../src/net/minecraft/data/worldgen/BiomeDefaultFeatures.java` (`addWaterTrees`, `addColdOceanExtraVegetation`, `addLukeWarmKelp`) | `src/worldgen/biome/overworld-biome-generation-settings.ts` |
 | `reference/.../src/net/minecraft/data/worldgen/biome/VanillaBiomes.java` (`riverBiome`, `beachBiome`, `oceanBiome`, `coldOceanBiome`, `lukeWarmOceanBiome`, `frozenOceanBiome`) | `src/worldgen/biome/overworld-biome-generation-settings.ts` |
 | `reference/.../extracted/assets/minecraft/{blockstates,models}/kelp*.json` | `src/world/level/generated-render-blocks.ts`, browser render path |
-| `test/worldgen/levelgen/feature/vegetation-parity.test.ts`, `test/renderer/block/surface-feature-palette.test.ts`, `test/browser/shoreline-parity.test.ts` | same |
+| `test/worldgen/levelgen/feature/vegetation-parity.test.ts`, `test/renderer/block/surface-feature-palette.test.ts`, `test/browser/probes/shoreline-parity.probe.ts` | same |
 
 ## What landed
 
@@ -40,7 +40,7 @@ Fill the next high-value biome-table gap after snowy / giant-taiga / mushroom co
 
 **Browser validation:**
 
-- `pnpm test:browser -- test/browser/shoreline-parity.test.ts` passes.
+- `pnpm probe:browser -- test/browser/probes/shoreline-parity.probe.ts` passes.
 - `/tmp/mclone-debug-beach.png`, `/tmp/mclone-debug-river.png`, `/tmp/mclone-debug-snowy-beach.png`, `/tmp/mclone-debug-frozen-ocean-shoreline.png`, and `/tmp/mclone-debug-stone-shore.png` are manually inspected.
 - Expectation for this slice: beach / river / frozen-ocean / stone-shore identity reads correctly under the repo’s existing green fog setup; snowy beach is still visibly limited by the deferred cold-surface follow-through (`FREEZE_TOP_LAYER`, `ICE_SPIKE`, `ICE_PATCH`).
 
@@ -48,7 +48,7 @@ Fill the next high-value biome-table gap after snowy / giant-taiga / mushroom co
 
 - `pnpm typecheck` passes
 - focused `pnpm test` passes for vegetation parity and generated render palette coverage
-- `pnpm test:browser -- test/browser/shoreline-parity.test.ts` passes
+- `pnpm probe:browser -- test/browser/probes/shoreline-parity.probe.ts` passes
 - `docs/tactical/README.md`, `docs/worldgen-status.md`, and `docs/carver-status.md` stop listing generic shoreline / river / non-warm-ocean table coverage as the next missing slice
 
 ## Next

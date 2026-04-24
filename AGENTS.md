@@ -66,7 +66,10 @@ Before doing oracle work, make sure the local Minecraft artifacts are actually h
 For any slice that produces pixels, **capture a screenshot and look at it before moving on.** Do not finish a whole slice and then check. Check at the first drawable milestone — even a solid-color quad or a clear-color frame — then keep checking as complexity increases.
 
 Concretely:
-- After wiring up a new draw path, run `pnpm test:browser` and take a screenshot. Read the image and describe what you see. Does it look right? Are the shapes, colors, and positions what you expect?
+- `pnpm test:browser` is the fast automatic WebGPU smoke lane. Run it for browser boot, WebGPU setup, remote-host smoke, and changes that could break the default browser entrypoint.
+- `pnpm test:browser:integration` is the slower automatic browser integration lane. Run it when touching remote player state, debug camera controls, resize/backing-buffer logic, or chunk-interest movement.
+- `pnpm probe:browser -- test/browser/probes/<name>.probe.ts` is the screenshot lane for human visual inspection. Run the smallest relevant probe when a change affects rendered pixels, terrain appearance, surface materials, vegetation, or camera framing. Do not run the full probe suite unless the user asks or the change broadly affects visual output.
+- After wiring up a new draw path, run the smallest browser command that reaches the new path, capture a screenshot, read the image, and describe what you see. Does it look right? Are the shapes, colors, and positions what you expect?
 - If the output looks wrong (blank canvas, wrong color, garbage geometry, WebGPU validation errors in the console), stop and fix it before adding more code on top.
 - Unit tests (`pnpm test`) catch data-structure correctness. They do not catch GPU submission errors, wrong buffer layouts, or misconfigured pipelines. Actually looking at the rendered output is the only way to catch those.
 - **Always save debug, smoke, and probe screenshots to `/tmp`** (e.g. `/tmp/mclone-debug-freecam.png`). Never write screenshots into the repo, into `test-results/`, or anywhere that risks getting committed. `/tmp` is also clickable in the chat UI per the global file-path convention.

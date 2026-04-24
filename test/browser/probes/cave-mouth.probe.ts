@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "./remote-world-host-fixture";
+import { expect, test, type Page } from "../remote-world-host-fixture";
 
 const CAVE_MOUTH_SCREENSHOT_PATH = "/tmp/mclone-debug-cave-mouth.png";
 
