@@ -177,7 +177,7 @@ Do not replace this with a simplified flood fill. The exact local rules determin
 
 ## Current Mclone Context
 
-Today the repo has pieces of the data path but not live liquid simulation:
+The repo now has the first live water simulation path wired through the authoritative generated-world host:
 
 | TS source | Current role |
 |---|---|
@@ -190,13 +190,16 @@ Today the repo has pieces of the data path but not live liquid simulation:
 | `src/world/level/server-tick-list.ts` | vanilla-shaped due tick queue used by simulation tests |
 | `src/world/level/tick-access.ts` | shared scheduled tick interface |
 | `src/world/level/static-render-level.ts` | generation/render level records block/liquid ticks into chunks |
+| `src/runtime/host/liquid-simulation-level.ts` | live host adapter that gives fluid ticks safe loaded-chunk block access plus neighbor-update scheduling |
+| `src/runtime/host/generated-world-host.ts` | owns host game time, liquid tick queue hydration/execution, dirty chunk snapshot publication, and pending-tick persistence |
 | `src/world/level/chunk-snapshot.ts` | snapshots already carry `blockTicks` and `liquidTicks` |
 | `src/worldgen/levelgen/feature/spring-feature.ts` | places source water and records a delay-0 liquid tick |
 | `src/worldgen/carver/underwater-cave-world-carver.ts` | records underwater liquid tick consequences |
 | `src/oracle/integration/liquid-fixture.ts` | Liquid0 bounded fixture builder, persisted `LiquidTicks` decoder, and comparison helpers |
 | `test/fixtures/liquid/water-slope-10-ticks.json` | first committed official-server dynamic water oracle |
+| `test/runtime/generated-world-host-liquid.test.ts` | host-level hydration/execution/persistence coverage for pending liquid ticks |
 
-That explains the current visible hill-water gap: the simulation core can now produce non-source water levels in a controlled test level, but the authoritative runtime does not yet hydrate and execute generation-created `liquidTicks`.
+Generation-created and saved `liquidTicks` are promoted into the host queue when loaded chunks are snapshotted or ticked. Live water mutations dirty the owning chunk and are currently published as replacement `chunk_snapshot` messages, matching the existing protocol surface. A future protocol slice can replace that coarse update with granular block deltas without changing the simulation ownership.
 
 ## Mclone Architecture
 
@@ -238,9 +241,9 @@ Chunk records need both:
 - block states, including `minecraft:water[level=...]`
 - pending scheduled liquid ticks, including position, target fluid, delay, and eventually priority
 
-Current snapshots already carry `liquidTicks`, but `ScheduledTickSnapshot` lacks priority and the runtime does not yet execute them. A later liquid slice should decide whether to extend the logical tick record with priority immediately or keep default priority until block systems need more.
+Current snapshots already carry `liquidTicks`, and host snapshots merge pending queue entries back into chunk records with delays relative to the current host game time. `ScheduledTickSnapshot` still lacks priority; a later liquid/block-physics slice should decide whether to extend the logical tick record with priority immediately or keep default priority until non-normal priorities are exercised.
 
-Chunk deltas should carry block mutations caused by liquid ticks. The client cache and render-world worker should treat these like any other authoritative block updates and rebuild affected sections/neighborhoods.
+Chunk deltas should eventually carry block mutations caused by liquid ticks. Until that protocol exists, Liquid2 republishes dirty chunks as whole `chunk_snapshot` messages; the client cache and render-world worker already treat those like normal authoritative chunk updates and rebuild affected sections/neighborhoods.
 
 ## Verification
 
@@ -291,8 +294,8 @@ Save screenshots to `/tmp` per project policy and inspect them before moving on.
 
 1. `Liquid0`: oracle foundation for dynamic liquid scenarios. **Done** for the first water-slope official-server fixture.
 2. `Liquid1`: direct water simulation foundation in TS, using Liquid0 fixtures. **Done** for the test-local water-slope path.
-3. `Liquid2`: authoritative host integration and chunk-delta publication.
-4. `Liquid3`: lava and waterlogged follow-through, if not included earlier.
+3. `Liquid2`: authoritative host integration and dirty-chunk publication. **Done** for host queue hydration/execution, pending-tick persistence, and coarse dirty chunk snapshots.
+4. `Liquid3`: broaden verification and parity surface: browser visual probe for the hill/spring case, cross-chunk and source-regeneration oracle fixtures, then granular block-delta protocol or lava/waterlogged follow-through depending on the failure found first.
 5. Later: interaction with block entities, entity physics, boats, particles/sounds, and visual polish.
 
 Do not include disabled Caves & Cliffs Part 1 aquifer work in this liquid track. The 1.17.1 vanilla overworld target has aquifers disabled, per `AGENTS.md`.

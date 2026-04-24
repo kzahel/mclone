@@ -95,7 +95,8 @@ Liquids are authoritative simulation data and renderer input. Use [`../liquids.m
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
 | [`Liquid0-liquid-oracle-foundation.md`](Liquid0-liquid-oracle-foundation.md) | scripted official-server liquid scenarios, bounded region fixtures preserving water `level`, pending `LiquidTicks` extraction, fixture comparison helpers | unit + server oracle | **done** — water-slope official-server fixture and reusable bounded comparison helpers are committed |
-| [`Liquid1-liquid-simulation-foundation.md`](Liquid1-liquid-simulation-foundation.md) | `FluidState`, `FlowingFluid`, `WaterFluid`, `LiquidBlock` level mapping, vanilla-shaped liquid tick queue, first fixture comparison | unit + server oracle | **done** — test-local water simulation matches the Liquid0 water-slope fixture exactly; host integration is deferred to Liquid2 |
+| [`Liquid1-liquid-simulation-foundation.md`](Liquid1-liquid-simulation-foundation.md) | `FluidState`, `FlowingFluid`, `WaterFluid`, `LiquidBlock` level mapping, vanilla-shaped liquid tick queue, first fixture comparison | unit + server oracle | **done** — test-local water simulation matches the Liquid0 water-slope fixture exactly |
+| [`Liquid2-authoritative-host-integration.md`](Liquid2-authoritative-host-integration.md) | host-owned liquid tick queue, chunk tick hydration, runtime water execution, dirty chunk snapshot publication, pending tick persistence | runtime + unit | **done** — generated/stored pending liquid ticks now execute through the authoritative host and republish dirty chunks through the existing snapshot protocol |
 
 ## Renderer oracle approach
 

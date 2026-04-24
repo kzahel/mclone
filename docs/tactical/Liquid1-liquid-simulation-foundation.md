@@ -193,6 +193,6 @@ The probe should frame the current hill/spring case or a dedicated debug water s
 
 ## Follow-Up
 
-`Liquid2`: wire liquid ticks fully into the authoritative host lifecycle if Liquid1 stops at simulation tests. This includes hydrating snapshot `liquidTicks`, executing due ticks during host ticks, publishing chunk deltas, saving remaining pending ticks, and validating the visible generated-world hill-water case.
+`Liquid2`: done in [`Liquid2-authoritative-host-integration.md`](Liquid2-authoritative-host-integration.md). Host chunks now hydrate pending `liquidTicks`, execute due water ticks, republish dirty chunks through the existing snapshot protocol, and persist remaining pending ticks.
 
-`Liquid3`: broaden from water foundation into lava, waterlogging, and block-family follow-through.
+`Liquid3`: broaden verification and parity surface before adding more fluid families: browser liquid probe, cross-chunk/source-regeneration oracles, then lava, waterlogging, and block-family follow-through.

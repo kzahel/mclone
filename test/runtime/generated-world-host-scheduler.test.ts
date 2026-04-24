@@ -40,12 +40,13 @@ function chunkSnapshots(messages: readonly WorldHostMessage[]): ChunkSnapshotMes
 
 async function drainChunkSnapshots(host: GeneratedWorldHost, expectedCount: number): Promise<ChunkSnapshotMessage[]> {
   const snapshots: ChunkSnapshotMessage[] = [];
-  for (let attempt = 0; attempt < 200; attempt++) {
-    await sleep();
+  const deadline = Date.now() + COOPERATIVE_CHUNK_LIGHTING_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(10);
     const messages = await host.pollUpdates({ type: "poll_world_updates" });
     snapshots.push(...chunkSnapshots(messages));
     if (snapshots.length >= expectedCount) {
-      return snapshots;
+      return snapshots.slice(0, expectedCount);
     }
   }
 

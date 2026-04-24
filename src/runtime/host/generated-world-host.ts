@@ -7,6 +7,7 @@ import {
   buildChunkSnapshot,
   createBlockStateResolver,
   hydrateChunkFromSnapshot,
+  type ChunkSnapshot,
   type ChunkLightSectionSnapshot,
   type ChunkLightSnapshot,
 } from "../../world/level/chunk-snapshot";
@@ -20,6 +21,15 @@ import type { BlockGetter } from "../../world/level/block-getter";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import { LightLayer } from "../../world/level/light-layer";
 import { LevelLightEngine } from "../../world/level/lighting/level-light-engine";
+import type { Fluid } from "../../world/level/material/fluid";
+import { Fluids } from "../../world/level/material/fluids";
+import {
+  createScheduledTickSnapshot,
+  resolveFluidTickTarget,
+  serializeFluidTickTarget,
+  type ScheduledTickSnapshot,
+} from "../../world/level/scheduled-tick";
+import { ServerTickList, type TickNextTickData } from "../../world/level/server-tick-list";
 import type { WorldHost } from "../protocol/world-host";
 import { drainWorldHostMessages } from "../protocol/world-message-queue";
 import type {
@@ -46,6 +56,7 @@ import {
   type WorldStorage,
   type WorldStorageSession,
 } from "../storage/world-storage";
+import { LiquidSimulationLevel } from "./liquid-simulation-level";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -88,6 +99,8 @@ export interface GeneratedWorldHostOptions {
   readonly blockStateIds: BlockStateIdMap;
   readonly lightingMode?: GeneratedWorldLightingMode;
   readonly chunkViewScheduling?: "synchronous" | "cooperative";
+  readonly worldTickIntervalMs?: number;
+  readonly nowMs?: () => number;
   readonly mutateWorld?: (level: WorldGenLevel) => void;
   readonly worldStorage?: WorldStorage;
 }
@@ -171,6 +184,9 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly generator;
   private readonly level;
   private readonly lightEngine: LevelLightEngine | undefined;
+  private readonly liquidLevel: LiquidSimulationLevel;
+  private readonly liquidTicks: ServerTickList<Fluid>;
+  private readonly nowMs: () => number;
   private readonly resolveBlockState;
   private storageSession: WorldStorageSession | undefined;
   private worldOpened: WorldOpenedMessage | undefined;
@@ -179,14 +195,19 @@ export class GeneratedWorldHost implements WorldHost {
   private playerInput: SetPlayerInputRequest["input"] | undefined;
   private currentChunkView: SetChunkViewRequest | undefined;
   private pendingMessages: WorldHostMessage[] = [];
+  private gameTime = 0;
+  private lastWorldTickAtMs: number;
   private lastPlayerTickAtMs = Date.now();
   private playerAnchoredToChunkView = false;
   private readonly publishedChunkSnapshots = new Set<string>();
   private readonly lightInitializedChunks = new Set<string>();
   private readonly lightCorrectChunks = new Set<string>();
+  private readonly dirtyLiquidChunks = new Set<string>();
   private opened = false;
 
   public constructor(private readonly options: GeneratedWorldHostOptions) {
+    this.nowMs = options.nowMs ?? (() => Date.now());
+    this.lastWorldTickAtMs = this.nowMs();
     this.biomeSource = new OverworldBiomeSource(options.seed);
     this.generator = new NoiseBasedChunkGenerator(this.biomeSource, options.seed);
     this.resolveBlockState = createBlockStateResolver(options.airState);
@@ -200,6 +221,18 @@ export class GeneratedWorldHost implements WorldHost {
     this.lightEngine = options.lightingMode === "none"
       ? undefined
       : new LevelLightEngine(new GeneratedWorldLightChunkGetter(this.level), true, true);
+    this.liquidTicks = new ServerTickList<Fluid>(
+      (fluid) => fluid === Fluids.EMPTY,
+      () => this.gameTime,
+      (tick) => this.tickLiquid(tick),
+      (pos) => this.isPositionTicking(pos),
+    );
+    this.liquidLevel = new LiquidSimulationLevel({
+      level: this.level,
+      airState: options.airState,
+      liquidTicks: this.liquidTicks,
+      onBlockChanged: (pos) => this.markLiquidBlockChanged(pos),
+    });
   }
 
   public async openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
@@ -243,6 +276,7 @@ export class GeneratedWorldHost implements WorldHost {
 
     this.ensureLocalSessionState();
     this.tickPlayerLoop();
+    await this.tickWorldLoop();
     if (this.options.chunkViewScheduling === "cooperative") {
       return this.setChunkViewCooperative(request);
     }
@@ -274,7 +308,7 @@ export class GeneratedWorldHost implements WorldHost {
       return messages;
     }
 
-    this.options.mutateWorld?.(this.level);
+    this.options.mutateWorld?.(this.liquidLevel);
 
     const loadedAfter = this.level.getLoadedChunks();
     const loadedAfterKeys = new Set(loadedAfter.map((chunk) => chunkKey(chunk.chunkX, chunk.chunkZ)));
@@ -287,6 +321,7 @@ export class GeneratedWorldHost implements WorldHost {
       }
 
       await this.storageSession?.chunks.evictChunk(chunk.chunkX, chunk.chunkZ);
+      this.publishedChunkSnapshots.delete(key);
       this.discardChunkLighting(chunk.chunkX, chunk.chunkZ);
       messages.push({
         type: "chunk_unload",
@@ -300,6 +335,7 @@ export class GeneratedWorldHost implements WorldHost {
         type: "chunk_snapshot",
         snapshot: this.buildPackedChunkSnapshot(chunk),
       });
+      this.markChunkSnapshotPublished(chunk.chunkX, chunk.chunkZ);
     }
 
     return messages;
@@ -380,6 +416,7 @@ export class GeneratedWorldHost implements WorldHost {
 
     this.ensureLocalSessionState();
     this.tickPlayerLoop();
+    await this.tickWorldLoop();
     this.playerInput = request.input;
     this.updateSessionState();
     return [this.createSessionStateMessage()];
@@ -392,6 +429,11 @@ export class GeneratedWorldHost implements WorldHost {
 
     this.ensureLocalSessionState();
     this.tickPlayerLoop();
+    if (this.pendingMessages.length > 0) {
+      return this.drainPendingMessages(request.maxMessages);
+    }
+
+    await this.tickWorldLoop();
     return this.drainPendingMessages(request.maxMessages);
   }
 
@@ -511,7 +553,7 @@ export class GeneratedWorldHost implements WorldHost {
         continue;
       }
 
-      this.options.mutateWorld?.(this.level);
+      this.options.mutateWorld?.(this.liquidLevel);
       await yieldStep();
       this.ensureLightingForLoadedChunks(this.level.getLoadedChunks());
       await yieldStep();
@@ -525,7 +567,7 @@ export class GeneratedWorldHost implements WorldHost {
         type: "chunk_snapshot",
         snapshot,
       });
-      this.publishedChunkSnapshots.add(key);
+      this.markChunkSnapshotPublished(job.chunkX, job.chunkZ);
     }
   }
 
@@ -539,6 +581,136 @@ export class GeneratedWorldHost implements WorldHost {
       && Math.abs(chunkZ - this.currentChunkView.centerChunkZ) <= viewRadius;
   }
 
+  private isPositionTicking(pos: BlockPos): boolean {
+    const chunkX = SectionPos.blockToSectionCoord(pos.getX());
+    const chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
+    const key = chunkKey(chunkX, chunkZ);
+    return this.publishedChunkSnapshots.has(key)
+      && this.isChunkInCurrentView(chunkX, chunkZ)
+      && this.level.getChunk(chunkX, chunkZ, false) !== null
+      && this.level.isChunkDecorated(chunkX, chunkZ);
+  }
+
+  private markChunkSnapshotPublished(chunkX: number, chunkZ: number): void {
+    const key = chunkKey(chunkX, chunkZ);
+    this.publishedChunkSnapshots.add(key);
+    this.dirtyLiquidChunks.delete(key);
+  }
+
+  private markLiquidBlockChanged(pos: BlockPos): void {
+    this.dirtyLiquidChunks.add(chunkKey(
+      SectionPos.blockToSectionCoord(pos.getX()),
+      SectionPos.blockToSectionCoord(pos.getZ()),
+    ));
+  }
+
+  private tickLiquid(tick: TickNextTickData<Fluid>): void {
+    const fluidState = this.liquidLevel.getFluidState(tick.pos);
+    if (fluidState.getType() === tick.getType()) {
+      fluidState.tick(this.liquidLevel, tick.pos);
+    }
+  }
+
+  private async tickWorldLoop(nowMs = this.nowMs()): Promise<void> {
+    const tickIntervalMs = Math.max(1, this.options.worldTickIntervalMs ?? PLAYER_TICK_INTERVAL_MS);
+    const dueTicks = Math.floor((nowMs - this.lastWorldTickAtMs) / tickIntervalMs);
+    if (dueTicks <= 0) {
+      return;
+    }
+    if (this.publishedChunkSnapshots.size === 0) {
+      this.lastWorldTickAtMs += dueTicks * tickIntervalMs;
+      return;
+    }
+
+    this.hydratePublishedLiquidTicks();
+    for (let tickIndex = 0; tickIndex < dueTicks; tickIndex++) {
+      this.gameTime++;
+      this.liquidTicks.tick();
+    }
+    this.hydratePublishedLiquidTicks();
+    this.lastWorldTickAtMs += dueTicks * tickIntervalMs;
+    await this.flushDirtyLiquidChunks();
+  }
+
+  private hydratePublishedLiquidTicks(): void {
+    for (const key of this.publishedChunkSnapshots) {
+      const [chunkXRaw, chunkZRaw] = key.split(",");
+      const chunk = this.level.getChunk(Number(chunkXRaw), Number(chunkZRaw), false);
+      if (chunk === null) {
+        continue;
+      }
+
+      this.hydrateLiquidTicksFromChunk(chunk);
+    }
+  }
+
+  private hydrateLiquidTicksFromChunk(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): void {
+    for (const tick of chunk.consumeScheduledLiquidTicks()) {
+      this.liquidTicks.scheduleTick(
+        new BlockPos(tick.x, tick.y, tick.z),
+        resolveFluidTickTarget(tick.target),
+        Math.max(0, tick.delay),
+      );
+    }
+  }
+
+  private withPendingLiquidTicks(
+    snapshot: ChunkSnapshot,
+    chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number],
+  ): ChunkSnapshot {
+    const pendingLiquidTicks = this.collectPendingLiquidTicksForChunk(chunk);
+    if (pendingLiquidTicks.length === 0) {
+      return snapshot;
+    }
+
+    return {
+      ...snapshot,
+      liquidTicks: [...snapshot.liquidTicks, ...pendingLiquidTicks],
+    };
+  }
+
+  private collectPendingLiquidTicksForChunk(
+    chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number],
+  ): ScheduledTickSnapshot[] {
+    return this.liquidTicks.getPendingTicks()
+      .filter((tick) => (
+        SectionPos.blockToSectionCoord(tick.pos.getX()) === chunk.chunkX
+        && SectionPos.blockToSectionCoord(tick.pos.getZ()) === chunk.chunkZ
+      ))
+      .map((tick) => createScheduledTickSnapshot(
+        tick.pos,
+        serializeFluidTickTarget(tick.getType()),
+        Math.max(0, tick.triggerTick - this.gameTime),
+      ));
+  }
+
+  private async flushDirtyLiquidChunks(): Promise<void> {
+    const dirtyKeys = [...this.dirtyLiquidChunks].sort();
+    this.dirtyLiquidChunks.clear();
+
+    for (const key of dirtyKeys) {
+      const [chunkXRaw, chunkZRaw] = key.split(",");
+      const chunkX = Number(chunkXRaw);
+      const chunkZ = Number(chunkZRaw);
+      const chunk = this.level.getChunk(chunkX, chunkZ, false);
+      if (chunk === null) {
+        continue;
+      }
+
+      this.discardChunkLighting(chunkX, chunkZ);
+      const snapshot = this.buildPackedChunkSnapshot(chunk);
+      await this.persistPackedChunkSnapshot(snapshot);
+      if (!this.isChunkInCurrentView(chunkX, chunkZ) || !this.publishedChunkSnapshots.has(key)) {
+        continue;
+      }
+
+      this.pendingMessages.push({
+        type: "chunk_snapshot",
+        snapshot,
+      });
+    }
+  }
+
   private queueStorageSideEffect(task: Promise<void> | undefined): void {
     if (task === undefined) {
       return;
@@ -550,18 +722,22 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private buildPackedChunkSnapshot(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): PackedChunkSnapshot {
+    this.hydrateLiquidTicksFromChunk(chunk);
     this.ensureLightingForLoadedChunks([chunk]);
-    const snapshot = buildChunkSnapshot(
-      chunk,
-      new ChunkBiomeContainer(
+    const snapshot = this.withPendingLiquidTicks(
+      buildChunkSnapshot(
+        chunk,
+        new ChunkBiomeContainer(
+          this.level.getMinBuildHeight(),
+          this.level.getHeight(),
+          chunk.chunkX,
+          chunk.chunkZ,
+          this.biomeSource,
+        ).writeBiomes(),
         this.level.getMinBuildHeight(),
         this.level.getHeight(),
-        chunk.chunkX,
-        chunk.chunkZ,
-        this.biomeSource,
-      ).writeBiomes(),
-      this.level.getMinBuildHeight(),
-      this.level.getHeight(),
+      ),
+      chunk,
     );
     const light = this.buildChunkLightSnapshot(chunk);
 

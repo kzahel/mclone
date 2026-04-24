@@ -90,4 +90,10 @@ export class LevelChunk {
   public getScheduledLiquidTicks(): readonly ScheduledTickSnapshot[] {
     return this.liquidTicks;
   }
+
+  public consumeScheduledLiquidTicks(): readonly ScheduledTickSnapshot[] {
+    const ticks = this.liquidTicks.map(cloneScheduledTickSnapshot);
+    this.liquidTicks.length = 0;
+    return ticks;
+  }
 }
