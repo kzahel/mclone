@@ -200,6 +200,10 @@ function fillBox(level: StaticRenderLevel, from: BlockPos, to: BlockPos, state: 
   }
 }
 
+function firstBlockVertexColor(buffer: Uint8Array): readonly [number, number, number, number] {
+  return [buffer[12]!, buffer[13]!, buffer[14]!, buffer[15]!];
+}
+
 class RecordingRenderWorldMeshBuildClient implements RenderWorldMeshBuildClient {
   public readonly concurrency = 1;
   public readonly requests: BuildRenderSectionMeshRequest[] = [];
@@ -323,6 +327,28 @@ describe("Chunk render infrastructure", () => {
     const compiled = renderChunk!.getCompiledChunk();
     expect(compiled.hasBlocks.has(RenderType.cutout())).toBe(true);
     expect(compiled.hasBlocks.has(RenderType.translucent())).toBe(true);
+  });
+
+  test("fluid mesh vertices preserve Java float colors as byte colors", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = new StaticRenderLevel(blocks.airState);
+    level.setBlock(new BlockPos(0, 0, 0), blocks.blockStateById[ChunkBlockId.WATER]!);
+    level.setBlock(new BlockPos(2, 0, 0), blocks.blockStateById[ChunkBlockId.LAVA]!);
+
+    const origin = new BlockPos(0, 0, 0);
+    const region = RenderChunkRegion.createIfNotEmpty(level, origin.offset(-1, -1, -1), origin.offset(16, 16, 16), 1);
+    const buffers = new ChunkBufferBuilderPack();
+    const build = buildSectionMesh(origin, new Vec3(8, 8, 0), region, createDispatcher(), buffers);
+
+    expect(build.hasBlocks.has(RenderType.translucent())).toBe(true);
+    expect(build.hasBlocks.has(RenderType.solid())).toBe(true);
+
+    const water = buffers.builder(RenderType.translucent()).popNextBuffer();
+    const lava = buffers.builder(RenderType.solid()).popNextBuffer();
+    expect(water.drawState.vertexCount()).toBeGreaterThan(0);
+    expect(lava.drawState.vertexCount()).toBeGreaterThan(0);
+    expect(firstBlockVertexColor(water.buffer)).toEqual([255, 255, 255, 255]);
+    expect(firstBlockVertexColor(lava.buffer)).toEqual([255, 255, 255, 255]);
   });
 
   test("worker-facing section mesh payloads round-trip chunk snapshots into uploadable layer data", () => {

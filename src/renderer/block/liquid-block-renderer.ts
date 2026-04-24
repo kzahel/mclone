@@ -261,7 +261,8 @@ export class LiquidBlockRenderer {
     v: number,
     light: number,
   ): void {
-    consumer.vertex(x, y, z).color(red, green, blue, 1.0).uv(u, v).uv2(light).normal(0.0, 1.0, 0.0).endVertex();
+    // TypeScript: explicit helper for Java's VertexConsumer.color(float, float, float, float) overload.
+    consumer.vertex(x, y, z).colorFloat(red, green, blue, 1.0).uv(u, v).uv2(light).normal(0.0, 1.0, 0.0).endVertex();
   }
 
   private getLightColor(level: BlockAndTintGetter, pos: BlockPos): number {
