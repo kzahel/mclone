@@ -31,11 +31,14 @@ Runs automatically at the end of `decompile-mc.sh` (client builds), or standalon
 ./scripts/extract-assets.sh 1.17.1
 ./scripts/extract-assets.sh 1.17.1 --force         # re-extract
 ./scripts/extract-assets.sh 1.17.1 --out /tmp/mc   # alternate output dir
+pnpm assets:pack                                  # build extracted.zip + manifest for browser runtime
 ```
 
 Output lands at `reference/minecraft-<version>/extracted/`. The script is idempotent — it skips if `extracted/pack.mcmeta` already exists.
 
 Expected output size: ~30MB (mostly textures and structure NBTs). Full `assets/*` + `data/*` dump would be ~40MB; the filter skips the categories we don't need.
+
+For browser deployment, the loose extracted tree is packed into `reference/minecraft-1.17.1/extracted.zip` with a sibling `extracted.zip.json` manifest containing size, file count, and SHA-256. The runtime loads and verifies the zip once, then resolves vanilla resource paths out of the in-memory pack. This avoids issuing thousands of small HTTP requests for blockstate/model/texture metadata.
 
 ## Where to put extracted assets
 

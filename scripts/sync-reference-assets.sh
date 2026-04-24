@@ -1,50 +1,38 @@
 #!/usr/bin/env bash
-# One-time (or rare) upload of reference/minecraft-1.17.1/extracted/ into R2.
-# Slow: ~5s per file via wrangler, run in parallel (~15 min for a full first sync).
-# Only re-run if the extracted asset tree changes.
+# Build and upload the zipped reference asset pack used by the browser runtime.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUCKET="mclone"
-ASSET_DIR="$PROJECT_DIR/reference/minecraft-1.17.1/extracted"
-PARALLEL="${PARALLEL:-20}"
+REFERENCE_DIR="$PROJECT_DIR/reference/minecraft-1.17.1"
+ASSET_PACK_ZIP="$REFERENCE_DIR/extracted.zip"
+ASSET_PACK_MANIFEST="$REFERENCE_DIR/extracted.zip.json"
 WRANGLER="npx --prefix $PROJECT_DIR wrangler"
-
-if [ ! -d "$ASSET_DIR" ]; then
-  echo "Error: $ASSET_DIR not found. Run scripts/extract-assets.sh first." >&2
-  exit 1
-fi
 
 content_type() {
   case "$1" in
     *.json) echo "application/json" ;;
-    *.png)  echo "image/png" ;;
-    *.mcmeta) echo "application/json" ;;
-    *.ogg)  echo "audio/ogg" ;;
-    *.txt)  echo "text/plain" ;;
-    *.nbt)  echo "application/octet-stream" ;;
+    *.zip)  echo "application/zip" ;;
     *)      echo "application/octet-stream" ;;
   esac
 }
-export -f content_type
-export WRANGLER BUCKET ASSET_DIR
 
 upload_one() {
-  local f="$1"
-  # Key is path relative to $PROJECT_DIR so it mirrors /reference/minecraft-1.17.1/extracted/...
-  local key="reference/minecraft-1.17.1/extracted/${f#$ASSET_DIR/}"
+  local file="$1"
+  local key="$2"
   local ct
-  ct=$(content_type "$f")
-  $WRANGLER r2 object put "$BUCKET/$key" --file="$f" --content-type="$ct" --remote >/dev/null
-  echo "  $key"
+  ct=$(content_type "$file")
+  echo "  $key ($ct)"
+  $WRANGLER r2 object put "$BUCKET/$key" --file="$file" --content-type="$ct" --remote >/dev/null
 }
-export -f upload_one
 
-total=$(find "$ASSET_DIR" -type f | wc -l | tr -d ' ')
-echo "==> Uploading $total files from $ASSET_DIR to R2 bucket '$BUCKET' ($PARALLEL parallel)"
-find "$ASSET_DIR" -type f -print0 \
-  | xargs -0 -n 1 -P "$PARALLEL" bash -c 'upload_one "$0"'
+cd "$PROJECT_DIR"
+pnpm assets:pack
+
+echo "==> Uploading reference asset pack to R2 bucket '$BUCKET'"
+upload_one "$ASSET_PACK_ZIP" "reference/minecraft-1.17.1/extracted.zip"
+upload_one "$ASSET_PACK_MANIFEST" "reference/minecraft-1.17.1/extracted.zip.json"
 
 echo ""
-echo "Reference asset sync complete."
+echo "Reference asset pack sync complete."

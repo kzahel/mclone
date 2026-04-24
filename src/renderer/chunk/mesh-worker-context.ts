@@ -7,6 +7,8 @@ import type { BlockStateIdMap } from "../../world/level/block/state/block-state-
 import { FoliageColor } from "../../world/level/foliage-color";
 import { registerGeneratedRenderBlocks } from "../../world/level/generated-render-blocks";
 import { GrassColor } from "../../world/level/grass-color";
+import { getBrowserAssetPack } from "../assets/asset-pack";
+import type { LoadingProgressSink } from "../loading-progress";
 import { BlockColors } from "../block/block-colors";
 import { BlockRenderDispatcher } from "../block/block-render-dispatcher";
 import { BlockModelRepository } from "../model/block-model-repository";
@@ -58,22 +60,45 @@ async function initializeBiomeColorTables(atlasSource: BrowserTextureAtlasSource
   FoliageColor.init(foliagePixels);
 }
 
-export async function createBrowserChunkMeshContext(request: BrowserChunkMeshContextRequest): Promise<BrowserChunkMeshContext> {
+export async function createBrowserChunkMeshContext(
+  request: BrowserChunkMeshContextRequest,
+  onProgress?: LoadingProgressSink,
+): Promise<BrowserChunkMeshContext> {
   const generatedBlocks = registerGeneratedRenderBlocks();
-  const atlasSource = new BrowserTextureAtlasSource();
+  onProgress?.({ stage: "Loading worker asset pack", fraction: 0 });
+  const assetPack = await getBrowserAssetPack((progress) => onProgress?.({
+    ...progress,
+    stage: `Worker: ${progress.stage}`,
+    fraction: progress.fraction === undefined ? undefined : progress.fraction * 0.2,
+  }));
+  onProgress?.({ stage: "Worker: loading biome colors", fraction: 0.2 });
+  const atlasSource = new BrowserTextureAtlasSource(assetPack);
   await initializeBiomeColorTables(atlasSource);
 
+  onProgress?.({ stage: "Worker: preparing texture atlas", fraction: 0.25 });
   const atlas = new TextureAtlas(TextureAtlas.LOCATION_BLOCKS);
   const preparations = await atlas.prepareToStitch(atlasSource, generatedBlocks.spriteLocations, DEFAULT_BLOCK_ATLAS_MIP_LEVEL);
   const getSprite = createSpriteLookup(preparations.regions);
 
-  const modelSource = await preloadBlockModelSource(generatedBlocks.blockLocations);
+  onProgress?.({ stage: "Worker: loading block models", fraction: 0.45 });
+  const modelSource = await preloadBlockModelSource(assetPack, generatedBlocks.blockLocations, (progress) => {
+    const fraction = progress.fraction ?? (progress.current !== undefined && progress.total !== undefined && progress.total > 0
+      ? progress.current / progress.total
+      : 0);
+    onProgress?.({
+      ...progress,
+      stage: `Worker: ${progress.stage}`,
+      fraction: 0.45 + (Math.max(0, Math.min(1, fraction)) * 0.25),
+    });
+  });
   const repository = new BlockModelRepository(modelSource);
+  onProgress?.({ stage: "Worker: baking block models", fraction: 0.75 });
   const bakery = new ModelBakery(repository, (material) => getSprite(material.texture()));
   const modelManager = new ModelManager(bakery.getMissingBakedModel());
   bakery.bakeTopLevelBlockModels(modelManager);
   const blockModelShaper = new BlockModelShaper(modelManager);
   blockModelShaper.rebuildCache();
+  onProgress?.({ stage: "Worker: renderer model cache ready", fraction: 1 });
 
   return {
     seed: request.seed,

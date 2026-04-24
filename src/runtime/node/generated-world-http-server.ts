@@ -226,6 +226,7 @@ function applyAuthoritativeMessages(world: SharedWorldRecord, messages: readonly
       case "world_opened":
       case "session_state":
       case "player_state":
+      case "world_progress":
         break;
       case "chunk_snapshot":
         world.loadedSnapshots.set(chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ), message.snapshot);
@@ -772,6 +773,12 @@ export class GeneratedWorldRemoteService {
         case "world_opened":
         case "session_state":
         case "player_state":
+          break;
+        case "world_progress":
+          for (const session of this.getWorldSessions(world)) {
+            session.pendingMessages = session.pendingMessages.filter((pending) => pending.type !== "world_progress");
+            session.pendingMessages.push(message);
+          }
           break;
         case "chunk_snapshot": {
           const key = chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ);

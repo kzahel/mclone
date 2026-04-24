@@ -1,4 +1,6 @@
 import { ResourceLocation } from "../../core/resource-location";
+import type { LoadingProgressSink } from "../loading-progress";
+import type { AssetPack } from "../assets/asset-pack";
 import type { BlockModelSource } from "./block-model-repository";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -53,13 +55,13 @@ function getParentLocationFromModelJson(json: string): ResourceLocation | undefi
   return new ResourceLocation(parsed.parent);
 }
 
-async function fetchJsonText(url: string): Promise<string> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Unable to load model asset ${url}: ${response.status} ${response.statusText}`);
+async function readJsonText(assetPack: AssetPack, path: string): Promise<string> {
+  const text = await assetPack.readText(path);
+  if (text === undefined) {
+    throw new Error(`Unable to load model asset ${path}`);
   }
 
-  return response.text();
+  return text;
 }
 
 export class PreloadedBlockModelSource implements BlockModelSource {
@@ -78,13 +80,16 @@ export class PreloadedBlockModelSource implements BlockModelSource {
 }
 
 export async function preloadBlockModelSource(
+  assetPack: AssetPack,
   blockLocations: readonly ResourceLocation[],
-  assetRoot = "/reference/minecraft-1.17.1/extracted/assets",
+  onProgress?: LoadingProgressSink,
 ): Promise<PreloadedBlockModelSource> {
   const modelJsonByLocation = new Map<string, string>();
   const blockStateJsonByLocation = new Map<string, string>();
   const queuedModels = new Set<string>();
   const modelQueue: ResourceLocation[] = [];
+  let loadedBlockStateCount = 0;
+  let loadedModelCount = 0;
 
   const enqueueModel = (location: ResourceLocation): void => {
     if (location.getPath().startsWith("builtin/")) {
@@ -100,24 +105,46 @@ export async function preloadBlockModelSource(
     modelQueue.push(location);
   };
 
-  for (const blockLocation of blockLocations) {
-    const blockStateJson = await fetchJsonText(
-      `${assetRoot}/${blockLocation.getNamespace()}/blockstates/${blockLocation.getPath()}.json`,
-    );
-    blockStateJsonByLocation.set(blockLocation.toString(), blockStateJson);
-    for (const modelLocation of getModelLocationsFromBlockStateJson(blockStateJson)) {
-      enqueueModel(modelLocation);
-    }
-  }
+  await Promise.all(
+    blockLocations.map(async (blockLocation) => {
+      const blockStateJson = await readJsonText(
+        assetPack,
+        `assets/${blockLocation.getNamespace()}/blockstates/${blockLocation.getPath()}.json`,
+      );
+      blockStateJsonByLocation.set(blockLocation.toString(), blockStateJson);
+      loadedBlockStateCount++;
+      onProgress?.({
+        stage: "Loading blockstate JSON",
+        current: loadedBlockStateCount,
+        total: blockLocations.length,
+      });
+      for (const modelLocation of getModelLocationsFromBlockStateJson(blockStateJson)) {
+        enqueueModel(modelLocation);
+      }
+    }),
+  );
 
   while (modelQueue.length !== 0) {
-    const modelLocation = modelQueue.shift()!;
-    const modelJson = await fetchJsonText(`${assetRoot}/${modelLocation.getNamespace()}/models/${modelLocation.getPath()}.json`);
-    modelJsonByLocation.set(modelLocation.toString(), modelJson);
-    const parentLocation = getParentLocationFromModelJson(modelJson);
-    if (parentLocation !== undefined) {
-      enqueueModel(parentLocation);
-    }
+    const batch = modelQueue.splice(0);
+    await Promise.all(
+      batch.map(async (modelLocation) => {
+        const modelJson = await readJsonText(
+          assetPack,
+          `assets/${modelLocation.getNamespace()}/models/${modelLocation.getPath()}.json`,
+        );
+        modelJsonByLocation.set(modelLocation.toString(), modelJson);
+        loadedModelCount++;
+        onProgress?.({
+          stage: "Loading model JSON",
+          current: loadedModelCount,
+          total: loadedModelCount + modelQueue.length,
+        });
+        const parentLocation = getParentLocationFromModelJson(modelJson);
+        if (parentLocation !== undefined) {
+          enqueueModel(parentLocation);
+        }
+      }),
+    );
   }
 
   return new PreloadedBlockModelSource(modelJsonByLocation, blockStateJsonByLocation);

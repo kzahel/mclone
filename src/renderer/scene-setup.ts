@@ -1,6 +1,6 @@
 import { ResourceLocation } from "../core/resource-location";
 import { SectionPos } from "../core/section-pos";
-import type { OpenWorldPreset } from "../runtime/protocol/world-messages";
+import type { OpenWorldPreset, WorldProgressMessage } from "../runtime/protocol/world-messages";
 import type { WorldClient } from "../runtime/protocol/world-client";
 import type { WorldSaveMetadata } from "../runtime/storage/world-storage";
 import { RemoteWorldClient, RemoteWorldTransport } from "../runtime/transport/remote-world-transport";
@@ -13,21 +13,25 @@ import { createBlockStateResolver } from "../world/level/chunk-snapshot";
 import { registerGeneratedRenderBlocks } from "../world/level/generated-render-blocks";
 import { FoliageColor } from "../world/level/foliage-color";
 import { GrassColor } from "../world/level/grass-color";
+import { getBrowserAssetPack } from "./assets/asset-pack";
+import type { LoadingProgressSink } from "./loading-progress";
+import { scaleProgress } from "./loading-progress";
 import { BlockColors } from "./block/block-colors";
 import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
 import { ChunkRenderDispatcher } from "./chunk/chunk-render-dispatcher";
 import { createRenderWorldWorker, RenderWorldWorkerClient, RenderWorldWorkerUpdateSink } from "./chunk/render-world-worker-client";
 import { ChunkBufferBuilderPack } from "./chunk-buffer-builder-pack";
-import { BlockModelRepository } from "./model/block-model-repository";
 import { BlockModelShaper } from "./model/block-model-shaper";
-import { preloadBlockModelSource } from "./model/browser-block-model-source";
-import { ModelBakery } from "./model/model-bakery";
+import { BuiltInModel } from "./model/built-in-model";
+import { ItemOverrides } from "./model/item-overrides";
+import { ItemTransforms } from "./model/item-transforms";
 import { ModelManager } from "./model/model-manager";
 import { LevelRenderer, type LevelRenderFrame } from "./level-renderer";
 import { LightTexture } from "./light-texture";
 import { GameRenderer, type CameraState } from "./game-renderer";
 import { BrowserTextureAtlasSource } from "./texture/browser-native-image-loader";
 import { DEFAULT_BLOCK_ATLAS_MIP_LEVEL, TextureAtlas } from "./texture/texture-atlas";
+import { MissingTextureAtlasSprite } from "./texture/missing-texture-atlas-sprite";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
 import { type CompositeRenderType, RenderType } from "./render-type";
 import { ViewArea } from "./view-area";
@@ -58,6 +62,7 @@ export interface SceneInitOptions {
   readonly preset?: OpenWorldPreset;
   readonly skyColor?: Vec3;
   readonly clearColorScale?: number;
+  readonly onProgress?: LoadingProgressSink;
 }
 
 export interface RendererScene {
@@ -107,6 +112,7 @@ export interface StableSceneFrameOptions {
   readonly maxAttempts?: number;
   readonly stablePasses?: number;
   readonly pollIntervalMs?: number;
+  readonly onProgress?: LoadingProgressSink;
 }
 
 export type SceneInitResult =
@@ -138,6 +144,30 @@ interface TextureSamplerState {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
+  });
+}
+
+function worldProgressFraction(progress: WorldProgressMessage): number {
+  const phaseFraction = progress.total > 0 ? progress.current / progress.total : 0;
+  const clampedPhaseFraction = Math.max(0, Math.min(1, phaseFraction));
+  switch (progress.stage) {
+    case "Generating terrain chunks":
+      return clampedPhaseFraction / 3;
+    case "Decorating chunks":
+      return (1 + clampedPhaseFraction) / 3;
+    case "Publishing chunks":
+      return (2 + clampedPhaseFraction) / 3;
+    default:
+      return clampedPhaseFraction;
+  }
+}
+
+function reportWorldProgress(sink: LoadingProgressSink | undefined, progress: WorldProgressMessage): void {
+  sink?.({
+    stage: progress.stage,
+    current: progress.current,
+    total: progress.total,
+    fraction: 0.92 + (worldProgressFraction(progress) * 0.06),
   });
 }
 
@@ -204,13 +234,19 @@ function createWorldClient(
     return new RemoteWorldClient(
       new RemoteWorldTransport(options.remoteWorldHostUrl ?? "http://127.0.0.1:4173"),
       levelFactory,
+      {
+        worldProgressSink: (progress) => reportWorldProgress(options.onProgress, progress),
+      },
     );
   }
 
   return new TransportWorldClient(
     new WorkerWorldTransport(createGeneratedWorldWorker()),
     levelFactory,
-    { pollUpdateMaxMessages: 4 },
+    {
+      pollUpdateMaxMessages: 4,
+      worldProgressSink: (progress) => reportWorldProgress(options.onProgress, progress),
+    },
   );
 }
 
@@ -260,8 +296,13 @@ export function applyRenderWorldDirtySections(scene: RendererScene): number {
 export async function waitForLoadedChunkRing(
   scene: RendererScene,
   expectedLoadedChunkCount: number,
-  options: Pick<StableSceneFrameOptions, "maxAttempts" | "pollIntervalMs"> = {},
+  options: Pick<StableSceneFrameOptions, "maxAttempts" | "pollIntervalMs" | "onProgress"> = {},
 ): Promise<boolean> {
+  options.onProgress?.({
+    stage: "Loading terrain chunks",
+    current: getSceneLoadedChunkCount(scene),
+    total: expectedLoadedChunkCount,
+  });
   if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
     return true;
   }
@@ -273,7 +314,15 @@ export async function waitForLoadedChunkRing(
     if (await scene.worldClient.pollUpdates()) {
       applyRenderWorldDirtySections(scene);
     }
-    if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
+    const loadedChunkCount = getSceneLoadedChunkCount(scene);
+    if (loadedChunkCount > 0) {
+      options.onProgress?.({
+        stage: "Loading terrain chunks",
+        current: loadedChunkCount,
+        total: expectedLoadedChunkCount,
+      });
+    }
+    if (loadedChunkCount >= expectedLoadedChunkCount) {
       return true;
     }
   }
@@ -391,15 +440,30 @@ function getAtlasSampler(scene: RendererScene, renderType: CompositeRenderType):
   return getTextureSampler(scene, textureState);
 }
 
+function createFallbackBlockModelShaper(atlas: TextureAtlas): BlockModelShaper {
+  const missingModel = new BuiltInModel(
+    ItemTransforms.NO_TRANSFORMS,
+    ItemOverrides.EMPTY,
+    atlas.getSprite(MissingTextureAtlasSprite.getLocation()),
+    false,
+  );
+  const modelManager = new ModelManager(missingModel);
+  const blockModelShaper = new BlockModelShaper(modelManager);
+  blockModelShaper.rebuildCache();
+  return blockModelShaper;
+}
+
 export async function initializeRendererScene(
   canvas: HTMLCanvasElement,
   options: SceneInitOptions,
 ): Promise<SceneInitResult> {
   if (!navigator.gpu) return { ok: false, reason: "navigator.gpu missing (no WebGPU)" };
 
+  options.onProgress?.({ stage: "Requesting WebGPU adapter", fraction: 0.02 });
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) return { ok: false, reason: "requestAdapter returned null" };
 
+  options.onProgress?.({ stage: "Requesting WebGPU device", fraction: 0.04 });
   const device = await adapter.requestDevice();
   resizeCanvasToDisplaySize(canvas, device.limits.maxTextureDimension2D);
   const ctx = canvas.getContext("webgpu");
@@ -409,20 +473,19 @@ export async function initializeRendererScene(
   ctx.configure({ device, format, alphaMode: "opaque" });
 
   const generatedBlocks = registerGeneratedRenderBlocks();
-  const atlasSource = new BrowserTextureAtlasSource();
+  options.onProgress?.({ stage: "Loading asset pack", fraction: 0.05 });
+  const assetPack = await getBrowserAssetPack(scaleProgress(options.onProgress, 0.05, 0.22, "Loading asset pack"));
+  const atlasSource = new BrowserTextureAtlasSource(assetPack);
+  options.onProgress?.({ stage: "Loading biome color tables", fraction: 0.24 });
   await initializeBiomeColorTables(atlasSource);
+  options.onProgress?.({ stage: "Preparing texture atlas", fraction: 0.28 });
   const atlas = new TextureAtlas(SMOKE_ATLAS_LOCATION, device.limits.maxTextureDimension2D);
   const preparations = await atlas.prepareToStitch(atlasSource, generatedBlocks.spriteLocations, DEFAULT_BLOCK_ATLAS_MIP_LEVEL);
+  options.onProgress?.({ stage: "Uploading texture atlas", fraction: 0.4 });
   atlas.reload(device, preparations);
+  const blockModelShaper = createFallbackBlockModelShaper(atlas);
 
-  const modelSource = await preloadBlockModelSource(generatedBlocks.blockLocations);
-  const repository = new BlockModelRepository(modelSource);
-  const bakery = new ModelBakery(repository, (material) => atlas.getSprite(material.texture()));
-  const modelManager = new ModelManager(bakery.getMissingBakedModel());
-  bakery.bakeTopLevelBlockModels(modelManager);
-  const blockModelShaper = new BlockModelShaper(modelManager);
-  blockModelShaper.rebuildCache();
-
+  options.onProgress?.({ stage: "Opening world", fraction: 0.44 });
   const biomeSource = new OverworldBiomeSource(options.seed);
   const blockStateResolver = createBlockStateResolver(generatedBlocks.airState);
   const worldClient = createWorldClient(options, generatedBlocks.airState, biomeSource, blockStateResolver, generatedBlocks.blockStateIds);
@@ -433,13 +496,18 @@ export async function initializeRendererScene(
   });
   const compatibilityLevel = worldClient.getLevel();
 
-  const renderWorldWorker = new RenderWorldWorkerClient(createRenderWorldWorker());
+  options.onProgress?.({ stage: "Initializing render worker", fraction: 0.5 });
+  const renderWorldWorker = new RenderWorldWorkerClient(
+    createRenderWorldWorker(),
+    scaleProgress(options.onProgress, 0.5, 0.9, "Initializing render worker"),
+  );
   await renderWorldWorker.initialize({
     type: "initialize_render_world",
     seed: options.seed,
     minBuildHeight: worldOpened.minBuildHeight,
     height: worldOpened.height,
   });
+  options.onProgress?.({ stage: "Preparing renderer", fraction: 0.92 });
   const renderWorldUpdateSink = new RenderWorldWorkerUpdateSink(renderWorldWorker);
   worldClient.setRenderWorldUpdateSink(renderWorldUpdateSink);
 
@@ -481,6 +549,8 @@ export async function initializeRendererScene(
     minFilter: "linear",
     mipmapFilter: "nearest",
   });
+
+  options.onProgress?.({ stage: "Renderer ready", fraction: 1 });
 
   return {
     ok: true,

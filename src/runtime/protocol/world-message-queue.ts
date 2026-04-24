@@ -6,7 +6,7 @@ export interface DrainedWorldHostMessages {
 }
 
 function isBulkChunkMessage(message: WorldHostMessage): boolean {
-  return message.type === "chunk_snapshot" || message.type === "chunk_light_delta";
+  return message.type === "chunk_snapshot" || message.type === "chunk_light_delta" || message.type === "world_progress";
 }
 
 export function drainWorldHostMessages(

@@ -261,6 +261,9 @@ function expectWorldOpened(messages: readonly WorldHostMessage[]): WorldOpenedMe
       case "chunk_snapshot":
       case "chunk_light_delta":
       case "chunk_unload":
+      case "session_state":
+      case "player_state":
+      case "world_progress":
         break;
     }
   }
@@ -292,6 +295,9 @@ function summarizeChunkViewMessages(
       case "world_error":
         throw new Error(message.message);
       case "world_opened":
+      case "session_state":
+      case "player_state":
+      case "world_progress":
         break;
     }
   }

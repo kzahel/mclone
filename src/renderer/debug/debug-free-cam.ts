@@ -19,6 +19,8 @@ import {
   type RendererScene,
 } from "../scene-setup";
 import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "../browser-render-config";
+import type { LoadingProgress } from "../loading-progress";
+import { progressFraction } from "../loading-progress";
 import { advanceTextureAtlasAnimations } from "../texture/texture-atlas";
 import { DebugInput } from "./debug-input";
 import {
@@ -62,6 +64,9 @@ interface DebugRuntimeState {
   frameCount: number;
   renderWorldCounters?: RenderWorldPerformanceCounters;
   renderQueueStats?: RenderSceneQueueStats;
+  loadingStage?: string;
+  loadingDetail?: string;
+  loadingProgress?: number;
   error?: string;
 }
 
@@ -151,6 +156,24 @@ function showOverlayMessage(message: string): void {
   if (overlay) overlay.textContent = message;
 }
 
+function showLoadingProgress(progress: LoadingProgress): void {
+  const fraction = progressFraction(progress);
+  const detail = progress.detail
+    ?? (progress.current !== undefined && progress.total !== undefined ? `${progress.current.toString()} / ${progress.total.toString()}` : undefined);
+  showOverlayMessage(detail === undefined ? progress.stage : `${progress.stage}\n${detail}`);
+
+  const progressElement = document.querySelector<HTMLElement>("#debug-progress");
+  const progressBar = document.querySelector<HTMLElement>("#debug-progress-bar");
+  progressElement?.classList.remove("hidden");
+  if (progressBar) {
+    progressBar.style.width = `${Math.round((fraction ?? 0) * 100).toString()}%`;
+  }
+}
+
+function hideLoadingProgress(): void {
+  document.querySelector<HTMLElement>("#debug-progress")?.classList.add("hidden");
+}
+
 function formatUnknownError(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
@@ -179,6 +202,13 @@ async function boot(): Promise<void> {
   const preserveInitialCamera = readPreserveInitialCamera();
   const debugRuntime = createDebugRuntimeController(runtimeConfig.worldTransport);
   window.__mcloneDebug = debugRuntime.controller;
+  const reportLoadingProgress = (progress: LoadingProgress): void => {
+    debugRuntime.controller.state.loadingStage = progress.stage;
+    debugRuntime.controller.state.loadingDetail = progress.detail;
+    debugRuntime.controller.state.loadingProgress = progressFraction(progress);
+    showLoadingProgress(progress);
+  };
+  reportLoadingProgress({ stage: "Starting renderer", fraction: 0 });
 
   const sceneResult = await initializeRendererScene(rendererCanvas, {
     seed: SEED,
@@ -188,6 +218,7 @@ async function boot(): Promise<void> {
     remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
     skyColor: renderConfig.skyColor,
     clearColorScale: renderConfig.clearColorScale,
+    onProgress: reportLoadingProgress,
   });
   if (!sceneResult.ok) {
     debugRuntime.controller.state.error = sceneResult.reason;
@@ -299,7 +330,13 @@ async function boot(): Promise<void> {
   })) {
     lastInputCommand = initialInputCommand;
   }
-  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount)) {
+  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, {
+    maxAttempts: 2400,
+    onProgress: (progress) => reportLoadingProgress({
+      ...progress,
+      fraction: 0.92 + ((progressFraction(progress) ?? 0) * 0.06),
+    }),
+  })) {
     debugRuntime.controller.state.error =
       `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`;
     showOverlayMessage(`error: ${debugRuntime.controller.state.error}`);
@@ -309,6 +346,7 @@ async function boot(): Promise<void> {
   // Mesh jobs can be requested before every chunk needed by their padded
   // neighborhood is present. Re-run the initial visible set after the ring is
   // complete so screenshots start from a settled frame instead of a partial one.
+  reportLoadingProgress({ stage: "Building first frame", fraction: 0.98 });
   scene.levelRenderer.allChanged();
   const initialFrame = await renderSceneUntilSettled(scene, camera);
   const initialEncoder = scene.device.createCommandEncoder();
@@ -336,6 +374,7 @@ async function boot(): Promise<void> {
   debugRuntime.controller.state.frameCount = totalFrameCount;
 
   const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+  hideLoadingProgress();
   showOverlayMessage(
     isTouch
       ? "joystick: look · FWD/BACK: move · ▲/▼: fly"

@@ -80,4 +80,18 @@ describe("world host message queue draining", () => {
     expect(drained.messages).toEqual([playerState]);
     expect(drained.remaining).toEqual([LIGHT_DELTA_MESSAGE]);
   });
+
+  test("keeps progress behind ready chunk snapshots when capped", () => {
+    const progress = {
+      type: "world_progress",
+      stage: "Publishing chunks",
+      current: 1,
+      total: 2,
+    } satisfies WorldHostMessage;
+
+    const drained = drainWorldHostMessages([CHUNK_MESSAGE, progress], 1);
+
+    expect(drained.messages).toEqual([CHUNK_MESSAGE]);
+    expect(drained.remaining).toEqual([progress]);
+  });
 });

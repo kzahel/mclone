@@ -1,4 +1,5 @@
 import type { ChunkLightDeltaMessage, ChunkSnapshotMessage, ChunkUnloadMessage } from "../../runtime/protocol/world-messages";
+import type { LoadingProgress } from "../loading-progress";
 import {
   collectPackedChunkLightDeltaTransferables,
   collectPackedChunkSnapshotTransferables,
@@ -55,6 +56,11 @@ export interface RenderWorldReadyResponse {
   readonly type: "render_world_ready";
 }
 
+export interface RenderWorldProgressResponse {
+  readonly type: "render_world_progress";
+  readonly progress: LoadingProgress;
+}
+
 export interface RenderWorldStatsResponse {
   readonly type: "render_world_stats";
   readonly stats: RenderWorldStats;
@@ -95,6 +101,7 @@ export type RenderWorldRequest =
 export type RenderWorldMeshBuildResponse = RenderSectionMeshBuiltResponse | RenderWorldMeshNotReadyResponse;
 
 export type RenderWorldResponse =
+  | RenderWorldProgressResponse
   | RenderWorldReadyResponse
   | RenderWorldStatsResponse
   | RenderWorldDirtySectionsResponse

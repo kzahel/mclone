@@ -44,6 +44,7 @@ import type {
   SessionChunkViewState,
   WorldHostMessage,
   WorldOpenedMessage,
+  WorldProgressMessage,
 } from "../protocol/world-messages";
 import {
   anchorPlayerStateToChunkView,
@@ -218,6 +219,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly dirtyLightSections = new Map<string, DirtyLightSectionRecord>();
   private readonly dirtyLiquidChunks = new Set<string>();
   private opened = false;
+  private chunkViewJobRevision = 0;
 
   public constructor(private readonly options: GeneratedWorldHostOptions) {
     this.nowMs = options.nowMs ?? (() => Date.now());
@@ -388,11 +390,12 @@ export class GeneratedWorldHost implements WorldHost {
       });
     }
 
+    const chunkViewJobRevision = chunkViewChanged ? ++this.chunkViewJobRevision : this.chunkViewJobRevision;
     if (!update.changed) {
       return messages;
     }
 
-    const chunkViewJob = this.runChunkViewJobs(this.collectChunkViewJobs(update.missingChunks));
+    const chunkViewJob = this.runChunkViewJobs(this.collectChunkViewJobs(update.missingChunks), chunkViewJobRevision);
     chunkViewJob.catch((error: unknown) => {
       this.enqueueWorldError(error);
     });
@@ -525,6 +528,7 @@ export class GeneratedWorldHost implements WorldHost {
 
   private async runChunkViewJobs(
     missingChunks: readonly (readonly [number, number])[],
+    chunkViewJobRevision: number,
   ): Promise<void> {
     const yieldStep = createCooperativeYield();
     const jobs: ChunkViewJobRecord[] = missingChunks.map(([chunkX, chunkZ]) => ({
@@ -532,42 +536,72 @@ export class GeneratedWorldHost implements WorldHost {
       chunkZ,
       loadedFromStorage: false,
     }));
-
-    for (const job of jobs) {
-      await yieldStep();
-      if (!this.isChunkInCurrentView(job.chunkX, job.chunkZ)) {
-        continue;
-      }
-
-      job.loadedFromStorage = await this.preloadStoredChunk(job.chunkX, job.chunkZ);
-      if (!this.isChunkInCurrentView(job.chunkX, job.chunkZ)) {
-        continue;
-      }
-      if (job.loadedFromStorage || this.level.getChunk(job.chunkX, job.chunkZ, false) !== null) {
-        continue;
-      }
-
-      await this.level.generateChunkTerrainCooperative(job.chunkX, job.chunkZ, yieldStep);
+    if (jobs.length === 0) {
+      return;
     }
 
+    let terrainDone = 0;
+    this.enqueueWorldProgress("Generating terrain chunks", terrainDone, jobs.length, chunkViewJobRevision);
     for (const job of jobs) {
       await yieldStep();
-      if (job.loadedFromStorage || !this.isChunkInCurrentView(job.chunkX, job.chunkZ)) {
-        continue;
+      if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+        return;
       }
 
-      await this.level.decorateChunkCooperative(job.chunkX, job.chunkZ, yieldStep);
+      if (this.isChunkInCurrentView(job.chunkX, job.chunkZ)) {
+        job.loadedFromStorage = await this.preloadStoredChunk(job.chunkX, job.chunkZ);
+        if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+          return;
+        }
+
+        if (
+          this.isChunkInCurrentView(job.chunkX, job.chunkZ)
+          && !job.loadedFromStorage
+          && this.level.getChunk(job.chunkX, job.chunkZ, false) === null
+        ) {
+          await this.level.generateChunkTerrainCooperative(job.chunkX, job.chunkZ, yieldStep);
+        }
+      }
+
+      terrainDone++;
+      this.enqueueWorldProgress("Generating terrain chunks", terrainDone, jobs.length, chunkViewJobRevision);
     }
 
+    let decorationDone = 0;
+    this.enqueueWorldProgress("Decorating chunks", decorationDone, jobs.length, chunkViewJobRevision);
     for (const job of jobs) {
       await yieldStep();
+      if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+        return;
+      }
+
+      if (!job.loadedFromStorage && this.isChunkInCurrentView(job.chunkX, job.chunkZ)) {
+        await this.level.decorateChunkCooperative(job.chunkX, job.chunkZ, yieldStep);
+      }
+
+      decorationDone++;
+      this.enqueueWorldProgress("Decorating chunks", decorationDone, jobs.length, chunkViewJobRevision);
+    }
+
+    let publishDone = 0;
+    this.enqueueWorldProgress("Publishing chunks", publishDone, jobs.length, chunkViewJobRevision);
+    for (const job of jobs) {
+      await yieldStep();
+      if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+        return;
+      }
+
       const key = chunkKey(job.chunkX, job.chunkZ);
       if (!this.isChunkInCurrentView(job.chunkX, job.chunkZ) || this.publishedChunkSnapshots.has(key)) {
+        publishDone++;
+        this.enqueueWorldProgress("Publishing chunks", publishDone, jobs.length, chunkViewJobRevision);
         continue;
       }
 
       const chunk = this.level.getChunk(job.chunkX, job.chunkZ, false);
       if (chunk === null || !this.level.isChunkDecorated(job.chunkX, job.chunkZ)) {
+        publishDone++;
+        this.enqueueWorldProgress("Publishing chunks", publishDone, jobs.length, chunkViewJobRevision);
         continue;
       }
 
@@ -577,7 +611,12 @@ export class GeneratedWorldHost implements WorldHost {
       await yieldStep();
       const snapshot = this.buildPackedChunkSnapshot(chunk);
       await this.persistPackedChunkSnapshot(snapshot);
+      if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+        return;
+      }
       if (!this.isChunkInCurrentView(job.chunkX, job.chunkZ) || this.publishedChunkSnapshots.has(key)) {
+        publishDone++;
+        this.enqueueWorldProgress("Publishing chunks", publishDone, jobs.length, chunkViewJobRevision);
         continue;
       }
 
@@ -587,7 +626,33 @@ export class GeneratedWorldHost implements WorldHost {
       });
       this.markChunkSnapshotPublished(job.chunkX, job.chunkZ);
       this.enqueueDirtyLightDeltas();
+      publishDone++;
+      this.enqueueWorldProgress("Publishing chunks", publishDone, jobs.length, chunkViewJobRevision);
     }
+  }
+
+  private isCurrentChunkViewJob(chunkViewJobRevision: number): boolean {
+    return chunkViewJobRevision === this.chunkViewJobRevision;
+  }
+
+  private enqueueWorldProgress(
+    stage: string,
+    current: number,
+    total: number,
+    chunkViewJobRevision: number,
+  ): void {
+    if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+      return;
+    }
+
+    const progress: WorldProgressMessage = {
+      type: "world_progress",
+      stage,
+      current,
+      total,
+    };
+    this.pendingMessages = this.pendingMessages.filter((message) => message.type !== "world_progress");
+    this.pendingMessages.push(progress);
   }
 
   private isChunkInCurrentView(chunkX: number, chunkZ: number): boolean {

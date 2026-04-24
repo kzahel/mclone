@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { Registry } from "../../src/core/registry";
 import { GeneratedWorldHost, getGeneratedWorldViewChunkRadius } from "../../src/runtime/host/generated-world-host";
-import type { ChunkSnapshotMessage, WorldHostMessage } from "../../src/runtime/protocol/world-messages";
+import type { ChunkSnapshotMessage, WorldHostMessage, WorldProgressMessage } from "../../src/runtime/protocol/world-messages";
 import { DataLayer } from "../../src/world/level/chunk/data-layer";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 
@@ -38,6 +38,10 @@ function chunkSnapshots(messages: readonly WorldHostMessage[]): ChunkSnapshotMes
   return messages.filter((message): message is ChunkSnapshotMessage => message.type === "chunk_snapshot");
 }
 
+function worldProgressMessages(messages: readonly WorldHostMessage[]): WorldProgressMessage[] {
+  return messages.filter((message): message is WorldProgressMessage => message.type === "world_progress");
+}
+
 async function drainChunkSnapshots(host: GeneratedWorldHost, expectedCount: number): Promise<ChunkSnapshotMessage[]> {
   const snapshots: ChunkSnapshotMessage[] = [];
   const deadline = Date.now() + COOPERATIVE_CHUNK_LIGHTING_TIMEOUT_MS;
@@ -70,6 +74,17 @@ describe("GeneratedWorldHost cooperative chunk scheduler", () => {
     });
 
     expect(response.map((message) => message.type)).toEqual(["session_state", "player_state"]);
+
+    const initialProgress = worldProgressMessages(await host.pollUpdates({
+      type: "poll_world_updates",
+      maxMessages: 1,
+    }));
+    expect(initialProgress).toEqual([{
+      type: "world_progress",
+      stage: "Generating terrain chunks",
+      current: 0,
+      total: countExpectedChunks(1),
+    }]);
 
     const inputResponse = await host.setPlayerInput({
       type: "set_player_input",

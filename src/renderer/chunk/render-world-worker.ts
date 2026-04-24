@@ -3,6 +3,7 @@ import { SectionPos } from "../../core/section-pos";
 import type { ChunkLightDeltaMessage } from "../../runtime/protocol/world-messages";
 import { ClientChunkCache } from "../../world/level/client-chunk-cache";
 import { Vec3 } from "../../world/phys/vec3";
+import type { LoadingProgressSink } from "../loading-progress";
 import { ChunkBufferBuilderPack } from "../chunk-buffer-builder-pack";
 import { serializeSectionMeshBuild } from "./chunk-mesh-protocol";
 import { createBrowserChunkMeshContext, type BrowserChunkMeshContext } from "./mesh-worker-context";
@@ -25,7 +26,10 @@ export interface RenderWorldWorkerContext extends BrowserChunkMeshContext {
   readonly level: ClientChunkCache;
 }
 
-export type RenderWorldContextFactory = (request: InitializeRenderWorldRequest) => Promise<RenderWorldWorkerContext>;
+export type RenderWorldContextFactory = (
+  request: InitializeRenderWorldRequest,
+  onProgress?: LoadingProgressSink,
+) => Promise<RenderWorldWorkerContext>;
 
 function sectionOrigin(sectionX: number, sectionY: number, sectionZ: number): RenderWorldSectionOrigin {
   return {
@@ -110,8 +114,11 @@ function missingMeshChunks(level: ClientChunkCache, origin: RenderWorldSectionOr
   return missing;
 }
 
-async function createRenderWorldWorkerContext(request: InitializeRenderWorldRequest): Promise<RenderWorldWorkerContext> {
-  const meshContext = await createBrowserChunkMeshContext(request);
+async function createRenderWorldWorkerContext(
+  request: InitializeRenderWorldRequest,
+  onProgress?: LoadingProgressSink,
+): Promise<RenderWorldWorkerContext> {
+  const meshContext = await createBrowserChunkMeshContext(request, onProgress);
   const level = new ClientChunkCache({
     airState: meshContext.airState,
     minBuildHeight: meshContext.minBuildHeight,
@@ -181,7 +188,7 @@ async function buildSectionMeshResponse(
 
 export function createRenderWorldWorkerHandler(
   contextFactory: RenderWorldContextFactory = createRenderWorldWorkerContext,
-): (message: RenderWorldRequest) => Promise<RenderWorldResponse> {
+): (message: RenderWorldRequest, onProgress?: LoadingProgressSink) => Promise<RenderWorldResponse> {
   let contextPromise: Promise<RenderWorldWorkerContext> | undefined;
 
   async function getContext(messageType: string): Promise<RenderWorldWorkerContext> {
@@ -192,14 +199,14 @@ export function createRenderWorldWorkerHandler(
     return contextPromise;
   }
 
-  return async (message) => {
+  return async (message, onProgress) => {
     switch (message.type) {
       case "initialize_render_world":
         if (contextPromise !== undefined) {
           throw new Error("initialize_render_world received more than once");
         }
 
-        contextPromise = contextFactory(message);
+        contextPromise = contextFactory(message, onProgress);
         await contextPromise;
         return { type: "render_world_ready" };
       case "ingest_render_world_updates": {

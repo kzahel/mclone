@@ -1,4 +1,5 @@
 import type { RenderWorldChunkUpdateResult, RenderWorldUpdateMessage, RenderWorldUpdateSink } from "../../runtime/transport/local-world-transport";
+import type { LoadingProgress, LoadingProgressSink } from "../loading-progress";
 import {
   collectRenderWorldRequestTransferables,
   collectRenderWorldResponseTransferables,
@@ -8,6 +9,7 @@ import {
   type RenderWorldDirtySectionsResponse,
   type RenderWorldErrorResponse,
   type RenderWorldMeshBuildResponse,
+  type RenderWorldProgressResponse,
   type RenderWorldReadyResponse,
   type RenderWorldRequest,
   type RenderWorldResponse,
@@ -108,6 +110,10 @@ function isRenderWorldMeshBuildResponse(message: RenderWorldResponse): message i
   return message.type === "render_section_mesh_built" || message.type === "render_world_mesh_not_ready";
 }
 
+function isRenderWorldProgressResponse(message: RenderWorldResponse): message is RenderWorldProgressResponse {
+  return message.type === "render_world_progress";
+}
+
 function throwIfWorkerError(message: RenderWorldResponse): void {
   if (message.type === "render_world_error") {
     throw new Error(message.message);
@@ -116,7 +122,7 @@ function throwIfWorkerError(message: RenderWorldResponse): void {
 
 export function connectRenderWorldWorkerSession(
   endpoint: RenderWorldWorkerHostEndpoint,
-  handler: (message: RenderWorldRequest) => Promise<RenderWorldResponse>,
+  handler: (message: RenderWorldRequest, onProgress?: LoadingProgressSink) => Promise<RenderWorldResponse>,
 ): void {
   const onMessage: RenderWorldWorkerMessageListener<RenderWorldWorkerRequestEnvelope> = (event) => {
     void handleMessage(event.data);
@@ -124,9 +130,18 @@ export function connectRenderWorldWorkerSession(
 
   async function handleMessage(envelope: RenderWorldWorkerRequestEnvelope): Promise<void> {
     let message: RenderWorldResponse;
+    const onProgress = (progress: LoadingProgress): void => {
+      endpoint.postMessage({
+        requestId: envelope.requestId,
+        message: {
+          type: "render_world_progress",
+          progress,
+        },
+      });
+    };
 
     try {
-      message = await handler(envelope.message);
+      message = await handler(envelope.message, onProgress);
     } catch (error) {
       message = workerError(formatUnknownError(error));
     }
@@ -165,6 +180,11 @@ export class RenderWorldWorkerClient {
       return;
     }
 
+    if (isRenderWorldProgressResponse(event.data.message)) {
+      this.onProgress?.(event.data.message.progress);
+      return;
+    }
+
     this.pending.delete(event.data.requestId);
     pending.resolve(event.data.message);
   };
@@ -174,7 +194,10 @@ export class RenderWorldWorkerClient {
     this.rejectAllPending(formatUnknownError(error));
   };
 
-  public constructor(private readonly endpoint: RenderWorldWorkerClientEndpoint) {
+  public constructor(
+    private readonly endpoint: RenderWorldWorkerClientEndpoint,
+    private readonly onProgress?: LoadingProgressSink,
+  ) {
     endpoint.addEventListener("message", this.onMessage);
     endpoint.addEventListener("error", this.onError);
     endpoint.addEventListener("messageerror", this.onError);

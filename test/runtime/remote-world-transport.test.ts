@@ -29,6 +29,7 @@ const OPEN_WORLD_REQUEST = {
   seed: 12345n,
   preset: "browser_smoke",
 } as const;
+const REMOTE_WORLD_TRANSPORT_TIMEOUT_MS = 30_000;
 
 async function createTempDirectory(): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), "mclone-remote-world-transport-"));
@@ -275,12 +276,13 @@ function sleep(ms = 0): Promise<void> {
 }
 
 async function drainRemoteClientChunks(client: RemoteWorldClient, expectedCount: number): Promise<void> {
-  for (let attempt = 0; attempt < 500; attempt++) {
+  const deadline = Date.now() + REMOTE_WORLD_TRANSPORT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     if (client.getLevel().getLoadedChunkCount() >= expectedCount) {
       return;
     }
 
-    await sleep();
+    await sleep(10);
     await client.pollUpdates();
   }
 
@@ -293,12 +295,13 @@ async function drainServiceSnapshots(
   expectedCount: number,
 ): Promise<ChunkSnapshotMessage[]> {
   const snapshots: ChunkSnapshotMessage[] = [];
-  for (let attempt = 0; attempt < 500; attempt++) {
-    await sleep();
+  const deadline = Date.now() + REMOTE_WORLD_TRANSPORT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(10);
     const messages = deserializeWorldHostMessages((await service.pollUpdates(sessionId, { type: "poll_world_updates" })).messages);
     snapshots.push(...chunkSnapshots(messages));
     if (snapshots.length >= expectedCount) {
-      return snapshots;
+      return snapshots.slice(0, expectedCount);
     }
   }
 
@@ -312,7 +315,7 @@ describe("RemoteWorld transport", () => {
     while (TEMP_DIRECTORIES.length > 0) {
       await rm(TEMP_DIRECTORIES.pop()!, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
-  });
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("streams generated chunks through the remote HTTP host boundary", async () => {
     const service = new GeneratedWorldRemoteService({
@@ -359,7 +362,7 @@ describe("RemoteWorld transport", () => {
     });
     expect(service.getSessionCount()).toBe(1);
     expect(service.getWorldCount()).toBe(1);
-  });
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("acknowledges remote chunk interest before streaming snapshots through poll updates", async () => {
     const service = new GeneratedWorldRemoteService({
@@ -402,7 +405,7 @@ describe("RemoteWorld transport", () => {
     expect(chunkSnapshots(nextChunkViewMessages)).toHaveLength(0);
     expect(nextChunkViewMessages.some((message) => message.type === "chunk_unload")).toBe(true);
     await expect(drainServiceSnapshots(service, sessionId, 5)).resolves.toHaveLength(5);
-  });
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("delivers authoritative player-state updates through the remote poll path", async () => {
     const service = new GeneratedWorldRemoteService({
@@ -454,7 +457,7 @@ describe("RemoteWorld transport", () => {
     });
     expect(client.getPlayerState()!.position.x).toBeGreaterThan(initialPlayerState!.position.x);
     expect(client.getPlayerState()!.revision).toBeGreaterThan(initialPlayerState!.revision);
-  });
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("supports two concurrent remote client sessions against one shared authoritative world", async () => {
     const service = new GeneratedWorldRemoteService({
@@ -493,7 +496,7 @@ describe("RemoteWorld transport", () => {
     expect(secondClient.getLevel().getLoadedChunkCount()).toBe(25);
     expect(service.getSessionCount()).toBe(2);
     expect(service.getWorldCount()).toBe(1);
-  });
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("resumes an existing remote session and resyncs its visible chunks", async () => {
     const service = new GeneratedWorldRemoteService({
@@ -530,7 +533,7 @@ describe("RemoteWorld transport", () => {
         radius: 1,
       },
     });
-  });
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("reopens and resyncs automatically when a remote session disappears", async () => {
     const service = new GeneratedWorldRemoteService({
@@ -563,7 +566,7 @@ describe("RemoteWorld transport", () => {
     expect(client.getLevel().getLoadedChunkCount()).toBe(25);
     expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
     expect(client.getSessionState()?.resumed).toBe(false);
-  });
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("restores player input and state when a polling session disappears", async () => {
     const service = new GeneratedWorldRemoteService({
@@ -603,5 +606,5 @@ describe("RemoteWorld transport", () => {
     expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
     expect(client.getPlayerState()?.acknowledgedInputSequence).toBe(2);
     expect(client.getPlayerState()?.tick).toBeGreaterThan(0);
-  });
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 });

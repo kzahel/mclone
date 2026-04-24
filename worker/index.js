@@ -15,11 +15,13 @@ export default {
     object.writeHttpMetadata(headers);
     headers.set("etag", object.httpEtag);
 
-    if (key.endsWith(".html")) {
+    if (key.endsWith(".html") || key.endsWith(".zip.json")) {
       headers.set("Cache-Control", "no-cache");
     } else if (key.startsWith("assets/")) {
       // Vite hashes these filenames; safe to cache forever.
       headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    } else if (key.endsWith(".zip")) {
+      headers.set("Cache-Control", "public, max-age=3600");
     } else {
       headers.set("Cache-Control", "public, max-age=3600");
     }

@@ -101,6 +101,13 @@ export interface ChunkLightDeltaMessage {
   readonly light: PackedChunkLightDelta;
 }
 
+export interface WorldProgressMessage {
+  readonly type: "world_progress";
+  readonly stage: string;
+  readonly current: number;
+  readonly total: number;
+}
+
 export interface WorldErrorMessage {
   readonly type: "world_error";
   readonly message: string;
@@ -114,4 +121,5 @@ export type WorldHostMessage =
   | ChunkSnapshotMessage
   | ChunkLightDeltaMessage
   | ChunkUnloadMessage
+  | WorldProgressMessage
   | WorldErrorMessage;

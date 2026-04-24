@@ -13,6 +13,7 @@ import {
   type SetPlayerInputRequest,
   type WorldHostMessage,
   type WorldOpenedMessage,
+  type WorldProgressMessage,
 } from "../protocol/world-messages";
 
 export interface WorldTransport {
@@ -41,6 +42,7 @@ export interface TransportWorldClientOptions {
   readonly chunkUpdateSink?: RenderWorldUpdateSink;
   readonly mirrorChunkUpdatesToLevel?: boolean;
   readonly pollUpdateMaxMessages?: number;
+  readonly worldProgressSink?: (message: WorldProgressMessage) => void;
 }
 
 export class LocalWorldTransport implements WorldTransport {
@@ -77,6 +79,7 @@ export class TransportWorldClient implements WorldClient {
   private chunkUpdateSink: RenderWorldUpdateSink | undefined;
   private mirrorChunkUpdatesToLevel: boolean;
   private readonly pollUpdateMaxMessages: number | undefined;
+  private readonly worldProgressSink: ((message: WorldProgressMessage) => void) | undefined;
 
   public constructor(
     private readonly transport: WorldTransport,
@@ -86,6 +89,7 @@ export class TransportWorldClient implements WorldClient {
     this.chunkUpdateSink = options.chunkUpdateSink;
     this.mirrorChunkUpdatesToLevel = options.mirrorChunkUpdatesToLevel ?? options.chunkUpdateSink === undefined;
     this.pollUpdateMaxMessages = options.pollUpdateMaxMessages;
+    this.worldProgressSink = options.worldProgressSink;
   }
 
   public setRenderWorldUpdateSink(
@@ -216,6 +220,10 @@ export class TransportWorldClient implements WorldClient {
           if (this.chunkUpdateSink === undefined || this.mirrorChunkUpdatesToLevel) {
             chunkChanged = this.getLevel().applyChunkUnload(message.chunkX, message.chunkZ) || chunkChanged;
           }
+          messageChanged = true;
+          break;
+        case "world_progress":
+          this.worldProgressSink?.(message);
           messageChanged = true;
           break;
         case "world_error":

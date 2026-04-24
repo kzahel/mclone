@@ -21,6 +21,24 @@
         white-space: pre;
         max-width: calc(100vw - 16px);
       }
+      #debug-progress {
+        position: fixed;
+        top: 42px;
+        left: 8px;
+        width: min(420px, calc(100vw - 16px));
+        height: 6px;
+        background: rgba(255, 255, 255, 0.16);
+        border-radius: 3px;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      #debug-progress.hidden { display: none; }
+      #debug-progress-bar {
+        width: 0%;
+        height: 100%;
+        background: #78a7ff;
+        transition: width 120ms linear;
+      }
       .joystick-el {
         position: fixed;
         left: 0;
@@ -67,6 +85,7 @@
   <body>
     <canvas id="renderer" width="800" height="600"></canvas>
     <div id="debug-overlay">loading...</div>
+    <div id="debug-progress"><div id="debug-progress-bar"></div></div>
     <div id="joystick-base" class="joystick-el"></div>
     <div id="joystick-knob" class="joystick-el"></div>
     <div id="move-fwd" class="fly-btn text">FWD</div>
