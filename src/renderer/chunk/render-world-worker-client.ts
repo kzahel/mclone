@@ -216,3 +216,11 @@ export class RenderWorldWorkerClient {
     this.pending.clear();
   }
 }
+
+export function createRenderWorldWorker(): Worker {
+  // Browser runtime: render-world cache ownership moves off the main thread while WebGPU upload stays main-thread-owned.
+  return new Worker(new URL("./render-world-worker.ts", import.meta.url), {
+    type: "module",
+    name: "mclone-render-world-worker",
+  });
+}

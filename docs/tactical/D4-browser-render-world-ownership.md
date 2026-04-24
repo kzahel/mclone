@@ -68,10 +68,12 @@ This makes future parity work easier or neutral. The render-world worker can sti
 | `src/runtime/transport/remote-world-transport.ts` | remote HTTP transport using the D3 packed wire codec |
 | `src/world/level/client-chunk-cache.ts` | current main-thread render cache and compatibility unpack adapter |
 | `src/renderer/chunk/chunk-mesh-protocol.ts` | current mesh job protocol sends `ChunkSnapshot[]` gathered on the main thread |
+| `src/renderer/chunk/mesh-worker-context.ts` | shared browser worker setup for generated blocks, state ids, biome color tables, model baking, atlas metadata, and `BlockRenderDispatcher` |
 | `src/renderer/chunk/mesh-worker.ts` | current worker builds a temporary `ClientChunkCache` per mesh job |
 | `src/renderer/chunk/mesh-worker-client.ts` | current mesh worker client transfers mesh layer buffers back to the main thread |
 | `src/renderer/chunk/render-world-protocol.ts` | D4 internal render-world protocol for initialization, packed update ingest, stats, mesh build, not-ready, and error responses |
 | `src/renderer/chunk/render-world-worker-client.ts` | D4 request-envelope client/session wrapper with request ids, worker errors, and transferable buffer handling |
+| `src/renderer/chunk/render-world-worker.ts` | D4 worker handler with worker-owned `ClientChunkCache`, packed update ingest, vanilla-shaped dirty section metadata, mesh-neighbor readiness checks, and CPU mesh build responses |
 | `src/renderer/chunk/chunk-render-dispatcher.ts` | main-thread render chunk scheduling, fallback compilation, GPU buffer upload |
 | `src/renderer/scene-setup.ts` | wires world client, main-thread `ClientChunkCache`, mesh worker, `ChunkRenderDispatcher`, and `ViewArea` |
 | `src/renderer/debug/debug-free-cam.ts` | drives world polling/chunk view and reads loaded chunk counts from the main-thread cache |
@@ -187,17 +189,20 @@ This is an internal browser render protocol. It must not replace the D3 host/cli
 
 ## Current implementation status
 
-Landed in the first D4 implementation slice:
+Landed so far:
 
 - `render-world-protocol.ts` defines the internal browser render-world messages for initialization, packed update ingest, stats, mesh build, mesh-not-ready, and worker errors
 - `render-world-worker-client.ts` mirrors the existing mesh-worker request-envelope pattern and transfers packed chunk buffers to the worker plus mesh layer buffers back to the main thread
 - `test/renderer/chunk/render-world-worker-client.test.ts` covers fake-endpoint initialization, request ids, packed snapshot transfer, mesh payload transfer, mesh-not-ready responses, and worker/endpoint errors
+- `mesh-worker-context.ts` factors the browser worker block/model/atlas/color initialization out of the old mesh worker
+- `render-world-worker.ts` initializes a worker-owned `ClientChunkCache`, ingests packed chunk updates, reports vanilla-shaped dirty section origins, checks mesh-neighbor availability, and returns mesh build or not-ready responses
+- `test/renderer/chunk/render-world-worker.test.ts` pins the dirty-section coordinate expansion, mesh-neighbor chunk set, and initialization guard
 
 Still pending:
 
-- no real `render-world-worker.ts` exists yet
 - browser runtime still applies chunk messages to the main-thread `ClientChunkCache`
 - mesh jobs still use main-thread `buildSectionMeshInput(...)` and `ChunkSnapshot[]` payloads
+- the real browser scene does not instantiate or feed `RenderWorldWorkerClient` yet
 
 ## Implementation sequence
 
@@ -207,11 +212,11 @@ Still pending:
 
 2. Move worker-side cache initialization.
 
-   The worker should register generated/render blocks, build `BlockStateIdMap`, initialize biome color tables, load models/atlas metadata needed for CPU meshing, and create the worker-owned cache. Reuse current mesh-worker initialization code where practical.
+   Done. `mesh-worker-context.ts` now shares generated/render block registration, `BlockStateIdMap`, biome color tables, model/atlas setup, and `BlockRenderDispatcher` construction between the old mesh worker and the render-world worker.
 
 3. Add packed chunk ingest.
 
-   Forward D3 `chunk_snapshot` and `chunk_unload` messages from the browser world client to the render-world worker. The worker applies packed snapshots to its cache and returns loaded-count/dirty-section metadata. Main-thread code may keep only that metadata.
+   Worker-side ingest is done. Browser runtime forwarding is still pending. The worker applies packed snapshots/unloads to its cache and returns loaded-count/dirty-section metadata; main-thread code may keep only that metadata once it is wired.
 
 4. Split protocol application from cache mutation.
 
@@ -321,6 +326,6 @@ This is not the final D5 measurement gate, but D4 should include a small sanity 
 
 ## Next
 
-Immediate next D4 implementation slice: add the real `render-world-worker.ts` and move worker-side cache/model/color initialization behind the new protocol, initially without browser runtime hookup.
+Immediate next D4 implementation slice: split browser world-client protocol application from cache mutation with a `RenderWorldUpdateSink`, then forward D3 `chunk_snapshot` / `chunk_unload` messages to `RenderWorldWorkerClient` while session/player state remains main-thread presentation state.
 
 `D5`: transport measurement and push/SAB decision. After `D4`, measure the actual browser traversal path with render-world ownership in place and decide from trace data whether HTTP polling, worker transfer/copy, mesh fan-out, or GPU upload is the next bottleneck.
