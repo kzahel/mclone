@@ -127,7 +127,32 @@ export function uniformHeight(minInclusive: VerticalAnchor, maxInclusive: Vertic
     sample: (random, context) => {
       const minValue = minInclusive.resolveY(context);
       const maxValue = maxInclusive.resolveY(context);
+      if (minValue > maxValue) {
+        return minValue;
+      }
+
       return minValue + random.nextInt((maxValue - minValue) + 1);
+    },
+  };
+}
+
+export function trapezoidHeight(minInclusive: VerticalAnchor, maxInclusive: VerticalAnchor, plateau = 0): HeightProvider {
+  return {
+    sample: (random, context) => {
+      const minValue = minInclusive.resolveY(context);
+      const maxValue = maxInclusive.resolveY(context);
+      if (minValue > maxValue) {
+        return minValue;
+      }
+
+      const span = maxValue - minValue;
+      if (plateau >= span) {
+        return minValue + random.nextInt(span + 1);
+      }
+
+      const lowerSpan = Math.trunc((span - plateau) / 2);
+      const upperSpan = span - lowerSpan;
+      return minValue + random.nextInt(upperSpan + 1) + random.nextInt(lowerSpan + 1);
     },
   };
 }

@@ -20,6 +20,7 @@ import { HugeRedMushroomFeature } from "./huge-red-mushroom-feature";
 import { IcePatchFeature } from "./ice-patch-feature";
 import { IceSpikeFeature } from "./ice-spike-feature";
 import { KelpFeature } from "./kelp-feature";
+import { OreFeature } from "./ore-feature";
 import { CoralClawFeature } from "./coral-claw-feature";
 import { CoralMushroomFeature } from "./coral-mushroom-feature";
 import { CoralTreeFeature } from "./coral-tree-feature";
@@ -58,6 +59,7 @@ export const Features = {
   SEAGRASS: register("seagrass", new SeagrassFeature()),
   KELP: register("kelp", new KelpFeature()),
   BAMBOO: register("bamboo", new BambooFeature()),
+  ORE: register("ore", new OreFeature()),
   CORAL_TREE: register("coral_tree", new CoralTreeFeature()),
   CORAL_MUSHROOM: register("coral_mushroom", new CoralMushroomFeature()),
   CORAL_CLAW: register("coral_claw", new CoralClawFeature()),

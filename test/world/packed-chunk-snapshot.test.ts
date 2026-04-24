@@ -181,9 +181,13 @@ describe("packed chunk snapshot codecs", () => {
     const states = stateIds.getStates();
     const stone = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:stone")!;
     const water = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:water")!;
+    const coalOre = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:coal_ore")!;
+    const deepslateCopperOre = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:deepslate_copper_ore")!;
     const chunk = new LevelChunk(0, 0, airState);
     chunk.setBlockState(new BlockPos(1, 2, 3), stone);
     chunk.setBlockState(new BlockPos(4, 5, 6), water);
+    chunk.setBlockState(new BlockPos(7, 8, 9), coalOre);
+    chunk.setBlockState(new BlockPos(10, 11, 12), deepslateCopperOre);
     chunk.recordBlockTick(new BlockPos(1, 2, 3), "minecraft:stone", 2);
     chunk.recordLiquidTick(new BlockPos(4, 5, 6), "minecraft:water", 3);
 
@@ -194,6 +198,8 @@ describe("packed chunk snapshot codecs", () => {
     expect(unpacked).toEqual(snapshot);
     expect(hydrated.getBlockState(new BlockPos(1, 2, 3))).toBe(stone);
     expect(hydrated.getBlockState(new BlockPos(4, 5, 6))).toBe(water);
+    expect(hydrated.getBlockState(new BlockPos(7, 8, 9))).toBe(coalOre);
+    expect(hydrated.getBlockState(new BlockPos(10, 11, 12))).toBe(deepslateCopperOre);
     expect(hydrated.getScheduledBlockTicks()).toEqual(snapshot.blockTicks);
     expect(hydrated.getScheduledLiquidTicks()).toEqual(snapshot.liquidTicks);
   });

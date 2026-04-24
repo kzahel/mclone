@@ -1,5 +1,6 @@
 import { BlockPos } from "../../../core/block-pos";
 import { ConstantInt } from "../../../util/valueproviders/constant-int";
+import { type VerticalAnchor, trapezoidHeight, uniformHeight } from "../../carver/carver-config";
 import type { WorldGenLevel } from "../../../world/level/world-gen-level";
 import type { SimpleRandomSource } from "../../prng/simple-random-source";
 import type { NoiseBasedChunkGenerator } from "../noise-based-chunk-generator";
@@ -15,6 +16,7 @@ import { DecoratedFeatureConfiguration } from "./configurations/decorated-featur
 import type { DecoratorConfiguration } from "./configurations/decorator-configuration";
 import type { FeatureConfiguration } from "./configurations/feature-configuration";
 import { NoneDecoratorConfiguration } from "./configurations/none-decorator-configuration";
+import { RangeDecoratorConfiguration } from "./configurations/range-decorator-configuration";
 import { FeaturePlaceContext } from "./feature-place-context";
 import { WeightedConfiguredFeature } from "./weighted-configured-feature";
 
@@ -63,6 +65,26 @@ export class ConfiguredFeature<FC extends FeatureConfiguration, F extends Placea
 
   public rarity(chance: number): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {
     return this.decorated(FeatureDecorators.CHANCE.configured(new ChanceDecoratorConfiguration(chance)));
+  }
+
+  public range(
+    config: RangeDecoratorConfiguration,
+  ): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {
+    return this.decorated(FeatureDecorators.RANGE.configured(config));
+  }
+
+  public rangeUniform(
+    minInclusive: VerticalAnchor,
+    maxInclusive: VerticalAnchor,
+  ): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {
+    return this.range(new RangeDecoratorConfiguration(uniformHeight(minInclusive, maxInclusive)));
+  }
+
+  public rangeTriangle(
+    minInclusive: VerticalAnchor,
+    maxInclusive: VerticalAnchor,
+  ): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {
+    return this.range(new RangeDecoratorConfiguration(trapezoidHeight(minInclusive, maxInclusive)));
   }
 
   public squared(): ConfiguredFeature<DecoratedFeatureConfiguration, PlaceableFeature<DecoratedFeatureConfiguration>> {

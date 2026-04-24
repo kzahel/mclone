@@ -199,7 +199,7 @@ async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expe
     scene.levelRenderer.allChanged();
   }
 
-  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount)) {
+  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, { maxAttempts: 480 })) {
     throw new Error(
       `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`,
     );

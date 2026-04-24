@@ -26,6 +26,7 @@ The project is past the “terrain demo” phase. The renderer is already consum
 - translated surface material placement
 - translated classic air carvers
 - translated first-pass biome decoration
+- translated common overworld ore generation
 - translated rendering for water, tint, dark-oak trees, acacia trees, jungle trees, bamboo, mega spruce / mega pine conifers, huge mushrooms, grass, flowers, lily pads, seagrass, kelp, coral, sea pickles, mushrooms, cactus, sugar cane, vine, cocoa, melon, and related surface features
 
 Several later worldgen capabilities landed through renderer-driven tacticals rather than through the original worldgen arc, so this document should be treated as the authoritative status view when it disagrees with the older tactical sequence.
@@ -45,11 +46,11 @@ The main remaining gap is not foundational plumbing. It is breadth, parity, and 
 | Overworld biome source / layered biome pipeline | `90-95%` | Landed and driving terrain + decoration lookup | [`05`](./tactical/05-overworld-biome-source.md) |
 | Surface rules / bedrock / top materials | `88-92%` | Landed for the current overworld path, now including frozen-ocean, badlands, giant-tree-taiga, shattered-savanna, and mushroom follow-through | [`06a`](./tactical/06a-pre-07-surface-prep.md), [`07`](./tactical/07-surface-builders.md), [`31`](./tactical/31-frozen-and-badlands-material-matrix.md), [`32`](./tactical/32-podzol-coarse-dirt-and-mycelium-matrix.md) |
 | Classic carvers (`CaveWorldCarver`, `CanyonWorldCarver`) | `85-90%` | Implemented for the overworld AIR+LIQUID path, integrated, and now backed by widened desert/ocean/frozen/badlands/podzol/coarse-dirt/mycelium material coverage, scheduled-tick capture, and a broader carved-fixture matrix, but still below full vanilla parity | code: [`src/worldgen/carver/`](../src/worldgen/carver), tacticals: [`28`](./tactical/28-carver-material-parity-and-oracle-expansion.md), [`29`](./tactical/29-underwater-liquid-carver-parity.md), [`30`](./tactical/30-liquid-floor-oracle-and-tick-capture.md), [`31`](./tactical/31-frozen-and-badlands-material-matrix.md), [`32`](./tactical/32-podzol-coarse-dirt-and-mycelium-matrix.md), status: [`carver-status.md`](./carver-status.md), generator hook: [`noise-based-chunk-generator.ts`](../src/worldgen/levelgen/noise-based-chunk-generator.ts) |
-| Feature/decorator framework | `87-93%` | Enough for the current vegetation, water-feature, dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, cold-surface, and warm-ocean placement set | [`22`](./tactical/22-simple-feature-placement-bridge.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
+| Feature/decorator framework | `88-94%` | Enough for the current vegetation, water-feature, dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, cold-surface, warm-ocean, and common-ore placement set | [`22`](./tactical/22-simple-feature-placement-bridge.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md) |
 | Tree pipeline | `80-90%` | Oak / swamp oak / fancy oak / spruce / pine / mega pine / mega spruce / birch / dark oak / acacia / jungle / mega-jungle / bamboo-jungle / huge-mushroom paths exist; bee-related parity still does not | [`23`](./tactical/23-true-tree-feature-placement.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
 | Surface vegetation + water decoration | `82-90%` | First substantial overworld set landed, now including dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, and cold-surface identity | [`20`](./tactical/20-surface-special-blocks-and-biome-tint.md), [`21`](./tactical/21-surface-feature-palette-expansion.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
-| Biome decoration table coverage | `78-86%` | A useful majority is real, now including dark forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, and the cold-surface follow-through; remaining gaps are concentrated in still-empty biome keys plus the entirely-missing underground/ore phase | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
-| Ore generation / underground decoration | `0-10%` | Not meaningfully started; tactical 42 now scopes the foundation slice | [`42`](./tactical/42-ore-and-underground-decoration-foundation.md) |
+| Biome decoration table coverage | `80-88%` | A useful majority is real, now including dark forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, the cold-surface follow-through, and the default common-ore pass; remaining gaps are concentrated in still-empty biome keys plus the not-yet-broadened underground phase | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md) |
+| Ore generation / underground decoration | `20-25%` | Common overworld ore foundation is live: `OreFeature`, target-rule plumbing, default configured ore entries, render palette coverage, and biome-table wiring landed; underground variety, biome-specific extras, and stronger oracle coverage are still missing | [`42`](./tactical/42-ore-and-underground-decoration-foundation.md) |
 | Structures | `0-5%` | Not meaningfully started | target bucket only |
 
 If you compress all of that to one number, the project is roughly `60-70%` of the way to “recognizable vanilla-overworld worldgen,” but much less complete than that for broad biome/decor/structure parity.
@@ -85,12 +86,14 @@ The project now has translated support for:
 - `IceSpikeFeature`
 - disk-based `IcePatchFeature`
 - `BambooFeature`
+- `OreFeature`
 - `HugeBrownMushroomFeature`
 - `HugeRedMushroomFeature`
 - flower-provider-backed flower placement
 - ocean `count_noise_biased` decorator follow-through
 - warm-ocean coral / sea-pickle selector follow-through
 - bamboo-jungle bamboo / podzol / selector follow-through
+- common overworld ore target lists and default ore configured features
 
 ### Current tree / plant / water feature families
 
@@ -147,11 +150,12 @@ The current tree system is enough to render believable forests, but not enough f
 
 ### Underground content gaps
 
-The project does not yet have meaningful overworld underground decoration parity:
+The project now has a first common-ore foundation, but underground parity is still far from complete:
 
-- ore features
-- ore distribution tables
+- `addDefaultUndergroundVariety(...)` material blobs and the remaining active underground material path
+- biome-specific underground extras such as badlands extra gold, mountain emeralds, and infested stone
 - non-ore underground feature families
+- stronger ore-stage oracle coverage beyond focused unit tests and browser validation
 
 ### Structures
 
@@ -185,7 +189,7 @@ The next broad parity win is moving past surface-only breadth into chunk-content
 
 Highest-value families:
 
-- ore / underground decoration, starting with [`42-ore-and-underground-decoration-foundation.md`](./tactical/42-ore-and-underground-decoration-foundation.md)
+- underground variety and biome-specific extras on top of the landed common-ore foundation from [`42`](./tactical/42-ore-and-underground-decoration-foundation.md)
 - the remaining still-empty biome keys once underground content is no longer entirely absent
 - only after that, narrower ocean-table exactness like `deep_warm_ocean` `SEAGRASS_SIMPLE` if it still matters
 
@@ -210,7 +214,7 @@ What still matters there:
 
 ### 4. Broaden ore and underground decoration after the foundation
 
-Tactical 42 starts the foundation. After that, broaden from common overworld ores into underground variety, soft disks, biome-specific extras, and any oracle gaps the foundation slice exposes.
+Tactical 42 landed the common-ore foundation. The next underground work should broaden into underground variety, soft disks, biome-specific extras, and any oracle gaps the foundation slice exposed.
 
 ### 5. Structures after the terrain/decor core is stable
 

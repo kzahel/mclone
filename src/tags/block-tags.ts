@@ -130,5 +130,26 @@ export class BlockTags {
     "minecraft:flowering_azalea_leaves",
   ]);
 
+  public static readonly BASE_STONE_OVERWORLD = new BlockTag("minecraft:base_stone_overworld", [
+    "minecraft:stone",
+    "minecraft:granite",
+    "minecraft:diorite",
+    "minecraft:andesite",
+    "minecraft:tuff",
+    "minecraft:deepslate",
+  ]);
+
+  public static readonly STONE_ORE_REPLACEABLES = new BlockTag("minecraft:stone_ore_replaceables", [
+    "minecraft:stone",
+    "minecraft:granite",
+    "minecraft:diorite",
+    "minecraft:andesite",
+  ]);
+
+  public static readonly DEEPSLATE_ORE_REPLACEABLES = new BlockTag("minecraft:deepslate_ore_replaceables", [
+    "minecraft:deepslate",
+    "minecraft:tuff",
+  ]);
+
   public static readonly LAVA_POOL_STONE_CANNOT_REPLACE = new BlockTag("minecraft:lava_pool_stone_cannot_replace", []);
 }
