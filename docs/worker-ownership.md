@@ -320,6 +320,8 @@ Before considering worker pooling, the baseline should satisfy:
 - stale generation/light/render results are rejected by revision
 - D5 traversal reports identify the remaining bottleneck before a pool or shared-buffer slice is started
 
+The first lighting boundary slice is landed: worker-backed browser/Node service shells, protocol types, and a bounded mailbox exist under `src/runtime/lighting/`. The baseline is not complete until `GeneratedWorldHost` no longer owns `LevelLightEngine`.
+
 ## Related Docs
 
 - [`architecture.md`](architecture.md): broad runtime/host split

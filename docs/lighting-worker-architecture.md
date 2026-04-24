@@ -57,6 +57,21 @@ Browser and Node hosts should use the same worker-backed interface. Command prom
 
 Solver unit tests and Java-oracle comparisons may instantiate the ported lighting classes directly below this service boundary. They should not provide a synchronous host-facing `LightingService`, because that hides accidental host-tick lighting work.
 
+## Implementation Status
+
+Landed:
+
+- `src/runtime/lighting/lighting-protocol.ts` defines the host/worker message shapes, revisioned requests/results, transferable light-input sections, and bounded result polling contract.
+- `src/runtime/lighting/lighting-worker-client.ts` provides the browser module-worker client and enforces command promises as accepted/enqueued acknowledgements.
+- `src/runtime/lighting/lighting-worker.ts` provides the serialized mailbox shell. It does not own `LevelLightEngine` yet; it only establishes the async worker boundary and readiness/result semantics.
+- `src/runtime/lighting/node-lighting-worker-client.ts` and `src/runtime/lighting/node-lighting-worker-thread.ts` provide the Node worker-thread shell for dedicated/headless hosts.
+
+Still pending:
+
+- Move `LevelLightEngine` and light-section storage out of `GeneratedWorldHost` and into the lighting worker.
+- Route chunk publication through `chunk_light_ready` instead of host-side light computation.
+- Route live block/liquid updates through `block_light_update_batch` and accepted light deltas.
+
 ## Protocol Shape
 
 Every message that can outlive a chunk-view turn must carry enough revision data to be dropped safely.
@@ -238,14 +253,13 @@ Backpressure rules:
 
 ## Migration Plan
 
-1. Add `LightingService` protocol types and the browser module-worker transport shell.
+1. Done: add `LightingService` protocol types, browser module-worker transport shell, Node worker-thread shell, and service-level mailbox tests.
 2. Move `LevelLightEngine` ownership into the lighting worker shell before routing host chunk publication through the service.
-3. Add Node worker-thread transport for dedicated/headless hosts.
-4. Add revision tracking for authoritative chunk mutations and neighbor dependency sets.
-5. Change cooperative chunk jobs to request initial light and publish only after `chunk_light_ready`.
-6. Route liquid/block updates through batched light update requests and publish accepted deltas.
-7. Split load radius from publish radius if needed for halo-only lighting work.
-8. Add D5 traversal performance gates for host-worker responsiveness, lighting worker budget, render-world ingestion, and main-thread GPU uploads.
+3. Add revision tracking for authoritative chunk mutations and neighbor dependency sets.
+4. Change cooperative chunk jobs to request initial light and publish only after `chunk_light_ready`.
+5. Route liquid/block updates through batched light update requests and publish accepted deltas.
+6. Split load radius from publish radius if needed for halo-only lighting work.
+7. Add D5 traversal performance gates for host-worker responsiveness, lighting worker budget, render-world ingestion, and main-thread GPU uploads.
 
 ## Tests
 
