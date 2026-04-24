@@ -268,4 +268,4 @@ D6 is complete when:
 
 ## Next
 
-Close the D5/D6 runtime scheduling decision and use `pnpm perf:d5` as a regression gate for future loading or transport changes. Future host work may still move snapshot/persistence or feature placement into dedicated host-owned jobs, but only after a new measurement or manual regression shows the cooperative phase split is no longer enough.
+Close the D5/D6 runtime scheduling decision and use `pnpm perf:d5` as a regression gate for future loading or transport changes. The next non-transport tactical is [`42-ore-and-underground-decoration-foundation.md`](42-ore-and-underground-decoration-foundation.md). Future host work may still move snapshot/persistence or feature placement into dedicated host-owned jobs, but only after a new measurement or manual regression shows the cooperative phase split is no longer enough.

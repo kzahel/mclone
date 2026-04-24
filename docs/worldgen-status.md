@@ -49,7 +49,7 @@ The main remaining gap is not foundational plumbing. It is breadth, parity, and 
 | Tree pipeline | `80-90%` | Oak / swamp oak / fancy oak / spruce / pine / mega pine / mega spruce / birch / dark oak / acacia / jungle / mega-jungle / bamboo-jungle / huge-mushroom paths exist; bee-related parity still does not | [`23`](./tactical/23-true-tree-feature-placement.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
 | Surface vegetation + water decoration | `82-90%` | First substantial overworld set landed, now including dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, and cold-surface identity | [`20`](./tactical/20-surface-special-blocks-and-biome-tint.md), [`21`](./tactical/21-surface-feature-palette-expansion.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
 | Biome decoration table coverage | `78-86%` | A useful majority is real, now including dark forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, and the cold-surface follow-through; remaining gaps are concentrated in still-empty biome keys plus the entirely-missing underground/ore phase | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
-| Ore generation / underground decoration | `0-10%` | Not meaningfully started | target bucket only |
+| Ore generation / underground decoration | `0-10%` | Not meaningfully started; tactical 42 now scopes the foundation slice | [`42`](./tactical/42-ore-and-underground-decoration-foundation.md) |
 | Structures | `0-5%` | Not meaningfully started | target bucket only |
 
 If you compress all of that to one number, the project is roughly `60-70%` of the way to “recognizable vanilla-overworld worldgen,” but much less complete than that for broad biome/decor/structure parity.
@@ -185,7 +185,7 @@ The next broad parity win is moving past surface-only breadth into chunk-content
 
 Highest-value families:
 
-- ore / underground decoration
+- ore / underground decoration, starting with [`42-ore-and-underground-decoration-foundation.md`](./tactical/42-ore-and-underground-decoration-foundation.md)
 - the remaining still-empty biome keys once underground content is no longer entirely absent
 - only after that, narrower ocean-table exactness like `deep_warm_ocean` `SEAGRASS_SIMPLE` if it still matters
 
@@ -208,9 +208,9 @@ What still matters there:
 - widen the flattened numeric/oracle block model if exhaustive carved-stage diffs remain a goal
 - keep ravine/cave-mouth browser validation whenever the carver path changes materially
 
-### 4. Start ore and underground decoration
+### 4. Broaden ore and underground decoration after the foundation
 
-Once terrain/carver confidence and biome breadth are in better shape, ores become the next major “this is actually Minecraft” milestone for chunk contents.
+Tactical 42 starts the foundation. After that, broaden from common overworld ores into underground variety, soft disks, biome-specific extras, and any oracle gaps the foundation slice exposes.
 
 ### 5. Structures after the terrain/decor core is stable
 

@@ -589,4 +589,4 @@ The browser screenshot rule from `AGENTS.md` still applies. Save D5 screenshots 
 
 ## Next
 
-Close the runtime data/protocol/loading decision for now and keep `pnpm perf:d5` as the regression gate. Return to the next non-transport tactical slice; revisit push transport, `SharedArrayBuffer`, or render-world subworkers only if a later D5-style report selects that path.
+Close the runtime data/protocol/loading decision for now and keep `pnpm perf:d5` as the regression gate. Return to the next non-transport tactical slice: [`42-ore-and-underground-decoration-foundation.md`](42-ore-and-underground-decoration-foundation.md). Revisit push transport, `SharedArrayBuffer`, or render-world subworkers only if a later D5-style report selects that path.

@@ -1,6 +1,6 @@
 # Tactical docs
 
-Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For runtime/host boundaries and durable data/protocol/loading contracts, see [`../architecture.md`](../architecture.md), [`../runtime-data-model.md`](../runtime-data-model.md), [`../protocol.md`](../protocol.md), and [`../loading-persistence.md`](../loading-persistence.md).
+Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For runtime/host boundaries and durable data/protocol/loading contracts, see [`../architecture.md`](../architecture.md), [`../runtime-data-model.md`](../runtime-data-model.md), [`../protocol.md`](../protocol.md), and [`../loading-persistence.md`](../loading-persistence.md). For liquid simulation architecture, see [`../liquids.md`](../liquids.md).
 
 ## Rule of thumb
 
@@ -69,6 +69,7 @@ Direct port of MC 1.17.1's client rendering stack to raw WebGPU. Target and skip
 | [`38-cold-surface-parity.md`](38-cold-surface-parity.md) | port `FREEZE_TOP_LAYER`, `ICE_SPIKE`, and `ICE_PATCH`, add the disk-feature support they depend on, and wire the remaining cold shoreline / `ice_spikes` follow-through | unit + browser visual | **done** — the missing cold-surface feature path is now translated, `ice_spikes` has a real biome table and surface definition, and browser validation captures a dedicated packed-ice-spire frame |
 | [`39-warm-ocean-parity.md`](39-warm-ocean-parity.md) | port coral features, `SeaPickleFeature`, the warm-ocean coral block family, and the `warm_ocean` / `deep_warm_ocean` biome tables | unit + browser visual | **done** — warm-ocean families now route through translated coral / sea-pickle vegetation instead of the old reduced ocean fallback |
 | [`41-bamboo-jungle-parity.md`](41-bamboo-jungle-parity.md) | port the bamboo block / feature path, restore light-bamboo jungle follow-through, and wire the `bamboo_jungle` / `bamboo_jungle_hills` biome tables | unit + browser visual | **done** — bamboo-jungle families now route through translated bamboo vegetation instead of the last reduced jungle-family fallback |
+| [`42-ore-and-underground-decoration-foundation.md`](42-ore-and-underground-decoration-foundation.md) | port the `OreFeature` / `OreConfiguration` / `RuleTest` foundation, add common overworld ore blocks, and wire vanilla `addDefaultOres` into the current biome tables | unit + integration + browser visual | **planned** — starts the underground content gap without pulling in disabled `OreVeinifier` or structure work |
 
 Ordering rationale: `BlockState` prereqs (13) deferred until just before model baking (14a/b) since nothing before that needs them. WGSL shader ports (16) deferred until after the mesher (15) so we can verify geometry correctness with stub shaders first, then swap in real shaders. `ModelBakery` split from `BlockModel` parse (14a/b) because `ModelBakery` is one of the largest classes in the client and the data-loading and baking passes are independently testable.
 
@@ -83,6 +84,15 @@ Lighting is both simulation data and renderer input. Use [`../lighting.md`](../l
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
 | [`L0-lighting-oracle-foundation.md`](L0-lighting-oracle-foundation.md) | Anvil `BlockLight` / `SkyLight` decode, light fixture shape, byte-exact comparison helpers, first committed server light fixture | unit + server oracle | **done** — persisted vanilla light bytes now ride in the pinned integration fixture and comparison helpers are ready for solver tests |
+
+## Liquid Simulation Arc
+
+Liquids are authoritative simulation data and renderer input. Use [`../liquids.md`](../liquids.md) as the durable reference before writing tactical slices. The intended split is a direct 1.17.1 port of water state/flow/tick rules in the authoritative host, with engine-native worker scheduling and block/tick facts flowing through snapshots/deltas into render-world meshing. Do not put propagation on the browser main thread, do not scan all water blocks every frame, and do not settle liquids by advancing an arbitrary number of ticks during load.
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| [`Liquid0-liquid-oracle-foundation.md`](Liquid0-liquid-oracle-foundation.md) | scripted official-server liquid scenarios, bounded region fixtures preserving water `level`, pending `LiquidTicks` extraction, fixture comparison helpers | unit + server oracle | **planned** — establish exact vanilla dynamic water outputs before porting `FlowingFluid` |
+| [`Liquid1-liquid-simulation-foundation.md`](Liquid1-liquid-simulation-foundation.md) | `FluidState`, `FlowingFluid`, `WaterFluid`, `LiquidBlock` level mapping, vanilla-shaped liquid tick queue, first fixture comparison | unit + server oracle + optional browser visual | **sketch** — first direct water simulation implementation slice after Liquid0 |
 
 ## Renderer oracle approach
 
@@ -163,30 +173,12 @@ Recommended sequence:
 | [`D2-packed-section-codecs.md`](D2-packed-section-codecs.md) | packed section codecs and chunk snapshot model | unit + fixture roundtrip | **landed** vanilla-shaped packed section records behind compatibility adapters |
 | [`D3-packed-chunk-storage-protocol.md`](D3-packed-chunk-storage-protocol.md) | storage/protocol rollout for packed chunk facts | unit + integration | **landed** authoritative chunk snapshots move through packed records across worker, remote, IndexedDB, and file adapters |
 | [`D4-browser-render-world-ownership.md`](D4-browser-render-world-ownership.md) | browser render-world ownership | perf probe + browser visual | **done** — live browser rendering now feeds packed chunks into a render-world worker, keeps raw chunk ownership and mesh-neighborhood gathering off the main thread, and passes the full browser validation gate |
-| [`D5-transport-measurement-and-push-sab-decision.md`](D5-transport-measurement-and-push-sab-decision.md) | transport measurement and push/SAB decision | perf probe + deployment check | measure the live D4 traversal path and decide from data whether HTTP polling, worker transfer, mesh fan-out, or GPU upload needs the next tactical |
-| [`D6-authoritative-host-scheduler.md`](D6-authoritative-host-scheduler.md) | authoritative host scheduler | runtime + browser perf probe | keep input, polling, and authoritative player ticks responsive while chunk load/generation/snapshot jobs run |
+| [`D5-transport-measurement-and-push-sab-decision.md`](D5-transport-measurement-and-push-sab-decision.md) | transport measurement and push/SAB decision | perf probe + deployment check | **done** — the repeatable traversal harness identified host chunk scheduling as the bottleneck, not polling, `SharedArrayBuffer`, or render-world subworkers |
+| [`D6-authoritative-host-scheduler.md`](D6-authoritative-host-scheduler.md) | authoritative host scheduler | runtime + browser perf probe | **done** — chunk interest now streams through cooperative host phases, `pnpm perf:d5` stays bounded, and manual `debug.html?viewDistance=1` walking no longer shows stalls |
 
-`D5` is not automatically completion. It is the acceptance gate for this arc:
+`D5` and `D6` close the runtime data/protocol/loading decision for now. Keep `pnpm perf:d5` as the regression gate when changing loading, scheduling, transport, packed snapshots, or render-world ingestion. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction unless a later D5-style report selects that path.
 
-- If `D5` shows the accepted end state is met and the remaining costs are acceptable, the arc is complete.
-- If HTTP polling is the measured problem, write a `D6-push-transport` tactical that reuses the same protocol semantics.
-- If worker transfer/copy is the measured problem, write a `D6-shared-buffer-pool` tactical with cross-origin-isolation and fallback requirements.
-- If mesh fan-out is the measured problem, write a `D6-render-world-subworkers` tactical without moving authority back into the renderer.
-
-`D5` must validate performance with a repeatable browser traversal, not only subjective playtesting:
-
-- run a scripted Playwright traversal across multiple chunk boundaries at fixed seed, preset, view distance, speed, route, and duration
-- capture a Chrome performance trace or equivalent browser performance data for the run
-- record long tasks, max frame gap, p95/p99 frame time, and frame pacing while new chunks arrive
-- mark or log timing for host storage load, host generation, snapshot encode, transport receive/decode, render-world ingest, mesh build, main-thread GPU upload, and request-to-visible latency
-- verify the main thread no longer performs raw chunk snapshot ownership, raw chunk-section decode, or chunk-neighborhood gathering for mesh jobs
-- inspect the run visually enough to confirm chunk arrival does not present as visible traversal hitches
-
-`D5` exits successfully only if the trace shows chunk-boundary traversal is acceptable at the target view distance, authoritative `player_state` ticks and input/poll handling stay responsive while chunk jobs run, and any remaining main-thread spikes are bounded GPU upload/render bookkeeping. If p95/p99 frame time, max frame gap, long tasks, player tick gaps, or input/poll latency are still unacceptable, the trace must identify the next bottleneck and the arc continues with the corresponding `D6` tactical.
-
-If chunk work is blocking player/session responsiveness, the next tactical should be `D6-authoritative-host-scheduler` as described in [`../authoritative-host-scheduling.md`](../authoritative-host-scheduling.md), not push transport, `SharedArrayBuffer`, or render-world subworkers.
-
-Implement [`D5-transport-measurement-and-push-sab-decision.md`](D5-transport-measurement-and-push-sab-decision.md) next. Each `D*` slice should be narrow enough to validate independently.
+With the runtime arc accepted, the next tactical should return to worldgen/content breadth. The current highest-value slice is [`42-ore-and-underground-decoration-foundation.md`](42-ore-and-underground-decoration-foundation.md): common overworld ore and underground decoration foundation.
 
 ## Skipped entirely (for renderer MVP)
 
