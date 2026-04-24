@@ -1,4 +1,7 @@
 import type { NbtCompound, NbtList, NbtValue } from "./nbt.ts";
+import { paletteBitsFor, unpackBitStorage as unpackRuntimeBitStorage } from "../../util/bit-storage.ts";
+
+export { paletteBitsFor };
 
 export interface DecodedPaletteEntry {
   readonly name: string;
@@ -138,49 +141,8 @@ function decodeHeightmaps(raw: NbtValue | undefined): DecodedHeightmaps {
   return out;
 }
 
-export function paletteBitsFor(paletteSize: number): number {
-  if (paletteSize <= 1) {
-    return 1;
-  }
-  let bits = 0;
-  let value = paletteSize - 1;
-  while (value > 0) {
-    bits += 1;
-    value >>>= 1;
-  }
-  return bits;
-}
-
 export function unpackBitStorage(packed: readonly bigint[] | BigInt64Array, bits: number, entries: number): number[] {
-  if (bits <= 0 || bits > 32) {
-    throw new Error(`unpackBitStorage requires bits in (0, 32], got ${bits}`);
-  }
-  const valuesPerLong = Math.floor(64 / bits);
-  if (valuesPerLong <= 0) {
-    throw new Error(`valuesPerLong must be positive, got ${valuesPerLong}`);
-  }
-  const expectedLongs = Math.ceil(entries / valuesPerLong);
-  if (packed.length < expectedLongs) {
-    throw new Error(`bit-storage data length ${packed.length} < expected ${expectedLongs} for bits=${bits}`);
-  }
-  const mask = (1n << BigInt(bits)) - 1n;
-  const out = new Array<number>(entries);
-  const shiftStep = BigInt(bits);
-  let index = 0;
-  for (let longIndex = 0; longIndex < expectedLongs; longIndex++) {
-    let long = typeof packed[longIndex] === "bigint"
-      ? (packed[longIndex] as bigint)
-      : (packed as BigInt64Array)[longIndex]!;
-    // Interpret as unsigned 64-bit for right-shift extraction.
-    if (long < 0n) {
-      long = long + (1n << 64n);
-    }
-    for (let slot = 0; slot < valuesPerLong && index < entries; slot++) {
-      out[index++] = Number(long & mask);
-      long >>= shiftStep;
-    }
-  }
-  return out;
+  return unpackRuntimeBitStorage(packed, bits, entries);
 }
 
 function asCompound(value: NbtValue | undefined, path: string): NbtCompound {
