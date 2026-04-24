@@ -192,6 +192,36 @@ Each fixture stores one seed + one generator configuration + one or more chunks.
 
 See `docs/tactical/04-integration-oracle-harness.md` for the full shape and design rationale.
 
+## Generation creature oracle (server-side)
+
+Creature-generation fixtures use the same official 1.17.1 server runner, but dump entity chunk storage from `world/entities/*.mca` instead of block chunk sections. The normalized fixture shape is `module: "creature-generation"` and intentionally omits UUIDs, motion, attributes, brain data, equipment, passengers, and other full-NBT fields that are not yet owned by the TypeScript runtime.
+
+Use scan mode first because generation-time passive mobs are probabilistic:
+
+```bash
+./oracle/integration/gen-creature-fixture.sh \
+    --seed 12345 \
+    --scan \
+    --out /tmp/mclone-creature-scan-seed-12345.json
+```
+
+Then commit a selected non-empty chunk fixture:
+
+```bash
+./oracle/integration/gen-creature-fixture.sh \
+    --seed 12345 \
+    --chunks -7,-15 \
+    --out test/fixtures/creatures/overworld-seed-12345-chunk--7--15-entities.json
+```
+
+Pieces:
+
+- `oracle/integration/dump-creature-fixture.ts` — reads `world/entities/*.mca`, falls back to legacy/proto `Level.Entities` when needed, and emits fixture or scan JSON.
+- `src/oracle/anvil/entity-chunk.ts` — decodes vanilla entity chunk NBT (`DataVersion`, `Position`, `Entities`) and legacy chunk entity lists.
+- `src/oracle/integration/creature-fixture.ts` — normalizes stable entity facts, maps common mob categories, sorts records, and compares fixtures with readable diffs.
+
+The first committed fixture is `test/fixtures/creatures/overworld-seed-12345-chunk--7--15-entities.json`, selected from scan output because it contains generated sheep.
+
 ## Dynamic liquid oracle (server-side)
 
 Liquid simulation fixtures use the official 1.17.1 server too, but instead of dumping whole chunks at startup they inject a generated datapack, run a scripted scenario for an exact number of server ticks, save, stop, and dump only a bounded block-state region plus persisted `LiquidTicks`.

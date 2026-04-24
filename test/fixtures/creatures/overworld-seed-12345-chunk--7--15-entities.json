@@ -1,0 +1,46 @@
+{
+  "module": "creature-generation",
+  "minecraftVersion": "1.17.1",
+  "dataVersion": 2730,
+  "seed": "12345",
+  "generator": "default",
+  "generateStructures": false,
+  "source": {
+    "entityStorage": "entities",
+    "normalization": ["uuid omitted", "motion omitted until simulated", "health, attributes, brain, equipment, leash, passengers, and full NBT omitted", "only allowlisted type data compared"]
+  },
+  "chunks": [
+    {
+      "chunkX": -7,
+      "chunkZ": -15
+    }
+  ],
+  "entities": [
+    {
+      "chunkX": -7,
+      "chunkZ": -15,
+      "type": "minecraft:sheep",
+      "category": "creature",
+      "pos": [-102, 78, -228],
+      "rotation": [87.390380859375, 0],
+      "onGround": false,
+      "age": 0,
+      "data": {
+        "Color": 0
+      }
+    },
+    {
+      "chunkX": -7,
+      "chunkZ": -15,
+      "type": "minecraft:sheep",
+      "category": "creature",
+      "pos": [-101, 78, -228],
+      "rotation": [254.69960021972656, 0],
+      "onGround": false,
+      "age": 0,
+      "data": {
+        "Color": 0
+      }
+    }
+  ]
+}
