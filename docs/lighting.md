@@ -430,41 +430,39 @@ Suggested sequence:
 
    `WorldLightEngine` / render lighting mode config surfaces are still deferred until solver ownership exists, so the public mode switch has one real implementation to select.
 
-2. Port the pure solver:
+2. Implement [`L2-light-solver-foundation.md`](tactical/L2-light-solver-foundation.md). Done:
    - `DynamicGraphMinFixedPoint`
+   - `SectionTracker`
+   - `DataLayerStorageMap`
    - `LayerLightSectionStorage`
    - `LayerLightEngine`
    - `BlockLightEngine`
    - `SkyLightSectionStorage`
    - `SkyLightEngine`
    - `LevelLightEngine`
+   - synthetic test-level adapter coverage for block sources, source removal, section-boundary propagation, sky columns, opaque rooms, and raw brightness
 
-3. Add a test-level adapter:
-   - chunk lookup by section coordinates
-   - `getBlockState`
-   - `getLightEmission`
-   - `getLightBlock`
-   - `onLightUpdate`
+   The current block-state layer still lacks full vanilla voxel face-shape APIs, so the solver preserves opacity/emission behavior and carries a narrow shape-occlusion approximation until those APIs are ported.
 
-4. Add initial chunk lighting:
+3. Add initial chunk lighting:
    - scan generated chunks for emitting blocks
    - enable sky sources
    - run initial lighting before publishing snapshots
    - store `lightCorrect`
 
-5. Extend storage/protocol/render-world:
+4. Extend storage/protocol/render-world:
    - packed chunk snapshots carry light
    - remote wire codec serializes 2048-byte light sections
    - render-world worker applies light snapshots
    - dirty sections are emitted for mesh rebuild
 
-6. Replace constant client light:
+5. Replace constant client light:
    - `ClientChunkCache` / render-world level reads section light data
    - meshing emits real packed light values
    - browser visual probes cover caves, open shafts, torch interiors, and daylight terrain
    - keep `fullbright` as a debug render lighting mode, not the default profile
 
-7. Add live edit deltas:
+6. Add live edit deltas:
    - host block edits call `checkBlock`
    - section empty transitions call `updateSectionStatus`
    - light dirty sections become `chunk_delta` updates

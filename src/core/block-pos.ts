@@ -10,6 +10,10 @@ const PACKED_Z_MASK = (1n << BigInt(PACKED_Z_LENGTH)) - 1n;
 const Z_OFFSET = PACKED_Y_LENGTH;
 const X_OFFSET = PACKED_Y_LENGTH + PACKED_Z_LENGTH;
 
+function unpackSigned(value: bigint, leftShift: number, rightShift: number): number {
+  return Number(BigInt.asIntN(64, value << BigInt(leftShift)) >> BigInt(rightShift));
+}
+
 export class BlockPos extends Vec3i {
   public static readonly ZERO = new BlockPos(0, 0, 0);
 
@@ -27,6 +31,40 @@ export class BlockPos extends Vec3i {
     packed |= BigInt(y) & PACKED_Y_MASK;
     packed |= (BigInt(z) & PACKED_Z_MASK) << BigInt(Z_OFFSET);
     return BigInt.asIntN(64, packed);
+  }
+
+  public static getX(value: bigint): number {
+    return unpackSigned(value, 64 - X_OFFSET - PACKED_X_LENGTH, 64 - PACKED_X_LENGTH);
+  }
+
+  public static getY(value: bigint): number {
+    return unpackSigned(value, 64 - PACKED_Y_LENGTH, 64 - PACKED_Y_LENGTH);
+  }
+
+  public static getZ(value: bigint): number {
+    return unpackSigned(value, 64 - Z_OFFSET - PACKED_Z_LENGTH, 64 - PACKED_Z_LENGTH);
+  }
+
+  public static of(value: bigint): BlockPos {
+    return new BlockPos(BlockPos.getX(value), BlockPos.getY(value), BlockPos.getZ(value));
+  }
+
+  public static offset(value: bigint, direction: Direction): bigint;
+  public static offset(value: bigint, x: number, y: number, z: number): bigint;
+  public static offset(value: bigint, second: Direction | number, third?: number, fourth?: number): bigint {
+    if (second instanceof Direction) {
+      return BlockPos.offset(value, second.getStepX(), second.getStepY(), second.getStepZ());
+    }
+
+    return BlockPos.asLong(
+      BlockPos.getX(value) + second,
+      BlockPos.getY(value) + (third ?? 0),
+      BlockPos.getZ(value) + (fourth ?? 0),
+    );
+  }
+
+  public static getFlatIndex(value: bigint): bigint {
+    return value & -16n;
   }
 
   public offset(x: number, y: number, z: number): BlockPos {

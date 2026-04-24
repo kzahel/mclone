@@ -165,6 +165,15 @@ export class Direction implements StringRepresentable {
     return Direction.BY_NAME.get(name);
   }
 
+  public static fromNormal(x: number, y: number, z: number): Direction | undefined {
+    for (const direction of Direction.VALUES) {
+      if (direction.getStepX() === x && direction.getStepY() === y && direction.getStepZ() === z) {
+        return direction;
+      }
+    }
+    return undefined;
+  }
+
   public static from3DDataValue(value: number): Direction {
     return Direction.BY_3D_DATA[Math.abs(value % Direction.BY_3D_DATA.length)]!;
   }
