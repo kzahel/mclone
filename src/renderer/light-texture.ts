@@ -77,7 +77,8 @@ export class LightTexture {
     }
 
     this.updateLightTextureValue = false;
-    const skyDarken = 0.0;
+    // TODO(day-night): Replace this static daytime value with ClientLevel.getSkyDarken(partialTick) once level time/weather exists.
+    const skyDarken = 1.0;
     const skyBrightnessScale = (skyDarken * 0.95) + 0.05;
     const blockBrightnessScale = this.blockLightRedFlicker + 1.5;
     const darkenWorldAmount = this.renderer.getDarkenWorldAmount(partialTick);

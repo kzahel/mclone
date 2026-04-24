@@ -481,6 +481,17 @@ describe("Chunk render infrastructure", () => {
     expect(frustum.isVisible(new AABB(-1, -1, 3, 1, 1, 5))).toBe(false);
   });
 
+  test("LightTexture maps full sky light to bright daylight", () => {
+    const lightTexture = new LightTexture(new GameRenderer(800, 600, 64), new StaticRenderLevel(createAirState()), createFakeDevice());
+    lightTexture.updateLightTexture(0);
+
+    const daylight = lightTexture.samplePacked(LightTexture.FULL_SKY);
+    expect(NativeImage.getR(daylight)).toBeGreaterThan(240);
+    expect(NativeImage.getG(daylight)).toBeGreaterThan(240);
+    expect(NativeImage.getB(daylight)).toBeGreaterThan(240);
+    lightTexture.close();
+  });
+
   test("GameRenderer and LevelRenderer build a camera-driven frame with only front-facing solid chunk draws", async () => {
     const airState = createAirState();
     const stone = createBlock("minecraft:stone", BlockMaterial.STONE);
