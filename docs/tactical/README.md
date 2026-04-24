@@ -156,6 +156,7 @@ Recommended sequence:
 | [`D3-packed-chunk-storage-protocol.md`](D3-packed-chunk-storage-protocol.md) | storage/protocol rollout for packed chunk facts | unit + integration | **landed** authoritative chunk snapshots move through packed records across worker, remote, IndexedDB, and file adapters |
 | [`D4-browser-render-world-ownership.md`](D4-browser-render-world-ownership.md) | browser render-world ownership | perf probe + browser visual | **done** — live browser rendering now feeds packed chunks into a render-world worker, keeps raw chunk ownership and mesh-neighborhood gathering off the main thread, and passes the full browser validation gate |
 | [`D5-transport-measurement-and-push-sab-decision.md`](D5-transport-measurement-and-push-sab-decision.md) | transport measurement and push/SAB decision | perf probe + deployment check | measure the live D4 traversal path and decide from data whether HTTP polling, worker transfer, mesh fan-out, or GPU upload needs the next tactical |
+| [`D6-authoritative-host-scheduler.md`](D6-authoritative-host-scheduler.md) | authoritative host scheduler | runtime + browser perf probe | keep input, polling, and authoritative player ticks responsive while chunk load/generation/snapshot jobs run |
 
 `D5` is not automatically completion. It is the acceptance gate for this arc:
 
