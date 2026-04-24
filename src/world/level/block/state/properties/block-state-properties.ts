@@ -1,6 +1,7 @@
 import { Direction } from "../../../../../core/direction";
 import { BambooLeaves } from "./bamboo-leaves";
 import { BooleanProperty } from "./boolean-property";
+import { DripstoneThickness } from "./dripstone-thickness";
 import { DoubleBlockHalf } from "./double-block-half";
 import { DirectionProperty } from "./direction-property";
 import { EnumProperty } from "./enum-property";
@@ -28,6 +29,8 @@ export class BlockStateProperties {
   public static readonly UP = BooleanProperty.create("up");
   public static readonly DOWN = BooleanProperty.create("down");
   public static readonly AXIS = EnumProperty.create("axis", Direction.Axis);
+  public static readonly VERTICAL_DIRECTION = DirectionProperty.create("vertical_direction", Direction.UP, Direction.DOWN);
+  public static readonly DRIPSTONE_THICKNESS = EnumProperty.create("thickness", DripstoneThickness);
   public static readonly DOUBLE_BLOCK_HALF = EnumProperty.create("half", DoubleBlockHalf);
   public static readonly HORIZONTAL_AXIS = EnumProperty.create("axis", Direction.Axis, Direction.Axis.X, Direction.Axis.Z);
   public static readonly BAMBOO_LEAVES = EnumProperty.create("leaves", BambooLeaves);

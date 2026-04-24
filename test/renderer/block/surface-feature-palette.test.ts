@@ -8,6 +8,7 @@ import { ItemBlockRenderTypes } from "../../../src/renderer/item-block-render-ty
 import { RenderType } from "../../../src/renderer/render-type";
 import { Block } from "../../../src/world/level/block/block";
 import { BlockStateProperties } from "../../../src/world/level/block/state/properties/block-state-properties";
+import { DripstoneThickness } from "../../../src/world/level/block/state/properties/dripstone-thickness";
 import { StaticBlockAndTintGetter } from "../../../src/world/level/static-block-and-tint-getter";
 import { FoliageColor } from "../../../src/world/level/foliage-color";
 import { GrassColor } from "../../../src/world/level/grass-color";
@@ -80,6 +81,11 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:cactus"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:tuff"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:clay"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:calcite"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:dripstone_block"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:pointed_dripstone"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:glow_lichen"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:coal_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:emerald_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate_emerald_ore"))).toBe(RenderType.solid());
@@ -92,6 +98,20 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:pumpkin"))).toBe(RenderType.solid());
     expect(getState("minecraft:deepslate").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
     expect(getState("minecraft:infested_deepslate").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
+
+    const pointedDripstone = getState("minecraft:pointed_dripstone");
+    expect(pointedDripstone.getValue(BlockStateProperties.VERTICAL_DIRECTION)).toBe(Direction.UP);
+    expect(pointedDripstone.getValue(BlockStateProperties.DRIPSTONE_THICKNESS)).toBe(DripstoneThickness.TIP);
+    expect(pointedDripstone.getValue(BlockStateProperties.WATERLOGGED)).toBe(false);
+
+    const glowLichen = getState("minecraft:glow_lichen");
+    expect(glowLichen.getValue(BlockStateProperties.NORTH)).toBe(false);
+    expect(glowLichen.getValue(BlockStateProperties.EAST)).toBe(false);
+    expect(glowLichen.getValue(BlockStateProperties.SOUTH)).toBe(false);
+    expect(glowLichen.getValue(BlockStateProperties.WEST)).toBe(false);
+    expect(glowLichen.getValue(BlockStateProperties.UP)).toBe(false);
+    expect(glowLichen.getValue(BlockStateProperties.DOWN)).toBe(false);
+    expect(glowLichen.getValue(BlockStateProperties.WATERLOGGED)).toBe(false);
   });
 
   test("leaves stay non-occluding so adjacent terrain faces are not culled", () => {

@@ -151,5 +151,15 @@ export class BlockTags {
     "minecraft:tuff",
   ]);
 
+  public static readonly DRIPSTONE_REPLACEABLE = new BlockTag("minecraft:dripstone_replaceable_blocks", [
+    "minecraft:stone",
+    "minecraft:granite",
+    "minecraft:diorite",
+    "minecraft:andesite",
+    "minecraft:tuff",
+    "minecraft:deepslate",
+    "minecraft:dirt",
+  ]);
+
   public static readonly LAVA_POOL_STONE_CANNOT_REPLACE = new BlockTag("minecraft:lava_pool_stone_cannot_replace", []);
 }

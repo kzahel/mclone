@@ -10,12 +10,17 @@ import { DecoratedFeatureConfiguration } from "./configurations/decorated-featur
 import { Feature } from "./feature";
 import { BlockStateConfiguration } from "./configurations/block-state-configuration";
 import { DiskConfiguration } from "./configurations/disk-configuration";
+import { DripstoneClusterConfiguration } from "./configurations/dripstone-cluster-configuration";
+import { GlowLichenConfiguration } from "./configurations/glow-lichen-configuration";
 import { HugeMushroomFeatureConfiguration } from "./configurations/huge-mushroom-feature-configuration";
 import { RandomPatchConfiguration } from "./configurations/random-patch-configuration";
 import { ReplaceBlockConfiguration } from "./configurations/replace-block-configuration";
+import { SmallDripstoneConfiguration } from "./configurations/small-dripstone-configuration";
 import { SimpleRandomFeatureConfiguration } from "./configurations/simple-random-feature-configuration";
 import { SimpleBlockConfiguration } from "./configurations/simple-block-configuration";
 import { DiskReplaceFeature } from "./disk-replace-feature";
+import { DripstoneClusterFeature } from "./dripstone-cluster-feature";
+import { GlowLichenFeature } from "./glow-lichen-feature";
 import { HugeBrownMushroomFeature } from "./huge-brown-mushroom-feature";
 import { HugeRedMushroomFeature } from "./huge-red-mushroom-feature";
 import { IcePatchFeature } from "./ice-patch-feature";
@@ -35,6 +40,7 @@ import { RandomBooleanSelectorFeature } from "./random-boolean-selector-feature"
 import { RandomSelectorFeature } from "./random-selector-feature";
 import { ReplaceBlockFeature } from "./replace-block-feature";
 import { SimpleBlockFeature } from "./simple-block-feature";
+import { SmallDripstoneFeature } from "./small-dripstone-feature";
 import { SimpleRandomSelectorFeature } from "./simple-random-selector-feature";
 import { SpringFeature } from "./spring-feature";
 import { TreeFeature } from "./tree-feature";
@@ -63,6 +69,9 @@ export const Features = {
   KELP: register("kelp", new KelpFeature()),
   BAMBOO: register("bamboo", new BambooFeature()),
   ORE: register("ore", new OreFeature()),
+  GLOW_LICHEN: register("glow_lichen", new GlowLichenFeature()),
+  DRIPSTONE_CLUSTER: register("dripstone_cluster", new DripstoneClusterFeature()),
+  SMALL_DRIPSTONE: register("small_dripstone", new SmallDripstoneFeature()),
   CORAL_TREE: register("coral_tree", new CoralTreeFeature()),
   CORAL_MUSHROOM: register("coral_mushroom", new CoralMushroomFeature()),
   CORAL_CLAW: register("coral_claw", new CoralClawFeature()),
@@ -85,6 +94,9 @@ export type SimpleVegetationFeature =
   | Feature<RandomBooleanFeatureConfiguration>
   | Feature<RandomFeatureConfiguration>
   | Feature<SimpleRandomFeatureConfiguration>
+  | Feature<GlowLichenConfiguration>
+  | Feature<DripstoneClusterConfiguration>
+  | Feature<SmallDripstoneConfiguration>
   | Feature<BlockStateConfiguration>
   | Feature<DiskConfiguration>
   | Feature<ReplaceBlockConfiguration>

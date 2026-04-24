@@ -3,6 +3,7 @@ import committedIntegration from "../fixtures/integration/overworld-seed-12345-c
 import terrainOnly from "../fixtures/integration/overworld-seed-12345-chunks-0-0-terrain-only.json" with { type: "json" };
 import { Registry } from "../../src/core/registry";
 import { BlockPos } from "../../src/core/block-pos";
+import { Direction } from "../../src/core/direction";
 import { Block } from "../../src/world/level/block/block";
 import { LevelChunk } from "../../src/world/level/chunk/level-chunk";
 import {
@@ -27,6 +28,8 @@ import {
   type PackedChunkSection,
 } from "../../src/world/level/packed-chunk-snapshot";
 import { buildBlockStateIdMap } from "../../src/world/level/block/state/block-state-id";
+import { BlockStateProperties } from "../../src/world/level/block/state/properties/block-state-properties";
+import { DripstoneThickness } from "../../src/world/level/block/state/properties/dripstone-thickness";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 import type { BlockState } from "../../src/world/level/block/state/block-state";
 import { BLOCKS_PER_SECTION } from "../../src/worldgen/chunk/chunk-block-buffer";
@@ -187,6 +190,17 @@ describe("packed chunk snapshot codecs", () => {
     const infestedDeepslate = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:infested_deepslate")!;
     const coalOre = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:coal_ore")!;
     const deepslateCopperOre = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:deepslate_copper_ore")!;
+    const clay = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:clay")!;
+    const calcite = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:calcite")!;
+    const dripstoneBlock = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:dripstone_block")!;
+    const pointedDripstone = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:pointed_dripstone")!
+      .setValue(BlockStateProperties.VERTICAL_DIRECTION, Direction.DOWN)
+      .setValue(BlockStateProperties.DRIPSTONE_THICKNESS, DripstoneThickness.FRUSTUM)
+      .setValue(BlockStateProperties.WATERLOGGED, true);
+    const glowLichen = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:glow_lichen")!
+      .setValue(BlockStateProperties.NORTH, true)
+      .setValue(BlockStateProperties.UP, true)
+      .setValue(BlockStateProperties.WATERLOGGED, true);
     const chunk = new LevelChunk(0, 0, airState);
     chunk.setBlockState(new BlockPos(1, 2, 3), stone);
     chunk.setBlockState(new BlockPos(4, 5, 6), water);
@@ -196,6 +210,11 @@ describe("packed chunk snapshot codecs", () => {
     chunk.setBlockState(new BlockPos(2, 3, 4), infestedDeepslate);
     chunk.setBlockState(new BlockPos(5, 6, 7), coalOre);
     chunk.setBlockState(new BlockPos(8, 9, 10), deepslateCopperOre);
+    chunk.setBlockState(new BlockPos(3, 4, 5), clay);
+    chunk.setBlockState(new BlockPos(6, 7, 8), calcite);
+    chunk.setBlockState(new BlockPos(9, 10, 11), dripstoneBlock);
+    chunk.setBlockState(new BlockPos(11, 12, 13), pointedDripstone);
+    chunk.setBlockState(new BlockPos(12, 13, 14), glowLichen);
     chunk.recordBlockTick(new BlockPos(1, 2, 3), "minecraft:stone", 2);
     chunk.recordLiquidTick(new BlockPos(4, 5, 6), "minecraft:water", 3);
 
@@ -212,6 +231,11 @@ describe("packed chunk snapshot codecs", () => {
     expect(hydrated.getBlockState(new BlockPos(2, 3, 4))).toBe(infestedDeepslate);
     expect(hydrated.getBlockState(new BlockPos(5, 6, 7))).toBe(coalOre);
     expect(hydrated.getBlockState(new BlockPos(8, 9, 10))).toBe(deepslateCopperOre);
+    expect(hydrated.getBlockState(new BlockPos(3, 4, 5))).toBe(clay);
+    expect(hydrated.getBlockState(new BlockPos(6, 7, 8))).toBe(calcite);
+    expect(hydrated.getBlockState(new BlockPos(9, 10, 11))).toBe(dripstoneBlock);
+    expect(hydrated.getBlockState(new BlockPos(11, 12, 13))).toBe(pointedDripstone);
+    expect(hydrated.getBlockState(new BlockPos(12, 13, 14))).toBe(glowLichen);
     expect(hydrated.getScheduledBlockTicks()).toEqual(snapshot.blockTicks);
     expect(hydrated.getScheduledLiquidTicks()).toEqual(snapshot.liquidTicks);
   });

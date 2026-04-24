@@ -42,14 +42,19 @@ function addDefaultLakes(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.LAKES, () => WaterFeatures.LAKE_WATER);
 }
 
-function addDefaultUndergroundVariety(builder: BiomeGenerationSettings.Builder): void {
+function addDefaultUndergroundVariety(builder: BiomeGenerationSettings.Builder, skipGlowLichen = false): void {
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_DIRT);
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_GRAVEL);
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_GRANITE);
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_DIORITE);
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_ANDESITE);
+  if (!skipGlowLichen) {
+    builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => OreFeatures.GLOW_LICHEN);
+  }
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_TUFF);
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_DEEPSLATE);
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_DECORATION, () => OreFeatures.RARE_DRIPSTONE_CLUSTER_FEATURE);
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_DECORATION, () => OreFeatures.RARE_SMALL_DRIPSTONE_FEATURE);
 }
 
 function addDefaultOres(builder: BiomeGenerationSettings.Builder): void {
@@ -72,6 +77,16 @@ function addExtraEmeralds(builder: BiomeGenerationSettings.Builder): void {
 
 function addInfestedStone(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_DECORATION, () => OreFeatures.ORE_INFESTED);
+}
+
+function addDefaultSoftDisks(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.DISK_SAND);
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.DISK_CLAY);
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.DISK_GRAVEL);
+}
+
+function addSwampClayDisk(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.DISK_CLAY);
 }
 
 function addDefaultSprings(builder: BiomeGenerationSettings.Builder): void {
@@ -268,6 +283,7 @@ function buildMountainSettings(edge: boolean): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   builder.addFeature(
     GenerationStep.Decoration.VEGETAL_DECORATION,
     () => (edge ? VegetationFeatures.TREES_MOUNTAIN_EDGE : VegetationFeatures.TREES_MOUNTAIN),
@@ -288,6 +304,7 @@ function buildTaigaSettings(): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addTaigaTrees(builder);
   addTaigaGrass(builder);
@@ -305,6 +322,7 @@ function buildSnowyTundraSettings(iceSpikes = false): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   if (iceSpikes) {
     builder.addFeature(GenerationStep.Decoration.SURFACE_STRUCTURES, () => VegetationFeatures.ICE_SPIKE);
     builder.addFeature(GenerationStep.Decoration.SURFACE_STRUCTURES, () => VegetationFeatures.ICE_PATCH);
@@ -325,6 +343,7 @@ function buildSnowyTaigaSettings(): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addTaigaTrees(builder);
   addDefaultFlowers(builder);
@@ -343,6 +362,7 @@ function buildGiantTaigaSettings(giantSpruce: boolean): BiomeGenerationSettings 
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addGiantTaigaTrees(builder, giantSpruce);
   addDefaultFlowers(builder);
@@ -361,6 +381,7 @@ function buildMushroomFieldSettings(): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   addMushroomFieldVegetation(builder);
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
@@ -375,6 +396,7 @@ function buildDesertSettings(): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   addDefaultMushrooms(builder);
   addDesertVegetation(builder);
   addDesertExtraVegetation(builder);
@@ -390,6 +412,7 @@ function buildBadlandsSettings(): BiomeGenerationSettings {
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addExtraGold(builder);
+  addDefaultSoftDisks(builder);
   addBadlandGrass(builder);
   addBadlandExtraVegetation(builder);
   addDefaultSprings(builder);
@@ -403,6 +426,7 @@ function buildForestSettings(): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   addForestFlowers(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.BIRCH_OTHER);
   addDefaultFlowers(builder);
@@ -420,6 +444,7 @@ function buildFlowerForestSettings(): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.FOREST_FLOWER_VEGETATION_COMMON);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.FOREST_FLOWER_TREES);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.FLOWER_FOREST);
@@ -437,6 +462,7 @@ function buildDarkForestSettings(redMushroomBias: boolean): BiomeGenerationSetti
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   builder.addFeature(
     GenerationStep.Decoration.VEGETAL_DECORATION,
     () => (redMushroomBias ? VegetationFeatures.DARK_FOREST_VEGETATION_RED : VegetationFeatures.DARK_FOREST_VEGETATION_BROWN),
@@ -457,6 +483,7 @@ function buildBirchForestSettings(tall: boolean): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   addForestFlowers(builder);
   builder.addFeature(
     GenerationStep.Decoration.VEGETAL_DECORATION,
@@ -477,6 +504,7 @@ function buildPlainsSettings(): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   addPlainGrass(builder);
   addPlainVegetation(builder);
   addDefaultMushrooms(builder);
@@ -492,6 +520,7 @@ function buildSwampSettings(swampHills: boolean): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addSwampClayDisk(builder);
   addSwampVegetation(builder);
   addDefaultMushrooms(builder);
   addSwampExtraVegetation(builder);
@@ -509,6 +538,7 @@ function buildSavannaSettings(shattered: boolean): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   if (!shattered) {
     addSavannaGrass(builder);
   }
@@ -534,6 +564,7 @@ function buildJungleSettings(edge: boolean, bamboo = false): BiomeGenerationSett
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   if (bamboo) {
     addBambooVegetation(builder);
   } else {
@@ -559,6 +590,7 @@ function buildBeachSettings(): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   addDefaultFlowers(builder);
   addDefaultGrass(builder);
   addDefaultMushrooms(builder);
@@ -574,6 +606,7 @@ function buildRiverSettings(frozen: boolean): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   addWaterTrees(builder);
   addDefaultFlowers(builder);
   addDefaultGrass(builder);
@@ -593,8 +626,9 @@ function buildOceanSettings(kind: OceanSettingsKind, deep: boolean): BiomeGenera
   const builder = new BiomeGenerationSettings.Builder();
   addOceanCarvers(builder);
   addDefaultLakes(builder);
-  addDefaultUndergroundVariety(builder);
+  addDefaultUndergroundVariety(builder, true);
   addDefaultOres(builder);
+  addDefaultSoftDisks(builder);
   addWaterTrees(builder);
   addDefaultFlowers(builder);
   addDefaultGrass(builder);

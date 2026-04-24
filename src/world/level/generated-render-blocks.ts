@@ -19,12 +19,14 @@ import { CoralPlantBlock } from "./block/coral-plant-block";
 import { CoralWallFanBlock } from "./block/coral-wall-fan-block";
 import { DeadBushBlock } from "./block/dead-bush-block";
 import { DoublePlantBlock } from "./block/double-plant-block";
+import { GlowLichenBlock } from "./block/glow-lichen-block";
 import { HugeMushroomBlock } from "./block/huge-mushroom-block";
 import { KelpBlock } from "./block/kelp-block";
 import { KelpPlantBlock } from "./block/kelp-plant-block";
 import { LeavesBlock } from "./block/leaves-block";
 import { LiquidBlock } from "./block/liquid-block";
 import { MushroomBlock } from "./block/mushroom-block";
+import { PointedDripstoneBlock } from "./block/pointed-dripstone-block";
 import { RotatedPillarBlock } from "./block/rotated-pillar-block";
 import { SeagrassBlock } from "./block/seagrass-block";
 import { SeaPickleBlock } from "./block/sea-pickle-block";
@@ -50,6 +52,7 @@ const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
 const DIRT_LOCATION = new ResourceLocation("minecraft:dirt");
 const SAND_LOCATION = new ResourceLocation("minecraft:sand");
 const GRAVEL_LOCATION = new ResourceLocation("minecraft:gravel");
+const CLAY_LOCATION = new ResourceLocation("minecraft:clay");
 const WATER_LOCATION = new ResourceLocation("minecraft:water");
 const LAVA_LOCATION = new ResourceLocation("minecraft:lava");
 const SNOW_LOCATION = new ResourceLocation("minecraft:snow");
@@ -115,6 +118,10 @@ const COCOA_LOCATION = new ResourceLocation("minecraft:cocoa");
 const GRANITE_LOCATION = new ResourceLocation("minecraft:granite");
 const DIORITE_LOCATION = new ResourceLocation("minecraft:diorite");
 const ANDESITE_LOCATION = new ResourceLocation("minecraft:andesite");
+const CALCITE_LOCATION = new ResourceLocation("minecraft:calcite");
+const DRIPSTONE_BLOCK_LOCATION = new ResourceLocation("minecraft:dripstone_block");
+const POINTED_DRIPSTONE_LOCATION = new ResourceLocation("minecraft:pointed_dripstone");
+const GLOW_LICHEN_LOCATION = new ResourceLocation("minecraft:glow_lichen");
 const TUFF_LOCATION = new ResourceLocation("minecraft:tuff");
 const DEEPSLATE_LOCATION = new ResourceLocation("minecraft:deepslate");
 const COAL_ORE_LOCATION = new ResourceLocation("minecraft:coal_ore");
@@ -209,6 +216,7 @@ const GENERATED_BLOCK_LOCATIONS = [
   DIRT_LOCATION,
   SAND_LOCATION,
   GRAVEL_LOCATION,
+  CLAY_LOCATION,
   WATER_LOCATION,
   LAVA_LOCATION,
   SNOW_LOCATION,
@@ -274,6 +282,10 @@ const GENERATED_BLOCK_LOCATIONS = [
   GRANITE_LOCATION,
   DIORITE_LOCATION,
   ANDESITE_LOCATION,
+  CALCITE_LOCATION,
+  DRIPSTONE_BLOCK_LOCATION,
+  POINTED_DRIPSTONE_LOCATION,
+  GLOW_LICHEN_LOCATION,
   TUFF_LOCATION,
   DEEPSLATE_LOCATION,
   COAL_ORE_LOCATION,
@@ -341,6 +353,7 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("dirt"),
   blockTexture("sand"),
   blockTexture("gravel"),
+  blockTexture("clay"),
   blockTexture("water_still"),
   blockTexture("water_flow"),
   blockTexture("water_overlay"),
@@ -432,6 +445,19 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("granite"),
   blockTexture("diorite"),
   blockTexture("andesite"),
+  blockTexture("calcite"),
+  blockTexture("dripstone_block"),
+  blockTexture("pointed_dripstone_up_base"),
+  blockTexture("pointed_dripstone_up_middle"),
+  blockTexture("pointed_dripstone_up_frustum"),
+  blockTexture("pointed_dripstone_up_tip"),
+  blockTexture("pointed_dripstone_up_tip_merge"),
+  blockTexture("pointed_dripstone_down_base"),
+  blockTexture("pointed_dripstone_down_middle"),
+  blockTexture("pointed_dripstone_down_frustum"),
+  blockTexture("pointed_dripstone_down_tip"),
+  blockTexture("pointed_dripstone_down_tip_merge"),
+  blockTexture("glow_lichen"),
   blockTexture("tuff"),
   blockTexture("deepslate"),
   blockTexture("deepslate_top"),
@@ -541,6 +567,10 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     GRAVEL_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.SAND, MaterialColor.STONE).strength(0.6).sound(SoundType.GRAVEL)),
   ).defaultBlockState();
+  const clayState = registerBlock(
+    CLAY_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.CLAY).strength(0.6).sound(SoundType.GRAVEL)),
+  ).defaultBlockState();
   const redSandState = registerBlock(
     RED_SAND_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.SAND, MaterialColor.COLOR_ORANGE).strength(0.5).sound(SoundType.GRAVEL)),
@@ -592,6 +622,40 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   const andesiteState = registerBlock(
     ANDESITE_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.STONE).requiresCorrectToolForDrops().strength(1.5, 6.0)),
+  ).defaultBlockState();
+  const calciteState = registerBlock(
+    CALCITE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_WHITE).sound(SoundType.CALCITE).requiresCorrectToolForDrops().strength(0.75)),
+  ).defaultBlockState();
+  const dripstoneBlockState = registerBlock(
+    DRIPSTONE_BLOCK_LOCATION,
+    new Block(
+      BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_BROWN)
+        .sound(SoundType.DRIPSTONE_BLOCK)
+        .requiresCorrectToolForDrops()
+        .strength(1.5, 1.0),
+    ),
+  ).defaultBlockState();
+  const pointedDripstoneState = registerBlock(
+    POINTED_DRIPSTONE_LOCATION,
+    new PointedDripstoneBlock(
+      BlockBehaviour.Properties.of(Material.STONE, MaterialColor.TERRACOTTA_BROWN)
+        .noOcclusion()
+        .sound(SoundType.POINTED_DRIPSTONE)
+        .randomTicks()
+        .strength(1.5, 3.0)
+        .dynamicShape(),
+    ),
+  ).defaultBlockState();
+  const glowLichenState = registerBlock(
+    GLOW_LICHEN_LOCATION,
+    new GlowLichenBlock(
+      BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT, MaterialColor.GLOW_LICHEN)
+        .noCollission()
+        .strength(0.2)
+        .sound(SoundType.GLOW_LICHEN)
+        .lightLevel(GlowLichenBlock.emission(7)),
+    ),
   ).defaultBlockState();
   const tuffState = registerBlock(
     TUFF_LOCATION,
@@ -1096,6 +1160,11 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(sugarCaneState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(vineState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(cocoaState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(clayState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(calciteState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(dripstoneBlockState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(pointedDripstoneState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(glowLichenState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(tuffState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(deepslateState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(coalOreState.getBlock(), RenderType.solid());
