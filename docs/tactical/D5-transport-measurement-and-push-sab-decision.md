@@ -500,7 +500,9 @@ Artifact paths:
 
 Visual inspection: the start screenshot shows a filled cliff/cave face, and the end screenshot shows populated savanna/desert/mountain terrain with no blank chunks.
 
-Interpretation: the measured bottleneck was host chunk scheduling, not push transport, `SharedArrayBuffer`, or render-world subworkers. The phase split brought traversal `poll_world_updates` p99 from the prior `238.7 ms` to `19.8 ms` and chunk-bearing poll p99 to `23.8 ms`. D6 should now be judged with manual low-view walking plus the remaining response max/player tick max, not by starting a transport or renderer topology change.
+Interpretation: the measured bottleneck was host chunk scheduling, not push transport, `SharedArrayBuffer`, or render-world subworkers. The phase split brought traversal `poll_world_updates` p99 from the prior `238.7 ms` to `19.8 ms` and chunk-bearing poll p99 to `23.8 ms`.
+
+Manual validation on `debug.html?viewDistance=1`: walking behavior is much improved, and no stalls were noticed. D5's decision is to accept the current polling/packed-snapshot/render-world architecture for now, with the D6 cooperative host scheduler as the fix for the measured stutter. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction from this result.
 
 ## Implementation sequence
 
@@ -587,4 +589,4 @@ The browser screenshot rule from `AGENTS.md` still applies. Save D5 screenshots 
 
 ## Next
 
-Use the D5 harness as the regression gate for the D6 scheduler work. Next, manually validate low-view walking on `debug.html?viewDistance=1`; if the remaining host max is still visible, continue D6 inside the host scheduler with snapshot/persistence or feature-placement job work. Do not start push transport, `SharedArrayBuffer`, or render-world subworkers unless a later D5 report selects that path.
+Close the runtime data/protocol/loading decision for now and keep `pnpm perf:d5` as the regression gate. Return to the next non-transport tactical slice; revisit push transport, `SharedArrayBuffer`, or render-world subworkers only if a later D5-style report selects that path.

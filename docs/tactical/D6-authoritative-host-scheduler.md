@@ -250,7 +250,9 @@ Artifact paths:
 
 Visual inspection: the start screenshot shows a filled cliff/cave face, and the end screenshot shows populated savanna/desert/mountain terrain with no blank chunks.
 
-Interpretation: the host single-chunk quantum was the measured bottleneck. Splitting chunk work into status-like cooperative phases brought `poll_world_updates` p99 down from the previous `238.7 ms` to `19.8 ms`, while frame pacing stayed clean and chunk-bearing polls remained capped. The remaining D6 risk is the response max and player tick max around `26-119 ms`, plus subjective low-view walking; if that still feels bad, the next host-only work should move snapshot/persistence and/or feature placement into a dedicated job worker rather than changing transport, `SharedArrayBuffer`, render-world ownership, or client prediction.
+Interpretation: the host single-chunk quantum was the measured bottleneck. Splitting chunk work into status-like cooperative phases brought `poll_world_updates` p99 down from the previous `238.7 ms` to `19.8 ms`, while frame pacing stayed clean and chunk-bearing polls remained capped. The remaining D6 risk was subjective low-view walking plus the response max and player tick max around `26-119 ms`.
+
+Manual validation on `debug.html?viewDistance=1`: walking behavior is much improved, and no stalls were noticed. Treat D6 as complete for the current architecture. Do not continue into push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction from this result.
 
 ## D6 completion acceptance
 
@@ -266,4 +268,4 @@ D6 is complete when:
 
 ## Next
 
-Manually validate low-view debug walking on `debug.html?viewDistance=1` against the phase-split scheduler. If movement still visibly stalls, continue D6 by reducing the remaining host response max with host-owned job work for snapshot/persistence and/or feature placement. If manual walking is acceptable, close D6 and return to the D5 acceptance decision. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction as part of this decision.
+Close the D5/D6 runtime scheduling decision and use `pnpm perf:d5` as a regression gate for future loading or transport changes. Future host work may still move snapshot/persistence or feature placement into dedicated host-owned jobs, but only after a new measurement or manual regression shows the cooperative phase split is no longer enough.
