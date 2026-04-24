@@ -4,10 +4,13 @@ Runtime architecture for `mclone`.
 
 For rough sequencing of the runtime/host refactor work, see the runtime/host arc in [`tactical/README.md`](./tactical/README.md).
 
-This document exists to answer a different question than [`strategy.md`](./strategy.md) and [`worldgen-status.md`](./worldgen-status.md):
+This document exists to answer a different question than [`strategy.md`](./strategy.md), [`worldgen-status.md`](./worldgen-status.md), and the more specific runtime contract docs:
 
 - `strategy.md`: how we translate Minecraft 1.17.1 into TypeScript
 - `worldgen-status.md`: what parts of worldgen are landed today
+- `runtime-data-model.md`: the shared chunk/block-state data model across simulation, storage, protocol, client workers, and meshing
+- `protocol.md`: the logical host/client message model and transport-codec boundaries
+- `loading-persistence.md`: world creation/open/join flow, chunk lifecycle, and save/eviction policy
 - this document: how the engine should be split across simulation, rendering, storage, workers, and multiplayer hosts
 
 The central decision is simple:
@@ -90,7 +93,7 @@ World state and chunk records should have an engine-defined logical shape. Brows
 Likewise, local singleplayer and remote multiplayer should share the same message model, with different transports:
 
 - local: `postMessage` / `MessagePort`
-- remote: WebSocket or later another network transport
+- remote: HTTP request/response today; WebSocket or another push transport later if measurements require it
 
 ### 5. Parity and custom gameplay are policies, not architectural forks
 
@@ -260,11 +263,15 @@ At minimum, the engine should converge on explicit shapes for:
 - authoritative player state snapshot
 - world metadata and save metadata
 
+The durable shape of those data records lives in [`runtime-data-model.md`](./runtime-data-model.md). The message model that carries them lives in [`protocol.md`](./protocol.md).
+
 These should be serializable without depending on live class instances.
 
 ## Persistence model
 
 The canonical model should be engine-defined chunk/world records, not raw IndexedDB layout and not whatever Node filesystem structure we choose first.
+
+Detailed loading, dirty-state, lazy-save, and eviction policy lives in [`loading-persistence.md`](./loading-persistence.md).
 
 Recommended rule:
 
@@ -286,6 +293,8 @@ Do not let browser persistence choices leak into the simulation core.
 ## Networking / transport model
 
 The message model should be shared between local singleplayer and multiplayer.
+
+The durable logical protocol and wire-codec split lives in [`protocol.md`](./protocol.md).
 
 That means:
 

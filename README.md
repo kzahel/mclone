@@ -2,17 +2,17 @@
 
 Web-based Minecraft-inspired voxel sandbox. Private project — primary target is home/LAN use for my daughter to play with.
 
-See [`docs/strategy.md`](docs/strategy.md) for the two-phase plan (direct translation now, optional clean-room only if we ever want to distribute), [`docs/architecture.md`](docs/architecture.md) for the runtime/host split, [`docs/worldgen-status.md`](docs/worldgen-status.md) for the living worldgen status/prioritization view, [`docs/carver-status.md`](docs/carver-status.md) for the narrower carver-parity/oracle tracker, and [`docs/assets-plan.md`](docs/assets-plan.md) for asset extraction. Implementation work is tracked in numbered tactical docs under [`docs/tactical/`](docs/tactical/). Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
+See [`docs/strategy.md`](docs/strategy.md) for the two-phase plan (direct translation now, optional clean-room only if we ever want to distribute), [`docs/architecture.md`](docs/architecture.md) for the runtime/host split, [`docs/runtime-data-model.md`](docs/runtime-data-model.md) for shared chunk/block-state data contracts, [`docs/protocol.md`](docs/protocol.md) for the host/client message model, [`docs/loading-persistence.md`](docs/loading-persistence.md) for world loading and save policy, [`docs/worldgen-status.md`](docs/worldgen-status.md) for the living worldgen status/prioritization view, [`docs/carver-status.md`](docs/carver-status.md) for the narrower carver-parity/oracle tracker, and [`docs/assets-plan.md`](docs/assets-plan.md) for asset extraction. Implementation work is tracked in numbered tactical docs under [`docs/tactical/`](docs/tactical/). Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
 
-Runtime/host arc status: `R0` authoritative world boundary, `R1` browser singleplayer worker host, and `R2` client mesh worker offload are landed.
+Runtime/host arc status: `R0` through `R8` are landed: browser singleplayer, dedicated Node hosting, remote browser clients, protocol hardening, and the first authoritative player/control loop all use the shared host/client boundary.
 
 ## Stack
 
 - **Language:** TypeScript end-to-end — host, workers, worldgen, meshing. No Rust.
 - **Renderer:** WebGPU. Greedy-meshed chunks packed into instanced buffers.
 - **Worldgen:** TS translation of MC 1.17.1's pipeline; bit-exact seed parity is the correctness bar. See `docs/tactical/`.
-- **Chunk storage:** IndexedDB (consider OPFS as alternative for large binary blobs).
-- **Host:** Vite + workers. Main thread handles input/UI; workers own worldgen + meshing.
+- **Chunk storage:** engine-native chunk records behind adapters; IndexedDB is the browser baseline, with OPFS still open for large binary blobs.
+- **Host:** Vite + workers. Main thread handles input/UI/GPU submission; workers own the authoritative local host and client meshing.
 - **Perf escape hatch:** any measured-hot module can move to WASM-from-C (not Rust). Default stack is pure TS; no WASM unless measurement says so.
 
 [`docs/native-target.md`](docs/native-target.md) is an exploratory architecture note only. It does not change the current TS-first roadmap or imply committed native-host work.
@@ -30,7 +30,7 @@ Pipeline per chunk:
 5. Ore veins + features (translated `OreFeature` / `TreeFeature`)
 6. Structures (translated position finders + block templates from extracted NBT)
 
-Worker boundary is chunk-sized: pass chunk coords into a worldgen worker, get a packed block array + heightmap back. No per-voxel calls across thread boundaries. Same rule applies to any future TS-module-migrated-to-WASM.
+Runtime boundaries should stay chunk/section-sized: pass chunk or section facts across workers/transports, never per-voxel calls. The same rule applies to any future TS-module-migrated-to-WASM.
 
 ## References (repo-local, under `reference/` — gitignored)
 

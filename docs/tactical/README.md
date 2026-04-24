@@ -1,6 +1,6 @@
 # Tactical docs
 
-Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For the runtime/host boundaries these tacticals are expected to converge toward, see [`../architecture.md`](../architecture.md).
+Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For runtime/host boundaries and durable data/protocol/loading contracts, see [`../architecture.md`](../architecture.md), [`../runtime-data-model.md`](../runtime-data-model.md), [`../protocol.md`](../protocol.md), and [`../loading-persistence.md`](../loading-persistence.md).
 
 ## Rule of thumb
 
@@ -115,6 +115,67 @@ WebRTC is intentionally deferred. The preferred path is:
 | `R9-` | optional browser-hosted peer/server or push-capable transport: WebSocket/WebTransport/WebRTC-style adapter reusing the same protocol and host boundary if polling stops fitting | integration | slot in a different transport later without redesigning the engine around it up front |
 
 The first tactical to plan in detail from this arc should be `R0-`, not `R7-`. If `R0-` and `R1-` are not real, every later runtime mode becomes a special case.
+
+## Runtime data / protocol / loading arc (rough, cross-cutting)
+
+This arc replaces the old draft `P0`/`P1`/`P2` performance-packing notes. The durable decisions now live in:
+
+- [`../runtime-data-model.md`](../runtime-data-model.md): block-state ids, packed sections, chunk snapshots/deltas, client chunk ownership, and `SharedArrayBuffer` criteria
+- [`../protocol.md`](../protocol.md): logical host/client messages, session lifecycle, wire codecs, and polling-vs-push transport guidance
+- [`../loading-persistence.md`](../loading-persistence.md): create/open/join flow, chunk lifecycle, lazy persistence, storage adapters, and aggregate remote interest
+
+The tactical track should now stay implementation-sized. It should not re-argue the architecture unless new measurements or parity constraints invalidate the durable docs.
+
+Governing rules:
+
+- vanilla-shaped chunk facts are the target data model
+- local singleplayer and remote multiplayer use the same logical protocol
+- loading and persistence are authoritative-host responsibilities
+- the browser main thread owns presentation, not raw chunk sections
+- packed typed-array payloads come before any `SharedArrayBuffer` work
+- `SharedArrayBuffer` is considered only after ownership, packing, and measurement justify it
+
+Accepted end state for this arc:
+
+- full `BlockStateId` mapping and 1.17.1-compatible `BitStorage` are shared runtime primitives
+- authoritative chunk snapshots use packed, vanilla-shaped section facts rather than hot-path name/property object graphs
+- browser and Node storage adapters persist the same logical chunk records behind adapter-specific physical layouts
+- local worker and remote transports carry the same logical protocol and packed chunk facts through appropriate wire codecs
+- browser main thread no longer owns raw chunk sections or gathers chunk neighborhoods for meshing
+- browser singleplayer and browser multiplayer feed the same client render-world/cache/meshing path
+- create/open/join, chunk loading, dirty-state, lazy-save, and eviction policy are explicit host responsibilities
+- performance measurements identify the remaining bottleneck as GPU upload/render bookkeeping or prove that a push/SAB follow-up is needed
+
+Recommended sequence:
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| `D0-` | durable architecture consolidation | docs review | **done by the architecture docs above**; keep future tacticals short and refer back to durable decisions |
+| [`D1-block-state-id-and-bitstorage-foundation.md`](D1-block-state-id-and-bitstorage-foundation.md) | shared `BlockStateId` table and runtime `BitStorage` helper | unit | small foundation for packed sections without changing ownership or protocol yet |
+| `D2-` | packed section codecs and chunk snapshot model | unit + fixture roundtrip | replace object-heavy section facts with vanilla-shaped packed section records |
+| `D3-` | storage/protocol rollout for packed chunk facts | unit + integration | move authoritative chunk snapshots through packed records across worker, remote, IndexedDB, and file adapters |
+| `D4-` | browser render-world ownership | perf probe + browser visual | move client chunk cache and meshing inputs off the main thread while preserving host authority |
+| `D5-` | transport measurement and push/SAB decision | perf probe + deployment check | decide from data whether HTTP polling, worker transfer, or buffer sharing needs replacement |
+
+`D5` is not automatically completion. It is the acceptance gate for this arc:
+
+- If `D5` shows the accepted end state is met and the remaining costs are acceptable, the arc is complete.
+- If HTTP polling is the measured problem, write a `D6-push-transport` tactical that reuses the same protocol semantics.
+- If worker transfer/copy is the measured problem, write a `D6-shared-buffer-pool` tactical with cross-origin-isolation and fallback requirements.
+- If mesh fan-out is the measured problem, write a `D6-render-world-subworkers` tactical without moving authority back into the renderer.
+
+`D5` must validate performance with a repeatable browser traversal, not only subjective playtesting:
+
+- run a scripted Playwright traversal across multiple chunk boundaries at fixed seed, preset, view distance, speed, route, and duration
+- capture a Chrome performance trace or equivalent browser performance data for the run
+- record long tasks, max frame gap, p95/p99 frame time, and frame pacing while new chunks arrive
+- mark or log timing for host storage load, host generation, snapshot encode, transport receive/decode, render-world ingest, mesh build, main-thread GPU upload, and request-to-visible latency
+- verify the main thread no longer performs raw chunk snapshot ownership, raw chunk-section decode, or chunk-neighborhood gathering for mesh jobs
+- inspect the run visually enough to confirm chunk arrival does not present as visible traversal hitches
+
+`D5` exits successfully only if the trace shows chunk-boundary traversal is acceptable at the target view distance and any remaining main-thread spikes are bounded GPU upload/render bookkeeping. If p95/p99 frame time, max frame gap, or long tasks are still unacceptable, the trace must identify the next bottleneck and the arc continues with the corresponding `D6` tactical.
+
+Do not write the detailed `D2-` tactical until `D1` has landed or implementation is next. Each `D*` slice should be narrow enough to validate independently.
 
 ## Skipped entirely (for renderer MVP)
 
