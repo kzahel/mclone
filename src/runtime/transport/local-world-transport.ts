@@ -39,6 +39,7 @@ export interface RenderWorldUpdateSink {
 export interface TransportWorldClientOptions {
   readonly chunkUpdateSink?: RenderWorldUpdateSink;
   readonly mirrorChunkUpdatesToLevel?: boolean;
+  readonly pollUpdateMaxMessages?: number;
 }
 
 export class LocalWorldTransport implements WorldTransport {
@@ -74,6 +75,7 @@ export class TransportWorldClient implements WorldClient {
   private lastChunkView: SetChunkViewRequest | undefined;
   private chunkUpdateSink: RenderWorldUpdateSink | undefined;
   private mirrorChunkUpdatesToLevel: boolean;
+  private readonly pollUpdateMaxMessages: number | undefined;
 
   public constructor(
     private readonly transport: WorldTransport,
@@ -82,6 +84,7 @@ export class TransportWorldClient implements WorldClient {
   ) {
     this.chunkUpdateSink = options.chunkUpdateSink;
     this.mirrorChunkUpdatesToLevel = options.mirrorChunkUpdatesToLevel ?? options.chunkUpdateSink === undefined;
+    this.pollUpdateMaxMessages = options.pollUpdateMaxMessages;
   }
 
   public setRenderWorldUpdateSink(
@@ -142,7 +145,10 @@ export class TransportWorldClient implements WorldClient {
   }
 
   public async pollUpdates(): Promise<boolean> {
-    const result = await this.applyHostMessages(await this.transport.pollUpdates({ type: "poll_world_updates" }));
+    const result = await this.applyHostMessages(await this.transport.pollUpdates({
+      type: "poll_world_updates",
+      maxMessages: this.pollUpdateMaxMessages,
+    }));
     return result.messageChanged;
   }
 

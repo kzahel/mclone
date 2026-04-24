@@ -9,6 +9,7 @@ import type { BlockState } from "../../world/level/block/state/block-state";
 import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import type { WorldHost } from "../protocol/world-host";
+import { drainWorldHostMessages } from "../protocol/world-message-queue";
 import type {
   ClientPlayerState,
   ClientSessionState,
@@ -360,12 +361,12 @@ export class GeneratedWorldHost implements WorldHost {
     }
   }
 
-  private async persistLoadedChunk(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): Promise<void> {
+  private async persistPackedChunkSnapshot(snapshot: PackedChunkSnapshot): Promise<void> {
     if (this.storageSession === undefined) {
       return;
     }
 
-    await this.storageSession.chunks.saveChunk(this.buildPackedChunkSnapshot(chunk));
+    await this.storageSession.chunks.saveChunk(snapshot);
   }
 
   private async runChunkViewJobs(
@@ -389,14 +390,16 @@ export class GeneratedWorldHost implements WorldHost {
       }
 
       this.options.mutateWorld?.(this.level);
-      await this.persistLoadedChunk(chunk);
+      await yieldToEventLoop();
+      const snapshot = this.buildPackedChunkSnapshot(chunk);
+      await this.persistPackedChunkSnapshot(snapshot);
       if (generation !== this.chunkViewGeneration || !this.isChunkInCurrentView(chunkX, chunkZ)) {
         continue;
       }
 
       this.pendingMessages.push({
         type: "chunk_snapshot",
-        snapshot: this.buildPackedChunkSnapshot(chunk),
+        snapshot,
       });
     }
   }
@@ -514,14 +517,8 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private drainPendingMessages(maxMessages: number | undefined): readonly WorldHostMessage[] {
-    if (maxMessages === undefined || maxMessages >= this.pendingMessages.length) {
-      const drained = this.pendingMessages;
-      this.pendingMessages = [];
-      return drained;
-    }
-
-    const drained = this.pendingMessages.slice(0, maxMessages);
-    this.pendingMessages = this.pendingMessages.slice(maxMessages);
-    return drained;
+    const drained = drainWorldHostMessages(this.pendingMessages, maxMessages);
+    this.pendingMessages = drained.remaining;
+    return drained.messages;
   }
 }

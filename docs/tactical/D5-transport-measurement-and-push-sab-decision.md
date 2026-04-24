@@ -433,6 +433,40 @@ Visual inspection: the start screenshot shows a populated stone/dirt cliff face;
 
 Interpretation: the D6 remote service migration removed chunk snapshots from `set_chunk_view` responses and made chunk-view acknowledgement cheap. Main-thread frame pacing remains clean. The next bottleneck is the host chunk-generation/snapshot quantum visible in chunk-bearing poll responses and p99 player tick delivery, not push transport, `SharedArrayBuffer`, or render-world subworkers.
 
+## D6 poll payload split update - 2026-04-24
+
+The next D6 slice capped streamed poll payloads and prioritized control/state messages ahead of bulk chunk snapshots when a capped response is drained. Remote browser polls cap at two messages; browser-worker scene setup caps at four messages to avoid regressing the parity-test boot path. Cooperative chunk jobs now build one packed snapshot and reuse it for both persistence and streaming.
+
+Single validation run after the poll payload split:
+
+| Metric | Observed |
+|---|---:|
+| traversal duration | `30407 ms` |
+| chunk-view changes | `11` (`[60,199] -> [66,194]`) |
+| frame gap p95 / p99 / max | `10.3 ms` / `10.4 ms` / `12.4 ms` |
+| frame gaps > 33.4 / 50 / 100 ms | `0` / `0` / `0` |
+| long tasks | `0` |
+| `set_chunk_view` ack p50 / p95 / max during traversal | `0.9 ms` / `1.2 ms` / `1.2 ms` |
+| `set_player_input` latency during traversal | `1.0 ms` |
+| `poll_world_updates` p50 / p95 / p99 / max during traversal | `0.9 ms` / `7.5 ms` / `238.7 ms` / `254.9 ms` |
+| `poll_world_updates` with chunk snapshots p50 / p95 / max | `1.2 ms` / `19.9 ms` / `246.1 ms` |
+| chunk snapshots per poll p50 / p95 / max | `1` / `1` / `2` |
+| player tick response gap p50 / p95 / p99 / max | `56.3 ms` / `60.0 ms` / `292.6 ms` / `304.0 ms` |
+| final loaded chunks | `225` |
+| final render queue | pending visible `0`, queued `0`, active `0` |
+| render-world delta | ingest batches `162`, mesh builds `10451`, mesh completions `1091`, GPU uploads `1454` |
+
+Artifact paths:
+
+- `/tmp/mclone-d5-start.png`
+- `/tmp/mclone-d5-end.png`
+- `/tmp/mclone-d5-traversal-report.json`
+- `/tmp/mclone-d5-traversal-trace.json`
+
+Visual inspection: the start screenshot shows a filled cliff/cave face, and the end screenshot shows settled savanna/desert/mountain terrain with no blank chunks.
+
+Interpretation: delivery-side splitting worked: chunk-bearing poll p50/p95 dropped sharply and capped polls now carry at most two snapshots. The remaining p99 spikes still occur with one chunk or even a player-only response, which means D6 needs to split or offload the synchronous per-chunk generation/decor/snapshot work inside the host rather than changing transport shape.
+
 ## Implementation sequence
 
 1. Add a D5 measurement model.

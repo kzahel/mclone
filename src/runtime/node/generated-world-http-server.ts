@@ -24,6 +24,7 @@ import {
   type WorldHttpErrorCode,
   type WorldHttpErrorResponse,
 } from "../protocol/world-http-protocol";
+import { drainWorldHostMessages } from "../protocol/world-message-queue";
 import type {
   ClientSessionState,
   ClientPlayerState,
@@ -205,15 +206,9 @@ function enqueuePlayerStateMessage(session: SessionRecord): void {
 }
 
 function drainPendingMessages(session: SessionRecord, maxMessages: number | undefined): readonly WorldHostMessage[] {
-  if (maxMessages === undefined || maxMessages >= session.pendingMessages.length) {
-    const drained = session.pendingMessages;
-    session.pendingMessages = [];
-    return drained;
-  }
-
-  const drained = session.pendingMessages.slice(0, maxMessages);
-  session.pendingMessages = session.pendingMessages.slice(maxMessages);
-  return drained;
+  const drained = drainWorldHostMessages(session.pendingMessages, maxMessages);
+  session.pendingMessages = drained.remaining;
+  return drained.messages;
 }
 
 function extractWorldOpened(messages: readonly WorldHostMessage[]): WorldOpenedMessage {

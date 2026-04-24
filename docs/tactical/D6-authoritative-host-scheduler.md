@@ -187,6 +187,32 @@ Measured D5 traversal after this slice:
 
 The browser frame path is smooth, and chunk-view acknowledgement is no longer the blocking path. The remaining D6 risk is the single chunk-generation/snapshot quantum: poll responses that include chunks still have p99/max spikes around `250-290 ms`, and player tick delivery shows matching p99 gaps.
 
+### Poll payload split slice
+
+- Added a shared world-host message drain helper that prefers session/player/control messages over bulk `chunk_snapshot` messages when a poll response is capped.
+- Capped remote browser poll responses at two messages by default.
+- Capped browser-worker poll responses at four messages in renderer scene setup so live chunk ingestion is split without regressing parity-test startup.
+- Reused the packed chunk snapshot built for persistence as the streamed snapshot, removing the duplicate pack pass from cooperative chunk jobs.
+- Inserted a yield between chunk mutation and snapshot packing so pending input/poll work gets a chance to run before the snapshot encode/persist step.
+- Added targeted queue-drain coverage for capped prioritization.
+
+Measured D5 traversal after this slice:
+
+| Metric | Observed |
+|---|---:|
+| traversal duration | `30407 ms` |
+| chunk-view changes | `11` |
+| `set_chunk_view` ack p50 / p95 / max during traversal | `0.9 ms` / `1.2 ms` / `1.2 ms` |
+| `set_player_input` latency during traversal | `1.0 ms` |
+| `poll_world_updates` p50 / p95 / p99 / max during traversal | `0.9 ms` / `7.5 ms` / `238.7 ms` / `254.9 ms` |
+| `poll_world_updates` with chunks p50 / p95 / max | `1.2 ms` / `19.9 ms` / `246.1 ms` |
+| chunk snapshots per poll p50 / p95 / max | `1` / `1` / `2` |
+| player tick response gap p50 / p95 / p99 / max during traversal | `56.3 ms` / `60.0 ms` / `292.6 ms` / `304.0 ms` |
+| frame gap p95 / p99 / max | `10.3 ms` / `10.4 ms` / `12.4 ms` |
+| long tasks | `0` |
+
+This slice split chunk delivery and removed duplicate snapshot packing. It improved chunk-bearing poll p50/p95 and response size shape, but D6 is still not complete: p99 poll latency and p99 player tick delivery still track a single synchronous chunk generation/decor/snapshot quantum.
+
 ## D6 completion acceptance
 
 D6 is complete when:
@@ -201,4 +227,4 @@ D6 is complete when:
 
 ## Next
 
-Split or offload the largest host chunk-generation/snapshot quantum so `poll_world_updates` and `player_state.tick` delivery stay bounded while chunks are streaming. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction as part of D6.
+Split or offload the actual per-chunk generation/decor/snapshot phases so the authoritative host can service input and poll work inside a single chunk quantum. Keep this in the host/server scheduling lane: no push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction as part of D6.

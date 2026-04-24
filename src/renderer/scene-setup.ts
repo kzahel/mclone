@@ -210,6 +210,7 @@ function createWorldClient(
   return new TransportWorldClient(
     new WorkerWorldTransport(createGeneratedWorldWorker()),
     levelFactory,
+    { pollUpdateMaxMessages: 4 },
   );
 }
 

@@ -281,6 +281,9 @@ export class RemoteWorldClient extends TransportWorldClient implements WorldClie
     levelFactory: (worldOpened: WorldOpenedMessage) => ClientChunkCache,
     options?: TransportWorldClientOptions,
   ) {
-    super(transport, levelFactory, options);
+    super(transport, levelFactory, {
+      ...options,
+      pollUpdateMaxMessages: options?.pollUpdateMaxMessages ?? 2,
+    });
   }
 }
