@@ -191,3 +191,25 @@ Each fixture stores one seed + one generator configuration + one or more chunks.
 - `biomes` — the native 4×4×4 biome grid 1.17.1 writes as 1024 ints
 
 See `docs/tactical/04-integration-oracle-harness.md` for the full shape and design rationale.
+
+## Dynamic liquid oracle (server-side)
+
+Liquid simulation fixtures use the official 1.17.1 server too, but instead of dumping whole chunks at startup they inject a generated datapack, run a scripted scenario for an exact number of server ticks, save, stop, and dump only a bounded block-state region plus persisted `LiquidTicks`.
+
+Regenerate the committed Liquid0 fixture with:
+
+```bash
+./oracle/integration/gen-liquid-fixture.sh \
+    --scenario test/fixtures/liquid-scenarios/water-slope.json \
+    --out test/fixtures/liquid/water-slope-10-ticks.json
+```
+
+Pieces:
+
+- `test/fixtures/liquid-scenarios/*.json` — scenario name, seed, tick count, setup commands, dump bounds, and tick margin.
+- `oracle/integration/prepare-liquid-server.ts` — writes `server.properties`, `eula.txt`, and a generated datapack with load/tick functions.
+- `oracle/integration/run-liquid-server.sh` — starts the official server and waits for the datapack to `save-all flush` and `stop`.
+- `oracle/integration/dump-liquid-fixture.ts` — reads the Anvil region files and emits `module: "liquid-sim"` JSON.
+- `src/oracle/integration/liquid-fixture.ts` — property-preserving fixture builder, persisted liquid tick decoder, and diff helpers.
+
+Liquid fixtures flatten `blocks` in `y-major,z-major,x-minor` order, preserve palette entries as `{ name, properties }`, and sort pending `liquidTicks` by remaining delay, priority, target, then position. The first committed fixture is `test/fixtures/liquid/water-slope-10-ticks.json`.

@@ -190,6 +190,8 @@ Today the repo has pieces of the data path but not live liquid simulation:
 | `src/world/level/chunk-snapshot.ts` | snapshots already carry `blockTicks` and `liquidTicks` |
 | `src/worldgen/levelgen/feature/spring-feature.ts` | places source water and records a delay-0 liquid tick |
 | `src/worldgen/carver/underwater-cave-world-carver.ts` | records underwater liquid tick consequences |
+| `src/oracle/integration/liquid-fixture.ts` | Liquid0 bounded fixture builder, persisted `LiquidTicks` decoder, and comparison helpers |
+| `test/fixtures/liquid/water-slope-10-ticks.json` | first committed official-server dynamic water oracle |
 
 That explains the current visible hill-water gap: generation can create a source patch and record a tick, but the runtime does not yet execute the liquid queue or write non-source water levels.
 
@@ -284,11 +286,10 @@ Save screenshots to `/tmp` per project policy and inspect them before moving on.
 
 ## Implementation Sequence
 
-1. `Liquid0`: oracle foundation for dynamic liquid scenarios.
+1. `Liquid0`: oracle foundation for dynamic liquid scenarios. **Done** for the first water-slope official-server fixture.
 2. `Liquid1`: direct water simulation foundation in TS, using Liquid0 fixtures.
 3. `Liquid2`: authoritative host integration and chunk-delta publication if Liquid1 keeps mutation test-local.
 4. `Liquid3`: lava and waterlogged follow-through, if not included earlier.
 5. Later: interaction with block entities, entity physics, boats, particles/sounds, and visual polish.
 
 Do not include disabled Caves & Cliffs Part 1 aquifer work in this liquid track. The 1.17.1 vanilla overworld target has aquifers disabled, per `AGENTS.md`.
-

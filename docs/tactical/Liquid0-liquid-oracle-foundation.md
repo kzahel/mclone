@@ -17,6 +17,20 @@ Extend the existing Minecraft 1.17.1 oracle infrastructure so it can capture sma
 
 At the end of `Liquid0`, we should be able to say: "for this scripted vanilla scenario after N ticks, these exact water levels and pending liquid ticks are Minecraft's result." The TypeScript liquid simulator does not exist yet.
 
+## Implementation Status
+
+Landed implementation:
+
+- scenario specs live under `test/fixtures/liquid-scenarios/`
+- `oracle/integration/gen-liquid-fixture.sh` runs the official 1.17.1 server, injects the generated datapack, advances the scenario for an exact tick count, and dumps a fixture
+- `oracle/integration/prepare-liquid-server.ts` writes the deterministic datapack and server config
+- `oracle/integration/dump-liquid-fixture.ts` decodes bounded Anvil output into `module: "liquid-sim"` JSON
+- `src/oracle/integration/liquid-scenario.ts` validates scenario specs
+- `src/oracle/integration/liquid-fixture.ts` builds fixtures, decodes persisted `LiquidTicks`, and compares bounded liquid regions
+- `test/fixtures/liquid/water-slope-10-ticks.json` is the first committed dynamic water fixture
+
+The first fixture proves source water spreading into `level=1` and `level=2` states after 10 vanilla server ticks, and preserves the remaining scheduled `minecraft:flowing_water` ticks with delay `5`.
+
 ## Why this slice first
 
 Liquid simulation has two independent risks:
@@ -59,10 +73,15 @@ Use the server oracle path for committed dynamic fixtures. Do not use wiki behav
 | `oracle/integration/run-server.sh` | starts official server, waits for startup, then stops |
 | `oracle/integration/gen-fixture.sh` | end-to-end server fixture wrapper |
 | `oracle/integration/dump-chunks.ts` | dumps complete chunks from generated Anvil region files |
+| `oracle/integration/run-liquid-server.sh` | starts the official server with a generated liquid datapack and waits for scenario stop |
+| `oracle/integration/gen-liquid-fixture.sh` | end-to-end dynamic liquid fixture wrapper |
+| `oracle/integration/dump-liquid-fixture.ts` | dumps bounded property-preserving liquid fixtures |
 | `src/oracle/anvil/chunk.ts` | decodes section palettes and block-state properties from Anvil |
 | `src/oracle/integration/chunk-fixture.ts` | currently serializes palette entries as resource keys only, dropping properties |
+| `src/oracle/integration/liquid-fixture.ts` | serializes bounded liquid regions and persisted liquid ticks |
 | `src/world/level/scheduled-tick.ts` | current TS tick snapshot shape has position, target, and delay only |
 | `test/fixtures/integration/` | committed chunk/server oracle fixtures |
+| `test/fixtures/liquid/` | committed dynamic liquid oracle fixtures |
 | `oracle/README.md` | documents oracle command usage |
 
 The existing integration fixture builder is chunk-oriented and currently drops block-state properties in its JSON palette. Liquid fixtures must preserve properties, because water `level` is the observable state being tested.
@@ -77,7 +96,7 @@ The existing integration fixture builder is chunk-oriented and currently drops b
 | 4 | Liquid tick extraction | decode persisted `LiquidTicks` from touched full chunks, including target, position, remaining delay, and priority if present |
 | 5 | Fixture shape | add `module: "liquid-sim"` fixtures separate from broad integration chunk fixtures |
 | 6 | Comparison helpers | compare bounded block-state regions and pending liquid ticks with useful diffs |
-| 7 | First fixtures | commit at least a water-slope fixture and one source-regeneration or falling-water fixture |
+| 7 | First fixtures | commit a water-slope fixture; source-regeneration/falling-water fixtures can follow in Liquid1 validation |
 | 8 | Tests | cover fixture encode/decode, palette properties, tick extraction, and comparison helpers |
 | 9 | Docs | document how to regenerate liquid oracle fixtures |
 
@@ -255,22 +274,24 @@ The helpers should:
 
 ## Commands
 
-Expected validation commands for the implementation:
+Validation commands for the implementation:
 
 ```bash
-pnpm test -- test/oracle/liquid-fixture.test.ts test/oracle/liquid-region-diff.test.ts
+pnpm test -- \
+  test/oracle/liquid-scenario.test.ts \
+  test/oracle/liquid-fixture.test.ts \
+  test/oracle/liquid-region-diff.test.ts \
+  test/oracle/committed-liquid-fixture.test.ts
 pnpm typecheck
 ```
 
-Expected fixture generation command shape:
+Fixture generation command:
 
 ```bash
 ./oracle/integration/gen-liquid-fixture.sh \
   --scenario test/fixtures/liquid-scenarios/water-slope.json \
-  --out test/fixtures/liquid/water-slope-5-ticks.json
+  --out test/fixtures/liquid/water-slope-10-ticks.json
 ```
-
-The exact script name can change. Keep the command documented in `oracle/README.md` once implemented.
 
 If `reference/minecraft-1.17.1/server.jar` is missing, use `scripts/fetch-server-jar.sh 1.17.1`. If that download fails because the sandbox cannot reach Mojang hosts, request escalation and rerun the same command.
 
@@ -287,4 +308,3 @@ If `reference/minecraft-1.17.1/server.jar` is missing, use `scripts/fetch-server
 ## Follow-Up
 
 `Liquid1`: port the water simulation foundation: `FluidState` properties, `FlowingFluid`, `WaterFluid`, `LiquidBlock` level mapping, and a vanilla-shaped liquid tick queue for synthetic tests against Liquid0 fixtures.
-

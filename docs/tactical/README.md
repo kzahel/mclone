@@ -92,7 +92,7 @@ Liquids are authoritative simulation data and renderer input. Use [`../liquids.m
 
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
-| [`Liquid0-liquid-oracle-foundation.md`](Liquid0-liquid-oracle-foundation.md) | scripted official-server liquid scenarios, bounded region fixtures preserving water `level`, pending `LiquidTicks` extraction, fixture comparison helpers | unit + server oracle | **planned** — establish exact vanilla dynamic water outputs before porting `FlowingFluid` |
+| [`Liquid0-liquid-oracle-foundation.md`](Liquid0-liquid-oracle-foundation.md) | scripted official-server liquid scenarios, bounded region fixtures preserving water `level`, pending `LiquidTicks` extraction, fixture comparison helpers | unit + server oracle | **done** — water-slope official-server fixture and reusable bounded comparison helpers are committed |
 | [`Liquid1-liquid-simulation-foundation.md`](Liquid1-liquid-simulation-foundation.md) | `FluidState`, `FlowingFluid`, `WaterFluid`, `LiquidBlock` level mapping, vanilla-shaped liquid tick queue, first fixture comparison | unit + server oracle + optional browser visual | **sketch** — first direct water simulation implementation slice after Liquid0 |
 
 ## Renderer oracle approach

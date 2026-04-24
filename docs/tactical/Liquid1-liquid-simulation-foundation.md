@@ -1,6 +1,6 @@
 # Liquid1 - Liquid simulation foundation
 
-Sketch tactical for the first implementation slice after [`Liquid0-liquid-oracle-foundation.md`](Liquid0-liquid-oracle-foundation.md). This is intentionally less detailed than Liquid0 until the oracle fixture shape is real.
+Sketch tactical for the first implementation slice after [`Liquid0-liquid-oracle-foundation.md`](Liquid0-liquid-oracle-foundation.md). Liquid0 now provides the `water_slope_10_ticks` official-server fixture and reusable comparison helpers; this document should be expanded before implementation starts.
 
 ## Goal
 
@@ -153,7 +153,7 @@ Use Liquid0 fixtures:
 - compare bounded block states including water `level`
 - compare pending liquid ticks if the fixture includes them
 
-Start with `water_slope_5_ticks`. Add source regeneration and falling-water fixtures as soon as Liquid0 provides them.
+Start with `water_slope_10_ticks`. Add source regeneration and falling-water fixtures as soon as the first water-flow port is stable enough to make those failures useful.
 
 ### Browser Visual
 
@@ -180,4 +180,3 @@ The probe should frame the current hill/spring case or a dedicated debug water s
 `Liquid2`: wire liquid ticks fully into the authoritative host lifecycle if Liquid1 stops at simulation tests. This includes hydrating snapshot `liquidTicks`, executing due ticks during host ticks, publishing chunk deltas, saving remaining pending ticks, and validating the visible generated-world hill-water case.
 
 `Liquid3`: broaden from water foundation into lava, waterlogging, and block-family follow-through.
-
