@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
 import surfaceFixture from "../fixtures/integration/overworld-seed-12345-chunks-0-0-surface-only.json";
+import fullFixture from "../fixtures/integration/overworld-seed-12345-chunks-0-0.json";
 import { BlockPos } from "../../src/core/block-pos";
 import { Registry } from "../../src/core/registry";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
@@ -18,7 +19,25 @@ interface SurfaceChunkOracleFixture {
   readonly blocks: readonly number[];
 }
 
+interface FullChunkOracleSectionFixture {
+  readonly y: number;
+  readonly palette: readonly string[];
+  readonly blocks: readonly number[];
+}
+
+interface FullChunkOracleFixture {
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly sections: readonly FullChunkOracleSectionFixture[];
+}
+
+interface FullIntegrationOracleFixture {
+  readonly seed: string;
+  readonly chunks: readonly FullChunkOracleFixture[];
+}
+
 const oracle = surfaceFixture as SurfaceChunkOracleFixture;
+const fullOracle = fullFixture as FullIntegrationOracleFixture;
 const OPEN_WORLD_REQUEST = {
   type: "open_world",
   seed: 12345n,
@@ -41,6 +60,9 @@ const DECORATION_BLOCKS = new Set([
   "minecraft:sugar_cane",
   "minecraft:cactus",
   "minecraft:pumpkin",
+  "minecraft:dandelion",
+  "minecraft:poppy",
+  "minecraft:snow",
 ]);
 
 function oracleBlockNameAt(localX: number, y: number, localZ: number): string {
@@ -57,6 +79,36 @@ function oracleSurfaceAt(localX: number, localZ: number): { readonly name: strin
   }
 
   throw new Error(`oracle chunk (${oracle.chunkX}, ${oracle.chunkZ}) had no surface block at (${localX}, ${localZ})`);
+}
+
+function fullOracleChunk(): FullChunkOracleFixture {
+  const chunk = fullOracle.chunks.find((candidate) => candidate.chunkX === 0 && candidate.chunkZ === 0);
+  if (chunk === undefined) {
+    throw new Error("full oracle fixture is missing chunk (0, 0)");
+  }
+
+  return chunk;
+}
+
+function fullOracleBlockNameAt(chunk: FullChunkOracleFixture, localX: number, y: number, localZ: number): string {
+  const section = chunk.sections.find((candidate) => candidate.y === Math.floor(y / 16));
+  if (section === undefined) {
+    return "minecraft:air";
+  }
+
+  const index = ((y & 15) << 8) | (localZ << 4) | localX;
+  return section.palette[section.blocks[index]!]!;
+}
+
+function fullOracleGroundSurfaceAt(chunk: FullChunkOracleFixture, localX: number, localZ: number): { readonly name: string; readonly y: number } {
+  for (let y = 255; y >= 0; y--) {
+    const name = fullOracleBlockNameAt(chunk, localX, y, localZ);
+    if (name !== "minecraft:air" && name !== "minecraft:cave_air" && name !== "minecraft:water" && !DECORATION_BLOCKS.has(name)) {
+      return { name, y };
+    }
+  }
+
+  throw new Error(`full oracle chunk (${chunk.chunkX}, ${chunk.chunkZ}) had no ground block at (${localX}, ${localZ})`);
 }
 
 function runtimeGroundSurfaceAt(level: ClientChunkCache, worldX: number, worldZ: number): { readonly name: string; readonly y: number } {
@@ -143,6 +195,39 @@ describe("GeneratedWorld boundary", () => {
     ] as const) {
       expect(runtimeGroundSurfaceAt(level, localX, localZ)).toEqual(oracleSurfaceAt(localX, localZ));
     }
+  }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
+
+  test("keeps chunk (0, 0) dry-land ground materials close to the full vanilla oracle", async () => {
+    const client = createWorldClient();
+
+    await client.openWorld(OPEN_WORLD_REQUEST);
+    await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const level = client.getLevel();
+    const chunk = fullOracleChunk();
+    const mismatches: string[] = [];
+    const unexpectedSand: string[] = [];
+
+    for (let localZ = 0; localZ < 16; localZ++) {
+      for (let localX = 0; localX < 16; localX++) {
+        const expected = fullOracleGroundSurfaceAt(chunk, localX, localZ);
+        const actual = runtimeGroundSurfaceAt(level, localX, localZ);
+        if (actual.name !== expected.name) {
+          mismatches.push(`${localX},${localZ}: expected ${expected.name}@${expected.y}, got ${actual.name}@${actual.y}`);
+        }
+        if (actual.name === "minecraft:sand" && expected.name !== "minecraft:sand") {
+          unexpectedSand.push(`${localX},${localZ}: expected ${expected.name}@${expected.y}, got ${actual.name}@${actual.y}`);
+        }
+      }
+    }
+
+    expect(unexpectedSand).toEqual([]);
+    expect(256 - mismatches.length, mismatches.slice(0, 10).join("\n")).toBeGreaterThanOrEqual(230);
   }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
 
   test("slides the client chunk cache when the chunk view moves", async () => {

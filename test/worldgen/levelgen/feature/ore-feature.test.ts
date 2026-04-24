@@ -730,4 +730,33 @@ describe("Ore feature", () => {
     const swampOres = getOverworldBiomeGenerationSettings("minecraft:swamp").features()[GenerationStep.Decoration.UNDERGROUND_ORES]!;
     expect(describeConfiguredDiskFeature(swampOres.at(-1)!())).toEqual(EXPECTED_SOFT_DISKS[1]);
   });
+
+  test("disk replace features only place from a water origin", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = new StaticRenderLevel(blocks.airState, 15, 15, 0, 32);
+    const generator = createGenerator();
+    const dirt = getState("minecraft:dirt");
+    const grass = getState("minecraft:grass_block");
+    const sand = getState("minecraft:sand");
+    const water = getState("minecraft:water");
+    const feature = Features.DISK.configured(new DiskConfiguration(sand, ConstantInt.of(2), 1, [dirt, grass]));
+    const origin = new BlockPos(8, 11, 8);
+
+    for (let z = 0; z < 16; z++) {
+      for (let x = 0; x < 16; x++) {
+        for (let y = 0; y < 10; y++) {
+          level.setBlock(new BlockPos(x, y, z), dirt);
+        }
+        level.setBlock(new BlockPos(x, 10, z), grass);
+      }
+    }
+
+    expect(feature.place(level, generator, new WorldgenRandom(0), origin)).toBe(false);
+    expect(collectPositions(level, sand, 16)).toEqual([]);
+
+    level.setBlock(origin, water);
+
+    expect(feature.place(level, generator, new WorldgenRandom(0), origin)).toBe(true);
+    expect(collectPositions(level, sand, 16).length).toBeGreaterThan(0);
+  });
 });
