@@ -11,6 +11,7 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `runtime-data-model.md`: the shared chunk/block-state data model across simulation, storage, protocol, client workers, and meshing
 - `protocol.md`: the logical host/client message model and transport-codec boundaries
 - `loading-persistence.md`: world creation/open/join flow, chunk lifecycle, and save/eviction policy
+- `authoritative-host-scheduling.md`: how player/session authority stays responsive while chunk jobs run
 - this document: how the engine should be split across simulation, rendering, storage, workers, and multiplayer hosts
 
 The central decision is simple:
@@ -272,6 +273,7 @@ These should be serializable without depending on live class instances.
 The canonical model should be engine-defined chunk/world records, not raw IndexedDB layout and not whatever Node filesystem structure we choose first.
 
 Detailed loading, dirty-state, lazy-save, and eviction policy lives in [`loading-persistence.md`](./loading-persistence.md).
+Scheduling rules that keep input, player ticks, and polling from blocking behind chunk jobs live in [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md).
 
 Recommended rule:
 
@@ -383,17 +385,19 @@ The codebase is materially closer to this target architecture now that the first
 Current gaps:
 
 - the remote update flow is still poll-driven HTTP, not a measured push-capable transport
+- the authoritative host still lacks the vanilla-style scheduler split that keeps player/session work responsive while chunk load/generation/snapshot jobs run
 - the gameplay layer still stops at baseline player/session motion state rather than parity movement, entities, or interactions
 
-That is why transport efficiency and richer authoritative gameplay are now the architectural priorities, not more ownership-split work.
+That is why host scheduling, transport efficiency, and richer authoritative gameplay are now the architectural priorities, not more ownership-split work.
 
 ## Immediate implications
 
 The next major refactor direction should be:
 
-1. Measure whether the live browser control path still fits within the current polled update transport.
-2. If it does not, add a push-capable transport without changing the world host/client authority model.
-3. Grow the authoritative gameplay layer beyond baseline player/session motion state without moving ownership back into the renderer.
+1. Measure whether player input, polling, and authoritative `player_state` ticks stay responsive while chunk work is active.
+2. If they do not, add the host scheduler split described in [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) before optimizing transport carriers.
+3. If host scheduling is healthy but remote delivery still lags, add a push-capable transport without changing the world host/client authority model.
+4. Grow the authoritative gameplay layer beyond baseline player/session motion state without moving ownership back into the renderer.
 
 ## Decision checklist
 

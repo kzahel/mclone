@@ -91,7 +91,7 @@ The first three runtime prerequisites are now landed, and they should generally 
 - browser singleplayer runs behind an authoritative local host boundary
 - chunk meshing no longer stalls the main thread
 
-Those conditions are now satisfied by `R0` through `R8`. The next runtime/host priority is deciding whether the now-live browser control path still fits within the current poll-based remote transport, without reopening the host/client authority split.
+Those conditions are now satisfied by `R0` through `R8`. The next runtime/host priority is deciding whether the now-live browser control path keeps authoritative player/session work responsive while chunk jobs are active, and only then deciding whether the current poll-based remote transport still fits.
 
 WebRTC is intentionally deferred. The preferred path is:
 
@@ -173,7 +173,9 @@ Recommended sequence:
 - verify the main thread no longer performs raw chunk snapshot ownership, raw chunk-section decode, or chunk-neighborhood gathering for mesh jobs
 - inspect the run visually enough to confirm chunk arrival does not present as visible traversal hitches
 
-`D5` exits successfully only if the trace shows chunk-boundary traversal is acceptable at the target view distance and any remaining main-thread spikes are bounded GPU upload/render bookkeeping. If p95/p99 frame time, max frame gap, or long tasks are still unacceptable, the trace must identify the next bottleneck and the arc continues with the corresponding `D6` tactical.
+`D5` exits successfully only if the trace shows chunk-boundary traversal is acceptable at the target view distance, authoritative `player_state` ticks and input/poll handling stay responsive while chunk jobs run, and any remaining main-thread spikes are bounded GPU upload/render bookkeeping. If p95/p99 frame time, max frame gap, long tasks, player tick gaps, or input/poll latency are still unacceptable, the trace must identify the next bottleneck and the arc continues with the corresponding `D6` tactical.
+
+If chunk work is blocking player/session responsiveness, the next tactical should be `D6-authoritative-host-scheduler` as described in [`../authoritative-host-scheduling.md`](../authoritative-host-scheduling.md), not push transport, `SharedArrayBuffer`, or render-world subworkers.
 
 Implement [`D5-transport-measurement-and-push-sab-decision.md`](D5-transport-measurement-and-push-sab-decision.md) next. Each `D*` slice should be narrow enough to validate independently.
 

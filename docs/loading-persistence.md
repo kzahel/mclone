@@ -2,7 +2,7 @@
 
 Durable guidance for world creation, joining, chunk loading, generation, saving, and eviction.
 
-[`architecture.md`](./architecture.md) owns runtime boundaries. [`runtime-data-model.md`](./runtime-data-model.md) owns the chunk data shape. [`protocol.md`](./protocol.md) owns host/client messages.
+[`architecture.md`](./architecture.md) owns runtime boundaries. [`runtime-data-model.md`](./runtime-data-model.md) owns the chunk data shape. [`protocol.md`](./protocol.md) owns host/client messages. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) owns scheduler rules that keep player/session authority responsive while chunk jobs run.
 
 ## Core Rule
 
@@ -69,6 +69,8 @@ When chunk interest changes, the host should:
 10. evict chunks after persistence obligations are satisfied
 
 The client render-world worker may have its own client-side cache lifecycle, but that cache is not authoritative.
+
+Chunk lifecycle work must not make input or authoritative player ticks wait for the full view to finish loading. A chunk-interest change should update host residency requirements and queue chunk work promptly; snapshots should be published as chunk jobs complete. See [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md).
 
 ## Lazy Persistence
 

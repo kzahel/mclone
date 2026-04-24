@@ -34,6 +34,7 @@ That means the remaining performance question is no longer "should the main thre
 - render-world ingest and dirty-section fan-out
 - mesh build CPU time
 - main-thread GPU buffer upload and render bookkeeping
+- host scheduler coupling that blocks player input, authoritative ticks, or polling behind chunk work
 
 `D5` exists to identify that cost with enough evidence that the next tactical is obvious.
 
@@ -47,6 +48,7 @@ Use these docs as constraints:
 | [`../runtime-data-model.md`](../runtime-data-model.md) | packed vanilla-shaped chunk facts remain the model; `SharedArrayBuffer` is only a carrier optimization |
 | [`../protocol.md`](../protocol.md) | local and remote play use one logical protocol; polling is a transport detail, not the protocol model |
 | [`../loading-persistence.md`](../loading-persistence.md) | host owns create/open/join, chunk loading, generation, saving, eviction, and aggregate interest |
+| [`../authoritative-host-scheduling.md`](../authoritative-host-scheduling.md) | input, player ticks, polling, and chunk-interest acknowledgement must not block behind chunk load/generation/snapshot jobs |
 
 ## Architecture divergence review
 
@@ -92,7 +94,7 @@ The D5 divergence scope is instrumentation and harnessing:
 |---|---|---|
 | 1 | Measurement model | a typed report shape captures traversal config, browser/adapter info, frame metrics, phase timings, counters, artifacts, and decision |
 | 2 | Browser frame metrics | `requestAnimationFrame` gaps, long tasks, p50/p95/p99/max frame gap, dropped-frame-like gaps, and traversal duration are recorded |
-| 3 | Host/runtime timings | open/session, chunk-view update, storage load, generation, snapshot encode, and HTTP response timings are recorded or approximated |
+| 3 | Host/runtime timings | open/session, chunk-view update, storage load, generation, snapshot encode, player tick cadence, input/poll latency, and HTTP response timings are recorded or approximated |
 | 4 | Transport timings | remote request duration, response bytes, decode time, reconnect count, poll cadence, and update batch sizes are recorded |
 | 5 | Render-world timings | chunk ingest duration, dirty-section count, mesh request queue wait/build duration, not-ready count, mesh bytes, and mesh completion count are recorded |
 | 6 | Main-thread render timings | visible queue stats, GPU upload count/bytes/time, frame encode/submit/wait time, and request-to-visible latency are recorded |
@@ -189,6 +191,9 @@ The harness should assert:
 - chunks returned per chunk-view response
 - response byte size by route
 - save/eviction work observed during traversal, if any
+- authoritative `player_state.tick` gaps while chunk jobs are active
+- `set_player_input` and `poll_world_updates` latency while chunk jobs are active
+- `set_chunk_view` acknowledgement latency, tracked separately from chunk snapshot completion
 
 If exact internal timing is awkward at first, add coarse marks at the host service boundary and refine only where the first trace points.
 
@@ -201,6 +206,7 @@ If exact internal timing is awkward at first, add coarse marks at the host servi
 - poll interval observed, including missed/delayed polls
 - reconnect/resync count
 - time from authoritative `player_state` tick to client observation when available
+- gaps in authoritative `player_state.tick` delivery during chunk-view changes
 
 ### Render-world worker
 
@@ -338,6 +344,7 @@ The D6 should keep authority out of the renderer and split only render-world CPU
 
 Choose this if the trace clearly points elsewhere:
 
+- player/session work is blocked behind chunk jobs: write `D6-authoritative-host-scheduler`
 - host generation dominates: write a host generation/loading scheduling tactical
 - storage dominates: write a storage/cache tactical
 - GPU upload dominates beyond thresholds: write a GPU upload/render bookkeeping tactical

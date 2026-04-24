@@ -2,7 +2,7 @@
 
 Durable guidance for the logical host/client protocol used by browser singleplayer, browser remote clients, dedicated Node hosts, and tests.
 
-[`architecture.md`](./architecture.md) owns the runtime boundary. [`runtime-data-model.md`](./runtime-data-model.md) owns chunk and block-state facts. [`loading-persistence.md`](./loading-persistence.md) owns world/chunk lifecycle and save policy.
+[`architecture.md`](./architecture.md) owns the runtime boundary. [`runtime-data-model.md`](./runtime-data-model.md) owns chunk and block-state facts. [`loading-persistence.md`](./loading-persistence.md) owns world/chunk lifecycle and save policy. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) owns host scheduler rules that keep input, ticks, and polling from blocking behind chunk jobs.
 
 ## Core Rule
 
@@ -54,7 +54,7 @@ The durable lifecycle should be explicit even if current code still folds some s
    A client can present a previous session id. The host either resumes it or returns a stable error that lets the client reopen and resync.
 
 4. **Set interest**
-   The client tells the host which chunks it needs. Today this is `set_chunk_view`; the durable concept is chunk interest, with view-based interest as the first policy.
+   The client tells the host which chunks it needs. Today this is `set_chunk_view`; the durable concept is chunk interest, with view-based interest as the first policy. Setting interest should acknowledge the new session/interest revision promptly and queue chunk work. It should not require the command response to contain every newly visible chunk.
 
 5. **Run update loop**
    The client sends input/commands. The host ticks authoritative state and sends or queues updates.
@@ -74,6 +74,8 @@ Current and near-term client-to-host commands:
 | `set_chunk_view` | current view-shaped chunk-interest command |
 | `set_player_input` | send latest input intent to authoritative host |
 | `poll_world_updates` | drain queued server-originated updates on polling transports |
+
+`set_chunk_view` is an interest command, not a synchronous "load my whole view now" RPC. Chunk snapshots are host-originated updates that may be returned by a polling response or delivered later by a push transport.
 
 Likely future commands:
 
