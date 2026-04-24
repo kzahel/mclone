@@ -4,6 +4,8 @@ const DEBUG_SCREENSHOT_PATH = "/tmp/mclone-debug-free-cam.png";
 const DEBUG_TALL_SCREENSHOT_PATH = "/tmp/mclone-debug-free-cam-tall.png";
 const EXPECTED_LOADED_CHUNK_COUNT = 225;
 
+test.setTimeout(60_000);
+
 interface RenderWorldPerformanceCounters {
   readonly ingestBatchCount: number;
   readonly meshBuildRequestCount: number;
@@ -160,6 +162,14 @@ test("debug free-cam follows authoritative player_state and moves chunk interest
   await page.evaluate(() => {
     window.__mcloneDebug!.setInjectedInput(null);
   });
+  await page.waitForFunction(
+    (expectedLoadedChunkCount) => {
+      const state = window.__mcloneDebug?.state;
+      return (state?.loadedChunkCount ?? 0) === expectedLoadedChunkCount;
+    },
+    EXPECTED_LOADED_CHUNK_COUNT,
+    { timeout: 20_000 },
+  );
 
   const movedState = await readDebugState(page);
   expect(movedState.playerPosition).not.toEqual(initialState.playerPosition);

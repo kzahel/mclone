@@ -249,7 +249,7 @@ Suggested top-level shape:
 
 ```ts
 interface D5TraversalReport {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly commit: string;
   readonly config: D5TraversalConfig;
   readonly environment: D5Environment;
@@ -265,7 +265,7 @@ interface D5TraversalReport {
     readonly endChunk: readonly [number, number];
   };
   readonly framePacing: D5FramePacingSummary;
-  readonly host: D5PhaseSummary;
+  readonly hostResponsiveness: D5HostResponsivenessSummary;
   readonly transport: D5TransportSummary;
   readonly renderWorld: D5RenderWorldSummary;
   readonly mainThread: D5MainThreadSummary;
@@ -388,6 +388,50 @@ Single validation run from the landing slice on this machine:
 | render-world delta | ingest batches `84`, mesh builds `1450`, mesh completions `1450`, GPU uploads `2488` |
 
 This run proves the harness and report path, but it is only one run and only uses existing counters plus coarse HTTP timings. The next D5 slice should add the internal phase timers called out below, then run the primary traversal at least three times before selecting `arc complete` or the correct D6.
+
+## D6 scheduler measurement update - 2026-04-24
+
+The D6 remote scheduler slice upgraded the D5 report to schema `2` and added client-observed host responsiveness fields:
+
+- `set_chunk_view` acknowledgement latency during the warmed traversal window
+- `set_player_input` latency during the warmed traversal window
+- `poll_world_updates` latency during the warmed traversal window
+- `poll_world_updates` latency when responses contain chunk snapshots
+- chunk snapshots per poll response
+- `player_state.tick` response gaps and sampled tick gaps
+- response message counts and chunk/player message counts by command
+
+The timing source is now a browser-side `fetch` wrapper installed by the harness. Playwright-side network events were too easily distorted because the test runner and per-test Node host share one process.
+
+Single validation run after remote scheduler migration:
+
+| Metric | Observed |
+|---|---:|
+| traversal duration | `30043 ms` |
+| chunk-view changes | `10` (`[60,199] -> [65,194]`) |
+| frame gap p95 / p99 / max | `10.3 ms` / `10.4 ms` / `10.7 ms` |
+| frame gaps > 33.4 / 50 / 100 ms | `0` / `0` / `0` |
+| long tasks | `0` |
+| `set_chunk_view` ack p50 / p95 / max during traversal | `1.8 ms` / `10.0 ms` / `10.0 ms` |
+| `set_player_input` latency during traversal | `1.1 ms` |
+| `poll_world_updates` p50 / p95 / p99 / max during traversal | `0.9 ms` / `11.2 ms` / `256.9 ms` / `291.3 ms` |
+| `poll_world_updates` with chunk snapshots p50 / p95 / max | `7.4 ms` / `256.9 ms` / `274.2 ms` |
+| chunk snapshots per poll p50 / p95 / max | `2` / `3` / `3` |
+| player tick response gap p50 / p95 / p99 / max | `56.4 ms` / `69.1 ms` / `309.2 ms` / `340.5 ms` |
+| final loaded chunks | `225` |
+| final render queue | pending visible `0`, queued `0`, active `0` |
+| render-world delta | ingest batches `86`, mesh builds `2486`, mesh completions `975`, GPU uploads `1311` |
+
+Artifact paths:
+
+- `/tmp/mclone-d5-start.png`
+- `/tmp/mclone-d5-end.png`
+- `/tmp/mclone-d5-traversal-report.json`
+- `/tmp/mclone-d5-traversal-trace.json`
+
+Visual inspection: the start screenshot shows a populated stone/dirt cliff face; the end screenshot shows settled terrain across savanna/desert/mountain chunks with no obvious holes.
+
+Interpretation: the D6 remote service migration removed chunk snapshots from `set_chunk_view` responses and made chunk-view acknowledgement cheap. Main-thread frame pacing remains clean. The next bottleneck is the host chunk-generation/snapshot quantum visible in chunk-bearing poll responses and p99 player tick delivery, not push transport, `SharedArrayBuffer`, or render-world subworkers.
 
 ## Implementation sequence
 

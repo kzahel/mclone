@@ -1,15 +1,14 @@
-import { Buffer } from "node:buffer";
 import { execFileSync } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { arch, platform, release } from "node:os";
 import process from "node:process";
 import { performance } from "node:perf_hooks";
-import type { Request, Response } from "@playwright/test";
 import { expect, test, type Page } from "./remote-world-host-fixture";
 import {
   D5_TRAVERSAL_REPORT_SCHEMA_VERSION,
   diffRenderWorldCounters,
   summarizeFramePacing,
+  summarizeHostResponsiveness,
   summarizeNumbers,
   type D5Artifacts,
   type D5DebugStateSnapshot,
@@ -91,6 +90,8 @@ interface D5FrameProbe {
 type DebugWindow = Window & {
   __mcloneDebug?: DebugRuntimeController;
   __mcloneD5FrameProbe?: D5FrameProbe;
+  __mcloneD5FetchRecords?: MutableNetworkRecord[];
+  __mcloneD5FetchRecorderFlush?: () => Promise<void>;
 };
 
 interface MutableNetworkRecord {
@@ -102,12 +103,11 @@ interface MutableNetworkRecord {
   status?: number;
   endMs?: number;
   responseBytes?: number;
+  responseMessageTypes?: string[];
+  responseMessageCount?: number;
+  chunkSnapshotCount?: number;
+  playerStateTicks?: number[];
   error?: string;
-}
-
-interface NetworkRecorder {
-  readonly records: readonly MutableNetworkRecord[];
-  flush(): Promise<void>;
 }
 
 interface TraceEvent {
@@ -344,86 +344,131 @@ async function stopFrameProbe(page: Page): Promise<D5FrameProbeResult> {
   });
 }
 
-function classifyWorldRequest(urlValue: string): D5TransportCommand | undefined {
-  const url = new URL(urlValue);
-  if (url.pathname === "/api/world/session") {
-    return "open_world";
-  }
+async function installBrowserFetchRecorder(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    type BrowserRecord = MutableNetworkRecord;
+    const d5Window = window as DebugWindow;
+    const records: BrowserRecord[] = [];
+    const pendingBodies: Promise<void>[] = [];
+    const originalFetch = window.fetch.bind(window);
 
-  if (/^\/api\/world\/session\/[^/]+\/chunk-view$/.test(url.pathname)) {
-    return "set_chunk_view";
-  }
+    const classify = (urlValue: string): D5TransportCommand | undefined => {
+      const url = new URL(urlValue, window.location.href);
+      if (url.pathname === "/api/world/session") {
+        return "open_world";
+      }
 
-  if (/^\/api\/world\/session\/[^/]+\/player-input$/.test(url.pathname)) {
-    return "set_player_input";
-  }
+      if (/^\/api\/world\/session\/[^/]+\/chunk-view$/.test(url.pathname)) {
+        return "set_chunk_view";
+      }
 
-  if (/^\/api\/world\/session\/[^/]+\/updates\/poll$/.test(url.pathname)) {
-    return "poll_world_updates";
-  }
+      if (/^\/api\/world\/session\/[^/]+\/player-input$/.test(url.pathname)) {
+        return "set_player_input";
+      }
 
-  return undefined;
+      if (/^\/api\/world\/session\/[^/]+\/updates\/poll$/.test(url.pathname)) {
+        return "poll_world_updates";
+      }
+
+      return undefined;
+    };
+
+    const byteLength = (value: string): number => new TextEncoder().encode(value).byteLength;
+    const extractMetrics = (body: string): Pick<
+      BrowserRecord,
+      "responseMessageTypes" | "responseMessageCount" | "chunkSnapshotCount" | "playerStateTicks"
+    > => {
+      const parsed = JSON.parse(body) as { messages?: unknown };
+      if (!Array.isArray(parsed.messages)) {
+        return {};
+      }
+
+      const responseMessageTypes: string[] = [];
+      const playerStateTicks: number[] = [];
+      let chunkSnapshotCount = 0;
+      for (const message of parsed.messages) {
+        if (typeof message !== "object" || message === null) {
+          continue;
+        }
+
+        const record = message as Record<string, unknown>;
+        if (typeof record.type === "string") {
+          responseMessageTypes.push(record.type);
+          if (record.type === "chunk_snapshot") {
+            chunkSnapshotCount++;
+          }
+        }
+
+        const state = record.state;
+        if (record.type === "player_state" && typeof state === "object" && state !== null) {
+          const tick = (state as Record<string, unknown>).tick;
+          if (typeof tick === "number") {
+            playerStateTicks.push(tick);
+          }
+        }
+      }
+
+      return {
+        responseMessageTypes,
+        responseMessageCount: parsed.messages.length,
+        chunkSnapshotCount,
+        playerStateTicks,
+      };
+    };
+
+    d5Window.__mcloneD5FetchRecords = records;
+    d5Window.__mcloneD5FetchRecorderFlush = async () => {
+      await Promise.allSettled(pendingBodies);
+    };
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+      const command = classify(url);
+      if (command === undefined) {
+        return await originalFetch(input, init);
+      }
+
+      const body = typeof init?.body === "string" ? init.body : "";
+      const record: BrowserRecord = {
+        command,
+        method: init?.method ?? "GET",
+        url: new URL(url, window.location.href).href,
+        startMs: performance.timeOrigin + performance.now(),
+        requestBytes: byteLength(body),
+      };
+      records.push(record);
+      try {
+        const response = await originalFetch(input, init);
+        record.status = response.status;
+        record.endMs = performance.timeOrigin + performance.now();
+        const pendingBody = response.clone().text()
+          .then((text) => {
+            record.responseBytes = byteLength(text);
+            Object.assign(record, extractMetrics(text));
+          })
+          .catch((error: unknown) => {
+            record.error = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+          });
+        pendingBodies.push(pendingBody);
+        return response;
+      } catch (error) {
+        record.endMs = performance.timeOrigin + performance.now();
+        record.error = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        throw error;
+      }
+    };
+  });
 }
 
-function attachNetworkRecorder(page: Page): NetworkRecorder {
-  const records: MutableNetworkRecord[] = [];
-  const requestRecords = new Map<Request, MutableNetworkRecord>();
-  const pendingResponses: Promise<void>[] = [];
-
-  page.on("request", (request) => {
-    const command = classifyWorldRequest(request.url());
-    if (command === undefined) {
-      return;
-    }
-
-    const postData = request.postData() ?? "";
-    const record: MutableNetworkRecord = {
-      command,
-      method: request.method(),
-      url: request.url(),
-      startMs: performance.timeOrigin + performance.now(),
-      requestBytes: Buffer.byteLength(postData, "utf8"),
-    };
-    requestRecords.set(request, record);
-    records.push(record);
+async function readBrowserFetchRecords(page: Page): Promise<MutableNetworkRecord[]> {
+  return await page.evaluate(async () => {
+    const d5Window = window as DebugWindow;
+    await d5Window.__mcloneD5FetchRecorderFlush?.();
+    return d5Window.__mcloneD5FetchRecords ?? [];
   });
-
-  page.on("response", (response: Response) => {
-    const record = requestRecords.get(response.request());
-    if (record === undefined) {
-      return;
-    }
-
-    const pending = (async () => {
-      try {
-        const body = await response.body();
-        record.responseBytes = body.byteLength;
-      } catch (error) {
-        record.error = formatUnknownError(error);
-      } finally {
-        record.status = response.status();
-        record.endMs = performance.timeOrigin + performance.now();
-      }
-    })();
-    pendingResponses.push(pending);
-  });
-
-  page.on("requestfailed", (request) => {
-    const record = requestRecords.get(request);
-    if (record === undefined) {
-      return;
-    }
-
-    record.error = request.failure()?.errorText ?? "request failed";
-    record.endMs = performance.timeOrigin + performance.now();
-  });
-
-  return {
-    records,
-    async flush(): Promise<void> {
-      await Promise.allSettled(pendingResponses);
-    },
-  };
 }
 
 function toTransportRecord(record: MutableNetworkRecord): D5TransportRequestRecord {
@@ -437,6 +482,10 @@ function toTransportRecord(record: MutableNetworkRecord): D5TransportRequestReco
     durationMs: record.endMs === undefined ? undefined : record.endMs - record.startMs,
     requestBytes: record.requestBytes,
     responseBytes: record.responseBytes,
+    responseMessageTypes: record.responseMessageTypes,
+    responseMessageCount: record.responseMessageCount,
+    chunkSnapshotCount: record.chunkSnapshotCount,
+    playerStateTicks: record.playerStateTicks,
     error: record.error,
   };
 }
@@ -458,6 +507,9 @@ function summarizeTransport(records: readonly MutableNetworkRecord[]): D5Transpo
       ))),
       requestBytes: commandRecords.reduce((total, record) => total + record.requestBytes, 0),
       responseBytes: commandRecords.reduce((total, record) => total + (record.responseBytes ?? 0), 0),
+      responseMessageCount: commandRecords.reduce((total, record) => total + (record.responseMessageCount ?? 0), 0),
+      chunkSnapshotCount: commandRecords.reduce((total, record) => total + (record.chunkSnapshotCount ?? 0), 0),
+      playerStateMessageCount: commandRecords.reduce((total, record) => total + (record.playerStateTicks?.length ?? 0), 0),
     };
   }
 
@@ -620,7 +672,7 @@ test("D5 remote traversal measurement harness", async ({ page, remoteWorldHostUr
   });
 
   await page.setViewportSize(D5_CONFIG.viewport);
-  const networkRecorder = attachNetworkRecorder(page);
+  await installBrowserFetchRecorder(page);
   await page.goto(createDebugUrl(remoteWorldHostUrl), { waitUntil: "load" });
   await waitForDebugReady(page);
   const startState = await waitForLoadedSettledFrame(page, EXPECTED_LOADED_CHUNK_COUNT);
@@ -694,7 +746,7 @@ test("D5 remote traversal measurement harness", async ({ page, remoteWorldHostUr
   const endState = await waitForLoadedSettledFrame(page, EXPECTED_LOADED_CHUNK_COUNT);
   samples.push(createSnapshot(traversalEndMs - traversalStartMs, endState));
   await page.locator("#renderer").screenshot({ path: END_SCREENSHOT_PATH });
-  await networkRecorder.flush();
+  const networkRecords = await readBrowserFetchRecords(page);
 
   const endChunk = chunkPair(endState);
   if (endChunk === undefined) {
@@ -702,6 +754,10 @@ test("D5 remote traversal measurement harness", async ({ page, remoteWorldHostUr
   }
 
   const renderWorldDelta = diffRenderWorldCounters(startState.renderWorldCounters, endState.renderWorldCounters);
+  const transportRecords = networkRecords.map(toTransportRecord);
+  const traversalTransportRecords = transportRecords.filter((record) => (
+    record.startMs >= traversalStartMs && record.startMs <= traversalEndMs
+  ));
   expect(chunkPath.length - 1).toBeGreaterThanOrEqual(D5_CONFIG.minChunkBoundaryCrossings);
   expect(endState.loadedChunkCount).toBe(EXPECTED_LOADED_CHUNK_COUNT);
   expect(isRenderQueueSettled(endState)).toBe(true);
@@ -731,7 +787,11 @@ test("D5 remote traversal measurement harness", async ({ page, remoteWorldHostUr
       expectedLoadedChunkCount: endState.expectedLoadedChunkCount,
     },
     framePacing: summarizeFramePacing(probe, traversalDurationMs),
-    transport: summarizeTransport(networkRecorder.records),
+    hostResponsiveness: summarizeHostResponsiveness(
+      traversalTransportRecords,
+      samples,
+    ),
+    transport: summarizeTransport(networkRecords),
     renderWorld: {
       start: startState.renderWorldCounters,
       end: endState.renderWorldCounters,

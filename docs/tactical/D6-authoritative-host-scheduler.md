@@ -160,6 +160,33 @@ The first implementation slice is done when:
 - Stale chunk jobs are guarded by a chunk-view generation and current interest check before publication.
 - Added targeted runtime coverage for prompt acknowledgement, input service during queued chunk work, streamed snapshots, and stale snapshot suppression.
 
+### Remote service and measurement slice
+
+- Changed the dedicated Node remote service to create its shared generated host in cooperative chunk-view mode.
+- Kept `set_chunk_view` as an interest acknowledgement path: immediate responses now carry session/unload messages, not chunk snapshots.
+- Routed host-originated chunk snapshots into per-session pending queues for delivery through `poll_world_updates`.
+- Moved cached visible chunk resync for ordinary chunk-view changes out of `set_chunk_view` responses and into poll delivery.
+- Removed the per-world operation queue from `set_player_input` and `poll_world_updates`.
+- Added a guarded shared host-drain path so concurrent session polls do not double-drain host pending messages.
+- Added browser-side D5 fetch timing so ack/input/poll latency is measured from the client, not from Playwright's Node-side network events.
+- Increased visual boot chunk-ring polling to allow cooperative remote startup to stream a full view instead of returning it synchronously.
+
+Measured D5 traversal after this slice:
+
+| Metric | Observed |
+|---|---:|
+| traversal duration | `30043 ms` |
+| chunk-view changes | `10` |
+| `set_chunk_view` ack p50 / p95 / max during traversal | `1.8 ms` / `10.0 ms` / `10.0 ms` |
+| `set_player_input` latency during traversal | `1.1 ms` |
+| `poll_world_updates` p50 / p95 / p99 / max during traversal | `0.9 ms` / `11.2 ms` / `256.9 ms` / `291.3 ms` |
+| `poll_world_updates` with chunks p50 / p95 / max | `7.4 ms` / `256.9 ms` / `274.2 ms` |
+| player tick response gap p50 / p95 / p99 / max during traversal | `56.4 ms` / `69.1 ms` / `309.2 ms` / `340.5 ms` |
+| frame gap p95 / p99 / max | `10.3 ms` / `10.4 ms` / `10.7 ms` |
+| long tasks | `0` |
+
+The browser frame path is smooth, and chunk-view acknowledgement is no longer the blocking path. The remaining D6 risk is the single chunk-generation/snapshot quantum: poll responses that include chunks still have p99/max spikes around `250-290 ms`, and player tick delivery shows matching p99 gaps.
+
 ## D6 completion acceptance
 
 D6 is complete when:
@@ -174,4 +201,4 @@ D6 is complete when:
 
 ## Next
 
-Extend D5/D6 measurement around input latency, poll latency, and `player_state.tick` gaps while chunk jobs are active, then migrate the Node remote service to the same interest-ack-plus-streaming semantics. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction as part of D6.
+Split or offload the largest host chunk-generation/snapshot quantum so `poll_world_updates` and `player_state.tick` delivery stay bounded while chunks are streaming. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction as part of D6.

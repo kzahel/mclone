@@ -1,4 +1,4 @@
-export const D5_TRAVERSAL_REPORT_SCHEMA_VERSION = 1;
+export const D5_TRAVERSAL_REPORT_SCHEMA_VERSION = 2;
 
 export type D5TransportCommand =
   | "open_world"
@@ -141,6 +141,10 @@ export interface D5TransportRequestRecord {
   readonly durationMs?: number;
   readonly requestBytes: number;
   readonly responseBytes?: number;
+  readonly responseMessageTypes?: readonly string[];
+  readonly responseMessageCount?: number;
+  readonly chunkSnapshotCount?: number;
+  readonly playerStateTicks?: readonly number[];
   readonly error?: string;
 }
 
@@ -150,6 +154,9 @@ export interface D5TransportCommandSummary {
   readonly requestDurationMs: D5NumericSummary;
   readonly requestBytes: number;
   readonly responseBytes: number;
+  readonly responseMessageCount: number;
+  readonly chunkSnapshotCount: number;
+  readonly playerStateMessageCount: number;
 }
 
 export interface D5TransportSummary {
@@ -158,6 +165,24 @@ export interface D5TransportSummary {
   readonly responseBytes: number;
   readonly byCommand: Partial<Record<D5TransportCommand, D5TransportCommandSummary>>;
   readonly requests: readonly D5TransportRequestRecord[];
+}
+
+export interface D5PlayerTickDeliverySummary {
+  readonly responseMessageCount: number;
+  readonly responseTickGapMs: D5NumericSummary;
+  readonly responseTickDelta: D5NumericSummary;
+  readonly sampledTickGapMs: D5NumericSummary;
+  readonly sampledTickDelta: D5NumericSummary;
+  readonly maxSampledWallGapWithoutTickAdvanceMs: number;
+}
+
+export interface D5HostResponsivenessSummary {
+  readonly setChunkViewAckLatencyMs: D5NumericSummary;
+  readonly setPlayerInputLatencyMs: D5NumericSummary;
+  readonly pollWorldUpdatesLatencyMs: D5NumericSummary;
+  readonly pollWorldUpdatesWithChunksLatencyMs: D5NumericSummary;
+  readonly chunkSnapshotsPerPoll: D5NumericSummary;
+  readonly playerTickDelivery: D5PlayerTickDeliverySummary;
 }
 
 export interface D5RenderWorldSummary {
@@ -189,6 +214,7 @@ export interface D5TraversalReport {
   readonly artifacts: D5Artifacts;
   readonly traversal: D5TraversalSummary;
   readonly framePacing: D5FramePacingSummary;
+  readonly hostResponsiveness: D5HostResponsivenessSummary;
   readonly transport: D5TransportSummary;
   readonly renderWorld: D5RenderWorldSummary;
   readonly mainThread: D5MainThreadSummary;
@@ -278,5 +304,93 @@ export function diffRenderWorldCounters(
     meshNotReadyResponseCount: end.meshNotReadyResponseCount - start.meshNotReadyResponseCount,
     meshCompletionCount: end.meshCompletionCount - start.meshCompletionCount,
     mainThreadGpuUploadCount: end.mainThreadGpuUploadCount - start.mainThreadGpuUploadCount,
+  };
+}
+
+function requestDurations(
+  requests: readonly D5TransportRequestRecord[],
+  command: D5TransportCommand,
+  predicate: (request: D5TransportRequestRecord) => boolean = () => true,
+): number[] {
+  return requests.flatMap((request) => (
+    request.command === command && request.durationMs !== undefined && predicate(request)
+      ? [request.durationMs]
+      : []
+  ));
+}
+
+export function summarizeHostResponsiveness(
+  requests: readonly D5TransportRequestRecord[],
+  samples: readonly D5DebugStateSnapshot[],
+): D5HostResponsivenessSummary {
+  const tickResponses = requests
+    .flatMap((request) => (request.endMs === undefined
+      ? []
+      : (request.playerStateTicks ?? []).map((tick) => ({ atMs: request.endMs!, tick }))))
+    .sort((left, right) => left.atMs - right.atMs);
+  const responseTickGaps: number[] = [];
+  const responseTickDeltas: number[] = [];
+  for (let index = 1; index < tickResponses.length; index++) {
+    const previous = tickResponses[index - 1]!;
+    const next = tickResponses[index]!;
+    if (next.tick <= previous.tick) {
+      continue;
+    }
+
+    responseTickGaps.push(next.atMs - previous.atMs);
+    responseTickDeltas.push(next.tick - previous.tick);
+  }
+
+  const sampledTicks = samples
+    .flatMap((sample) => sample.playerTick === undefined ? [] : [{ atMs: sample.atMs, tick: sample.playerTick }])
+    .sort((left, right) => left.atMs - right.atMs);
+  const sampledTickGaps: number[] = [];
+  const sampledTickDeltas: number[] = [];
+  let maxSampledWallGapWithoutTickAdvanceMs = 0;
+  let lastAdvancedSample = sampledTicks[0];
+  for (let index = 1; index < sampledTicks.length; index++) {
+    const previous = sampledTicks[index - 1]!;
+    const next = sampledTicks[index]!;
+    if (next.tick > previous.tick) {
+      if (lastAdvancedSample !== undefined) {
+        sampledTickGaps.push(next.atMs - lastAdvancedSample.atMs);
+        sampledTickDeltas.push(next.tick - lastAdvancedSample.tick);
+      }
+      lastAdvancedSample = next;
+      continue;
+    }
+
+    if (lastAdvancedSample !== undefined) {
+      maxSampledWallGapWithoutTickAdvanceMs = Math.max(
+        maxSampledWallGapWithoutTickAdvanceMs,
+        next.atMs - lastAdvancedSample.atMs,
+      );
+    }
+  }
+
+  const pollChunkSnapshotCounts = requests.flatMap((request) => (
+    request.command === "poll_world_updates" && (request.chunkSnapshotCount ?? 0) > 0
+      ? [request.chunkSnapshotCount!]
+      : []
+  ));
+
+  return {
+    setChunkViewAckLatencyMs: summarizeNumbers(requestDurations(requests, "set_chunk_view")),
+    setPlayerInputLatencyMs: summarizeNumbers(requestDurations(requests, "set_player_input")),
+    pollWorldUpdatesLatencyMs: summarizeNumbers(requestDurations(requests, "poll_world_updates")),
+    pollWorldUpdatesWithChunksLatencyMs: summarizeNumbers(requestDurations(
+      requests,
+      "poll_world_updates",
+      (request) => (request.chunkSnapshotCount ?? 0) > 0,
+    )),
+    chunkSnapshotsPerPoll: summarizeNumbers(pollChunkSnapshotCounts),
+    playerTickDelivery: {
+      responseMessageCount: tickResponses.length,
+      responseTickGapMs: summarizeNumbers(responseTickGaps),
+      responseTickDelta: summarizeNumbers(responseTickDeltas),
+      sampledTickGapMs: summarizeNumbers(sampledTickGaps),
+      sampledTickDelta: summarizeNumbers(sampledTickDeltas),
+      maxSampledWallGapWithoutTickAdvanceMs,
+    },
   };
 }

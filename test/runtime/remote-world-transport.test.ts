@@ -6,6 +6,7 @@ import { Registry } from "../../src/core/registry";
 import { createGeneratedWorldSaveId } from "../../src/runtime/host/generated-world-host";
 import { GeneratedWorldRemoteService } from "../../src/runtime/node/generated-world-http-server";
 import {
+  deserializeWorldHostMessages,
   deserializeWorldClientMessage,
   WORLD_HTTP_PROTOCOL_VERSION,
   type OpenWorldSessionRequest,
@@ -15,6 +16,7 @@ import {
   type WorldHttpErrorCode,
   type WorldHttpErrorResponse,
 } from "../../src/runtime/protocol/world-http-protocol";
+import type { ChunkSnapshotMessage, WorldHostMessage } from "../../src/runtime/protocol/world-messages";
 import { RemoteWorldClient, RemoteWorldTransport } from "../../src/runtime/transport/remote-world-transport";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
@@ -253,12 +255,62 @@ function createRemoteWorldClient(baseUrl: string, fetchImpl: typeof fetch, sessi
   );
 }
 
+function findSessionId(messages: readonly WorldHostMessage[]): string {
+  const sessionState = messages.find((message) => message.type === "session_state");
+  if (sessionState?.type !== "session_state") {
+    throw new Error("expected session_state message");
+  }
+
+  return sessionState.state.sessionId;
+}
+
+function chunkSnapshots(messages: readonly WorldHostMessage[]): ChunkSnapshotMessage[] {
+  return messages.filter((message): message is ChunkSnapshotMessage => message.type === "chunk_snapshot");
+}
+
+function sleep(ms = 0): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function drainRemoteClientChunks(client: RemoteWorldClient, expectedCount: number): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (client.getLevel().getLoadedChunkCount() >= expectedCount) {
+      return;
+    }
+
+    await sleep();
+    await client.pollUpdates();
+  }
+
+  throw new Error(`expected ${expectedCount.toString()} loaded chunks, got ${client.getLevel().getLoadedChunkCount().toString()}`);
+}
+
+async function drainServiceSnapshots(
+  service: GeneratedWorldRemoteService,
+  sessionId: string,
+  expectedCount: number,
+): Promise<ChunkSnapshotMessage[]> {
+  const snapshots: ChunkSnapshotMessage[] = [];
+  for (let attempt = 0; attempt < 200; attempt++) {
+    await sleep();
+    const messages = deserializeWorldHostMessages((await service.pollUpdates(sessionId, { type: "poll_world_updates" })).messages);
+    snapshots.push(...chunkSnapshots(messages));
+    if (snapshots.length >= expectedCount) {
+      return snapshots;
+    }
+  }
+
+  throw new Error(`expected ${expectedCount.toString()} chunk snapshots, got ${snapshots.length.toString()}`);
+}
+
 describe("RemoteWorld transport", () => {
   afterEach(async () => {
     Registry.BLOCK.clear();
 
     while (TEMP_DIRECTORIES.length > 0) {
-      await rm(TEMP_DIRECTORIES.pop()!, { recursive: true, force: true });
+      await rm(TEMP_DIRECTORIES.pop()!, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 
@@ -289,8 +341,9 @@ describe("RemoteWorld transport", () => {
       centerChunkX: 0,
       centerChunkZ: 0,
       radius: 1,
-    })).toBe(true);
+    })).toBe(false);
 
+    await drainRemoteClientChunks(client, 25);
     expect(client.getLevel().getLoadedChunkCount()).toBe(25);
     expect(client.getSessionState()).toEqual({
       sessionId: expect.any(String),
@@ -308,6 +361,49 @@ describe("RemoteWorld transport", () => {
     expect(service.getWorldCount()).toBe(1);
   });
 
+  test("acknowledges remote chunk interest before streaming snapshots through poll updates", async () => {
+    const service = new GeneratedWorldRemoteService({
+      saveRoot: await createTempDirectory(),
+    });
+
+    const openMessages = deserializeWorldHostMessages((await service.openWorld(OPEN_WORLD_REQUEST)).messages);
+    const sessionId = findSessionId(openMessages);
+    const chunkViewMessages = deserializeWorldHostMessages((await service.setChunkView(sessionId, {
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    })).messages);
+    expect(chunkViewMessages.map((message) => message.type)).toEqual(["session_state", "player_state"]);
+
+    const inputMessages = deserializeWorldHostMessages((await service.setPlayerInput(sessionId, {
+      type: "set_player_input",
+      input: {
+        sequence: 1,
+        moveX: 1,
+        moveY: 0,
+        moveZ: 0,
+        yaw: 90,
+        pitch: 10,
+      },
+    })).messages);
+    expect(inputMessages.map((message) => message.type)).toEqual(["session_state"]);
+
+    const snapshots = await drainServiceSnapshots(service, sessionId, 25);
+    expect(snapshots).toHaveLength(25);
+    expect(snapshots.some((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0)).toBe(true);
+
+    const nextChunkViewMessages = deserializeWorldHostMessages((await service.setChunkView(sessionId, {
+      type: "set_chunk_view",
+      centerChunkX: 1,
+      centerChunkZ: 0,
+      radius: 1,
+    })).messages);
+    expect(chunkSnapshots(nextChunkViewMessages)).toHaveLength(0);
+    expect(nextChunkViewMessages.some((message) => message.type === "chunk_unload")).toBe(true);
+    await expect(drainServiceSnapshots(service, sessionId, 5)).resolves.toHaveLength(5);
+  });
+
   test("delivers authoritative player-state updates through the remote poll path", async () => {
     const service = new GeneratedWorldRemoteService({
       saveRoot: await createTempDirectory(),
@@ -321,6 +417,7 @@ describe("RemoteWorld transport", () => {
       centerChunkZ: 0,
       radius: 1,
     });
+    await drainRemoteClientChunks(client, 25);
 
     const initialPlayerState = client.getPlayerState();
     expect(initialPlayerState).toBeDefined();
@@ -388,6 +485,10 @@ describe("RemoteWorld transport", () => {
       }),
     ]);
 
+    await Promise.all([
+      drainRemoteClientChunks(firstClient, 25),
+      drainRemoteClientChunks(secondClient, 25),
+    ]);
     expect(firstClient.getLevel().getLoadedChunkCount()).toBe(25);
     expect(secondClient.getLevel().getLoadedChunkCount()).toBe(25);
     expect(service.getSessionCount()).toBe(2);
@@ -408,6 +509,7 @@ describe("RemoteWorld transport", () => {
       centerChunkZ: 0,
       radius: 1,
     });
+    await drainRemoteClientChunks(firstClient, 25);
 
     const sessionId = firstClient.getSessionState()?.sessionId;
     expect(sessionId).toBeDefined();
@@ -444,6 +546,7 @@ describe("RemoteWorld transport", () => {
       centerChunkZ: 0,
       radius: 1,
     });
+    await drainRemoteClientChunks(client, 25);
 
     const previousSessionId = client.getSessionState()?.sessionId;
     expect(previousSessionId).toBeDefined();
@@ -454,8 +557,9 @@ describe("RemoteWorld transport", () => {
       centerChunkX: 0,
       centerChunkZ: 0,
       radius: 1,
-    })).toBe(true);
+    })).toBe(false);
 
+    await drainRemoteClientChunks(client, 25);
     expect(client.getLevel().getLoadedChunkCount()).toBe(25);
     expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
     expect(client.getSessionState()?.resumed).toBe(false);
@@ -475,6 +579,7 @@ describe("RemoteWorld transport", () => {
       centerChunkZ: 0,
       radius: 1,
     });
+    await drainRemoteClientChunks(client, 25);
     await client.setPlayerInput({
       type: "set_player_input",
       input: {

@@ -99,6 +99,7 @@ type SharedWorldRecord = {
   readonly loadedSnapshots: Map<string, PackedChunkSnapshot>;
   aggregateChunkView: SetChunkViewRequest | undefined;
   pendingOperation: Promise<void>;
+  pendingHostDrain: Promise<void> | undefined;
 };
 
 class GeneratedWorldRemoteServiceError extends Error {
@@ -534,9 +535,13 @@ export class GeneratedWorldRemoteService {
 
       if (chunkViewChanged || aggregateChunkViewChanged) {
         for (const key of visibleChunks) {
+          if (previousVisibleChunks.has(key)) {
+            continue;
+          }
+
           const snapshot = queuedWorld.loadedSnapshots.get(key);
           if (snapshot !== undefined) {
-            responseMessages.push({
+            queuedSession.pendingMessages.push({
               type: "chunk_snapshot",
               snapshot,
             });
@@ -563,26 +568,14 @@ export class GeneratedWorldRemoteService {
       throw new GeneratedWorldRemoteServiceError(`Unknown world ${session.worldSaveId}`, "unknown_session", 404);
     }
 
-    return await this.runWorldOperation(world, async () => {
-      const queuedSession = this.sessions.get(sessionId);
-      if (queuedSession === undefined) {
-        throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
-      }
-
-      const queuedWorld = this.worlds.get(queuedSession.worldSaveId);
-      if (queuedWorld === undefined) {
-        throw new GeneratedWorldRemoteServiceError(`Unknown world ${queuedSession.worldSaveId}`, "unknown_session", 404);
-      }
-
-      queuedSession.playerInput = request.input;
-      queuedSession.revision++;
-      return {
-        protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
-        messages: serializeWorldHostMessages([
-          createSessionStateMessage(queuedSession, queuedWorld, false),
-        ]),
-      };
-    });
+    session.playerInput = request.input;
+    session.revision++;
+    return {
+      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+      messages: serializeWorldHostMessages([
+        createSessionStateMessage(session, world, false),
+      ]),
+    };
   }
 
   public async pollUpdates(sessionId: string, request: PollWorldUpdatesRequest): Promise<SessionPollUpdatesResponse> {
@@ -596,18 +589,11 @@ export class GeneratedWorldRemoteService {
       throw new GeneratedWorldRemoteServiceError(`Unknown world ${session.worldSaveId}`, "unknown_session", 404);
     }
 
-    return await this.runWorldOperation(world, async () => {
-      const queuedSession = this.sessions.get(sessionId);
-      if (queuedSession === undefined) {
-        throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
-      }
-
-      const responseMessages = drainPendingMessages(queuedSession, request.maxMessages);
-      return {
-        protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
-        messages: serializeWorldHostMessages(responseMessages),
-      };
-    });
+    await this.drainAuthoritativeHostMessages(world);
+    return {
+      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+      messages: serializeWorldHostMessages(drainPendingMessages(session, request.maxMessages)),
+    };
   }
 
   public getSessionCount(): number {
@@ -718,6 +704,7 @@ export class GeneratedWorldRemoteService {
         loadedSnapshots: new Map<string, PackedChunkSnapshot>(),
         aggregateChunkView: undefined,
         pendingOperation: Promise.resolve(),
+        pendingHostDrain: undefined,
       };
       applyAuthoritativeMessages(world, messages);
       this.worlds.set(saveId, world);
@@ -756,8 +743,65 @@ export class GeneratedWorldRemoteService {
     }
   }
 
+  private async drainAuthoritativeHostMessages(world: SharedWorldRecord): Promise<void> {
+    if (world.pendingHostDrain !== undefined) {
+      await world.pendingHostDrain;
+      return;
+    }
+
+    const drain = (async () => {
+      const messages = await world.host.pollUpdates({ type: "poll_world_updates" });
+      this.publishAuthoritativeHostMessages(world, messages);
+    })();
+    world.pendingHostDrain = drain;
+    try {
+      await drain;
+    } finally {
+      if (world.pendingHostDrain === drain) {
+        world.pendingHostDrain = undefined;
+      }
+    }
+  }
+
+  private publishAuthoritativeHostMessages(world: SharedWorldRecord, messages: readonly WorldHostMessage[]): void {
+    for (const message of messages) {
+      switch (message.type) {
+        case "world_opened":
+        case "session_state":
+        case "player_state":
+          break;
+        case "chunk_snapshot": {
+          const key = chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ);
+          world.loadedSnapshots.set(key, message.snapshot);
+          for (const session of this.getWorldSessions(world)) {
+            if (session.visibleChunks.has(key)) {
+              session.pendingMessages.push(message);
+            }
+          }
+          break;
+        }
+        case "chunk_unload": {
+          const key = chunkKey(message.chunkX, message.chunkZ);
+          world.loadedSnapshots.delete(key);
+          for (const session of this.getWorldSessions(world)) {
+            if (session.visibleChunks.has(key)) {
+              session.pendingMessages.push(message);
+            }
+          }
+          break;
+        }
+        case "world_error":
+          for (const session of this.getWorldSessions(world)) {
+            session.pendingMessages.push(message);
+          }
+          break;
+      }
+    }
+  }
+
   private createSessionHost(request: OpenWorldRequest): WorldHost {
     return createGeneratedWorldHostForRequest(request, {
+      chunkViewScheduling: "cooperative",
       worldStorage: this.worldStorage,
     });
   }

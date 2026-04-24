@@ -79,6 +79,24 @@ export interface GeneratedWorldHostOptions {
 const LOCAL_WORLD_SESSION_ID = "local";
 
 function yieldToEventLoop(): Promise<void> {
+  if (typeof process !== "undefined" && process.versions?.node !== undefined) {
+    return new Promise((resolve) => {
+      setTimeout(resolve, 1);
+    });
+  }
+
+  if (typeof MessageChannel !== "undefined") {
+    return new Promise((resolve) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        channel.port1.close();
+        channel.port2.close();
+        resolve();
+      };
+      channel.port2.postMessage(undefined);
+    });
+  }
+
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
