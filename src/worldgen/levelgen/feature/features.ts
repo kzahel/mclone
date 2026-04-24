@@ -12,6 +12,7 @@ import { BlockStateConfiguration } from "./configurations/block-state-configurat
 import { DiskConfiguration } from "./configurations/disk-configuration";
 import { HugeMushroomFeatureConfiguration } from "./configurations/huge-mushroom-feature-configuration";
 import { RandomPatchConfiguration } from "./configurations/random-patch-configuration";
+import { ReplaceBlockConfiguration } from "./configurations/replace-block-configuration";
 import { SimpleRandomFeatureConfiguration } from "./configurations/simple-random-feature-configuration";
 import { SimpleBlockConfiguration } from "./configurations/simple-block-configuration";
 import { DiskReplaceFeature } from "./disk-replace-feature";
@@ -32,6 +33,7 @@ import { TreeConfiguration } from "./configurations/tree-configuration";
 import { RandomPatchFeature } from "./random-patch-feature";
 import { RandomBooleanSelectorFeature } from "./random-boolean-selector-feature";
 import { RandomSelectorFeature } from "./random-selector-feature";
+import { ReplaceBlockFeature } from "./replace-block-feature";
 import { SimpleBlockFeature } from "./simple-block-feature";
 import { SimpleRandomSelectorFeature } from "./simple-random-selector-feature";
 import { SpringFeature } from "./spring-feature";
@@ -49,6 +51,7 @@ export const Features = {
   FLOWER: register("flower", new DefaultFlowerFeature()),
   NO_BONEMEAL_FLOWER: register("no_bonemeal_flower", new DefaultFlowerFeature()),
   RANDOM_PATCH: register("random_patch", new RandomPatchFeature()),
+  REPLACE_SINGLE_BLOCK: register("replace_single_block", new ReplaceBlockFeature()),
   SIMPLE_BLOCK: register("simple_block", new SimpleBlockFeature()),
   DECORATED: register("decorated", new DecoratedFeature()),
   RANDOM_BOOLEAN_SELECTOR: register("random_boolean_selector", new RandomBooleanSelectorFeature()),
@@ -84,6 +87,7 @@ export type SimpleVegetationFeature =
   | Feature<SimpleRandomFeatureConfiguration>
   | Feature<BlockStateConfiguration>
   | Feature<DiskConfiguration>
+  | Feature<ReplaceBlockConfiguration>
   | Feature<SpringConfiguration>
   | Feature<ProbabilityFeatureConfiguration>
   | Feature<NoneFeatureConfiguration>;

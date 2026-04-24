@@ -81,12 +81,17 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:tuff"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:coal_ore"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:emerald_ore"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate_emerald_ore"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:infested_stone"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:infested_deepslate"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate_redstone_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:copper_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_log"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:birch_leaves"))).toBe(RenderType.cutoutMipped());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:pumpkin"))).toBe(RenderType.solid());
     expect(getState("minecraft:deepslate").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
+    expect(getState("minecraft:infested_deepslate").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
   });
 
   test("leaves stay non-occluding so adjacent terrain faces are not culled", () => {

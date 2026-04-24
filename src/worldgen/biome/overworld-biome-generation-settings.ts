@@ -62,6 +62,18 @@ function addDefaultOres(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_COPPER);
 }
 
+function addExtraGold(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_GOLD_EXTRA);
+}
+
+function addExtraEmeralds(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_EMERALD);
+}
+
+function addInfestedStone(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_DECORATION, () => OreFeatures.ORE_INFESTED);
+}
+
 function addDefaultSprings(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => WaterFeatures.SPRING_WATER);
 }
@@ -264,6 +276,8 @@ function buildMountainSettings(edge: boolean): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
+  addExtraEmeralds(builder);
+  addInfestedStone(builder);
   addSurfaceFreezing(builder);
   return builder.build();
 }
@@ -375,6 +389,7 @@ function buildBadlandsSettings(): BiomeGenerationSettings {
   addDefaultLakes(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
+  addExtraGold(builder);
   addBadlandGrass(builder);
   addBadlandExtraVegetation(builder);
   addDefaultSprings(builder);

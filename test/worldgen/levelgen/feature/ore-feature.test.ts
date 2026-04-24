@@ -16,6 +16,7 @@ import { DecoratedFeatureConfiguration } from "../../../../src/worldgen/levelgen
 import type { DecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorator-configuration";
 import { NoneDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/none-decorator-configuration";
 import { OreConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/ore-configuration";
+import { ReplaceBlockConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/replace-block-configuration";
 import { RangeDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/range-decorator-configuration";
 import { Features } from "../../../../src/worldgen/levelgen/feature/features";
 import { OreFeature } from "../../../../src/worldgen/levelgen/feature/ore-feature";
@@ -27,6 +28,12 @@ interface OreFeatureDescription {
   readonly size: number;
   readonly discardChanceOnAirExposure: number;
   readonly count: number;
+  readonly hasRange: boolean;
+  readonly hasSquare: boolean;
+}
+
+interface ReplaceBlockFeatureDescription {
+  readonly states: readonly string[];
   readonly hasRange: boolean;
   readonly hasSquare: boolean;
 }
@@ -151,6 +158,30 @@ const EXPECTED_UNDERGROUND_VARIETY: readonly OreFeatureDescription[] = [
 
 const EXPECTED_DEFAULT_UNDERGROUND_ORES = [...EXPECTED_UNDERGROUND_VARIETY, ...EXPECTED_COMMON_ORES] as const;
 
+const EXPECTED_EXTRA_GOLD: OreFeatureDescription = {
+  states: ["minecraft:gold_ore", "minecraft:deepslate_gold_ore"],
+  size: 9,
+  discardChanceOnAirExposure: 0,
+  count: 20,
+  hasRange: true,
+  hasSquare: true,
+};
+
+const EXPECTED_INFESTED: OreFeatureDescription = {
+  states: ["minecraft:infested_stone", "minecraft:infested_deepslate"],
+  size: 9,
+  discardChanceOnAirExposure: 0,
+  count: 7,
+  hasRange: true,
+  hasSquare: true,
+};
+
+const EXPECTED_EMERALD: ReplaceBlockFeatureDescription = {
+  states: ["minecraft:emerald_ore", "minecraft:deepslate_emerald_ore"],
+  hasRange: true,
+  hasSquare: true,
+};
+
 function getState(location: string): BlockState {
   const block = Registry.BLOCK.get(new ResourceLocation(location)) as Block | undefined;
   if (block === undefined) {
@@ -219,6 +250,26 @@ function describeConfiguredOreFeature(feature: ConfiguredFeature<any, any>): Ore
     size: config.size,
     discardChanceOnAirExposure: config.discardChanceOnAirExposure,
     count: countConfig?.count().sample(new WorldgenRandom(0n)) ?? 1,
+    hasRange: decoratorConfigs.some((decoratorConfig) => decoratorConfig instanceof RangeDecoratorConfiguration),
+    hasSquare: decoratorConfigs.some((decoratorConfig) => decoratorConfig instanceof NoneDecoratorConfiguration),
+  };
+}
+
+function describeConfiguredReplaceBlockFeature(feature: ConfiguredFeature<any, any>): ReplaceBlockFeatureDescription {
+  const decoratorConfigs: DecoratorConfiguration[] = [];
+  let current = feature;
+
+  while (current.config instanceof DecoratedFeatureConfiguration) {
+    decoratorConfigs.push(current.config.decorator.config());
+    current = current.config.feature();
+  }
+
+  expect(current.feature).toBe(Features.REPLACE_SINGLE_BLOCK);
+  expect(current.config).toBeInstanceOf(ReplaceBlockConfiguration);
+  const config = current.config as ReplaceBlockConfiguration;
+
+  return {
+    states: config.targetStates.map((targetState) => targetState.state.getBlock().getLocation()!.toString()),
     hasRange: decoratorConfigs.some((decoratorConfig) => decoratorConfig instanceof RangeDecoratorConfiguration),
     hasSquare: decoratorConfigs.some((decoratorConfig) => decoratorConfig instanceof NoneDecoratorConfiguration),
   };
@@ -344,5 +395,23 @@ describe("Ore feature", () => {
     ].map(describeConfiguredOreFeature);
 
     expect(configuredDefaults).toEqual(EXPECTED_UNDERGROUND_VARIETY);
+  });
+
+  test("biome-specific underground extras match the vanilla badlands and mountain wiring", () => {
+    registerGeneratedRenderBlocks();
+
+    expect(describeConfiguredOreFeature(OreFeatures.ORE_GOLD_EXTRA)).toEqual(EXPECTED_EXTRA_GOLD);
+    expect(describeConfiguredOreFeature(OreFeatures.ORE_INFESTED)).toEqual(EXPECTED_INFESTED);
+    expect(describeConfiguredReplaceBlockFeature(OreFeatures.ORE_EMERALD)).toEqual(EXPECTED_EMERALD);
+
+    const badlandsOres = getOverworldBiomeGenerationSettings("minecraft:badlands").features()[GenerationStep.Decoration.UNDERGROUND_ORES]!;
+    expect(badlandsOres.map((feature) => describeConfiguredOreFeature(feature()))).toEqual([...EXPECTED_DEFAULT_UNDERGROUND_ORES, EXPECTED_EXTRA_GOLD]);
+
+    const mountainOres = getOverworldBiomeGenerationSettings("minecraft:mountains").features()[GenerationStep.Decoration.UNDERGROUND_ORES]!;
+    expect(mountainOres.slice(0, -1).map((feature) => describeConfiguredOreFeature(feature()))).toEqual(EXPECTED_DEFAULT_UNDERGROUND_ORES);
+    expect(describeConfiguredReplaceBlockFeature(mountainOres.at(-1)!())).toEqual(EXPECTED_EMERALD);
+
+    const mountainDecoration = getOverworldBiomeGenerationSettings("minecraft:mountains").features()[GenerationStep.Decoration.UNDERGROUND_DECORATION]!;
+    expect(mountainDecoration.map((feature) => describeConfiguredOreFeature(feature()))).toEqual([EXPECTED_INFESTED]);
   });
 });

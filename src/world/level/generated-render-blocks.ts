@@ -123,6 +123,8 @@ const IRON_ORE_LOCATION = new ResourceLocation("minecraft:iron_ore");
 const DEEPSLATE_IRON_ORE_LOCATION = new ResourceLocation("minecraft:deepslate_iron_ore");
 const GOLD_ORE_LOCATION = new ResourceLocation("minecraft:gold_ore");
 const DEEPSLATE_GOLD_ORE_LOCATION = new ResourceLocation("minecraft:deepslate_gold_ore");
+const EMERALD_ORE_LOCATION = new ResourceLocation("minecraft:emerald_ore");
+const DEEPSLATE_EMERALD_ORE_LOCATION = new ResourceLocation("minecraft:deepslate_emerald_ore");
 const REDSTONE_ORE_LOCATION = new ResourceLocation("minecraft:redstone_ore");
 const DEEPSLATE_REDSTONE_ORE_LOCATION = new ResourceLocation("minecraft:deepslate_redstone_ore");
 const DIAMOND_ORE_LOCATION = new ResourceLocation("minecraft:diamond_ore");
@@ -131,6 +133,8 @@ const LAPIS_ORE_LOCATION = new ResourceLocation("minecraft:lapis_ore");
 const DEEPSLATE_LAPIS_ORE_LOCATION = new ResourceLocation("minecraft:deepslate_lapis_ore");
 const COPPER_ORE_LOCATION = new ResourceLocation("minecraft:copper_ore");
 const DEEPSLATE_COPPER_ORE_LOCATION = new ResourceLocation("minecraft:deepslate_copper_ore");
+const INFESTED_STONE_LOCATION = new ResourceLocation("minecraft:infested_stone");
+const INFESTED_DEEPSLATE_LOCATION = new ResourceLocation("minecraft:infested_deepslate");
 const COARSE_DIRT_LOCATION = new ResourceLocation("minecraft:coarse_dirt");
 const PODZOL_LOCATION = new ResourceLocation("minecraft:podzol");
 const MYCELIUM_LOCATION = new ResourceLocation("minecraft:mycelium");
@@ -195,7 +199,7 @@ function deepslateOreProperties(): BlockBehaviour.Properties {
   return BlockBehaviour.Properties.of(Material.STONE, MaterialColor.DEEPSLATE)
     .requiresCorrectToolForDrops()
     .strength(4.5, 3.0)
-    .sound(SoundType.STONE);
+    .sound(SoundType.DEEPSLATE);
 }
 
 const GENERATED_BLOCK_LOCATIONS = [
@@ -278,6 +282,8 @@ const GENERATED_BLOCK_LOCATIONS = [
   DEEPSLATE_IRON_ORE_LOCATION,
   GOLD_ORE_LOCATION,
   DEEPSLATE_GOLD_ORE_LOCATION,
+  EMERALD_ORE_LOCATION,
+  DEEPSLATE_EMERALD_ORE_LOCATION,
   REDSTONE_ORE_LOCATION,
   DEEPSLATE_REDSTONE_ORE_LOCATION,
   DIAMOND_ORE_LOCATION,
@@ -286,6 +292,8 @@ const GENERATED_BLOCK_LOCATIONS = [
   DEEPSLATE_LAPIS_ORE_LOCATION,
   COPPER_ORE_LOCATION,
   DEEPSLATE_COPPER_ORE_LOCATION,
+  INFESTED_STONE_LOCATION,
+  INFESTED_DEEPSLATE_LOCATION,
   COARSE_DIRT_LOCATION,
   PODZOL_LOCATION,
   MYCELIUM_LOCATION,
@@ -433,6 +441,8 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("deepslate_iron_ore"),
   blockTexture("gold_ore"),
   blockTexture("deepslate_gold_ore"),
+  blockTexture("emerald_ore"),
+  blockTexture("deepslate_emerald_ore"),
   blockTexture("redstone_ore"),
   blockTexture("deepslate_redstone_ore"),
   blockTexture("diamond_ore"),
@@ -601,6 +611,8 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   const deepslateIronOreState = registerBlock(DEEPSLATE_IRON_ORE_LOCATION, new Block(deepslateOreProperties())).defaultBlockState();
   const goldOreState = registerBlock(GOLD_ORE_LOCATION, new Block(stoneOreProperties())).defaultBlockState();
   const deepslateGoldOreState = registerBlock(DEEPSLATE_GOLD_ORE_LOCATION, new Block(deepslateOreProperties())).defaultBlockState();
+  const emeraldOreState = registerBlock(EMERALD_ORE_LOCATION, new Block(stoneOreProperties())).defaultBlockState();
+  const deepslateEmeraldOreState = registerBlock(DEEPSLATE_EMERALD_ORE_LOCATION, new Block(deepslateOreProperties())).defaultBlockState();
   const redstoneOreState = registerBlock(REDSTONE_ORE_LOCATION, new Block(stoneOreProperties())).defaultBlockState();
   const deepslateRedstoneOreState = registerBlock(DEEPSLATE_REDSTONE_ORE_LOCATION, new Block(deepslateOreProperties())).defaultBlockState();
   const diamondOreState = registerBlock(DIAMOND_ORE_LOCATION, new Block(stoneOreProperties())).defaultBlockState();
@@ -609,6 +621,14 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   const deepslateLapisOreState = registerBlock(DEEPSLATE_LAPIS_ORE_LOCATION, new Block(deepslateOreProperties())).defaultBlockState();
   const copperOreState = registerBlock(COPPER_ORE_LOCATION, new Block(stoneOreProperties())).defaultBlockState();
   const deepslateCopperOreState = registerBlock(DEEPSLATE_COPPER_ORE_LOCATION, new Block(deepslateOreProperties())).defaultBlockState();
+  const infestedStoneState = registerBlock(
+    INFESTED_STONE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.CLAY)),
+  ).defaultBlockState();
+  const infestedDeepslateState = registerBlock(
+    INFESTED_DEEPSLATE_LOCATION,
+    new RotatedPillarBlock(BlockBehaviour.Properties.of(Material.CLAY, MaterialColor.DEEPSLATE).sound(SoundType.DEEPSLATE)),
+  ).defaultBlockState();
   const coarseDirtState = registerBlock(
     COARSE_DIRT_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.DIRT, MaterialColor.DIRT).strength(0.5).sound(SoundType.GRAVEL)),
@@ -1084,6 +1104,8 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(deepslateIronOreState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(goldOreState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(deepslateGoldOreState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(emeraldOreState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(deepslateEmeraldOreState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(redstoneOreState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(deepslateRedstoneOreState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(diamondOreState.getBlock(), RenderType.solid());
@@ -1092,6 +1114,8 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(deepslateLapisOreState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(copperOreState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(deepslateCopperOreState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(infestedStoneState.getBlock(), RenderType.solid());
+  ItemBlockRenderTypes.setRenderLayer(infestedDeepslateState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setFluidRenderLayer(Fluids.WATER, RenderType.translucent());
 
   const blockStateById = new Array<BlockState>(ChunkBlockId.SNOW_BLOCK + 1);

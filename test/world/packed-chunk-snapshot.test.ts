@@ -183,6 +183,8 @@ describe("packed chunk snapshot codecs", () => {
     const water = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:water")!;
     const deepslate = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:deepslate")!;
     const tuff = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:tuff")!;
+    const emeraldOre = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:emerald_ore")!;
+    const infestedDeepslate = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:infested_deepslate")!;
     const coalOre = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:coal_ore")!;
     const deepslateCopperOre = states.find((state) => serializeBlockStateSnapshot(state).name === "minecraft:deepslate_copper_ore")!;
     const chunk = new LevelChunk(0, 0, airState);
@@ -190,8 +192,10 @@ describe("packed chunk snapshot codecs", () => {
     chunk.setBlockState(new BlockPos(4, 5, 6), water);
     chunk.setBlockState(new BlockPos(7, 8, 9), deepslate);
     chunk.setBlockState(new BlockPos(10, 11, 12), tuff);
-    chunk.setBlockState(new BlockPos(13, 14, 15), coalOre);
-    chunk.setBlockState(new BlockPos(2, 3, 4), deepslateCopperOre);
+    chunk.setBlockState(new BlockPos(13, 14, 15), emeraldOre);
+    chunk.setBlockState(new BlockPos(2, 3, 4), infestedDeepslate);
+    chunk.setBlockState(new BlockPos(5, 6, 7), coalOre);
+    chunk.setBlockState(new BlockPos(8, 9, 10), deepslateCopperOre);
     chunk.recordBlockTick(new BlockPos(1, 2, 3), "minecraft:stone", 2);
     chunk.recordLiquidTick(new BlockPos(4, 5, 6), "minecraft:water", 3);
 
@@ -204,8 +208,10 @@ describe("packed chunk snapshot codecs", () => {
     expect(hydrated.getBlockState(new BlockPos(4, 5, 6))).toBe(water);
     expect(hydrated.getBlockState(new BlockPos(7, 8, 9))).toBe(deepslate);
     expect(hydrated.getBlockState(new BlockPos(10, 11, 12))).toBe(tuff);
-    expect(hydrated.getBlockState(new BlockPos(13, 14, 15))).toBe(coalOre);
-    expect(hydrated.getBlockState(new BlockPos(2, 3, 4))).toBe(deepslateCopperOre);
+    expect(hydrated.getBlockState(new BlockPos(13, 14, 15))).toBe(emeraldOre);
+    expect(hydrated.getBlockState(new BlockPos(2, 3, 4))).toBe(infestedDeepslate);
+    expect(hydrated.getBlockState(new BlockPos(5, 6, 7))).toBe(coalOre);
+    expect(hydrated.getBlockState(new BlockPos(8, 9, 10))).toBe(deepslateCopperOre);
     expect(hydrated.getScheduledBlockTicks()).toEqual(snapshot.blockTicks);
     expect(hydrated.getScheduledLiquidTicks()).toEqual(snapshot.liquidTicks);
   });
