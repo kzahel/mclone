@@ -16,6 +16,12 @@ function decoratedChunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
 }
 
+export interface GeneratedChunkViewUpdate {
+  readonly changed: boolean;
+  readonly unloadedChunks: readonly LevelChunk[];
+  readonly missingChunks: readonly (readonly [number, number])[];
+}
+
 export class GeneratedRenderLevel extends StaticRenderLevel {
   private viewCenterX = Number.MIN_SAFE_INTEGER;
   private viewCenterZ = Number.MIN_SAFE_INTEGER;
@@ -53,36 +59,52 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   }
 
   public ensureChunksForCamera(cameraX: number, cameraZ: number, viewDistance: number): boolean {
-    const nextCenterX = SectionPos.posToSectionCoord(cameraX);
-    const nextCenterZ = SectionPos.posToSectionCoord(cameraZ);
+    const update = this.updateChunkView(
+      SectionPos.posToSectionCoord(cameraX),
+      SectionPos.posToSectionCoord(cameraZ),
+      viewDistance,
+    );
+    for (const [chunkX, chunkZ] of update.missingChunks) {
+      this.getChunk(chunkX, chunkZ, true);
+    }
+
+    return update.changed;
+  }
+
+  public updateChunkView(centerChunkX: number, centerChunkZ: number, viewDistance: number): GeneratedChunkViewUpdate {
     const nextRadius = Math.max(1, viewDistance) + 1;
     let changed =
-      nextCenterX !== this.viewCenterX ||
-      nextCenterZ !== this.viewCenterZ ||
+      centerChunkX !== this.viewCenterX ||
+      centerChunkZ !== this.viewCenterZ ||
       nextRadius !== this.chunkRadius;
 
-    this.viewCenterX = nextCenterX;
-    this.viewCenterZ = nextCenterZ;
+    this.viewCenterX = centerChunkX;
+    this.viewCenterZ = centerChunkZ;
     this.chunkRadius = nextRadius;
 
+    const unloadedChunks: LevelChunk[] = [];
     for (const chunk of this.getLoadedChunks()) {
       if (!this.inRange(chunk.chunkX, chunk.chunkZ)) {
-        super.removeChunk(chunk.chunkX, chunk.chunkZ);
+        const removed = super.removeChunk(chunk.chunkX, chunk.chunkZ);
+        if (removed !== undefined) {
+          unloadedChunks.push(removed);
+        }
         this.decoratedChunks.delete(decoratedChunkKey(chunk.chunkX, chunk.chunkZ));
         changed = true;
       }
     }
 
+    const missingChunks: Array<readonly [number, number]> = [];
     for (let chunkZ = this.viewCenterZ - this.chunkRadius; chunkZ <= this.viewCenterZ + this.chunkRadius; chunkZ++) {
       for (let chunkX = this.viewCenterX - this.chunkRadius; chunkX <= this.viewCenterX + this.chunkRadius; chunkX++) {
         if (super.getChunk(chunkX, chunkZ, false) === null) {
-          this.getChunk(chunkX, chunkZ, true);
+          missingChunks.push([chunkX, chunkZ]);
           changed = true;
         }
       }
     }
 
-    return changed;
+    return { changed, unloadedChunks, missingChunks };
   }
 
   public override getBlockTint(pos: BlockPos, resolver?: ColorResolver): number {

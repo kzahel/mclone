@@ -16,6 +16,7 @@ function applySmokeWorldMutations(level: WorldGenLevel, waterState: BlockState):
 }
 
 export interface CreateGeneratedWorldHostOptions {
+  readonly chunkViewScheduling?: "synchronous" | "cooperative";
   readonly worldStorage?: WorldStorage;
 }
 
@@ -30,6 +31,7 @@ export function createGeneratedWorldHostForRequest(
     airState: generatedBlocks.airState,
     blockStateById: generatedBlocks.blockStateById,
     blockStateIds: generatedBlocks.blockStateIds,
+    chunkViewScheduling: options.chunkViewScheduling,
     worldStorage: options.worldStorage,
     mutateWorld:
       request.preset === "browser_smoke"

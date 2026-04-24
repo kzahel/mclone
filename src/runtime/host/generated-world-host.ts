@@ -71,11 +71,18 @@ export interface GeneratedWorldHostOptions {
   readonly airState: BlockState;
   readonly blockStateById: readonly BlockState[];
   readonly blockStateIds: BlockStateIdMap;
+  readonly chunkViewScheduling?: "synchronous" | "cooperative";
   readonly mutateWorld?: (level: WorldGenLevel) => void;
   readonly worldStorage?: WorldStorage;
 }
 
 const LOCAL_WORLD_SESSION_ID = "local";
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
 
 function createSessionChunkViewState(request: SetChunkViewRequest | undefined): SessionChunkViewState | undefined {
   if (request === undefined) {
@@ -103,6 +110,7 @@ export class GeneratedWorldHost implements WorldHost {
   private pendingMessages: WorldHostMessage[] = [];
   private lastPlayerTickAtMs = Date.now();
   private playerAnchoredToChunkView = false;
+  private chunkViewGeneration = 0;
   private opened = false;
 
   public constructor(private readonly options: GeneratedWorldHostOptions) {
@@ -159,6 +167,9 @@ export class GeneratedWorldHost implements WorldHost {
 
     this.ensureLocalSessionState();
     this.tickPlayerLoop();
+    if (this.options.chunkViewScheduling === "cooperative") {
+      return this.setChunkViewCooperative(request);
+    }
 
     const loadedBefore = new Map(this.level.getLoadedChunks().map((chunk) => [chunkKey(chunk.chunkX, chunk.chunkZ), chunk] as const));
     await this.preloadStoredChunks(request.centerChunkX, request.centerChunkZ, request.radius);
@@ -216,6 +227,45 @@ export class GeneratedWorldHost implements WorldHost {
     return messages;
   }
 
+  private setChunkViewCooperative(request: SetChunkViewRequest): readonly WorldHostMessage[] {
+    const update = this.level.updateChunkView(request.centerChunkX, request.centerChunkZ, request.radius);
+    const chunkViewChanged = this.currentChunkView === undefined
+      || this.currentChunkView.centerChunkX !== request.centerChunkX
+      || this.currentChunkView.centerChunkZ !== request.centerChunkZ
+      || this.currentChunkView.radius !== request.radius;
+    this.currentChunkView = request;
+    if (chunkViewChanged) {
+      this.updateSessionState();
+    }
+
+    const messages: WorldHostMessage[] = [this.createSessionStateMessage()];
+    if (!this.playerAnchoredToChunkView) {
+      this.playerState = anchorPlayerStateToChunkView(this.playerState!, createSessionChunkViewState(request)!, this.playerState!.tick);
+      this.playerAnchoredToChunkView = true;
+      messages.push(this.createPlayerStateMessage());
+    }
+
+    for (const chunk of update.unloadedChunks) {
+      this.queueStorageSideEffect(this.storageSession?.chunks.evictChunk(chunk.chunkX, chunk.chunkZ));
+      messages.push({
+        type: "chunk_unload",
+        chunkX: chunk.chunkX,
+        chunkZ: chunk.chunkZ,
+      });
+    }
+
+    if (!update.changed) {
+      return messages;
+    }
+
+    const generation = ++this.chunkViewGeneration;
+    const chunkViewJob = this.runChunkViewJobs(generation, update.missingChunks);
+    chunkViewJob.catch((error: unknown) => {
+      this.enqueueWorldError(error);
+    });
+    return messages;
+  }
+
   public async setPlayerInput(request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]> {
     if (!this.opened) {
       return [{ type: "world_error", message: "set_player_input received before open_world" }];
@@ -264,6 +314,24 @@ export class GeneratedWorldHost implements WorldHost {
     }
   }
 
+  private async preloadStoredChunk(chunkX: number, chunkZ: number): Promise<boolean> {
+    if (this.storageSession === undefined || this.level.getChunk(chunkX, chunkZ, false) !== null) {
+      return false;
+    }
+
+    const snapshot = await this.storageSession.chunks.loadChunk(chunkX, chunkZ);
+    if (snapshot === undefined) {
+      return false;
+    }
+
+    this.level.setChunk(hydrateChunkFromSnapshot(
+      unpackChunkSnapshot(snapshot, this.options.blockStateIds),
+      this.options.airState,
+      this.resolveBlockState,
+    ));
+    return true;
+  }
+
   private async persistLoadedChunks(chunks: readonly ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number][]): Promise<void> {
     if (this.storageSession === undefined) {
       return;
@@ -272,6 +340,67 @@ export class GeneratedWorldHost implements WorldHost {
     for (const chunk of chunks) {
       await this.storageSession.chunks.saveChunk(this.buildPackedChunkSnapshot(chunk));
     }
+  }
+
+  private async persistLoadedChunk(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): Promise<void> {
+    if (this.storageSession === undefined) {
+      return;
+    }
+
+    await this.storageSession.chunks.saveChunk(this.buildPackedChunkSnapshot(chunk));
+  }
+
+  private async runChunkViewJobs(
+    generation: number,
+    missingChunks: readonly (readonly [number, number])[],
+  ): Promise<void> {
+    for (const [chunkX, chunkZ] of missingChunks) {
+      await yieldToEventLoop();
+      if (generation !== this.chunkViewGeneration || !this.isChunkInCurrentView(chunkX, chunkZ)) {
+        continue;
+      }
+
+      await this.preloadStoredChunk(chunkX, chunkZ);
+      if (generation !== this.chunkViewGeneration || !this.isChunkInCurrentView(chunkX, chunkZ)) {
+        continue;
+      }
+
+      const chunk = this.level.getChunk(chunkX, chunkZ, true);
+      if (chunk === null) {
+        continue;
+      }
+
+      this.options.mutateWorld?.(this.level);
+      await this.persistLoadedChunk(chunk);
+      if (generation !== this.chunkViewGeneration || !this.isChunkInCurrentView(chunkX, chunkZ)) {
+        continue;
+      }
+
+      this.pendingMessages.push({
+        type: "chunk_snapshot",
+        snapshot: this.buildPackedChunkSnapshot(chunk),
+      });
+    }
+  }
+
+  private isChunkInCurrentView(chunkX: number, chunkZ: number): boolean {
+    if (this.currentChunkView === undefined) {
+      return false;
+    }
+
+    const viewRadius = getGeneratedWorldViewChunkRadius(this.currentChunkView.radius);
+    return Math.abs(chunkX - this.currentChunkView.centerChunkX) <= viewRadius
+      && Math.abs(chunkZ - this.currentChunkView.centerChunkZ) <= viewRadius;
+  }
+
+  private queueStorageSideEffect(task: Promise<void> | undefined): void {
+    if (task === undefined) {
+      return;
+    }
+
+    task.catch((error: unknown) => {
+      this.enqueueWorldError(error);
+    });
   }
 
   private buildPackedChunkSnapshot(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): PackedChunkSnapshot {
@@ -359,6 +488,11 @@ export class GeneratedWorldHost implements WorldHost {
   private enqueuePlayerStateMessage(): void {
     this.pendingMessages = this.pendingMessages.filter((message) => message.type !== "player_state");
     this.pendingMessages.push(this.createPlayerStateMessage());
+  }
+
+  private enqueueWorldError(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.pendingMessages.push({ type: "world_error", message });
   }
 
   private drainPendingMessages(maxMessages: number | undefined): readonly WorldHostMessage[] {

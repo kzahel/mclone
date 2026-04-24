@@ -147,6 +147,19 @@ The first implementation slice is done when:
 - browser worker mode uses scheduler mode
 - `pnpm typecheck` and targeted runtime tests pass
 
+## Landed
+
+### First scheduler-mode slice
+
+- Added a cooperative `GeneratedWorldHost` chunk-view scheduling mode.
+- Kept the synchronous host path as the default for existing direct and Node remote behavior.
+- Changed browser worker singleplayer host creation to use cooperative scheduling.
+- Split chunk-view interest updates from chunk generation in `GeneratedRenderLevel`.
+- In cooperative mode, `set_chunk_view` acknowledges session interest before snapshots are ready.
+- In cooperative mode, chunk snapshots are queued through `poll_world_updates` as chunk jobs complete.
+- Stale chunk jobs are guarded by a chunk-view generation and current interest check before publication.
+- Added targeted runtime coverage for prompt acknowledgement, input service during queued chunk work, streamed snapshots, and stale snapshot suppression.
+
 ## D6 completion acceptance
 
 D6 is complete when:
@@ -161,4 +174,4 @@ D6 is complete when:
 
 ## Next
 
-Implement the first scheduler-mode slice in `GeneratedWorldHost` and the local browser worker transport. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction as part of this tactical.
+Extend D5/D6 measurement around input latency, poll latency, and `player_state.tick` gaps while chunk jobs are active, then migrate the Node remote service to the same interest-ack-plus-streaming semantics. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction as part of D6.

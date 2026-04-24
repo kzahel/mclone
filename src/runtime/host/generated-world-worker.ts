@@ -6,6 +6,7 @@ import { GeneratedWorldHost } from "./generated-world-host";
 
 function createGeneratedWorldHost(request: OpenWorldRequest): GeneratedWorldHost {
   return createGeneratedWorldHostForRequest(request, {
+    chunkViewScheduling: "cooperative",
     worldStorage: typeof indexedDB === "undefined" ? undefined : new IndexedDbWorldStorage(indexedDB),
   });
 }
