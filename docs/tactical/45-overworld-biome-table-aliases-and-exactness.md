@@ -54,8 +54,6 @@ Close the remaining broad overworld biome-table holes after the underground-help
 
 ## Next
 
-With the broad layered-overworld biome key set now covered, the next highest-value parity slice is narrow table exactness rather than more table breadth:
+With the broad layered-overworld biome key set now covered, the next highest-value parity slice is a concrete decorated-stage confidence target rather than more table breadth: tactical [`46`](46-full-decorated-spawn-chunk-parity.md) should drive seed `12345`, chunk `(0, 0)` from the current `64,768 / 65,536` full-block runtime match to exact parity against the committed official-server fixture.
 
-1. Finish `deep_warm_ocean` / warm-ocean exactness such as the remaining `SEAGRASS_SIMPLE` / `CARVING_MASK` behavior and any still-live narrow ocean-table mismatches.
-2. Revisit decorated-stage confidence only if the current focused unit/browser surface proves too weak.
-3. Keep structures, disabled Caves & Cliffs systems, and gameplay block behavior out until the target changes.
+After that harness exists and the baseline chunk is exact, use its mismatch reports to choose the next fixture set deliberately. Likely candidates are `deep_warm_ocean` / warm-ocean exactness, a shoreline/sand boundary, a taiga/snowy slope, and a desert or badlands chunk.

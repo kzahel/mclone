@@ -402,6 +402,12 @@ Recommended host policy:
 
 For initial MVP generated terrain, it is acceptable for a chunk job to generate terrain and then finish initial lighting before publishing the chunk. Live block edits need incremental light deltas.
 
+### Worker Boundary
+
+The current browser implementation runs generation, world ticks, persistence, and light propagation inside the generated-world worker. That is a tactical simplification, not the target architecture. It prevents main-thread stalls, but lighting can still starve the authoritative world worker and delay chunk publication, water ticks, and player-state responses.
+
+The target architecture is a dedicated lighting service/worker owned by the authoritative host. See [`lighting-worker-architecture.md`](lighting-worker-architecture.md) for the full worker boundary, protocol, mailbox, revisioning, neighbor readiness, and migration plan. The core rule is that normal terrain chunks should be published once with initial light included; do not publish unlit geometry as a loading shortcut.
+
 ## Interaction With Meshing
 
 The translated renderer already expects vanilla packed light:
