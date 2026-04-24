@@ -19,6 +19,7 @@ import {
   type RendererScene,
 } from "../scene-setup";
 import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "../browser-render-config";
+import { advanceTextureAtlasAnimations } from "../texture/texture-atlas";
 import { DebugInput } from "./debug-input";
 import {
   applyPredictedCameraInput,
@@ -221,6 +222,7 @@ async function boot(): Promise<void> {
   let lastFrameMs = performance.now();
   let lastLightTickMs = lastFrameMs;
   let lastWorldPollMs = lastFrameMs;
+  let textureAnimationElapsedMs = 0.0;
   let renderInFlight = false;
   let totalFrameCount = 0;
   let fpsFrameCount = 0;
@@ -342,8 +344,11 @@ async function boot(): Promise<void> {
 
   async function tick(): Promise<void> {
     const now = performance.now();
-    const dtSeconds = Math.min(0.1, (now - lastFrameMs) / 1000.0);
+    const frameDeltaMs = Math.max(0.0, now - lastFrameMs);
+    const dtSeconds = Math.min(0.1, frameDeltaMs / 1000.0);
     lastFrameMs = now;
+    // WebGPU: drive vanilla atlas animation ticks from the browser frame loop.
+    textureAnimationElapsedMs = advanceTextureAtlasAnimations(scene.atlas, textureAnimationElapsedMs + frameDeltaMs);
     resizeViewport();
 
     const inputFrame = mergeDebugInputFrame(input.consumeFrame(), debugRuntime.getInjectedInput());

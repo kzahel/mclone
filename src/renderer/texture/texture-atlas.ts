@@ -10,6 +10,8 @@ function lowestOneBit(value: number): number {
 }
 
 export const DEFAULT_BLOCK_ATLAS_MIP_LEVEL = 4;
+export const TEXTURE_ATLAS_TICK_INTERVAL_MS = 50.0;
+export const TEXTURE_ATLAS_MAX_CATCHUP_MS = 250.0;
 
 export interface TextureAtlasSource {
   getBasicSpriteInfos(spriteNames: readonly ResourceLocation[]): Promise<readonly TextureAtlasSpriteInfo[]>;
@@ -22,6 +24,24 @@ export interface TextureAtlasSource {
     x: number,
     y: number,
   ): Promise<TextureAtlasSprite | undefined>;
+}
+
+export interface TextureAtlasAnimationTarget {
+  cycleAnimationFrames(): void;
+}
+
+export function advanceTextureAtlasAnimations(atlas: TextureAtlasAnimationTarget, elapsedMs: number): number {
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0.0) {
+    return 0.0;
+  }
+
+  const clampedElapsedMs = Math.min(elapsedMs, TEXTURE_ATLAS_MAX_CATCHUP_MS);
+  const tickCount = Math.trunc(clampedElapsedMs / TEXTURE_ATLAS_TICK_INTERVAL_MS);
+  for (let tick = 0; tick < tickCount; tick++) {
+    atlas.cycleAnimationFrames();
+  }
+
+  return clampedElapsedMs - (tickCount * TEXTURE_ATLAS_TICK_INTERVAL_MS);
 }
 
 export class TextureAtlasPreparations {

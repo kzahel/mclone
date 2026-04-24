@@ -9,7 +9,12 @@ import {
 import { MipmapGenerator } from "../../../src/renderer/texture/mipmap-generator";
 import { NativeImage } from "../../../src/renderer/texture/native-image";
 import { Stitcher } from "../../../src/renderer/texture/stitcher";
-import { TextureAtlas, type TextureAtlasSource } from "../../../src/renderer/texture/texture-atlas";
+import {
+  advanceTextureAtlasAnimations,
+  TEXTURE_ATLAS_TICK_INTERVAL_MS,
+  TextureAtlas,
+  type TextureAtlasSource,
+} from "../../../src/renderer/texture/texture-atlas";
 import { TextureAtlasSprite, TextureAtlasSpriteInfo } from "../../../src/renderer/texture/texture-atlas-sprite";
 
 function solidImage(width: number, height: number, color: number): NativeImage {
@@ -163,5 +168,30 @@ describe("Texture atlas plumbing", () => {
     expect(sprite?.getWidth()).toBe(16);
     expect(sprite?.getHeight()).toBe(16);
     expect(sprite?.getAnimationTicker()).toBeDefined();
+  });
+
+  test("advanceTextureAtlasAnimations runs atlas tickers at vanilla client tick cadence", () => {
+    let ticks = 0;
+    const atlas = {
+      cycleAnimationFrames(): void {
+        ticks++;
+      },
+    };
+
+    let elapsedMs = advanceTextureAtlasAnimations(atlas, TEXTURE_ATLAS_TICK_INTERVAL_MS - 1);
+    expect(ticks).toBe(0);
+    expect(elapsedMs).toBe(TEXTURE_ATLAS_TICK_INTERVAL_MS - 1);
+
+    elapsedMs = advanceTextureAtlasAnimations(atlas, elapsedMs + 1);
+    expect(ticks).toBe(1);
+    expect(elapsedMs).toBe(0);
+
+    elapsedMs = advanceTextureAtlasAnimations(atlas, 125);
+    expect(ticks).toBe(3);
+    expect(elapsedMs).toBe(25);
+
+    elapsedMs = advanceTextureAtlasAnimations(atlas, 1_000);
+    expect(ticks).toBe(8);
+    expect(elapsedMs).toBe(0);
   });
 });
