@@ -156,6 +156,10 @@ function addBadlandGrass(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_DEAD_BUSH_BADLANDS);
 }
 
+function addBadlandsTrees(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.TREES_BADLANDS);
+}
+
 function addBadlandExtraVegetation(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_SUGAR_CANE_BADLANDS);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_PUMPKIN);
@@ -288,7 +292,8 @@ function buildMountainSettings(edge: boolean): BiomeGenerationSettings {
     GenerationStep.Decoration.VEGETAL_DECORATION,
     () => (edge ? VegetationFeatures.TREES_MOUNTAIN_EDGE : VegetationFeatures.TREES_MOUNTAIN),
   );
-  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_BADLANDS);
+  addDefaultFlowers(builder);
+  addDefaultGrass(builder);
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
@@ -405,7 +410,7 @@ function buildDesertSettings(): BiomeGenerationSettings {
   return builder.build();
 }
 
-function buildBadlandsSettings(): BiomeGenerationSettings {
+function buildBadlandsSettings(wooded = false): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
@@ -413,7 +418,11 @@ function buildBadlandsSettings(): BiomeGenerationSettings {
   addDefaultOres(builder);
   addExtraGold(builder);
   addDefaultSoftDisks(builder);
+  if (wooded) {
+    addBadlandsTrees(builder);
+  }
   addBadlandGrass(builder);
+  addDefaultMushrooms(builder);
   addBadlandExtraVegetation(builder);
   addDefaultSprings(builder);
   addSurfaceFreezing(builder);
@@ -558,7 +567,7 @@ function buildSavannaSettings(shattered: boolean): BiomeGenerationSettings {
   return builder.build();
 }
 
-function buildJungleSettings(edge: boolean, bamboo = false): BiomeGenerationSettings {
+function buildJungleSettings(edge: boolean, bamboo = false, modified = false): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
@@ -568,7 +577,7 @@ function buildJungleSettings(edge: boolean, bamboo = false): BiomeGenerationSett
   if (bamboo) {
     addBambooVegetation(builder);
   } else {
-    if (!edge) {
+    if (!edge && !modified) {
       addLightBambooVegetation(builder);
     }
 
@@ -697,21 +706,29 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:frozen_river", buildRiverSettings(true)],
   ["minecraft:bamboo_jungle", buildJungleSettings(false, true)],
   ["minecraft:bamboo_jungle_hills", buildJungleSettings(false, true)],
+  ["minecraft:eroded_badlands", buildBadlandsSettings()],
   ["minecraft:giant_spruce_taiga", buildGiantTaigaSettings(true)],
   ["minecraft:giant_spruce_taiga_hills", buildGiantTaigaSettings(true)],
   ["minecraft:giant_tree_taiga", buildGiantTaigaSettings(false)],
   ["minecraft:giant_tree_taiga_hills", buildGiantTaigaSettings(false)],
+  ["minecraft:gravelly_mountains", buildMountainSettings(false)],
   ["minecraft:ice_spikes", buildSnowyTundraSettings(true)],
   ["minecraft:lukewarm_ocean", buildOceanSettings("lukewarm", false)],
   ["minecraft:mountains", buildMountainSettings(false)],
   ["minecraft:jungle", buildJungleSettings(false)],
   ["minecraft:jungle_edge", buildJungleSettings(true)],
   ["minecraft:jungle_hills", buildJungleSettings(false)],
+  ["minecraft:modified_badlands_plateau", buildBadlandsSettings()],
+  ["minecraft:modified_gravelly_mountains", buildMountainSettings(false)],
+  ["minecraft:modified_jungle", buildJungleSettings(false, false, true)],
+  ["minecraft:modified_jungle_edge", buildJungleSettings(true, false, true)],
+  ["minecraft:modified_wooded_badlands_plateau", buildBadlandsSettings(true)],
   ["minecraft:mushroom_fields", buildMushroomFieldSettings()],
   ["minecraft:mushroom_field_shore", buildMushroomFieldSettings()],
   ["minecraft:ocean", buildOceanSettings("normal", false)],
   ["minecraft:warm_ocean", buildOceanSettings("warm", false)],
-  ["minecraft:wooded_mountains", buildMountainSettings(false)],
+  ["minecraft:wooded_badlands_plateau", buildBadlandsSettings(true)],
+  ["minecraft:wooded_mountains", buildMountainSettings(true)],
   ["minecraft:mountain_edge", buildMountainSettings(true)],
   ["minecraft:plains", buildPlainsSettings()],
   ["minecraft:river", buildRiverSettings(false)],

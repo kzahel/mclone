@@ -732,6 +732,10 @@ export class VegetationFeatures {
       .decorated(countExtraDecorator(1, 0.1, 1));
   }
 
+  public static get TREES_BADLANDS() {
+    return TreeFeatures.OAK.decorated(heightmapWithTreeThresholdSquared()).decorated(countExtraDecorator(5, 0.1, 1));
+  }
+
   public static get TREES_SNOWY() {
     return TreeFeatures.SPRUCE.decorated(heightmapWithTreeThresholdSquared()).decorated(countExtraDecorator(0, 0.1, 1));
   }

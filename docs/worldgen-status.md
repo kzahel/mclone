@@ -49,7 +49,7 @@ The main remaining gap is not foundational plumbing. It is breadth, parity, and 
 | Feature/decorator framework | `90-95%` | Enough for the current vegetation, water-feature, dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, cold-surface, warm-ocean, common-ore placement, the replace-single-block underground extra path, glow lichen, rare dripstone, and soft disks | [`22`](./tactical/22-simple-feature-placement-bridge.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md) |
 | Tree pipeline | `80-90%` | Oak / swamp oak / fancy oak / spruce / pine / mega pine / mega spruce / birch / dark oak / acacia / jungle / mega-jungle / bamboo-jungle / huge-mushroom paths exist; bee-related parity still does not | [`23`](./tactical/23-true-tree-feature-placement.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
 | Surface vegetation + water decoration | `82-90%` | First substantial overworld set landed, now including dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, and cold-surface identity | [`20`](./tactical/20-surface-special-blocks-and-biome-tint.md), [`21`](./tactical/21-surface-feature-palette-expansion.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
-| Biome decoration table coverage | `84-90%` | A useful majority is real, now including dark forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, the cold-surface follow-through, the full live default underground helper stack, and the badlands/mountain underground extras; remaining gaps are concentrated in still-empty biome keys and narrower table exactness | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md) |
+| Biome decoration table coverage | `88-93%` | The full layered-overworld biome key set now has non-empty translated settings, including the last mountain / modified-jungle / badlands aliases; remaining gaps are narrower table exactness and confidence, not broad empty-table coverage | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md), [`45`](./tactical/45-overworld-biome-table-aliases-and-exactness.md) |
 | Ore generation / underground decoration | `55-60%` | The live overworld underground helper stack is now translated: common ores, underground variety, biome-specific badlands/mountain extras, glow lichen, rare dripstone, soft disks, target-rule plumbing, replace-single-block support, block/palette coverage, and biome-table wiring all landed; the main remaining gaps are stronger decorated-stage confidence/oracle coverage and later underground feature families outside this helper surface | [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md) |
 | Structures | `0-5%` | Not meaningfully started | target bucket only |
 
@@ -97,6 +97,7 @@ The project now has translated support for:
 - ocean `count_noise_biased` decorator follow-through
 - warm-ocean coral / sea-pickle selector follow-through
 - bamboo-jungle bamboo / podzol / selector follow-through
+- badlands oak-tree selector follow-through for wooded badlands variants
 - common overworld ore target lists and default ore configured features
 - active `addDefaultUndergroundVariety(...)` material blobs: dirt, gravel, granite, diorite, andesite, tuff, and deepslate
 - the remaining live underground helper tail: glow lichen, rare dripstone clusters, and rare small dripstone
@@ -119,33 +120,33 @@ The current worldgen path covers a meaningful first-pass overworld set:
 
 `src/worldgen/biome/overworld-biome-generation-settings.ts` currently has non-empty translated settings for:
 
-- badlands, badlands plateau
+- badlands, wooded badlands plateau, badlands plateau, eroded badlands, modified wooded badlands plateau, modified badlands plateau
 - desert, desert hills, desert lakes
 - forest, wooded hills, flower forest
 - birch forest, birch forest hills, tall birch forest, tall birch hills
 - dark forest, dark forest hills
 - giant tree taiga, giant tree taiga hills, giant spruce taiga, giant spruce taiga hills
 - ice spikes
-- jungle, jungle hills, jungle edge
+- jungle, jungle hills, jungle edge, modified jungle, modified jungle edge
 - bamboo jungle, bamboo jungle hills
 - beach, snowy beach, stone shore
 - mushroom fields, mushroom field shore
+- mountains, wooded mountains, mountain edge, gravelly mountains, modified gravelly mountains
 - river, frozen river
 - ocean, deep ocean, warm ocean, deep warm ocean, cold ocean, deep cold ocean, lukewarm ocean, deep lukewarm ocean, frozen ocean, deep frozen ocean
 - plains, sunflower plains
 - savanna, savanna plateau, shattered savanna, shattered savanna plateau
 - snowy tundra, snowy mountains, snowy taiga, snowy taiga hills, snowy taiga mountains
 - swamp, swamp hills
-- mountains, wooded mountains, mountain edge
 - taiga, taiga hills, taiga mountains
 
-That is enough to produce varied generated scenes, but it is still a subset of the overworld biome matrix. The last big common ocean-family and jungle-family fallbacks are gone; the remaining broad gaps now tilt toward still-empty biome keys and the not-yet-finished underground/ore phase.
+Every layered-overworld biome key in the current target now resolves to a non-empty translated settings table. The remaining gaps now tilt toward narrow exactness issues such as `deep_warm_ocean` and toward confidence/oracle depth rather than missing biome-table rows.
 
 ## What is still missing
 
 ### Common biome families still missing or thin
 
-Several high-signal families still lack their final biome-specific follow-through. Important gaps now include:
+No layered-overworld biome key in the current target still falls back to a carver-only settings table. The remaining biome-table gaps are narrow exactness issues rather than broad missing families. Important ones now include:
 
 - exact `deep_warm_ocean` `SEAGRASS_SIMPLE` / `CARVING_MASK` follow-through and later coral state/death-tick behavior if narrow ocean-table exactness becomes worth another slice
 
@@ -190,17 +191,17 @@ This is the current recommended ordering for worldgen work.
 
 These priorities are only for parity-oriented worldgen work. The runtime/host arc already landed the browser-local authority, mesh-worker, browser-persistence, headless-Node-host, remote-browser-transport, protocol-hardening, first authoritative-player-loop, and browser-control integration prerequisites (`R0` through `R8`), so parity work no longer has to wait on the old browser render-path coupling. Remaining runtime/host work still matters, but it now shifts toward measuring whether polling remains sufficient under the live browser control path and then growing richer authoritative gameplay on top of the same boundary; see the runtime/host arc in [`tactical/README.md`](./tactical/README.md).
 
-### 1. Expand biome-table coverage for common overworld families
+### 1. Narrow biome-table exactness for remaining overworld edge cases
 
-The next broad parity win is no longer the generic underground-helper stack; that part is now in. The main remaining recognizability gap is breadth and exactness across the remaining overworld biome tables.
+The next broad parity win is no longer table breadth. The layered-overworld biome key set is covered now, so the main remaining recognizability gap is narrow exactness inside a few biome tables.
 
 Highest-value families:
 
-- the remaining still-empty or still-thin overworld biome keys
-- narrower ocean-table exactness like `deep_warm_ocean` `SEAGRASS_SIMPLE` / `CARVING_MASK` only after the broad biome-table holes are closed
+- narrower ocean-table exactness like `deep_warm_ocean` `SEAGRASS_SIMPLE` / `CARVING_MASK`
+- any remaining helper-level mismatches that are now visible only because the broad biome-table holes are closed
 - only after that, confidence/oracle follow-through if later decorated-stage parity needs stronger proof
 
-This is a larger win than adding more variants inside already-covered forest/plains/swamp paths.
+This is a larger win now than opening new generic underground breadth again.
 
 ### 2. Finish the remaining tree/decorator ecosystems
 
@@ -238,6 +239,6 @@ When a tactical lands that changes worldgen, update this document in the same ch
 - move buckets between “landed”, “partial”, and “missing”
 - update the priority order if the leverage changed
 - add links to the new tactical doc
-- keep the “Current biome-table coverage” section honest about which biomes still fall back to carver-only settings without translated feature tables
+- keep the “Current biome-table coverage” section honest about whether any current-target biomes still fall back to carver-only settings without translated feature tables; that count is now zero
 
 This document should be the authoritative worldgen status page. Tactical docs are the work log; this file is the map.

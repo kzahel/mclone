@@ -8,8 +8,13 @@ import { registerGeneratedRenderBlocks } from "../../../../src/world/level/gener
 import { StaticRenderLevel } from "../../../../src/world/level/static-render-level";
 import { OverworldBiomeSource } from "../../../../src/worldgen/biome/overworld-biome-source";
 import { getOverworldBiomeGenerationSettings } from "../../../../src/worldgen/biome/overworld-biome-generation-settings";
-import { DecoratedFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorated-feature-configuration";
+import { GenerationStep } from "../../../../src/worldgen/levelgen/generation-step";
+import { ConfiguredFeature } from "../../../../src/worldgen/levelgen/feature/configured-feature";
 import { CountConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/count-configuration";
+import { DecoratedDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorated-decorator-configuration";
+import { DecoratedFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorated-feature-configuration";
+import type { DecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorator-configuration";
+import { FrequencyWithExtraChanceDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/frequency-with-extra-chance-decorator-configuration";
 import { ProbabilityFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/probability-feature-configuration";
 import { Features } from "../../../../src/worldgen/levelgen/feature/features";
 import { TreeFeatures } from "../../../../src/worldgen/levelgen/feature/tree-features";
@@ -61,6 +66,12 @@ const SAVANNA_OUTPUT_LOCATIONS = new Set([
   "minecraft:oak_leaves",
   "minecraft:acacia_log",
   "minecraft:acacia_leaves",
+]);
+
+const BADLANDS_TREE_OUTPUT_LOCATIONS = new Set([
+  "minecraft:dirt",
+  "minecraft:oak_log",
+  "minecraft:oak_leaves",
 ]);
 
 const JUNGLE_TREE_OUTPUT_LOCATIONS = new Set([
@@ -176,6 +187,48 @@ function getBaseFeature(configuredFeature: { feature: unknown; config: unknown }
   }
 
   return current.feature;
+}
+
+function collectDecoratorConfigs(config: DecoratorConfiguration, target: DecoratorConfiguration[]): void {
+  target.push(config);
+  if (config instanceof DecoratedDecoratorConfiguration) {
+    collectDecoratorConfigs(config.outer().config(), target);
+    collectDecoratorConfigs(config.inner().config(), target);
+  }
+}
+
+function unwrapConfiguredFeature(feature: ConfiguredFeature<any, any>): {
+  readonly current: ConfiguredFeature<any, any>;
+  readonly decoratorConfigs: readonly DecoratorConfiguration[];
+} {
+  const decoratorConfigs: DecoratorConfiguration[] = [];
+  let current = feature;
+
+  while (current.config instanceof DecoratedFeatureConfiguration) {
+    collectDecoratorConfigs(current.config.decorator.config(), decoratorConfigs);
+    current = current.config.feature();
+  }
+
+  return { current, decoratorConfigs };
+}
+
+function getVegetalFeatures(key: string): ConfiguredFeature<any, any>[] {
+  return (getOverworldBiomeGenerationSettings(key).features()[GenerationStep.Decoration.VEGETAL_DECORATION] ?? []).map((supplier) => supplier());
+}
+
+function getTreeExtraCount(key: string): number {
+  const treeFeature = getVegetalFeatures(key).find((feature) => {
+    const rootFeature = unwrapConfiguredFeature(feature).current.feature;
+    return rootFeature === Features.RANDOM_SELECTOR || rootFeature === Features.TREE;
+  });
+  expect(treeFeature).toBeDefined();
+
+  const countConfig = unwrapConfiguredFeature(treeFeature!).decoratorConfigs.find(
+    (decoratorConfig): decoratorConfig is FrequencyWithExtraChanceDecoratorConfiguration =>
+      decoratorConfig instanceof FrequencyWithExtraChanceDecoratorConfiguration,
+  );
+  expect(countConfig).toBeDefined();
+  return countConfig!.count;
 }
 
 describe("Vegetation parity", () => {
@@ -438,6 +491,21 @@ describe("Vegetation parity", () => {
       expect(GIANT_TAIGA_OUTPUT_LOCATIONS.has(location)).toBe(true);
     }
 
+    let badlandsTreeLevel: StaticRenderLevel | undefined;
+    for (let seed = 0n; seed < 32n; seed++) {
+      const candidate = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+      if (VegetationFeatures.TREES_BADLANDS.place(candidate, generator, new WorldgenRandom(seed), new BlockPos(0, 0, 0))) {
+        badlandsTreeLevel = candidate;
+        break;
+      }
+    }
+    expect(badlandsTreeLevel).toBeDefined();
+    const badlandsTreePlacements = collectPlacedLocations(badlandsTreeLevel!, 10, 24);
+    expect(badlandsTreePlacements.length).toBeGreaterThan(0);
+    for (const location of badlandsTreePlacements) {
+      expect(BADLANDS_TREE_OUTPUT_LOCATIONS.has(location)).toBe(true);
+    }
+
     let mushroomFieldLevel: StaticRenderLevel | undefined;
     for (let seed = 0n; seed < 32n; seed++) {
       const candidate = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
@@ -454,7 +522,7 @@ describe("Vegetation parity", () => {
     }
   });
 
-  test("overworld biome settings wire the shoreline, ocean, swamp, forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, and mushroom tables", () => {
+  test("overworld biome settings wire the shoreline, ocean, swamp, forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom, mountain, and badlands tables", () => {
     registerGeneratedRenderBlocks();
     const beachFeatures = getOverworldBiomeGenerationSettings("minecraft:beach").features().flat().map((supplier) => getBaseFeature(supplier()));
     const stoneShoreFeatures = getOverworldBiomeGenerationSettings("minecraft:stone_shore").features().flat().map((supplier) => getBaseFeature(supplier()));
@@ -508,6 +576,14 @@ describe("Vegetation parity", () => {
     const jungleFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle").features().flat().map((supplier) => getBaseFeature(supplier()));
     const jungleHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle_hills").features().flat().map((supplier) => getBaseFeature(supplier()));
     const jungleEdgeFeatures = getOverworldBiomeGenerationSettings("minecraft:jungle_edge").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const modifiedJungleFeatures = getOverworldBiomeGenerationSettings("minecraft:modified_jungle")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const modifiedJungleEdgeFeatures = getOverworldBiomeGenerationSettings("minecraft:modified_jungle_edge")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
     const bambooJungleFeatures = getOverworldBiomeGenerationSettings("minecraft:bamboo_jungle")
       .features()
       .flat()
@@ -538,6 +614,28 @@ describe("Vegetation parity", () => {
       .features()
       .flat()
       .map((supplier) => getBaseFeature(supplier()));
+    const mountainsFeatures = getOverworldBiomeGenerationSettings("minecraft:mountains").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const woodedMountainsFeatures = getOverworldBiomeGenerationSettings("minecraft:wooded_mountains")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const mountainEdgeFeatures = getOverworldBiomeGenerationSettings("minecraft:mountain_edge")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const gravellyMountainFeatures = getOverworldBiomeGenerationSettings("minecraft:gravelly_mountains")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const modifiedGravellyMountainFeatures = getOverworldBiomeGenerationSettings("minecraft:modified_gravelly_mountains")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const badlandsVegetal = getVegetalFeatures("minecraft:badlands");
+    const woodedBadlandsVegetal = getVegetalFeatures("minecraft:wooded_badlands_plateau");
+    const erodedBadlandsVegetal = getVegetalFeatures("minecraft:eroded_badlands");
+    const modifiedWoodedBadlandsVegetal = getVegetalFeatures("minecraft:modified_wooded_badlands_plateau");
+    const modifiedBadlandsPlateauVegetal = getVegetalFeatures("minecraft:modified_badlands_plateau");
     const mushroomFieldFeatures = getOverworldBiomeGenerationSettings("minecraft:mushroom_fields")
       .features()
       .flat()
@@ -606,6 +704,11 @@ describe("Vegetation parity", () => {
     expect(jungleEdgeFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(jungleEdgeFeatures.some((feature) => feature === Features.BAMBOO)).toBe(false);
     expect(jungleEdgeFeatures.some((feature) => feature === Features.VINES)).toBe(true);
+    expect(modifiedJungleFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(modifiedJungleFeatures.some((feature) => feature === Features.BAMBOO)).toBe(false);
+    expect(modifiedJungleFeatures.some((feature) => feature === Features.VINES)).toBe(true);
+    expect(modifiedJungleFeatures.length).toBe(jungleFeatures.length - 1);
+    expect(modifiedJungleEdgeFeatures).toEqual(jungleEdgeFeatures);
     expect(bambooJungleFeatures.some((feature) => feature === Features.BAMBOO)).toBe(true);
     expect(bambooJungleFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(bambooJungleFeatures.some((feature) => feature === Features.VINES)).toBe(true);
@@ -627,6 +730,28 @@ describe("Vegetation parity", () => {
     expect(giantTaigaHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(giantSpruceTaigaFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(giantSpruceTaigaHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(mountainsFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(woodedMountainsFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(mountainEdgeFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(gravellyMountainFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(modifiedGravellyMountainFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
+    expect(getTreeExtraCount("minecraft:mountains")).toBe(0);
+    expect(getTreeExtraCount("minecraft:gravelly_mountains")).toBe(0);
+    expect(getTreeExtraCount("minecraft:modified_gravelly_mountains")).toBe(0);
+    expect(getTreeExtraCount("minecraft:wooded_mountains")).toBe(3);
+    expect(getTreeExtraCount("minecraft:mountain_edge")).toBe(3);
+    expect(badlandsVegetal).toHaveLength(9);
+    expect(woodedBadlandsVegetal).toHaveLength(10);
+    expect(erodedBadlandsVegetal).toHaveLength(9);
+    expect(modifiedWoodedBadlandsVegetal).toHaveLength(10);
+    expect(modifiedBadlandsPlateauVegetal).toHaveLength(9);
+    expect(badlandsVegetal.some((feature) => unwrapConfiguredFeature(feature).current.feature === Features.TREE)).toBe(false);
+    expect(erodedBadlandsVegetal.some((feature) => unwrapConfiguredFeature(feature).current.feature === Features.TREE)).toBe(false);
+    expect(modifiedBadlandsPlateauVegetal.some((feature) => unwrapConfiguredFeature(feature).current.feature === Features.TREE)).toBe(false);
+    expect(woodedBadlandsVegetal.some((feature) => unwrapConfiguredFeature(feature).current.feature === Features.TREE)).toBe(true);
+    expect(modifiedWoodedBadlandsVegetal.some((feature) => unwrapConfiguredFeature(feature).current.feature === Features.TREE)).toBe(true);
+    expect(getTreeExtraCount("minecraft:wooded_badlands_plateau")).toBe(5);
+    expect(getTreeExtraCount("minecraft:modified_wooded_badlands_plateau")).toBe(5);
     expect(mushroomFieldFeatures.some((feature) => feature === Features.RANDOM_BOOLEAN_SELECTOR)).toBe(true);
     expect(mushroomFieldShoreFeatures.some((feature) => feature === Features.RANDOM_BOOLEAN_SELECTOR)).toBe(true);
   });
