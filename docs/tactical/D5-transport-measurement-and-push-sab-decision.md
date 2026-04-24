@@ -345,6 +345,43 @@ Choose this if the trace clearly points elsewhere:
 
 Name the bottleneck directly. Do not force every result into push/SAB/subworkers.
 
+## First slice landed - 2026-04-24
+
+The first D5 slice adds the repeatable traversal harness and report schema, but it does **not** make the D5 architecture decision yet.
+
+What landed:
+
+- typed report data in `test/browser/d5-traversal-report.ts`
+- targeted Playwright harness in `test/browser/d5-traversal.test.ts`
+- `pnpm perf:d5` entrypoint, skipped from default `pnpm test:browser`
+- `/tmp` artifacts:
+  - `/tmp/mclone-d5-start.png`
+  - `/tmp/mclone-d5-end.png`
+  - `/tmp/mclone-d5-traversal-report.json`
+  - `/tmp/mclone-d5-traversal-trace.json`
+- browser `requestAnimationFrame` gap collection during the warmed traversal window
+- browser long-task collection where Chrome exposes `PerformanceObserver` `longtask`
+- existing render-world counters and render queue stats sampled through the debug page
+- coarse remote HTTP request duration/byte summaries from Playwright network events
+- Chrome-trace-compatible JSON containing traversal, marker, long-task, HTTP, and chunk-view events
+
+Current harness note: the debug flight controls apply pitch to forward movement. The first harness holds `Space` with `KeyW` at yaw/pitch `225,55` so the camera follows authoritative `player_state` without diving below the world during the 30-second run. This is a harness-only measurement constraint, not an optimization or protocol change.
+
+Single validation run from the landing slice on this machine:
+
+| Metric | Observed |
+|---|---:|
+| traversal duration | `30226 ms` |
+| chunk-view changes | `4` (`[60,199] -> [64,196]`) |
+| frame gap p95 / p99 / max | `10.1 ms` / `11.5 ms` / `18.5 ms` |
+| frame gaps > 33.4 / 50 / 100 ms | `0` / `0` / `0` |
+| long tasks | `0` |
+| final loaded chunks | `225` |
+| final render queue | pending visible `0`, queued `0`, active `0` |
+| render-world delta | ingest batches `84`, mesh builds `1450`, mesh completions `1450`, GPU uploads `2488` |
+
+This run proves the harness and report path, but it is only one run and only uses existing counters plus coarse HTTP timings. The next D5 slice should add the internal phase timers called out below, then run the primary traversal at least three times before selecting `arc complete` or the correct D6.
+
 ## Implementation sequence
 
 1. Add a D5 measurement model.
@@ -430,4 +467,4 @@ The browser screenshot rule from `AGENTS.md` still applies. Save D5 screenshots 
 
 ## Next
 
-Implement D5 instrumentation and the traversal harness. Do not start push transport, `SharedArrayBuffer`, or render-world subworkers until the D5 report selects that path.
+Add the deeper D5 phase timers and repeat the primary traversal enough times to make the decision. Do not start push transport, `SharedArrayBuffer`, or render-world subworkers until the D5 report selects that path.

@@ -13,7 +13,8 @@
     "host:remote": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/generated-world-http-server.ts",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "oracle:gen": "bash ./oracle/run.sh"
+    "oracle:gen": "bash ./oracle/run.sh",
+    "perf:d5": "MCLONE_RUN_D5=1 playwright test test/browser/d5-traversal.test.ts --workers=1"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
