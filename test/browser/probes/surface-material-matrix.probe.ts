@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { FAST_VISUAL_PROBE_PARAMS } from "./fast-visual-probe-config";
 
 const FROZEN_SCREENSHOT_PATH = "/tmp/mclone-debug-frozen-ocean.png";
 const BADLANDS_SCREENSHOT_PATH = "/tmp/mclone-debug-badlands.png";
@@ -89,6 +90,7 @@ const SURFACE_FRAMES: readonly SurfaceFrame[] = [
 
 function createSurfaceUrl(frame: SurfaceFrame): string {
   return `/debug.html?${new URLSearchParams({
+    ...FAST_VISUAL_PROBE_PARAMS,
     worldTransport: "worker",
     clearWorldStorage: "1",
     cameraX: frame.cameraX,

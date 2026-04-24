@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { FAST_VISUAL_PROBE_PARAMS } from "./fast-visual-probe-config";
 
 const TUFF_SCREENSHOT_PATH = "/tmp/mclone-debug-underground-variety-tuff.png";
 const DEEPSLATE_SCREENSHOT_PATH = "/tmp/mclone-debug-underground-variety-deepslate.png";
@@ -24,7 +25,7 @@ async function captureFrame(
   screenshotPath: string,
 ): Promise<DebugRuntimeState> {
   await page.goto(
-    `/debug.html?${new URLSearchParams({ worldTransport: "worker", clearWorldStorage: "1", preserveInitialCamera: "1", viewDistance: "1", ...params }).toString()}`,
+    `/debug.html?${new URLSearchParams({ ...FAST_VISUAL_PROBE_PARAMS, worldTransport: "worker", clearWorldStorage: "1", preserveInitialCamera: "1", ...params }).toString()}`,
     {
       waitUntil: "load",
     },

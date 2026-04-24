@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { FAST_VISUAL_PROBE_PARAMS } from "./fast-visual-probe-config";
 
 const DARK_FOREST_SCREENSHOT_PATH = "/tmp/mclone-debug-dark-forest.png";
 
@@ -22,6 +23,7 @@ test.setTimeout(60_000);
 test("debug free-cam captures dark-forest vegetation in the worker-generated world", async ({ page }) => {
   await page.goto(
     `/debug.html?${new URLSearchParams({
+      ...FAST_VISUAL_PROBE_PARAMS,
       worldTransport: "worker",
       clearWorldStorage: "1",
       cameraX: "584.5",

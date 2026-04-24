@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "../remote-world-host-fixture";
+import { FAST_VISUAL_PROBE_PARAMS } from "./fast-visual-probe-config";
 
 const CAVE_MOUTH_SCREENSHOT_PATH = "/tmp/mclone-debug-cave-mouth.png";
 
@@ -21,6 +22,7 @@ interface DebugRuntimeState {
 
 function createCaveMouthUrl(remoteWorldHostUrl: string): string {
   return `/debug.html?${new URLSearchParams({
+    ...FAST_VISUAL_PROBE_PARAMS,
     worldTransport: "remote",
     worldHostUrl: remoteWorldHostUrl,
     cameraX: "-103.5",

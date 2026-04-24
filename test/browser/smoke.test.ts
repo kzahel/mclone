@@ -1,15 +1,20 @@
 import { expect, test, type Page } from "./remote-world-host-fixture";
 import { type BootResult } from "../../src/renderer/main.ts";
+import { getDefaultRenderDistance, getExpectedLoadedChunkCount } from "../../src/renderer/browser-render-config.ts";
 
 const SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-smoke.png";
-const EXPECTED_LOADED_CHUNK_COUNT = 225;
+const SMOKE_VIEW_DISTANCE = 2;
+const SMOKE_RENDER_DISTANCE = getDefaultRenderDistance(SMOKE_VIEW_DISTANCE);
+const EXPECTED_LOADED_CHUNK_COUNT = getExpectedLoadedChunkCount(SMOKE_VIEW_DISTANCE);
 
 function createRemoteSmokeUrl(remoteWorldHostUrl: string): string {
   return `/?${new URLSearchParams({
     worldTransport: "remote",
     worldHostUrl: remoteWorldHostUrl,
-    viewDistance: "6",
-    renderDistance: "192",
+    viewDistance: SMOKE_VIEW_DISTANCE.toString(),
+    renderDistance: SMOKE_RENDER_DISTANCE.toString(),
+    lightingMode: "none",
+    liquidSimulationMode: "none",
     fogColor: "8fb8ff",
     cameraX: "960.5",
     cameraY: "132",
@@ -50,8 +55,10 @@ test("WebGPU boot succeeds against the remote Node host with two browser clients
       expect(["bgra8unorm", "rgba8unorm"]).toContain(result.format);
       expect(result.loadedChunkCount).toBe(EXPECTED_LOADED_CHUNK_COUNT);
       expect(result.expectedLoadedChunkCount).toBe(EXPECTED_LOADED_CHUNK_COUNT);
-      expect(result.viewDistance).toBe(6);
-      expect(result.renderDistance).toBe(192);
+      expect(result.viewDistance).toBe(SMOKE_VIEW_DISTANCE);
+      expect(result.renderDistance).toBe(SMOKE_RENDER_DISTANCE);
+      expect(result.lightingMode).toBe("none");
+      expect(result.liquidSimulationMode).toBe("none");
       expect(result.solidDrawCount).toBeGreaterThan(0);
       expect(result.renderWorldCounters.ingestBatchCount).toBeGreaterThan(0);
       expect(result.renderWorldCounters.meshBuildRequestCount).toBeGreaterThan(0);

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { FAST_VISUAL_PROBE_PARAMS } from "./fast-visual-probe-config";
 
 const BAMBOO_JUNGLE_SCREENSHOT_PATH = "/tmp/mclone-debug-bamboo-jungle.png";
 
@@ -22,6 +23,7 @@ test.setTimeout(60_000);
 test("debug free-cam captures bamboo-jungle parity in the worker-generated world", async ({ page }) => {
   await page.goto(
     `/debug.html?${new URLSearchParams({
+      ...FAST_VISUAL_PROBE_PARAMS,
       worldTransport: "worker",
       clearWorldStorage: "1",
       preserveInitialCamera: "1",

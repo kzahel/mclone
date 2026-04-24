@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { FAST_VISUAL_PROBE_PARAMS } from "./fast-visual-probe-config";
 
 const BEACH_SCREENSHOT_PATH = "/tmp/mclone-debug-beach.png";
 const RIVER_SCREENSHOT_PATH = "/tmp/mclone-debug-river.png";
@@ -89,6 +90,7 @@ const SHORELINE_FRAMES: readonly ShorelineFrame[] = [
 
 function createFrameUrl(frame: ShorelineFrame): string {
   return `/debug.html?${new URLSearchParams({
+    ...FAST_VISUAL_PROBE_PARAMS,
     worldTransport: "worker",
     clearWorldStorage: "1",
     preserveInitialCamera: "1",

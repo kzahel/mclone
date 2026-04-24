@@ -53,6 +53,8 @@ export type BootResult =
       expectedLoadedChunkCount: number;
       viewDistance: number;
       renderDistance: number;
+      lightingMode: string;
+      liquidSimulationMode: string;
       solidDrawCount: number;
       cutoutDrawCount: number;
       translucentDrawCount: number;
@@ -245,6 +247,10 @@ async function boot(): Promise<BootResult> {
     renderDistance: renderConfig.renderDistance,
     worldTransport: runtimeConfig.worldTransport,
     remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
+    engineConfig: {
+      lightingMode: renderConfig.lightingMode,
+      liquidSimulationMode: renderConfig.liquidSimulationMode,
+    },
     skyColor: renderConfig.skyColor,
     clearColorScale: renderConfig.clearColorScale,
   });
@@ -370,6 +376,8 @@ async function boot(): Promise<BootResult> {
     expectedLoadedChunkCount,
     viewDistance: scene.viewDistance,
     renderDistance: scene.gameRenderer.getRenderDistance(),
+    lightingMode: renderConfig.lightingMode,
+    liquidSimulationMode: renderConfig.liquidSimulationMode,
     solidDrawCount: solidDraws.length,
     cutoutDrawCount: cutoutDraws.length,
     translucentDrawCount: translucentDraws.length,

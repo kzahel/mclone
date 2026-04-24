@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { FAST_LIQUID_VISUAL_PROBE_PARAMS } from "./fast-visual-probe-config";
 
 const LIQUID_FLOW_SCREENSHOT_PATH = "/tmp/mclone-debug-liquid-flow.png";
 
@@ -14,11 +15,10 @@ interface DebugRuntimeState {
 
 function createLiquidFlowUrl(): string {
   return `/debug.html?${new URLSearchParams({
+    ...FAST_LIQUID_VISUAL_PROBE_PARAMS,
     worldTransport: "worker",
     clearWorldStorage: "1",
     preserveInitialCamera: "1",
-    viewDistance: "1",
-    renderDistance: "96",
     cameraX: "45.5",
     cameraY: "104",
     cameraZ: "58.5",

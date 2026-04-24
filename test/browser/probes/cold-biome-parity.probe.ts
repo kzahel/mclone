@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { FAST_VISUAL_PROBE_PARAMS } from "./fast-visual-probe-config";
 
 const SNOWY_TAIGA_SCREENSHOT_PATH = "/tmp/mclone-debug-snowy-taiga.png";
 const ICE_SPIKES_SCREENSHOT_PATH = "/tmp/mclone-debug-ice-spikes.png";
@@ -77,6 +78,7 @@ const COLD_BIOME_FRAMES: readonly ColdBiomeFrame[] = [
 
 function createFrameUrl(frame: ColdBiomeFrame): string {
   return `/debug.html?${new URLSearchParams({
+    ...FAST_VISUAL_PROBE_PARAMS,
     worldTransport: "worker",
     clearWorldStorage: "1",
     preserveInitialCamera: "1",
