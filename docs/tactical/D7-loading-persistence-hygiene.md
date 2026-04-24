@@ -151,4 +151,4 @@ Validation run:
 
 ## Next
 
-After this hygiene pass, stale persisted light and misleading progress labels are handled. The next likely slice is dirty/lazy save policy, but it can remain deferred until chunk status or broader persistence work makes it necessary.
+After this hygiene pass, stale persisted light and misleading progress labels are handled. The follow-up dirty/cache terminology and dirty-save-before-evict slice landed in [`D8-dirty-cache-save-policy.md`](D8-dirty-cache-save-policy.md).

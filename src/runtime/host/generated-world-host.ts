@@ -14,6 +14,7 @@ import {
 import { packChunkSnapshot, unpackChunkSnapshot, type PackedChunkSnapshot, type PackedLightSectionUpdate } from "../../world/level/packed-chunk-snapshot";
 import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
 import { DataLayer } from "../../world/level/chunk/data-layer";
+import type { LevelChunk } from "../../world/level/chunk/level-chunk";
 import type { LightChunkGetter } from "../../world/level/chunk/light-chunk-getter";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
@@ -143,6 +144,8 @@ interface DirtyLightSectionRecord {
   readonly section: SectionPos;
 }
 
+type GeneratedLevelChunk = LevelChunk;
+
 class GeneratedWorldLightChunkGetter implements LightChunkGetter {
   public constructor(
     private readonly level: GeneratedRenderLevel,
@@ -256,7 +259,8 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly lightInitializedChunks = new Set<string>();
   private readonly lightCorrectChunks = new Set<string>();
   private readonly dirtyLightSections = new Map<string, DirtyLightSectionRecord>();
-  private readonly dirtyLiquidChunks = new Set<string>();
+  private readonly dirtyChunksForPublication = new Set<string>();
+  private readonly dirtyDurableChunks = new Set<string>();
   private opened = false;
   private chunkViewJobRevision = 0;
 
@@ -295,7 +299,7 @@ export class GeneratedWorldHost implements WorldHost {
       level: this.level,
       airState: options.airState,
       liquidTicks: this.liquidTicks,
-      onBlockChanged: (pos, oldState, newState) => this.markLiquidBlockChanged(pos, oldState, newState),
+      onBlockChanged: (pos, oldState, newState) => this.markHostBlockChanged(pos, oldState, newState),
     });
   }
 
@@ -378,16 +382,16 @@ export class GeneratedWorldHost implements WorldHost {
     const loadedAfter = this.level.getLoadedChunks();
     const loadedAfterKeys = new Set(loadedAfter.map((chunk) => chunkKey(chunk.chunkX, chunk.chunkZ)));
     this.ensureLightingForLoadedChunks(loadedAfter);
-    await this.persistLoadedChunks(loadedAfter);
+    await this.writeLoadedChunkSnapshotsByPolicy(loadedAfter);
 
     for (const [key, chunk] of loadedBefore) {
       if (loadedAfterKeys.has(key)) {
         continue;
       }
 
+      await this.saveDirtyChunkBeforeUnload(chunk);
       await this.storageSession?.chunks.evictChunk(chunk.chunkX, chunk.chunkZ);
-      this.publishedChunkSnapshots.delete(key);
-      this.discardChunkLighting(chunk.chunkX, chunk.chunkZ);
+      this.discardUnloadedChunkState(chunk.chunkX, chunk.chunkZ);
       messages.push({
         type: "chunk_unload",
         chunkX: chunk.chunkX,
@@ -425,9 +429,8 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     for (const chunk of update.unloadedChunks) {
-      this.queueStorageSideEffect(this.storageSession?.chunks.evictChunk(chunk.chunkX, chunk.chunkZ));
-      this.publishedChunkSnapshots.delete(chunkKey(chunk.chunkX, chunk.chunkZ));
-      this.discardChunkLighting(chunk.chunkX, chunk.chunkZ);
+      this.queueStorageSideEffect(this.queueEvictAfterDirtySave(chunk));
+      this.discardUnloadedChunkState(chunk.chunkX, chunk.chunkZ);
       messages.push({
         type: "chunk_unload",
         chunkX: chunk.chunkX,
@@ -557,22 +560,58 @@ export class GeneratedWorldHost implements WorldHost {
     return "loaded";
   }
 
-  private async persistLoadedChunks(chunks: readonly ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number][]): Promise<void> {
-    if (this.storageSession === undefined) {
-      return;
-    }
-
+  private async writeLoadedChunkSnapshotsByPolicy(chunks: readonly GeneratedLevelChunk[]): Promise<void> {
     for (const chunk of chunks) {
-      await this.storageSession.chunks.saveChunk(withoutPersistedLight(this.buildPackedChunkSnapshot(chunk)));
+      await this.writeChunkSnapshotByPolicy(this.buildPackedChunkSnapshot(chunk));
     }
   }
 
-  private async persistPackedChunkSnapshot(snapshot: PackedChunkSnapshot): Promise<void> {
+  private async writeChunkSnapshotByPolicy(snapshot: PackedChunkSnapshot): Promise<void> {
+    const key = chunkKey(snapshot.chunkX, snapshot.chunkZ);
+    if (this.dirtyDurableChunks.has(key)) {
+      await this.saveDirtyChunkSnapshot(key, snapshot);
+      return;
+    }
+
+    await this.cacheGeneratedChunkSnapshot(snapshot);
+  }
+
+  private async cacheGeneratedChunkSnapshot(snapshot: PackedChunkSnapshot): Promise<void> {
     if (this.storageSession === undefined) {
       return;
     }
 
     await this.storageSession.chunks.saveChunk(withoutPersistedLight(snapshot));
+  }
+
+  private async saveDirtyChunkSnapshot(key: string, snapshot: PackedChunkSnapshot): Promise<void> {
+    if (this.storageSession === undefined) {
+      this.dirtyDurableChunks.delete(key);
+      return;
+    }
+
+    await this.storageSession.chunks.saveChunk(withoutPersistedLight(snapshot));
+    this.dirtyDurableChunks.delete(key);
+  }
+
+  private async saveDirtyChunkBeforeUnload(chunk: GeneratedLevelChunk): Promise<void> {
+    const key = chunkKey(chunk.chunkX, chunk.chunkZ);
+    if (!this.dirtyDurableChunks.has(key)) {
+      return;
+    }
+
+    await this.saveDirtyChunkSnapshot(key, this.buildPackedChunkSnapshot(chunk));
+  }
+
+  private async queueEvictAfterDirtySave(chunk: GeneratedLevelChunk): Promise<void> {
+    const key = chunkKey(chunk.chunkX, chunk.chunkZ);
+    try {
+      await this.saveDirtyChunkBeforeUnload(chunk);
+    } finally {
+      this.dirtyDurableChunks.delete(key);
+    }
+
+    await this.storageSession?.chunks.evictChunk(chunk.chunkX, chunk.chunkZ);
   }
 
   private async runChunkViewJobs(
@@ -685,7 +724,7 @@ export class GeneratedWorldHost implements WorldHost {
     });
     const lightingChunks = publishJobs
       .map((job) => this.level.getChunk(job.chunkX, job.chunkZ, false))
-      .filter((chunk): chunk is ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number] => chunk !== null);
+      .filter((chunk): chunk is GeneratedLevelChunk => chunk !== null);
     this.enqueueWorldProgress("Computing light", 0, lightingChunks.length, chunkViewJobRevision);
     if (lightingChunks.length > 0) {
       this.options.mutateWorld?.(this.liquidLevel);
@@ -740,7 +779,7 @@ export class GeneratedWorldHost implements WorldHost {
         snapshot,
       });
       this.markChunkSnapshotPublished(job.chunkX, job.chunkZ);
-      this.queueStorageSideEffect(this.persistPackedChunkSnapshot(snapshot));
+      this.queueStorageSideEffect(this.writeChunkSnapshotByPolicy(snapshot));
       this.enqueueDirtyLightDeltas();
       publishDone++;
       this.enqueueWorldProgress("Publishing chunks", publishDone, publishJobs.length, chunkViewJobRevision);
@@ -824,19 +863,16 @@ export class GeneratedWorldHost implements WorldHost {
   private markChunkSnapshotPublished(chunkX: number, chunkZ: number): void {
     const key = chunkKey(chunkX, chunkZ);
     this.publishedChunkSnapshots.add(key);
-    this.dirtyLiquidChunks.delete(key);
+    this.dirtyChunksForPublication.delete(key);
     this.clearDirtyLightSectionsForChunk(chunkX, chunkZ);
   }
 
-  private markLiquidBlockChanged(pos: BlockPos, oldState: BlockState, newState: BlockState): void {
-    if (!this.liquidSimulationEnabled) {
-      return;
-    }
-
-    this.dirtyLiquidChunks.add(chunkKey(
-      SectionPos.blockToSectionCoord(pos.getX()),
-      SectionPos.blockToSectionCoord(pos.getZ()),
-    ));
+  private markHostBlockChanged(pos: BlockPos, oldState: BlockState, newState: BlockState): void {
+    const chunkX = SectionPos.blockToSectionCoord(pos.getX());
+    const chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
+    const key = chunkKey(chunkX, chunkZ);
+    this.dirtyDurableChunks.add(key);
+    this.dirtyChunksForPublication.add(key);
     this.queueBlockLightUpdate(pos, oldState, newState);
   }
 
@@ -865,7 +901,7 @@ export class GeneratedWorldHost implements WorldHost {
     }
     this.hydratePublishedLiquidTicks();
     this.lastWorldTickAtMs += dueTicks * tickIntervalMs;
-    await this.flushDirtyLiquidChunks(
+    await this.flushDirtyPublishedChunks(
       this.options.chunkViewScheduling === "cooperative" ? createCooperativeYield() : undefined,
     );
     this.enqueueDirtyLightDeltas();
@@ -883,7 +919,7 @@ export class GeneratedWorldHost implements WorldHost {
     }
   }
 
-  private hydrateLiquidTicksFromChunk(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): void {
+  private hydrateLiquidTicksFromChunk(chunk: GeneratedLevelChunk): void {
     for (const tick of chunk.consumeScheduledLiquidTicks()) {
       this.liquidTicks.scheduleTick(
         new BlockPos(tick.x, tick.y, tick.z),
@@ -895,7 +931,7 @@ export class GeneratedWorldHost implements WorldHost {
 
   private withPendingLiquidTicks(
     snapshot: ChunkSnapshot,
-    chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number],
+    chunk: GeneratedLevelChunk,
   ): ChunkSnapshot {
     if (!this.liquidSimulationEnabled) {
       return snapshot;
@@ -913,7 +949,7 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private collectPendingLiquidTicksForChunk(
-    chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number],
+    chunk: GeneratedLevelChunk,
   ): ScheduledTickSnapshot[] {
     return this.liquidTicks.getPendingTicks()
       .filter((tick) => (
@@ -927,9 +963,9 @@ export class GeneratedWorldHost implements WorldHost {
       ));
   }
 
-  private async flushDirtyLiquidChunks(yieldStep?: () => Promise<void>): Promise<void> {
-    const dirtyKeys = [...this.dirtyLiquidChunks].sort();
-    this.dirtyLiquidChunks.clear();
+  private async flushDirtyPublishedChunks(yieldStep?: () => Promise<void>): Promise<void> {
+    const dirtyKeys = [...this.dirtyChunksForPublication].sort();
+    this.dirtyChunksForPublication.clear();
     if (yieldStep === undefined) {
       this.runPendingLightingUntilIdle();
     } else {
@@ -947,7 +983,7 @@ export class GeneratedWorldHost implements WorldHost {
       }
 
       const snapshot = this.buildPackedChunkSnapshot(chunk);
-      await this.persistPackedChunkSnapshot(snapshot);
+      await this.writeChunkSnapshotByPolicy(snapshot);
       this.clearDirtyLightSectionsForChunk(chunkX, chunkZ);
       if (!this.isChunkInCurrentView(chunkX, chunkZ) || !this.publishedChunkSnapshots.has(key)) {
         continue;
@@ -970,7 +1006,7 @@ export class GeneratedWorldHost implements WorldHost {
     });
   }
 
-  private buildPackedChunkSnapshot(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): PackedChunkSnapshot {
+  private buildPackedChunkSnapshot(chunk: GeneratedLevelChunk): PackedChunkSnapshot {
     if (this.liquidSimulationEnabled) {
       this.hydrateLiquidTicksFromChunk(chunk);
     }
@@ -999,7 +1035,7 @@ export class GeneratedWorldHost implements WorldHost {
     );
   }
 
-  private ensureLightingForLoadedChunks(chunks: readonly ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number][]): void {
+  private ensureLightingForLoadedChunks(chunks: readonly GeneratedLevelChunk[]): void {
     const lightEngine = this.lightEngine;
     if (lightEngine === undefined) {
       return;
@@ -1026,7 +1062,7 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private async ensureLightingForLoadedChunksCooperative(
-    chunks: readonly ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number][],
+    chunks: readonly GeneratedLevelChunk[],
     yieldStep: () => Promise<void>,
   ): Promise<void> {
     const lightEngine = this.lightEngine;
@@ -1168,7 +1204,7 @@ export class GeneratedWorldHost implements WorldHost {
 
   private initializeChunkLighting(
     lightEngine: LevelLightEngine,
-    chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number],
+    chunk: GeneratedLevelChunk,
   ): void {
     const nonEmptySections = new Set<number>();
     const lightEmitters: Array<{ readonly pos: BlockPos; readonly lightEmission: number }> = [];
@@ -1222,6 +1258,13 @@ export class GeneratedWorldHost implements WorldHost {
     }
   }
 
+  private discardUnloadedChunkState(chunkX: number, chunkZ: number): void {
+    const key = chunkKey(chunkX, chunkZ);
+    this.publishedChunkSnapshots.delete(key);
+    this.dirtyChunksForPublication.delete(key);
+    this.discardChunkLighting(chunkX, chunkZ);
+  }
+
   private runLightingUntilIdle(lightEngine: LevelLightEngine): void {
     for (let iteration = 0; iteration < 100; iteration++) {
       if (!lightEngine.hasLightWork()) {
@@ -1250,7 +1293,7 @@ export class GeneratedWorldHost implements WorldHost {
     throw new Error("Generated world light engine did not become idle");
   }
 
-  private buildChunkLightSnapshot(chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number]): ChunkLightSnapshot | undefined {
+  private buildChunkLightSnapshot(chunk: GeneratedLevelChunk): ChunkLightSnapshot | undefined {
     const lightEngine = this.lightEngine;
     if (lightEngine === undefined) {
       return undefined;
@@ -1266,7 +1309,7 @@ export class GeneratedWorldHost implements WorldHost {
   private collectChunkLightSections(
     lightEngine: LevelLightEngine,
     layer: LightLayer,
-    chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number],
+    chunk: GeneratedLevelChunk,
   ): ChunkLightSectionSnapshot[] {
     const listener = lightEngine.getLayerListener(layer);
     const sections: ChunkLightSectionSnapshot[] = [];

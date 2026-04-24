@@ -6,7 +6,8 @@ import { createGeneratedWorldSaveId, GeneratedWorldHost } from "../../src/runtim
 import type { ChunkSnapshotMessage, WorldHostMessage, WorldOpenedMessage } from "../../src/runtime/protocol/world-messages";
 import { MemoryWorldStorage } from "../../src/runtime/storage/memory-world-storage";
 import { LocalWorldClient, LocalWorldTransport } from "../../src/runtime/transport/local-world-transport";
-import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
+import { createBlockStateResolver, hydrateChunkFromSnapshot } from "../../src/world/level/chunk-snapshot";
+import { unpackChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 import type { WorldGenLevel } from "../../src/world/level/world-gen-level";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
@@ -131,6 +132,59 @@ describe("GeneratedWorld persistence", () => {
     });
 
     expect(storage.getChunkRecord(opened.saveMetadata.saveId, -2, 0)?.lastEvictedAtMs).toBe(2_000);
+  });
+
+  test("saves dirty authoritative chunks before eviction", async () => {
+    let now = 4_000;
+    const storage = new MemoryWorldStorage(() => now);
+    const blocks = registerGeneratedRenderBlocks();
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      worldStorage: storage,
+      worldTickIntervalMs: 10_000,
+      nowMs: () => now,
+    });
+    const opened = worldOpenedMessage(await host.openWorld(OPEN_WORLD_REQUEST));
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const pumpkin = Registry.BLOCK.get(new ResourceLocation("minecraft:pumpkin"));
+    if (pumpkin === undefined || !("defaultBlockState" in pumpkin)) {
+      throw new Error("minecraft:pumpkin was not registered for persistence test");
+    }
+
+    const changedPos = new BlockPos(0, 90, 0);
+    const mutationLevel = (host as unknown as { readonly liquidLevel: WorldGenLevel }).liquidLevel;
+    expect(mutationLevel.setBlock(
+      changedPos,
+      (pumpkin as { defaultBlockState(): ReturnType<WorldGenLevel["getBlockState"]> }).defaultBlockState(),
+    )).toBe(true);
+
+    now = 4_001;
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 8,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const savedRecord = storage.getChunkRecord(opened.saveMetadata.saveId, 0, 0);
+    expect(savedRecord?.lastEvictedAtMs).toBe(4_001);
+    const restoredChunk = hydrateChunkFromSnapshot(
+      unpackChunkSnapshot(savedRecord!.snapshot, blocks.blockStateIds),
+      blocks.airState,
+      createBlockStateResolver(blocks.airState),
+    );
+    const restored = restoredChunk.getBlockState(changedPos);
+    expect(Registry.BLOCK.getKey(restored.getBlock() as unknown as object)?.toString()).toBe("minecraft:pumpkin");
   });
 
   test("persists durable chunk facts without derived light", async () => {

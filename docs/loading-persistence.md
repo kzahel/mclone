@@ -267,14 +267,15 @@ That means persisted light is currently not authoritative for host reload. A lig
 
 ### Current Save Policy
 
-`mclone` currently has eager snapshot persistence:
+`mclone` currently has eager generated-cache persistence plus explicit dirty saves:
 
-- The synchronous path saves all loaded chunks after a changed view.
-- The cooperative path publishes each chunk snapshot, then queues persistence as a storage side effect.
-- Dirty liquid chunks are saved when flushed.
-- Eviction only records adapter-local `lastEvictedAtMs`; it does not perform a save because the current policy assumes chunks were already saved.
+- The synchronous path writes all loaded chunks after a changed view, using a policy helper that treats dirty chunks as durable saves and clean chunks as generated-cache writes.
+- The cooperative path publishes each chunk snapshot, then queues the same policy write as a storage side effect.
+- Host block mutations mark the owning chunk dirty and mark published chunks for replacement snapshot publication.
+- Dirty published chunks are saved when flushed.
+- Dirty chunks are saved before eviction; clean eviction still only records adapter-local `lastEvictedAtMs`.
 
-There is no `isUnsaved`/dirty flag equivalent for general chunk state. Generated clean chunks and mutated chunks use the same `saveChunk(...)` path.
+There is still no full vanilla `isUnsaved` equivalent across all future gameplay state. The current dirty state covers host block mutations and liquid-driven scheduled updates. Generated-clean chunks still use the same adapter-level `saveChunk(...)` call, but the host code now distinguishes cache writes from dirty durable saves before calling the adapter.
 
 This is a deliberate early runtime simplification, not vanilla behavior.
 
@@ -302,15 +303,15 @@ Fresh Playwright contexts reduce leakage, but the explicit query is the determin
 | Physical storage | Region/NBT plus `DataVersion` and DataFixer | Engine-native snapshots in IndexedDB or JSON files | Intentional platform divergence | Keep adapter boundary |
 | Chunk status | Explicit persisted `ChunkStatus`; resume partial generation | No persisted status; chunks are absent, generated terrain, decorated, or published | Future parity work can become harder if status does not fit later | Defer, but keep docs and APIs status-friendly |
 | Load before generate | Disk load at `EMPTY`, then generate missing statuses | Storage lookup before terrain generation | Match in principle | Keep |
-| Generated clean persistence | Dirty/save policy; not every publish writes | Eager cache save of published chunks; cooperative publish no longer blocks on the write | Excess IO, confusing "save" semantics, stale generated cache after content changes | Revisit soon |
-| Dirty tracking | `isUnsaved` gates save | No general dirty flag | Mutations and generated cache are conflated | Immediate design target |
+| Generated clean persistence | Dirty/save policy; not every publish writes | Eager cache save of published-clean chunks; cooperative publish no longer blocks on the write | Excess IO, stale generated cache after content changes | Keep named as cache; make lazy later if needed |
+| Dirty tracking | `isUnsaved` gates save | Host block mutations mark durable dirty chunks; future gameplay domains still need to join that policy | Entity/block-entity/player state could bypass dirty saving until implemented | Extend with each gameplay domain |
 | Light persistence | Saved and hydrated only through `isLightOn`/light-correct trust path | Sent to clients but omitted from storage; recomputed on reload | Cannot benefit from trusted saved light yet | Keep until trusted-light hydration exists |
 | Tick persistence | Proto/full tick lists preserved; unpacked into server tick lists when accessible | Block/liquid tick snapshots restored into chunks; liquid host hydrates published chunk ticks | Reasonable partial match for liquid work | Continue parity work |
 | Heightmaps | Stored and primed if missing | Not stored in snapshots | Current systems recompute or avoid persisted heightmaps | Defer until needed |
 | Structures | Stored starts/references | Not persisted | Structures are post-MVP | Defer |
 | Entities/block entities | Persisted and loaded | Not persisted | Gameplay persistence missing | Defer until entity/block-entity slices |
 | Postprocessing/carving masks | Persisted for proto chunks | Not modeled in storage | Relevant to full vanilla status pipeline | Defer |
-| Save on unload/close | Dirty chunks saved before unload/flush/close | Chunks are expected to have been saved before publish; close is a no-op | Unsafe if we move to lazy dirty policy | Fix with dirty tracking |
+| Save on unload/close | Dirty chunks saved before unload/flush/close | Dirty chunks save before unload/flush; close is still a no-op because there is no host close command | Unsafe once gameplay state can mutate outside chunk-view/tick paths | Add host close/flush lifecycle when needed |
 | Client chunk visibility | Server filters packets per player interest | Remote service filters snapshots per session | Close enough for current multiplayer | Keep until ticket model grows |
 | Progress UI | Status listener reports status changes | UI reports saved-chunk lookup, missing generation, decoration, lighting, and publish phases | Coarse lighting progress only | Keep improving with future status work |
 | Test storage isolation | N/A | Worker probes can request `clearWorldStorage=1`; dev profile still persists unless requested | Manual dev refreshes can still intentionally reuse local saves | Keep explicit reset path |
@@ -378,7 +379,7 @@ The current halfway state should not remain long-term.
 
 ## Immediate Work
 
-These were small enough and high enough leverage to do before deeper persistence work. D7 landed items 1, 2, 3, and 5; item 4 remains a design target for a later dirty/cache policy slice.
+These were small enough and high enough leverage to do before deeper persistence work. D7 landed items 1, 2, 3, and 5. D8 landed item 4 for current host block mutations, generated-cache writes, dirty publication, and dirty-save-before-evict.
 
 1. Rename loading progress stages and include real counts.
 
@@ -394,7 +395,7 @@ These were small enough and high enough leverage to do before deeper persistence
 
 4. Add dirty/cache terminology to host code.
 
-   Even before a full lazy save implementation, distinguish "cache generated chunk snapshot" from "save dirty authoritative chunk". This prevents future work from treating every saved generated chunk as user state.
+   Done for the current generated-world host. `GeneratedWorldHost` now distinguishes "cache generated chunk snapshot" from "save dirty authoritative chunk". Future gameplay domains must mark dirty chunks through the same policy rather than treating every saved generated chunk as user state.
 
 5. Document the version bump rule in code near `GENERATED_WORLD_STORAGE_VERSION`.
 
