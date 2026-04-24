@@ -123,6 +123,8 @@ export function connectRenderWorldWorkerSession(
 }
 
 export class RenderWorldWorkerClient {
+  public readonly concurrency = 1;
+
   private nextRequestId = 1;
   private readonly pending = new Map<number, {
     resolve: (message: RenderWorldResponse) => void;

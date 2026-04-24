@@ -1,4 +1,5 @@
 import { ResourceLocation } from "../core/resource-location";
+import { SectionPos } from "../core/section-pos";
 import type { OpenWorldPreset } from "../runtime/protocol/world-messages";
 import type { WorldClient } from "../runtime/protocol/world-client";
 import type { WorldSaveMetadata } from "../runtime/storage/world-storage";
@@ -15,7 +16,7 @@ import { GrassColor } from "../world/level/grass-color";
 import { BlockColors } from "./block/block-colors";
 import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
 import { ChunkRenderDispatcher } from "./chunk/chunk-render-dispatcher";
-import { ChunkMeshWorkerClient, createChunkMeshWorker } from "./chunk/mesh-worker-client";
+import { createRenderWorldWorker, RenderWorldWorkerClient, RenderWorldWorkerUpdateSink } from "./chunk/render-world-worker-client";
 import { ChunkBufferBuilderPack } from "./chunk-buffer-builder-pack";
 import { BlockModelRepository } from "./model/block-model-repository";
 import { BlockModelShaper } from "./model/block-model-shaper";
@@ -69,6 +70,7 @@ export interface RendererScene {
   readonly atlas: TextureAtlas;
   readonly worldClient: WorldClient;
   readonly level: ClientChunkCache;
+  readonly renderWorldUpdateSink: RenderWorldWorkerUpdateSink;
   readonly levelRenderer: LevelRenderer;
   readonly gameRenderer: GameRenderer;
   readonly lightTexture: LightTexture;
@@ -76,6 +78,7 @@ export interface RendererScene {
   readonly textureSamplers: ReadonlyMap<string, GPUSampler>;
   readonly lightSampler: GPUSampler;
   readonly viewDistance: number;
+  readonly viewArea: ViewArea;
   readonly chunkDrawResources: WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>;
 }
 
@@ -151,7 +154,7 @@ function createWorldClient(
   biomeSource: OverworldBiomeSource,
   blockStateResolver: ReturnType<typeof createBlockStateResolver>,
   blockStateIds: import("../world/level/block/state/block-state-id").BlockStateIdMap,
-): WorldClient {
+): TransportWorldClient {
   const levelFactory = (worldOpened: import("../runtime/protocol/world-messages").WorldOpenedMessage) => new ClientChunkCache({
     airState,
     minBuildHeight: worldOpened.minBuildHeight,
@@ -175,6 +178,33 @@ function createWorldClient(
     new WorkerWorldTransport(createGeneratedWorldWorker()),
     levelFactory,
   );
+}
+
+export function getSceneLoadedChunkCount(scene: RendererScene): number {
+  return scene.renderWorldUpdateSink.getStats().loadedChunkCount;
+}
+
+export function applyRenderWorldDirtySections(scene: RendererScene): number {
+  let dirtyCount = 0;
+  for (const dirtySection of scene.renderWorldUpdateSink.drainDirtySections()) {
+    if (dirtySection.y < scene.level.getMinBuildHeight() || dirtySection.y >= scene.level.getMaxBuildHeight()) {
+      continue;
+    }
+
+    scene.viewArea.setDirty(
+      SectionPos.blockToSectionCoord(dirtySection.x),
+      SectionPos.blockToSectionCoord(dirtySection.y),
+      SectionPos.blockToSectionCoord(dirtySection.z),
+      false,
+    );
+    dirtyCount++;
+  }
+
+  if (dirtyCount > 0) {
+    scene.levelRenderer.requestUpdate();
+  }
+
+  return dirtyCount;
 }
 
 async function initializeBiomeColorTables(atlasSource: BrowserTextureAtlasSource): Promise<void> {
@@ -272,13 +302,16 @@ export async function initializeRendererScene(
     preset: options.preset ?? "browser_smoke",
   });
   const level = worldClient.getLevel();
-  const meshWorker = new ChunkMeshWorkerClient(createChunkMeshWorker());
-  await meshWorker.initialize({
-    type: "initialize_mesh_worker",
+
+  const renderWorldWorker = new RenderWorldWorkerClient(createRenderWorldWorker());
+  await renderWorldWorker.initialize({
+    type: "initialize_render_world",
     seed: options.seed,
     minBuildHeight: worldOpened.minBuildHeight,
     height: worldOpened.height,
   });
+  const renderWorldUpdateSink = new RenderWorldWorkerUpdateSink(renderWorldWorker);
+  worldClient.setRenderWorldUpdateSink(renderWorldUpdateSink);
 
   const levelRenderer = new LevelRenderer();
   const blockRenderer = new BlockRenderDispatcher(
@@ -296,7 +329,8 @@ export async function initializeRendererScene(
     (task) => queueMicrotask(task),
     false,
     new ChunkBufferBuilderPack(),
-    meshWorker,
+    undefined,
+    renderWorldWorker,
   );
   const viewArea = new ViewArea(chunkDispatcher, level, options.viewDistance, levelRenderer);
   levelRenderer.setLevel(level, chunkDispatcher, viewArea, options.viewDistance);
@@ -330,6 +364,7 @@ export async function initializeRendererScene(
       atlas,
       worldClient,
       level,
+      renderWorldUpdateSink,
       levelRenderer,
       gameRenderer,
       lightTexture,
@@ -337,6 +372,7 @@ export async function initializeRendererScene(
       textureSamplers,
       lightSampler,
       viewDistance: options.viewDistance,
+      viewArea,
       chunkDrawResources: new WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>(),
     },
   };

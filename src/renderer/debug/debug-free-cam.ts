@@ -3,8 +3,10 @@
 import { SectionPos } from "../../core/section-pos";
 import { Vec3 } from "../../world/phys/vec3";
 import {
+  applyRenderWorldDirtySections,
   createSceneDepthTarget,
   encodeSceneFrame,
+  getSceneLoadedChunkCount,
   initializeRendererScene,
   resizeCanvasToDisplaySize,
   type RendererScene,
@@ -135,19 +137,21 @@ function showOverlayMessage(message: string): void {
 }
 
 async function waitForLoadedChunkRing(scene: RendererScene, expectedLoadedChunkCount: number): Promise<boolean> {
-  if (scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount) {
+  if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
     return true;
   }
 
   for (let attempt = 0; attempt < 40; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, WORLD_POLL_INTERVAL_MS));
-    await scene.worldClient.pollUpdates();
-    if (scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount) {
+    if (await scene.worldClient.pollUpdates()) {
+      applyRenderWorldDirtySections(scene);
+    }
+    if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
       return true;
     }
   }
 
-  return scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount;
+  return getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount;
 }
 
 async function boot(): Promise<void> {
@@ -220,6 +224,7 @@ async function boot(): Promise<void> {
     centerChunkZ: SectionPos.posToSectionCoord(initialCamera.position.z),
     radius: scene.viewDistance,
   })) {
+    applyRenderWorldDirtySections(scene);
     scene.levelRenderer.allChanged();
   }
   if (await scene.worldClient.setPlayerInput({
@@ -244,13 +249,13 @@ async function boot(): Promise<void> {
   }
   if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount)) {
     debugRuntime.controller.state.error =
-      `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${scene.level.getLoadedChunkCount().toString()}`;
+      `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`;
     showOverlayMessage(`error: ${debugRuntime.controller.state.error}`);
     return;
   }
   debugRuntime.controller.state.ready = true;
   debugRuntime.controller.state.saveId = scene.saveMetadata.saveId;
-  debugRuntime.controller.state.loadedChunkCount = scene.level.getLoadedChunkCount();
+  debugRuntime.controller.state.loadedChunkCount = getSceneLoadedChunkCount(scene);
   debugRuntime.controller.state.viewDistance = scene.viewDistance;
   debugRuntime.controller.state.renderDistance = scene.gameRenderer.getRenderDistance();
 
@@ -270,7 +275,9 @@ async function boot(): Promise<void> {
     const inputFrame = mergeDebugInputFrame(input.consumeFrame(), debugRuntime.getInjectedInput());
 
     if (now - lastWorldPollMs >= WORLD_POLL_INTERVAL_MS) {
-      await scene.worldClient.pollUpdates();
+      if (await scene.worldClient.pollUpdates()) {
+        applyRenderWorldDirtySections(scene);
+      }
       lastWorldPollMs = now;
     }
 
@@ -302,7 +309,7 @@ async function boot(): Promise<void> {
       }
       const chunkViewRequest = createChunkViewRequestForPlayerState(playerState, scene.viewDistance);
       if (await scene.worldClient.setChunkView(chunkViewRequest)) {
-        scene.levelRenderer.allChanged();
+        applyRenderWorldDirtySections(scene);
       }
       const sessionState = scene.worldClient.getSessionState();
       debugRuntime.controller.state.sessionId = sessionState?.sessionId;
@@ -313,7 +320,7 @@ async function boot(): Promise<void> {
       debugRuntime.controller.state.playerChunkZ = chunkViewRequest.centerChunkZ;
       debugRuntime.controller.state.chunkViewCenterX = sessionState?.chunkView?.centerChunkX;
       debugRuntime.controller.state.chunkViewCenterZ = sessionState?.chunkView?.centerChunkZ;
-      debugRuntime.controller.state.loadedChunkCount = scene.level.getLoadedChunkCount();
+      debugRuntime.controller.state.loadedChunkCount = getSceneLoadedChunkCount(scene);
     }
 
     if (!renderInFlight) {

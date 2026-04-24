@@ -14,10 +14,17 @@ import { VertexBuffer } from "../vertex/vertex-buffer";
 import { buildSectionMeshInput, decodeSectionMeshResult, withSectionMeshCamera, type SectionMeshInput } from "./chunk-mesh-protocol";
 import { ChunkMeshWorkerClient } from "./mesh-worker-client";
 import { RenderChunkRegion } from "./render-chunk-region";
+import type { BuildRenderSectionMeshRequest, RenderWorldMeshBuildResponse, RenderWorldSectionOrigin } from "./render-world-protocol";
 import { beginChunkRenderLayer, buildSectionMesh } from "./section-mesh-compiler";
 import { VisibilitySet } from "./visibility-set";
 
 type Executor = (task: () => void) => void;
+
+export interface RenderWorldMeshBuildClient {
+  readonly concurrency: number;
+  buildSectionMesh(request: BuildRenderSectionMeshRequest): Promise<RenderWorldMeshBuildResponse>;
+  close?(): void;
+}
 
 function sortTasks(left: ChunkRenderDispatcher.ChunkCompileTask, right: ChunkRenderDispatcher.ChunkCompileTask): number {
   return left.compareTo(right);
@@ -52,6 +59,7 @@ export class ChunkRenderDispatcher {
     useAllCores = false,
     public readonly fixedBuffers = new ChunkBufferBuilderPack(),
     private readonly meshWorker?: ChunkMeshWorkerClient,
+    private readonly renderWorldWorker?: RenderWorldMeshBuildClient,
   ) {
     // WebGPU: Promise scheduling replaces ProcessorMailbox worker orchestration.
     const workerBufferCount = useAllCores ? 2 : 1;
@@ -61,7 +69,7 @@ export class ChunkRenderDispatcher {
     }
 
     this.freeBufferCount = this.freeBuffers.length;
-    this.freeMeshWorkerSlots = meshWorker?.concurrency ?? 0;
+    this.freeMeshWorkerSlots = renderWorldWorker?.concurrency ?? meshWorker?.concurrency ?? 0;
   }
 
   public setLevel(level: StaticRenderLevel): void {
@@ -222,6 +230,10 @@ export class ChunkRenderDispatcher {
     this.hasPendingUploads = true;
   }
 
+  public usesRenderWorldWorker(): boolean {
+    return this.renderWorldWorker !== undefined;
+  }
+
   public rebuildChunkSync(renderChunk: ChunkRenderDispatcher.RenderChunk): Promise<void> {
     return renderChunk.compileSync();
   }
@@ -244,6 +256,10 @@ export class ChunkRenderDispatcher {
   }
 
   public createSectionMeshInput(origin: BlockPos): SectionMeshInput | undefined {
+    if (this.renderWorldWorker !== undefined) {
+      return undefined;
+    }
+
     if (this.meshWorker === undefined || !(this.level instanceof ClientChunkCache)) {
       return undefined;
     }
@@ -256,12 +272,40 @@ export class ChunkRenderDispatcher {
     }
   }
 
+  public createRenderWorldSectionOrigin(origin: BlockPos): RenderWorldSectionOrigin | undefined {
+    if (this.renderWorldWorker === undefined) {
+      return undefined;
+    }
+
+    return {
+      x: origin.getX(),
+      y: origin.getY(),
+      z: origin.getZ(),
+    };
+  }
+
   public async runMeshWorkerBuild(meshInput: SectionMeshInput, camera: Vec3): Promise<import("./chunk-mesh-protocol").SectionMeshResult> {
     if (this.meshWorker === undefined) {
       throw new Error("Mesh worker was not configured for this chunk render dispatcher");
     }
 
     return this.meshWorker.buildSectionMesh(withSectionMeshCamera(meshInput, camera));
+  }
+
+  public async runRenderWorldWorkerBuild(origin: RenderWorldSectionOrigin, camera: Vec3): Promise<RenderWorldMeshBuildResponse> {
+    if (this.renderWorldWorker === undefined) {
+      throw new Error("Render-world worker was not configured for this chunk render dispatcher");
+    }
+
+    return this.renderWorldWorker.buildSectionMesh({
+      type: "build_render_section_mesh",
+      origin,
+      camera: {
+        x: camera.x,
+        y: camera.y,
+        z: camera.z,
+      },
+    });
   }
 
   private clearBatchQueue(): void {
@@ -279,6 +323,7 @@ export class ChunkRenderDispatcher {
   public dispose(): void {
     this.clearBatchQueue();
     this.meshWorker?.close();
+    this.renderWorldWorker?.close?.();
     this.freeBuffers.length = 0;
   }
 }
@@ -373,6 +418,10 @@ export namespace ChunkRenderDispatcher {
     }
 
     private doesChunkExistAt(pos: BlockPos): boolean {
+      if (this.dispatcher.usesRenderWorldWorker()) {
+        return true;
+      }
+
       return this.dispatcher.level.getChunk(
         SectionPos.blockToSectionCoord(pos.getX()),
         SectionPos.blockToSectionCoord(pos.getZ()),
@@ -497,11 +546,12 @@ export namespace ChunkRenderDispatcher {
     public createCompileTask(): ChunkCompileTask {
       this.cancelTasks();
       const origin = new BlockPos(this.origin.getX(), this.origin.getY(), this.origin.getZ());
-      const meshInput = this.dispatcher.createSectionMeshInput(origin);
-      const region = meshInput === undefined
+      const renderWorldOrigin = this.dispatcher.createRenderWorldSectionOrigin(origin);
+      const meshInput = renderWorldOrigin === undefined ? this.dispatcher.createSectionMeshInput(origin) : undefined;
+      const region = renderWorldOrigin === undefined && meshInput === undefined
         ? RenderChunkRegion.createIfNotEmpty(this.dispatcher.level, origin.offset(-1, -1, -1), origin.offset(16, 16, 16), 1)
         : null;
-      this.lastRebuildTask = new RebuildTask(this, this.getDistToPlayerSqr(), region, meshInput);
+      this.lastRebuildTask = new RebuildTask(this, this.getDistToPlayerSqr(), region, meshInput, renderWorldOrigin);
       return this.lastRebuildTask;
     }
 
@@ -524,16 +574,17 @@ export namespace ChunkRenderDispatcher {
       distAtCreation: number,
       private region: RenderChunkRegion | null,
       private readonly meshInput?: SectionMeshInput,
+      private readonly renderWorldOrigin?: RenderWorldSectionOrigin,
     ) {
       super(renderChunk, distAtCreation);
     }
 
     public override usesBuilderPack(): boolean {
-      return this.meshInput === undefined;
+      return this.meshInput === undefined && this.renderWorldOrigin === undefined;
     }
 
     public override usesMeshWorker(): boolean {
-      return this.meshInput !== undefined;
+      return this.meshInput !== undefined || this.renderWorldOrigin !== undefined;
     }
 
     public override async doTask(buffers?: ChunkBufferBuilderPack): Promise<ChunkTaskResult> {
@@ -541,7 +592,7 @@ export namespace ChunkRenderDispatcher {
         return ChunkTaskResult.CANCELLED;
       }
 
-      if (!this.renderChunk.hasAllNeighbors()) {
+      if (this.renderWorldOrigin === undefined && !this.renderChunk.hasAllNeighbors()) {
         this.region = null;
         this.renderChunk.setDirty(false);
         this.isCancelled = true;
@@ -556,7 +607,26 @@ export namespace ChunkRenderDispatcher {
       );
       const compiledChunk = new CompiledChunk();
 
-      if (this.meshInput !== undefined) {
+      if (this.renderWorldOrigin !== undefined) {
+        const response = await this.renderChunk.getDispatcher().runRenderWorldWorkerBuild(this.renderWorldOrigin, camera);
+        if (response.type === "render_world_mesh_not_ready") {
+          this.renderChunk.setDirty(false);
+          this.isCancelled = true;
+          return ChunkTaskResult.CANCELLED;
+        }
+
+        const decoded = decodeSectionMeshResult(response.result);
+        this.applyCompiledState(compiledChunk, decoded);
+        this.renderChunk.updateGlobalBlockEntities(new Set<unknown>(), new Set<unknown>());
+        if (this.isCancelled) {
+          return ChunkTaskResult.CANCELLED;
+        }
+
+        for (const layer of decoded.layers) {
+          this.renderChunk.getBuffer(layer.renderType).uploadRaw(layer.drawState, layer.buffer);
+        }
+        this.renderChunk.getDispatcher().notePendingUploads();
+      } else if (this.meshInput !== undefined) {
         const decoded = decodeSectionMeshResult(await this.renderChunk.getDispatcher().runMeshWorkerBuild(this.meshInput, camera));
         this.applyCompiledState(compiledChunk, decoded);
         this.renderChunk.updateGlobalBlockEntities(new Set<unknown>(), new Set<unknown>());

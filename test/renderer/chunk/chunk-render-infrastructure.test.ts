@@ -7,9 +7,10 @@ import { Registry } from "../../../src/core/registry";
 import { ResourceLocation } from "../../../src/core/resource-location";
 import { BlockColors } from "../../../src/renderer/block/block-colors";
 import { BlockRenderDispatcher } from "../../../src/renderer/block/block-render-dispatcher";
-import { ChunkRenderDispatcher } from "../../../src/renderer/chunk/chunk-render-dispatcher";
+import { ChunkRenderDispatcher, type RenderWorldMeshBuildClient } from "../../../src/renderer/chunk/chunk-render-dispatcher";
 import { buildSectionMeshInput, decodeSectionMeshResult, serializeSectionMeshBuild } from "../../../src/renderer/chunk/chunk-mesh-protocol";
 import { RenderChunkRegion } from "../../../src/renderer/chunk/render-chunk-region";
+import type { BuildRenderSectionMeshRequest, RenderWorldMeshBuildResponse } from "../../../src/renderer/chunk/render-world-protocol";
 import { buildSectionMesh } from "../../../src/renderer/chunk/section-mesh-compiler";
 import { VisGraph } from "../../../src/renderer/chunk/vis-graph";
 import { ChunkBufferBuilderPack } from "../../../src/renderer/chunk-buffer-builder-pack";
@@ -199,6 +200,23 @@ function fillBox(level: StaticRenderLevel, from: BlockPos, to: BlockPos, state: 
   }
 }
 
+class RecordingRenderWorldMeshBuildClient implements RenderWorldMeshBuildClient {
+  public readonly concurrency = 1;
+  public readonly requests: BuildRenderSectionMeshRequest[] = [];
+  public closed = false;
+
+  public constructor(private readonly response: RenderWorldMeshBuildResponse) {}
+
+  public buildSectionMesh(request: BuildRenderSectionMeshRequest): Promise<RenderWorldMeshBuildResponse> {
+    this.requests.push(request);
+    return Promise.resolve(this.response);
+  }
+
+  public close(): void {
+    this.closed = true;
+  }
+}
+
 describe("Chunk render infrastructure", () => {
   beforeEach(() => {
     Registry.BLOCK.clear();
@@ -357,6 +375,72 @@ describe("Chunk render infrastructure", () => {
     expect(decoded.layers[0]!.renderType).toBe(RenderType.solid());
     expect(decoded.layers[0]!.drawState.format()).toBe(DefaultVertexFormat.BLOCK);
     expect(decoded.visibilitySet.visibilityBetween(Direction.NORTH, Direction.SOUTH)).toBe(true);
+  });
+
+  test("ChunkRenderDispatcher can build a section from a render-world worker without main-thread chunk snapshots", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const biomeSource = new OverworldBiomeSource(12345n);
+    const populatedLevel = new StaticRenderLevel(blocks.airState, 15, 15, 0, 16);
+    for (let chunkX = -1; chunkX <= 1; chunkX++) {
+      for (let chunkZ = -1; chunkZ <= 1; chunkZ++) {
+        populatedLevel.getChunk(chunkX, chunkZ);
+      }
+    }
+    populatedLevel.setBlock(new BlockPos(0, 0, 0), blocks.blockStateById[ChunkBlockId.STONE]!);
+
+    const origin = new BlockPos(0, 0, 0);
+    const region = RenderChunkRegion.createIfNotEmpty(populatedLevel, origin.offset(-1, -1, -1), origin.offset(16, 16, 16), 1);
+    const buffers = new ChunkBufferBuilderPack();
+    const build = buildSectionMesh(origin, new Vec3(8, 8, 0), region, createDispatcher(), buffers);
+    const renderWorldClient = new RecordingRenderWorldMeshBuildClient({
+      type: "render_section_mesh_built",
+      origin: { x: 0, y: 0, z: 0 },
+      result: serializeSectionMeshBuild(build, buffers),
+    });
+
+    const mainThreadCache = new ClientChunkCache({
+      airState: blocks.airState,
+      minBuildHeight: 0,
+      height: 16,
+      biomeSource,
+      biomeZoomSeed: 12345n,
+      blockStateResolver: createBlockStateResolver(blocks.airState),
+      blockStateIds: blocks.blockStateIds,
+    });
+    const levelRenderer = new LevelRenderer();
+    const chunkDispatcher = new ChunkRenderDispatcher(
+      mainThreadCache,
+      levelRenderer,
+      createDispatcher(),
+      createFakeDevice(),
+      (task) => task(),
+      false,
+      new ChunkBufferBuilderPack(),
+      undefined,
+      renderWorldClient,
+    );
+    const viewArea = new ViewArea(chunkDispatcher, mainThreadCache, 1, levelRenderer);
+    chunkDispatcher.setCamera(new Vec3(8, 8, 0));
+    viewArea.repositionCamera(8, 0);
+
+    const renderChunk = viewArea.getRenderChunkAt(origin);
+    expect(renderChunk).not.toBeNull();
+    renderChunk!.rebuildChunkAsync(chunkDispatcher);
+    await chunkDispatcher.awaitAllTasks();
+
+    expect(mainThreadCache.getLoadedChunkCount()).toBe(0);
+    expect(renderWorldClient.requests).toEqual([{
+      type: "build_render_section_mesh",
+      origin: { x: 0, y: 0, z: 0 },
+      camera: { x: 8, y: 8, z: 0 },
+    }]);
+    const compiled = renderChunk!.getCompiledChunk();
+    expect(compiled.hasBlocks.has(RenderType.solid())).toBe(true);
+    expect(compiled.hasLayer.has(RenderType.solid())).toBe(true);
+    expect(renderChunk!.getBuffer(RenderType.solid()).getFormat()).toBe(DefaultVertexFormat.BLOCK);
+
+    chunkDispatcher.dispose();
+    expect(renderWorldClient.closed).toBe(true);
   });
 
   test("Frustum accepts boxes in front of the camera and rejects boxes behind it", () => {

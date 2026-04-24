@@ -5,8 +5,10 @@ import { type CameraState } from "./game-renderer";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
 import { RenderType } from "./render-type";
 import {
+  applyRenderWorldDirtySections,
   createSceneDepthView,
   encodeSceneFrame,
+  getSceneLoadedChunkCount,
   initializeRendererScene,
   SCENE_DEPTH_FORMAT,
   type RendererScene,
@@ -179,19 +181,21 @@ async function readPixel(
 }
 
 async function waitForLoadedChunkRing(scene: RendererScene, expectedLoadedChunkCount: number): Promise<boolean> {
-  if (scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount) {
+  if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
     return true;
   }
 
   for (let attempt = 0; attempt < 40; attempt++) {
     await sleep(50);
-    await scene.worldClient.pollUpdates();
-    if (scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount) {
+    if (await scene.worldClient.pollUpdates()) {
+      applyRenderWorldDirtySections(scene);
+    }
+    if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
       return true;
     }
   }
 
-  return scene.level.getLoadedChunkCount() >= expectedLoadedChunkCount;
+  return getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount;
 }
 
 async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expectedLoadedChunkCount: number): Promise<LevelRenderFrame> {
@@ -201,12 +205,13 @@ async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expe
     centerChunkZ: SectionPos.posToSectionCoord(camera.position.z),
     radius: scene.viewDistance,
   })) {
+    applyRenderWorldDirtySections(scene);
     scene.levelRenderer.allChanged();
   }
 
   if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount)) {
     throw new Error(
-      `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${scene.level.getLoadedChunkCount().toString()}`,
+      `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`,
     );
   }
 
@@ -238,7 +243,9 @@ async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expe
     }
 
     await sleep(50);
-    await scene.worldClient.pollUpdates();
+    if (await scene.worldClient.pollUpdates()) {
+      applyRenderWorldDirtySections(scene);
+    }
     scene.levelRenderer.requestUpdate();
   }
 
@@ -378,7 +385,7 @@ async function boot(): Promise<BootResult> {
     centerPixel,
     terrainPixel,
     clearPixel,
-    loadedChunkCount: scene.level.getLoadedChunkCount(),
+    loadedChunkCount: getSceneLoadedChunkCount(scene),
     expectedLoadedChunkCount,
     viewDistance: scene.viewDistance,
     renderDistance: scene.gameRenderer.getRenderDistance(),
