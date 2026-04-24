@@ -109,6 +109,8 @@ export interface GeneratedWorldHostOptions {
 
 const LOCAL_WORLD_SESSION_ID = "local";
 const COOPERATIVE_CHUNK_PHASE_BUDGET_MS = 8;
+const COOPERATIVE_LIGHT_UPDATE_BUDGET = 262_144;
+const LIQUID_TICK_READ_RADIUS_BLOCKS = 4;
 
 interface ChunkViewJobRecord {
   readonly chunkX: number;
@@ -245,7 +247,7 @@ export class GeneratedWorldHost implements WorldHost {
       (fluid) => fluid === Fluids.EMPTY,
       () => this.gameTime,
       (tick) => this.tickLiquid(tick),
-      (pos) => this.isPositionTicking(pos),
+      (pos) => this.isLiquidPositionTicking(pos),
     );
     this.liquidLevel = new LiquidSimulationLevel({
       level: this.level,
@@ -607,7 +609,10 @@ export class GeneratedWorldHost implements WorldHost {
 
       this.options.mutateWorld?.(this.liquidLevel);
       await yieldStep();
-      this.ensureLightingForLoadedChunks(this.level.getLoadedChunks());
+      await this.ensureLightingForLoadedChunksCooperative(
+        this.getLoadedLightingNeighborhoodChunks(job.chunkX, job.chunkZ),
+        yieldStep,
+      );
       await yieldStep();
       const snapshot = this.buildPackedChunkSnapshot(chunk);
       await this.persistPackedChunkSnapshot(snapshot);
@@ -665,14 +670,52 @@ export class GeneratedWorldHost implements WorldHost {
       && Math.abs(chunkZ - this.currentChunkView.centerChunkZ) <= viewRadius;
   }
 
-  private isPositionTicking(pos: BlockPos): boolean {
+  private isLiquidPositionTicking(pos: BlockPos): boolean {
     const chunkX = SectionPos.blockToSectionCoord(pos.getX());
     const chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
+    if (!this.isChunkTicking(chunkX, chunkZ)) {
+      return false;
+    }
+
+    // Host scheduling: defer fluid ticks whose water read footprint crosses unloaded chunks instead of synchronously loading them.
+    const minChunkX = SectionPos.blockToSectionCoord(pos.getX() - LIQUID_TICK_READ_RADIUS_BLOCKS);
+    const maxChunkX = SectionPos.blockToSectionCoord(pos.getX() + LIQUID_TICK_READ_RADIUS_BLOCKS);
+    const minChunkZ = SectionPos.blockToSectionCoord(pos.getZ() - LIQUID_TICK_READ_RADIUS_BLOCKS);
+    const maxChunkZ = SectionPos.blockToSectionCoord(pos.getZ() + LIQUID_TICK_READ_RADIUS_BLOCKS);
+    for (let neighborChunkZ = minChunkZ; neighborChunkZ <= maxChunkZ; neighborChunkZ++) {
+      for (let neighborChunkX = minChunkX; neighborChunkX <= maxChunkX; neighborChunkX++) {
+        if (!this.isChunkTicking(neighborChunkX, neighborChunkZ)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  private isChunkTicking(chunkX: number, chunkZ: number): boolean {
     const key = chunkKey(chunkX, chunkZ);
     return this.publishedChunkSnapshots.has(key)
       && this.isChunkInCurrentView(chunkX, chunkZ)
       && this.level.getChunk(chunkX, chunkZ, false) !== null
       && this.level.isChunkDecorated(chunkX, chunkZ);
+  }
+
+  private getLoadedLightingNeighborhoodChunks(
+    chunkX: number,
+    chunkZ: number,
+  ): readonly ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number][] {
+    const chunks: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number][] = [];
+    for (let neighborChunkZ = chunkZ - 1; neighborChunkZ <= chunkZ + 1; neighborChunkZ++) {
+      for (let neighborChunkX = chunkX - 1; neighborChunkX <= chunkX + 1; neighborChunkX++) {
+        const chunk = this.level.getChunk(neighborChunkX, neighborChunkZ, false);
+        if (chunk !== null && this.level.isChunkDecorated(neighborChunkX, neighborChunkZ)) {
+          chunks.push(chunk);
+        }
+      }
+    }
+
+    return chunks;
   }
 
   private markChunkSnapshotPublished(chunkX: number, chunkZ: number): void {
@@ -715,7 +758,9 @@ export class GeneratedWorldHost implements WorldHost {
     }
     this.hydratePublishedLiquidTicks();
     this.lastWorldTickAtMs += dueTicks * tickIntervalMs;
-    await this.flushDirtyLiquidChunks();
+    await this.flushDirtyLiquidChunks(
+      this.options.chunkViewScheduling === "cooperative" ? createCooperativeYield() : undefined,
+    );
     this.enqueueDirtyLightDeltas();
   }
 
@@ -771,12 +816,17 @@ export class GeneratedWorldHost implements WorldHost {
       ));
   }
 
-  private async flushDirtyLiquidChunks(): Promise<void> {
+  private async flushDirtyLiquidChunks(yieldStep?: () => Promise<void>): Promise<void> {
     const dirtyKeys = [...this.dirtyLiquidChunks].sort();
     this.dirtyLiquidChunks.clear();
-    this.runPendingLightingUntilIdle();
+    if (yieldStep === undefined) {
+      this.runPendingLightingUntilIdle();
+    } else {
+      await this.runPendingLightingUntilIdleCooperative(yieldStep);
+    }
 
     for (const key of dirtyKeys) {
+      await yieldStep?.();
       const [chunkXRaw, chunkZRaw] = key.split(",");
       const chunkX = Number(chunkXRaw);
       const chunkZ = Number(chunkZRaw);
@@ -862,6 +912,36 @@ export class GeneratedWorldHost implements WorldHost {
     }
   }
 
+  private async ensureLightingForLoadedChunksCooperative(
+    chunks: readonly ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number][],
+    yieldStep: () => Promise<void>,
+  ): Promise<void> {
+    const lightEngine = this.lightEngine;
+    if (lightEngine === undefined) {
+      return;
+    }
+
+    let queuedWork = false;
+    for (const chunk of chunks) {
+      await yieldStep();
+      const key = chunkKey(chunk.chunkX, chunk.chunkZ);
+      if (this.lightInitializedChunks.has(key)) {
+        continue;
+      }
+
+      this.initializeChunkLighting(lightEngine, chunk);
+      this.lightInitializedChunks.add(key);
+      queuedWork = true;
+    }
+
+    if (queuedWork || lightEngine.hasLightWork()) {
+      await this.runLightingUntilIdleCooperative(lightEngine, yieldStep);
+      for (const chunk of chunks) {
+        this.lightCorrectChunks.add(chunkKey(chunk.chunkX, chunk.chunkZ));
+      }
+    }
+  }
+
   private queueBlockLightUpdate(pos: BlockPos, oldState: BlockState, newState: BlockState): void {
     const lightEngine = this.lightEngine;
     if (lightEngine === undefined) {
@@ -902,6 +982,13 @@ export class GeneratedWorldHost implements WorldHost {
     const lightEngine = this.lightEngine;
     if (lightEngine !== undefined && lightEngine.hasLightWork()) {
       this.runLightingUntilIdle(lightEngine);
+    }
+  }
+
+  private async runPendingLightingUntilIdleCooperative(yieldStep: () => Promise<void>): Promise<void> {
+    const lightEngine = this.lightEngine;
+    if (lightEngine !== undefined && lightEngine.hasLightWork()) {
+      await this.runLightingUntilIdleCooperative(lightEngine, yieldStep);
     }
   }
 
@@ -1029,6 +1116,22 @@ export class GeneratedWorldHost implements WorldHost {
       }
 
       lightEngine.runUpdates(1_000_000, true, true);
+    }
+
+    throw new Error("Generated world light engine did not become idle");
+  }
+
+  private async runLightingUntilIdleCooperative(
+    lightEngine: LevelLightEngine,
+    yieldStep: () => Promise<void>,
+  ): Promise<void> {
+    for (let iteration = 0; iteration < 10_000; iteration++) {
+      if (!lightEngine.hasLightWork()) {
+        return;
+      }
+
+      lightEngine.runUpdates(COOPERATIVE_LIGHT_UPDATE_BUDGET, true, true);
+      await yieldStep();
     }
 
     throw new Error("Generated world light engine did not become idle");

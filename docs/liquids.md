@@ -65,6 +65,12 @@ Water movement starts when something schedules a fluid tick:
 
 When the tick fires, `FlowingFluid.tick(...)` recomputes the fluid state at that position, updates the block if its level changed, schedules follow-up ticks when needed, and spreads to neighboring cells.
 
+### Chunk Boundary Footprint
+
+Liquid simulation has the same loaded-neighborhood issue as lighting, but not the same fixed radius. Water can eventually travel across arbitrary chunks, yet each scheduled tick only reads a small local footprint: direct neighbors, above/below, and the water slope search (`4` blocks for vanilla water). A water source in an unloaded neighboring chunk must not flow until that chunk is loaded and ticking.
+
+For `mclone`, do not answer fluid reads outside the loaded simulation neighborhood with fake air and then let the tick proceed. The host should defer due boundary liquid ticks until the local read footprint is loaded/decorated/published, keeping the tick pending just like other non-eligible scheduled ticks. This is a host scheduling divergence from vanilla's shared server chunk source, not a change to `FlowingFluid` rules.
+
 ### Oceans And Rivers
 
 Oceans and rivers use the same stored water block states as any other water. They are cheap because most of their cells are stable `water[level=0]` source blocks and are not scheduled to tick.

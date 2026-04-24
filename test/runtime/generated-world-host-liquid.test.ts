@@ -112,4 +112,75 @@ describe("GeneratedWorldHost liquid simulation", () => {
     expect(saved).toBeDefined();
     expect(unpackChunkSnapshot(saved!, blocks.blockStateIds).liquidTicks.length).toBeGreaterThan(0);
   });
+
+  test("defers boundary liquid ticks until neighboring read chunks are loaded", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const resolveState = createBlockStateResolver(blocks.airState);
+    const storage = new MemoryWorldStorage(() => 1_000);
+    let nowMs = 0;
+    const session = await storage.openWorld({
+      saveId: saveId(),
+      storageVersion: GENERATED_WORLD_STORAGE_VERSION,
+      seed: OPEN_WORLD_REQUEST.seed.toString(),
+      preset: OPEN_WORLD_REQUEST.preset,
+      minBuildHeight: 0,
+      height: 256,
+      openedAtMs: 1_000,
+    });
+
+    const edgeSourcePos = new BlockPos(47, 200, 0);
+    const edgeChunk = new LevelChunk(2, 0, blocks.airState);
+    edgeChunk.setBlockState(edgeSourcePos, blocks.blockStateById[ChunkBlockId.WATER]!);
+    edgeChunk.recordLiquidTick(edgeSourcePos, "minecraft:water", 0);
+    await session.chunks.saveChunk(packChunkSnapshot(
+      buildChunkSnapshot(edgeChunk, [0], 0, 256),
+      blocks.blockStateIds,
+      resolveState,
+    ));
+
+    const host = new GeneratedWorldHost({
+      seed: OPEN_WORLD_REQUEST.seed,
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      worldStorage: storage,
+      worldTickIntervalMs: 1,
+      nowMs: () => nowMs,
+    });
+
+    await host.openWorld(OPEN_WORLD_REQUEST);
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    nowMs = 6;
+    const updates = await host.pollUpdates({ type: "poll_world_updates" });
+    const edgeUpdate = chunkSnapshots(updates).find((message) => message.snapshot.chunkX === 2 && message.snapshot.chunkZ === 0);
+    if (edgeUpdate !== undefined) {
+      const updatedSnapshot = unpackChunkSnapshot(edgeUpdate.snapshot, blocks.blockStateIds);
+      expect(updatedSnapshot.liquidTicks).toContainEqual({
+        x: edgeSourcePos.getX(),
+        y: edgeSourcePos.getY(),
+        z: edgeSourcePos.getZ(),
+        target: "minecraft:water",
+        delay: 0,
+      });
+      const updatedChunk = hydrateChunkFromSnapshot(updatedSnapshot, blocks.airState, resolveState);
+      expect(blockName(updatedChunk.getBlockState(edgeSourcePos.below()))).not.toBe("minecraft:water");
+    }
+
+    const saved = storage.getChunkRecord(saveId(), 2, 0)?.snapshot;
+    expect(saved).toBeDefined();
+    expect(unpackChunkSnapshot(saved!, blocks.blockStateIds).liquidTicks).toContainEqual({
+      x: edgeSourcePos.getX(),
+      y: edgeSourcePos.getY(),
+      z: edgeSourcePos.getZ(),
+      target: "minecraft:water",
+      delay: 0,
+    });
+  });
 });

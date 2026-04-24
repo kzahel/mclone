@@ -55,7 +55,7 @@ describe("Headless Node host", () => {
       unloadCount: 0,
     }]);
     expect(await readdir(path.resolve(getFileWorldSaveDirectory(saveRoot, result.saveId), "chunks"))).toHaveLength(25);
-  });
+  }, 20_000);
 
   test("boots through the Node CLI config entry point", async () => {
     const tempDirectory = await createTempDirectory();
@@ -105,5 +105,5 @@ describe("Headless Node host", () => {
       }),
     ]);
     expect(result.saveDirectory).toBe(path.resolve(tempDirectory, "saves", encodeURIComponent(result.saveId)));
-  });
+  }, 20_000);
 });

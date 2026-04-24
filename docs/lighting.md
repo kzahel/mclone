@@ -86,6 +86,14 @@ That padding matters for sky propagation and client/server light packets. `mclon
 
 Vanilla queues light work from three main places.
 
+### Chunk Boundary Footprint
+
+Lighting is not an isolated per-chunk calculation. Block light falls off by one level per transparent block, so a level-15 source can affect blocks up to 15 blocks away. A chunk whose light is correct for rendering therefore needs the neighboring chunk data that covers that footprint, especially for emitters or openings near chunk borders.
+
+`mclone` currently loads a `viewDistance + 1` chunk ring. That one-chunk halo is enough for block-light propagation into the visible view, but the solver work for that halo must still be scheduled cooperatively. Running the whole halo to idle in one host command recreates the D6 chunk-load stutter under a new name.
+
+Sky light has a different shape: straight vertical sky columns are mostly column-local, but side propagation around roofs, cave mouths, and chunk-edge openings still crosses chunk boundaries. Missing chunks must not be treated as transparent final data for a published lit chunk; either the neighboring data is present for the solve, or later authoritative light deltas must correct the result when it arrives.
+
 ### Block Changes
 
 `Level.setBlock(...)` compares old and new states. It queues `checkBlock(pos)` only when the change can affect light:
