@@ -341,8 +341,10 @@ export interface ChunkLightDelta {
   readonly type: "chunk_light_delta";
   readonly chunkX: number;
   readonly chunkZ: number;
-  readonly sky?: readonly PackedLightSectionUpdate[];
-  readonly block?: readonly PackedLightSectionUpdate[];
+  readonly light: {
+    readonly sky?: readonly PackedLightSectionUpdate[];
+    readonly block?: readonly PackedLightSectionUpdate[];
+  };
 }
 ```
 
@@ -454,22 +456,29 @@ Suggested sequence:
 
    The generated-world host now owns a default vanilla 1.17 `LevelLightEngine`, activates generated sections, scans non-air chunk entries for emitters, drains initial propagation before snapshot packing, and publishes `ChunkSnapshot.light` / packed light bytes with `lightCorrect`.
 
-4. Extend storage/protocol/render-world:
-   - trust and hydrate persisted packed chunk light where available
-   - render-world worker applies light snapshots
-   - dirty sections are emitted for mesh rebuild
-
-5. Replace constant client light:
+4. Implement [`L4-light-snapshot-consumption.md`](tactical/L4-light-snapshot-consumption.md). Done:
    - `ClientChunkCache` / render-world level reads section light data
-   - meshing emits real packed light values
-   - browser visual probes cover caves, open shafts, torch interiors, and daylight terrain
-   - keep `fullbright` as a debug render lighting mode, not the default profile
+   - render-world worker applies light snapshots through existing chunk ingest
+   - full-chunk dirty sections are emitted for mesh rebuild
+   - meshing can emit real packed light values from stored sky/block light
 
-6. Add live edit deltas:
+   Snapshots without `light` still fall back to the old constants for explicit debug/non-vanilla profiles. Section-level light deltas are still pending.
+
+5. Implement [`L5-live-light-deltas.md`](tactical/L5-live-light-deltas.md). Done:
    - host block edits call `checkBlock`
    - section empty transitions call `updateSectionStatus`
-   - light dirty sections become `chunk_delta` updates
+   - light dirty sections become `chunk_light_delta` updates
    - render-world worker applies deltas and rebuilds affected meshes
+
+   Current live block changes can still publish full replacement chunk snapshots; `chunk_light_delta` now carries light-only section changes and gives the future block-delta path a vanilla-shaped light transport.
+
+6. Make meshing visibly consume stored light:
+   - route packed-light calculation through stored sky/block light
+   - remove remaining fullbright constants from the vanilla raster mode
+   - keep `fullbright` as a debug render lighting mode, not the default profile
+
+7. Broaden visual validation:
+   - browser visual probes cover caves, open shafts, torch interiors, and daylight terrain
 
 ## Validation
 

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
-import type { PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import { applyPackedChunkLightDeltaToSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 import { createGeneratedWorldHostForRequest } from "../host/generated-world-host-factory";
 import { createGeneratedWorldSaveId, getGeneratedWorldViewChunkRadius } from "../host/generated-world-host";
 import type { WorldHost } from "../protocol/world-host";
@@ -230,6 +230,14 @@ function applyAuthoritativeMessages(world: SharedWorldRecord, messages: readonly
       case "chunk_snapshot":
         world.loadedSnapshots.set(chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ), message.snapshot);
         break;
+      case "chunk_light_delta": {
+        const key = chunkKey(message.chunkX, message.chunkZ);
+        const snapshot = world.loadedSnapshots.get(key);
+        if (snapshot !== undefined) {
+          world.loadedSnapshots.set(key, applyPackedChunkLightDeltaToSnapshot(snapshot, message.light));
+        }
+        break;
+      }
       case "chunk_unload":
         world.loadedSnapshots.delete(chunkKey(message.chunkX, message.chunkZ));
         break;
@@ -768,6 +776,19 @@ export class GeneratedWorldRemoteService {
         case "chunk_snapshot": {
           const key = chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ);
           world.loadedSnapshots.set(key, message.snapshot);
+          for (const session of this.getWorldSessions(world)) {
+            if (session.visibleChunks.has(key)) {
+              session.pendingMessages.push(message);
+            }
+          }
+          break;
+        }
+        case "chunk_light_delta": {
+          const key = chunkKey(message.chunkX, message.chunkZ);
+          const snapshot = world.loadedSnapshots.get(key);
+          if (snapshot !== undefined) {
+            world.loadedSnapshots.set(key, applyPackedChunkLightDeltaToSnapshot(snapshot, message.light));
+          }
           for (const session of this.getWorldSessions(world)) {
             if (session.visibleChunks.has(key)) {
               session.pendingMessages.push(message);

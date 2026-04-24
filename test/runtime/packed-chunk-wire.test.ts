@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
   deserializePackedChunkSnapshot,
+  deserializePackedChunkLightDelta,
+  serializePackedChunkLightDelta,
   serializePackedChunkSnapshot,
   type SerializedPackedChunkSnapshot,
 } from "../../src/runtime/protocol/packed-chunk-wire";
@@ -54,6 +56,20 @@ describe("packed chunk wire codecs", () => {
     expect(PACKED_SNAPSHOT.sections[0]!.paletteStateIds[0]).toBe(0);
     expect(PACKED_SNAPSHOT.sections[0]!.packedBlockIndices[0]).toBe(0x0123456789ABCDEFn);
     expect(PACKED_SNAPSHOT.light!.sky[0]!.data[0]).toBe(0xFF);
+  });
+
+  test("round-trips light deltas with explicit empty sections", () => {
+    const serialized = serializePackedChunkLightDelta({
+      sky: [{ y: 5, data: SKY_LIGHT }],
+      block: [{ y: 5 }],
+    });
+
+    expect(serialized.sky?.[0]?.dataBase64).toBeTruthy();
+    expect(serialized.block?.[0]?.dataBase64).toBeUndefined();
+    expect(deserializePackedChunkLightDelta(serialized)).toEqual({
+      sky: [{ y: 5, data: SKY_LIGHT }],
+      block: [{ y: 5 }],
+    });
   });
 
   test("rejects packed word payloads that are not whole 64-bit words", () => {

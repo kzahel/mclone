@@ -1,4 +1,5 @@
 import type {
+  ChunkLightDeltaMessage,
   ChunkSnapshotMessage,
   ChunkUnloadMessage,
   PlayerStateMessage,
@@ -13,12 +14,15 @@ import type {
   WorldHostMessage,
 } from "./world-messages";
 import {
+  deserializePackedChunkLightDelta,
   deserializePackedChunkSnapshot,
+  serializePackedChunkLightDelta,
   serializePackedChunkSnapshot,
+  type SerializedPackedChunkLightDelta,
   type SerializedPackedChunkSnapshot,
 } from "./packed-chunk-wire";
 
-export const WORLD_HTTP_PROTOCOL_VERSION = 2;
+export const WORLD_HTTP_PROTOCOL_VERSION = 3;
 
 export type WorldHttpErrorCode =
   | "protocol_version_mismatch"
@@ -45,11 +49,19 @@ export interface SerializedChunkSnapshotMessage {
   readonly snapshot: SerializedPackedChunkSnapshot;
 }
 
+export interface SerializedChunkLightDeltaMessage {
+  readonly type: "chunk_light_delta";
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly light: SerializedPackedChunkLightDelta;
+}
+
 export type SerializedWorldHostMessage =
   | WorldOpenedMessage
   | SessionStateMessage
   | PlayerStateMessage
   | SerializedChunkSnapshotMessage
+  | SerializedChunkLightDeltaMessage
   | ChunkUnloadMessage
   | WorldErrorMessage;
 
@@ -151,6 +163,13 @@ export function serializeWorldHostMessages(messages: readonly WorldHostMessage[]
           type: "chunk_snapshot",
           snapshot: serializePackedChunkSnapshot(message.snapshot),
         };
+      case "chunk_light_delta":
+        return {
+          type: "chunk_light_delta",
+          chunkX: message.chunkX,
+          chunkZ: message.chunkZ,
+          light: serializePackedChunkLightDelta(message.light),
+        };
     }
   });
 }
@@ -169,6 +188,13 @@ export function deserializeWorldHostMessages(messages: readonly SerializedWorldH
           type: "chunk_snapshot",
           snapshot: deserializePackedChunkSnapshot(message.snapshot),
         } satisfies ChunkSnapshotMessage;
+      case "chunk_light_delta":
+        return {
+          type: "chunk_light_delta",
+          chunkX: message.chunkX,
+          chunkZ: message.chunkZ,
+          light: deserializePackedChunkLightDelta(message.light),
+        } satisfies ChunkLightDeltaMessage;
     }
   });
 }

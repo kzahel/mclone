@@ -1,6 +1,6 @@
 import { cloneScheduledTickSnapshot, type ScheduledTickSnapshot } from "../../world/level/scheduled-tick";
 import { DataLayer } from "../../world/level/chunk/data-layer";
-import type { PackedChunkLight, PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import type { PackedChunkLight, PackedChunkLightDelta, PackedChunkSnapshot, PackedLightSectionUpdate } from "../../world/level/packed-chunk-snapshot";
 
 export interface SerializedPackedChunkSection {
   readonly y: number;
@@ -18,6 +18,16 @@ export interface SerializedPackedChunkLight {
   readonly sky: readonly SerializedPackedLightSection[];
   readonly block: readonly SerializedPackedLightSection[];
   readonly lightCorrect: boolean;
+}
+
+export interface SerializedPackedLightSectionUpdate {
+  readonly y: number;
+  readonly dataBase64?: string;
+}
+
+export interface SerializedPackedChunkLightDelta {
+  readonly sky?: readonly SerializedPackedLightSectionUpdate[];
+  readonly block?: readonly SerializedPackedLightSectionUpdate[];
 }
 
 export interface SerializedPackedChunkSnapshot {
@@ -107,6 +117,20 @@ export function deserializePackedChunkSnapshot(snapshot: SerializedPackedChunkSn
   return snapshot.light === undefined ? deserialized : { ...deserialized, light: deserializePackedChunkLight(snapshot.light) };
 }
 
+export function serializePackedChunkLightDelta(delta: PackedChunkLightDelta): SerializedPackedChunkLightDelta {
+  return {
+    sky: delta.sky?.map((section) => serializePackedLightSectionUpdate(section, "sky")),
+    block: delta.block?.map((section) => serializePackedLightSectionUpdate(section, "block")),
+  };
+}
+
+export function deserializePackedChunkLightDelta(delta: SerializedPackedChunkLightDelta): PackedChunkLightDelta {
+  return {
+    sky: delta.sky?.map((section) => deserializePackedLightSectionUpdate(section, "sky")),
+    block: delta.block?.map((section) => deserializePackedLightSectionUpdate(section, "block")),
+  };
+}
+
 function serializePackedChunkLight(light: PackedChunkLight): SerializedPackedChunkLight {
   return {
     sky: light.sky.map((section) => serializePackedLightSection(section, "sky")),
@@ -128,11 +152,45 @@ function serializePackedLightSection(
   };
 }
 
+function serializePackedLightSectionUpdate(
+  section: PackedLightSectionUpdate,
+  layer: "sky" | "block",
+): SerializedPackedLightSectionUpdate {
+  if (section.data === undefined) {
+    return { y: section.y };
+  }
+  if (section.data.length !== DataLayer.SIZE) {
+    throw new Error(`${layer} light section update ${section.y} had ${section.data.length} bytes instead of ${DataLayer.SIZE}`);
+  }
+  return {
+    y: section.y,
+    dataBase64: bytesToBase64(section.data),
+  };
+}
+
 function deserializePackedChunkLight(light: SerializedPackedChunkLight): PackedChunkLight {
   return {
     sky: light.sky.map((section) => deserializePackedLightSection(section, "sky")),
     block: light.block.map((section) => deserializePackedLightSection(section, "block")),
     lightCorrect: light.lightCorrect,
+  };
+}
+
+function deserializePackedLightSectionUpdate(
+  section: SerializedPackedLightSectionUpdate,
+  layer: "sky" | "block",
+): PackedLightSectionUpdate {
+  if (section.dataBase64 === undefined) {
+    return { y: section.y };
+  }
+
+  const data = base64ToBytes(section.dataBase64);
+  if (data.length !== DataLayer.SIZE) {
+    throw new Error(`${layer} light section update ${section.y} had ${data.length} bytes instead of ${DataLayer.SIZE}`);
+  }
+  return {
+    y: section.y,
+    data,
   };
 }
 

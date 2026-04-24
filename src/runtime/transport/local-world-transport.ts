@@ -4,6 +4,7 @@ import type { WorldHost } from "../protocol/world-host";
 import {
   type ClientPlayerState,
   type ClientSessionState,
+  type ChunkLightDeltaMessage,
   type ChunkSnapshotMessage,
   type ChunkUnloadMessage,
   type OpenWorldRequest,
@@ -26,7 +27,7 @@ export interface WorldTransport {
   supportsChunkViewDeduplication?(): boolean;
 }
 
-export type RenderWorldUpdateMessage = ChunkSnapshotMessage | ChunkUnloadMessage;
+export type RenderWorldUpdateMessage = ChunkSnapshotMessage | ChunkLightDeltaMessage | ChunkUnloadMessage;
 
 export interface RenderWorldChunkUpdateResult {
   readonly chunkChanged: boolean;
@@ -196,6 +197,15 @@ export class TransportWorldClient implements WorldClient {
           if (this.chunkUpdateSink === undefined || this.mirrorChunkUpdatesToLevel) {
             this.getLevel().applyPackedChunkSnapshot(message.snapshot);
             chunkChanged = true;
+          }
+          messageChanged = true;
+          break;
+        case "chunk_light_delta":
+          if (this.chunkUpdateSink !== undefined) {
+            pendingChunkUpdates.push(message);
+          }
+          if (this.chunkUpdateSink === undefined || this.mirrorChunkUpdatesToLevel) {
+            chunkChanged = this.getLevel().applyChunkLightDelta(message) || chunkChanged;
           }
           messageChanged = true;
           break;

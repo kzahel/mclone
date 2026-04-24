@@ -259,6 +259,7 @@ function expectWorldOpened(messages: readonly WorldHostMessage[]): WorldOpenedMe
       case "world_error":
         throw new Error(message.message);
       case "chunk_snapshot":
+      case "chunk_light_delta":
       case "chunk_unload":
         break;
     }
@@ -282,6 +283,8 @@ function summarizeChunkViewMessages(
     switch (message.type) {
       case "chunk_snapshot":
         snapshotCount++;
+        break;
+      case "chunk_light_delta":
         break;
       case "chunk_unload":
         unloadCount++;

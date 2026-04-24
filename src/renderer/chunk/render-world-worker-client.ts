@@ -18,6 +18,21 @@ import {
 
 const MAX_RENDER_WORLD_INGEST_TRANSFERABLES = 256;
 
+function countRenderWorldUpdateTransferables(message: RenderWorldUpdateMessage): number {
+  if (message.type === "chunk_snapshot") {
+    return (message.snapshot.sections.length * 2)
+      + (message.snapshot.light?.sky.length ?? 0)
+      + (message.snapshot.light?.block.length ?? 0);
+  }
+
+  if (message.type === "chunk_light_delta") {
+    return (message.light.sky?.filter((section) => section.data !== undefined).length ?? 0)
+      + (message.light.block?.filter((section) => section.data !== undefined).length ?? 0);
+  }
+
+  return 0;
+}
+
 export interface RenderWorldWorkerRequestEnvelope {
   readonly requestId: number;
   readonly message: RenderWorldRequest;
@@ -280,7 +295,7 @@ export class RenderWorldWorkerUpdateSink implements RenderWorldUpdateSink {
     };
 
     for (const message of messages) {
-      const messageTransferCount = message.type === "chunk_snapshot" ? message.snapshot.sections.length * 2 : 0;
+      const messageTransferCount = countRenderWorldUpdateTransferables(message);
       if (batch.length > 0 && transferCount + messageTransferCount > MAX_RENDER_WORLD_INGEST_TRANSFERABLES) {
         await flushBatch();
       }

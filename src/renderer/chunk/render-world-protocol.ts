@@ -1,5 +1,8 @@
-import type { ChunkSnapshotMessage, ChunkUnloadMessage } from "../../runtime/protocol/world-messages";
-import { collectPackedChunkSnapshotTransferables } from "../../world/level/packed-chunk-snapshot";
+import type { ChunkLightDeltaMessage, ChunkSnapshotMessage, ChunkUnloadMessage } from "../../runtime/protocol/world-messages";
+import {
+  collectPackedChunkLightDeltaTransferables,
+  collectPackedChunkSnapshotTransferables,
+} from "../../world/level/packed-chunk-snapshot";
 import { collectSectionMeshTransferables, type SectionMeshResult } from "./chunk-mesh-protocol";
 
 export interface RenderWorldSectionOrigin {
@@ -24,7 +27,7 @@ export interface RenderWorldStats {
   readonly pendingMeshBuildCount?: number;
 }
 
-export type RenderWorldUpdateMessage = ChunkSnapshotMessage | ChunkUnloadMessage;
+export type RenderWorldUpdateMessage = ChunkSnapshotMessage | ChunkLightDeltaMessage | ChunkUnloadMessage;
 
 export interface InitializeRenderWorldRequest {
   readonly type: "initialize_render_world";
@@ -107,6 +110,8 @@ export function collectRenderWorldRequestTransferables(message: RenderWorldReque
   for (const update of message.messages) {
     if (update.type === "chunk_snapshot") {
       transferables.push(...collectPackedChunkSnapshotTransferables(update.snapshot));
+    } else if (update.type === "chunk_light_delta") {
+      transferables.push(...collectPackedChunkLightDeltaTransferables(update.light));
     }
   }
   return transferables;

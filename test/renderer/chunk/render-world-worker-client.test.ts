@@ -16,6 +16,7 @@ import type {
   RenderWorldSectionOrigin,
 } from "../../../src/renderer/chunk/render-world-protocol";
 import type { PackedChunkSnapshot } from "../../../src/world/level/packed-chunk-snapshot";
+import { DataLayer } from "../../../src/world/level/chunk/data-layer";
 
 class TestMessageEndpoint<TOutgoing, TIncoming> {
   private peer?: TestMessageEndpoint<TIncoming, TOutgoing>;
@@ -93,8 +94,8 @@ function createEndpointPair(): {
   };
 }
 
-function createPackedChunkSnapshot(chunkX = 2, sectionCount = 1): PackedChunkSnapshot {
-  return {
+function createPackedChunkSnapshot(chunkX = 2, sectionCount = 1, includeLight = false): PackedChunkSnapshot {
+  const snapshot: PackedChunkSnapshot = {
     chunkX,
     chunkZ: -3,
     biomes: [1, 2, 3],
@@ -106,6 +107,18 @@ function createPackedChunkSnapshot(chunkX = 2, sectionCount = 1): PackedChunkSna
     })),
     blockTicks: [],
     liquidTicks: [],
+  };
+  if (!includeLight) {
+    return snapshot;
+  }
+
+  return {
+    ...snapshot,
+    light: {
+      sky: [{ y: 0, data: new Uint8Array(DataLayer.SIZE).fill(0xFF) }],
+      block: [{ y: 0, data: new Uint8Array(DataLayer.SIZE) }],
+      lightCorrect: true,
+    },
   };
 }
 
@@ -210,6 +223,76 @@ describe("RenderWorld worker client", () => {
       snapshot.sections[0]!.paletteStateIds.buffer,
       snapshot.sections[0]!.packedBlockIndices.buffer,
     ]);
+  });
+
+  test("transfers packed light buffers with render-world update ingests", async () => {
+    const { clientEndpoint, hostEndpoint, rawClientEndpoint } = createEndpointPair();
+    const snapshot = createPackedChunkSnapshot(2, 1, true);
+
+    connectRenderWorldWorkerSession(hostEndpoint, async (message): Promise<RenderWorldResponse> => {
+      expect(message).toEqual({
+        type: "ingest_render_world_updates",
+        messages: [{ type: "chunk_snapshot", snapshot }],
+      });
+      return {
+        type: "render_world_dirty_sections",
+        dirtySections: [sectionOrigin(32, 0, -48)],
+        stats: { loadedChunkCount: 1 },
+      };
+    });
+
+    const client = new RenderWorldWorkerClient(clientEndpoint);
+    await expect(client.ingestUpdates({
+      type: "ingest_render_world_updates",
+      messages: [{ type: "chunk_snapshot", snapshot }],
+    })).resolves.toMatchObject({
+      type: "render_world_dirty_sections",
+      stats: { loadedChunkCount: 1 },
+    });
+
+    expect(rawClientEndpoint.getTransfers()[0]).toEqual([
+      snapshot.sections[0]!.paletteStateIds.buffer,
+      snapshot.sections[0]!.packedBlockIndices.buffer,
+      snapshot.light!.sky[0]!.data.buffer,
+      snapshot.light!.block[0]!.data.buffer,
+    ]);
+  });
+
+  test("transfers light delta buffers with render-world update ingests", async () => {
+    const { clientEndpoint, hostEndpoint, rawClientEndpoint } = createEndpointPair();
+    const sky = new Uint8Array(DataLayer.SIZE).fill(0xFF);
+    const delta = {
+      type: "chunk_light_delta",
+      chunkX: 2,
+      chunkZ: -3,
+      light: {
+        sky: [{ y: 5, data: sky }],
+        block: [{ y: 5 }],
+      },
+    } as const;
+
+    connectRenderWorldWorkerSession(hostEndpoint, async (message): Promise<RenderWorldResponse> => {
+      expect(message).toEqual({
+        type: "ingest_render_world_updates",
+        messages: [delta],
+      });
+      return {
+        type: "render_world_dirty_sections",
+        dirtySections: [sectionOrigin(32, 80, -48)],
+        stats: { loadedChunkCount: 1 },
+      };
+    });
+
+    const client = new RenderWorldWorkerClient(clientEndpoint);
+    await expect(client.ingestUpdates({
+      type: "ingest_render_world_updates",
+      messages: [delta],
+    })).resolves.toMatchObject({
+      type: "render_world_dirty_sections",
+      stats: { loadedChunkCount: 1 },
+    });
+
+    expect(rawClientEndpoint.getTransfers()[0]).toEqual([sky.buffer]);
   });
 
   test("adapts world chunk updates into render-world worker ingest requests", async () => {

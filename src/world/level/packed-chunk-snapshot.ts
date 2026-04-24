@@ -22,6 +22,16 @@ export interface PackedChunkLight {
   readonly lightCorrect: boolean;
 }
 
+export interface PackedLightSectionUpdate {
+  readonly y: number;
+  readonly data?: Uint8Array;
+}
+
+export interface PackedChunkLightDelta {
+  readonly sky?: readonly PackedLightSectionUpdate[];
+  readonly block?: readonly PackedLightSectionUpdate[];
+}
+
 export interface PackedChunkSection {
   readonly y: number;
   readonly paletteStateIds: Uint32Array;
@@ -64,6 +74,20 @@ export function clonePackedChunkLight(light: PackedChunkLight): PackedChunkLight
   };
 }
 
+export function clonePackedLightSectionUpdate(section: PackedLightSectionUpdate): PackedLightSectionUpdate {
+  validatePackedLightSectionUpdate(section);
+  return section.data === undefined
+    ? { y: section.y }
+    : { y: section.y, data: new Uint8Array(section.data) };
+}
+
+export function clonePackedChunkLightDelta(light: PackedChunkLightDelta): PackedChunkLightDelta {
+  return {
+    sky: light.sky?.map(clonePackedLightSectionUpdate),
+    block: light.block?.map(clonePackedLightSectionUpdate),
+  };
+}
+
 export function clonePackedChunkSnapshot(snapshot: PackedChunkSnapshot): PackedChunkSnapshot {
   const clone: PackedChunkSnapshot = {
     chunkX: snapshot.chunkX,
@@ -74,6 +98,31 @@ export function clonePackedChunkSnapshot(snapshot: PackedChunkSnapshot): PackedC
     liquidTicks: snapshot.liquidTicks.map(cloneScheduledTickSnapshot),
   };
   return snapshot.light === undefined ? clone : { ...clone, light: clonePackedChunkLight(snapshot.light) };
+}
+
+export function applyPackedChunkLightDeltaToSnapshot(
+  snapshot: PackedChunkSnapshot,
+  delta: PackedChunkLightDelta,
+): PackedChunkSnapshot {
+  return {
+    ...snapshot,
+    light: {
+      sky: applyPackedLightSectionUpdates(snapshot.light?.sky ?? [], delta.sky ?? []),
+      block: applyPackedLightSectionUpdates(snapshot.light?.block ?? [], delta.block ?? []),
+      lightCorrect: true,
+    },
+  };
+}
+
+export function collectPackedChunkLightDeltaTransferables(light: PackedChunkLightDelta): Transferable[] {
+  const transferables: Transferable[] = [];
+  for (const section of [...(light.sky ?? []), ...(light.block ?? [])]) {
+    validatePackedLightSectionUpdate(section);
+    if (section.data !== undefined) {
+      transferables.push(section.data.buffer);
+    }
+  }
+  return transferables;
 }
 
 export function collectPackedChunkSnapshotTransferables(snapshot: PackedChunkSnapshot): Transferable[] {
@@ -88,6 +137,20 @@ export function collectPackedChunkSnapshotTransferables(snapshot: PackedChunkSna
     }
   }
   return transferables;
+}
+
+function applyPackedLightSectionUpdates(
+  existing: readonly PackedLightSection[],
+  updates: readonly PackedLightSectionUpdate[],
+): readonly PackedLightSection[] {
+  const next = new Map(existing.map((section) => [section.y, clonePackedLightSection(section)] as const));
+  for (const update of updates) {
+    next.set(update.y, update.data === undefined
+      ? { y: update.y, data: new Uint8Array(DataLayer.SIZE) }
+      : { y: update.y, data: new Uint8Array(update.data) });
+  }
+
+  return [...next.values()].sort((left, right) => left.y - right.y);
 }
 
 export function packChunkSnapshot(
@@ -192,5 +255,11 @@ export function bitsForLocalPalette(paletteSize: number): number {
 function validatePackedLightSection(section: PackedLightSection): void {
   if (section.data.length !== DataLayer.SIZE) {
     throw new Error(`Packed light section ${section.y} had ${section.data.length} bytes instead of ${DataLayer.SIZE}`);
+  }
+}
+
+function validatePackedLightSectionUpdate(section: PackedLightSectionUpdate): void {
+  if (section.data !== undefined && section.data.length !== DataLayer.SIZE) {
+    throw new Error(`Packed light section update ${section.y} had ${section.data.length} bytes instead of ${DataLayer.SIZE}`);
   }
 }

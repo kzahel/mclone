@@ -1,5 +1,10 @@
 import type { ClientChunkCache } from "../../world/level/client-chunk-cache";
-import { clonePackedChunkSnapshot, collectPackedChunkSnapshotTransferables } from "../../world/level/packed-chunk-snapshot";
+import {
+  clonePackedChunkLightDelta,
+  clonePackedChunkSnapshot,
+  collectPackedChunkLightDeltaTransferables,
+  collectPackedChunkSnapshotTransferables,
+} from "../../world/level/packed-chunk-snapshot";
 import type { WorldHost } from "../protocol/world-host";
 import type {
   OpenWorldRequest,
@@ -63,16 +68,28 @@ function cloneHostMessagesForTransfer(messages: readonly WorldHostMessage[]): {
 } {
   const transfer: Transferable[] = [];
   const cloned = messages.map((message) => {
-    if (message.type !== "chunk_snapshot") {
-      return message;
+    switch (message.type) {
+      case "chunk_snapshot": {
+        const snapshot = clonePackedChunkSnapshot(message.snapshot);
+        transfer.push(...collectPackedChunkSnapshotTransferables(snapshot));
+        return {
+          type: "chunk_snapshot",
+          snapshot,
+        } satisfies WorldHostMessage;
+      }
+      case "chunk_light_delta": {
+        const light = clonePackedChunkLightDelta(message.light);
+        transfer.push(...collectPackedChunkLightDeltaTransferables(light));
+        return {
+          type: "chunk_light_delta",
+          chunkX: message.chunkX,
+          chunkZ: message.chunkZ,
+          light,
+        } satisfies WorldHostMessage;
+      }
+      default:
+        return message;
     }
-
-    const snapshot = clonePackedChunkSnapshot(message.snapshot);
-    transfer.push(...collectPackedChunkSnapshotTransferables(snapshot));
-    return {
-      type: "chunk_snapshot",
-      snapshot,
-    } satisfies WorldHostMessage;
   });
 
   return { messages: cloned, transfer };

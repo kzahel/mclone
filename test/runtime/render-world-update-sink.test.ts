@@ -11,7 +11,7 @@ import type {
   WorldOpenedMessage,
 } from "../../src/runtime/protocol/world-messages";
 import type { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
-import type { PackedChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
+import type { PackedChunkLightDelta, PackedChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
 
 const OPENED: WorldOpenedMessage = {
   type: "world_opened",
@@ -60,6 +60,10 @@ const SNAPSHOT: PackedChunkSnapshot = {
   liquidTicks: [],
 };
 
+const LIGHT_DELTA: PackedChunkLightDelta = {
+  block: [{ y: 4 }],
+};
+
 class StaticWorldTransport implements WorldTransport {
   public constructor(private readonly chunkViewMessages: readonly WorldHostMessage[]) {}
 
@@ -83,14 +87,20 @@ class StaticWorldTransport implements WorldTransport {
 function createRecordingLevel(): {
   readonly level: ClientChunkCache;
   readonly snapshots: PackedChunkSnapshot[];
+  readonly lightDeltas: Array<{ readonly chunkX: number; readonly chunkZ: number; readonly light: PackedChunkLightDelta }>;
   readonly unloads: Array<{ readonly chunkX: number; readonly chunkZ: number }>;
 } {
   const snapshots: PackedChunkSnapshot[] = [];
+  const lightDeltas: Array<{ readonly chunkX: number; readonly chunkZ: number; readonly light: PackedChunkLightDelta }> = [];
   const unloads: Array<{ readonly chunkX: number; readonly chunkZ: number }> = [];
   return {
     level: {
       applyPackedChunkSnapshot(snapshot: PackedChunkSnapshot): void {
         snapshots.push(snapshot);
+      },
+      applyChunkLightDelta(delta: { readonly chunkX: number; readonly chunkZ: number; readonly light: PackedChunkLightDelta }): boolean {
+        lightDeltas.push(delta);
+        return true;
       },
       applyChunkUnload(chunkX: number, chunkZ: number): boolean {
         unloads.push({ chunkX, chunkZ });
@@ -98,6 +108,7 @@ function createRecordingLevel(): {
       },
     } as unknown as ClientChunkCache,
     snapshots,
+    lightDeltas,
     unloads,
   };
 }
@@ -127,6 +138,7 @@ describe("RenderWorld update sink", () => {
         { type: "session_state", state: SESSION_STATE },
         { type: "player_state", state: PLAYER_STATE },
         { type: "chunk_snapshot", snapshot: SNAPSHOT },
+        { type: "chunk_light_delta", chunkX: 0, chunkZ: 0, light: LIGHT_DELTA },
         { type: "chunk_unload", chunkX: 1, chunkZ: -1 },
       ]),
       () => recordingLevel.level,
@@ -147,10 +159,12 @@ describe("RenderWorld update sink", () => {
     expect(recordingSink.batches).toEqual([
       [
         { type: "chunk_snapshot", snapshot: SNAPSHOT },
+        { type: "chunk_light_delta", chunkX: 0, chunkZ: 0, light: LIGHT_DELTA },
         { type: "chunk_unload", chunkX: 1, chunkZ: -1 },
       ],
     ]);
     expect(recordingLevel.snapshots).toEqual([]);
+    expect(recordingLevel.lightDeltas).toEqual([]);
     expect(recordingLevel.unloads).toEqual([]);
   });
 
@@ -160,6 +174,7 @@ describe("RenderWorld update sink", () => {
     const client = new TransportWorldClient(
       new StaticWorldTransport([
         { type: "chunk_snapshot", snapshot: SNAPSHOT },
+        { type: "chunk_light_delta", chunkX: 0, chunkZ: 0, light: LIGHT_DELTA },
         { type: "chunk_unload", chunkX: 1, chunkZ: -1 },
       ]),
       () => recordingLevel.level,
@@ -180,10 +195,12 @@ describe("RenderWorld update sink", () => {
     expect(recordingSink.batches).toEqual([
       [
         { type: "chunk_snapshot", snapshot: SNAPSHOT },
+        { type: "chunk_light_delta", chunkX: 0, chunkZ: 0, light: LIGHT_DELTA },
         { type: "chunk_unload", chunkX: 1, chunkZ: -1 },
       ],
     ]);
     expect(recordingLevel.snapshots).toEqual([SNAPSHOT]);
+    expect(recordingLevel.lightDeltas).toEqual([{ type: "chunk_light_delta", chunkX: 0, chunkZ: 0, light: LIGHT_DELTA }]);
     expect(recordingLevel.unloads).toEqual([{ chunkX: 1, chunkZ: -1 }]);
   });
 });

@@ -1,5 +1,5 @@
 import type { WorldSaveMetadata } from "../storage/world-storage";
-import type { PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import type { PackedChunkLightDelta, PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 
 export type OpenWorldPreset = "default" | "browser_smoke";
 
@@ -94,6 +94,13 @@ export interface ChunkUnloadMessage {
   readonly chunkZ: number;
 }
 
+export interface ChunkLightDeltaMessage {
+  readonly type: "chunk_light_delta";
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly light: PackedChunkLightDelta;
+}
+
 export interface WorldErrorMessage {
   readonly type: "world_error";
   readonly message: string;
@@ -105,5 +112,6 @@ export type WorldHostMessage =
   | SessionStateMessage
   | PlayerStateMessage
   | ChunkSnapshotMessage
+  | ChunkLightDeltaMessage
   | ChunkUnloadMessage
   | WorldErrorMessage;

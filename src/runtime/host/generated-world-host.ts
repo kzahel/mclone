@@ -11,7 +11,7 @@ import {
   type ChunkLightSectionSnapshot,
   type ChunkLightSnapshot,
 } from "../../world/level/chunk-snapshot";
-import { packChunkSnapshot, unpackChunkSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import { packChunkSnapshot, unpackChunkSnapshot, type PackedChunkSnapshot, type PackedLightSectionUpdate } from "../../world/level/packed-chunk-snapshot";
 import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
 import { DataLayer } from "../../world/level/chunk/data-layer";
 import type { LightChunkGetter } from "../../world/level/chunk/light-chunk-getter";
@@ -33,6 +33,7 @@ import { ServerTickList, type TickNextTickData } from "../../world/level/server-
 import type { WorldHost } from "../protocol/world-host";
 import { drainWorldHostMessages } from "../protocol/world-message-queue";
 import type {
+  ChunkLightDeltaMessage,
   ClientPlayerState,
   ClientSessionState,
   OpenWorldPreset,
@@ -114,11 +115,23 @@ interface ChunkViewJobRecord {
   loadedFromStorage: boolean;
 }
 
+interface DirtyLightSectionRecord {
+  readonly layer: LightLayer;
+  readonly section: SectionPos;
+}
+
 class GeneratedWorldLightChunkGetter implements LightChunkGetter {
-  public constructor(private readonly level: GeneratedRenderLevel) {}
+  public constructor(
+    private readonly level: GeneratedRenderLevel,
+    private readonly onLightUpdateCallback: (layer: LightLayer, section: SectionPos) => void,
+  ) {}
 
   public getChunkForLighting(chunkX: number, chunkZ: number): BlockGetter | null {
     return this.level.getChunk(chunkX, chunkZ, false);
+  }
+
+  public onLightUpdate(layer: LightLayer, section: SectionPos): void {
+    this.onLightUpdateCallback(layer, section);
   }
 
   public getLevel(): GeneratedRenderLevel {
@@ -202,6 +215,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly publishedChunkSnapshots = new Set<string>();
   private readonly lightInitializedChunks = new Set<string>();
   private readonly lightCorrectChunks = new Set<string>();
+  private readonly dirtyLightSections = new Map<string, DirtyLightSectionRecord>();
   private readonly dirtyLiquidChunks = new Set<string>();
   private opened = false;
 
@@ -220,7 +234,11 @@ export class GeneratedWorldHost implements WorldHost {
     );
     this.lightEngine = options.lightingMode === "none"
       ? undefined
-      : new LevelLightEngine(new GeneratedWorldLightChunkGetter(this.level), true, true);
+      : new LevelLightEngine(
+        new GeneratedWorldLightChunkGetter(this.level, (layer, section) => this.markLightSectionDirty(layer, section)),
+        true,
+        true,
+      );
     this.liquidTicks = new ServerTickList<Fluid>(
       (fluid) => fluid === Fluids.EMPTY,
       () => this.gameTime,
@@ -231,7 +249,7 @@ export class GeneratedWorldHost implements WorldHost {
       level: this.level,
       airState: options.airState,
       liquidTicks: this.liquidTicks,
-      onBlockChanged: (pos) => this.markLiquidBlockChanged(pos),
+      onBlockChanged: (pos, oldState, newState) => this.markLiquidBlockChanged(pos, oldState, newState),
     });
   }
 
@@ -568,6 +586,7 @@ export class GeneratedWorldHost implements WorldHost {
         snapshot,
       });
       this.markChunkSnapshotPublished(job.chunkX, job.chunkZ);
+      this.enqueueDirtyLightDeltas();
     }
   }
 
@@ -595,13 +614,15 @@ export class GeneratedWorldHost implements WorldHost {
     const key = chunkKey(chunkX, chunkZ);
     this.publishedChunkSnapshots.add(key);
     this.dirtyLiquidChunks.delete(key);
+    this.clearDirtyLightSectionsForChunk(chunkX, chunkZ);
   }
 
-  private markLiquidBlockChanged(pos: BlockPos): void {
+  private markLiquidBlockChanged(pos: BlockPos, oldState: BlockState, newState: BlockState): void {
     this.dirtyLiquidChunks.add(chunkKey(
       SectionPos.blockToSectionCoord(pos.getX()),
       SectionPos.blockToSectionCoord(pos.getZ()),
     ));
+    this.queueBlockLightUpdate(pos, oldState, newState);
   }
 
   private tickLiquid(tick: TickNextTickData<Fluid>): void {
@@ -630,6 +651,7 @@ export class GeneratedWorldHost implements WorldHost {
     this.hydratePublishedLiquidTicks();
     this.lastWorldTickAtMs += dueTicks * tickIntervalMs;
     await this.flushDirtyLiquidChunks();
+    this.enqueueDirtyLightDeltas();
   }
 
   private hydratePublishedLiquidTicks(): void {
@@ -687,6 +709,7 @@ export class GeneratedWorldHost implements WorldHost {
   private async flushDirtyLiquidChunks(): Promise<void> {
     const dirtyKeys = [...this.dirtyLiquidChunks].sort();
     this.dirtyLiquidChunks.clear();
+    this.runPendingLightingUntilIdle();
 
     for (const key of dirtyKeys) {
       const [chunkXRaw, chunkZRaw] = key.split(",");
@@ -697,9 +720,9 @@ export class GeneratedWorldHost implements WorldHost {
         continue;
       }
 
-      this.discardChunkLighting(chunkX, chunkZ);
       const snapshot = this.buildPackedChunkSnapshot(chunk);
       await this.persistPackedChunkSnapshot(snapshot);
+      this.clearDirtyLightSectionsForChunk(chunkX, chunkZ);
       if (!this.isChunkInCurrentView(chunkX, chunkZ) || !this.publishedChunkSnapshots.has(key)) {
         continue;
       }
@@ -774,6 +797,110 @@ export class GeneratedWorldHost implements WorldHost {
     }
   }
 
+  private queueBlockLightUpdate(pos: BlockPos, oldState: BlockState, newState: BlockState): void {
+    const lightEngine = this.lightEngine;
+    if (lightEngine === undefined) {
+      return;
+    }
+
+    const section = SectionPos.fromBlockPos(pos);
+    const chunk = this.level.getChunk(section.x(), section.z(), false);
+    if (chunk !== null) {
+      const sectionMinY = SectionPos.sectionToBlockCoord(section.y());
+      lightEngine.updateSectionStatus(section, chunk.isYSpaceEmpty(sectionMinY, sectionMinY + 15));
+    }
+
+    lightEngine.checkBlock(pos);
+    const newEmission = newState.getLightEmission();
+    if (newEmission > oldState.getLightEmission()) {
+      lightEngine.onBlockEmissionIncrease(pos, newEmission);
+    }
+    this.lightCorrectChunks.delete(chunkKey(section.x(), section.z()));
+  }
+
+  private markLightSectionDirty(layer: LightLayer, section: SectionPos): void {
+    this.dirtyLightSections.set(
+      `${layer},${section.x()},${section.y()},${section.z()}`,
+      { layer, section },
+    );
+  }
+
+  private clearDirtyLightSectionsForChunk(chunkX: number, chunkZ: number): void {
+    for (const [key, record] of this.dirtyLightSections) {
+      if (record.section.x() === chunkX && record.section.z() === chunkZ) {
+        this.dirtyLightSections.delete(key);
+      }
+    }
+  }
+
+  private runPendingLightingUntilIdle(): void {
+    const lightEngine = this.lightEngine;
+    if (lightEngine !== undefined && lightEngine.hasLightWork()) {
+      this.runLightingUntilIdle(lightEngine);
+    }
+  }
+
+  private enqueueDirtyLightDeltas(): void {
+    this.pendingMessages.push(...this.drainDirtyLightDeltas());
+  }
+
+  private drainDirtyLightDeltas(): ChunkLightDeltaMessage[] {
+    const lightEngine = this.lightEngine;
+    if (lightEngine === undefined || this.dirtyLightSections.size === 0) {
+      return [];
+    }
+
+    const grouped = new Map<string, {
+      readonly chunkX: number;
+      readonly chunkZ: number;
+      readonly sky: PackedLightSectionUpdate[];
+      readonly block: PackedLightSectionUpdate[];
+    }>();
+    const dirty = [...this.dirtyLightSections.values()];
+    this.dirtyLightSections.clear();
+
+    for (const record of dirty) {
+      const chunkX = record.section.x();
+      const chunkZ = record.section.z();
+      const key = chunkKey(chunkX, chunkZ);
+      if (!this.publishedChunkSnapshots.has(key) || !this.isChunkInCurrentView(chunkX, chunkZ)) {
+        continue;
+      }
+
+      const dataLayer = lightEngine.getLayerListener(record.layer).getDataLayerData(record.section);
+      if (dataLayer === undefined) {
+        continue;
+      }
+
+      let group = grouped.get(key);
+      if (group === undefined) {
+        group = { chunkX, chunkZ, sky: [], block: [] };
+        grouped.set(key, group);
+      }
+
+      const update: PackedLightSectionUpdate = dataLayer.isEmpty()
+        ? { y: record.section.y() }
+        : { y: record.section.y(), data: this.copyDataLayerBytes(dataLayer) };
+      if (record.layer === LightLayer.SKY) {
+        group.sky.push(update);
+      } else {
+        group.block.push(update);
+      }
+    }
+
+    return [...grouped.values()]
+      .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX)
+      .map((group) => ({
+        type: "chunk_light_delta",
+        chunkX: group.chunkX,
+        chunkZ: group.chunkZ,
+        light: {
+          sky: group.sky.length === 0 ? undefined : group.sky.sort((left, right) => left.y - right.y),
+          block: group.block.length === 0 ? undefined : group.block.sort((left, right) => left.y - right.y),
+        },
+      }));
+  }
+
   private initializeChunkLighting(
     lightEngine: LevelLightEngine,
     chunk: ReturnType<GeneratedRenderLevel["getLoadedChunks"]>[number],
@@ -808,6 +935,7 @@ export class GeneratedWorldHost implements WorldHost {
     const key = chunkKey(chunkX, chunkZ);
     this.lightInitializedChunks.delete(key);
     this.lightCorrectChunks.delete(key);
+    this.clearDirtyLightSectionsForChunk(chunkX, chunkZ);
     const lightEngine = this.lightEngine;
     if (lightEngine === undefined) {
       return;

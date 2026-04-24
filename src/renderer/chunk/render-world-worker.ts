@@ -1,5 +1,6 @@
 import { BlockPos } from "../../core/block-pos";
 import { SectionPos } from "../../core/section-pos";
+import type { ChunkLightDeltaMessage } from "../../runtime/protocol/world-messages";
 import { ClientChunkCache } from "../../world/level/client-chunk-cache";
 import { Vec3 } from "../../world/phys/vec3";
 import { ChunkBufferBuilderPack } from "../chunk-buffer-builder-pack";
@@ -47,6 +48,30 @@ export function collectChunkDirtySectionOrigins(
   for (let sectionY = minSectionY; sectionY < minSectionY + sectionCount; sectionY++) {
     for (let dirtyZ = chunkZ - 1; dirtyZ <= chunkZ + 1; dirtyZ++) {
       for (let dirtyX = chunkX - 1; dirtyX <= chunkX + 1; dirtyX++) {
+        for (let dirtyY = sectionY - 1; dirtyY <= sectionY + 1; dirtyY++) {
+          const key = `${dirtyX},${dirtyY},${dirtyZ}`;
+          dirty.set(key, sectionOrigin(dirtyX, dirtyY, dirtyZ));
+        }
+      }
+    }
+  }
+
+  return [...dirty.values()];
+}
+
+export function collectLightDeltaDirtySectionOrigins(delta: ChunkLightDeltaMessage): readonly RenderWorldSectionOrigin[] {
+  const dirty = new Map<string, RenderWorldSectionOrigin>();
+  const changedSectionY = new Set<number>();
+  for (const section of delta.light.sky ?? []) {
+    changedSectionY.add(section.y);
+  }
+  for (const section of delta.light.block ?? []) {
+    changedSectionY.add(section.y);
+  }
+
+  for (const sectionY of changedSectionY) {
+    for (let dirtyZ = delta.chunkZ - 1; dirtyZ <= delta.chunkZ + 1; dirtyZ++) {
+      for (let dirtyX = delta.chunkX - 1; dirtyX <= delta.chunkX + 1; dirtyX++) {
         for (let dirtyY = sectionY - 1; dirtyY <= sectionY + 1; dirtyY++) {
           const key = `${dirtyX},${dirtyY},${dirtyZ}`;
           dirty.set(key, sectionOrigin(dirtyX, dirtyY, dirtyZ));
@@ -190,6 +215,15 @@ export function createRenderWorldWorkerHandler(
               update.snapshot.chunkZ,
             )) {
               dirtySections.set(`${dirtySection.x},${dirtySection.y},${dirtySection.z}`, dirtySection);
+            }
+            continue;
+          }
+
+          if (update.type === "chunk_light_delta") {
+            if (context.level.applyChunkLightDelta(update)) {
+              for (const dirtySection of collectLightDeltaDirtySectionOrigins(update)) {
+                dirtySections.set(`${dirtySection.x},${dirtySection.y},${dirtySection.z}`, dirtySection);
+              }
             }
             continue;
           }
