@@ -52,15 +52,23 @@ export function resolveBlockTickTarget(targetName: string): Block {
 }
 
 export function serializeFluidTickTarget(target: Fluid): string {
-  if (target.isSame(Fluids.WATER)) {
+  if (target === Fluids.WATER) {
     return "minecraft:water";
   }
 
-  if (target.isSame(Fluids.LAVA)) {
+  if (target === Fluids.FLOWING_WATER) {
+    return "minecraft:flowing_water";
+  }
+
+  if (target === Fluids.LAVA) {
     return "minecraft:lava";
   }
 
-  if (target.isSame(Fluids.EMPTY)) {
+  if (target === Fluids.FLOWING_LAVA) {
+    return "minecraft:flowing_lava";
+  }
+
+  if (target === Fluids.EMPTY) {
     return "minecraft:empty";
   }
 
@@ -71,8 +79,12 @@ export function resolveFluidTickTarget(targetName: string): Fluid {
   switch (targetName) {
     case "minecraft:water":
       return Fluids.WATER;
+    case "minecraft:flowing_water":
+      return Fluids.FLOWING_WATER;
     case "minecraft:lava":
       return Fluids.LAVA;
+    case "minecraft:flowing_lava":
+      return Fluids.FLOWING_LAVA;
     case "minecraft:empty":
       return Fluids.EMPTY;
     default:

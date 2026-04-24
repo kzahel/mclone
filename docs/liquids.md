@@ -181,11 +181,14 @@ Today the repo has pieces of the data path but not live liquid simulation:
 
 | TS source | Current role |
 |---|---|
-| `src/world/level/material/fluid.ts` | minimal source-only fluid API for rendering/features |
-| `src/world/level/material/fluid-state.ts` | minimal fluid-state wrapper |
-| `src/world/level/material/fluids.ts` | `EMPTY`, `WATER`, and `LAVA` are source-like placeholders |
-| `src/world/level/block/liquid-block.ts` | stores `level` but currently returns only the default source fluid state |
-| `src/world/level/tick-access.ts` | records scheduled tick facts but does not execute a due-tick queue |
+| `src/world/level/material/fluid.ts` | base fluid API for replacement, ticking, and legacy block-state writes |
+| `src/world/level/material/fluid-state.ts` | source/flowing/falling state wrapper |
+| `src/world/level/material/flowing-fluid.ts` | water-relevant direct port of vanilla `FlowingFluid` |
+| `src/world/level/material/water-fluid.ts` | water constants, source conversion, and legacy level mapping |
+| `src/world/level/material/fluids.ts` | exact `WATER` / `FLOWING_WATER` identities plus minimal lava compatibility |
+| `src/world/level/block/liquid-block.ts` | `level` cache plus vanilla liquid scheduling hooks |
+| `src/world/level/server-tick-list.ts` | vanilla-shaped due tick queue used by simulation tests |
+| `src/world/level/tick-access.ts` | shared scheduled tick interface |
 | `src/world/level/static-render-level.ts` | generation/render level records block/liquid ticks into chunks |
 | `src/world/level/chunk-snapshot.ts` | snapshots already carry `blockTicks` and `liquidTicks` |
 | `src/worldgen/levelgen/feature/spring-feature.ts` | places source water and records a delay-0 liquid tick |
@@ -193,7 +196,7 @@ Today the repo has pieces of the data path but not live liquid simulation:
 | `src/oracle/integration/liquid-fixture.ts` | Liquid0 bounded fixture builder, persisted `LiquidTicks` decoder, and comparison helpers |
 | `test/fixtures/liquid/water-slope-10-ticks.json` | first committed official-server dynamic water oracle |
 
-That explains the current visible hill-water gap: generation can create a source patch and record a tick, but the runtime does not yet execute the liquid queue or write non-source water levels.
+That explains the current visible hill-water gap: the simulation core can now produce non-source water levels in a controlled test level, but the authoritative runtime does not yet hydrate and execute generation-created `liquidTicks`.
 
 ## Mclone Architecture
 
@@ -287,8 +290,8 @@ Save screenshots to `/tmp` per project policy and inspect them before moving on.
 ## Implementation Sequence
 
 1. `Liquid0`: oracle foundation for dynamic liquid scenarios. **Done** for the first water-slope official-server fixture.
-2. `Liquid1`: direct water simulation foundation in TS, using Liquid0 fixtures.
-3. `Liquid2`: authoritative host integration and chunk-delta publication if Liquid1 keeps mutation test-local.
+2. `Liquid1`: direct water simulation foundation in TS, using Liquid0 fixtures. **Done** for the test-local water-slope path.
+3. `Liquid2`: authoritative host integration and chunk-delta publication.
 4. `Liquid3`: lava and waterlogged follow-through, if not included earlier.
 5. Later: interaction with block entities, entity physics, boats, particles/sounds, and visual polish.
 

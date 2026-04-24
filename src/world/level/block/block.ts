@@ -79,6 +79,10 @@ export class Block extends BlockBehaviour {
     return false;
   }
 
+  public onPlace(_state: BlockState, _level: WorldGenLevel, _pos: BlockPos, _oldState: BlockState, _movedByPiston: boolean): void {}
+
+  public neighborChanged(_state: BlockState, _level: WorldGenLevel, _pos: BlockPos, _block: Block, _neighborPos: BlockPos, _movedByPiston: boolean): void {}
+
   public getFluidState(_state: BlockState): FluidState {
     return Fluids.EMPTY.defaultFluidState();
   }

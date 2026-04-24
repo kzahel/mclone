@@ -1,8 +1,10 @@
 import type { BlockGetter } from "../block-getter";
 import { BlockPos } from "../../../core/block-pos";
+import { Direction } from "../../../core/direction";
 import { Vec3 } from "../../phys/vec3";
 import { FluidState } from "./fluid-state";
 import type { BlockState } from "../block/state/block-state";
+import type { WorldGenLevel } from "../world-gen-level";
 
 export abstract class Fluid {
   private readonly defaultFluidStateValue: FluidState;
@@ -44,11 +46,21 @@ export abstract class Fluid {
     return Vec3.ZERO;
   }
 
+  public canBeReplacedWith(_state: FluidState, _level: BlockGetter, _pos: BlockPos, _fluid: Fluid, _direction: Direction): boolean {
+    return false;
+  }
+
+  public getTickDelay(_level: WorldGenLevel): number {
+    return 0;
+  }
+
+  public tick(_level: WorldGenLevel, _pos: BlockPos, _state: FluidState): void {}
+
   public setLegacyBlock(state: BlockState): void {
     this.legacyBlockValue = state;
   }
 
-  public createLegacyBlock(): BlockState {
+  public createLegacyBlock(_state: FluidState): BlockState {
     if (this.legacyBlockValue === undefined) {
       throw new Error(`No legacy block has been registered for fluid ${this.constructor.name}`);
     }

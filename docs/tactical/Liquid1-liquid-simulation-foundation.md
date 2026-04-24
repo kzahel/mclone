@@ -1,6 +1,6 @@
 # Liquid1 - Liquid simulation foundation
 
-Sketch tactical for the first implementation slice after [`Liquid0-liquid-oracle-foundation.md`](Liquid0-liquid-oracle-foundation.md). Liquid0 now provides the `water_slope_10_ticks` official-server fixture and reusable comparison helpers; this document should be expanded before implementation starts.
+Implementation tactical for the first simulation slice after [`Liquid0-liquid-oracle-foundation.md`](Liquid0-liquid-oracle-foundation.md). Liquid0 provides the `water_slope_10_ticks` official-server fixture and reusable comparison helpers.
 
 ## Goal
 
@@ -15,6 +15,19 @@ At the end of Liquid1, a controlled TS test world should:
 - match the Liquid0 water-slope fixture for the selected tick count
 
 Whether this slice integrates with the full browser host immediately depends on scope pressure. The minimum useful end state is an authoritative simulation module with tests; the preferred end state also wires it into generated-world host ticks for local browser validation.
+
+## Implementation Status
+
+Landed implementation:
+
+- `FluidState` now carries source/flowing/falling facts and can execute its owning fluid tick.
+- `Fluids` now has exact `WATER` / `FLOWING_WATER` identities, with scheduled tick serialization preserving `minecraft:flowing_water`.
+- `LiquidBlock` ports the vanilla `level` state cache plus `onPlace`, `updateShape`, and `neighborChanged` liquid scheduling hooks.
+- `FlowingFluid` and `WaterFluid` cover the water spread path exercised by the Liquid0 water-slope oracle: new-liquid computation, side spread, source conversion, legacy level writeback, and water constants.
+- `ServerTickList` / `TickNextTickData` provide a vanilla-shaped scheduled tick queue for simulation tests: duplicate suppression by position plus exact target identity, trigger-time/priority/insertion ordering, and the vanilla per-tick cap.
+- `test/world/liquid-simulation.test.ts` includes the mutable test level, command hydration for the Liquid0 scenario, and exact comparison against `water_slope_10_ticks`.
+
+Runtime host hydration/execution is explicitly deferred to Liquid2. Liquid1 proves the simulation core and tick semantics in a controlled level first.
 
 ## Reference Source
 
@@ -36,15 +49,18 @@ Read before implementing:
 
 | TS source | Current role |
 |---|---|
-| `src/world/level/material/fluid.ts` | minimal source-only API; needs expansion |
-| `src/world/level/material/fluid-state.ts` | minimal wrapper; needs properties and tick hooks |
-| `src/world/level/material/fluids.ts` | lacks `FLOWING_WATER` and flowing state model |
-| `src/world/level/block/liquid-block.ts` | has `LEVEL` property but returns only default fluid state |
-| `src/world/level/tick-access.ts` | records ticks; no due queue or priority |
+| `src/world/level/material/fluid.ts` | base fluid API with tick, replacement, and legacy-block hooks |
+| `src/world/level/material/fluid-state.ts` | source/flowing/falling state wrapper and tick entry point |
+| `src/world/level/material/flowing-fluid.ts` | direct water-relevant `FlowingFluid` port |
+| `src/world/level/material/water-fluid.ts` | water constants, source/flowing identity, and legacy block-state mapping |
+| `src/world/level/material/fluids.ts` | `WATER` / `FLOWING_WATER` identities plus minimal lava compatibility |
+| `src/world/level/block/liquid-block.ts` | `LEVEL` cache and liquid scheduling hooks |
+| `src/world/level/server-tick-list.ts` | vanilla-shaped due tick queue for simulation tests |
+| `src/world/level/tick-access.ts` | shared scheduling interface |
 | `src/world/level/static-render-level.ts` | records generated liquid ticks to chunks |
 | `src/world/level/chunk/level-chunk.ts` | stores block states and recorded scheduled ticks |
 | `src/world/level/chunk-snapshot.ts` | carries scheduled tick records |
-| `src/runtime/` | authoritative host path that should eventually own live ticks |
+| `src/runtime/` | authoritative host path that Liquid2 should wire to live ticks |
 
 ## Scope
 
@@ -58,8 +74,8 @@ Read before implementing:
 | 6 | Tick queue | implement a vanilla-shaped scheduled liquid tick queue for simulation tests |
 | 7 | Test level | add a small mutable level implementing the block/fluid/tick APIs needed by `FlowingFluid` |
 | 8 | Oracle comparison | run TS scenarios against Liquid0 fixtures |
-| 9 | Runtime hook | if feasible, hydrate generation-created `liquidTicks` into the host queue and execute due ticks in authoritative host ticks |
-| 10 | Visual probe | if runtime hook lands, capture a hill/spring water-flow screenshot |
+| 9 | Runtime hook | deferred to Liquid2: hydrate generation-created `liquidTicks` into the host queue and execute due ticks in authoritative host ticks |
+| 10 | Visual probe | deferred to Liquid2 with the host/runtime hook |
 
 ## Explicit Non-Goals
 
@@ -157,7 +173,7 @@ Start with `water_slope_10_ticks`. Add source regeneration and falling-water fix
 
 ### Browser Visual
 
-Only if runtime integration lands:
+Deferred to Liquid2 with runtime integration:
 
 ```bash
 pnpm probe:browser -- test/browser/probes/<small-liquid-probe>.probe.ts

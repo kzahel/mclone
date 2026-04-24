@@ -1,11 +1,17 @@
 import { BlockPos } from "../../../core/block-pos";
+import { Direction } from "../../../core/direction";
 import type { BlockGetter } from "../block-getter";
 import type { Fluid } from "./fluid";
 import { Vec3 } from "../../phys/vec3";
 import type { BlockState } from "../block/state/block-state";
+import type { WorldGenLevel } from "../world-gen-level";
 
 export class FluidState {
-  public constructor(private readonly owner: Fluid) {}
+  public constructor(
+    private readonly owner: Fluid,
+    private readonly amountValue: number | undefined = undefined,
+    private readonly fallingValue = false,
+  ) {}
 
   public getType(): Fluid {
     return this.owner;
@@ -31,6 +37,30 @@ export class FluidState {
     return this.owner.getAmount(this);
   }
 
+  public getAmountValue(): number | undefined {
+    return this.amountValue;
+  }
+
+  public getFallingValue(): boolean {
+    return this.fallingValue;
+  }
+
+  public isFalling(): boolean {
+    return this.fallingValue;
+  }
+
+  public canBeReplacedWith(level: BlockGetter, pos: BlockPos, fluid: Fluid, direction: Direction): boolean {
+    return this.owner.canBeReplacedWith(this, level, pos, fluid, direction);
+  }
+
+  public tick(level: WorldGenLevel, pos: BlockPos): void {
+    this.owner.tick(level, pos, this);
+  }
+
+  public equals(other: FluidState): boolean {
+    return this.owner === other.owner && this.getAmount() === other.getAmount() && this.fallingValue === other.fallingValue;
+  }
+
   public shouldRenderBackwardUpFace(level: BlockGetter, pos: BlockPos): boolean {
     for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
       for (let offsetX = -1; offsetX <= 1; offsetX++) {
@@ -50,6 +80,6 @@ export class FluidState {
   }
 
   public createLegacyBlock(): BlockState {
-    return this.owner.createLegacyBlock();
+    return this.owner.createLegacyBlock(this);
   }
 }

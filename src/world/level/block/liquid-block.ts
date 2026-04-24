@@ -1,26 +1,34 @@
 import { Direction } from "../../../core/direction";
+import { BlockPos } from "../../../core/block-pos";
 import type { BlockState } from "./state/block-state";
 import { StateDefinition } from "./state/state-definition";
 import { BlockStateProperties } from "./state/properties/block-state-properties";
 import { Block } from "./block";
 import { RenderShape } from "./render-shape";
 import { BlockBehaviour } from "./state/block-behaviour";
-import type { Fluid } from "../material/fluid";
 import type { FluidState } from "../material/fluid-state";
+import type { FlowingFluid } from "../material/flowing-fluid";
+import type { WorldGenLevel } from "../world-gen-level";
 
 export class LiquidBlock extends Block {
   public static readonly LEVEL = BlockStateProperties.LEVEL;
+  private readonly stateCache: FluidState[];
 
   public constructor(
-    protected readonly fluid: Fluid,
+    protected readonly fluid: FlowingFluid,
     properties: BlockBehaviour.Properties,
   ) {
     super(properties);
+    this.stateCache = [this.fluid.getSourceState(false)];
+    for (let level = 1; level < 8; level++) {
+      this.stateCache.push(this.fluid.getFlowingState(8 - level, false));
+    }
+    this.stateCache.push(this.fluid.getFlowingState(8, true));
     this.registerDefaultState(this.getStateDefinition().any().setValue(LiquidBlock.LEVEL, 0));
   }
 
-  public override getFluidState(_state: BlockState): FluidState {
-    return this.fluid.defaultFluidState();
+  public override getFluidState(state: BlockState): FluidState {
+    return this.stateCache[Math.min(state.getValue(LiquidBlock.LEVEL), 8)]!;
   }
 
   public override skipRendering(_state: BlockState, adjacentState: BlockState, _direction: Direction): boolean {
@@ -29,6 +37,29 @@ export class LiquidBlock extends Block {
 
   public override getRenderShape(_state: BlockState): RenderShape {
     return RenderShape.INVISIBLE;
+  }
+
+  public override onPlace(state: BlockState, level: WorldGenLevel, pos: BlockPos, _oldState: BlockState, _movedByPiston: boolean): void {
+    level.getLiquidTicks().scheduleTick(pos, state.getFluidState().getType(), this.fluid.getTickDelay(level));
+  }
+
+  public override updateShape(
+    state: BlockState,
+    _direction: Direction,
+    neighborState: BlockState,
+    level: WorldGenLevel,
+    pos: BlockPos,
+    _neighborPos: BlockPos,
+  ): BlockState {
+    if (state.getFluidState().isSource() || neighborState.getFluidState().isSource()) {
+      level.getLiquidTicks().scheduleTick(pos, state.getFluidState().getType(), this.fluid.getTickDelay(level));
+    }
+
+    return super.updateShape(state, _direction, neighborState, level, pos, _neighborPos);
+  }
+
+  public override neighborChanged(state: BlockState, level: WorldGenLevel, pos: BlockPos, _block: Block, _neighborPos: BlockPos, _movedByPiston: boolean): void {
+    level.getLiquidTicks().scheduleTick(pos, state.getFluidState().getType(), this.fluid.getTickDelay(level));
   }
 
   protected override createBlockStateDefinition(builder: StateDefinition.Builder<Block, BlockState>): void {
