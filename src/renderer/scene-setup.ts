@@ -1,6 +1,6 @@
 import { ResourceLocation } from "../core/resource-location";
 import { SectionPos } from "../core/section-pos";
-import type { OpenWorldPreset, WorldProgressMessage } from "../runtime/protocol/world-messages";
+import type { OpenWorldPreset, WorldEngineConfig, WorldProgressMessage } from "../runtime/protocol/world-messages";
 import type { WorldClient } from "../runtime/protocol/world-client";
 import type { WorldSaveMetadata } from "../runtime/storage/world-storage";
 import { RemoteWorldClient, RemoteWorldTransport } from "../runtime/transport/remote-world-transport";
@@ -60,6 +60,7 @@ export interface SceneInitOptions {
   readonly worldTransport?: "worker" | "remote";
   readonly remoteWorldHostUrl?: string;
   readonly preset?: OpenWorldPreset;
+  readonly engineConfig?: WorldEngineConfig;
   readonly skyColor?: Vec3;
   readonly clearColorScale?: number;
   readonly onProgress?: LoadingProgressSink;
@@ -148,8 +149,20 @@ function sleep(ms: number): Promise<void> {
 }
 
 function worldProgressFraction(progress: WorldProgressMessage): number {
-  const phaseFraction = progress.total > 0 ? progress.current / progress.total : 0;
+  const phaseFraction = progress.total > 0 ? progress.current / progress.total : 1;
   const clampedPhaseFraction = Math.max(0, Math.min(1, phaseFraction));
+  const loadingPhases = [
+    "Checking saved chunks",
+    "Generating missing chunks",
+    "Decorating new chunks",
+    "Computing light",
+    "Publishing chunks",
+  ];
+  const phaseIndex = loadingPhases.indexOf(progress.stage);
+  if (phaseIndex >= 0) {
+    return (phaseIndex + clampedPhaseFraction) / loadingPhases.length;
+  }
+
   switch (progress.stage) {
     case "Generating terrain chunks":
       return clampedPhaseFraction / 3;
@@ -165,6 +178,7 @@ function worldProgressFraction(progress: WorldProgressMessage): number {
 function reportWorldProgress(sink: LoadingProgressSink | undefined, progress: WorldProgressMessage): void {
   sink?.({
     stage: progress.stage,
+    detail: progress.detail,
     current: progress.current,
     total: progress.total,
     fraction: 0.92 + (worldProgressFraction(progress) * 0.06),
@@ -493,6 +507,7 @@ export async function initializeRendererScene(
     type: "open_world",
     seed: options.seed,
     preset: options.preset ?? "browser_smoke",
+    config: options.engineConfig,
   });
   const compatibilityLevel = worldClient.getLevel();
 

@@ -25,16 +25,18 @@ import {
   type WorldHttpErrorResponse,
 } from "../protocol/world-http-protocol";
 import { drainWorldHostMessages } from "../protocol/world-message-queue";
-import type {
-  ClientSessionState,
-  ClientPlayerState,
-  OpenWorldRequest,
-  PollWorldUpdatesRequest,
-  SetPlayerInputRequest,
-  SessionChunkViewState,
-  SetChunkViewRequest,
-  WorldHostMessage,
-  WorldOpenedMessage,
+import {
+  isDefaultWorldEngineConfig,
+  normalizeWorldEngineConfig,
+  type ClientSessionState,
+  type ClientPlayerState,
+  type OpenWorldRequest,
+  type PollWorldUpdatesRequest,
+  type SetPlayerInputRequest,
+  type SessionChunkViewState,
+  type SetChunkViewRequest,
+  type WorldHostMessage,
+  type WorldOpenedMessage,
 } from "../protocol/world-messages";
 import {
   anchorPlayerStateToChunkView,
@@ -160,6 +162,21 @@ function isSameChunkView(left: SetChunkViewRequest | undefined, right: SetChunkV
   return left.centerChunkX === right.centerChunkX
     && left.centerChunkZ === right.centerChunkZ
     && left.radius === right.radius;
+}
+
+function isSameOpenWorldRequest(left: OpenWorldRequest, right: OpenWorldRequest): boolean {
+  if (left.seed !== right.seed || left.preset !== right.preset) {
+    return false;
+  }
+
+  if (isDefaultWorldEngineConfig(left.config) && isDefaultWorldEngineConfig(right.config)) {
+    return true;
+  }
+
+  const leftConfig = normalizeWorldEngineConfig(left.config);
+  const rightConfig = normalizeWorldEngineConfig(right.config);
+  return leftConfig.lightingMode === rightConfig.lightingMode
+    && leftConfig.liquidSimulationMode === rightConfig.liquidSimulationMode;
 }
 
 function createSessionChunkViewState(chunkView: SetChunkViewRequest | undefined): SessionChunkViewState | undefined {
@@ -651,7 +668,7 @@ export class GeneratedWorldRemoteService {
       throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
     }
 
-    if (session.openWorldRequest.seed !== request.seed || session.openWorldRequest.preset !== request.preset) {
+    if (!isSameOpenWorldRequest(session.openWorldRequest, request)) {
       throw new GeneratedWorldRemoteServiceError(
         `resume_session request did not match the original world request for session ${sessionId}`,
         "world_request_mismatch",
@@ -686,7 +703,7 @@ export class GeneratedWorldRemoteService {
   }
 
   private async getOrCreateWorld(request: OpenWorldRequest): Promise<SharedWorldRecord> {
-    const saveId = createGeneratedWorldSaveId(request.seed, request.preset);
+    const saveId = createGeneratedWorldSaveId(request.seed, request.preset, request.config);
     const existing = this.worlds.get(saveId);
     if (existing !== undefined) {
       return existing;

@@ -23,6 +23,7 @@ test("debug free-cam captures warm-ocean coral parity in the worker-generated wo
   await page.goto(
     `/debug.html?${new URLSearchParams({
       worldTransport: "worker",
+      clearWorldStorage: "1",
       preserveInitialCamera: "1",
       cameraX: "4056.5",
       cameraY: "96",

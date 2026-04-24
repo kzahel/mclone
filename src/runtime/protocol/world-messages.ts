@@ -2,11 +2,36 @@ import type { WorldSaveMetadata } from "../storage/world-storage";
 import type { PackedChunkLightDelta, PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 
 export type OpenWorldPreset = "default" | "browser_smoke";
+export type WorldEngineLightingMode = "vanilla17" | "none";
+export type WorldEngineLiquidSimulationMode = "vanilla17" | "none";
+
+export interface WorldEngineConfig {
+  readonly lightingMode?: WorldEngineLightingMode;
+  readonly liquidSimulationMode?: WorldEngineLiquidSimulationMode;
+}
+
+export interface NormalizedWorldEngineConfig {
+  readonly lightingMode: WorldEngineLightingMode;
+  readonly liquidSimulationMode: WorldEngineLiquidSimulationMode;
+}
+
+export function normalizeWorldEngineConfig(config: WorldEngineConfig | undefined): NormalizedWorldEngineConfig {
+  return {
+    lightingMode: config?.lightingMode === "none" ? "none" : "vanilla17",
+    liquidSimulationMode: config?.liquidSimulationMode === "none" ? "none" : "vanilla17",
+  };
+}
+
+export function isDefaultWorldEngineConfig(config: WorldEngineConfig | undefined): boolean {
+  const normalized = normalizeWorldEngineConfig(config);
+  return normalized.lightingMode === "vanilla17" && normalized.liquidSimulationMode === "vanilla17";
+}
 
 export interface OpenWorldRequest {
   readonly type: "open_world";
   readonly seed: bigint;
   readonly preset: OpenWorldPreset;
+  readonly config?: WorldEngineConfig;
 }
 
 export interface SetChunkViewRequest {
@@ -104,6 +129,7 @@ export interface ChunkLightDeltaMessage {
 export interface WorldProgressMessage {
   readonly type: "world_progress";
   readonly stage: string;
+  readonly detail?: string;
   readonly current: number;
   readonly total: number;
 }

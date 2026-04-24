@@ -227,9 +227,9 @@ For each chunk job:
 3. If storage misses, the host generates terrain.
 4. Newly generated chunks are decorated.
 5. The host computes lighting for currently loaded chunks.
-6. The host builds a packed snapshot, saves it, publishes it, and may later publish light deltas.
+6. The host builds a packed snapshot, publishes it, queues persistence as a storage side effect, and may later publish light deltas.
 
-The important point: current code does check storage before generation, but the progress stage calls that phase "Generating terrain chunks" even when most work is actually storage lookup and snapshot hydration.
+The important point: current code checks storage before generation and now reports that as a distinct `Checking saved chunks` phase with stored/existing/missing counts. Missing chunks then move through `Generating missing chunks`, `Decorating new chunks`, `Computing light`, and `Publishing chunks`.
 
 ### Current Snapshot Facts
 
@@ -255,15 +255,14 @@ It does not contain:
 - per-chunk dirty/unsaved state
 - explicit content/light algorithm version
 
-Hydration currently restores blocks and scheduled ticks. It ignores persisted biomes and persisted light; biomes are regenerated from the current biome source when snapshots are rebuilt.
+Hydration currently restores blocks and scheduled ticks. It ignores persisted biomes; biomes are regenerated from the current biome source when snapshots are rebuilt. The storage write path omits packed light, so persisted chunk records no longer carry light bytes.
 
 ### Current Light Behavior
 
-The host writes light into packed snapshots, but stored light is not hydrated back into the host light engine. On reload, stored chunks are hydrated as blocks, then `buildPackedChunkSnapshot(...)` calls lighting setup and recomputes light from current block state.
+The host writes light into packed snapshots sent to clients, but stored light is not hydrated back into the host light engine. The storage write path strips light from chunk records. On reload, stored chunks are hydrated as blocks, then `buildPackedChunkSnapshot(...)` calls lighting setup and recomputes light from current block state.
 
-That means persisted light bytes are currently not authoritative for host reload. A lighting algorithm fix should take effect after reload even if IndexedDB contains old light bytes. The risk is still real in two ways:
+That means persisted light is currently not authoritative for host reload. A lighting algorithm fix should take effect after reload even if an older IndexedDB/file record used to contain light bytes. The remaining future risk is narrower:
 
-- The data model suggests persisted light is trusted when it is not.
 - If we later hydrate stored light without a version/trust protocol, old IndexedDB/file records can become stale immediately.
 
 ### Current Save Policy
@@ -271,7 +270,7 @@ That means persisted light bytes are currently not authoritative for host reload
 `mclone` currently has eager snapshot persistence:
 
 - The synchronous path saves all loaded chunks after a changed view.
-- The cooperative path saves each chunk snapshot before publishing it.
+- The cooperative path publishes each chunk snapshot, then queues persistence as a storage side effect.
 - Dirty liquid chunks are saved when flushed.
 - Eviction only records adapter-local `lastEvictedAtMs`; it does not perform a save because the current policy assumes chunks were already saved.
 
@@ -291,9 +290,9 @@ Current test behavior is mixed:
 
 - Unit tests use `MemoryWorldStorage`.
 - Browser smoke/integration tests mostly use the remote Node host with a per-test temporary file save root.
-- Worker-backed browser probes use IndexedDB through the browser worker, but there is no explicit `indexedDB.deleteDatabase("mclone-world-storage")` test fixture.
+- Worker-backed browser probes use IndexedDB through the browser worker and pass `clearWorldStorage=1` when they need deterministic empty storage.
 
-Fresh Playwright contexts reduce leakage, but tests do not currently assert or force IndexedDB cleanup. Dev browser refreshes reuse the real browser profile and will reuse `mclone-world-storage`.
+Fresh Playwright contexts reduce leakage, but the explicit query is the deterministic clean-start path. Dev browser refreshes reuse the real browser profile and will reuse `mclone-world-storage` unless `clearWorldStorage=1` is present.
 
 ## Delta Matrix
 
@@ -303,9 +302,9 @@ Fresh Playwright contexts reduce leakage, but tests do not currently assert or f
 | Physical storage | Region/NBT plus `DataVersion` and DataFixer | Engine-native snapshots in IndexedDB or JSON files | Intentional platform divergence | Keep adapter boundary |
 | Chunk status | Explicit persisted `ChunkStatus`; resume partial generation | No persisted status; chunks are absent, generated terrain, decorated, or published | Future parity work can become harder if status does not fit later | Defer, but keep docs and APIs status-friendly |
 | Load before generate | Disk load at `EMPTY`, then generate missing statuses | Storage lookup before terrain generation | Match in principle | Keep |
-| Generated clean persistence | Dirty/save policy; not every publish writes | Eager save of every published chunk | Excess IO, confusing "save" semantics, stale generated cache after content changes | Revisit soon |
+| Generated clean persistence | Dirty/save policy; not every publish writes | Eager cache save of published chunks; cooperative publish no longer blocks on the write | Excess IO, confusing "save" semantics, stale generated cache after content changes | Revisit soon |
 | Dirty tracking | `isUnsaved` gates save | No general dirty flag | Mutations and generated cache are conflated | Immediate design target |
-| Light persistence | Saved and hydrated only through `isLightOn`/light-correct trust path | Saved but ignored on host reload | Confusing and future stale-data trap | Fix soon |
+| Light persistence | Saved and hydrated only through `isLightOn`/light-correct trust path | Sent to clients but omitted from storage; recomputed on reload | Cannot benefit from trusted saved light yet | Keep until trusted-light hydration exists |
 | Tick persistence | Proto/full tick lists preserved; unpacked into server tick lists when accessible | Block/liquid tick snapshots restored into chunks; liquid host hydrates published chunk ticks | Reasonable partial match for liquid work | Continue parity work |
 | Heightmaps | Stored and primed if missing | Not stored in snapshots | Current systems recompute or avoid persisted heightmaps | Defer until needed |
 | Structures | Stored starts/references | Not persisted | Structures are post-MVP | Defer |
@@ -313,8 +312,8 @@ Fresh Playwright contexts reduce leakage, but tests do not currently assert or f
 | Postprocessing/carving masks | Persisted for proto chunks | Not modeled in storage | Relevant to full vanilla status pipeline | Defer |
 | Save on unload/close | Dirty chunks saved before unload/flush/close | Chunks are expected to have been saved before publish; close is a no-op | Unsafe if we move to lazy dirty policy | Fix with dirty tracking |
 | Client chunk visibility | Server filters packets per player interest | Remote service filters snapshots per session | Close enough for current multiplayer | Keep until ticket model grows |
-| Progress UI | Status listener reports status changes | UI labels storage lookup as generation and skips hit/miss counts | User confusion | Immediate fix |
-| Test storage isolation | N/A | No explicit IndexedDB cleanup for worker probes/dev profile | Stale local data can mask or confuse changes | Immediate test/dev hygiene |
+| Progress UI | Status listener reports status changes | UI reports saved-chunk lookup, missing generation, decoration, lighting, and publish phases | Coarse lighting progress only | Keep improving with future status work |
+| Test storage isolation | N/A | Worker probes can request `clearWorldStorage=1`; dev profile still persists unless requested | Manual dev refreshes can still intentionally reuse local saves | Keep explicit reset path |
 
 ## Recommended Target Shape
 
@@ -379,7 +378,7 @@ The current halfway state should not remain long-term.
 
 ## Immediate Work
 
-These are small enough and high enough leverage to do before deeper persistence work.
+These were small enough and high enough leverage to do before deeper persistence work. D7 landed items 1, 2, 3, and 5; item 4 remains a design target for a later dirty/cache policy slice.
 
 1. Rename loading progress stages and include real counts.
 

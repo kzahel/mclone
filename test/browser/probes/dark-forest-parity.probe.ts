@@ -23,6 +23,7 @@ test("debug free-cam captures dark-forest vegetation in the worker-generated wor
   await page.goto(
     `/debug.html?${new URLSearchParams({
       worldTransport: "worker",
+      clearWorldStorage: "1",
       cameraX: "584.5",
       cameraY: "110",
       cameraZ: "248.5",

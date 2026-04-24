@@ -3,6 +3,7 @@ import { BlockPos } from "../../src/core/block-pos";
 import { Registry } from "../../src/core/registry";
 import { ResourceLocation } from "../../src/core/resource-location";
 import { createGeneratedWorldSaveId, GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
+import type { ChunkSnapshotMessage, WorldHostMessage, WorldOpenedMessage } from "../../src/runtime/protocol/world-messages";
 import { MemoryWorldStorage } from "../../src/runtime/storage/memory-world-storage";
 import { LocalWorldClient, LocalWorldTransport } from "../../src/runtime/transport/local-world-transport";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
@@ -42,6 +43,31 @@ function createWorldClient(storage: MemoryWorldStorage, mutateWorld?: (level: Wo
       blockStateIds: blocks.blockStateIds,
     }),
   );
+}
+
+function createWorldHost(storage: MemoryWorldStorage, mutateWorld?: (level: WorldGenLevel) => void): GeneratedWorldHost {
+  const blocks = registerGeneratedRenderBlocks();
+  return new GeneratedWorldHost({
+    seed: 12345n,
+    airState: blocks.airState,
+    blockStateById: blocks.blockStateById,
+    blockStateIds: blocks.blockStateIds,
+    worldStorage: storage,
+    mutateWorld,
+  });
+}
+
+function worldOpenedMessage(messages: readonly WorldHostMessage[]): WorldOpenedMessage {
+  const message = messages.find((candidate): candidate is WorldOpenedMessage => candidate.type === "world_opened");
+  if (message === undefined) {
+    throw new Error("Expected world_opened message");
+  }
+
+  return message;
+}
+
+function chunkSnapshots(messages: readonly WorldHostMessage[]): ChunkSnapshotMessage[] {
+  return messages.filter((message): message is ChunkSnapshotMessage => message.type === "chunk_snapshot");
 }
 
 describe("GeneratedWorld persistence", () => {
@@ -105,5 +131,23 @@ describe("GeneratedWorld persistence", () => {
     });
 
     expect(storage.getChunkRecord(opened.saveMetadata.saveId, -2, 0)?.lastEvictedAtMs).toBe(2_000);
+  });
+
+  test("persists durable chunk facts without derived light", async () => {
+    const storage = new MemoryWorldStorage(() => 3_000);
+    const host = createWorldHost(storage);
+
+    const opened = worldOpenedMessage(await host.openWorld(OPEN_WORLD_REQUEST));
+    const messages = await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const publishedCenter = chunkSnapshots(messages)
+      .find((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0);
+    expect(publishedCenter?.snapshot.light?.lightCorrect).toBe(true);
+    expect(storage.getChunkRecord(opened.saveMetadata.saveId, 0, 0)?.snapshot.light).toBeUndefined();
   });
 });

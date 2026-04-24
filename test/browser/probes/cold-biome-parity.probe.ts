@@ -78,6 +78,7 @@ const COLD_BIOME_FRAMES: readonly ColdBiomeFrame[] = [
 function createFrameUrl(frame: ColdBiomeFrame): string {
   return `/debug.html?${new URLSearchParams({
     worldTransport: "worker",
+    clearWorldStorage: "1",
     preserveInitialCamera: "1",
     cameraX: frame.cameraX,
     cameraY: frame.cameraY,

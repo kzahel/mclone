@@ -10,7 +10,7 @@ import {
   type WorldStorageSession,
 } from "./world-storage";
 
-const DATABASE_NAME = "mclone-world-storage";
+export const INDEXED_DB_WORLD_STORAGE_DATABASE_NAME = "mclone-world-storage";
 const DATABASE_VERSION = 1;
 const WORLDS_STORE = "worlds";
 const CHUNKS_STORE = "chunks";
@@ -28,8 +28,8 @@ type IndexedDbChunkRecord = {
 
 function openIndexedDb(factory: IDBFactory): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = factory.open(DATABASE_NAME, DATABASE_VERSION);
-    request.onerror = () => reject(request.error ?? new Error(`Unable to open ${DATABASE_NAME}`));
+    const request = factory.open(INDEXED_DB_WORLD_STORAGE_DATABASE_NAME, DATABASE_VERSION);
+    request.onerror = () => reject(request.error ?? new Error(`Unable to open ${INDEXED_DB_WORLD_STORAGE_DATABASE_NAME}`));
     request.onupgradeneeded = () => {
       const database = request.result;
       if (!database.objectStoreNames.contains(WORLDS_STORE)) {
@@ -44,6 +44,33 @@ function openIndexedDb(factory: IDBFactory): Promise<IDBDatabase> {
       }
     };
     request.onsuccess = () => resolve(request.result);
+  });
+}
+
+export function deleteIndexedDbWorldStorage(factory: IDBFactory): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let blockedTimeout: ReturnType<typeof setTimeout> | undefined;
+    const clearBlockedTimeout = (): void => {
+      if (blockedTimeout !== undefined) {
+        clearTimeout(blockedTimeout);
+        blockedTimeout = undefined;
+      }
+    };
+    const request = factory.deleteDatabase(INDEXED_DB_WORLD_STORAGE_DATABASE_NAME);
+    request.onerror = () => {
+      clearBlockedTimeout();
+      reject(request.error ?? new Error(`Unable to delete ${INDEXED_DB_WORLD_STORAGE_DATABASE_NAME}`));
+    };
+    request.onblocked = () => {
+      clearBlockedTimeout();
+      blockedTimeout = setTimeout(() => {
+        reject(new Error(`Unable to delete ${INDEXED_DB_WORLD_STORAGE_DATABASE_NAME}: open connections are still using it`));
+      }, 5_000);
+    };
+    request.onsuccess = () => {
+      clearBlockedTimeout();
+      resolve();
+    };
   });
 }
 

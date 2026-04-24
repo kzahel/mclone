@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { Registry } from "../../src/core/registry";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
-import { createGeneratedWorldSaveId, GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
+import { createGeneratedWorldSaveId, GENERATED_WORLD_STORAGE_VERSION, GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
 import {
   connectWorldWorkerSession,
   WorkerWorldClient,
@@ -129,7 +129,7 @@ describe("WorkerWorld transport", () => {
       height: 256,
       saveMetadata: {
         saveId: createGeneratedWorldSaveId(12345n, "default"),
-        storageVersion: 3,
+        storageVersion: GENERATED_WORLD_STORAGE_VERSION,
         seed: "12345",
         preset: "default",
         minBuildHeight: 0,

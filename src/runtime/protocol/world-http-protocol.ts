@@ -11,6 +11,7 @@ import type {
   SetPlayerInputRequest,
   WorldOpenedMessage,
   WorldClientMessage,
+  WorldEngineConfig,
   WorldHostMessage,
   WorldProgressMessage,
 } from "./world-messages";
@@ -23,7 +24,7 @@ import {
   type SerializedPackedChunkSnapshot,
 } from "./packed-chunk-wire";
 
-export const WORLD_HTTP_PROTOCOL_VERSION = 4;
+export const WORLD_HTTP_PROTOCOL_VERSION = 5;
 
 export type WorldHttpErrorCode =
   | "protocol_version_mismatch"
@@ -34,6 +35,7 @@ export interface SerializedOpenWorldRequest {
   readonly type: "open_world";
   readonly seed: string;
   readonly preset: OpenWorldPreset;
+  readonly config?: WorldEngineConfig;
 }
 
 export type SerializedSetChunkViewRequest = SetChunkViewRequest;
@@ -124,6 +126,7 @@ export function serializeWorldClientMessage(message: WorldClientMessage): Serial
         type: "open_world",
         seed: message.seed.toString(),
         preset: message.preset,
+        ...(message.config === undefined ? {} : { config: message.config }),
       };
     case "set_chunk_view":
       return message;
@@ -141,6 +144,7 @@ export function deserializeWorldClientMessage(message: SerializedWorldClientMess
         type: "open_world",
         seed: BigInt(message.seed),
         preset: message.preset,
+        ...(message.config === undefined ? {} : { config: message.config }),
       };
     case "set_chunk_view":
       return message;

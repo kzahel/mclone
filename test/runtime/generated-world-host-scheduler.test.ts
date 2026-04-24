@@ -81,7 +81,8 @@ describe("GeneratedWorldHost cooperative chunk scheduler", () => {
     }));
     expect(initialProgress).toEqual([{
       type: "world_progress",
-      stage: "Generating terrain chunks",
+      stage: "Checking saved chunks",
+      detail: "stored 0, existing 0, missing 0",
       current: 0,
       total: countExpectedChunks(1),
     }]);

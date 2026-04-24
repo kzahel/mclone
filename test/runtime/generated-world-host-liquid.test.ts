@@ -183,4 +183,85 @@ describe("GeneratedWorldHost liquid simulation", () => {
       delay: 0,
     });
   });
+
+  test("leaves persisted liquid ticks static when liquid simulation is disabled", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const resolveState = createBlockStateResolver(blocks.airState);
+    const storage = new MemoryWorldStorage(() => 1_000);
+    let nowMs = 0;
+    const session = await storage.openWorld({
+      saveId: createGeneratedWorldSaveId(OPEN_WORLD_REQUEST.seed, OPEN_WORLD_REQUEST.preset, {
+        liquidSimulationMode: "none",
+      }),
+      storageVersion: GENERATED_WORLD_STORAGE_VERSION,
+      seed: OPEN_WORLD_REQUEST.seed.toString(),
+      preset: OPEN_WORLD_REQUEST.preset,
+      minBuildHeight: 0,
+      height: 256,
+      openedAtMs: 1_000,
+    });
+
+    const sourcePos = new BlockPos(0, 200, 0);
+    const chunk = new LevelChunk(0, 0, blocks.airState);
+    chunk.setBlockState(sourcePos, blocks.blockStateById[ChunkBlockId.WATER]!);
+    chunk.recordLiquidTick(sourcePos, "minecraft:water", 0);
+    await session.chunks.saveChunk(packChunkSnapshot(
+      buildChunkSnapshot(chunk, [0], 0, 256),
+      blocks.blockStateIds,
+      resolveState,
+    ));
+
+    const host = new GeneratedWorldHost({
+      seed: OPEN_WORLD_REQUEST.seed,
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      liquidSimulationMode: "none",
+      worldStorage: storage,
+      worldTickIntervalMs: 1,
+      nowMs: () => nowMs,
+    });
+    await host.openWorld({
+      ...OPEN_WORLD_REQUEST,
+      config: { liquidSimulationMode: "none" },
+    });
+    const initialMessages = await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const initialCenter = chunkSnapshots(initialMessages).find((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0);
+    expect(initialCenter?.snapshot.liquidTicks).toContainEqual({
+      x: sourcePos.getX(),
+      y: sourcePos.getY(),
+      z: sourcePos.getZ(),
+      target: "minecraft:water",
+      delay: 0,
+    });
+
+    nowMs = 6;
+    const updates = await host.pollUpdates({ type: "poll_world_updates" });
+    expect(chunkSnapshots(updates).find((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0)).toBeUndefined();
+
+    const saved = storage.getChunkRecord(createGeneratedWorldSaveId(OPEN_WORLD_REQUEST.seed, OPEN_WORLD_REQUEST.preset, {
+      liquidSimulationMode: "none",
+    }), 0, 0)?.snapshot;
+    expect(saved).toBeDefined();
+    const savedChunk = hydrateChunkFromSnapshot(
+      unpackChunkSnapshot(saved!, blocks.blockStateIds),
+      blocks.airState,
+      resolveState,
+    );
+    expect(blockName(savedChunk.getBlockState(sourcePos.below()))).not.toBe("minecraft:water");
+    expect(unpackChunkSnapshot(saved!, blocks.blockStateIds).liquidTicks).toContainEqual({
+      x: sourcePos.getX(),
+      y: sourcePos.getY(),
+      z: sourcePos.getZ(),
+      target: "minecraft:water",
+      delay: 0,
+    });
+  });
 });

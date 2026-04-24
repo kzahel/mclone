@@ -23,6 +23,7 @@ test("debug free-cam captures an exposed overworld ore cluster in the worker-gen
   await page.goto(
     `/debug.html?${new URLSearchParams({
       worldTransport: "worker",
+      clearWorldStorage: "1",
       preserveInitialCamera: "1",
       cameraX: "33.5",
       cameraY: "50.5",

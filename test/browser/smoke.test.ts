@@ -20,7 +20,7 @@ function createRemoteSmokeUrl(remoteWorldHostUrl: string): string {
 }
 
 async function bootPage(page: Page, remoteWorldHostUrl: string): Promise<BootResult> {
-  await page.goto(createRemoteSmokeUrl(remoteWorldHostUrl), { waitUntil: "networkidle" });
+  await page.goto(createRemoteSmokeUrl(remoteWorldHostUrl), { waitUntil: "load" });
   await page.waitForFunction(() => typeof window.__mcloneReady !== "undefined");
   return (await page.evaluate(() => window.__mcloneReady)) as BootResult;
 }

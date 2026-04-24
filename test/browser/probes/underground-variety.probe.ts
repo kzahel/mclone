@@ -24,7 +24,7 @@ async function captureFrame(
   screenshotPath: string,
 ): Promise<DebugRuntimeState> {
   await page.goto(
-    `/debug.html?${new URLSearchParams({ worldTransport: "worker", preserveInitialCamera: "1", viewDistance: "1", ...params }).toString()}`,
+    `/debug.html?${new URLSearchParams({ worldTransport: "worker", clearWorldStorage: "1", preserveInitialCamera: "1", viewDistance: "1", ...params }).toString()}`,
     {
       waitUntil: "load",
     },

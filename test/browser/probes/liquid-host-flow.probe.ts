@@ -15,6 +15,7 @@ interface DebugRuntimeState {
 function createLiquidFlowUrl(): string {
   return `/debug.html?${new URLSearchParams({
     worldTransport: "worker",
+    clearWorldStorage: "1",
     preserveInitialCamera: "1",
     viewDistance: "1",
     renderDistance: "96",

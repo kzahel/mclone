@@ -1,4 +1,5 @@
 import { SectionPos } from "../core/section-pos";
+import { deleteIndexedDbWorldStorage } from "../runtime/storage/indexeddb-world-storage";
 import { Vec3 } from "../world/phys/vec3";
 import { type LevelRenderFrame } from "./level-renderer";
 import { type CameraState } from "./game-renderer";
@@ -126,6 +127,11 @@ function readSmokeCamera(url: URL): CameraState | undefined {
   };
 }
 
+function readClearWorldStorage(url: URL): boolean {
+  const value = url.searchParams.get("clearWorldStorage");
+  return value === "1" || value === "true";
+}
+
 function rgba8FromColor(color: readonly [number, number, number, number]): readonly [number, number, number, number] {
   return [
     Math.round(color[0] * 255),
@@ -199,7 +205,7 @@ async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expe
     scene.levelRenderer.allChanged();
   }
 
-  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, { maxAttempts: 480 })) {
+  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, { maxAttempts: 1800 })) {
     throw new Error(
       `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`,
     );
@@ -219,6 +225,20 @@ async function boot(): Promise<BootResult> {
   const url = typeof window === "undefined" ? new URL("http://127.0.0.1/") : new URL(window.location.href);
   const renderConfig = readBrowserRenderConfig(url);
   const requestedCamera = readSmokeCamera(url);
+  if (readClearWorldStorage(url)) {
+    if (typeof indexedDB === "undefined") {
+      return { ok: false, reason: "clearWorldStorage requested but IndexedDB is unavailable" };
+    }
+    try {
+      await deleteIndexedDbWorldStorage(indexedDB);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   const sceneResult = await initializeRendererScene(canvas, {
     seed: GENERATED_SEED,
     viewDistance: renderConfig.viewDistance,

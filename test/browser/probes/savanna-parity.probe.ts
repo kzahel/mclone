@@ -23,6 +23,7 @@ test("debug free-cam captures savanna vegetation in the worker-generated world",
   await page.goto(
     `/debug.html?${new URLSearchParams({
       worldTransport: "worker",
+      clearWorldStorage: "1",
       cameraX: "280.5",
       cameraY: "112",
       cameraZ: "-776.5",

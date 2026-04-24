@@ -3,7 +3,7 @@ import surfaceFixture from "../fixtures/integration/overworld-seed-12345-chunks-
 import { BlockPos } from "../../src/core/block-pos";
 import { Registry } from "../../src/core/registry";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
-import { createGeneratedWorldSaveId, GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
+import { createGeneratedWorldSaveId, GENERATED_WORLD_STORAGE_VERSION, GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
 import { LocalWorldClient, LocalWorldTransport } from "../../src/runtime/transport/local-world-transport";
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
@@ -114,7 +114,7 @@ describe("GeneratedWorld boundary", () => {
       height: 256,
       saveMetadata: {
         saveId: createGeneratedWorldSaveId(12345n, "default"),
-        storageVersion: 3,
+        storageVersion: GENERATED_WORLD_STORAGE_VERSION,
         seed: "12345",
         preset: "default",
         minBuildHeight: 0,

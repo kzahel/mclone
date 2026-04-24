@@ -2,6 +2,7 @@
 
 import { SectionPos } from "../../core/section-pos";
 import type { PlayerInputCommand, SetChunkViewRequest } from "../../runtime/protocol/world-messages";
+import { deleteIndexedDbWorldStorage } from "../../runtime/storage/indexeddb-world-storage";
 import { Vec3 } from "../../world/phys/vec3";
 import {
   applyRenderWorldDirtySections,
@@ -18,7 +19,16 @@ import {
   type RenderWorldPerformanceCounters,
   type RendererScene,
 } from "../scene-setup";
-import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "../browser-render-config";
+import {
+  BROWSER_RENDER_CONFIG_QUERY_KEYS,
+  clearStoredBrowserRenderConfig,
+  getDefaultRenderDistance,
+  getExpectedLoadedChunkCount,
+  readBrowserRenderConfig,
+  writeStoredBrowserRenderConfig,
+  type BrowserRenderConfig,
+  type StoredBrowserRenderConfig,
+} from "../browser-render-config";
 import type { LoadingProgress } from "../loading-progress";
 import { progressFraction } from "../loading-progress";
 import { advanceTextureAtlasAnimations } from "../texture/texture-atlas";
@@ -61,6 +71,8 @@ interface DebugRuntimeState {
   expectedLoadedChunkCount?: number;
   viewDistance?: number;
   renderDistance?: number;
+  lightingMode?: BrowserRenderConfig["lightingMode"];
+  liquidSimulationMode?: BrowserRenderConfig["liquidSimulationMode"];
   frameCount: number;
   renderWorldCounters?: RenderWorldPerformanceCounters;
   renderQueueStats?: RenderSceneQueueStats;
@@ -125,6 +137,12 @@ function readPreserveInitialCamera(): boolean {
   return value === "1" || value === "true";
 }
 
+function readClearWorldStorage(): boolean {
+  const url = new URL(window.location.href);
+  const value = url.searchParams.get("clearWorldStorage");
+  return value === "1" || value === "true";
+}
+
 function createDebugRuntimeController(
   worldTransport: "worker" | "remote",
 ): {
@@ -174,6 +192,81 @@ function hideLoadingProgress(): void {
   document.querySelector<HTMLElement>("#debug-progress")?.classList.add("hidden");
 }
 
+function clampInteger(value: number, fallback: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+function reloadWithoutBrowserConfigQueryParams(): void {
+  const url = new URL(window.location.href);
+  for (const key of BROWSER_RENDER_CONFIG_QUERY_KEYS) {
+    url.searchParams.delete(key);
+  }
+
+  window.location.href = `${url.pathname}${url.search}${url.hash}`;
+}
+
+function configureDebugSettingsMenu(config: BrowserRenderConfig): void {
+  const form = document.querySelector<HTMLFormElement>("#debug-config-form");
+  const viewDistanceInput = document.querySelector<HTMLInputElement>("#debug-view-distance");
+  const renderDistanceInput = document.querySelector<HTMLInputElement>("#debug-render-distance");
+  const disableLightingInput = document.querySelector<HTMLInputElement>("#debug-disable-lighting");
+  const disableWaterSimInput = document.querySelector<HTMLInputElement>("#debug-disable-water-sim");
+  const chunkCountOutput = document.querySelector<HTMLOutputElement>("#debug-config-chunk-count");
+  const resetButton = document.querySelector<HTMLButtonElement>("#debug-config-reset");
+  if (
+    form === null
+    || viewDistanceInput === null
+    || renderDistanceInput === null
+    || disableLightingInput === null
+    || disableWaterSimInput === null
+  ) {
+    return;
+  }
+
+  const renderChunkCount = (): void => {
+    if (chunkCountOutput === null) {
+      return;
+    }
+
+    const viewDistance = clampInteger(Number.parseInt(viewDistanceInput.value, 10), config.viewDistance, 1, 16);
+    chunkCountOutput.value = `${getExpectedLoadedChunkCount(viewDistance).toString()} loaded host chunks`;
+  };
+
+  viewDistanceInput.value = config.viewDistance.toString();
+  renderDistanceInput.value = config.renderDistance.toString();
+  disableLightingInput.checked = config.lightingMode === "none";
+  disableWaterSimInput.checked = config.liquidSimulationMode === "none";
+  renderChunkCount();
+
+  viewDistanceInput.addEventListener("input", () => {
+    const viewDistance = clampInteger(Number.parseInt(viewDistanceInput.value, 10), config.viewDistance, 1, 16);
+    renderDistanceInput.value = getDefaultRenderDistance(viewDistance).toString();
+    renderChunkCount();
+  });
+  renderDistanceInput.addEventListener("input", renderChunkCount);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const viewDistance = clampInteger(Number.parseInt(viewDistanceInput.value, 10), config.viewDistance, 1, 16);
+    const renderDistance = clampInteger(Number.parseInt(renderDistanceInput.value, 10), getDefaultRenderDistance(viewDistance), 16, 512);
+    const nextConfig: StoredBrowserRenderConfig = {
+      viewDistance,
+      renderDistance,
+      lightingMode: disableLightingInput.checked ? "none" : "vanilla17",
+      liquidSimulationMode: disableWaterSimInput.checked ? "none" : "vanilla17",
+    };
+    writeStoredBrowserRenderConfig(window.localStorage, nextConfig);
+    reloadWithoutBrowserConfigQueryParams();
+  });
+  resetButton?.addEventListener("click", () => {
+    clearStoredBrowserRenderConfig(window.localStorage);
+    reloadWithoutBrowserConfigQueryParams();
+  });
+}
+
 function formatUnknownError(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
@@ -197,7 +290,8 @@ async function boot(): Promise<void> {
   const rendererCanvas = canvas;
 
   const runtimeConfig = readWorldTransport();
-  const renderConfig = readBrowserRenderConfig(new URL(window.location.href));
+  const renderConfig = readBrowserRenderConfig(new URL(window.location.href), window.localStorage);
+  configureDebugSettingsMenu(renderConfig);
   const initialCamera = readInitialCamera();
   const preserveInitialCamera = readPreserveInitialCamera();
   const debugRuntime = createDebugRuntimeController(runtimeConfig.worldTransport);
@@ -209,11 +303,22 @@ async function boot(): Promise<void> {
     showLoadingProgress(progress);
   };
   reportLoadingProgress({ stage: "Starting renderer", fraction: 0 });
+  if (readClearWorldStorage()) {
+    reportLoadingProgress({ stage: "Clearing stored world", fraction: 0.01 });
+    if (typeof indexedDB === "undefined") {
+      throw new Error("clearWorldStorage requested but IndexedDB is unavailable");
+    }
+    await deleteIndexedDbWorldStorage(indexedDB);
+  }
 
   const sceneResult = await initializeRendererScene(rendererCanvas, {
     seed: SEED,
     viewDistance: renderConfig.viewDistance,
     renderDistance: renderConfig.renderDistance,
+    engineConfig: {
+      lightingMode: renderConfig.lightingMode,
+      liquidSimulationMode: renderConfig.liquidSimulationMode,
+    },
     worldTransport: runtimeConfig.worldTransport,
     remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
     skyColor: renderConfig.skyColor,
@@ -371,6 +476,8 @@ async function boot(): Promise<void> {
   debugRuntime.controller.state.renderQueueStats = getSceneRenderQueueStats(scene);
   debugRuntime.controller.state.viewDistance = scene.viewDistance;
   debugRuntime.controller.state.renderDistance = scene.gameRenderer.getRenderDistance();
+  debugRuntime.controller.state.lightingMode = renderConfig.lightingMode;
+  debugRuntime.controller.state.liquidSimulationMode = renderConfig.liquidSimulationMode;
   debugRuntime.controller.state.frameCount = totalFrameCount;
 
   const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;

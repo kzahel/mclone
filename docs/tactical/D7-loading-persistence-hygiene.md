@@ -122,6 +122,25 @@ Run the smallest checks that exercise the changed path:
 
 For the persisted-light policy, add a focused unit/integration assertion that the storage record written by the host does not contain `light`, while the client-published snapshot still does.
 
+## Landed Shape
+
+This slice is implemented.
+
+- Cooperative chunk loading now reports `Checking saved chunks`, `Generating missing chunks`, `Decorating new chunks`, `Computing light`, and `Publishing chunks`.
+- The saved-chunk phase reports stored/existing/missing detail.
+- Client snapshots still include light; storage records omit `light`.
+- `GENERATED_WORLD_STORAGE_VERSION` was bumped to invalidate older generated-world cache ids, and the code comment now states the bump rule.
+- Browser and debug entrypoints accept `clearWorldStorage=1`, backed by the shared IndexedDB reset helper.
+- Worker-backed browser probes that expect clean generated worlds pass `clearWorldStorage=1`.
+- Cooperative publishing no longer waits for the storage write before queuing the snapshot to clients.
+- Browser smoke navigation waits for page `load` and then waits on the explicit boot promise, rather than using `networkidle` while world polling is active.
+
+Validation run:
+
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm test:browser`
+
 ## Done When
 
 - refreshing a stored browser world no longer reports all work as terrain generation
@@ -132,4 +151,4 @@ For the persisted-light policy, add a focused unit/integration assertion that th
 
 ## Next
 
-After this hygiene pass, reassess whether stale-cache confusion remains. If it does, the next likely slice is dirty/lazy save policy. If it does not, defer dirty saving until chunk status or broader persistence work makes it necessary.
+After this hygiene pass, stale persisted light and misleading progress labels are handled. The next likely slice is dirty/lazy save policy, but it can remain deferred until chunk status or broader persistence work makes it necessary.

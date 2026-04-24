@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { Registry } from "../../src/core/registry";
-import { createGeneratedWorldSaveId } from "../../src/runtime/host/generated-world-host";
+import { createGeneratedWorldSaveId, GENERATED_WORLD_STORAGE_VERSION } from "../../src/runtime/host/generated-world-host";
 import { GeneratedWorldRemoteService } from "../../src/runtime/node/generated-world-http-server";
 import {
   deserializeWorldHostMessages,
@@ -329,7 +329,7 @@ describe("RemoteWorld transport", () => {
       height: 256,
       saveMetadata: {
         saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
-        storageVersion: 3,
+        storageVersion: GENERATED_WORLD_STORAGE_VERSION,
         seed: "12345",
         preset: "browser_smoke",
         minBuildHeight: 0,

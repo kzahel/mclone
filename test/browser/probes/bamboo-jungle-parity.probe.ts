@@ -23,6 +23,7 @@ test("debug free-cam captures bamboo-jungle parity in the worker-generated world
   await page.goto(
     `/debug.html?${new URLSearchParams({
       worldTransport: "worker",
+      clearWorldStorage: "1",
       preserveInitialCamera: "1",
       cameraX: "936.5",
       cameraY: "128",
