@@ -1,5 +1,6 @@
 import { BLOCKS_PER_SECTION } from "../../worldgen/chunk/chunk-block-buffer";
 import { BitStorage, paletteBitsFor } from "../../util/bit-storage";
+import { DataLayer } from "./chunk/data-layer";
 import type { BlockStateId, BlockStateIdMap } from "./block/state/block-state-id";
 import {
   CHUNK_SNAPSHOT_BLOCK_ORDER,
@@ -9,6 +10,17 @@ import {
   type ChunkSnapshot,
 } from "./chunk-snapshot";
 import { cloneScheduledTickSnapshot, type ScheduledTickSnapshot } from "./scheduled-tick";
+
+export interface PackedLightSection {
+  readonly y: number;
+  readonly data: Uint8Array;
+}
+
+export interface PackedChunkLight {
+  readonly sky: readonly PackedLightSection[];
+  readonly block: readonly PackedLightSection[];
+  readonly lightCorrect: boolean;
+}
 
 export interface PackedChunkSection {
   readonly y: number;
@@ -22,6 +34,7 @@ export interface PackedChunkSnapshot {
   readonly chunkZ: number;
   readonly biomes: readonly number[];
   readonly sections: readonly PackedChunkSection[];
+  readonly light?: PackedChunkLight;
   readonly blockTicks: readonly ScheduledTickSnapshot[];
   readonly liquidTicks: readonly ScheduledTickSnapshot[];
 }
@@ -35,8 +48,24 @@ export function clonePackedChunkSection(section: PackedChunkSection): PackedChun
   };
 }
 
-export function clonePackedChunkSnapshot(snapshot: PackedChunkSnapshot): PackedChunkSnapshot {
+export function clonePackedLightSection(section: PackedLightSection): PackedLightSection {
+  validatePackedLightSection(section);
   return {
+    y: section.y,
+    data: new Uint8Array(section.data),
+  };
+}
+
+export function clonePackedChunkLight(light: PackedChunkLight): PackedChunkLight {
+  return {
+    sky: light.sky.map(clonePackedLightSection),
+    block: light.block.map(clonePackedLightSection),
+    lightCorrect: light.lightCorrect,
+  };
+}
+
+export function clonePackedChunkSnapshot(snapshot: PackedChunkSnapshot): PackedChunkSnapshot {
+  const clone: PackedChunkSnapshot = {
     chunkX: snapshot.chunkX,
     chunkZ: snapshot.chunkZ,
     biomes: [...snapshot.biomes],
@@ -44,12 +73,19 @@ export function clonePackedChunkSnapshot(snapshot: PackedChunkSnapshot): PackedC
     blockTicks: snapshot.blockTicks.map(cloneScheduledTickSnapshot),
     liquidTicks: snapshot.liquidTicks.map(cloneScheduledTickSnapshot),
   };
+  return snapshot.light === undefined ? clone : { ...clone, light: clonePackedChunkLight(snapshot.light) };
 }
 
 export function collectPackedChunkSnapshotTransferables(snapshot: PackedChunkSnapshot): Transferable[] {
   const transferables: Transferable[] = [];
   for (const section of snapshot.sections) {
     transferables.push(section.paletteStateIds.buffer, section.packedBlockIndices.buffer);
+  }
+  if (snapshot.light !== undefined) {
+    for (const section of [...snapshot.light.sky, ...snapshot.light.block]) {
+      validatePackedLightSection(section);
+      transferables.push(section.data.buffer);
+    }
   }
   return transferables;
 }
@@ -59,7 +95,7 @@ export function packChunkSnapshot(
   stateIds: BlockStateIdMap,
   resolveState: BlockStateResolver,
 ): PackedChunkSnapshot {
-  return {
+  const packed: PackedChunkSnapshot = {
     chunkX: snapshot.chunkX,
     chunkZ: snapshot.chunkZ,
     biomes: [...snapshot.biomes],
@@ -67,10 +103,11 @@ export function packChunkSnapshot(
     blockTicks: snapshot.blockTicks.map(cloneScheduledTickSnapshot),
     liquidTicks: snapshot.liquidTicks.map(cloneScheduledTickSnapshot),
   };
+  return snapshot.light === undefined ? packed : { ...packed, light: clonePackedChunkLight(snapshot.light) };
 }
 
 export function unpackChunkSnapshot(snapshot: PackedChunkSnapshot, stateIds: BlockStateIdMap): ChunkSnapshot {
-  return {
+  const unpacked: ChunkSnapshot = {
     chunkX: snapshot.chunkX,
     chunkZ: snapshot.chunkZ,
     biomes: [...snapshot.biomes],
@@ -78,6 +115,7 @@ export function unpackChunkSnapshot(snapshot: PackedChunkSnapshot, stateIds: Blo
     blockTicks: snapshot.blockTicks.map(cloneScheduledTickSnapshot),
     liquidTicks: snapshot.liquidTicks.map(cloneScheduledTickSnapshot),
   };
+  return snapshot.light === undefined ? unpacked : { ...unpacked, light: clonePackedChunkLight(snapshot.light) };
 }
 
 export function packChunkSection(
@@ -149,4 +187,10 @@ export function unpackChunkSection(section: PackedChunkSection, stateIds: BlockS
 
 export function bitsForLocalPalette(paletteSize: number): number {
   return Math.max(4, paletteBitsFor(paletteSize));
+}
+
+function validatePackedLightSection(section: PackedLightSection): void {
+  if (section.data.length !== DataLayer.SIZE) {
+    throw new Error(`Packed light section ${section.y} had ${section.data.length} bytes instead of ${DataLayer.SIZE}`);
+  }
 }

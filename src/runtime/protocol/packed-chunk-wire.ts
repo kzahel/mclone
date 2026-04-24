@@ -1,5 +1,6 @@
 import { cloneScheduledTickSnapshot, type ScheduledTickSnapshot } from "../../world/level/scheduled-tick";
-import type { PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import { DataLayer } from "../../world/level/chunk/data-layer";
+import type { PackedChunkLight, PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 
 export interface SerializedPackedChunkSection {
   readonly y: number;
@@ -8,11 +9,23 @@ export interface SerializedPackedChunkSection {
   readonly packedBlockIndicesBase64: string;
 }
 
+export interface SerializedPackedLightSection {
+  readonly y: number;
+  readonly dataBase64: string;
+}
+
+export interface SerializedPackedChunkLight {
+  readonly sky: readonly SerializedPackedLightSection[];
+  readonly block: readonly SerializedPackedLightSection[];
+  readonly lightCorrect: boolean;
+}
+
 export interface SerializedPackedChunkSnapshot {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly biomes: readonly number[];
   readonly sections: readonly SerializedPackedChunkSection[];
+  readonly light?: SerializedPackedChunkLight;
   readonly blockTicks: readonly ScheduledTickSnapshot[];
   readonly liquidTicks: readonly ScheduledTickSnapshot[];
 }
@@ -61,7 +74,7 @@ function deserializeBigInt64Words(value: string): BigInt64Array {
 }
 
 export function serializePackedChunkSnapshot(snapshot: PackedChunkSnapshot): SerializedPackedChunkSnapshot {
-  return {
+  const serialized: SerializedPackedChunkSnapshot = {
     chunkX: snapshot.chunkX,
     chunkZ: snapshot.chunkZ,
     biomes: [...snapshot.biomes],
@@ -74,10 +87,11 @@ export function serializePackedChunkSnapshot(snapshot: PackedChunkSnapshot): Ser
     blockTicks: snapshot.blockTicks.map(cloneScheduledTickSnapshot),
     liquidTicks: snapshot.liquidTicks.map(cloneScheduledTickSnapshot),
   };
+  return snapshot.light === undefined ? serialized : { ...serialized, light: serializePackedChunkLight(snapshot.light) };
 }
 
 export function deserializePackedChunkSnapshot(snapshot: SerializedPackedChunkSnapshot): PackedChunkSnapshot {
-  return {
+  const deserialized: PackedChunkSnapshot = {
     chunkX: snapshot.chunkX,
     chunkZ: snapshot.chunkZ,
     biomes: [...snapshot.biomes],
@@ -89,5 +103,49 @@ export function deserializePackedChunkSnapshot(snapshot: SerializedPackedChunkSn
     })),
     blockTicks: snapshot.blockTicks.map(cloneScheduledTickSnapshot),
     liquidTicks: snapshot.liquidTicks.map(cloneScheduledTickSnapshot),
+  };
+  return snapshot.light === undefined ? deserialized : { ...deserialized, light: deserializePackedChunkLight(snapshot.light) };
+}
+
+function serializePackedChunkLight(light: PackedChunkLight): SerializedPackedChunkLight {
+  return {
+    sky: light.sky.map((section) => serializePackedLightSection(section, "sky")),
+    block: light.block.map((section) => serializePackedLightSection(section, "block")),
+    lightCorrect: light.lightCorrect,
+  };
+}
+
+function serializePackedLightSection(
+  section: PackedChunkLight["sky"][number],
+  layer: "sky" | "block",
+): SerializedPackedLightSection {
+  if (section.data.length !== DataLayer.SIZE) {
+    throw new Error(`${layer} light section ${section.y} had ${section.data.length} bytes instead of ${DataLayer.SIZE}`);
+  }
+  return {
+    y: section.y,
+    dataBase64: bytesToBase64(section.data),
+  };
+}
+
+function deserializePackedChunkLight(light: SerializedPackedChunkLight): PackedChunkLight {
+  return {
+    sky: light.sky.map((section) => deserializePackedLightSection(section, "sky")),
+    block: light.block.map((section) => deserializePackedLightSection(section, "block")),
+    lightCorrect: light.lightCorrect,
+  };
+}
+
+function deserializePackedLightSection(
+  section: SerializedPackedLightSection,
+  layer: "sky" | "block",
+): PackedChunkLight["sky"][number] {
+  const data = base64ToBytes(section.dataBase64);
+  if (data.length !== DataLayer.SIZE) {
+    throw new Error(`${layer} light section ${section.y} had ${data.length} bytes instead of ${DataLayer.SIZE}`);
+  }
+  return {
+    y: section.y,
+    data,
   };
 }

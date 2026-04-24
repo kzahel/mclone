@@ -421,12 +421,14 @@ Suggested sequence:
    - commit official-server light bytes in the pinned `(0,0)` integration fixture
    - add byte-exact comparison helpers for future solver tests
 
-1. Port light data primitives:
+1. Implement [`L1-light-data-foundation.md`](tactical/L1-light-data-foundation.md). Done:
    - `DataLayer`
-   - `LightLayer`
+   - `LightLayer` surrounding defaults
    - section-position helpers for light section padding
-   - packed light snapshot serialization and transferables
-   - `WorldLightEngine` / render lighting mode config surfaces
+   - optional packed chunk light snapshots, clone/transferable support, and remote wire serialization
+   - fixture-backed tests proving the L0 vanilla light bytes survive pack/unpack and wire codecs
+
+   `WorldLightEngine` / render lighting mode config surfaces are still deferred until solver ownership exists, so the public mode switch has one real implementation to select.
 
 2. Port the pure solver:
    - `DynamicGraphMinFixedPoint`

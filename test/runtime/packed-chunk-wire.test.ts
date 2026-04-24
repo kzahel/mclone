@@ -5,6 +5,14 @@ import {
   type SerializedPackedChunkSnapshot,
 } from "../../src/runtime/protocol/packed-chunk-wire";
 import { clonePackedChunkSnapshot, type PackedChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
+import { DataLayer } from "../../src/world/level/chunk/data-layer";
+
+const SKY_LIGHT = new Uint8Array(DataLayer.SIZE);
+SKY_LIGHT[0] = 0xFF;
+SKY_LIGHT[DataLayer.SIZE - 1] = 0x10;
+
+const BLOCK_LIGHT = new Uint8Array(DataLayer.SIZE);
+BLOCK_LIGHT[1] = 0x22;
 
 const PACKED_SNAPSHOT: PackedChunkSnapshot = {
   chunkX: -2,
@@ -16,6 +24,11 @@ const PACKED_SNAPSHOT: PackedChunkSnapshot = {
     bitsPerBlock: 4,
     packedBlockIndices: new BigInt64Array([0x0123456789ABCDEFn, -1n]),
   }],
+  light: {
+    sky: [{ y: -1, data: SKY_LIGHT }],
+    block: [{ y: 0, data: BLOCK_LIGHT }],
+    lightCorrect: true,
+  },
   blockTicks: [{ x: 1, y: 2, z: 3, target: "minecraft:stone", delay: 4 }],
   liquidTicks: [{ x: 5, y: 6, z: 7, target: "minecraft:water", delay: 8 }],
 };
@@ -27,6 +40,7 @@ describe("packed chunk wire codecs", () => {
 
     expect(serialized.sections[0]!.paletteStateIds).toEqual([0, 1, 255, 65_535]);
     expect(serialized.sections[0]!.packedBlockIndicesBase64).not.toContain("name");
+    expect(serialized.light?.sky[0]?.dataBase64).toBeTruthy();
     expect(deserialized).toEqual(PACKED_SNAPSHOT);
   });
 
@@ -35,9 +49,11 @@ describe("packed chunk wire codecs", () => {
 
     cloned.sections[0]!.paletteStateIds[0] = 99;
     cloned.sections[0]!.packedBlockIndices[0] = 0n;
+    cloned.light!.sky[0]!.data[0] = 0;
 
     expect(PACKED_SNAPSHOT.sections[0]!.paletteStateIds[0]).toBe(0);
     expect(PACKED_SNAPSHOT.sections[0]!.packedBlockIndices[0]).toBe(0x0123456789ABCDEFn);
+    expect(PACKED_SNAPSHOT.light!.sky[0]!.data[0]).toBe(0xFF);
   });
 
   test("rejects packed word payloads that are not whole 64-bit words", () => {
@@ -50,5 +66,20 @@ describe("packed chunk wire codecs", () => {
     };
 
     expect(() => deserializePackedChunkSnapshot(serialized)).toThrow(/multiple of 8/);
+  });
+
+  test("rejects light payloads that are not whole DataLayers", () => {
+    const serialized: SerializedPackedChunkSnapshot = {
+      ...serializePackedChunkSnapshot(PACKED_SNAPSHOT),
+      light: {
+        ...serializePackedChunkSnapshot(PACKED_SNAPSHOT).light!,
+        block: [{
+          y: 0,
+          dataBase64: "AA==",
+        }],
+      },
+    };
+
+    expect(() => deserializePackedChunkSnapshot(serialized)).toThrow(/2048/);
   });
 });

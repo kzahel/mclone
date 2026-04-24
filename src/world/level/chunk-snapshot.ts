@@ -29,11 +29,23 @@ export interface ChunkSectionSnapshot {
   readonly blocks: readonly number[];
 }
 
+export interface ChunkLightSectionSnapshot {
+  readonly y: number;
+  readonly data: Uint8Array;
+}
+
+export interface ChunkLightSnapshot {
+  readonly sky: readonly ChunkLightSectionSnapshot[];
+  readonly block: readonly ChunkLightSectionSnapshot[];
+  readonly lightCorrect: boolean;
+}
+
 export interface ChunkSnapshot {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly biomes: readonly number[];
   readonly sections: readonly ChunkSectionSnapshot[];
+  readonly light?: ChunkLightSnapshot;
   readonly blockTicks: readonly ScheduledTickSnapshot[];
   readonly liquidTicks: readonly ScheduledTickSnapshot[];
 }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import committedIntegration from "../fixtures/integration/overworld-seed-12345-chunks-0-0.json" with { type: "json" };
 import terrainOnly from "../fixtures/integration/overworld-seed-12345-chunks-0-0-terrain-only.json" with { type: "json" };
 import { Registry } from "../../src/core/registry";
 import { BlockPos } from "../../src/core/block-pos";
@@ -16,10 +17,13 @@ import {
 } from "../../src/world/level/chunk-snapshot";
 import {
   bitsForLocalPalette,
+  clonePackedChunkSnapshot,
+  collectPackedChunkSnapshotTransferables,
   packChunkSection,
   packChunkSnapshot,
   unpackChunkSection,
   unpackChunkSnapshot,
+  type PackedChunkLight,
   type PackedChunkSection,
 } from "../../src/world/level/packed-chunk-snapshot";
 import { buildBlockStateIdMap } from "../../src/world/level/block/state/block-state-id";
@@ -27,6 +31,11 @@ import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-r
 import type { BlockState } from "../../src/world/level/block/state/block-state";
 import { BLOCKS_PER_SECTION } from "../../src/worldgen/chunk/chunk-block-buffer";
 import { BitStorage } from "../../src/util/bit-storage";
+import {
+  compareChunkLight,
+  decodeChunkLightFixture,
+  type ChunkLightFixture,
+} from "../../src/oracle/integration/light-fixture";
 
 interface TerrainOnlyFixture {
   readonly chunkX: number;
@@ -36,6 +45,13 @@ interface TerrainOnlyFixture {
   readonly blockOrder: string;
   readonly palette: readonly string[];
   readonly blocks: readonly number[];
+}
+
+interface IntegrationFixtureWithLight {
+  readonly chunks: readonly {
+    readonly isLightOn: boolean;
+    readonly light: ChunkLightFixture;
+  }[];
 }
 
 function registeredBlocks(): Iterable<Block> {
@@ -99,6 +115,14 @@ function terrainFixtureSnapshot(): ChunkSnapshot {
     sections,
     blockTicks: [],
     liquidTicks: [],
+  };
+}
+
+function committedFixtureLight(): PackedChunkLight {
+  const fixture = committedIntegration as unknown as IntegrationFixtureWithLight;
+  return {
+    ...decodeChunkLightFixture(fixture.chunks[0]!.light),
+    lightCorrect: fixture.chunks[0]!.isLightOn,
   };
 }
 
@@ -185,5 +209,37 @@ describe("packed chunk snapshot codecs", () => {
       expect(section.bitsPerBlock).toBe(bitsForLocalPalette(section.paletteStateIds.length));
     }
     expect(unpacked).toEqual(snapshot);
+  });
+
+  test("carries L0 vanilla light bytes through packed snapshots", () => {
+    const { stateIds, resolveState } = createCodecContext();
+    const light = committedFixtureLight();
+    const snapshot: ChunkSnapshot = {
+      ...terrainFixtureSnapshot(),
+      light,
+    };
+
+    const packed = packChunkSnapshot(snapshot, stateIds, resolveState);
+    const unpacked = unpackChunkSnapshot(packed, stateIds);
+
+    expect(packed.light?.lightCorrect).toBe(true);
+    expect(compareChunkLight(light, packed.light!)).toEqual([]);
+    expect(compareChunkLight(light, unpacked.light!)).toEqual([]);
+  });
+
+  test("clones and collects transferables for packed light bytes", () => {
+    const { stateIds, resolveState } = createCodecContext();
+    const light = committedFixtureLight();
+    const snapshot = packChunkSnapshot({ ...terrainFixtureSnapshot(), light }, stateIds, resolveState);
+    const cloned = clonePackedChunkSnapshot(snapshot);
+
+    const clonedSkyLight = cloned.light!.sky[0]!.data;
+    clonedSkyLight[0] = clonedSkyLight[0]! ^ 0xFF;
+    expect(cloned.light!.sky[0]!.data[0]).not.toBe(snapshot.light!.sky[0]!.data[0]);
+
+    const transferables = collectPackedChunkSnapshotTransferables(snapshot);
+    for (const section of [...snapshot.light!.sky, ...snapshot.light!.block]) {
+      expect(transferables).toContain(section.data.buffer);
+    }
   });
 });
