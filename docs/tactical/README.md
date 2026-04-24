@@ -153,7 +153,7 @@ Recommended sequence:
 | `D0-` | durable architecture consolidation | docs review | **done by the architecture docs above**; keep future tacticals short and refer back to durable decisions |
 | [`D1-block-state-id-and-bitstorage-foundation.md`](D1-block-state-id-and-bitstorage-foundation.md) | shared `BlockStateId` table and runtime `BitStorage` helper | unit | **landed** foundation for packed sections without changing ownership or protocol |
 | [`D2-packed-section-codecs.md`](D2-packed-section-codecs.md) | packed section codecs and chunk snapshot model | unit + fixture roundtrip | **landed** vanilla-shaped packed section records behind compatibility adapters |
-| `D3-` | storage/protocol rollout for packed chunk facts | unit + integration | move authoritative chunk snapshots through packed records across worker, remote, IndexedDB, and file adapters |
+| [`D3-packed-chunk-storage-protocol.md`](D3-packed-chunk-storage-protocol.md) | storage/protocol rollout for packed chunk facts | unit + integration | move authoritative chunk snapshots through packed records across worker, remote, IndexedDB, and file adapters |
 | `D4-` | browser render-world ownership | perf probe + browser visual | move client chunk cache and meshing inputs off the main thread while preserving host authority |
 | `D5-` | transport measurement and push/SAB decision | perf probe + deployment check | decide from data whether HTTP polling, worker transfer, or buffer sharing needs replacement |
 
@@ -175,7 +175,7 @@ Recommended sequence:
 
 `D5` exits successfully only if the trace shows chunk-boundary traversal is acceptable at the target view distance and any remaining main-thread spikes are bounded GPU upload/render bookkeeping. If p95/p99 frame time, max frame gap, or long tasks are still unacceptable, the trace must identify the next bottleneck and the arc continues with the corresponding `D6` tactical.
 
-Do not write the detailed `D3-` tactical until `D2` has landed or implementation is next. Each `D*` slice should be narrow enough to validate independently.
+Do not write the detailed `D4-` tactical until `D3` has landed or implementation is next. Each `D*` slice should be narrow enough to validate independently.
 
 ## Skipped entirely (for renderer MVP)
 
