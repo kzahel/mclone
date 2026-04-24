@@ -9,9 +9,13 @@ import {
   createSceneDepthView,
   encodeSceneFrame,
   getSceneLoadedChunkCount,
+  getSceneRenderQueueStats,
   getSceneRenderWorldPerformanceCounters,
   initializeRendererScene,
+  renderSceneUntilSettled,
   SCENE_DEPTH_FORMAT,
+  waitForLoadedChunkRing,
+  type RenderSceneQueueStats,
   type RenderWorldPerformanceCounters,
   type RendererScene,
 } from "./scene-setup";
@@ -52,6 +56,7 @@ export type BootResult =
       cutoutDrawCount: number;
       translucentDrawCount: number;
       renderWorldCounters: RenderWorldPerformanceCounters;
+      renderQueueStats: RenderSceneQueueStats;
     }
   | { ok: false; reason: string };
 
@@ -183,24 +188,6 @@ async function readPixel(
   return [bytes[0]!, bytes[1]!, bytes[2]!, bytes[3]!];
 }
 
-async function waitForLoadedChunkRing(scene: RendererScene, expectedLoadedChunkCount: number): Promise<boolean> {
-  if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
-    return true;
-  }
-
-  for (let attempt = 0; attempt < 40; attempt++) {
-    await sleep(50);
-    if (await scene.worldClient.pollUpdates()) {
-      applyRenderWorldDirtySections(scene);
-    }
-    if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
-      return true;
-    }
-  }
-
-  return getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount;
-}
-
 async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expectedLoadedChunkCount: number): Promise<LevelRenderFrame> {
   if (await scene.worldClient.setChunkView({
     type: "set_chunk_view",
@@ -218,41 +205,10 @@ async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expe
     );
   }
 
-  let frame: LevelRenderFrame | undefined;
-  let bestFrame: LevelRenderFrame | undefined;
-  let bestRenderedChunkCount = -1;
-  let stablePasses = 0;
-  for (let attempt = 0; attempt < 12; attempt++) {
-    frame = await scene.gameRenderer.renderLevel(
-      0.0,
-      Number.MAX_SAFE_INTEGER,
-      scene.levelRenderer,
-      scene.lightTexture,
-      camera,
-      { waitForChunkTasks: true },
-    );
-
-    const renderedChunkCount = scene.levelRenderer.countRenderedChunks();
-    if (renderedChunkCount > bestRenderedChunkCount) {
-      bestFrame = frame;
-      bestRenderedChunkCount = renderedChunkCount;
-      stablePasses = 0;
-    } else {
-      stablePasses++;
-    }
-
-    if ((frame.layerDraws.get(RenderType.solid())?.length ?? 0) > 0 && stablePasses >= 2) {
-      return bestFrame!;
-    }
-
-    await sleep(50);
-    if (await scene.worldClient.pollUpdates()) {
-      applyRenderWorldDirtySections(scene);
-    }
-    scene.levelRenderer.requestUpdate();
-  }
-
-  return bestFrame ?? frame!;
+  // Mesh requests issued before the full chunk ring arrives can legitimately
+  // return "not ready"; force one visibility pass after the ring is present.
+  scene.levelRenderer.allChanged();
+  return renderSceneUntilSettled(scene, camera);
 }
 
 async function boot(): Promise<BootResult> {
@@ -398,6 +354,7 @@ async function boot(): Promise<BootResult> {
     cutoutDrawCount: cutoutDraws.length,
     translucentDrawCount: translucentDraws.length,
     renderWorldCounters: getSceneRenderWorldPerformanceCounters(scene),
+    renderQueueStats: getSceneRenderQueueStats(scene),
   };
 }
 

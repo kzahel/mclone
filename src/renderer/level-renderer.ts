@@ -88,6 +88,10 @@ export class LevelRenderer {
     return count;
   }
 
+  public getPendingVisibleChunkCompileCount(): number {
+    return this.chunksToCompile.size;
+  }
+
   public static getLightColor(level: BlockAndTintGetter, pos: BlockPos): number {
     return LevelRenderer.getLightColorFromState(level, level.getBlockState(pos), pos);
   }

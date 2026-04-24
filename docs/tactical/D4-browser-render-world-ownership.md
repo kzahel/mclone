@@ -210,6 +210,7 @@ Landed so far:
 - `RendererScene` no longer exposes the compatibility `ClientChunkCache`; dirty-section clipping uses small `worldBounds` metadata
 - browser remote-host validation is isolated per test by `test/browser/remote-world-host-fixture.ts`; `playwright.config.ts` starts only Vite, and remote specs create a fresh `GeneratedWorldHttpServer` on a random localhost port
 - `GeneratedWorldHttpServer.stop()` closes active HTTP connections during shutdown, and the browser remote-host fixture retries temp save-root cleanup to avoid filesystem races with aborted browser requests
+- screenshot readiness is based on a settled render queue, not first-frame success: after the expected chunk ring arrives, smoke/debug force a fresh visible-set pass, wait for chunk-build queues to drain across stable rendered-chunk counts, submit the frame, and expose queue-idle stats to browser tests
 - browser validation for this slice passed with terrain visible in `/tmp/mclone-browser-smoke.png`, `/tmp/mclone-debug-free-cam.png`, `/tmp/mclone-debug-free-cam-tall.png`, and `/tmp/mclone-debug-cave-mouth.png`
 - full `pnpm test:browser` passes 23/23 specs with the isolated remote-host fixture
 
@@ -253,7 +254,7 @@ Landed so far:
 
 10. Stabilize browser validation.
 
-   Done. Remote browser specs use a per-test host fixture instead of a shared `4173` host, server shutdown closes active HTTP connections, temp save roots retry cleanup, and the full browser suite passes.
+   Done. Remote browser specs use a per-test host fixture instead of a shared `4173` host, server shutdown closes active HTTP connections, temp save roots retry cleanup, screenshot capture waits for a settled render queue plus submitted GPU work, and the full browser suite passes.
 
 ## Dirty-section policy
 
@@ -330,6 +331,7 @@ Current coverage:
 Current browser validation:
 
 - targeted remote browser specs pass: smoke, debug free-cam movement, debug free-cam tall resize, and cave-mouth
+- smoke and debug screenshot specs assert the visible render queue is drained before capture (`pendingVisibleChunkCompileCount`, `queuedChunkBuildCount`, and `activeChunkBuildCount` are zero)
 - full `pnpm test:browser` passes 23/23 specs
 - inspected screenshots under `/tmp`: `/tmp/mclone-browser-smoke.png`, `/tmp/mclone-debug-free-cam.png`, `/tmp/mclone-debug-free-cam-tall.png`, and `/tmp/mclone-debug-cave-mouth.png`
 

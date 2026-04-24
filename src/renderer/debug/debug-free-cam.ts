@@ -7,9 +7,13 @@ import {
   createSceneDepthTarget,
   encodeSceneFrame,
   getSceneLoadedChunkCount,
+  getSceneRenderQueueStats,
   getSceneRenderWorldPerformanceCounters,
   initializeRendererScene,
+  renderSceneUntilSettled,
   resizeCanvasToDisplaySize,
+  waitForLoadedChunkRing,
+  type RenderSceneQueueStats,
   type RenderWorldPerformanceCounters,
   type RendererScene,
 } from "../scene-setup";
@@ -50,6 +54,7 @@ interface DebugRuntimeState {
   renderDistance?: number;
   frameCount: number;
   renderWorldCounters?: RenderWorldPerformanceCounters;
+  renderQueueStats?: RenderSceneQueueStats;
   error?: string;
 }
 
@@ -139,24 +144,6 @@ function showOverlayMessage(message: string): void {
   if (overlay) overlay.textContent = message;
 }
 
-async function waitForLoadedChunkRing(scene: RendererScene, expectedLoadedChunkCount: number): Promise<boolean> {
-  if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
-    return true;
-  }
-
-  for (let attempt = 0; attempt < 40; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, WORLD_POLL_INTERVAL_MS));
-    if (await scene.worldClient.pollUpdates()) {
-      applyRenderWorldDirtySections(scene);
-    }
-    if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
-      return true;
-    }
-  }
-
-  return getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount;
-}
-
 async function boot(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
   if (!canvas) {
@@ -215,7 +202,8 @@ async function boot(): Promise<void> {
   let lastLightTickMs = lastFrameMs;
   let lastWorldPollMs = lastFrameMs;
   let renderInFlight = false;
-  let frameCount = 0;
+  let totalFrameCount = 0;
+  let fpsFrameCount = 0;
   let lastFpsReportMs = lastFrameMs;
   let nextInputSequence = 1;
   let lastSentInput: import("../../runtime/protocol/world-messages").PlayerInputCommand | undefined;
@@ -256,12 +244,35 @@ async function boot(): Promise<void> {
     showOverlayMessage(`error: ${debugRuntime.controller.state.error}`);
     return;
   }
+
+  // Mesh jobs can be requested before every chunk needed by their padded
+  // neighborhood is present. Re-run the initial visible set after the ring is
+  // complete so screenshots start from a settled frame instead of a partial one.
+  scene.levelRenderer.allChanged();
+  const initialFrame = await renderSceneUntilSettled(scene, camera);
+  const initialEncoder = scene.device.createCommandEncoder();
+  encodeSceneFrame(
+    scene,
+    initialFrame,
+    {
+      view: scene.ctx.getCurrentTexture().createView(),
+      depthView: depthTarget!.view,
+      format: scene.format,
+    },
+    initialEncoder,
+  );
+  scene.device.queue.submit([initialEncoder.finish()]);
+  await scene.device.queue.onSubmittedWorkDone();
+  totalFrameCount++;
+
   debugRuntime.controller.state.ready = true;
   debugRuntime.controller.state.saveId = scene.saveMetadata.saveId;
   debugRuntime.controller.state.loadedChunkCount = getSceneLoadedChunkCount(scene);
   debugRuntime.controller.state.renderWorldCounters = getSceneRenderWorldPerformanceCounters(scene);
+  debugRuntime.controller.state.renderQueueStats = getSceneRenderQueueStats(scene);
   debugRuntime.controller.state.viewDistance = scene.viewDistance;
   debugRuntime.controller.state.renderDistance = scene.gameRenderer.getRenderDistance();
+  debugRuntime.controller.state.frameCount = totalFrameCount;
 
   const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
   showOverlayMessage(
@@ -326,6 +337,7 @@ async function boot(): Promise<void> {
       debugRuntime.controller.state.chunkViewCenterZ = sessionState?.chunkView?.centerChunkZ;
       debugRuntime.controller.state.loadedChunkCount = getSceneLoadedChunkCount(scene);
       debugRuntime.controller.state.renderWorldCounters = getSceneRenderWorldPerformanceCounters(scene);
+      debugRuntime.controller.state.renderQueueStats = getSceneRenderQueueStats(scene);
     }
 
     if (!renderInFlight) {
@@ -351,18 +363,21 @@ async function boot(): Promise<void> {
           encoder,
         );
         scene.device.queue.submit([encoder.finish()]);
-        frameCount++;
-        debugRuntime.controller.state.frameCount = frameCount;
+        await scene.device.queue.onSubmittedWorkDone();
+        totalFrameCount++;
+        fpsFrameCount++;
+        debugRuntime.controller.state.frameCount = totalFrameCount;
         debugRuntime.controller.state.renderWorldCounters = getSceneRenderWorldPerformanceCounters(scene);
+        debugRuntime.controller.state.renderQueueStats = getSceneRenderQueueStats(scene);
         if (now - lastFpsReportMs >= 1000.0) {
-          const fps = (frameCount * 1000.0) / (now - lastFpsReportMs);
+          const fps = (fpsFrameCount * 1000.0) / (now - lastFpsReportMs);
           const playerStateForOverlay = scene.worldClient.getPlayerState();
           if (playerStateForOverlay !== undefined) {
             showOverlayMessage(
               `fps ${fps.toFixed(0)}  pos ${playerStateForOverlay.position.x.toFixed(1)}, ${playerStateForOverlay.position.y.toFixed(1)}, ${playerStateForOverlay.position.z.toFixed(1)}  yaw ${playerStateForOverlay.rotation.yaw.toFixed(0)}  pitch ${playerStateForOverlay.rotation.pitch.toFixed(0)}  tick ${playerStateForOverlay.tick.toString()}`,
             );
           }
-          frameCount = 0;
+          fpsFrameCount = 0;
           lastFpsReportMs = now;
         }
       } finally {

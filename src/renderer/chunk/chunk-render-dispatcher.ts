@@ -204,6 +204,10 @@ export class ChunkRenderDispatcher {
     return this.toBatchCount;
   }
 
+  public getActiveTaskCount(): number {
+    return this.activeTasks.size;
+  }
+
   public getToUpload(): number {
     return 0;
   }

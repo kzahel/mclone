@@ -25,7 +25,7 @@ import { ModelBakery } from "./model/model-bakery";
 import { ModelManager } from "./model/model-manager";
 import { LevelRenderer, type LevelRenderFrame } from "./level-renderer";
 import { LightTexture } from "./light-texture";
-import { GameRenderer } from "./game-renderer";
+import { GameRenderer, type CameraState } from "./game-renderer";
 import { BrowserTextureAtlasSource } from "./texture/browser-native-image-loader";
 import { DEFAULT_BLOCK_ATLAS_MIP_LEVEL, TextureAtlas } from "./texture/texture-atlas";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
@@ -96,6 +96,19 @@ export interface RenderWorldPerformanceCounters {
   readonly mainThreadGpuUploadCount: number;
 }
 
+export interface RenderSceneQueueStats {
+  readonly renderedChunkCount: number;
+  readonly pendingVisibleChunkCompileCount: number;
+  readonly queuedChunkBuildCount: number;
+  readonly activeChunkBuildCount: number;
+}
+
+export interface StableSceneFrameOptions {
+  readonly maxAttempts?: number;
+  readonly stablePasses?: number;
+  readonly pollIntervalMs?: number;
+}
+
 export type SceneInitResult =
   | { ok: true; scene: RendererScene }
   | { ok: false; reason: string };
@@ -120,6 +133,12 @@ export interface CanvasResizeResult {
 interface TextureSamplerState {
   readonly blur: boolean;
   readonly mipmap: boolean;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function clampCanvasSize(width: number, height: number, maxTextureDimension: number): {
@@ -205,6 +224,15 @@ export function getSceneRenderWorldPerformanceCounters(scene: RendererScene): Re
   };
 }
 
+export function getSceneRenderQueueStats(scene: RendererScene): RenderSceneQueueStats {
+  return {
+    renderedChunkCount: scene.levelRenderer.countRenderedChunks(),
+    pendingVisibleChunkCompileCount: scene.levelRenderer.getPendingVisibleChunkCompileCount(),
+    queuedChunkBuildCount: scene.chunkDispatcher.getToBatchCount(),
+    activeChunkBuildCount: scene.chunkDispatcher.getActiveTaskCount(),
+  };
+}
+
 export function applyRenderWorldDirtySections(scene: RendererScene): number {
   let dirtyCount = 0;
   for (const dirtySection of scene.renderWorldUpdateSink.drainDirtySections()) {
@@ -226,6 +254,86 @@ export function applyRenderWorldDirtySections(scene: RendererScene): number {
   }
 
   return dirtyCount;
+}
+
+export async function waitForLoadedChunkRing(
+  scene: RendererScene,
+  expectedLoadedChunkCount: number,
+  options: Pick<StableSceneFrameOptions, "maxAttempts" | "pollIntervalMs"> = {},
+): Promise<boolean> {
+  if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
+    return true;
+  }
+
+  const maxAttempts = options.maxAttempts ?? 80;
+  const pollIntervalMs = options.pollIntervalMs ?? 50;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await sleep(pollIntervalMs);
+    if (await scene.worldClient.pollUpdates()) {
+      applyRenderWorldDirtySections(scene);
+    }
+    if (getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount) {
+      return true;
+    }
+  }
+
+  return getSceneLoadedChunkCount(scene) >= expectedLoadedChunkCount;
+}
+
+export async function renderSceneUntilSettled(
+  scene: RendererScene,
+  camera: CameraState,
+  options: StableSceneFrameOptions = {},
+): Promise<LevelRenderFrame> {
+  const maxAttempts = options.maxAttempts ?? 30;
+  const stablePassTarget = options.stablePasses ?? 3;
+  const pollIntervalMs = options.pollIntervalMs ?? 50;
+  let frame: LevelRenderFrame | undefined;
+  let bestFrame: LevelRenderFrame | undefined;
+  let bestRenderedChunkCount = -1;
+  let previousRenderedChunkCount = -1;
+  let stablePasses = 0;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (await scene.worldClient.pollUpdates()) {
+      applyRenderWorldDirtySections(scene);
+    }
+
+    frame = await scene.gameRenderer.renderLevel(
+      0.0,
+      Number.MAX_SAFE_INTEGER,
+      scene.levelRenderer,
+      scene.lightTexture,
+      camera,
+      { waitForChunkTasks: true },
+    );
+
+    const queueStats = getSceneRenderQueueStats(scene);
+    const hasSolidDraws = (frame.layerDraws.get(RenderType.solid())?.length ?? 0) > 0;
+    const renderQueueIdle = queueStats.pendingVisibleChunkCompileCount === 0
+      && queueStats.queuedChunkBuildCount === 0
+      && queueStats.activeChunkBuildCount === 0;
+
+    if (queueStats.renderedChunkCount > bestRenderedChunkCount) {
+      bestFrame = frame;
+      bestRenderedChunkCount = queueStats.renderedChunkCount;
+    }
+
+    if (hasSolidDraws && renderQueueIdle && queueStats.renderedChunkCount === previousRenderedChunkCount) {
+      stablePasses++;
+      if (stablePasses >= stablePassTarget) {
+        return frame;
+      }
+    } else {
+      stablePasses = 0;
+    }
+    previousRenderedChunkCount = queueStats.renderedChunkCount;
+
+    await sleep(pollIntervalMs);
+    scene.levelRenderer.requestUpdate();
+  }
+
+  return bestFrame ?? frame!;
 }
 
 async function initializeBiomeColorTables(atlasSource: BrowserTextureAtlasSource): Promise<void> {

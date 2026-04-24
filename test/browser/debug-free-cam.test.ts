@@ -12,6 +12,13 @@ interface RenderWorldPerformanceCounters {
   readonly mainThreadGpuUploadCount: number;
 }
 
+interface RenderSceneQueueStats {
+  readonly renderedChunkCount: number;
+  readonly pendingVisibleChunkCompileCount: number;
+  readonly queuedChunkBuildCount: number;
+  readonly activeChunkBuildCount: number;
+}
+
 interface DebugRuntimeState {
   readonly ready: boolean;
   readonly worldTransport: "worker" | "remote";
@@ -27,6 +34,7 @@ interface DebugRuntimeState {
   readonly renderDistance?: number;
   readonly frameCount: number;
   readonly renderWorldCounters?: RenderWorldPerformanceCounters;
+  readonly renderQueueStats?: RenderSceneQueueStats;
   readonly error?: string;
 }
 
@@ -84,6 +92,14 @@ async function waitForDebugReady(page: Page): Promise<void> {
   );
 }
 
+function expectRenderQueueSettled(state: DebugRuntimeState): void {
+  expect(state.renderQueueStats).toBeDefined();
+  expect(state.renderQueueStats!.renderedChunkCount).toBeGreaterThan(0);
+  expect(state.renderQueueStats!.pendingVisibleChunkCompileCount).toBe(0);
+  expect(state.renderQueueStats!.queuedChunkBuildCount).toBe(0);
+  expect(state.renderQueueStats!.activeChunkBuildCount).toBe(0);
+}
+
 test("debug free-cam follows authoritative player_state and moves chunk interest with remote input", async ({ page, remoteWorldHostUrl }) => {
   await page.goto(createDebugUrl(remoteWorldHostUrl), { waitUntil: "load" });
   await waitForDebugReady(page);
@@ -110,6 +126,7 @@ test("debug free-cam follows authoritative player_state and moves chunk interest
   expect(initialState.renderWorldCounters!.meshBuildRequestCount).toBeGreaterThan(0);
   expect(initialState.renderWorldCounters!.meshCompletionCount).toBeGreaterThan(0);
   expect(initialState.renderWorldCounters!.mainThreadGpuUploadCount).toBeGreaterThan(0);
+  expectRenderQueueSettled(initialState);
   await page.locator("#renderer").screenshot({ path: DEBUG_SCREENSHOT_PATH });
 
   await page.evaluate(() => {
@@ -180,6 +197,7 @@ test("debug free-cam keeps the backing buffer aligned with a tall viewport after
   await page.locator("#renderer").screenshot({ path: DEBUG_TALL_SCREENSHOT_PATH });
 
   expect(state.error).toBeUndefined();
+  expectRenderQueueSettled(state);
   expect(metrics.clientHeight).toBeGreaterThan(metrics.clientWidth);
   expect(Math.abs(metrics.width - Math.round(metrics.clientWidth * metrics.devicePixelRatio))).toBeLessThanOrEqual(1);
   expect(Math.abs(metrics.height - Math.round(metrics.clientHeight * metrics.devicePixelRatio))).toBeLessThanOrEqual(1);

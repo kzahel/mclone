@@ -10,6 +10,12 @@ interface DebugRuntimeState {
   readonly playerChunkZ?: number;
   readonly loadedChunkCount: number;
   readonly frameCount: number;
+  readonly renderQueueStats?: {
+    readonly renderedChunkCount: number;
+    readonly pendingVisibleChunkCompileCount: number;
+    readonly queuedChunkBuildCount: number;
+    readonly activeChunkBuildCount: number;
+  };
   readonly error?: string;
 }
 
@@ -44,6 +50,11 @@ test("debug free-cam captures a targeted cave-mouth or ravine frame against the 
   expect(state.error).toBeUndefined();
   expect(state.worldTransport).toBe("remote");
   expect(state.loadedChunkCount).toBeGreaterThan(0);
+  expect(state.renderQueueStats).toBeDefined();
+  expect(state.renderQueueStats!.renderedChunkCount).toBeGreaterThan(0);
+  expect(state.renderQueueStats!.pendingVisibleChunkCompileCount).toBe(0);
+  expect(state.renderQueueStats!.queuedChunkBuildCount).toBe(0);
+  expect(state.renderQueueStats!.activeChunkBuildCount).toBe(0);
   expect(state.playerChunkX).toBe(-7);
   expect(state.playerChunkZ).toBe(-20);
   expect(state.playerPosition?.[0]).toBe(-103.5);

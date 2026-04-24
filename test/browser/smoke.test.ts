@@ -58,6 +58,10 @@ test("WebGPU boot succeeds against the remote Node host with two browser clients
       expect(result.renderWorldCounters.meshCompletionCount).toBeGreaterThan(0);
       expect(result.renderWorldCounters.mainThreadGpuUploadCount).toBeGreaterThan(0);
       expect(result.renderWorldCounters.meshNotReadyResponseCount).toBeGreaterThanOrEqual(0);
+      expect(result.renderQueueStats.renderedChunkCount).toBeGreaterThan(0);
+      expect(result.renderQueueStats.pendingVisibleChunkCompileCount).toBe(0);
+      expect(result.renderQueueStats.queuedChunkBuildCount).toBe(0);
+      expect(result.renderQueueStats.activeChunkBuildCount).toBe(0);
     }
   }
 
