@@ -394,7 +394,7 @@ describe("Chunk render infrastructure", () => {
       position: new Vec3(8.5, 8.5, 20),
       xRot: 0,
       yRot: 180,
-    });
+    }, { waitForChunkTasks: true });
 
     const solidDraws = frame.layerDraws.get(RenderType.solid()) ?? [];
     expect(solidDraws.length).toBeGreaterThan(0);
