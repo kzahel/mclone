@@ -5,6 +5,14 @@ const DEBUG_SCREENSHOT_PATH = "/tmp/mclone-debug-free-cam.png";
 const DEBUG_TALL_SCREENSHOT_PATH = "/tmp/mclone-debug-free-cam-tall.png";
 const EXPECTED_LOADED_CHUNK_COUNT = 225;
 
+interface RenderWorldPerformanceCounters {
+  readonly ingestBatchCount: number;
+  readonly meshBuildRequestCount: number;
+  readonly meshNotReadyResponseCount: number;
+  readonly meshCompletionCount: number;
+  readonly mainThreadGpuUploadCount: number;
+}
+
 interface DebugRuntimeState {
   readonly ready: boolean;
   readonly worldTransport: "worker" | "remote";
@@ -19,6 +27,7 @@ interface DebugRuntimeState {
   readonly viewDistance?: number;
   readonly renderDistance?: number;
   readonly frameCount: number;
+  readonly renderWorldCounters?: RenderWorldPerformanceCounters;
   readonly error?: string;
 }
 
@@ -97,6 +106,11 @@ test("debug free-cam follows authoritative player_state and moves chunk interest
   expect(initialState.renderDistance).toBe(192);
   expect(initialState.playerChunkZ).toBeDefined();
   expect(initialState.chunkViewCenterZ).toBeDefined();
+  expect(initialState.renderWorldCounters).toBeDefined();
+  expect(initialState.renderWorldCounters!.ingestBatchCount).toBeGreaterThan(0);
+  expect(initialState.renderWorldCounters!.meshBuildRequestCount).toBeGreaterThan(0);
+  expect(initialState.renderWorldCounters!.meshCompletionCount).toBeGreaterThan(0);
+  expect(initialState.renderWorldCounters!.mainThreadGpuUploadCount).toBeGreaterThan(0);
   await page.locator("#renderer").screenshot({ path: DEBUG_SCREENSHOT_PATH });
 
   await page.evaluate(() => {
@@ -136,6 +150,11 @@ test("debug free-cam follows authoritative player_state and moves chunk interest
   expect(movedState.playerChunkX).toBe(movedState.chunkViewCenterX);
   expect(movedState.playerChunkZ).toBe(movedState.chunkViewCenterZ);
   expect(movedState.loadedChunkCount).toBe(EXPECTED_LOADED_CHUNK_COUNT);
+  expect(movedState.renderWorldCounters).toBeDefined();
+  expect(movedState.renderWorldCounters!.ingestBatchCount).toBeGreaterThan(initialState.renderWorldCounters!.ingestBatchCount);
+  expect(movedState.renderWorldCounters!.meshBuildRequestCount).toBeGreaterThanOrEqual(initialState.renderWorldCounters!.meshBuildRequestCount);
+  expect(movedState.renderWorldCounters!.meshCompletionCount).toBeGreaterThanOrEqual(initialState.renderWorldCounters!.meshCompletionCount);
+  expect(movedState.renderWorldCounters!.mainThreadGpuUploadCount).toBeGreaterThanOrEqual(initialState.renderWorldCounters!.mainThreadGpuUploadCount);
 });
 
 test("debug free-cam keeps the backing buffer aligned with a tall viewport after resize", async ({ page }) => {

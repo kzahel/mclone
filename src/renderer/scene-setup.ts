@@ -79,7 +79,16 @@ export interface RendererScene {
   readonly lightSampler: GPUSampler;
   readonly viewDistance: number;
   readonly viewArea: ViewArea;
+  readonly chunkDispatcher: ChunkRenderDispatcher;
   readonly chunkDrawResources: WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>;
+}
+
+export interface RenderWorldPerformanceCounters {
+  readonly ingestBatchCount: number;
+  readonly meshBuildRequestCount: number;
+  readonly meshNotReadyResponseCount: number;
+  readonly meshCompletionCount: number;
+  readonly mainThreadGpuUploadCount: number;
 }
 
 export type SceneInitResult =
@@ -182,6 +191,13 @@ function createWorldClient(
 
 export function getSceneLoadedChunkCount(scene: RendererScene): number {
   return scene.renderWorldUpdateSink.getStats().loadedChunkCount;
+}
+
+export function getSceneRenderWorldPerformanceCounters(scene: RendererScene): RenderWorldPerformanceCounters {
+  return {
+    ...scene.renderWorldUpdateSink.getPerformanceCounters(),
+    mainThreadGpuUploadCount: scene.chunkDispatcher.getMainThreadGpuUploadCount(),
+  };
 }
 
 export function applyRenderWorldDirtySections(scene: RendererScene): number {
@@ -373,6 +389,7 @@ export async function initializeRendererScene(
       lightSampler,
       viewDistance: options.viewDistance,
       viewArea,
+      chunkDispatcher,
       chunkDrawResources: new WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>(),
     },
   };

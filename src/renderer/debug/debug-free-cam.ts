@@ -7,8 +7,10 @@ import {
   createSceneDepthTarget,
   encodeSceneFrame,
   getSceneLoadedChunkCount,
+  getSceneRenderWorldPerformanceCounters,
   initializeRendererScene,
   resizeCanvasToDisplaySize,
+  type RenderWorldPerformanceCounters,
   type RendererScene,
 } from "../scene-setup";
 import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "../browser-render-config";
@@ -47,6 +49,7 @@ interface DebugRuntimeState {
   viewDistance?: number;
   renderDistance?: number;
   frameCount: number;
+  renderWorldCounters?: RenderWorldPerformanceCounters;
   error?: string;
 }
 
@@ -256,6 +259,7 @@ async function boot(): Promise<void> {
   debugRuntime.controller.state.ready = true;
   debugRuntime.controller.state.saveId = scene.saveMetadata.saveId;
   debugRuntime.controller.state.loadedChunkCount = getSceneLoadedChunkCount(scene);
+  debugRuntime.controller.state.renderWorldCounters = getSceneRenderWorldPerformanceCounters(scene);
   debugRuntime.controller.state.viewDistance = scene.viewDistance;
   debugRuntime.controller.state.renderDistance = scene.gameRenderer.getRenderDistance();
 
@@ -321,6 +325,7 @@ async function boot(): Promise<void> {
       debugRuntime.controller.state.chunkViewCenterX = sessionState?.chunkView?.centerChunkX;
       debugRuntime.controller.state.chunkViewCenterZ = sessionState?.chunkView?.centerChunkZ;
       debugRuntime.controller.state.loadedChunkCount = getSceneLoadedChunkCount(scene);
+      debugRuntime.controller.state.renderWorldCounters = getSceneRenderWorldPerformanceCounters(scene);
     }
 
     if (!renderInFlight) {
@@ -348,6 +353,7 @@ async function boot(): Promise<void> {
         scene.device.queue.submit([encoder.finish()]);
         frameCount++;
         debugRuntime.controller.state.frameCount = frameCount;
+        debugRuntime.controller.state.renderWorldCounters = getSceneRenderWorldPerformanceCounters(scene);
         if (now - lastFpsReportMs >= 1000.0) {
           const fps = (frameCount * 1000.0) / (now - lastFpsReportMs);
           const playerStateForOverlay = scene.worldClient.getPlayerState();

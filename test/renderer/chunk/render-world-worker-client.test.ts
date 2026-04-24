@@ -228,11 +228,18 @@ describe("RenderWorld worker client", () => {
       };
     });
 
-    const sink = new RenderWorldWorkerUpdateSink(new RenderWorldWorkerClient(clientEndpoint));
+    const client = new RenderWorldWorkerClient(clientEndpoint);
+    const sink = new RenderWorldWorkerUpdateSink(client);
     await expect(sink.ingestUpdates([{ type: "chunk_snapshot", snapshot }])).resolves.toEqual({
       chunkChanged: true,
     });
     expect(sink.getStats()).toEqual({ loadedChunkCount: 9 });
+    expect(sink.getPerformanceCounters()).toEqual({
+      ingestBatchCount: 1,
+      meshBuildRequestCount: 0,
+      meshNotReadyResponseCount: 0,
+      meshCompletionCount: 0,
+    });
     expect(sink.drainDirtySections()).toEqual([sectionOrigin(32, 0, -48)]);
     expect(sink.drainDirtySections()).toEqual([]);
   });
@@ -264,6 +271,7 @@ describe("RenderWorld worker client", () => {
     expect(receivedBatchSizes).toEqual([8, 1]);
     expect(rawClientEndpoint.getMessages()).toHaveLength(2);
     expect(sink.getStats()).toEqual({ loadedChunkCount: 2 });
+    expect(sink.getPerformanceCounters().ingestBatchCount).toBe(2);
     expect(sink.drainDirtySections()).toEqual([
       sectionOrigin(1, 0, 0),
       sectionOrigin(2, 0, 0),
@@ -299,6 +307,12 @@ describe("RenderWorld worker client", () => {
       origin,
       result,
     });
+    expect(client.getPerformanceCounters()).toEqual({
+      ingestBatchCount: 0,
+      meshBuildRequestCount: 1,
+      meshNotReadyResponseCount: 0,
+      meshCompletionCount: 1,
+    });
 
     expect(rawHostEndpoint.getTransfers()).toHaveLength(1);
     expect(rawHostEndpoint.getTransfers()[0]).toEqual([resultBuffer.buffer]);
@@ -325,6 +339,12 @@ describe("RenderWorld worker client", () => {
       origin,
       reason: "missing_neighbors",
       missingChunks: [{ chunkX: 2, chunkZ: 1 }],
+    });
+    expect(client.getPerformanceCounters()).toEqual({
+      ingestBatchCount: 0,
+      meshBuildRequestCount: 1,
+      meshNotReadyResponseCount: 1,
+      meshCompletionCount: 0,
     });
   });
 

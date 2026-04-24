@@ -49,6 +49,7 @@ export class ChunkRenderDispatcher {
   private taskFailure: unknown;
   private camera = Vec3.ZERO;
   private hasPendingUploads = false;
+  private mainThreadGpuUploadCount = 0;
 
   public constructor(
     public level: StaticRenderLevel,
@@ -230,6 +231,15 @@ export class ChunkRenderDispatcher {
     this.hasPendingUploads = true;
   }
 
+  public noteMainThreadGpuUpload(): void {
+    this.mainThreadGpuUploadCount++;
+    this.notePendingUploads();
+  }
+
+  public getMainThreadGpuUploadCount(): number {
+    return this.mainThreadGpuUploadCount;
+  }
+
   public usesRenderWorldWorker(): boolean {
     return this.renderWorldWorker !== undefined;
   }
@@ -252,7 +262,7 @@ export class ChunkRenderDispatcher {
   public async uploadChunkLayer(bufferBuilder: import("../vertex/buffer-builder").BufferBuilder, vertexBuffer: VertexBuffer): Promise<void> {
     // WebGPU: section uploads happen immediately on the main thread instead of through the deferred GL upload queue.
     vertexBuffer.upload(bufferBuilder);
-    this.notePendingUploads();
+    this.noteMainThreadGpuUpload();
   }
 
   public createSectionMeshInput(origin: BlockPos): SectionMeshInput | undefined {
@@ -624,8 +634,8 @@ export namespace ChunkRenderDispatcher {
 
         for (const layer of decoded.layers) {
           this.renderChunk.getBuffer(layer.renderType).uploadRaw(layer.drawState, layer.buffer);
+          this.renderChunk.getDispatcher().noteMainThreadGpuUpload();
         }
-        this.renderChunk.getDispatcher().notePendingUploads();
       } else if (this.meshInput !== undefined) {
         const decoded = decodeSectionMeshResult(await this.renderChunk.getDispatcher().runMeshWorkerBuild(this.meshInput, camera));
         this.applyCompiledState(compiledChunk, decoded);
@@ -636,8 +646,8 @@ export namespace ChunkRenderDispatcher {
 
         for (const layer of decoded.layers) {
           this.renderChunk.getBuffer(layer.renderType).uploadRaw(layer.drawState, layer.buffer);
+          this.renderChunk.getDispatcher().noteMainThreadGpuUpload();
         }
-        this.renderChunk.getDispatcher().notePendingUploads();
       } else {
         if (buffers === undefined) {
           throw new Error("Chunk rebuild task requires a ChunkBufferBuilderPack");

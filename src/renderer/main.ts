@@ -9,8 +9,10 @@ import {
   createSceneDepthView,
   encodeSceneFrame,
   getSceneLoadedChunkCount,
+  getSceneRenderWorldPerformanceCounters,
   initializeRendererScene,
   SCENE_DEPTH_FORMAT,
+  type RenderWorldPerformanceCounters,
   type RendererScene,
 } from "./scene-setup";
 import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "./browser-render-config";
@@ -49,6 +51,7 @@ export type BootResult =
       solidDrawCount: number;
       cutoutDrawCount: number;
       translucentDrawCount: number;
+      renderWorldCounters: RenderWorldPerformanceCounters;
     }
   | { ok: false; reason: string };
 
@@ -305,7 +308,9 @@ async function boot(): Promise<BootResult> {
     });
     for (let attempt = 0; attempt < 5; attempt++) {
       await sleep(60);
-      await scene.worldClient.pollUpdates();
+      if (await scene.worldClient.pollUpdates()) {
+        applyRenderWorldDirtySections(scene);
+      }
       const updatedPlayerState = scene.worldClient.getPlayerState();
       if (updatedPlayerState !== undefined && updatedPlayerState.revision > initialPlayerState.revision) {
         break;
@@ -392,6 +397,7 @@ async function boot(): Promise<BootResult> {
     solidDrawCount: solidDraws.length,
     cutoutDrawCount: cutoutDraws.length,
     translucentDrawCount: translucentDraws.length,
+    renderWorldCounters: getSceneRenderWorldPerformanceCounters(scene),
   };
 }
 

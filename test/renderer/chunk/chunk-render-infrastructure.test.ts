@@ -438,6 +438,7 @@ describe("Chunk render infrastructure", () => {
     expect(compiled.hasBlocks.has(RenderType.solid())).toBe(true);
     expect(compiled.hasLayer.has(RenderType.solid())).toBe(true);
     expect(renderChunk!.getBuffer(RenderType.solid()).getFormat()).toBe(DefaultVertexFormat.BLOCK);
+    expect(chunkDispatcher.getMainThreadGpuUploadCount()).toBe(1);
 
     chunkDispatcher.dispose();
     expect(renderWorldClient.closed).toBe(true);

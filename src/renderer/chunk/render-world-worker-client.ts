@@ -55,6 +55,13 @@ export interface RenderWorldWorkerClientEndpoint extends RenderWorldWorkerMessag
 
 export interface RenderWorldWorkerHostEndpoint extends RenderWorldWorkerMessageEndpoint<RenderWorldWorkerResponseEnvelope, RenderWorldWorkerRequestEnvelope> {}
 
+export interface RenderWorldWorkerPerformanceCounters {
+  readonly ingestBatchCount: number;
+  readonly meshBuildRequestCount: number;
+  readonly meshNotReadyResponseCount: number;
+  readonly meshCompletionCount: number;
+}
+
 function formatUnknownError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -125,6 +132,12 @@ export function connectRenderWorldWorkerSession(
 export class RenderWorldWorkerClient {
   public readonly concurrency = 1;
 
+  private readonly performanceCounters = {
+    ingestBatchCount: 0,
+    meshBuildRequestCount: 0,
+    meshNotReadyResponseCount: 0,
+    meshCompletionCount: 0,
+  };
   private nextRequestId = 1;
   private readonly pending = new Map<number, {
     resolve: (message: RenderWorldResponse) => void;
@@ -162,6 +175,7 @@ export class RenderWorldWorkerClient {
   }
 
   public async ingestUpdates(request: IngestRenderWorldUpdatesRequest): Promise<RenderWorldDirtySectionsResponse> {
+    this.performanceCounters.ingestBatchCount++;
     const message = await this.send(request);
     throwIfWorkerError(message);
 
@@ -173,11 +187,18 @@ export class RenderWorldWorkerClient {
   }
 
   public async buildSectionMesh(request: BuildRenderSectionMeshRequest): Promise<RenderWorldMeshBuildResponse> {
+    this.performanceCounters.meshBuildRequestCount++;
     const message = await this.send(request);
     throwIfWorkerError(message);
 
     if (!isRenderWorldMeshBuildResponse(message)) {
       throw new Error(`Expected render_section_mesh_built or render_world_mesh_not_ready, received ${message.type}`);
+    }
+
+    if (message.type === "render_world_mesh_not_ready") {
+      this.performanceCounters.meshNotReadyResponseCount++;
+    } else {
+      this.performanceCounters.meshCompletionCount++;
     }
 
     return message;
@@ -192,6 +213,10 @@ export class RenderWorldWorkerClient {
     }
 
     return message.stats;
+  }
+
+  public getPerformanceCounters(): RenderWorldWorkerPerformanceCounters {
+    return { ...this.performanceCounters };
   }
 
   public close(): void {
@@ -272,6 +297,10 @@ export class RenderWorldWorkerUpdateSink implements RenderWorldUpdateSink {
 
   public getStats(): RenderWorldStats {
     return this.currentStats;
+  }
+
+  public getPerformanceCounters(): RenderWorldWorkerPerformanceCounters {
+    return this.client.getPerformanceCounters();
   }
 
   public drainDirtySections(): readonly RenderWorldSectionOrigin[] {
