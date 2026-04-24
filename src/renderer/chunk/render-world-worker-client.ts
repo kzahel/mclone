@@ -1,3 +1,4 @@
+import type { RenderWorldChunkUpdateResult, RenderWorldUpdateMessage, RenderWorldUpdateSink } from "../../runtime/transport/local-world-transport";
 import {
   collectRenderWorldRequestTransferables,
   collectRenderWorldResponseTransferables,
@@ -10,9 +11,12 @@ import {
   type RenderWorldReadyResponse,
   type RenderWorldRequest,
   type RenderWorldResponse,
+  type RenderWorldSectionOrigin,
   type RenderWorldStats,
   type RenderWorldStatsResponse,
 } from "./render-world-protocol";
+
+const MAX_RENDER_WORLD_INGEST_TRANSFERABLES = 256;
 
 export interface RenderWorldWorkerRequestEnvelope {
   readonly requestId: number;
@@ -214,6 +218,64 @@ export class RenderWorldWorkerClient {
     }
 
     this.pending.clear();
+  }
+}
+
+export class RenderWorldWorkerUpdateSink implements RenderWorldUpdateSink {
+  private currentStats: RenderWorldStats = { loadedChunkCount: 0 };
+  private readonly dirtySections: RenderWorldSectionOrigin[] = [];
+
+  public constructor(private readonly client: RenderWorldWorkerClient) {}
+
+  public async ingestUpdates(messages: readonly RenderWorldUpdateMessage[]): Promise<RenderWorldChunkUpdateResult> {
+    if (messages.length <= 0) {
+      return { chunkChanged: false };
+    }
+
+    let chunkChanged = false;
+    let batch: RenderWorldUpdateMessage[] = [];
+    let transferCount = 0;
+
+    const flushBatch = async (): Promise<void> => {
+      if (batch.length <= 0) {
+        return;
+      }
+
+      const response = await this.client.ingestUpdates({
+        type: "ingest_render_world_updates",
+        messages: batch,
+      });
+      batch = [];
+      transferCount = 0;
+      this.currentStats = response.stats;
+      this.dirtySections.push(...response.dirtySections);
+      chunkChanged = response.dirtySections.length > 0 || chunkChanged;
+    };
+
+    for (const message of messages) {
+      const messageTransferCount = message.type === "chunk_snapshot" ? message.snapshot.sections.length * 2 : 0;
+      if (batch.length > 0 && transferCount + messageTransferCount > MAX_RENDER_WORLD_INGEST_TRANSFERABLES) {
+        await flushBatch();
+      }
+
+      batch.push(message);
+      transferCount += messageTransferCount;
+    }
+
+    await flushBatch();
+    return {
+      chunkChanged,
+    };
+  }
+
+  public getStats(): RenderWorldStats {
+    return this.currentStats;
+  }
+
+  public drainDirtySections(): readonly RenderWorldSectionOrigin[] {
+    const drained = [...this.dirtySections];
+    this.dirtySections.length = 0;
+    return drained;
   }
 }
 

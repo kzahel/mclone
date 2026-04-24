@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   connectRenderWorldWorkerSession,
   RenderWorldWorkerClient,
+  RenderWorldWorkerUpdateSink,
   type RenderWorldWorkerClientEndpoint,
   type RenderWorldWorkerHostEndpoint,
   type RenderWorldWorkerMessageListener,
@@ -92,17 +93,17 @@ function createEndpointPair(): {
   };
 }
 
-function createPackedChunkSnapshot(): PackedChunkSnapshot {
+function createPackedChunkSnapshot(chunkX = 2, sectionCount = 1): PackedChunkSnapshot {
   return {
-    chunkX: 2,
+    chunkX,
     chunkZ: -3,
     biomes: [1, 2, 3],
-    sections: [{
-      y: 0,
+    sections: Array.from({ length: sectionCount }, (_, sectionIndex) => ({
+      y: sectionIndex,
       paletteStateIds: new Uint32Array([1, 2]),
       bitsPerBlock: 4,
       packedBlockIndices: new BigInt64Array([0n, 1n]),
-    }],
+    })),
     blockTicks: [],
     liquidTicks: [],
   };
@@ -208,6 +209,64 @@ describe("RenderWorld worker client", () => {
     expect(rawClientEndpoint.getTransfers()[0]).toEqual([
       snapshot.sections[0]!.paletteStateIds.buffer,
       snapshot.sections[0]!.packedBlockIndices.buffer,
+    ]);
+  });
+
+  test("adapts world chunk updates into render-world worker ingest requests", async () => {
+    const { clientEndpoint, hostEndpoint } = createEndpointPair();
+    const snapshot = createPackedChunkSnapshot();
+
+    connectRenderWorldWorkerSession(hostEndpoint, async (message): Promise<RenderWorldResponse> => {
+      expect(message).toEqual({
+        type: "ingest_render_world_updates",
+        messages: [{ type: "chunk_snapshot", snapshot }],
+      });
+      return {
+        type: "render_world_dirty_sections",
+        dirtySections: [sectionOrigin(32, 0, -48)],
+        stats: { loadedChunkCount: 9 },
+      };
+    });
+
+    const sink = new RenderWorldWorkerUpdateSink(new RenderWorldWorkerClient(clientEndpoint));
+    await expect(sink.ingestUpdates([{ type: "chunk_snapshot", snapshot }])).resolves.toEqual({
+      chunkChanged: true,
+    });
+    expect(sink.getStats()).toEqual({ loadedChunkCount: 9 });
+    expect(sink.drainDirtySections()).toEqual([sectionOrigin(32, 0, -48)]);
+    expect(sink.drainDirtySections()).toEqual([]);
+  });
+
+  test("batches large render-world update ingests to keep transfer lists bounded", async () => {
+    const { clientEndpoint, hostEndpoint, rawClientEndpoint } = createEndpointPair();
+    const snapshots = Array.from({ length: 9 }, (_, index) => createPackedChunkSnapshot(index, 16));
+    const receivedBatchSizes: number[] = [];
+
+    connectRenderWorldWorkerSession(hostEndpoint, async (message): Promise<RenderWorldResponse> => {
+      expect(message.type).toBe("ingest_render_world_updates");
+      if (message.type !== "ingest_render_world_updates") {
+        throw new Error(`Unexpected message ${message.type}`);
+      }
+
+      receivedBatchSizes.push(message.messages.length);
+      return {
+        type: "render_world_dirty_sections",
+        dirtySections: [sectionOrigin(receivedBatchSizes.length, 0, 0)],
+        stats: { loadedChunkCount: receivedBatchSizes.length },
+      };
+    });
+
+    const sink = new RenderWorldWorkerUpdateSink(new RenderWorldWorkerClient(clientEndpoint));
+    await expect(sink.ingestUpdates(snapshots.map((snapshot) => ({ type: "chunk_snapshot", snapshot })))).resolves.toEqual({
+      chunkChanged: true,
+    });
+
+    expect(receivedBatchSizes).toEqual([8, 1]);
+    expect(rawClientEndpoint.getMessages()).toHaveLength(2);
+    expect(sink.getStats()).toEqual({ loadedChunkCount: 2 });
+    expect(sink.drainDirtySections()).toEqual([
+      sectionOrigin(1, 0, 0),
+      sectionOrigin(2, 0, 0),
     ]);
   });
 

@@ -4,6 +4,8 @@ import type { WorldHost } from "../protocol/world-host";
 import {
   type ClientPlayerState,
   type ClientSessionState,
+  type ChunkSnapshotMessage,
+  type ChunkUnloadMessage,
   type OpenWorldRequest,
   type PollWorldUpdatesRequest,
   type SetChunkViewRequest,
@@ -22,6 +24,21 @@ export interface WorldTransport {
   pollUpdates(request: PollWorldUpdatesRequest): Promise<readonly WorldHostMessage[]>;
 
   supportsChunkViewDeduplication?(): boolean;
+}
+
+export type RenderWorldUpdateMessage = ChunkSnapshotMessage | ChunkUnloadMessage;
+
+export interface RenderWorldChunkUpdateResult {
+  readonly chunkChanged: boolean;
+}
+
+export interface RenderWorldUpdateSink {
+  ingestUpdates(messages: readonly RenderWorldUpdateMessage[]): Promise<RenderWorldChunkUpdateResult> | RenderWorldChunkUpdateResult;
+}
+
+export interface TransportWorldClientOptions {
+  readonly chunkUpdateSink?: RenderWorldUpdateSink;
+  readonly mirrorChunkUpdatesToLevel?: boolean;
 }
 
 export class LocalWorldTransport implements WorldTransport {
@@ -55,11 +72,25 @@ export class TransportWorldClient implements WorldClient {
   private sessionState: ClientSessionState | undefined;
   private playerState: ClientPlayerState | undefined;
   private lastChunkView: SetChunkViewRequest | undefined;
+  private chunkUpdateSink: RenderWorldUpdateSink | undefined;
+  private mirrorChunkUpdatesToLevel: boolean;
 
   public constructor(
     private readonly transport: WorldTransport,
     private readonly levelFactory: (worldOpened: WorldOpenedMessage) => ClientChunkCache,
-  ) {}
+    options: TransportWorldClientOptions = {},
+  ) {
+    this.chunkUpdateSink = options.chunkUpdateSink;
+    this.mirrorChunkUpdatesToLevel = options.mirrorChunkUpdatesToLevel ?? options.chunkUpdateSink === undefined;
+  }
+
+  public setRenderWorldUpdateSink(
+    chunkUpdateSink: RenderWorldUpdateSink | undefined,
+    options: { readonly mirrorChunkUpdatesToLevel?: boolean } = {},
+  ): void {
+    this.chunkUpdateSink = chunkUpdateSink;
+    this.mirrorChunkUpdatesToLevel = options.mirrorChunkUpdatesToLevel ?? chunkUpdateSink === undefined;
+  }
 
   public getLevel(): ClientChunkCache {
     if (this.level === undefined) {
@@ -78,7 +109,7 @@ export class TransportWorldClient implements WorldClient {
   }
 
   public async openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage> {
-    const result = this.applyHostMessages(await this.transport.openWorld(request));
+    const result = await this.applyHostMessages(await this.transport.openWorld(request));
     if (result.worldOpened === undefined) {
       throw new Error("World host did not acknowledge open_world");
     }
@@ -100,29 +131,43 @@ export class TransportWorldClient implements WorldClient {
       return false;
     }
 
-    const result = this.applyHostMessages(await this.transport.setChunkView(request));
+    const result = await this.applyHostMessages(await this.transport.setChunkView(request));
     this.lastChunkView = request;
     return result.chunkChanged;
   }
 
   public async setPlayerInput(request: SetPlayerInputRequest): Promise<boolean> {
-    const result = this.applyHostMessages(await this.transport.setPlayerInput(request));
+    const result = await this.applyHostMessages(await this.transport.setPlayerInput(request));
     return result.messageChanged;
   }
 
   public async pollUpdates(): Promise<boolean> {
-    const result = this.applyHostMessages(await this.transport.pollUpdates({ type: "poll_world_updates" }));
+    const result = await this.applyHostMessages(await this.transport.pollUpdates({ type: "poll_world_updates" }));
     return result.messageChanged;
   }
 
-  private applyHostMessages(messages: readonly WorldHostMessage[]): {
+  private async applyHostMessages(messages: readonly WorldHostMessage[]): Promise<{
     readonly worldOpened?: WorldOpenedMessage;
     readonly chunkChanged: boolean;
     readonly messageChanged: boolean;
-  } {
+  }> {
     let worldOpened: WorldOpenedMessage | undefined;
     let chunkChanged = false;
     let messageChanged = false;
+    const pendingChunkUpdates: RenderWorldUpdateMessage[] = [];
+
+    const flushChunkUpdates = async (): Promise<void> => {
+      if (pendingChunkUpdates.length <= 0) {
+        return;
+      }
+
+      const updates = [...pendingChunkUpdates];
+      pendingChunkUpdates.length = 0;
+      if (this.chunkUpdateSink !== undefined) {
+        const result = await this.chunkUpdateSink.ingestUpdates(updates);
+        chunkChanged = result.chunkChanged || chunkChanged;
+      }
+    };
 
     for (const message of messages) {
       switch (message.type) {
@@ -139,19 +184,31 @@ export class TransportWorldClient implements WorldClient {
           messageChanged = true;
           break;
         case "chunk_snapshot":
-          this.getLevel().applyPackedChunkSnapshot(message.snapshot);
-          chunkChanged = true;
+          if (this.chunkUpdateSink !== undefined) {
+            pendingChunkUpdates.push(message);
+          }
+          if (this.chunkUpdateSink === undefined || this.mirrorChunkUpdatesToLevel) {
+            this.getLevel().applyPackedChunkSnapshot(message.snapshot);
+            chunkChanged = true;
+          }
           messageChanged = true;
           break;
         case "chunk_unload":
-          chunkChanged = this.getLevel().applyChunkUnload(message.chunkX, message.chunkZ) || chunkChanged;
+          if (this.chunkUpdateSink !== undefined) {
+            pendingChunkUpdates.push(message);
+          }
+          if (this.chunkUpdateSink === undefined || this.mirrorChunkUpdatesToLevel) {
+            chunkChanged = this.getLevel().applyChunkUnload(message.chunkX, message.chunkZ) || chunkChanged;
+          }
           messageChanged = true;
           break;
         case "world_error":
+          await flushChunkUpdates();
           throw new Error(message.message);
       }
     }
 
+    await flushChunkUpdates();
     return { worldOpened, chunkChanged, messageChanged };
   }
 }
@@ -160,7 +217,8 @@ export class LocalWorldClient extends TransportWorldClient {
   public constructor(
     transport: LocalWorldTransport,
     levelFactory: (worldOpened: WorldOpenedMessage) => ClientChunkCache,
+    options?: TransportWorldClientOptions,
   ) {
-    super(transport, levelFactory);
+    super(transport, levelFactory, options);
   }
 }

@@ -10,7 +10,7 @@ import type {
   WorldHostMessage,
   WorldOpenedMessage,
 } from "../protocol/world-messages";
-import { TransportWorldClient, type WorldTransport } from "./local-world-transport";
+import { TransportWorldClient, type TransportWorldClientOptions, type WorldTransport } from "./local-world-transport";
 
 export interface WorldWorkerRequestEnvelope {
   readonly requestId: number;
@@ -206,8 +206,9 @@ export class WorkerWorldClient extends TransportWorldClient {
   public constructor(
     transport: WorkerWorldTransport,
     levelFactory: (worldOpened: WorldOpenedMessage) => ClientChunkCache,
+    options?: TransportWorldClientOptions,
   ) {
-    super(transport, levelFactory);
+    super(transport, levelFactory, options);
   }
 }
 

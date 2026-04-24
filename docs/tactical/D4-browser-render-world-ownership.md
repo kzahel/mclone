@@ -63,7 +63,7 @@ This makes future parity work easier or neutral. The render-world worker can sti
 | TS source | Current role |
 |---|---|
 | `src/runtime/protocol/world-messages.ts` | D3 `chunk_snapshot` protocol payload is `PackedChunkSnapshot` |
-| `src/runtime/transport/local-world-transport.ts` | current `TransportWorldClient` owns session/player state and applies chunk messages to `ClientChunkCache` |
+| `src/runtime/transport/local-world-transport.ts` | `TransportWorldClient` owns session/player state and can route chunk messages through a `RenderWorldUpdateSink`; compatibility cache mirroring remains available during migration |
 | `src/runtime/transport/worker-world-transport.ts` | local authoritative host worker transport with transferable packed chunk buffers |
 | `src/runtime/transport/remote-world-transport.ts` | remote HTTP transport using the D3 packed wire codec |
 | `src/world/level/client-chunk-cache.ts` | current main-thread render cache and compatibility unpack adapter |
@@ -72,10 +72,10 @@ This makes future parity work easier or neutral. The render-world worker can sti
 | `src/renderer/chunk/mesh-worker.ts` | current worker builds a temporary `ClientChunkCache` per mesh job |
 | `src/renderer/chunk/mesh-worker-client.ts` | current mesh worker client transfers mesh layer buffers back to the main thread |
 | `src/renderer/chunk/render-world-protocol.ts` | D4 internal render-world protocol for initialization, packed update ingest, stats, mesh build, not-ready, and error responses |
-| `src/renderer/chunk/render-world-worker-client.ts` | D4 request-envelope client/session wrapper with request ids, worker errors, and transferable buffer handling |
+| `src/renderer/chunk/render-world-worker-client.ts` | D4 request-envelope client/session wrapper with request ids, worker errors, transferable buffer handling, and `RenderWorldWorkerUpdateSink` adapter |
 | `src/renderer/chunk/render-world-worker.ts` | D4 worker handler with worker-owned `ClientChunkCache`, packed update ingest, vanilla-shaped dirty section metadata, mesh-neighbor readiness checks, and CPU mesh build responses |
 | `src/renderer/chunk/chunk-render-dispatcher.ts` | main-thread render chunk scheduling, fallback compilation, GPU buffer upload |
-| `src/renderer/scene-setup.ts` | wires world client, main-thread `ClientChunkCache`, mesh worker, `ChunkRenderDispatcher`, and `ViewArea` |
+| `src/renderer/scene-setup.ts` | currently wires world client, main-thread `ClientChunkCache`, mesh worker, `ChunkRenderDispatcher`, and `ViewArea`; render-world worker hookup is deferred until the dispatcher consumes it |
 | `src/renderer/debug/debug-free-cam.ts` | drives world polling/chunk view and reads loaded chunk counts from the main-thread cache |
 
 ## Scope
@@ -197,12 +197,16 @@ Landed so far:
 - `mesh-worker-context.ts` factors the browser worker block/model/atlas/color initialization out of the old mesh worker
 - `render-world-worker.ts` initializes a worker-owned `ClientChunkCache`, ingests packed chunk updates, reports vanilla-shaped dirty section origins, checks mesh-neighbor availability, and returns mesh build or not-ready responses
 - `test/renderer/chunk/render-world-worker.test.ts` pins the dirty-section coordinate expansion, mesh-neighbor chunk set, and initialization guard
+- `TransportWorldClient` separates chunk message routing through `RenderWorldUpdateSink` from session/player presentation state, with an explicit temporary compatibility-cache mirror option
+- `RenderWorldWorkerUpdateSink` adapts D3 `chunk_snapshot` / `chunk_unload` messages into bounded render-world worker ingest batches, so the browser scene can turn on forwarding when the dispatcher consumes worker-owned meshes
+- `test/runtime/render-world-update-sink.test.ts` proves chunk messages can go to a sink without mutating the client cache, and can be mirrored only when requested
 
 Still pending:
 
 - browser runtime still applies chunk messages to the main-thread `ClientChunkCache`
 - mesh jobs still use main-thread `buildSectionMeshInput(...)` and `ChunkSnapshot[]` payloads
 - the real browser scene does not instantiate or feed `RenderWorldWorkerClient` yet
+- dirty-section metadata from the render-world worker is not yet driving `ViewArea.setDirty(...)`
 
 ## Implementation sequence
 
@@ -216,11 +220,11 @@ Still pending:
 
 3. Add packed chunk ingest.
 
-   Worker-side ingest is done. Browser runtime forwarding is still pending. The worker applies packed snapshots/unloads to its cache and returns loaded-count/dirty-section metadata; main-thread code may keep only that metadata once it is wired.
+   Worker-side ingest and bounded `RenderWorldWorkerUpdateSink` forwarding are done. Live browser scene hookup is deferred until mesh dispatch stops reading the main-thread compatibility cache; validation showed that eager duplicate worker/cache ownership slows the current browser debug path before it removes any old work.
 
 4. Split protocol application from cache mutation.
 
-   `TransportWorldClient` or a browser-specific wrapper should keep `world_opened`, `session_state`, `player_state`, and errors on the main thread, while chunk messages go to a `RenderWorldUpdateSink`. Tests should prove chunk messages no longer call `ClientChunkCache.applyPackedChunkSnapshot(...)` on the main thread.
+   Done at the transport boundary. `TransportWorldClient` keeps `world_opened`, `session_state`, `player_state`, and errors on the main thread, while chunk messages can go to a `RenderWorldUpdateSink` without touching `ClientChunkCache`. The explicit mirror path exists for transitional call sites but is not enabled in the live scene yet.
 
 5. Replace main-thread mesh input gathering.
 
@@ -326,6 +330,6 @@ This is not the final D5 measurement gate, but D4 should include a small sanity 
 
 ## Next
 
-Immediate next D4 implementation slice: split browser world-client protocol application from cache mutation with a `RenderWorldUpdateSink`, then forward D3 `chunk_snapshot` / `chunk_unload` messages to `RenderWorldWorkerClient` while session/player state remains main-thread presentation state.
+Immediate next D4 implementation slice: replace main-thread mesh input gathering so `ChunkRenderDispatcher` sends section origin/camera requests to `RenderWorldWorkerClient`, consumes built/not-ready responses, and then enable live browser forwarding without duplicate main-thread/worker cache work.
 
 `D5`: transport measurement and push/SAB decision. After `D4`, measure the actual browser traversal path with render-world ownership in place and decide from trace data whether HTTP polling, worker transfer/copy, mesh fan-out, or GPU upload is the next bottleneck.

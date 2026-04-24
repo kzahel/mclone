@@ -19,7 +19,7 @@ import type {
   WorldHostMessage,
   WorldOpenedMessage,
 } from "../protocol/world-messages";
-import { TransportWorldClient, type WorldTransport } from "./local-world-transport";
+import { TransportWorldClient, type TransportWorldClientOptions, type WorldTransport } from "./local-world-transport";
 
 export const DEFAULT_REMOTE_WORLD_HOST_URL = "http://127.0.0.1:4173";
 
@@ -279,7 +279,8 @@ export class RemoteWorldClient extends TransportWorldClient implements WorldClie
   public constructor(
     transport: RemoteWorldTransport,
     levelFactory: (worldOpened: WorldOpenedMessage) => ClientChunkCache,
+    options?: TransportWorldClientOptions,
   ) {
-    super(transport, levelFactory);
+    super(transport, levelFactory, options);
   }
 }
