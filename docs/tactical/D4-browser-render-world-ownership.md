@@ -357,6 +357,6 @@ Current browser validation:
 
 ## Next
 
-D4 is complete. The next tactical is `D5`: transport measurement and push/SAB decision. Start by writing the detailed `D5` plan with a repeatable browser traversal, trace capture, frame-pacing metrics, and timing marks for host load/generation, snapshot encode, transport receive/decode, render-world ingest, mesh build, GPU upload, and request-to-visible latency.
+D4 is complete. The next tactical is [`D5-transport-measurement-and-push-sab-decision.md`](D5-transport-measurement-and-push-sab-decision.md): transport measurement and push/SAB decision.
 
-After that plan is accepted, measure the actual browser traversal path with render-world ownership in place and decide from trace data whether HTTP polling, worker transfer/copy, mesh fan-out, or GPU upload is the next bottleneck.
+Measure the actual browser traversal path with render-world ownership in place and decide from trace data whether HTTP polling, worker transfer/copy, mesh fan-out, or GPU upload is the next bottleneck.

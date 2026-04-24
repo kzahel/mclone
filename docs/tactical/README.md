@@ -155,7 +155,7 @@ Recommended sequence:
 | [`D2-packed-section-codecs.md`](D2-packed-section-codecs.md) | packed section codecs and chunk snapshot model | unit + fixture roundtrip | **landed** vanilla-shaped packed section records behind compatibility adapters |
 | [`D3-packed-chunk-storage-protocol.md`](D3-packed-chunk-storage-protocol.md) | storage/protocol rollout for packed chunk facts | unit + integration | **landed** authoritative chunk snapshots move through packed records across worker, remote, IndexedDB, and file adapters |
 | [`D4-browser-render-world-ownership.md`](D4-browser-render-world-ownership.md) | browser render-world ownership | perf probe + browser visual | **done** — live browser rendering now feeds packed chunks into a render-world worker, keeps raw chunk ownership and mesh-neighborhood gathering off the main thread, and passes the full browser validation gate |
-| `D5-` | transport measurement and push/SAB decision | perf probe + deployment check | decide from data whether HTTP polling, worker transfer, or buffer sharing needs replacement |
+| [`D5-transport-measurement-and-push-sab-decision.md`](D5-transport-measurement-and-push-sab-decision.md) | transport measurement and push/SAB decision | perf probe + deployment check | measure the live D4 traversal path and decide from data whether HTTP polling, worker transfer, mesh fan-out, or GPU upload needs the next tactical |
 
 `D5` is not automatically completion. It is the acceptance gate for this arc:
 
@@ -175,7 +175,7 @@ Recommended sequence:
 
 `D5` exits successfully only if the trace shows chunk-boundary traversal is acceptable at the target view distance and any remaining main-thread spikes are bounded GPU upload/render bookkeeping. If p95/p99 frame time, max frame gap, or long tasks are still unacceptable, the trace must identify the next bottleneck and the arc continues with the corresponding `D6` tactical.
 
-Write the detailed `D5-` tactical next. Each `D*` slice should be narrow enough to validate independently.
+Implement [`D5-transport-measurement-and-push-sab-decision.md`](D5-transport-measurement-and-push-sab-decision.md) next. Each `D*` slice should be narrow enough to validate independently.
 
 ## Skipped entirely (for renderer MVP)
 
