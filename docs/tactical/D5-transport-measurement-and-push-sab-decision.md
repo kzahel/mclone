@@ -467,6 +467,41 @@ Visual inspection: the start screenshot shows a filled cliff/cave face, and the 
 
 Interpretation: delivery-side splitting worked: chunk-bearing poll p50/p95 dropped sharply and capped polls now carry at most two snapshots. The remaining p99 spikes still occur with one chunk or even a player-only response, which means D6 needs to split or offload the synchronous per-chunk generation/decor/snapshot work inside the host rather than changing transport shape.
 
+## D6 chunk status phase split update - 2026-04-24
+
+The next D6 slice split cooperative host chunk work into terrain/load, decoration, and snapshot publication phases. It also added cooperative decoration yields inside decorated feature placement loops and suppressed automatic synchronous decoration while cooperative decoration is active, preventing feature placement reads from recursively generating/decorating neighboring chunks in one large host quantum.
+
+Single validation run after the chunk status phase split:
+
+| Metric | Observed |
+|---|---:|
+| traversal duration | `30136 ms` |
+| chunk-view changes | `12` (`[60,199] -> [66,193]`) |
+| frame gap p95 / p99 / max | `9.3 ms` / `9.4 ms` / `9.4 ms` |
+| frame gaps > 33.4 / 50 / 100 ms | `0` / `0` / `0` |
+| long tasks | `0` |
+| `set_chunk_view` ack p50 / p95 / max during traversal | `1.3 ms` / `11.6 ms` / `11.6 ms` |
+| `set_player_input` p50 / p95 / p99 / max during traversal | `1.0 ms` / `1.0 ms` / `1.0 ms` / `1.0 ms` |
+| `poll_world_updates` p50 / p95 / p99 / max during traversal | `0.9 ms` / `10.6 ms` / `19.8 ms` / `26.4 ms` |
+| `poll_world_updates` with chunk snapshots p50 / p95 / p99 / max | `1.3 ms` / `17.2 ms` / `23.8 ms` / `26.4 ms` |
+| chunk snapshots per poll p50 / p95 / max | `1` / `1` / `2` |
+| player tick response gap p50 / p95 / p99 / max | `50.1 ms` / `61.4 ms` / `100.0 ms` / `119.3 ms` |
+| sampled tick gap p50 / p95 / p99 / max | `253.5 ms` / `382.9 ms` / `425.1 ms` / `441.7 ms` |
+| final loaded chunks | `225` |
+| final render queue | pending visible `0`, queued `0`, active `0` |
+| render-world delta | ingest batches `180`, mesh builds `13119`, mesh completions `1273`, GPU uploads `1678` |
+
+Artifact paths:
+
+- `/tmp/mclone-d5-start.png`
+- `/tmp/mclone-d5-end.png`
+- `/tmp/mclone-d5-traversal-report.json`
+- `/tmp/mclone-d5-traversal-trace.json`
+
+Visual inspection: the start screenshot shows a filled cliff/cave face, and the end screenshot shows populated savanna/desert/mountain terrain with no blank chunks.
+
+Interpretation: the measured bottleneck was host chunk scheduling, not push transport, `SharedArrayBuffer`, or render-world subworkers. The phase split brought traversal `poll_world_updates` p99 from the prior `238.7 ms` to `19.8 ms` and chunk-bearing poll p99 to `23.8 ms`. D6 should now be judged with manual low-view walking plus the remaining response max/player tick max, not by starting a transport or renderer topology change.
+
 ## Implementation sequence
 
 1. Add a D5 measurement model.
@@ -552,4 +587,4 @@ The browser screenshot rule from `AGENTS.md` still applies. Save D5 screenshots 
 
 ## Next
 
-Add the deeper D5 phase timers and repeat the primary traversal enough times to make the decision. Do not start push transport, `SharedArrayBuffer`, or render-world subworkers until the D5 report selects that path.
+Use the D5 harness as the regression gate for the D6 scheduler work. Next, manually validate low-view walking on `debug.html?viewDistance=1`; if the remaining host max is still visible, continue D6 inside the host scheduler with snapshot/persistence or feature-placement job work. Do not start push transport, `SharedArrayBuffer`, or render-world subworkers unless a later D5 report selects that path.

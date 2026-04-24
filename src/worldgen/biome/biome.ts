@@ -10,6 +10,7 @@ import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import { LightLayer } from "../../world/level/light-layer";
 import { GenerationStep } from "../levelgen/generation-step";
 import type { NoiseBasedChunkGenerator } from "../levelgen/noise-based-chunk-generator";
+import type { CooperativeGenerationYield } from "../levelgen/cooperative-generation";
 import { PerlinSimplexNoise } from "../noise/perlin-simplex-noise";
 import { WorldgenRandom } from "../prng/worldgen-random";
 import { Fluids } from "../../world/level/material/fluids";
@@ -207,6 +208,31 @@ export class Biome implements NoiseBiome {
         const feature = featureSupplier();
         random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
         feature.place(level, chunkGenerator, random, origin);
+        featureIndex++;
+      }
+    }
+  }
+
+  public async generateCooperative(
+    chunkGenerator: NoiseBasedChunkGenerator,
+    level: WorldGenLevel,
+    decorationSeed: bigint,
+    random: WorldgenRandom,
+    origin: BlockPos,
+    yieldStep: CooperativeGenerationYield,
+  ): Promise<void> {
+    const features = this.generationSettings.features();
+    // Host scheduling: same feature order as generate(), but yields between configured placement units.
+    for (let stepIndex = 0; stepIndex < GenerationStep.DECORATION_VALUES.length; stepIndex++) {
+      if (features.length <= stepIndex) {
+        continue;
+      }
+
+      let featureIndex = 0;
+      for (const featureSupplier of features[stepIndex]!) {
+        const feature = featureSupplier();
+        random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
+        await feature.placeCooperative(level, chunkGenerator, random, origin, yieldStep);
         featureIndex++;
       }
     }

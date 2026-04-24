@@ -275,7 +275,7 @@ function sleep(ms = 0): Promise<void> {
 }
 
 async function drainRemoteClientChunks(client: RemoteWorldClient, expectedCount: number): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt++) {
+  for (let attempt = 0; attempt < 500; attempt++) {
     if (client.getLevel().getLoadedChunkCount() >= expectedCount) {
       return;
     }
@@ -293,7 +293,7 @@ async function drainServiceSnapshots(
   expectedCount: number,
 ): Promise<ChunkSnapshotMessage[]> {
   const snapshots: ChunkSnapshotMessage[] = [];
-  for (let attempt = 0; attempt < 200; attempt++) {
+  for (let attempt = 0; attempt < 500; attempt++) {
     await sleep();
     const messages = deserializeWorldHostMessages((await service.pollUpdates(sessionId, { type: "poll_world_updates" })).messages);
     snapshots.push(...chunkSnapshots(messages));

@@ -78,6 +78,17 @@ export interface GeneratedWorldHostOptions {
 }
 
 const LOCAL_WORLD_SESSION_ID = "local";
+const COOPERATIVE_CHUNK_PHASE_BUDGET_MS = 8;
+
+interface ChunkViewJobRecord {
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  loadedFromStorage: boolean;
+}
+
+function monotonicNowMs(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
 
 function yieldToEventLoop(): Promise<void> {
   if (typeof process !== "undefined" && process.versions?.node !== undefined) {
@@ -101,6 +112,19 @@ function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
+}
+
+function createCooperativeYield(): () => Promise<void> {
+  let lastYieldAtMs = monotonicNowMs();
+  return async () => {
+    const nowMs = monotonicNowMs();
+    if (nowMs - lastYieldAtMs < COOPERATIVE_CHUNK_PHASE_BUDGET_MS) {
+      return;
+    }
+
+    await yieldToEventLoop();
+    lastYieldAtMs = monotonicNowMs();
+  };
 }
 
 function createSessionChunkViewState(request: SetChunkViewRequest | undefined): SessionChunkViewState | undefined {
@@ -129,7 +153,7 @@ export class GeneratedWorldHost implements WorldHost {
   private pendingMessages: WorldHostMessage[] = [];
   private lastPlayerTickAtMs = Date.now();
   private playerAnchoredToChunkView = false;
-  private chunkViewGeneration = 0;
+  private readonly publishedChunkSnapshots = new Set<string>();
   private opened = false;
 
   public constructor(private readonly options: GeneratedWorldHostOptions) {
@@ -266,6 +290,7 @@ export class GeneratedWorldHost implements WorldHost {
 
     for (const chunk of update.unloadedChunks) {
       this.queueStorageSideEffect(this.storageSession?.chunks.evictChunk(chunk.chunkX, chunk.chunkZ));
+      this.publishedChunkSnapshots.delete(chunkKey(chunk.chunkX, chunk.chunkZ));
       messages.push({
         type: "chunk_unload",
         chunkX: chunk.chunkX,
@@ -277,12 +302,39 @@ export class GeneratedWorldHost implements WorldHost {
       return messages;
     }
 
-    const generation = ++this.chunkViewGeneration;
-    const chunkViewJob = this.runChunkViewJobs(generation, update.missingChunks);
+    const chunkViewJob = this.runChunkViewJobs(this.collectChunkViewJobs(update.missingChunks));
     chunkViewJob.catch((error: unknown) => {
       this.enqueueWorldError(error);
     });
     return messages;
+  }
+
+  private collectChunkViewJobs(missingChunks: readonly (readonly [number, number])[]): readonly (readonly [number, number])[] {
+    const jobs = new Map<string, readonly [number, number]>();
+    for (const chunk of missingChunks) {
+      jobs.set(chunkKey(chunk[0], chunk[1]), chunk);
+    }
+
+    if (this.currentChunkView === undefined) {
+      return [...jobs.values()];
+    }
+
+    const viewRadius = getGeneratedWorldViewChunkRadius(this.currentChunkView.radius);
+    for (let chunkZ = this.currentChunkView.centerChunkZ - viewRadius; chunkZ <= this.currentChunkView.centerChunkZ + viewRadius; chunkZ++) {
+      for (let chunkX = this.currentChunkView.centerChunkX - viewRadius; chunkX <= this.currentChunkView.centerChunkX + viewRadius; chunkX++) {
+        const key = chunkKey(chunkX, chunkZ);
+        if (this.publishedChunkSnapshots.has(key)) {
+          continue;
+        }
+        if (this.level.getChunk(chunkX, chunkZ, false) === null) {
+          continue;
+        }
+
+        jobs.set(key, [chunkX, chunkZ]);
+      }
+    }
+
+    return [...jobs.values()];
   }
 
   public async setPlayerInput(request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]> {
@@ -324,11 +376,14 @@ export class GeneratedWorldHost implements WorldHost {
           continue;
         }
 
-        this.level.setChunk(hydrateChunkFromSnapshot(
-          unpackChunkSnapshot(snapshot, this.options.blockStateIds),
-          this.options.airState,
-          this.resolveBlockState,
-        ));
+        this.level.setChunk(
+          hydrateChunkFromSnapshot(
+            unpackChunkSnapshot(snapshot, this.options.blockStateIds),
+            this.options.airState,
+            this.resolveBlockState,
+          ),
+          true,
+        );
       }
     }
   }
@@ -343,11 +398,14 @@ export class GeneratedWorldHost implements WorldHost {
       return false;
     }
 
-    this.level.setChunk(hydrateChunkFromSnapshot(
-      unpackChunkSnapshot(snapshot, this.options.blockStateIds),
-      this.options.airState,
-      this.resolveBlockState,
-    ));
+    this.level.setChunk(
+      hydrateChunkFromSnapshot(
+        unpackChunkSnapshot(snapshot, this.options.blockStateIds),
+        this.options.airState,
+        this.resolveBlockState,
+      ),
+      true,
+    );
     return true;
   }
 
@@ -370,30 +428,58 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private async runChunkViewJobs(
-    generation: number,
     missingChunks: readonly (readonly [number, number])[],
   ): Promise<void> {
-    for (const [chunkX, chunkZ] of missingChunks) {
-      await yieldToEventLoop();
-      if (generation !== this.chunkViewGeneration || !this.isChunkInCurrentView(chunkX, chunkZ)) {
+    const yieldStep = createCooperativeYield();
+    const jobs: ChunkViewJobRecord[] = missingChunks.map(([chunkX, chunkZ]) => ({
+      chunkX,
+      chunkZ,
+      loadedFromStorage: false,
+    }));
+
+    for (const job of jobs) {
+      await yieldStep();
+      if (!this.isChunkInCurrentView(job.chunkX, job.chunkZ)) {
         continue;
       }
 
-      await this.preloadStoredChunk(chunkX, chunkZ);
-      if (generation !== this.chunkViewGeneration || !this.isChunkInCurrentView(chunkX, chunkZ)) {
+      job.loadedFromStorage = await this.preloadStoredChunk(job.chunkX, job.chunkZ);
+      if (!this.isChunkInCurrentView(job.chunkX, job.chunkZ)) {
+        continue;
+      }
+      if (job.loadedFromStorage || this.level.getChunk(job.chunkX, job.chunkZ, false) !== null) {
         continue;
       }
 
-      const chunk = this.level.getChunk(chunkX, chunkZ, true);
-      if (chunk === null) {
+      await this.level.generateChunkTerrainCooperative(job.chunkX, job.chunkZ, yieldStep);
+    }
+
+    for (const job of jobs) {
+      await yieldStep();
+      if (job.loadedFromStorage || !this.isChunkInCurrentView(job.chunkX, job.chunkZ)) {
+        continue;
+      }
+
+      await this.level.decorateChunkCooperative(job.chunkX, job.chunkZ, yieldStep);
+    }
+
+    for (const job of jobs) {
+      await yieldStep();
+      const key = chunkKey(job.chunkX, job.chunkZ);
+      if (!this.isChunkInCurrentView(job.chunkX, job.chunkZ) || this.publishedChunkSnapshots.has(key)) {
+        continue;
+      }
+
+      const chunk = this.level.getChunk(job.chunkX, job.chunkZ, false);
+      if (chunk === null || !this.level.isChunkDecorated(job.chunkX, job.chunkZ)) {
         continue;
       }
 
       this.options.mutateWorld?.(this.level);
-      await yieldToEventLoop();
+      await yieldStep();
       const snapshot = this.buildPackedChunkSnapshot(chunk);
       await this.persistPackedChunkSnapshot(snapshot);
-      if (generation !== this.chunkViewGeneration || !this.isChunkInCurrentView(chunkX, chunkZ)) {
+      if (!this.isChunkInCurrentView(job.chunkX, job.chunkZ) || this.publishedChunkSnapshots.has(key)) {
         continue;
       }
 
@@ -401,6 +487,7 @@ export class GeneratedWorldHost implements WorldHost {
         type: "chunk_snapshot",
         snapshot,
       });
+      this.publishedChunkSnapshots.add(key);
     }
   }
 

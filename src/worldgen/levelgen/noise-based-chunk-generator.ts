@@ -8,6 +8,7 @@ import { ResourceLocation } from "../../core/resource-location.ts";
 import type { WorldGenLevel } from "../../world/level/world-gen-level.ts";
 import type { Block } from "../../world/level/block/block.ts";
 import { applyOverworldCarvers } from "../carver/overworld-carvers.ts";
+import type { CooperativeGenerationYield } from "./cooperative-generation.ts";
 import { MutableChunkBlockBuffer, CHUNK_WIDTH, ChunkBlockId, blockBufferIndex } from "../chunk/chunk-block-buffer.ts";
 import { buildChunkHeightmaps, type ChunkHeightmaps } from "../chunk/chunk-heightmaps.ts";
 import { buildChunkSections, type ChunkSection } from "../chunk/chunk-section-serialization.ts";
@@ -206,6 +207,14 @@ export class NoiseBasedChunkGenerator {
     }
   }
 
+  public async applyCarversCooperative(chunk: MutableChunkBlockBuffer, yieldStep: CooperativeGenerationYield): Promise<void> {
+    this.assertCompatibleChunk(chunk);
+    for (const carvingStep of GenerationStep.CARVING_VALUES) {
+      this.applyCarvers(chunk, carvingStep);
+      await yieldStep();
+    }
+  }
+
   public applyBiomeDecoration(level: WorldGenLevel, chunkX: number, chunkZ: number): void {
     const minBlockX = chunkX * CHUNK_WIDTH;
     const minBlockZ = chunkZ * CHUNK_WIDTH;
@@ -214,6 +223,21 @@ export class NoiseBasedChunkGenerator {
     const random = new WorldgenRandom();
     const decorationSeed = random.setDecorationSeed(this.seed, minBlockX, minBlockZ);
     biome.generate(this, level, decorationSeed, random, origin);
+  }
+
+  public async applyBiomeDecorationCooperative(
+    level: WorldGenLevel,
+    chunkX: number,
+    chunkZ: number,
+    yieldStep: CooperativeGenerationYield,
+  ): Promise<void> {
+    const minBlockX = chunkX * CHUNK_WIDTH;
+    const minBlockZ = chunkZ * CHUNK_WIDTH;
+    const origin = new BlockPos(minBlockX, level.getMinBuildHeight(), minBlockZ);
+    const biome = this.getPrimaryBiome(chunkX, chunkZ);
+    const random = new WorldgenRandom();
+    const decorationSeed = random.setDecorationSeed(this.seed, minBlockX, minBlockZ);
+    await biome.generateCooperative(this, level, decorationSeed, random, origin, yieldStep);
   }
 
   public getBaseStoneSource(): BaseStoneSource {

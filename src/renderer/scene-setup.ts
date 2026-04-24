@@ -266,7 +266,7 @@ export async function waitForLoadedChunkRing(
     return true;
   }
 
-  const maxAttempts = options.maxAttempts ?? 160;
+  const maxAttempts = options.maxAttempts ?? 320;
   const pollIntervalMs = options.pollIntervalMs ?? 50;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await sleep(pollIntervalMs);

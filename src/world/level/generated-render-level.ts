@@ -7,6 +7,7 @@ import type { NoiseBiomeSource } from "../../worldgen/biome/noise-biome-source";
 import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
 import { MutableChunkBlockBuffer } from "../../worldgen/chunk/chunk-block-buffer";
 import { NoiseBasedChunkGenerator } from "../../worldgen/levelgen/noise-based-chunk-generator";
+import type { CooperativeGenerationYield } from "../../worldgen/levelgen/cooperative-generation";
 import { BlockStateProperties } from "./block/state/properties/block-state-properties";
 import { type BlockState } from "./block/state/block-state";
 import { LevelChunk } from "./chunk/level-chunk";
@@ -27,6 +28,8 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   private viewCenterZ = Number.MIN_SAFE_INTEGER;
   private chunkRadius = -1;
   private readonly decoratedChunks = new Set<string>();
+  private readonly decoratingChunks = new Set<string>();
+  private automaticDecorationEnabled = true;
 
   public constructor(
     airState: BlockState,
@@ -45,6 +48,15 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   public override getChunk(chunkX: number, chunkZ: number, create = true): LevelChunk | null {
     const existing = super.getChunk(chunkX, chunkZ, false);
     if (existing !== null) {
+      if (
+        create
+        && this.automaticDecorationEnabled
+        && this.inRange(chunkX, chunkZ)
+        && !this.isChunkDecorated(chunkX, chunkZ)
+        && !this.decoratingChunks.has(decoratedChunkKey(chunkX, chunkZ))
+      ) {
+        this.decorateChunk(chunkX, chunkZ);
+      }
       return existing;
     }
 
@@ -52,10 +64,26 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       return null;
     }
 
-    const generated = this.generateChunk(chunkX, chunkZ);
-    super.setChunk(generated);
+    const generated = this.generateChunkTerrain(chunkX, chunkZ);
+    if (generated === null) {
+      return null;
+    }
+    if (!this.automaticDecorationEnabled) {
+      return generated;
+    }
     this.decorateChunk(chunkX, chunkZ);
     return generated;
+  }
+
+  public override setChunk(chunk: LevelChunk, decorated = false): void {
+    super.setChunk(chunk);
+    const key = decoratedChunkKey(chunk.chunkX, chunk.chunkZ);
+    if (decorated) {
+      this.decoratedChunks.add(key);
+    } else {
+      this.decoratedChunks.delete(key);
+    }
+    this.decoratingChunks.delete(key);
   }
 
   public ensureChunksForCamera(cameraX: number, cameraZ: number, viewDistance: number): boolean {
@@ -90,6 +118,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
           unloadedChunks.push(removed);
         }
         this.decoratedChunks.delete(decoratedChunkKey(chunk.chunkX, chunk.chunkZ));
+        this.decoratingChunks.delete(decoratedChunkKey(chunk.chunkX, chunk.chunkZ));
         changed = true;
       }
     }
@@ -97,7 +126,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     const missingChunks: Array<readonly [number, number]> = [];
     for (let chunkZ = this.viewCenterZ - this.chunkRadius; chunkZ <= this.viewCenterZ + this.chunkRadius; chunkZ++) {
       for (let chunkX = this.viewCenterX - this.chunkRadius; chunkX <= this.viewCenterX + this.chunkRadius; chunkX++) {
-        if (super.getChunk(chunkX, chunkZ, false) === null) {
+        if (super.getChunk(chunkX, chunkZ, false) === null || !this.isChunkDecorated(chunkX, chunkZ)) {
           missingChunks.push([chunkX, chunkZ]);
           changed = true;
         }
@@ -124,21 +153,94 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     return Math.abs(chunkX - this.viewCenterX) <= this.chunkRadius && Math.abs(chunkZ - this.viewCenterZ) <= this.chunkRadius;
   }
 
-  private generateChunk(chunkX: number, chunkZ: number): LevelChunk {
+  public isChunkDecorated(chunkX: number, chunkZ: number): boolean {
+    return this.decoratedChunks.has(decoratedChunkKey(chunkX, chunkZ));
+  }
+
+  public generateChunkTerrain(chunkX: number, chunkZ: number): LevelChunk | null {
+    const existing = super.getChunk(chunkX, chunkZ, false);
+    if (existing !== null) {
+      return existing;
+    }
+
+    if (!this.inRange(chunkX, chunkZ)) {
+      return null;
+    }
+
     const generated = this.generator.fillFromNoise(chunkX, chunkZ);
     this.generator.buildSurfaceAndBedrock(generated);
     this.generator.applyCarvers(generated);
-    return this.copyGeneratedChunk(chunkX, chunkZ, generated);
+    const chunk = this.copyGeneratedChunk(chunkX, chunkZ, generated);
+    super.setChunk(chunk);
+    this.decoratedChunks.delete(decoratedChunkKey(chunkX, chunkZ));
+    return chunk;
   }
 
-  private decorateChunk(chunkX: number, chunkZ: number): void {
+  public async generateChunkTerrainCooperative(
+    chunkX: number,
+    chunkZ: number,
+    yieldStep: CooperativeGenerationYield,
+  ): Promise<LevelChunk | null> {
+    const existing = super.getChunk(chunkX, chunkZ, false);
+    if (existing !== null) {
+      return existing;
+    }
+
+    if (!this.inRange(chunkX, chunkZ)) {
+      return null;
+    }
+
+    const generated = this.generator.fillFromNoise(chunkX, chunkZ);
+    await yieldStep();
+    this.generator.buildSurfaceAndBedrock(generated);
+    await yieldStep();
+    await this.generator.applyCarversCooperative(generated, yieldStep);
+    const chunk = this.copyGeneratedChunk(chunkX, chunkZ, generated);
+    super.setChunk(chunk);
+    this.decoratedChunks.delete(decoratedChunkKey(chunkX, chunkZ));
+    await yieldStep();
+    return chunk;
+  }
+
+  public decorateChunk(chunkX: number, chunkZ: number): void {
     const key = decoratedChunkKey(chunkX, chunkZ);
     if (this.decoratedChunks.has(key)) {
       return;
     }
 
+    this.decoratingChunks.add(key);
     this.decoratedChunks.add(key);
-    this.generator.applyBiomeDecoration(this, chunkX, chunkZ);
+    try {
+      this.generator.applyBiomeDecoration(this, chunkX, chunkZ);
+    } finally {
+      this.decoratingChunks.delete(key);
+    }
+  }
+
+  public async decorateChunkCooperative(
+    chunkX: number,
+    chunkZ: number,
+    yieldStep: CooperativeGenerationYield,
+  ): Promise<void> {
+    const key = decoratedChunkKey(chunkX, chunkZ);
+    if (this.decoratedChunks.has(key)) {
+      return;
+    }
+
+    if (this.decoratingChunks.has(key)) {
+      return;
+    }
+
+    this.decoratingChunks.add(key);
+    const previousAutomaticDecorationEnabled = this.automaticDecorationEnabled;
+    this.automaticDecorationEnabled = false;
+    try {
+      await this.generator.applyBiomeDecorationCooperative(this, chunkX, chunkZ, yieldStep);
+      this.decoratedChunks.add(key);
+    } finally {
+      this.automaticDecorationEnabled = previousAutomaticDecorationEnabled;
+      this.decoratingChunks.delete(key);
+    }
   }
 
   private copyGeneratedChunk(chunkX: number, chunkZ: number, generated: MutableChunkBlockBuffer): LevelChunk {

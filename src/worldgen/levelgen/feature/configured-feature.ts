@@ -3,6 +3,7 @@ import { ConstantInt } from "../../../util/valueproviders/constant-int";
 import type { WorldGenLevel } from "../../../world/level/world-gen-level";
 import type { SimpleRandomSource } from "../../prng/simple-random-source";
 import type { NoiseBasedChunkGenerator } from "../noise-based-chunk-generator";
+import type { CooperativeGenerationYield } from "../cooperative-generation";
 import { DecorationContext } from "../placement/decoration-context";
 import { ConfiguredDecorator } from "../placement/configured-decorator";
 import { FeatureDecorators } from "../placement/feature-decorators";
@@ -74,5 +75,29 @@ export class ConfiguredFeature<FC extends FeatureConfiguration, F extends Placea
 
   public place(level: WorldGenLevel, chunkGenerator: NoiseBasedChunkGenerator, random: SimpleRandomSource, origin: BlockPos): boolean {
     return this.feature.place(new FeaturePlaceContext(level, chunkGenerator, random, origin, this.config));
+  }
+
+  public async placeCooperative(
+    level: WorldGenLevel,
+    chunkGenerator: NoiseBasedChunkGenerator,
+    random: SimpleRandomSource,
+    origin: BlockPos,
+    yieldStep: CooperativeGenerationYield,
+  ): Promise<boolean> {
+    if (this.config instanceof DecoratedFeatureConfiguration) {
+      let placed = false;
+      const feature = this.config.feature();
+      for (const position of this.config.decorator.getPositions(new DecorationContext(level, chunkGenerator), random, origin)) {
+        await yieldStep();
+        if (await feature.placeCooperative(level, chunkGenerator, random, position, yieldStep)) {
+          placed = true;
+        }
+      }
+
+      return placed;
+    }
+
+    await yieldStep();
+    return this.place(level, chunkGenerator, random, origin);
   }
 }

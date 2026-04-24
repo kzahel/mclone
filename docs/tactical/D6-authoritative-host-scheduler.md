@@ -213,6 +213,45 @@ Measured D5 traversal after this slice:
 
 This slice split chunk delivery and removed duplicate snapshot packing. It improved chunk-bearing poll p50/p95 and response size shape, but D6 is still not complete: p99 poll latency and p99 player tick delivery still track a single synchronous chunk generation/decor/snapshot quantum.
 
+### Chunk status phase split slice
+
+- Split cooperative chunk-view jobs into explicit terrain/load, decoration, and snapshot publication passes.
+- Added a cooperative terrain path that yields between density fill, surface/bedrock, carvers, chunk copy, and publication work.
+- Added cooperative biome decoration that preserves the existing feature order while yielding between decorated feature placement units.
+- Suppressed automatic synchronous decoration while host cooperative decoration is active, so feature placement reads do not recursively generate/decorate neighboring chunks before the view's terrain pass has filled them.
+- Tracked published chunk snapshots separately from in-memory terrain/decor state, allowing chunks produced under an older job batch to publish later if they are still visible in the current view.
+- Marked hydrated stored chunks as decorated when loading from packed snapshots.
+- Increased debug boot chunk-ring polling and remote test drain loops to account for deliberately yielded 225-chunk startup.
+
+Measured D5 traversal after this slice:
+
+| Metric | Observed |
+|---|---:|
+| traversal duration | `30136 ms` |
+| chunk-view changes | `12` (`[60,199] -> [66,193]`) |
+| `set_chunk_view` ack p50 / p95 / max during traversal | `1.3 ms` / `11.6 ms` / `11.6 ms` |
+| `set_player_input` p50 / p95 / p99 / max during traversal | `1.0 ms` / `1.0 ms` / `1.0 ms` / `1.0 ms` |
+| `poll_world_updates` p50 / p95 / p99 / max during traversal | `0.9 ms` / `10.6 ms` / `19.8 ms` / `26.4 ms` |
+| `poll_world_updates` with chunks p50 / p95 / p99 / max | `1.3 ms` / `17.2 ms` / `23.8 ms` / `26.4 ms` |
+| chunk snapshots per poll p50 / p95 / max | `1` / `1` / `2` |
+| player tick response gap p50 / p95 / p99 / max during traversal | `50.1 ms` / `61.4 ms` / `100.0 ms` / `119.3 ms` |
+| sampled tick gap p50 / p95 / p99 / max | `253.5 ms` / `382.9 ms` / `425.1 ms` / `441.7 ms` |
+| frame gap p95 / p99 / max | `9.3 ms` / `9.4 ms` / `9.4 ms` |
+| long tasks | `0` |
+| final loaded chunks | `225` |
+| render-world delta | ingest batches `180`, mesh builds `13119`, mesh completions `1273`, GPU uploads `1678` |
+
+Artifact paths:
+
+- `/tmp/mclone-d5-start.png`
+- `/tmp/mclone-d5-end.png`
+- `/tmp/mclone-d5-traversal-report.json`
+- `/tmp/mclone-d5-traversal-trace.json`
+
+Visual inspection: the start screenshot shows a filled cliff/cave face, and the end screenshot shows populated savanna/desert/mountain terrain with no blank chunks.
+
+Interpretation: the host single-chunk quantum was the measured bottleneck. Splitting chunk work into status-like cooperative phases brought `poll_world_updates` p99 down from the previous `238.7 ms` to `19.8 ms`, while frame pacing stayed clean and chunk-bearing polls remained capped. The remaining D6 risk is the response max and player tick max around `26-119 ms`, plus subjective low-view walking; if that still feels bad, the next host-only work should move snapshot/persistence and/or feature placement into a dedicated job worker rather than changing transport, `SharedArrayBuffer`, render-world ownership, or client prediction.
+
 ## D6 completion acceptance
 
 D6 is complete when:
@@ -227,4 +266,4 @@ D6 is complete when:
 
 ## Next
 
-Split or offload the actual per-chunk generation/decor/snapshot phases so the authoritative host can service input and poll work inside a single chunk quantum. Keep this in the host/server scheduling lane: no push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction as part of D6.
+Manually validate low-view debug walking on `debug.html?viewDistance=1` against the phase-split scheduler. If movement still visibly stalls, continue D6 by reducing the remaining host response max with host-owned job work for snapshot/persistence and/or feature placement. If manual walking is acceptable, close D6 and return to the D5 acceptance decision. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction as part of this decision.
