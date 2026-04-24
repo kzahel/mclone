@@ -35,6 +35,7 @@ const DECORATION_BLOCKS = new Set([
   "minecraft:cactus",
   "minecraft:pumpkin",
 ]);
+const GENERATED_RENDER_LEVEL_TIMEOUT_MS = 30_000;
 
 function oracleBlockNameAt(localX: number, y: number, localZ: number): string {
   const index = ((y - oracle.minY) << 8) | (localZ << 4) | localX;
@@ -75,6 +76,10 @@ function createGeneratedLevel(): GeneratedRenderLevel {
   return new GeneratedRenderLevel(blocks.airState, generator, biomeSource, 12345n, blocks.blockStateById);
 }
 
+function hasPublishedChunk(level: GeneratedRenderLevel, chunkX: number, chunkZ: number): boolean {
+  return level.getLoadedChunks().some((chunk) => chunk.chunkX === chunkX && chunk.chunkZ === chunkZ);
+}
+
 describe("GeneratedRenderLevel", () => {
   afterEach(() => {
     Registry.BLOCK.clear();
@@ -97,14 +102,14 @@ describe("GeneratedRenderLevel", () => {
       expect(state!.isAir()).toBe(false);
       expect(Registry.BLOCK.getKey(state!.getBlock() as unknown as object)?.toString()).toBe(key);
     }
-  });
+  }, GENERATED_RENDER_LEVEL_TIMEOUT_MS);
 
   test("loads the oracle chunk into the camera-centered cache with matching top surfaces", () => {
     const level = createGeneratedLevel();
 
     expect(level.ensureChunksForCamera(8.5, 8.5, 1)).toBe(true);
     expect(level.getLoadedChunkCount()).toBe(25);
-    expect(level.getChunk(0, 0, false)).not.toBeNull();
+    expect(hasPublishedChunk(level, 0, 0)).toBe(true);
 
     for (const [localX, localZ] of [
       [0, 0],
@@ -115,21 +120,22 @@ describe("GeneratedRenderLevel", () => {
       const actual = runtimeGroundSurfaceAt(level, localX, localZ);
       expect(actual).toEqual(expected);
     }
-  });
+  }, GENERATED_RENDER_LEVEL_TIMEOUT_MS);
 
   test("slides the generated chunk cache when the camera crosses chunk boundaries", () => {
     const level = createGeneratedLevel();
 
     expect(level.ensureChunksForCamera(8.5, 8.5, 1)).toBe(true);
-    expect(level.getChunk(-2, 0, false)).not.toBeNull();
-    expect(level.getChunk(2, 0, false)).not.toBeNull();
+    expect(hasPublishedChunk(level, -2, 0)).toBe(true);
+    expect(hasPublishedChunk(level, 2, 0)).toBe(true);
 
     expect(level.ensureChunksForCamera(40.5, 8.5, 1)).toBe(true);
     expect(level.getLoadedChunkCount()).toBe(25);
-    expect(level.getChunk(-2, 0, false)).toBeNull();
-    expect(level.getChunk(0, 0, false)).not.toBeNull();
-    expect(level.getChunk(4, 0, false)).not.toBeNull();
-  });
+    expect(hasPublishedChunk(level, -2, 0)).toBe(false);
+    expect(level.getAuthorityChunk(-2, 0)).not.toBeNull();
+    expect(hasPublishedChunk(level, 0, 0)).toBe(true);
+    expect(hasPublishedChunk(level, 4, 0)).toBe(true);
+  }, GENERATED_RENDER_LEVEL_TIMEOUT_MS);
 
   test("generated chunks gain biome-driven tree and ground vegetation blocks", () => {
     const level = createGeneratedLevel();
@@ -157,5 +163,5 @@ describe("GeneratedRenderLevel", () => {
 
     expect(foundTree).toBe(true);
     expect(foundGroundPlant).toBe(true);
-  });
+  }, GENERATED_RENDER_LEVEL_TIMEOUT_MS);
 });

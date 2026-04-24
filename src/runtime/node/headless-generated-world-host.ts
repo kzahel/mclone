@@ -4,6 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { createGeneratedWorldHostForRequest } from "../host/generated-world-host-factory";
+import { createNodeLightingService } from "../lighting/node-lighting-worker-client";
 import type {
   OpenWorldPreset,
   SetChunkViewRequest,
@@ -320,7 +321,10 @@ export async function runHeadlessGeneratedWorldHost(
     preset: config.preset,
   } as const;
   const worldStorage = options.worldStorage ?? new FileWorldStorage(config.saveRoot);
-  const host = createGeneratedWorldHostForRequest(openWorldRequest, { worldStorage });
+  const host = createGeneratedWorldHostForRequest(openWorldRequest, {
+    worldStorage,
+    lightingService: createNodeLightingService(),
+  });
   const opened = expectWorldOpened(await host.openWorld(openWorldRequest));
   const viewResults: HeadlessGeneratedWorldHostViewResult[] = [];
 

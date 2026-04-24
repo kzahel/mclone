@@ -102,6 +102,7 @@ describe("WorkerWorld transport", () => {
         airState: generatedBlocks.airState,
         blockStateById: generatedBlocks.blockStateById,
         blockStateIds: generatedBlocks.blockStateIds,
+        lightingMode: "none",
       }),
     );
 

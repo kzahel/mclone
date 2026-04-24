@@ -31,6 +31,7 @@ function createWorldClient(storage: MemoryWorldStorage, mutateWorld?: (level: Wo
         blockStateById: blocks.blockStateById,
         blockStateIds: blocks.blockStateIds,
         worldStorage: storage,
+        lightingMode: "none",
         mutateWorld,
       }),
     ),
@@ -54,6 +55,7 @@ function createWorldHost(storage: MemoryWorldStorage, mutateWorld?: (level: Worl
     blockStateById: blocks.blockStateById,
     blockStateIds: blocks.blockStateIds,
     worldStorage: storage,
+    lightingMode: "none",
     mutateWorld,
   });
 }
@@ -126,7 +128,7 @@ describe("GeneratedWorld persistence", () => {
     });
     await client.setChunkView({
       type: "set_chunk_view",
-      centerChunkX: 2,
+      centerChunkX: 32,
       centerChunkZ: 0,
       radius: 1,
     });
@@ -171,7 +173,7 @@ describe("GeneratedWorld persistence", () => {
     now = 4_001;
     await host.setChunkView({
       type: "set_chunk_view",
-      centerChunkX: 8,
+      centerChunkX: 32,
       centerChunkZ: 0,
       radius: 1,
     });
@@ -201,7 +203,7 @@ describe("GeneratedWorld persistence", () => {
 
     const publishedCenter = chunkSnapshots(messages)
       .find((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0);
-    expect(publishedCenter?.snapshot.light?.lightCorrect).toBe(true);
+    expect(publishedCenter?.snapshot.light).toBeUndefined();
     expect(storage.getChunkRecord(opened.saveMetadata.saveId, 0, 0)?.snapshot.light).toBeUndefined();
   });
 });

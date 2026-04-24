@@ -43,7 +43,7 @@ const OPEN_WORLD_REQUEST = {
   seed: 12345n,
   preset: "default",
 } as const;
-const GENERATED_WORLD_LIGHTING_TIMEOUT_MS = 15_000;
+const GENERATED_WORLD_LIGHTING_TIMEOUT_MS = 30_000;
 const DECORATION_BLOCKS = new Set([
   "minecraft:oak_log",
   "minecraft:oak_leaves",
@@ -138,6 +138,7 @@ function createWorldClient(): LocalWorldClient {
         airState: blocks.airState,
         blockStateById: blocks.blockStateById,
         blockStateIds: blocks.blockStateIds,
+        lightingMode: "none",
       }),
     ),
     (worldOpened) => new ClientChunkCache({

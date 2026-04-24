@@ -406,7 +406,7 @@ For initial MVP generated terrain, it is acceptable for a chunk job to generate 
 
 The current browser implementation runs generation, world ticks, persistence, and light propagation inside the generated-world worker. That is a tactical simplification, not the target architecture. It prevents main-thread stalls, but lighting can still starve the authoritative world worker and delay chunk publication, water ticks, and player-state responses.
 
-The target architecture is a dedicated lighting service/worker owned by the authoritative host. The worker-backed protocol shell now exists under `src/runtime/lighting/`; the next implementation step is moving `LevelLightEngine` ownership out of `GeneratedWorldHost` and into that worker. See [`lighting-worker-architecture.md`](lighting-worker-architecture.md) for the full worker boundary, protocol, mailbox, revisioning, neighbor readiness, and migration plan. The core rule is that normal terrain chunks should be published once with initial light included; do not publish unlit geometry as a loading shortcut.
+The target architecture is a dedicated lighting service/worker owned by the authoritative host. The worker-backed service now owns `LevelLightEngine`; `GeneratedWorldHost` packs light inputs, requests initial light, accepts revisioned `chunk_light_ready` results, and publishes normal chunk snapshots with accepted worker light. See [`lighting-worker-architecture.md`](lighting-worker-architecture.md) for the full worker boundary, protocol, mailbox, revisioning, neighbor readiness, and migration plan. The core rule is that normal terrain chunks should be published once with initial light included; do not publish unlit geometry as a loading shortcut.
 
 ## Interaction With Meshing
 
@@ -468,7 +468,7 @@ Suggested sequence:
    - run initial lighting before publishing snapshots
    - store `lightCorrect`
 
-   The generated-world host now owns a default vanilla 1.17 `LevelLightEngine`, activates generated sections, scans non-air chunk entries for emitters, drains initial propagation before snapshot packing, and publishes `ChunkSnapshot.light` / packed light bytes with `lightCorrect`.
+   The generated-world host now routes initial chunk lighting through the worker-backed `LightingService`; the lighting worker owns the vanilla 1.17 `LevelLightEngine`, activates generated sections, scans non-air chunk entries for emitters, drains initial propagation before snapshot packing, and returns `ChunkSnapshot.light` / packed light bytes with `lightCorrect`.
 
 4. Implement [`L4-light-snapshot-consumption.md`](tactical/L4-light-snapshot-consumption.md). Done:
    - `ClientChunkCache` / render-world level reads section light data

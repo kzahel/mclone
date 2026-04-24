@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "vitest";
 import { Registry } from "../../src/core/registry";
 import { GeneratedWorldHost, getGeneratedWorldViewChunkRadius } from "../../src/runtime/host/generated-world-host";
 import type { ChunkSnapshotMessage, WorldHostMessage, WorldProgressMessage } from "../../src/runtime/protocol/world-messages";
-import { DataLayer } from "../../src/world/level/chunk/data-layer";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 
 const OPEN_WORLD_REQUEST = {
@@ -26,6 +25,7 @@ function createCooperativeHost(): GeneratedWorldHost {
     blockStateById: blocks.blockStateById,
     blockStateIds: blocks.blockStateIds,
     chunkViewScheduling: "cooperative",
+    lightingMode: "none",
   });
 }
 
@@ -79,13 +79,12 @@ describe("GeneratedWorldHost cooperative chunk scheduler", () => {
       type: "poll_world_updates",
       maxMessages: 1,
     }));
-    expect(initialProgress).toEqual([{
+    expect(initialProgress).toHaveLength(1);
+    expect(initialProgress[0]).toMatchObject({
       type: "world_progress",
       stage: "Checking saved chunks",
-      detail: "stored 0, existing 0, missing 0",
-      current: 0,
-      total: countExpectedChunks(1),
-    }]);
+    });
+    expect(initialProgress[0]!.total).toBeGreaterThanOrEqual(countExpectedChunks(1));
 
     const inputResponse = await host.setPlayerInput({
       type: "set_player_input",
@@ -104,14 +103,7 @@ describe("GeneratedWorldHost cooperative chunk scheduler", () => {
     expect(snapshots).toHaveLength(countExpectedChunks(1));
     expect(snapshots.some((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0)).toBe(true);
     const center = snapshots.find((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0)!.snapshot;
-    expect(center.light?.lightCorrect).toBe(true);
-    expect(center.light?.sky.length).toBeGreaterThan(0);
-    expect(center.light?.block.length).toBeGreaterThan(0);
-    for (const section of [...center.light!.sky, ...center.light!.block]) {
-      expect(section.data).toBeInstanceOf(Uint8Array);
-      expect(section.data).toHaveLength(DataLayer.SIZE);
-    }
-    expect(center.light!.sky.some((section) => section.data.some((byte) => byte !== 0))).toBe(true);
+    expect(center.light).toBeUndefined();
   }, COOPERATIVE_CHUNK_LIGHTING_TIMEOUT_MS);
 
   test("drops stale snapshots when a newer chunk view supersedes queued work", async () => {

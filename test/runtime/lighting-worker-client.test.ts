@@ -8,6 +8,7 @@ import {
   type LightingWorkerRequestEnvelope,
   type LightingWorkerResponseEnvelope,
 } from "../../src/runtime/lighting/lighting-worker-client";
+import type { LightingResult } from "../../src/runtime/lighting/lighting-protocol";
 import { createLightingWorkerHandler } from "../../src/runtime/lighting/lighting-worker";
 
 class TestMessageEndpoint<TOutgoing, TIncoming> {
@@ -78,14 +79,19 @@ function createEndpointPair(): {
   };
 }
 
-async function waitForResultCount(client: LightingWorkerClient, expectedCount: number): Promise<readonly unknown[]> {
-  for (let attempt = 0; attempt < 20; attempt++) {
+async function collectLightingResultsUntil(
+  client: LightingWorkerClient,
+  predicate: (result: LightingResult) => boolean,
+): Promise<readonly LightingResult[]> {
+  const collected: LightingResult[] = [];
+  for (let attempt = 0; attempt < 50; attempt++) {
     const batch = await client.pollResults({
       type: "poll_light_results",
-      maxResults: expectedCount,
+      maxResults: 16,
     });
-    if (batch.results.length >= expectedCount) {
-      return batch.results;
+    collected.push(...batch.results);
+    if (collected.some(predicate)) {
+      return collected;
     }
 
     await new Promise((resolve) => {
@@ -93,7 +99,7 @@ async function waitForResultCount(client: LightingWorkerClient, expectedCount: n
     });
   }
 
-  return [];
+  return collected;
 }
 
 describe("Lighting worker client", () => {
@@ -101,7 +107,7 @@ describe("Lighting worker client", () => {
     const { clientEndpoint, hostEndpoint, rawClientEndpoint } = createEndpointPair();
     connectLightingWorkerSession(hostEndpoint, createLightingWorkerHandler());
     const client = new LightingWorkerClient(clientEndpoint);
-    const blockStateIds = new Uint16Array([0, 1, 2, 3]);
+    const blockStateIds = new Uint16Array(16 * 16 * 16);
 
     await client.configureWorld({
       type: "configure_light_world",
@@ -138,12 +144,23 @@ describe("Lighting worker client", () => {
 
     expect(rawClientEndpoint.getTransfers().some((transfer) => transfer.includes(blockStateIds.buffer))).toBe(true);
 
-    const results = await waitForResultCount(client, 1);
+    const results = await collectLightingResultsUntil(client, (result) => result.type === "chunk_light_ready");
     expect(results).toContainEqual({
       type: "light_progress",
       stage: "configured",
       current: 1,
       total: 1,
+    });
+    const ready = results.find((result) => result.type === "chunk_light_ready");
+    expect(ready).toMatchObject({
+      type: "chunk_light_ready",
+      chunkViewRevision: 1,
+      chunkX: 0,
+      chunkZ: 0,
+      chunkRevision: 7,
+      light: {
+        lightCorrect: true,
+      },
     });
   });
 

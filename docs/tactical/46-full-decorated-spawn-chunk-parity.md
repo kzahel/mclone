@@ -24,13 +24,13 @@ The staged generator path is already exact for this chunk:
 - `buildSurfaceAndBedrock(...)` matches the Java surface oracle block-for-block.
 - AIR carvers match the Java carved oracle block-for-block, including scheduled tick capture.
 
-The full runtime decorated chunk is close but not exact against the official-server integration fixture:
+After correcting the runtime `FEATURES` dependency model to use a `WorldGenRegion`-style read/write envelope, the full runtime decorated chunk is still close but not exact against the official-server integration fixture:
 
 | Metric | Current value |
 |---|---:|
-| Full-block matches | `64,768 / 65,536` |
-| Full-block mismatches | `768` |
-| Full-block match rate | `98.83%` |
+| Full-block matches | `64,796 / 65,536` |
+| Full-block mismatches | `740` |
+| Full-block match rate | `98.87%` |
 | Ground material matches | `232 / 256` columns |
 | Exact ground block + Y matches | `225 / 256` columns |
 | Unexpected dry-land sand | `0` |
@@ -49,18 +49,35 @@ Current full-block mismatch buckets:
 Top concrete block-pair mismatches:
 
 ```text
-minecraft:air -> minecraft:spruce_leaves: 324
-minecraft:spruce_leaves -> minecraft:air: 200
-minecraft:air -> minecraft:spruce_log: 32
-minecraft:spruce_log -> minecraft:air: 22
-minecraft:cave_air -> minecraft:dirt: 22
-minecraft:cave_air -> minecraft:grass_block: 22
-minecraft:water -> minecraft:dirt: 21
-minecraft:granite -> minecraft:deepslate: 20
-minecraft:tuff -> minecraft:granite: 13
-minecraft:air -> minecraft:large_fern: 12
-minecraft:grass_block -> minecraft:dirt: 11
+minecraft:spruce_leaves -> minecraft:air: 324
+minecraft:air -> minecraft:spruce_leaves: 201
+minecraft:spruce_log -> minecraft:air: 32
+minecraft:air -> minecraft:spruce_log: 22
+minecraft:dirt -> minecraft:cave_air: 22
+minecraft:grass_block -> minecraft:cave_air: 22
+minecraft:dirt -> minecraft:water: 21
+minecraft:deepslate -> minecraft:granite: 20
+minecraft:air -> minecraft:cave_air: 15
+minecraft:large_fern -> minecraft:air: 12
+minecraft:dirt -> minecraft:grass_block: 11
 ```
+
+## Dependency model correction
+
+Vanilla `FEATURES` semantics are the first correctness bar for this slice:
+
+- chunk-status dependency range is `8`
+- biome decoration writes are constrained by `WorldGenRegion.ensureCanWrite(...)`
+- for `FEATURES`, vanilla uses `writeRadiusCutoff = 1`
+
+The runtime model for this tactical now follows that shape explicitly:
+
+- published/view chunks stay at the existing client-facing radius
+- a hidden authoritative chunk window stays resident for the `FEATURES` read dependency radius
+- decoration runs through a `WorldGenRegion`-style wrapper instead of the raw level
+- normal feature writes are rejected outside the center chunk plus immediate neighbors
+
+This removes the old “neighbor read accidentally generates/decorates more chunks” behavior and gives us a stable base for the remaining mismatch burn-down.
 
 ## Scope
 
@@ -92,11 +109,12 @@ Out of scope:
    - Keep the existing ground-material sand regression guard.
    - Add a full-block diff assertion that can be ratcheted during the slice.
    - Do not leave the final test as a loose similarity threshold.
-3. Verify generation context before touching feature code.
-   - Confirm the runtime path decorates the same chunk neighborhood needed for vanilla feature spillover.
-   - Confirm chunk decoration order, decoration seed setup, and biome feature-step iteration match Java.
+3. Lock the runtime dependency model before touching feature code.
+   - Keep `FEATURES` reads at `±8` chunks and normal writes at `±1`.
+   - Keep the host as the owner of authoritative chunks and client publication.
+   - Do not let decoration reads recursively trigger unrelated chunk decoration.
 4. Burn down tree placement first.
-   - It owns `589 / 768` current mismatches.
+   - It still owns the majority of the remaining `740` mismatches.
    - Check spruce tree configured-feature selection, decorator coordinates, trunk height sampling, foliage radius/height sampling, and leaf/log placement predicates against Java.
 5. Burn down non-tree decoration and underground helper mismatches.
    - Plants/snow: `27`

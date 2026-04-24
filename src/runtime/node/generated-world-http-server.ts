@@ -7,6 +7,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { applyPackedChunkLightDeltaToSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 import { createGeneratedWorldHostForRequest } from "../host/generated-world-host-factory";
+import { createNodeLightingService } from "../lighting/node-lighting-worker-client";
 import { createGeneratedWorldSaveId, getGeneratedWorldViewChunkRadius } from "../host/generated-world-host";
 import type { WorldHost } from "../protocol/world-host";
 import {
@@ -843,6 +844,7 @@ export class GeneratedWorldRemoteService {
     return createGeneratedWorldHostForRequest(request, {
       chunkViewScheduling: "cooperative",
       worldStorage: this.worldStorage,
+      lightingService: request.config?.lightingMode === "none" ? undefined : createNodeLightingService(),
     });
   }
 }

@@ -11,6 +11,10 @@ import type { CooperativeGenerationYield } from "../../worldgen/levelgen/coopera
 import { BlockStateProperties } from "./block/state/properties/block-state-properties";
 import { type BlockState } from "./block/state/block-state";
 import { LevelChunk } from "./chunk/level-chunk";
+import {
+  FEATURES_CHUNK_DEPENDENCY_RADIUS,
+  GeneratedDecorationRegion,
+} from "./generated-decoration-region";
 import { StaticRenderLevel } from "./static-render-level";
 
 function decoratedChunkKey(chunkX: number, chunkZ: number): string {
@@ -20,13 +24,16 @@ function decoratedChunkKey(chunkX: number, chunkZ: number): string {
 export interface GeneratedChunkViewUpdate {
   readonly changed: boolean;
   readonly unloadedChunks: readonly LevelChunk[];
+  readonly removedChunks: readonly LevelChunk[];
   readonly missingChunks: readonly (readonly [number, number])[];
 }
 
 export class GeneratedRenderLevel extends StaticRenderLevel {
   private viewCenterX = Number.MIN_SAFE_INTEGER;
   private viewCenterZ = Number.MIN_SAFE_INTEGER;
-  private chunkRadius = -1;
+  // Runtime: keep a hidden authority window for FEATURES dependency reads while only publishing the view radius.
+  private publishChunkRadius = -1;
+  private authorityChunkRadius = -1;
   private readonly decoratedChunks = new Set<string>();
   private readonly decoratingChunks = new Set<string>();
   private automaticDecorationEnabled = true;
@@ -51,7 +58,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       if (
         create
         && this.automaticDecorationEnabled
-        && this.inRange(chunkX, chunkZ)
+        && this.inPublishRange(chunkX, chunkZ)
         && !this.isChunkDecorated(chunkX, chunkZ)
         && !this.decoratingChunks.has(decoratedChunkKey(chunkX, chunkZ))
       ) {
@@ -60,7 +67,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       return existing;
     }
 
-    if (!create || !this.inRange(chunkX, chunkZ)) {
+    if (!create || !this.inAuthorityRange(chunkX, chunkZ)) {
       return null;
     }
 
@@ -68,11 +75,19 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     if (generated === null) {
       return null;
     }
-    if (!this.automaticDecorationEnabled) {
+    if (!this.automaticDecorationEnabled || !this.inPublishRange(chunkX, chunkZ)) {
       return generated;
     }
     this.decorateChunk(chunkX, chunkZ);
     return generated;
+  }
+
+  public override getLoadedChunks(): readonly LevelChunk[] {
+    return super.getLoadedChunks().filter((chunk) => this.inPublishRange(chunk.chunkX, chunk.chunkZ));
+  }
+
+  public override getLoadedChunkCount(): number {
+    return this.getLoadedChunks().length;
   }
 
   public override setChunk(chunk: LevelChunk, decorated = false): void {
@@ -100,40 +115,59 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   }
 
   public updateChunkView(centerChunkX: number, centerChunkZ: number, viewDistance: number): GeneratedChunkViewUpdate {
-    const nextRadius = Math.max(1, viewDistance) + 1;
+    const previousCenterX = this.viewCenterX;
+    const previousCenterZ = this.viewCenterZ;
+    const previousPublishRadius = this.publishChunkRadius;
+    const nextPublishRadius = Math.max(1, viewDistance) + 1;
+    // Runtime: widen authoritative retention to cover the vanilla FEATURES read dependency window.
+    const nextAuthorityRadius = nextPublishRadius + FEATURES_CHUNK_DEPENDENCY_RADIUS;
     let changed =
-      centerChunkX !== this.viewCenterX ||
-      centerChunkZ !== this.viewCenterZ ||
-      nextRadius !== this.chunkRadius;
+      centerChunkX !== previousCenterX ||
+      centerChunkZ !== previousCenterZ ||
+      nextPublishRadius !== previousPublishRadius ||
+      nextAuthorityRadius !== this.authorityChunkRadius;
 
     this.viewCenterX = centerChunkX;
     this.viewCenterZ = centerChunkZ;
-    this.chunkRadius = nextRadius;
+    this.publishChunkRadius = nextPublishRadius;
+    this.authorityChunkRadius = nextAuthorityRadius;
 
     const unloadedChunks: LevelChunk[] = [];
-    for (const chunk of this.getLoadedChunks()) {
-      if (!this.inRange(chunk.chunkX, chunk.chunkZ)) {
+    const removedChunks: LevelChunk[] = [];
+    for (const chunk of super.getLoadedChunks()) {
+      const wasPublished = this.isWithinRadius(chunk.chunkX, chunk.chunkZ, previousCenterX, previousCenterZ, previousPublishRadius);
+      if (!this.inAuthorityRange(chunk.chunkX, chunk.chunkZ)) {
         const removed = super.removeChunk(chunk.chunkX, chunk.chunkZ);
         if (removed !== undefined) {
-          unloadedChunks.push(removed);
+          removedChunks.push(removed);
+          if (wasPublished) {
+            unloadedChunks.push(removed);
+          }
         }
         this.decoratedChunks.delete(decoratedChunkKey(chunk.chunkX, chunk.chunkZ));
         this.decoratingChunks.delete(decoratedChunkKey(chunk.chunkX, chunk.chunkZ));
+        changed = true;
+        continue;
+      }
+
+      if (wasPublished && !this.inPublishRange(chunk.chunkX, chunk.chunkZ)) {
+        unloadedChunks.push(chunk);
         changed = true;
       }
     }
 
     const missingChunks: Array<readonly [number, number]> = [];
-    for (let chunkZ = this.viewCenterZ - this.chunkRadius; chunkZ <= this.viewCenterZ + this.chunkRadius; chunkZ++) {
-      for (let chunkX = this.viewCenterX - this.chunkRadius; chunkX <= this.viewCenterX + this.chunkRadius; chunkX++) {
-        if (super.getChunk(chunkX, chunkZ, false) === null || !this.isChunkDecorated(chunkX, chunkZ)) {
+    for (let chunkZ = this.viewCenterZ - this.authorityChunkRadius; chunkZ <= this.viewCenterZ + this.authorityChunkRadius; chunkZ++) {
+      for (let chunkX = this.viewCenterX - this.authorityChunkRadius; chunkX <= this.viewCenterX + this.authorityChunkRadius; chunkX++) {
+        const chunk = super.getChunk(chunkX, chunkZ, false);
+        if (chunk === null || (this.inPublishRange(chunkX, chunkZ) && !this.isChunkDecorated(chunkX, chunkZ))) {
           missingChunks.push([chunkX, chunkZ]);
           changed = true;
         }
       }
     }
 
-    return { changed, unloadedChunks, missingChunks };
+    return { changed, unloadedChunks, removedChunks, missingChunks };
   }
 
   public override getBlockTint(pos: BlockPos, resolver?: ColorResolver): number {
@@ -149,8 +183,30 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     return getBlockPositionBiome(this.biomeZoomSeed, pos.getX(), pos.getZ(), this.biomeSource) as Biome;
   }
 
-  private inRange(chunkX: number, chunkZ: number): boolean {
-    return Math.abs(chunkX - this.viewCenterX) <= this.chunkRadius && Math.abs(chunkZ - this.viewCenterZ) <= this.chunkRadius;
+  public getAuthorityChunk(chunkX: number, chunkZ: number): LevelChunk | null {
+    return super.getChunk(chunkX, chunkZ, false);
+  }
+
+  private inPublishRange(chunkX: number, chunkZ: number): boolean {
+    return this.isWithinRadius(chunkX, chunkZ, this.viewCenterX, this.viewCenterZ, this.publishChunkRadius);
+  }
+
+  private inAuthorityRange(chunkX: number, chunkZ: number): boolean {
+    return this.isWithinRadius(chunkX, chunkZ, this.viewCenterX, this.viewCenterZ, this.authorityChunkRadius);
+  }
+
+  private isWithinRadius(
+    chunkX: number,
+    chunkZ: number,
+    centerChunkX: number,
+    centerChunkZ: number,
+    radius: number,
+  ): boolean {
+    if (radius < 0) {
+      return false;
+    }
+
+    return Math.abs(chunkX - centerChunkX) <= radius && Math.abs(chunkZ - centerChunkZ) <= radius;
   }
 
   public isChunkDecorated(chunkX: number, chunkZ: number): boolean {
@@ -163,7 +219,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       return existing;
     }
 
-    if (!this.inRange(chunkX, chunkZ)) {
+    if (!this.inAuthorityRange(chunkX, chunkZ)) {
       return null;
     }
 
@@ -186,7 +242,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       return existing;
     }
 
-    if (!this.inRange(chunkX, chunkZ)) {
+    if (!this.inAuthorityRange(chunkX, chunkZ)) {
       return null;
     }
 
@@ -208,10 +264,15 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       return;
     }
 
+    if (this.decoratingChunks.has(key)) {
+      return;
+    }
+
     this.decoratingChunks.add(key);
-    this.decoratedChunks.add(key);
     try {
-      this.generator.applyBiomeDecoration(this, chunkX, chunkZ);
+      this.ensureDecorationTerrainWindow(chunkX, chunkZ);
+      this.generator.applyBiomeDecoration(new GeneratedDecorationRegion(this, chunkX, chunkZ), chunkX, chunkZ);
+      this.decoratedChunks.add(key);
     } finally {
       this.decoratingChunks.delete(key);
     }
@@ -232,14 +293,48 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     }
 
     this.decoratingChunks.add(key);
-    const previousAutomaticDecorationEnabled = this.automaticDecorationEnabled;
-    this.automaticDecorationEnabled = false;
     try {
-      await this.generator.applyBiomeDecorationCooperative(this, chunkX, chunkZ, yieldStep);
+      await this.ensureDecorationTerrainWindowCooperative(chunkX, chunkZ, yieldStep);
+      await this.generator.applyBiomeDecorationCooperative(new GeneratedDecorationRegion(this, chunkX, chunkZ), chunkX, chunkZ, yieldStep);
       this.decoratedChunks.add(key);
     } finally {
-      this.automaticDecorationEnabled = previousAutomaticDecorationEnabled;
       this.decoratingChunks.delete(key);
+    }
+  }
+
+  private ensureDecorationTerrainWindow(chunkX: number, chunkZ: number): void {
+    for (let neighborChunkZ = chunkZ - FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkZ <= chunkZ + FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkZ++) {
+      for (let neighborChunkX = chunkX - FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkX <= chunkX + FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkX++) {
+        if (super.getChunk(neighborChunkX, neighborChunkZ, false) !== null) {
+          continue;
+        }
+
+        if (this.generateChunkTerrain(neighborChunkX, neighborChunkZ) === null) {
+          throw new Error(
+            `Missing authority terrain for decoration window at (${neighborChunkX.toString()}, ${neighborChunkZ.toString()}) around (${chunkX.toString()}, ${chunkZ.toString()})`,
+          );
+        }
+      }
+    }
+  }
+
+  private async ensureDecorationTerrainWindowCooperative(
+    chunkX: number,
+    chunkZ: number,
+    yieldStep: CooperativeGenerationYield,
+  ): Promise<void> {
+    for (let neighborChunkZ = chunkZ - FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkZ <= chunkZ + FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkZ++) {
+      for (let neighborChunkX = chunkX - FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkX <= chunkX + FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkX++) {
+        if (super.getChunk(neighborChunkX, neighborChunkZ, false) !== null) {
+          continue;
+        }
+
+        if (await this.generateChunkTerrainCooperative(neighborChunkX, neighborChunkZ, yieldStep) === null) {
+          throw new Error(
+            `Missing authority terrain for decoration window at (${neighborChunkX.toString()}, ${neighborChunkZ.toString()}) around (${chunkX.toString()}, ${chunkZ.toString()})`,
+          );
+        }
+      }
     }
   }
 

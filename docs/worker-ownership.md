@@ -320,7 +320,7 @@ Before considering worker pooling, the baseline should satisfy:
 - stale generation/light/render results are rejected by revision
 - D5 traversal reports identify the remaining bottleneck before a pool or shared-buffer slice is started
 
-The first lighting boundary slice is landed: worker-backed browser/Node service shells, protocol types, and a bounded mailbox exist under `src/runtime/lighting/`. The baseline is not complete until `GeneratedWorldHost` no longer owns `LevelLightEngine`.
+The lighting ownership slice is landed: worker-backed browser/Node service shells, protocol types, a bounded mailbox, worker-owned `LevelLightEngine`, and initial `chunk_light_ready` publication exist under `src/runtime/lighting/`. The baseline is not complete until live block/liquid light updates also flow through the lighting mailbox and D5 traversal gates confirm host responsiveness under chunk loading.
 
 ## Related Docs
 
