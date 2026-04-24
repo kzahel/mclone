@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
-import { paletteBitsFor, unpackBitStorage } from "../../src/oracle/anvil/chunk.ts";
+import { decodeChunk, paletteBitsFor, unpackBitStorage } from "../../src/oracle/anvil/chunk.ts";
+import { NBT_TAG_COMPOUND, type NbtCompound, type NbtList } from "../../src/oracle/anvil/nbt.ts";
 
 function pack(entries: readonly number[], bits: number): BigInt64Array {
   if (bits <= 0 || bits > 32) {
@@ -29,6 +30,41 @@ function pack(entries: readonly number[], bits: number): BigInt64Array {
   return longs;
 }
 
+function sectionList(sections: readonly NbtCompound[]): NbtList {
+  return { type: NBT_TAG_COMPOUND, values: sections };
+}
+
+function palette(names: readonly string[]): NbtList {
+  return {
+    type: NBT_TAG_COMPOUND,
+    values: names.map((name) => ({ Name: name })),
+  };
+}
+
+function rootWithSections(sections: readonly NbtCompound[], isLightOn: number | "absent" = 1): NbtCompound {
+  const level: Record<string, unknown> = {
+    xPos: 0,
+    zPos: 0,
+    Status: "full",
+    Sections: sectionList(sections),
+  };
+  if (isLightOn !== "absent") {
+    level.isLightOn = isLightOn;
+  }
+  return {
+    DataVersion: 2730,
+    Level: level as NbtCompound,
+  };
+}
+
+function lightBytes(values: readonly number[]): Int8Array {
+  const out = new Int8Array(2048);
+  for (let index = 0; index < values.length; index++) {
+    out[index] = values[index]!;
+  }
+  return out;
+}
+
 describe("paletteBitsFor", () => {
   test.each([
     [1, 1],
@@ -43,6 +79,95 @@ describe("paletteBitsFor", () => {
     [257, 9],
   ])("palette size %i -> %i bits", (size, expected) => {
     expect(paletteBitsFor(size)).toBe(expected);
+  });
+});
+
+describe("decodeChunk light sections", () => {
+  test("decodes the isLightOn validity flag", () => {
+    expect(decodeChunk(rootWithSections([], 1)).isLightOn).toBe(true);
+    expect(decodeChunk(rootWithSections([], 0)).isLightOn).toBe(false);
+    expect(decodeChunk(rootWithSections([], "absent")).isLightOn).toBe(false);
+  });
+
+  test("decodes BlockLight and SkyLight DataLayers from raw section entries", () => {
+    const blockLight = lightBytes([1, 2, 3]);
+    const skyLight = lightBytes([15, 14, 13]);
+    const chunk = decodeChunk(rootWithSections([
+      {
+        Y: 0,
+        Palette: palette(["minecraft:air"]),
+        BlockLight: blockLight,
+        SkyLight: skyLight,
+      },
+    ]));
+
+    expect(chunk.light.block).toHaveLength(1);
+    expect(chunk.light.block[0]?.y).toBe(0);
+    expect(Array.from(chunk.light.block[0]!.data.slice(0, 3))).toEqual([1, 2, 3]);
+    expect(chunk.light.sky).toHaveLength(1);
+    expect(chunk.light.sky[0]?.y).toBe(0);
+    expect(Array.from(chunk.light.sky[0]!.data.slice(0, 3))).toEqual([15, 14, 13]);
+  });
+
+  test("retains light-only sections while keeping block sections palette-backed", () => {
+    const chunk = decodeChunk(rootWithSections([
+      {
+        Y: -1,
+        BlockLight: lightBytes([7]),
+      },
+      {
+        Y: 0,
+        Palette: palette(["minecraft:air"]),
+      },
+    ]));
+
+    expect(chunk.sections.map((section) => section.y)).toEqual([0]);
+    expect(chunk.light.block.map((section) => section.y)).toEqual([-1]);
+    expect(chunk.light.sky).toEqual([]);
+  });
+
+  test("sorts light sections by signed section Y", () => {
+    const chunk = decodeChunk(rootWithSections([
+      { Y: 2, SkyLight: lightBytes([2]) },
+      { Y: -1, SkyLight: lightBytes([255]) },
+      { Y: 1, SkyLight: lightBytes([1]) },
+    ]));
+
+    expect(chunk.light.sky.map((section) => section.y)).toEqual([-1, 1, 2]);
+    expect(chunk.light.sky.map((section) => section.data[0])).toEqual([255, 1, 2]);
+  });
+
+  test("missing light tags produce empty light layers", () => {
+    const chunk = decodeChunk(rootWithSections([
+      {
+        Y: 0,
+        Palette: palette(["minecraft:air"]),
+      },
+    ]));
+
+    expect(chunk.light).toEqual({ block: [], sky: [] });
+  });
+
+  test("rejects light arrays that are not vanilla DataLayer length", () => {
+    expect(() =>
+      decodeChunk(rootWithSections([
+        {
+          Y: 0,
+          BlockLight: new Int8Array(2047),
+        },
+      ]))
+    ).toThrow(/BlockLight must contain 2048 bytes/);
+  });
+
+  test("preserves signed NBT bytes as unsigned fixture bytes", () => {
+    const chunk = decodeChunk(rootWithSections([
+      {
+        Y: 0,
+        BlockLight: lightBytes([0, -1, -128, 127]),
+      },
+    ]));
+
+    expect(Array.from(chunk.light.block[0]!.data.slice(0, 4))).toEqual([0, 255, 128, 127]);
   });
 });
 

@@ -1,4 +1,5 @@
 import type { DecodedChunk } from "../anvil/chunk.ts";
+import { encodeChunkLightFixture, type ChunkLightFixture } from "./light-fixture.ts";
 
 export interface ChunkFixtureSection {
   readonly y: number;
@@ -11,7 +12,9 @@ export interface ChunkFixtureEntry {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly status: string;
+  readonly isLightOn: boolean;
   readonly sections: readonly ChunkFixtureSection[];
+  readonly light?: ChunkLightFixture;
   readonly heightmaps: { readonly [name: string]: readonly number[] };
   readonly biomes: readonly number[];
 }
@@ -28,6 +31,7 @@ export interface ChunkFixture {
     readonly heightmapOrder: "z-major,x-minor";
     readonly biomeOrder: "y-major,z-major,x-minor";
     readonly paletteEntries: "resource-key";
+    readonly lightData: "base64-encoded-2048-byte-datalayer";
   };
   readonly chunks: readonly ChunkFixtureEntry[];
 }
@@ -71,16 +75,19 @@ export function buildChunkFixture(metadata: ChunkFixtureMetadata, chunks: readon
       heightmapOrder: "z-major,x-minor",
       biomeOrder: "y-major,z-major,x-minor",
       paletteEntries: "resource-key",
+      lightData: "base64-encoded-2048-byte-datalayer",
     },
     chunks: ordered.map(toFixtureEntry),
   };
 }
 
 function toFixtureEntry(chunk: DecodedChunk): ChunkFixtureEntry {
-  return {
+  const light = encodeChunkLightFixture(chunk.light);
+  const entry: ChunkFixtureEntry = {
     chunkX: chunk.chunkX,
     chunkZ: chunk.chunkZ,
     status: chunk.status,
+    isLightOn: chunk.isLightOn,
     sections: chunk.sections.map((section) => ({
       y: section.y,
       palette: section.palette.map((entry) => entry.name),
@@ -90,4 +97,8 @@ function toFixtureEntry(chunk: DecodedChunk): ChunkFixtureEntry {
     heightmaps: chunk.heightmaps,
     biomes: chunk.biomes,
   };
+  if (light.block.length > 0 || light.sky.length > 0) {
+    return { ...entry, light };
+  }
+  return entry;
 }

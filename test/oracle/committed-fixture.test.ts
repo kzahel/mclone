@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import committed from "../fixtures/integration/overworld-seed-12345-chunks-0-0.json" with { type: "json" };
+import { decodeChunkLightFixture } from "../../src/oracle/integration/light-fixture.ts";
 
 interface CommittedFixtureSection {
   readonly y: number;
@@ -8,11 +9,23 @@ interface CommittedFixtureSection {
   readonly blocks: readonly number[];
 }
 
+interface CommittedLightSection {
+  readonly y: number;
+  readonly dataBase64: string;
+}
+
+interface CommittedChunkLight {
+  readonly sky: readonly CommittedLightSection[];
+  readonly block: readonly CommittedLightSection[];
+}
+
 interface CommittedFixtureChunk {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly status: string;
+  readonly isLightOn: boolean;
   readonly sections: readonly CommittedFixtureSection[];
+  readonly light?: CommittedChunkLight;
   readonly heightmaps: { readonly [name: string]: readonly number[] };
   readonly biomes: readonly number[];
 }
@@ -29,6 +42,7 @@ interface CommittedFixture {
     readonly heightmapOrder: string;
     readonly biomeOrder: string;
     readonly paletteEntries: string;
+    readonly lightData?: string;
   };
   readonly chunks: readonly CommittedFixtureChunk[];
 }
@@ -46,6 +60,7 @@ describe("committed integration fixture", () => {
     expect(fixture.wireFormat.heightmapOrder).toBe("z-major,x-minor");
     expect(fixture.wireFormat.biomeOrder).toBe("y-major,z-major,x-minor");
     expect(fixture.wireFormat.paletteEntries).toBe("resource-key");
+    expect(fixture.wireFormat.lightData).toBe("base64-encoded-2048-byte-datalayer");
   });
 
   test("contains exactly one fully-generated chunk at (0, 0)", () => {
@@ -54,6 +69,7 @@ describe("committed integration fixture", () => {
     expect(chunk.chunkX).toBe(0);
     expect(chunk.chunkZ).toBe(0);
     expect(chunk.status).toBe("full");
+    expect(chunk.isLightOn).toBe(true);
   });
 
   test("biomes array is MC's native 4x64x4 grid (1024 entries)", () => {
@@ -100,5 +116,18 @@ describe("committed integration fixture", () => {
     const chunk = fixture.chunks[0]!;
     const bottom = chunk.sections.slice().sort((a, b) => a.y - b.y)[0]!;
     expect(bottom.palette).toContain("minecraft:bedrock");
+  });
+
+  test("includes vanilla persisted BlockLight and SkyLight DataLayers", () => {
+    const chunk = fixture.chunks[0]!;
+    expect(chunk.light).toBeDefined();
+    const light = decodeChunkLightFixture(chunk.light!);
+
+    expect(light.block.length).toBeGreaterThan(0);
+    expect(light.sky.length).toBeGreaterThan(0);
+    for (const section of [...light.block, ...light.sky]) {
+      expect(Number.isInteger(section.y)).toBe(true);
+      expect(section.data).toHaveLength(2048);
+    }
   });
 });

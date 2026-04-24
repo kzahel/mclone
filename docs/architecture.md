@@ -265,6 +265,7 @@ At minimum, the engine should converge on explicit shapes for:
 - world metadata and save metadata
 
 The durable shape of those data records lives in [`runtime-data-model.md`](./runtime-data-model.md). The message model that carries them lives in [`protocol.md`](./protocol.md).
+Lighting has additional parity-sensitive solver rules and browser/worker ownership constraints; keep the detailed design in [`lighting.md`](./lighting.md).
 
 These should be serializable without depending on live class instances.
 

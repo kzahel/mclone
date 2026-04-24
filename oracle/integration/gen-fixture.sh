@@ -59,7 +59,11 @@ fi
 # 3. Decode the requested chunks into the fixture JSON.
 log "Decoding chunks ${CHUNKS} -> ${OUT}"
 mkdir -p "$(dirname "$OUT")"
-node "${SCRIPT_DIR}/dump-chunks.ts" \
+node \
+    --disable-warning=ExperimentalWarning \
+    --experimental-transform-types \
+    --experimental-loader "${REPO_ROOT}/scripts/node-ts-loader.mjs" \
+    "${SCRIPT_DIR}/dump-chunks.ts" \
     --region-dir "${WORK_DIR}/world/region" \
     --seed "$SEED" \
     --chunks "$CHUNKS" \

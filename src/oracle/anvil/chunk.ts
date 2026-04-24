@@ -14,6 +14,16 @@ export interface DecodedSection {
   readonly blocks: readonly number[];
 }
 
+export interface DecodedLightSection {
+  readonly y: number;
+  readonly data: Uint8Array;
+}
+
+export interface DecodedChunkLight {
+  readonly block: readonly DecodedLightSection[];
+  readonly sky: readonly DecodedLightSection[];
+}
+
 export interface DecodedHeightmaps {
   readonly [name: string]: readonly number[];
 }
@@ -23,12 +33,15 @@ export interface DecodedChunk {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly status: string;
+  readonly isLightOn: boolean;
   readonly sections: readonly DecodedSection[];
+  readonly light: DecodedChunkLight;
   readonly heightmaps: DecodedHeightmaps;
   readonly biomes: readonly number[];
 }
 
 const BLOCKS_PER_SECTION = 16 * 16 * 16;
+const LIGHT_DATALAYER_BYTES = 2048;
 const HEIGHTMAP_BITS = 9;
 const HEIGHTMAP_ENTRIES = 256;
 const BIOMES_PER_CHUNK = 4 * 64 * 4;
@@ -39,6 +52,7 @@ export function decodeChunk(root: NbtCompound): DecodedChunk {
   const chunkX = asInt(level["xPos"], "Level.xPos");
   const chunkZ = asInt(level["zPos"], "Level.zPos");
   const status = asString(level["Status"], "Level.Status");
+  const isLightOn = asBooleanByte(level["isLightOn"], "Level.isLightOn", false);
 
   const biomesValue = level["Biomes"];
   const biomes = biomesValue === undefined ? [] : asInt32Array(biomesValue, "Level.Biomes");
@@ -46,7 +60,7 @@ export function decodeChunk(root: NbtCompound): DecodedChunk {
     throw new Error(`Level.Biomes must contain ${BIOMES_PER_CHUNK} entries, got ${biomes.length}`);
   }
 
-  const sections = decodeSections(level["Sections"]);
+  const decodedSections = decodeSections(level["Sections"]);
   const heightmaps = decodeHeightmaps(level["Heightmaps"]);
 
   return {
@@ -54,27 +68,41 @@ export function decodeChunk(root: NbtCompound): DecodedChunk {
     chunkX,
     chunkZ,
     status,
-    sections,
+    isLightOn,
+    sections: decodedSections.sections,
+    light: decodedSections.light,
     heightmaps,
     biomes: Array.from(biomes),
   };
 }
 
-function decodeSections(raw: NbtValue | undefined): DecodedSection[] {
+interface DecodedSectionPayload {
+  readonly sections: DecodedSection[];
+  readonly light: DecodedChunkLight;
+}
+
+function decodeSections(raw: NbtValue | undefined): DecodedSectionPayload {
   if (raw === undefined) {
-    return [];
+    return { sections: [], light: { block: [], sky: [] } };
   }
   const list = asList(raw, "Level.Sections");
-  const out: DecodedSection[] = [];
-  for (const entry of list.values) {
-    const section = entry as NbtCompound;
+  const sections: DecodedSection[] = [];
+  const blockLight: DecodedLightSection[] = [];
+  const skyLight: DecodedLightSection[] = [];
+  for (const [index, entry] of list.values.entries()) {
+    const section = asCompound(entry, `Level.Sections[${index}]`);
     const decoded = decodeSection(section);
     if (decoded !== undefined) {
-      out.push(decoded);
+      sections.push(decoded);
     }
+    const light = decodeSectionLight(section);
+    blockLight.push(...light.block);
+    skyLight.push(...light.sky);
   }
-  out.sort((a, b) => a.y - b.y);
-  return out;
+  sections.sort((a, b) => a.y - b.y);
+  blockLight.sort((a, b) => a.y - b.y);
+  skyLight.sort((a, b) => a.y - b.y);
+  return { sections, light: { block: blockLight, sky: skyLight } };
 }
 
 function decodeSection(section: NbtCompound): DecodedSection | undefined {
@@ -107,6 +135,31 @@ function decodeSection(section: NbtCompound): DecodedSection | undefined {
   }
 
   return { y, palette, blocks };
+}
+
+function decodeSectionLight(section: NbtCompound): DecodedChunkLight {
+  const y = asInt(section["Y"], "Sections[].Y");
+  const block = decodeLightLayer(section, "BlockLight", y);
+  const sky = decodeLightLayer(section, "SkyLight", y);
+  return {
+    block: block === undefined ? [] : [block],
+    sky: sky === undefined ? [] : [sky],
+  };
+}
+
+function decodeLightLayer(section: NbtCompound, tagName: "BlockLight" | "SkyLight", y: number): DecodedLightSection | undefined {
+  const value = section[tagName];
+  if (value === undefined) {
+    return undefined;
+  }
+  const raw = asByteArray(value, `Sections[Y=${y}].${tagName}`);
+  if (raw.length !== LIGHT_DATALAYER_BYTES) {
+    throw new Error(`Sections[Y=${y}].${tagName} must contain ${LIGHT_DATALAYER_BYTES} bytes, got ${raw.length}`);
+  }
+  return {
+    y,
+    data: new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength),
+  };
 }
 
 function decodePaletteEntry(entry: NbtValue, index: number): DecodedPaletteEntry {
@@ -191,6 +244,16 @@ function asString(value: NbtValue | undefined, path: string): string {
   return value;
 }
 
+function asBooleanByte(value: NbtValue | undefined, path: string, fallback: boolean): boolean {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (typeof value !== "number") {
+    throw new Error(`expected boolean byte at ${path}, got ${typeof value}`);
+  }
+  return value !== 0;
+}
+
 function asInt32Array(value: NbtValue, path: string): Int32Array {
   if (!(value instanceof Int32Array)) {
     throw new Error(`expected int array at ${path}`);
@@ -201,6 +264,13 @@ function asInt32Array(value: NbtValue, path: string): Int32Array {
 function asInt64Array(value: NbtValue, path: string): BigInt64Array {
   if (!(value instanceof BigInt64Array)) {
     throw new Error(`expected long array at ${path}`);
+  }
+  return value;
+}
+
+function asByteArray(value: NbtValue, path: string): Int8Array {
+  if (!(value instanceof Int8Array)) {
+    throw new Error(`expected byte array at ${path}`);
   }
   return value;
 }

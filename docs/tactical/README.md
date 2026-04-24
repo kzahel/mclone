@@ -76,6 +76,14 @@ Ordering rationale: `BlockState` prereqs (13) deferred until just before model b
 
 "Fly around a vanilla-parity overworld" — textured blocks, day lighting, face culling, AO, chunk-level visibility culling, fog. No entities, no GUI, no particles, no item rendering, no post-processing.
 
+## Lighting Arc
+
+Lighting is both simulation data and renderer input. Use [`../lighting.md`](../lighting.md) as the durable reference before writing tactical slices. The intended split is a direct 1.17.1 port of the light data/solver in the authoritative host, with engine-native worker scheduling and packed light facts flowing through snapshots/deltas into render-world meshing. Do not put propagation on the browser main thread, and do not make mesh payloads the source of truth for light.
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| [`L0-lighting-oracle-foundation.md`](L0-lighting-oracle-foundation.md) | Anvil `BlockLight` / `SkyLight` decode, light fixture shape, byte-exact comparison helpers, first committed server light fixture | unit + server oracle | **done** — persisted vanilla light bytes now ride in the pinned integration fixture and comparison helpers are ready for solver tests |
+
 ## Renderer oracle approach
 
 - **Unit**: dump atlas UVs, baked-model quads, and section visibility graphs from MC as JSON; exact-diff those. Catches most correctness bugs before pixels are involved.

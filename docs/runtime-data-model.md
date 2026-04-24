@@ -111,6 +111,7 @@ Deltas should be additive to the same model:
 - block entity deltas after block entities exist
 
 Mesh payloads are not chunk snapshots. Meshes are renderer-consumer products derived from chunk facts.
+For the intended packed light-section shape and solver ownership, see [`lighting.md`](./lighting.md).
 
 ## Storage Records
 

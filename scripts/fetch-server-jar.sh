@@ -53,6 +53,19 @@ done
 log()  { printf '[fetch-server-jar] %s\n' "$*"; }
 need() { [ "$FORCE" = 1 ] || [ ! -e "$1" ]; }
 
+verify_sha1() {
+    local expected="$1"
+    local file="$2"
+    local actual
+    actual=$(sha1sum "$file")
+    actual=${actual%% *}
+    if [ "$actual" != "$expected" ]; then
+        echo "SHA1 mismatch for $file: expected $expected, got $actual" >&2
+        exit 1
+    fi
+    log "$file: OK"
+}
+
 mkdir -p "$OUT_DIR"
 cd "$OUT_DIR"
 
@@ -84,7 +97,8 @@ fi
 if need server.jar; then
     log "Downloading server.jar..."
     curl -sSfL -o server.jar "$JAR_URL"
-    echo "${JAR_SHA}  server.jar" | sha1sum -c
 fi
+
+verify_sha1 "$JAR_SHA" server.jar
 
 log "Done. Server jar: $OUT_DIR/server.jar"
