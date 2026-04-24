@@ -303,12 +303,16 @@ function fixtureFromLevel(template: LiquidRegionFixture, scenario: LiquidScenari
 
 describe("Liquid1 water simulation foundation", () => {
   test("maps LiquidBlock levels to vanilla source, flowing, and falling FluidStates", () => {
-    registerGeneratedRenderBlocks();
+    const blocks = registerGeneratedRenderBlocks();
     const water = parseBlockState("minecraft:water");
+    const level = new MutableLiquidLevel(blocks.airState);
+    const pos = new BlockPos(1, 2, 3);
 
     expect(water.getFluidState().getType()).toBe(Fluids.WATER);
     expect(water.getFluidState().isSource()).toBe(true);
     expect(water.getFluidState().getAmount()).toBe(8);
+    expect(water.propagatesSkylightDown(level, pos)).toBe(false);
+    expect(water.getLightBlock(level, pos)).toBe(1);
 
     const flowing = water.setValue(LiquidBlock.LEVEL, 3).getFluidState();
     expect(flowing.getType()).toBe(Fluids.FLOWING_WATER);

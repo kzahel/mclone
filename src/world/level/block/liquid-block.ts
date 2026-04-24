@@ -9,6 +9,7 @@ import { BlockBehaviour } from "./state/block-behaviour";
 import type { FluidState } from "../material/fluid-state";
 import type { FlowingFluid } from "../material/flowing-fluid";
 import type { WorldGenLevel } from "../world-gen-level";
+import type { BlockGetter } from "../block-getter";
 
 export class LiquidBlock extends Block {
   public static readonly LEVEL = BlockStateProperties.LEVEL;
@@ -29,6 +30,10 @@ export class LiquidBlock extends Block {
 
   public override getFluidState(state: BlockState): FluidState {
     return this.stateCache[Math.min(state.getValue(LiquidBlock.LEVEL), 8)]!;
+  }
+
+  public override propagatesSkylightDown(_state: BlockState, _level: BlockGetter, _pos: BlockPos): boolean {
+    return false;
   }
 
   public override skipRendering(_state: BlockState, adjacentState: BlockState, _direction: Direction): boolean {
