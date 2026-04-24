@@ -9,7 +9,13 @@ import {
   hydrateChunkFromSnapshot,
   type ChunkSnapshot,
 } from "../../world/level/chunk-snapshot";
-import { packChunkSnapshot, unpackChunkSnapshot, type PackedChunkLight, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import {
+  applyPackedChunkLightDelta,
+  packChunkSnapshot,
+  unpackChunkSnapshot,
+  type PackedChunkLight,
+  type PackedChunkSnapshot,
+} from "../../world/level/packed-chunk-snapshot";
 import { FEATURES_CHUNK_DEPENDENCY_RADIUS } from "../../world/level/generated-decoration-region";
 import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
 import type { LevelChunk } from "../../world/level/chunk/level-chunk";
@@ -146,6 +152,16 @@ type StoredChunkPreloadResult = "loaded" | "already_loaded" | "missing";
 
 type GeneratedLevelChunk = LevelChunk;
 
+interface PendingLightBlockChange {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly oldBlockStateId: number;
+  readonly newBlockStateId: number;
+}
+
 function monotonicNowMs(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
@@ -240,10 +256,13 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly chunkRevisions = new Map<string, number>();
   private readonly sentLightInputRevisions = new Map<string, number>();
   private readonly acceptedChunkLight = new Map<string, PackedChunkLight>();
+  private readonly acceptedChunkLightRevisions = new Map<string, number>();
+  private readonly pendingLightBlockChanges = new Map<bigint, PendingLightBlockChange>();
   private readonly dirtyChunksForPublication = new Set<string>();
   private readonly dirtyDurableChunks = new Set<string>();
   private opened = false;
   private chunkViewJobRevision = 0;
+  private nextLightBlockChangeBatchId = 1;
 
   public constructor(private readonly options: GeneratedWorldHostOptions) {
     this.engineConfig = normalizeWorldEngineConfig({
@@ -875,23 +894,52 @@ export class GeneratedWorldHost implements WorldHost {
     const key = chunkKey(chunkX, chunkZ);
     const revision = this.getChunkRevision(chunkX, chunkZ) + 1;
     this.chunkRevisions.set(key, revision);
-    this.sentLightInputRevisions.delete(key);
     for (let neighborChunkZ = chunkZ - 1; neighborChunkZ <= chunkZ + 1; neighborChunkZ++) {
       for (let neighborChunkX = chunkX - 1; neighborChunkX <= chunkX + 1; neighborChunkX++) {
-        this.acceptedChunkLight.delete(chunkKey(neighborChunkX, neighborChunkZ));
+        this.acceptedChunkLightRevisions.delete(chunkKey(neighborChunkX, neighborChunkZ));
       }
     }
     return revision;
   }
 
-  private markHostBlockChanged(pos: BlockPos, _oldState: BlockState, _newState: BlockState): void {
+  private markHostBlockChanged(pos: BlockPos, oldState: BlockState, newState: BlockState): void {
     const chunkX = SectionPos.blockToSectionCoord(pos.getX());
     const chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
     const key = chunkKey(chunkX, chunkZ);
     this.dirtyDurableChunks.add(key);
     this.dirtyChunksForPublication.add(key);
     this.incrementChunkRevision(chunkX, chunkZ);
-    this.acceptedChunkLight.delete(key);
+    this.recordPendingLightBlockChange(pos, oldState, newState);
+  }
+
+  private recordPendingLightBlockChange(pos: BlockPos, oldState: BlockState, newState: BlockState): void {
+    if (this.lightingService === undefined || oldState === newState) {
+      return;
+    }
+
+    const oldBlockStateId = this.options.blockStateIds.idFor(oldState);
+    const newBlockStateId = this.options.blockStateIds.idFor(newState);
+    if (oldBlockStateId === newBlockStateId) {
+      return;
+    }
+
+    const posKey = pos.asLong();
+    const existing = this.pendingLightBlockChanges.get(posKey);
+    const coalescedOldBlockStateId = existing?.oldBlockStateId ?? oldBlockStateId;
+    if (coalescedOldBlockStateId === newBlockStateId) {
+      this.pendingLightBlockChanges.delete(posKey);
+      return;
+    }
+
+    this.pendingLightBlockChanges.set(posKey, {
+      x: pos.getX(),
+      y: pos.getY(),
+      z: pos.getZ(),
+      chunkX: SectionPos.blockToSectionCoord(pos.getX()),
+      chunkZ: SectionPos.blockToSectionCoord(pos.getZ()),
+      oldBlockStateId: coalescedOldBlockStateId,
+      newBlockStateId,
+    });
   }
 
   private tickLiquid(tick: TickNextTickData<Fluid>): void {
@@ -983,7 +1031,6 @@ export class GeneratedWorldHost implements WorldHost {
 
   private async flushDirtyPublishedChunks(yieldStep?: () => Promise<void>): Promise<void> {
     const dirtyKeys = [...this.dirtyChunksForPublication].sort();
-    this.dirtyChunksForPublication.clear();
     const dirtyChunks = dirtyKeys
       .map((key) => {
         const [chunkXRaw, chunkZRaw] = key.split(",");
@@ -1003,12 +1050,14 @@ export class GeneratedWorldHost implements WorldHost {
       const chunkZ = Number(chunkZRaw);
       const chunk = this.level.getChunk(chunkX, chunkZ, false);
       if (chunk === null) {
+        this.dirtyChunksForPublication.delete(key);
         continue;
       }
 
       const snapshot = this.buildPackedChunkSnapshot(chunk);
       await this.writeChunkSnapshotByPolicy(snapshot);
       if (!this.isChunkInCurrentPublishView(chunkX, chunkZ) || !this.publishedChunkSnapshots.has(key)) {
+        this.dirtyChunksForPublication.delete(key);
         continue;
       }
 
@@ -1016,6 +1065,7 @@ export class GeneratedWorldHost implements WorldHost {
         type: "chunk_snapshot",
         snapshot,
       });
+      this.dirtyChunksForPublication.delete(key);
     }
   }
 
@@ -1048,13 +1098,23 @@ export class GeneratedWorldHost implements WorldHost {
       ),
       chunk,
     );
-    const light = this.acceptedChunkLight.get(chunkKey(chunk.chunkX, chunk.chunkZ));
+    const light = this.getAcceptedCurrentChunkLight(chunk.chunkX, chunk.chunkZ);
 
     return packChunkSnapshot(
       light === undefined ? snapshot : { ...snapshot, light },
       this.options.blockStateIds,
       this.resolveBlockState,
     );
+  }
+
+  private getAcceptedCurrentChunkLight(chunkX: number, chunkZ: number): PackedChunkLight | undefined {
+    const key = chunkKey(chunkX, chunkZ);
+    const light = this.acceptedChunkLight.get(key);
+    if (light === undefined || this.acceptedChunkLightRevisions.get(key) !== this.getChunkRevision(chunkX, chunkZ)) {
+      return undefined;
+    }
+
+    return light;
   }
 
   private async ensureLightingForLoadedChunks(
@@ -1074,6 +1134,8 @@ export class GeneratedWorldHost implements WorldHost {
       return;
     }
 
+    await this.flushPendingLightBlockChanges(yieldStep);
+
     const dependencyChunks = this.collectLightingDependencyChunks(chunks);
     for (const chunk of dependencyChunks) {
       await yieldStep();
@@ -1084,7 +1146,7 @@ export class GeneratedWorldHost implements WorldHost {
     for (const chunk of chunks) {
       const key = chunkKey(chunk.chunkX, chunk.chunkZ);
       const chunkRevision = this.getChunkRevision(chunk.chunkX, chunk.chunkZ);
-      const accepted = this.acceptedChunkLight.get(key);
+      const accepted = this.getAcceptedCurrentChunkLight(chunk.chunkX, chunk.chunkZ);
       if (accepted !== undefined && accepted.lightCorrect && this.sentLightInputRevisions.get(key) === chunkRevision) {
         continue;
       }
@@ -1114,6 +1176,8 @@ export class GeneratedWorldHost implements WorldHost {
             break;
           case "chunk_light_delta":
             this.acceptLightDeltaResult(result, chunkViewRevision);
+            break;
+          case "block_light_update_complete":
             break;
           case "light_error":
             this.handleLightError(result, chunkViewRevision);
@@ -1200,6 +1264,8 @@ export class GeneratedWorldHost implements WorldHost {
     });
     this.sentLightInputRevisions.set(key, chunkRevision);
     this.acceptedChunkLight.delete(key);
+    this.acceptedChunkLightRevisions.delete(key);
+    this.clearPendingLightBlockChangesForChunk(chunk.chunkX, chunk.chunkZ);
   }
 
   private buildLightInputSections(chunk: GeneratedLevelChunk): readonly { readonly y: number; readonly blockStateIds: Uint32Array }[] {
@@ -1244,23 +1310,41 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     this.acceptedChunkLight.set(key, result.light);
+    this.acceptedChunkLightRevisions.set(key, result.chunkRevision);
     pending.delete(key);
   }
 
-  private acceptLightDeltaResult(result: ChunkLightDeltaResult, currentChunkViewRevision: number): void {
+  private acceptLightDeltaResult(
+    result: ChunkLightDeltaResult,
+    currentChunkViewRevision: number,
+    options: { readonly enqueueMessage?: boolean } = {},
+  ): boolean {
     if (
       result.chunkViewRevision !== currentChunkViewRevision
       || this.getChunkRevision(result.chunkX, result.chunkZ) !== result.chunkRevision
     ) {
-      return;
+      return false;
     }
 
-    this.pendingMessages.push({
-      type: "chunk_light_delta",
-      chunkX: result.chunkX,
-      chunkZ: result.chunkZ,
-      light: result.light,
-    });
+    const key = chunkKey(result.chunkX, result.chunkZ);
+    const currentLight = this.acceptedChunkLight.get(key);
+    if (currentLight === undefined) {
+      return false;
+    }
+
+    this.acceptedChunkLight.set(key, applyPackedChunkLightDelta(currentLight, result.light));
+    this.acceptedChunkLightRevisions.set(key, result.chunkRevision);
+
+    if (options.enqueueMessage ?? true) {
+      this.pendingMessages.push({
+        type: "chunk_light_delta",
+        chunkX: result.chunkX,
+        chunkZ: result.chunkZ,
+        light: result.light,
+      });
+    }
+
+    return true;
   }
 
   private handleLightError(result: LightErrorResult, currentChunkViewRevision: number): void {
@@ -1271,13 +1355,181 @@ export class GeneratedWorldHost implements WorldHost {
     throw new Error(result.message);
   }
 
-  private enqueueDirtyLightDeltas(): void {}
+  private enqueueDirtyLightDeltas(): void {
+    if (this.pendingLightBlockChanges.size === 0) {
+      return;
+    }
+
+    this.queueStorageSideEffect(this.flushPendingLightBlockChanges(yieldToEventLoop));
+  }
+
+  private async flushPendingLightBlockChanges(yieldStep: () => Promise<void>): Promise<void> {
+    const lightingService = this.lightingService;
+    if (lightingService === undefined || this.pendingLightBlockChanges.size === 0) {
+      return;
+    }
+
+    const batchChanges: PendingLightBlockChange[] = [];
+    const batchChangeKeys: bigint[] = [];
+    const chunkRevisions = new Map<string, {
+      readonly chunkViewRevision: number;
+      readonly chunkX: number;
+      readonly chunkZ: number;
+      readonly chunkRevision: number;
+    }>();
+    const chunkViewRevision = this.chunkViewJobRevision;
+
+    for (const [posKey, change] of this.pendingLightBlockChanges) {
+      const changedChunkKey = chunkKey(change.chunkX, change.chunkZ);
+      const sentRevision = this.sentLightInputRevisions.get(changedChunkKey);
+      if (sentRevision === undefined || this.level.getChunk(change.chunkX, change.chunkZ, false) === null) {
+        this.pendingLightBlockChanges.delete(posKey);
+        continue;
+      }
+
+      const currentRevision = this.getChunkRevision(change.chunkX, change.chunkZ);
+      if (sentRevision === currentRevision) {
+        this.pendingLightBlockChanges.delete(posKey);
+        continue;
+      }
+
+      batchChanges.push(change);
+      batchChangeKeys.push(posKey);
+      this.collectLightDeltaRevisionWindow(change.chunkX, change.chunkZ, chunkViewRevision, chunkRevisions);
+    }
+
+    if (batchChanges.length === 0 || chunkRevisions.size === 0) {
+      return;
+    }
+
+    const batchId = this.nextLightBlockChangeBatchId++;
+    const revisionList = [...chunkRevisions.values()];
+    await lightingService.enqueueBlockChanges({
+      type: "block_light_update_batch",
+      batchId,
+      chunkViewRevision,
+      changes: batchChanges.map((change) => ({
+        x: change.x,
+        y: change.y,
+        z: change.z,
+        oldBlockStateId: change.oldBlockStateId,
+        newBlockStateId: change.newBlockStateId,
+      })),
+      chunkRevisions: revisionList,
+    });
+
+    const acceptedDeltaChunks = new Set<string>();
+    for (let attempt = 0; attempt < 10_000; attempt++) {
+      await yieldStep();
+      const batch = await lightingService.pollResults({
+        type: "poll_light_results",
+        maxResults: LIGHTING_RESULT_BATCH_SIZE,
+      });
+
+      for (const result of batch.results) {
+        switch (result.type) {
+          case "chunk_light_ready":
+            break;
+          case "chunk_light_delta": {
+            const accepted = this.acceptLightDeltaResult(result, chunkViewRevision, {
+              enqueueMessage: this.shouldPublishLightDeltaMessage(result.chunkX, result.chunkZ),
+            });
+            if (accepted) {
+              acceptedDeltaChunks.add(chunkKey(result.chunkX, result.chunkZ));
+            }
+            break;
+          }
+          case "block_light_update_complete":
+            if (result.batchId !== batchId || result.chunkViewRevision !== chunkViewRevision) {
+              break;
+            }
+
+            for (const revision of result.chunkRevisions) {
+              const key = chunkKey(revision.chunkX, revision.chunkZ);
+              this.sentLightInputRevisions.set(key, revision.chunkRevision);
+              if (!acceptedDeltaChunks.has(key) && this.acceptedChunkLight.has(key)) {
+                this.acceptedChunkLightRevisions.set(key, revision.chunkRevision);
+              }
+            }
+
+            for (let index = 0; index < batchChangeKeys.length; index++) {
+              const key = batchChangeKeys[index]!;
+              const sentChange = batchChanges[index]!;
+              const current = this.pendingLightBlockChanges.get(key);
+              if (
+                current !== undefined
+                && current.x === sentChange.x
+                && current.y === sentChange.y
+                && current.z === sentChange.z
+                && current.oldBlockStateId === sentChange.oldBlockStateId
+                && current.newBlockStateId === sentChange.newBlockStateId
+              ) {
+                this.pendingLightBlockChanges.delete(key);
+              }
+            }
+            return;
+          case "light_error":
+            this.handleLightError(result, chunkViewRevision);
+            break;
+          case "light_progress":
+            break;
+        }
+      }
+    }
+
+    throw new Error("Lighting worker did not complete block light update batch");
+  }
+
+  private collectLightDeltaRevisionWindow(
+    chunkX: number,
+    chunkZ: number,
+    chunkViewRevision: number,
+    revisions: Map<string, {
+      readonly chunkViewRevision: number;
+      readonly chunkX: number;
+      readonly chunkZ: number;
+      readonly chunkRevision: number;
+    }>,
+  ): void {
+    for (let neighborChunkZ = chunkZ - 1; neighborChunkZ <= chunkZ + 1; neighborChunkZ++) {
+      for (let neighborChunkX = chunkX - 1; neighborChunkX <= chunkX + 1; neighborChunkX++) {
+        const key = chunkKey(neighborChunkX, neighborChunkZ);
+        if (this.sentLightInputRevisions.get(key) === undefined || this.level.getChunk(neighborChunkX, neighborChunkZ, false) === null) {
+          continue;
+        }
+
+        revisions.set(key, {
+          chunkViewRevision,
+          chunkX: neighborChunkX,
+          chunkZ: neighborChunkZ,
+          chunkRevision: this.getChunkRevision(neighborChunkX, neighborChunkZ),
+        });
+      }
+    }
+  }
+
+  private shouldPublishLightDeltaMessage(chunkX: number, chunkZ: number): boolean {
+    const key = chunkKey(chunkX, chunkZ);
+    return this.publishedChunkSnapshots.has(key)
+      && !this.dirtyChunksForPublication.has(key)
+      && this.isChunkInCurrentPublishView(chunkX, chunkZ);
+  }
+
+  private clearPendingLightBlockChangesForChunk(chunkX: number, chunkZ: number): void {
+    for (const [key, change] of this.pendingLightBlockChanges) {
+      if (change.chunkX === chunkX && change.chunkZ === chunkZ) {
+        this.pendingLightBlockChanges.delete(key);
+      }
+    }
+  }
 
   private discardChunkLighting(chunkX: number, chunkZ: number): void {
     const key = chunkKey(chunkX, chunkZ);
     const chunkRevision = this.getChunkRevision(chunkX, chunkZ);
     this.sentLightInputRevisions.delete(key);
     this.acceptedChunkLight.delete(key);
+    this.acceptedChunkLightRevisions.delete(key);
+    this.clearPendingLightBlockChangesForChunk(chunkX, chunkZ);
     this.chunkRevisions.delete(key);
     this.queueStorageSideEffect(this.lightingService?.removeChunk({
       type: "remove_light_chunk",

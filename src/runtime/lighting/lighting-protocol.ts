@@ -60,6 +60,7 @@ export interface LightBlockChange {
 
 export interface LightBlockChangeBatchRequest {
   readonly type: "block_light_update_batch";
+  readonly batchId: number;
   readonly chunkViewRevision: number;
   readonly changes: readonly LightBlockChange[];
   readonly chunkRevisions: readonly LightingChunkRevision[];
@@ -90,6 +91,14 @@ export interface ChunkLightDeltaResult extends LightingChunkRevision {
   readonly light: PackedChunkLightDelta;
 }
 
+export interface LightBlockChangeBatchCompleteResult {
+  readonly type: "block_light_update_complete";
+  readonly batchId: number;
+  readonly chunkViewRevision: number;
+  readonly changeCount: number;
+  readonly chunkRevisions: readonly LightingChunkRevision[];
+}
+
 export interface LightProgressResult {
   readonly type: "light_progress";
   readonly stage: string;
@@ -113,6 +122,7 @@ export interface LightErrorResult {
 export type LightingResult =
   | ChunkLightReadyResult
   | ChunkLightDeltaResult
+  | LightBlockChangeBatchCompleteResult
   | LightProgressResult
   | LightErrorResult;
 
@@ -171,6 +181,7 @@ export function collectLightingResultTransferables(result: LightingResult): Tran
         }
       }
       break;
+    case "block_light_update_complete":
     case "light_progress":
     case "light_error":
       break;

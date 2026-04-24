@@ -106,11 +106,18 @@ export function applyPackedChunkLightDeltaToSnapshot(
 ): PackedChunkSnapshot {
   return {
     ...snapshot,
-    light: {
-      sky: applyPackedLightSectionUpdates(snapshot.light?.sky ?? [], delta.sky ?? []),
-      block: applyPackedLightSectionUpdates(snapshot.light?.block ?? [], delta.block ?? []),
-      lightCorrect: true,
-    },
+    light: applyPackedChunkLightDelta(snapshot.light, delta),
+  };
+}
+
+export function applyPackedChunkLightDelta(
+  light: PackedChunkLight | undefined,
+  delta: PackedChunkLightDelta,
+): PackedChunkLight {
+  return {
+    sky: applyPackedLightSectionUpdates(light?.sky ?? [], delta.sky ?? []),
+    block: applyPackedLightSectionUpdates(light?.block ?? [], delta.block ?? []),
+    lightCorrect: true,
   };
 }
 

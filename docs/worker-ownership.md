@@ -183,16 +183,17 @@ generated-world host worker
   ticks liquid/entity/block systems
   mutates authoritative chunks
   increments affected chunk revisions
-  sends light input changes to lighting worker
+  sends revisioned block-light update batches to lighting worker
 
 lighting worker
-  applies block/light changes
+  applies block/light changes to its light-only chunk cache
   propagates within budget
-  returns revisioned light deltas
+  returns revisioned light deltas and a batch-complete marker
 
 generated-world host worker
   validates revisions
-  publishes block snapshot/delta plus matching light deltas
+  updates accepted light cache
+  publishes block snapshots with matching light and light-only neighbor deltas
 
 render-world worker
   applies updates
@@ -320,7 +321,7 @@ Before considering worker pooling, the baseline should satisfy:
 - stale generation/light/render results are rejected by revision
 - D5 traversal reports identify the remaining bottleneck before a pool or shared-buffer slice is started
 
-The lighting ownership slice is landed: worker-backed browser/Node service shells, protocol types, a bounded mailbox, worker-owned `LevelLightEngine`, and initial `chunk_light_ready` publication exist under `src/runtime/lighting/`. The baseline is not complete until live block/liquid light updates also flow through the lighting mailbox and D5 traversal gates confirm host responsiveness under chunk loading.
+The lighting ownership baseline is landed: worker-backed browser/Node service shells, protocol types, a bounded mailbox, worker-owned `LevelLightEngine`, initial `chunk_light_ready` publication, and live `block_light_update_batch` / `chunk_light_delta` routing exist under `src/runtime/lighting/`. The baseline is not complete until D5 traversal gates confirm host responsiveness under chunk loading and remaining render/upload bottlenecks are measured.
 
 ## Related Docs
 

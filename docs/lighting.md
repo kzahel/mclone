@@ -250,9 +250,14 @@ The intended ownership is:
 
 ```text
 authoritative host worker / Node host
-  owns chunks, block edits, light engine, light data, dirty light sections
-  schedules light work with cooperative budgets
+  owns chunks, block edits, chunk revisions, and publication policy
+  sends revisioned light inputs and live block-change batches to the lighting worker
   emits snapshots/deltas
+
+lighting worker
+  owns LevelLightEngine, light-only chunk inputs, light data, and dirty light sections
+  schedules light work with mailbox budgets
+  returns revisioned initial snapshots and live section deltas
 
 render-world worker
   owns client-side read-only chunk cache plus light snapshots
@@ -476,15 +481,15 @@ Suggested sequence:
    - full-chunk dirty sections are emitted for mesh rebuild
    - meshing can emit real packed light values from stored sky/block light
 
-   Snapshots without `light` still fall back to the old constants for explicit debug/non-vanilla profiles. Section-level light deltas are still pending.
+   Snapshots without `light` still fall back to the old constants for explicit debug/non-vanilla profiles. Section-level light deltas are now the live-update transport.
 
 5. Implement [`L5-live-light-deltas.md`](tactical/L5-live-light-deltas.md). Done:
-   - host block edits call `checkBlock`
-   - section empty transitions call `updateSectionStatus`
-   - light dirty sections become `chunk_light_delta` updates
+   - host block/liquid edits coalesce into `block_light_update_batch`
+   - lighting worker applies edits, calls `checkBlock`, updates section status, propagates, and returns dirty section replacements
+   - host accepts revisioned `chunk_light_delta` results, updates its accepted light cache, waits for `block_light_update_complete`, and publishes dirty snapshots with matching light
    - render-world worker applies deltas and rebuilds affected meshes
 
-   Current live block changes can still publish full replacement chunk snapshots; `chunk_light_delta` now carries light-only section changes and gives the future block-delta path a vanilla-shaped light transport.
+   Current live block changes still publish full replacement chunk snapshots for block-state changes; `chunk_light_delta` carries light-only section changes, especially for neighboring chunks that do not need a block snapshot.
 
 6. Make meshing visibly consume stored light:
    - route packed-light calculation through stored sky/block light

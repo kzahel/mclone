@@ -10,6 +10,7 @@ import {
 } from "../../src/runtime/lighting/lighting-worker-client";
 import type { LightingResult } from "../../src/runtime/lighting/lighting-protocol";
 import { createLightingWorkerHandler } from "../../src/runtime/lighting/lighting-worker";
+import { ChunkBlockId } from "../../src/worldgen/chunk/chunk-block-buffer";
 
 class TestMessageEndpoint<TOutgoing, TIncoming> {
   private peer?: TestMessageEndpoint<TIncoming, TOutgoing>;
@@ -162,6 +163,87 @@ describe("Lighting worker client", () => {
         lightCorrect: true,
       },
     });
+  });
+
+  test("applies revisioned block light update batches and reports completion after deltas", async () => {
+    const { clientEndpoint, hostEndpoint } = createEndpointPair();
+    connectLightingWorkerSession(hostEndpoint, createLightingWorkerHandler());
+    const client = new LightingWorkerClient(clientEndpoint);
+    const blockStateIds = new Uint16Array(16 * 16 * 16);
+
+    await client.configureWorld({
+      type: "configure_light_world",
+      seed: 12345n,
+      minBuildHeight: 0,
+      height: 256,
+      blockRegistryVersion: 41,
+    });
+    await client.setView({
+      type: "set_light_view",
+      chunkViewRevision: 1,
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      loadRadius: 1,
+      publishRadius: 1,
+    });
+    await client.upsertChunk({
+      type: "upsert_light_chunk",
+      chunkViewRevision: 1,
+      chunkX: 0,
+      chunkZ: 0,
+      chunkRevision: 7,
+      decorated: true,
+      sections: [{ y: 0, blockStateIds }],
+    });
+    await client.requestInitialLight({
+      type: "request_initial_light",
+      chunkViewRevision: 1,
+      chunkX: 0,
+      chunkZ: 0,
+      chunkRevision: 7,
+      neighbors: [],
+    });
+    await collectLightingResultsUntil(client, (result) => result.type === "chunk_light_ready");
+
+    await client.enqueueBlockChanges({
+      type: "block_light_update_batch",
+      batchId: 1,
+      chunkViewRevision: 1,
+      changes: [{
+        x: 0,
+        y: 1,
+        z: 0,
+        oldBlockStateId: ChunkBlockId.AIR,
+        newBlockStateId: ChunkBlockId.LAVA,
+      }],
+      chunkRevisions: [{
+        chunkViewRevision: 1,
+        chunkX: 0,
+        chunkZ: 0,
+        chunkRevision: 8,
+      }],
+    });
+
+    const results = await collectLightingResultsUntil(client, (result) => result.type === "block_light_update_complete");
+    expect(results).toContainEqual({
+      type: "block_light_update_complete",
+      batchId: 1,
+      chunkViewRevision: 1,
+      changeCount: 1,
+      chunkRevisions: [{
+        chunkViewRevision: 1,
+        chunkX: 0,
+        chunkZ: 0,
+        chunkRevision: 8,
+      }],
+    });
+    expect(results).toContainEqual(expect.objectContaining({
+      type: "chunk_light_delta",
+      chunkViewRevision: 1,
+      chunkX: 0,
+      chunkZ: 0,
+      chunkRevision: 8,
+    }));
   });
 
   test("rejects commands when the bounded lighting mailbox is full", async () => {

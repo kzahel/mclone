@@ -67,11 +67,11 @@ Landed:
 - `src/runtime/lighting/node-lighting-worker-client.ts` and `src/runtime/lighting/node-lighting-worker-thread.ts` provide the Node worker-thread shell for dedicated/headless hosts.
 - `GeneratedWorldHost` no longer constructs `LevelLightEngine`; vanilla lighting mode requires a worker-backed `LightingService`.
 - Initial chunk publication now packs light inputs, requests `chunk_light_ready`, validates chunk revisions, and publishes snapshots with accepted worker light.
+- Live block/liquid mutations now coalesce into `block_light_update_batch` requests. The worker applies the block-state changes, drains propagation, returns revisioned `chunk_light_delta` section replacements, and finishes with `block_light_update_complete` so the host can update its accepted light cache before publishing dirty snapshots.
 
 Still pending:
 
-- Route live block/liquid updates through `block_light_update_batch` and accepted light deltas.
-- Add sharper dependency tracking for accepted light when neighbor revisions change.
+- Add sharper dependency tracking for accepted light when neighbor revisions change; the current host invalidates a conservative 3x3 chunk window.
 - Add D5 traversal performance gates for host responsiveness, lighting worker budget, render-world ingestion, and GPU uploads.
 
 ## Protocol Shape
@@ -101,6 +101,7 @@ Worker results:
 
 - `chunk_light_ready`: full initial `ChunkLightSnapshot` for a chunk.
 - `chunk_light_delta`: section-level replacements for already published chunks.
+- `block_light_update_complete`: revisioned completion marker for a live block-change batch.
 - `light_progress`: optional progress/backpressure diagnostics.
 - `light_error`: fatal worker error with the triggering revision.
 
@@ -181,10 +182,11 @@ If a chunk is superseded before step 7, the host drops the result and sends no s
 For liquid flow, block edits, and future entity/block interactions:
 
 1. Host mutates authoritative chunks and increments affected chunk revisions.
-2. Host sends a batched block/light input update to the lighting worker.
-3. Lighting worker queues `checkBlock`/emission changes as post-update work.
-4. Lighting worker propagates within budget.
-5. Host publishes the block-state snapshot and matching light deltas in revision order.
+2. Host coalesces pending per-position edits and sends a revisioned `block_light_update_batch` with old/new block-state ids.
+3. Lighting worker applies the edits to its light-only chunk cache, queues `checkBlock`/emission changes, and propagates within budget.
+4. Lighting worker returns `chunk_light_delta` section replacements for affected current chunks, then `block_light_update_complete`.
+5. Host accepts only current-revision deltas, applies them to its accepted light cache, and marks batch chunks as current.
+6. Host publishes dirty block-state snapshots with matching accepted light. Light-only neighbor changes are published as `chunk_light_delta`.
 
 For visual stability, prefer batching visible block snapshots with their corresponding light deltas. If simulation throughput requires block snapshots to arrive first later, that should be a deliberate mode with known visual popping, not the default.
 
@@ -248,7 +250,7 @@ Backpressure rules:
 
 - A light result is accepted only when its chunk revision matches the host's current chunk revision.
 - Initial light for a chunk is accepted only when the required neighbor revisions match the request.
-- A light delta is accepted only for a currently published chunk and current chunk revision.
+- A light delta is accepted only for the current chunk-view and current chunk revision; it is published to clients only when the chunk is currently published and is not already being republished as a full dirty snapshot.
 - Unload always wins over pending light work.
 - Missing neighbor chunks are "not ready", never "transparent air".
 - Persisted chunk data should not trust stale light unless the stored light format is explicitly versioned and all neighbor dependencies are satisfied.
@@ -258,8 +260,8 @@ Backpressure rules:
 1. Done: add `LightingService` protocol types, browser module-worker transport shell, Node worker-thread shell, and service-level mailbox tests.
 2. Done: move `LevelLightEngine` ownership into the lighting worker shell.
 3. Done: change chunk publication to request initial light and publish only after accepted `chunk_light_ready` results.
-4. In progress: track authoritative chunk revisions and reject stale light results; neighbor dependency tracking still needs tightening around accepted light invalidation.
-5. Route liquid/block updates through batched light update requests and publish accepted deltas.
+4. Done: track authoritative chunk revisions and reject stale initial light and live light results.
+5. Done: route liquid/block updates through batched light update requests and publish accepted deltas.
 6. Split load radius from publish radius if needed for halo-only lighting work.
 7. Add D5 traversal performance gates for host-worker responsiveness, lighting worker budget, render-world ingestion, and main-thread GPU uploads.
 

@@ -218,6 +218,12 @@ class LightingWorkerWorld {
       await this.runLightingUntilIdle(yieldStep);
     }
 
+    for (const revision of request.chunkRevisions) {
+      if (this.level.getChunk(revision.chunkX, revision.chunkZ, false) !== null) {
+        this.lightCorrectChunks.add(chunkKey(revision.chunkX, revision.chunkZ));
+      }
+    }
+
     return this.drainDirtyLightDeltas(request.chunkRevisions);
   }
 
@@ -583,7 +589,16 @@ class LightingWorkerMailbox {
     for (const delta of await world.applyBlockChanges(command, yieldMailboxTurn)) {
       this.enqueueResult(delta);
     }
-    this.enqueueResult(lightProgress("block_light_updates_queued", command.changes.length, command.changes.length));
+    for (const revision of command.chunkRevisions) {
+      this.state.chunkRevisions.set(chunkKey(revision.chunkX, revision.chunkZ), revision.chunkRevision);
+    }
+    this.enqueueResult({
+      type: "block_light_update_complete",
+      batchId: command.batchId,
+      chunkViewRevision: command.chunkViewRevision,
+      changeCount: command.changes.length,
+      chunkRevisions: command.chunkRevisions,
+    });
   }
 
   private requireWorld(messageType: string): LightingWorkerWorld {

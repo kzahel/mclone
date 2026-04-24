@@ -17,6 +17,7 @@ import {
   type ChunkSnapshot,
 } from "../../src/world/level/chunk-snapshot";
 import {
+  applyPackedChunkLightDelta,
   bitsForLocalPalette,
   clonePackedChunkSnapshot,
   collectPackedChunkSnapshotTransferables,
@@ -283,5 +284,26 @@ describe("packed chunk snapshot codecs", () => {
     for (const section of [...snapshot.light!.sky, ...snapshot.light!.block]) {
       expect(transferables).toContain(section.data.buffer);
     }
+  });
+
+  test("applies packed light deltas without mutating the accepted base", () => {
+    const baseBlock = new Uint8Array(2048);
+    baseBlock[0] = 1;
+    const updateBlock = new Uint8Array(2048);
+    updateBlock[0] = 15;
+    const light: PackedChunkLight = {
+      sky: [{ y: 0, data: new Uint8Array([2, ...new Uint8Array(2047)]) }],
+      block: [{ y: 0, data: baseBlock }],
+      lightCorrect: true,
+    };
+
+    const next = applyPackedChunkLightDelta(light, {
+      block: [{ y: 0, data: updateBlock }, { y: 1 }],
+    });
+
+    expect(light.block[0]!.data[0]).toBe(1);
+    expect(next.block.find((section) => section.y === 0)!.data[0]).toBe(15);
+    expect(next.block.find((section) => section.y === 1)!.data.every((value) => value === 0)).toBe(true);
+    expect(next.sky[0]!.data[0]).toBe(2);
   });
 });
