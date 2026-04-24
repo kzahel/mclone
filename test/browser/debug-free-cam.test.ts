@@ -1,6 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./remote-world-host-fixture";
 
-const REMOTE_WORLD_HOST_URL = "http://127.0.0.1:4173";
 const DEBUG_SCREENSHOT_PATH = "/tmp/mclone-debug-free-cam.png";
 const DEBUG_TALL_SCREENSHOT_PATH = "/tmp/mclone-debug-free-cam-tall.png";
 const EXPECTED_LOADED_CHUNK_COUNT = 225;
@@ -39,10 +38,10 @@ interface CanvasMetrics {
   readonly devicePixelRatio: number;
 }
 
-function createDebugUrl(): string {
+function createDebugUrl(remoteWorldHostUrl: string): string {
   return `/debug.html?${new URLSearchParams({
     worldTransport: "remote",
-    worldHostUrl: REMOTE_WORLD_HOST_URL,
+    worldHostUrl: remoteWorldHostUrl,
     preserveInitialCamera: "1",
     cameraX: "965.5",
     cameraY: "168",
@@ -85,8 +84,8 @@ async function waitForDebugReady(page: Page): Promise<void> {
   );
 }
 
-test("debug free-cam follows authoritative player_state and moves chunk interest with remote input", async ({ page }) => {
-  await page.goto(createDebugUrl(), { waitUntil: "load" });
+test("debug free-cam follows authoritative player_state and moves chunk interest with remote input", async ({ page, remoteWorldHostUrl }) => {
+  await page.goto(createDebugUrl(remoteWorldHostUrl), { waitUntil: "load" });
   await waitForDebugReady(page);
   await page.waitForFunction(
     (expectedLoadedChunkCount) => {
@@ -157,9 +156,9 @@ test("debug free-cam follows authoritative player_state and moves chunk interest
   expect(movedState.renderWorldCounters!.mainThreadGpuUploadCount).toBeGreaterThanOrEqual(initialState.renderWorldCounters!.mainThreadGpuUploadCount);
 });
 
-test("debug free-cam keeps the backing buffer aligned with a tall viewport after resize", async ({ page }) => {
+test("debug free-cam keeps the backing buffer aligned with a tall viewport after resize", async ({ page, remoteWorldHostUrl }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.goto(createDebugUrl(), { waitUntil: "load" });
+  await page.goto(createDebugUrl(remoteWorldHostUrl), { waitUntil: "load" });
   await waitForDebugReady(page);
   await page.waitForFunction(() => (window.__mcloneDebug?.state.frameCount ?? 0) >= 10, undefined, { timeout: 20_000 });
 

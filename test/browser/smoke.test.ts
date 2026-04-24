@@ -1,14 +1,13 @@
-import { test, expect, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./remote-world-host-fixture";
 import { type BootResult } from "../../src/renderer/main.ts";
 
 const SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-smoke.png";
-const REMOTE_WORLD_HOST_URL = "http://127.0.0.1:4173";
 const EXPECTED_LOADED_CHUNK_COUNT = 225;
 
-function createRemoteSmokeUrl(): string {
+function createRemoteSmokeUrl(remoteWorldHostUrl: string): string {
   return `/?${new URLSearchParams({
     worldTransport: "remote",
-    worldHostUrl: REMOTE_WORLD_HOST_URL,
+    worldHostUrl: remoteWorldHostUrl,
     viewDistance: "6",
     renderDistance: "192",
     fogColor: "8fb8ff",
@@ -20,15 +19,15 @@ function createRemoteSmokeUrl(): string {
   }).toString()}`;
 }
 
-async function bootPage(page: Page): Promise<BootResult> {
-  await page.goto(createRemoteSmokeUrl(), { waitUntil: "networkidle" });
+async function bootPage(page: Page, remoteWorldHostUrl: string): Promise<BootResult> {
+  await page.goto(createRemoteSmokeUrl(remoteWorldHostUrl), { waitUntil: "networkidle" });
   await page.waitForFunction(() => typeof window.__mcloneReady !== "undefined");
   return (await page.evaluate(() => window.__mcloneReady)) as BootResult;
 }
 
 test.setTimeout(90_000);
 
-test("WebGPU boot succeeds against the remote Node host with two browser clients", async ({ browser }) => {
+test("WebGPU boot succeeds against the remote Node host with two browser clients", async ({ browser, remoteWorldHostUrl }) => {
   const context = await browser.newContext();
   const firstPage = await context.newPage();
   const secondPage = await context.newPage();
@@ -37,8 +36,8 @@ test("WebGPU boot succeeds against the remote Node host with two browser clients
   secondPage.on("pageerror", (err) => pageErrors.push(`second: ${String(err)}`));
 
   const [firstResult, secondResult] = await Promise.all([
-    bootPage(firstPage),
-    bootPage(secondPage),
+    bootPage(firstPage, remoteWorldHostUrl),
+    bootPage(secondPage, remoteWorldHostUrl),
   ]);
   await firstPage.locator("#renderer").screenshot({ path: SMOKE_SCREENSHOT_PATH });
 

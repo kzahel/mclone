@@ -21,12 +21,5 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
     },
-    {
-      command: "pnpm host:remote -- --host 127.0.0.1 --port 4173 --save-root /tmp/mclone-remote-browser-smoke",
-      port: 4173,
-      reuseExistingServer: !process.env.CI,
-      stdout: "pipe",
-      stderr: "pipe",
-    },
   ],
 });

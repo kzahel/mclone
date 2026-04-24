@@ -69,8 +69,8 @@ export interface RendererScene {
   readonly saveMetadata: WorldSaveMetadata;
   readonly atlas: TextureAtlas;
   readonly worldClient: WorldClient;
-  readonly level: ClientChunkCache;
   readonly renderWorldUpdateSink: RenderWorldWorkerUpdateSink;
+  readonly worldBounds: RenderWorldBounds;
   readonly levelRenderer: LevelRenderer;
   readonly gameRenderer: GameRenderer;
   readonly lightTexture: LightTexture;
@@ -81,6 +81,11 @@ export interface RendererScene {
   readonly viewArea: ViewArea;
   readonly chunkDispatcher: ChunkRenderDispatcher;
   readonly chunkDrawResources: WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>;
+}
+
+export interface RenderWorldBounds {
+  readonly minBuildHeight: number;
+  readonly maxBuildHeight: number;
 }
 
 export interface RenderWorldPerformanceCounters {
@@ -203,7 +208,7 @@ export function getSceneRenderWorldPerformanceCounters(scene: RendererScene): Re
 export function applyRenderWorldDirtySections(scene: RendererScene): number {
   let dirtyCount = 0;
   for (const dirtySection of scene.renderWorldUpdateSink.drainDirtySections()) {
-    if (dirtySection.y < scene.level.getMinBuildHeight() || dirtySection.y >= scene.level.getMaxBuildHeight()) {
+    if (dirtySection.y < scene.worldBounds.minBuildHeight || dirtySection.y >= scene.worldBounds.maxBuildHeight) {
       continue;
     }
 
@@ -317,7 +322,7 @@ export async function initializeRendererScene(
     seed: options.seed,
     preset: options.preset ?? "browser_smoke",
   });
-  const level = worldClient.getLevel();
+  const compatibilityLevel = worldClient.getLevel();
 
   const renderWorldWorker = new RenderWorldWorkerClient(createRenderWorldWorker());
   await renderWorldWorker.initialize({
@@ -338,7 +343,7 @@ export async function initializeRendererScene(
     generatedBlocks.blockStateById[ChunkBlockId.LAVA]!,
   );
   const chunkDispatcher = new ChunkRenderDispatcher(
-    level,
+    compatibilityLevel,
     levelRenderer,
     blockRenderer,
     device,
@@ -348,8 +353,8 @@ export async function initializeRendererScene(
     undefined,
     renderWorldWorker,
   );
-  const viewArea = new ViewArea(chunkDispatcher, level, options.viewDistance, levelRenderer);
-  levelRenderer.setLevel(level, chunkDispatcher, viewArea, options.viewDistance);
+  const viewArea = new ViewArea(chunkDispatcher, compatibilityLevel, options.viewDistance, levelRenderer);
+  levelRenderer.setLevel(compatibilityLevel, chunkDispatcher, viewArea, options.viewDistance);
 
   const gameRenderer = new GameRenderer(
     canvas.width,
@@ -357,7 +362,7 @@ export async function initializeRendererScene(
     options.renderDistance ?? Math.max(32, (options.viewDistance + 2) * 16),
     options.fov,
   );
-  const lightTexture = new LightTexture(gameRenderer, level, device);
+  const lightTexture = new LightTexture(gameRenderer, compatibilityLevel, device);
   lightTexture.tick();
 
   const pipelineCache = new RenderPipelineCache(device);
@@ -379,8 +384,11 @@ export async function initializeRendererScene(
       saveMetadata: worldOpened.saveMetadata,
       atlas,
       worldClient,
-      level,
       renderWorldUpdateSink,
+      worldBounds: {
+        minBuildHeight: compatibilityLevel.getMinBuildHeight(),
+        maxBuildHeight: compatibilityLevel.getMaxBuildHeight(),
+      },
       levelRenderer,
       gameRenderer,
       lightTexture,

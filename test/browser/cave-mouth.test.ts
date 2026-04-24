@@ -1,6 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./remote-world-host-fixture";
 
-const REMOTE_WORLD_HOST_URL = "http://127.0.0.1:4173";
 const CAVE_MOUTH_SCREENSHOT_PATH = "/tmp/mclone-debug-cave-mouth.png";
 
 interface DebugRuntimeState {
@@ -14,10 +13,10 @@ interface DebugRuntimeState {
   readonly error?: string;
 }
 
-function createCaveMouthUrl(): string {
+function createCaveMouthUrl(remoteWorldHostUrl: string): string {
   return `/debug.html?${new URLSearchParams({
     worldTransport: "remote",
-    worldHostUrl: REMOTE_WORLD_HOST_URL,
+    worldHostUrl: remoteWorldHostUrl,
     cameraX: "-103.5",
     cameraY: "104",
     cameraZ: "-311.5",
@@ -30,8 +29,8 @@ async function readDebugState(page: Page): Promise<DebugRuntimeState> {
   return await page.evaluate(() => window.__mcloneDebug!.state as DebugRuntimeState);
 }
 
-test("debug free-cam captures a targeted cave-mouth or ravine frame against the remote host", async ({ page }) => {
-  await page.goto(createCaveMouthUrl(), { waitUntil: "load" });
+test("debug free-cam captures a targeted cave-mouth or ravine frame against the remote host", async ({ page, remoteWorldHostUrl }) => {
+  await page.goto(createCaveMouthUrl(remoteWorldHostUrl), { waitUntil: "load" });
   await page.waitForFunction(() => typeof window.__mcloneDebug !== "undefined", undefined, { timeout: 20_000 });
   await page.waitForFunction(
     () => window.__mcloneDebug!.state.ready === true || window.__mcloneDebug!.state.error !== undefined,

@@ -810,6 +810,7 @@ export class GeneratedWorldHttpServer {
 
         resolve();
       });
+      this.server.closeAllConnections();
     });
   }
 

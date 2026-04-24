@@ -75,7 +75,7 @@ This makes future parity work easier or neutral. The render-world worker can sti
 | `src/renderer/chunk/render-world-worker-client.ts` | D4 request-envelope client/session wrapper with request ids, worker errors, transferable buffer handling, and `RenderWorldWorkerUpdateSink` adapter |
 | `src/renderer/chunk/render-world-worker.ts` | D4 worker handler with worker-owned `ClientChunkCache`, packed update ingest, vanilla-shaped dirty section metadata, mesh-neighbor readiness checks, and CPU mesh build responses |
 | `src/renderer/chunk/chunk-render-dispatcher.ts` | main-thread render chunk scheduling, render-world mesh requests by section origin/camera, fallback compilation, GPU buffer upload |
-| `src/renderer/scene-setup.ts` | wires one render-world worker as packed-chunk update sink and section mesh builder; compatibility main-thread level remains for metadata/light/render interfaces but receives no chunk snapshots |
+| `src/renderer/scene-setup.ts` | wires one render-world worker as packed-chunk update sink and section mesh builder; the compatibility main-thread level is quarantined inside renderer/light setup and `RendererScene` exposes only small world bounds, stats, dirty-section drains, and GPU/render state |
 | `src/renderer/debug/debug-free-cam.ts` | drives world polling/chunk view and reads loaded chunk counts from render-world worker stats |
 
 ## Scope
@@ -207,12 +207,11 @@ Landed so far:
 - `RenderWorldWorkerClient`, `RenderWorldWorkerUpdateSink`, `ChunkRenderDispatcher`, `src/renderer/main.ts`, and `src/renderer/debug/debug-free-cam.ts` expose D4 performance-smoke counters for ingest batches, mesh build requests, not-ready responses, mesh completions, and main-thread GPU uploads
 - `test/browser/debug-free-cam.test.ts` now uses scripted remote input across chunk interest and asserts render-world ingest counters increase after movement
 - `test/browser/smoke.test.ts` asserts render-world ingest/build/upload counters are nonzero during browser boot
-- Browser validation for this slice passed with terrain visible in `/tmp/mclone-browser-smoke.png`, `/tmp/mclone-debug-free-cam.png`, and `/tmp/mclone-debug-free-cam-tall.png`
-
-Still pending:
-
-- `RendererScene.level` is still typed/exposed as a main-thread `ClientChunkCache` metadata shell for renderer interfaces, although live chunk snapshots no longer flow into it
-- full browser-suite stability still needs a clean run after the render-world path; targeted smoke and debug-free-cam browser tests passed, while a full run reached 20/23 passed before the shared remote host hit its heap limit and caused later timeouts/fetch failures. A combined smoke+debug run also reproduced the shared-host heap limit after debug passed, while isolated smoke passed with a fresh host.
+- `RendererScene` no longer exposes the compatibility `ClientChunkCache`; dirty-section clipping uses small `worldBounds` metadata
+- browser remote-host validation is isolated per test by `test/browser/remote-world-host-fixture.ts`; `playwright.config.ts` starts only Vite, and remote specs create a fresh `GeneratedWorldHttpServer` on a random localhost port
+- `GeneratedWorldHttpServer.stop()` closes active HTTP connections during shutdown, and the browser remote-host fixture retries temp save-root cleanup to avoid filesystem races with aborted browser requests
+- browser validation for this slice passed with terrain visible in `/tmp/mclone-browser-smoke.png`, `/tmp/mclone-debug-free-cam.png`, `/tmp/mclone-debug-free-cam-tall.png`, and `/tmp/mclone-debug-cave-mouth.png`
+- full `pnpm test:browser` passes 23/23 specs with the isolated remote-host fixture
 
 ## Implementation sequence
 
@@ -242,7 +241,7 @@ Still pending:
 
 7. Update scene/debug state.
 
-   Done for live stats. Debug overlays and browser smoke waits use render-world loaded-count/stats/counters, and dirty-section coordinates are drained into `ViewArea`. `RendererScene.level` still exists as a metadata/light/render compatibility shell; it should not be treated as the live chunk owner.
+   Done. Debug overlays and browser smoke waits use render-world loaded-count/stats/counters, dirty-section coordinates are drained into `ViewArea`, and `RendererScene` exposes `worldBounds` instead of a compatibility cache.
 
 8. Preserve non-browser/test adapters where useful.
 
@@ -251,6 +250,10 @@ Still pending:
 9. Add D4 performance-smoke counters.
 
    Done. `RenderWorldWorkerClient` counts ingest batches, mesh build requests, not-ready responses, and mesh completions. `ChunkRenderDispatcher` counts main-thread GPU uploads. Browser smoke exposes and asserts nonzero boot counters, and debug free-cam asserts ingest batches increase after scripted chunk-interest movement.
+
+10. Stabilize browser validation.
+
+   Done. Remote browser specs use a per-test host fixture instead of a shared `4173` host, server shutdown closes active HTTP connections, temp save roots retry cleanup, and the full browser suite passes.
 
 ## Dirty-section policy
 
@@ -324,6 +327,12 @@ Current coverage:
 - `test/browser/smoke.test.ts` asserts ingest batches, mesh build requests, mesh completions, and main-thread GPU uploads are nonzero
 - the exposed counter surface is `RenderWorldPerformanceCounters` from `src/renderer/scene-setup.ts`
 
+Current browser validation:
+
+- targeted remote browser specs pass: smoke, debug free-cam movement, debug free-cam tall resize, and cave-mouth
+- full `pnpm test:browser` passes 23/23 specs
+- inspected screenshots under `/tmp`: `/tmp/mclone-browser-smoke.png`, `/tmp/mclone-debug-free-cam.png`, `/tmp/mclone-debug-free-cam-tall.png`, and `/tmp/mclone-debug-cave-mouth.png`
+
 ### Static checks
 
 - `pnpm typecheck`
@@ -346,6 +355,6 @@ Current coverage:
 
 ## Next
 
-Immediate next D4 closeout slice: narrow or explicitly quarantine the remaining `RendererScene.level` compatibility shell, then make the browser validation gate deterministic by addressing the shared remote-host heap growth or by isolating the remote host per browser spec.
+D4 is complete. The next tactical is `D5`: transport measurement and push/SAB decision. Start by writing the detailed `D5` plan with a repeatable browser traversal, trace capture, frame-pacing metrics, and timing marks for host load/generation, snapshot encode, transport receive/decode, render-world ingest, mesh build, GPU upload, and request-to-visible latency.
 
-`D5`: transport measurement and push/SAB decision. After `D4`, measure the actual browser traversal path with render-world ownership in place and decide from trace data whether HTTP polling, worker transfer/copy, mesh fan-out, or GPU upload is the next bottleneck.
+After that plan is accepted, measure the actual browser traversal path with render-world ownership in place and decide from trace data whether HTTP polling, worker transfer/copy, mesh fan-out, or GPU upload is the next bottleneck.
