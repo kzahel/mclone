@@ -15,7 +15,7 @@ import {
 } from "./scheduled-tick";
 
 const AIR_BLOCK_NAME = "minecraft:air";
-const CHUNK_SNAPSHOT_BLOCK_ORDER = "y-major,z-major,x-minor";
+export const CHUNK_SNAPSHOT_BLOCK_ORDER = "y-major,z-major,x-minor";
 
 export interface BlockStateSnapshot {
   readonly name: string;
@@ -40,7 +40,7 @@ export interface ChunkSnapshot {
 
 export type BlockStateResolver = (snapshot: BlockStateSnapshot) => BlockState;
 
-function blockStateSnapshotKey(snapshot: BlockStateSnapshot): string {
+export function blockStateSnapshotKey(snapshot: BlockStateSnapshot): string {
   const properties = Object.entries(snapshot.properties ?? {}).sort(([left], [right]) => left.localeCompare(right));
   if (properties.length === 0) {
     return snapshot.name;
@@ -49,7 +49,7 @@ function blockStateSnapshotKey(snapshot: BlockStateSnapshot): string {
   return `${snapshot.name}[${properties.map(([key, value]) => `${key}=${value}`).join(",")}]`;
 }
 
-function serializeBlockState(state: BlockState): BlockStateSnapshot {
+export function serializeBlockStateSnapshot(state: BlockState): BlockStateSnapshot {
   if (state.isAir()) {
     return { name: AIR_BLOCK_NAME };
   }
@@ -143,7 +143,7 @@ export function buildChunkSnapshot(
           const state = chunk.getBlockState(pos);
           hasNonAir = hasNonAir || !state.isAir();
 
-          const snapshot = serializeBlockState(state);
+          const snapshot = serializeBlockStateSnapshot(state);
           const key = blockStateSnapshotKey(snapshot);
           let paletteIndex = paletteIndexByKey.get(key);
           if (paletteIndex === undefined) {
