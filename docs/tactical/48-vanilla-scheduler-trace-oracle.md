@@ -2,7 +2,7 @@
 
 Build a source-backed, executable trace of vanilla Minecraft Java 1.17.1 chunk-status scheduling so decorated-chunk parity work can use the real cross-chunk `FEATURES` commit order instead of an inferred order.
 
-Status: next. This tactical blocks [`46-full-decorated-spawn-chunk-parity.md`](46-full-decorated-spawn-chunk-parity.md). Tactical [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) made status gates explicit in `mclone`; this tactical verifies the vanilla scheduler order that drives neighboring `FEATURES` side effects.
+Status: first bounded oracle implemented. Tactical [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) made status gates explicit in `mclone`; this tactical now has an executable vanilla spawn-bootstrap trace for the 3x3 `FEATURES` commit order around chunk `(0,0)`.
 
 ## Source files (read before writing)
 
@@ -25,6 +25,26 @@ Tactical 47 now gives `mclone` explicit `FEATURES`, `LIGHT`, `FULL`, 3x3 feature
 Ordinary biome decoration is not commutative. A `FEATURES` pass centered at chunk `A` can write into the 3x3 neighborhood around `A`. Therefore a target chunk can be mutated by its own `FEATURES` pass and by the 8 neighboring `FEATURES` passes. If two neighboring passes write overlapping blocks, the later committed write wins.
 
 The existing Java `feature-order-trace` oracle records one center chunk's internal biome/feature seed order. It does not answer which center chunk's `FEATURES` pass commits first under vanilla loading.
+
+## First trace result
+
+The first bounded oracle path is `pnpm --silent oracle:gen scheduler-trace --seed 12345 --chunk-x 0 --chunk-z 0`. It runs a temporary deobfuscated 1.17.1 dedicated server and instruments `ChunkStatus.generate(...)` through an oracle-only shadow class.
+
+Committed fixture:
+
+- [`../../test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json`](../../test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json)
+
+Observed `FEATURES` completion/commit order for the target 3x3 in that fixture:
+
+```text
+(-1,-1) -> (0,-1) -> (1,-1)
+(-1, 0) -> (0, 0) -> (1, 0)
+(-1, 1) -> (0, 1) -> (1, 1)
+```
+
+The current `GeneratedWorldHost` job ordering uses `sortChunkCoordinates(...)`, which is z-major then x-major. For this bounded fixture, that host order matches the observed vanilla `FEATURES` commit order. No runtime feature-generation changes are made in this tactical.
+
+The default trace stops at the `FEATURES` gate because that is the order needed before tactical 46 resumes. The oracle child JVM pins `ActiveProcessorCount=2` and HotSpot `hashCode=3` so vanilla's background executor and identity-hashed scheduling collections are reproducible. Use `--stop-status full` for an extended trace that includes later `LIGHT`/`SPAWN`/`HEIGHTMAPS`/`FULL` completions; those phases are asynchronous and should not be used as the stable `FEATURES` commit-order fixture.
 
 ## Questions to answer
 

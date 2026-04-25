@@ -4,7 +4,7 @@ Reach exact full-block parity for one concrete, server-backed baseline: seed `12
 
 This is intentionally not a claim of full overworld parity. It is a bounded end-to-end confidence milestone: prove that the current translated pipeline can produce one simple decorated overworld chunk exactly, then use the same harness to expand coverage later.
 
-Status: blocked by [`48-vanilla-scheduler-trace-oracle.md`](48-vanilla-scheduler-trace-oracle.md). [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) has replaced the decorated/published shortcut with explicit `ChunkStatus`-shaped `FEATURES`, `LIGHT`, and publication gates, but the remaining tree/log/leaf mismatches may depend on the vanilla cross-chunk `FEATURES` commit order. Resume this burn-down only after tactical 48 records the scheduler trace or proves the current host order is equivalent.
+Status: ready to resume after the first bounded [`48-vanilla-scheduler-trace-oracle.md`](48-vanilla-scheduler-trace-oracle.md) result. [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) replaced the decorated/published shortcut with explicit `ChunkStatus`-shaped `FEATURES`, `LIGHT`, and publication gates; tactical 48 now records the seed `12345`, chunk `(0,0)` spawn-bootstrap `FEATURES` order and shows it matches the current host's z-major/x-major chunk order for the target 3x3.
 
 ## Source files (read before writing)
 
@@ -87,7 +87,17 @@ The runtime model for this tactical now follows that shape explicitly:
 
 This removes the old “neighbor read accidentally generates/decorates more chunks” behavior and gives us a stable base for the remaining mismatch burn-down.
 
-One prerequisite remains: the runtime must know the deterministic order in which neighboring `FEATURES` center passes commit their side effects. A target chunk can receive writes from the 9 center chunks in its 3x3 neighborhood, and overlapping writes are order-dependent. Tactical [`48`](48-vanilla-scheduler-trace-oracle.md) owns the vanilla scheduler trace needed to confirm or correct that commit order before this tactical edits feature logic further.
+The first scheduler trace prerequisite is now available:
+[`../../test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json`](../../test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json).
+For the target 3x3, the observed `FEATURES` completion order is z-major/x-major:
+
+```text
+(-1,-1) -> (0,-1) -> (1,-1)
+(-1, 0) -> (0, 0) -> (1, 0)
+(-1, 1) -> (0, 1) -> (1, 1)
+```
+
+Use that committed trace together with `feature-order-trace` before editing tree placement. If later decorated diffs still suggest cross-chunk write ordering, regenerate a same-run scheduler trace rather than inferring a new order.
 
 ## Scope
 

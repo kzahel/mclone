@@ -163,6 +163,30 @@ This diagnostic emits the vanilla `ChunkGenerator.applyBiomeDecoration(...)` ord
 
 Pass `--generate-structures true` to include the structure seed slots that vanilla consumes before configured features in the same decoration step when `StructureFeatureManager.shouldGenerateFeatures()` is true. This is a trace of feature seed/order coordination, not a block snapshot; use it when a decorated-chunk diff looks like the right features are present but placed from the wrong random stream.
 
+## Scheduler trace oracle
+
+`pnpm --silent oracle:gen scheduler-trace --seed 12345 --chunk-x 0 --chunk-z 0`
+
+This diagnostic starts a temporary deobfuscated 1.17.1 dedicated server with seed `12345`, instruments the vanilla `ChunkStatus.generate(...)` entry point through a narrow oracle-only shadow class, and stops when the target 3x3 neighborhood around `(0,0)` completes `FEATURES`.
+
+The committed fixture is:
+
+- `test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json`
+
+The fixture records dependency-ready, task-start, and task-complete events for the target 3x3. The observed `FEATURES` completion/commit order in that fixture is:
+
+```text
+(-1,-1) -> (0,-1) -> (1,-1) -> (-1,0) -> (0,0) -> (1,0) -> (-1,1) -> (0,1) -> (1,1)
+```
+
+Options:
+
+- `--stop-status full` continues the run until the target 3x3 reaches `FULL`.
+- `--record-radius 12` records the wider dependency-window event stream instead of only the target 3x3.
+- `--timeout-seconds <n>` changes the server-process timeout.
+
+The child JVM is pinned with `-XX:ActiveProcessorCount=2` so vanilla's background executor has one worker, and `-XX:hashCode=3` so identity-hashed scheduler collections iterate reproducibly. In sandboxed environments the temporary server may need elevated permission to bind its localhost listener.
+
 ## Wrappers
 
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`

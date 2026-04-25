@@ -127,6 +127,18 @@ For `mclone`, adjacent `FEATURES` tasks must not commit directly into shared chu
 
 Trace coverage note: the rule above is source-backed, but the project still needs an executable vanilla scheduler trace for concrete player/spawn load scenarios. Tactical [`48`](tactical/48-vanilla-scheduler-trace-oracle.md) owns that oracle before tactical [`46`](tactical/46-full-decorated-spawn-chunk-parity.md) resumes exact decorated block burn-down.
 
+Tactical [`48`](tactical/48-vanilla-scheduler-trace-oracle.md) now includes the first bounded spawn-bootstrap trace fixture:
+[`vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json`](../test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json).
+For seed `12345`, chunk `(0,0)`, the committed trace observes this 3x3 `FEATURES` completion order:
+
+```text
+(-1,-1) -> (0,-1) -> (1,-1)
+(-1, 0) -> (0, 0) -> (1, 0)
+(-1, 1) -> (0, 1) -> (1, 1)
+```
+
+That order matches the current generated-host `sortChunkCoordinates(...)` order for the target 3x3. The oracle pins the child JVM's worker count and identity-hash mode to make the vanilla scheduler's otherwise JVM-sensitive collection iteration reproducible. Treat this as the initial measured spawn-bootstrap fixture, not a replacement for future player-ticket or same-run full decorated diagnostics.
+
 ## Lighting Gate
 
 `LIGHT` has parent `FEATURES` and dependency range `1` ([`ChunkStatus.java:135`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:137`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:138`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)). Through `getDependencyStatus(...)` and `STATUS_BY_RANGE[1]`, lighting a target chunk waits for the target chunk plus its 8 neighbors to have completed `FEATURES` ([`ChunkMap.java:555`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:557`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkStatus.java:164`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)).

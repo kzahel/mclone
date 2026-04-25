@@ -1,10 +1,14 @@
 import com.google.gson.Gson;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.lang.reflect.Field;
@@ -204,6 +208,14 @@ public final class OracleDumper {
                parseBooleanOption(options, "generate-structures", false)
             );
             break;
+         case "scheduler-trace":
+            json = dumpSchedulerTrace(
+               seed,
+               parseInteger(requireOption(options, "chunk-x"), "chunk-x"),
+               parseInteger(requireOption(options, "chunk-z"), "chunk-z"),
+               options
+            );
+            break;
          default:
             throw new IllegalArgumentException("unsupported module '" + module + "'");
       }
@@ -291,6 +303,11 @@ public final class OracleDumper {
       }
 
       throw new IllegalArgumentException("invalid " + name + " '" + value + "'");
+   }
+
+   private static int parseIntegerOption(Map<String, String> options, String name, int defaultValue) {
+      String value = options.get(name);
+      return value == null ? defaultValue : parseInteger(value, name);
    }
 
    private static String dumpPrng(long seed, int count) {
@@ -771,6 +788,123 @@ public final class OracleDumper {
       json.put("decorationSeed", Long.toString(decorationSeed));
       json.put("entries", entries);
       return GSON.toJson(json);
+   }
+
+   private static String dumpSchedulerTrace(long seed, int chunkX, int chunkZ, Map<String, String> options) throws Exception {
+      int targetRadius = parseIntegerOption(options, "target-radius", 1);
+      int recordRadius = parseIntegerOption(options, "record-radius", targetRadius);
+      int timeoutSeconds = parseIntegerOption(options, "timeout-seconds", 180);
+      if (targetRadius < 0) {
+         throw new IllegalArgumentException("target-radius must be non-negative");
+      }
+      if (recordRadius < targetRadius) {
+         throw new IllegalArgumentException("record-radius must be >= target-radius");
+      }
+      if (timeoutSeconds <= 0) {
+         throw new IllegalArgumentException("timeout-seconds must be positive");
+      }
+
+      String scenario = options.getOrDefault("scenario", "spawn_bootstrap");
+      String stopStatus = options.getOrDefault("stop-status", "features");
+      Path tempDir = Files.createTempDirectory("mclone-scheduler-trace-");
+      Path output = tempDir.resolve("scheduler-trace.json");
+      Files.writeString(tempDir.resolve("eula.txt"), "eula=true\n", StandardCharsets.UTF_8);
+      Files.writeString(tempDir.resolve("server.properties"), schedulerTraceServerProperties(seed), StandardCharsets.UTF_8);
+
+      List<String> command = new ArrayList<>();
+      command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+      command.add("-XX:+UnlockExperimentalVMOptions");
+      command.add("-XX:hashCode=3");
+      command.add("-XX:ActiveProcessorCount=2");
+      command.add("-Xms256m");
+      command.add("-Xmx2g");
+      command.add("-Djava.awt.headless=true");
+      command.add("-Dmclone.schedulerTrace.enabled=true");
+      command.add("-Dmclone.schedulerTrace.haltOnComplete=true");
+      command.add("-Dmclone.schedulerTrace.seed=" + seed);
+      command.add("-Dmclone.schedulerTrace.chunkX=" + chunkX);
+      command.add("-Dmclone.schedulerTrace.chunkZ=" + chunkZ);
+      command.add("-Dmclone.schedulerTrace.radius=" + targetRadius);
+      command.add("-Dmclone.schedulerTrace.recordRadius=" + recordRadius);
+      command.add("-Dmclone.schedulerTrace.scenario=" + scenario);
+      command.add("-Dmclone.schedulerTrace.stopStatus=" + stopStatus);
+      command.add("-Dmclone.schedulerTrace.identityHashCodeMode=3");
+      command.add("-Dmclone.schedulerTrace.output=" + output);
+      command.add("-cp");
+      command.add(System.getProperty("java.class.path"));
+      command.add("net.minecraft.server.Main");
+      command.add("--nogui");
+      command.add("--universe");
+      command.add(tempDir.toString());
+      command.add("--world");
+      command.add("world");
+      command.add("--port");
+      command.add("0");
+
+      Process process = new ProcessBuilder(command).directory(tempDir.toFile()).redirectErrorStream(true).start();
+      StringBuilder log = new StringBuilder();
+      Thread logThread = new Thread(() -> {
+         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+               appendBoundedLog(log, line);
+            }
+         } catch (IOException ignored) {
+         }
+      }, "scheduler-trace-server-log");
+      logThread.setDaemon(true);
+      logThread.start();
+
+      boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+      if (!finished) {
+         process.destroyForcibly();
+         throw new IllegalStateException("scheduler trace server timed out after " + timeoutSeconds + "s\n" + log);
+      }
+
+      logThread.join(TimeUnit.SECONDS.toMillis(5));
+      int exitCode = process.exitValue();
+      if (!Files.exists(output)) {
+         throw new IllegalStateException("scheduler trace server exited " + exitCode + " before writing " + output + "\n" + log);
+      }
+      if (exitCode != 0) {
+         throw new IllegalStateException("scheduler trace server exited " + exitCode + "\n" + log);
+      }
+
+      return Files.readString(output, StandardCharsets.UTF_8);
+   }
+
+   private static String schedulerTraceServerProperties(long seed) {
+      return "allow-flight=true\n"
+         + "difficulty=peaceful\n"
+         + "enable-command-block=false\n"
+         + "enable-query=false\n"
+         + "enable-rcon=false\n"
+         + "force-gamemode=false\n"
+         + "gamemode=survival\n"
+         + "generate-structures=true\n"
+         + "level-name=world\n"
+         + "level-seed=" + seed + "\n"
+         + "max-players=1\n"
+         + "max-tick-time=-1\n"
+         + "motd=mclone scheduler trace oracle\n"
+         + "online-mode=false\n"
+         + "pvp=false\n"
+         + "server-ip=127.0.0.1\n"
+         + "server-port=0\n"
+         + "spawn-protection=0\n"
+         + "sync-chunk-writes=false\n"
+         + "view-distance=3\n"
+         + "white-list=false\n";
+   }
+
+   private static void appendBoundedLog(StringBuilder log, String line) {
+      synchronized (log) {
+         log.append(line).append('\n');
+         int maxLength = 24000;
+         if (log.length() > maxLength) {
+            log.delete(0, log.length() - maxLength);
+         }
+      }
    }
 
    private static String configuredFeatureName(ConfiguredFeature<?, ?> feature) {
@@ -2185,6 +2319,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper liquid-carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper feature-order-trace --seed <long> --chunk-x <int> --chunk-z <int> [--generate-structures <true|false>]");
+      System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full]");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");
