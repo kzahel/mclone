@@ -59,6 +59,28 @@ The target is not a class-for-class Java thread model port. The target is a fait
 - Render-world/mesh workers produce derived render products. Meshes are never collision truth.
 - Transport adapters carry logical records. HTTP polling, worker `postMessage`, WebSocket, or future WebRTC/WebTransport do not define gameplay semantics.
 
+## Clock-Rate Safeguards
+
+`ClientRuntime0` should protect future high-rate FPS movement without implementing it.
+
+Keep these clocks separate in names, interfaces, and docs:
+
+- host world/block/entity tick
+- player command clock
+- player physics step / fixed command quantum
+- snapshot publish cadence
+- transport poll/send/push cadence
+- render frame / presentation interpolation cadence
+
+Safeguards:
+
+- `ClientWorld` stores replica facts and revisions; it does not decide movement step rate.
+- `PredictionService` is the future owner of fixed-quantum replay over bounded `ClientWorld` views.
+- UI/render may sample input every frame, but render frame delta must not become authoritative movement `dt`.
+- Host authority may drain multiple command records inside one lower-rate world/network tick.
+- Protocol records must keep command sequence, command quantum, step count, ack sequence, and revision facts explicit.
+- Avoid generic API names that imply one global tick drives everything. Prefer names that reveal the clock, such as `applyWorldUpdate`, `publishPresentationState`, `advanceCommandReplay`, or `drainMovementCommands`.
+
 ## Scope
 
 Implement or document enough to make the boundary concrete:
@@ -73,6 +95,7 @@ Implement or document enough to make the boundary concrete:
 | 6 | Prediction boundary | define how existing movement command/replay code will eventually attach without owning the whole client world |
 | 7 | Presentation boundary | document or test that UI/render consumes presentation state and mesh handles, not host/client-world mutable internals |
 | 8 | Migration notes | list exact follow-up slices needed to move existing code without breaking browser smoke, remote host smoke, lighting, liquids, or entity publication |
+| 9 | Clock vocabulary | define names and interfaces that keep world ticks, command quanta, snapshot cadence, transport cadence, and render frames separate |
 
 ## Do Not Add
 
@@ -89,6 +112,7 @@ Minimum validation for this tactical:
 
 - architecture docs name the runtime owners consistently
 - tactical README pauses movement work and points to the client runtime arc
+- clock/rate safeguards are recorded in active architecture docs, not only in paused movement notes
 - existing browser singleplayer, remote host, entity, lighting, and liquid docs still have a clear owner after the rename/facade plan
 - type-level interfaces or facade names are small enough that the next slice can implement them without a rewrite
 - `pnpm typecheck` if code changes land

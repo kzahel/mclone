@@ -126,6 +126,19 @@ The durable constraints are:
 
 The movement tactical arc is paused until the client runtime arc establishes `IntegratedServer`, `ClientRuntime`, `ClientWorld`, prediction-service, and presentation ownership. See [`player-movement-netcode.md`](./player-movement-netcode.md) for retained constraints and the Client Runtime / Integrated Server arc in [`tactical/README.md`](./tactical/README.md) for active sequencing.
 
+### 7. Simulation clocks are separate API boundaries
+
+The client runtime architecture must not bake in vanilla's 20 TPS rate or a browser render-frame rate as the single simulation clock. Keep these as separate concepts at API boundaries:
+
+- host world/block/entity tick
+- player command clock
+- player physics step or fixed command quantum
+- host snapshot publication cadence
+- transport send/poll/push cadence
+- render frame and presentation interpolation cadence
+
+`ClientWorld` stores replicated facts and revisions. It should not decide high-rate movement timing. `PredictionService` may later run fixed quanta such as `1/120` or `1/128` over a bounded `ClientWorld` collision/entity view. The host may drain multiple movement commands inside one lower-rate world or network tick. Presentation may smooth or interpolate, but it must not become simulation truth.
+
 ## Layer model
 
 | Layer | Responsibility | Parity expectation |

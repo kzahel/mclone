@@ -133,6 +133,22 @@ Those messages may share source payloads with rendering, lighting, and predictio
 
 When the host cannot provide enough collision facts for prediction, the protocol should make that explicit through missing-collision diagnostics or revision mismatch facts. The client can then fall back to reduced prediction or accept correction instead of silently drifting.
 
+## Rate Separation Rule
+
+The logical protocol must not imply that one transport request, one host world tick, one snapshot, or one render frame equals one movement step.
+
+Future movement command records should keep these facts explicit:
+
+- command sequence
+- `commandQuantumUs`
+- `stepCount`
+- button and edge-button state for the command window
+- movement physics revision
+- collision/world revision facts when dynamic collision can affect prediction
+- authoritative snapshot ack of the last processed command sequence
+
+Polling, worker `postMessage`, WebSocket, WebTransport, and future WebRTC adapters may bundle or schedule records differently, but they must carry the same logical command/snapshot facts. The host may drain multiple fixed-quantum movement commands during one lower-rate world/network tick, and the client may render many frames from predicted/interpolated presentation state without creating additional authoritative movement.
+
 ## Versioning And Errors
 
 Remote envelopes should stay protocol-versioned.
