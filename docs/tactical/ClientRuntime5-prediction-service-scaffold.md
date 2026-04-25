@@ -71,4 +71,4 @@ Vanilla singleplayer and multiplayer both hydrate a client-side `ClientLevel`/`C
 
 ## Next Step
 
-`ClientRuntime6-entity-interpolation-and-ai-bridge.md`: define client entity interpolation buffers and NPC presentation hooks while keeping AI authority on the host.
+[`ClientRuntime6-entity-interpolation-and-ai-bridge.md`](ClientRuntime6-entity-interpolation-and-ai-bridge.md): define client entity interpolation buffers and NPC presentation hooks while keeping AI authority on the host.

@@ -12,14 +12,23 @@ import type { WorldClient } from "../protocol/world-client";
 import { PlayerMovementPredictor } from "../movement";
 import { type ClientWorld, type RenderWorldUpdateSink, WorldClientBackedClientWorld } from "./client-world";
 import {
+  ClientEntityInterpolationService,
+  type ClientEntityPresentationState,
+} from "./entity-interpolation-service";
+import {
   PlayerMovementPredictionService,
   type PredictionService,
 } from "./prediction-service";
+
+export interface ClientPresentationStateOptions {
+  readonly entityInterpolationTimeMs?: number;
+}
 
 export interface ClientPresentationState {
   readonly sessionState?: ClientSessionState;
   readonly localPlayerState?: ClientPlayerState;
   readonly entities: readonly EntitySnapshot[];
+  readonly entityPresentation: readonly ClientEntityPresentationState[];
   readonly performance?: WorldPerformanceSnapshot;
 }
 
@@ -32,7 +41,8 @@ export interface ClientRuntime {
   close(): void;
   getClientWorld(): ClientWorld;
   getPredictionService(): PredictionService;
-  publishPresentationState(): ClientPresentationState;
+  getEntityInterpolationService(): ClientEntityInterpolationService;
+  publishPresentationState(options?: ClientPresentationStateOptions): ClientPresentationState;
 }
 
 interface RenderWorldUpdateSinkTarget {
@@ -45,6 +55,7 @@ interface ClientRuntimeCloseTarget {
 
 export class WorldClientRuntimeFacade implements ClientRuntime {
   private readonly clientWorld: ClientWorld;
+  private readonly entityInterpolationService = new ClientEntityInterpolationService();
   private predictionService: PredictionService | undefined;
 
   public constructor(private readonly client: WorldClient) {
@@ -54,6 +65,7 @@ export class WorldClientRuntimeFacade implements ClientRuntime {
   public async openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage> {
     const opened = await this.client.openWorld(request);
     this.predictionService = undefined;
+    this.entityInterpolationService.clear();
     return opened;
   }
 
@@ -86,6 +98,7 @@ export class WorldClientRuntimeFacade implements ClientRuntime {
       this.client.close();
     }
     this.predictionService = undefined;
+    this.entityInterpolationService.clear();
   }
 
   public getClientWorld(): ClientWorld {
@@ -113,14 +126,26 @@ export class WorldClientRuntimeFacade implements ClientRuntime {
     return predictionService;
   }
 
-  public publishPresentationState(): ClientPresentationState {
+  public getEntityInterpolationService(): ClientEntityInterpolationService {
+    return this.entityInterpolationService;
+  }
+
+  public publishPresentationState(options: ClientPresentationStateOptions = {}): ClientPresentationState {
+    const entityInterpolationTimeMs = options.entityInterpolationTimeMs ?? currentPresentationTimeMs();
+    const entityView = this.clientWorld.getEntityView();
+    this.entityInterpolationService.syncClientWorldEntities(entityView, entityInterpolationTimeMs);
     return {
       sessionState: this.clientWorld.getSessionState(),
       localPlayerState: this.clientWorld.getLocalPlayerState(),
-      entities: this.clientWorld.getEntitySnapshots(),
+      entities: entityView.getEntitySnapshots(),
+      entityPresentation: this.entityInterpolationService.publishPresentationEntities(entityInterpolationTimeMs),
       performance: this.clientWorld.getPerformanceSnapshot(),
     };
   }
+}
+
+function currentPresentationTimeMs(): number {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
 function getClientWorld(client: WorldClient): ClientWorld {

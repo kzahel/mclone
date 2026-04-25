@@ -120,7 +120,7 @@ Entities are authoritative simulation data. Use [`../entities.md`](../entities.m
 | [`Entities0-runtime-entity-foundation.md`](Entities0-runtime-entity-foundation.md) | host-owned entity sections, visibility, tick list, and memory persistence shape | unit | **done** — runtime entity lifecycle has a vanilla-shaped host-owned home |
 | [`Creatures1-generation-passive-spawning.md`](Creatures1-generation-passive-spawning.md) | passive `CREATURE` generation path, spawn settings, placements, sheep color | unit + fixture | **done** — generation-time passive spawning matches the committed fixture through the runtime sink |
 | [`Creatures2-host-entity-publication.md`](Creatures2-host-entity-publication.md) | generated-world host entity runtime, entity snapshots, local/remote client caches | runtime | **done** — generated original mobs now publish as authoritative protocol data |
-| `Creatures3-` | browser presentation of authoritative entity snapshots | browser visual | **deferred** — should resume after the Client Runtime / Integrated Server arc defines `ClientWorld` entity replicas and presentation ownership |
+| [`Creatures3-render-entity-placeholders.md`](Creatures3-render-entity-placeholders.md) | browser presentation of authoritative entity snapshots | browser visual | **next** — consume `ClientPresentationState.entityPresentation` and draw simple visual placeholders |
 
 ## Client Runtime / Integrated Server Arc
 
@@ -145,7 +145,7 @@ Movement, NPC/AI, and network work should all depend on this shared architecture
 | [`ClientRuntime3-integrated-server-flow.md`](ClientRuntime3-integrated-server-flow.md) | browser singleplayer `IntegratedServer` class/facade, local transport/session bootstrap, pause/resume/reset semantics | browser smoke + integration | **done** - browser worker singleplayer now joins through an explicit `IntegratedServer` facade with lifecycle/close hooks |
 | [`ClientRuntime4-remote-client-parity.md`](ClientRuntime4-remote-client-parity.md) | remote HTTP client drives the same `ClientRuntime`/`ClientWorld` path as singleplayer | browser smoke + two-client integration | **done** - remote HTTP clients now publish presentation state and client-world views through the shared runtime path |
 | [`ClientRuntime5-prediction-service-scaffold.md`](ClientRuntime5-prediction-service-scaffold.md) | host command surface plus client prediction-service API over bounded `ClientWorld` views | unit + browser smoke + integration | **done** - prediction service is exposed from `ClientRuntime` and reads movement/collision/entity facts through `ClientWorldPredictionView` |
-| `ClientRuntime6-entity-interpolation-and-ai-bridge.md` | client entity replicas, remote interpolation buffers, NPC/AI presentation hooks, host-owned AI authority boundary | unit + browser smoke + visual probe | **next** - give creature/NPC work the same client-world model as movement and networking |
+| [`ClientRuntime6-entity-interpolation-and-ai-bridge.md`](ClientRuntime6-entity-interpolation-and-ai-bridge.md) | client entity replicas, remote interpolation buffers, NPC/AI presentation hooks, host-owned AI authority boundary | unit + browser smoke + integration | **done** - runtime presentation now publishes visual-only interpolated entity state while host authority owns AI |
 
 Do not start new movement, WebRTC/WebTransport, NPC AI, or fluid-prediction tacticals until at least `ClientRuntime0` has made the boundary concrete.
 

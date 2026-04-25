@@ -54,6 +54,10 @@ export interface ClientWorldRenderView {
   getRenderLevel(): ClientChunkCache;
 }
 
+export interface ClientWorldEntityView {
+  getEntitySnapshots(): readonly EntitySnapshot[];
+}
+
 export interface ClientWorldPredictionView {
   readonly movementPhysicsRevision?: number;
   readonly collisionRevision?: number;
@@ -72,6 +76,7 @@ export interface ClientWorld {
   getChunkSnapshot(chunkX: number, chunkZ: number): ChunkSnapshot | undefined;
   getRevisionFacts(): ClientWorldRevisionFacts;
   getRenderView(): ClientWorldRenderView;
+  getEntityView(): ClientWorldEntityView;
   getPredictionView(): ClientWorldPredictionView;
 }
 
@@ -217,6 +222,12 @@ export class HostMessageClientWorld implements ClientWorldHydrationTarget {
     };
   }
 
+  public getEntityView(): ClientWorldEntityView {
+    return {
+      getEntitySnapshots: () => this.getEntitySnapshots(),
+    };
+  }
+
   public getPredictionView(): ClientWorldPredictionView {
     return {
       movementPhysicsRevision: this.playerState?.movementBody?.physicsRevision,
@@ -358,6 +369,12 @@ export class WorldClientBackedClientWorld implements ClientWorld {
   public getRenderView(): ClientWorldRenderView {
     return {
       getRenderLevel: () => this.client.getLevel(),
+    };
+  }
+
+  public getEntityView(): ClientWorldEntityView {
+    return {
+      getEntitySnapshots: () => this.client.getEntitySnapshots(),
     };
   }
 
