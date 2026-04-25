@@ -5,11 +5,20 @@ export interface DrainedWorldHostMessages {
   readonly remaining: WorldHostMessage[];
 }
 
-function isBulkChunkMessage(message: WorldHostMessage): boolean {
+function isCappedBulkMessage(message: WorldHostMessage): boolean {
   return message.type === "chunk_snapshot"
     || message.type === "chunk_light_delta"
-    || message.type === "entity_snapshot"
-    || message.type === "world_progress";
+    || message.type === "entity_snapshot";
+}
+
+function findLatestWorldProgressIndex(messages: readonly WorldHostMessage[]): number | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index]!.type === "world_progress") {
+      return index;
+    }
+  }
+
+  return undefined;
 }
 
 export function drainWorldHostMessages(
@@ -24,10 +33,12 @@ export function drainWorldHostMessages(
   }
 
   const limit = Math.max(0, Math.floor(maxMessages));
+  const latestProgressIndex = findLatestWorldProgressIndex(pendingMessages);
+  const latestProgress = latestProgressIndex === undefined ? undefined : pendingMessages[latestProgressIndex]!;
   if (limit <= 0) {
     return {
-      messages: [],
-      remaining: [...pendingMessages],
+      messages: latestProgress === undefined ? [] : [latestProgress],
+      remaining: pendingMessages.filter((message) => message.type !== "world_progress"),
     };
   }
 
@@ -50,11 +61,11 @@ export function drainWorldHostMessages(
     }
   };
 
-  selectWhere((message) => !isBulkChunkMessage(message));
-  selectWhere(() => true);
+  selectWhere((message) => message.type !== "world_progress" && !isCappedBulkMessage(message));
+  selectWhere((message) => message.type !== "world_progress");
 
   return {
-    messages: selectedMessages,
-    remaining: pendingMessages.filter((_, index) => !selectedIndices.has(index)),
+    messages: latestProgress === undefined ? selectedMessages : [latestProgress, ...selectedMessages],
+    remaining: pendingMessages.filter((message, index) => message.type !== "world_progress" && !selectedIndices.has(index)),
   };
 }

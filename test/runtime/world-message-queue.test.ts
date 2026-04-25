@@ -117,7 +117,7 @@ describe("world host message queue draining", () => {
     expect(drained.remaining).toEqual([ENTITY_SNAPSHOT_MESSAGE]);
   });
 
-  test("keeps progress behind ready chunk snapshots when capped", () => {
+  test("drains latest progress outside the bulk message cap", () => {
     const progress = {
       type: "world_progress",
       stage: "Publishing chunks",
@@ -127,7 +127,41 @@ describe("world host message queue draining", () => {
 
     const drained = drainWorldHostMessages([CHUNK_MESSAGE, progress], 1);
 
-    expect(drained.messages).toEqual([CHUNK_MESSAGE]);
-    expect(drained.remaining).toEqual([progress]);
+    expect(drained.messages).toEqual([progress, CHUNK_MESSAGE]);
+    expect(drained.remaining).toEqual([]);
+  });
+
+  test("drains progress even when bulk messages are capped at zero", () => {
+    const progress = {
+      type: "world_progress",
+      stage: "Publishing chunks",
+      current: 1,
+      total: 2,
+    } satisfies WorldHostMessage;
+
+    const drained = drainWorldHostMessages([CHUNK_MESSAGE, progress], 0);
+
+    expect(drained.messages).toEqual([progress]);
+    expect(drained.remaining).toEqual([CHUNK_MESSAGE]);
+  });
+
+  test("drops stale progress records when draining the latest progress", () => {
+    const staleProgress = {
+      type: "world_progress",
+      stage: "Publishing chunks",
+      current: 1,
+      total: 3,
+    } satisfies WorldHostMessage;
+    const latestProgress = {
+      type: "world_progress",
+      stage: "Publishing chunks",
+      current: 2,
+      total: 3,
+    } satisfies WorldHostMessage;
+
+    const drained = drainWorldHostMessages([staleProgress, CHUNK_MESSAGE, latestProgress], 0);
+
+    expect(drained.messages).toEqual([latestProgress]);
+    expect(drained.remaining).toEqual([CHUNK_MESSAGE]);
   });
 });
