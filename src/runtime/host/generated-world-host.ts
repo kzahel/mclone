@@ -35,6 +35,7 @@ import type {
   ChunkLightDeltaResult,
   ChunkLightReadyResult,
   LightErrorResult,
+  LightProgressResult,
   LightingNeighborRevision,
   LightingService,
 } from "../lighting/lighting-protocol";
@@ -180,6 +181,8 @@ interface ChunkViewJobRecord {
 interface EnsureLightingOptions {
   readonly isCancelled?: () => boolean;
   readonly onInitialLightReady?: (chunk: GeneratedLevelChunk) => Promise<void>;
+  readonly onInitialLightBatchReady?: () => Promise<void>;
+  readonly onLightProgress?: (progress: LightProgressResult) => void;
 }
 
 interface PublishReadyChunksOptions {
@@ -819,6 +822,20 @@ export class GeneratedWorldHost implements WorldHost {
       publishProgressStarted = true;
       this.enqueueWorldProgress("Publishing chunks", current, publishTotal, chunkViewJobRevision);
     };
+    let pendingLightReadyForPublish = false;
+    const publishReadyLightingBatch = async (): Promise<void> => {
+      if (!pendingLightReadyForPublish) {
+        return;
+      }
+
+      pendingLightReadyForPublish = false;
+      publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep, {
+        onChunkPublished: (publishedInPass) => {
+          enqueuePublishingProgress(publishDone + publishedInPass);
+        },
+      });
+      enqueuePublishingProgress(publishDone);
+    };
     if (this.lightingService !== undefined && lightingChunks.length > 0) {
       this.options.mutateWorld?.(this.liquidLevel);
       await yieldStep();
@@ -830,13 +847,22 @@ export class GeneratedWorldHost implements WorldHost {
         isCancelled: () => !this.isCurrentChunkViewJob(chunkViewJobRevision),
         onInitialLightReady: async () => {
           lightingDone++;
+          pendingLightReadyForPublish = true;
           enqueueLightingProgress();
-          publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep, {
-            onChunkPublished: (publishedInPass) => {
-              enqueuePublishingProgress(publishDone + publishedInPass);
-            },
-          });
-          enqueuePublishingProgress(publishDone);
+        },
+        onInitialLightBatchReady: publishReadyLightingBatch,
+        onLightProgress: (progress) => {
+          if (publishProgressStarted) {
+            return;
+          }
+
+          this.enqueueWorldProgress(
+            "Computing light",
+            lightingDone,
+            lightingChunks.length,
+            chunkViewJobRevision,
+            `lit ${lightingDone.toString()} / ${lightingChunks.length.toString()}, ${progress.stage} ${progress.current.toString()} / ${progress.total.toString()}`,
+          );
         },
       });
       if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
@@ -853,6 +879,7 @@ export class GeneratedWorldHost implements WorldHost {
         this.markChunkFullWithoutLighting(chunk);
       }
     }
+    await publishReadyLightingBatch();
     publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep, {
       onChunkPublished: (publishedInPass) => {
         enqueuePublishingProgress(publishDone + publishedInPass);
@@ -1470,6 +1497,7 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     const pending = new Map<string, number>();
+    let acceptedBeforeRequests = false;
     for (const chunk of lightEligibleChunks) {
       if (options.isCancelled?.() === true) {
         return;
@@ -1481,6 +1509,7 @@ export class GeneratedWorldHost implements WorldHost {
       if (accepted !== undefined && accepted.lightCorrect && this.sentLightInputRevisions.get(key) === chunkRevision) {
         this.markChunkFullAfterAcceptedLight(chunk.chunkX, chunk.chunkZ);
         await options.onInitialLightReady?.(chunk);
+        acceptedBeforeRequests = true;
         continue;
       }
 
@@ -1494,6 +1523,9 @@ export class GeneratedWorldHost implements WorldHost {
         neighbors,
       });
       pending.set(key, chunkRevision);
+    }
+    if (acceptedBeforeRequests) {
+      await options.onInitialLightBatchReady?.();
     }
 
     while (pending.size > 0) {
@@ -1510,6 +1542,7 @@ export class GeneratedWorldHost implements WorldHost {
         continue;
       }
 
+      let acceptedInBatch = false;
       for (const result of batch.results) {
         switch (result.type) {
           case "chunk_light_ready": {
@@ -1519,6 +1552,7 @@ export class GeneratedWorldHost implements WorldHost {
               if (chunk !== null) {
                 this.markChunkFullAfterAcceptedLight(chunk.chunkX, chunk.chunkZ);
                 await options.onInitialLightReady?.(chunk);
+                acceptedInBatch = true;
               }
             }
             break;
@@ -1527,13 +1561,18 @@ export class GeneratedWorldHost implements WorldHost {
             this.acceptLightDeltaResult(result, chunkViewRevision);
             break;
           case "block_light_update_complete":
-          case "light_progress":
           case "light_performance":
+            break;
+          case "light_progress":
+            options.onLightProgress?.(result);
             break;
           case "light_error":
             this.handleLightError(result, chunkViewRevision);
             break;
         }
+      }
+      if (acceptedInBatch) {
+        await options.onInitialLightBatchReady?.();
       }
     }
   }

@@ -35,6 +35,7 @@ import { connectLightingWorkerSession, type LightingWorkerHostEndpoint } from ".
 const DEFAULT_MAX_QUEUED_COMMANDS = 1024;
 const DEFAULT_MAX_QUEUED_RESULTS = 1024;
 const PROPAGATION_UPDATE_BUDGET_PER_SLICE = 2048;
+const INITIAL_LIGHT_REQUEST_BATCH_SIZE = 16;
 
 export interface LightingWorkerHandlerOptions {
   readonly maxQueuedCommands?: number;
@@ -524,7 +525,7 @@ class LightingWorkerMailbox {
       while (this.queuedCommands.length > 0) {
         const command = this.queuedCommands.shift()!;
         const commands = command.type === "request_initial_light"
-          ? [command, ...this.drainAdjacentInitialLightRequests()]
+          ? [command, ...this.drainAdjacentInitialLightRequests(INITIAL_LIGHT_REQUEST_BATCH_SIZE - 1)]
           : [command];
         const startedAtMs = nowMs();
         const metrics: LightingWorkerCommandMetrics = {
@@ -554,9 +555,9 @@ class LightingWorkerMailbox {
     }
   }
 
-  private drainAdjacentInitialLightRequests(): RequestInitialLightRequest[] {
+  private drainAdjacentInitialLightRequests(limit: number): RequestInitialLightRequest[] {
     const requests: RequestInitialLightRequest[] = [];
-    while (this.queuedCommands[0]?.type === "request_initial_light") {
+    while (requests.length < limit && this.queuedCommands[0]?.type === "request_initial_light") {
       requests.push(this.queuedCommands.shift() as RequestInitialLightRequest);
     }
 
