@@ -109,6 +109,22 @@ We should be able to support both:
 
 The architecture should not assume only one of those exists.
 
+### 6. High-rate player movement is command-driven runtime gameplay
+
+Player movement is a deliberate runtime/gameplay divergence from vanilla 1.17.1, not a reason to fork the world or entity architecture. The lower shared movement ideas in `Entity.move(...)` and `LivingEntity.travel(...)` are still the reference to study before implementation, but the vanilla 20 TPS player packet loop is not the target protocol shape.
+
+The durable constraints are:
+
+- local player and host simulation consume the same sequenced movement commands
+- render frame delta is never authoritative movement delta
+- commands use fixed integer movement quanta; long frames are split or capped before simulation
+- the host drains queued commands in order, rather than applying one mutable "latest input" per tick
+- prediction snaps to authoritative state and replays unacknowledged commands; smoothing is presentation-only
+- lower-rate NPC AI can produce movement intent for the shared body simulation without forcing player physics down to AI tick rate
+- collision and physics revisions should be explicit once dynamic collision can affect prediction
+
+See [`player-movement-netcode.md`](./player-movement-netcode.md) and the player movement/netcode tactical arc in [`tactical/README.md`](./tactical/README.md).
+
 ## Layer model
 
 | Layer | Responsibility | Parity expectation |

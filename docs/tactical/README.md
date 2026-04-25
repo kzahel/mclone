@@ -1,6 +1,6 @@
 # Tactical docs
 
-Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For vanilla chunk-status order, deterministic decoration finality, lighting gates, and publication gates, see [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For vanilla overworld structure generation architecture and suggested implementation order, see [`../structures.md`](../structures.md). For runtime/host boundaries and durable data/protocol/loading contracts, see [`../architecture.md`](../architecture.md), [`../runtime-data-model.md`](../runtime-data-model.md), [`../protocol.md`](../protocol.md), and [`../loading-persistence.md`](../loading-persistence.md). For liquid simulation architecture, see [`../liquids.md`](../liquids.md).
+Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For vanilla chunk-status order, deterministic decoration finality, lighting gates, and publication gates, see [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For vanilla overworld structure generation architecture and suggested implementation order, see [`../structures.md`](../structures.md). For runtime/host boundaries and durable data/protocol/loading contracts, see [`../architecture.md`](../architecture.md), [`../runtime-data-model.md`](../runtime-data-model.md), [`../protocol.md`](../protocol.md), and [`../loading-persistence.md`](../loading-persistence.md). For liquid simulation architecture, see [`../liquids.md`](../liquids.md). For high-rate player movement, prediction, reconciliation, interpolation, and lower-rate NPC movement intent, see [`../player-movement-netcode.md`](../player-movement-netcode.md).
 
 ## Rule of thumb
 
@@ -117,6 +117,25 @@ Entities are authoritative simulation data. Use [`../entities.md`](../entities.m
 | [`Creatures1-generation-passive-spawning.md`](Creatures1-generation-passive-spawning.md) | passive `CREATURE` generation path, spawn settings, placements, sheep color | unit + fixture | **done** — generation-time passive spawning matches the committed fixture through the runtime sink |
 | [`Creatures2-host-entity-publication.md`](Creatures2-host-entity-publication.md) | generated-world host entity runtime, entity snapshots, local/remote client caches | runtime | **done** — generated original mobs now publish as authoritative protocol data |
 | `Creatures3-` | browser presentation of authoritative entity snapshots | browser visual | **next** — draw simple placeholders at host-owned entity positions before real models or behavior |
+
+## Player Movement / Netcode Arc
+
+Player movement is authoritative simulation data, but the high-rate FPS-style command/prediction model is a deliberate gameplay/runtime divergence from vanilla's 20 TPS player packet shape. Use [`../player-movement-netcode.md`](../player-movement-netcode.md) as the durable reference. Study vanilla `Entity.move(...)`, `LivingEntity.travel(...)`, player hooks, and mob intent sources before implementing the lower movement/collision pieces; do not copy `LocalPlayer` / `ServerGamePacketListenerImpl` as the long-term custom movement protocol.
+
+The arc should keep three concerns separate:
+
+- movement body and collision determinism
+- sequenced command prediction/reconciliation
+- presentation interpolation and correction smoothing
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| [`Movement0-shared-movement-body-and-collision.md`](Movement0-shared-movement-body-and-collision.md) | movement body, fixed-step core, full-block collision, step-up/grounding, vanilla source review | unit | **proposed** - first shared movement core; no prediction or protocol migration yet |
+| `Movement1-command-stream-and-local-prediction.md` | sequenced commands, command quanta, ring buffer predictor, replay tests | unit + runtime | sketch deterministic command timeline and local prediction |
+| `Movement2-authoritative-host-command-integration.md` | host command queue, ack snapshots, `set_player_input` evolution, processing budgets | runtime + browser | sketch migration from simple player loop to command queue authority |
+| `Movement3-interpolation-and-correction-smoothing.md` | local correction offset, remote interpolation buffers, latency/jitter debug controls | unit + browser visual | sketch presentation smoothing without mutating simulation truth |
+| `Movement4-richer-collision-and-world-interaction.md` | non-full block shapes, crouch shape, liquid hooks, collision revisions | unit + browser | sketch expanded collision after the fixed-step core is stable |
+| `Movement5-npc-locomotion-bridge.md` | low-rate AI intent feeding movement body, entity activity tiers, nearby high-rate body stepping | unit + runtime | sketch NPCs sharing the movement core without inheriting player command rate |
 
 ## Renderer oracle approach
 

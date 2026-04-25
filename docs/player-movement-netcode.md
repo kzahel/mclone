@@ -21,6 +21,21 @@ This document is intentionally not a vanilla movement parity plan. Minecraft Jav
 - Do not require every mob AI decision, path search, block tick, or liquid tick to run at player movement frequency.
 - Do not start with full rollback for all world entities. Local player prediction plus remote interpolation is the first target.
 
+## Implementation Constraints
+
+These constraints should survive the tactical breakdown. They are the parts most likely to cause subtle movement jank if they are postponed or treated as transport details.
+
+- Use one shared movement body/core for host authority, local prediction, and future NPC body stepping. Controllers may differ; the body simulation should not.
+- Keep vanilla source review mandatory for the lower movement/collision concepts: `Entity.move(...)`, `LivingEntity.travel(...)`, player hooks in `Player`, and mob intent production through `MoveControl`/navigation. Do not copy vanilla's high-level 20 TPS client-position-packet shape for the custom FPS path.
+- Movement simulation takes an explicit fixed `dt` or integer command quantum. Browser frame time, host tick time, and transport poll cadence must not be used directly as body integration time.
+- Store and process ordered command records. A "latest input" slot is acceptable only as a temporary compatibility shim before the command stream lands, not as the long-term player movement model.
+- A host tick at 60 Hz may drain two 120 Hz commands and run two `1/120` movement steps. It should not replace them with one `1/60` step if the client predicted two smaller steps.
+- Long or irregular client frames must be converted into bounded fixed quanta, preserving button edges where possible. One large variable-dt command is a misprediction source.
+- Reconciliation mutates simulation truth by snap-and-replay. Interpolation, smoothing, and camera/viewmodel easing are presentation layers over that truth.
+- NPC AI/pathfinding can run at lower rates and feed intent into the movement body. Collision-relevant NPC bodies may still need higher-rate stepping near players.
+- Dynamic collision inputs need revision facts once block edits, non-full shapes, liquids, or entity collisions enter prediction. Revision mismatch should be diagnosable, not hidden as generic floating-point drift.
+- The protocol should evolve `set_player_input` toward sequenced movement commands with acknowledgements, while preserving the existing host/client authority boundary.
+
 ## Prior Art
 
 Minecraft 1.17.1 source is useful for the shared lower movement layers:
@@ -344,7 +359,9 @@ Browser tests:
 
 ## Suggested Planning Slices
 
-1. **Movement0: shared movement body and collision world**
+Use the player movement/netcode arc in [`tactical/README.md`](./tactical/README.md) as the tactical index. Draft the next slice in detail only when the previous one has taught us enough.
+
+1. **[`Movement0: shared movement body and collision world`](./tactical/Movement0-shared-movement-body-and-collision.md)**
    - AABB body, velocity, grounded state, full-block collision, stepping, fixed-step simulation.
 
 2. **Movement1: command stream and local prediction**
@@ -361,4 +378,3 @@ Browser tests:
 
 6. **Movement5: NPC locomotion bridge**
    - Low-rate AI intent feeding shared movement bodies, entity activity tiers, nearby high-rate body stepping.
-
