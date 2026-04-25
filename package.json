@@ -13,6 +13,7 @@
     "dev:browser": "vite",
     "host:node": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/headless-generated-world-host.ts",
     "host:remote": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/generated-world-http-server.ts",
+    "perf:worldgen": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./scripts/worldgen-phase-baseline.ts",
     "build": "vite build",
     "deploy": "bash ./scripts/deploy.sh",
     "assets:pack": "node ./scripts/build-reference-asset-pack.mjs",
