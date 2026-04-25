@@ -12,6 +12,7 @@ Related docs:
 - [`worker-ownership.md`](worker-ownership.md): thread/worker ownership of mutable state
 - [`structures.md`](structures.md): structure-specific starts, references, pieces, templates, and implementation order
 - [`lighting.md`](lighting.md): light engine data structures and propagation algorithm
+- [`tactical/47-generated-chunk-status-orchestration.md`](tactical/47-generated-chunk-status-orchestration.md): implementation slice that made this order model explicit in the generated runtime
 
 ## Scope
 

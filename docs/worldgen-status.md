@@ -203,7 +203,7 @@ For seed `12345`, chunk `(0, 0)`, staged terrain/surface/carver generation alrea
 | Surface dirt/grass choice | `15` |
 | Ores/glow lichen | `6` |
 
-The current ground-surface regression test for this same chunk is intentionally weaker: it compares one derived ground block per column, matches `232 / 256` materials, and rejects unexpected dry-land sand. Tactical [`46`](./tactical/46-full-decorated-spawn-chunk-parity.md) should replace that confidence shape with an exact full-block decorated-chunk oracle once the buckets above are burned down.
+The current ground-surface regression test for this same chunk is intentionally weaker: it compares one derived ground block per column, matches `232 / 256` materials, and rejects unexpected dry-land sand. Tactical [`47`](./tactical/47-generated-chunk-status-orchestration.md) has landed the explicit status-order foundation, so tactical [`46`](./tactical/46-full-decorated-spawn-chunk-parity.md) should replace that confidence shape with an exact full-block decorated-chunk oracle once the buckets above are burned down.
 
 ## Priorities
 
@@ -213,7 +213,7 @@ These priorities are only for parity-oriented worldgen work. The runtime/host ar
 
 ### 1. Reach exact full-decorated parity for the spawn baseline chunk
 
-The next broad parity win is no longer table breadth. The layered-overworld biome key set is covered now, and the project has enough feature/decorator surface area to make a stronger claim: one simple official-server chunk should match exactly.
+The next broad parity win is no longer table breadth. The layered-overworld biome key set is covered now, the explicit status-order foundation has landed, and the project has enough feature/decorator surface area to make a stronger claim: one simple official-server chunk should match exactly.
 
 The priority target is seed `12345`, chunk `(0, 0)`:
 

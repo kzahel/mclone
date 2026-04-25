@@ -437,7 +437,7 @@ async function boot(): Promise<void> {
     lastInputCommand = initialInputCommand;
   }
   if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, {
-    maxAttempts: 2400,
+    maxAttempts: Math.max(2400, expectedLoadedChunkCount * 32),
     onProgress: (progress) => reportLoadingProgress({
       ...progress,
       fraction: 0.92 + ((progressFraction(progress) ?? 0) * 0.06),
@@ -469,6 +469,27 @@ async function boot(): Promise<void> {
   scene.device.queue.submit([initialEncoder.finish()]);
   await scene.device.queue.onSubmittedWorkDone();
   totalFrameCount++;
+
+  const initialPlayerState = scene.worldClient.getPlayerState();
+  const initialSessionState = scene.worldClient.getSessionState();
+  if (initialPlayerState !== undefined) {
+    const playerChunkViewRequest = createChunkViewRequestForPlayerState(initialPlayerState, scene.viewDistance);
+    debugRuntime.controller.state.sessionId = initialSessionState?.sessionId;
+    debugRuntime.controller.state.playerId = initialSessionState?.playerId;
+    debugRuntime.controller.state.playerTick = initialPlayerState.tick;
+    debugRuntime.controller.state.playerPosition = [
+      initialPlayerState.position.x,
+      initialPlayerState.position.y,
+      initialPlayerState.position.z,
+    ];
+    debugRuntime.controller.state.cameraPosition = [camera.position.x, camera.position.y, camera.position.z];
+    debugRuntime.controller.state.cameraYaw = camera.yRot;
+    debugRuntime.controller.state.cameraPitch = camera.xRot;
+    debugRuntime.controller.state.playerChunkX = playerChunkViewRequest.centerChunkX;
+    debugRuntime.controller.state.playerChunkZ = playerChunkViewRequest.centerChunkZ;
+    debugRuntime.controller.state.chunkViewCenterX = initialSessionState?.chunkView?.centerChunkX;
+    debugRuntime.controller.state.chunkViewCenterZ = initialSessionState?.chunkView?.centerChunkZ;
+  }
 
   debugRuntime.controller.state.ready = true;
   debugRuntime.controller.state.saveId = scene.saveMetadata.saveId;

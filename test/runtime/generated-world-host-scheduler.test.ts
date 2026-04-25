@@ -9,7 +9,7 @@ const OPEN_WORLD_REQUEST = {
   seed: 12345n,
   preset: "default",
 } as const;
-const COOPERATIVE_CHUNK_LIGHTING_TIMEOUT_MS = 15_000;
+const COOPERATIVE_CHUNK_LIGHTING_TIMEOUT_MS = 60_000;
 
 function sleep(ms = 0): Promise<void> {
   return new Promise((resolve) => {

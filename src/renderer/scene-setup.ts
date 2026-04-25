@@ -153,8 +153,8 @@ function worldProgressFraction(progress: WorldProgressMessage): number {
   const clampedPhaseFraction = Math.max(0, Math.min(1, phaseFraction));
   const loadingPhases = [
     "Checking saved chunks",
-    "Generating missing chunks",
-    "Decorating new chunks",
+    "Generating status chunks",
+    "Advancing FEATURES",
     "Computing light",
     "Publishing chunks",
   ];

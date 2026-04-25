@@ -4,6 +4,8 @@ Reach exact full-block parity for one concrete, server-backed baseline: seed `12
 
 This is intentionally not a claim of full overworld parity. It is a bounded end-to-end confidence milestone: prove that the current translated pipeline can produce one simple decorated overworld chunk exactly, then use the same harness to expand coverage later.
 
+Status: next. [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) has replaced the decorated/published shortcut with explicit `ChunkStatus`-shaped `FEATURES`, `LIGHT`, and publication gates, so this exact mismatch burn-down can run on that foundation.
+
 ## Source files (read before writing)
 
 | Java / asset source | TS target |
@@ -73,7 +75,7 @@ Vanilla `FEATURES` semantics are the first correctness bar for this slice:
 The runtime model for this tactical now follows that shape explicitly:
 
 - published/view chunks stay at the existing client-facing radius
-- a hidden authoritative chunk window stays resident for the `FEATURES` read dependency radius
+- a hidden authoritative chunk window stays resident for the `3x3 FULL` publication gate, `3x3 FEATURES` light input, and `FEATURES` read dependency radius
 - decoration runs through a `WorldGenRegion`-style wrapper instead of the raw level
 - normal feature writes are rejected outside the center chunk plus immediate neighbors
 

@@ -6,20 +6,29 @@ import { getBlockPositionBiome } from "../../worldgen/biome/biome-zoom";
 import type { NoiseBiomeSource } from "../../worldgen/biome/noise-biome-source";
 import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
 import { MutableChunkBlockBuffer } from "../../worldgen/chunk/chunk-block-buffer";
+import { GenerationStep } from "../../worldgen/levelgen/generation-step";
 import { NoiseBasedChunkGenerator } from "../../worldgen/levelgen/noise-based-chunk-generator";
 import type { CooperativeGenerationYield } from "../../worldgen/levelgen/cooperative-generation";
 import { BlockStateProperties } from "./block/state/properties/block-state-properties";
 import { type BlockState } from "./block/state/block-state";
 import { LevelChunk } from "./chunk/level-chunk";
 import {
+  GeneratedChunkStatus,
+  isGeneratedChunkStatusAtLeast,
+  type GeneratedChunkStatus as GeneratedChunkStatusName,
+} from "./generated-chunk-status";
+import {
   FEATURES_CHUNK_DEPENDENCY_RADIUS,
   GeneratedDecorationRegion,
 } from "./generated-decoration-region";
 import { StaticRenderLevel } from "./static-render-level";
 
-function decoratedChunkKey(chunkX: number, chunkZ: number): string {
+function generatedChunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
 }
+
+const FULL_PUBLICATION_NEIGHBOR_RADIUS = 1;
+const LIGHT_FEATURES_NEIGHBOR_RADIUS = 1;
 
 export interface GeneratedChunkViewUpdate {
   readonly changed: boolean;
@@ -34,8 +43,8 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   // Runtime: keep a hidden authority window for FEATURES dependency reads while only publishing the view radius.
   private publishChunkRadius = -1;
   private authorityChunkRadius = -1;
-  private readonly decoratedChunks = new Set<string>();
-  private readonly decoratingChunks = new Set<string>();
+  private readonly chunkStatuses = new Map<string, GeneratedChunkStatusName>();
+  private readonly advancingFeatureChunks = new Set<string>();
   private automaticDecorationEnabled = true;
 
   public constructor(
@@ -59,8 +68,8 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
         create
         && this.automaticDecorationEnabled
         && this.inPublishRange(chunkX, chunkZ)
-        && !this.isChunkDecorated(chunkX, chunkZ)
-        && !this.decoratingChunks.has(decoratedChunkKey(chunkX, chunkZ))
+        && !this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)
+        && !this.advancingFeatureChunks.has(generatedChunkKey(chunkX, chunkZ))
       ) {
         this.decorateChunk(chunkX, chunkZ);
       }
@@ -90,15 +99,16 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     return this.getLoadedChunks().length;
   }
 
-  public override setChunk(chunk: LevelChunk, decorated = false): void {
+  public override setChunk(
+    chunk: LevelChunk,
+    status: GeneratedChunkStatusName | boolean = GeneratedChunkStatus.LIQUID_CARVERS,
+  ): void {
     super.setChunk(chunk);
-    const key = decoratedChunkKey(chunk.chunkX, chunk.chunkZ);
-    if (decorated) {
-      this.decoratedChunks.add(key);
-    } else {
-      this.decoratedChunks.delete(key);
-    }
-    this.decoratingChunks.delete(key);
+    const nextStatus = typeof status === "boolean"
+      ? (status ? GeneratedChunkStatus.FULL : GeneratedChunkStatus.LIQUID_CARVERS)
+      : status;
+    this.setChunkStatus(chunk.chunkX, chunk.chunkZ, nextStatus);
+    this.advancingFeatureChunks.delete(generatedChunkKey(chunk.chunkX, chunk.chunkZ));
   }
 
   public ensureChunksForCamera(cameraX: number, cameraZ: number, viewDistance: number): boolean {
@@ -119,8 +129,12 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     const previousCenterZ = this.viewCenterZ;
     const previousPublishRadius = this.publishChunkRadius;
     const nextPublishRadius = Math.max(1, viewDistance) + 1;
-    // Runtime: widen authoritative retention to cover the vanilla FEATURES read dependency window.
-    const nextAuthorityRadius = nextPublishRadius + FEATURES_CHUNK_DEPENDENCY_RADIUS;
+    // Runtime: retain terrain far enough for publishable 3x3 FULL, LIGHT's 3x3 FEATURES input, and FEATURES' terrain window.
+    const nextAuthorityRadius =
+      nextPublishRadius
+      + FULL_PUBLICATION_NEIGHBOR_RADIUS
+      + LIGHT_FEATURES_NEIGHBOR_RADIUS
+      + FEATURES_CHUNK_DEPENDENCY_RADIUS;
     let changed =
       centerChunkX !== previousCenterX ||
       centerChunkZ !== previousCenterZ ||
@@ -144,8 +158,8 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
             unloadedChunks.push(removed);
           }
         }
-        this.decoratedChunks.delete(decoratedChunkKey(chunk.chunkX, chunk.chunkZ));
-        this.decoratingChunks.delete(decoratedChunkKey(chunk.chunkX, chunk.chunkZ));
+        this.chunkStatuses.delete(generatedChunkKey(chunk.chunkX, chunk.chunkZ));
+        this.advancingFeatureChunks.delete(generatedChunkKey(chunk.chunkX, chunk.chunkZ));
         changed = true;
         continue;
       }
@@ -160,7 +174,13 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     for (let chunkZ = this.viewCenterZ - this.authorityChunkRadius; chunkZ <= this.viewCenterZ + this.authorityChunkRadius; chunkZ++) {
       for (let chunkX = this.viewCenterX - this.authorityChunkRadius; chunkX <= this.viewCenterX + this.authorityChunkRadius; chunkX++) {
         const chunk = super.getChunk(chunkX, chunkZ, false);
-        if (chunk === null || (this.inPublishRange(chunkX, chunkZ) && !this.isChunkDecorated(chunkX, chunkZ))) {
+        if (
+          this.inPublishRange(chunkX, chunkZ)
+          && (
+            chunk === null
+            || !this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)
+          )
+        ) {
           missingChunks.push([chunkX, chunkZ]);
           changed = true;
         }
@@ -210,12 +230,70 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   }
 
   public isChunkDecorated(chunkX: number, chunkZ: number): boolean {
-    return this.decoratedChunks.has(decoratedChunkKey(chunkX, chunkZ));
+    return this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES);
+  }
+
+  public getChunkStatus(chunkX: number, chunkZ: number): GeneratedChunkStatusName {
+    return this.chunkStatuses.get(generatedChunkKey(chunkX, chunkZ)) ?? GeneratedChunkStatus.EMPTY;
+  }
+
+  public hasChunkStatus(chunkX: number, chunkZ: number, status: GeneratedChunkStatusName): boolean {
+    return isGeneratedChunkStatusAtLeast(this.getChunkStatus(chunkX, chunkZ), status);
+  }
+
+  public hasStatusWindow(
+    centerChunkX: number,
+    centerChunkZ: number,
+    radius: number,
+    status: GeneratedChunkStatusName,
+  ): boolean {
+    for (let chunkZ = centerChunkZ - radius; chunkZ <= centerChunkZ + radius; chunkZ++) {
+      for (let chunkX = centerChunkX - radius; chunkX <= centerChunkX + radius; chunkX++) {
+        if (!this.hasChunkStatus(chunkX, chunkZ, status)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  public isChunkFeaturesStable(chunkX: number, chunkZ: number): boolean {
+    return this.hasStatusWindow(chunkX, chunkZ, 1, GeneratedChunkStatus.FEATURES);
+  }
+
+  public isChunkFull(chunkX: number, chunkZ: number): boolean {
+    return this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FULL);
+  }
+
+  public isChunkPublishable(chunkX: number, chunkZ: number): boolean {
+    return this.hasStatusWindow(chunkX, chunkZ, 1, GeneratedChunkStatus.FULL);
+  }
+
+  public markChunkLighted(chunkX: number, chunkZ: number): boolean {
+    if (!this.isChunkFeaturesStable(chunkX, chunkZ)) {
+      return false;
+    }
+
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.LIGHT);
+    return true;
+  }
+
+  public markChunkFull(chunkX: number, chunkZ: number): boolean {
+    if (!this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.LIGHT)) {
+      return false;
+    }
+
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.SPAWN);
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.HEIGHTMAPS);
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.FULL);
+    return true;
   }
 
   public generateChunkTerrain(chunkX: number, chunkZ: number): LevelChunk | null {
     const existing = super.getChunk(chunkX, chunkZ, false);
     if (existing !== null) {
+      this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS);
       return existing;
     }
 
@@ -223,12 +301,17 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       return null;
     }
 
+    this.advanceNoopPreNoiseStatuses(chunkX, chunkZ);
     const generated = this.generator.fillFromNoise(chunkX, chunkZ);
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.NOISE);
     this.generator.buildSurfaceAndBedrock(generated);
-    this.generator.applyCarvers(generated);
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.SURFACE);
+    this.generator.applyCarvers(generated, GenerationStep.Carving.AIR);
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.CARVERS);
+    this.generator.applyCarvers(generated, GenerationStep.Carving.LIQUID);
     const chunk = this.copyGeneratedChunk(chunkX, chunkZ, generated);
     super.setChunk(chunk);
-    this.decoratedChunks.delete(decoratedChunkKey(chunkX, chunkZ));
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS);
     return chunk;
   }
 
@@ -246,35 +329,41 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       return null;
     }
 
+    this.advanceNoopPreNoiseStatuses(chunkX, chunkZ);
     const generated = this.generator.fillFromNoise(chunkX, chunkZ);
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.NOISE);
     await yieldStep();
     this.generator.buildSurfaceAndBedrock(generated);
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.SURFACE);
     await yieldStep();
-    await this.generator.applyCarversCooperative(generated, yieldStep);
+    this.generator.applyCarvers(generated, GenerationStep.Carving.AIR);
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.CARVERS);
+    await yieldStep();
+    this.generator.applyCarvers(generated, GenerationStep.Carving.LIQUID);
     const chunk = this.copyGeneratedChunk(chunkX, chunkZ, generated);
     super.setChunk(chunk);
-    this.decoratedChunks.delete(decoratedChunkKey(chunkX, chunkZ));
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS);
     await yieldStep();
     return chunk;
   }
 
   public decorateChunk(chunkX: number, chunkZ: number): void {
-    const key = decoratedChunkKey(chunkX, chunkZ);
-    if (this.decoratedChunks.has(key)) {
+    const key = generatedChunkKey(chunkX, chunkZ);
+    if (this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)) {
       return;
     }
 
-    if (this.decoratingChunks.has(key)) {
+    if (this.advancingFeatureChunks.has(key)) {
       return;
     }
 
-    this.decoratingChunks.add(key);
+    this.advancingFeatureChunks.add(key);
     try {
       this.ensureDecorationTerrainWindow(chunkX, chunkZ);
       this.generator.applyBiomeDecoration(new GeneratedDecorationRegion(this, chunkX, chunkZ), chunkX, chunkZ);
-      this.decoratedChunks.add(key);
+      this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.FEATURES);
     } finally {
-      this.decoratingChunks.delete(key);
+      this.advancingFeatureChunks.delete(key);
     }
   }
 
@@ -283,29 +372,29 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     chunkZ: number,
     yieldStep: CooperativeGenerationYield,
   ): Promise<void> {
-    const key = decoratedChunkKey(chunkX, chunkZ);
-    if (this.decoratedChunks.has(key)) {
+    const key = generatedChunkKey(chunkX, chunkZ);
+    if (this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)) {
       return;
     }
 
-    if (this.decoratingChunks.has(key)) {
+    if (this.advancingFeatureChunks.has(key)) {
       return;
     }
 
-    this.decoratingChunks.add(key);
+    this.advancingFeatureChunks.add(key);
     try {
       await this.ensureDecorationTerrainWindowCooperative(chunkX, chunkZ, yieldStep);
       await this.generator.applyBiomeDecorationCooperative(new GeneratedDecorationRegion(this, chunkX, chunkZ), chunkX, chunkZ, yieldStep);
-      this.decoratedChunks.add(key);
+      this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.FEATURES);
     } finally {
-      this.decoratingChunks.delete(key);
+      this.advancingFeatureChunks.delete(key);
     }
   }
 
   private ensureDecorationTerrainWindow(chunkX: number, chunkZ: number): void {
     for (let neighborChunkZ = chunkZ - FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkZ <= chunkZ + FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkZ++) {
       for (let neighborChunkX = chunkX - FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkX <= chunkX + FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkX++) {
-        if (super.getChunk(neighborChunkX, neighborChunkZ, false) !== null) {
+        if (this.hasChunkStatus(neighborChunkX, neighborChunkZ, GeneratedChunkStatus.LIQUID_CARVERS)) {
           continue;
         }
 
@@ -325,7 +414,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   ): Promise<void> {
     for (let neighborChunkZ = chunkZ - FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkZ <= chunkZ + FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkZ++) {
       for (let neighborChunkX = chunkX - FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkX <= chunkX + FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkX++) {
-        if (super.getChunk(neighborChunkX, neighborChunkZ, false) !== null) {
+        if (this.hasChunkStatus(neighborChunkX, neighborChunkZ, GeneratedChunkStatus.LIQUID_CARVERS)) {
           continue;
         }
 
@@ -368,5 +457,23 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     chunk.appendLiquidTicks(generated.getScheduledLiquidTicks());
 
     return chunk;
+  }
+
+  private advanceNoopPreNoiseStatuses(chunkX: number, chunkZ: number): void {
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES);
+    this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.BIOMES);
+  }
+
+  private setChunkStatusAtLeast(chunkX: number, chunkZ: number, status: GeneratedChunkStatusName): void {
+    if (this.hasChunkStatus(chunkX, chunkZ, status)) {
+      return;
+    }
+
+    this.setChunkStatus(chunkX, chunkZ, status);
+  }
+
+  private setChunkStatus(chunkX: number, chunkZ: number, status: GeneratedChunkStatusName): void {
+    this.chunkStatuses.set(generatedChunkKey(chunkX, chunkZ), status);
   }
 }

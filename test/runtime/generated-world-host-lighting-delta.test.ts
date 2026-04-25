@@ -29,6 +29,8 @@ const OPEN_WORLD_REQUEST = {
 
 class RecordingLightingService implements LightingService {
   public readonly blockChangeBatches: LightBlockChangeBatchRequest[] = [];
+  public readonly initialLightRequests: RequestInitialLightRequest[] = [];
+  public readonly upsertRequests: UpsertLightChunkRequest[] = [];
   private readonly results: LightingResult[] = [];
 
   public configureWorld(_request: ConfigureLightingWorldRequest): Promise<void> {
@@ -39,7 +41,8 @@ class RecordingLightingService implements LightingService {
     return Promise.resolve();
   }
 
-  public upsertChunk(_request: UpsertLightChunkRequest): Promise<void> {
+  public upsertChunk(request: UpsertLightChunkRequest): Promise<void> {
+    this.upsertRequests.push(request);
     return Promise.resolve();
   }
 
@@ -48,6 +51,7 @@ class RecordingLightingService implements LightingService {
   }
 
   public requestInitialLight(request: RequestInitialLightRequest): Promise<void> {
+    this.initialLightRequests.push(request);
     this.results.push({
       type: "chunk_light_ready",
       chunkViewRevision: request.chunkViewRevision,
@@ -165,5 +169,37 @@ describe("GeneratedWorldHost lighting deltas", () => {
       y: 15,
       data: expect.any(Uint8Array),
     });
+  }, 30_000);
+
+  test("requests initial light only from feature-complete 3x3 inputs", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const lightingService = new RecordingLightingService();
+    const host = new GeneratedWorldHost({
+      seed: OPEN_WORLD_REQUEST.seed,
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingService,
+    });
+
+    await host.openWorld(OPEN_WORLD_REQUEST);
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    expect(lightingService.initialLightRequests.length).toBeGreaterThan(0);
+    expect(lightingService.upsertRequests.every((request) => request.decorated)).toBe(true);
+
+    const upserted = new Set(lightingService.upsertRequests.map((request) => `${request.chunkX},${request.chunkZ}`));
+    const centerRequest = lightingService.initialLightRequests.find((request) => request.chunkX === 0 && request.chunkZ === 0);
+    expect(centerRequest).toBeDefined();
+    expect(centerRequest!.neighbors).toHaveLength(8);
+    expect(upserted.has("0,0")).toBe(true);
+    for (const neighbor of centerRequest!.neighbors) {
+      expect(upserted.has(`${neighbor.chunkX},${neighbor.chunkZ}`)).toBe(true);
+    }
   }, 30_000);
 });

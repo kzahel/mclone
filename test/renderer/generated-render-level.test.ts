@@ -122,6 +122,28 @@ describe("GeneratedRenderLevel", () => {
     }
   }, GENERATED_RENDER_LEVEL_TIMEOUT_MS);
 
+  test("keeps FEATURES stability and FULL publishability as separate status gates", () => {
+    const level = createGeneratedLevel();
+
+    expect(level.ensureChunksForCamera(8.5, 8.5, 1)).toBe(true);
+    expect(level.isChunkDecorated(0, 0)).toBe(true);
+    expect(level.isChunkFeaturesStable(0, 0)).toBe(true);
+    expect(level.isChunkFull(0, 0)).toBe(false);
+    expect(level.isChunkPublishable(0, 0)).toBe(false);
+
+    for (let chunkZ = -1; chunkZ <= 1; chunkZ++) {
+      for (let chunkX = -1; chunkX <= 1; chunkX++) {
+        expect(level.markChunkLighted(chunkX, chunkZ)).toBe(true);
+        expect(level.markChunkFull(chunkX, chunkZ)).toBe(true);
+      }
+    }
+
+    expect(level.isChunkFull(0, 0)).toBe(true);
+    expect(level.isChunkPublishable(0, 0)).toBe(true);
+    expect(level.isChunkPublishable(1, 1)).toBe(false);
+    expect(level.markChunkLighted(2, 2)).toBe(false);
+  }, GENERATED_RENDER_LEVEL_TIMEOUT_MS);
+
   test("slides the generated chunk cache when the camera crosses chunk boundaries", () => {
     const level = createGeneratedLevel();
 

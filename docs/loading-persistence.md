@@ -225,13 +225,13 @@ Browser worker and remote Node host both use cooperative scheduling.
 For each chunk job:
 
 1. The host tries `preloadStoredChunk(...)`.
-2. If storage returns a snapshot, the host hydrates block states and scheduled ticks into a `LevelChunk` and marks it decorated.
-3. If storage misses, the host generates terrain.
-4. Newly generated chunks are decorated.
-5. The host computes lighting for currently loaded chunks.
-6. The host builds a packed snapshot, publishes it, queues persistence as a storage side effect, and may later publish light deltas.
+2. If storage returns a snapshot, the host hydrates block states and scheduled ticks into a `LevelChunk` and marks it as a full generated snapshot.
+3. If storage misses, the host advances explicit generated chunk statuses through the terrain/carver boundary.
+4. Newly generated chunks advance through `FEATURES` in the deterministic status order.
+5. The host computes lighting only after the 3x3 `FEATURES` input is ready.
+6. The host marks chunks `FULL`, publishes only chunks that satisfy the publication gate, queues persistence as a storage side effect, and may later publish light deltas.
 
-The important point: current code checks storage before generation and now reports that as a distinct `Checking saved chunks` phase with stored/existing/missing counts. Missing chunks then move through `Generating missing chunks`, `Decorating new chunks`, `Computing light`, and `Publishing chunks`.
+The important point: current code checks storage before generation and now reports that as a distinct `Checking saved chunks` phase with stored/existing/missing counts. Missing chunks then move through `Generating status chunks`, `Advancing FEATURES`, `Computing light`, and `Publishing chunks`.
 
 ### Current Snapshot Facts
 
@@ -385,7 +385,7 @@ These were small enough and high enough leverage to do before deeper persistence
 
 1. Rename loading progress stages and include real counts.
 
-   Use stages like `Checking saved chunks`, `Generating missing chunks`, `Decorating new chunks`, `Computing light`, and `Publishing chunks`. Report storage hits, storage misses, generated count, and published count separately.
+   Use stages like `Checking saved chunks`, `Generating status chunks`, `Advancing FEATURES`, `Computing light`, and `Publishing chunks`. Report storage hits, storage misses, generated count, and published count separately.
 
 2. Add explicit browser storage hygiene.
 
