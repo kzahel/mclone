@@ -51,6 +51,13 @@ export interface PlayerInputCommand {
   readonly moveZ: number;
   readonly yaw: number;
   readonly pitch: number;
+  readonly clientTimeUs?: number;
+  readonly commandQuantumUs?: number;
+  readonly stepCount?: number;
+  readonly buttons?: number;
+  readonly edgeButtons?: number;
+  readonly physicsRevision?: number;
+  readonly collisionRevision?: number;
 }
 
 export interface SetPlayerInputRequest {
@@ -78,6 +85,36 @@ export interface ClientSessionState {
   readonly chunkView?: SessionChunkViewState;
 }
 
+export type ClientMovementBodyMode = "ground" | "air" | "water" | "flying";
+
+export interface ClientMovementBodySnapshot {
+  readonly position: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
+  readonly velocity: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
+  readonly bounds: {
+    readonly minX: number;
+    readonly minY: number;
+    readonly minZ: number;
+    readonly maxX: number;
+    readonly maxY: number;
+    readonly maxZ: number;
+  };
+  readonly onGround: boolean;
+  readonly mode: ClientMovementBodyMode;
+  readonly jumpHeld: boolean;
+  readonly physicsRevision: number;
+  readonly collisionRevision?: number;
+  readonly commandQuantumUs: number;
+  readonly lastProcessedCommandSequence: number;
+}
+
 export interface ClientPlayerState {
   readonly playerId: string;
   readonly position: {
@@ -92,6 +129,7 @@ export interface ClientPlayerState {
   readonly acknowledgedInputSequence: number;
   readonly tick: number;
   readonly revision: number;
+  readonly movementBody?: ClientMovementBodySnapshot;
 }
 
 export type EntitySnapshotCategory =

@@ -150,10 +150,18 @@ HTTP polling is acceptable as an interim transport because the current gameplay 
 
 Do not redesign authority around polling. The logical protocol should be ready to move to push delivery when measurements or gameplay needs require it.
 
+Transport adapters should preserve three logical lanes:
+
+- reliable ordered lane: open/join/resume, chunk interest, chunk snapshots/deltas, interactions, inventory, errors, and world/session state
+- realtime superseding lane: movement command bundles and player/entity snapshots where newer data can replace older unprocessed data
+- bulk/binary lane: packed chunk, light, and similar large payloads; these may use binary framing or transferables, but remain logically reliable unless a later protocol explicitly says otherwise
+
+Movement correctness must not depend on HTTP request cadence. A polling response may carry movement commands and snapshots today, but the movement model is sequenced command records plus authoritative ack snapshots. WebSocket, WebTransport, or WebRTC adapters later should implement the same logical records rather than inventing a new gameplay protocol.
+
 A push-capable transport becomes justified when:
 
 - player/entity update frequency makes polling latency or overhead visible
 - block/entity updates need server-initiated delivery between client commands
 - reconnect/replay semantics are clear enough to preserve correctness
 
-Moving to WebSocket or another push transport should not change world ownership or message meaning.
+Moving to WebSocket or another push transport should not change world ownership or message meaning. WebSocket is the first likely push lane because it preserves reliable ordered delivery. WebRTC/WebTransport datagram lanes are later options only if measurements justify lossy realtime traffic, and they require explicit command bundling, sequence-gap handling, authoritative acknowledgements, periodic baselines, and reliable control/chunk lanes.

@@ -323,6 +323,17 @@ When revisions differ, the predictor should expect correction rather than trying
 
 `set_player_input` should evolve from "latest input intent" toward sequenced command records. Polling can carry these messages initially, but high-rate movement likely wants a push-capable transport later.
 
+Transport rule: movement commands are a logical sequenced stream, not an HTTP polling behavior. The host must enqueue command records by sequence and ack the last processed command in authoritative player snapshots. It must not interpret "one request" or "one poll" as "one movement step", and it must not keep a mutable latest-input slot as the authority model.
+
+Delivery rules:
+
+- command messages may be bundled, but each command keeps its own sequence, `commandQuantumUs`, `stepCount`, button/edge bits, yaw/pitch, and revision facts
+- duplicates and already-acked commands are ignored; sequence gaps remain queued/backlogged policy decisions, not permission to simulate stale input
+- host snapshots include the last processed command sequence and enough movement body state to restart replay
+- polling, local worker `postMessage`, WebSocket, WebTransport, and future WebRTC adapters all carry the same logical command/snapshot records
+- lossy realtime lanes, if added later, must resend recent unacked commands or bundles until acked and keep reliable ordered lanes for control, chunk, and interaction state
+- HTTP polling may be used for Movement2 validation, but it is not the network model
+
 Logical host-to-client snapshots should include:
 
 - server tick/time

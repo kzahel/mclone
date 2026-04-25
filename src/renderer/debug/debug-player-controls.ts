@@ -110,10 +110,13 @@ export function applyPredictedCameraInput(
   input: PlayerInputCommand,
   dtSeconds: number,
 ): DebugCameraState {
+  const fixedCommandSeconds = input.commandQuantumUs !== undefined && input.stepCount !== undefined
+    ? (input.commandQuantumUs * input.stepCount) / 1_000_000.0
+    : dtSeconds;
   const moveMagnitude = Math.hypot(input.moveX, input.moveY, input.moveZ);
   const moveScale = moveMagnitude > 1.0
-    ? (PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND * dtSeconds) / moveMagnitude
-    : PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND * dtSeconds;
+    ? (PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND * fixedCommandSeconds) / moveMagnitude
+    : PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND * fixedCommandSeconds;
 
   return {
     position: new Vec3(
@@ -150,6 +153,16 @@ export function buildPlayerInputCommand(
   frame: DebugInputFrame,
   dtSeconds: number,
   sequence: number,
+  options: Partial<Pick<
+    PlayerInputCommand,
+    | "clientTimeUs"
+    | "commandQuantumUs"
+    | "stepCount"
+    | "buttons"
+    | "edgeButtons"
+    | "physicsRevision"
+    | "collisionRevision"
+  >> = {},
 ): PlayerInputCommand {
   const yawDelta =
     frame.mouseDeltaX * MOUSE_SENS_DEG_PER_PIXEL
@@ -178,6 +191,7 @@ export function buildPlayerInputCommand(
     moveZ: move.z,
     yaw,
     pitch,
+    ...options,
   };
 }
 

@@ -70,9 +70,12 @@ import {
 } from "../protocol/world-messages";
 import {
   anchorPlayerStateToChunkView,
+  createPlayerCommandQueue,
   createInitialPlayerState,
+  enqueuePlayerInputCommand,
   PLAYER_TICK_INTERVAL_MS,
-  tickPlayerState,
+  tickPlayerStateWithCommandQueue,
+  type PlayerCommandQueue,
 } from "../session/player-loop";
 import {
   createWorldSaveMetadata,
@@ -276,12 +279,12 @@ export class GeneratedWorldHost implements WorldHost {
   private worldOpened: WorldOpenedMessage | undefined;
   private sessionState: ClientSessionState | undefined;
   private playerState: ClientPlayerState | undefined;
-  private playerInput: SetPlayerInputRequest["input"] | undefined;
+  private readonly playerCommandQueue: PlayerCommandQueue = createPlayerCommandQueue();
   private currentChunkView: SetChunkViewRequest | undefined;
   private pendingMessages: WorldHostMessage[] = [];
   private gameTime = 0;
   private lastWorldTickAtMs: number;
-  private lastPlayerTickAtMs = Date.now();
+  private lastPlayerTickAtMs: number;
   private playerAnchoredToChunkView = false;
   private readonly publishedChunkSnapshots = new Set<string>();
   private readonly chunkRevisions = new Map<string, number>();
@@ -305,6 +308,7 @@ export class GeneratedWorldHost implements WorldHost {
     });
     this.nowMs = options.nowMs ?? (() => Date.now());
     this.lastWorldTickAtMs = this.nowMs();
+    this.lastPlayerTickAtMs = this.nowMs();
     this.biomeSource = new OverworldBiomeSource(options.seed);
     this.generator = new NoiseBasedChunkGenerator(this.biomeSource, options.seed);
     this.resolveBlockState = createBlockStateResolver(options.airState);
@@ -572,8 +576,9 @@ export class GeneratedWorldHost implements WorldHost {
     this.ensureLocalSessionState();
     this.tickPlayerLoop();
     await this.tickWorldLoop();
-    this.playerInput = request.input;
-    this.updateSessionState();
+    if (enqueuePlayerInputCommand(this.playerCommandQueue, this.playerState!, request.input)) {
+      this.updateSessionState();
+    }
     return [this.createSessionStateMessage()];
   }
 
@@ -1924,9 +1929,9 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     for (let tickIndex = 0; tickIndex < dueTicks; tickIndex++) {
-      const nextPlayerState = tickPlayerState(
+      const nextPlayerState = tickPlayerStateWithCommandQueue(
         this.playerState,
-        this.playerInput,
+        this.playerCommandQueue,
         this.playerState.tick + 1,
       );
       if (nextPlayerState !== this.playerState) {

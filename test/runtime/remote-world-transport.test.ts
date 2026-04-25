@@ -490,7 +490,7 @@ describe("RemoteWorld transport", () => {
     service.forceTick();
     expect(await client.pollUpdates()).toBe(true);
 
-    expect(client.getPlayerState()).toEqual({
+    expect(client.getPlayerState()).toMatchObject({
       playerId: expect.any(String),
       position: {
         x: expect.any(Number),
@@ -504,6 +504,19 @@ describe("RemoteWorld transport", () => {
       acknowledgedInputSequence: 1,
       tick: 1,
       revision: expect.any(Number),
+      movementBody: {
+        position: {
+          x: expect.any(Number),
+          y: expect.any(Number),
+          z: expect.any(Number),
+        },
+        velocity: {
+          x: expect.any(Number),
+          y: expect.any(Number),
+          z: expect.any(Number),
+        },
+        lastProcessedCommandSequence: 1,
+      },
     });
     expect(client.getPlayerState()!.position.x).toBeGreaterThan(initialPlayerState!.position.x);
     expect(client.getPlayerState()!.revision).toBeGreaterThan(initialPlayerState!.revision);

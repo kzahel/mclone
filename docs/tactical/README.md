@@ -132,10 +132,12 @@ The arc should keep three concerns separate:
 |---|---|---|---|
 | [`Movement0-shared-movement-body-and-collision.md`](Movement0-shared-movement-body-and-collision.md) | movement body, fixed-step core, full-block collision, step-up/grounding, vanilla source review | unit | **done** - first shared movement core; no prediction or protocol migration yet |
 | [`Movement1-command-stream-and-local-prediction.md`](Movement1-command-stream-and-local-prediction.md) | sequenced commands, command quanta, ring buffer predictor, replay tests | unit + runtime | **done** - deterministic command timeline and local prediction |
-| `Movement2-authoritative-host-command-integration.md` | host command queue, ack snapshots, `set_player_input` evolution, processing budgets | runtime + browser | **next** - sketch migration from simple player loop to command queue authority |
-| `Movement3-interpolation-and-correction-smoothing.md` | local correction offset, remote interpolation buffers, latency/jitter debug controls | unit + browser visual | sketch presentation smoothing without mutating simulation truth |
+| [`Movement2-authoritative-host-command-integration.md`](Movement2-authoritative-host-command-integration.md) | host command queue, ack snapshots, `set_player_input` command records, processing budgets | runtime + browser | **done** - sequenced command stream authority over current local worker/HTTP adapters without making transport cadence the movement model |
+| `Movement3-interpolation-and-correction-smoothing.md` | local correction offset, remote interpolation buffers, latency/jitter debug controls | unit + browser visual | **next** - prove command/replay behavior under latency, jitter, and loss before any push/lossy transport work |
 | `Movement4-richer-collision-and-world-interaction.md` | non-full block shapes, crouch shape, liquid hooks, collision revisions | unit + browser | sketch expanded collision after the fixed-step core is stable |
 | `Movement5-npc-locomotion-bridge.md` | low-rate AI intent feeding movement body, entity activity tiers, nearby high-rate body stepping | unit + runtime | sketch NPCs sharing the movement core without inheriting player command rate |
+
+`Movement2` must not bake in HTTP polling, latest-input semantics, or one-request-equals-one-step behavior. Its implementation target is a logical sequenced movement command stream plus authoritative ack snapshots. Local worker `postMessage` and remote HTTP are only the current transport adapters used to validate that logical model. Push transports belong to later runtime slices unless measurement proves polling is the bottleneck.
 
 ## Renderer oracle approach
 

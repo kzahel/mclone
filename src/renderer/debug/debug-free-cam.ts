@@ -1,7 +1,13 @@
 // Debug tooling — see tactical 40. Throwaway when real Player/Input lands.
 
 import { SectionPos } from "../../core/section-pos";
+import { MovementCommandClock } from "../../runtime/movement";
 import type { PlayerInputCommand, SetChunkViewRequest, WorldPerformanceSnapshot } from "../../runtime/protocol/world-messages";
+import {
+  PLAYER_COLLISION_REVISION,
+  PLAYER_COMMAND_QUANTUM_US,
+  PLAYER_MOVEMENT_PHYSICS_REVISION,
+} from "../../runtime/session/player-loop";
 import { deleteIndexedDbWorldStorage } from "../../runtime/storage/indexeddb-world-storage";
 import { Vec3 } from "../../world/phys/vec3";
 import {
@@ -409,9 +415,14 @@ async function boot(): Promise<void> {
   let totalFrameCount = 0;
   let nextInputSequence = 1;
   let lastInputCommand: PlayerInputCommand | undefined;
-  let queuedPlayerInput: PlayerInputCommand | undefined;
+  const queuedPlayerInputs: PlayerInputCommand[] = [];
   let playerInputSendInFlight = false;
   let lastChunkViewRequest: SetChunkViewRequest | undefined;
+  const playerCommandClock = new MovementCommandClock({
+    commandQuantumUs: PLAYER_COMMAND_QUANTUM_US,
+    maxStepCountPerCommand: 4,
+    maxCatchupStepCount: 24,
+  });
 
   async function flushPlayerInputQueue(): Promise<void> {
     if (playerInputSendInFlight) {
@@ -420,9 +431,8 @@ async function boot(): Promise<void> {
 
     playerInputSendInFlight = true;
     try {
-      while (queuedPlayerInput !== undefined) {
-        const inputCommand = queuedPlayerInput;
-        queuedPlayerInput = undefined;
+      while (queuedPlayerInputs.length > 0) {
+        const inputCommand = queuedPlayerInputs.shift()!;
         await scene.worldClient.setPlayerInput({
           type: "set_player_input",
           input: inputCommand,
@@ -436,20 +446,30 @@ async function boot(): Promise<void> {
       console.error(error);
     } finally {
       playerInputSendInFlight = false;
-      if (queuedPlayerInput !== undefined) {
+      if (queuedPlayerInputs.length > 0) {
         void flushPlayerInputQueue();
       }
     }
   }
 
+  function shouldQueuePlayerInput(inputCommand: PlayerInputCommand): boolean {
+    if (!isSamePlayerInput(lastInputCommand, inputCommand)) {
+      return true;
+    }
+
+    return Math.hypot(inputCommand.moveX, inputCommand.moveY, inputCommand.moveZ) > 0.0
+      || (inputCommand.buttons ?? 0) !== 0
+      || (inputCommand.edgeButtons ?? 0) !== 0;
+  }
+
   function queuePlayerInput(inputCommand: PlayerInputCommand): void {
-    if (isSamePlayerInput(lastInputCommand, inputCommand)) {
+    if (!shouldQueuePlayerInput(inputCommand)) {
       return;
     }
 
     lastInputCommand = inputCommand;
     nextInputSequence++;
-    queuedPlayerInput = inputCommand;
+    queuedPlayerInputs.push(inputCommand);
     void flushPlayerInputQueue();
   }
 
@@ -581,11 +601,25 @@ async function boot(): Promise<void> {
       }
       const baseYaw = preserveInitialCamera ? (lastInputCommand?.yaw ?? playerState.rotation.yaw) : camera.yRot;
       const basePitch = preserveInitialCamera ? (lastInputCommand?.pitch ?? playerState.rotation.pitch) : camera.xRot;
-      const playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence);
+      const commandStepCounts = playerCommandClock.consumeElapsedUs(Math.max(0, Math.round(dtSeconds * 1_000_000.0)));
+      const predictedCommandSeconds = commandStepCounts.reduce(
+        (sum, stepCount) => sum + ((stepCount * PLAYER_COMMAND_QUANTUM_US) / 1_000_000.0),
+        0.0,
+      );
+      const sampledPlayerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence);
       if (!preserveInitialCamera) {
-        camera = applyPredictedCameraInput(camera, playerInput, dtSeconds);
+        camera = applyPredictedCameraInput(camera, sampledPlayerInput, predictedCommandSeconds);
       }
-      queuePlayerInput(playerInput);
+      for (const stepCount of commandStepCounts) {
+        const playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence, {
+          clientTimeUs: Math.max(0, Math.round(now * 1_000.0)),
+          commandQuantumUs: PLAYER_COMMAND_QUANTUM_US,
+          stepCount,
+          physicsRevision: PLAYER_MOVEMENT_PHYSICS_REVISION,
+          collisionRevision: PLAYER_COLLISION_REVISION,
+        });
+        queuePlayerInput(playerInput);
+      }
 
       const chunkViewRequest = preserveInitialCamera
         ? createChunkViewRequestForPlayerState(playerState, scene.viewDistance)

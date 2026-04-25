@@ -43,9 +43,12 @@ import {
 } from "../protocol/world-messages";
 import {
   anchorPlayerStateToChunkView,
+  createPlayerCommandQueue,
   createInitialPlayerState,
+  enqueuePlayerInputCommand,
   PLAYER_TICK_INTERVAL_MS,
-  tickPlayerState,
+  tickPlayerStateWithCommandQueue,
+  type PlayerCommandQueue,
 } from "../session/player-loop";
 import { FileWorldStorage } from "../storage/file-world-storage";
 
@@ -92,7 +95,7 @@ type SessionRecord = {
   visibleChunks: Set<string>;
   revision: number;
   playerState: ClientPlayerState;
-  playerInput: SetPlayerInputRequest["input"] | undefined;
+  playerCommandQueue: PlayerCommandQueue;
   pendingMessages: WorldHostMessage[];
   playerAnchoredToChunkView: boolean;
 };
@@ -521,7 +524,7 @@ export class GeneratedWorldRemoteService {
       visibleChunks: new Set<string>(),
       revision: 0,
       playerState: createInitialPlayerState(sessionId),
-      playerInput: undefined,
+      playerCommandQueue: createPlayerCommandQueue(),
       pendingMessages: [],
       playerAnchoredToChunkView: false,
     };
@@ -631,8 +634,9 @@ export class GeneratedWorldRemoteService {
       throw new GeneratedWorldRemoteServiceError(`Unknown world ${session.worldSaveId}`, "unknown_session", 404);
     }
 
-    session.playerInput = request.input;
-    session.revision++;
+    if (enqueuePlayerInputCommand(session.playerCommandQueue, session.playerState, request.input)) {
+      session.revision++;
+    }
     return {
       protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
       messages: serializeWorldHostMessages([
@@ -671,7 +675,11 @@ export class GeneratedWorldRemoteService {
     for (let tickIndex = 0; tickIndex < tickCount; tickIndex++) {
       this.currentTick++;
       for (const session of this.sessions.values()) {
-        const nextPlayerState = tickPlayerState(session.playerState, session.playerInput, this.currentTick);
+        const nextPlayerState = tickPlayerStateWithCommandQueue(
+          session.playerState,
+          session.playerCommandQueue,
+          this.currentTick,
+        );
         if (nextPlayerState !== session.playerState) {
           session.playerState = nextPlayerState;
           enqueuePlayerStateMessage(session);
