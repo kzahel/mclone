@@ -182,6 +182,12 @@ interface EnsureLightingOptions {
   readonly onInitialLightReady?: (chunk: GeneratedLevelChunk) => Promise<void>;
 }
 
+interface PublishReadyChunksOptions {
+  readonly targetMessages?: WorldHostMessage[];
+  readonly awaitStorage?: boolean;
+  readonly onChunkPublished?: (publishedInPass: number) => void;
+}
+
 type StoredChunkPreloadResult = "loaded" | "already_loaded" | "missing";
 
 type GeneratedLevelChunk = LevelChunk;
@@ -460,7 +466,10 @@ export class GeneratedWorldHost implements WorldHost {
       });
     }
 
-    await this.publishReadyChunksForCurrentView(this.chunkViewJobRevision, undefined, messages, true);
+    await this.publishReadyChunksForCurrentView(this.chunkViewJobRevision, undefined, {
+      targetMessages: messages,
+      awaitStorage: true,
+    });
 
     return messages;
   }
@@ -809,7 +818,11 @@ export class GeneratedWorldHost implements WorldHost {
         onInitialLightReady: async () => {
           lightingDone++;
           this.enqueueWorldProgress("Computing light", lightingDone, lightingChunks.length, chunkViewJobRevision);
-          publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep);
+          publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep, {
+            onChunkPublished: (publishedInPass) => {
+              this.enqueueWorldProgress("Publishing chunks", publishDone + publishedInPass, publishTotal, chunkViewJobRevision);
+            },
+          });
           this.enqueueWorldProgress("Publishing chunks", publishDone, publishTotal, chunkViewJobRevision);
         },
       });
@@ -827,7 +840,11 @@ export class GeneratedWorldHost implements WorldHost {
         this.markChunkFullWithoutLighting(chunk);
       }
     }
-    publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep);
+    publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep, {
+      onChunkPublished: (publishedInPass) => {
+        this.enqueueWorldProgress("Publishing chunks", publishDone + publishedInPass, publishTotal, chunkViewJobRevision);
+      },
+    });
     this.enqueueWorldProgress("Publishing chunks", publishDone, publishTotal, chunkViewJobRevision);
     this.enqueueWorldProgress("Computing light", lightingChunks.length, lightingChunks.length, chunkViewJobRevision);
     this.enqueueWorldProgress("Publishing chunks", publishTotal, publishTotal, chunkViewJobRevision);
@@ -987,8 +1004,7 @@ export class GeneratedWorldHost implements WorldHost {
   private async publishReadyChunksForCurrentView(
     chunkViewJobRevision: number,
     yieldStep?: () => Promise<void>,
-    targetMessages?: WorldHostMessage[],
-    awaitStorage = false,
+    options: PublishReadyChunksOptions = {},
   ): Promise<number> {
     if (this.currentChunkView === undefined) {
       return 0;
@@ -1004,8 +1020,15 @@ export class GeneratedWorldHost implements WorldHost {
           continue;
         }
 
-        if (await this.publishChunkSnapshotIfReady(chunk, chunkViewJobRevision, undefined, targetMessages, awaitStorage)) {
+        if (await this.publishChunkSnapshotIfReady(
+          chunk,
+          chunkViewJobRevision,
+          undefined,
+          options.targetMessages,
+          options.awaitStorage ?? false,
+        )) {
           published++;
+          options.onChunkPublished?.(published);
         }
       }
     }
