@@ -13,6 +13,7 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `protocol.md`: the logical host/client message model and transport-codec boundaries
 - `loading-persistence.md`: world creation/open/join flow, chunk lifecycle, and save/eviction policy
 - `authoritative-host-scheduling.md`: how player/session authority stays responsive while chunk jobs run
+- `player-movement-netcode.md`: high-rate player movement, prediction, reconciliation, interpolation, and lower-rate NPC intent
 - `structures.md`: vanilla overworld structure starts, references, placement, and implementation order
 - `worker-ownership.md`: concrete worker/cache ownership and the no-hangs baseline for UI/GPU and host ticks
 - this document: how the engine should be split across simulation, rendering, storage, workers, and multiplayer hosts
