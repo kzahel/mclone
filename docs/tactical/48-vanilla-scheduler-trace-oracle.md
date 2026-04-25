@@ -110,6 +110,7 @@ Minimum required chunk window:
 - center `(0, 0)`
 - its 3x3 `FEATURES` stability neighborhood
 - any extra chunks needed to explain why those 9 chunks were dependency-ready, especially the `FEATURES` range-8 input window
+- for that input window, record the requested dependency status per offset. This must prove the vanilla mixed-status rule: center/radius-1 at `LIQUID_CARVERS`, outer radius 2-8 at `STRUCTURE_STARTS`, not a flattened terrain window.
 
 ## Implementation plan
 
@@ -128,6 +129,7 @@ Minimum required chunk window:
    - Chunk `(0, 0)`.
    - Small load radius sufficient to force `FULL`/send eligibility for the center.
    - Record all status events needed to order the center 3x3 `FEATURES` completions.
+   - Record enough dependency-status events to catch accidental promotion of metadata-only outer-ring chunks to terrain statuses.
 
 4. **Add a current-host trace**
    - Emit the analogous `mclone` status events from `GeneratedWorldHost` / `GeneratedRenderLevel`.

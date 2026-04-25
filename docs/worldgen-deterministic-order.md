@@ -33,6 +33,7 @@ This is not a status dashboard and not a worker topology doc. It answers:
 |---|---|
 | Status chain and dependency ranges | [`ChunkStatus.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java) |
 | Status scheduling and range futures | [`ChunkMap.java`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkTaskPriorityQueueSorter.java`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkTaskPriorityQueueSorter.java), [`ChunkTaskPriorityQueue.java`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkTaskPriorityQueue.java), [`ProcessorMailbox.java`](../reference/minecraft-1.17.1/src/net/minecraft/util/thread/ProcessorMailbox.java) |
+| Status futures and chunk data shape | [`ChunkHolder.java`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java), [`ChunkAccess.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkAccess.java), [`ProtoChunk.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ProtoChunk.java), [`LevelChunk.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/LevelChunk.java), [`ImposterProtoChunk.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ImposterProtoChunk.java) |
 | Player tickets and view-distance tracking | [`DistanceManager.java`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/DistanceManager.java), [`TicketType.java`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/TicketType.java), [`ChunkMap.java`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java) |
 | Generation tasks | [`ChunkGenerator.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java) |
 | Worldgen write cutoff | [`WorldGenRegion.java`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/WorldGenRegion.java) |
@@ -91,6 +92,22 @@ That mapping is encoded in `STATUS_BY_RANGE` ([`ChunkStatus.java:164`](../refere
 
 Important consequence: formulas such as "visible R, decorate R+1, terrain R+9" are at best shorthand. The faithful model is not a single flattened radius; it is recursive status scheduling through `getChunkRangeFuture(...)`, `getDependencyStatus(...)`, each status's parent, and `STATUS_BY_RANGE`.
 
+## Status Futures And Partial Chunks
+
+Vanilla does not compute a second "authority terrain radius" and eagerly materialize every chunk inside it. A `ChunkHolder` owns one future slot per `ChunkStatus`; `getOrScheduleFuture(status, chunkMap)` either returns an existing future or asks `ChunkMap.schedule(...)` to load/generate exactly that requested status if the current ticket level allows it ([`ChunkHolder.java`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java)). `ChunkMap.schedule(...)` loads `EMPTY`, recursively asks for the requested status's parent, and then either runs the requested status's loading task when the loaded chunk already satisfies it or calls `scheduleChunkGeneration(...)` for the missing status ([`ChunkMap.java:450`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:460`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:467`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java)).
+
+`scheduleChunkGeneration(...)` resolves the target status's dependency square as a list of `ChunkAccess` objects whose statuses may differ by offset. The dependency function is the `getDependencyStatus(...)` rule above, not "all chunks to the same terrain status" ([`ChunkMap.java:512`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:555`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java)). The status task receives that mixed-status list and creates a `WorldGenRegion` over it when needed ([`ChunkStatus.java:57`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:127`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`WorldGenRegion.java:69`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/WorldGenRegion.java)).
+
+The chunk object itself is status-shaped. `ProtoChunk` starts at `EMPTY` with an empty section array, but it can already carry chunk metadata: biome container, heightmaps, structure starts, structure references, carving masks, post-processing lists, proto ticks, entities, block entities, and generated light positions ([`ProtoChunk.java:42`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ProtoChunk.java), [`ProtoChunk.java:87`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ProtoChunk.java), [`ProtoChunk.java:321`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ProtoChunk.java), [`ProtoChunk.java:455`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ProtoChunk.java)). A `LevelChunk` is the `FULL` representation and copies the proto chunk's sections plus metadata at conversion time ([`LevelChunk.java:154`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/LevelChunk.java), [`LevelChunk.java:797`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/LevelChunk.java)). `ImposterProtoChunk` wraps an already-full chunk when the status pipeline needs a `ProtoChunk`-shaped view without mutating that full chunk ([`ImposterProtoChunk.java:24`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ImposterProtoChunk.java)).
+
+Concrete examples:
+
+- `STRUCTURE_REFERENCES` has range `8`, but the center needs only `STRUCTURE_STARTS` through the parent edge and the full `[-8,+8]` input square supplies structure-start metadata, not terrain blocks.
+- `NOISE` has range `8`, but only the center advances from `BIOMES` to `NOISE`; neighbors in the range are there for already-recorded structure metadata that can affect density through `Beardifier`.
+- `FEATURES` has range `8`, but `getDependencyStatus(FEATURES, r)` means the center and Chebyshev radius `1` are `LIQUID_CARVERS`, while radii `2..8` are only `STRUCTURE_STARTS`. Those outer chunks are metadata inputs, not carved terrain inputs.
+
+For `mclone`, this is a parity requirement. Do not replace vanilla's mixed-status dependency futures with a flattened "hidden authority terrain window." The runtime needs host-owned chunk records that can represent partial `ProtoChunk`-like states and metadata-only statuses separately from materialized block sections. Browser or Node scheduling can differ in mechanics, but status requests, dependency statuses, and the data each status is allowed to require must follow the vanilla mechanism.
+
 ## Carvers
 
 Classic carvers are target-local status tasks. `CARVERS` and `LIQUID_CARVERS` have dependency range `0`, so the status scheduler does not wait for a neighbor status ring before running them ([`ChunkStatus.java:95`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:103`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)).
@@ -116,6 +133,8 @@ Detailed structure architecture and implementation order live in [`structures.md
 ## Ordinary Decoration And Finality
 
 `FEATURES` has parent `LIQUID_CARVERS` and dependency range `8` ([`ChunkStatus.java:111`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:113`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:114`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)). The task creates a `WorldGenRegion` with `writeRadiusCutoff = 1`, then calls `applyBiomeDecoration(...)` ([`ChunkStatus.java:127`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:128`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)).
+
+The range `8` is not a terrain-read guarantee. As described above, the `FEATURES` input list contains mixed statuses: center plus radius `1` at `LIQUID_CARVERS`, outer radii `2..8` at `STRUCTURE_STARTS`. `WorldGenRegion.getChunk(x, z, requestedStatus, required)` enforces the requested status if callers ask for one, and ordinary `getBlockState(...)` reads through the chunk object actually present in the cache ([`WorldGenRegion.java:105`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/WorldGenRegion.java), [`WorldGenRegion.java:114`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/WorldGenRegion.java), [`WorldGenRegion.java:144`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/WorldGenRegion.java)).
 
 `WorldGenRegion.ensureCanWrite(...)` allows writes only when both the X and Z section distances from the region center are `<= writeRadiusCutoff` ([`WorldGenRegion.java:238`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/WorldGenRegion.java), [`WorldGenRegion.java:241`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/WorldGenRegion.java), [`WorldGenRegion.java:243`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/WorldGenRegion.java)). For `FEATURES`, that means the center chunk plus its immediate 8 neighbors.
 
@@ -208,6 +227,14 @@ status state per chunk:
   HEIGHTMAPS
   FULL
 
+data state per chunk:
+  ProtoChunk-like partial record with status, metadata, optional sections, masks, ticks, and light positions
+  LevelChunk/full snapshot only after the FULL conversion path
+
+status input examples:
+  FEATURES(C): C and radius 1 at LIQUID_CARVERS; radii 2..8 at STRUCTURE_STARTS
+  LIGHT(C): C and radius 1 at FEATURES
+
 derived readiness:
   decoration_stable(C) = FEATURES complete for C and its 8 neighbors
   initial_light_ready(C) = LIGHT complete from decoration_stable input
@@ -217,10 +244,12 @@ derived readiness:
 Implementation rules:
 
 1. Schedule statuses through parent/range dependencies, not through a flattened radius shortcut.
-2. Treat `FEATURES` side effects as ordered, non-commutative writes.
-3. Keep ordinary `FEATURES` writes within the center 3x3 region.
-4. Run carvers as target-local deterministic passes with the vanilla `[-8,+8]` start scan.
-5. Represent structures as starts, references, optional noise influence, and clipped per-chunk placement during `FEATURES`.
-6. Compute final initial light only after the 3x3 `FEATURES` gate.
-7. Publish normal chunk snapshots only after the 3x3 `FULL` gate.
-8. Let host scheduling and worker topology diverge from vanilla only when these ordering facts remain observable.
+2. Keep partial `ProtoChunk`-like state first-class; metadata-only chunks must not be forced to `LIQUID_CARVERS` or `FULL` just because they are in a dependency square.
+3. Build `WorldGenRegion`-style inputs from mixed-status chunks exactly as `getDependencyStatus(...)` selects them.
+4. Treat `FEATURES` side effects as ordered, non-commutative writes.
+5. Keep ordinary `FEATURES` writes within the center 3x3 region.
+6. Run carvers as target-local deterministic passes with the vanilla `[-8,+8]` start scan.
+7. Represent structures as starts, references, optional noise influence, and clipped per-chunk placement during `FEATURES`.
+8. Compute final initial light only after the 3x3 `FEATURES` gate.
+9. Publish normal chunk snapshots only after the 3x3 `FULL` gate.
+10. Let host scheduling and worker topology diverge from vanilla only when these ordering facts remain observable.

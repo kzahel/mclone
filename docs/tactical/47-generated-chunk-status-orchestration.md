@@ -4,7 +4,9 @@ Replace the current generated/decorated/published lifecycle with an explicit van
 
 This tactical intentionally precedes [`46-full-decorated-spawn-chunk-parity.md`](46-full-decorated-spawn-chunk-parity.md). Tactical 46 should run on top of the `FEATURES`, initial lighting, and publication gates made explicit here.
 
-Status: implemented. Keep this document as the implementation reference for the explicit generated chunk status model.
+Status: implemented for explicit status names, finality gates, and publish/light checks. Follow-up required: the current runtime still uses a flattened hidden authority terrain window for some dependency preparation. That must be replaced with vanilla-shaped status futures and partial `ProtoChunk`-like records before treating the scheduler as parity-complete.
+
+Post-implementation finding, 2026-04-25: [`worldgen-deterministic-order.md`](../worldgen-deterministic-order.md) now documents the missing metadata-only path. In vanilla, a `FEATURES` range-8 dependency list is not all `LIQUID_CARVERS`; the center plus radius `1` are `LIQUID_CARVERS`, while radii `2..8` are only `STRUCTURE_STARTS`. The current `GeneratedRenderLevel.ensureDecorationTerrainWindow(...)` shape is therefore an over-generation shortcut and should be replaced, not optimized in place.
 
 ## Source files (read before writing)
 
@@ -30,6 +32,7 @@ The current generated-world path has useful pieces, but the lifecycle is still n
 - `GeneratedWorldHost` publishes chunks after local decoration plus accepted light, but it does not have an explicit `3x3 FULL` publication gate.
 - Initial lighting requests require 3x3 light-input chunks, but the host does not yet express the stronger rule that those inputs correspond to completed `FEATURES` for the whole 3x3 neighborhood.
 - Structure statuses do not exist yet, so future structures would have to retrofit the pipeline while also porting structure-specific logic.
+- The post-47 implementation added status labels but still flattens part of the dependency graph into an eager terrain authority radius. Vanilla schedules mixed-status futures and permits metadata-only chunks in the outer dependency rings.
 
 The practical risk is that tactical 46 can burn down mismatches against an ordering model that is still too weak. We need the order model first.
 
@@ -45,6 +48,8 @@ In scope:
 - make initial lighting requests require `decoration_stable(C)`
 - make publishability require the documented `3x3 FULL` gate, or explicitly encode and test a temporary divergence if full vanilla gating is too large for the current runtime path
 - keep hidden authority chunks resident separately from chunks sent to clients
+- replace flattened authority terrain generation with status requests whose dependency inputs match `ChunkMap.getDependencyStatus(...)`
+- represent metadata-only `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES` inputs without materializing block sections
 - keep host-owned deterministic status advancement; workers may compute results but must not directly mutate neighboring authoritative chunks
 - add tests that fail if light or publication happens from weaker inputs
 
@@ -103,7 +108,8 @@ If we temporarily decide not to require `3x3 FULL` for normal browser publicatio
 
 3. **Replace `decoratedChunks` with `FEATURES` status**
    - `decorateChunk(...)` / cooperative decoration should become `ensureStatus(chunk, FEATURES)` or equivalent.
-   - Preserve `GeneratedDecorationRegion`'s read radius `8` and write cutoff `1`.
+   - Preserve `GeneratedDecorationRegion`'s range-8 input cache and write cutoff `1`.
+   - Do not treat the whole range-8 input cache as terrain. For `FEATURES`, vanilla only requires the center and immediate neighbors at `LIQUID_CARVERS`; the outer ring is `STRUCTURE_STARTS` metadata.
    - Prevent recursive decoration caused by reads through `getChunk(...)`.
 
 4. **Add dependency queries**
@@ -139,7 +145,8 @@ If we temporarily decide not to require `3x3 FULL` for normal browser publicatio
 
 Unit/runtime tests should cover the order, not just final pixels:
 
-- A chunk cannot reach `FEATURES` unless its `FEATURES` dependency terrain window exists.
+- A chunk can reach `FEATURES` with the vanilla mixed-status input window: center/radius-1 at `LIQUID_CARVERS`, outer radius 2-8 at `STRUCTURE_STARTS`.
+- A `STRUCTURE_STARTS`-only dependency chunk is not silently promoted to terrain just because it sits in a `FEATURES` dependency square.
 - A write outside `FEATURES_WRITE_RADIUS_CUTOFF` is rejected and does not mutate the far chunk.
 - A chunk cannot request or accept initial light until its 3x3 `FEATURES` neighborhood is complete.
 - A chunk with local `FEATURES` but incomplete neighboring `FEATURES` is not treated as `LIGHT`-eligible.
@@ -176,6 +183,7 @@ Browser visual probes are not the primary validation for this slice. Run the sma
 
 - generated chunks have explicit status records instead of only `decoratedChunks`
 - `STRUCTURE_STARTS` and `STRUCTURE_REFERENCES` exist as no-op placeholders in the order
+- status records can represent metadata-only partial chunks separately from materialized block terrain
 - `FEATURES` completion, 3x3 `FEATURES` stability, initial `LIGHT`, `FULL`, and publishability are separate, testable states
 - lighting cannot consume weaker-than-3x3-`FEATURES` inputs as final initial light
 - publication cannot accidentally bypass the chosen `FULL`/neighbor policy
