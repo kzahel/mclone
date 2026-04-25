@@ -197,7 +197,7 @@ async function readPixel(
 }
 
 async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expectedLoadedChunkCount: number): Promise<LevelRenderFrame> {
-  if (await scene.worldClient.setChunkView({
+  if (await scene.clientRuntime.setChunkInterest({
     type: "set_chunk_view",
     centerChunkX: SectionPos.posToSectionCoord(camera.position.x),
     centerChunkZ: SectionPos.posToSectionCoord(camera.position.z),
@@ -276,9 +276,9 @@ async function boot(): Promise<BootResult> {
     return { ok: false, reason: "camera-driven level renderer produced no solid drawables for the generated terrain scene" };
   }
 
-  const initialPlayerState = scene.worldClient.getPlayerState();
+  const initialPlayerState = scene.clientRuntime.publishPresentationState().localPlayerState;
   if (initialPlayerState !== undefined) {
-    await scene.worldClient.setPlayerInput({
+    await scene.clientRuntime.sendPlayerCommand({
       type: "set_player_input",
       input: {
         sequence: 1,
@@ -291,10 +291,10 @@ async function boot(): Promise<BootResult> {
     });
     for (let attempt = 0; attempt < 5; attempt++) {
       await sleep(60);
-      if (await scene.worldClient.pollUpdates()) {
+      if (await scene.clientRuntime.drainTransportUpdates()) {
         applyRenderWorldDirtySections(scene);
       }
-      const updatedPlayerState = scene.worldClient.getPlayerState();
+      const updatedPlayerState = scene.clientRuntime.publishPresentationState().localPlayerState;
       if (updatedPlayerState !== undefined && updatedPlayerState.revision > initialPlayerState.revision) {
         break;
       }
@@ -353,8 +353,9 @@ async function boot(): Promise<BootResult> {
   const adapterInfo = [info.vendor, info.architecture, info.device, info.description]
     .filter(Boolean)
     .join(" / ") || "unknown";
-  const sessionState = scene.worldClient.getSessionState();
-  const playerState = scene.worldClient.getPlayerState();
+  const presentation = scene.clientRuntime.publishPresentationState();
+  const sessionState = presentation.sessionState;
+  const playerState = presentation.localPlayerState;
 
   return {
     ok: true,

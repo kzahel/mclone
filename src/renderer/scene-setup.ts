@@ -1,7 +1,7 @@
 import { ResourceLocation } from "../core/resource-location";
 import { SectionPos } from "../core/section-pos";
+import { type ClientRuntime, WorldClientRuntimeFacade } from "../runtime/client/client-runtime";
 import type { OpenWorldPreset, WorldEngineConfig, WorldProgressMessage, WorldStorageMode } from "../runtime/protocol/world-messages";
-import type { WorldClient } from "../runtime/protocol/world-client";
 import type { WorldSaveMetadata } from "../runtime/storage/world-storage";
 import { RemoteWorldClient, RemoteWorldTransport } from "../runtime/transport/remote-world-transport";
 import { TransportWorldClient } from "../runtime/transport/local-world-transport";
@@ -75,7 +75,7 @@ export interface RendererScene {
   readonly ctx: GPUCanvasContext;
   readonly saveMetadata: WorldSaveMetadata;
   readonly atlas: TextureAtlas;
-  readonly worldClient: WorldClient;
+  readonly clientRuntime: ClientRuntime;
   readonly renderWorldUpdateSink: RenderWorldWorkerUpdateSink;
   readonly worldBounds: RenderWorldBounds;
   readonly levelRenderer: LevelRenderer;
@@ -326,7 +326,7 @@ export async function waitForLoadedChunkRing(
   const pollIntervalMs = options.pollIntervalMs ?? 50;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await sleep(pollIntervalMs);
-    if (await scene.worldClient.pollUpdates()) {
+    if (await scene.clientRuntime.drainTransportUpdates()) {
       applyRenderWorldDirtySections(scene);
     }
     const loadedChunkCount = getSceneLoadedChunkCount(scene);
@@ -360,7 +360,7 @@ export async function renderSceneUntilSettled(
   let stablePasses = 0;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (await scene.worldClient.pollUpdates()) {
+    if (await scene.clientRuntime.drainTransportUpdates()) {
       applyRenderWorldDirtySections(scene);
     }
 
@@ -504,15 +504,16 @@ export async function initializeRendererScene(
   const biomeSource = new OverworldBiomeSource(options.seed);
   const blockStateResolver = createBlockStateResolver(generatedBlocks.airState);
   const worldClient = createWorldClient(options, generatedBlocks.airState, biomeSource, blockStateResolver, generatedBlocks.blockStateIds);
+  const clientRuntime = new WorldClientRuntimeFacade(worldClient);
   const storageMode = options.worldTransport === "remote" ? undefined : options.worldStorageMode;
-  const worldOpened = await worldClient.openWorld({
+  const worldOpened = await clientRuntime.openWorld({
     type: "open_world",
     seed: options.seed,
     preset: options.preset ?? "browser_smoke",
     config: options.engineConfig,
     ...(storageMode === undefined || storageMode === "default" ? {} : { storageMode }),
   });
-  const compatibilityLevel = worldClient.getLevel();
+  const compatibilityLevel = clientRuntime.getClientWorld().getRenderView().getRenderLevel();
 
   options.onProgress?.({ stage: "Initializing render worker", fraction: 0.5 });
   const renderWorldWorker = new RenderWorldWorkerClient(
@@ -527,7 +528,7 @@ export async function initializeRendererScene(
   });
   options.onProgress?.({ stage: "Preparing renderer", fraction: 0.92 });
   const renderWorldUpdateSink = new RenderWorldWorkerUpdateSink(renderWorldWorker);
-  worldClient.setRenderWorldUpdateSink(renderWorldUpdateSink);
+  clientRuntime.setRenderWorldUpdateSink(renderWorldUpdateSink);
 
   const levelRenderer = new LevelRenderer();
   const blockRenderer = new BlockRenderDispatcher(
@@ -580,7 +581,7 @@ export async function initializeRendererScene(
       ctx,
       saveMetadata: worldOpened.saveMetadata,
       atlas,
-      worldClient,
+      clientRuntime,
       renderWorldUpdateSink,
       worldBounds: {
         minBuildHeight: compatibilityLevel.getMinBuildHeight(),

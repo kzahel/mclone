@@ -2,6 +2,10 @@
 
 Standing after [`ClientRuntime1-client-world-replica-hydration.md`](ClientRuntime1-client-world-replica-hydration.md), which moved protocol message application behind `ClientWorld` hydration APIs while keeping transports as carriers.
 
+Status: **done**.
+
+Landed result: browser scene setup now owns a `ClientRuntime`, uses it for world open, chunk-interest, player commands, update draining, and presentation-state reads, while render-world update sink wiring stays behind the runtime facade.
+
 ## Goal
 
 Make the browser UI/render path consume compact presentation surfaces from `ClientRuntime` and `ClientWorld` instead of reaching through transport compatibility methods or owning raw replica mutation.
@@ -59,11 +63,18 @@ Run a screenshot probe only if the implementation changes camera framing, visibl
 
 ## Done When
 
-- Browser scene setup owns a `ClientRuntime` and uses it for host/client lifecycle operations.
-- Presentation state publication is the normal path for UI/debug state reads.
-- Render-world ingestion remains derived from `ClientWorld` hydration.
-- No transport class owns client replica mutation semantics.
-- Current remote and worker browser smoke paths still render and debug free-cam integration still passes.
+- [x] Browser scene setup owns a `ClientRuntime` and uses it for host/client lifecycle operations.
+- [x] Presentation state publication is the normal path for UI/debug state reads.
+- [x] Render-world ingestion remains derived from `ClientWorld` hydration.
+- [x] No transport class owns client replica mutation semantics.
+- [x] Current remote and worker browser smoke paths still render and debug free-cam integration still passes.
+
+## Validation Run
+
+- `pnpm typecheck`
+- `pnpm test:browser`
+- `pnpm test:browser:integration`
+- `git diff --check`
 
 ## Next Step
 

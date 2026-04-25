@@ -9,7 +9,7 @@ import type {
   WorldPerformanceSnapshot,
 } from "../protocol/world-messages";
 import type { WorldClient } from "../protocol/world-client";
-import { type ClientWorld, WorldClientBackedClientWorld } from "./client-world";
+import { type ClientWorld, type RenderWorldUpdateSink, WorldClientBackedClientWorld } from "./client-world";
 
 export interface ClientPresentationState {
   readonly sessionState?: ClientSessionState;
@@ -23,8 +23,13 @@ export interface ClientRuntime {
   setChunkInterest(request: SetChunkViewRequest): Promise<boolean>;
   sendPlayerCommand(request: SetPlayerInputRequest): Promise<boolean>;
   drainTransportUpdates(): Promise<boolean>;
+  setRenderWorldUpdateSink(sink: RenderWorldUpdateSink | undefined): void;
   getClientWorld(): ClientWorld;
   publishPresentationState(): ClientPresentationState;
+}
+
+interface RenderWorldUpdateSinkTarget {
+  setRenderWorldUpdateSink(sink: RenderWorldUpdateSink | undefined): void;
 }
 
 export class WorldClientRuntimeFacade implements ClientRuntime {
@@ -50,6 +55,15 @@ export class WorldClientRuntimeFacade implements ClientRuntime {
     return this.client.pollUpdates();
   }
 
+  public setRenderWorldUpdateSink(sink: RenderWorldUpdateSink | undefined): void {
+    if (isRenderWorldUpdateSinkTarget(this.client)) {
+      this.client.setRenderWorldUpdateSink(sink);
+      return;
+    }
+
+    throw new Error("WorldClientRuntimeFacade requires a render-world update sink target");
+  }
+
   public getClientWorld(): ClientWorld {
     return this.clientWorld;
   }
@@ -70,4 +84,8 @@ function getClientWorld(client: WorldClient): ClientWorld {
   }
 
   return new WorldClientBackedClientWorld(client);
+}
+
+function isRenderWorldUpdateSinkTarget(client: WorldClient): client is WorldClient & RenderWorldUpdateSinkTarget {
+  return "setRenderWorldUpdateSink" in client && typeof client.setRenderWorldUpdateSink === "function";
 }
