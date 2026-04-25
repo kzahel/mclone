@@ -43,7 +43,7 @@
         position: fixed;
         top: 8px;
         right: 8px;
-        width: min(280px, calc(100vw - 16px));
+        width: min(320px, calc(100vw - 16px));
         background: rgba(9, 12, 16, 0.82);
         border: 1px solid rgba(255, 255, 255, 0.18);
         border-radius: 6px;
@@ -78,7 +78,8 @@
         gap: 8px;
         align-items: center;
       }
-      .debug-config-row input[type="number"] {
+      .debug-config-row input[type="number"],
+      .debug-config-row input[type="text"] {
         width: 100%;
         box-sizing: border-box;
         border: 1px solid rgba(255, 255, 255, 0.22);
@@ -87,6 +88,39 @@
         color: #f4f7fb;
         padding: 5px 6px;
         font: inherit;
+      }
+      .debug-config-field {
+        display: grid;
+        gap: 6px;
+      }
+      .debug-config-field-title {
+        color: #e6edf3;
+      }
+      .debug-config-segmented {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2px;
+        padding: 2px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .debug-config-segmented input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .debug-config-segmented label {
+        display: grid;
+        min-height: 28px;
+        place-items: center;
+        border-radius: 2px;
+        color: #dce7f5;
+        cursor: pointer;
+      }
+      .debug-config-segmented input:checked + label {
+        background: rgba(120, 167, 255, 0.28);
+        color: #fff;
       }
       .debug-config-toggle {
         display: flex;
@@ -182,6 +216,19 @@
           <span>Render Blocks</span>
           <input id="debug-render-distance" name="renderDistance" type="number" min="16" max="512" step="16" inputmode="numeric" />
         </label>
+        <label class="debug-config-row" for="debug-seed">
+          <span>Seed</span>
+          <input id="debug-seed" name="seed" type="text" inputmode="numeric" autocomplete="off" />
+        </label>
+        <div class="debug-config-field">
+          <div class="debug-config-field-title">Movement Mode</div>
+          <div class="debug-config-segmented">
+            <input id="debug-mode-player" name="movementMode" type="radio" value="player" />
+            <label for="debug-mode-player">Player</label>
+            <input id="debug-mode-freecam" name="movementMode" type="radio" value="freecam" />
+            <label for="debug-mode-freecam">Free Cam</label>
+          </div>
+        </div>
         <label class="debug-config-toggle" for="debug-disable-lighting">
           <input id="debug-disable-lighting" name="disableLighting" type="checkbox" />
           <span>Disable Lighting</span>

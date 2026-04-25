@@ -25,14 +25,14 @@ function createSmokeParams(extra: Record<string, string>): URLSearchParams {
 }
 
 function createRemoteSmokeUrl(remoteWorldHostUrl: string): string {
-  return `/?${createSmokeParams({
+  return `/smoke.html?${createSmokeParams({
     worldTransport: "remote",
     worldHostUrl: remoteWorldHostUrl,
   }).toString()}`;
 }
 
 function createWorkerSmokeUrl(): string {
-  return `/?${createSmokeParams({
+  return `/smoke.html?${createSmokeParams({
     worldTransport: "worker",
     worldStorageMode: "none",
   }).toString()}`;

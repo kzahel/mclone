@@ -11,6 +11,7 @@ export default defineConfig({
       input: {
         index: resolve(__dirname, "index.html"),
         debug: resolve(__dirname, "debug.html"),
+        smoke: resolve(__dirname, "smoke.html"),
       },
     },
   },

@@ -2,7 +2,7 @@
 
 import { SectionPos } from "../../core/section-pos";
 import { MovementCommandClock } from "../../runtime/movement";
-import type { PlayerInputCommand, SetChunkViewRequest, WorldPerformanceSnapshot } from "../../runtime/protocol/world-messages";
+import type { OpenWorldPreset, PlayerInputCommand, SetChunkViewRequest, WorldPerformanceSnapshot } from "../../runtime/protocol/world-messages";
 import {
   PLAYER_COLLISION_REVISION,
   PLAYER_COMMAND_QUANTUM_US,
@@ -47,10 +47,16 @@ import {
   isSamePlayerInput,
   mergeDebugInputFrame,
   reconcilePredictedCameraState,
+  type DebugCameraState,
   type DebugInjectedInput,
 } from "./debug-player-controls";
 
-const SEED = 12_345n;
+const DEFAULT_SEED = 12_345n;
+const DEFAULT_PRESET: OpenWorldPreset = "browser_smoke";
+const DEFAULT_MOVEMENT_MODE: DebugMovementMode = "player";
+const DEBUG_SESSION_CONFIG_STORAGE_KEY = "mclone.debug.sessionConfig.v1";
+const START_LAST_WORLD_STORAGE_KEY = "mclone.start.lastWorld.v1";
+const DEBUG_SESSION_CONFIG_QUERY_KEYS = ["seed", "movementMode", "preset"] as const;
 const LIGHT_TICK_INTERVAL_MS = 1000.0;
 const WORLD_POLL_INTERVAL_MS = 50.0;
 
@@ -58,9 +64,20 @@ const DEFAULT_INITIAL_POSITION = new Vec3(8.5, 104.0, 40.5);
 const DEFAULT_INITIAL_X_ROT = 30.0;
 const DEFAULT_INITIAL_Y_ROT = 180.0;
 
+type DebugMovementMode = "player" | "freecam";
+
+interface DebugSessionConfig {
+  readonly seed: bigint;
+  readonly movementMode: DebugMovementMode;
+  readonly preset: OpenWorldPreset;
+}
+
 interface DebugRuntimeState {
   ready: boolean;
   readonly worldTransport: "worker" | "remote";
+  seed: string;
+  movementMode: DebugMovementMode;
+  preset: OpenWorldPreset;
   saveId?: string;
   sessionId?: string;
   playerId?: string;
@@ -116,6 +133,103 @@ function readWorldTransport(): {
   return { worldTransport: "worker" };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseSeedValue(value: string | null | undefined, fallback: bigint): bigint {
+  if (value === null || value === undefined || value.trim() === "") {
+    return fallback;
+  }
+
+  try {
+    return BigInt(value.trim());
+  } catch {
+    return fallback;
+  }
+}
+
+function parseMovementMode(value: unknown, fallback: DebugMovementMode): DebugMovementMode {
+  return value === "player" || value === "freecam" ? value : fallback;
+}
+
+function parsePreset(value: unknown, fallback: OpenWorldPreset): OpenWorldPreset {
+  return value === "default" || value === "browser_smoke" ? value : fallback;
+}
+
+function readStoredDebugSessionConfig(
+  storage: Pick<Storage, "getItem"> | undefined,
+): Partial<DebugSessionConfig> {
+  if (storage === undefined) {
+    return {};
+  }
+
+  try {
+    const raw = storage.getItem(DEBUG_SESSION_CONFIG_STORAGE_KEY);
+    if (raw === null) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) {
+      return {};
+    }
+
+    const movementMode = parsed.movementMode === "player" || parsed.movementMode === "freecam"
+      ? parsed.movementMode
+      : undefined;
+    const preset = parsed.preset === "default" || parsed.preset === "browser_smoke"
+      ? parsed.preset
+      : undefined;
+    return {
+      seed: typeof parsed.seed === "string" ? parseSeedValue(parsed.seed, DEFAULT_SEED) : undefined,
+      movementMode,
+      preset,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function readDebugSessionConfig(url: URL, storage?: Pick<Storage, "getItem">): DebugSessionConfig {
+  const stored = readStoredDebugSessionConfig(storage);
+  const storedSeed = stored.seed ?? DEFAULT_SEED;
+  const storedMovementMode = stored.movementMode ?? DEFAULT_MOVEMENT_MODE;
+  const storedPreset = stored.preset ?? DEFAULT_PRESET;
+  return {
+    seed: parseSeedValue(url.searchParams.get("seed"), storedSeed),
+    movementMode: parseMovementMode(url.searchParams.get("movementMode"), storedMovementMode),
+    preset: parsePreset(url.searchParams.get("preset"), storedPreset),
+  };
+}
+
+function writeStoredDebugSessionConfig(
+  storage: Pick<Storage, "setItem">,
+  config: DebugSessionConfig,
+): void {
+  storage.setItem(DEBUG_SESSION_CONFIG_STORAGE_KEY, JSON.stringify({
+    seed: config.seed.toString(),
+    movementMode: config.movementMode,
+    preset: config.preset,
+  }));
+}
+
+function writeStartLastWorld(
+  storage: Pick<Storage, "setItem">,
+  config: DebugSessionConfig,
+): void {
+  storage.setItem(START_LAST_WORLD_STORAGE_KEY, JSON.stringify({
+    seed: config.seed.toString(),
+    movementMode: config.movementMode,
+    preset: config.preset,
+    lastOpenedAtMs: Date.now(),
+  }));
+}
+
+function clearStoredDebugSessionConfig(storage: Pick<Storage, "removeItem">): void {
+  storage.removeItem(DEBUG_SESSION_CONFIG_STORAGE_KEY);
+}
+
 function readInitialCamera(): {
   readonly position: Vec3;
   readonly xRot: number;
@@ -153,6 +267,7 @@ function readClearWorldStorage(): boolean {
 
 function createDebugRuntimeController(
   worldTransport: "worker" | "remote",
+  sessionConfig: DebugSessionConfig,
 ): {
   readonly controller: DebugRuntimeController;
   readonly getInjectedInput: () => DebugInjectedInput | null;
@@ -161,6 +276,9 @@ function createDebugRuntimeController(
   const state: DebugRuntimeState = {
     ready: false,
     worldTransport,
+    seed: sessionConfig.seed.toString(),
+    movementMode: sessionConfig.movementMode,
+    preset: sessionConfig.preset,
     loadedChunkCount: 0,
     frameCount: 0,
   };
@@ -216,6 +334,9 @@ function reloadWithoutBrowserConfigQueryParams(): void {
   for (const key of BROWSER_RENDER_CONFIG_QUERY_KEYS) {
     url.searchParams.delete(key);
   }
+  for (const key of DEBUG_SESSION_CONFIG_QUERY_KEYS) {
+    url.searchParams.delete(key);
+  }
 
   window.location.href = `${url.pathname}${url.search}${url.hash}`;
 }
@@ -236,10 +357,13 @@ function clearTransientWorldStorageQueryParam(): void {
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-function configureDebugSettingsMenu(config: BrowserRenderConfig): void {
+function configureDebugSettingsMenu(config: BrowserRenderConfig, sessionConfig: DebugSessionConfig): void {
   const form = document.querySelector<HTMLFormElement>("#debug-config-form");
   const viewDistanceInput = document.querySelector<HTMLInputElement>("#debug-view-distance");
   const renderDistanceInput = document.querySelector<HTMLInputElement>("#debug-render-distance");
+  const seedInput = document.querySelector<HTMLInputElement>("#debug-seed");
+  const playerModeInput = document.querySelector<HTMLInputElement>("#debug-mode-player");
+  const freeCamModeInput = document.querySelector<HTMLInputElement>("#debug-mode-freecam");
   const disableLightingInput = document.querySelector<HTMLInputElement>("#debug-disable-lighting");
   const disableWaterSimInput = document.querySelector<HTMLInputElement>("#debug-disable-water-sim");
   const disableIndexedDbInput = document.querySelector<HTMLInputElement>("#debug-disable-indexed-db");
@@ -250,6 +374,9 @@ function configureDebugSettingsMenu(config: BrowserRenderConfig): void {
     form === null
     || viewDistanceInput === null
     || renderDistanceInput === null
+    || seedInput === null
+    || playerModeInput === null
+    || freeCamModeInput === null
     || disableLightingInput === null
     || disableWaterSimInput === null
     || disableIndexedDbInput === null
@@ -268,6 +395,9 @@ function configureDebugSettingsMenu(config: BrowserRenderConfig): void {
 
   viewDistanceInput.value = config.viewDistance.toString();
   renderDistanceInput.value = config.renderDistance.toString();
+  seedInput.value = sessionConfig.seed.toString();
+  playerModeInput.checked = sessionConfig.movementMode === "player";
+  freeCamModeInput.checked = sessionConfig.movementMode === "freecam";
   disableLightingInput.checked = config.lightingMode === "none";
   disableWaterSimInput.checked = config.liquidSimulationMode === "none";
   disableIndexedDbInput.checked = config.worldStorageMode === "none";
@@ -291,10 +421,18 @@ function configureDebugSettingsMenu(config: BrowserRenderConfig): void {
       worldStorageMode: disableIndexedDbInput.checked ? "none" : "default",
     };
     writeStoredBrowserRenderConfig(window.localStorage, nextConfig);
+    const nextSessionConfig: DebugSessionConfig = {
+      seed: parseSeedValue(seedInput.value, sessionConfig.seed),
+      movementMode: freeCamModeInput.checked ? "freecam" : "player",
+      preset: sessionConfig.preset,
+    };
+    writeStoredDebugSessionConfig(window.localStorage, nextSessionConfig);
+    writeStartLastWorld(window.localStorage, nextSessionConfig);
     reloadWithoutBrowserConfigQueryParams();
   });
   resetButton?.addEventListener("click", () => {
     clearStoredBrowserRenderConfig(window.localStorage);
+    clearStoredDebugSessionConfig(window.localStorage);
     reloadWithoutBrowserConfigQueryParams();
   });
   deleteIndexedDbButton?.addEventListener("click", () => {
@@ -320,6 +458,15 @@ function isSameChunkViewRequest(
     && left.radius === right.radius;
 }
 
+function applyFreeCameraInput(
+  camera: DebugCameraState,
+  inputFrame: ReturnType<DebugInput["consumeFrame"]>,
+  dtSeconds: number,
+): DebugCameraState {
+  const inputCommand = buildPlayerInputCommand(camera.yRot, camera.xRot, inputFrame, dtSeconds, 0);
+  return applyPredictedCameraInput(camera, inputCommand, dtSeconds);
+}
+
 async function boot(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
   if (!canvas) {
@@ -329,11 +476,13 @@ async function boot(): Promise<void> {
   const rendererCanvas = canvas;
 
   const runtimeConfig = readWorldTransport();
-  const renderConfig = readBrowserRenderConfig(new URL(window.location.href), window.localStorage);
-  configureDebugSettingsMenu(renderConfig);
+  const url = new URL(window.location.href);
+  const renderConfig = readBrowserRenderConfig(url, window.localStorage);
+  const sessionConfig = readDebugSessionConfig(url, window.localStorage);
+  configureDebugSettingsMenu(renderConfig, sessionConfig);
   const initialCamera = readInitialCamera();
   const preserveInitialCamera = readPreserveInitialCamera();
-  const debugRuntime = createDebugRuntimeController(runtimeConfig.worldTransport);
+  const debugRuntime = createDebugRuntimeController(runtimeConfig.worldTransport, sessionConfig);
   window.__mcloneDebug = debugRuntime.controller;
   let showInitialLoadingUi = true;
   const reportLoadingProgress = (progress: LoadingProgress): void => {
@@ -355,7 +504,8 @@ async function boot(): Promise<void> {
   }
 
   const sceneResult = await initializeRendererScene(rendererCanvas, {
-    seed: SEED,
+    seed: sessionConfig.seed,
+    preset: sessionConfig.preset,
     viewDistance: renderConfig.viewDistance,
     renderDistance: renderConfig.renderDistance,
     engineConfig: {
@@ -374,6 +524,8 @@ async function boot(): Promise<void> {
     showOverlayMessage(`error: ${sceneResult.reason}`);
     return;
   }
+  writeStoredDebugSessionConfig(window.localStorage, sessionConfig);
+  writeStartLastWorld(window.localStorage, sessionConfig);
   const scene: RendererScene = sceneResult.scene;
   const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
   debugRuntime.controller.state.expectedLoadedChunkCount = expectedLoadedChunkCount;
@@ -417,6 +569,7 @@ async function boot(): Promise<void> {
     maxStepCountPerCommand: 4,
     maxCatchupStepCount: 24,
   });
+  const drivesPlayer = sessionConfig.movementMode === "player";
 
   async function flushPlayerInputQueue(): Promise<void> {
     if (playerInputSendInFlight) {
@@ -479,19 +632,21 @@ async function boot(): Promise<void> {
     scene.levelRenderer.allChanged();
   }
   lastChunkViewRequest = initialChunkViewRequest;
-  const initialInputCommand: PlayerInputCommand = {
-    sequence: nextInputSequence++,
-    moveX: 0,
-    moveY: 0,
-    moveZ: 0,
-    yaw: initialCamera.yRot,
-    pitch: initialCamera.xRot,
-  };
-  if (await scene.clientRuntime.sendPlayerCommand({
-    type: "set_player_input",
-    input: initialInputCommand,
-  })) {
-    lastInputCommand = initialInputCommand;
+  if (drivesPlayer) {
+    const initialInputCommand: PlayerInputCommand = {
+      sequence: nextInputSequence++,
+      moveX: 0,
+      moveY: 0,
+      moveZ: 0,
+      yaw: initialCamera.yRot,
+      pitch: initialCamera.xRot,
+    };
+    if (await scene.clientRuntime.sendPlayerCommand({
+      type: "set_player_input",
+      input: initialInputCommand,
+    })) {
+      lastInputCommand = initialInputCommand;
+    }
   }
   if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, {
     maxAttempts: Math.max(2400, expectedLoadedChunkCount * 32),
@@ -573,7 +728,7 @@ async function boot(): Promise<void> {
     }
 
     showOverlayMessage(
-      `fps ${fps === undefined ? "--" : fps.toFixed(0)}  pos ${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}  yaw ${camera.yRot.toFixed(0)}  pitch ${camera.xRot.toFixed(0)}  tick ${playerStateForOverlay.tick.toString()}`,
+      `fps ${fps === undefined ? "--" : fps.toFixed(0)}  mode ${sessionConfig.movementMode}  pos ${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}  yaw ${camera.yRot.toFixed(0)}  pitch ${camera.xRot.toFixed(0)}  tick ${playerStateForOverlay.tick.toString()}`,
     );
   }
 
@@ -602,40 +757,53 @@ async function boot(): Promise<void> {
 
     const presentation = scene.clientRuntime.publishPresentationState();
     const playerState = presentation.localPlayerState;
-    if (playerState !== undefined) {
-      if (!preserveInitialCamera) {
-        camera = reconcilePredictedCameraState(camera, playerState, lastInputCommand);
-      }
-      const baseYaw = preserveInitialCamera ? (lastInputCommand?.yaw ?? playerState.rotation.yaw) : camera.yRot;
-      const basePitch = preserveInitialCamera ? (lastInputCommand?.pitch ?? playerState.rotation.pitch) : camera.xRot;
-      const commandStepCounts = playerCommandClock.consumeElapsedUs(Math.max(0, Math.round(dtSeconds * 1_000_000.0)));
-      const predictedCommandSeconds = commandStepCounts.reduce(
-        (sum, stepCount) => sum + ((stepCount * PLAYER_COMMAND_QUANTUM_US) / 1_000_000.0),
-        0.0,
-      );
-      const sampledPlayerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence);
-      if (!preserveInitialCamera) {
-        camera = applyPredictedCameraInput(camera, sampledPlayerInput, predictedCommandSeconds);
-      }
-      for (const stepCount of commandStepCounts) {
-        const playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence, {
-          clientTimeUs: Math.max(0, Math.round(now * 1_000.0)),
-          commandQuantumUs: PLAYER_COMMAND_QUANTUM_US,
-          stepCount,
-          physicsRevision: PLAYER_MOVEMENT_PHYSICS_REVISION,
-          collisionRevision: PLAYER_COLLISION_REVISION,
-        });
-        queuePlayerInput(playerInput);
-      }
-
-      const chunkViewRequest = preserveInitialCamera
-        ? createChunkViewRequestForPlayerState(playerState, scene.viewDistance)
-        : createChunkViewRequestForCameraState(camera, scene.viewDistance);
+    if (!drivesPlayer) {
+      camera = applyFreeCameraInput(camera, inputFrame, dtSeconds);
+      const chunkViewRequest = createChunkViewRequestForCameraState(camera, scene.viewDistance);
       if (!isSameChunkViewRequest(lastChunkViewRequest, chunkViewRequest)) {
         if (await scene.clientRuntime.setChunkInterest(chunkViewRequest)) {
           applyRenderWorldDirtySections(scene);
         }
         lastChunkViewRequest = chunkViewRequest;
+      }
+    }
+
+    if (playerState !== undefined) {
+      if (drivesPlayer) {
+        if (!preserveInitialCamera) {
+          camera = reconcilePredictedCameraState(camera, playerState, lastInputCommand);
+        }
+        const baseYaw = preserveInitialCamera ? (lastInputCommand?.yaw ?? playerState.rotation.yaw) : camera.yRot;
+        const basePitch = preserveInitialCamera ? (lastInputCommand?.pitch ?? playerState.rotation.pitch) : camera.xRot;
+        const commandStepCounts = playerCommandClock.consumeElapsedUs(Math.max(0, Math.round(dtSeconds * 1_000_000.0)));
+        const predictedCommandSeconds = commandStepCounts.reduce(
+          (sum, stepCount) => sum + ((stepCount * PLAYER_COMMAND_QUANTUM_US) / 1_000_000.0),
+          0.0,
+        );
+        const sampledPlayerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence);
+        if (!preserveInitialCamera) {
+          camera = applyPredictedCameraInput(camera, sampledPlayerInput, predictedCommandSeconds);
+        }
+        for (const stepCount of commandStepCounts) {
+          const playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence, {
+            clientTimeUs: Math.max(0, Math.round(now * 1_000.0)),
+            commandQuantumUs: PLAYER_COMMAND_QUANTUM_US,
+            stepCount,
+            physicsRevision: PLAYER_MOVEMENT_PHYSICS_REVISION,
+            collisionRevision: PLAYER_COLLISION_REVISION,
+          });
+          queuePlayerInput(playerInput);
+        }
+
+        const chunkViewRequest = preserveInitialCamera
+          ? createChunkViewRequestForPlayerState(playerState, scene.viewDistance)
+          : createChunkViewRequestForCameraState(camera, scene.viewDistance);
+        if (!isSameChunkViewRequest(lastChunkViewRequest, chunkViewRequest)) {
+          if (await scene.clientRuntime.setChunkInterest(chunkViewRequest)) {
+            applyRenderWorldDirtySections(scene);
+          }
+          lastChunkViewRequest = chunkViewRequest;
+        }
       }
       const playerChunkViewRequest = createChunkViewRequestForPlayerState(playerState, scene.viewDistance);
       const sessionState = presentation.sessionState;
