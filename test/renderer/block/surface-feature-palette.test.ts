@@ -53,7 +53,7 @@ describe("Surface feature palette", () => {
   });
 
   test("generated feature blocks route through the expected render layers", () => {
-    registerGeneratedRenderBlocks();
+    const palette = registerGeneratedRenderBlocks();
 
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_leaves"))).toBe(RenderType.cutoutMipped());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:grass"))).toBe(RenderType.cutout());
@@ -94,6 +94,7 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate_redstone_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:copper_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_log"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:bee_nest"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:birch_leaves"))).toBe(RenderType.cutoutMipped());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:pumpkin"))).toBe(RenderType.solid());
     expect(getState("minecraft:deepslate").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
@@ -112,6 +113,12 @@ describe("Surface feature palette", () => {
     expect(glowLichen.getValue(BlockStateProperties.UP)).toBe(false);
     expect(glowLichen.getValue(BlockStateProperties.DOWN)).toBe(false);
     expect(glowLichen.getValue(BlockStateProperties.WATERLOGGED)).toBe(false);
+
+    const beeNest = getState("minecraft:bee_nest");
+    expect(beeNest.getValue(BlockStateProperties.HORIZONTAL_FACING)).toBe(Direction.NORTH);
+    expect(beeNest.getValue(BlockStateProperties.LEVEL_HONEY)).toBe(0);
+    expect(palette.blockLocations.some((location) => location.toString() === "minecraft:bee_nest")).toBe(true);
+    expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/bee_nest_front_honey")).toBe(true);
   });
 
   test("leaves stay non-occluding so adjacent terrain faces are not culled", () => {

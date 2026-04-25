@@ -27,7 +27,7 @@ Finish the missing flower / dead-bush / seagrass vegetation path now that lakes,
 
 - Landed here: the missing flower-provider, dead-bush, seagrass, birch, and flower-forest parity work that only needed existing tree placers and model plumbing.
 - Deferred on purpose: dark-forest parity. The real dark-forest table wants `DarkOakTrunkPlacer`, `DarkOakFoliagePlacer`, huge mushroom features, and the remaining tree-decorator path. Porting only the biome table first would have produced another partial fallback.
-- Also still deferred: sunflower-plains specific `PATCH_SUNFLOWER`, vine placement consumers, and bee-decorator variants. Those are separate visible systems, not table-only follow-ups.
+- Also still deferred at the time: sunflower-plains specific `PATCH_SUNFLOWER`, vine placement consumers, and bee-decorator variants. The bee-decorator follow-through later landed in [`51-bee-tree-decorator-follow-through.md`](51-bee-tree-decorator-follow-through.md); sunflower patches remain the next simple decoration gap in this family.
 
 ## Oracle / done-when
 

@@ -19,6 +19,7 @@ import { TwoLayersFeatureSize } from "./featuresize/two-layers-feature-size";
 import { Features } from "./features";
 import { SimpleStateProvider } from "./stateproviders/simple-state-provider";
 import { AlterGroundDecorator } from "./treedecorators/alter-ground-decorator";
+import { BeehiveDecorator } from "./treedecorators/beehive-decorator";
 import { CocoaDecorator } from "./treedecorators/cocoa-decorator";
 import { LeaveVineDecorator } from "./treedecorators/leave-vine-decorator";
 import { TrunkVineDecorator } from "./treedecorators/trunk-vine-decorator";
@@ -48,6 +49,9 @@ const JUNGLE_LOG_LOCATION = new ResourceLocation("minecraft:jungle_log");
 const JUNGLE_LEAVES_LOCATION = new ResourceLocation("minecraft:jungle_leaves");
 const JUNGLE_SAPLING_LOCATION = new ResourceLocation("minecraft:jungle_sapling");
 const PODZOL_LOCATION = new ResourceLocation("minecraft:podzol");
+const BEEHIVE_0002 = 0.002;
+const BEEHIVE_002 = 0.02;
+const BEEHIVE_005 = 0.05;
 
 function getRequiredState(location: ResourceLocation): BlockState {
   const block = Registry.BLOCK.get(location) as Block | undefined;
@@ -56,6 +60,10 @@ function getRequiredState(location: ResourceLocation): BlockState {
   }
 
   return block.defaultBlockState();
+}
+
+function withBeehiveDecorator(feature: { readonly config: TreeConfiguration }, probability: number) {
+  return Features.TREE.configured(feature.config.withDecorators([new BeehiveDecorator(probability)]));
 }
 
 export class TreeFeatures {
@@ -255,6 +263,10 @@ export class TreeFeatures {
     );
   }
 
+  public static get SUPER_BIRCH_BEES_0002() {
+    return withBeehiveDecorator(TreeFeatures.SUPER_BIRCH, BEEHIVE_0002);
+  }
+
   public static get SWAMP_OAK() {
     return Features.TREE.configured(
       new TreeConfiguration.TreeConfigurationBuilder(
@@ -279,5 +291,41 @@ export class TreeFeatures {
         new TwoLayersFeatureSize(0, 0, 0),
       ).build(),
     );
+  }
+
+  public static get OAK_BEES_0002() {
+    return withBeehiveDecorator(TreeFeatures.OAK, BEEHIVE_0002);
+  }
+
+  public static get OAK_BEES_002() {
+    return withBeehiveDecorator(TreeFeatures.OAK, BEEHIVE_002);
+  }
+
+  public static get OAK_BEES_005() {
+    return withBeehiveDecorator(TreeFeatures.OAK, BEEHIVE_005);
+  }
+
+  public static get BIRCH_BEES_0002() {
+    return withBeehiveDecorator(TreeFeatures.BIRCH, BEEHIVE_0002);
+  }
+
+  public static get BIRCH_BEES_002() {
+    return withBeehiveDecorator(TreeFeatures.BIRCH, BEEHIVE_002);
+  }
+
+  public static get BIRCH_BEES_005() {
+    return withBeehiveDecorator(TreeFeatures.BIRCH, BEEHIVE_005);
+  }
+
+  public static get FANCY_OAK_BEES_0002() {
+    return withBeehiveDecorator(TreeFeatures.FANCY_OAK, BEEHIVE_0002);
+  }
+
+  public static get FANCY_OAK_BEES_002() {
+    return withBeehiveDecorator(TreeFeatures.FANCY_OAK, BEEHIVE_002);
+  }
+
+  public static get FANCY_OAK_BEES_005() {
+    return withBeehiveDecorator(TreeFeatures.FANCY_OAK, BEEHIVE_005);
   }
 }

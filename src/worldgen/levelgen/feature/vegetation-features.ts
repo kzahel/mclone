@@ -772,7 +772,7 @@ export class VegetationFeatures {
 
   public static get FOREST_FLOWER_TREES() {
     return Features.RANDOM_SELECTOR.configured(
-      new RandomFeatureConfiguration([TreeFeatures.BIRCH.weighted(0.2), TreeFeatures.FANCY_OAK.weighted(0.1)], TreeFeatures.OAK),
+      new RandomFeatureConfiguration([TreeFeatures.BIRCH_BEES_002.weighted(0.2), TreeFeatures.FANCY_OAK_BEES_002.weighted(0.1)], TreeFeatures.OAK_BEES_002),
     )
       .decorated(heightmapWithTreeThresholdSquared())
       .decorated(countExtraDecorator(6, 0.1, 1));
@@ -780,7 +780,7 @@ export class VegetationFeatures {
 
   public static get BIRCH_TALL() {
     return Features.RANDOM_SELECTOR.configured(
-      new RandomFeatureConfiguration([TreeFeatures.SUPER_BIRCH.weighted(0.5)], TreeFeatures.BIRCH),
+      new RandomFeatureConfiguration([TreeFeatures.SUPER_BIRCH_BEES_0002.weighted(0.5)], TreeFeatures.BIRCH_BEES_0002),
     )
       .decorated(heightmapWithTreeThresholdSquared())
       .decorated(countExtraDecorator(10, 0.1, 1));
@@ -810,7 +810,7 @@ export class VegetationFeatures {
   }
 
   public static get TREES_BIRCH() {
-    return TreeFeatures.BIRCH.decorated(heightmapWithTreeThresholdSquared()).decorated(countExtraDecorator(10, 0.1, 1));
+    return TreeFeatures.BIRCH_BEES_0002.decorated(heightmapWithTreeThresholdSquared()).decorated(countExtraDecorator(10, 0.1, 1));
   }
 
   public static get TREES_WATER() {
@@ -823,7 +823,10 @@ export class VegetationFeatures {
 
   public static get BIRCH_OTHER() {
     return Features.RANDOM_SELECTOR.configured(
-      new RandomFeatureConfiguration([TreeFeatures.BIRCH.weighted(0.2), TreeFeatures.FANCY_OAK.weighted(0.1)], TreeFeatures.OAK),
+      new RandomFeatureConfiguration(
+        [TreeFeatures.BIRCH_BEES_0002.weighted(0.2), TreeFeatures.FANCY_OAK_BEES_0002.weighted(0.1)],
+        TreeFeatures.OAK_BEES_0002,
+      ),
     )
       .decorated(heightmapWithTreeThresholdSquared())
       .decorated(countExtraDecorator(10, 0.1, 1));
@@ -831,7 +834,7 @@ export class VegetationFeatures {
 
   public static get PLAIN_VEGETATION() {
     return Features.RANDOM_SELECTOR.configured(
-      new RandomFeatureConfiguration([TreeFeatures.FANCY_OAK.weighted(0.33333334)], TreeFeatures.OAK),
+      new RandomFeatureConfiguration([TreeFeatures.FANCY_OAK_BEES_005.weighted(0.33333334)], TreeFeatures.OAK_BEES_005),
     )
       .decorated(heightmapWithTreeThresholdSquared())
       .decorated(countExtraDecorator(0, 0.05, 1));

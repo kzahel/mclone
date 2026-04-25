@@ -9,6 +9,7 @@ import { BaseCoralPlantBlock } from "./block/base-coral-plant-block";
 import { BaseCoralWallFanBlock } from "./block/base-coral-wall-fan-block";
 import { BambooBlock } from "./block/bamboo-block";
 import { BambooSaplingBlock } from "./block/bamboo-sapling-block";
+import { BeeNestBlock } from "./block/bee-nest-block";
 import { Block } from "./block/block";
 import { BushBlock } from "./block/bush-block";
 import { CactusBlock } from "./block/cactus-block";
@@ -89,6 +90,7 @@ const SPRUCE_SAPLING_LOCATION = new ResourceLocation("minecraft:spruce_sapling")
 const BIRCH_SAPLING_LOCATION = new ResourceLocation("minecraft:birch_sapling");
 const DARK_OAK_SAPLING_LOCATION = new ResourceLocation("minecraft:dark_oak_sapling");
 const JUNGLE_SAPLING_LOCATION = new ResourceLocation("minecraft:jungle_sapling");
+const BEE_NEST_LOCATION = new ResourceLocation("minecraft:bee_nest");
 const BAMBOO_SAPLING_LOCATION = new ResourceLocation("minecraft:bamboo_sapling");
 const BAMBOO_LOCATION = new ResourceLocation("minecraft:bamboo");
 const LARGE_FERN_LOCATION = new ResourceLocation("minecraft:large_fern");
@@ -253,6 +255,7 @@ const GENERATED_BLOCK_LOCATIONS = [
   BIRCH_SAPLING_LOCATION,
   DARK_OAK_SAPLING_LOCATION,
   JUNGLE_SAPLING_LOCATION,
+  BEE_NEST_LOCATION,
   BAMBOO_SAPLING_LOCATION,
   BAMBOO_LOCATION,
   LARGE_FERN_LOCATION,
@@ -399,6 +402,11 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("birch_sapling"),
   blockTexture("dark_oak_sapling"),
   blockTexture("jungle_sapling"),
+  blockTexture("bee_nest_bottom"),
+  blockTexture("bee_nest_front"),
+  blockTexture("bee_nest_front_honey"),
+  blockTexture("bee_nest_side"),
+  blockTexture("bee_nest_top"),
   blockTexture("bamboo_stage0"),
   blockTexture("bamboo_stalk"),
   blockTexture("bamboo_small_leaves"),
@@ -911,6 +919,10 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     JUNGLE_SAPLING_LOCATION,
     new BushBlock(BlockBehaviour.Properties.of(Material.PLANT).noCollission().randomTicks().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
+  const beeNestState = registerBlock(
+    BEE_NEST_LOCATION,
+    new BeeNestBlock(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.COLOR_YELLOW).strength(0.3).sound(SoundType.WOOD)),
+  ).defaultBlockState();
   const bambooSaplingState = registerBlock(
     BAMBOO_SAPLING_LOCATION,
     new BambooSaplingBlock(
@@ -1116,6 +1128,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(birchSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(darkOakSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(jungleSaplingState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(beeNestState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(bambooSaplingState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(bambooState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(largeFernState.getBlock(), RenderType.cutout());

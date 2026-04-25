@@ -14,6 +14,7 @@ export class BlockStateProperties {
   public static readonly AGE_15 = IntegerProperty.create("age", 0, 15);
   public static readonly STAGE = IntegerProperty.create("stage", 0, 1);
   public static readonly DISTANCE = IntegerProperty.create("distance", 1, 7);
+  public static readonly LEVEL_HONEY = IntegerProperty.create("honey_level", 0, 5);
   public static readonly LAYERS = IntegerProperty.create("layers", 1, 8);
   public static readonly LIT = BooleanProperty.create("lit");
   public static readonly LEVEL = IntegerProperty.create("level", 0, 15);

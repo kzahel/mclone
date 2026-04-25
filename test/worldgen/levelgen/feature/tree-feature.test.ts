@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import { BlockPos } from "../../../../src/core/block-pos";
+import { Direction } from "../../../../src/core/direction";
 import { Registry } from "../../../../src/core/registry";
 import { ResourceLocation } from "../../../../src/core/resource-location";
 import type { Block } from "../../../../src/world/level/block/block";
@@ -246,5 +247,48 @@ describe("TreeFeature", () => {
     expect(leafCount).toBeGreaterThan(0);
     expect(vineCount).toBeGreaterThan(0);
     expect(cocoaCount).toBeGreaterThan(0);
+  });
+
+  test("bee-decorated oak placement can emit a translated bee nest block", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const generator = createGenerator();
+    const feature = TreeFeatures.OAK_BEES_005;
+    const beeNestState = getState("minecraft:bee_nest");
+    const origin = new BlockPos(16, 11, 16);
+
+    let placedLevel: StaticRenderLevel | undefined;
+    const beeNestPositions: BlockPos[] = [];
+
+    for (let seed = 0n; seed < 512n; seed++) {
+      const candidate = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+      if (!feature.place(candidate, generator, new WorldgenRandom(seed), origin)) {
+        continue;
+      }
+
+      const candidateBeeNestPositions: BlockPos[] = [];
+      for (let y = 11; y < 32; y++) {
+        for (let z = 0; z < 32; z++) {
+          for (let x = 0; x < 32; x++) {
+            const pos = new BlockPos(x, y, z);
+            if (candidate.getBlockState(pos).is(beeNestState.getBlock())) {
+              candidateBeeNestPositions.push(pos);
+            }
+          }
+        }
+      }
+
+      if (candidateBeeNestPositions.length > 0) {
+        placedLevel = candidate;
+        beeNestPositions.push(...candidateBeeNestPositions);
+        break;
+      }
+    }
+
+    expect(placedLevel).toBeDefined();
+    expect(beeNestPositions).toHaveLength(1);
+
+    const placedBeeNest = placedLevel!.getBlockState(beeNestPositions[0]!);
+    expect(placedBeeNest.getValue(BlockStateProperties.HORIZONTAL_FACING)).toBe(Direction.SOUTH);
+    expect(placedBeeNest.getValue(BlockStateProperties.LEVEL_HONEY)).toBe(0);
   });
 });
