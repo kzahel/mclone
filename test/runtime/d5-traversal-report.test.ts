@@ -45,6 +45,8 @@ const PASSING_THRESHOLDS = {
   maxQueuedChunkBuildCount: 3_000,
   maxActiveChunkBuildCount: 16,
   minRenderWorldIngestBatchCount: 1,
+  minRenderWorldMeshBuildRequestCount: 1,
+  minRenderWorldMeshCompletionCount: 1,
   minMainThreadGpuUploadCount: 1,
 } satisfies D5GateThresholds;
 
@@ -244,6 +246,8 @@ describe("D5 traversal report helpers", () => {
     expect(gates.failures).toEqual(expect.arrayContaining([
       expect.stringContaining("lighting.propagation_slice_max_ms"),
       expect.stringContaining("render_world.ingest_batches"),
+      expect.stringContaining("render_world.mesh_build_requests"),
+      expect.stringContaining("render_world.mesh_completions"),
       expect.stringContaining("main_thread.gpu_uploads"),
     ]));
   });

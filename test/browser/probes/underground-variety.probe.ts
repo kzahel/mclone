@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { FAST_VISUAL_PROBE_PARAMS } from "./fast-visual-probe-config";
+import { FAST_VISUAL_PROBE_PARAMS, FAST_VISUAL_PROBE_TIMEOUTS } from "./fast-visual-probe-config";
 
 const TUFF_SCREENSHOT_PATH = "/tmp/mclone-debug-underground-variety-tuff.png";
 const DEEPSLATE_SCREENSHOT_PATH = "/tmp/mclone-debug-underground-variety-deepslate.png";
@@ -30,19 +30,19 @@ async function captureFrame(
       waitUntil: "load",
     },
   );
-  await page.waitForFunction(() => typeof window.__mcloneDebug !== "undefined", undefined, { timeout: 20_000 });
+  await page.waitForFunction(() => typeof window.__mcloneDebug !== "undefined", undefined, { timeout: FAST_VISUAL_PROBE_TIMEOUTS.ready });
   await page.waitForFunction(
     () => window.__mcloneDebug!.state.ready === true || window.__mcloneDebug!.state.error !== undefined,
     undefined,
-    { timeout: 45_000 },
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
   );
-  await page.waitForFunction(() => (window.__mcloneDebug?.state.frameCount ?? 0) >= 1, undefined, { timeout: 20_000 });
+  await page.waitForFunction(() => (window.__mcloneDebug?.state.frameCount ?? 0) >= 1, undefined, { timeout: FAST_VISUAL_PROBE_TIMEOUTS.ready });
   await page.waitForTimeout(2_000);
   await page.locator("#renderer").screenshot({ path: screenshotPath });
   return await readDebugState(page);
 }
 
-test.setTimeout(60_000);
+test.setTimeout(FAST_VISUAL_PROBE_TIMEOUTS.test);
 
 test("captures an exposed tuff pocket in the worker-generated world", async ({ page }) => {
   const state = await captureFrame(

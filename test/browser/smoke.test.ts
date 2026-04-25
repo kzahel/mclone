@@ -30,7 +30,7 @@ async function bootPage(page: Page, remoteWorldHostUrl: string): Promise<BootRes
   return (await page.evaluate(() => window.__mcloneReady)) as BootResult;
 }
 
-test.setTimeout(90_000);
+test.setTimeout(30_000);
 
 test("WebGPU boot succeeds against the remote Node host with two browser clients", async ({ browser, remoteWorldHostUrl }) => {
   const context = await browser.newContext();

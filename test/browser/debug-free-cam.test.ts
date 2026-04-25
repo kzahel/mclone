@@ -1,10 +1,13 @@
 import { expect, test, type Page } from "./remote-world-host-fixture";
+import { getDefaultRenderDistance, getExpectedLoadedChunkCount } from "../../src/renderer/browser-render-config";
 
 const DEBUG_SCREENSHOT_PATH = "/tmp/mclone-debug-free-cam.png";
 const DEBUG_TALL_SCREENSHOT_PATH = "/tmp/mclone-debug-free-cam-tall.png";
-const EXPECTED_LOADED_CHUNK_COUNT = 225;
+const DEBUG_VIEW_DISTANCE = 1;
+const DEBUG_RENDER_DISTANCE = getDefaultRenderDistance(DEBUG_VIEW_DISTANCE);
+const EXPECTED_LOADED_CHUNK_COUNT = getExpectedLoadedChunkCount(DEBUG_VIEW_DISTANCE);
 
-test.setTimeout(60_000);
+test.setTimeout(30_000);
 
 interface RenderWorldPerformanceCounters {
   readonly ingestBatchCount: number;
@@ -58,8 +61,10 @@ function createDebugUrl(remoteWorldHostUrl: string): string {
     cameraZ: "3189.5",
     cameraYaw: "225",
     cameraPitch: "55",
-    viewDistance: "6",
-    renderDistance: "192",
+    viewDistance: DEBUG_VIEW_DISTANCE.toString(),
+    renderDistance: DEBUG_RENDER_DISTANCE.toString(),
+    lightingMode: "none",
+    liquidSimulationMode: "none",
     fogColor: "8fb8ff",
   }).toString()}`;
 }
@@ -119,8 +124,8 @@ test("debug free-cam follows authoritative player_state and moves chunk interest
   expect(initialState.worldTransport).toBe("remote");
   expect(initialState.loadedChunkCount).toBe(EXPECTED_LOADED_CHUNK_COUNT);
   expect(initialState.expectedLoadedChunkCount).toBe(EXPECTED_LOADED_CHUNK_COUNT);
-  expect(initialState.viewDistance).toBe(6);
-  expect(initialState.renderDistance).toBe(192);
+  expect(initialState.viewDistance).toBe(DEBUG_VIEW_DISTANCE);
+  expect(initialState.renderDistance).toBe(DEBUG_RENDER_DISTANCE);
   expect(initialState.playerChunkZ).toBeDefined();
   expect(initialState.chunkViewCenterZ).toBeDefined();
   expect(initialState.renderWorldCounters).toBeDefined();

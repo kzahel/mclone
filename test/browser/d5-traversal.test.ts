@@ -70,6 +70,8 @@ const D5_GATE_THRESHOLDS = {
   maxQueuedChunkBuildCount: 3_000,
   maxActiveChunkBuildCount: 16,
   minRenderWorldIngestBatchCount: 1,
+  minRenderWorldMeshBuildRequestCount: 1,
+  minRenderWorldMeshCompletionCount: 1,
   minMainThreadGpuUploadCount: 1,
 } as const;
 
@@ -143,10 +145,11 @@ interface TraceEvent {
 }
 
 test.skip(process.env.MCLONE_RUN_D5 !== "1", "run with pnpm perf:d5");
-test.setTimeout(600_000);
+const D5_TEST_TIMEOUT_MS = 90_000;
+const DEBUG_READY_TIMEOUT_MS = 60_000;
+const SETTLED_FRAME_TIMEOUT_MS = 60_000;
 
-const DEBUG_READY_TIMEOUT_MS = 360_000;
-const SETTLED_FRAME_TIMEOUT_MS = 300_000;
+test.setTimeout(D5_TEST_TIMEOUT_MS);
 
 function createDebugUrl(remoteWorldHostUrl: string): string {
   return `/debug.html?${new URLSearchParams({
@@ -811,14 +814,6 @@ test("D5 remote traversal measurement harness", async ({ page, remoteWorldHostUr
   const traversalTransportRecords = transportRecords.filter((record) => (
     record.startMs >= traversalStartMs && record.startMs <= traversalEndMs
   ));
-  expect(chunkPath.length - 1).toBeGreaterThanOrEqual(D5_CONFIG.minChunkBoundaryCrossings);
-  expect(isRenderQueueSettled(endState)).toBe(true);
-  expect(renderWorldDelta?.ingestBatchCount ?? 0).toBeGreaterThan(0);
-  expect(renderWorldDelta?.meshBuildRequestCount ?? 0).toBeGreaterThan(0);
-  expect(renderWorldDelta?.meshCompletionCount ?? 0).toBeGreaterThan(0);
-  expect(renderWorldDelta?.mainThreadGpuUploadCount ?? 0).toBeGreaterThan(0);
-  expect(pageErrors).toEqual([]);
-  expect(consoleErrors.filter(isWebGpuConsoleError)).toEqual([]);
 
   const traversalDurationMs = traversalEndMs - traversalStartMs;
   const reportWithoutGates: D5TraversalReportWithoutGates = {
@@ -872,5 +867,10 @@ test("D5 remote traversal measurement harness", async ({ page, remoteWorldHostUr
   await writeFile(TRACE_PATH, `${JSON.stringify({
     traceEvents: createTraceEvents(report, probe, traversalStartMs, traversalEndMs),
   }, null, 2)}\n`, "utf8");
+
+  expect(chunkPath.length - 1).toBeGreaterThanOrEqual(D5_CONFIG.minChunkBoundaryCrossings);
+  expect(isRenderQueueSettled(endState)).toBe(true);
+  expect(pageErrors).toEqual([]);
+  expect(consoleErrors.filter(isWebGpuConsoleError)).toEqual([]);
   expect(gates.failures).toEqual([]);
 });

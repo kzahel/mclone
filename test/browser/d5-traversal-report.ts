@@ -226,6 +226,8 @@ export interface D5GateThresholds {
   readonly maxQueuedChunkBuildCount: number;
   readonly maxActiveChunkBuildCount: number;
   readonly minRenderWorldIngestBatchCount: number;
+  readonly minRenderWorldMeshBuildRequestCount: number;
+  readonly minRenderWorldMeshCompletionCount: number;
   readonly minMainThreadGpuUploadCount: number;
 }
 
@@ -563,6 +565,18 @@ export function evaluateD5Gates(
       "render_world.ingest_batches",
       report.renderWorld.delta?.ingestBatchCount ?? 0,
       thresholds.minRenderWorldIngestBatchCount,
+      ">=",
+    ),
+    gate(
+      "render_world.mesh_build_requests",
+      report.renderWorld.delta?.meshBuildRequestCount ?? 0,
+      thresholds.minRenderWorldMeshBuildRequestCount,
+      ">=",
+    ),
+    gate(
+      "render_world.mesh_completions",
+      report.renderWorld.delta?.meshCompletionCount ?? 0,
+      thresholds.minRenderWorldMeshCompletionCount,
       ">=",
     ),
     gate(
