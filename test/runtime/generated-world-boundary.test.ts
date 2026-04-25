@@ -35,6 +35,7 @@ const OPEN_WORLD_REQUEST = {
   preset: "default",
 } as const;
 const GENERATED_WORLD_LIGHTING_TIMEOUT_MS = 30_000;
+const GENERATED_WORLD_TICK_INTERVAL_MS = 1000;
 
 function oracleBlockNameAt(localX: number, y: number, localZ: number): string {
   const index = ((y - oracle.minY) << 8) | (localZ << 4) | localX;
@@ -73,7 +74,10 @@ function runtimeBlockNameAt(level: ClientChunkCache, worldX: number, y: number, 
   return Registry.BLOCK.getKey(state.getBlock() as unknown as object)?.toString() ?? "unregistered";
 }
 
-function createWorldClient(): LocalWorldClient {
+function createWorldClient(options: {
+  readonly nowMs?: () => number;
+  readonly worldTickIntervalMs?: number;
+} = {}): LocalWorldClient {
   const blocks = registerGeneratedRenderBlocks();
   const biomeSource = new OverworldBiomeSource(12345n);
 
@@ -85,6 +89,8 @@ function createWorldClient(): LocalWorldClient {
         blockStateById: blocks.blockStateById,
         blockStateIds: blocks.blockStateIds,
         lightingMode: "none",
+        worldTickIntervalMs: options.worldTickIntervalMs,
+        nowMs: options.nowMs,
       }),
     ),
     (worldOpened) => new ClientChunkCache({
@@ -177,8 +183,12 @@ describe("GeneratedWorld boundary", () => {
     expect(256 - mismatches.length, mismatches.slice(0, 10).join("\n")).toBeGreaterThanOrEqual(230);
   }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
 
-  test("keeps chunk (0, 0) full-block decorated parity ratcheted against the vanilla oracle", async () => {
-    const client = createWorldClient();
+  test("matches chunk (0, 0) full-block decorated parity after fixture-equivalent liquid ticks", async () => {
+    let nowMs = 0;
+    const client = createWorldClient({
+      nowMs: () => nowMs,
+      worldTickIntervalMs: GENERATED_WORLD_TICK_INTERVAL_MS,
+    });
 
     await client.openWorld(OPEN_WORLD_REQUEST);
     await client.setChunkView({
@@ -190,13 +200,24 @@ describe("GeneratedWorld boundary", () => {
 
     const level = client.getLevel();
     const chunk = findDecoratedOracleChunk(fullOracle, 0, 0);
-    const diff = compareDecoratedChunkToOracle(
+    const preTickDiff = compareDecoratedChunkToOracle(
       chunk,
       (localX, y, localZ) => runtimeBlockNameAt(level, localX, y, localZ),
     );
 
-    expect(diff.matches, formatDecoratedChunkDiff(diff)).toBe(65_533);
-    expect(diff.mismatchCount, formatDecoratedChunkDiff(diff)).toBe(3);
+    expect(preTickDiff.matches, formatDecoratedChunkDiff(preTickDiff)).toBe(65_533);
+    expect(preTickDiff.mismatchCount, formatDecoratedChunkDiff(preTickDiff)).toBe(3);
+
+    nowMs += 10 * GENERATED_WORLD_TICK_INTERVAL_MS;
+    expect(await client.pollUpdates()).toBe(true);
+
+    const postTickDiff = compareDecoratedChunkToOracle(
+      chunk,
+      (localX, y, localZ) => runtimeBlockNameAt(level, localX, y, localZ),
+    );
+
+    expect(postTickDiff.matches, formatDecoratedChunkDiff(postTickDiff)).toBe(65_536);
+    expect(postTickDiff.mismatchCount, formatDecoratedChunkDiff(postTickDiff)).toBe(0);
   }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
 
   test("slides the client chunk cache when the chunk view moves", async () => {

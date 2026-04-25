@@ -4,7 +4,7 @@ Reach exact full-block parity for one concrete, server-backed baseline: seed `12
 
 This is intentionally not a claim of full overworld parity. It is a bounded end-to-end confidence milestone: prove that the current translated pipeline can produce one simple decorated overworld chunk exactly, then use the same harness to expand coverage later.
 
-Status: in burn-down after the first bounded [`48-vanilla-scheduler-trace-oracle.md`](48-vanilla-scheduler-trace-oracle.md) result. [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) replaced the decorated/published shortcut with explicit `ChunkStatus`-shaped `FEATURES`, `LIGHT`, and publication gates; tactical 48 now records the seed `12345`, chunk `(0,0)` spawn-bootstrap `FEATURES` order and shows it matches the current host's z-major/x-major chunk order for the target 3x3.
+Status: exact for the pinned fixture after the fixture-equivalent generated-liquid tick window. [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) replaced the decorated/published shortcut with explicit `ChunkStatus`-shaped `FEATURES`, `LIGHT`, and publication gates; tactical 48 records the seed `12345`, chunk `(0,0)` spawn-bootstrap `FEATURES` order and shows it matches the current host's z-major/x-major chunk order for the target 3x3.
 
 ## Source files (read before writing)
 
@@ -43,6 +43,8 @@ minecraft:lava -> minecraft:air: 1
 ```
 
 The scheduler trace probe for those three positions shows they are still `minecraft:air` at the end of `FEATURES`; they appear in the committed official-server fixture only after the server continues startup and executes generated liquid ticks. This means the remaining exactness question is fixture-equivalent host tick timing, not another decoration, carver, or feature-placement bug.
+
+[`test/runtime/generated-world-boundary.test.ts`](../../test/runtime/generated-world-boundary.test.ts) now encodes that distinction: it first asserts the `3` pre-tick fluid differences, advances `10` deterministic host ticks with `liquidSimulationMode: vanilla17`, then asserts exact `65,536 / 65,536` full-block parity.
 
 Ground surface remains exact throughout this window:
 
@@ -137,11 +139,11 @@ Out of scope:
    - Plants/snow: `0`
    - Deep blobs/lava after fixture-equivalent liquid ticks: `0`
 6. Encode fixture-equivalent liquid tick timing in the full parity harness.
-   - Static post-generation diff before host liquid ticks: `3`
-   - `vanilla17` diff after `10` deterministic host ticks: `0`
+   - Done: static post-generation diff before host liquid ticks: `3`
+   - Done: `vanilla17` diff after `10` deterministic host ticks: `0`
    - Surface dirt/grass choice: `0`
 7. Promote the exact full-block test.
-   - Done means `65,536 / 65,536` block names match for seed `12345`, chunk `(0, 0)` under the same generated-fluid tick window represented by the official-server fixture.
+   - Done: `65,536 / 65,536` block names match for seed `12345`, chunk `(0, 0)` under the same generated-fluid tick window represented by the official-server fixture.
 
 ## Validation
 
