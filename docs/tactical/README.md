@@ -147,7 +147,7 @@ Do not start new movement, WebRTC/WebTransport, NPC AI, or fluid-prediction tact
 
 ### Client Runtime Validation Baseline
 
-Every implementation slice in `ClientRuntime1+` must prove the browser still loads and renders the world:
+Every implementation slice in `ClientRuntime1+` must prove the browser still loads and renders the world. Treat this as a completion gate between client-runtime tacticals: do not mark a Client Runtime implementation slice done, and do not move to the next one, until the required smoke lane passes or the failure is explicitly documented as unrelated and accepted.
 
 - `pnpm typecheck`
 - `pnpm test:browser`
