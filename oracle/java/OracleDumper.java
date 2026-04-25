@@ -806,10 +806,12 @@ public final class OracleDumper {
 
       String scenario = options.getOrDefault("scenario", "spawn_bootstrap");
       String stopStatus = options.getOrDefault("stop-status", "features");
+      String probeBlocks = options.getOrDefault("probe-blocks", "");
+      boolean generateStructures = parseBooleanOption(options, "generate-structures", true);
       Path tempDir = Files.createTempDirectory("mclone-scheduler-trace-");
       Path output = tempDir.resolve("scheduler-trace.json");
       Files.writeString(tempDir.resolve("eula.txt"), "eula=true\n", StandardCharsets.UTF_8);
-      Files.writeString(tempDir.resolve("server.properties"), schedulerTraceServerProperties(seed), StandardCharsets.UTF_8);
+      Files.writeString(tempDir.resolve("server.properties"), schedulerTraceServerProperties(seed, generateStructures), StandardCharsets.UTF_8);
 
       List<String> command = new ArrayList<>();
       command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
@@ -828,6 +830,7 @@ public final class OracleDumper {
       command.add("-Dmclone.schedulerTrace.recordRadius=" + recordRadius);
       command.add("-Dmclone.schedulerTrace.scenario=" + scenario);
       command.add("-Dmclone.schedulerTrace.stopStatus=" + stopStatus);
+      command.add("-Dmclone.schedulerTrace.probeBlocks=" + probeBlocks);
       command.add("-Dmclone.schedulerTrace.identityHashCodeMode=3");
       command.add("-Dmclone.schedulerTrace.output=" + output);
       command.add("-cp");
@@ -873,7 +876,7 @@ public final class OracleDumper {
       return Files.readString(output, StandardCharsets.UTF_8);
    }
 
-   private static String schedulerTraceServerProperties(long seed) {
+   private static String schedulerTraceServerProperties(long seed, boolean generateStructures) {
       return "allow-flight=true\n"
          + "difficulty=peaceful\n"
          + "enable-command-block=false\n"
@@ -881,7 +884,7 @@ public final class OracleDumper {
          + "enable-rcon=false\n"
          + "force-gamemode=false\n"
          + "gamemode=survival\n"
-         + "generate-structures=true\n"
+         + "generate-structures=" + Boolean.toString(generateStructures) + "\n"
          + "level-name=world\n"
          + "level-seed=" + seed + "\n"
          + "max-players=1\n"
@@ -2319,7 +2322,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper liquid-carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper feature-order-trace --seed <long> --chunk-x <int> --chunk-z <int> [--generate-structures <true|false>]");
-      System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full]");
+      System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full] [--generate-structures <true|false>] [--probe-blocks <x,y,z;...>]");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");

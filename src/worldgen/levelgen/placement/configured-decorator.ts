@@ -18,7 +18,7 @@ export class ConfiguredDecorator<DC extends DecoratorConfiguration> {
     private readonly configValue: DC,
   ) {}
 
-  public getPositions(context: DecorationContext, random: SimpleRandomSource, pos: BlockPos): readonly BlockPos[] {
+  public getPositions(context: DecorationContext, random: SimpleRandomSource, pos: BlockPos): Iterable<BlockPos> {
     return this.decorator.getPositions(context, random, this.configValue, pos);
   }
 

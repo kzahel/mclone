@@ -12,15 +12,22 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import net.minecraft.Util;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ThreadedLevelLightEngine;
 import net.minecraft.server.level.WorldGenRegion;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeGenerationSettings;
 import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.WorldgenRandom;
+import net.minecraft.world.level.levelgen.feature.ConfiguredFeature;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureManager;
 
 // Oracle shadow: instrument generate(...) while preserving vanilla 1.17.1 ChunkStatus logic.
@@ -125,7 +132,11 @@ public class ChunkStatus {
                )
             );
             WorldGenRegion var10 = new WorldGenRegion(var2, var7, var0, 1);
-            var3.applyBiomeDecoration(var10, var2.structureFeatureManager().forWorldGenRegion(var10));
+            if (McloneSchedulerTraceRecorder.hasProbeBlocks() && !var2.structureFeatureManager().forWorldGenRegion(var10).shouldGenerateFeatures()) {
+               applyBiomeDecorationWithFeatureProbes(var10, var3);
+            } else {
+               var3.applyBiomeDecoration(var10, var2.structureFeatureManager().forWorldGenRegion(var10));
+            }
             var9.setStatus(var0);
          }
 
@@ -344,6 +355,41 @@ public class ChunkStatus {
 
    public boolean isOrAfter(ChunkStatus var1) {
       return this.getIndex() >= var1.getIndex();
+   }
+
+   private static void applyBiomeDecorationWithFeatureProbes(WorldGenRegion region, ChunkGenerator generator) {
+      ChunkPos chunkPos = region.getCenter();
+      int minBlockX = chunkPos.getMinBlockX();
+      int minBlockZ = chunkPos.getMinBlockZ();
+      BlockPos origin = new BlockPos(minBlockX, region.getMinBuildHeight(), minBlockZ);
+      Biome biome = generator.getBiomeSource().getPrimaryBiome(chunkPos);
+      WorldgenRandom random = new WorldgenRandom();
+      long decorationSeed = random.setDecorationSeed(region.getSeed(), minBlockX, minBlockZ);
+      BiomeGenerationSettings generationSettings = biome.getGenerationSettings();
+      List<List<Supplier<ConfiguredFeature<?, ?>>>> features = generationSettings.features();
+
+      for (int stepIndex = 0; stepIndex < GenerationStep.Decoration.values().length; stepIndex++) {
+         if (features.size() <= stepIndex) {
+            continue;
+         }
+
+         int featureIndex = 0;
+         for (Supplier<ConfiguredFeature<?, ?>> featureSupplier : features.get(stepIndex)) {
+            ConfiguredFeature<?, ?> feature = featureSupplier.get();
+            random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
+            region.setCurrentlyGenerating(feature::toString);
+            feature.place(region, generator, random, origin);
+            McloneSchedulerTraceRecorder.recordFeatureProbe(
+               region,
+               stepIndex,
+               featureIndex,
+               feature.toString(),
+               Registry.FEATURE.getKey(feature.feature()).toString(),
+               random.getCount()
+            );
+            featureIndex++;
+         }
+      }
    }
 
    @Override

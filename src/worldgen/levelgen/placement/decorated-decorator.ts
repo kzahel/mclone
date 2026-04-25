@@ -10,12 +10,18 @@ export class DecoratedDecorator extends FeatureDecorator<DecoratedDecoratorConfi
     random: SimpleRandomSource,
     config: DecoratedDecoratorConfiguration,
     pos: BlockPos,
-  ): readonly BlockPos[] {
-    const positions: BlockPos[] = [];
-    for (const outerPos of config.outer().getPositions(context, random, pos)) {
-      positions.push(...config.inner().getPositions(context, random, outerPos));
-    }
+  ): Iterable<BlockPos> {
+    return this.generatePositions(context, random, config, pos);
+  }
 
-    return positions;
+  private *generatePositions(
+    context: DecorationContext,
+    random: SimpleRandomSource,
+    config: DecoratedDecoratorConfiguration,
+    pos: BlockPos,
+  ): IterableIterator<BlockPos> {
+    for (const outerPos of config.outer().getPositions(context, random, pos)) {
+      yield* config.inner().getPositions(context, random, outerPos);
+    }
   }
 }

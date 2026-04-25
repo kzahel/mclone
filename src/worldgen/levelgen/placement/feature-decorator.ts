@@ -9,5 +9,5 @@ export abstract class FeatureDecorator<DC extends DecoratorConfiguration> {
     return new ConfiguredDecorator(this, config);
   }
 
-  public abstract getPositions(context: DecorationContext, random: SimpleRandomSource, config: DC, pos: BlockPos): readonly BlockPos[];
+  public abstract getPositions(context: DecorationContext, random: SimpleRandomSource, config: DC, pos: BlockPos): Iterable<BlockPos>;
 }

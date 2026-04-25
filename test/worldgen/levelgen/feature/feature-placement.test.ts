@@ -14,6 +14,8 @@ import { DoublePlantPlacer } from "../../../../src/worldgen/levelgen/feature/blo
 import { SimpleBlockPlacer } from "../../../../src/worldgen/levelgen/feature/blockplacers/simple-block-placer";
 import { CountConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/count-configuration";
 import type { DecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorator-configuration";
+import { NoneFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/none-feature-configuration";
+import { ConfiguredFeature } from "../../../../src/worldgen/levelgen/feature/configured-feature";
 import { Features } from "../../../../src/worldgen/levelgen/feature/features";
 import { FrequencyWithExtraChanceDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/frequency-with-extra-chance-decorator-configuration";
 import { HeightmapConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/heightmap-configuration";
@@ -24,6 +26,7 @@ import { SimpleStateProvider } from "../../../../src/worldgen/levelgen/feature/s
 import { DecorationContext } from "../../../../src/worldgen/levelgen/placement/decoration-context";
 import type { ConfiguredDecorator } from "../../../../src/worldgen/levelgen/placement/configured-decorator";
 import { FeatureDecorators } from "../../../../src/worldgen/levelgen/placement/feature-decorators";
+import { absolute, top } from "../../../../src/worldgen/carver/carver-config";
 import { WorldgenRandom } from "../../../../src/worldgen/prng/worldgen-random";
 import { StaticRenderLevel } from "../../../../src/world/level/static-render-level";
 import { registerGeneratedRenderBlocks } from "../../../../src/world/level/generated-render-blocks";
@@ -73,10 +76,12 @@ describe("Feature placement", () => {
     const blocks = registerGeneratedRenderBlocks();
     const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
     const generator = createGenerator();
-    const positions = createCountSquareHeightmapDecorator(4).getPositions(
-      new DecorationContext(level, generator),
-      new WorldgenRandom(12345n),
-      new BlockPos(0, 0, 0),
+    const positions = Array.from(
+      createCountSquareHeightmapDecorator(4).getPositions(
+        new DecorationContext(level, generator),
+        new WorldgenRandom(12345n),
+        new BlockPos(0, 0, 0),
+      ),
     );
 
     expect(positions).toHaveLength(4);
@@ -99,10 +104,41 @@ describe("Feature placement", () => {
     );
     const beforeCount = random.getCount();
 
-    const positions = decorator.getPositions(new DecorationContext(level, generator), random, new BlockPos(0, 0, 0));
+    const positions = Array.from(decorator.getPositions(new DecorationContext(level, generator), random, new BlockPos(0, 0, 0)));
 
     expect(positions).toHaveLength(10);
     expect(random.getCount() - beforeCount).toBe(1);
+  });
+
+  test("decorated placement lazily interleaves repeated positions with feature random consumption", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    const generator = createGenerator();
+    const origins: string[] = [];
+    const feature = new ConfiguredFeature(
+      {
+        place(context) {
+          const origin = context.origin();
+          origins.push(`${origin.getX()},${origin.getY()},${origin.getZ()}`);
+          context.random().nextInt(256);
+          return true;
+        },
+      },
+      NoneFeatureConfiguration.INSTANCE,
+    ).rangeUniform(absolute(0), top()).squared().count(2);
+    const expectedRandom = new WorldgenRandom(12345n);
+    const expected: string[] = [];
+    for (let index = 0; index < 2; index++) {
+      const x = expectedRandom.nextInt(16);
+      const z = expectedRandom.nextInt(16);
+      const y = expectedRandom.nextInt(64);
+      expected.push(`${x},${y},${z}`);
+      expectedRandom.nextInt(256);
+    }
+
+    feature.place(level, generator, new WorldgenRandom(12345n), new BlockPos(0, 0, 0));
+
+    expect(origins).toEqual(expected);
   });
 
   test("random patch feature places vegetation onto the translated grass surface", () => {
