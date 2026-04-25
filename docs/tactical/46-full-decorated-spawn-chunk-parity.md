@@ -169,9 +169,10 @@ Run browser validation if a fix changes rendered pixels materially:
 
 ## Next
 
-After this lands, use the same full-decorated diff harness to choose the next small fixture set deliberately:
+After this lands, tactical [`50`](50-beach-river-full-decorated-parity.md) should use the same full-decorated diff harness on seed `12345`, chunk `(5,115)`, the existing sand/gravel surface-oracle target. That is the best second fixture because it proves legitimate shoreline/river loose material, soft disks, fluids, and decoration all stay exact together.
 
-1. one beach/river boundary where sand is legitimate
-2. one taiga/snowy slope like the visual regression area
-3. one desert or badlands chunk where loose material checks must not overfit grassland assumptions
-4. one ocean/shoreline chunk if the remaining table exactness issues are still visible
+After that, choose the next small fixture set from measured full-block diffs rather than from broad biome breadth:
+
+1. one taiga/snowy slope like the visual regression area
+2. one desert or badlands chunk where loose material checks must not overfit grassland assumptions
+3. one ocean/shoreline chunk if the remaining table exactness issues are still visible

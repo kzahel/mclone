@@ -146,7 +146,7 @@ This is not just an `mclone` porting concern. Vanilla Minecraft itself is order-
 
 For `mclone`, adjacent `FEATURES` tasks must not commit directly into shared chunks in arbitrary parallel order. If generation workers are used, they should return write plans or isolated results; the authoritative host must apply side effects in one deterministic vanilla-shaped order.
 
-Trace coverage note: the rule above is source-backed, but the project still needs an executable vanilla scheduler trace for concrete player/spawn load scenarios. Tactical [`48`](tactical/48-vanilla-scheduler-trace-oracle.md) owns that oracle before tactical [`46`](tactical/46-full-decorated-spawn-chunk-parity.md) resumes exact decorated block burn-down.
+Trace coverage note: the rule above is source-backed, and tactical [`48`](tactical/48-vanilla-scheduler-trace-oracle.md) now provides the first executable vanilla scheduler trace for a bounded spawn-bootstrap scenario. Tactical [`46`](tactical/46-full-decorated-spawn-chunk-parity.md) consumed that trace before claiming exact decorated block parity for the spawn fixture.
 
 Tactical [`48`](tactical/48-vanilla-scheduler-trace-oracle.md) now includes the first bounded spawn-bootstrap trace fixture:
 [`vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json`](../test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json).
@@ -158,7 +158,7 @@ For seed `12345`, chunk `(0,0)`, the committed trace observes this 3x3 `FEATURES
 (-1, 1) -> (0, 1) -> (1, 1)
 ```
 
-That order matches the current generated-host `sortChunkCoordinates(...)` order for the target 3x3. The oracle pins the child JVM's worker count and identity-hash mode to make the vanilla scheduler's otherwise JVM-sensitive collection iteration reproducible. Treat this as the initial measured spawn-bootstrap fixture, not a replacement for future player-ticket or same-run full decorated diagnostics.
+That order matches the current generated-host `sortChunkCoordinates(...)` order for the target 3x3. The oracle pins the child JVM's worker count and identity-hash mode to make the vanilla scheduler's otherwise JVM-sensitive collection iteration reproducible. Treat this as the initial measured spawn-bootstrap fixture, not a replacement for future player-ticket or same-run full decorated diagnostics. Vanilla does not source-sort decoration jobs by coordinate; the coordinate order above is measured scheduler behavior for this fixture and run shape.
 
 ## Lighting Gate
 

@@ -144,7 +144,7 @@ Minimum required chunk window:
    - If it does not, add a follow-up implementation task: workers may compute feature write plans, but the host applies them in the vanilla traced order.
 
 7. **Update downstream docs**
-   - Mark tactical 46 unblocked only after the scheduler trace exists and the host commit rule is documented.
+   - Done: tactical 46 references the scheduler trace and host commit rule before claiming exact parity.
    - Update [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md) with the observed trace result and fixture path.
 
 ## Validation
@@ -169,7 +169,9 @@ If the oracle path needs official server or Mojang artifacts, follow the project
 
 ## Next
 
-After this lands, return to [`46-full-decorated-spawn-chunk-parity.md`](46-full-decorated-spawn-chunk-parity.md). Tree/log/leaf mismatch work should then use three diagnostics together:
+This trace has been consumed by [`46-full-decorated-spawn-chunk-parity.md`](46-full-decorated-spawn-chunk-parity.md): the bounded spawn fixture's observed `FEATURES` order matches the current host order, and the remaining spawn differences were generated-liquid tick timing, not source-sorted decoration jobs.
+
+For future full-decorated fixture burn-downs, keep using these diagnostics together before changing runtime ordering:
 
 1. the full decorated block diff
 2. the per-chunk `feature-order-trace`
