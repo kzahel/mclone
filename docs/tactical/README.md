@@ -95,6 +95,10 @@ Lighting is both simulation data and renderer input. Use [`../lighting.md`](../l
 | [`L1-light-data-foundation.md`](L1-light-data-foundation.md) | `DataLayer`, `LightLayer`, light-section padding helpers, packed snapshot/wire light payloads | unit + L0 fixture roundtrip | **done** — runtime snapshots can now carry vanilla sky/block light bytes without interpreting propagation yet |
 | [`L2-light-solver-foundation.md`](L2-light-solver-foundation.md) | `DynamicGraphMinFixedPoint`, section storage, block/sky engines, `LevelLightEngine`, `LightChunkGetter` adapter | unit | **done** — synthetic levels now compute stored block and sky light before host snapshot wiring |
 | [`L3-initial-chunk-lighting.md`](L3-initial-chunk-lighting.md) | generated-world host light initialization, section activation, sky sources, emitter scan, lit packed snapshots | runtime + unit | **done** — authoritative generated chunks now publish vanilla stored sky/block light bytes with `lightCorrect` |
+| [`L4-light-snapshot-consumption.md`](L4-light-snapshot-consumption.md) | client/render-world light snapshot ingestion and brightness lookup | runtime + unit | **done** — authoritative light bytes are retained by client caches and available to mesh inputs |
+| [`L5-live-light-deltas.md`](L5-live-light-deltas.md) | `chunk_light_delta`, live block/liquid light updates, dirty-section propagation through protocol/render-world | runtime + unit | **done** — live light section replacements flow through host, client cache, and render-world dirtying |
+| [`L6-lighting-scheduler-and-status-integration.md`](L6-lighting-scheduler-and-status-integration.md) | per-chunk `LIGHT` scheduling, generation/light pipelining, lighting instrumentation | runtime + perf | **next lighting** — make lighting a status-scheduled pipeline instead of a late whole-view phase |
+| `L7-` | visible renderer consumption of stored light and focused light probes | browser visual + unit | follow-up after scheduling: remove remaining vanilla-mode fullbright constants and validate caves/shafts/torches |
 
 ## Liquid Simulation Arc
 

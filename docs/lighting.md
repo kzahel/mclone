@@ -28,6 +28,8 @@ This document is a reference for the future lighting implementation. It is not a
 | 4-bit light storage | `reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/DataLayer.java` |
 | Threaded server wrapper | `reference/minecraft-1.17.1/src/net/minecraft/server/level/ThreadedLevelLightEngine.java` |
 | Chunk light status | `reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java` |
+| Chunk status scheduling | `reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java`, `reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java` |
+| Server light update hook | `reference/minecraft-1.17.1/src/net/minecraft/server/level/ServerChunkCache.java` |
 | Server dirty/broadcast path | `reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java` |
 | Light update packet | `reference/minecraft-1.17.1/src/net/minecraft/network/protocol/game/ClientboundLightUpdatePacket.java` |
 | Client render dirty path | `reference/minecraft-1.17.1/src/net/minecraft/client/multiplayer/ClientChunkCache.java` |
@@ -130,6 +132,37 @@ At `ChunkStatus.LIGHT`, `ThreadedLevelLightEngine.lightChunk(...)`:
 - marks the chunk light-correct
 
 During worldgen, `ProtoChunk` records emitting positions as blocks are placed. On load from storage without trusted light data, `ChunkSerializer` can rescan the chunk for emitters.
+
+### Server Scheduling Shape
+
+The solver is not scheduled as an isolated "light the whole loaded area" phase in vanilla. It participates in the same chunk-holder future graph as other statuses:
+
+- `ChunkMap.schedule(holder, ChunkStatus.LIGHT)` adds a `TicketType.LIGHT` ticket for the target chunk before the status work is requested, so the chunk stays scheduled while asynchronous lighting is outstanding.
+- `ChunkHolder.getOrScheduleFuture(status, chunkMap)` owns one future slot per `ChunkStatus`; lighting is just one requested future in that ordered status chain.
+- `ChunkMap.scheduleChunkGeneration(...)` gathers the `LIGHT` dependency square through `getChunkRangeFuture(...)`, using the same `getDependencyStatus(...)` rule as other statuses.
+- `ThreadedLevelLightEngine.lightChunk(...)` returns a `CompletableFuture<ChunkAccess>` that completes through a `POST_UPDATE` task after propagation has run; only then does it mark the chunk light-correct and release the light ticket.
+- `ServerChunkCache` opportunistically calls `lightEngine.tryScheduleUpdate()` from its task polling loop after distance-manager updates, so lighting makes progress beside chunk scheduling rather than as a blocking world-load step.
+
+`ThreadedLevelLightEngine` itself is a priority-batched wrapper around `LevelLightEngine`, not a different solver. Public mutators enqueue tasks through `ChunkTaskPriorityQueueSorter` with the chunk's current queue level:
+
+```text
+PRE_UPDATE tasks:
+  updateSectionStatus(...)
+  enableLightSources(...)
+  queueSectionData(...)
+  lightChunk(...) section/source/emitter setup
+
+propagation:
+  LevelLightEngine.runUpdates(Integer.MAX_VALUE, true, true)
+
+POST_UPDATE tasks:
+  checkBlock(...)
+  lightChunk(...) completion: set lightCorrect, retainData(false), release light ticket
+```
+
+The default `taskPerBatch` is `5`. Vanilla's propagation call uses `Integer.MAX_VALUE` because it is already running on the server's threaded task machinery; browser and Node hosts should keep explicit wall-time/update budgets, but they should preserve the same pre-update / propagation / post-update ordering.
+
+Light-section publication is also scheduler-owned. After propagation swaps visible section data, `ServerChunkCache.onLightUpdate(...)` marks the visible `ChunkHolder` dirty; `ChunkHolder.broadcastChanges(...)` later sends `ClientboundLightUpdatePacket` masks for changed light sections. Initial client send waits for the ticking/full publication path, where `playerLoadedChunk(...)` sends the level chunk packet and light update packet together.
 
 ## Propagation Algorithm
 
@@ -379,7 +412,16 @@ run light propagation
 POST_UPDATE tasks
 ```
 
-For `mclone`, keep the semantic split but use the host scheduler:
+For `mclone`, keep the semantic split but use the host scheduler and worker boundary. The important parity fact is that lighting should be requested as per-chunk `LIGHT` status work as soon as its `3x3 FEATURES` dependency is ready, not as a separate all-view pass after the whole publish ring has decorated.
+
+Current state after the first worker-backed optimization:
+
+- the host enforces the `3x3 FEATURES` initial-light gate.
+- initial lighting runs in a dedicated lighting worker and publishes chunks incrementally as `chunk_light_ready` results arrive.
+- adjacent initial-light requests are batched in the worker so overlapping dependency chunks initialize once and propagation runs once for the batch.
+- the remaining architectural gap is that the host still enters a "Computing light" phase after decoration jobs for the current view are collected, instead of representing `LIGHT` as a status future that can be scheduled and prioritized alongside generation.
+
+Target queue shape:
 
 ```text
 light job queues:
@@ -403,13 +445,14 @@ Use a cooperative budget, not `Integer.MAX_VALUE`, in browser workers. Node can 
 
 Recommended host policy:
 
-- prioritize chunks by current player/session chunk interest.
+- prioritize chunks by current player/session chunk interest and vanilla-shaped ticket/status readiness.
 - keep input/poll/player-state work ahead of lighting.
 - process lighting in bounded slices.
+- enqueue initial `LIGHT(C)` the moment `FEATURES` is complete for C and its eight neighbors; do not wait for unrelated visible chunks to finish decoration.
 - publish chunk snapshots only after required initial lighting completes for that chunk, and only after the initial-light input satisfied vanilla's 3x3 `FEATURES` gate.
 - publish light deltas after dynamic edits or delayed propagation slices complete.
 
-For initial MVP generated terrain, it is acceptable for a chunk job to generate terrain and then finish initial lighting before publishing the chunk. Live block edits need incremental light deltas.
+For initial MVP generated terrain, it is acceptable for browser/Node scheduling machinery to diverge from the JVM executor classes. It is not acceptable for a `vanilla17` profile to weaken the status gates, treat missing neighbors as final transparent air, or hide lighting behind a debug-only disabled path.
 
 ### Worker Boundary
 
@@ -495,12 +538,18 @@ Suggested sequence:
 
    Current live block changes still publish full replacement chunk snapshots for block-state changes; `chunk_light_delta` carries light-only section changes, especially for neighboring chunks that do not need a block snapshot.
 
-6. Make meshing visibly consume stored light:
+6. Implement [`L6-lighting-scheduler-and-status-integration.md`](tactical/L6-lighting-scheduler-and-status-integration.md):
+   - treat initial lighting as per-chunk `LIGHT` status work instead of an all-view phase
+   - pipeline decoration and lighting so dependency-ready chunks start lighting before unrelated chunks finish decoration
+   - align worker queues with vanilla's pre-update / propagation / post-update split under browser-safe budgets
+   - instrument `FEATURES -> LIGHT -> FULL -> publish` timings per chunk-view radius
+
+7. Make meshing visibly consume stored light:
    - route packed-light calculation through stored sky/block light
    - remove remaining fullbright constants from the vanilla raster mode
    - keep `fullbright` as a debug render lighting mode, not the default profile
 
-7. Broaden visual validation:
+8. Broaden visual validation:
    - browser visual probes cover caves, open shafts, torch interiors, and daylight terrain
 
 ## Validation

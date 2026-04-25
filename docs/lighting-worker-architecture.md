@@ -75,7 +75,9 @@ Landed:
 Still pending:
 
 - Add sharper dependency tracking for accepted light when neighbor revisions change; the current host invalidates a conservative 3x3 chunk window.
-- Pipeline decoration and initial lighting so the host starts lighting dependency-ready chunks before the entire publish ring has finished decoration.
+- Pipeline decoration and initial lighting so the host starts `LIGHT` status work for dependency-ready chunks before the entire publish ring has finished decoration.
+- Make the worker mailbox explicitly mirror vanilla's `PRE_UPDATE` / propagation / `POST_UPDATE` phases under browser-safe budgets, instead of treating initial-light requests as a separate service batch shape.
+- Add status-level timing around `FEATURES -> LIGHT -> FULL -> publish` so lighting cost is visible as a loading stage and not inferred from missing publish time.
 - Run and record the first post-lighting D5 baseline with the schema `3` gates after any follow-up responsiveness fixes.
 
 ## Protocol Shape
@@ -199,6 +201,16 @@ For visual stability, prefer batching visible block snapshots with their corresp
 
 The lighting worker should have one serialized mailbox. It can receive messages concurrently from the browser runtime, but it should process them in-order inside the worker.
 
+Vanilla reference shape:
+
+- `ThreadedLevelLightEngine.addTask(...)` submits work through `ChunkTaskPriorityQueueSorter` using the target chunk's queue level.
+- most setup calls are `PRE_UPDATE`: section status changes, queued section data, sky-source enablement, and initial `lightChunk(...)` setup.
+- `checkBlock(...)` is a `POST_UPDATE` task.
+- each `runUpdate()` batch runs up to `taskPerBatch` queued tasks, calls `LevelLightEngine.runUpdates(...)`, then runs matching post-update tasks.
+- `lightChunk(...)` completes its future in `POST_UPDATE`, sets `lightCorrect`, retains/removes transient light data, and releases the light ticket.
+
+`mclone` does not need JVM executors, but the service should preserve that ordering. The current batching optimization is useful, but it is not the same as vanilla scheduling: it batches ready `request_initial_light` commands and drains propagation for the union. The next scheduler slice should keep the shared-propagation win while making `LIGHT` a priority/status queue participant rather than a whole-view service phase.
+
 Queue phases:
 
 ```text
@@ -243,6 +255,8 @@ This is closer to vanilla's `ThreadedLevelLightEngine` shape than the current ho
 
 The host should not wait synchronously inside `set_chunk_view` for lighting. `set_chunk_view` should acknowledge the view/session change and start background generation and lighting jobs. Polling then streams snapshots as chunks become fully lit.
 
+The stronger target is that generation and lighting overlap: after a chunk finishes `FEATURES`, the host should check which nearby chunks have become `3x3 FEATURES`-stable and enqueue their `LIGHT` work immediately. This matches the chunk-status future model better than collecting a full publish ring and then entering a monolithic lighting phase.
+
 Backpressure rules:
 
 - cap pending light inputs and requests per chunk-view revision.
@@ -270,7 +284,7 @@ Backpressure rules:
 6. Split load radius from publish radius if needed for halo-only lighting work.
 7. Done: add D5 traversal performance gates for host-worker responsiveness, lighting worker budget, render-world ingestion, and main-thread GPU uploads.
 8. Done: publish initial lit chunk snapshots incrementally as each `chunk_light_ready` result is accepted.
-9. Pipeline decoration and initial lighting across the publish ring, then rerun and record the post-lighting D5 baseline. Use failures to choose the next bottleneck slice instead of loosening the gate after the fact.
+9. Next: implement [`L6-lighting-scheduler-and-status-integration.md`](tactical/L6-lighting-scheduler-and-status-integration.md): schedule per-chunk `LIGHT` work as soon as its `3x3 FEATURES` dependency is ready, keep lighting priority tied to current chunk interest, expose per-stage timing, and rerun the radius-1/radius-2 worldgen benchmarks plus D5/browser smoke. Use failures to choose the next bottleneck slice instead of loosening the gate after the fact.
 
 ## Tests
 

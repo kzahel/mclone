@@ -53,7 +53,9 @@ pnpm typecheck
 
 ## Next
 
-`L6` should make the renderer visibly use the stored light facts:
+The next lighting slice is [`L6-lighting-scheduler-and-status-integration.md`](L6-lighting-scheduler-and-status-integration.md). Recent radius-1/radius-2 measurement showed the remaining pain is not the light data format or snapshot protocol; it is that initial lighting is still scheduled as a late service phase instead of status work that overlaps with generation.
+
+After `L6`, a renderer-facing follow-up should make the renderer visibly use the stored light facts:
 
 - route mesh packed-light calculation through `ClientChunkCache.getBrightness(...)`
 - remove remaining fullbright constants from block/liquid mesh emission in the vanilla render mode
