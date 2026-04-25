@@ -9,7 +9,12 @@ import type {
   WorldPerformanceSnapshot,
 } from "../protocol/world-messages";
 import type { WorldClient } from "../protocol/world-client";
+import { PlayerMovementPredictor } from "../movement";
 import { type ClientWorld, type RenderWorldUpdateSink, WorldClientBackedClientWorld } from "./client-world";
+import {
+  PlayerMovementPredictionService,
+  type PredictionService,
+} from "./prediction-service";
 
 export interface ClientPresentationState {
   readonly sessionState?: ClientSessionState;
@@ -26,6 +31,7 @@ export interface ClientRuntime {
   setRenderWorldUpdateSink(sink: RenderWorldUpdateSink | undefined): void;
   close(): void;
   getClientWorld(): ClientWorld;
+  getPredictionService(): PredictionService;
   publishPresentationState(): ClientPresentationState;
 }
 
@@ -39,13 +45,16 @@ interface ClientRuntimeCloseTarget {
 
 export class WorldClientRuntimeFacade implements ClientRuntime {
   private readonly clientWorld: ClientWorld;
+  private predictionService: PredictionService | undefined;
 
   public constructor(private readonly client: WorldClient) {
     this.clientWorld = getClientWorld(client);
   }
 
-  public openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage> {
-    return this.client.openWorld(request);
+  public async openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage> {
+    const opened = await this.client.openWorld(request);
+    this.predictionService = undefined;
+    return opened;
   }
 
   public setChunkInterest(request: SetChunkViewRequest): Promise<boolean> {
@@ -76,10 +85,32 @@ export class WorldClientRuntimeFacade implements ClientRuntime {
     if (isClientRuntimeCloseTarget(this.client)) {
       this.client.close();
     }
+    this.predictionService = undefined;
   }
 
   public getClientWorld(): ClientWorld {
     return this.clientWorld;
+  }
+
+  public getPredictionService(): PredictionService {
+    if (this.predictionService !== undefined) {
+      return this.predictionService;
+    }
+
+    const authoritative = this.clientWorld.getPredictionView().getAuthoritativeMovementState();
+    if (authoritative === undefined) {
+      throw new Error("ClientRuntime prediction service requires an authoritative movement state");
+    }
+
+    const predictionService = new PlayerMovementPredictionService(
+      new PlayerMovementPredictor(authoritative.body),
+    );
+    predictionService.resetFromAuthoritativeBody(
+      authoritative.body,
+      authoritative.lastProcessedCommandSeq,
+    );
+    this.predictionService = predictionService;
+    return predictionService;
   }
 
   public publishPresentationState(): ClientPresentationState {

@@ -2,7 +2,9 @@
 
 Standing after [`ClientRuntime3-integrated-server-flow.md`](ClientRuntime3-integrated-server-flow.md), which made browser worker singleplayer explicitly join a local `IntegratedServer` facade while preserving the shared client runtime and client-world hydration path.
 
-Status: **next**.
+Status: **done**.
+
+Landed result: remote HTTP clients now have explicit close behavior and focused parity coverage proving remote state is visible through `ClientRuntime.publishPresentationState()` and `ClientWorld` views. Reconnect/session restoration remains owned by `RemoteWorldTransport`, while hydration still flows through the shared `ClientWorld`.
 
 ## Goal
 

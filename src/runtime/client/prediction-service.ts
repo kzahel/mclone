@@ -10,6 +10,10 @@ import {
 import type { MovementPhysicsParams } from "../movement/movement-params";
 import type { ClientWorldPredictionView } from "./client-world";
 
+type MutableMovementReconcileOptions = {
+  -readonly [Key in keyof MovementReconcileOptions]: MovementReconcileOptions[Key];
+};
+
 export interface PredictionCommandReplayRequest {
   readonly command: PlayerMoveCommand;
   readonly clientWorld: ClientWorldPredictionView;
@@ -23,6 +27,12 @@ export interface PredictionReconcileRequest {
   readonly options?: MovementReconcileOptions;
 }
 
+export interface PredictionClientWorldReconcileRequest {
+  readonly clientWorld: ClientWorldPredictionView;
+  readonly physicsParams: MovementPhysicsParams;
+  readonly options?: MovementReconcileOptions;
+}
+
 export interface PredictionService {
   getPredictedBody(): MovementBody;
   getLastAcknowledgedSequence(): number;
@@ -31,6 +41,22 @@ export interface PredictionService {
   resetFromAuthoritativeBody(body: MovementBody, acknowledgedSequence?: number): void;
   advanceCommandReplay(request: PredictionCommandReplayRequest): MovementBody;
   reconcileAuthoritativeSnapshot(request: PredictionReconcileRequest): MovementReconcileResult;
+  reconcileClientWorldSnapshot(request: PredictionClientWorldReconcileRequest): MovementReconcileResult | undefined;
+}
+
+function mergeClientWorldReconcileOptions(
+  clientWorld: ClientWorldPredictionView,
+  options: MovementReconcileOptions | undefined,
+): MovementReconcileOptions {
+  const merged: MutableMovementReconcileOptions = { ...(options ?? {}) };
+  if (merged.currentPhysicsRevision === undefined && clientWorld.movementPhysicsRevision !== undefined) {
+    merged.currentPhysicsRevision = clientWorld.movementPhysicsRevision;
+  }
+  if (merged.currentCollisionRevision === undefined && clientWorld.collisionRevision !== undefined) {
+    merged.currentCollisionRevision = clientWorld.collisionRevision;
+  }
+
+  return merged;
 }
 
 export class PlayerMovementPredictionService implements PredictionService {
@@ -69,7 +95,19 @@ export class PlayerMovementPredictionService implements PredictionService {
       request.authoritative,
       request.clientWorld.createCollisionWorld(),
       request.physicsParams,
-      request.options,
+      mergeClientWorldReconcileOptions(request.clientWorld, request.options),
     );
+  }
+
+  public reconcileClientWorldSnapshot(request: PredictionClientWorldReconcileRequest): MovementReconcileResult | undefined {
+    const authoritative = request.clientWorld.getAuthoritativeMovementState();
+    if (authoritative === undefined) {
+      return undefined;
+    }
+
+    return this.reconcileAuthoritativeSnapshot({
+      ...request,
+      authoritative,
+    });
   }
 }

@@ -2,7 +2,12 @@ import type { ClientChunkCache } from "../../world/level/client-chunk-cache";
 import type { ChunkSnapshot } from "../../world/level/chunk-snapshot";
 import { SectionPos } from "../../core/section-pos";
 import { AABB } from "../../world/phys/aabb";
+import { Vec3 } from "../../world/phys/vec3";
 import { blockGetterCollisionWorld, type CollisionWorld } from "../movement/collision-world";
+import type {
+  MovementAuthoritativeState,
+  MovementBody,
+} from "../movement";
 import type {
   ChunkLightDeltaMessage,
   ChunkSnapshotMessage,
@@ -52,6 +57,8 @@ export interface ClientWorldRenderView {
 export interface ClientWorldPredictionView {
   readonly movementPhysicsRevision?: number;
   readonly collisionRevision?: number;
+  getAuthoritativeMovementState(): MovementAuthoritativeState | undefined;
+  getEntitySnapshots(): readonly EntitySnapshot[];
   createCollisionWorld(): CollisionWorld;
 }
 
@@ -107,6 +114,42 @@ function clientChunkCacheCollisionWorld(level: ClientChunkCache): CollisionWorld
 
       return loadedWorld.queryBlockCollisions(bounds);
     },
+  };
+}
+
+function movementBodyFromClientSnapshot(
+  snapshot: NonNullable<ClientPlayerState["movementBody"]>,
+): MovementBody {
+  return {
+    position: new Vec3(snapshot.position.x, snapshot.position.y, snapshot.position.z),
+    velocity: new Vec3(snapshot.velocity.x, snapshot.velocity.y, snapshot.velocity.z),
+    bounds: new AABB(
+      snapshot.bounds.minX,
+      snapshot.bounds.minY,
+      snapshot.bounds.minZ,
+      snapshot.bounds.maxX,
+      snapshot.bounds.maxY,
+      snapshot.bounds.maxZ,
+    ),
+    onGround: snapshot.onGround,
+    mode: snapshot.mode,
+    jumpHeld: snapshot.jumpHeld,
+  };
+}
+
+function authoritativeMovementStateFromPlayerState(
+  playerState: ClientPlayerState | undefined,
+): MovementAuthoritativeState | undefined {
+  const movementBody = playerState?.movementBody;
+  if (movementBody === undefined) {
+    return undefined;
+  }
+
+  return {
+    body: movementBodyFromClientSnapshot(movementBody),
+    lastProcessedCommandSeq: movementBody.lastProcessedCommandSequence,
+    physicsRevision: movementBody.physicsRevision,
+    collisionRevision: movementBody.collisionRevision,
   };
 }
 
@@ -178,6 +221,8 @@ export class HostMessageClientWorld implements ClientWorldHydrationTarget {
     return {
       movementPhysicsRevision: this.playerState?.movementBody?.physicsRevision,
       collisionRevision: this.playerState?.movementBody?.collisionRevision,
+      getAuthoritativeMovementState: () => authoritativeMovementStateFromPlayerState(this.playerState),
+      getEntitySnapshots: () => this.getEntitySnapshots(),
       createCollisionWorld: () => clientChunkCacheCollisionWorld(this.getLevel()),
     };
   }
@@ -320,6 +365,8 @@ export class WorldClientBackedClientWorld implements ClientWorld {
     return {
       movementPhysicsRevision: this.client.getPlayerState()?.movementBody?.physicsRevision,
       collisionRevision: this.client.getPlayerState()?.movementBody?.collisionRevision,
+      getAuthoritativeMovementState: () => authoritativeMovementStateFromPlayerState(this.client.getPlayerState()),
+      getEntitySnapshots: () => this.client.getEntitySnapshots(),
       createCollisionWorld: () => clientChunkCacheCollisionWorld(this.client.getLevel()),
     };
   }
