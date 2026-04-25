@@ -26,30 +26,31 @@ The staged generator path is already exact for this chunk:
 - `buildSurfaceAndBedrock(...)` matches the Java surface oracle block-for-block.
 - AIR carvers match the Java carved oracle block-for-block, including scheduled tick capture.
 
-After correcting the runtime `FEATURES` dependency model to use a `WorldGenRegion`-style read/write envelope, fixing `RepeatingDecorator` to sample its count once like Java, preserving vanilla `LakeFeature` `cave_air`, regenerating the server-backed fixture through the scheduler-pinned integration harness, and making feature-time block-light reads match vanilla's pre-lighting darkness, the full runtime decorated chunk is still close but not exact against the measured official-server fixture:
+After correcting the runtime `FEATURES` dependency model to use a `WorldGenRegion`-style read/write envelope, fixing `RepeatingDecorator` to sample its count once like Java, preserving vanilla `LakeFeature` `cave_air`, regenerating the server-backed fixture through the scheduler-pinned integration harness, and making feature-time block-light reads match vanilla's pre-lighting darkness, the static post-generation snapshot is close but intentionally still short of the measured official-server fixture:
 
-| Metric | Current value |
-|---|---:|
-| Full-block matches | `65,533 / 65,536` |
-| Full-block mismatches | `3` |
-| Full-block match rate | `99.995%` |
-| Ground material matches | `256 / 256` columns |
-| Exact ground block + Y matches | `256 / 256` columns |
-| Unexpected dry-land sand | `0` |
+| Comparison | Full-block matches | Full-block mismatches |
+|---|---:|---:|
+| Static host snapshot, `liquidSimulationMode: none` | `65,533 / 65,536` | `3` |
+| Static host snapshot, `liquidSimulationMode: vanilla17`, before host ticks | `65,533 / 65,536` | `3` |
+| `vanilla17` liquid simulation after `1` deterministic host tick | `65,535 / 65,536` | `1` |
+| `vanilla17` liquid simulation after `10` deterministic host ticks | `65,536 / 65,536` | `0` |
 
-Current full-block mismatch buckets:
-
-| Bucket | Count |
-|---|---:|
-| Carver/fluid edge | `2` |
-| Deep underground blobs/lava | `1` |
-
-Top concrete block-pair mismatches:
+The static mismatch cells are all fluid follow-through:
 
 ```text
 minecraft:water -> minecraft:air: 2
 minecraft:lava -> minecraft:air: 1
 ```
+
+The scheduler trace probe for those three positions shows they are still `minecraft:air` at the end of `FEATURES`; they appear in the committed official-server fixture only after the server continues startup and executes generated liquid ticks. This means the remaining exactness question is fixture-equivalent host tick timing, not another decoration, carver, or feature-placement bug.
+
+Ground surface remains exact throughout this window:
+
+| Metric | Current value |
+|---|---:|
+| Ground material matches | `256 / 256` columns |
+| Exact ground block + Y matches | `256 / 256` columns |
+| Unexpected dry-land sand | `0` |
 
 This baseline includes two source-backed table corrections from `VanillaBiomes.taigaBiome(...)` and `BiomeDefaultFeatures`:
 
@@ -60,6 +61,7 @@ This baseline includes two source-backed table corrections from `VanillaBiomes.t
 - the committed full decorated fixture is now generated with `./oracle/integration/gen-fixture.sh --scheduler-pins ...` to use the same JVM scheduler pins as the scheduler trace oracle; treat it as an exact empirical run fixture, because edge decoration writes are scheduler/run-shape sensitive.
 - `GeneratedDecorationRegion` now reports block light `0` during feature placement, matching vanilla's pre-lighting `WorldGenRegion` behavior. This lets `SnowAndFreezeFeature` place the same cold-slope snow blockers that reject the extra neighboring `(0,1)` spruce and removes the tree/leaves plus plants/snow mismatch buckets.
 - `LevelChunk` now keeps `WORLD_SURFACE_WG` / `OCEAN_FLOOR_WG` as pre-feature heightmaps and restricts decoration writes to vanilla's post-feature heightmaps. This prevents neighboring tree leaves from changing later ore height gates and removes the `10` gravel/deepslate mismatches.
+- `liquidSimulationMode: vanilla17` reaches exact fixture parity after `10` deterministic host ticks. With liquid simulation disabled, or before host ticks are allowed to run, the expected fixture-fluid cells remain air.
 
 ## Dependency model correction
 
@@ -133,13 +135,13 @@ Out of scope:
    - Edge leaves from the neighboring `(0,1)` tree are now gone after matching feature-time block light and top-layer snow behavior.
 5. Burn down non-tree decoration and underground helper mismatches.
    - Plants/snow: `0`
-   - Deep blobs/lava: `1`
-6. Resolve remaining carver/fluid and dirt/grass edges.
-   - Carver/fluid edge: `2`
+   - Deep blobs/lava after fixture-equivalent liquid ticks: `0`
+6. Encode fixture-equivalent liquid tick timing in the full parity harness.
+   - Static post-generation diff before host liquid ticks: `3`
+   - `vanilla17` diff after `10` deterministic host ticks: `0`
    - Surface dirt/grass choice: `0`
-   - Re-check whether any apparent carver mismatch is actually tree/feature spillover or cross-chunk decoration context before editing carvers.
 7. Promote the exact full-block test.
-   - Done means `65,536 / 65,536` block names match for seed `12345`, chunk `(0, 0)`.
+   - Done means `65,536 / 65,536` block names match for seed `12345`, chunk `(0, 0)` under the same generated-fluid tick window represented by the official-server fixture.
 
 ## Validation
 
@@ -157,7 +159,7 @@ Run browser validation if a fix changes rendered pixels materially:
 
 ## Done when
 
-- the full decorated runtime chunk `(0, 0)` for seed `12345` matches the committed official-server fixture at all `65,536` block positions
+- the full decorated runtime chunk `(0, 0)` for seed `12345` matches the committed official-server fixture at all `65,536` block positions after the fixture-equivalent generated-liquid tick window
 - the exact comparison is encoded in a normal test, not only a diagnostic script
 - the existing staged terrain/surface/carver oracle tests remain exact
 - the dry-land sand regression stays covered
