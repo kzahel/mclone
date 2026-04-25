@@ -251,6 +251,7 @@ async function boot(): Promise<BootResult> {
       lightingMode: renderConfig.lightingMode,
       liquidSimulationMode: renderConfig.liquidSimulationMode,
     },
+    worldStorageMode: renderConfig.worldStorageMode,
     skyColor: renderConfig.skyColor,
     clearColorScale: renderConfig.clearColorScale,
   });

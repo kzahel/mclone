@@ -6,9 +6,12 @@ import { createGeneratedWorldHostForRequest } from "./generated-world-host-facto
 import { GeneratedWorldHost } from "./generated-world-host";
 
 function createGeneratedWorldHost(request: OpenWorldRequest): GeneratedWorldHost {
+  const worldStorage = request.storageMode === "none" || typeof indexedDB === "undefined"
+    ? undefined
+    : new IndexedDbWorldStorage(indexedDB);
   return createGeneratedWorldHostForRequest(request, {
     chunkViewScheduling: "cooperative",
-    worldStorage: typeof indexedDB === "undefined" ? undefined : new IndexedDbWorldStorage(indexedDB),
+    worldStorage,
     lightingService: request.config?.lightingMode === "none" ? undefined : createBrowserLightingService(),
   });
 }

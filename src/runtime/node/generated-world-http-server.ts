@@ -38,6 +38,7 @@ import {
   type SetChunkViewRequest,
   type WorldHostMessage,
   type WorldOpenedMessage,
+  type WorldStorageMode,
 } from "../protocol/world-messages";
 import {
   anchorPlayerStateToChunkView,
@@ -165,8 +166,16 @@ function isSameChunkView(left: SetChunkViewRequest | undefined, right: SetChunkV
     && left.radius === right.radius;
 }
 
+function normalizeWorldStorageMode(storageMode: WorldStorageMode | undefined): WorldStorageMode {
+  return storageMode === "none" ? "none" : "default";
+}
+
 function isSameOpenWorldRequest(left: OpenWorldRequest, right: OpenWorldRequest): boolean {
   if (left.seed !== right.seed || left.preset !== right.preset) {
+    return false;
+  }
+
+  if (normalizeWorldStorageMode(left.storageMode) !== normalizeWorldStorageMode(right.storageMode)) {
     return false;
   }
 
@@ -853,7 +862,7 @@ export class GeneratedWorldRemoteService {
   private createSessionHost(request: OpenWorldRequest): WorldHost {
     return createGeneratedWorldHostForRequest(request, {
       chunkViewScheduling: "cooperative",
-      worldStorage: this.worldStorage,
+      worldStorage: request.storageMode === "none" ? undefined : this.worldStorage,
       lightingService: request.config?.lightingMode === "none" ? undefined : createNodeLightingService(),
     });
   }

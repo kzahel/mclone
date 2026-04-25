@@ -119,6 +119,11 @@
       .debug-config-actions button[type="button"] {
         background: rgba(255, 255, 255, 0.08);
       }
+      #debug-delete-indexed-db {
+        grid-column: 1 / -1;
+        border-color: rgba(255, 106, 106, 0.42);
+        background: rgba(255, 106, 106, 0.16);
+      }
       .joystick-el {
         position: fixed;
         left: 0;
@@ -185,10 +190,15 @@
           <input id="debug-disable-water-sim" name="disableWaterSim" type="checkbox" />
           <span>Disable Water Sim</span>
         </label>
+        <label class="debug-config-toggle" for="debug-disable-indexed-db">
+          <input id="debug-disable-indexed-db" name="disableIndexedDb" type="checkbox" />
+          <span>Disable IndexedDB</span>
+        </label>
         <output id="debug-config-chunk-count"></output>
         <div class="debug-config-actions">
           <button type="submit">Apply &amp; Reload</button>
           <button id="debug-config-reset" type="button">Reset</button>
+          <button id="debug-delete-indexed-db" type="button">Delete IndexedDB &amp; Reload</button>
         </div>
       </form>
     </details>

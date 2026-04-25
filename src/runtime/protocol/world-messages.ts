@@ -5,6 +5,7 @@ import type { PackedChunkLightDelta, PackedChunkSnapshot } from "../../world/lev
 export type OpenWorldPreset = "default" | "browser_smoke";
 export type WorldEngineLightingMode = "vanilla17" | "none";
 export type WorldEngineLiquidSimulationMode = "vanilla17" | "none";
+export type WorldStorageMode = "default" | "none";
 
 export interface WorldEngineConfig {
   readonly lightingMode?: WorldEngineLightingMode;
@@ -33,6 +34,7 @@ export interface OpenWorldRequest {
   readonly seed: bigint;
   readonly preset: OpenWorldPreset;
   readonly config?: WorldEngineConfig;
+  readonly storageMode?: WorldStorageMode;
 }
 
 export interface SetChunkViewRequest {

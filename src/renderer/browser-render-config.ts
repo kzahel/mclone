@@ -1,5 +1,5 @@
 import { Vec3 } from "../world/phys/vec3";
-import type { WorldEngineConfig, WorldEngineLightingMode, WorldEngineLiquidSimulationMode } from "../runtime/protocol/world-messages";
+import type { WorldEngineConfig, WorldEngineLightingMode, WorldEngineLiquidSimulationMode, WorldStorageMode } from "../runtime/protocol/world-messages";
 
 export interface BrowserRenderConfig {
   readonly viewDistance: number;
@@ -8,6 +8,7 @@ export interface BrowserRenderConfig {
   readonly clearColorScale: number;
   readonly lightingMode: WorldEngineLightingMode;
   readonly liquidSimulationMode: WorldEngineLiquidSimulationMode;
+  readonly worldStorageMode: WorldStorageMode;
 }
 
 const DEFAULT_VIEW_DISTANCE = 6;
@@ -15,6 +16,7 @@ const DEFAULT_SKY_COLOR = new Vec3(0x8f / 255, 0xb8 / 255, 0xff / 255);
 const DEFAULT_CLEAR_COLOR_SCALE = 1.0;
 const DEFAULT_LIGHTING_MODE: WorldEngineLightingMode = "vanilla17";
 const DEFAULT_LIQUID_SIMULATION_MODE: WorldEngineLiquidSimulationMode = "vanilla17";
+const DEFAULT_WORLD_STORAGE_MODE: WorldStorageMode = "default";
 
 export const BROWSER_RENDER_CONFIG_STORAGE_KEY = "mclone.debug.renderConfig.v1";
 export const BROWSER_RENDER_CONFIG_QUERY_KEYS = [
@@ -22,13 +24,16 @@ export const BROWSER_RENDER_CONFIG_QUERY_KEYS = [
   "renderDistance",
   "lightingMode",
   "liquidSimulationMode",
+  "worldStorageMode",
   "disableLighting",
   "disableWaterSim",
+  "disableIndexedDb",
 ] as const;
 
 export interface StoredBrowserRenderConfig extends WorldEngineConfig {
   readonly viewDistance?: number;
   readonly renderDistance?: number;
+  readonly worldStorageMode?: WorldStorageMode;
 }
 
 export interface BrowserRenderConfigStorage {
@@ -137,6 +142,10 @@ function readStoredLiquidSimulationMode(record: Record<string, unknown>): WorldE
     : undefined;
 }
 
+function readStoredWorldStorageMode(record: Record<string, unknown>): WorldStorageMode | undefined {
+  return record.worldStorageMode === "none" || record.worldStorageMode === "default" ? record.worldStorageMode : undefined;
+}
+
 export function readStoredBrowserRenderConfig(storage: Pick<BrowserRenderConfigStorage, "getItem"> | undefined): StoredBrowserRenderConfig {
   if (storage === undefined) {
     return {};
@@ -158,6 +167,7 @@ export function readStoredBrowserRenderConfig(storage: Pick<BrowserRenderConfigS
       renderDistance: readStoredInteger(parsed, "renderDistance", 16, 512),
       lightingMode: readStoredLightingMode(parsed),
       liquidSimulationMode: readStoredLiquidSimulationMode(parsed),
+      worldStorageMode: readStoredWorldStorageMode(parsed),
     };
   } catch {
     return {};
@@ -173,6 +183,7 @@ export function writeStoredBrowserRenderConfig(
     renderDistance: config.renderDistance,
     lightingMode: config.lightingMode,
     liquidSimulationMode: config.liquidSimulationMode,
+    worldStorageMode: config.worldStorageMode,
   }));
 }
 
@@ -214,6 +225,23 @@ function parseLiquidSimulationModeParam(url: URL, fallback: WorldEngineLiquidSim
   return fallback;
 }
 
+function parseWorldStorageModeParam(url: URL, fallback: WorldStorageMode): WorldStorageMode {
+  const raw = url.searchParams.get("worldStorageMode");
+  if (raw === "none" || raw === "default") {
+    return raw;
+  }
+
+  const disable = url.searchParams.get("disableIndexedDb");
+  if (disable === "1" || disable === "true") {
+    return "none";
+  }
+  if (disable === "0" || disable === "false") {
+    return "default";
+  }
+
+  return fallback;
+}
+
 export function readBrowserRenderConfig(
   url: URL,
   storage?: Pick<BrowserRenderConfigStorage, "getItem">,
@@ -229,5 +257,6 @@ export function readBrowserRenderConfig(
     clearColorScale: parseFloatParam(url, "clearColorScale", DEFAULT_CLEAR_COLOR_SCALE, 0.0, 1.0),
     lightingMode: parseLightingModeParam(url, stored.lightingMode ?? DEFAULT_LIGHTING_MODE),
     liquidSimulationMode: parseLiquidSimulationModeParam(url, stored.liquidSimulationMode ?? DEFAULT_LIQUID_SIMULATION_MODE),
+    worldStorageMode: parseWorldStorageModeParam(url, stored.worldStorageMode ?? DEFAULT_WORLD_STORAGE_MODE),
   };
 }

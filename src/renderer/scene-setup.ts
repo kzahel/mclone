@@ -1,6 +1,6 @@
 import { ResourceLocation } from "../core/resource-location";
 import { SectionPos } from "../core/section-pos";
-import type { OpenWorldPreset, WorldEngineConfig, WorldProgressMessage } from "../runtime/protocol/world-messages";
+import type { OpenWorldPreset, WorldEngineConfig, WorldProgressMessage, WorldStorageMode } from "../runtime/protocol/world-messages";
 import type { WorldClient } from "../runtime/protocol/world-client";
 import type { WorldSaveMetadata } from "../runtime/storage/world-storage";
 import { RemoteWorldClient, RemoteWorldTransport } from "../runtime/transport/remote-world-transport";
@@ -61,6 +61,7 @@ export interface SceneInitOptions {
   readonly remoteWorldHostUrl?: string;
   readonly preset?: OpenWorldPreset;
   readonly engineConfig?: WorldEngineConfig;
+  readonly worldStorageMode?: WorldStorageMode;
   readonly skyColor?: Vec3;
   readonly clearColorScale?: number;
   readonly onProgress?: LoadingProgressSink;
@@ -503,11 +504,13 @@ export async function initializeRendererScene(
   const biomeSource = new OverworldBiomeSource(options.seed);
   const blockStateResolver = createBlockStateResolver(generatedBlocks.airState);
   const worldClient = createWorldClient(options, generatedBlocks.airState, biomeSource, blockStateResolver, generatedBlocks.blockStateIds);
+  const storageMode = options.worldTransport === "remote" ? undefined : options.worldStorageMode;
   const worldOpened = await worldClient.openWorld({
     type: "open_world",
     seed: options.seed,
     preset: options.preset ?? "browser_smoke",
     config: options.engineConfig,
+    ...(storageMode === undefined || storageMode === "default" ? {} : { storageMode }),
   });
   const compatibilityLevel = worldClient.getLevel();
 

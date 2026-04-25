@@ -73,6 +73,7 @@ interface DebugRuntimeState {
   renderDistance?: number;
   lightingMode?: BrowserRenderConfig["lightingMode"];
   liquidSimulationMode?: BrowserRenderConfig["liquidSimulationMode"];
+  worldStorageMode?: BrowserRenderConfig["worldStorageMode"];
   frameCount: number;
   renderWorldCounters?: RenderWorldPerformanceCounters;
   renderQueueStats?: RenderSceneQueueStats;
@@ -210,20 +211,39 @@ function reloadWithoutBrowserConfigQueryParams(): void {
   window.location.href = `${url.pathname}${url.search}${url.hash}`;
 }
 
+function reloadWithClearWorldStorage(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("clearWorldStorage", "1");
+  window.location.href = `${url.pathname}${url.search}${url.hash}`;
+}
+
+function clearTransientWorldStorageQueryParam(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("clearWorldStorage")) {
+    return;
+  }
+
+  url.searchParams.delete("clearWorldStorage");
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 function configureDebugSettingsMenu(config: BrowserRenderConfig): void {
   const form = document.querySelector<HTMLFormElement>("#debug-config-form");
   const viewDistanceInput = document.querySelector<HTMLInputElement>("#debug-view-distance");
   const renderDistanceInput = document.querySelector<HTMLInputElement>("#debug-render-distance");
   const disableLightingInput = document.querySelector<HTMLInputElement>("#debug-disable-lighting");
   const disableWaterSimInput = document.querySelector<HTMLInputElement>("#debug-disable-water-sim");
+  const disableIndexedDbInput = document.querySelector<HTMLInputElement>("#debug-disable-indexed-db");
   const chunkCountOutput = document.querySelector<HTMLOutputElement>("#debug-config-chunk-count");
   const resetButton = document.querySelector<HTMLButtonElement>("#debug-config-reset");
+  const deleteIndexedDbButton = document.querySelector<HTMLButtonElement>("#debug-delete-indexed-db");
   if (
     form === null
     || viewDistanceInput === null
     || renderDistanceInput === null
     || disableLightingInput === null
     || disableWaterSimInput === null
+    || disableIndexedDbInput === null
   ) {
     return;
   }
@@ -241,6 +261,7 @@ function configureDebugSettingsMenu(config: BrowserRenderConfig): void {
   renderDistanceInput.value = config.renderDistance.toString();
   disableLightingInput.checked = config.lightingMode === "none";
   disableWaterSimInput.checked = config.liquidSimulationMode === "none";
+  disableIndexedDbInput.checked = config.worldStorageMode === "none";
   renderChunkCount();
 
   viewDistanceInput.addEventListener("input", () => {
@@ -258,6 +279,7 @@ function configureDebugSettingsMenu(config: BrowserRenderConfig): void {
       renderDistance,
       lightingMode: disableLightingInput.checked ? "none" : "vanilla17",
       liquidSimulationMode: disableWaterSimInput.checked ? "none" : "vanilla17",
+      worldStorageMode: disableIndexedDbInput.checked ? "none" : "default",
     };
     writeStoredBrowserRenderConfig(window.localStorage, nextConfig);
     reloadWithoutBrowserConfigQueryParams();
@@ -265,6 +287,13 @@ function configureDebugSettingsMenu(config: BrowserRenderConfig): void {
   resetButton?.addEventListener("click", () => {
     clearStoredBrowserRenderConfig(window.localStorage);
     reloadWithoutBrowserConfigQueryParams();
+  });
+  deleteIndexedDbButton?.addEventListener("click", () => {
+    if (!window.confirm("Delete mclone IndexedDB world storage and reload?")) {
+      return;
+    }
+
+    reloadWithClearWorldStorage();
   });
 }
 
@@ -310,6 +339,7 @@ async function boot(): Promise<void> {
       throw new Error("clearWorldStorage requested but IndexedDB is unavailable");
     }
     await deleteIndexedDbWorldStorage(indexedDB);
+    clearTransientWorldStorageQueryParam();
   }
 
   const sceneResult = await initializeRendererScene(rendererCanvas, {
@@ -324,6 +354,7 @@ async function boot(): Promise<void> {
     remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
     skyColor: renderConfig.skyColor,
     clearColorScale: renderConfig.clearColorScale,
+    worldStorageMode: renderConfig.worldStorageMode,
     onProgress: reportLoadingProgress,
   });
   if (!sceneResult.ok) {
@@ -501,6 +532,7 @@ async function boot(): Promise<void> {
   debugRuntime.controller.state.renderDistance = scene.gameRenderer.getRenderDistance();
   debugRuntime.controller.state.lightingMode = renderConfig.lightingMode;
   debugRuntime.controller.state.liquidSimulationMode = renderConfig.liquidSimulationMode;
+  debugRuntime.controller.state.worldStorageMode = renderConfig.worldStorageMode;
   debugRuntime.controller.state.frameCount = totalFrameCount;
 
   const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;

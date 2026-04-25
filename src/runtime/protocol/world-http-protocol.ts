@@ -15,6 +15,7 @@ import type {
   WorldHostMessage,
   WorldPerformanceMessage,
   WorldProgressMessage,
+  WorldStorageMode,
 } from "./world-messages";
 import {
   deserializePackedChunkLightDelta,
@@ -37,6 +38,7 @@ export interface SerializedOpenWorldRequest {
   readonly seed: string;
   readonly preset: OpenWorldPreset;
   readonly config?: WorldEngineConfig;
+  readonly storageMode?: WorldStorageMode;
 }
 
 export type SerializedSetChunkViewRequest = SetChunkViewRequest;
@@ -129,6 +131,7 @@ export function serializeWorldClientMessage(message: WorldClientMessage): Serial
         seed: message.seed.toString(),
         preset: message.preset,
         ...(message.config === undefined ? {} : { config: message.config }),
+        ...(message.storageMode === undefined ? {} : { storageMode: message.storageMode }),
       };
     case "set_chunk_view":
       return message;
@@ -147,6 +150,7 @@ export function deserializeWorldClientMessage(message: SerializedWorldClientMess
         seed: BigInt(message.seed),
         preset: message.preset,
         ...(message.config === undefined ? {} : { config: message.config }),
+        ...(message.storageMode === undefined ? {} : { storageMode: message.storageMode }),
       };
     case "set_chunk_view":
       return message;
