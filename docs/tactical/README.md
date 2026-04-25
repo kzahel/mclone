@@ -137,13 +137,31 @@ Movement, NPC/AI, and network work should all depend on this shared architecture
 |---|---|---|---|
 | [`ClientRuntime0-integrated-server-client-world-boundary.md`](ClientRuntime0-integrated-server-client-world-boundary.md) | runtime inventory, `IntegratedServer` / dedicated host / `ClientRuntime` / `ClientWorld` / `PredictionService` naming, boundary contracts, migration notes | docs + typecheck | **done** - landed the first facade names over the existing host/client protocol without moving runtime behavior |
 | [`ClientRuntime1-client-world-replica-hydration.md`](ClientRuntime1-client-world-replica-hydration.md) | first concrete `ClientWorld` facade over chunks, light, fluids, block entities, entities, revisions, and speculative overlays | unit + browser smoke | **next** - hydrate singleplayer and remote clients through the same client-world path without client-side seed generation |
-| `ClientRuntime2-presentation-thread-boundary.md` | presentation-state stream, raw input handoff, render-world/mesh handles, no raw chunk/collision ownership on UI thread | browser smoke + import/ownership checks | make UI/render presentation-only without losing current debug controls |
+| `ClientRuntime2-presentation-thread-boundary.md` | presentation-state stream, raw input handoff, render-world/mesh handles, no raw chunk/collision ownership on UI thread | browser smoke + integration | make UI/render presentation-only without losing current debug controls |
 | `ClientRuntime3-integrated-server-flow.md` | browser singleplayer `IntegratedServer` class/facade, local transport/session bootstrap, pause/resume/reset semantics | browser smoke + integration | make singleplayer visibly shaped like a client joining a local server |
-| `ClientRuntime4-remote-client-parity.md` | remote HTTP client drives the same `ClientRuntime`/`ClientWorld` path as singleplayer | two-client integration | keep dedicated-host multiplayer from becoming a separate client architecture |
-| `ClientRuntime5-prediction-service-scaffold.md` | host command surface plus client prediction-service API over bounded `ClientWorld` views | unit + runtime | prepare high-Hz movement prediction without redrafting netcode around transport or renderer state |
-| `ClientRuntime6-entity-interpolation-and-ai-bridge.md` | client entity replicas, remote interpolation buffers, NPC/AI presentation hooks, host-owned AI authority boundary | unit + browser visual | give creature/NPC work the same client-world model as movement and networking |
+| `ClientRuntime4-remote-client-parity.md` | remote HTTP client drives the same `ClientRuntime`/`ClientWorld` path as singleplayer | browser smoke + two-client integration | keep dedicated-host multiplayer from becoming a separate client architecture |
+| `ClientRuntime5-prediction-service-scaffold.md` | host command surface plus client prediction-service API over bounded `ClientWorld` views | unit + browser smoke + integration | prepare high-Hz movement prediction without redrafting netcode around transport or renderer state |
+| `ClientRuntime6-entity-interpolation-and-ai-bridge.md` | client entity replicas, remote interpolation buffers, NPC/AI presentation hooks, host-owned AI authority boundary | unit + browser smoke + visual probe | give creature/NPC work the same client-world model as movement and networking |
 
 Do not start new movement, WebRTC/WebTransport, NPC AI, or fluid-prediction tacticals until at least `ClientRuntime0` has made the boundary concrete.
+
+### Client Runtime Validation Baseline
+
+Every implementation slice in `ClientRuntime1+` must prove the browser still loads and renders the world:
+
+- `pnpm typecheck`
+- `pnpm test:browser`
+- `git diff --check`
+
+`pnpm test:browser` is the required smoke gate for this arc. It boots two remote browser clients against the Node host, drives the normal host/client/render-world worker path, asserts loaded chunk counts, render-world ingestion, mesh build/completion, GPU upload counts, draw counts, and settled render queues, then writes `/tmp/mclone-browser-smoke.png`.
+
+Use stronger lanes when the touched boundary warrants them:
+
+- `pnpm test:browser:integration` when touching authoritative player state, debug camera controls, chunk-interest movement, resize/backing-buffer logic, update polling cadence, or presentation-state consumption.
+- `pnpm probe:browser -- test/browser/probes/<name>.probe.ts` when rendered pixels, terrain appearance, surface materials, entity presentation, camera framing, or mesh invalidation behavior changes. Inspect and describe the screenshot; save outputs under `/tmp`.
+- `pnpm perf:d5` when changing host scheduling, transport responsiveness, chunk traversal, render-world ingestion throughput, or anything expected to affect stalls under movement.
+
+Docs-only Client Runtime edits can stop at `git diff --check`. Pure type-only facades that are not wired into runtime code should still run `pnpm typecheck`, and should run `pnpm test:browser` before being marked done if they alter imports or public surfaces used by browser entrypoints.
 
 ## Player Movement / Netcode Arc
 
