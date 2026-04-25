@@ -6,7 +6,10 @@ import { OverworldBiomeSource } from "../src/worldgen/biome/overworld-biome-sour
 import { ChunkBiomeContainer } from "../src/worldgen/biome/chunk-biome-container";
 import { NoiseBasedChunkGenerator } from "../src/worldgen/levelgen/noise-based-chunk-generator";
 import { GeneratedRenderLevel } from "../src/world/level/generated-render-level";
-import { FEATURES_CHUNK_DEPENDENCY_RADIUS } from "../src/world/level/generated-decoration-region";
+import {
+  FEATURES_CHUNK_DEPENDENCY_RADIUS,
+  FEATURES_WRITE_RADIUS_CUTOFF,
+} from "../src/world/level/generated-decoration-region";
 import { registerGeneratedRenderBlocks } from "../src/world/level/generated-render-blocks";
 import {
   buildChunkSnapshot,
@@ -290,6 +293,16 @@ function chunkCoordinates(centerChunkX: number, centerChunkZ: number, radius: nu
   return chunks;
 }
 
+function isWithinChunkRadius(
+  chunkX: number,
+  chunkZ: number,
+  centerChunkX: number,
+  centerChunkZ: number,
+  radius: number,
+): boolean {
+  return Math.abs(chunkX - centerChunkX) <= radius && Math.abs(chunkZ - centerChunkZ) <= radius;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -415,7 +428,17 @@ function packSnapshotForChunk(
 async function runDirectBenchmark(options: CliOptions, mode: DirectMode, window: ChunkWindow): Promise<DirectBenchmarkResult> {
   const palette = createPalette();
   const { level, biomeSource } = createLevel(options.seed, options.centerChunkX, options.centerChunkZ, options.radius, palette);
-  const authorityChunks = chunkCoordinates(options.centerChunkX, options.centerChunkZ, window.authorityRadius);
+  const terrainHaloChunks = chunkCoordinates(
+    options.centerChunkX,
+    options.centerChunkZ,
+    window.featuresRadius + FEATURES_WRITE_RADIUS_CUTOFF,
+  );
+  const publishTerrainChunks = terrainHaloChunks.filter(([chunkX, chunkZ]) =>
+    isWithinChunkRadius(chunkX, chunkZ, options.centerChunkX, options.centerChunkZ, window.publishRadius)
+  );
+  const remainingTerrainHaloChunks = terrainHaloChunks.filter(([chunkX, chunkZ]) =>
+    !isWithinChunkRadius(chunkX, chunkZ, options.centerChunkX, options.centerChunkZ, window.publishRadius)
+  );
   const featuresChunks = chunkCoordinates(options.centerChunkX, options.centerChunkZ, window.featuresRadius);
   const fullChunks = chunkCoordinates(options.centerChunkX, options.centerChunkZ, window.fullRadius);
   const publishChunks = chunkCoordinates(options.centerChunkX, options.centerChunkZ, window.publishRadius);
@@ -423,8 +446,18 @@ async function runDirectBenchmark(options: CliOptions, mode: DirectMode, window:
   const yieldMeter = mode === "sync" ? undefined : createYieldMeter(mode, options.yieldBudgetMs);
   const resolveBlockState = createBlockStateResolver(palette.airState);
 
-  phases.push(await timePhase("terrain:authority", authorityChunks.length, async () => {
-    for (const [chunkX, chunkZ] of authorityChunks) {
+  phases.push(await timePhase("terrain:publish", publishTerrainChunks.length, async () => {
+    for (const [chunkX, chunkZ] of publishTerrainChunks) {
+      if (mode === "sync") {
+        level.generateChunkTerrain(chunkX, chunkZ);
+      } else {
+        await level.generateChunkTerrainCooperative(chunkX, chunkZ, yieldMeter!.yieldStep);
+      }
+    }
+  }));
+
+  phases.push(await timePhase("terrain:features-halo", remainingTerrainHaloChunks.length, async () => {
+    for (const [chunkX, chunkZ] of remainingTerrainHaloChunks) {
       if (mode === "sync") {
         level.generateChunkTerrain(chunkX, chunkZ);
       } else {

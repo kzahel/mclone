@@ -5,6 +5,7 @@ import { Registry } from "../../src/core/registry";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
 import { ChunkBlockId } from "../../src/worldgen/chunk/chunk-block-buffer";
 import { NoiseBasedChunkGenerator } from "../../src/worldgen/levelgen/noise-based-chunk-generator";
+import { GeneratedChunkStatus } from "../../src/world/level/generated-chunk-status";
 import { GeneratedRenderLevel } from "../../src/world/level/generated-render-level";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 
@@ -142,6 +143,19 @@ describe("GeneratedRenderLevel", () => {
     expect(level.isChunkPublishable(0, 0)).toBe(true);
     expect(level.isChunkPublishable(1, 1)).toBe(false);
     expect(level.markChunkLighted(2, 2)).toBe(false);
+  }, GENERATED_RENDER_LEVEL_TIMEOUT_MS);
+
+  test("keeps far FEATURES dependencies metadata-only", () => {
+    const level = createGeneratedLevel();
+
+    expect(level.ensureChunksForCamera(8.5, 8.5, 1)).toBe(true);
+
+    expect(level.getAuthorityChunk(3, 0)).not.toBeNull();
+    expect(level.hasChunkStatus(3, 0, GeneratedChunkStatus.LIQUID_CARVERS)).toBe(true);
+    expect(level.getAuthorityChunk(10, 0)).toBeNull();
+    expect(level.hasMaterializedChunk(10, 0)).toBe(false);
+    expect(level.hasChunkStatus(10, 0, GeneratedChunkStatus.STRUCTURE_STARTS)).toBe(true);
+    expect(level.hasChunkStatus(10, 0, GeneratedChunkStatus.LIQUID_CARVERS)).toBe(false);
   }, GENERATED_RENDER_LEVEL_TIMEOUT_MS);
 
   test("slides the generated chunk cache when the camera crosses chunk boundaries", () => {

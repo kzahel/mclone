@@ -16,7 +16,10 @@ import {
   type PackedChunkLight,
   type PackedChunkSnapshot,
 } from "../../world/level/packed-chunk-snapshot";
-import { FEATURES_CHUNK_DEPENDENCY_RADIUS } from "../../world/level/generated-decoration-region";
+import {
+  FEATURES_CHUNK_DEPENDENCY_RADIUS,
+  FEATURES_WRITE_RADIUS_CUTOFF,
+} from "../../world/level/generated-decoration-region";
 import { GeneratedChunkStatus } from "../../world/level/generated-chunk-status";
 import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
 import type { LevelChunk } from "../../world/level/chunk/level-chunk";
@@ -376,7 +379,6 @@ export class GeneratedWorldHost implements WorldHost {
       return this.setChunkViewCooperative(request);
     }
 
-    await this.preloadStoredChunks(request.centerChunkX, request.centerChunkZ, request.radius);
     const update = this.level.updateChunkView(request.centerChunkX, request.centerChunkZ, request.radius);
     const chunkViewChanged = this.currentChunkView === undefined
       || this.currentChunkView.centerChunkX !== request.centerChunkX
@@ -401,6 +403,12 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     const jobs = this.collectChunkViewJobs(update.missingChunks);
+    for (const [chunkX, chunkZ] of jobs) {
+      if (this.isChunkInCurrentAuthorityView(chunkX, chunkZ)) {
+        await this.preloadStoredChunk(chunkX, chunkZ);
+      }
+    }
+
     for (const [chunkX, chunkZ] of jobs) {
       if (
         this.isChunkInCurrentAuthorityView(chunkX, chunkZ)
@@ -498,9 +506,10 @@ export class GeneratedWorldHost implements WorldHost {
       return sortChunkCoordinates(jobs.values());
     }
 
-    const authorityRadius = getGeneratedWorldAuthorityChunkRadius(this.currentChunkView.radius);
-    for (let chunkZ = this.currentChunkView.centerChunkZ - authorityRadius; chunkZ <= this.currentChunkView.centerChunkZ + authorityRadius; chunkZ++) {
-      for (let chunkX = this.currentChunkView.centerChunkX - authorityRadius; chunkX <= this.currentChunkView.centerChunkX + authorityRadius; chunkX++) {
+    const featuresRadius = getGeneratedWorldFeaturesChunkRadius(this.currentChunkView.radius);
+    const featuresTerrainRadius = featuresRadius + FEATURES_WRITE_RADIUS_CUTOFF;
+    for (let chunkZ = this.currentChunkView.centerChunkZ - featuresTerrainRadius; chunkZ <= this.currentChunkView.centerChunkZ + featuresTerrainRadius; chunkZ++) {
+      for (let chunkX = this.currentChunkView.centerChunkX - featuresTerrainRadius; chunkX <= this.currentChunkView.centerChunkX + featuresTerrainRadius; chunkX++) {
         if (this.level.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS)) {
           continue;
         }
@@ -509,7 +518,7 @@ export class GeneratedWorldHost implements WorldHost {
       }
     }
 
-    const featuresRadius = getGeneratedWorldFeaturesChunkRadius(this.currentChunkView.radius);
+    // Runtime: FEATURES initializes the rest of its vanilla dependency window as metadata-only.
     for (let chunkZ = this.currentChunkView.centerChunkZ - featuresRadius; chunkZ <= this.currentChunkView.centerChunkZ + featuresRadius; chunkZ++) {
       for (let chunkX = this.currentChunkView.centerChunkX - featuresRadius; chunkX <= this.currentChunkView.centerChunkX + featuresRadius; chunkX++) {
         if (this.level.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)) {
@@ -576,35 +585,6 @@ export class GeneratedWorldHost implements WorldHost {
 
   public close(): void {
     this.lightingService?.close?.();
-  }
-
-  private async preloadStoredChunks(centerChunkX: number, centerChunkZ: number, radius: number): Promise<void> {
-    if (this.storageSession === undefined) {
-      return;
-    }
-
-    const viewRadius = getGeneratedWorldAuthorityChunkRadius(radius);
-    for (let chunkZ = centerChunkZ - viewRadius; chunkZ <= centerChunkZ + viewRadius; chunkZ++) {
-      for (let chunkX = centerChunkX - viewRadius; chunkX <= centerChunkX + viewRadius; chunkX++) {
-        if (this.level.getChunk(chunkX, chunkZ, false) !== null) {
-          continue;
-        }
-
-        const snapshot = await this.storageSession.chunks.loadChunk(chunkX, chunkZ);
-        if (snapshot === undefined) {
-          continue;
-        }
-
-        this.level.setChunk(
-          hydrateChunkFromSnapshot(
-            unpackChunkSnapshot(snapshot, this.options.blockStateIds),
-            this.options.airState,
-            this.resolveBlockState,
-          ),
-          true,
-        );
-      }
-    }
   }
 
   private async preloadStoredChunk(chunkX: number, chunkZ: number): Promise<StoredChunkPreloadResult> {

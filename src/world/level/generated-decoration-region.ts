@@ -51,11 +51,17 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
   }
 
   public getBlockState(pos: BlockPos): BlockState {
-    return this.getChunkForPos(pos).getBlockState(pos);
+    const chunkX = SectionPos.blockToSectionCoord(pos.getX());
+    const chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
+    this.ensureWithinDependencyWindow(chunkX, chunkZ);
+    return this.level.getAuthorityBlockState(pos);
   }
 
   public getFluidState(pos: BlockPos): FluidState {
-    return this.getBlockState(pos).getFluidState();
+    const chunkX = SectionPos.blockToSectionCoord(pos.getX());
+    const chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
+    this.ensureWithinDependencyWindow(chunkX, chunkZ);
+    return this.level.getAuthorityFluidState(pos);
   }
 
   public isEmptyBlock(pos: BlockPos): boolean {
@@ -71,14 +77,10 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
   }
 
   public getHeight(type: Heightmap.Types, x: number, z: number): number {
-    for (let y = this.getMaxBuildHeight() - 1; y >= this.getMinBuildHeight(); y--) {
-      const pos = new BlockPos(x, y, z);
-      if (type.isOpaque(this.getBlockState(pos))) {
-        return y + 1;
-      }
-    }
-
-    return this.getMinBuildHeight();
+    const chunkX = SectionPos.blockToSectionCoord(x);
+    const chunkZ = SectionPos.blockToSectionCoord(z);
+    this.ensureWithinDependencyWindow(chunkX, chunkZ);
+    return this.level.getAuthorityHeight(type, x, z);
   }
 
   public getHeightmapPos(type: Heightmap.Types, pos: BlockPos): BlockPos {

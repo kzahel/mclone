@@ -3,6 +3,7 @@ import { BlockPos } from "../../src/core/block-pos";
 import { Registry } from "../../src/core/registry";
 import { ResourceLocation } from "../../src/core/resource-location";
 import { GeneratedDecorationRegion } from "../../src/world/level/generated-decoration-region";
+import { GeneratedChunkStatus } from "../../src/world/level/generated-chunk-status";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 import { GeneratedRenderLevel } from "../../src/world/level/generated-render-level";
 import type { BlockState } from "../../src/world/level/block/state/block-state";
@@ -35,11 +36,14 @@ describe("GeneratedDecorationRegion", () => {
     const level = createGeneratedLevel();
     expect(level.ensureChunksForCamera(8.5, 8.5, 1)).toBe(true);
     expect(level.getLoadedChunkCount()).toBe(25);
-    expect(level.getAuthorityChunk(10, 0)).not.toBeNull();
+    expect(level.getAuthorityChunk(10, 0)).toBeNull();
+    expect(level.hasChunkStatus(10, 0, GeneratedChunkStatus.STRUCTURE_STARTS)).toBe(true);
+    expect(level.hasChunkStatus(10, 0, GeneratedChunkStatus.LIQUID_CARVERS)).toBe(false);
 
     const region = new GeneratedDecorationRegion(level, 0, 0);
     const writablePos = new BlockPos(16, 90, 0);
     const blockedPos = new BlockPos(32, 90, 0);
+    const metadataOnlyReadPos = new BlockPos(8 * 16, 90, 0);
     const farReadPos = new BlockPos(9 * 16, 90, 0);
     const writableState = getRequiredBlockState("minecraft:oak_log");
     const blockedBefore = level.getBlockState(blockedPos);
@@ -50,6 +54,7 @@ describe("GeneratedDecorationRegion", () => {
     expect(region.setBlock(blockedPos, writableState, 2)).toBe(false);
     expect(level.getBlockState(blockedPos)).toBe(blockedBefore);
 
+    expect(region.getBlockState(metadataOnlyReadPos).isAir()).toBe(true);
     expect(() => region.getBlockState(farReadPos)).toThrow(/dependency window/);
   });
 });
