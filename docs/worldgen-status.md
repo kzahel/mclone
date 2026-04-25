@@ -115,7 +115,7 @@ The current worldgen path covers a meaningful first-pass overworld set:
 - water/surface flora: lily pads, seagrass, tall seagrass
 - ocean flora: kelp, kelp plant, live/dead coral blocks/plants/fans/wall fans, sea pickles
 - cold-surface features: top-layer snow/ice freezing, packed-ice patches, ice spikes
-- water features: water lakes and water springs
+- water features: water and lava lakes, plus water and lava springs
 
 ### Current biome-table coverage
 
@@ -185,25 +185,25 @@ Not every landed bucket has the same validation strength.
 | PRNG / noise / terrain sampling / biome source | High | These are the oldest and best-documented worldgen slices, with tactical docs and oracle-oriented work |
 | Surface path | High | Landed and visible in generated frames, with committed fixture coverage for the major live surface families in the current overworld path |
 | Carvers | Medium-high | AIR and LIQUID classic overworld carvers are now integrated, scheduled underwater tick consequences are captured, and the live surface/material matrix is broad, but exhaustive parity still needs block-state/tick follow-through decisions |
-| Feature/decor framework | Medium | Good unit coverage on individual feature families, but the first full decorated server-fixture baseline still has `768 / 65,536` block mismatches |
+| Feature/decor framework | Medium | Good unit coverage on individual feature families, but the first full decorated server-fixture baseline still has `746 / 65,536` block mismatches |
 | Biome decoration tables | Medium | The layered-overworld key set is now covered; remaining risk is exact feature-table ordering/selection rather than broad empty-table coverage |
 
 ### Decorated chunk baseline
 
 The next parity milestone is exact block parity for the existing official-server fixture `test/fixtures/integration/overworld-seed-12345-chunks-0-0.json`.
 
-For seed `12345`, chunk `(0, 0)`, staged terrain/surface/carver generation already matches the Java oracle exactly. The full runtime decorated chunk currently matches `64,768 / 65,536` block positions (`98.83%`). The remaining `768` full-block mismatches are concentrated in a few actionable buckets:
+For seed `12345`, chunk `(0, 0)`, staged terrain/surface/carver generation already matches the Java oracle exactly. The full runtime decorated chunk currently matches `64,790 / 65,536` block positions (`98.86%`). The remaining `746` full-block mismatches are concentrated in a few actionable buckets:
 
 | Bucket | Current mismatches |
 |---|---:|
-| Tree logs/leaves placement | `589` |
-| Carver/fluid edge | `83` |
-| Deep underground blobs/lava | `48` |
-| Plants/snow decoration | `27` |
+| Tree logs/leaves placement | `590` |
+| Carver/fluid edge | `80` |
+| Deep underground blobs/lava | `31` |
+| Plants/snow decoration | `26` |
 | Surface dirt/grass choice | `15` |
-| Ores/glow lichen | `6` |
+| Ores/glow lichen | `4` |
 
-The current ground-surface regression test for this same chunk is intentionally weaker: it compares one derived ground block per column, matches `232 / 256` materials, and rejects unexpected dry-land sand. Tactical [`47`](./tactical/47-generated-chunk-status-orchestration.md) has landed the explicit status-order foundation, so tactical [`46`](./tactical/46-full-decorated-spawn-chunk-parity.md) should replace that confidence shape with an exact full-block decorated-chunk oracle once the buckets above are burned down.
+The current ground-surface regression test for this same chunk is intentionally weaker: it compares one derived ground block per column, matches `232 / 256` materials, and rejects unexpected dry-land sand. Tactical [`47`](./tactical/47-generated-chunk-status-orchestration.md) has landed the explicit status-order foundation, but exact decorated parity now needs tactical [`48`](./tactical/48-vanilla-scheduler-trace-oracle.md) first: neighboring `FEATURES` passes can write into the same target chunk, and the remaining tree/log/leaf mismatch bucket may depend on vanilla's cross-chunk commit order. After 48 verifies that order, tactical [`46`](./tactical/46-full-decorated-spawn-chunk-parity.md) should replace the weaker confidence shape with an exact full-block decorated-chunk oracle.
 
 ## Priorities
 
@@ -211,20 +211,24 @@ This is the current recommended ordering for worldgen work.
 
 These priorities are only for parity-oriented worldgen work. The runtime/host arc already landed the browser-local authority, mesh-worker, browser-persistence, headless-Node-host, remote-browser-transport, protocol-hardening, first authoritative-player-loop, and browser-control integration prerequisites (`R0` through `R8`), so parity work no longer has to wait on the old browser render-path coupling. Remaining runtime/host work still matters, but it now shifts toward measuring whether polling remains sufficient under the live browser control path and then growing richer authoritative gameplay on top of the same boundary; see the runtime/host arc in [`tactical/README.md`](./tactical/README.md).
 
-### 1. Reach exact full-decorated parity for the spawn baseline chunk
+### 1. Trace vanilla scheduler order for cross-chunk `FEATURES`
+
+Tactical [`48`](./tactical/48-vanilla-scheduler-trace-oracle.md) is the immediate blocker before more decorated mismatch burn-down. It should produce an executable vanilla 1.17.1 scheduler trace for a bounded seed `12345`, chunk `(0, 0)` load scenario and identify the `FEATURES` completion/commit order for the 3x3 neighborhood around the target chunk.
+
+### 2. Reach exact full-decorated parity for the spawn baseline chunk
 
 The next broad parity win is no longer table breadth. The layered-overworld biome key set is covered now, the explicit status-order foundation has landed, and the project has enough feature/decorator surface area to make a stronger claim: one simple official-server chunk should match exactly.
 
 The priority target is seed `12345`, chunk `(0, 0)`:
 
-- add a reusable full-decorated chunk diff helper
-- promote the current loose ground-material runtime check into exact full-block parity
-- burn down the current `768 / 65,536` mismatches, starting with tree placement
+- use the reusable full-decorated chunk diff helper
+- keep the full-block runtime check ratcheted against the exact oracle target
+- burn down the current `746 / 65,536` mismatches, starting with tree placement
 - keep the staged terrain/surface/carver oracle tests exact throughout
 
 See [`46-full-decorated-spawn-chunk-parity.md`](./tactical/46-full-decorated-spawn-chunk-parity.md).
 
-### 2. Narrow biome-table exactness for remaining overworld edge cases
+### 3. Narrow biome-table exactness for remaining overworld edge cases
 
 After the spawn chunk is exact, use the new full-decorated diff harness to decide which narrow biome-table exactness issues are still worth a dedicated slice.
 
@@ -234,14 +238,14 @@ Candidate families:
 - any remaining helper-level mismatches that are visible only because the broad biome-table holes are closed
 - fixture-driven follow-through for shoreline, taiga/snowy slope, desert, badlands, or ocean chunks
 
-### 3. Finish the remaining tree/decorator ecosystems
+### 4. Finish the remaining tree/decorator ecosystems
 
 The current vegetation set is already enough to make scenes legible, and dark forest, savanna, and the first jungle slice are now in the covered set. The next leverage point is the still-missing ecosystems that unlock the next whole biome identities or finish the ones that are only partially covered:
 
 - bees
 - remaining biome-specific decorators
 
-### 4. Revisit exhaustive carver parity only where the current matrix is still intentionally lossy
+### 5. Revisit exhaustive carver parity only where the current matrix is still intentionally lossy
 
 Classic carvers are now integrated and broadly covered across the current live surface families, so the remaining carver work is narrower and should stay driven by [`carver-status.md`](./carver-status.md) rather than by the old top-level blocker framing.
 
@@ -251,14 +255,14 @@ What still matters there:
 - widen the flattened numeric/oracle block model if exhaustive carved-stage diffs remain a goal
 - keep ravine/cave-mouth browser validation whenever the carver path changes materially
 
-### 5. Revisit underground confidence after the helper stack
+### 6. Revisit underground confidence after the helper stack
 
 Tacticals 42 through 44 landed the live overworld underground-helper surface. The next underground work should be confidence-driven rather than breadth-driven:
 
 - add stronger decorated-stage/oracle coverage if the current browser/unit surface proves too weak
 - only then broaden into underground families that sit outside the helper stack
 
-### 6. Structures after the terrain/decor core is stable
+### 7. Structures after the terrain/decor core is stable
 
 Structures are important for parity, but they should not displace the terrain/carver/biome-decor core unless priorities change.
 

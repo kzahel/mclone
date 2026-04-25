@@ -122,6 +122,26 @@ export function biasedToBottomHeight(
   };
 }
 
+export function veryBiasedToBottomHeight(
+  minInclusive: VerticalAnchor,
+  maxInclusive: VerticalAnchor,
+  inner: number,
+): HeightProvider {
+  return {
+    sample: (random, context) => {
+      const minValue = minInclusive.resolveY(context);
+      const maxValue = maxInclusive.resolveY(context);
+      if (((maxValue - minValue) - inner) + 1 <= 0) {
+        return minValue;
+      }
+
+      const top = minValue + inner + random.nextInt((maxValue - (minValue + inner)) + 1);
+      const middle = minValue + random.nextInt((top - minValue - 1) + 1);
+      return minValue + random.nextInt(((middle - 1 + inner) - minValue) + 1);
+    },
+  };
+}
+
 export function uniformHeight(minInclusive: VerticalAnchor, maxInclusive: VerticalAnchor): HeightProvider {
   return {
     sample: (random, context) => {

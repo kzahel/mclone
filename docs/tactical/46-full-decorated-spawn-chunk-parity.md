@@ -4,7 +4,7 @@ Reach exact full-block parity for one concrete, server-backed baseline: seed `12
 
 This is intentionally not a claim of full overworld parity. It is a bounded end-to-end confidence milestone: prove that the current translated pipeline can produce one simple decorated overworld chunk exactly, then use the same harness to expand coverage later.
 
-Status: next. [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) has replaced the decorated/published shortcut with explicit `ChunkStatus`-shaped `FEATURES`, `LIGHT`, and publication gates, so this exact mismatch burn-down can run on that foundation.
+Status: blocked by [`48-vanilla-scheduler-trace-oracle.md`](48-vanilla-scheduler-trace-oracle.md). [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) has replaced the decorated/published shortcut with explicit `ChunkStatus`-shaped `FEATURES`, `LIGHT`, and publication gates, but the remaining tree/log/leaf mismatches may depend on the vanilla cross-chunk `FEATURES` commit order. Resume this burn-down only after tactical 48 records the scheduler trace or proves the current host order is equivalent.
 
 ## Source files (read before writing)
 
@@ -30,9 +30,9 @@ After correcting the runtime `FEATURES` dependency model to use a `WorldGenRegio
 
 | Metric | Current value |
 |---|---:|
-| Full-block matches | `64,796 / 65,536` |
-| Full-block mismatches | `740` |
-| Full-block match rate | `98.87%` |
+| Full-block matches | `64,790 / 65,536` |
+| Full-block mismatches | `746` |
+| Full-block match rate | `98.86%` |
 | Ground material matches | `232 / 256` columns |
 | Exact ground block + Y matches | `225 / 256` columns |
 | Unexpected dry-land sand | `0` |
@@ -41,28 +41,34 @@ Current full-block mismatch buckets:
 
 | Bucket | Count |
 |---|---:|
-| Tree logs/leaves placement | `589` |
-| Carver/fluid edge | `83` |
-| Deep underground blobs/lava | `48` |
-| Plants/snow decoration | `27` |
+| Tree logs/leaves placement | `590` |
+| Carver/fluid edge | `80` |
+| Deep underground blobs/lava | `31` |
+| Plants/snow decoration | `26` |
 | Surface dirt/grass choice | `15` |
-| Ores/glow lichen | `6` |
+| Ores/glow lichen | `4` |
 
 Top concrete block-pair mismatches:
 
 ```text
-minecraft:spruce_leaves -> minecraft:air: 324
-minecraft:air -> minecraft:spruce_leaves: 201
-minecraft:spruce_log -> minecraft:air: 32
-minecraft:air -> minecraft:spruce_log: 22
-minecraft:dirt -> minecraft:cave_air: 22
-minecraft:grass_block -> minecraft:cave_air: 22
-minecraft:dirt -> minecraft:water: 21
-minecraft:deepslate -> minecraft:granite: 20
-minecraft:air -> minecraft:cave_air: 15
-minecraft:large_fern -> minecraft:air: 12
-minecraft:dirt -> minecraft:grass_block: 11
+minecraft:air -> minecraft:spruce_leaves: 324
+minecraft:spruce_leaves -> minecraft:air: 202
+minecraft:air -> minecraft:spruce_log: 32
+minecraft:cave_air -> minecraft:dirt: 22
+minecraft:cave_air -> minecraft:grass_block: 22
+minecraft:spruce_log -> minecraft:air: 22
+minecraft:water -> minecraft:dirt: 21
+minecraft:granite -> minecraft:deepslate: 20
+minecraft:cave_air -> minecraft:air: 12
+minecraft:grass_block -> minecraft:dirt: 11
+minecraft:air -> minecraft:large_fern: 9
+minecraft:gravel -> minecraft:deepslate: 9
 ```
+
+This baseline includes two source-backed table corrections from `VanillaBiomes.taigaBiome(...)` and `BiomeDefaultFeatures`:
+
+- taiga-family biome generation settings now keep the Java feature order for large ferns, underground variety, taiga trees, default flowers, springs, berry bushes, and top-layer freezing
+- default overworld lakes/springs now wire the Java lava variants (`LAKE_LAVA`, `SPRING_LAVA`) in addition to water
 
 ## Dependency model correction
 
@@ -80,6 +86,8 @@ The runtime model for this tactical now follows that shape explicitly:
 - normal feature writes are rejected outside the center chunk plus immediate neighbors
 
 This removes the old “neighbor read accidentally generates/decorates more chunks” behavior and gives us a stable base for the remaining mismatch burn-down.
+
+One prerequisite remains: the runtime must know the deterministic order in which neighboring `FEATURES` center passes commit their side effects. A target chunk can receive writes from the 9 center chunks in its 3x3 neighborhood, and overlapping writes are order-dependent. Tactical [`48`](48-vanilla-scheduler-trace-oracle.md) owns the vanilla scheduler trace needed to confirm or correct that commit order before this tactical edits feature logic further.
 
 ## Scope
 
@@ -103,6 +111,10 @@ Out of scope:
 
 ## Plan
 
+0. Complete tactical [`48`](48-vanilla-scheduler-trace-oracle.md).
+   - Record the vanilla scheduler trace for the bounded seed `12345`, chunk `(0, 0)` load scenario.
+   - Confirm the `FEATURES` completion/commit order for the target 3x3 neighborhood.
+   - Compare that order against the current host order before changing tree placement.
 1. Add a reusable decorated-chunk oracle diff module.
    - Compare all `16 * 16 * 256` block positions.
    - Keep the official-server fixture as the source of truth.
@@ -116,14 +128,14 @@ Out of scope:
    - Keep the host as the owner of authoritative chunks and client publication.
    - Do not let decoration reads recursively trigger unrelated chunk decoration.
 4. Burn down tree placement first.
-   - It still owns the majority of the remaining `740` mismatches.
+   - It still owns the majority of the remaining `746` mismatches.
    - Check spruce tree configured-feature selection, decorator coordinates, trunk height sampling, foliage radius/height sampling, and leaf/log placement predicates against Java.
 5. Burn down non-tree decoration and underground helper mismatches.
-   - Plants/snow: `27`
-   - Deep blobs/lava: `48`
-   - Ores/glow lichen: `6`
+   - Plants/snow: `26`
+   - Deep blobs/lava: `31`
+   - Ores/glow lichen: `4`
 6. Resolve remaining carver/fluid and dirt/grass edges.
-   - Carver/fluid edge: `83`
+   - Carver/fluid edge: `80`
    - Surface dirt/grass choice: `15`
    - Re-check whether any apparent carver mismatch is actually tree/feature spillover or cross-chunk decoration context before editing carvers.
 7. Promote the exact full-block test.

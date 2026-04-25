@@ -125,6 +125,8 @@ Decoration is deterministic because the chunk scheduler gives `FEATURES` tasks a
 
 For `mclone`, adjacent `FEATURES` tasks must not commit directly into shared chunks in arbitrary parallel order. If generation workers are used, they should return write plans or isolated results; the authoritative host must apply side effects in one deterministic vanilla-shaped order.
 
+Trace coverage note: the rule above is source-backed, but the project still needs an executable vanilla scheduler trace for concrete player/spawn load scenarios. Tactical [`48`](tactical/48-vanilla-scheduler-trace-oracle.md) owns that oracle before tactical [`46`](tactical/46-full-decorated-spawn-chunk-parity.md) resumes exact decorated block burn-down.
+
 ## Lighting Gate
 
 `LIGHT` has parent `FEATURES` and dependency range `1` ([`ChunkStatus.java:135`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:137`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java), [`ChunkStatus.java:138`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)). Through `getDependencyStatus(...)` and `STATUS_BY_RANGE[1]`, lighting a target chunk waits for the target chunk plus its 8 neighbors to have completed `FEATURES` ([`ChunkMap.java:555`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:557`](../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkStatus.java:164`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java)).

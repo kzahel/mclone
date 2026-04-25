@@ -1,9 +1,13 @@
 import com.google.gson.Gson;
 import java.util.LinkedHashMap;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.function.Supplier;
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,6 +23,7 @@ import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.TickList;
 import net.minecraft.world.level.TickPriority;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeGenerationSettings;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.FuzzyOffsetConstantColumnBiomeZoomer;
@@ -36,6 +41,8 @@ import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.SimpleRandomSource;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.feature.ConfiguredFeature;
+import net.minecraft.world.level.levelgen.feature.StructureFeature;
 import net.minecraft.world.level.chunk.ProtoChunk;
 import net.minecraft.world.level.chunk.UpgradeData;
 import net.minecraft.world.level.levelgen.synth.BlendedNoise;
@@ -188,6 +195,14 @@ public final class OracleDumper {
             break;
          case "liquid-carved-chunk":
             json = dumpLiquidCarvedChunk(seed, parseInteger(requireOption(options, "chunk-x"), "chunk-x"), parseInteger(requireOption(options, "chunk-z"), "chunk-z"));
+            break;
+         case "feature-order-trace":
+            json = dumpFeatureOrderTrace(
+               seed,
+               parseInteger(requireOption(options, "chunk-x"), "chunk-x"),
+               parseInteger(requireOption(options, "chunk-z"), "chunk-z"),
+               parseBooleanOption(options, "generate-structures", false)
+            );
             break;
          default:
             throw new IllegalArgumentException("unsupported module '" + module + "'");
@@ -682,6 +697,91 @@ public final class OracleDumper {
       json.put("blockTicks", collectScheduledBlockTicks(chunk));
       json.put("liquidTicks", collectScheduledLiquidTicks(chunk));
       return GSON.toJson(json);
+   }
+
+   private static String dumpFeatureOrderTrace(long seed, int chunkX, int chunkZ, boolean generateStructures) throws Exception {
+      SharedConstants.tryDetectVersion();
+      java.io.PrintStream originalOut = Bootstrap.STDOUT;
+      java.io.PrintStream originalErr = System.err;
+      Bootstrap.bootStrap();
+      System.setOut(originalOut);
+      System.setErr(originalErr);
+
+      OverworldBiomeSource biomeSource = new OverworldBiomeSource(seed, false, false, BuiltinRegistries.BIOME);
+      NoiseBasedChunkGenerator generator = new NoiseBasedChunkGenerator(
+         biomeSource,
+         seed,
+         () -> BuiltinRegistries.NOISE_GENERATOR_SETTINGS.getOrThrow(NoiseGeneratorSettings.OVERWORLD)
+      );
+      ChunkPos chunkPos = new ChunkPos(chunkX, chunkZ);
+      int minBlockX = chunkPos.getMinBlockX();
+      int minBlockZ = chunkPos.getMinBlockZ();
+      Biome biome = biomeSource.getPrimaryBiome(chunkPos);
+      WorldgenRandom random = new WorldgenRandom();
+      long decorationSeed = random.setDecorationSeed(seed, minBlockX, minBlockZ);
+      BiomeGenerationSettings generationSettings = biome.getGenerationSettings();
+      List<List<Supplier<ConfiguredFeature<?, ?>>>> features = generationSettings.features();
+      Map<Integer, List<StructureFeature<?>>> structuresByStep = generateStructures ? getStructuresByDecorationStep(biome) : Collections.emptyMap();
+      List<Map<String, Object>> entries = new ArrayList<>();
+
+      for (int stepIndex = 0; stepIndex < GenerationStep.Decoration.values().length; stepIndex++) {
+         int featureIndex = 0;
+         for (StructureFeature<?> structure : structuresByStep.getOrDefault(stepIndex, Collections.emptyList())) {
+            long featureSeed = random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("kind", "structure");
+            entry.put("step", GenerationStep.Decoration.values()[stepIndex].name());
+            entry.put("stepIndex", stepIndex);
+            entry.put("featureIndex", featureIndex);
+            entry.put("featureSeed", Long.toString(featureSeed));
+            entry.put("structure", Registry.STRUCTURE_FEATURE.getKey(structure).toString());
+            entries.add(entry);
+            featureIndex++;
+         }
+
+         if (features.size() > stepIndex) {
+            for (Supplier<ConfiguredFeature<?, ?>> featureSupplier : features.get(stepIndex)) {
+               ConfiguredFeature<?, ?> feature = featureSupplier.get();
+               long featureSeed = random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
+               Map<String, Object> entry = new LinkedHashMap<>();
+               entry.put("kind", "configured_feature");
+               entry.put("step", GenerationStep.Decoration.values()[stepIndex].name());
+               entry.put("stepIndex", stepIndex);
+               entry.put("featureIndex", featureIndex);
+               entry.put("featureSeed", Long.toString(featureSeed));
+               entry.put("configuredFeature", configuredFeatureName(feature));
+               entry.put("featureType", Registry.FEATURE.getKey(feature.feature()).toString());
+               entries.add(entry);
+               featureIndex++;
+            }
+         }
+      }
+
+      Map<String, Object> json = new LinkedHashMap<>();
+      json.put("module", "feature-order-trace");
+      json.put("minecraftVersion", MINECRAFT_VERSION);
+      json.put("generatorClass", generator.getClass().getName());
+      json.put("seed", Long.toString(seed));
+      json.put("chunkX", chunkX);
+      json.put("chunkZ", chunkZ);
+      json.put("minBlockX", minBlockX);
+      json.put("minBlockZ", minBlockZ);
+      json.put("generateStructures", generateStructures);
+      json.put("primaryBiome", BuiltinRegistries.BIOME.getKey(biome).toString());
+      json.put("decorationSeed", Long.toString(decorationSeed));
+      json.put("entries", entries);
+      return GSON.toJson(json);
+   }
+
+   private static String configuredFeatureName(ConfiguredFeature<?, ?> feature) {
+      return BuiltinRegistries.CONFIGURED_FEATURE.getResourceKey(feature).map(Object::toString).orElseGet(feature::toString);
+   }
+
+   @SuppressWarnings("unchecked")
+   private static Map<Integer, List<StructureFeature<?>>> getStructuresByDecorationStep(Biome biome) throws Exception {
+      Field field = Biome.class.getDeclaredField("structuresByStep");
+      field.setAccessible(true);
+      return new HashMap<>((Map<Integer, List<StructureFeature<?>>>)field.get(biome));
    }
 
    private static int terrainBlockId(BlockState state) {
@@ -2084,6 +2184,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper surface-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper liquid-carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
+      System.err.println("  oracle-dumper feature-order-trace --seed <long> --chunk-x <int> --chunk-z <int> [--generate-structures <true|false>]");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");

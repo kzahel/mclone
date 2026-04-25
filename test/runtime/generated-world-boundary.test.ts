@@ -9,6 +9,14 @@ import { LocalWorldClient, LocalWorldTransport } from "../../src/runtime/transpo
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
+import {
+  compareDecoratedChunkToOracle,
+  DECORATED_GROUND_IGNORED_BLOCKS,
+  decoratedOracleGroundSurfaceAt,
+  findDecoratedOracleChunk,
+  formatDecoratedChunkDiff,
+  type DecoratedIntegrationOracleFixture,
+} from "../../src/oracle/integration/decorated-chunk-fixture.ts";
 
 interface SurfaceChunkOracleFixture {
   readonly chunkX: number;
@@ -19,51 +27,14 @@ interface SurfaceChunkOracleFixture {
   readonly blocks: readonly number[];
 }
 
-interface FullChunkOracleSectionFixture {
-  readonly y: number;
-  readonly palette: readonly string[];
-  readonly blocks: readonly number[];
-}
-
-interface FullChunkOracleFixture {
-  readonly chunkX: number;
-  readonly chunkZ: number;
-  readonly sections: readonly FullChunkOracleSectionFixture[];
-}
-
-interface FullIntegrationOracleFixture {
-  readonly seed: string;
-  readonly chunks: readonly FullChunkOracleFixture[];
-}
-
 const oracle = surfaceFixture as SurfaceChunkOracleFixture;
-const fullOracle = fullFixture as FullIntegrationOracleFixture;
+const fullOracle = fullFixture as DecoratedIntegrationOracleFixture;
 const OPEN_WORLD_REQUEST = {
   type: "open_world",
   seed: 12345n,
   preset: "default",
 } as const;
 const GENERATED_WORLD_LIGHTING_TIMEOUT_MS = 30_000;
-const DECORATION_BLOCKS = new Set([
-  "minecraft:oak_log",
-  "minecraft:oak_leaves",
-  "minecraft:spruce_log",
-  "minecraft:spruce_leaves",
-  "minecraft:grass",
-  "minecraft:fern",
-  "minecraft:large_fern",
-  "minecraft:oak_sapling",
-  "minecraft:spruce_sapling",
-  "minecraft:sweet_berry_bush",
-  "minecraft:brown_mushroom",
-  "minecraft:red_mushroom",
-  "minecraft:sugar_cane",
-  "minecraft:cactus",
-  "minecraft:pumpkin",
-  "minecraft:dandelion",
-  "minecraft:poppy",
-  "minecraft:snow",
-]);
 
 function oracleBlockNameAt(localX: number, y: number, localZ: number): string {
   const index = ((y - oracle.minY) << 8) | (localZ << 4) | localX;
@@ -81,42 +52,12 @@ function oracleSurfaceAt(localX: number, localZ: number): { readonly name: strin
   throw new Error(`oracle chunk (${oracle.chunkX}, ${oracle.chunkZ}) had no surface block at (${localX}, ${localZ})`);
 }
 
-function fullOracleChunk(): FullChunkOracleFixture {
-  const chunk = fullOracle.chunks.find((candidate) => candidate.chunkX === 0 && candidate.chunkZ === 0);
-  if (chunk === undefined) {
-    throw new Error("full oracle fixture is missing chunk (0, 0)");
-  }
-
-  return chunk;
-}
-
-function fullOracleBlockNameAt(chunk: FullChunkOracleFixture, localX: number, y: number, localZ: number): string {
-  const section = chunk.sections.find((candidate) => candidate.y === Math.floor(y / 16));
-  if (section === undefined) {
-    return "minecraft:air";
-  }
-
-  const index = ((y & 15) << 8) | (localZ << 4) | localX;
-  return section.palette[section.blocks[index]!]!;
-}
-
-function fullOracleGroundSurfaceAt(chunk: FullChunkOracleFixture, localX: number, localZ: number): { readonly name: string; readonly y: number } {
-  for (let y = 255; y >= 0; y--) {
-    const name = fullOracleBlockNameAt(chunk, localX, y, localZ);
-    if (name !== "minecraft:air" && name !== "minecraft:cave_air" && name !== "minecraft:water" && !DECORATION_BLOCKS.has(name)) {
-      return { name, y };
-    }
-  }
-
-  throw new Error(`full oracle chunk (${chunk.chunkX}, ${chunk.chunkZ}) had no ground block at (${localX}, ${localZ})`);
-}
-
 function runtimeGroundSurfaceAt(level: ClientChunkCache, worldX: number, worldZ: number): { readonly name: string; readonly y: number } {
   for (let y = level.getMaxBuildHeight() - 1; y >= level.getMinBuildHeight(); y--) {
     const state = level.getBlockState(new BlockPos(worldX, y, worldZ));
     if (!state.isAir()) {
       const name = Registry.BLOCK.getKey(state.getBlock() as unknown as object)?.toString();
-      if (name !== undefined && DECORATION_BLOCKS.has(name)) {
+      if (name !== undefined && DECORATED_GROUND_IGNORED_BLOCKS.has(name)) {
         continue;
       }
 
@@ -125,6 +66,11 @@ function runtimeGroundSurfaceAt(level: ClientChunkCache, worldX: number, worldZ:
   }
 
   throw new Error(`runtime level had no surface block at (${worldX}, ${worldZ})`);
+}
+
+function runtimeBlockNameAt(level: ClientChunkCache, worldX: number, y: number, worldZ: number): string {
+  const state = level.getBlockState(new BlockPos(worldX, y, worldZ));
+  return Registry.BLOCK.getKey(state.getBlock() as unknown as object)?.toString() ?? "unregistered";
 }
 
 function createWorldClient(): LocalWorldClient {
@@ -210,13 +156,13 @@ describe("GeneratedWorld boundary", () => {
     });
 
     const level = client.getLevel();
-    const chunk = fullOracleChunk();
+    const chunk = findDecoratedOracleChunk(fullOracle, 0, 0);
     const mismatches: string[] = [];
     const unexpectedSand: string[] = [];
 
     for (let localZ = 0; localZ < 16; localZ++) {
       for (let localX = 0; localX < 16; localX++) {
-        const expected = fullOracleGroundSurfaceAt(chunk, localX, localZ);
+        const expected = decoratedOracleGroundSurfaceAt(chunk, localX, localZ);
         const actual = runtimeGroundSurfaceAt(level, localX, localZ);
         if (actual.name !== expected.name) {
           mismatches.push(`${localX},${localZ}: expected ${expected.name}@${expected.y}, got ${actual.name}@${actual.y}`);
@@ -229,6 +175,28 @@ describe("GeneratedWorld boundary", () => {
 
     expect(unexpectedSand).toEqual([]);
     expect(256 - mismatches.length, mismatches.slice(0, 10).join("\n")).toBeGreaterThanOrEqual(230);
+  }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
+
+  test("keeps chunk (0, 0) full-block decorated parity ratcheted against the vanilla oracle", async () => {
+    const client = createWorldClient();
+
+    await client.openWorld(OPEN_WORLD_REQUEST);
+    await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const level = client.getLevel();
+    const chunk = findDecoratedOracleChunk(fullOracle, 0, 0);
+    const diff = compareDecoratedChunkToOracle(
+      chunk,
+      (localX, y, localZ) => runtimeBlockNameAt(level, localX, y, localZ),
+    );
+
+    expect(diff.matches, formatDecoratedChunkDiff(diff)).toBe(64_790);
+    expect(diff.mismatchCount, formatDecoratedChunkDiff(diff)).toBe(746);
   }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
 
   test("slides the client chunk cache when the chunk view moves", async () => {

@@ -150,6 +150,19 @@ The Java oracle harness also emits pinned chunk snapshots for the translated ter
 
 `carved-chunk` stays intentionally AIR-step-only so the older carved fixtures remain stable and step-scoped. `liquid-carved-chunk` applies AIR and LIQUID sequentially and is the committed oracle path for full classic-ocean carved-stage parity checks. Carved and liquid-carved fixtures now also include `blockTicks` / `liquidTicks`, which pin the generation-stage scheduled tick consequences alongside the carved block palette.
 
+## Feature-order trace oracle
+
+`pnpm --silent oracle:gen feature-order-trace --seed 12345 --chunk-x 0 --chunk-z 0`
+
+This diagnostic emits the vanilla `ChunkGenerator.applyBiomeDecoration(...)` ordering for one center chunk:
+
+- the chunk primary biome selected by `OverworldBiomeSource.getPrimaryBiome(...)`
+- the `WorldgenRandom.setDecorationSeed(...)` result for the chunk origin
+- every configured feature slot in each `GenerationStep.Decoration`
+- the exact `WorldgenRandom.setFeatureSeed(decorationSeed, featureIndex, stepIndex)` value used before that feature places
+
+Pass `--generate-structures true` to include the structure seed slots that vanilla consumes before configured features in the same decoration step when `StructureFeatureManager.shouldGenerateFeatures()` is true. This is a trace of feature seed/order coordination, not a block snapshot; use it when a decorated-chunk diff looks like the right features are present but placed from the wrong random stream.
+
 ## Wrappers
 
 - `oracle/build.sh`: hydrates Mojang-declared runtime libraries into `reference/minecraft-1.17.1/libraries`, then compiles `oracle/java/*.java` into `oracle/classes`

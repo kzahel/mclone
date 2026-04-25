@@ -20,6 +20,7 @@ import { DecoratedDecorator } from "./decorated-decorator";
 import { FeatureDecorator } from "./feature-decorator";
 import { HeightmapDecorator } from "./heightmap-decorator";
 import { HeightmapSpreadDoubleDecorator } from "./heightmap-spread-double-decorator";
+import { LakeLavaPlacementDecorator } from "./lake-lava-placement-decorator";
 import { NopePlacementDecorator } from "./nope-placement-decorator";
 import { RangeDecorator } from "./range-decorator";
 import { SquareDecorator } from "./square-decorator";
@@ -36,6 +37,7 @@ export const FeatureDecorators = {
   SQUARE: register("square", new SquareDecorator()),
   DARK_OAK_TREE: register("dark_oak_tree", new DarkOakTreePlacementDecorator()),
   CHANCE: register("chance", new ChanceDecorator()),
+  LAVA_LAKE: register("lava_lake", new LakeLavaPlacementDecorator()),
   COUNT: register("count", new CountDecorator()),
   COUNT_NOISE: register("count_noise", new CountNoiseDecorator()),
   COUNT_NOISE_BIASED: register("count_noise_biased", new CountNoiseBiasedDecorator()),

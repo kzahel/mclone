@@ -40,6 +40,7 @@ function addOceanCarvers(builder: BiomeGenerationSettings.Builder): void {
 
 function addDefaultLakes(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.LAKES, () => WaterFeatures.LAKE_WATER);
+  builder.addFeature(GenerationStep.Decoration.LAKES, () => WaterFeatures.LAKE_LAVA);
 }
 
 function addDefaultUndergroundVariety(builder: BiomeGenerationSettings.Builder, skipGlowLichen = false): void {
@@ -91,6 +92,7 @@ function addSwampClayDisk(builder: BiomeGenerationSettings.Builder): void {
 
 function addDefaultSprings(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => WaterFeatures.SPRING_WATER);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => WaterFeatures.SPRING_LAVA);
 }
 
 function addSurfaceFreezing(builder: BiomeGenerationSettings.Builder): void {
@@ -307,16 +309,17 @@ function buildTaigaSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
-  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addTaigaTrees(builder);
+  addDefaultFlowers(builder);
   addTaigaGrass(builder);
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
-  addSparseBerryBushes(builder);
   addDefaultSprings(builder);
+  addSparseBerryBushes(builder);
   addSurfaceFreezing(builder);
   return builder.build();
 }
@@ -346,18 +349,18 @@ function buildSnowyTaigaSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
-  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addTaigaTrees(builder);
   addDefaultFlowers(builder);
   addTaigaGrass(builder);
   addDefaultMushrooms(builder);
   addDefaultExtraVegetation(builder);
   addDefaultSprings(builder);
-  addSurfaceFreezing(builder);
   addBerryBushes(builder);
+  addSurfaceFreezing(builder);
   return builder.build();
 }
 
@@ -365,10 +368,10 @@ function buildGiantTaigaSettings(giantSpruce: boolean): BiomeGenerationSettings 
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
-  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addGiantTaigaTrees(builder, giantSpruce);
   addDefaultFlowers(builder);
   addGiantTaigaVegetation(builder);
