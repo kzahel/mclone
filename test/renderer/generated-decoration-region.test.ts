@@ -8,6 +8,7 @@ import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-r
 import { GeneratedRenderLevel } from "../../src/world/level/generated-render-level";
 import type { BlockState } from "../../src/world/level/block/state/block-state";
 import type { Block } from "../../src/world/level/block/block";
+import { LightLayer } from "../../src/world/level/light-layer";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
 import { NoiseBasedChunkGenerator } from "../../src/worldgen/levelgen/noise-based-chunk-generator";
 
@@ -56,5 +57,15 @@ describe("GeneratedDecorationRegion", () => {
 
     expect(region.getBlockState(metadataOnlyReadPos).isAir()).toBe(true);
     expect(() => region.getBlockState(farReadPos)).toThrow(/dependency window/);
+  });
+
+  test("reports dark block light during feature placement", () => {
+    const level = createGeneratedLevel();
+    const region = new GeneratedDecorationRegion(level, 0, 0);
+    const pos = new BlockPos(0, 90, 0);
+
+    expect(level.getBrightness(LightLayer.BLOCK, pos)).toBe(15);
+    expect(region.getBrightness(LightLayer.BLOCK, pos)).toBe(0);
+    expect(region.getBrightness(LightLayer.SKY, pos)).toBe(15);
   });
 });

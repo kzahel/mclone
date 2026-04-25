@@ -156,6 +156,11 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
 
   public getBrightness(layer: LightLayer, pos: BlockPos): number {
     incrementMetric(this.options.metrics, "brightnessQueries");
+    if (layer === LightLayer.BLOCK) {
+      // Runtime: FEATURES runs before block light is solved; vanilla WorldGenRegion observes darkness here.
+      return 0;
+    }
+
     return this.level.getBrightness(layer, pos);
   }
 

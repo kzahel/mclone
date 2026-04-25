@@ -26,13 +26,13 @@ The staged generator path is already exact for this chunk:
 - `buildSurfaceAndBedrock(...)` matches the Java surface oracle block-for-block.
 - AIR carvers match the Java carved oracle block-for-block, including scheduled tick capture.
 
-After correcting the runtime `FEATURES` dependency model to use a `WorldGenRegion`-style read/write envelope, fixing `RepeatingDecorator` to sample its count once like Java, preserving vanilla `LakeFeature` `cave_air`, and regenerating the server-backed fixture through the scheduler-pinned integration harness, the full runtime decorated chunk is still close but not exact against the measured official-server fixture:
+After correcting the runtime `FEATURES` dependency model to use a `WorldGenRegion`-style read/write envelope, fixing `RepeatingDecorator` to sample its count once like Java, preserving vanilla `LakeFeature` `cave_air`, regenerating the server-backed fixture through the scheduler-pinned integration harness, and making feature-time block-light reads match vanilla's pre-lighting darkness, the full runtime decorated chunk is still close but not exact against the measured official-server fixture:
 
 | Metric | Current value |
 |---|---:|
-| Full-block matches | `65,505 / 65,536` |
-| Full-block mismatches | `31` |
-| Full-block match rate | `99.95%` |
+| Full-block matches | `65,523 / 65,536` |
+| Full-block mismatches | `13` |
+| Full-block match rate | `99.98%` |
 | Ground material matches | `256 / 256` columns |
 | Exact ground block + Y matches | `256 / 256` columns |
 | Unexpected dry-land sand | `0` |
@@ -41,17 +41,13 @@ Current full-block mismatch buckets:
 
 | Bucket | Count |
 |---|---:|
-| Tree logs/leaves placement | `14` |
 | Deep underground blobs/lava | `11` |
-| Plants/snow decoration | `4` |
 | Carver/fluid edge | `2` |
 
 Top concrete block-pair mismatches:
 
 ```text
-minecraft:air -> minecraft:spruce_leaves: 14
 minecraft:gravel -> minecraft:deepslate: 9
-minecraft:snow -> minecraft:air: 4
 minecraft:water -> minecraft:air: 2
 minecraft:gravel -> minecraft:stone: 1
 minecraft:lava -> minecraft:air: 1
@@ -64,6 +60,7 @@ This baseline includes two source-backed table corrections from `VanillaBiomes.t
 - `RepeatingDecorator.getPositions(...)` now evaluates `count(...)` once before looping, matching Java `IntStream.range(0, this.count(...))`; this fixed the target spruce trunk origins exactly.
 - `LakeFeature` now writes and snapshots `minecraft:cave_air` for upper lake cavities like Java `Blocks.CAVE_AIR`, removing the `59`-block `cave_air -> air` mismatch bucket.
 - the committed full decorated fixture is now generated with `./oracle/integration/gen-fixture.sh --scheduler-pins ...` to use the same JVM scheduler pins as the scheduler trace oracle; treat it as an exact empirical run fixture, because edge decoration writes are scheduler/run-shape sensitive.
+- `GeneratedDecorationRegion` now reports block light `0` during feature placement, matching vanilla's pre-lighting `WorldGenRegion` behavior. This lets `SnowAndFreezeFeature` place the same cold-slope snow blockers that reject the extra neighboring `(0,1)` spruce and removes the tree/leaves plus plants/snow mismatch buckets.
 
 ## Dependency model correction
 
@@ -134,9 +131,9 @@ Out of scope:
    - Do not let decoration reads recursively trigger unrelated chunk decoration.
 4. Burn down tree placement first.
    - Center-chunk spruce trunk origins now match the oracle exactly after the `RepeatingDecorator` count fix.
-   - Remaining tree mismatches are `14` edge leaves from the neighboring `(0,1)` tree spilling into `(0,0)`; re-check wider scheduler order before editing trunk or foliage placers.
+   - Edge leaves from the neighboring `(0,1)` tree are now gone after matching feature-time block light and top-layer snow behavior.
 5. Burn down non-tree decoration and underground helper mismatches.
-   - Plants/snow: `4`
+   - Plants/snow: `0`
    - Deep blobs/lava: `11`
 6. Resolve remaining carver/fluid and dirt/grass edges.
    - Carver/fluid edge: `2`
