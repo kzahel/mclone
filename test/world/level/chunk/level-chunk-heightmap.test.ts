@@ -30,6 +30,22 @@ describe("LevelChunk heightmaps", () => {
     expect(chunk.getHeight(Heightmap.Types.WORLD_SURFACE_WG, 1, 2)).toBe(10);
   });
 
+  test("can restrict feature writes to post-feature heightmaps", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const chunk = new LevelChunk(0, 0, blocks.airState, 0, 32);
+    const stone = blocks.blockStateById[ChunkBlockId.STONE]!;
+    const groundPos = new BlockPos(1, 10, 2);
+    const featurePos = new BlockPos(1, 20, 2);
+
+    chunk.setBlockState(groundPos, stone);
+    expect(chunk.getHeight(Heightmap.Types.OCEAN_FLOOR_WG, 1, 2)).toBe(10);
+
+    chunk.setBlockState(featurePos, stone, [Heightmap.Types.OCEAN_FLOOR]);
+
+    expect(chunk.getHeight(Heightmap.Types.OCEAN_FLOOR_WG, 1, 2)).toBe(10);
+    expect(chunk.getHeight(Heightmap.Types.OCEAN_FLOOR, 1, 2)).toBe(20);
+  });
+
   test("stores blocks in section-local coordinates and removes default air writes", () => {
     const blocks = registerGeneratedRenderBlocks();
     const chunk = new LevelChunk(-1, 2, blocks.airState, 0, 64);

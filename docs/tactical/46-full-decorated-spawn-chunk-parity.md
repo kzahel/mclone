@@ -30,9 +30,9 @@ After correcting the runtime `FEATURES` dependency model to use a `WorldGenRegio
 
 | Metric | Current value |
 |---|---:|
-| Full-block matches | `65,523 / 65,536` |
-| Full-block mismatches | `13` |
-| Full-block match rate | `99.98%` |
+| Full-block matches | `65,533 / 65,536` |
+| Full-block mismatches | `3` |
+| Full-block match rate | `99.995%` |
 | Ground material matches | `256 / 256` columns |
 | Exact ground block + Y matches | `256 / 256` columns |
 | Unexpected dry-land sand | `0` |
@@ -41,15 +41,13 @@ Current full-block mismatch buckets:
 
 | Bucket | Count |
 |---|---:|
-| Deep underground blobs/lava | `11` |
 | Carver/fluid edge | `2` |
+| Deep underground blobs/lava | `1` |
 
 Top concrete block-pair mismatches:
 
 ```text
-minecraft:gravel -> minecraft:deepslate: 9
 minecraft:water -> minecraft:air: 2
-minecraft:gravel -> minecraft:stone: 1
 minecraft:lava -> minecraft:air: 1
 ```
 
@@ -61,6 +59,7 @@ This baseline includes two source-backed table corrections from `VanillaBiomes.t
 - `LakeFeature` now writes and snapshots `minecraft:cave_air` for upper lake cavities like Java `Blocks.CAVE_AIR`, removing the `59`-block `cave_air -> air` mismatch bucket.
 - the committed full decorated fixture is now generated with `./oracle/integration/gen-fixture.sh --scheduler-pins ...` to use the same JVM scheduler pins as the scheduler trace oracle; treat it as an exact empirical run fixture, because edge decoration writes are scheduler/run-shape sensitive.
 - `GeneratedDecorationRegion` now reports block light `0` during feature placement, matching vanilla's pre-lighting `WorldGenRegion` behavior. This lets `SnowAndFreezeFeature` place the same cold-slope snow blockers that reject the extra neighboring `(0,1)` spruce and removes the tree/leaves plus plants/snow mismatch buckets.
+- `LevelChunk` now keeps `WORLD_SURFACE_WG` / `OCEAN_FLOOR_WG` as pre-feature heightmaps and restricts decoration writes to vanilla's post-feature heightmaps. This prevents neighboring tree leaves from changing later ore height gates and removes the `10` gravel/deepslate mismatches.
 
 ## Dependency model correction
 
@@ -134,7 +133,7 @@ Out of scope:
    - Edge leaves from the neighboring `(0,1)` tree are now gone after matching feature-time block light and top-layer snow behavior.
 5. Burn down non-tree decoration and underground helper mismatches.
    - Plants/snow: `0`
-   - Deep blobs/lava: `11`
+   - Deep blobs/lava: `1`
 6. Resolve remaining carver/fluid and dirt/grass edges.
    - Carver/fluid edge: `2`
    - Surface dirt/grass choice: `0`

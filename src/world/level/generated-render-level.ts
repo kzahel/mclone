@@ -643,6 +643,10 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       }
     }
 
+    chunk.primeHeightmaps([
+      Heightmap.Types.OCEAN_FLOOR_WG,
+      Heightmap.Types.WORLD_SURFACE_WG,
+    ]);
     chunk.appendBlockTicks(generated.getScheduledBlockTicks());
     chunk.appendLiquidTicks(generated.getScheduledLiquidTicks());
 

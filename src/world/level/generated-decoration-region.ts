@@ -15,6 +15,12 @@ import type { GeneratedRenderLevel } from "./generated-render-level";
 
 export const FEATURES_CHUNK_DEPENDENCY_RADIUS = 8;
 export const FEATURES_WRITE_RADIUS_CUTOFF = 1;
+const POST_FEATURE_HEIGHTMAPS = [
+  Heightmap.Types.MOTION_BLOCKING,
+  Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+  Heightmap.Types.OCEAN_FLOOR,
+  Heightmap.Types.WORLD_SURFACE,
+] as const;
 
 export interface GeneratedDecorationMetrics {
   blockReads: number;
@@ -96,7 +102,7 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
       return false;
     }
 
-    this.getChunkForPos(pos).setBlockState(pos, state);
+    this.getChunkForPos(pos).setBlockState(pos, state, POST_FEATURE_HEIGHTMAPS);
     incrementMetric(this.options.metrics, "blockWrites");
     return true;
   }

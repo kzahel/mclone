@@ -44,7 +44,7 @@ export class LevelChunk {
     return 15;
   }
 
-  public setBlockState(pos: BlockPos, state: BlockState): void {
+  public setBlockState(pos: BlockPos, state: BlockState, heightmapUpdateTypes?: Iterable<Heightmap.Types>): void {
     const sectionY = SectionPos.blockToSectionCoord(pos.getY());
     const section = this.getSection(sectionY, state !== this.airState);
     if (section === undefined) {
@@ -55,8 +55,13 @@ export class LevelChunk {
     if (!section.hasStoredBlocks()) {
       this.chunkSections.delete(sectionY);
     }
-    for (const heightmap of this.heightmaps.values()) {
-      heightmap.update(pos.getX() & 15, pos.getY(), pos.getZ() & 15, state);
+    const updateTypes = heightmapUpdateTypes === undefined ? [...this.heightmaps.keys()] : [...heightmapUpdateTypes];
+    const missingTypes = updateTypes.filter((type) => !this.heightmaps.has(type));
+    if (missingTypes.length > 0) {
+      Heightmap.primeHeightmaps(this, missingTypes);
+    }
+    for (const type of updateTypes) {
+      this.heightmaps.get(type)?.update(pos.getX() & 15, pos.getY(), pos.getZ() & 15, state);
     }
   }
 

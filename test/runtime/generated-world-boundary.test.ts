@@ -195,8 +195,8 @@ describe("GeneratedWorld boundary", () => {
       (localX, y, localZ) => runtimeBlockNameAt(level, localX, y, localZ),
     );
 
-    expect(diff.matches, formatDecoratedChunkDiff(diff)).toBe(65_523);
-    expect(diff.mismatchCount, formatDecoratedChunkDiff(diff)).toBe(13);
+    expect(diff.matches, formatDecoratedChunkDiff(diff)).toBe(65_533);
+    expect(diff.mismatchCount, formatDecoratedChunkDiff(diff)).toBe(3);
   }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
 
   test("slides the client chunk cache when the chunk view moves", async () => {
