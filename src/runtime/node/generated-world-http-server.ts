@@ -30,6 +30,7 @@ import {
   isDefaultWorldEngineConfig,
   normalizeWorldEngineConfig,
   type ClientSessionState,
+  type EntitySnapshot,
   type ClientPlayerState,
   type OpenWorldRequest,
   type PollWorldUpdatesRequest,
@@ -102,6 +103,7 @@ type SharedWorldRecord = {
   readonly worldOpened: WorldOpenedMessage;
   readonly sessionIds: Set<string>;
   readonly loadedSnapshots: Map<string, PackedChunkSnapshot>;
+  readonly loadedEntitySnapshots: Map<number, EntitySnapshot>;
   aggregateChunkView: SetChunkViewRequest | undefined;
   pendingOperation: Promise<void>;
   pendingHostDrain: Promise<void> | undefined;
@@ -154,6 +156,10 @@ function createChunkUnloadMessage(key: string): Extract<WorldHostMessage, { type
     chunkX,
     chunkZ,
   };
+}
+
+function entitySnapshotChunkKey(entity: EntitySnapshot): string {
+  return chunkKey(entity.chunkX, entity.chunkZ);
 }
 
 function isSameChunkView(left: SetChunkViewRequest | undefined, right: SetChunkViewRequest | undefined): boolean {
@@ -256,6 +262,9 @@ function applyAuthoritativeMessages(world: SharedWorldRecord, messages: readonly
       case "world_progress":
       case "world_perf":
         break;
+      case "entity_snapshot":
+        world.loadedEntitySnapshots.set(message.entity.id, message.entity);
+        break;
       case "chunk_snapshot":
         world.loadedSnapshots.set(chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ), message.snapshot);
         break;
@@ -268,7 +277,15 @@ function applyAuthoritativeMessages(world: SharedWorldRecord, messages: readonly
         break;
       }
       case "chunk_unload":
-        world.loadedSnapshots.delete(chunkKey(message.chunkX, message.chunkZ));
+        {
+          const key = chunkKey(message.chunkX, message.chunkZ);
+          world.loadedSnapshots.delete(key);
+          for (const [entityId, entity] of world.loadedEntitySnapshots) {
+            if (entitySnapshotChunkKey(entity) === key) {
+              world.loadedEntitySnapshots.delete(entityId);
+            }
+          }
+        }
         break;
       case "world_error":
         throw new Error(message.message);
@@ -290,6 +307,19 @@ function getSessionVisibleChunks(chunkView: SetChunkViewRequest | undefined): Se
   }
 
   return keys;
+}
+
+function getEntitySnapshotMessagesForChunk(
+  world: SharedWorldRecord,
+  key: string,
+): Extract<WorldHostMessage, { type: "entity_snapshot" }>[] {
+  return [...world.loadedEntitySnapshots.values()]
+    .filter((entity) => entitySnapshotChunkKey(entity) === key)
+    .sort((left, right) => left.id - right.id)
+    .map((entity) => ({
+      type: "entity_snapshot",
+      entity,
+    }));
 }
 
 function computeAggregateChunkView(sessions: Iterable<SessionRecord>): SetChunkViewRequest | undefined {
@@ -578,6 +608,7 @@ export class GeneratedWorldRemoteService {
               snapshot,
             });
           }
+          queuedSession.pendingMessages.push(...getEntitySnapshotMessagesForChunk(queuedWorld, key));
         }
       }
 
@@ -708,6 +739,7 @@ export class GeneratedWorldRemoteService {
           snapshot,
         });
       }
+      messages.push(...getEntitySnapshotMessagesForChunk(world, key));
     }
 
     return {
@@ -737,6 +769,7 @@ export class GeneratedWorldRemoteService {
         worldOpened: extractWorldOpened(messages),
         sessionIds: new Set<string>(),
         loadedSnapshots: new Map<string, PackedChunkSnapshot>(),
+        loadedEntitySnapshots: new Map<number, EntitySnapshot>(),
         aggregateChunkView: undefined,
         pendingOperation: Promise.resolve(),
         pendingHostDrain: undefined,
@@ -817,6 +850,16 @@ export class GeneratedWorldRemoteService {
             session.pendingMessages.push(message);
           }
           break;
+        case "entity_snapshot": {
+          const key = entitySnapshotChunkKey(message.entity);
+          world.loadedEntitySnapshots.set(message.entity.id, message.entity);
+          for (const session of this.getWorldSessions(world)) {
+            if (session.visibleChunks.has(key)) {
+              session.pendingMessages.push(message);
+            }
+          }
+          break;
+        }
         case "chunk_snapshot": {
           const key = chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ);
           world.loadedSnapshots.set(key, message.snapshot);
@@ -843,6 +886,11 @@ export class GeneratedWorldRemoteService {
         case "chunk_unload": {
           const key = chunkKey(message.chunkX, message.chunkZ);
           world.loadedSnapshots.delete(key);
+          for (const [entityId, entity] of world.loadedEntitySnapshots) {
+            if (entitySnapshotChunkKey(entity) === key) {
+              world.loadedEntitySnapshots.delete(entityId);
+            }
+          }
           for (const session of this.getWorldSessions(world)) {
             if (session.visibleChunks.has(key)) {
               session.pendingMessages.push(message);

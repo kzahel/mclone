@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import fixture from "../fixtures/creatures/overworld-seed-12345-chunk--7--15-entities.json";
 import { Registry } from "../../src/core/registry";
 import { createGeneratedWorldSaveId, GENERATED_WORLD_STORAGE_VERSION } from "../../src/runtime/host/generated-world-host";
 import { GeneratedWorldRemoteService } from "../../src/runtime/node/generated-world-http-server";
@@ -16,18 +17,29 @@ import {
   type WorldHttpErrorCode,
   type WorldHttpErrorResponse,
 } from "../../src/runtime/protocol/world-http-protocol";
-import type { ChunkSnapshotMessage, WorldHostMessage } from "../../src/runtime/protocol/world-messages";
+import type { ChunkSnapshotMessage, EntitySnapshot, WorldHostMessage } from "../../src/runtime/protocol/world-messages";
 import { RemoteWorldClient, RemoteWorldTransport } from "../../src/runtime/transport/remote-world-transport";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
+import type { CreatureGenerationFixture } from "../../src/oracle/integration/creature-fixture";
 
 const TEMP_DIRECTORIES: string[] = [];
+const creatureFixture = fixture as unknown as CreatureGenerationFixture;
 const OPEN_WORLD_REQUEST = {
   type: "open_world",
   seed: 12345n,
   preset: "browser_smoke",
+  config: {
+    lightingMode: "none",
+  },
+} as const;
+const OPEN_CREATURE_WORLD_REQUEST = {
+  type: "open_world",
+  seed: 12345n,
+  preset: "default",
+  storageMode: "none",
   config: {
     lightingMode: "none",
   },
@@ -292,6 +304,13 @@ async function drainRemoteClientChunks(client: RemoteWorldClient, expectedCount:
   throw new Error(`expected ${expectedCount.toString()} loaded chunks, got ${client.getLevel().getLoadedChunkCount().toString()}`);
 }
 
+function targetChunkEntitySnapshots(entities: readonly EntitySnapshot[]): readonly EntitySnapshot[] {
+  const chunk = creatureFixture.chunks[0]!;
+  return entities
+    .filter((entity) => entity.chunkX === chunk.chunkX && entity.chunkZ === chunk.chunkZ)
+    .sort((left, right) => left.id - right.id);
+}
+
 async function drainServiceSnapshots(
   service: GeneratedWorldRemoteService,
   sessionId: string,
@@ -365,6 +384,34 @@ describe("RemoteWorld transport", () => {
     });
     expect(service.getSessionCount()).toBe(1);
     expect(service.getWorldCount()).toBe(1);
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
+
+  test("streams generated entity snapshots through the remote HTTP host boundary", async () => {
+    const service = new GeneratedWorldRemoteService({
+      saveRoot: await createTempDirectory(),
+    });
+    const client = createRemoteWorldClient("http://127.0.0.1:4173", createServiceFetch(service));
+
+    await client.openWorld(OPEN_CREATURE_WORLD_REQUEST);
+    const chunk = creatureFixture.chunks[0]!;
+    await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: chunk.chunkX,
+      centerChunkZ: chunk.chunkZ,
+      radius: 1,
+    });
+
+    const deadline = Date.now() + REMOTE_WORLD_TRANSPORT_TIMEOUT_MS;
+    while (Date.now() < deadline && targetChunkEntitySnapshots(client.getEntitySnapshots()).length === 0) {
+      await sleep(10);
+      await client.pollUpdates();
+    }
+
+    const snapshots = targetChunkEntitySnapshots(client.getEntitySnapshots());
+    expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots.every((entity) => entity.category === "creature")).toBe(true);
+    expect(snapshots.every((entity) => entity.position.x >= chunk.chunkX * 16 && entity.position.x < (chunk.chunkX + 1) * 16)).toBe(true);
+    expect(snapshots.every((entity) => entity.position.z >= chunk.chunkZ * 16 && entity.position.z < (chunk.chunkZ + 1) * 16)).toBe(true);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("acknowledges remote chunk interest before streaming snapshots through poll updates", async () => {

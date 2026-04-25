@@ -2,6 +2,7 @@ import type {
   ChunkLightDeltaMessage,
   ChunkSnapshotMessage,
   ChunkUnloadMessage,
+  EntitySnapshotMessage,
   PlayerStateMessage,
   SessionStateMessage,
   WorldErrorMessage,
@@ -26,7 +27,7 @@ import {
   type SerializedPackedChunkSnapshot,
 } from "./packed-chunk-wire";
 
-export const WORLD_HTTP_PROTOCOL_VERSION = 5;
+export const WORLD_HTTP_PROTOCOL_VERSION = 6;
 
 export type WorldHttpErrorCode =
   | "protocol_version_mismatch"
@@ -66,6 +67,7 @@ export type SerializedWorldHostMessage =
   | WorldOpenedMessage
   | SessionStateMessage
   | PlayerStateMessage
+  | EntitySnapshotMessage
   | SerializedChunkSnapshotMessage
   | SerializedChunkLightDeltaMessage
   | ChunkUnloadMessage
@@ -167,6 +169,7 @@ export function serializeWorldHostMessages(messages: readonly WorldHostMessage[]
       case "world_opened":
       case "session_state":
       case "player_state":
+      case "entity_snapshot":
       case "chunk_unload":
       case "world_progress":
       case "world_perf":
@@ -194,6 +197,7 @@ export function deserializeWorldHostMessages(messages: readonly SerializedWorldH
       case "world_opened":
       case "session_state":
       case "player_state":
+      case "entity_snapshot":
       case "chunk_unload":
       case "world_progress":
       case "world_perf":

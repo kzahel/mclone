@@ -29,6 +29,7 @@ The logical protocol defines commands and updates in engine terms:
 - set chunk interest
 - send player input
 - receive chunk snapshots/deltas
+- receive entity snapshots/deltas
 - receive player/session state
 
 Wire codecs decide how those messages move:
@@ -98,7 +99,9 @@ Current and near-term host-to-client updates:
 | `session_state` | session/player/save ids, revision, current interest state |
 | `player_state` | authoritative player position/rotation/tick/revision |
 | `chunk_snapshot` | baseline chunk facts |
+| `chunk_light_delta` | stored light changes for an already loaded chunk |
 | `chunk_unload` | release a chunk from client view/cache |
+| `entity_snapshot` | authoritative generated entity baseline data for a visible chunk |
 | `world_error` | stable failure surface |
 
 Likely future updates:
@@ -106,11 +109,13 @@ Likely future updates:
 | Update | Purpose |
 |---|---|
 | `chunk_delta` | block, section, light, and block-entity mutations |
-| `entity_snapshot` / `entity_delta` | authoritative entity state |
+| `entity_delta` | authoritative entity movement, metadata changes, and removals after an entity baseline exists |
 | `tick` / `time_state` | world time and tick metadata |
 | `inventory_state` | player inventory and container state |
 
 Updates should carry revision or tick context where ordering matters.
+
+`entity_snapshot` is currently a baseline/interested-chunk update, similar to chunk snapshots. Polling transports should keep session/player state ahead of entity snapshots when capped, then drain entity snapshots with other chunk-interest bulk data.
 
 ## Versioning And Errors
 

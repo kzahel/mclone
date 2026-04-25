@@ -28,7 +28,9 @@ This document is a reference for future creature work. It is not a tactical slic
 - `NoiseBasedChunkGenerator.spawnOriginalMobs(...)`
 - fixture-backed comparison that inserts generated mobs through the host-owned entity runtime
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, entity ticking behavior, AI/pathfinding, protocol snapshots, persistence adapters beyond the in-memory test storage, and rendering.
+`Creatures2` wires that generation path into `GeneratedWorldHost`: generated original mobs enter the host-owned `EntityRuntime`, publish `entity_snapshot` protocol records, flow through local and remote clients, and clear when their chunk unloads.
+
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, meaningful entity ticking behavior, AI/pathfinding, entity deltas/removal messages, persistence adapters beyond the in-memory runtime path, and rendering.
 
 ## Reference Source Map
 
@@ -301,16 +303,16 @@ For `mclone`, generated original mobs can be oracle-tested as chunk content once
 
 ## Current Mclone Context
 
-Today the repo has authoritative host/session plumbing and chunk snapshots, but no real vanilla entity system:
+Today the repo has authoritative host/session plumbing, chunk snapshots, an early host-owned entity runtime, and generated passive entity publication:
 
 | Area | Current role |
 |---|---|
 | `src/runtime/session/player-loop.ts` | debug authoritative player-state loop, not vanilla `Player`/`Entity` |
-| `docs/protocol.md` | reserves future `entity_snapshot` / `entity_delta` message concepts |
-| `src/runtime/protocol/world-messages.ts` | current concrete protocol has session, player, chunk, unload, and error messages only |
-| `src/runtime/host/generated-world-host.ts` | owns chunk interest, player state, and chunk snapshot delivery |
-| `src/runtime/node/generated-world-http-server.ts` | dedicated host path with the same logical ownership |
-| `src/worldgen/biome/` | biome source exists, but spawn settings are not yet part of runtime content |
+| `docs/protocol.md` | documents current `entity_snapshot` and future `entity_delta` semantics |
+| `src/runtime/protocol/world-messages.ts` | concrete protocol has session, player, chunk, unload, error, and generated entity snapshot messages |
+| `src/runtime/host/generated-world-host.ts` | owns chunk interest, player state, chunk snapshot delivery, and generated original mob publication |
+| `src/runtime/node/generated-world-http-server.ts` | dedicated host path with the same logical ownership and per-session entity snapshot replay |
+| `src/worldgen/biome/` | biome source exists, with the first passive spawn settings needed for generation-time creatures |
 | `src/world/level/chunk-snapshot.ts` | carries blocks/biomes/ticks, not entities |
 | `src/renderer/` | renders chunks and debug camera state, not mobs |
 
@@ -377,10 +379,10 @@ A useful first creature slice is not "all mobs." Keep it narrow:
 1. Content tables: `MobCategory`, minimal `EntityType` records, `MobSpawnSettings.SpawnerData`, and the common overworld spawn settings needed for current biomes.
 2. Done in `Entities0`: host-owned entity records keyed by id/uuid and chunk section, with tracked vs ticking visibility.
 3. Done in `Creatures1`: generation original mobs, `spawnOriginalMobs(...)`, `spawnMobsForChunkGeneration(...)` for `CREATURE` only, and passive spawn placement/collision rules enough for the committed sheep fixture.
-4. Next: integrate the entity runtime into the generated-world host lifecycle and publish simple generated-entity snapshots as data.
-5. Later: rendering follow-through, draw simple authoritative entity placeholders or first real models only after data/state parity exists.
+4. Done in [`Creatures2`](tactical/Creatures2-host-entity-publication.md): integrate the entity runtime into the generated-world host lifecycle and publish simple generated-entity snapshots as data.
+5. Next: rendering follow-through, draw simple authoritative entity placeholders before first real models or behavior.
 
-A second slice can add live natural spawning for `CREATURE`. A third can add common `MONSTER` spawning once stored lighting and entity ticking are credible, because hostile spawn rules depend on sky/block light and despawn behavior.
+A later slice can add live natural spawning for `CREATURE`. Another can add common `MONSTER` spawning once stored lighting and entity ticking are credible, because hostile spawn rules depend on sky/block light and despawn behavior.
 
 ## Verification
 
@@ -422,6 +424,6 @@ When a creature slice produces pixels, run the smallest browser probe that reach
 
 - Whether first entity persistence should be stored inside the chunk record or a sidecar entity-section record.
 - How much of vanilla `EntityType` to port before the first visual creature, versus a minimal metadata table that is intentionally shaped for future expansion.
-- Whether the first generation-original-mobs fixture should compare exact type/position only, or include type-specific finalized data such as sheep color and horse variant.
-- How to expose host chunk activity states in our engine API: use vanilla names (`BORDER`, `TICKING`, `ENTITY_TICKING`) or engine names that map one-to-one.
+- How broadly to expand generation-original-mobs fixtures beyond the current exact sheep type/position/rotation/color comparison.
+- Whether host chunk activity should keep exposing vanilla names (`BORDER`, `TICKING`, `ENTITY_TICKING`) at every API boundary or wrap them at higher runtime layers.
 - Whether first browser rendering should use placeholder billboards, extracted vanilla models, or a deliberately small custom model path while entity behavior is still being ported.

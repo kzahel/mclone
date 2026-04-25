@@ -104,6 +104,18 @@ Liquids are authoritative simulation data and renderer input. Use [`../liquids.m
 | [`Liquid1-liquid-simulation-foundation.md`](Liquid1-liquid-simulation-foundation.md) | `FluidState`, `FlowingFluid`, `WaterFluid`, `LiquidBlock` level mapping, vanilla-shaped liquid tick queue, first fixture comparison | unit + server oracle | **done** — test-local water simulation matches the Liquid0 water-slope fixture exactly |
 | [`Liquid2-authoritative-host-integration.md`](Liquid2-authoritative-host-integration.md) | host-owned liquid tick queue, chunk tick hydration, runtime water execution, dirty chunk snapshot publication, pending tick persistence | runtime + unit | **done** — generated/stored pending liquid ticks now execute through the authoritative host and republish dirty chunks through the existing snapshot protocol |
 
+## Creature / Entity Arc
+
+Entities are authoritative simulation data. Use [`../entities.md`](../entities.md) and [`../creatures.md`](../creatures.md) as the durable references before tactical creature work.
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| [`Creatures0-generation-entity-oracle-foundation.md`](Creatures0-generation-entity-oracle-foundation.md) | official-server entity fixture extraction and committed sheep fixture | server oracle | **done** — generated entity facts can be observed from vanilla saves |
+| [`Entities0-runtime-entity-foundation.md`](Entities0-runtime-entity-foundation.md) | host-owned entity sections, visibility, tick list, and memory persistence shape | unit | **done** — runtime entity lifecycle has a vanilla-shaped host-owned home |
+| [`Creatures1-generation-passive-spawning.md`](Creatures1-generation-passive-spawning.md) | passive `CREATURE` generation path, spawn settings, placements, sheep color | unit + fixture | **done** — generation-time passive spawning matches the committed fixture through the runtime sink |
+| [`Creatures2-host-entity-publication.md`](Creatures2-host-entity-publication.md) | generated-world host entity runtime, entity snapshots, local/remote client caches | runtime | **done** — generated original mobs now publish as authoritative protocol data |
+| `Creatures3-` | browser presentation of authoritative entity snapshots | browser visual | **next** — draw simple placeholders at host-owned entity positions before real models or behavior |
+
 ## Renderer oracle approach
 
 - **Unit**: dump atlas UVs, baked-model quads, and section visibility graphs from MC as JSON; exact-diff those. Catches most correctness bugs before pixels are involved.

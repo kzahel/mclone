@@ -2,6 +2,7 @@ import type { ClientChunkCache } from "../../world/level/client-chunk-cache";
 import type {
   ClientPlayerState,
   ClientSessionState,
+  EntitySnapshot,
   OpenWorldRequest,
   SetChunkViewRequest,
   SetPlayerInputRequest,
@@ -23,6 +24,8 @@ export interface WorldClient {
   getSessionState(): ClientSessionState | undefined;
 
   getPlayerState(): ClientPlayerState | undefined;
+
+  getEntitySnapshots(): readonly EntitySnapshot[];
 
   getPerformanceSnapshot(): WorldPerformanceSnapshot | undefined;
 }

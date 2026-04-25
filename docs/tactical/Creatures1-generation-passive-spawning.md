@@ -52,7 +52,7 @@ Read these before changing this slice:
 - difficulty, gamerules, dedicated-server spawn flags
 - hostile, ambient, water, and underground-water spawn tables
 - full `Mob`, `LivingEntity`, AI, navigation, goals, despawn, breeding, taming, and combat
-- entity protocol snapshots/deltas
+- entity deltas and renderer consumption
 - entity rendering, models, animations, sounds, particles, and selection UI
 - persistent entity storage adapters beyond the in-memory runtime test path
 
@@ -77,13 +77,13 @@ No browser screenshot is required; this slice does not produce pixels.
 - done: spawned generated entities enter `EntityRuntime.addWorldGenChunkEntities(...)`
 - done: no live natural spawning, AI, despawn, renderer, or protocol path was added
 
-## Next
+## Follow-Up
 
-The next creature/entity slice should make generated entities visible outside tests without turning them into rendered mobs yet:
+[`Creatures2-host-entity-publication.md`](Creatures2-host-entity-publication.md) landed the immediate follow-up:
 
-- integrate a host-owned entity runtime into the generated-world host lifecycle
-- define the first entity snapshot protocol records
-- publish tracked generated entities to clients as data
-- keep browser rendering as a follow-up slice after the protocol/cache boundary is clear
+- integrated a host-owned entity runtime into the generated-world host lifecycle
+- defined the first entity snapshot protocol records
+- published tracked generated entities to local and remote clients as data
+- kept browser rendering as a follow-up slice after the protocol/cache boundary was clear
 
 Live natural spawning should wait until entity ticking, mob caps, player-distance eligibility, and despawn have enough runtime support to avoid a one-off local spawner.

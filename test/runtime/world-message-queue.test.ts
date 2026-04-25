@@ -21,6 +21,23 @@ const LIGHT_DELTA_MESSAGE = {
   light: { block: [{ y: 4 }] },
 } satisfies WorldHostMessage;
 
+const ENTITY_SNAPSHOT_MESSAGE = {
+  type: "entity_snapshot",
+  entity: {
+    id: 1,
+    uuid: "test:entity/1",
+    typeId: "minecraft:sheep",
+    category: "creature",
+    chunkX: 0,
+    chunkZ: 0,
+    position: { x: 0, y: 64, z: 0 },
+    rotation: { yaw: 0, pitch: 0 },
+    width: 0.9,
+    height: 1.3,
+    onGround: true,
+  },
+} satisfies WorldHostMessage;
+
 describe("world host message queue draining", () => {
   test("keeps player and session messages ahead of bulk chunk snapshots when capped", () => {
     const firstChunk = {
@@ -79,6 +96,25 @@ describe("world host message queue draining", () => {
 
     expect(drained.messages).toEqual([playerState]);
     expect(drained.remaining).toEqual([LIGHT_DELTA_MESSAGE]);
+  });
+
+  test("keeps entity snapshots behind session-critical messages when capped", () => {
+    const playerState = {
+      type: "player_state",
+      state: {
+        playerId: "test",
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { yaw: 0, pitch: 0 },
+        acknowledgedInputSequence: 1,
+        tick: 1,
+        revision: 1,
+      },
+    } satisfies WorldHostMessage;
+
+    const drained = drainWorldHostMessages([ENTITY_SNAPSHOT_MESSAGE, playerState], 1);
+
+    expect(drained.messages).toEqual([playerState]);
+    expect(drained.remaining).toEqual([ENTITY_SNAPSHOT_MESSAGE]);
   });
 
   test("keeps progress behind ready chunk snapshots when capped", () => {

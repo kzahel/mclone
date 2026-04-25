@@ -94,6 +94,38 @@ export interface ClientPlayerState {
   readonly revision: number;
 }
 
+export type EntitySnapshotCategory =
+  | "monster"
+  | "creature"
+  | "ambient"
+  | "underground_water_creature"
+  | "water_creature"
+  | "water_ambient"
+  | "misc";
+
+export interface EntitySnapshot {
+  readonly id: number;
+  readonly uuid: string;
+  readonly typeId: string;
+  readonly category: EntitySnapshotCategory;
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly position: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
+  readonly rotation: {
+    readonly yaw: number;
+    readonly pitch: number;
+  };
+  readonly width: number;
+  readonly height: number;
+  readonly onGround: boolean;
+  readonly age?: number;
+  readonly data?: Readonly<Record<string, number | boolean | string>>;
+}
+
 export interface WorldOpenedMessage {
   readonly type: "world_opened";
   readonly minBuildHeight: number;
@@ -129,6 +161,11 @@ export interface ChunkLightDeltaMessage {
   readonly light: PackedChunkLightDelta;
 }
 
+export interface EntitySnapshotMessage {
+  readonly type: "entity_snapshot";
+  readonly entity: EntitySnapshot;
+}
+
 export interface WorldProgressMessage {
   readonly type: "world_progress";
   readonly stage: string;
@@ -156,6 +193,7 @@ export type WorldHostMessage =
   | WorldOpenedMessage
   | SessionStateMessage
   | PlayerStateMessage
+  | EntitySnapshotMessage
   | ChunkSnapshotMessage
   | ChunkLightDeltaMessage
   | ChunkUnloadMessage

@@ -7,6 +7,7 @@ import {
   type ChunkLightDeltaMessage,
   type ChunkSnapshotMessage,
   type ChunkUnloadMessage,
+  type EntitySnapshot,
   type OpenWorldRequest,
   type PollWorldUpdatesRequest,
   type SetChunkViewRequest,
@@ -76,6 +77,7 @@ export class TransportWorldClient implements WorldClient {
   private level: ClientChunkCache | undefined;
   private sessionState: ClientSessionState | undefined;
   private playerState: ClientPlayerState | undefined;
+  private readonly entitySnapshots = new Map<number, EntitySnapshot>();
   private performanceSnapshot: WorldPerformanceSnapshot | undefined;
   private lastChunkView: SetChunkViewRequest | undefined;
   private chunkUpdateSink: RenderWorldUpdateSink | undefined;
@@ -118,6 +120,10 @@ export class TransportWorldClient implements WorldClient {
     return this.playerState;
   }
 
+  public getEntitySnapshots(): readonly EntitySnapshot[] {
+    return [...this.entitySnapshots.values()];
+  }
+
   public getPerformanceSnapshot(): WorldPerformanceSnapshot | undefined {
     return this.performanceSnapshot;
   }
@@ -129,6 +135,7 @@ export class TransportWorldClient implements WorldClient {
     }
 
     this.lastChunkView = undefined;
+    this.entitySnapshots.clear();
     return result.worldOpened;
   }
 
@@ -200,6 +207,10 @@ export class TransportWorldClient implements WorldClient {
           this.playerState = message.state;
           messageChanged = true;
           break;
+        case "entity_snapshot":
+          this.entitySnapshots.set(message.entity.id, message.entity);
+          messageChanged = true;
+          break;
         case "chunk_snapshot":
           if (this.chunkUpdateSink !== undefined) {
             pendingChunkUpdates.push(message);
@@ -220,6 +231,11 @@ export class TransportWorldClient implements WorldClient {
           messageChanged = true;
           break;
         case "chunk_unload":
+          for (const [entityId, entity] of this.entitySnapshots) {
+            if (entity.chunkX === message.chunkX && entity.chunkZ === message.chunkZ) {
+              this.entitySnapshots.delete(entityId);
+            }
+          }
           if (this.chunkUpdateSink !== undefined) {
             pendingChunkUpdates.push(message);
           }

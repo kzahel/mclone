@@ -23,11 +23,13 @@ import {
 import { GeneratedChunkStatus } from "../../world/level/generated-chunk-status";
 import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
 import type { LevelChunk } from "../../world/level/chunk/level-chunk";
+import { FullChunkStatus } from "../../world/level/entity/full-chunk-status";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import type { Fluid } from "../../world/level/material/fluid";
 import { Fluids } from "../../world/level/material/fluids";
+import type { GeneratedMobEntity } from "../../world/entity/entity-type";
 import type {
   ChunkLightDeltaResult,
   ChunkLightReadyResult,
@@ -48,6 +50,9 @@ import {
   normalizeWorldEngineConfig,
   type ClientPlayerState,
   type ClientSessionState,
+  type EntitySnapshot,
+  type EntitySnapshotCategory,
+  type EntitySnapshotMessage,
   type OpenWorldPreset,
   type OpenWorldRequest,
   type PollWorldUpdatesRequest,
@@ -75,6 +80,7 @@ import {
   type WorldStorage,
   type WorldStorageSession,
 } from "../storage/world-storage";
+import { EntityRuntime } from "./entity-runtime";
 import { LiquidSimulationLevel } from "./liquid-simulation-level";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
@@ -261,6 +267,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly lightingService: LightingService | undefined;
   private readonly liquidLevel: LiquidSimulationLevel;
   private readonly liquidTicks: ServerTickList<Fluid>;
+  private readonly entityRuntime = new EntityRuntime<GeneratedMobEntity>();
   private readonly engineConfig: NormalizedWorldEngineConfig;
   private readonly liquidSimulationEnabled: boolean;
   private readonly nowMs: () => number;
@@ -284,10 +291,12 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly pendingLightBlockChanges = new Map<bigint, PendingLightBlockChange>();
   private readonly dirtyChunksForPublication = new Set<string>();
   private readonly dirtyDurableChunks = new Set<string>();
+  private readonly spawnedOriginalMobChunks = new Set<string>();
   private opened = false;
   private chunkViewJobRevision = 0;
   private activeChunkViewJobRevision: number | undefined;
   private nextLightBlockChangeBatchId = 1;
+  private nextGeneratedEntityId = 1;
 
   public constructor(private readonly options: GeneratedWorldHostOptions) {
     this.engineConfig = normalizeWorldEngineConfig({
@@ -1263,6 +1272,7 @@ export class GeneratedWorldHost implements WorldHost {
       return false;
     }
 
+    this.ensureOriginalMobsForChunk(chunk);
     const snapshot = this.buildPackedChunkSnapshot(chunk);
     const messages = targetMessages ?? this.pendingMessages;
     messages.push({
@@ -1270,6 +1280,7 @@ export class GeneratedWorldHost implements WorldHost {
       snapshot,
     });
     this.markChunkSnapshotPublished(chunk.chunkX, chunk.chunkZ);
+    this.publishEntitySnapshotsForChunk(chunk.chunkX, chunk.chunkZ, messages);
     const writeTask = this.writeChunkSnapshotByPolicy(snapshot);
     if (awaitStorage) {
       await writeTask;
@@ -1305,6 +1316,67 @@ export class GeneratedWorldHost implements WorldHost {
       this.options.blockStateIds,
       this.resolveBlockState,
     );
+  }
+
+  private ensureOriginalMobsForChunk(chunk: GeneratedLevelChunk): void {
+    const key = chunkKey(chunk.chunkX, chunk.chunkZ);
+    this.entityRuntime.updateChunkStatus(chunk.chunkX, chunk.chunkZ, FullChunkStatus.BORDER);
+    this.entityRuntime.tick();
+    if (this.spawnedOriginalMobChunks.has(key)) {
+      return;
+    }
+
+    // Runtime: generated-world host owns the entity sink until status futures can invoke ChunkStatus.SPAWN directly.
+    this.generator.spawnOriginalMobs(
+      this.level,
+      chunk.chunkX,
+      chunk.chunkZ,
+      {
+        addFreshEntityWithPassengers: (entity) => {
+          this.entityRuntime.addWorldGenChunkEntities([entity]);
+        },
+      },
+      {
+        nextEntityId: () => this.nextGeneratedEntityId++,
+        nextEntityUuid: (id) => `mclone:generated/${this.options.seed.toString()}/${chunk.chunkX.toString()}/${chunk.chunkZ.toString()}/${id.toString()}`,
+      },
+    );
+    this.spawnedOriginalMobChunks.add(key);
+    this.entityRuntime.tick();
+  }
+
+  private publishEntitySnapshotsForChunk(chunkX: number, chunkZ: number, messages: WorldHostMessage[]): void {
+    const snapshots = this.entityRuntime.manager.getEntityGetter().getAll()
+      .filter((entity) => SectionPos.blockToSectionCoord(entity.blockPosition().getX()) === chunkX
+        && SectionPos.blockToSectionCoord(entity.blockPosition().getZ()) === chunkZ)
+      .sort((left, right) => left.id - right.id)
+      .map((entity) => this.createEntitySnapshotMessage(entity));
+
+    messages.push(...snapshots);
+  }
+
+  private createEntitySnapshotMessage(entity: GeneratedMobEntity): EntitySnapshotMessage {
+    const data = Object.keys(entity.data).length === 0 ? undefined : entity.data;
+    const snapshot: EntitySnapshot = {
+      id: entity.id,
+      uuid: entity.uuid,
+      typeId: entity.typeId,
+      category: entity.entityType.category as EntitySnapshotCategory,
+      chunkX: SectionPos.blockToSectionCoord(entity.blockPosition().getX()),
+      chunkZ: SectionPos.blockToSectionCoord(entity.blockPosition().getZ()),
+      position: { ...entity.position },
+      rotation: { ...entity.rotation },
+      width: entity.entityType.width,
+      height: entity.entityType.height,
+      onGround: entity.onGround,
+      age: entity.age,
+      ...(data === undefined ? {} : { data }),
+    };
+
+    return {
+      type: "entity_snapshot",
+      entity: snapshot,
+    };
   }
 
   private getAcceptedCurrentChunkLight(chunkX: number, chunkZ: number): PackedChunkLight | undefined {
@@ -1798,6 +1870,8 @@ export class GeneratedWorldHost implements WorldHost {
     const key = chunkKey(chunkX, chunkZ);
     this.publishedChunkSnapshots.delete(key);
     this.dirtyChunksForPublication.delete(key);
+    this.entityRuntime.updateChunkStatus(chunkX, chunkZ, FullChunkStatus.INACCESSIBLE);
+    this.entityRuntime.tick();
     this.discardChunkLighting(chunkX, chunkZ);
   }
 

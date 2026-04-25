@@ -17,7 +17,9 @@ This document is about entity lifecycle, storage, ticking, host ownership, persi
 - logical chunk entity storage with a memory adapter for tests
 - `EntityRuntime` host wrapper that owns the manager and tick list
 
-`Entities0` itself stayed pre-creature. `Creatures1` now feeds the runtime with generation-time passive entities through the host-owned worldgen entity sink; AI, despawn, renderer paths, persistence adapters, and entity protocol consumption are still deferred.
+`Entities0` itself stayed pre-creature. `Creatures1` feeds the runtime with generation-time passive entities through the host-owned worldgen entity sink. `Creatures2` wires that runtime into `GeneratedWorldHost` and publishes generated entities as protocol `entity_snapshot` records consumed by local and remote clients as data.
+
+Still deferred: `entity_delta`/removal streams, AI, despawn, renderer paths, and durable entity persistence adapters beyond the current in-memory runtime path.
 
 ## Scope
 
@@ -297,8 +299,9 @@ Suggested baseline facts for `entity_snapshot`:
 - owning chunk and section
 - position, rotation, and optional velocity
 - pose or minimal flags needed by presentation
-- tick and revision
 - initial tracked data subset
+
+The current landed `entity_snapshot` is the first baseline form for generated original mobs: id/UUID, type/category, owning chunk, position/rotation, dimensions, on-ground, age, and small type-specific data. Add tick/revision before introducing `entity_delta` or movement interpolation.
 
 Suggested baseline facts for `entity_delta`:
 
