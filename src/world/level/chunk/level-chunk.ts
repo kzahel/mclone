@@ -1,7 +1,9 @@
 import { BlockPos } from "../../../core/block-pos";
+import { SectionPos } from "../../../core/section-pos";
 import type { BlockState } from "../block/state/block-state";
 import type { FluidState } from "../material/fluid-state";
 import { Heightmap } from "../../../worldgen/levelgen/heightmap";
+import { LevelChunkSection } from "./level-chunk-section";
 import {
   cloneScheduledTickSnapshot,
   createScheduledTickSnapshot,
@@ -14,7 +16,7 @@ export type ChunkEntry = {
 };
 
 export class LevelChunk {
-  private readonly states = new Map<bigint, ChunkEntry>();
+  private readonly chunkSections = new Map<number, LevelChunkSection>();
   private readonly blockTicks: ScheduledTickSnapshot[] = [];
   private readonly liquidTicks: ScheduledTickSnapshot[] = [];
 
@@ -29,7 +31,9 @@ export class LevelChunk {
   private readonly heightmaps = new Map<Heightmap.Types, Heightmap>();
 
   public getBlockState(pos: BlockPos): BlockState {
-    return this.states.get(pos.asLong())?.state ?? this.airState;
+    return this.getSection(SectionPos.blockToSectionCoord(pos.getY()), false)
+      ?.getBlockState(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15)
+      ?? this.airState;
   }
 
   public getFluidState(pos: BlockPos): FluidState {
@@ -41,16 +45,16 @@ export class LevelChunk {
   }
 
   public setBlockState(pos: BlockPos, state: BlockState): void {
-    const key = pos.asLong();
-    if (state === this.airState) {
-      this.states.delete(key);
-    } else {
-      this.states.set(key, {
-        pos: new BlockPos(pos.getX(), pos.getY(), pos.getZ()),
-        state,
-      });
+    const sectionY = SectionPos.blockToSectionCoord(pos.getY());
+    const section = this.getSection(sectionY, state !== this.airState);
+    if (section === undefined) {
+      return;
     }
 
+    section.setBlockState(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15, state);
+    if (!section.hasStoredBlocks()) {
+      this.chunkSections.delete(sectionY);
+    }
     for (const heightmap of this.heightmaps.values()) {
       heightmap.update(pos.getX() & 15, pos.getY(), pos.getZ() & 15, state);
     }
@@ -98,9 +102,18 @@ export class LevelChunk {
   }
 
   public isYSpaceEmpty(minY: number, maxY: number): boolean {
-    for (const entry of this.states.values()) {
-      const y = entry.pos.getY();
-      if (y >= minY && y <= maxY && !entry.state.isAir()) {
+    const minSectionY = SectionPos.blockToSectionCoord(minY);
+    const maxSectionY = SectionPos.blockToSectionCoord(maxY);
+    for (let sectionY = minSectionY; sectionY <= maxSectionY; sectionY++) {
+      const section = this.chunkSections.get(sectionY);
+      if (section === undefined) {
+        continue;
+      }
+
+      const sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
+      const localMinY = Math.max(0, minY - sectionMinY);
+      const localMaxY = Math.min(15, maxY - sectionMinY);
+      if (!section.isYSpaceEmpty(localMinY, localMaxY)) {
         return false;
       }
     }
@@ -109,7 +122,7 @@ export class LevelChunk {
   }
 
   public getBlockEntries(): Iterable<ChunkEntry> {
-    return this.states.values();
+    return this.iterBlockEntries();
   }
 
   public recordBlockTick(pos: BlockPos, target: string, delay: number): void {
@@ -144,5 +157,22 @@ export class LevelChunk {
     const ticks = this.liquidTicks.map(cloneScheduledTickSnapshot);
     this.liquidTicks.length = 0;
     return ticks;
+  }
+
+  private getSection(sectionY: number, create: boolean): LevelChunkSection | undefined {
+    let section = this.chunkSections.get(sectionY);
+    if (section === undefined && create) {
+      section = new LevelChunkSection(sectionY, this.airState);
+      this.chunkSections.set(sectionY, section);
+    }
+
+    return section;
+  }
+
+  private *iterBlockEntries(): Iterable<ChunkEntry> {
+    const sectionYs = [...this.chunkSections.keys()].sort((left, right) => left - right);
+    for (const sectionY of sectionYs) {
+      yield* this.chunkSections.get(sectionY)!.blockEntries(this.chunkX, this.chunkZ);
+    }
   }
 }
