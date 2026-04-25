@@ -24,12 +24,17 @@ export interface ClientRuntime {
   sendPlayerCommand(request: SetPlayerInputRequest): Promise<boolean>;
   drainTransportUpdates(): Promise<boolean>;
   setRenderWorldUpdateSink(sink: RenderWorldUpdateSink | undefined): void;
+  close(): void;
   getClientWorld(): ClientWorld;
   publishPresentationState(): ClientPresentationState;
 }
 
 interface RenderWorldUpdateSinkTarget {
   setRenderWorldUpdateSink(sink: RenderWorldUpdateSink | undefined): void;
+}
+
+interface ClientRuntimeCloseTarget {
+  close(): void;
 }
 
 export class WorldClientRuntimeFacade implements ClientRuntime {
@@ -64,6 +69,15 @@ export class WorldClientRuntimeFacade implements ClientRuntime {
     throw new Error("WorldClientRuntimeFacade requires a render-world update sink target");
   }
 
+  public close(): void {
+    if (isRenderWorldUpdateSinkTarget(this.client)) {
+      this.client.setRenderWorldUpdateSink(undefined);
+    }
+    if (isClientRuntimeCloseTarget(this.client)) {
+      this.client.close();
+    }
+  }
+
   public getClientWorld(): ClientWorld {
     return this.clientWorld;
   }
@@ -88,4 +102,8 @@ function getClientWorld(client: WorldClient): ClientWorld {
 
 function isRenderWorldUpdateSinkTarget(client: WorldClient): client is WorldClient & RenderWorldUpdateSinkTarget {
   return "setRenderWorldUpdateSink" in client && typeof client.setRenderWorldUpdateSink === "function";
+}
+
+function isClientRuntimeCloseTarget(client: WorldClient): client is WorldClient & ClientRuntimeCloseTarget {
+  return "close" in client && typeof client.close === "function";
 }

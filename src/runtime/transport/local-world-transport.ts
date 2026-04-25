@@ -29,6 +29,8 @@ export interface WorldTransport {
   pollUpdates(request: PollWorldUpdatesRequest): Promise<readonly WorldHostMessage[]>;
 
   supportsChunkViewDeduplication?(): boolean;
+
+  close?(): void;
 }
 
 export interface TransportWorldClientOptions extends ClientWorldHydrationOptions {
@@ -58,6 +60,10 @@ export class LocalWorldTransport implements WorldTransport {
 
   public pollUpdates(request: PollWorldUpdatesRequest): Promise<readonly WorldHostMessage[]> {
     return this.host.pollUpdates(request);
+  }
+
+  public close(): void {
+    this.host.close?.();
   }
 }
 
@@ -144,6 +150,11 @@ export class TransportWorldClient implements WorldClient {
       maxMessages: this.pollUpdateMaxMessages,
     }));
     return result.messageChanged;
+  }
+
+  public close(): void {
+    this.clientWorld.setRenderWorldUpdateSink(undefined);
+    this.transport.close?.();
   }
 }
 

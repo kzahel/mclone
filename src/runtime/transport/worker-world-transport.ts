@@ -156,6 +156,7 @@ export function connectWorldWorkerSession(
 
 export class WorkerWorldTransport implements WorldTransport {
   private nextRequestId = 1;
+  private closed = false;
   private readonly pending = new Map<number, {
     resolve: (messages: readonly WorldHostMessage[]) => void;
     reject: (error: unknown) => void;
@@ -203,11 +204,29 @@ export class WorkerWorldTransport implements WorldTransport {
   }
 
   private send(message: WorldClientMessage): Promise<readonly WorldHostMessage[]> {
+    if (this.closed) {
+      return Promise.reject(new Error("WorkerWorldTransport.send() called after close()"));
+    }
+
     const requestId = this.nextRequestId++;
     return new Promise((resolve, reject) => {
       this.pending.set(requestId, { resolve, reject });
       this.endpoint.postMessage({ requestId, message });
     });
+  }
+
+  public close(): void {
+    if (this.closed) {
+      return;
+    }
+
+    this.closed = true;
+    this.endpoint.removeEventListener("message", this.onMessage);
+    this.endpoint.removeEventListener("error", this.onError);
+    this.endpoint.removeEventListener("messageerror", this.onError);
+    this.rejectAllPending("worker transport closed");
+    this.endpoint.terminate?.();
+    this.endpoint.close?.();
   }
 
   private rejectAllPending(error: string): void {

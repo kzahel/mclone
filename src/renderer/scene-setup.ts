@@ -1,11 +1,11 @@
 import { ResourceLocation } from "../core/resource-location";
 import { SectionPos } from "../core/section-pos";
 import { type ClientRuntime, WorldClientRuntimeFacade } from "../runtime/client/client-runtime";
+import { createBrowserIntegratedServer } from "../runtime/host/browser-integrated-server";
 import type { OpenWorldPreset, WorldEngineConfig, WorldProgressMessage, WorldStorageMode } from "../runtime/protocol/world-messages";
 import type { WorldSaveMetadata } from "../runtime/storage/world-storage";
 import { RemoteWorldClient, RemoteWorldTransport } from "../runtime/transport/remote-world-transport";
 import { TransportWorldClient } from "../runtime/transport/local-world-transport";
-import { WorkerWorldTransport, createGeneratedWorldWorker } from "../runtime/transport/worker-world-transport";
 import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
 import { ChunkBlockId } from "../worldgen/chunk/chunk-block-buffer";
 import { ClientChunkCache } from "../world/level/client-chunk-cache";
@@ -256,7 +256,7 @@ function createWorldClient(
   }
 
   return new TransportWorldClient(
-    new WorkerWorldTransport(createGeneratedWorldWorker()),
+    createBrowserIntegratedServer(),
     levelFactory,
     {
       pollUpdateMaxMessages: 4,

@@ -21,6 +21,8 @@ class TestMessageEndpoint<TOutgoing, TIncoming> {
   private readonly messageListeners = new Set<WorldWorkerMessageListener<TIncoming>>();
   private readonly errorListeners = new Set<(event: unknown) => void>();
   private readonly transfers: Transferable[][] = [];
+  public closed = false;
+  public terminated = false;
 
   public connect(peer: TestMessageEndpoint<TIncoming, TOutgoing>): void {
     this.peer = peer;
@@ -55,6 +57,14 @@ class TestMessageEndpoint<TOutgoing, TIncoming> {
     for (const listener of this.errorListeners) {
       listener(error);
     }
+  }
+
+  public close(): void {
+    this.closed = true;
+  }
+
+  public terminate(): void {
+    this.terminated = true;
   }
 
   public getTransfers(): readonly (readonly Transferable[])[] {
@@ -178,5 +188,22 @@ describe("WorkerWorld transport", () => {
     rawClientEndpoint.emitError(new Error("worker transport failed"));
 
     await expect(openPromise).rejects.toThrow("worker transport failed");
+  });
+
+  test("close terminates the endpoint and rejects pending client requests", async () => {
+    const { clientEndpoint, rawClientEndpoint } = createEndpointPair();
+    const transport = new WorkerWorldTransport(clientEndpoint);
+    const openPromise = transport.openWorld({
+      type: "open_world",
+      seed: 12345n,
+      preset: "default",
+    });
+
+    transport.close();
+
+    await expect(openPromise).rejects.toThrow("worker transport closed");
+    expect(rawClientEndpoint.terminated).toBe(true);
+    expect(rawClientEndpoint.closed).toBe(true);
+    await expect(transport.pollUpdates({ type: "poll_world_updates" })).rejects.toThrow("WorkerWorldTransport.send() called after close()");
   });
 });
