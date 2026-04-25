@@ -62,27 +62,27 @@ export function blockStateSnapshotKey(snapshot: BlockStateSnapshot): string {
 }
 
 export function serializeBlockStateSnapshot(state: BlockState): BlockStateSnapshot {
+  const blockName = Registry.BLOCK.getKey(state.getBlock() as unknown as object)?.toString();
+  if (blockName !== undefined) {
+    const properties = [...state.getValues().entries()]
+      .map(([property, value]) => [property.getName(), property.getNameForValue(value as never)] as const)
+      .sort(([left], [right]) => left.localeCompare(right));
+
+    if (properties.length === 0) {
+      return { name: blockName };
+    }
+
+    return {
+      name: blockName,
+      properties: Object.fromEntries(properties),
+    };
+  }
+
   if (state.isAir()) {
     return { name: AIR_BLOCK_NAME };
   }
 
-  const blockName = Registry.BLOCK.getKey(state.getBlock() as unknown as object)?.toString();
-  if (blockName === undefined) {
-    throw new Error(`Cannot snapshot unregistered block state ${state}`);
-  }
-
-  const properties = [...state.getValues().entries()]
-    .map(([property, value]) => [property.getName(), property.getNameForValue(value as never)] as const)
-    .sort(([left], [right]) => left.localeCompare(right));
-
-  if (properties.length === 0) {
-    return { name: blockName };
-  }
-
-  return {
-    name: blockName,
-    properties: Object.fromEntries(properties),
-  };
+  throw new Error(`Cannot snapshot unregistered block state ${state}`);
 }
 
 export function createBlockStateResolver(airState: BlockState): BlockStateResolver {
@@ -153,9 +153,8 @@ export function buildChunkSnapshot(
         for (let localX = 0; localX < CHUNK_WIDTH; localX++) {
           pos.set(worldX + localX, sectionMinY + localY, worldZ + localZ);
           const state = chunk.getBlockState(pos);
-          hasNonAir = hasNonAir || !state.isAir();
-
           const snapshot = serializeBlockStateSnapshot(state);
+          hasNonAir = hasNonAir || snapshot.name !== AIR_BLOCK_NAME;
           const key = blockStateSnapshotKey(snapshot);
           let paletteIndex = paletteIndexByKey.get(key);
           if (paletteIndex === undefined) {
@@ -226,7 +225,7 @@ export function hydrateChunkFromSnapshot(
             );
           }
 
-          if (state.isAir()) {
+          if (state === airState) {
             continue;
           }
 

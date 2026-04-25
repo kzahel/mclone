@@ -5,7 +5,7 @@
 #
 # Usage:
 #   ./gen-fixture.sh --seed <long> --chunks <x,z,x,z,...> --out <path>
-#                    [--timeout SECONDS] [--keep-world]
+#                    [--timeout SECONDS] [--keep-world] [--scheduler-pins]
 #
 # Prereqs: Java 17, Node 22.6+ (for native TS strip-types), curl, jq, sha1sum.
 
@@ -19,14 +19,16 @@ CHUNKS=""
 OUT=""
 TIMEOUT="180"
 KEEP_WORLD=0
+SCHEDULER_PINS=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --seed)        SEED="$2"; shift 2 ;;
-        --chunks)      CHUNKS="$2"; shift 2 ;;
-        --out)         OUT="$2"; shift 2 ;;
-        --timeout)     TIMEOUT="$2"; shift 2 ;;
-        --keep-world)  KEEP_WORLD=1; shift ;;
+        --seed)           SEED="$2"; shift 2 ;;
+        --chunks)         CHUNKS="$2"; shift 2 ;;
+        --out)            OUT="$2"; shift 2 ;;
+        --timeout)        TIMEOUT="$2"; shift 2 ;;
+        --keep-world)     KEEP_WORLD=1; shift ;;
+        --scheduler-pins) SCHEDULER_PINS=1; shift ;;
         -h|--help)
             sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
             exit 0 ;;
@@ -49,7 +51,11 @@ fi
 
 # 2. Run the server headless against the pinned seed.
 log "Running server (seed=${SEED})..."
-WORK_DIR=$("${SCRIPT_DIR}/run-server.sh" --seed "$SEED" --timeout "$TIMEOUT" | tail -n 1)
+RUN_SERVER_ARGS=(--seed "$SEED" --timeout "$TIMEOUT")
+if [ "$SCHEDULER_PINS" -eq 1 ]; then
+    RUN_SERVER_ARGS+=(--scheduler-pins)
+fi
+WORK_DIR=$("${SCRIPT_DIR}/run-server.sh" "${RUN_SERVER_ARGS[@]}" | tail -n 1)
 
 if [ ! -d "$WORK_DIR/world/region" ]; then
     echo "server-runner produced no region dir: $WORK_DIR/world/region" >&2

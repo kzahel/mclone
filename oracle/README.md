@@ -199,7 +199,7 @@ A second oracle tier runs the official 1.17.1 server jar headless against a pinn
 Pieces:
 
 - `scripts/fetch-server-jar.sh 1.17.1` — SHA1-verified download of the server jar (Mojang manifest). Idempotent. Writes to `reference/minecraft-1.17.1/server.jar`.
-- `oracle/integration/run-server.sh --seed <long>` — spawns the server with a pinned seed, waits for the `Done (` startup line, sends `stop`, and leaves the generated `world/region/*.mca` files on disk. Prints the working directory to stdout.
+- `oracle/integration/run-server.sh --seed <long>` — spawns the server with a pinned seed, waits for the `Done (` startup line, sends `stop`, and leaves the generated `world/region/*.mca` files on disk. Prints the working directory to stdout. Pass `--scheduler-pins` to use the same JVM scheduler pins as the scheduler-trace oracle.
 - `oracle/integration/dump-chunks.ts` — Node CLI that reads region files and emits a committable JSON fixture. `gen-fixture.sh` runs it with Node transform-types support so it can import the shared TypeScript oracle code.
 - `oracle/integration/gen-fixture.sh --seed <long> --chunks <x,z,x,z,...> --out <path>` — end-to-end orchestration: ensures the server jar exists, runs the server, and decodes the requested chunks.
 
@@ -209,12 +209,14 @@ The reader + fixture builder live under `src/oracle/anvil/` and `src/oracle/inte
 
 ```bash
 ./oracle/integration/gen-fixture.sh \
+    --scheduler-pins \
     --seed 12345 \
     --chunks 0,0 \
     --out test/fixtures/integration/overworld-seed-12345-chunks-0-0.json
 ```
 
 Fixtures are factual measurements and therefore safe to distribute even though the server jar itself isn't.
+For full decorated fixtures, use `--scheduler-pins` unless the fixture is intentionally documenting an unpinned server run. Vanilla edge decoration writes are sensitive to scheduler run shape.
 
 ### Fixture format
 

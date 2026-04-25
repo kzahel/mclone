@@ -37,7 +37,7 @@ export class LevelChunk {
 
   public setBlockState(pos: BlockPos, state: BlockState): void {
     const key = pos.asLong();
-    if (state.isAir()) {
+    if (state === this.airState) {
       this.states.delete(key);
       return;
     }
@@ -51,7 +51,7 @@ export class LevelChunk {
   public isYSpaceEmpty(minY: number, maxY: number): boolean {
     for (const entry of this.states.values()) {
       const y = entry.pos.getY();
-      if (y >= minY && y <= maxY) {
+      if (y >= minY && y <= maxY && !entry.state.isAir()) {
         return false;
       }
     }

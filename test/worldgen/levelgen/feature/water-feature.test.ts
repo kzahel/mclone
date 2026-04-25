@@ -84,6 +84,7 @@ describe("Water features", () => {
     const blocks = registerGeneratedRenderBlocks();
     const stoneState = getState("minecraft:stone");
     const waterState = getState("minecraft:water");
+    const caveAirState = getState("minecraft:cave_air");
     const level = createStoneLevel(blocks.airState, stoneState);
     const generator = createGenerator();
     const feature = Features.LAKE.configured(new BlockStateConfiguration(waterState));
@@ -98,7 +99,7 @@ describe("Water features", () => {
           const state = level.getBlockState(new BlockPos(x, y, z));
           if (state.is(waterState.getBlock())) {
             waterCount++;
-          } else if (state.isAir() && y <= 24) {
+          } else if (state.is(caveAirState.getBlock()) && y <= 24) {
             carvedAirCount++;
           }
         }

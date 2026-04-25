@@ -3,7 +3,7 @@
 # integration oracle can read the generated region files.
 #
 # Usage:
-#   ./run-server.sh --seed <long> [--work-dir DIR] [--timeout SECONDS]
+#   ./run-server.sh --seed <long> [--work-dir DIR] [--timeout SECONDS] [--scheduler-pins]
 #
 # The script writes server.properties (from the template) + eula.txt into an
 # isolated working directory, spawns `java -jar server.jar --nogui`, waits for
@@ -23,12 +23,14 @@ EULA_TEMPLATE="${SCRIPT_DIR}/server/eula.txt"
 SEED=""
 WORK_DIR=""
 TIMEOUT="180"
+SCHEDULER_PINS=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --seed)     SEED="$2"; shift 2 ;;
-        --work-dir) WORK_DIR="$2"; shift 2 ;;
-        --timeout)  TIMEOUT="$2"; shift 2 ;;
+        --seed)           SEED="$2"; shift 2 ;;
+        --work-dir)       WORK_DIR="$2"; shift 2 ;;
+        --timeout)        TIMEOUT="$2"; shift 2 ;;
+        --scheduler-pins) SCHEDULER_PINS=1; shift ;;
         -h|--help)
             sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
             exit 0 ;;
@@ -79,7 +81,11 @@ exec 9<>"$FIFO_IN"
 
 (
     cd "$WORK_DIR"
-    exec java -Xmx2G -Xms1G -jar "$SERVER_JAR" --nogui <"$FIFO_IN" >"$LOG_FILE" 2>&1
+    JAVA_ARGS=()
+    if [ "$SCHEDULER_PINS" -eq 1 ]; then
+        JAVA_ARGS+=("-XX:+UnlockExperimentalVMOptions" "-XX:hashCode=3" "-XX:ActiveProcessorCount=2")
+    fi
+    exec java "${JAVA_ARGS[@]}" -Xmx2G -Xms1G -jar "$SERVER_JAR" --nogui <"$FIFO_IN" >"$LOG_FILE" 2>&1
 ) &
 SERVER_PID=$!
 

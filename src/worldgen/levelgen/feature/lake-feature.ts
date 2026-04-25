@@ -11,7 +11,7 @@ import { Feature } from "./feature";
 import type { FeaturePlaceContext } from "./feature-place-context";
 import { BlockStateConfiguration } from "./configurations/block-state-configuration";
 
-const AIR_LOCATION = new ResourceLocation("minecraft:air");
+const CAVE_AIR_LOCATION = new ResourceLocation("minecraft:cave_air");
 const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
 const MYCELIUM_LOCATION = new ResourceLocation("minecraft:mycelium");
 const ICE_LOCATION = new ResourceLocation("minecraft:ice");
@@ -52,7 +52,7 @@ export class LakeFeature extends Feature<BlockStateConfiguration> {
     }
 
     origin = origin.below(4);
-    const airState = getRequiredState(AIR_LOCATION);
+    const airState = getRequiredState(CAVE_AIR_LOCATION);
     const grassBlockState = getRequiredState(GRASS_BLOCK_LOCATION);
     const myceliumState = getRequiredState(MYCELIUM_LOCATION);
     const iceState = getRequiredState(ICE_LOCATION);

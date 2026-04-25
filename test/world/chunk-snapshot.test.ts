@@ -1,10 +1,23 @@
 import { describe, expect, test } from "vitest";
 import { BlockPos } from "../../src/core/block-pos";
+import { Registry } from "../../src/core/registry";
+import { ResourceLocation } from "../../src/core/resource-location";
+import type { Block } from "../../src/world/level/block/block";
+import type { BlockState } from "../../src/world/level/block/state/block-state";
 import { buildChunkSnapshot, createBlockStateResolver, hydrateChunkFromSnapshot } from "../../src/world/level/chunk-snapshot";
 import { LevelChunk } from "../../src/world/level/chunk/level-chunk";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 
-describe("chunk snapshot scheduled ticks", () => {
+function getState(location: string): BlockState {
+  const block = Registry.BLOCK.get(new ResourceLocation(location)) as Block | undefined;
+  if (block === undefined) {
+    throw new Error(`Missing registered block ${location}`);
+  }
+
+  return block.defaultBlockState();
+}
+
+describe("chunk snapshots", () => {
   test("round-trips scheduled block and liquid ticks through chunk snapshots", () => {
     const { airState } = registerGeneratedRenderBlocks();
     const chunk = new LevelChunk(0, 0, airState);
@@ -22,5 +35,24 @@ describe("chunk snapshot scheduled ticks", () => {
     ]);
     expect(hydrated.getScheduledBlockTicks()).toEqual(snapshot.blockTicks);
     expect(hydrated.getScheduledLiquidTicks()).toEqual(snapshot.liquidTicks);
+  });
+
+  test("preserves registered air-like block states distinct from default air", () => {
+    const { airState } = registerGeneratedRenderBlocks();
+    const caveAirState = getState("minecraft:cave_air");
+    const pos = new BlockPos(1, 5, 2);
+    const chunk = new LevelChunk(0, 0, airState);
+
+    chunk.setBlockState(pos, caveAirState);
+
+    const snapshot = buildChunkSnapshot(chunk, [0], 0, 16);
+    const hydrated = hydrateChunkFromSnapshot(snapshot, airState, createBlockStateResolver(airState));
+
+    expect(chunk.getBlockState(pos)).toBe(caveAirState);
+    expect(chunk.isYSpaceEmpty(5, 5)).toBe(true);
+    expect(snapshot.sections).toHaveLength(1);
+    expect(snapshot.sections[0]!.palette).toContainEqual({ name: "minecraft:cave_air" });
+    expect(hydrated.getBlockState(pos)).toBe(caveAirState);
+    expect(hydrated.isYSpaceEmpty(5, 5)).toBe(true);
   });
 });

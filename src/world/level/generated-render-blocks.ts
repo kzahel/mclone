@@ -47,6 +47,7 @@ import { MaterialColor } from "./material/material-color";
 
 const STONE_LOCATION = new ResourceLocation("minecraft:stone");
 const AIR_LOCATION = new ResourceLocation("minecraft:air");
+const CAVE_AIR_LOCATION = new ResourceLocation("minecraft:cave_air");
 const BEDROCK_LOCATION = new ResourceLocation("minecraft:bedrock");
 const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
 const DIRT_LOCATION = new ResourceLocation("minecraft:dirt");
@@ -542,6 +543,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
 
   const airState = createAirState();
   registerBlock(AIR_LOCATION, airState.getBlock());
+  registerBlock(CAVE_AIR_LOCATION, createAirState().getBlock());
   Fluids.EMPTY.setLegacyBlock(airState);
   const stoneState = registerBlock(
     STONE_LOCATION,
