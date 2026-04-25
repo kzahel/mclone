@@ -71,6 +71,8 @@ Good divergences are ones where we can say all of the following clearly:
 
 Browser singleplayer should run an authoritative local server in a worker and talk to it through a client-facing protocol boundary. It should also hydrate a client world replica from that boundary, like vanilla's `IntegratedServer` plus `ClientLevel` shape. It should not let the renderer call `NoiseBasedChunkGenerator` directly or read host internals.
 
+Canonical generation from seed is host-only. `ClientWorld` may interpret received block-state ids, light facts, biomes, model data, and collision views, but it must not fill missing chunks by running worldgen or decoration locally. Placeholder/loading visuals are allowed only when they are clearly non-authoritative and never become client-world truth.
+
 ### 2. The simulation core is shared across all hosts
 
 The same simulation core should be usable by:

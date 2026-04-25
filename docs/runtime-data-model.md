@@ -149,7 +149,9 @@ Target ownership:
 - render-world/mesh worker owns meshing jobs and derived render products, or acts as part of the broader client replica/runtime
 - main thread owns input/UI/GPU and receives small presentation poses
 
-The client replica is a derived client mirror, not a server clone. It may contain visible chunks, entities, block entities, fluid states, light state, and presentation-time derived caches. The prediction view should contain only the authoritative facts needed to replay local movement commands: nearby block collision data, movement/collision revision maps, and dynamic colliders that can affect local prediction. The client replica should not run worldgen, AI authority, spawning authority, block ticks, liquid ticks, persistence, or chunk scheduling.
+The client replica is a derived client mirror, not a server clone. It may contain visible chunks, entities, block entities, fluid states, light state, and presentation-time derived caches. The prediction view should contain only the authoritative facts needed to replay local movement commands: nearby block collision data, movement/collision revision maps, and dynamic colliders that can affect local prediction. The client replica should not run worldgen, decoration, AI authority, spawning authority, block ticks, liquid ticks, persistence, or chunk scheduling.
+
+No client fallback may synthesize canonical chunk contents from seed. If `ClientWorld` lacks a chunk or collision window, the correct state is missing authority data, not locally generated authority. A temporary placeholder can be a presentation-only loading product, but it must not be stored as a `ClientWorld` chunk snapshot, collision truth, or revisioned fact.
 
 Packed chunk snapshots/deltas may feed rendering, lighting, and prediction views, but no derived product should become another subsystem's source of truth. Meshes are not collision. Collision snapshots are not meshes. Client light caches are not host light authority. If sharing immutable packed buffers later becomes worthwhile, it remains a carrier optimization with explicit ownership and lifetime rules.
 

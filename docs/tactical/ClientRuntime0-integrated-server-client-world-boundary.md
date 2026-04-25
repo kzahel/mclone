@@ -53,7 +53,8 @@ The target is not a class-for-class Java thread model port. The target is a fait
 
 - Singleplayer and multiplayer clients must hydrate `ClientWorld` from the same logical protocol records.
 - The presentation/UI thread must not own raw chunk sections, collision caches, replay buffers, or host objects.
-- `ClientWorld` is a client replica, not a server clone. It does not run worldgen, persistence, block ticks, liquid ticks, spawning authority, NPC AI authority, or host scheduling.
+- `ClientWorld` is a client replica, not a server clone. It does not run worldgen, decoration, persistence, block ticks, liquid ticks, spawning authority, NPC AI authority, or host scheduling.
+- Missing `ClientWorld` chunks stay missing until host protocol facts arrive. Do not fill canonical client-world state by running seed-based generation locally.
 - Host authority remains the only owner of gameplay consequences.
 - Prediction reads bounded collision/entity views from `ClientWorld`; it never reads `IntegratedServer` or dedicated-host internals.
 - Render-world/mesh workers produce derived render products. Meshes are never collision truth.

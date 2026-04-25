@@ -26,6 +26,8 @@ export interface ClientWorldPredictionView {
   createCollisionWorld(): CollisionWorld;
 }
 
+// ClientWorld is a replica hydrated from host updates. It must not generate
+// canonical chunks from seed or fill missing authority data through worldgen.
 export interface ClientWorld {
   getSessionState(): ClientSessionState | undefined;
   getLocalPlayerState(): ClientPlayerState | undefined;

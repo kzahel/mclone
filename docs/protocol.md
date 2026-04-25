@@ -27,6 +27,8 @@ The active client-runtime facade layer keeps this protocol split explicit:
 
 Transport adapters still decide only how records move. They do not decide host ticks, player command quanta, snapshot cadence, transport cadence, or render frames.
 
+Host protocol messages are the only source of canonical client chunk facts. Clients must not compensate for missing chunks by running seed-based worldgen or decoration locally. Missing data should stay explicit so rendering can show loading state and prediction can report missing collision facts.
+
 ## Logical Messages Vs Wire Codecs
 
 Keep the message model separate from wire encoding.
