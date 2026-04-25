@@ -11,6 +11,7 @@ import type {
   WorldOpenedMessage,
 } from "../../src/runtime/protocol/world-messages";
 import type { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
+import { AABB } from "../../src/world/phys/aabb";
 import type { PackedChunkLightDelta, PackedChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
 
 const OPENED: WorldOpenedMessage = {
@@ -106,6 +107,9 @@ function createRecordingLevel(): {
         unloads.push({ chunkX, chunkZ });
         return true;
       },
+      getChunkSnapshot() {
+        return undefined;
+      },
     } as unknown as ClientChunkCache,
     snapshots,
     lightDeltas,
@@ -130,7 +134,7 @@ function createRecordingSink(): {
 }
 
 describe("RenderWorld update sink", () => {
-  test("forwards chunk messages to a sink without mutating the client cache", async () => {
+  test("hydrates the client cache and forwards chunk messages to a sink", async () => {
     const recordingLevel = createRecordingLevel();
     const recordingSink = createRecordingSink();
     const client = new TransportWorldClient(
@@ -156,6 +160,8 @@ describe("RenderWorld update sink", () => {
 
     expect(client.getSessionState()).toEqual(SESSION_STATE);
     expect(client.getPlayerState()).toEqual(PLAYER_STATE);
+    expect(client.getClientWorld().getSessionState()).toEqual(SESSION_STATE);
+    expect(client.getClientWorld().getLocalPlayerState()).toEqual(PLAYER_STATE);
     expect(recordingSink.batches).toEqual([
       [
         { type: "chunk_snapshot", snapshot: SNAPSHOT },
@@ -163,12 +169,12 @@ describe("RenderWorld update sink", () => {
         { type: "chunk_unload", chunkX: 1, chunkZ: -1 },
       ],
     ]);
-    expect(recordingLevel.snapshots).toEqual([]);
-    expect(recordingLevel.lightDeltas).toEqual([]);
-    expect(recordingLevel.unloads).toEqual([]);
+    expect(recordingLevel.snapshots).toEqual([SNAPSHOT]);
+    expect(recordingLevel.lightDeltas).toEqual([{ type: "chunk_light_delta", chunkX: 0, chunkZ: 0, light: LIGHT_DELTA }]);
+    expect(recordingLevel.unloads).toEqual([{ chunkX: 1, chunkZ: -1 }]);
   });
 
-  test("can mirror chunk updates to the compatibility cache during renderer migration", async () => {
+  test("can install the render sink after opening the world", async () => {
     const recordingLevel = createRecordingLevel();
     const recordingSink = createRecordingSink();
     const client = new TransportWorldClient(
@@ -178,13 +184,10 @@ describe("RenderWorld update sink", () => {
         { type: "chunk_unload", chunkX: 1, chunkZ: -1 },
       ]),
       () => recordingLevel.level,
-      {
-        chunkUpdateSink: recordingSink.sink,
-        mirrorChunkUpdatesToLevel: true,
-      },
     );
 
     await client.openWorld({ type: "open_world", seed: 12345n, preset: "default" });
+    client.setRenderWorldUpdateSink(recordingSink.sink);
     await expect(client.setChunkView({
       type: "set_chunk_view",
       centerChunkX: 0,
@@ -227,5 +230,21 @@ describe("RenderWorld update sink", () => {
 
     expect(client.getPerformanceSnapshot()).toEqual({});
     expect(recordingLevel.snapshots).toEqual([]);
+  });
+
+  test("reports missing collision data for chunks not hydrated by the host", async () => {
+    const recordingLevel = createRecordingLevel();
+    const client = new TransportWorldClient(
+      new StaticWorldTransport([]),
+      () => recordingLevel.level,
+    );
+
+    await client.openWorld({ type: "open_world", seed: 12345n, preset: "default" });
+
+    const collisionWorld = client.getClientWorld().getPredictionView().createCollisionWorld();
+    expect(collisionWorld.queryBlockCollisions(new AABB(2, 64, 2, 3, 65, 3))).toEqual({
+      type: "missing",
+      reason: "missing_chunk:0,0",
+    });
   });
 });

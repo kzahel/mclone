@@ -2,6 +2,10 @@
 
 Standing after [`ClientRuntime0-integrated-server-client-world-boundary.md`](ClientRuntime0-integrated-server-client-world-boundary.md), which introduced the first facade names for `IntegratedServer`, `ClientRuntime`, `ClientWorld`, and `PredictionService`.
 
+Status: **done**.
+
+Landed result: `HostMessageClientWorld` is now the shared host-message hydration target for worker singleplayer and remote clients. `TransportWorldClient` remains request/transport orchestration only, while client replica mutation, render-world derived updates, session/player/entity/perf snapshots, and missing-collision reporting live behind `ClientWorld`.
+
 ## Goal
 
 Make `ClientWorld` the single protocol-facing hydration target for visible/interested client facts:
@@ -76,11 +80,19 @@ Run `pnpm test:browser:integration` if the change touches debug camera controls,
 
 ## Done When
 
-- `ClientRuntime` applies host messages by hydrating `ClientWorld`.
-- Local worker and remote HTTP clients use the same client-world hydration path.
-- `ClientWorld` has no import path to host worldgen or decoration code.
-- Missing chunks/collision facts remain explicit instead of being locally generated.
-- Render-world and prediction views consume bounded client-world facts rather than host internals.
+- [x] `ClientRuntime` applies host messages by hydrating `ClientWorld`.
+- [x] Local worker and remote HTTP clients use the same client-world hydration path.
+- [x] `ClientWorld` has no import path to host worldgen or decoration code.
+- [x] Missing chunks/collision facts remain explicit instead of being locally generated.
+- [x] Render-world and prediction views consume bounded client-world facts rather than host internals.
+
+## Validation Run
+
+- `pnpm -s vitest run test/runtime/render-world-update-sink.test.ts`
+- `pnpm typecheck`
+- `pnpm test:browser`
+- `pnpm test:browser:integration`
+- `git diff --check`
 
 ## Next Step
 

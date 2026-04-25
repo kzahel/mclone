@@ -31,7 +31,7 @@ export class WorldClientRuntimeFacade implements ClientRuntime {
   private readonly clientWorld: ClientWorld;
 
   public constructor(private readonly client: WorldClient) {
-    this.clientWorld = new WorldClientBackedClientWorld(client);
+    this.clientWorld = getClientWorld(client);
   }
 
   public openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage> {
@@ -56,10 +56,18 @@ export class WorldClientRuntimeFacade implements ClientRuntime {
 
   public publishPresentationState(): ClientPresentationState {
     return {
-      sessionState: this.client.getSessionState(),
-      localPlayerState: this.client.getPlayerState(),
-      entities: this.client.getEntitySnapshots(),
-      performance: this.client.getPerformanceSnapshot(),
+      sessionState: this.clientWorld.getSessionState(),
+      localPlayerState: this.clientWorld.getLocalPlayerState(),
+      entities: this.clientWorld.getEntitySnapshots(),
+      performance: this.clientWorld.getPerformanceSnapshot(),
     };
   }
+}
+
+function getClientWorld(client: WorldClient): ClientWorld {
+  if ("getClientWorld" in client && typeof client.getClientWorld === "function") {
+    return client.getClientWorld() as ClientWorld;
+  }
+
+  return new WorldClientBackedClientWorld(client);
 }
