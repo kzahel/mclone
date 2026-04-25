@@ -14,7 +14,8 @@ export abstract class RepeatingDecorator<DC extends DecoratorConfiguration> exte
     pos: BlockPos,
   ): readonly BlockPos[] {
     const positions: BlockPos[] = [];
-    for (let index = 0; index < this.count(random, config, pos); index++) {
+    const count = this.count(random, config, pos);
+    for (let index = 0; index < count; index++) {
       positions.push(pos);
     }
 

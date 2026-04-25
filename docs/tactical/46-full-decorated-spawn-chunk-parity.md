@@ -4,7 +4,7 @@ Reach exact full-block parity for one concrete, server-backed baseline: seed `12
 
 This is intentionally not a claim of full overworld parity. It is a bounded end-to-end confidence milestone: prove that the current translated pipeline can produce one simple decorated overworld chunk exactly, then use the same harness to expand coverage later.
 
-Status: ready to resume after the first bounded [`48-vanilla-scheduler-trace-oracle.md`](48-vanilla-scheduler-trace-oracle.md) result. [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) replaced the decorated/published shortcut with explicit `ChunkStatus`-shaped `FEATURES`, `LIGHT`, and publication gates; tactical 48 now records the seed `12345`, chunk `(0,0)` spawn-bootstrap `FEATURES` order and shows it matches the current host's z-major/x-major chunk order for the target 3x3.
+Status: in burn-down after the first bounded [`48-vanilla-scheduler-trace-oracle.md`](48-vanilla-scheduler-trace-oracle.md) result. [`47-generated-chunk-status-orchestration.md`](47-generated-chunk-status-orchestration.md) replaced the decorated/published shortcut with explicit `ChunkStatus`-shaped `FEATURES`, `LIGHT`, and publication gates; tactical 48 now records the seed `12345`, chunk `(0,0)` spawn-bootstrap `FEATURES` order and shows it matches the current host's z-major/x-major chunk order for the target 3x3.
 
 ## Source files (read before writing)
 
@@ -26,49 +26,49 @@ The staged generator path is already exact for this chunk:
 - `buildSurfaceAndBedrock(...)` matches the Java surface oracle block-for-block.
 - AIR carvers match the Java carved oracle block-for-block, including scheduled tick capture.
 
-After correcting the runtime `FEATURES` dependency model to use a `WorldGenRegion`-style read/write envelope, the full runtime decorated chunk is still close but not exact against the official-server integration fixture:
+After correcting the runtime `FEATURES` dependency model to use a `WorldGenRegion`-style read/write envelope and fixing `RepeatingDecorator` to sample its count once like Java, the full runtime decorated chunk is still close but not exact against the official-server integration fixture:
 
 | Metric | Current value |
 |---|---:|
-| Full-block matches | `64,790 / 65,536` |
-| Full-block mismatches | `746` |
-| Full-block match rate | `98.86%` |
-| Ground material matches | `232 / 256` columns |
-| Exact ground block + Y matches | `225 / 256` columns |
+| Full-block matches | `65,383 / 65,536` |
+| Full-block mismatches | `153` |
+| Full-block match rate | `99.77%` |
+| Ground material matches | `256 / 256` columns |
+| Exact ground block + Y matches | `256 / 256` columns |
 | Unexpected dry-land sand | `0` |
 
 Current full-block mismatch buckets:
 
 | Bucket | Count |
 |---|---:|
-| Tree logs/leaves placement | `590` |
-| Carver/fluid edge | `80` |
+| Carver/fluid edge | `62` |
+| Tree logs/leaves placement | `47` |
 | Deep underground blobs/lava | `31` |
-| Plants/snow decoration | `26` |
-| Surface dirt/grass choice | `15` |
-| Ores/glow lichen | `4` |
+| Plants/snow decoration | `10` |
+| Ores/glow lichen | `3` |
 
 Top concrete block-pair mismatches:
 
 ```text
-minecraft:air -> minecraft:spruce_leaves: 324
-minecraft:spruce_leaves -> minecraft:air: 202
-minecraft:air -> minecraft:spruce_log: 32
-minecraft:cave_air -> minecraft:dirt: 22
-minecraft:cave_air -> minecraft:grass_block: 22
-minecraft:spruce_log -> minecraft:air: 22
-minecraft:water -> minecraft:dirt: 21
+minecraft:cave_air -> minecraft:air: 59
+minecraft:spruce_leaves -> minecraft:air: 33
 minecraft:granite -> minecraft:deepslate: 20
-minecraft:cave_air -> minecraft:air: 12
-minecraft:grass_block -> minecraft:dirt: 11
-minecraft:air -> minecraft:large_fern: 9
+minecraft:air -> minecraft:spruce_leaves: 14
 minecraft:gravel -> minecraft:deepslate: 9
+minecraft:air -> minecraft:large_fern: 4
+minecraft:snow -> minecraft:air: 4
+minecraft:water -> minecraft:air: 3
+minecraft:cave_air -> minecraft:large_fern: 2
+minecraft:air -> minecraft:glow_lichen: 1
+minecraft:deepslate_iron_ore -> minecraft:iron_ore: 1
+minecraft:glow_lichen -> minecraft:air: 1
 ```
 
 This baseline includes two source-backed table corrections from `VanillaBiomes.taigaBiome(...)` and `BiomeDefaultFeatures`:
 
 - taiga-family biome generation settings now keep the Java feature order for large ferns, underground variety, taiga trees, default flowers, springs, berry bushes, and top-layer freezing
 - default overworld lakes/springs now wire the Java lava variants (`LAKE_LAVA`, `SPRING_LAVA`) in addition to water
+- `RepeatingDecorator.getPositions(...)` now evaluates `count(...)` once before looping, matching Java `IntStream.range(0, this.count(...))`; this fixed the target spruce trunk origins exactly and reduced tree mismatches from `590` to `47`.
 
 ## Dependency model correction
 
@@ -138,15 +138,15 @@ Out of scope:
    - Keep the host as the owner of authoritative chunks and client publication.
    - Do not let decoration reads recursively trigger unrelated chunk decoration.
 4. Burn down tree placement first.
-   - It still owns the majority of the remaining `746` mismatches.
-   - Check spruce tree configured-feature selection, decorator coordinates, trunk height sampling, foliage radius/height sampling, and leaf/log placement predicates against Java.
+   - Center-chunk spruce trunk origins now match the oracle exactly after the `RepeatingDecorator` count fix.
+   - Remaining tree mismatches are edge leaves from cross-chunk trees; re-check neighboring decoration writes before editing trunk or foliage placers.
 5. Burn down non-tree decoration and underground helper mismatches.
-   - Plants/snow: `26`
+   - Plants/snow: `10`
    - Deep blobs/lava: `31`
-   - Ores/glow lichen: `4`
+   - Ores/glow lichen: `3`
 6. Resolve remaining carver/fluid and dirt/grass edges.
-   - Carver/fluid edge: `80`
-   - Surface dirt/grass choice: `15`
+   - Carver/fluid edge: `62`
+   - Surface dirt/grass choice: `0`
    - Re-check whether any apparent carver mismatch is actually tree/feature spillover or cross-chunk decoration context before editing carvers.
 7. Promote the exact full-block test.
    - Done means `65,536 / 65,536` block names match for seed `12345`, chunk `(0, 0)`.

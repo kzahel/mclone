@@ -15,6 +15,7 @@ import { SimpleBlockPlacer } from "../../../../src/worldgen/levelgen/feature/blo
 import { CountConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/count-configuration";
 import type { DecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorator-configuration";
 import { Features } from "../../../../src/worldgen/levelgen/feature/features";
+import { FrequencyWithExtraChanceDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/frequency-with-extra-chance-decorator-configuration";
 import { HeightmapConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/heightmap-configuration";
 import { NoneDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/none-decorator-configuration";
 import { RandomPatchConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/random-patch-configuration";
@@ -86,6 +87,22 @@ describe("Feature placement", () => {
       expect(pos.getZ()).toBeLessThan(16);
       expect(pos.getY()).toBe(11);
     }
+  });
+
+  test("count extra decorator samples its count once like vanilla", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    const generator = createGenerator();
+    const random = new WorldgenRandom(92347n);
+    const decorator = FeatureDecorators.COUNT_EXTRA.configured(
+      new FrequencyWithExtraChanceDecoratorConfiguration(10, 0.1, 1),
+    );
+    const beforeCount = random.getCount();
+
+    const positions = decorator.getPositions(new DecorationContext(level, generator), random, new BlockPos(0, 0, 0));
+
+    expect(positions).toHaveLength(10);
+    expect(random.getCount() - beforeCount).toBe(1);
   });
 
   test("random patch feature places vegetation onto the translated grass surface", () => {
