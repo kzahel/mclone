@@ -9,8 +9,14 @@ import { GeneratedRenderLevel } from "../src/world/level/generated-render-level"
 import {
   FEATURES_CHUNK_DEPENDENCY_RADIUS,
   FEATURES_WRITE_RADIUS_CUTOFF,
+  createGeneratedDecorationMetrics,
+  type GeneratedDecorationMetrics,
 } from "../src/world/level/generated-decoration-region";
 import { registerGeneratedRenderBlocks } from "../src/world/level/generated-render-blocks";
+import type {
+  BiomeDecorationFeatureInfo,
+  BiomeDecorationProfiler,
+} from "../src/worldgen/levelgen/decoration-profiler";
 import {
   buildChunkSnapshot,
   createBlockStateResolver,
@@ -83,6 +89,7 @@ interface DirectBenchmarkResult {
   readonly mode: DirectMode;
   readonly phases: readonly PhaseResult[];
   readonly yieldCounters?: YieldCounters;
+  readonly decorationSummary?: DecorationProfileSummary;
 }
 
 interface HostBenchmarkResult {
@@ -107,6 +114,19 @@ interface GeneratedPalette {
   readonly airState: BlockState;
   readonly blockStateById: readonly BlockState[];
   readonly blockStateIds: BlockStateIdMap;
+}
+
+interface DecorationFeatureAggregate {
+  readonly info: BiomeDecorationFeatureInfo;
+  calls: number;
+  placed: number;
+  ms: number;
+  readonly metrics: GeneratedDecorationMetrics;
+}
+
+interface DecorationProfileSummary {
+  readonly totals: GeneratedDecorationMetrics;
+  readonly topFeatures: readonly DecorationFeatureAggregate[];
 }
 
 function parseInteger(name: string, value: string): number {
@@ -340,6 +360,110 @@ function createYieldMeter(mode: DirectMode, budgetMs: number): {
   };
 }
 
+function cloneDecorationMetrics(metrics: GeneratedDecorationMetrics): GeneratedDecorationMetrics {
+  return { ...metrics };
+}
+
+function addDecorationMetrics(target: GeneratedDecorationMetrics, source: GeneratedDecorationMetrics): void {
+  target.blockReads += source.blockReads;
+  target.metadataOnlyBlockReads += source.metadataOnlyBlockReads;
+  target.fluidReads += source.fluidReads;
+  target.heightQueries += source.heightQueries;
+  target.heightBlockReads += source.heightBlockReads;
+  target.blockWriteAttempts += source.blockWriteAttempts;
+  target.blockWrites += source.blockWrites;
+  target.blockedBlockWrites += source.blockedBlockWrites;
+  target.biomeQueries += source.biomeQueries;
+  target.brightnessQueries += source.brightnessQueries;
+  target.blockTickSchedules += source.blockTickSchedules;
+  target.liquidTickSchedules += source.liquidTickSchedules;
+}
+
+function subtractDecorationMetrics(
+  current: GeneratedDecorationMetrics | undefined,
+  previous: GeneratedDecorationMetrics | undefined,
+): GeneratedDecorationMetrics {
+  const next = current ?? createGeneratedDecorationMetrics();
+  const before = previous ?? createGeneratedDecorationMetrics();
+  return {
+    blockReads: next.blockReads - before.blockReads,
+    metadataOnlyBlockReads: next.metadataOnlyBlockReads - before.metadataOnlyBlockReads,
+    fluidReads: next.fluidReads - before.fluidReads,
+    heightQueries: next.heightQueries - before.heightQueries,
+    heightBlockReads: next.heightBlockReads - before.heightBlockReads,
+    blockWriteAttempts: next.blockWriteAttempts - before.blockWriteAttempts,
+    blockWrites: next.blockWrites - before.blockWrites,
+    blockedBlockWrites: next.blockedBlockWrites - before.blockedBlockWrites,
+    biomeQueries: next.biomeQueries - before.biomeQueries,
+    brightnessQueries: next.brightnessQueries - before.brightnessQueries,
+    blockTickSchedules: next.blockTickSchedules - before.blockTickSchedules,
+    liquidTickSchedules: next.liquidTickSchedules - before.liquidTickSchedules,
+  };
+}
+
+function featureLabel(info: BiomeDecorationFeatureInfo): string {
+  const decorators = info.decoratorConfigNames.length === 0 ? "" : ` via ${info.decoratorConfigNames.join(">")}`;
+  return `step ${info.stepIndex.toString()} #${info.featureIndex.toString()} ${info.featureName}<${info.configName}>${decorators}`;
+}
+
+class DecorationProfileCollector implements BiomeDecorationProfiler {
+  private readonly totals = createGeneratedDecorationMetrics();
+  private readonly features = new Map<string, DecorationFeatureAggregate>();
+  private currentMetrics: GeneratedDecorationMetrics | undefined;
+  private featureStartMetrics: GeneratedDecorationMetrics | undefined;
+
+  public setCurrentMetrics(metrics: GeneratedDecorationMetrics): void {
+    this.currentMetrics = metrics;
+  }
+
+  public clearCurrentMetrics(): void {
+    this.currentMetrics = undefined;
+    this.featureStartMetrics = undefined;
+  }
+
+  public addChunkMetrics(metrics: GeneratedDecorationMetrics): void {
+    addDecorationMetrics(this.totals, metrics);
+  }
+
+  public beginFeature(_info: BiomeDecorationFeatureInfo): void {
+    this.featureStartMetrics = this.currentMetrics === undefined ? undefined : cloneDecorationMetrics(this.currentMetrics);
+  }
+
+  public endFeature(info: BiomeDecorationFeatureInfo, placed: boolean, elapsedMs: number): void {
+    const key = featureLabel(info);
+    let aggregate = this.features.get(key);
+    if (aggregate === undefined) {
+      aggregate = {
+        info,
+        calls: 0,
+        placed: 0,
+        ms: 0,
+        metrics: createGeneratedDecorationMetrics(),
+      };
+      this.features.set(key, aggregate);
+    }
+
+    aggregate.calls++;
+    if (placed) {
+      aggregate.placed++;
+    }
+    aggregate.ms += elapsedMs;
+    addDecorationMetrics(
+      aggregate.metrics,
+      subtractDecorationMetrics(this.currentMetrics, this.featureStartMetrics),
+    );
+  }
+
+  public summarize(): DecorationProfileSummary {
+    return {
+      totals: cloneDecorationMetrics(this.totals),
+      topFeatures: [...this.features.values()]
+        .sort((a, b) => b.ms - a.ms)
+        .slice(0, 8),
+    };
+  }
+}
+
 async function timePhase(
   name: string,
   chunks: number | undefined,
@@ -445,6 +569,7 @@ async function runDirectBenchmark(options: CliOptions, mode: DirectMode, window:
   const phases: PhaseResult[] = [];
   const yieldMeter = mode === "sync" ? undefined : createYieldMeter(mode, options.yieldBudgetMs);
   const resolveBlockState = createBlockStateResolver(palette.airState);
+  const decorationProfile = new DecorationProfileCollector();
 
   phases.push(await timePhase("terrain:publish", publishTerrainChunks.length, async () => {
     for (const [chunkX, chunkZ] of publishTerrainChunks) {
@@ -468,13 +593,17 @@ async function runDirectBenchmark(options: CliOptions, mode: DirectMode, window:
 
   phases.push(await timePhase("features:decorate", featuresChunks.length, async () => {
     for (const [chunkX, chunkZ] of featuresChunks) {
+      const metrics = createGeneratedDecorationMetrics();
+      decorationProfile.setCurrentMetrics(metrics);
       if (mode === "sync") {
-        level.decorateChunk(chunkX, chunkZ);
+        level.decorateChunk(chunkX, chunkZ, { metrics, profiler: decorationProfile });
       } else {
-        await level.decorateChunkCooperative(chunkX, chunkZ, yieldMeter!.yieldStep);
+        await level.decorateChunkCooperative(chunkX, chunkZ, yieldMeter!.yieldStep, { metrics, profiler: decorationProfile });
       }
+      decorationProfile.addChunkMetrics(metrics);
+      decorationProfile.clearCurrentMetrics();
     }
-  }));
+  }, () => formatDecorationMetrics(decorationProfile.summarize().totals)));
 
   phases.push(await timePhase("full:no-light", fullChunks.length, () => {
     for (const [chunkX, chunkZ] of fullChunks) {
@@ -502,6 +631,7 @@ async function runDirectBenchmark(options: CliOptions, mode: DirectMode, window:
     mode,
     phases,
     yieldCounters: yieldMeter?.getCounters(),
+    decorationSummary: decorationProfile.summarize(),
   };
 }
 
@@ -641,12 +771,40 @@ function formatRate(rate: number | undefined): string {
   return rate === undefined ? "-" : `${rate.toFixed(1)}/s`;
 }
 
+function formatDecorationMetrics(metrics: GeneratedDecorationMetrics): string {
+  return [
+    `height ${metrics.heightQueries.toString()} calls/${metrics.heightBlockReads.toString()} scanned`,
+    `reads ${metrics.blockReads.toString()}`,
+    `metadata ${metrics.metadataOnlyBlockReads.toString()}`,
+    `writes ${metrics.blockWrites.toString()}/${metrics.blockWriteAttempts.toString()}`,
+    `biome ${metrics.biomeQueries.toString()}`,
+  ].join(", ");
+}
+
 function printPhaseRows(prefix: string, phases: readonly PhaseResult[]): void {
   for (const phase of phases) {
     const chunks = phase.chunks === undefined ? "-" : phase.chunks.toString();
     const detail = phase.detail === undefined ? "" : `  ${phase.detail}`;
     process.stdout.write(
       `${prefix.padEnd(26)} ${phase.name.padEnd(24)} ${chunks.padStart(6)} chunks  ${formatMs(phase.ms).padStart(10)}  ${formatRate(phase.chunksPerSecond).padStart(10)}${detail}\n`,
+    );
+  }
+}
+
+function printDecorationSummary(summary: DecorationProfileSummary | undefined): void {
+  if (summary === undefined) {
+    return;
+  }
+
+  process.stdout.write(`${"".padEnd(26)} top decoration features:\n`);
+  for (const feature of summary.topFeatures.slice(0, 5)) {
+    process.stdout.write(
+      `${"".padEnd(28)} ${formatMs(feature.ms).padStart(9)} `
+      + `${feature.calls.toString().padStart(4)} calls `
+      + `${feature.placed.toString().padStart(4)} placed `
+      + `${feature.metrics.heightQueries.toString().padStart(6)} height `
+      + `${feature.metrics.heightBlockReads.toString().padStart(8)} scanned `
+      + `${featureLabel(feature.info)}\n`,
     );
   }
 }
@@ -678,6 +836,7 @@ function printReport(report: BenchmarkReport): void {
   process.stdout.write("--------------------------------------------------------------------------------\n");
   for (const result of report.direct) {
     printPhaseRows(`direct:${result.mode}`, result.phases);
+    printDecorationSummary(result.decorationSummary);
     if (result.yieldCounters !== undefined) {
       process.stdout.write(
         `${"".padEnd(26)} yield calls=${result.yieldCounters.calls.toString()}, actual=${result.yieldCounters.actualYields.toString()}, wait=${formatMs(result.yieldCounters.waitMs)}\n`,

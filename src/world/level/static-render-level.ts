@@ -71,7 +71,7 @@ export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
       return null;
     }
 
-    const created = new LevelChunk(chunkX, chunkZ, this.airState);
+    const created = new LevelChunk(chunkX, chunkZ, this.airState, this.minBuildHeight, this.height);
     this.chunks.set(key, created);
     return created;
   }

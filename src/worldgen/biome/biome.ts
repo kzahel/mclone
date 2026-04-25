@@ -11,6 +11,11 @@ import { LightLayer } from "../../world/level/light-layer";
 import { GenerationStep } from "../levelgen/generation-step";
 import type { NoiseBasedChunkGenerator } from "../levelgen/noise-based-chunk-generator";
 import type { CooperativeGenerationYield } from "../levelgen/cooperative-generation";
+import {
+  describeConfiguredFeature,
+  monotonicDecorationNowMs,
+  type BiomeDecorationProfiler,
+} from "../levelgen/decoration-profiler";
 import { PerlinSimplexNoise } from "../noise/perlin-simplex-noise";
 import { WorldgenRandom } from "../prng/worldgen-random";
 import { Fluids } from "../../world/level/material/fluids";
@@ -195,6 +200,7 @@ export class Biome implements NoiseBiome {
     decorationSeed: bigint,
     random: WorldgenRandom,
     origin: BlockPos,
+    profiler?: BiomeDecorationProfiler,
   ): void {
     const features = this.generationSettings.features();
     // TypeScript: structure placement stays deferred here; only configured features run during biome decoration.
@@ -207,7 +213,15 @@ export class Biome implements NoiseBiome {
       for (const featureSupplier of features[stepIndex]!) {
         const feature = featureSupplier();
         random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
-        feature.place(level, chunkGenerator, random, origin);
+        if (profiler === undefined) {
+          feature.place(level, chunkGenerator, random, origin);
+        } else {
+          const info = describeConfiguredFeature(stepIndex, featureIndex, feature);
+          profiler.beginFeature(info);
+          const startedAtMs = monotonicDecorationNowMs();
+          const placed = feature.place(level, chunkGenerator, random, origin);
+          profiler.endFeature(info, placed, monotonicDecorationNowMs() - startedAtMs);
+        }
         featureIndex++;
       }
     }
@@ -220,6 +234,7 @@ export class Biome implements NoiseBiome {
     random: WorldgenRandom,
     origin: BlockPos,
     yieldStep: CooperativeGenerationYield,
+    profiler?: BiomeDecorationProfiler,
   ): Promise<void> {
     const features = this.generationSettings.features();
     // Host scheduling: same feature order as generate(), but yields between configured placement units.
@@ -232,7 +247,15 @@ export class Biome implements NoiseBiome {
       for (const featureSupplier of features[stepIndex]!) {
         const feature = featureSupplier();
         random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
-        await feature.placeCooperative(level, chunkGenerator, random, origin, yieldStep);
+        if (profiler === undefined) {
+          await feature.placeCooperative(level, chunkGenerator, random, origin, yieldStep);
+        } else {
+          const info = describeConfiguredFeature(stepIndex, featureIndex, feature);
+          profiler.beginFeature(info);
+          const startedAtMs = monotonicDecorationNowMs();
+          const placed = await feature.placeCooperative(level, chunkGenerator, random, origin, yieldStep);
+          profiler.endFeature(info, placed, monotonicDecorationNowMs() - startedAtMs);
+        }
         featureIndex++;
       }
     }

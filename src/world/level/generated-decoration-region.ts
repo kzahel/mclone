@@ -16,9 +16,55 @@ import type { GeneratedRenderLevel } from "./generated-render-level";
 export const FEATURES_CHUNK_DEPENDENCY_RADIUS = 8;
 export const FEATURES_WRITE_RADIUS_CUTOFF = 1;
 
+export interface GeneratedDecorationMetrics {
+  blockReads: number;
+  metadataOnlyBlockReads: number;
+  fluidReads: number;
+  heightQueries: number;
+  heightBlockReads: number;
+  blockWriteAttempts: number;
+  blockWrites: number;
+  blockedBlockWrites: number;
+  biomeQueries: number;
+  brightnessQueries: number;
+  blockTickSchedules: number;
+  liquidTickSchedules: number;
+}
+
+export interface GeneratedDecorationOptions {
+  readonly metrics?: GeneratedDecorationMetrics;
+}
+
+export function createGeneratedDecorationMetrics(): GeneratedDecorationMetrics {
+  return {
+    blockReads: 0,
+    metadataOnlyBlockReads: 0,
+    fluidReads: 0,
+    heightQueries: 0,
+    heightBlockReads: 0,
+    blockWriteAttempts: 0,
+    blockWrites: 0,
+    blockedBlockWrites: 0,
+    biomeQueries: 0,
+    brightnessQueries: 0,
+    blockTickSchedules: 0,
+    liquidTickSchedules: 0,
+  };
+}
+
+function incrementMetric(
+  metrics: GeneratedDecorationMetrics | undefined,
+  key: keyof GeneratedDecorationMetrics,
+): void {
+  if (metrics !== undefined) {
+    metrics[key]++;
+  }
+}
+
 // Runtime: WorldGenRegion-style FEATURES wrapper over GeneratedRenderLevel without exposing on-demand decoration.
 export class GeneratedDecorationRegion implements WorldGenLevel {
   private readonly blockTicks: TickAccess<Block> = new RecordingTickAccess((pos, target, delay) => {
+    incrementMetric(this.options.metrics, "blockTickSchedules");
     if (!this.ensureCanWrite(pos)) {
       return;
     }
@@ -26,6 +72,7 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
     this.getChunkForPos(pos).recordBlockTick(pos, serializeBlockTickTarget(target), delay);
   });
   private readonly liquidTicks: TickAccess<Fluid> = new RecordingTickAccess((pos, target, delay) => {
+    incrementMetric(this.options.metrics, "liquidTickSchedules");
     if (!this.ensureCanWrite(pos)) {
       return;
     }
@@ -39,14 +86,18 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
     private readonly centerChunkZ: number,
     private readonly dependencyRadius = FEATURES_CHUNK_DEPENDENCY_RADIUS,
     private readonly writeRadiusCutoff = FEATURES_WRITE_RADIUS_CUTOFF,
+    private readonly options: GeneratedDecorationOptions = {},
   ) {}
 
   public setBlock(pos: BlockPos, state: BlockState, _flags = 3): boolean {
+    incrementMetric(this.options.metrics, "blockWriteAttempts");
     if (!this.ensureCanWrite(pos)) {
+      incrementMetric(this.options.metrics, "blockedBlockWrites");
       return false;
     }
 
     this.getChunkForPos(pos).setBlockState(pos, state);
+    incrementMetric(this.options.metrics, "blockWrites");
     return true;
   }
 
@@ -54,14 +105,16 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
     const chunkX = SectionPos.blockToSectionCoord(pos.getX());
     const chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
     this.ensureWithinDependencyWindow(chunkX, chunkZ);
-    return this.level.getAuthorityBlockState(pos);
+    incrementMetric(this.options.metrics, "blockReads");
+    return this.level.getAuthorityBlockState(pos, this.options.metrics);
   }
 
   public getFluidState(pos: BlockPos): FluidState {
     const chunkX = SectionPos.blockToSectionCoord(pos.getX());
     const chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
     this.ensureWithinDependencyWindow(chunkX, chunkZ);
-    return this.level.getAuthorityFluidState(pos);
+    incrementMetric(this.options.metrics, "fluidReads");
+    return this.level.getAuthorityFluidState(pos, this.options.metrics);
   }
 
   public isEmptyBlock(pos: BlockPos): boolean {
@@ -80,7 +133,8 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
     const chunkX = SectionPos.blockToSectionCoord(x);
     const chunkZ = SectionPos.blockToSectionCoord(z);
     this.ensureWithinDependencyWindow(chunkX, chunkZ);
-    return this.level.getAuthorityHeight(type, x, z);
+    incrementMetric(this.options.metrics, "heightQueries");
+    return this.level.getAuthorityHeight(type, x, z, this.options.metrics);
   }
 
   public getHeightmapPos(type: Heightmap.Types, pos: BlockPos): BlockPos {
@@ -96,10 +150,12 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
   }
 
   public getBiome(pos: BlockPos): Biome {
+    incrementMetric(this.options.metrics, "biomeQueries");
     return this.level.getBiome(pos);
   }
 
   public getBrightness(layer: LightLayer, pos: BlockPos): number {
+    incrementMetric(this.options.metrics, "brightnessQueries");
     return this.level.getBrightness(layer, pos);
   }
 

@@ -10,6 +10,7 @@ import { GenerationStep } from "../../worldgen/levelgen/generation-step";
 import { Heightmap } from "../../worldgen/levelgen/heightmap";
 import { NoiseBasedChunkGenerator } from "../../worldgen/levelgen/noise-based-chunk-generator";
 import type { CooperativeGenerationYield } from "../../worldgen/levelgen/cooperative-generation";
+import type { BiomeDecorationProfiler } from "../../worldgen/levelgen/decoration-profiler";
 import { BlockStateProperties } from "./block/state/properties/block-state-properties";
 import { type BlockState } from "./block/state/block-state";
 import { LevelChunk } from "./chunk/level-chunk";
@@ -23,6 +24,8 @@ import {
 import {
   FEATURES_CHUNK_DEPENDENCY_RADIUS,
   GeneratedDecorationRegion,
+  type GeneratedDecorationMetrics,
+  type GeneratedDecorationOptions,
 } from "./generated-decoration-region";
 import { StaticRenderLevel } from "./static-render-level";
 
@@ -225,7 +228,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     return super.getChunk(chunkX, chunkZ, false);
   }
 
-  public getAuthorityBlockState(pos: BlockPos): BlockState {
+  public getAuthorityBlockState(pos: BlockPos, metrics?: GeneratedDecorationMetrics): BlockState {
     const chunkX = SectionPos.blockToSectionCoord(pos.getX());
     const chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
     const chunk = super.getChunk(chunkX, chunkZ, false);
@@ -234,25 +237,37 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     }
 
     if (this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS)) {
+      if (metrics !== undefined) {
+        metrics.metadataOnlyBlockReads++;
+      }
       return this.airState;
     }
 
     throw new Error(`Missing authority status for block read at chunk (${chunkX.toString()}, ${chunkZ.toString()})`);
   }
 
-  public getAuthorityFluidState(pos: BlockPos): FluidState {
-    return this.getAuthorityBlockState(pos).getFluidState();
+  public getAuthorityFluidState(pos: BlockPos, metrics?: GeneratedDecorationMetrics): FluidState {
+    return this.getAuthorityBlockState(pos, metrics).getFluidState();
   }
 
-  public getAuthorityHeight(type: Heightmap.Types, x: number, z: number): number {
-    for (let y = this.getMaxBuildHeight() - 1; y >= this.getMinBuildHeight(); y--) {
-      const pos = new BlockPos(x, y, z);
-      if (type.isOpaque(this.getAuthorityBlockState(pos))) {
-        return y + 1;
-      }
+  public getAuthorityHeight(
+    type: Heightmap.Types,
+    x: number,
+    z: number,
+    _metrics?: GeneratedDecorationMetrics,
+  ): number {
+    const chunkX = SectionPos.blockToSectionCoord(x);
+    const chunkZ = SectionPos.blockToSectionCoord(z);
+    const chunk = super.getChunk(chunkX, chunkZ, false);
+    if (chunk !== null) {
+      return chunk.getHeight(type, x, z) + 1;
     }
 
-    return this.getMinBuildHeight();
+    if (this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS)) {
+      return this.getMinBuildHeight();
+    }
+
+    throw new Error(`Missing authority status for height read at chunk (${chunkX.toString()}, ${chunkZ.toString()})`);
   }
 
   private inPublishRange(chunkX: number, chunkZ: number): boolean {
@@ -400,7 +415,11 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     return chunk;
   }
 
-  public decorateChunk(chunkX: number, chunkZ: number): void {
+  public decorateChunk(
+    chunkX: number,
+    chunkZ: number,
+    options: GeneratedDecorationOptions & { readonly profiler?: BiomeDecorationProfiler } = {},
+  ): void {
     const key = generatedChunkKey(chunkX, chunkZ);
     if (this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)) {
       return;
@@ -413,7 +432,13 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     this.advancingFeatureChunks.add(key);
     try {
       this.ensureDecorationStatusWindow(chunkX, chunkZ);
-      this.generator.applyBiomeDecoration(new GeneratedDecorationRegion(this, chunkX, chunkZ), chunkX, chunkZ);
+      this.primeFeatureHeightmaps(chunkX, chunkZ);
+      this.generator.applyBiomeDecoration(
+        new GeneratedDecorationRegion(this, chunkX, chunkZ, undefined, undefined, options),
+        chunkX,
+        chunkZ,
+        options.profiler,
+      );
       this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.FEATURES);
     } finally {
       this.advancingFeatureChunks.delete(key);
@@ -424,6 +449,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     chunkX: number,
     chunkZ: number,
     yieldStep: CooperativeGenerationYield,
+    options: GeneratedDecorationOptions & { readonly profiler?: BiomeDecorationProfiler } = {},
   ): Promise<void> {
     const key = generatedChunkKey(chunkX, chunkZ);
     if (this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)) {
@@ -437,11 +463,32 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     this.advancingFeatureChunks.add(key);
     try {
       await this.ensureDecorationStatusWindowCooperative(chunkX, chunkZ, yieldStep);
-      await this.generator.applyBiomeDecorationCooperative(new GeneratedDecorationRegion(this, chunkX, chunkZ), chunkX, chunkZ, yieldStep);
+      this.primeFeatureHeightmaps(chunkX, chunkZ);
+      await this.generator.applyBiomeDecorationCooperative(
+        new GeneratedDecorationRegion(this, chunkX, chunkZ, undefined, undefined, options),
+        chunkX,
+        chunkZ,
+        yieldStep,
+        options.profiler,
+      );
       this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.FEATURES);
     } finally {
       this.advancingFeatureChunks.delete(key);
     }
+  }
+
+  private primeFeatureHeightmaps(chunkX: number, chunkZ: number): void {
+    const chunk = this.getAuthorityChunk(chunkX, chunkZ);
+    if (chunk === null) {
+      throw new Error(`Missing center chunk (${chunkX.toString()}, ${chunkZ.toString()}) while priming FEATURES heightmaps`);
+    }
+
+    chunk.primeHeightmaps([
+      Heightmap.Types.MOTION_BLOCKING,
+      Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+      Heightmap.Types.OCEAN_FLOOR,
+      Heightmap.Types.WORLD_SURFACE,
+    ]);
   }
 
   private ensureDecorationStatusWindow(chunkX: number, chunkZ: number): void {
@@ -571,7 +618,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   }
 
   private copyGeneratedChunk(chunkX: number, chunkZ: number, generated: MutableChunkBlockBuffer): LevelChunk {
-    const chunk = new LevelChunk(chunkX, chunkZ, this.blockStateById[0]!);
+    const chunk = new LevelChunk(chunkX, chunkZ, this.blockStateById[0]!, this.getMinBuildHeight(), this.getHeight());
     const worldX = SectionPos.sectionToBlockCoord(chunkX);
     const worldZ = SectionPos.sectionToBlockCoord(chunkZ);
     const pos = new BlockPos.MutableBlockPos();

@@ -1,6 +1,7 @@
 import { BlockPos } from "../../../core/block-pos";
 import type { BlockState } from "../block/state/block-state";
 import type { FluidState } from "../material/fluid-state";
+import { Heightmap } from "../../../worldgen/levelgen/heightmap";
 import {
   cloneScheduledTickSnapshot,
   createScheduledTickSnapshot,
@@ -21,7 +22,11 @@ export class LevelChunk {
     public readonly chunkX: number,
     public readonly chunkZ: number,
     private readonly airState: BlockState,
+    private readonly minBuildHeight = 0,
+    private readonly height = 256,
   ) {}
+
+  private readonly heightmaps = new Map<Heightmap.Types, Heightmap>();
 
   public getBlockState(pos: BlockPos): BlockState {
     return this.states.get(pos.asLong())?.state ?? this.airState;
@@ -39,13 +44,57 @@ export class LevelChunk {
     const key = pos.asLong();
     if (state === this.airState) {
       this.states.delete(key);
-      return;
+    } else {
+      this.states.set(key, {
+        pos: new BlockPos(pos.getX(), pos.getY(), pos.getZ()),
+        state,
+      });
     }
 
-    this.states.set(key, {
-      pos: new BlockPos(pos.getX(), pos.getY(), pos.getZ()),
-      state,
-    });
+    for (const heightmap of this.heightmaps.values()) {
+      heightmap.update(pos.getX() & 15, pos.getY(), pos.getZ() & 15, state);
+    }
+  }
+
+  public getMinBuildHeight(): number {
+    return this.minBuildHeight;
+  }
+
+  public getHeight(): number;
+  public getHeight(type: Heightmap.Types, x: number, z: number): number;
+  public getHeight(type?: Heightmap.Types, x?: number, z?: number): number {
+    if (type === undefined || x === undefined || z === undefined) {
+      return this.height;
+    }
+
+    let heightmap = this.heightmaps.get(type);
+    if (heightmap === undefined) {
+      Heightmap.primeHeightmaps(this, [type]);
+      heightmap = this.heightmaps.get(type);
+      if (heightmap === undefined) {
+        throw new Error(`Failed to prime heightmap ${type.toString()} for chunk (${this.chunkX.toString()}, ${this.chunkZ.toString()})`);
+      }
+    }
+
+    return heightmap.getHighestTaken(x & 15, z & 15);
+  }
+
+  public getMaxBuildHeight(): number {
+    return this.minBuildHeight + this.height;
+  }
+
+  public getOrCreateHeightmapUnprimed(type: Heightmap.Types): Heightmap {
+    let heightmap = this.heightmaps.get(type);
+    if (heightmap === undefined) {
+      heightmap = new Heightmap(this, type);
+      this.heightmaps.set(type, heightmap);
+    }
+
+    return heightmap;
+  }
+
+  public primeHeightmaps(types: Iterable<Heightmap.Types>): void {
+    Heightmap.primeHeightmaps(this, types);
   }
 
   public isYSpaceEmpty(minY: number, maxY: number): boolean {
