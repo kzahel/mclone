@@ -73,7 +73,7 @@ Current and near-term client-to-host commands:
 |---|---|
 | `open_world` | open/create a world and establish baseline metadata |
 | `set_chunk_view` | current view-shaped chunk-interest command |
-| `set_player_input` | send latest input intent to authoritative host |
+| `set_player_input` | send sequenced movement command records to authoritative host |
 | `poll_world_updates` | drain queued server-originated updates on polling transports |
 
 `set_chunk_view` is an interest command, not a synchronous "load my whole view now" RPC. Chunk snapshots are host-originated updates that may be returned by a polling response or delivered later by a push transport.
@@ -116,6 +116,21 @@ Likely future updates:
 Updates should carry revision or tick context where ordering matters.
 
 `entity_snapshot` is currently a baseline/interested-chunk update, similar to chunk snapshots. Polling transports should keep session/player state ahead of entity snapshots when capped, then drain entity snapshots with other chunk-interest bulk data.
+
+## Client Prediction Inputs
+
+Prediction is a client runtime concern, but the host protocol must provide enough authoritative facts for it without exposing host internals.
+
+The client prediction worker should be able to hydrate a bounded prediction world from client-facing messages:
+
+- authoritative local-player movement snapshots with ack sequence and body restart facts
+- nearby chunk/collision snapshots or deltas for the local player's prediction window
+- movement physics and collision revision facts
+- dynamic collider snapshots for entities that can affect local prediction
+
+Those messages may share source payloads with rendering, but their meaning should stay distinct. Chunk facts can feed a mesh worker and a prediction worker; mesh payloads must not become collision truth, and prediction caches must not become renderer-owned world state.
+
+When the host cannot provide enough collision facts for prediction, the protocol should make that explicit through missing-collision diagnostics or revision mismatch facts. The client can then fall back to reduced prediction or accept correction instead of silently drifting.
 
 ## Versioning And Errors
 

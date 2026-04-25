@@ -138,6 +138,21 @@ Target browser-client ownership:
 
 Local singleplayer and remote multiplayer should share this browser-client shape. Only the authoritative source and transport differ.
 
+## Client Prediction-World Ownership
+
+Player prediction needs collision-relevant world facts, but those facts should have their own client-side owner instead of leaking into the render thread.
+
+Target ownership:
+
+- authoritative host owns canonical chunk/entity/block/liquid state
+- client prediction worker owns a bounded prediction world for local movement replay
+- render-world worker owns chunk facts and derived mesh inputs for rendering
+- main thread owns input/UI/GPU and receives small presentation poses
+
+The prediction world is a derived client mirror, not a server clone. It should contain only the authoritative facts needed to replay local movement commands: nearby block collision data, movement/collision revision maps, and dynamic colliders that can affect local prediction. It should not run worldgen, AI, spawning, block ticks, liquid ticks, persistence, lighting, or chunk scheduling.
+
+Packed chunk snapshots/deltas may feed both the render-world worker and prediction worker, but neither worker should treat the other's derived products as truth. Meshes are not collision. Collision snapshots are not meshes. If sharing immutable packed buffers later becomes worthwhile, it remains a carrier optimization with explicit ownership and lifetime rules.
+
 ## SharedArrayBuffer
 
 `SharedArrayBuffer` is a carrier optimization, not a data model.

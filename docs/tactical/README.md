@@ -126,6 +126,7 @@ The arc should keep three concerns separate:
 
 - movement body and collision determinism
 - sequenced command prediction/reconciliation
+- client prediction runtime ownership and bounded prediction-world facts
 - presentation interpolation and correction smoothing
 
 | Doc | Modules | Validation tier | Purpose |
@@ -133,11 +134,14 @@ The arc should keep three concerns separate:
 | [`Movement0-shared-movement-body-and-collision.md`](Movement0-shared-movement-body-and-collision.md) | movement body, fixed-step core, full-block collision, step-up/grounding, vanilla source review | unit | **done** - first shared movement core; no prediction or protocol migration yet |
 | [`Movement1-command-stream-and-local-prediction.md`](Movement1-command-stream-and-local-prediction.md) | sequenced commands, command quanta, ring buffer predictor, replay tests | unit + runtime | **done** - deterministic command timeline and local prediction |
 | [`Movement2-authoritative-host-command-integration.md`](Movement2-authoritative-host-command-integration.md) | host command queue, ack snapshots, `set_player_input` command records, processing budgets | runtime + browser | **done** - sequenced command stream authority over current local worker/HTTP adapters without making transport cadence the movement model |
-| `Movement3-interpolation-and-correction-smoothing.md` | local correction offset, remote interpolation buffers, latency/jitter debug controls | unit + browser visual | **next** - prove command/replay behavior under latency, jitter, and loss before any push/lossy transport work |
-| `Movement4-richer-collision-and-world-interaction.md` | non-full block shapes, crouch shape, liquid hooks, collision revisions | unit + browser | sketch expanded collision after the fixed-step core is stable |
-| `Movement5-npc-locomotion-bridge.md` | low-rate AI intent feeding movement body, entity activity tiers, nearby high-rate body stepping | unit + runtime | sketch NPCs sharing the movement core without inheriting player command rate |
+| [`Movement3-client-prediction-runtime-ownership.md`](Movement3-client-prediction-runtime-ownership.md) | client prediction worker boundary, bounded prediction world, render-thread presentation state, in-memory latency harness | unit + runtime | **next** - decide where prediction runs and prove it does not require render-thread world ownership or a full server clone |
+| `Movement4-interpolation-and-correction-smoothing.md` | local correction offset, remote interpolation buffers, latency/jitter debug controls | unit + browser visual | prove command/replay behavior under latency, jitter, and loss before any push/lossy transport work |
+| `Movement5-richer-collision-and-world-interaction.md` | non-full block shapes, crouch shape, liquid hooks, collision revisions | unit + browser | sketch expanded collision after the fixed-step core is stable |
+| `Movement6-npc-locomotion-bridge.md` | low-rate AI intent feeding movement body, entity activity tiers, nearby high-rate body stepping | unit + runtime | sketch NPCs sharing the movement core without inheriting player command rate |
 
 `Movement2` must not bake in HTTP polling, latest-input semantics, or one-request-equals-one-step behavior. Its implementation target is a logical sequenced movement command stream plus authoritative ack snapshots. Local worker `postMessage` and remote HTTP are only the current transport adapters used to validate that logical model. Push transports belong to later runtime slices unless measurement proves polling is the bottleneck.
+
+`Movement3` must not assume prediction runs on the browser render thread. The next planning target is a client prediction runtime boundary: raw input and small presentation states cross the render thread, while command buffering, replay, collision-relevant prediction facts, and reconciliation live in a client runtime worker. Multiplayer clients should carry a bounded prediction world, not a full authoritative host.
 
 ## Renderer oracle approach
 

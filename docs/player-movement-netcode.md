@@ -32,6 +32,7 @@ These constraints should survive the tactical breakdown. They are the parts most
 - A host tick at 60 Hz may drain two 120 Hz commands and run two `1/120` movement steps. It should not replace them with one `1/60` step if the client predicted two smaller steps.
 - Long or irregular client frames must be converted into bounded fixed quanta, preserving button edges where possible. One large variable-dt command is a misprediction source.
 - Reconciliation mutates simulation truth by snap-and-replay. Interpolation, smoothing, and camera/viewmodel easing are presentation layers over that truth.
+- Client prediction should not run on the browser render/UI thread. That thread should sample input, own UI/GPU work, and consume small presentation states; it should not own collision chunk caches, replay buffers, or a prediction world.
 - NPC AI/pathfinding can run at lower rates and feed intent into the movement body. Collision-relevant NPC bodies may still need higher-rate stepping near players.
 - Dynamic collision inputs need revision facts once block edits, non-full shapes, liquids, or entity collisions enter prediction. Revision mismatch should be diagnosable, not hidden as generic floating-point drift.
 - The protocol should evolve `set_player_input` toward sequenced movement commands with acknowledgements, while preserving the existing host/client authority boundary.
@@ -207,6 +208,38 @@ Diagnostics should classify common drift causes:
 
 `tilefun`'s `PlayerPredictor` diagnostics are a good model for this.
 
+## Client Prediction Runtime Ownership
+
+Prediction needs a client-side simulation owner, but that owner should not be the browser render thread. The target split is:
+
+| Owner | Responsibilities |
+|---|---|
+| Render/UI thread | sample raw input events, own pointer lock/UI/GPU/draw submission, receive small predicted/interpolated presentation states |
+| Client prediction worker | own command clock, command buffer, local predictor, correction diagnostics, and collision-relevant prediction world |
+| Render-world/mesh worker | own client chunk cache for meshing and render-world ingestion |
+| Authoritative host | own canonical world, player bodies, entities, block/liquid ticks, persistence, and gameplay consequences |
+
+The render thread may apply immediate look/camera orientation for feel, but body position prediction and replay should happen in the client prediction worker. The render thread should not need packed chunk sections, block collision data, entity-collision state, or the ring buffer of unacknowledged commands.
+
+The prediction worker does need a model of the host, but it should be a bounded prediction model, not a full server:
+
+- collision-relevant block/shape facts for chunks near the local player plus a safety margin
+- movement physics parameters and `physicsRevision`
+- chunk/collision revision facts for the collision window
+- dynamic collider facts only for entities that can affect local prediction
+- authoritative local-player snapshots with ack sequence and body restart facts
+
+It should not:
+
+- generate terrain or own worldgen
+- run NPC AI, spawning, block ticks, liquid ticks, lighting, saving, or chunk scheduling
+- hold the entire world just because the server can
+- read renderer mesh data as collision truth
+
+Singleplayer should still use this client prediction path. The local host may live in a browser worker with the full authoritative world, but the predictor should consume the same client-facing snapshots/deltas as remote multiplayer. That prevents local-only shortcuts from hiding missing protocol facts.
+
+When the prediction worker lacks required collision facts, it should mark missing collision data and either reduce prediction scope or accept correction on the next authoritative snapshot. It should not silently predict through unknown terrain and classify the result as generic drift.
+
 ## Interpolation
 
 Use separate paths for local and remote presentation.
@@ -358,6 +391,8 @@ Core tests:
 - quick-tap jump is preserved through `edgeButtons`
 - held jump landing does not diverge after replay
 - collision edge / step-up / chunk-boundary fixtures stay deterministic
+- prediction worker can replay from only client-facing collision snapshots, not host internals
+- missing client collision facts produce explicit diagnostics or a no-prediction fallback
 - physics revision changes are classified and corrected
 - delayed ack leaves temporary correction but settles after backlog drains
 
@@ -378,14 +413,17 @@ Use the player movement/netcode arc in [`tactical/README.md`](./tactical/README.
 2. **[`Movement1: command stream and local prediction`](./tactical/Movement1-command-stream-and-local-prediction.md)** - landed
    - Sequenced commands, fixed command quanta, ring buffer, local replay predictor, deterministic unit tests.
 
-3. **Movement2: authoritative host integration** - next
+3. **[`Movement2: authoritative host integration`](./tactical/Movement2-authoritative-host-command-integration.md)** - landed
    - Host command queue, command processing budgets, authoritative snapshots with ack sequence, browser control path migration.
 
-4. **Movement3: interpolation and correction smoothing**
+4. **Movement3: client prediction runtime ownership** - next
+   - Decide and test where command generation, prediction replay, collision facts, and presentation outputs live; keep render/UI thread lightweight.
+
+5. **Movement4: interpolation and correction smoothing**
    - Local visual correction offset, remote entity interpolation buffers, latency/jitter debug controls.
 
-5. **Movement4: richer collision and world interaction**
+6. **Movement5: richer collision and world interaction**
    - Non-full block shapes, liquids, crouch body shape, block edit collision revisions, chunk boundary policy.
 
-6. **Movement5: NPC locomotion bridge**
+7. **Movement6: NPC locomotion bridge**
    - Low-rate AI intent feeding shared movement bodies, entity activity tiers, nearby high-rate body stepping.

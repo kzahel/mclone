@@ -96,4 +96,4 @@ Minimum:
 
 ## Next Step
 
-`Movement3-interpolation-and-correction-smoothing.md`: add local correction offsets, remote interpolation buffers, and artificial latency/jitter/loss tests against an in-memory transport so the command/replay model is proven before any push or lossy realtime transport work.
+`Movement3-client-prediction-runtime-ownership.md`: decide the client-side prediction owner before adding smoothing. The render/UI thread should stay lightweight; command buffering, replay, collision-relevant prediction facts, and reconciliation need a client runtime boundary that works for both local singleplayer and remote multiplayer.
