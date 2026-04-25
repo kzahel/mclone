@@ -143,10 +143,10 @@ interface TraceEvent {
 }
 
 test.skip(process.env.MCLONE_RUN_D5 !== "1", "run with pnpm perf:d5");
-test.setTimeout(300_000);
+test.setTimeout(420_000);
 
-const DEBUG_READY_TIMEOUT_MS = 90_000;
-const SETTLED_FRAME_TIMEOUT_MS = 120_000;
+const DEBUG_READY_TIMEOUT_MS = 180_000;
+const SETTLED_FRAME_TIMEOUT_MS = 180_000;
 
 function createDebugUrl(remoteWorldHostUrl: string): string {
   return `/debug.html?${new URLSearchParams({

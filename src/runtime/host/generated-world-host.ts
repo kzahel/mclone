@@ -149,6 +149,11 @@ interface ChunkViewJobRecord {
   loadedFromStorage: boolean;
 }
 
+interface EnsureLightingOptions {
+  readonly isCancelled?: () => boolean;
+  readonly onInitialLightReady?: (chunk: GeneratedLevelChunk) => Promise<void>;
+}
+
 type StoredChunkPreloadResult = "loaded" | "already_loaded" | "missing";
 
 type GeneratedLevelChunk = LevelChunk;
@@ -263,6 +268,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly dirtyDurableChunks = new Set<string>();
   private opened = false;
   private chunkViewJobRevision = 0;
+  private activeChunkViewJobRevision: number | undefined;
   private nextLightBlockChangeBatchId = 1;
 
   public constructor(private readonly options: GeneratedWorldHostOptions) {
@@ -633,6 +639,20 @@ export class GeneratedWorldHost implements WorldHost {
     missingChunks: readonly (readonly [number, number])[],
     chunkViewJobRevision: number,
   ): Promise<void> {
+    this.activeChunkViewJobRevision = chunkViewJobRevision;
+    try {
+      await this.runChunkViewJobsInternal(missingChunks, chunkViewJobRevision);
+    } finally {
+      if (this.activeChunkViewJobRevision === chunkViewJobRevision) {
+        this.activeChunkViewJobRevision = undefined;
+      }
+    }
+  }
+
+  private async runChunkViewJobsInternal(
+    missingChunks: readonly (readonly [number, number])[],
+    chunkViewJobRevision: number,
+  ): Promise<void> {
     const yieldStep = createCooperativeYield();
     const jobs: ChunkViewJobRecord[] = missingChunks.map(([chunkX, chunkZ]) => ({
       chunkX,
@@ -740,65 +760,49 @@ export class GeneratedWorldHost implements WorldHost {
     const lightingChunks = publishJobs
       .map((job) => this.level.getChunk(job.chunkX, job.chunkZ, false))
       .filter((chunk): chunk is GeneratedLevelChunk => chunk !== null);
-    this.enqueueWorldProgress("Computing light", 0, lightingChunks.length, chunkViewJobRevision);
-    if (lightingChunks.length > 0) {
+    let lightingDone = 0;
+    let publishDone = 0;
+    this.enqueueWorldProgress("Computing light", lightingDone, lightingChunks.length, chunkViewJobRevision);
+    this.enqueueWorldProgress("Publishing chunks", publishDone, publishJobs.length, chunkViewJobRevision);
+    if (this.lightingService !== undefined && lightingChunks.length > 0) {
       this.options.mutateWorld?.(this.liquidLevel);
       await yieldStep();
       if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
         return;
       }
 
-      await this.ensureLightingForLoadedChunksCooperative(lightingChunks, chunkViewJobRevision, yieldStep);
+      await this.ensureLightingForLoadedChunksCooperative(lightingChunks, chunkViewJobRevision, yieldStep, {
+        isCancelled: () => !this.isCurrentChunkViewJob(chunkViewJobRevision),
+        onInitialLightReady: async (chunk) => {
+          lightingDone++;
+          this.enqueueWorldProgress("Computing light", lightingDone, lightingChunks.length, chunkViewJobRevision);
+          await this.publishChunkSnapshotIfReady(chunk, chunkViewJobRevision, yieldStep);
+          publishDone++;
+          this.enqueueWorldProgress("Publishing chunks", publishDone, publishJobs.length, chunkViewJobRevision);
+        },
+      });
       if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
         return;
+      }
+    } else {
+      this.enqueueWorldProgress("Computing light", lightingChunks.length, lightingChunks.length, chunkViewJobRevision);
+      for (const job of publishJobs) {
+        await yieldStep();
+        if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+          return;
+        }
+
+        const chunk = this.level.getChunk(job.chunkX, job.chunkZ, false);
+        if (chunk !== null) {
+          await this.publishChunkSnapshotIfReady(chunk, chunkViewJobRevision, yieldStep);
+        }
+        publishDone++;
+        this.enqueueWorldProgress("Publishing chunks", publishDone, publishJobs.length, chunkViewJobRevision);
       }
     }
     this.enqueueWorldProgress("Computing light", lightingChunks.length, lightingChunks.length, chunkViewJobRevision);
+    this.enqueueWorldProgress("Publishing chunks", publishJobs.length, publishJobs.length, chunkViewJobRevision);
     this.enqueueDirtyLightDeltas();
-
-    let publishDone = 0;
-    this.enqueueWorldProgress("Publishing chunks", publishDone, publishJobs.length, chunkViewJobRevision);
-    for (const job of publishJobs) {
-      await yieldStep();
-      if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
-        return;
-      }
-
-      const key = chunkKey(job.chunkX, job.chunkZ);
-      if (!this.isChunkInCurrentPublishView(job.chunkX, job.chunkZ) || this.publishedChunkSnapshots.has(key)) {
-        publishDone++;
-        this.enqueueWorldProgress("Publishing chunks", publishDone, publishJobs.length, chunkViewJobRevision);
-        continue;
-      }
-
-      const chunk = this.level.getChunk(job.chunkX, job.chunkZ, false);
-      if (chunk === null || !this.level.isChunkDecorated(job.chunkX, job.chunkZ)) {
-        publishDone++;
-        this.enqueueWorldProgress("Publishing chunks", publishDone, publishJobs.length, chunkViewJobRevision);
-        continue;
-      }
-
-      await yieldStep();
-      const snapshot = this.buildPackedChunkSnapshot(chunk);
-      if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
-        return;
-      }
-      if (!this.isChunkInCurrentPublishView(job.chunkX, job.chunkZ) || this.publishedChunkSnapshots.has(key)) {
-        publishDone++;
-        this.enqueueWorldProgress("Publishing chunks", publishDone, publishJobs.length, chunkViewJobRevision);
-        continue;
-      }
-
-      this.pendingMessages.push({
-        type: "chunk_snapshot",
-        snapshot,
-      });
-      this.markChunkSnapshotPublished(job.chunkX, job.chunkZ);
-      this.queueStorageSideEffect(this.writeChunkSnapshotByPolicy(snapshot));
-      this.enqueueDirtyLightDeltas();
-      publishDone++;
-      this.enqueueWorldProgress("Publishing chunks", publishDone, publishJobs.length, chunkViewJobRevision);
-    }
   }
 
   private isCurrentChunkViewJob(chunkViewJobRevision: number): boolean {
@@ -960,7 +964,11 @@ export class GeneratedWorldHost implements WorldHost {
     if (dueTicks <= 0) {
       return;
     }
-    if (!this.liquidSimulationEnabled || this.publishedChunkSnapshots.size === 0) {
+    if (
+      !this.liquidSimulationEnabled
+      || this.publishedChunkSnapshots.size === 0
+      || this.activeChunkViewJobRevision !== undefined
+    ) {
       this.lastWorldTickAtMs += dueTicks * tickIntervalMs;
       return;
     }
@@ -1084,6 +1092,45 @@ export class GeneratedWorldHost implements WorldHost {
     });
   }
 
+  private async publishChunkSnapshotIfReady(
+    chunk: GeneratedLevelChunk,
+    chunkViewJobRevision: number,
+    yieldStep?: () => Promise<void>,
+  ): Promise<boolean> {
+    const key = chunkKey(chunk.chunkX, chunk.chunkZ);
+    if (
+      !this.isCurrentChunkViewJob(chunkViewJobRevision)
+      || !this.isChunkInCurrentPublishView(chunk.chunkX, chunk.chunkZ)
+      || this.publishedChunkSnapshots.has(key)
+      || !this.level.isChunkDecorated(chunk.chunkX, chunk.chunkZ)
+    ) {
+      return false;
+    }
+
+    if (this.lightingService !== undefined && this.getAcceptedCurrentChunkLight(chunk.chunkX, chunk.chunkZ) === undefined) {
+      return false;
+    }
+
+    await yieldStep?.();
+    if (
+      !this.isCurrentChunkViewJob(chunkViewJobRevision)
+      || !this.isChunkInCurrentPublishView(chunk.chunkX, chunk.chunkZ)
+      || this.publishedChunkSnapshots.has(key)
+      || !this.level.isChunkDecorated(chunk.chunkX, chunk.chunkZ)
+    ) {
+      return false;
+    }
+
+    const snapshot = this.buildPackedChunkSnapshot(chunk);
+    this.pendingMessages.push({
+      type: "chunk_snapshot",
+      snapshot,
+    });
+    this.markChunkSnapshotPublished(chunk.chunkX, chunk.chunkZ);
+    this.queueStorageSideEffect(this.writeChunkSnapshotByPolicy(snapshot));
+    return true;
+  }
+
   private buildPackedChunkSnapshot(chunk: GeneratedLevelChunk): PackedChunkSnapshot {
     if (this.liquidSimulationEnabled) {
       this.hydrateLiquidTicksFromChunk(chunk);
@@ -1133,6 +1180,7 @@ export class GeneratedWorldHost implements WorldHost {
     chunks: readonly GeneratedLevelChunk[],
     chunkViewRevision: number,
     yieldStep: () => Promise<void>,
+    options: EnsureLightingOptions = {},
   ): Promise<void> {
     const lightingService = this.lightingService;
     if (lightingService === undefined || chunks.length === 0) {
@@ -1140,19 +1188,30 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     await this.flushPendingLightBlockChanges(yieldStep);
+    if (options.isCancelled?.() === true) {
+      return;
+    }
 
     const dependencyChunks = this.collectLightingDependencyChunks(chunks);
     for (const chunk of dependencyChunks) {
       await yieldStep();
+      if (options.isCancelled?.() === true) {
+        return;
+      }
       await this.upsertLightInputChunk(chunk, chunkViewRevision);
     }
 
     const pending = new Map<string, number>();
     for (const chunk of chunks) {
+      if (options.isCancelled?.() === true) {
+        return;
+      }
+
       const key = chunkKey(chunk.chunkX, chunk.chunkZ);
       const chunkRevision = this.getChunkRevision(chunk.chunkX, chunk.chunkZ);
       const accepted = this.getAcceptedCurrentChunkLight(chunk.chunkX, chunk.chunkZ);
       if (accepted !== undefined && accepted.lightCorrect && this.sentLightInputRevisions.get(key) === chunkRevision) {
+        await options.onInitialLightReady?.(chunk);
         continue;
       }
 
@@ -1170,15 +1229,25 @@ export class GeneratedWorldHost implements WorldHost {
 
     while (pending.size > 0) {
       await yieldStep();
+      if (options.isCancelled?.() === true) {
+        return;
+      }
       const batch = await lightingService.pollResults({
         type: "poll_light_results",
         maxResults: LIGHTING_RESULT_BATCH_SIZE,
       });
       for (const result of batch.results) {
         switch (result.type) {
-          case "chunk_light_ready":
-            this.acceptInitialLightResult(result, pending, chunkViewRevision);
+          case "chunk_light_ready": {
+            const accepted = this.acceptInitialLightResult(result, pending, chunkViewRevision);
+            if (accepted) {
+              const chunk = this.level.getChunk(result.chunkX, result.chunkZ, false);
+              if (chunk !== null) {
+                await options.onInitialLightReady?.(chunk);
+              }
+            }
             break;
+          }
           case "chunk_light_delta":
             this.acceptLightDeltaResult(result, chunkViewRevision);
             break;
@@ -1304,19 +1373,20 @@ export class GeneratedWorldHost implements WorldHost {
     result: ChunkLightReadyResult,
     pending: Map<string, number>,
     currentChunkViewRevision: number,
-  ): void {
+  ): boolean {
     const key = chunkKey(result.chunkX, result.chunkZ);
     if (
       result.chunkViewRevision !== currentChunkViewRevision
       || pending.get(key) !== result.chunkRevision
       || this.getChunkRevision(result.chunkX, result.chunkZ) !== result.chunkRevision
     ) {
-      return;
+      return false;
     }
 
     this.acceptedChunkLight.set(key, result.light);
     this.acceptedChunkLightRevisions.set(key, result.chunkRevision);
     pending.delete(key);
+    return true;
   }
 
   private acceptLightDeltaResult(
@@ -1477,6 +1547,7 @@ export class GeneratedWorldHost implements WorldHost {
             this.handleLightError(result, chunkViewRevision);
             break;
           case "light_progress":
+          case "light_performance":
             break;
         }
       }

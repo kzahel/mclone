@@ -67,7 +67,7 @@ Landed:
 - `src/runtime/lighting/lighting-worker.ts` owns the worker-side light-only chunk cache, `LevelLightEngine`, serialized mailbox, bounded result polling, initial-light neighbor validation, and `chunk_light_ready` result production.
 - `src/runtime/lighting/node-lighting-worker-client.ts` and `src/runtime/lighting/node-lighting-worker-thread.ts` provide the Node worker-thread shell for dedicated/headless hosts.
 - `GeneratedWorldHost` no longer constructs `LevelLightEngine`; vanilla lighting mode requires a worker-backed `LightingService`.
-- Initial chunk publication now packs light inputs, requests `chunk_light_ready`, validates chunk revisions, and publishes snapshots with accepted worker light.
+- Initial chunk publication now packs light inputs, requests `chunk_light_ready`, validates chunk revisions, and publishes each snapshot as its own accepted worker light becomes ready.
 - Live block/liquid mutations now coalesce into `block_light_update_batch` requests. The worker applies the block-state changes, drains propagation, returns revisioned `chunk_light_delta` section replacements, and finishes with `block_light_update_complete` so the host can update its accepted light cache before publishing dirty snapshots.
 - Worker-side command timing and propagation-slice timing now flow through `light_performance` results, `LightingServicePerformanceCounters`, host `world_perf` snapshots, the debug runtime state, and the D5 traversal report.
 - D5 traversal schema `3` now has regression gates for host responsiveness, lighting worker command/slice budgets, render-world ingest, and main-thread GPU uploads.
@@ -75,6 +75,7 @@ Landed:
 Still pending:
 
 - Add sharper dependency tracking for accepted light when neighbor revisions change; the current host invalidates a conservative 3x3 chunk window.
+- Pipeline decoration and initial lighting so the host starts lighting dependency-ready chunks before the entire publish ring has finished decoration.
 - Run and record the first post-lighting D5 baseline with the schema `3` gates after any follow-up responsiveness fixes.
 
 ## Protocol Shape
@@ -268,7 +269,8 @@ Backpressure rules:
 5. Done: route liquid/block updates through batched light update requests and publish accepted deltas.
 6. Split load radius from publish radius if needed for halo-only lighting work.
 7. Done: add D5 traversal performance gates for host-worker responsiveness, lighting worker budget, render-world ingestion, and main-thread GPU uploads.
-8. Run and record the first post-lighting D5 baseline. Use failures to choose the next bottleneck slice instead of loosening the gate after the fact.
+8. Done: publish initial lit chunk snapshots incrementally as each `chunk_light_ready` result is accepted.
+9. Pipeline decoration and initial lighting across the publish ring, then rerun and record the post-lighting D5 baseline. Use failures to choose the next bottleneck slice instead of loosening the gate after the fact.
 
 ## Tests
 

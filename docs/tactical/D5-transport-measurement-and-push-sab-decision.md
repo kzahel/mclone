@@ -549,6 +549,20 @@ First attempted post-lighting run:
 
 Interpretation: this is not a push transport, `SharedArrayBuffer`, render-world subworker, or GPU-upload signal. The host currently gathers the full publish job set, sends the lighting work, waits for all publish candidates to have accepted initial light, and only then starts publishing snapshots. With view distance `6`, that means the D5 page can wait on the whole lit ring before the first settled frame. The next slice should stream initial lit chunks incrementally: request lighting as chunks become dependency-ready, accept `chunk_light_ready` per chunk, and publish each chunk once its own current light is available instead of waiting for the entire publish batch.
 
+## Incremental initial-light publication update - 2026-04-25
+
+The host now publishes initial chunk snapshots incrementally as each current `chunk_light_ready` result is accepted. During active chunk-view jobs, liquid/world mutation ticks are deferred so live `block_light_update_batch` work does not compete with the initial-light backlog. Player/session polling still runs; only block/liquid mutations are held until the active chunk-view job finishes.
+
+Attempted D5 run after this change:
+
+| Metric | Observed |
+|---|---:|
+| loaded chunks at debug warmup timeout | `191 / 225` |
+| traversal window | not reached |
+| failure phase | initial lit-ring warmup |
+
+Interpretation: the snapshot starvation bug is fixed, because chunks now stream before the full light batch completes. The remaining blocker is throughput: the host still finishes the whole terrain/decor phase before it starts initial lighting for the publish ring. The next slice should pipeline decoration and initial-light requests so dependency-ready chunks can enter the lighting worker while later chunks are still decorating. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or a worldgen pool from this result.
+
 ## Implementation sequence
 
 1. Add a D5 measurement model.
