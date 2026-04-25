@@ -356,10 +356,10 @@ The first tactical slice is [`tactical/Creatures0-generation-entity-oracle-found
 A useful first creature slice is not "all mobs." Keep it narrow:
 
 1. Content tables: `MobCategory`, minimal `EntityType` records, `MobSpawnSettings.SpawnerData`, and the common overworld spawn settings needed for current biomes.
-2. Entity storage: host-owned entity records keyed by id/uuid and chunk section, with tracked vs ticking visibility.
-3. Generation original mobs: port `spawnOriginalMobs(...)` and `spawnMobsForChunkGeneration(...)` for `CREATURE` only; persist and snapshot simple passive entities.
-4. Passive spawn placement: `ON_GROUND`, grass-block, brightness, collision/AABB enough for sheep/cow/pig/chicken.
-5. Rendering follow-through: draw simple authoritative entity placeholders or first real models only after data/state parity exists.
+2. Done in `Entities0`: host-owned entity records keyed by id/uuid and chunk section, with tracked vs ticking visibility.
+3. Next: generation original mobs, port `spawnOriginalMobs(...)` and `spawnMobsForChunkGeneration(...)` for `CREATURE` only; persist and snapshot simple passive entities through the host-owned entity manager.
+4. Next: passive spawn placement, `ON_GROUND`, grass-block, brightness, collision/AABB enough for sheep/cow/pig/chicken.
+5. Later: rendering follow-through, draw simple authoritative entity placeholders or first real models only after data/state parity exists.
 
 A second slice can add live natural spawning for `CREATURE`. A third can add common `MONSTER` spawning once stored lighting and entity ticking are credible, because hostile spawn rules depend on sky/block light and despawn behavior.
 

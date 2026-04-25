@@ -2,7 +2,22 @@
 
 Durable architecture notes for Minecraft Java 1.17.1-style entity runtime ownership in `mclone`.
 
-This document is about entity lifecycle, storage, ticking, host ownership, persistence, and protocol shape. Creature spawning remains covered by [`creatures.md`](./creatures.md), and the first fixture/oracle step remains [`tactical/Creatures0-generation-entity-oracle-foundation.md`](./tactical/Creatures0-generation-entity-oracle-foundation.md). The first runtime foundation slice is [`tactical/Entities0-runtime-entity-foundation.md`](./tactical/Entities0-runtime-entity-foundation.md).
+This document is about entity lifecycle, storage, ticking, host ownership, persistence, and protocol shape. Creature spawning remains covered by [`creatures.md`](./creatures.md), and the first fixture/oracle step remains [`tactical/Creatures0-generation-entity-oracle-foundation.md`](./tactical/Creatures0-generation-entity-oracle-foundation.md). The first runtime foundation slice, [`tactical/Entities0-runtime-entity-foundation.md`](./tactical/Entities0-runtime-entity-foundation.md), is landed.
+
+## Current Status
+
+`Entities0` has the first host-owned runtime container:
+
+- vanilla-shaped `FullChunkStatus` to `Visibility` mapping
+- minimal runtime entity access records and removal reasons
+- section-owned entity storage and accessible AABB queries
+- visible id/UUID lookup and entity getter facade
+- copy-on-write `EntityTickList`
+- `PersistentEntitySectionManager` add/move/remove/load/unload/save semantics
+- logical chunk entity storage with a memory adapter for tests
+- `EntityRuntime` host wrapper that owns the manager and tick list
+
+This is still deliberately pre-creature: no `NaturalSpawner`, spawn placement tables, AI, despawn, renderer path, or entity protocol consumption has landed.
 
 ## Scope
 
@@ -333,6 +348,6 @@ For browser storage, the first adapter can store entity chunk records beside pac
 
 `Creatures0` remains the official-server fixture slice. It proves that we can read and normalize vanilla-generated entity output from `world/entities/*.mca` and legacy/proto chunk entity lists.
 
-`Entities0` should not port `NaturalSpawner`. It should provide the host-owned runtime container that later creature slices can feed.
+`Entities0` provides the host-owned runtime container that later creature slices can feed. It does not port `NaturalSpawner`.
 
 `Creatures1` can then port generation-time original mobs against `Creatures0` fixtures and insert them through an entity sink shaped like `ServerLevel.addWorldGenChunkEntities(...)`. Live natural spawning should come later, after entity ticking, lighting, chunk activity, mob caps, and despawn semantics have enough runtime support.

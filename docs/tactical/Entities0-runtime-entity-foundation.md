@@ -15,6 +15,15 @@ Add a minimal TypeScript entity runtime foundation that mirrors the vanilla 1.17
 
 At the end of `Entities0`, mclone should be able to own, move, tick, track, untrack, save, unload, and reload simple synthetic entity records in tests. It should not spawn mobs, render mobs, or simulate AI.
 
+## Implementation Status
+
+Landed as the first runtime foundation pass:
+
+- `src/world/level/entity/` now contains vanilla-shaped full chunk status, visibility, entity access, section storage, visible lookup, tick-list, logical persistent storage, and persistent section manager modules.
+- `src/runtime/host/entity-runtime.ts` provides a narrow host-owned wrapper that owns the manager plus `EntityTickList`.
+- Unit coverage exercises tracking/ticking status transitions, always-ticking entities, duplicate UUID rejection, id/UUID and AABB lookup, section/chunk movement, removal reasons, pending load/unload, `saveAll()`, and tick-list copy-on-write mutation.
+- The slice intentionally does not add `NaturalSpawner`, creature spawn tables, AI/pathfinding, renderer ingestion, entity model loading, or protocol consumption.
+
 ## Why This Slice Exists
 
 `Creatures0` is the oracle fixture slice. It teaches us how to observe vanilla entity output from official server worlds.
@@ -290,14 +299,14 @@ No browser screenshot is required because `Entities0` must not produce pixels.
 
 ## Done When
 
-- entity manager modules exist under `src/world/level/entity/`
-- runtime entity records can be added, moved, removed, tracked, and ticked in unit tests
-- full chunk status changes drive tracking/ticking exactly as vanilla visibility mapping requires
-- tick-list mutation during iteration is covered by tests
-- logical entity chunk storage exists separately from packed block chunk snapshots
-- no `NaturalSpawner`, AI/pathfinding, renderer, model, or creature spawn code was added
-- `Creatures0` remains an oracle fixture slice and is not folded into runtime work
-- tests and typecheck pass
+- done: entity manager modules exist under `src/world/level/entity/`
+- done: runtime entity records can be added, moved, removed, tracked, and ticked in unit tests
+- done: full chunk status changes drive tracking/ticking exactly as vanilla visibility mapping requires
+- done: tick-list mutation during iteration is covered by tests
+- done: logical entity chunk storage exists separately from packed block chunk snapshots
+- done: no `NaturalSpawner`, AI/pathfinding, renderer, model, or creature spawn code was added
+- done: `Creatures0` remains an oracle fixture slice and is not folded into runtime work
+- done: tests and typecheck pass
 
 ## Prepares For Creatures1
 
