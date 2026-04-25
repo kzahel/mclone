@@ -2,7 +2,7 @@
 
 Durable guidance for the logical host/client protocol used by browser singleplayer, browser remote clients, dedicated Node hosts, and tests.
 
-[`architecture.md`](./architecture.md) owns the runtime boundary. [`runtime-data-model.md`](./runtime-data-model.md) owns chunk and block-state facts. [`loading-persistence.md`](./loading-persistence.md) owns world/chunk lifecycle and save policy. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) owns host scheduler rules that keep input, ticks, and polling from blocking behind chunk jobs.
+[`architecture.md`](./architecture.md) owns the runtime boundary. [`runtime-data-model.md`](./runtime-data-model.md) owns chunk and block-state facts. [`loading-persistence.md`](./loading-persistence.md) owns world/chunk lifecycle and save policy. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) owns host scheduler rules that keep input, ticks, and polling from blocking behind chunk jobs. [`minecraft-client-replica-research.md`](./minecraft-client-replica-research.md) records the vanilla client-replica and networking source review that informs the client/host split.
 
 ## Core Rule
 
@@ -117,18 +117,19 @@ Updates should carry revision or tick context where ordering matters.
 
 `entity_snapshot` is currently a baseline/interested-chunk update, similar to chunk snapshots. Polling transports should keep session/player state ahead of entity snapshots when capped, then drain entity snapshots with other chunk-interest bulk data.
 
-## Client Prediction Inputs
+## Client Replica And Prediction Inputs
 
-Prediction is a client runtime concern, but the host protocol must provide enough authoritative facts for it without exposing host internals.
+Prediction is a client runtime concern, but it sits on top of the broader client replica. The host protocol must provide enough authoritative facts for the client replica and predictor without exposing host internals.
 
-The client prediction worker should be able to hydrate a bounded prediction world from client-facing messages:
+The client replica/runtime should be able to hydrate visible world state and a bounded prediction view from client-facing messages:
 
 - authoritative local-player movement snapshots with ack sequence and body restart facts
 - nearby chunk/collision snapshots or deltas for the local player's prediction window
+- visible chunk, light, block-entity, and entity snapshots for presentation
 - movement physics and collision revision facts
 - dynamic collider snapshots for entities that can affect local prediction
 
-Those messages may share source payloads with rendering, but their meaning should stay distinct. Chunk facts can feed a mesh worker and a prediction worker; mesh payloads must not become collision truth, and prediction caches must not become renderer-owned world state.
+Those messages may share source payloads with rendering, lighting, and prediction, but their meaning should stay distinct. Chunk facts can feed a mesh worker and a prediction view; mesh payloads must not become collision truth, and prediction caches must not become renderer-owned world state.
 
 When the host cannot provide enough collision facts for prediction, the protocol should make that explicit through missing-collision diagnostics or revision mismatch facts. The client can then fall back to reduced prediction or accept correction instead of silently drifting.
 

@@ -138,20 +138,20 @@ Target browser-client ownership:
 
 Local singleplayer and remote multiplayer should share this browser-client shape. Only the authoritative source and transport differ.
 
-## Client Prediction-World Ownership
+## Client Replica And Prediction Ownership
 
-Player prediction needs collision-relevant world facts, but those facts should have their own client-side owner instead of leaking into the render thread.
+Vanilla's singleplayer and multiplayer clients both use a client world replica rather than rendering directly from a server world; see [`minecraft-client-replica-research.md`](./minecraft-client-replica-research.md). Player prediction needs collision-relevant facts from that replica, but those facts should have their own client-side owner instead of leaking into the render thread.
 
 Target ownership:
 
 - authoritative host owns canonical chunk/entity/block/liquid state
-- client prediction worker owns a bounded prediction world for local movement replay
-- render-world worker owns chunk facts and derived mesh inputs for rendering
+- client replica/runtime owns visible client world facts, entity replicas, light/render facts, speculative overlays, and a bounded prediction view for local movement replay
+- render-world/mesh worker owns meshing jobs and derived render products, or acts as part of the broader client replica/runtime
 - main thread owns input/UI/GPU and receives small presentation poses
 
-The prediction world is a derived client mirror, not a server clone. It should contain only the authoritative facts needed to replay local movement commands: nearby block collision data, movement/collision revision maps, and dynamic colliders that can affect local prediction. It should not run worldgen, AI, spawning, block ticks, liquid ticks, persistence, lighting, or chunk scheduling.
+The client replica is a derived client mirror, not a server clone. It may contain visible chunks, entities, block entities, fluid states, light state, and presentation-time derived caches. The prediction view should contain only the authoritative facts needed to replay local movement commands: nearby block collision data, movement/collision revision maps, and dynamic colliders that can affect local prediction. The client replica should not run worldgen, AI authority, spawning authority, block ticks, liquid ticks, persistence, or chunk scheduling.
 
-Packed chunk snapshots/deltas may feed both the render-world worker and prediction worker, but neither worker should treat the other's derived products as truth. Meshes are not collision. Collision snapshots are not meshes. If sharing immutable packed buffers later becomes worthwhile, it remains a carrier optimization with explicit ownership and lifetime rules.
+Packed chunk snapshots/deltas may feed rendering, lighting, and prediction views, but no derived product should become another subsystem's source of truth. Meshes are not collision. Collision snapshots are not meshes. Client light caches are not host light authority. If sharing immutable packed buffers later becomes worthwhile, it remains a carrier optimization with explicit ownership and lifetime rules.
 
 ## SharedArrayBuffer
 

@@ -1,6 +1,6 @@
 # Tactical docs
 
-Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For vanilla chunk-status order, deterministic decoration finality, lighting gates, and publication gates, see [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For vanilla overworld structure generation architecture and suggested implementation order, see [`../structures.md`](../structures.md). For runtime/host boundaries and durable data/protocol/loading contracts, see [`../architecture.md`](../architecture.md), [`../runtime-data-model.md`](../runtime-data-model.md), [`../protocol.md`](../protocol.md), and [`../loading-persistence.md`](../loading-persistence.md). For liquid simulation architecture, see [`../liquids.md`](../liquids.md). For high-rate player movement, prediction, reconciliation, interpolation, and lower-rate NPC movement intent, see [`../player-movement-netcode.md`](../player-movement-netcode.md).
+Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For vanilla chunk-status order, deterministic decoration finality, lighting gates, and publication gates, see [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For vanilla overworld structure generation architecture and suggested implementation order, see [`../structures.md`](../structures.md). For runtime/host boundaries and durable data/protocol/loading contracts, see [`../architecture.md`](../architecture.md), [`../runtime-data-model.md`](../runtime-data-model.md), [`../protocol.md`](../protocol.md), and [`../loading-persistence.md`](../loading-persistence.md). For the vanilla client-replica source review that drives the active client runtime arc, see [`../minecraft-client-replica-research.md`](../minecraft-client-replica-research.md). For liquid simulation architecture, see [`../liquids.md`](../liquids.md). For paused high-rate movement constraints, see [`../player-movement-netcode.md`](../player-movement-netcode.md).
 
 ## Rule of thumb
 
@@ -116,32 +116,51 @@ Entities are authoritative simulation data. Use [`../entities.md`](../entities.m
 | [`Entities0-runtime-entity-foundation.md`](Entities0-runtime-entity-foundation.md) | host-owned entity sections, visibility, tick list, and memory persistence shape | unit | **done** — runtime entity lifecycle has a vanilla-shaped host-owned home |
 | [`Creatures1-generation-passive-spawning.md`](Creatures1-generation-passive-spawning.md) | passive `CREATURE` generation path, spawn settings, placements, sheep color | unit + fixture | **done** — generation-time passive spawning matches the committed fixture through the runtime sink |
 | [`Creatures2-host-entity-publication.md`](Creatures2-host-entity-publication.md) | generated-world host entity runtime, entity snapshots, local/remote client caches | runtime | **done** — generated original mobs now publish as authoritative protocol data |
-| `Creatures3-` | browser presentation of authoritative entity snapshots | browser visual | **next** — draw simple placeholders at host-owned entity positions before real models or behavior |
+| `Creatures3-` | browser presentation of authoritative entity snapshots | browser visual | **deferred** — should resume after the Client Runtime / Integrated Server arc defines `ClientWorld` entity replicas and presentation ownership |
+
+## Client Runtime / Integrated Server Arc
+
+This arc is now the active runtime priority before new movement, NPC/AI, or network-transport tacticals. The vanilla source review in [`../minecraft-client-replica-research.md`](../minecraft-client-replica-research.md) shows that the right baseline is not "prediction worker first"; it is integrated server authority plus a client world replica plus presentation-only UI/render.
+
+The target ownership split is:
+
+- `IntegratedServer` / authoritative local host for browser singleplayer
+- dedicated/headless host sharing the same authority core
+- `ClientRuntime` owning protocol application, session state, `ClientWorld`, interpolation, prediction services, and presentation-state publication
+- `ClientWorld` owning visible chunk, block/fluid, block-entity, entity, light/render, revision, and speculative-overlay facts
+- `PredictionService` reading bounded collision/entity views from `ClientWorld`, not host internals
+- presentation/UI thread owning input sampling, pointer lock, UI, GPU resources, draw submission, and compact presentation-state consumption
+
+Movement, NPC/AI, and network work should all depend on this shared architecture instead of each creating a partial client model.
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| [`ClientRuntime0-integrated-server-client-world-boundary.md`](ClientRuntime0-integrated-server-client-world-boundary.md) | runtime inventory, `IntegratedServer` / dedicated host / `ClientRuntime` / `ClientWorld` / `PredictionService` naming, boundary contracts, migration notes | docs + optional typecheck | **next** - establish the architecture vocabulary and first facade plan before moving code |
+| `ClientRuntime1-client-world-replica-hydration.md` | first concrete `ClientWorld` facade over chunks, light, fluids, block entities, entities, revisions, and speculative overlays | unit + browser smoke | hydrate singleplayer and remote clients through the same client-world path |
+| `ClientRuntime2-presentation-thread-boundary.md` | presentation-state stream, raw input handoff, render-world/mesh handles, no raw chunk/collision ownership on UI thread | browser smoke + import/ownership checks | make UI/render presentation-only without losing current debug controls |
+| `ClientRuntime3-integrated-server-flow.md` | browser singleplayer `IntegratedServer` class/facade, local transport/session bootstrap, pause/resume/reset semantics | browser smoke + integration | make singleplayer visibly shaped like a client joining a local server |
+| `ClientRuntime4-remote-client-parity.md` | remote HTTP client drives the same `ClientRuntime`/`ClientWorld` path as singleplayer | two-client integration | keep dedicated-host multiplayer from becoming a separate client architecture |
+| `ClientRuntime5-prediction-service-scaffold.md` | host command surface plus client prediction-service API over bounded `ClientWorld` views | unit + runtime | prepare high-Hz movement prediction without redrafting netcode around transport or renderer state |
+| `ClientRuntime6-entity-interpolation-and-ai-bridge.md` | client entity replicas, remote interpolation buffers, NPC/AI presentation hooks, host-owned AI authority boundary | unit + browser visual | give creature/NPC work the same client-world model as movement and networking |
+
+Do not start new movement, WebRTC/WebTransport, NPC AI, or fluid-prediction tacticals until at least `ClientRuntime0` has made the boundary concrete.
 
 ## Player Movement / Netcode Arc
 
-Player movement is authoritative simulation data, but the high-rate FPS-style command/prediction model is a deliberate gameplay/runtime divergence from vanilla's 20 TPS player packet shape. Use [`../player-movement-netcode.md`](../player-movement-netcode.md) as the durable reference. Study vanilla `Entity.move(...)`, `LivingEntity.travel(...)`, player hooks, and mob intent sources before implementing the lower movement/collision pieces; do not copy `LocalPlayer` / `ServerGamePacketListenerImpl` as the long-term custom movement protocol.
+Status: **paused**.
 
-The arc should keep three concerns separate:
+Player movement remains an important future gameplay/runtime divergence: we still want FPS-style high-Hz command prediction/reconciliation, and we still do not want vanilla's 20 TPS position-packet model as the final protocol. But the next movement work cannot be planned correctly until the client runtime arc defines `IntegratedServer`, `ClientRuntime`, `ClientWorld`, `PredictionService`, and presentation ownership.
 
-- movement body and collision determinism
-- sequenced command prediction/reconciliation
-- client prediction runtime ownership and bounded prediction-world facts
-- presentation interpolation and correction smoothing
+Use [`../player-movement-netcode.md`](../player-movement-netcode.md) only as constraint notes. The old `Movement3+` direction has been cleared out.
 
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
 | [`Movement0-shared-movement-body-and-collision.md`](Movement0-shared-movement-body-and-collision.md) | movement body, fixed-step core, full-block collision, step-up/grounding, vanilla source review | unit | **done** - first shared movement core; no prediction or protocol migration yet |
 | [`Movement1-command-stream-and-local-prediction.md`](Movement1-command-stream-and-local-prediction.md) | sequenced commands, command quanta, ring buffer predictor, replay tests | unit + runtime | **done** - deterministic command timeline and local prediction |
 | [`Movement2-authoritative-host-command-integration.md`](Movement2-authoritative-host-command-integration.md) | host command queue, ack snapshots, `set_player_input` command records, processing budgets | runtime + browser | **done** - sequenced command stream authority over current local worker/HTTP adapters without making transport cadence the movement model |
-| [`Movement3-client-prediction-runtime-ownership.md`](Movement3-client-prediction-runtime-ownership.md) | client prediction worker boundary, bounded prediction world, render-thread presentation state, in-memory latency harness | unit + runtime | **next** - decide where prediction runs and prove it does not require render-thread world ownership or a full server clone |
-| `Movement4-interpolation-and-correction-smoothing.md` | local correction offset, remote interpolation buffers, latency/jitter debug controls | unit + browser visual | prove command/replay behavior under latency, jitter, and loss before any push/lossy transport work |
-| `Movement5-richer-collision-and-world-interaction.md` | non-full block shapes, crouch shape, liquid hooks, collision revisions | unit + browser | sketch expanded collision after the fixed-step core is stable |
-| `Movement6-npc-locomotion-bridge.md` | low-rate AI intent feeding movement body, entity activity tiers, nearby high-rate body stepping | unit + runtime | sketch NPCs sharing the movement core without inheriting player command rate |
+| [`Movement3-client-prediction-runtime-ownership.md`](Movement3-client-prediction-runtime-ownership.md) | old client-prediction ownership tactical | docs | **paused** - superseded by the Client Runtime / Integrated Server arc |
 
-`Movement2` must not bake in HTTP polling, latest-input semantics, or one-request-equals-one-step behavior. Its implementation target is a logical sequenced movement command stream plus authoritative ack snapshots. Local worker `postMessage` and remote HTTP are only the current transport adapters used to validate that logical model. Push transports belong to later runtime slices unless measurement proves polling is the bottleneck.
-
-`Movement3` must not assume prediction runs on the browser render thread. The next planning target is a client prediction runtime boundary: raw input and small presentation states cross the render thread, while command buffering, replay, collision-relevant prediction facts, and reconciliation live in a client runtime worker. Multiplayer clients should carry a bounded prediction world, not a full authoritative host.
+Movement resumes only after the client runtime arc provides a bounded client-world prediction view and proves singleplayer and multiplayer hydrate the same client replica. Redraft the next movement tactical from that architecture instead of continuing the old `Movement3` plan.
 
 ## Renderer oracle approach
 
@@ -158,7 +177,7 @@ The first three runtime prerequisites are now landed, and they should generally 
 - browser singleplayer runs behind an authoritative local host boundary
 - chunk meshing no longer stalls the main thread
 
-Those conditions are now satisfied by `R0` through `R8`. The next runtime/host priority is deciding whether the now-live browser control path keeps authoritative player/session work responsive while chunk jobs are active, and only then deciding whether the current poll-based remote transport still fits.
+Those conditions are now satisfied by `R0` through `R8`. The next runtime priority is no longer a transport experiment; it is the Client Runtime / Integrated Server arc above, which gives the existing host/client protocol a vanilla-shaped `IntegratedServer`, `ClientRuntime`, and `ClientWorld` model before movement, NPC, or network follow-through.
 
 WebRTC is intentionally deferred. The preferred path is:
 
@@ -181,7 +200,7 @@ WebRTC is intentionally deferred. The preferred path is:
 | [`R8-authoritative-browser-control-integration.md`](R8-authoritative-browser-control-integration.md) | authoritative browser control/camera integration: bind debug/browser camera to `player_state`, translate browser input to `set_player_input`, schedule live update polling, keep renderer presentation-only | browser smoke + live debug path | **done** — the live browser debug path now drives authoritative player input/state against the same host boundary as remote clients, and chunk interest follows authoritative player state instead of a renderer-owned free-cam |
 | `R9-` | optional browser-hosted peer/server or push-capable transport: WebSocket/WebTransport/WebRTC-style adapter reusing the same protocol and host boundary if polling stops fitting | integration | slot in a different transport later without redesigning the engine around it up front |
 
-The first tactical to plan in detail from this arc should be `R0-`, not `R7-`. If `R0-` and `R1-` are not real, every later runtime mode becomes a special case.
+This `R` arc records the landed host/transport foundation. New runtime work should continue through the Client Runtime / Integrated Server arc instead of adding `R9` transport work by default.
 
 ## Runtime data / protocol / loading arc (rough, cross-cutting)
 
@@ -227,7 +246,7 @@ Recommended sequence:
 | [`D7-loading-persistence-hygiene.md`](D7-loading-persistence-hygiene.md) | loading/persistence hygiene | unit + browser smoke/probe | **done** — honest progress labels, explicit IndexedDB reset, persisted-light omission, and storage-version discipline are landed |
 | [`D8-dirty-cache-save-policy.md`](D8-dirty-cache-save-policy.md) | dirty/cache save policy | unit | **done** — host code now distinguishes generated-cache writes from dirty durable saves, marks host block mutations dirty, and saves dirty chunks before eviction |
 
-`D5` and `D6` close the scheduler/transport decision for now. `D7` and `D8` make current loading/persistence behavior visible, deterministic, and less ambiguous before larger persistence work. Keep `pnpm perf:d5` as the regression gate when changing loading, scheduling, transport, packed snapshots, or render-world ingestion. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction unless a later D5-style report selects that path.
+`D5` and `D6` close the scheduler/transport decision for now. `D7` and `D8` make current loading/persistence behavior visible, deterministic, and less ambiguous before larger persistence work. Keep `pnpm perf:d5` as the regression gate when changing loading, scheduling, transport, packed snapshots, or render-world ingestion. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or full movement prediction unless a later report or the Client Runtime / Integrated Server arc selects that path.
 
 With the runtime arc accepted and the spawn full-decorated fixture exact, the next highest-value content-parity slice is no longer broad biome-table breadth. Tactical [`50`](50-beach-river-full-decorated-parity.md) should extend the exact full-block harness to seed `12345`, chunk `(5,115)`, the existing sand/gravel surface-oracle target, and prove legitimate shoreline/river loose material plus decoration parity under a scheduler-pinned server fixture. Tactical [`49`](49-vanilla-status-futures-and-partial-chunks.md) remains the separate status-orchestration and throughput follow-through for replacing the flattened authority terrain window.
 

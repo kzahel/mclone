@@ -2,7 +2,7 @@
 
 Runtime architecture for `mclone`.
 
-For rough sequencing of the runtime/host refactor work, see the runtime/host arc in [`tactical/README.md`](./tactical/README.md).
+For rough sequencing of the active runtime refactor work, see the Client Runtime / Integrated Server arc in [`tactical/README.md`](./tactical/README.md).
 
 This document exists to answer a different question than [`strategy.md`](./strategy.md), [`worldgen-status.md`](./worldgen-status.md), and the more specific runtime contract docs:
 
@@ -13,7 +13,8 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `protocol.md`: the logical host/client message model and transport-codec boundaries
 - `loading-persistence.md`: world creation/open/join flow, chunk lifecycle, and save/eviction policy
 - `authoritative-host-scheduling.md`: how player/session authority stays responsive while chunk jobs run
-- `player-movement-netcode.md`: high-rate player movement, prediction, reconciliation, interpolation, and lower-rate NPC intent
+- `minecraft-client-replica-research.md`: vanilla integrated-server, client-world, lighting, fluid, entity-interpolation, and networking source review
+- `player-movement-netcode.md`: paused high-rate player movement and netcode constraint notes
 - `structures.md`: vanilla overworld structure starts, references, placement, and implementation order
 - `worker-ownership.md`: concrete worker/cache ownership and the no-hangs baseline for UI/GPU and host ticks
 - this document: how the engine should be split across simulation, rendering, storage, workers, and multiplayer hosts
@@ -66,9 +67,9 @@ Good divergences are ones where we can say all of the following clearly:
 
 ## Core decisions
 
-### 1. Singleplayer is a local server, not a renderer shortcut
+### 1. Singleplayer is an integrated server plus client world, not a renderer shortcut
 
-Browser singleplayer should run an authoritative local world host in a worker and talk to it through a transport boundary. It should not let the renderer call `NoiseBasedChunkGenerator` directly.
+Browser singleplayer should run an authoritative local server in a worker and talk to it through a client-facing protocol boundary. It should also hydrate a client world replica from that boundary, like vanilla's `IntegratedServer` plus `ClientLevel` shape. It should not let the renderer call `NoiseBasedChunkGenerator` directly or read host internals.
 
 ### 2. The simulation core is shared across all hosts
 
@@ -109,7 +110,7 @@ We should be able to support both:
 
 The architecture should not assume only one of those exists.
 
-### 6. High-rate player movement is command-driven runtime gameplay
+### 6. High-rate player movement is command-driven runtime gameplay, but paused behind client runtime architecture
 
 Player movement is a deliberate runtime/gameplay divergence from vanilla 1.17.1, not a reason to fork the world or entity architecture. The lower shared movement ideas in `Entity.move(...)` and `LivingEntity.travel(...)` are still the reference to study before implementation, but the vanilla 20 TPS player packet loop is not the target protocol shape.
 
@@ -123,7 +124,7 @@ The durable constraints are:
 - lower-rate NPC AI can produce movement intent for the shared body simulation without forcing player physics down to AI tick rate
 - collision and physics revisions should be explicit once dynamic collision can affect prediction
 
-See [`player-movement-netcode.md`](./player-movement-netcode.md) and the player movement/netcode tactical arc in [`tactical/README.md`](./tactical/README.md).
+The movement tactical arc is paused until the client runtime arc establishes `IntegratedServer`, `ClientRuntime`, `ClientWorld`, prediction-service, and presentation ownership. See [`player-movement-netcode.md`](./player-movement-netcode.md) for retained constraints and the Client Runtime / Integrated Server arc in [`tactical/README.md`](./tactical/README.md) for active sequencing.
 
 ## Layer model
 
@@ -131,7 +132,7 @@ See [`player-movement-netcode.md`](./player-movement-netcode.md) and the player 
 |---|---|---|
 | Simulation core | worldgen, block/state rules, chunk contents, gameplay systems, authoritative world state | strict where we target vanilla parity |
 | Server runtime | task scheduling, chunk lifecycle, ticking, authority, persistence orchestration, multiplayer session state | engine-native divergence |
-| Client runtime | input, camera, UI, chunk subscription, prediction/interpolation where needed | engine-native divergence |
+| Client runtime | protocol application, client-world replica, input/session ownership, prediction/interpolation services, presentation-state publication | engine-native divergence shaped by vanilla `ClientLevel` ownership |
 | Meshing/build pipeline | convert chunk/block state into renderer-ready geometry | renderer-native divergence, while consuming parity-correct chunk contents |
 | Renderer | WebGPU resources, uploads, passes, shaders, frame submission | engine-native divergence |
 | Persistence adapters | IndexedDB, filesystem, future alternate backends | engine-native divergence |
@@ -182,22 +183,24 @@ Responsibilities:
 
 There should be two host forms of the same conceptual server:
 
-- browser singleplayer host: worker-backed
-- dedicated host: Node-backed
+- `IntegratedServer`: browser-singleplayer, worker-backed, created by a local game session
+- dedicated/headless host: Node-backed
 
 The client should not bypass this layer even in singleplayer.
 
 ### Client runtime
 
-This is the owner of rendering, input, and presentation.
+This is the owner of the client session and client-side replica.
 
 Responsibilities:
 
-- camera and controls
-- subscribing to chunk/state data from the server runtime
-- handing chunk contents to client meshing workers
-- GPU upload and frame submission
-- future UI, HUD, inventory, and presentation-only effects
+- apply client-facing protocol messages
+- own `ClientWorld`: visible/interested chunks, block/fluid states, block entities, entities, light/render facts, revisions, and speculative overlays
+- own prediction and interpolation services when they exist
+- publish compact presentation state to UI/render
+- hand chunk contents or mesh jobs to client meshing workers
+
+The presentation/UI thread owns input sampling, pointer lock, UI, GPU resources, uploads, and frame submission. It should consume client-runtime outputs rather than owning raw world facts.
 
 The client runtime should never call worldgen directly.
 
