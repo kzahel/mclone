@@ -2,7 +2,7 @@
 
 Baseline worker architecture for keeping the browser UI/GPU thread and authoritative host tick responsive while chunk generation, decoration, lighting, persistence, render-world ingest, and meshing are active.
 
-This is the target ownership model, not a tactical implementation slice. Worker pooling for terrain generation and decoration is deliberately deferred. The immediate goal is a clean baseline with one owner per mutable cache and bounded cross-worker queues.
+This is the target ownership model, not a tactical implementation slice. Worker pooling for terrain generation and decoration is deliberately deferred. The immediate goal is a clean baseline with one owner per mutable cache and bounded cross-worker queues. Runtime priorities and latency budgets are owned by [`authoritative-host-scheduling.md`](authoritative-host-scheduling.md); vanilla generation order is owned by [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md).
 
 ## Core Rule
 
@@ -247,7 +247,7 @@ Bad worker payloads:
 
 ## Backpressure Rules
 
-Every boundary that can carry bulk work needs an explicit budget:
+Every boundary that can carry bulk work needs an explicit budget. This section is about worker boundaries; global host priority policy lives in [`authoritative-host-scheduling.md`](authoritative-host-scheduling.md).
 
 - max host messages drained per poll/frame
 - max lit chunks accepted per host turn
@@ -271,7 +271,8 @@ Worldgen and decoration are good future pool candidates, but not part of this ba
 Reasons to defer:
 
 - decoration has cross-chunk write/read behavior
-- structures span many chunks through starts/references
+- vanilla status order and publication gates are parity-critical; see [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md)
+- structures span many chunks through starts/references; see [`structures.md`](structures.md)
 - feature application must preserve vanilla ordering and deterministic seeds
 - chunk workers must return data or write plans, not mutate host chunks directly
 
@@ -291,23 +292,15 @@ Do not allow multiple worldgen workers to directly mutate neighboring authoritat
 
 ## Vanilla Dependency Notes
 
-Minecraft 1.17.1 uses chunk-status dependency ranges:
+Minecraft 1.17.1 chunk statuses have dependency ranges, write cutoffs, structure stages, lighting gates, and publication gates. Those details are centralized in [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md).
 
-```text
-STRUCTURE_STARTS       range 0
-STRUCTURE_REFERENCES   range 8
-NOISE                  range 8
-FEATURES               range 8
-LIGHT                  range 1
-```
-
-Those ranges are scheduling dependencies, not permission for arbitrary concurrent mutation. During `FEATURES`, vanilla builds a `WorldGenRegion` with `writeRadiusCutoff = 1`; normal feature writes outside the center chunk plus immediate neighbors are rejected/logged. Large structures are split into starts/references and placed clipped to the currently generated chunk.
+The worker-ownership consequence is narrow: dependency windows are not permission for arbitrary concurrent mutation. During generation and decoration, mutable authoritative chunk state stays owned by the generated-world host. Pool workers may compute isolated results or write plans; they must not directly mutate neighboring authoritative chunks.
 
 The baseline worker model should preserve that distinction:
 
-- dependency windows can be large
 - mutation ownership stays centralized
 - outputs are applied in deterministic chunk-stage order
+- worker boundaries do not weaken the documented status gates
 
 ## Acceptance Bar
 
@@ -327,6 +320,7 @@ The lighting ownership baseline is landed: worker-backed browser/Node service sh
 
 - [`architecture.md`](architecture.md): broad runtime/host split
 - [`authoritative-host-scheduling.md`](authoritative-host-scheduling.md): host responsiveness rules
+- [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md): vanilla status order, finality, and publication gates
 - [`lighting-worker-architecture.md`](lighting-worker-architecture.md): dedicated lighting service details
 - [`runtime-data-model.md`](runtime-data-model.md): chunk/block-state facts crossing boundaries
 - [`protocol.md`](protocol.md): host/client message model

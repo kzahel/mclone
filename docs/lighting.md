@@ -116,6 +116,10 @@ This tells section storage whether that 16x16x16 area should have a light data l
 
 ### Chunk Lighting
 
+Vanilla does not light a chunk immediately after local terrain or local decoration. `ChunkStatus.LIGHT` has parent `FEATURES` and dependency range `1`, and `ChunkMap.scheduleChunkGeneration(...)` resolves that through `getChunkRangeFuture(...)` / `getDependencyStatus(...)`. For a target chunk, the center must satisfy `FEATURES` through the parent edge, and the 8 neighboring chunks also resolve to `FEATURES` through `STATUS_BY_RANGE[1]`.
+
+That means initial chunk lighting is gated by the same 3x3 `FEATURES` neighborhood that makes ordinary biome-decoration spillover stable. This is a generation-status dependency, separate from the light solver's physical propagation footprint. See [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md) for the scheduling rule and source citations.
+
 At `ChunkStatus.LIGHT`, `ThreadedLevelLightEngine.lightChunk(...)`:
 
 - marks the chunk not light-correct
@@ -402,7 +406,7 @@ Recommended host policy:
 - prioritize chunks by current player/session chunk interest.
 - keep input/poll/player-state work ahead of lighting.
 - process lighting in bounded slices.
-- publish chunk snapshots only after required initial lighting completes for that chunk.
+- publish chunk snapshots only after required initial lighting completes for that chunk, and only after the initial-light input satisfied vanilla's 3x3 `FEATURES` gate.
 - publish light deltas after dynamic edits or delayed propagation slices complete.
 
 For initial MVP generated terrain, it is acceptable for a chunk job to generate terrain and then finish initial lighting before publishing the chunk. Live block edits need incremental light deltas.

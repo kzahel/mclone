@@ -2,7 +2,7 @@
 
 Living status page for the overworld carver path.
 
-This doc is narrower than [`worldgen-status.md`](./worldgen-status.md): it only tracks classic 1.17.1 overworld carvers and their oracle coverage.
+This doc is narrower than [`worldgen-status.md`](./worldgen-status.md): it only tracks classic 1.17.1 overworld carvers and their oracle coverage. The status-order contract for when carvers run relative to structures, decoration, lighting, and publication lives in [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md).
 
 ## Scope
 

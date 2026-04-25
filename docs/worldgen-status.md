@@ -15,6 +15,7 @@ Treat the percentages below as directional, not promises.
 
 - Target: vanilla Java `1.17.1` overworld seed parity.
 - Method: direct translation from the decompiled Java source under `reference/minecraft-1.17.1/src/`.
+- Ordering contract: [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md) is the canonical source for chunk-status dependencies, decoration finality, lighting gates, and publication gates.
 - Out of scope for the current target: the disabled Caves & Cliffs Part 1 paths called out in [`../AGENTS.md`](../AGENTS.md) (`Aquifer`, `Cavifier`, `NoodleCavifier`, `OreVeinifier`, deepslate substitution, and their `NormalNoise`-driven branches).
 
 ## Current state
@@ -51,7 +52,7 @@ The main remaining gap is not foundational plumbing. It is parity and confidence
 | Surface vegetation + water decoration | `82-90%` | First substantial overworld set landed, now including dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, and cold-surface identity | [`20`](./tactical/20-surface-special-blocks-and-biome-tint.md), [`21`](./tactical/21-surface-feature-palette-expansion.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md) |
 | Biome decoration table coverage | `88-93%` | The full layered-overworld biome key set now has non-empty translated settings, including the last mountain / modified-jungle / badlands aliases; remaining gaps are narrower table exactness and confidence, not broad empty-table coverage | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md), [`45`](./tactical/45-overworld-biome-table-aliases-and-exactness.md) |
 | Ore generation / underground decoration | `55-60%` | The live overworld underground helper stack is now translated: common ores, underground variety, biome-specific badlands/mountain extras, glow lichen, rare dripstone, soft disks, target-rule plumbing, replace-single-block support, block/palette coverage, and biome-table wiring all landed; the main remaining gaps are stronger decorated-stage confidence/oracle coverage and later underground feature families outside this helper surface | [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md) |
-| Structures | `0-5%` | Not meaningfully started | target bucket only |
+| Structures | `0-5%` | Not meaningfully started; structure architecture is documented, with orchestration covered by the deterministic-order contract | [`structures.md`](./structures.md), [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) |
 
 If you compress all of that to one number, the project is roughly `60-70%` of the way to “recognizable vanilla-overworld worldgen,” but much less complete than that for broad biome/decor/structure parity.
 
@@ -173,6 +174,8 @@ Structure generation is still effectively absent:
 - no start/piece/jigsaw system
 - no generated structure injection into chunks
 
+The target architecture is status-aware rather than a decoration shortcut: structure starts are recorded first, references are computed before noise, and each chunk places clipped structure slices during `FEATURES`. See [`structures.md`](./structures.md) for structure details and [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) for the broader status-order contract.
+
 ## Current confidence level
 
 Not every landed bucket has the same validation strength.
@@ -258,6 +261,8 @@ Tacticals 42 through 44 landed the live overworld underground-helper surface. Th
 ### 6. Structures after the terrain/decor core is stable
 
 Structures are important for parity, but they should not displace the terrain/carver/biome-decor core unless priorities change.
+
+When they do become the priority, follow [`structures.md`](./structures.md) and keep the orchestration aligned with [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md): start with structure status/metadata and simple custom structures, then mineshafts, template-backed structures, strongholds/terrain blending, large structures, and finally jigsaw villages/outposts.
 
 ## Update rules
 

@@ -2,7 +2,7 @@
 
 Durable guidance for keeping authoritative player/session work responsive while chunk loading, generation, saving, and snapshot assembly are active.
 
-This document fills a gap left by [`architecture.md`](./architecture.md), [`protocol.md`](./protocol.md), and [`loading-persistence.md`](./loading-persistence.md). Those docs say the host owns authority and chunk lifecycle; this doc says how host work must be scheduled so authority does not stall behind chunk jobs.
+This document fills a gap left by [`architecture.md`](./architecture.md), [`protocol.md`](./protocol.md), and [`loading-persistence.md`](./loading-persistence.md). Those docs say the host owns authority and chunk lifecycle; this doc says how host work must be scheduled so authority does not stall behind chunk jobs. The parity-critical generation, lighting, and publication order is centralized in [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md).
 
 ## Core Rule
 
@@ -97,6 +97,12 @@ The key responsibilities are separate:
 `prepareTickingChunk(...)` publishes a chunk to players only after the relevant future completes, via `playerLoadedChunk(...)`.
 
 This is the part we missed in the earlier architecture analysis: vanilla's server is not "one command handler that returns all chunk data." It is a tick-owned authority core plus a chunk task graph that reports completions back to the server.
+
+### Worldgen Order Contract
+
+The detailed vanilla generation order lives in [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md). This host-scheduling doc does not decide that order.
+
+For `mclone`, a `vanilla17` path may use engine-native workers and queues, but the host scheduler must treat the deterministic-order contract as an input: enqueue eligible work, prioritize it, cancel stale work, and publish completed chunks without weakening the documented status, lighting, and send gates. If a scheduling change needs to alter status order or finality, update [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md) with source evidence first.
 
 ### Vanilla Still Has Blocking Escape Hatches
 
@@ -283,3 +289,5 @@ Before changing host scheduling, answer:
 4. Are chunk snapshots published as completions rather than command return values?
 5. Can the same logical scheduler run in browser singleplayer and dedicated Node hosting?
 6. Does the renderer remain a consumer of authoritative outputs?
+7. Does this scheduler defer status order and finality rules to [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md) instead of embedding a second model?
+8. Do worker or queue changes preserve the already-documented publication gates without reinterpreting them?

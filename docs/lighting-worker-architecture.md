@@ -145,7 +145,7 @@ Do not use `SharedArrayBuffer` for the first version. Transferable typed arrays 
 
 ## Neighbor Readiness
 
-Vanilla `ChunkStatus.LIGHT` has range 1. `mclone` should mirror that scheduling fact even if the worker implementation is browser-specific.
+Vanilla `ChunkStatus.LIGHT` has range 1. `mclone` should mirror that scheduling fact even if the worker implementation is browser-specific; see [`worldgen-deterministic-order.md`](worldgen-deterministic-order.md) for the status gate and source references.
 
 For a chunk to produce an initial lit snapshot:
 

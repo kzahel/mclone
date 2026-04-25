@@ -7,7 +7,7 @@ This document has two jobs:
 1. Describe Minecraft Java 1.17.1's loading and persistence model closely enough to guide parity work.
 2. Describe where `mclone` intentionally or accidentally diverges today, with immediate fixes separated from acceptable deferrals.
 
-[`architecture.md`](./architecture.md) owns runtime boundaries. [`runtime-data-model.md`](./runtime-data-model.md) owns logical chunk and block-state facts. [`protocol.md`](./protocol.md) owns host/client messages. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) owns scheduler rules that keep player/session authority responsive while chunk jobs run.
+[`architecture.md`](./architecture.md) owns runtime boundaries. [`runtime-data-model.md`](./runtime-data-model.md) owns logical chunk and block-state facts. [`protocol.md`](./protocol.md) owns host/client messages. [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md) owns scheduler rules that keep player/session authority responsive while chunk jobs run. [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) owns vanilla status order, finality, lighting gates, and chunk publication gates. [`structures.md`](./structures.md) owns the structure-specific start/reference/placement model inside the status pipeline.
 
 ## Core Rule
 
@@ -88,6 +88,8 @@ EMPTY
 Each status declares a parent, dependency range, generation task, loading task, chunk type, and heightmaps available after that status. If a stored chunk already satisfies a requested status, the loading task advances or passes it through. If it does not, the generation task resumes from the stored status rather than starting from nothing.
 
 This matters for future parity because persisted partial chunks are real vanilla state. For MVP we mostly deal in fully publishable chunks, but the architecture should not make status-based loading impossible later.
+
+Structure-specific status semantics are not optional details: `STRUCTURE_STARTS` records starts, `STRUCTURE_REFERENCES` records touched-start references, noise-affecting structures can alter `NOISE`, and final structure slices are placed during `FEATURES`. The canonical status-order and finality model is [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md); structure implementation details live in [`structures.md`](./structures.md).
 
 ### Load Or Generate Flow
 

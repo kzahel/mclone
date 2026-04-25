@@ -8,10 +8,12 @@ This document exists to answer a different question than [`strategy.md`](./strat
 
 - `strategy.md`: how we translate Minecraft 1.17.1 into TypeScript
 - `worldgen-status.md`: what parts of worldgen are landed today
+- `worldgen-deterministic-order.md`: vanilla chunk-status order, decoration finality, lighting gates, and publication gates
 - `runtime-data-model.md`: the shared chunk/block-state data model across simulation, storage, protocol, client workers, and meshing
 - `protocol.md`: the logical host/client message model and transport-codec boundaries
 - `loading-persistence.md`: world creation/open/join flow, chunk lifecycle, and save/eviction policy
 - `authoritative-host-scheduling.md`: how player/session authority stays responsive while chunk jobs run
+- `structures.md`: vanilla overworld structure starts, references, placement, and implementation order
 - `worker-ownership.md`: concrete worker/cache ownership and the no-hangs baseline for UI/GPU and host ticks
 - this document: how the engine should be split across simulation, rendering, storage, workers, and multiplayer hosts
 
@@ -277,6 +279,7 @@ These should be serializable without depending on live class instances.
 The canonical model should be engine-defined chunk/world records, not raw IndexedDB layout and not whatever Node filesystem structure we choose first.
 
 Detailed loading, dirty-state, lazy-save, and eviction policy lives in [`loading-persistence.md`](./loading-persistence.md).
+Vanilla chunk-status order, generation finality, lighting gates, and publication gates live in [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md).
 Scheduling rules that keep input, player ticks, and polling from blocking behind chunk jobs live in [`authoritative-host-scheduling.md`](./authoritative-host-scheduling.md).
 
 Recommended rule:
