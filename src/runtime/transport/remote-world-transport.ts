@@ -87,6 +87,7 @@ export class RemoteWorldTransport implements WorldTransport {
   private lastOpenWorldRequest: OpenWorldRequest | undefined;
   private lastChunkViewRequest: SetChunkViewRequest | undefined;
   private lastPlayerInputRequest: SetPlayerInputRequest | undefined;
+  private closed = false;
 
   public constructor(
     baseUrl: string,
@@ -102,6 +103,7 @@ export class RemoteWorldTransport implements WorldTransport {
   }
 
   public async openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]> {
+    this.assertNotClosed("openWorld");
     this.lastOpenWorldRequest = request;
     this.lastChunkViewRequest = undefined;
     this.lastPlayerInputRequest = undefined;
@@ -109,6 +111,7 @@ export class RemoteWorldTransport implements WorldTransport {
   }
 
   public async setChunkView(request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]> {
+    this.assertNotClosed("setChunkView");
     if (this.sessionId === undefined) {
       throw new Error("RemoteWorldTransport.setChunkView() called before openWorld()");
     }
@@ -118,6 +121,7 @@ export class RemoteWorldTransport implements WorldTransport {
   }
 
   public async setPlayerInput(request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]> {
+    this.assertNotClosed("setPlayerInput");
     if (this.sessionId === undefined) {
       throw new Error("RemoteWorldTransport.setPlayerInput() called before openWorld()");
     }
@@ -127,6 +131,7 @@ export class RemoteWorldTransport implements WorldTransport {
   }
 
   public async pollUpdates(request: PollWorldUpdatesRequest): Promise<readonly WorldHostMessage[]> {
+    this.assertNotClosed("pollUpdates");
     if (this.sessionId === undefined) {
       throw new Error("RemoteWorldTransport.pollUpdates() called before openWorld()");
     }
@@ -138,7 +143,22 @@ export class RemoteWorldTransport implements WorldTransport {
     return this.sessionId;
   }
 
+  public close(): void {
+    this.closed = true;
+    this.sessionId = undefined;
+    this.lastOpenWorldRequest = undefined;
+    this.lastChunkViewRequest = undefined;
+    this.lastPlayerInputRequest = undefined;
+  }
+
+  private assertNotClosed(operation: string): void {
+    if (this.closed) {
+      throw new Error(`RemoteWorldTransport.${operation}() called after close()`);
+    }
+  }
+
   private async openWorldInternal(request: OpenWorldRequest, allowResumeFallback: boolean): Promise<readonly WorldHostMessage[]> {
+    this.assertNotClosed("openWorld");
     try {
       const response = await this.fetchJson<OpenWorldSessionResponse>(
         `${this.baseUrl}/api/world/session`,
@@ -151,10 +171,12 @@ export class RemoteWorldTransport implements WorldTransport {
           }),
         },
       );
+      this.assertNotClosed("openWorld");
       const messages = deserializeWorldHostMessages(response.messages);
       this.sessionId = extractSessionId(messages);
       return messages;
     } catch (error) {
+      this.assertNotClosed("openWorld");
       if (allowResumeFallback && error instanceof RemoteWorldTransportError && error.code === "unknown_session" && this.sessionId !== undefined) {
         this.sessionId = undefined;
         return await this.openWorldInternal(request, false);
@@ -165,6 +187,7 @@ export class RemoteWorldTransport implements WorldTransport {
   }
 
   private async setChunkViewInternal(request: SetChunkViewRequest, allowReconnect: boolean): Promise<readonly WorldHostMessage[]> {
+    this.assertNotClosed("setChunkView");
     try {
       const response = await this.fetchJson<SessionChunkViewResponse>(
         `${this.baseUrl}/api/world/session/${encodeURIComponent(this.sessionId!)}/chunk-view`,
@@ -176,10 +199,12 @@ export class RemoteWorldTransport implements WorldTransport {
           }),
         },
       );
+      this.assertNotClosed("setChunkView");
       const messages = deserializeWorldHostMessages(response.messages);
       this.sessionId = extractSessionId(messages);
       return messages;
     } catch (error) {
+      this.assertNotClosed("setChunkView");
       if (allowReconnect && error instanceof RemoteWorldTransportError && error.code === "unknown_session" && this.lastOpenWorldRequest !== undefined) {
         return await this.restoreSession(false);
       }
@@ -189,6 +214,7 @@ export class RemoteWorldTransport implements WorldTransport {
   }
 
   private async setPlayerInputInternal(request: SetPlayerInputRequest, allowReconnect: boolean): Promise<readonly WorldHostMessage[]> {
+    this.assertNotClosed("setPlayerInput");
     try {
       const response = await this.fetchJson<SessionPlayerInputResponse>(
         `${this.baseUrl}/api/world/session/${encodeURIComponent(this.sessionId!)}/player-input`,
@@ -200,10 +226,12 @@ export class RemoteWorldTransport implements WorldTransport {
           }),
         },
       );
+      this.assertNotClosed("setPlayerInput");
       const messages = deserializeWorldHostMessages(response.messages);
       this.sessionId = extractSessionId(messages);
       return messages;
     } catch (error) {
+      this.assertNotClosed("setPlayerInput");
       if (allowReconnect && error instanceof RemoteWorldTransportError && error.code === "unknown_session" && this.lastOpenWorldRequest !== undefined) {
         return await this.restoreSession(false);
       }
@@ -213,6 +241,7 @@ export class RemoteWorldTransport implements WorldTransport {
   }
 
   private async pollUpdatesInternal(request: PollWorldUpdatesRequest, allowReconnect: boolean): Promise<readonly WorldHostMessage[]> {
+    this.assertNotClosed("pollUpdates");
     try {
       const response = await this.fetchJson<SessionPollUpdatesResponse>(
         `${this.baseUrl}/api/world/session/${encodeURIComponent(this.sessionId!)}/updates/poll`,
@@ -224,8 +253,10 @@ export class RemoteWorldTransport implements WorldTransport {
           }),
         },
       );
+      this.assertNotClosed("pollUpdates");
       return deserializeWorldHostMessages(response.messages);
     } catch (error) {
+      this.assertNotClosed("pollUpdates");
       if (allowReconnect && error instanceof RemoteWorldTransportError && error.code === "unknown_session" && this.lastOpenWorldRequest !== undefined) {
         return await this.restoreSession(false);
       }
@@ -235,6 +266,7 @@ export class RemoteWorldTransport implements WorldTransport {
   }
 
   private async restoreSession(allowResumeFallback: boolean): Promise<readonly WorldHostMessage[]> {
+    this.assertNotClosed("restoreSession");
     if (this.lastOpenWorldRequest === undefined) {
       throw new Error("Remote world transport could not restore a missing session before openWorld()");
     }

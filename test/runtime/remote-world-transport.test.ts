@@ -6,6 +6,7 @@ import fixture from "../fixtures/creatures/overworld-seed-12345-chunk--7--15-ent
 import { Registry } from "../../src/core/registry";
 import { createGeneratedWorldSaveId, GENERATED_WORLD_STORAGE_VERSION } from "../../src/runtime/host/generated-world-host";
 import { GeneratedWorldRemoteService } from "../../src/runtime/node/generated-world-http-server";
+import { type ClientRuntime, WorldClientRuntimeFacade } from "../../src/runtime/client/client-runtime";
 import {
   deserializeWorldHostMessages,
   deserializeWorldClientMessage,
@@ -254,11 +255,11 @@ function createServiceFetch(service: GeneratedWorldRemoteService): typeof fetch 
   };
 }
 
-function createRemoteWorldClient(baseUrl: string, fetchImpl: typeof fetch, sessionId?: string): RemoteWorldClient {
+function createRemoteWorldClientForTransport(transport: RemoteWorldTransport): RemoteWorldClient {
   const blocks = registerGeneratedRenderBlocks();
   const biomeSource = new OverworldBiomeSource(12345n);
   return new RemoteWorldClient(
-    new RemoteWorldTransport(baseUrl, { fetchImpl, sessionId }),
+    transport,
     (worldOpened) => new ClientChunkCache({
       airState: blocks.airState,
       minBuildHeight: worldOpened.minBuildHeight,
@@ -269,6 +270,10 @@ function createRemoteWorldClient(baseUrl: string, fetchImpl: typeof fetch, sessi
       blockStateIds: blocks.blockStateIds,
     }),
   );
+}
+
+function createRemoteWorldClient(baseUrl: string, fetchImpl: typeof fetch, sessionId?: string): RemoteWorldClient {
+  return createRemoteWorldClientForTransport(new RemoteWorldTransport(baseUrl, { fetchImpl, sessionId }));
 }
 
 function findSessionId(messages: readonly WorldHostMessage[]): string {
@@ -302,6 +307,21 @@ async function drainRemoteClientChunks(client: RemoteWorldClient, expectedCount:
   }
 
   throw new Error(`expected ${expectedCount.toString()} loaded chunks, got ${client.getLevel().getLoadedChunkCount().toString()}`);
+}
+
+async function drainRemoteRuntimeChunks(runtime: ClientRuntime, expectedCount: number): Promise<void> {
+  const level = runtime.getClientWorld().getRenderView().getRenderLevel();
+  const deadline = Date.now() + REMOTE_WORLD_TRANSPORT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (level.getLoadedChunkCount() >= expectedCount) {
+      return;
+    }
+
+    await sleep(10);
+    await runtime.drainTransportUpdates();
+  }
+
+  throw new Error(`expected ${expectedCount.toString()} loaded chunks, got ${level.getLoadedChunkCount().toString()}`);
 }
 
 function targetChunkEntitySnapshots(entities: readonly EntitySnapshot[]): readonly EntitySnapshot[] {
@@ -384,6 +404,74 @@ describe("RemoteWorld transport", () => {
     });
     expect(service.getSessionCount()).toBe(1);
     expect(service.getWorldCount()).toBe(1);
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
+
+  test("publishes remote state through ClientRuntime and ClientWorld views", async () => {
+    const service = new GeneratedWorldRemoteService({
+      saveRoot: await createTempDirectory(),
+    });
+    const runtime = new WorldClientRuntimeFacade(createRemoteWorldClient("http://127.0.0.1:4173", createServiceFetch(service)));
+
+    await runtime.openWorld(OPEN_WORLD_REQUEST);
+    expect(runtime.publishPresentationState()).toMatchObject({
+      sessionState: {
+        sessionId: expect.any(String),
+        playerId: expect.any(String),
+        saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
+        resumed: false,
+        revision: 0,
+      },
+      localPlayerState: {
+        playerId: expect.any(String),
+        revision: 0,
+      },
+      entities: [],
+    });
+
+    expect(await runtime.setChunkInterest({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    })).toBe(false);
+    await drainRemoteRuntimeChunks(runtime, 25);
+
+    const clientWorld = runtime.getClientWorld();
+    const presentation = runtime.publishPresentationState();
+    expect(clientWorld.getSessionState()).toEqual(presentation.sessionState);
+    expect(clientWorld.getLocalPlayerState()).toEqual(presentation.localPlayerState);
+    expect(clientWorld.getEntitySnapshots()).toEqual(presentation.entities);
+    expect(clientWorld.getRevisionFacts()).toMatchObject({
+      sessionRevision: 1,
+      localPlayerRevision: 0,
+    });
+    expect(clientWorld.getRenderView().getRenderLevel().getLoadedChunkCount()).toBe(25);
+    expect(clientWorld.getChunkSnapshot(0, 0)).toBeDefined();
+
+    const initialPlayerState = presentation.localPlayerState;
+    expect(initialPlayerState).toBeDefined();
+    expect(await runtime.sendPlayerCommand({
+      type: "set_player_input",
+      input: {
+        sequence: 1,
+        moveX: 1,
+        moveY: 0,
+        moveZ: 0,
+        yaw: 90,
+        pitch: 10,
+      },
+    })).toBe(true);
+    service.forceTick();
+    expect(await runtime.drainTransportUpdates()).toBe(true);
+
+    const updatedPlayerState = runtime.publishPresentationState().localPlayerState;
+    expect(updatedPlayerState).toBeDefined();
+    expect(updatedPlayerState!.acknowledgedInputSequence).toBe(1);
+    expect(updatedPlayerState!.revision).toBeGreaterThan(initialPlayerState!.revision);
+    expect(clientWorld.getPredictionView()).toMatchObject({
+      movementPhysicsRevision: updatedPlayerState!.movementBody?.physicsRevision,
+      collisionRevision: updatedPlayerState!.movementBody?.collisionRevision,
+    });
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("streams generated entity snapshots through the remote HTTP host boundary", async () => {
@@ -623,7 +711,7 @@ describe("RemoteWorld transport", () => {
       centerChunkX: 0,
       centerChunkZ: 0,
       radius: 1,
-    })).toBe(false);
+    })).toBe(true);
 
     await drainRemoteClientChunks(client, 25);
     expect(client.getLevel().getLoadedChunkCount()).toBe(25);
@@ -669,5 +757,23 @@ describe("RemoteWorld transport", () => {
     expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
     expect(client.getPlayerState()?.acknowledgedInputSequence).toBe(2);
     expect(client.getPlayerState()?.tick).toBeGreaterThan(0);
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
+
+  test("close drops remote transport session handles and rejects later requests", async () => {
+    const service = new GeneratedWorldRemoteService({
+      saveRoot: await createTempDirectory(),
+    });
+    const transport = new RemoteWorldTransport("http://127.0.0.1:4173", {
+      fetchImpl: createServiceFetch(service),
+    });
+    const runtime = new WorldClientRuntimeFacade(createRemoteWorldClientForTransport(transport));
+
+    await runtime.openWorld(OPEN_WORLD_REQUEST);
+    expect(transport.getSessionId()).toBeDefined();
+
+    runtime.close();
+
+    expect(transport.getSessionId()).toBeUndefined();
+    await expect(runtime.drainTransportUpdates()).rejects.toThrow("RemoteWorldTransport.pollUpdates() called after close()");
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 });
