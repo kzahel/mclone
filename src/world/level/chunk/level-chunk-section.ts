@@ -17,6 +17,10 @@ function sectionIndex(localX: number, localY: number, localZ: number): number {
   return (localY << 8) | (localZ << 4) | localX;
 }
 
+export function levelChunkSectionIndex(localX: number, localY: number, localZ: number): number {
+  return sectionIndex(localX, localY, localZ);
+}
+
 export class LevelChunkSection {
   private readonly states = new Array<BlockState | undefined>(LEVEL_CHUNK_SECTION_SIZE);
   private nonEmptyBlockCount = 0;
@@ -38,6 +42,10 @@ export class LevelChunkSection {
 
   public getBlockState(localX: number, localY: number, localZ: number): BlockState {
     return this.states[sectionIndex(localX, localY, localZ)] ?? this.airState;
+  }
+
+  public getBlockStateByIndex(index: number): BlockState {
+    return this.states[index] ?? this.airState;
   }
 
   public getFluidState(localX: number, localY: number, localZ: number): FluidState {

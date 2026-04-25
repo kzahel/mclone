@@ -125,6 +125,10 @@ export class LevelChunk {
     return this.iterBlockEntries();
   }
 
+  public getStoredSections(): readonly LevelChunkSection[] {
+    return [...this.chunkSections.values()].sort((left, right) => left.sectionY - right.sectionY);
+  }
+
   public recordBlockTick(pos: BlockPos, target: string, delay: number): void {
     this.blockTicks.push(createScheduledTickSnapshot(pos, target, delay));
   }

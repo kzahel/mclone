@@ -13,6 +13,7 @@ import {
   resolveFluidTickTarget,
   type ScheduledTickSnapshot,
 } from "./scheduled-tick";
+import type { LevelChunkSection } from "./chunk/level-chunk-section";
 
 const AIR_BLOCK_NAME = "minecraft:air";
 export const CHUNK_SNAPSHOT_BLOCK_ORDER = "y-major,z-major,x-minor";
@@ -133,51 +134,15 @@ export function buildChunkSnapshot(
   height: number,
 ): ChunkSnapshot {
   const minSectionY = Math.floor(minBuildHeight / SECTION_HEIGHT);
-  const sectionCount = height / SECTION_HEIGHT;
-  const worldX = SectionPos.sectionToBlockCoord(chunk.chunkX);
-  const worldZ = SectionPos.sectionToBlockCoord(chunk.chunkZ);
-  const pos = new BlockPos.MutableBlockPos();
+  const maxSectionY = minSectionY + (height / SECTION_HEIGHT) - 1;
   const sections: ChunkSectionSnapshot[] = [];
 
-  for (let sectionOffset = 0; sectionOffset < sectionCount; sectionOffset++) {
-    const sectionY = minSectionY + sectionOffset;
-    const sectionMinY = minBuildHeight + (sectionOffset * SECTION_HEIGHT);
-    const palette: BlockStateSnapshot[] = [];
-    const paletteIndexByKey = new Map<string, number>();
-    const blocks = new Array<number>(BLOCKS_PER_SECTION);
-    let hasNonAir = false;
-    let index = 0;
-
-    for (let localY = 0; localY < SECTION_HEIGHT; localY++) {
-      for (let localZ = 0; localZ < CHUNK_WIDTH; localZ++) {
-        for (let localX = 0; localX < CHUNK_WIDTH; localX++) {
-          pos.set(worldX + localX, sectionMinY + localY, worldZ + localZ);
-          const state = chunk.getBlockState(pos);
-          const snapshot = serializeBlockStateSnapshot(state);
-          hasNonAir = hasNonAir || snapshot.name !== AIR_BLOCK_NAME;
-          const key = blockStateSnapshotKey(snapshot);
-          let paletteIndex = paletteIndexByKey.get(key);
-          if (paletteIndex === undefined) {
-            paletteIndex = palette.length;
-            palette.push(snapshot);
-            paletteIndexByKey.set(key, paletteIndex);
-          }
-
-          blocks[index++] = paletteIndex;
-        }
-      }
-    }
-
-    if (!hasNonAir) {
+  for (const section of chunk.getStoredSections()) {
+    if (section.sectionY < minSectionY || section.sectionY > maxSectionY) {
       continue;
     }
 
-    sections.push({
-      y: sectionY,
-      palette,
-      blockOrder: CHUNK_SNAPSHOT_BLOCK_ORDER,
-      blocks,
-    });
+    sections.push(buildChunkSectionSnapshot(section));
   }
 
   return {
@@ -187,6 +152,42 @@ export function buildChunkSnapshot(
     sections,
     blockTicks: chunk.getScheduledBlockTicks().map(cloneScheduledTickSnapshot),
     liquidTicks: chunk.getScheduledLiquidTicks().map(cloneScheduledTickSnapshot),
+  };
+}
+
+function buildChunkSectionSnapshot(section: LevelChunkSection): ChunkSectionSnapshot {
+  const palette: BlockStateSnapshot[] = [];
+  const paletteIndexByKey = new Map<string, number>();
+  const stateSnapshotByState = new Map<BlockState, { readonly snapshot: BlockStateSnapshot; readonly key: string }>();
+  const blocks = new Array<number>(BLOCKS_PER_SECTION);
+
+  for (let index = 0; index < BLOCKS_PER_SECTION; index++) {
+    const state = section.getBlockStateByIndex(index);
+    let snapshotEntry = stateSnapshotByState.get(state);
+    if (snapshotEntry === undefined) {
+      const snapshot = serializeBlockStateSnapshot(state);
+      snapshotEntry = {
+        snapshot,
+        key: blockStateSnapshotKey(snapshot),
+      };
+      stateSnapshotByState.set(state, snapshotEntry);
+    }
+
+    let paletteIndex = paletteIndexByKey.get(snapshotEntry.key);
+    if (paletteIndex === undefined) {
+      paletteIndex = palette.length;
+      palette.push(snapshotEntry.snapshot);
+      paletteIndexByKey.set(snapshotEntry.key, paletteIndex);
+    }
+
+    blocks[index] = paletteIndex;
+  }
+
+  return {
+    y: section.sectionY,
+    palette,
+    blockOrder: CHUNK_SNAPSHOT_BLOCK_ORDER,
+    blocks,
   };
 }
 

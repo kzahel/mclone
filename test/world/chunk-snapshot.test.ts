@@ -55,4 +55,18 @@ describe("chunk snapshots", () => {
     expect(hydrated.getBlockState(pos)).toBe(caveAirState);
     expect(hydrated.isYSpaceEmpty(5, 5)).toBe(true);
   });
+
+  test("packs only stored sections in the requested build-height range", () => {
+    const { airState } = registerGeneratedRenderBlocks();
+    const stoneState = getState("minecraft:stone");
+    const pos = new BlockPos(1, 33, 2);
+    const chunk = new LevelChunk(0, 0, airState, 0, 64);
+
+    chunk.setBlockState(pos, stoneState);
+
+    const snapshot = buildChunkSnapshot(chunk, [0], 0, 64);
+
+    expect(snapshot.sections.map((section) => section.y)).toEqual([2]);
+    expect(snapshot.sections[0]!.palette).toContainEqual({ name: "minecraft:stone" });
+  });
 });
