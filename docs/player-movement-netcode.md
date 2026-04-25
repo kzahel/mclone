@@ -361,10 +361,10 @@ Browser tests:
 
 Use the player movement/netcode arc in [`tactical/README.md`](./tactical/README.md) as the tactical index. Draft the next slice in detail only when the previous one has taught us enough.
 
-1. **[`Movement0: shared movement body and collision world`](./tactical/Movement0-shared-movement-body-and-collision.md)**
+1. **[`Movement0: shared movement body and collision world`](./tactical/Movement0-shared-movement-body-and-collision.md)** - landed
    - AABB body, velocity, grounded state, full-block collision, stepping, fixed-step simulation.
 
-2. **Movement1: command stream and local prediction**
+2. **Movement1: command stream and local prediction** - next
    - Sequenced commands, fixed command quanta, ring buffer, local replay predictor, deterministic unit tests.
 
 3. **Movement2: authoritative host integration**

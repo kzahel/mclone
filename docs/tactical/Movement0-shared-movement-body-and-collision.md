@@ -15,7 +15,16 @@ At the end of `Movement0`, `mclone` should have a fixed-step movement body that 
 
 ## Status
 
-Proposed. This is the first tactical to draft in detail for the player movement/netcode arc.
+Done. Landed as the first shared movement/collision foundation. The live protocol and browser control path are intentionally unchanged.
+
+## Implementation Status
+
+Landed shape:
+
+- `src/runtime/movement/` contains movement body, intent, params, collision-world adapter, fixed-step simulation, and a barrel export.
+- `src/world/phys/vec3.ts` and `src/world/phys/aabb.ts` now include the vanilla-shaped vector and box helpers needed by collision and movement.
+- `test/runtime/movement/movement-step.test.ts` covers grounded movement, gravity/landing, wall collision, edge grounding, jump-held behavior, low step-up, missing collision data, deterministic repeatability, and zero-`dt` no-op behavior.
+- The first collision scope is solid full-block AABBs only. Non-full block shapes, liquids, crouch resize, dynamic collision revisions, entity collision, command prediction, and protocol migration remain out of scope.
 
 ## Reference Source
 
@@ -190,6 +199,11 @@ Tests should prove:
 - no movement occurs from stale intent when no step is requested
 - full-block collisions stop the body without burying it in terrain
 - `onGround` changes only from vertical collision/grounding logic
+
+Landed validation:
+
+- `pnpm test -- test/runtime/movement/movement-step.test.ts`
+- `pnpm typecheck`
 
 ## Done When
 

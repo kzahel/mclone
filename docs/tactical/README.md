@@ -130,8 +130,8 @@ The arc should keep three concerns separate:
 
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
-| [`Movement0-shared-movement-body-and-collision.md`](Movement0-shared-movement-body-and-collision.md) | movement body, fixed-step core, full-block collision, step-up/grounding, vanilla source review | unit | **proposed** - first shared movement core; no prediction or protocol migration yet |
-| `Movement1-command-stream-and-local-prediction.md` | sequenced commands, command quanta, ring buffer predictor, replay tests | unit + runtime | sketch deterministic command timeline and local prediction |
+| [`Movement0-shared-movement-body-and-collision.md`](Movement0-shared-movement-body-and-collision.md) | movement body, fixed-step core, full-block collision, step-up/grounding, vanilla source review | unit | **done** - first shared movement core; no prediction or protocol migration yet |
+| `Movement1-command-stream-and-local-prediction.md` | sequenced commands, command quanta, ring buffer predictor, replay tests | unit + runtime | **next** - sketch deterministic command timeline and local prediction |
 | `Movement2-authoritative-host-command-integration.md` | host command queue, ack snapshots, `set_player_input` evolution, processing budgets | runtime + browser | sketch migration from simple player loop to command queue authority |
 | `Movement3-interpolation-and-correction-smoothing.md` | local correction offset, remote interpolation buffers, latency/jitter debug controls | unit + browser visual | sketch presentation smoothing without mutating simulation truth |
 | `Movement4-richer-collision-and-world-interaction.md` | non-full block shapes, crouch shape, liquid hooks, collision revisions | unit + browser | sketch expanded collision after the fixed-step core is stable |
