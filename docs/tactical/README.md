@@ -153,7 +153,7 @@ Every implementation slice in `ClientRuntime1+` must prove the browser still loa
 - `pnpm test:browser`
 - `git diff --check`
 
-`pnpm test:browser` is the required smoke gate for this arc. It boots two remote browser clients against the Node host, drives the normal host/client/render-world worker path, asserts loaded chunk counts, render-world ingestion, mesh build/completion, GPU upload counts, draw counts, and settled render queues, then writes `/tmp/mclone-browser-smoke.png`.
+`pnpm test:browser` is the required smoke gate for this arc. It boots both the worker integrated-server path and the remote Node-host path, drives the normal host/client/render-world worker flow, asserts loaded chunk counts, render-world ingestion, mesh build/completion, GPU upload counts, draw counts, authoritative player state, and settled render queues, then writes smoke screenshots under `/tmp`.
 
 Use stronger lanes when the touched boundary warrants them:
 

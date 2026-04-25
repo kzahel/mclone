@@ -70,7 +70,7 @@ Vanilla hydrates `ClientLevel` and `ClientChunkCache` from server packets, even 
 - `pnpm test:browser`
 - `git diff --check`
 
-`pnpm test:browser` is required because this slice changes the world-load and render-world hydration path. It boots two remote browser clients against the Node host, waits for chunks/meshes/GPU uploads, asserts a non-empty rendered world, and saves `/tmp/mclone-browser-smoke.png`.
+`pnpm test:browser` is required because this slice changes the world-load and render-world hydration path. It boots the worker integrated-server path and the remote Node-host path, waits for chunks/meshes/GPU uploads, asserts a non-empty rendered world, and saves smoke screenshots under `/tmp`.
 
 Run `pnpm test:browser:integration` if the change touches debug camera controls, authoritative player state, resize/backing-buffer behavior, chunk-interest movement, or update polling cadence. Run the smallest relevant `pnpm probe:browser -- test/browser/probes/<name>.probe.ts` only if the implementation changes rendered pixels, terrain appearance, camera framing, or mesh invalidation behavior.
 
