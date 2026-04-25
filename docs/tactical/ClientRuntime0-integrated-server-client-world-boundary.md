@@ -97,6 +97,76 @@ Implement or document enough to make the boundary concrete:
 | 8 | Migration notes | list exact follow-up slices needed to move existing code without breaking browser smoke, remote host smoke, lighting, liquids, or entity publication |
 | 9 | Clock vocabulary | define names and interfaces that keep world ticks, command quanta, snapshot cadence, transport cadence, and render frames separate |
 
+## Runtime Inventory
+
+Current code maps to the target ownership terms like this:
+
+| Current code | Target term | Boundary note |
+|---|---|---|
+| `GeneratedWorldHost` | shared authoritative host core | owns worldgen, persistence, liquid ticks, entity snapshots, light publication, session/player state, and pending host-to-client updates |
+| `generated-world-worker.ts` + `WorkerWorldTransport` | browser `IntegratedServer` adapter | browser singleplayer authority currently lives in a worker and speaks the same logical `WorldHost` messages as other transports |
+| `headless-generated-world-host.ts` + `generated-world-http-server.ts` | dedicated/headless host adapter | Node entry points reuse `createGeneratedWorldHostForRequest(...)`; remote HTTP is a transport adapter, not a separate authority model |
+| `WorldHost` | authoritative host protocol surface | open/create world, set chunk interest, accept player commands, and publish updates through logical records |
+| `TransportWorldClient`, `WorkerWorldClient`, `RemoteWorldClient` | current `ClientRuntime` implementation shape | owns protocol application, session/player/entity caches, polling, and chunk-update routing, but is still named after transport |
+| `ClientChunkCache` | current `ClientWorld` fact cache and render view | stores visible chunk snapshots, block/fluid states through block states, biome containers, light data, and render-level queries |
+| `render-world-worker.ts` | render-world/client-world derived worker | owns meshing input cache and produces derived render products; meshes remain outside collision truth |
+| `LocalWorldTransport`, `WorkerWorldTransport`, `RemoteWorldTransport` | transport adapters | carry logical records over direct calls, `postMessage`, or HTTP without owning gameplay semantics |
+| `runtime/movement/*` | paused prediction-service implementation parts | command clocks, command buffers, and predictor exist, but future client prediction must read bounded `ClientWorld` views |
+| lighting worker/client and liquid host code | host-owned simulation plus client-facing facts | authoritative outputs flow through chunk snapshots/deltas; no client fluid prediction is introduced here |
+
+## Naming Plan
+
+`ClientRuntime0` introduces facade names before moving boot flow:
+
+| Name | First implementation step |
+|---|---|
+| `IntegratedServer` | `src/runtime/host/integrated-server.ts` wraps any `WorldHost` and labels browser-singleplayer authority without changing the shared host core |
+| dedicated/headless host | `DedicatedServerHost` is a type alias for the same `WorldHost` protocol surface |
+| `ClientRuntime` | `src/runtime/client/client-runtime.ts` wraps existing `WorldClient` calls with owner-oriented method names |
+| `ClientWorld` | `src/runtime/client/client-world.ts` exposes a replica facade over current session/player/entity/chunk/light facts |
+| `PredictionService` | `src/runtime/client/prediction-service.ts` wraps the existing `PlayerMovementPredictor` behind client-world prediction views |
+| presentation state | `ClientRuntime.publishPresentationState()` returns session/player/entity/perf state without exposing host objects |
+
+This is intentionally a facade step. It does not yet replace the browser bootstrap, move chunk hydration, or make `ClientChunkCache` the final client-world implementation. It gives the next slice stable names to wire through existing code.
+
+## Boundary Contracts
+
+`IntegratedServer` and dedicated/headless hosts both implement `WorldHost`; the distinction is ownership and adapter placement. Browser singleplayer creates and owns an integrated host worker, while the Node path owns a headless host behind HTTP. Both keep the same authority core and message semantics.
+
+`ClientRuntime` owns session orchestration and protocol application. Its method names keep clocks visible:
+
+| Method | Clock or cadence |
+|---|---|
+| `setChunkInterest(...)` | client interest changes, currently view-shaped |
+| `sendPlayerCommand(...)` | player command clock |
+| `drainTransportUpdates()` | transport poll/push cadence |
+| `publishPresentationState()` | render/presentation sampling cadence |
+
+`ClientWorld` owns replica facts and exposes views:
+
+| View | Purpose |
+|---|---|
+| render view | transitional access to the current `ClientChunkCache` for render-world and meshing consumers |
+| prediction view | bounded `CollisionWorld` construction plus movement/collision revision facts |
+| revision facts | session, local-player, movement-physics, and collision revisions that future reconciliation can compare |
+
+`PredictionService` is deliberately smaller than a movement system. It advances or reconciles existing command replay against a `ClientWorldPredictionView`; it does not own worldgen, transport polling, render frames, NPC AI, or fluid prediction.
+
+## Architecture Divergence Review
+
+Vanilla Java starts an `IntegratedServer`, waits for readiness, opens a memory channel, and lets the normal client login path hydrate `ClientLevel` and `ClientChunkCache`. `mclone` keeps that ownership split but diverges in carriers: browser singleplayer uses workers and `postMessage`; remote play uses HTTP polling today; Node uses a headless process. The divergence is limited to runtime adapters and facade names. Simulation/content parity stays in the shared host core, and future parity work can still follow the vanilla host-to-client fact flow.
+
+## Migration Notes
+
+Follow-up slices should move one boundary at a time:
+
+1. `ClientRuntime1`: make `ClientWorld` the single hydration target for chunks, light, fluids, entities, revisions, and speculative overlays. Keep worker and remote clients on the same path.
+2. `ClientRuntime2`: make UI/render consume presentation state plus render-world mesh handles, not mutable host or raw client-world internals.
+3. `ClientRuntime3`: wire browser singleplayer bootstrap through the `IntegratedServer` facade and local transport naming.
+4. `ClientRuntime4`: prove remote HTTP clients use the same `ClientRuntime`/`ClientWorld` path as singleplayer.
+5. `ClientRuntime5`: attach prediction to explicit `ClientWorldPredictionView` collision/entity facts without changing movement physics.
+6. `ClientRuntime6`: add entity interpolation and NPC presentation hooks while keeping AI authority on the host.
+
 ## Do Not Add
 
 - new movement physics or correction smoothing

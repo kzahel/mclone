@@ -217,6 +217,14 @@ The presentation/UI thread owns input sampling, pointer lock, UI, GPU resources,
 
 The client runtime should never call worldgen directly.
 
+The first facade layer lives under `src/runtime/client/`:
+
+- `ClientRuntime` wraps the existing `WorldClient` protocol application with ownership-oriented names such as `setChunkInterest(...)`, `sendPlayerCommand(...)`, `drainTransportUpdates()`, and `publishPresentationState()`.
+- `ClientWorld` is the client-replica contract over visible chunk, light, entity, session, player, and revision facts.
+- `PredictionService` is the future command/replay/reconcile boundary over a bounded `ClientWorldPredictionView`.
+
+These facades are a naming and contract step over current code. They do not make `ClientChunkCache` final, and they do not add new movement physics, NPC AI, transport semantics, or fluid prediction.
+
 ### Client meshing workers
 
 Chunk meshing is renderer-adjacent CPU work, not authoritative gameplay.

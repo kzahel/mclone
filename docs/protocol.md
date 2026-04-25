@@ -18,6 +18,15 @@ Only the transport changes:
 
 The renderer should not get a special protocol bypass.
 
+The active client-runtime facade layer keeps this protocol split explicit:
+
+- `WorldHost` is the logical authority surface shared by integrated and dedicated hosts.
+- `IntegratedServer` is a browser-singleplayer facade over that same authority surface, not a new protocol.
+- `ClientRuntime` owns protocol application and transport polling/push draining.
+- `ClientWorld` owns hydrated replica facts and revision views.
+
+Transport adapters still decide only how records move. They do not decide host ticks, player command quanta, snapshot cadence, transport cadence, or render frames.
+
 ## Logical Messages Vs Wire Codecs
 
 Keep the message model separate from wire encoding.
