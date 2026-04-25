@@ -13,6 +13,23 @@ This document is a reference for future creature work. It is not a tactical slic
 - Preserve one logical entity lifecycle for browser singleplayer, remote clients, Node hosts, storage, and oracle tests.
 - Keep the first slice smaller than full Minecraft entity behavior: no dungeon spawners, monster rooms, raids, patrols, phantoms, villages, villagers, cats, wandering traders, structure-specific mobs, breeding, taming, combat AI, loot, equipment, or full pathfinding unless explicitly pulled into scope.
 
+## Current Status
+
+`Creatures0` landed the official-server generated-entity fixture path and the committed passive sheep fixture for seed `12345`, chunk `(-7, -15)`.
+
+`Entities0` landed the host-owned entity manager foundation that generated entities can enter through `EntityRuntime.addWorldGenChunkEntities(...)`.
+
+`Creatures1` now ports the generation-time passive path needed by that fixture:
+
+- `MobCategory`, minimal passive `EntityType` metadata, and sheep color data
+- biome `MobSpawnSettings` / `SpawnerData` for the current overworld passive tables
+- `SpawnPlacements` entries and passive animal spawn predicates
+- `NaturalSpawner.spawnMobsForChunkGeneration(...)`
+- `NoiseBasedChunkGenerator.spawnOriginalMobs(...)`
+- fixture-backed comparison that inserts generated mobs through the host-owned entity runtime
+
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, entity ticking behavior, AI/pathfinding, protocol snapshots, persistence adapters beyond the in-memory test storage, and rendering.
+
 ## Reference Source Map
 
 | Concern | Vanilla source |
@@ -69,6 +86,8 @@ During world generation, `ChunkStatus.SPAWN` calls `ChunkGenerator.spawnOriginal
 `spawnMobsForChunkGeneration(...)` only uses the biome's `MobCategory.CREATURE` list. It loops while `random.nextFloat() < biome.mobSettings.creatureGenerationProbability`, which defaults to `0.1`, chooses a weighted `SpawnerData`, picks the group count, then attempts nearby top-surface positions with `MobSpawnType.CHUNK_GENERATION`.
 
 This is not a feature/decorator in the block-placement sense, but it is generation content. It produces real entities stored with the chunk, not decorative block states.
+
+In `mclone`, this path is intentionally host-owned: `NaturalSpawner` emits `GeneratedMobEntity` records to a sink shaped like `addFreshEntityWithPassengers(...)`, and tests feed that sink into `EntityRuntime.addWorldGenChunkEntities(...)`. The renderer still receives no entity truth from this slice.
 
 ### Live Natural Spawning
 
@@ -357,8 +376,8 @@ A useful first creature slice is not "all mobs." Keep it narrow:
 
 1. Content tables: `MobCategory`, minimal `EntityType` records, `MobSpawnSettings.SpawnerData`, and the common overworld spawn settings needed for current biomes.
 2. Done in `Entities0`: host-owned entity records keyed by id/uuid and chunk section, with tracked vs ticking visibility.
-3. Next: generation original mobs, port `spawnOriginalMobs(...)` and `spawnMobsForChunkGeneration(...)` for `CREATURE` only; persist and snapshot simple passive entities through the host-owned entity manager.
-4. Next: passive spawn placement, `ON_GROUND`, grass-block, brightness, collision/AABB enough for sheep/cow/pig/chicken.
+3. Done in `Creatures1`: generation original mobs, `spawnOriginalMobs(...)`, `spawnMobsForChunkGeneration(...)` for `CREATURE` only, and passive spawn placement/collision rules enough for the committed sheep fixture.
+4. Next: integrate the entity runtime into the generated-world host lifecycle and publish simple generated-entity snapshots as data.
 5. Later: rendering follow-through, draw simple authoritative entity placeholders or first real models only after data/state parity exists.
 
 A second slice can add live natural spawning for `CREATURE`. A third can add common `MONSTER` spawning once stored lighting and entity ticking are credible, because hostile spawn rules depend on sky/block light and despawn behavior.

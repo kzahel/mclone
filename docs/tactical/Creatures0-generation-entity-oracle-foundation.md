@@ -210,7 +210,7 @@ The first implementation pass covers schema, entity-region decode, legacy/proto 
 
 ## Next
 
-`Creatures1` should port the generation-time passive spawning path against the `Creatures0` fixture:
+`Creatures1` is now [`Creatures1-generation-passive-spawning.md`](Creatures1-generation-passive-spawning.md). It ports the generation-time passive spawning path against the `Creatures0` fixture:
 
 - `MobCategory`
 - minimal `EntityType` metadata for first passive creatures
@@ -221,4 +221,4 @@ The first implementation pass covers schema, entity-region decode, legacy/proto 
 - `NaturalSpawner.spawnMobsForChunkGeneration(...)`
 - a minimal generation entity sink shaped like `WorldGenRegion.addFreshEntity(...)`
 
-Still defer live natural spawning, host entity ticking, AI, despawn, runtime protocol, and rendering until the generated-entity data path is correct.
+Still defer live natural spawning, host entity ticking, AI, despawn, runtime protocol, and rendering until the generated-entity data path is connected beyond tests.

@@ -17,7 +17,7 @@ This document is about entity lifecycle, storage, ticking, host ownership, persi
 - logical chunk entity storage with a memory adapter for tests
 - `EntityRuntime` host wrapper that owns the manager and tick list
 
-This is still deliberately pre-creature: no `NaturalSpawner`, spawn placement tables, AI, despawn, renderer path, or entity protocol consumption has landed.
+`Entities0` itself stayed pre-creature. `Creatures1` now feeds the runtime with generation-time passive entities through the host-owned worldgen entity sink; AI, despawn, renderer paths, persistence adapters, and entity protocol consumption are still deferred.
 
 ## Scope
 
@@ -350,4 +350,6 @@ For browser storage, the first adapter can store entity chunk records beside pac
 
 `Entities0` provides the host-owned runtime container that later creature slices can feed. It does not port `NaturalSpawner`.
 
-`Creatures1` can then port generation-time original mobs against `Creatures0` fixtures and insert them through an entity sink shaped like `ServerLevel.addWorldGenChunkEntities(...)`. Live natural spawning should come later, after entity ticking, lighting, chunk activity, mob caps, and despawn semantics have enough runtime support.
+`Creatures1` now ports generation-time original passive mobs against the `Creatures0` sheep fixture and inserts them through an entity sink shaped like `ServerLevel.addWorldGenChunkEntities(...)`. The generated records become normal host-owned entities in `PersistentEntitySectionManager`.
+
+Live natural spawning should come later, after entity ticking, lighting, chunk activity, mob caps, and despawn semantics have enough runtime support.

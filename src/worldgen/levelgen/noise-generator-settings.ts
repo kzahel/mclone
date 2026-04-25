@@ -13,6 +13,7 @@ export class NoiseGeneratorSettings {
     private readonly bedrockFloorPositionValue: number,
     private readonly seaLevelValue: number,
     private readonly minSurfaceLevelValue: number,
+    private readonly disableMobGenerationValue: boolean,
     private readonly aquifersEnabledValue: boolean,
     private readonly noiseCavesEnabledValue: boolean,
     private readonly deepslateEnabledValue: boolean,
@@ -68,6 +69,10 @@ export class NoiseGeneratorSettings {
     return this.noodleCavesEnabledValue;
   }
 
+  public disableMobGeneration(): boolean {
+    return this.disableMobGenerationValue;
+  }
+
   public static overworld(isAmplified = false): NoiseGeneratorSettings {
     return new NoiseGeneratorSettings(
       NoiseSettings.create(
@@ -91,6 +96,7 @@ export class NoiseGeneratorSettings {
       0,
       63,
       0,
+      false,
       false,
       false,
       false,

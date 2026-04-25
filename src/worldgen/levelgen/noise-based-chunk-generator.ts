@@ -26,6 +26,7 @@ import { GenerationStep } from "./generation-step.ts";
 import { NoiseModifier } from "./noise-modifier.ts";
 import { NoiseGeneratorSettings } from "./noise-generator-settings.ts";
 import { NoiseSampler } from "./noise-sampler.ts";
+import { NaturalSpawner, type GenerationEntitySink, type NaturalSpawnerOptions } from "./natural-spawner.ts";
 
 const SURFACE_NOISE_OCTAVES = [-3, -2, -1, 0] as const;
 const DEPTH_NOISE_OCTAVES = [-15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0] as const;
@@ -229,6 +230,25 @@ export class NoiseBasedChunkGenerator {
     const random = new WorldgenRandom();
     const decorationSeed = random.setDecorationSeed(this.seed, minBlockX, minBlockZ);
     biome.generate(this, level, decorationSeed, random, origin, profiler);
+  }
+
+  public spawnOriginalMobs(
+    level: WorldGenLevel,
+    chunkX: number,
+    chunkZ: number,
+    sink: GenerationEntitySink,
+    options?: NaturalSpawnerOptions,
+  ): void {
+    if (this.settings.disableMobGeneration()) {
+      return;
+    }
+
+    const minBlockX = chunkX * CHUNK_WIDTH;
+    const minBlockZ = chunkZ * CHUNK_WIDTH;
+    const biome = level.getBiome(new BlockPos(minBlockX, level.getMinBuildHeight(), minBlockZ));
+    const random = new WorldgenRandom();
+    random.setDecorationSeed(this.seed, minBlockX, minBlockZ);
+    NaturalSpawner.spawnMobsForChunkGeneration(level, biome, chunkX, chunkZ, random, sink, options);
   }
 
   public async applyBiomeDecorationCooperative(

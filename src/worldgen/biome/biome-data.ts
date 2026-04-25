@@ -1,5 +1,6 @@
 import { Biome, GrassColorModifier, TemperatureModifier, type BiomeDefinition } from "./biome";
 import { getOverworldBiomeGenerationSettings } from "./overworld-biome-generation-settings";
+import { getOverworldBiomeMobSpawnSettings } from "./overworld-biome-mob-spawn-settings";
 
 function visuals(
   id: number,
@@ -174,6 +175,7 @@ const ALL_OVERWORLD_LAYERED_BIOMES = ALL_OVERWORLD_LAYERED_BIOME_DEFINITIONS.map
       definition.grassColorModifier,
       definition.temperatureModifier,
       getOverworldBiomeGenerationSettings(definition.key),
+      getOverworldBiomeMobSpawnSettings(definition.key),
     ),
 );
 

@@ -1,5 +1,6 @@
 import type { NoiseBiome } from "./noise-biome";
 import { BiomeGenerationSettings } from "./biome-generation-settings";
+import { MobSpawnSettings } from "./mob-spawn-settings";
 import { clamp } from "../../util/mth";
 import { Registry } from "../../core/registry";
 import { ResourceLocation } from "../../core/resource-location";
@@ -68,6 +69,7 @@ export class Biome implements NoiseBiome {
     private readonly grassColorModifier: GrassColorModifier = GrassColorModifier.NONE,
     private readonly temperatureModifier: TemperatureModifier = TemperatureModifier.NONE,
     private readonly generationSettings: BiomeGenerationSettings = BiomeGenerationSettings.EMPTY,
+    private readonly mobSpawnSettings: MobSpawnSettings = MobSpawnSettings.EMPTY,
   ) {}
 
   public getId(): number {
@@ -192,6 +194,10 @@ export class Biome implements NoiseBiome {
 
   public getGenerationSettings(): BiomeGenerationSettings {
     return this.generationSettings;
+  }
+
+  public getMobSettings(): MobSpawnSettings {
+    return this.mobSpawnSettings;
   }
 
   public generate(
