@@ -87,6 +87,9 @@ export abstract class LayerLightSectionStorage<M extends DataLayerStorageMap<M>>
   }
 
   public setStoredLevel(pos: bigint, level: number): void {
+    const x = BlockPos.getX(pos);
+    const y = BlockPos.getY(pos);
+    const z = BlockPos.getZ(pos);
     const section = SectionPos.blockToSection(pos);
     if (!this.changedSections.has(section)) {
       this.changedSections.add(section);
@@ -99,16 +102,28 @@ export abstract class LayerLightSectionStorage<M extends DataLayerStorageMap<M>>
     }
 
     dataLayer.set(
-      SectionPos.sectionRelative(BlockPos.getX(pos)),
-      SectionPos.sectionRelative(BlockPos.getY(pos)),
-      SectionPos.sectionRelative(BlockPos.getZ(pos)),
+      SectionPos.sectionRelative(x),
+      SectionPos.sectionRelative(y),
+      SectionPos.sectionRelative(z),
       level,
     );
 
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dz = -1; dz <= 1; dz++) {
-          this.sectionsAffectedByLightUpdates.add(SectionPos.blockToSection(BlockPos.offset(pos, dx, dy, dz)));
+    const sectionX = SectionPos.blockToSectionCoord(x);
+    const sectionY = SectionPos.blockToSectionCoord(y);
+    const sectionZ = SectionPos.blockToSectionCoord(z);
+    const localX = SectionPos.sectionRelative(x);
+    const localY = SectionPos.sectionRelative(y);
+    const localZ = SectionPos.sectionRelative(z);
+    const minSectionX = localX === 0 ? sectionX - 1 : sectionX;
+    const maxSectionX = localX === 15 ? sectionX + 1 : sectionX;
+    const minSectionY = localY === 0 ? sectionY - 1 : sectionY;
+    const maxSectionY = localY === 15 ? sectionY + 1 : sectionY;
+    const minSectionZ = localZ === 0 ? sectionZ - 1 : sectionZ;
+    const maxSectionZ = localZ === 15 ? sectionZ + 1 : sectionZ;
+    for (let affectedX = minSectionX; affectedX <= maxSectionX; affectedX++) {
+      for (let affectedY = minSectionY; affectedY <= maxSectionY; affectedY++) {
+        for (let affectedZ = minSectionZ; affectedZ <= maxSectionZ; affectedZ++) {
+          this.sectionsAffectedByLightUpdates.add(SectionPos.asLong(affectedX, affectedY, affectedZ));
         }
       }
     }

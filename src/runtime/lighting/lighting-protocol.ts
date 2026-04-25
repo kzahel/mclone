@@ -104,6 +104,7 @@ export interface LightBlockChangeBatchCompleteResult {
 export interface LightPerformanceResult {
   readonly type: "light_performance";
   readonly commandType: LightingCommandType;
+  readonly commandCount?: number;
   readonly durationMs: number;
   readonly propagationSliceCount: number;
   readonly propagationTotalMs: number;
@@ -149,6 +150,8 @@ export interface LightingServicePerformanceCounters {
   readonly maxPendingResultsAfterPoll: number;
   readonly resultCount: number;
   readonly resultCountsByType: Readonly<Record<string, number>>;
+  readonly workerBatchCount: number;
+  readonly maxWorkerBatchSize: number;
   readonly workerCommandCount: number;
   readonly workerCommandCountsByType: Readonly<Record<string, number>>;
   readonly maxWorkerCommandDurationMs: number;

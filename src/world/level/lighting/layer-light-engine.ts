@@ -18,17 +18,15 @@ interface MutableInt {
   value: number;
 }
 
-function chunkKey(chunkX: number, chunkZ: number): string {
-  return `${chunkX},${chunkZ}`;
-}
-
 export abstract class LayerLightEngine<M extends DataLayerStorageMap<M>, S extends LayerLightSectionStorage<M>>
   extends DynamicGraphMinFixedPoint
   implements LayerLightEventListener, LightEngineStorageAccess {
   public readonly selfSource = LIGHT_SELF_SOURCE;
   private runningLightUpdates = false;
-  private readonly lastChunkPos: string[] = ["", ""];
+  private readonly lastChunkX: number[] = [Number.NaN, Number.NaN];
+  private readonly lastChunkZ: number[] = [Number.NaN, Number.NaN];
   private readonly lastChunk: Array<BlockGetter | null> = [null, null];
+  private readonly blockPosScratch = new BlockPos.MutableBlockPos();
 
   protected constructor(
     protected readonly chunkSource: LightChunkGetter,
@@ -47,24 +45,27 @@ export abstract class LayerLightEngine<M extends DataLayerStorageMap<M>, S exten
   }
 
   private getChunk(chunkX: number, chunkZ: number): BlockGetter | null {
-    const key = chunkKey(chunkX, chunkZ);
     for (let index = 0; index < 2; index++) {
-      if (key === this.lastChunkPos[index]) {
+      if (chunkX === this.lastChunkX[index] && chunkZ === this.lastChunkZ[index]) {
         return this.lastChunk[index] ?? null;
       }
     }
 
     const chunk = this.chunkSource.getChunkForLighting(chunkX, chunkZ);
-    this.lastChunkPos[1] = this.lastChunkPos[0]!;
+    this.lastChunkX[1] = this.lastChunkX[0]!;
+    this.lastChunkZ[1] = this.lastChunkZ[0]!;
     this.lastChunk[1] = this.lastChunk[0] ?? null;
-    this.lastChunkPos[0] = key;
+    this.lastChunkX[0] = chunkX;
+    this.lastChunkZ[0] = chunkZ;
     this.lastChunk[0] = chunk;
     return chunk;
   }
 
   private clearCache(): void {
-    this.lastChunkPos[0] = "invalid";
-    this.lastChunkPos[1] = "invalid";
+    this.lastChunkX[0] = Number.NaN;
+    this.lastChunkZ[0] = Number.NaN;
+    this.lastChunkX[1] = Number.NaN;
+    this.lastChunkZ[1] = Number.NaN;
     this.lastChunk[0] = null;
     this.lastChunk[1] = null;
   }
@@ -89,7 +90,11 @@ export abstract class LayerLightEngine<M extends DataLayerStorageMap<M>, S exten
       return undefined;
     }
 
-    const blockPos = BlockPos.of(pos);
+    const blockPos = this.blockPosScratch.set(
+      BlockPos.getX(pos),
+      BlockPos.getY(pos),
+      BlockPos.getZ(pos),
+    );
     const state = chunk.getBlockState(blockPos);
     if (opacity !== undefined) {
       opacity.value = state.getLightBlock(this.chunkSource.getLevel(), blockPos);

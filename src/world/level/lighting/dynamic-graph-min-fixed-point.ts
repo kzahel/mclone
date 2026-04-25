@@ -2,8 +2,53 @@ import { clamp } from "../../../util/mth";
 
 const NO_COMPUTED_LEVEL = 255;
 
+class LightUpdateQueue {
+  private readonly items: bigint[] = [];
+  private readonly queued = new Set<bigint>();
+  private head = 0;
+
+  public get size(): number {
+    return this.queued.size;
+  }
+
+  public add(pos: bigint): void {
+    if (this.queued.has(pos)) {
+      return;
+    }
+
+    this.queued.add(pos);
+    this.items.push(pos);
+  }
+
+  public delete(pos: bigint): void {
+    this.queued.delete(pos);
+  }
+
+  public shift(): bigint | undefined {
+    while (this.head < this.items.length) {
+      const pos = this.items[this.head++]!;
+      if (this.queued.delete(pos)) {
+        this.compactIfSparse();
+        return pos;
+      }
+    }
+
+    this.compactIfSparse();
+    return undefined;
+  }
+
+  private compactIfSparse(): void {
+    if (this.head < 4096 || this.head * 2 < this.items.length) {
+      return;
+    }
+
+    this.items.splice(0, this.head);
+    this.head = 0;
+  }
+}
+
 export abstract class DynamicGraphMinFixedPoint {
-  private readonly queues: Array<Set<bigint>>;
+  private readonly queues: LightUpdateQueue[];
   private readonly computedLevels = new Map<bigint, number>();
   private firstQueuedLevel: number;
   private workQueued = false;
@@ -13,7 +58,7 @@ export abstract class DynamicGraphMinFixedPoint {
       throw new Error("Level count must be < 254.");
     }
 
-    this.queues = Array.from({ length: levelCount }, () => new Set<bigint>());
+    this.queues = Array.from({ length: levelCount }, () => new LightUpdateQueue());
     this.firstQueuedLevel = levelCount;
   }
 
@@ -173,13 +218,12 @@ export abstract class DynamicGraphMinFixedPoint {
     while (this.firstQueuedLevel < this.levelCount && budget > 0) {
       budget--;
       const queue = this.queues[this.firstQueuedLevel]!;
-      const pos = queue.values().next().value as bigint | undefined;
+      const pos = queue.shift();
       if (pos === undefined) {
         this.checkFirstQueuedLevel(this.levelCount);
         continue;
       }
 
-      queue.delete(pos);
       const level = clamp(this.getLevel(pos), 0, this.levelCount - 1);
       if (queue.size === 0) {
         this.checkFirstQueuedLevel(this.levelCount);

@@ -138,6 +138,8 @@ export class LightingWorkerClient implements LightingService {
     maxPendingResultsAfterPoll: 0,
     resultCount: 0,
     resultCountsByType: {} as Record<string, number>,
+    workerBatchCount: 0,
+    maxWorkerBatchSize: 0,
     workerCommandCount: 0,
     workerCommandCountsByType: {} as Record<string, number>,
     maxWorkerCommandDurationMs: 0,
@@ -213,6 +215,8 @@ export class LightingWorkerClient implements LightingService {
       maxPendingResultsAfterPoll: this.performanceCounters.maxPendingResultsAfterPoll,
       resultCount: this.performanceCounters.resultCount,
       resultCountsByType: { ...this.performanceCounters.resultCountsByType },
+      workerBatchCount: this.performanceCounters.workerBatchCount,
+      maxWorkerBatchSize: this.performanceCounters.maxWorkerBatchSize,
       workerCommandCount: this.performanceCounters.workerCommandCount,
       workerCommandCountsByType: { ...this.performanceCounters.workerCommandCountsByType },
       maxWorkerCommandDurationMs: this.performanceCounters.maxWorkerCommandDurationMs,
@@ -274,8 +278,14 @@ export class LightingWorkerClient implements LightingService {
         continue;
       }
 
-      this.performanceCounters.workerCommandCount++;
-      incrementCount(this.performanceCounters.workerCommandCountsByType, result.commandType);
+      const commandCount = result.commandCount ?? 1;
+      this.performanceCounters.workerBatchCount++;
+      this.performanceCounters.maxWorkerBatchSize = Math.max(
+        this.performanceCounters.maxWorkerBatchSize,
+        commandCount,
+      );
+      this.performanceCounters.workerCommandCount += commandCount;
+      incrementCount(this.performanceCounters.workerCommandCountsByType, result.commandType, commandCount);
       this.performanceCounters.maxWorkerCommandDurationMs = Math.max(
         this.performanceCounters.maxWorkerCommandDurationMs,
         result.durationMs,

@@ -33,10 +33,15 @@ import {
   getGeneratedWorldViewChunkRadius,
 } from "../src/runtime/host/generated-world-host";
 import { createGeneratedWorldHostForRequest } from "../src/runtime/host/generated-world-host-factory";
+import { createNodeLightingService } from "../src/runtime/lighting/node-lighting-worker-client";
+import type { LightingServicePerformanceCounters } from "../src/runtime/lighting/lighting-protocol";
 import type {
   OpenWorldPreset,
   OpenWorldRequest,
+  WorldEngineLightingMode,
+  WorldEngineLiquidSimulationMode,
   WorldHostMessage,
+  WorldPerformanceSnapshot,
   WorldProgressMessage,
 } from "../src/runtime/protocol/world-messages";
 import type { BlockState } from "../src/world/level/block/state/block-state";
@@ -48,6 +53,8 @@ type HostMode = "sync" | "cooperative";
 interface CliOptions {
   readonly seed: bigint;
   readonly preset: OpenWorldPreset;
+  readonly lightingMode: WorldEngineLightingMode;
+  readonly liquidSimulationMode: WorldEngineLiquidSimulationMode;
   readonly centerChunkX: number;
   readonly centerChunkZ: number;
   readonly radius: number;
@@ -97,11 +104,14 @@ interface HostBenchmarkResult {
   readonly mode: HostMode;
   readonly phases: readonly PhaseResult[];
   readonly progress: readonly WorldProgressMessage[];
+  readonly performance?: WorldPerformanceSnapshot;
 }
 
 interface BenchmarkReport {
   readonly seed: string;
   readonly preset: OpenWorldPreset;
+  readonly lightingMode: WorldEngineLightingMode;
+  readonly liquidSimulationMode: WorldEngineLiquidSimulationMode;
   readonly centerChunkX: number;
   readonly centerChunkZ: number;
   readonly radius: number;
@@ -186,6 +196,8 @@ function parseHostModes(value: string): readonly HostMode[] {
 function parseCliOptions(argv: readonly string[]): CliOptions {
   let seed = 12345n;
   let preset: OpenWorldPreset = "default";
+  let lightingMode: WorldEngineLightingMode = "none";
+  let liquidSimulationMode: WorldEngineLiquidSimulationMode = "none";
   let centerChunkX = 0;
   let centerChunkZ = 0;
   let radius = 1;
@@ -222,6 +234,18 @@ function parseCliOptions(argv: readonly string[]): CliOptions {
         break;
       case "--preset":
         preset = parsePreset(value);
+        break;
+      case "--lighting-mode":
+        if (value !== "vanilla17" && value !== "none") {
+          throw new Error(`Unsupported lighting mode ${value}`);
+        }
+        lightingMode = value;
+        break;
+      case "--liquid-simulation-mode":
+        if (value !== "vanilla17" && value !== "none") {
+          throw new Error(`Unsupported liquid simulation mode ${value}`);
+        }
+        liquidSimulationMode = value;
         break;
       case "--center-chunk-x":
         centerChunkX = parseInteger("centerChunkX", value);
@@ -269,6 +293,8 @@ function parseCliOptions(argv: readonly string[]): CliOptions {
   return {
     seed,
     preset,
+    lightingMode,
+    liquidSimulationMode,
     centerChunkX,
     centerChunkZ,
     radius,
@@ -641,8 +667,8 @@ function createOpenWorldRequest(options: CliOptions): OpenWorldRequest {
     seed: options.seed,
     preset: options.preset,
     config: {
-      lightingMode: "none",
-      liquidSimulationMode: "none",
+      lightingMode: options.lightingMode,
+      liquidSimulationMode: options.liquidSimulationMode,
     },
   };
 }
@@ -666,20 +692,35 @@ function collectProgress(messages: readonly WorldHostMessage[], progress: WorldP
   }
 }
 
+function collectPerformance(messages: readonly WorldHostMessage[]): WorldPerformanceSnapshot | undefined {
+  let performance: WorldPerformanceSnapshot | undefined;
+  for (const message of messages) {
+    if (message.type === "world_perf") {
+      performance = message.performance;
+    }
+  }
+
+  return performance;
+}
+
 async function runHostBenchmark(options: CliOptions, mode: HostMode, expectedPublishChunks: number): Promise<HostBenchmarkResult> {
   const request = createOpenWorldRequest(options);
+  const lightingService = options.lightingMode === "vanilla17" ? createNodeLightingService() : undefined;
   const host = createGeneratedWorldHostForRequest(request, {
-    lightingMode: "none",
-    liquidSimulationMode: "none",
+    lightingMode: options.lightingMode,
+    liquidSimulationMode: options.liquidSimulationMode,
     chunkViewScheduling: mode === "cooperative" ? "cooperative" : "synchronous",
+    lightingService,
   });
   const phases: PhaseResult[] = [];
   const progress: WorldProgressMessage[] = [];
+  let latestPerformance: WorldPerformanceSnapshot | undefined;
 
   try {
     phases.push(await timePhase("open_world", undefined, async () => {
       const messages = await host.openWorld(request);
       throwOnWorldError(messages);
+      latestPerformance = collectPerformance(messages) ?? latestPerformance;
     }));
 
     const chunkViewRequest = {
@@ -695,6 +736,7 @@ async function runHostBenchmark(options: CliOptions, mode: HostMode, expectedPub
         const messages = await host.setChunkView(chunkViewRequest);
         throwOnWorldError(messages);
         collectProgress(messages, progress);
+        latestPerformance = collectPerformance(messages) ?? latestPerformance;
         publishedChunks += countSnapshots(messages);
       }, () => `${publishedChunks.toString()} chunk snapshots returned`));
     } else {
@@ -702,6 +744,7 @@ async function runHostBenchmark(options: CliOptions, mode: HostMode, expectedPub
         const messages = await host.setChunkView(chunkViewRequest);
         throwOnWorldError(messages);
         collectProgress(messages, progress);
+        latestPerformance = collectPerformance(messages) ?? latestPerformance;
         publishedChunks += countSnapshots(messages);
       }, () => `${publishedChunks.toString()} chunk snapshots returned in ack`));
 
@@ -721,6 +764,7 @@ async function runHostBenchmark(options: CliOptions, mode: HostMode, expectedPub
           });
           throwOnWorldError(messages);
           collectProgress(messages, progress);
+          latestPerformance = collectPerformance(messages) ?? latestPerformance;
           publishedChunks += countSnapshots(messages);
         }
       }, () => `${publishedChunks.toString()} chunk snapshots returned`));
@@ -736,6 +780,7 @@ async function runHostBenchmark(options: CliOptions, mode: HostMode, expectedPub
     mode,
     phases,
     progress,
+    performance: latestPerformance,
   };
 }
 
@@ -754,6 +799,8 @@ async function runBenchmark(options: CliOptions): Promise<BenchmarkReport> {
   return {
     seed: options.seed.toString(),
     preset: options.preset,
+    lightingMode: options.lightingMode,
+    liquidSimulationMode: options.liquidSimulationMode,
     centerChunkX: options.centerChunkX,
     centerChunkZ: options.centerChunkZ,
     radius: options.radius,
@@ -824,8 +871,41 @@ function summarizeProgress(progress: readonly WorldProgressMessage[]): string {
     .join("; ");
 }
 
+function formatCounts(counts: Readonly<Record<string, number>> | undefined): string {
+  if (counts === undefined) {
+    return "{}";
+  }
+
+  const entries = Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0]));
+  if (entries.length === 0) {
+    return "{}";
+  }
+
+  return entries.map(([key, value]) => `${key}=${value.toString()}`).join(", ");
+}
+
+function formatLightingCounters(counters: LightingServicePerformanceCounters | undefined): string {
+  if (counters === undefined) {
+    return "none";
+  }
+
+  return [
+    `requests ${counters.requestCount.toString()} [${formatCounts(counters.requestCountsByType)}]`,
+    `results ${counters.resultCount.toString()} [${formatCounts(counters.resultCountsByType)}]`,
+    `batches ${counters.workerBatchCount.toString()} max ${counters.maxWorkerBatchSize.toString()}`,
+    `worker ${counters.workerCommandCount.toString()} [${formatCounts(counters.workerCommandCountsByType)}]`,
+    `max command ${formatMs(counters.maxWorkerCommandDurationMs)}`,
+    `propagation ${formatMs(counters.propagationTotalMs)} across ${counters.propagationSliceCount.toString()} slices`,
+    `max slice ${formatMs(counters.maxPropagationSliceMs)}`,
+  ].join("; ");
+}
+
 function printReport(report: BenchmarkReport): void {
-  process.stdout.write(`worldgen phase baseline seed=${report.seed} preset=${report.preset} center=(${report.centerChunkX.toString()},${report.centerChunkZ.toString()}) radius=${report.radius.toString()}\n`);
+  process.stdout.write(
+    `worldgen phase baseline seed=${report.seed} preset=${report.preset} `
+    + `lighting=${report.lightingMode} liquid=${report.liquidSimulationMode} `
+    + `center=(${report.centerChunkX.toString()},${report.centerChunkZ.toString()}) radius=${report.radius.toString()}\n`,
+  );
   process.stdout.write(
     `windows: publish r=${report.window.publishRadius.toString()} (${report.window.publishChunkCount.toString()} chunks), `
     + `full r=${report.window.fullRadius.toString()} (${report.window.fullChunkCount.toString()}), `
@@ -846,6 +926,7 @@ function printReport(report: BenchmarkReport): void {
   for (const result of report.host) {
     printPhaseRows(`host:${result.mode}`, result.phases);
     process.stdout.write(`${"".padEnd(26)} progress: ${summarizeProgress(result.progress)}\n`);
+    process.stdout.write(`${"".padEnd(26)} lighting: ${formatLightingCounters(result.performance?.lighting)}\n`);
   }
 }
 

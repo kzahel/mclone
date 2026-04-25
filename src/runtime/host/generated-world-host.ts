@@ -23,6 +23,7 @@ import {
 import { GeneratedChunkStatus } from "../../world/level/generated-chunk-status";
 import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
 import type { LevelChunk } from "../../world/level/chunk/level-chunk";
+import { LEVEL_CHUNK_SECTION_SIZE } from "../../world/level/chunk/level-chunk-section";
 import { FullChunkStatus } from "../../world/level/entity/full-chunk-status";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
@@ -1467,6 +1468,11 @@ export class GeneratedWorldHost implements WorldHost {
         type: "poll_light_results",
         maxResults: LIGHTING_RESULT_BATCH_SIZE,
       });
+      if (batch.results.length === 0) {
+        await yieldToEventLoop();
+        continue;
+      }
+
       for (const result of batch.results) {
         switch (result.type) {
           case "chunk_light_ready": {
@@ -1598,26 +1604,13 @@ export class GeneratedWorldHost implements WorldHost {
 
   private buildLightInputSections(chunk: GeneratedLevelChunk): readonly { readonly y: number; readonly blockStateIds: Uint32Array }[] {
     const sections: Array<{ readonly y: number; readonly blockStateIds: Uint32Array }> = [];
-    const pos = new BlockPos.MutableBlockPos();
-    const chunkBlockX = SectionPos.sectionToBlockCoord(chunk.chunkX);
-    const chunkBlockZ = SectionPos.sectionToBlockCoord(chunk.chunkZ);
-    const minSection = this.level.getMinSection();
-    const sectionCount = this.level.getSectionsCount();
-    for (let sectionOffset = 0; sectionOffset < sectionCount; sectionOffset++) {
-      const sectionY = minSection + sectionOffset;
-      const sectionMinY = SectionPos.sectionToBlockCoord(sectionY);
-      const blockStateIds = new Uint32Array(16 * 16 * 16);
-      let index = 0;
-      for (let localY = 0; localY < 16; localY++) {
-        for (let localZ = 0; localZ < 16; localZ++) {
-          for (let localX = 0; localX < 16; localX++) {
-            pos.set(chunkBlockX + localX, sectionMinY + localY, chunkBlockZ + localZ);
-            blockStateIds[index++] = this.options.blockStateIds.idFor(chunk.getBlockState(pos));
-          }
-        }
+    for (const section of chunk.getStoredSections()) {
+      const blockStateIds = new Uint32Array(LEVEL_CHUNK_SECTION_SIZE);
+      for (let index = 0; index < LEVEL_CHUNK_SECTION_SIZE; index++) {
+        blockStateIds[index] = this.options.blockStateIds.idFor(section.getBlockStateByIndex(index));
       }
 
-      sections.push({ y: sectionY, blockStateIds });
+      sections.push({ y: section.sectionY, blockStateIds });
     }
 
     return sections;
@@ -1755,6 +1748,10 @@ export class GeneratedWorldHost implements WorldHost {
         type: "poll_light_results",
         maxResults: LIGHTING_RESULT_BATCH_SIZE,
       });
+      if (batch.results.length === 0) {
+        await yieldToEventLoop();
+        continue;
+      }
 
       for (const result of batch.results) {
         switch (result.type) {
@@ -1918,7 +1915,7 @@ export class GeneratedWorldHost implements WorldHost {
     };
   }
 
-  private tickPlayerLoop(nowMs = Date.now()): void {
+  private tickPlayerLoop(nowMs = this.nowMs()): void {
     if (this.playerState === undefined) {
       return;
     }

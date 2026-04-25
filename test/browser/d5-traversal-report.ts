@@ -391,6 +391,8 @@ export function diffLightingServicePerformanceCounters(
     maxPendingResultsAfterPoll: end.maxPendingResultsAfterPoll,
     resultCount: end.resultCount - start.resultCount,
     resultCountsByType: diffCountsByType(start.resultCountsByType, end.resultCountsByType),
+    workerBatchCount: end.workerBatchCount - start.workerBatchCount,
+    maxWorkerBatchSize: end.maxWorkerBatchSize,
     workerCommandCount: end.workerCommandCount - start.workerCommandCount,
     workerCommandCountsByType: diffCountsByType(start.workerCommandCountsByType, end.workerCommandCountsByType),
     maxWorkerCommandDurationMs: end.maxWorkerCommandDurationMs,

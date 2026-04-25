@@ -34,6 +34,7 @@ import { connectLightingWorkerSession, type LightingWorkerHostEndpoint } from ".
 
 const DEFAULT_MAX_QUEUED_COMMANDS = 1024;
 const DEFAULT_MAX_QUEUED_RESULTS = 1024;
+const PROPAGATION_UPDATE_BUDGET_PER_SLICE = 2048;
 
 export interface LightingWorkerHandlerOptions {
   readonly maxQueuedCommands?: number;
@@ -160,27 +161,29 @@ class LightingWorkerWorld {
       && this.level.getChunk(request.chunkX, request.chunkZ, false) !== null;
   }
 
-  public async computeInitialLight(
-    request: RequestInitialLightRequest,
+  public async computeInitialLightBatch(
+    requests: readonly RequestInitialLightRequest[],
     yieldStep: () => Promise<void>,
     metrics: LightingWorkerCommandMetrics,
-  ): Promise<ChunkLightReadyResult> {
-    const dependencies = [
-      { chunkX: request.chunkX, chunkZ: request.chunkZ },
-      ...request.neighbors.map((neighbor) => ({ chunkX: neighbor.chunkX, chunkZ: neighbor.chunkZ })),
-    ];
-    const chunks: LevelChunk[] = [];
-    for (const dependency of dependencies) {
-      const chunk = this.level.getChunk(dependency.chunkX, dependency.chunkZ, false);
-      if (chunk === null) {
-        throw new Error(`Missing light input chunk (${dependency.chunkX.toString()}, ${dependency.chunkZ.toString()})`);
-      }
+  ): Promise<readonly ChunkLightReadyResult[]> {
+    const chunksByKey = new Map<string, LevelChunk>();
+    for (const request of requests) {
+      const dependencies = [
+        { chunkX: request.chunkX, chunkZ: request.chunkZ },
+        ...request.neighbors.map((neighbor) => ({ chunkX: neighbor.chunkX, chunkZ: neighbor.chunkZ })),
+      ];
+      for (const dependency of dependencies) {
+        const chunk = this.level.getChunk(dependency.chunkX, dependency.chunkZ, false);
+        if (chunk === null) {
+          throw new Error(`Missing light input chunk (${dependency.chunkX.toString()}, ${dependency.chunkZ.toString()})`);
+        }
 
-      chunks.push(chunk);
+        chunksByKey.set(chunkKey(chunk.chunkX, chunk.chunkZ), chunk);
+      }
     }
 
     let queuedWork = false;
-    for (const chunk of chunks) {
+    for (const chunk of chunksByKey.values()) {
       await yieldStep();
       const key = chunkKey(chunk.chunkX, chunk.chunkZ);
       if (this.initializedChunks.has(key)) {
@@ -196,20 +199,25 @@ class LightingWorkerWorld {
       await this.runLightingUntilIdle(yieldStep, metrics);
     }
 
-    this.lightCorrectChunks.add(chunkKey(request.chunkX, request.chunkZ));
-    const center = this.level.getChunk(request.chunkX, request.chunkZ, false);
-    if (center === null) {
-      throw new Error(`Missing lit output chunk (${request.chunkX.toString()}, ${request.chunkZ.toString()})`);
+    const results: ChunkLightReadyResult[] = [];
+    for (const request of requests) {
+      this.lightCorrectChunks.add(chunkKey(request.chunkX, request.chunkZ));
+      const center = this.level.getChunk(request.chunkX, request.chunkZ, false);
+      if (center === null) {
+        throw new Error(`Missing lit output chunk (${request.chunkX.toString()}, ${request.chunkZ.toString()})`);
+      }
+
+      results.push({
+        type: "chunk_light_ready",
+        chunkViewRevision: request.chunkViewRevision,
+        chunkX: request.chunkX,
+        chunkZ: request.chunkZ,
+        chunkRevision: request.chunkRevision,
+        light: this.buildChunkLightSnapshot(center),
+      });
     }
 
-    return {
-      type: "chunk_light_ready",
-      chunkViewRevision: request.chunkViewRevision,
-      chunkX: request.chunkX,
-      chunkZ: request.chunkZ,
-      chunkRevision: request.chunkRevision,
-      light: this.buildChunkLightSnapshot(center),
-    };
+    return results;
   }
 
   public async applyBlockChanges(
@@ -247,7 +255,13 @@ class LightingWorkerWorld {
   }
 
   private hydrateChunk(request: UpsertLightChunkRequest): LevelChunk {
-    const chunk = new LevelChunk(request.chunkX, request.chunkZ, this.blocks.airState);
+    const chunk = new LevelChunk(
+      request.chunkX,
+      request.chunkZ,
+      this.blocks.airState,
+      this.level.getMinBuildHeight(),
+      this.level.getHeight(),
+    );
     const chunkBlockX = SectionPos.sectionToBlockCoord(request.chunkX);
     const chunkBlockZ = SectionPos.sectionToBlockCoord(request.chunkZ);
     const pos = new BlockPos.MutableBlockPos();
@@ -352,7 +366,7 @@ class LightingWorkerWorld {
       }
 
       const startedAtMs = nowMs();
-      this.lightEngine.runUpdates(262_144, true, true);
+      this.lightEngine.runUpdates(PROPAGATION_UPDATE_BUDGET_PER_SLICE, true, true);
       const durationMs = nowMs() - startedAtMs;
       metrics.propagationSliceCount++;
       metrics.propagationTotalMs += durationMs;
@@ -509,6 +523,9 @@ class LightingWorkerMailbox {
     try {
       while (this.queuedCommands.length > 0) {
         const command = this.queuedCommands.shift()!;
+        const commands = command.type === "request_initial_light"
+          ? [command, ...this.drainAdjacentInitialLightRequests()]
+          : [command];
         const startedAtMs = nowMs();
         const metrics: LightingWorkerCommandMetrics = {
           propagationSliceCount: 0,
@@ -516,12 +533,12 @@ class LightingWorkerMailbox {
           maxPropagationSliceMs: 0,
         };
         try {
-          await this.processCommand(command, metrics);
+          await this.processCommands(commands, metrics);
         } catch (error) {
           this.enqueueResult(lightError(error instanceof Error ? error.message : String(error)));
         } finally {
-          this.enqueuePerformanceResult(command.type, nowMs() - startedAtMs, metrics);
-          this.activeCommandCount--;
+          this.enqueuePerformanceResult(command.type, commands.length, nowMs() - startedAtMs, metrics);
+          this.activeCommandCount -= commands.length;
         }
 
         await yieldMailboxTurn();
@@ -535,6 +552,36 @@ class LightingWorkerMailbox {
         });
       }
     }
+  }
+
+  private drainAdjacentInitialLightRequests(): RequestInitialLightRequest[] {
+    const requests: RequestInitialLightRequest[] = [];
+    while (this.queuedCommands[0]?.type === "request_initial_light") {
+      requests.push(this.queuedCommands.shift() as RequestInitialLightRequest);
+    }
+
+    return requests;
+  }
+
+  private async processCommands(
+    commands: readonly LightingCommandRequest[],
+    metrics: LightingWorkerCommandMetrics,
+  ): Promise<void> {
+    if (commands.length === 0) {
+      return;
+    }
+
+    if (commands.length === 1) {
+      await this.processCommand(commands[0]!, metrics);
+      return;
+    }
+
+    const firstType = commands[0]!.type;
+    if (firstType !== "request_initial_light" || !commands.every((command) => command.type === firstType)) {
+      throw new Error(`Cannot batch mixed lighting command types starting with ${firstType}`);
+    }
+
+    await this.processInitialLightRequestBatch(commands as readonly RequestInitialLightRequest[], metrics);
   }
 
   private async processCommand(command: LightingCommandRequest, metrics: LightingWorkerCommandMetrics): Promise<void> {
@@ -556,7 +603,7 @@ class LightingWorkerMailbox {
         this.processRemoveChunk(command);
         break;
       case "request_initial_light":
-        await this.processInitialLightRequest(command, metrics);
+        await this.processInitialLightRequestBatch([command], metrics);
         break;
       case "block_light_update_batch":
         await this.processBlockLightUpdateBatch(command, metrics);
@@ -578,42 +625,53 @@ class LightingWorkerMailbox {
     }
   }
 
-  private async processInitialLightRequest(
-    command: RequestInitialLightRequest,
+  private async processInitialLightRequestBatch(
+    commands: readonly RequestInitialLightRequest[],
     metrics: LightingWorkerCommandMetrics,
   ): Promise<void> {
     const world = this.state.world;
     if (world === undefined) {
-      this.enqueueResult(lightError("request_initial_light received before configure_light_world", command));
+      for (const command of commands) {
+        this.enqueueResult(lightError("request_initial_light received before configure_light_world", command));
+      }
       return;
     }
 
-    const required = [
-      {
-        chunkX: command.chunkX,
-        chunkZ: command.chunkZ,
-        chunkRevision: command.chunkRevision,
-      },
-      ...command.neighbors,
-    ];
-    let ready = 0;
-    for (const dependency of required) {
-      if (world.hasChunkRevision(dependency, this.state.chunkRevisions)) {
-        ready++;
+    const readyCommands: RequestInitialLightRequest[] = [];
+    for (const command of commands) {
+      const required = [
+        {
+          chunkX: command.chunkX,
+          chunkZ: command.chunkZ,
+          chunkRevision: command.chunkRevision,
+        },
+        ...command.neighbors,
+      ];
+      let ready = 0;
+      for (const dependency of required) {
+        if (world.hasChunkRevision(dependency, this.state.chunkRevisions)) {
+          ready++;
+        }
+      }
+
+      this.enqueueResult(lightProgress(
+        ready === required.length ? "initial_light_ready_for_solver" : "initial_light_waiting_for_inputs",
+        ready,
+        required.length,
+        command,
+      ));
+      if (ready === required.length) {
+        readyCommands.push(command);
       }
     }
 
-    this.enqueueResult(lightProgress(
-      ready === required.length ? "initial_light_ready_for_solver" : "initial_light_waiting_for_inputs",
-      ready,
-      required.length,
-      command,
-    ));
-    if (ready !== required.length) {
+    if (readyCommands.length === 0) {
       return;
     }
 
-    this.enqueueResult(await world.computeInitialLight(command, yieldMailboxTurn, metrics));
+    for (const result of await world.computeInitialLightBatch(readyCommands, yieldMailboxTurn, metrics)) {
+      this.enqueueResult(result);
+    }
   }
 
   private async processBlockLightUpdateBatch(
@@ -665,12 +723,14 @@ class LightingWorkerMailbox {
 
   private enqueuePerformanceResult(
     commandType: LightingCommandType,
+    commandCount: number,
     durationMs: number,
     metrics: LightingWorkerCommandMetrics,
   ): void {
     this.enqueueResult({
       type: "light_performance",
       commandType,
+      commandCount,
       durationMs,
       propagationSliceCount: metrics.propagationSliceCount,
       propagationTotalMs: metrics.propagationTotalMs,

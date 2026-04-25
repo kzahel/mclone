@@ -16,6 +16,8 @@ function signum(value: number): number {
 }
 
 export class BlockLightEngine extends LayerLightEngine<BlockDataLayerStorageMap, BlockLightSectionStorage> {
+  private readonly emissionPosScratch = new BlockPos.MutableBlockPos();
+
   public constructor(chunkSource: LightChunkGetter) {
     super(chunkSource, LightLayer.BLOCK, new BlockLightSectionStorage(chunkSource));
   }
@@ -25,7 +27,7 @@ export class BlockLightEngine extends LayerLightEngine<BlockDataLayerStorageMap,
     const y = BlockPos.getY(pos);
     const z = BlockPos.getZ(pos);
     const chunk: BlockGetter | null = this.chunkSource.getChunkForLighting(SectionPos.blockToSectionCoord(x), SectionPos.blockToSectionCoord(z));
-    return chunk?.getBlockState(new BlockPos(x, y, z)).getLightEmission() ?? 0;
+    return chunk?.getBlockState(this.emissionPosScratch.set(x, y, z)).getLightEmission() ?? 0;
   }
 
   protected override computeLevelFromNeighbor(source: bigint, target: bigint, sourceLevel: number): number {
