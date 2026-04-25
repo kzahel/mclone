@@ -803,9 +803,22 @@ export class GeneratedWorldHost implements WorldHost {
     const lightingChunks = this.collectFullStatusChunksForCurrentView();
     let lightingDone = 0;
     let publishDone = 0;
+    let publishProgressStarted = false;
     this.enqueueWorldProgress("Computing light", lightingDone, lightingChunks.length, chunkViewJobRevision);
     const publishTotal = this.countUnpublishedChunksInCurrentPublishView();
-    this.enqueueWorldProgress("Publishing chunks", publishDone, publishTotal, chunkViewJobRevision);
+    const enqueueLightingProgress = (): void => {
+      if (!publishProgressStarted) {
+        this.enqueueWorldProgress("Computing light", lightingDone, lightingChunks.length, chunkViewJobRevision);
+      }
+    };
+    const enqueuePublishingProgress = (current: number, force = false): void => {
+      if (!force && current <= 0 && publishTotal > 0) {
+        return;
+      }
+
+      publishProgressStarted = true;
+      this.enqueueWorldProgress("Publishing chunks", current, publishTotal, chunkViewJobRevision);
+    };
     if (this.lightingService !== undefined && lightingChunks.length > 0) {
       this.options.mutateWorld?.(this.liquidLevel);
       await yieldStep();
@@ -817,13 +830,13 @@ export class GeneratedWorldHost implements WorldHost {
         isCancelled: () => !this.isCurrentChunkViewJob(chunkViewJobRevision),
         onInitialLightReady: async () => {
           lightingDone++;
-          this.enqueueWorldProgress("Computing light", lightingDone, lightingChunks.length, chunkViewJobRevision);
+          enqueueLightingProgress();
           publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep, {
             onChunkPublished: (publishedInPass) => {
-              this.enqueueWorldProgress("Publishing chunks", publishDone + publishedInPass, publishTotal, chunkViewJobRevision);
+              enqueuePublishingProgress(publishDone + publishedInPass);
             },
           });
-          this.enqueueWorldProgress("Publishing chunks", publishDone, publishTotal, chunkViewJobRevision);
+          enqueuePublishingProgress(publishDone);
         },
       });
       if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
@@ -842,12 +855,13 @@ export class GeneratedWorldHost implements WorldHost {
     }
     publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep, {
       onChunkPublished: (publishedInPass) => {
-        this.enqueueWorldProgress("Publishing chunks", publishDone + publishedInPass, publishTotal, chunkViewJobRevision);
+        enqueuePublishingProgress(publishDone + publishedInPass);
       },
     });
-    this.enqueueWorldProgress("Publishing chunks", publishDone, publishTotal, chunkViewJobRevision);
-    this.enqueueWorldProgress("Computing light", lightingChunks.length, lightingChunks.length, chunkViewJobRevision);
-    this.enqueueWorldProgress("Publishing chunks", publishTotal, publishTotal, chunkViewJobRevision);
+    enqueuePublishingProgress(publishDone);
+    lightingDone = lightingChunks.length;
+    enqueueLightingProgress();
+    enqueuePublishingProgress(publishTotal, true);
     this.enqueueDirtyLightDeltas();
   }
 
