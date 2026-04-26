@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { BlockPos } from "../../src/core/block-pos";
 import { Registry } from "../../src/core/registry";
 import { createGeneratedWorldHostForRequest } from "../../src/runtime/host/generated-world-host-factory";
+import type { ChunkSnapshotMessage } from "../../src/runtime/protocol/world-messages";
 import { createBlockStateResolver, hydrateChunkFromSnapshot } from "../../src/world/level/chunk-snapshot";
 import { unpackChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
@@ -34,7 +35,8 @@ describe("GeneratedWorldHost factory presets", () => {
     });
 
     const centerSnapshot = messages.find(
-      (message) => message.type === "chunk_snapshot" && message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0,
+      (message): message is ChunkSnapshotMessage =>
+        message.type === "chunk_snapshot" && message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0,
     );
 
     expect(centerSnapshot?.type).toBe("chunk_snapshot");
