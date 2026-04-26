@@ -3,6 +3,7 @@ import { Vec3 } from "../world/phys/vec3";
 import { ProgressScreen } from "../client/gui/screens/progress-screen";
 import { TitleScreen } from "../client/gui/screens/title-screen";
 import { OptionsScreen, type GuiOptionsState } from "../client/gui/screens/options-screen";
+import { DebugSettingsScreen, type GuiDebugSettingsState } from "../client/gui/screens/debug-settings-screen";
 import { ScreenManager } from "../client/gui/screen-manager";
 import { type CameraState } from "./game-renderer";
 import {
@@ -23,6 +24,12 @@ import {
 } from "./generated-world-boot";
 import type { GeneratedWorldSmokeScenarioResult } from "./generated-world-smoke-runner";
 import { progressFraction, type LoadingProgress, type LoadingProgressSink } from "./loading-progress";
+import {
+  readDebugSessionConfig,
+  writeStartLastWorld,
+  writeStoredDebugSessionConfig,
+  type DebugSessionConfig,
+} from "./debug/debug-session-config";
 import { BROWSER_RENDERER_HOST, type BrowserRendererHost } from "./renderer-host";
 import { GuiRenderer } from "./gui/gui-renderer";
 import { GuiOverlayHost } from "./gui/gui-overlay-host";
@@ -50,9 +57,9 @@ export interface GpuTitleBootResult {
 
 interface GpuGuiRuntimeState {
   ready: boolean;
-  mode: "title" | "options" | "loading" | "world" | "paused" | "error";
+  mode: "title" | "options" | "debug_settings" | "loading" | "world" | "paused" | "error";
   screenTitle: string;
-  lastAction?: "continue" | "start_world" | "options" | "options_done" | "back_to_game";
+  lastAction?: "continue" | "start_world" | "options" | "options_done" | "debug_settings" | "debug_settings_done" | "back_to_game";
   loadingStage?: string;
   loadingDetail?: string;
   loadingProgress?: number;
@@ -66,6 +73,7 @@ interface GpuGuiRuntimeState {
   cameraPitch?: number;
   loadedChunkCount?: number;
   options?: GuiOptionsState;
+  debugSettings?: GuiDebugSettingsState;
   error?: string;
   width: number;
   height: number;
@@ -173,6 +181,25 @@ function readGuiOptionsState(url: URL): GuiOptionsState {
   };
 }
 
+interface GuiDebugSettingsBundle {
+  debugSession: DebugSessionConfig;
+  debugSettings: GuiDebugSettingsState;
+}
+
+function readGuiDebugSettingsState(url: URL): GuiDebugSettingsBundle {
+  const storage = browserRenderConfigStorage();
+  const renderConfig = readBrowserRenderConfig(url, storage);
+  const debugSession = readDebugSessionConfig(url, storage);
+  return {
+    debugSession,
+    debugSettings: {
+      movementMode: debugSession.movementMode,
+      preset: debugSession.preset,
+      worldStorageMode: renderConfig.worldStorageMode,
+    },
+  };
+}
+
 function copyGuiOptionsState(options: GuiOptionsState): GuiOptionsState {
   return {
     viewDistance: options.viewDistance,
@@ -182,13 +209,30 @@ function copyGuiOptionsState(options: GuiOptionsState): GuiOptionsState {
   };
 }
 
-function persistGuiOptionsState(options: GuiOptionsState): void {
+function copyGuiDebugSettingsState(debugSettings: GuiDebugSettingsState): GuiDebugSettingsState {
+  return {
+    movementMode: debugSettings.movementMode,
+    preset: debugSettings.preset,
+    worldStorageMode: debugSettings.worldStorageMode,
+  };
+}
+
+function persistGuiSettingsState(
+  options: GuiOptionsState,
+  debugSession: DebugSessionConfig,
+  debugSettings: GuiDebugSettingsState,
+): void {
   const storage = browserRenderConfigStorage();
   if (storage === undefined) {
     return;
   }
   try {
-    writeStoredBrowserRenderConfig(storage, options);
+    writeStoredBrowserRenderConfig(storage, {
+      ...options,
+      worldStorageMode: debugSettings.worldStorageMode,
+    });
+    writeStoredDebugSessionConfig(storage, debugSession);
+    writeStartLastWorld(storage, debugSession);
   } catch {
     // WebGPU: localStorage may be unavailable in strict browser contexts; keep the in-memory GUI state usable.
   }
@@ -218,6 +262,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
   const size = GuiRenderer.calculateGuiSize(canvas.width, canvas.height);
   const screenManager = new ScreenManager(size.guiWidth, size.guiHeight);
   const optionsState = readGuiOptionsState(url);
+  const debugSettingsState = readGuiDebugSettingsState(url);
   const state: GpuGuiRuntimeState = {
     ready: false,
     mode: "title",
@@ -225,6 +270,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
     frameCount: 0,
     inputEventCount: 0,
     options: copyGuiOptionsState(optionsState),
+    debugSettings: copyGuiDebugSettingsState(debugSettingsState.debugSettings),
     width: size.guiWidth,
     height: size.guiHeight,
   };
@@ -279,9 +325,15 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
   };
 
   let startWorldPromise: Promise<BootResult> | undefined;
-  const onOptionsChanged = (): void => {
-    persistGuiOptionsState(optionsState);
+  const onSettingsChanged = (): void => {
+    debugSettingsState.debugSession = {
+      seed: debugSettingsState.debugSession.seed,
+      movementMode: debugSettingsState.debugSettings.movementMode,
+      preset: debugSettingsState.debugSettings.preset,
+    };
+    persistGuiSettingsState(optionsState, debugSettingsState.debugSession, debugSettingsState.debugSettings);
     state.options = copyGuiOptionsState(optionsState);
+    state.debugSettings = copyGuiDebugSettingsState(debugSettingsState.debugSettings);
   };
   const startWorld = (): void => {
     state.lastAction = "start_world";
@@ -305,7 +357,9 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
       screenManager,
       state,
       optionsState,
-      onOptionsChanged,
+      onOptionsChanged: onSettingsChanged,
+      debugSettingsState: debugSettingsState.debugSettings,
+      onDebugSettingsChanged: onSettingsChanged,
       renderGuiFrameNow,
     });
     controller.worldReady = startWorldPromise;
@@ -317,9 +371,23 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
     state.mode = "options";
     state.screenTitle = "options.title";
     screenManager.setScreen(new OptionsScreen(titleScreen, optionsState, {
-      onChanged: onOptionsChanged,
+      onChanged: onSettingsChanged,
       onDone: () => {
         state.lastAction = "options_done";
+        state.mode = "title";
+        state.screenTitle = "Title Screen";
+      },
+    }));
+    scheduleGuiFrame();
+  };
+  const openDebugSettings = (): void => {
+    state.lastAction = "debug_settings";
+    state.mode = "debug_settings";
+    state.screenTitle = "debug.settings.title";
+    screenManager.setScreen(new DebugSettingsScreen(titleScreen, debugSettingsState.debugSettings, {
+      onChanged: onSettingsChanged,
+      onDone: () => {
+        state.lastAction = "debug_settings_done";
         state.mode = "title";
         state.screenTitle = "Title Screen";
       },
@@ -332,6 +400,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
     },
     onStartWorld: startWorld,
     onOptions: openOptions,
+    onDebugSettings: openDebugSettings,
   });
   screenManager.setScreen(titleScreen);
   host = await GuiOverlayHost.create(device, canvas, screenManager);
@@ -360,6 +429,8 @@ interface StartGpuTitleWorldOptions {
   readonly state: GpuGuiRuntimeState;
   readonly optionsState: GuiOptionsState;
   readonly onOptionsChanged: () => void;
+  readonly debugSettingsState: GuiDebugSettingsState;
+  readonly onDebugSettingsChanged: () => void;
   readonly renderGuiFrameNow: () => void;
 }
 
@@ -407,6 +478,8 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<B
       state: options.state,
       optionsState: options.optionsState,
       onOptionsChanged: options.onOptionsChanged,
+      debugSettingsState: options.debugSettingsState,
+      onDebugSettingsChanged: options.onDebugSettingsChanged,
       onError: (message) => {
         options.state.mode = "error";
         options.state.error = message;

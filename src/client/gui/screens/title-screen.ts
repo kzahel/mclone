@@ -9,6 +9,8 @@ export interface TitleScreenActions {
   onStartWorld(): void;
 
   onOptions(): void;
+
+  onDebugSettings(): void;
 }
 
 export class TitleScreen extends Screen {
@@ -41,6 +43,10 @@ export class TitleScreen extends Screen {
     this.addRenderableWidget(new Button(this.width / 2 - 100, top + (spacing * 2), 200, 20, "Options", this.getFont(), () => {
       this.statusMessage = "Options selected";
       this.actions.onOptions();
+    }));
+    this.addRenderableWidget(new Button(this.width / 2 - 100, top + (spacing * 3), 200, 20, "Debug Settings", this.getFont(), () => {
+      this.statusMessage = "Debug Settings selected";
+      this.actions.onDebugSettings();
     }));
   }
 

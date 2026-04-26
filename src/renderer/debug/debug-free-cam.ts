@@ -2,7 +2,7 @@
 
 import { SectionPos } from "../../core/section-pos";
 import { DEFAULT_MOVEMENT_PHYSICS, MovementCommandClock } from "../../runtime/movement";
-import type { OpenWorldPreset, PlayerInputCommand, SetChunkViewRequest, WorldPerformanceSnapshot } from "../../runtime/protocol/world-messages";
+import type { PlayerInputCommand, SetChunkViewRequest, WorldPerformanceSnapshot } from "../../runtime/protocol/world-messages";
 import {
   PLAYER_COLLISION_REVISION,
   PLAYER_COMMAND_QUANTUM_US,
@@ -41,6 +41,16 @@ import { progressFraction } from "../loading-progress";
 import { advanceTextureAtlasAnimations } from "../texture/texture-atlas";
 import { DebugInput } from "./debug-input";
 import {
+  DEBUG_SESSION_CONFIG_QUERY_KEYS,
+  clearStoredDebugSessionConfig,
+  parseSeedValue,
+  readDebugSessionConfig,
+  writeStartLastWorld,
+  writeStoredDebugSessionConfig,
+  type DebugMovementMode,
+  type DebugSessionConfig,
+} from "./debug-session-config";
+import {
   applyPredictedCameraInput,
   buildFreeCameraInputCommand,
   buildPlayerInputCommand,
@@ -54,12 +64,6 @@ import {
   type DebugInjectedInput,
 } from "./debug-player-controls";
 
-const DEFAULT_SEED = 12_345n;
-const DEFAULT_PRESET: OpenWorldPreset = "browser_smoke";
-const DEFAULT_MOVEMENT_MODE: DebugMovementMode = "player";
-const DEBUG_SESSION_CONFIG_STORAGE_KEY = "mclone.debug.sessionConfig.v1";
-const START_LAST_WORLD_STORAGE_KEY = "mclone.start.lastWorld.v1";
-const DEBUG_SESSION_CONFIG_QUERY_KEYS = ["seed", "movementMode", "preset"] as const;
 const LIGHT_TICK_INTERVAL_MS = 1000.0;
 const WORLD_POLL_INTERVAL_MS = 50.0;
 
@@ -67,20 +71,12 @@ const DEFAULT_INITIAL_POSITION = new Vec3(8.5, 104.0, 40.5);
 const DEFAULT_INITIAL_X_ROT = 30.0;
 const DEFAULT_INITIAL_Y_ROT = 180.0;
 
-type DebugMovementMode = "player" | "freecam";
-
-interface DebugSessionConfig {
-  readonly seed: bigint;
-  readonly movementMode: DebugMovementMode;
-  readonly preset: OpenWorldPreset;
-}
-
 interface DebugRuntimeState {
   ready: boolean;
   readonly worldTransport: "worker" | "remote";
   seed: string;
   movementMode: DebugMovementMode;
-  preset: OpenWorldPreset;
+  preset: DebugSessionConfig["preset"];
   saveId?: string;
   sessionId?: string;
   playerId?: string;
@@ -134,104 +130,6 @@ function readWorldTransport(): {
   }
 
   return { worldTransport: "worker" };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function parseSeedValue(value: string | null | undefined, fallback: bigint): bigint {
-  if (value === null || value === undefined || value.trim() === "") {
-    return fallback;
-  }
-
-  try {
-    return BigInt(value.trim());
-  } catch {
-    return fallback;
-  }
-}
-
-function parseMovementMode(value: unknown, fallback: DebugMovementMode): DebugMovementMode {
-  return value === "player" || value === "freecam" ? value : fallback;
-}
-
-function parsePreset(value: unknown, fallback: OpenWorldPreset): OpenWorldPreset {
-  return value === "default" || value === "browser_smoke" || value === "flat_grass" || value === "small_island" ? value : fallback;
-}
-
-function readStoredDebugSessionConfig(
-  storage: Pick<Storage, "getItem"> | undefined,
-): Partial<DebugSessionConfig> {
-  if (storage === undefined) {
-    return {};
-  }
-
-  try {
-    const raw = storage.getItem(DEBUG_SESSION_CONFIG_STORAGE_KEY);
-    if (raw === null) {
-      return {};
-    }
-
-    const parsed = JSON.parse(raw) as unknown;
-    if (!isRecord(parsed)) {
-      return {};
-    }
-
-    const movementMode = parsed.movementMode === "player" || parsed.movementMode === "freecam"
-      ? parsed.movementMode
-      : undefined;
-    const preset = parsed.preset === "default" || parsed.preset === "browser_smoke"
-      || parsed.preset === "flat_grass" || parsed.preset === "small_island"
-      ? parsed.preset
-      : undefined;
-    return {
-      seed: typeof parsed.seed === "string" ? parseSeedValue(parsed.seed, DEFAULT_SEED) : undefined,
-      movementMode,
-      preset,
-    };
-  } catch {
-    return {};
-  }
-}
-
-function readDebugSessionConfig(url: URL, storage?: Pick<Storage, "getItem">): DebugSessionConfig {
-  const stored = readStoredDebugSessionConfig(storage);
-  const storedSeed = stored.seed ?? DEFAULT_SEED;
-  const storedMovementMode = stored.movementMode ?? DEFAULT_MOVEMENT_MODE;
-  const storedPreset = stored.preset ?? DEFAULT_PRESET;
-  return {
-    seed: parseSeedValue(url.searchParams.get("seed"), storedSeed),
-    movementMode: parseMovementMode(url.searchParams.get("movementMode"), storedMovementMode),
-    preset: parsePreset(url.searchParams.get("preset"), storedPreset),
-  };
-}
-
-function writeStoredDebugSessionConfig(
-  storage: Pick<Storage, "setItem">,
-  config: DebugSessionConfig,
-): void {
-  storage.setItem(DEBUG_SESSION_CONFIG_STORAGE_KEY, JSON.stringify({
-    seed: config.seed.toString(),
-    movementMode: config.movementMode,
-    preset: config.preset,
-  }));
-}
-
-function writeStartLastWorld(
-  storage: Pick<Storage, "setItem">,
-  config: DebugSessionConfig,
-): void {
-  storage.setItem(START_LAST_WORLD_STORAGE_KEY, JSON.stringify({
-    seed: config.seed.toString(),
-    movementMode: config.movementMode,
-    preset: config.preset,
-    lastOpenedAtMs: Date.now(),
-  }));
-}
-
-function clearStoredDebugSessionConfig(storage: Pick<Storage, "removeItem">): void {
-  storage.removeItem(DEBUG_SESSION_CONFIG_STORAGE_KEY);
 }
 
 function readInitialCamera(): {

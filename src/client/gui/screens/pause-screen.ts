@@ -8,6 +8,8 @@ export interface PauseScreenActions {
 
   onOptions?(): void;
 
+  onDebugSettings?(): void;
+
   onDisconnect?(): void;
 }
 
@@ -56,10 +58,13 @@ export class PauseScreen extends Screen {
       }),
     );
     optionsButton.active = this.actions.onOptions !== undefined;
-    const lanButton = this.addRenderableWidget(
-      new Button(centerX + 4, baseY + 96 + rowOffset, 98, 20, "Open to LAN", this.getFont(), () => {}),
+    // WebGPU: development-only debug settings occupy the unavailable LAN slot until LAN flow exists.
+    const debugSettingsButton = this.addRenderableWidget(
+      new Button(centerX + 4, baseY + 96 + rowOffset, 98, 20, "Debug Settings", this.getFont(), () => {
+        this.actions.onDebugSettings?.();
+      }),
     );
-    lanButton.active = false;
+    debugSettingsButton.active = this.actions.onDebugSettings !== undefined;
     const disconnectButton = this.addRenderableWidget(
       new Button(centerX - 102, baseY + 120 + rowOffset, 204, 20, "Save and Quit to Title", this.getFont(), () => {
         this.actions.onDisconnect?.();

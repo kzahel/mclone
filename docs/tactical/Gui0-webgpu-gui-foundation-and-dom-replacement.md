@@ -8,7 +8,8 @@ Current implementation state:
 - The opt-in GPU title flow can show title, loading progress, and a live generated world.
 - `Esc` opens a minimal GPU-rendered `PauseScreen` over the live world; Back to Game closes it and gameplay input resumes.
 - A minimal GPU-rendered `OptionsScreen` is reachable from title and pause, with sliders/cycle/checkbox controls for browser render settings.
-- Debug settings, quit-to-title, and the remaining visible DOM deletion remain later slices.
+- A minimal GPU-rendered `DebugSettingsScreen` is reachable from title and pause, sharing the existing debug session storage keys.
+- Quit-to-title and the remaining visible DOM deletion remain later slices.
 
 Durable architecture: [`../gui.md`](../gui.md).
 

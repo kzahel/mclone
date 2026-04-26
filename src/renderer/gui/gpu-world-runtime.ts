@@ -1,5 +1,6 @@
 import type { SetChunkViewRequest } from "../../runtime/protocol/world-messages";
 import type { ScreenManager } from "../../client/gui/screen-manager";
+import { DebugSettingsScreen, type GuiDebugSettingsState } from "../../client/gui/screens/debug-settings-screen";
 import { OptionsScreen, type GuiOptionsState } from "../../client/gui/screens/options-screen";
 import { PauseScreen } from "../../client/gui/screens/pause-screen";
 import {
@@ -55,6 +56,8 @@ export interface GpuWorldRuntimeOptions {
   readonly state: GpuWorldRuntimeState;
   readonly optionsState: GuiOptionsState;
   readonly onOptionsChanged: () => void;
+  readonly debugSettingsState: GuiDebugSettingsState;
+  readonly onDebugSettingsChanged: () => void;
   readonly onError?: (message: string) => void;
 }
 
@@ -242,6 +245,9 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
       onOptions: () => {
         this.openOptionsScreen(pauseScreen);
       },
+      onDebugSettings: () => {
+        this.openDebugSettingsScreen(pauseScreen);
+      },
     });
     this.options.screenManager.setScreen(pauseScreen);
     this.updateState();
@@ -256,6 +262,21 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
       },
       onDone: () => {
         this.options.state.lastAction = "options_done";
+        this.updateState();
+      },
+    }));
+    this.updateState();
+  }
+
+  private openDebugSettingsScreen(lastScreen: PauseScreen): void {
+    this.options.state.lastAction = "debug_settings";
+    this.options.screenManager.setScreen(new DebugSettingsScreen(lastScreen, this.options.debugSettingsState, {
+      onChanged: () => {
+        this.options.onDebugSettingsChanged();
+        this.updateState();
+      },
+      onDone: () => {
+        this.options.state.lastAction = "debug_settings_done";
         this.updateState();
       },
     }));

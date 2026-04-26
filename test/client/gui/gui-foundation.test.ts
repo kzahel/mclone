@@ -6,6 +6,7 @@ import { ScreenManager } from "../../../src/client/gui/screen-manager";
 import { ProgressScreen } from "../../../src/client/gui/screens/progress-screen";
 import { PauseScreen } from "../../../src/client/gui/screens/pause-screen";
 import { OptionsScreen, type GuiOptionsState } from "../../../src/client/gui/screens/options-screen";
+import { DebugSettingsScreen, type GuiDebugSettingsState } from "../../../src/client/gui/screens/debug-settings-screen";
 import { Screen } from "../../../src/client/gui/screens/screen";
 import { TitleScreen } from "../../../src/client/gui/screens/title-screen";
 import { GuiDrawList } from "../../../src/renderer/gui/gui-draw-list";
@@ -58,6 +59,7 @@ describe("Gui0 model foundation", () => {
       onContinue: () => actions.push("continue"),
       onStartWorld: () => actions.push("start_world"),
       onOptions: () => actions.push("options"),
+      onDebugSettings: () => actions.push("debug_settings"),
     }));
 
     const drawList = new GuiDrawList();
@@ -110,6 +112,7 @@ describe("Gui0 model foundation", () => {
       onContinue: () => {},
       onStartWorld: () => {},
       onOptions: () => {},
+      onDebugSettings: () => {},
     });
     const options: GuiOptionsState = {
       viewDistance: 6,
@@ -162,6 +165,43 @@ describe("Gui0 model foundation", () => {
     expect(manager.currentScreen?.getTitle()).toBe("options.title");
     expect(manager.mouseClicked(160, 146, 0)).toBe(true);
     expect(manager.currentScreen).toBe(pauseScreen);
+  });
+
+  it("edits debug settings with GPU cycle buttons", () => {
+    const manager = new ScreenManager(320, 240);
+    const titleScreen = new TitleScreen({
+      onContinue: () => {},
+      onStartWorld: () => {},
+      onOptions: () => {},
+      onDebugSettings: () => {},
+    });
+    const settings: GuiDebugSettingsState = {
+      movementMode: "player",
+      preset: "browser_smoke",
+      worldStorageMode: "default",
+    };
+    let changedState: GuiDebugSettingsState | undefined;
+    let done = false;
+    manager.setScreen(new DebugSettingsScreen(titleScreen, settings, {
+      onChanged: (state) => {
+        changedState = { ...state };
+      },
+      onDone: () => {
+        done = true;
+      },
+    }));
+
+    expect(manager.currentScreen?.getTitle()).toBe("debug.settings.title");
+    expect(manager.mouseClicked(80, 38, 0)).toBe(true);
+    expect(settings.movementMode).toBe("freecam");
+    expect(manager.mouseClicked(240, 38, 0)).toBe(true);
+    expect(settings.preset).toBe("default");
+    expect(manager.mouseClicked(80, 62, 0)).toBe(true);
+    expect(settings.worldStorageMode).toBe("none");
+    expect(manager.mouseClicked(160, 146, 0)).toBe(true);
+    expect(done).toBe(true);
+    expect(changedState).toEqual(settings);
+    expect(manager.currentScreen).toBe(titleScreen);
   });
 });
 

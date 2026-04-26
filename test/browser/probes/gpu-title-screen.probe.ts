@@ -3,10 +3,11 @@ import type { GpuTitleBootResult } from "../../../src/renderer/main";
 
 const GPU_TITLE_SCREENSHOT_PATH = "/tmp/mclone-gpu-root-title-screen.png";
 const GPU_OPTIONS_SCREENSHOT_PATH = "/tmp/mclone-gpu-root-options-screen.png";
+const GPU_DEBUG_SETTINGS_SCREENSHOT_PATH = "/tmp/mclone-gpu-root-debug-settings.png";
 
 interface GpuGuiState {
   readonly ready: boolean;
-  readonly mode: "title" | "options";
+  readonly mode: "title" | "options" | "debug_settings";
   readonly screenTitle: string;
   readonly lastAction?: string;
   readonly width: number;
@@ -16,6 +17,11 @@ interface GpuGuiState {
     readonly renderDistance: number;
     readonly lightingMode: string;
     readonly liquidSimulationMode: string;
+  };
+  readonly debugSettings?: {
+    readonly movementMode: string;
+    readonly preset: string;
+    readonly worldStorageMode: string;
   };
 }
 
@@ -49,4 +55,19 @@ test("captures the root GPU title screen and routes button clicks without visibl
   await page.waitForFunction(() => window.__mcloneGui?.state.mode === "title");
   const titleState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
   expect(titleState.lastAction).toBe("options_done");
+
+  const debugSettingsCenterY = (Math.floor(titleState.height / 4) + 48 + (24 * 3) + 10) / titleState.height;
+  await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * debugSettingsCenterY));
+  await page.waitForFunction(() => window.__mcloneGui?.state.mode === "debug_settings");
+  const debugState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  expect(debugState.screenTitle).toBe("debug.settings.title");
+  expect(debugState.lastAction).toBe("debug_settings");
+  expect(debugState.debugSettings).toBeDefined();
+  await page.locator("#renderer").screenshot({ path: GPU_DEBUG_SETTINGS_SCREENSHOT_PATH });
+
+  const debugDoneCenterY = (Math.min(debugState.height - 28, (Math.floor(debugState.height / 6) - 12) + (24 * 4) + 12) + 10) / debugState.height;
+  await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * debugDoneCenterY));
+  await page.waitForFunction(() => window.__mcloneGui?.state.mode === "title");
+  const finalTitleState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  expect(finalTitleState.lastAction).toBe("debug_settings_done");
 });
