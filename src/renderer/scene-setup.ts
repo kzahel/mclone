@@ -4,7 +4,7 @@ import { type ClientRuntime, WorldClientRuntimeFacade } from "../runtime/client/
 import { createBrowserIntegratedServer } from "../runtime/host/browser-integrated-server";
 import type { OpenWorldPreset, WorldEngineConfig, WorldProgressMessage, WorldStorageMode } from "../runtime/protocol/world-messages";
 import type { WorldSaveMetadata } from "../runtime/storage/world-storage";
-import { RemoteWorldClient, RemoteWorldTransport } from "../runtime/transport/remote-world-transport";
+import { RemoteWorldClient, RemoteWorldWebSocketTransport } from "../runtime/transport/remote-world-transport";
 import { TransportWorldClient } from "../runtime/transport/local-world-transport";
 import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
 import { ChunkBlockId } from "../worldgen/chunk/chunk-block-buffer";
@@ -247,7 +247,7 @@ function createWorldClient(
 
   if (options.worldTransport === "remote") {
     return new RemoteWorldClient(
-      new RemoteWorldTransport(options.remoteWorldHostUrl ?? "http://127.0.0.1:4173"),
+      new RemoteWorldWebSocketTransport(options.remoteWorldHostUrl ?? "http://127.0.0.1:4173"),
       levelFactory,
       {
         worldProgressSink: (progress) => reportWorldProgress(options.onProgress, progress),

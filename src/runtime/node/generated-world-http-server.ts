@@ -1,9 +1,10 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
+import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { applyPackedChunkLightDeltaToSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 import { createGeneratedWorldHostForRequest } from "../host/generated-world-host-factory";
@@ -11,8 +12,6 @@ import { createNodeLightingService } from "../lighting/node-lighting-worker-clie
 import { createGeneratedWorldSaveId, getGeneratedWorldViewChunkRadius } from "../host/generated-world-host";
 import type { WorldHost } from "../protocol/world-host";
 import {
-  deserializeWorldClientMessage,
-  serializeWorldHostMessages,
   WORLD_HTTP_PROTOCOL_VERSION,
   type OpenWorldSessionRequest,
   type OpenWorldSessionResponse,
@@ -25,6 +24,14 @@ import {
   type WorldHttpErrorCode,
   type WorldHttpErrorResponse,
 } from "../protocol/world-http-protocol";
+import {
+  deserializeWorldClientMessage,
+  serializeWorldHostMessages,
+  WORLD_REMOTE_PROTOCOL_VERSION,
+  type WorldRemoteErrorCode,
+  type WorldSocketClientFrame,
+  type WorldSocketServerFrame,
+} from "../protocol/world-wire-protocol";
 import { drainWorldHostMessages } from "../protocol/world-message-queue";
 import {
   isDefaultWorldEngineConfig,
@@ -509,8 +516,15 @@ export class GeneratedWorldRemoteService {
   }
 
   public async openWorld(request: OpenWorldRequest, resumeSessionId?: string): Promise<OpenWorldSessionResponse> {
+    return {
+      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+      messages: serializeWorldHostMessages(await this.openWorldMessages(request, resumeSessionId)),
+    };
+  }
+
+  public async openWorldMessages(request: OpenWorldRequest, resumeSessionId?: string): Promise<readonly WorldHostMessage[]> {
     if (resumeSessionId !== undefined) {
-      return await this.resumeWorld(request, resumeSessionId);
+      return await this.resumeWorldMessages(request, resumeSessionId);
     }
 
     const world = await this.getOrCreateWorld(request);
@@ -530,17 +544,21 @@ export class GeneratedWorldRemoteService {
     };
     this.sessions.set(sessionId, session);
     world.sessionIds.add(sessionId);
-    return {
-      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
-      messages: serializeWorldHostMessages([
-        world.worldOpened,
-        createSessionStateMessage(session, world, false),
-        createPlayerStateMessage(session),
-      ]),
-    };
+    return [
+      world.worldOpened,
+      createSessionStateMessage(session, world, false),
+      createPlayerStateMessage(session),
+    ];
   }
 
   public async setChunkView(sessionId: string, request: SetChunkViewRequest): Promise<SessionChunkViewResponse> {
+    return {
+      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+      messages: serializeWorldHostMessages(await this.setChunkViewMessages(sessionId, request)),
+    };
+  }
+
+  public async setChunkViewMessages(sessionId: string, request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]> {
     const session = this.sessions.get(sessionId);
     if (session === undefined) {
       throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
@@ -616,14 +634,18 @@ export class GeneratedWorldRemoteService {
       }
 
       queuedSession.visibleChunks = visibleChunks;
-      return {
-        protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
-        messages: serializeWorldHostMessages(responseMessages),
-      };
+      return responseMessages;
     });
   }
 
   public async setPlayerInput(sessionId: string, request: SetPlayerInputRequest): Promise<SessionPlayerInputResponse> {
+    return {
+      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+      messages: serializeWorldHostMessages(await this.setPlayerInputMessages(sessionId, request)),
+    };
+  }
+
+  public async setPlayerInputMessages(sessionId: string, request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]> {
     const session = this.sessions.get(sessionId);
     if (session === undefined) {
       throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
@@ -637,15 +659,22 @@ export class GeneratedWorldRemoteService {
     if (enqueuePlayerInputCommand(session.playerCommandQueue, session.playerState, request.input)) {
       session.revision++;
     }
-    return {
-      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
-      messages: serializeWorldHostMessages([
-        createSessionStateMessage(session, world, false),
-      ]),
-    };
+    return [
+      createSessionStateMessage(session, world, false),
+    ];
   }
 
   public async pollUpdates(sessionId: string, request: PollWorldUpdatesRequest): Promise<SessionPollUpdatesResponse> {
+    return {
+      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
+      messages: serializeWorldHostMessages(await this.drainSessionUpdates(sessionId, request)),
+    };
+  }
+
+  public async drainSessionUpdates(
+    sessionId: string,
+    request: PollWorldUpdatesRequest = { type: "poll_world_updates" },
+  ): Promise<readonly WorldHostMessage[]> {
     const session = this.sessions.get(sessionId);
     if (session === undefined) {
       throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
@@ -657,10 +686,7 @@ export class GeneratedWorldRemoteService {
     }
 
     await this.drainAuthoritativeHostMessages(world);
-    return {
-      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
-      messages: serializeWorldHostMessages(drainPendingMessages(session, request.maxMessages)),
-    };
+    return drainPendingMessages(session, request.maxMessages);
   }
 
   public getSessionCount(): number {
@@ -715,7 +741,7 @@ export class GeneratedWorldRemoteService {
     }
   }
 
-  private async resumeWorld(request: OpenWorldRequest, sessionId: string): Promise<OpenWorldSessionResponse> {
+  private async resumeWorldMessages(request: OpenWorldRequest, sessionId: string): Promise<readonly WorldHostMessage[]> {
     const session = this.sessions.get(sessionId);
     if (session === undefined) {
       throw new GeneratedWorldRemoteServiceError(`Unknown world session ${sessionId}`, "unknown_session", 404);
@@ -750,10 +776,7 @@ export class GeneratedWorldRemoteService {
       messages.push(...getEntitySnapshotMessagesForChunk(world, key));
     }
 
-    return {
-      protocolVersion: WORLD_HTTP_PROTOCOL_VERSION,
-      messages: serializeWorldHostMessages(messages),
-    };
+    return messages;
   }
 
   private async getOrCreateWorld(request: OpenWorldRequest): Promise<SharedWorldRecord> {
@@ -924,10 +947,399 @@ export class GeneratedWorldRemoteService {
   }
 }
 
+const WEB_SOCKET_ACCEPT_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const WEB_SOCKET_PUSH_MAX_MESSAGES = 16;
+
+function findSessionId(messages: readonly WorldHostMessage[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message?.type === "session_state") {
+      return message.state.sessionId;
+    }
+  }
+
+  return undefined;
+}
+
+function isPerformanceOnlyPush(messages: readonly WorldHostMessage[]): boolean {
+  return messages.length > 0 && messages.every((message) => message.type === "world_perf");
+}
+
+function createProtocolVersionMismatchError(protocolVersion: unknown): GeneratedWorldRemoteServiceError {
+  return new GeneratedWorldRemoteServiceError(
+    `protocolVersion ${String(protocolVersion)} did not match server protocol version ${WORLD_REMOTE_PROTOCOL_VERSION.toString()}`,
+    "protocol_version_mismatch",
+    409,
+    WORLD_REMOTE_PROTOCOL_VERSION,
+  );
+}
+
+function createMalformedSocketMessageError(message: string): GeneratedWorldRemoteServiceError {
+  return new GeneratedWorldRemoteServiceError(message, "malformed_message", 400);
+}
+
+function createUnsupportedSocketMessageError(message: string): GeneratedWorldRemoteServiceError {
+  return new GeneratedWorldRemoteServiceError(message, "unsupported_message", 400);
+}
+
+function worldSocketErrorCode(error: unknown): WorldRemoteErrorCode {
+  if (error instanceof GeneratedWorldRemoteServiceError) {
+    return error.code;
+  }
+  return "world_request_mismatch";
+}
+
+function worldSocketErrorExpectedProtocolVersion(error: unknown): number | undefined {
+  return error instanceof GeneratedWorldRemoteServiceError ? error.expectedProtocolVersion : undefined;
+}
+
+function createWebSocketAccept(key: string): string {
+  return createHash("sha1").update(`${key}${WEB_SOCKET_ACCEPT_GUID}`).digest("base64");
+}
+
+function sendUpgradeError(socket: Duplex, statusCode: number, statusText: string): void {
+  socket.end(`HTTP/1.1 ${statusCode.toString()} ${statusText}\r\nConnection: close\r\n\r\n`);
+}
+
+class NodeTextWebSocket {
+  private pending: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  private closed = false;
+  public onText: (text: string) => void = () => {};
+  public onClose: () => void = () => {};
+
+  public constructor(private readonly socket: Duplex) {
+    socket.on("data", (chunk) => {
+      this.readData(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    });
+    socket.on("close", () => {
+      this.closed = true;
+      this.onClose();
+    });
+    socket.on("error", () => {
+      this.close();
+    });
+  }
+
+  public sendJson(frame: WorldSocketServerFrame): void {
+    this.sendText(JSON.stringify(frame));
+  }
+
+  public close(): void {
+    if (this.closed) {
+      return;
+    }
+
+    this.closed = true;
+    this.sendFrame(0x8, Buffer.alloc(0));
+    this.socket.end();
+  }
+
+  public readBufferedData(chunk: Buffer<ArrayBufferLike>): void {
+    this.readData(chunk);
+  }
+
+  private readData(chunk: Buffer<ArrayBufferLike>): void {
+    if (this.closed) {
+      return;
+    }
+
+    this.pending = this.pending.length === 0 ? chunk : Buffer.concat([this.pending, chunk]);
+    while (this.tryReadFrame()) {}
+  }
+
+  private tryReadFrame(): boolean {
+    if (this.pending.length < 2) {
+      return false;
+    }
+
+    const first = this.pending[0]!;
+    const second = this.pending[1]!;
+    const opcode = first & 0x0f;
+    const masked = (second & 0x80) !== 0;
+    let offset = 2;
+    let payloadLength = second & 0x7f;
+    if (payloadLength === 126) {
+      if (this.pending.length < offset + 2) {
+        return false;
+      }
+      payloadLength = this.pending.readUInt16BE(offset);
+      offset += 2;
+    } else if (payloadLength === 127) {
+      if (this.pending.length < offset + 8) {
+        return false;
+      }
+      const largeLength = this.pending.readBigUInt64BE(offset);
+      if (largeLength > BigInt(Number.MAX_SAFE_INTEGER)) {
+        this.close();
+        return false;
+      }
+      payloadLength = Number(largeLength);
+      offset += 8;
+    }
+
+    if (!masked) {
+      this.close();
+      return false;
+    }
+    if (this.pending.length < offset + 4 + payloadLength) {
+      return false;
+    }
+
+    const mask = this.pending.subarray(offset, offset + 4);
+    offset += 4;
+    const payload = Buffer.from(this.pending.subarray(offset, offset + payloadLength));
+    this.pending = this.pending.subarray(offset + payloadLength);
+    for (let index = 0; index < payload.length; index++) {
+      payload[index] = payload[index]! ^ mask[index % 4]!;
+    }
+
+    switch (opcode) {
+      case 0x1:
+        this.onText(payload.toString("utf8"));
+        break;
+      case 0x8:
+        this.close();
+        break;
+      case 0x9:
+        this.sendFrame(0xA, payload);
+        break;
+      case 0xA:
+        break;
+      default:
+        this.close();
+        break;
+    }
+
+    return true;
+  }
+
+  private sendText(text: string): void {
+    this.sendFrame(0x1, Buffer.from(text, "utf8"));
+  }
+
+  private sendFrame(opcode: number, payload: Buffer<ArrayBufferLike>): void {
+    if (this.socket.destroyed) {
+      return;
+    }
+
+    let header: Buffer;
+    if (payload.length <= 125) {
+      header = Buffer.from([0x80 | opcode, payload.length]);
+    } else if (payload.length <= 65_535) {
+      header = Buffer.alloc(4);
+      header[0] = 0x80 | opcode;
+      header[1] = 126;
+      header.writeUInt16BE(payload.length, 2);
+    } else {
+      header = Buffer.alloc(10);
+      header[0] = 0x80 | opcode;
+      header[1] = 127;
+      header.writeBigUInt64BE(BigInt(payload.length), 2);
+    }
+
+    this.socket.write(Buffer.concat([header, payload]));
+  }
+}
+
+function acceptTextWebSocket(request: IncomingMessage, socket: Duplex): NodeTextWebSocket | undefined {
+  if (request.headers.upgrade?.toLowerCase() !== "websocket") {
+    sendUpgradeError(socket, 400, "Bad Request");
+    return undefined;
+  }
+
+  const key = request.headers["sec-websocket-key"];
+  if (typeof key !== "string" || key.length === 0) {
+    sendUpgradeError(socket, 400, "Bad Request");
+    return undefined;
+  }
+
+  socket.write([
+    "HTTP/1.1 101 Switching Protocols",
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    `Sec-WebSocket-Accept: ${createWebSocketAccept(key)}`,
+    "",
+    "",
+  ].join("\r\n"));
+  return new NodeTextWebSocket(socket);
+}
+
+class GeneratedWorldWebSocketConnection {
+  private sessionId: string | undefined;
+  private nextSequence = 1;
+  private closed = false;
+  private pushPendingPromise: Promise<void> | undefined;
+
+  public constructor(
+    private readonly service: GeneratedWorldRemoteService,
+    private readonly socket: NodeTextWebSocket,
+    onClose: () => void,
+  ) {
+    this.socket.onText = (text) => {
+      void this.handleText(text);
+    };
+    this.socket.onClose = () => {
+      this.closed = true;
+      onClose();
+    };
+  }
+
+  public close(): void {
+    this.closed = true;
+    this.socket.close();
+  }
+
+  public async pushPending(): Promise<void> {
+    if (this.closed || this.sessionId === undefined) {
+      return;
+    }
+    if (this.pushPendingPromise !== undefined) {
+      await this.pushPendingPromise;
+      return;
+    }
+
+    const push = (async () => {
+      if (this.sessionId === undefined) {
+        return;
+      }
+
+      try {
+        const messages = await this.service.drainSessionUpdates(this.sessionId, {
+          type: "poll_world_updates",
+          maxMessages: WEB_SOCKET_PUSH_MAX_MESSAGES,
+        });
+        if (messages.length > 0 && !isPerformanceOnlyPush(messages)) {
+          this.send({
+            protocolVersion: WORLD_REMOTE_PROTOCOL_VERSION,
+            kind: "push",
+            sequence: this.nextSequence++,
+            messages: serializeWorldHostMessages(messages),
+          });
+        }
+      } catch (error) {
+        if (error instanceof GeneratedWorldRemoteServiceError && error.code === "unknown_session") {
+          this.sessionId = undefined;
+        }
+        this.sendError(undefined, error);
+      }
+    })();
+    this.pushPendingPromise = push;
+    try {
+      await push;
+    } finally {
+      if (this.pushPendingPromise === push) {
+        this.pushPendingPromise = undefined;
+      }
+    }
+  }
+
+  private async handleText(text: string): Promise<void> {
+    let frame: Partial<WorldSocketClientFrame> & { readonly kind?: unknown; readonly requestId?: unknown };
+    try {
+      frame = JSON.parse(text) as Partial<WorldSocketClientFrame> & { readonly kind?: unknown; readonly requestId?: unknown };
+    } catch {
+      this.sendError(undefined, createMalformedSocketMessageError("Malformed WebSocket JSON frame"));
+      return;
+    }
+
+    try {
+      this.assertProtocolVersion(frame.protocolVersion);
+      if (frame.kind === "ack") {
+        return;
+      }
+      if (frame.kind !== "request") {
+        throw createUnsupportedSocketMessageError(`Unsupported WebSocket frame kind ${String(frame.kind)}`);
+      }
+      if (typeof frame.requestId !== "number" || !Number.isSafeInteger(frame.requestId)) {
+        throw createMalformedSocketMessageError("WebSocket request frame requires an integer requestId");
+      }
+      if (frame.message === undefined) {
+        throw createMalformedSocketMessageError("WebSocket request frame requires a message");
+      }
+
+      await this.handleRequest(frame as Extract<WorldSocketClientFrame, { kind: "request" }>);
+    } catch (error) {
+      this.sendError(typeof frame.requestId === "number" ? frame.requestId : undefined, error);
+    }
+  }
+
+  private async handleRequest(frame: Extract<WorldSocketClientFrame, { kind: "request" }>): Promise<void> {
+    const message = deserializeWorldClientMessage(frame.message);
+    let messages: readonly WorldHostMessage[];
+    switch (message.type) {
+      case "open_world":
+        messages = await this.service.openWorldMessages(message, frame.resumeSessionId ?? this.sessionId);
+        this.updateSessionId(messages);
+        break;
+      case "set_chunk_view":
+        messages = await this.service.setChunkViewMessages(this.requireSessionId(), message);
+        this.updateSessionId(messages);
+        break;
+      case "set_player_input":
+        messages = await this.service.setPlayerInputMessages(this.requireSessionId(), message);
+        this.updateSessionId(messages);
+        break;
+      case "poll_world_updates":
+        messages = await this.service.drainSessionUpdates(this.requireSessionId(), message);
+        break;
+    }
+
+    this.send({
+      protocolVersion: WORLD_REMOTE_PROTOCOL_VERSION,
+      kind: "response",
+      requestId: frame.requestId,
+      messages: serializeWorldHostMessages(messages),
+    });
+    await this.pushPending();
+  }
+
+  private assertProtocolVersion(protocolVersion: unknown): void {
+    if (protocolVersion !== WORLD_REMOTE_PROTOCOL_VERSION) {
+      throw createProtocolVersionMismatchError(protocolVersion);
+    }
+  }
+
+  private requireSessionId(): string {
+    if (this.sessionId === undefined) {
+      throw new GeneratedWorldRemoteServiceError("WebSocket session has not opened a world", "unknown_session", 404);
+    }
+
+    return this.sessionId;
+  }
+
+  private updateSessionId(messages: readonly WorldHostMessage[]): void {
+    const nextSessionId = findSessionId(messages);
+    if (nextSessionId !== undefined) {
+      this.sessionId = nextSessionId;
+    }
+  }
+
+  private send(frame: WorldSocketServerFrame): void {
+    if (!this.closed) {
+      this.socket.sendJson(frame);
+    }
+  }
+
+  private sendError(requestId: number | undefined, error: unknown): void {
+    this.send({
+      protocolVersion: WORLD_REMOTE_PROTOCOL_VERSION,
+      kind: "error",
+      ...(requestId === undefined ? {} : { requestId }),
+      code: worldSocketErrorCode(error),
+      message: formatUnknownError(error),
+      ...(worldSocketErrorExpectedProtocolVersion(error) === undefined
+        ? {}
+        : { expectedProtocolVersion: worldSocketErrorExpectedProtocolVersion(error) }),
+    });
+  }
+}
+
 export class GeneratedWorldHttpServer {
   private readonly config: GeneratedWorldHttpServerConfig;
   private readonly service: GeneratedWorldRemoteService;
   private readonly server: Server;
+  private readonly webSocketConnections = new Set<GeneratedWorldWebSocketConnection>();
+  private readonly pushTimer: ReturnType<typeof setInterval>;
 
   public constructor(options: GeneratedWorldHttpServerOptions = {}) {
     this.config = {
@@ -942,6 +1354,13 @@ export class GeneratedWorldHttpServer {
     this.server = createServer((request, response) => {
       void this.handleRequest(request, response);
     });
+    this.server.on("upgrade", (request, socket, head) => {
+      this.handleUpgrade(request, socket, head);
+    });
+    this.pushTimer = setInterval(() => {
+      void this.pushWebSocketUpdates();
+    }, 10);
+    this.pushTimer.unref?.();
   }
 
   public async start(): Promise<void> {
@@ -956,6 +1375,11 @@ export class GeneratedWorldHttpServer {
   }
 
   public async stop(): Promise<void> {
+    clearInterval(this.pushTimer);
+    for (const connection of this.webSocketConnections) {
+      connection.close();
+    }
+    this.webSocketConnections.clear();
     this.service.dispose();
     this.service.clearSessions();
     if (!this.server.listening) {
@@ -986,6 +1410,42 @@ export class GeneratedWorldHttpServer {
 
   public getSessionCount(): number {
     return this.service.getSessionCount();
+  }
+
+  public forceTick(tickCount = 1): void {
+    this.service.forceTick(tickCount);
+    void this.pushWebSocketUpdates();
+  }
+
+  public dropSession(sessionId: string): void {
+    this.service.dropSession(sessionId);
+    void this.pushWebSocketUpdates();
+  }
+
+  private handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer<ArrayBufferLike>): void {
+    const url = new URL(request.url ?? "/", "http://mclone.invalid");
+    if (url.pathname !== "/api/world/socket") {
+      sendUpgradeError(socket, 404, "Not Found");
+      return;
+    }
+
+    const webSocket = acceptTextWebSocket(request, socket);
+    if (webSocket === undefined) {
+      return;
+    }
+
+    let connection: GeneratedWorldWebSocketConnection;
+    connection = new GeneratedWorldWebSocketConnection(this.service, webSocket, () => {
+      this.webSocketConnections.delete(connection);
+    });
+    this.webSocketConnections.add(connection);
+    if (head.length > 0) {
+      webSocket.readBufferedData(head);
+    }
+  }
+
+  private async pushWebSocketUpdates(): Promise<void> {
+    await Promise.all([...this.webSocketConnections].map((connection) => connection.pushPending()));
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {

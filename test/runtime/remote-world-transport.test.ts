@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import fixture from "../fixtures/creatures/overworld-seed-12345-chunk--7--15-entities.json";
 import { Registry } from "../../src/core/registry";
 import { createGeneratedWorldSaveId, GENERATED_WORLD_STORAGE_VERSION } from "../../src/runtime/host/generated-world-host";
-import { GeneratedWorldRemoteService } from "../../src/runtime/node/generated-world-http-server";
+import { GeneratedWorldHttpServer, GeneratedWorldRemoteService } from "../../src/runtime/node/generated-world-http-server";
 import { type ClientRuntime, WorldClientRuntimeFacade } from "../../src/runtime/client/client-runtime";
 import {
   deserializeWorldHostMessages,
@@ -19,7 +19,8 @@ import {
   type WorldHttpErrorResponse,
 } from "../../src/runtime/protocol/world-http-protocol";
 import type { ChunkSnapshotMessage, EntitySnapshot, WorldHostMessage } from "../../src/runtime/protocol/world-messages";
-import { RemoteWorldClient, RemoteWorldTransport } from "../../src/runtime/transport/remote-world-transport";
+import { RemoteWorldClient, RemoteWorldTransport, RemoteWorldWebSocketTransport } from "../../src/runtime/transport/remote-world-transport";
+import type { WorldTransport } from "../../src/runtime/transport/local-world-transport";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
@@ -27,6 +28,7 @@ import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-s
 import type { CreatureGenerationFixture } from "../../src/oracle/integration/creature-fixture";
 
 const TEMP_DIRECTORIES: string[] = [];
+const REMOTE_SERVERS: GeneratedWorldHttpServer[] = [];
 const creatureFixture = fixture as unknown as CreatureGenerationFixture;
 const OPEN_WORLD_REQUEST = {
   type: "open_world",
@@ -51,6 +53,17 @@ async function createTempDirectory(): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), "mclone-remote-world-transport-"));
   TEMP_DIRECTORIES.push(directory);
   return directory;
+}
+
+async function createRemoteServer(): Promise<GeneratedWorldHttpServer> {
+  const server = new GeneratedWorldHttpServer({
+    host: "127.0.0.1",
+    port: 0,
+    saveRoot: await createTempDirectory(),
+  });
+  await server.start();
+  REMOTE_SERVERS.push(server);
+  return server;
 }
 
 function createServiceFetch(service: GeneratedWorldRemoteService): typeof fetch {
@@ -255,7 +268,7 @@ function createServiceFetch(service: GeneratedWorldRemoteService): typeof fetch 
   };
 }
 
-function createRemoteWorldClientForTransport(transport: RemoteWorldTransport): RemoteWorldClient {
+function createRemoteWorldClientForTransport(transport: WorldTransport): RemoteWorldClient {
   const blocks = registerGeneratedRenderBlocks();
   const biomeSource = new OverworldBiomeSource(12345n);
   return new RemoteWorldClient(
@@ -274,6 +287,10 @@ function createRemoteWorldClientForTransport(transport: RemoteWorldTransport): R
 
 function createRemoteWorldClient(baseUrl: string, fetchImpl: typeof fetch, sessionId?: string): RemoteWorldClient {
   return createRemoteWorldClientForTransport(new RemoteWorldTransport(baseUrl, { fetchImpl, sessionId }));
+}
+
+function createRemoteWorldWebSocketClient(baseUrl: string, sessionId?: string): RemoteWorldClient {
+  return createRemoteWorldClientForTransport(new RemoteWorldWebSocketTransport(baseUrl, { sessionId }));
 }
 
 function findSessionId(messages: readonly WorldHostMessage[]): string {
@@ -324,6 +341,19 @@ async function drainRemoteRuntimeChunks(runtime: ClientRuntime, expectedCount: n
   throw new Error(`expected ${expectedCount.toString()} loaded chunks, got ${level.getLoadedChunkCount().toString()}`);
 }
 
+async function waitForRuntimePlayerAck(runtime: ClientRuntime, sequence: number): Promise<void> {
+  const deadline = Date.now() + REMOTE_WORLD_TRANSPORT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(10);
+    await runtime.drainTransportUpdates();
+    if ((runtime.publishPresentationState().localPlayerState?.acknowledgedInputSequence ?? 0) >= sequence) {
+      return;
+    }
+  }
+
+  throw new Error(`expected acknowledged player input sequence ${sequence.toString()}`);
+}
+
 function targetChunkEntitySnapshots(entities: readonly EntitySnapshot[]): readonly EntitySnapshot[] {
   const chunk = creatureFixture.chunks[0]!;
   return entities
@@ -353,6 +383,10 @@ async function drainServiceSnapshots(
 describe("RemoteWorld transport", () => {
   afterEach(async () => {
     Registry.BLOCK.clear();
+
+    while (REMOTE_SERVERS.length > 0) {
+      await REMOTE_SERVERS.pop()!.stop();
+    }
 
     while (TEMP_DIRECTORIES.length > 0) {
       await rm(TEMP_DIRECTORIES.pop()!, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -757,6 +791,184 @@ describe("RemoteWorld transport", () => {
     expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
     expect(client.getPlayerState()?.acknowledgedInputSequence).toBe(2);
     expect(client.getPlayerState()?.tick).toBeGreaterThan(0);
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
+
+  test("streams generated chunks through the remote WebSocket push channel", async () => {
+    const server = await createRemoteServer();
+    const client = createRemoteWorldWebSocketClient(server.getBaseUrl());
+
+    await expect(client.openWorld(OPEN_WORLD_REQUEST)).resolves.toEqual({
+      type: "world_opened",
+      minBuildHeight: 0,
+      height: 256,
+      saveMetadata: {
+        saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
+        storageVersion: GENERATED_WORLD_STORAGE_VERSION,
+        seed: "12345",
+        preset: "browser_smoke",
+        minBuildHeight: 0,
+        height: 256,
+        createdAtMs: expect.any(Number),
+        lastOpenedAtMs: expect.any(Number),
+      },
+    });
+
+    expect(await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    })).toBe(false);
+
+    await drainRemoteClientChunks(client, 25);
+    expect(client.getLevel().getLoadedChunkCount()).toBe(25);
+    expect(client.getSessionState()).toEqual({
+      sessionId: expect.any(String),
+      playerId: expect.any(String),
+      saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
+      resumed: false,
+      revision: 1,
+      chunkView: {
+        centerChunkX: 0,
+        centerChunkZ: 0,
+        radius: 1,
+      },
+    });
+    expect(server.getSessionCount()).toBe(1);
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
+
+  test("pushes WebSocket player-state updates into ClientRuntime drain queues", async () => {
+    const server = await createRemoteServer();
+    const runtime = new WorldClientRuntimeFacade(createRemoteWorldWebSocketClient(server.getBaseUrl()));
+
+    await runtime.openWorld(OPEN_WORLD_REQUEST);
+    expect(await runtime.setChunkInterest({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    })).toBe(false);
+    await drainRemoteRuntimeChunks(runtime, 25);
+
+    const initialPlayerState = runtime.publishPresentationState().localPlayerState;
+    expect(initialPlayerState).toBeDefined();
+    expect(await runtime.sendPlayerCommand({
+      type: "set_player_input",
+      input: {
+        sequence: 1,
+        moveX: 1,
+        moveY: 0,
+        moveZ: 0,
+        yaw: 90,
+        pitch: 10,
+      },
+    })).toBe(true);
+
+    server.forceTick();
+    await waitForRuntimePlayerAck(runtime, 1);
+
+    const updatedPlayerState = runtime.publishPresentationState().localPlayerState;
+    expect(updatedPlayerState).toBeDefined();
+    expect(updatedPlayerState!.revision).toBeGreaterThan(initialPlayerState!.revision);
+    expect(updatedPlayerState!.tick).toBeGreaterThan(initialPlayerState!.tick);
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
+
+  test("supports two concurrent WebSocket client sessions against one shared world", async () => {
+    const server = await createRemoteServer();
+    const firstClient = createRemoteWorldWebSocketClient(server.getBaseUrl());
+    const secondClient = createRemoteWorldWebSocketClient(server.getBaseUrl());
+    const [firstOpened, secondOpened] = await Promise.all([
+      firstClient.openWorld(OPEN_WORLD_REQUEST),
+      secondClient.openWorld(OPEN_WORLD_REQUEST),
+    ]);
+
+    expect(firstOpened.saveMetadata.saveId).toBe(secondOpened.saveMetadata.saveId);
+    await Promise.all([
+      firstClient.setChunkView({
+        type: "set_chunk_view",
+        centerChunkX: 0,
+        centerChunkZ: 0,
+        radius: 1,
+      }),
+      secondClient.setChunkView({
+        type: "set_chunk_view",
+        centerChunkX: 2,
+        centerChunkZ: 0,
+        radius: 1,
+      }),
+    ]);
+
+    await Promise.all([
+      drainRemoteClientChunks(firstClient, 25),
+      drainRemoteClientChunks(secondClient, 25),
+    ]);
+    expect(firstClient.getLevel().getLoadedChunkCount()).toBe(25);
+    expect(secondClient.getLevel().getLoadedChunkCount()).toBe(25);
+    expect(server.getSessionCount()).toBe(2);
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
+
+  test("resumes an existing WebSocket session and resyncs visible chunks", async () => {
+    const server = await createRemoteServer();
+    const firstClient = createRemoteWorldWebSocketClient(server.getBaseUrl());
+    await firstClient.openWorld(OPEN_WORLD_REQUEST);
+    await firstClient.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+    await drainRemoteClientChunks(firstClient, 25);
+
+    const sessionId = firstClient.getSessionState()?.sessionId;
+    expect(sessionId).toBeDefined();
+    firstClient.close();
+
+    const resumedClient = createRemoteWorldWebSocketClient(server.getBaseUrl(), sessionId);
+    await resumedClient.openWorld(OPEN_WORLD_REQUEST);
+
+    expect(resumedClient.getLevel().getLoadedChunkCount()).toBe(25);
+    expect(resumedClient.getSessionState()).toEqual({
+      sessionId,
+      playerId: expect.any(String),
+      saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
+      resumed: true,
+      revision: 1,
+      chunkView: {
+        centerChunkX: 0,
+        centerChunkZ: 0,
+        radius: 1,
+      },
+    });
+  }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
+
+  test("reopens and resyncs automatically when a WebSocket session disappears", async () => {
+    const server = await createRemoteServer();
+    const client = createRemoteWorldWebSocketClient(server.getBaseUrl());
+
+    await client.openWorld(OPEN_WORLD_REQUEST);
+    await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+    await drainRemoteClientChunks(client, 25);
+
+    const previousSessionId = client.getSessionState()?.sessionId;
+    expect(previousSessionId).toBeDefined();
+    server.dropSession(previousSessionId!);
+
+    expect(await client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    })).toBe(true);
+
+    await drainRemoteClientChunks(client, 25);
+    expect(client.getLevel().getLoadedChunkCount()).toBe(25);
+    expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
+    expect(client.getSessionState()?.resumed).toBe(false);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("close drops remote transport session handles and rejects later requests", async () => {

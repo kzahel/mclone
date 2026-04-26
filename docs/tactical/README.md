@@ -80,6 +80,7 @@ Direct port of MC 1.17.1's client rendering stack to raw WebGPU. Target and skip
 | [`50-beach-river-full-decorated-parity.md`](50-beach-river-full-decorated-parity.md) | scheduler-pinned full-decorated fixture for seed `12345`, chunk `(5,115)`, focused on legitimate sand/gravel boundary parity | integration + runtime | **next parity** - expand the full-block diff harness from the exact spawn fixture to the existing sand/gravel surface-oracle target |
 | [`51-bee-tree-decorator-follow-through.md`](51-bee-tree-decorator-follow-through.md) | port `BeehiveDecorator`, register `minecraft:bee_nest`, and wire the vanilla bee-tagged tree variants back into the live selectors | unit + browser visual | **done** - bee-nest tree decoration and the live bee-tagged birch/oak/fancy-oak selector paths now match vanilla |
 | [`52-sunflower-plains-follow-through.md`](52-sunflower-plains-follow-through.md) | port `PATCH_SUNFLOWER`, register `minecraft:sunflower`, split `sunflower_plains` from `plains`, and validate a generated sunflower frame | unit + browser visual | **done** - sunflower plains now have their own translated patch feature and the rendered worker world shows generated sunflowers |
+| [`53-remote-player-integration-sequence.md`](53-remote-player-integration-sequence.md) | WebSocket remote transport, named join/player-slot semantics, grounded movement integration ordering | runtime + browser integration | **coordination / active ordering** - record that R9 comes first, player-slot protocol cleanup follows, then movement physics/prediction integration |
 
 Ordering rationale: `BlockState` prereqs (13) deferred until just before model baking (14a/b) since nothing before that needs them. WGSL shader ports (16) deferred until after the mesher (15) so we can verify geometry correctness with stub shaders first, then swap in real shaders. `ModelBakery` split from `BlockModel` parse (14a/b) because `ModelBakery` is one of the largest classes in the client and the data-loading and baking passes are independently testable.
 
@@ -187,6 +188,8 @@ Before grounded player physics depends on persisted/player-owned state, fix the 
 
 The next movement tactical should integrate the shared movement body with host collision, client prediction, debug player input semantics, and singleplayer/remote parity from the current `ClientRuntime` / `ClientWorld` shape.
 
+The ordering across transport, player-slot protocol, and movement integration is tracked in [`53-remote-player-integration-sequence.md`](53-remote-player-integration-sequence.md).
+
 ## Renderer oracle approach
 
 - **Unit**: dump atlas UVs, baked-model quads, and section visibility graphs from MC as JSON; exact-diff those. Catches most correctness bugs before pixels are involved.
@@ -223,9 +226,11 @@ WebRTC is intentionally deferred. The preferred path is:
 | [`R6-protocol-hardening.md`](R6-protocol-hardening.md) | protocol hardening: reconnect/resync, chunk interest management, baseline player/session state sync, error handling and versioning discipline | integration | **done** — the remote path now has versioned envelopes, resumable sessions, per-session chunk interest, and shared dedicated-host authority per save instead of one host per remote session |
 | [`R7-authoritative-player-loop.md`](R7-authoritative-player-loop.md) | authoritative player/session loop: player input commands, authoritative player-state snapshots, server-driven update flow, dedicated-host shared-session ticking | integration + browser smoke | **done** — the host/client boundary now carries player input, authoritative player-state snapshots, and polled server-originated updates on top of shared session authority |
 | [`R8-authoritative-browser-control-integration.md`](R8-authoritative-browser-control-integration.md) | authoritative browser control/camera integration: bind debug/browser camera to `player_state`, translate browser input to `set_player_input`, schedule live update polling, keep renderer presentation-only | browser smoke + live debug path | **done** — the live browser debug path now drives authoritative player input/state against the same host boundary as remote clients, and chunk interest follows authoritative player state instead of a renderer-owned free-cam |
-| [`R9-websocket-message-channel.md`](R9-websocket-message-channel.md) | WebSocket remote transport, request/reply command envelopes, server-pushed updates, reusable remote wire codec, HTTP polling retirement path | integration + browser smoke | **next** - make the dedicated remote path a persistent message channel before grounding movement/player-state traffic on it |
+| [`R9-websocket-message-channel.md`](R9-websocket-message-channel.md) | WebSocket remote transport, request/reply command envelopes, server-pushed updates, reusable remote wire codec, HTTP polling retirement path | integration + browser smoke | **done** - browser remote clients now use a persistent WebSocket channel by default; HTTP polling is isolated as non-default compatibility coverage |
 
-This `R` arc records the landed host/transport foundation. The client runtime arc is now landed far enough that `R9` can replace the remote HTTP polling adapter without reopening the authority split.
+This `R` arc records the landed host/transport foundation. The remote browser path now uses the WebSocket message channel by default, so the next multiplayer-facing dependency is player-slot semantics rather than another transport migration.
+
+The broader R9 -> player-slot cleanup -> movement integration order is tracked in [`53-remote-player-integration-sequence.md`](53-remote-player-integration-sequence.md).
 
 ## Runtime data / protocol / loading arc (rough, cross-cutting)
 

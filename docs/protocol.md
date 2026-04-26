@@ -213,12 +213,14 @@ Transport adapters should preserve three logical lanes:
 
 Movement correctness must not depend on transport cadence. The movement model is sequenced command records plus authoritative ack snapshots. WebSocket should carry those same logical records instead of inventing a different gameplay protocol.
 
-The current HTTP polling implementation is now a compatibility adapter, not the target remote path. WebSocket migration should:
+The previous HTTP polling implementation is now a compatibility adapter, not the target remote path. The WebSocket migration now:
 
 - replace remote `poll_world_updates` network requests with server-pushed updates
 - keep a local drain API on `ClientRuntime` so the presentation loop can hydrate queued pushed messages without owning sockets
 - split the existing HTTP-specific envelope code from reusable message serialization
 - keep session resume, player slot identity, chunk interest, and reconnect behavior explicit
 - make packed chunk/light payloads ready for binary WebSocket frames after the initial JSON message-channel migration is stable
+
+As of `R9`, browser remote clients use WebSocket by default. `world-http-protocol.ts` remains only as the HTTP envelope compatibility layer; reusable remote serialization lives in the transport-neutral wire module.
 
 WebRTC/WebTransport datagram lanes are later options only if measurements justify lossy realtime traffic, and they require explicit command bundling, sequence-gap handling, authoritative acknowledgements, periodic baselines, and reliable control/chunk lanes.

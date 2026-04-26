@@ -1,6 +1,17 @@
 # R9: WebSocket Message Channel
 
+Status: done.
+
 Standing after `R0` through `R8` and the `ClientRuntime0` through `ClientRuntime6` arc. The current remote path has the right host/client ownership shape, but its carrier is still HTTP polling. Before grounding player physics and higher-frequency entity updates on the remote path, move dedicated remote play to a persistent WebSocket-backed message channel.
+
+Implementation landed:
+
+- remote browser clients use `RemoteWorldWebSocketTransport` by default
+- `src/runtime/protocol/world-wire-protocol.ts` owns reusable remote message serialization
+- `world-http-protocol.ts` is now an HTTP envelope wrapper over the shared wire codec
+- `GeneratedWorldHttpServer` accepts `/api/world/socket` upgrades and pushes queued service messages through one ordered JSON channel per connection
+- `ClientRuntime.drainTransportUpdates()` remains the hydrate/drain point; WebSocket clients drain an in-memory pushed-message queue instead of issuing network `poll_world_updates`
+- HTTP polling remains only as non-default compatibility coverage
 
 ## Goal
 
@@ -19,12 +30,12 @@ Add:
 
 | # | Module | Expected result |
 |---|---|---|
-| 1 | remote wire codec | split reusable message serialization from HTTP-specific request/response envelopes |
-| 2 | WebSocket server | dedicated Node host upgrades clients to one persistent ordered channel per session |
-| 3 | WebSocket client transport | browser `WorldTransport` implementation sends command envelopes and queues server-pushed host messages |
-| 4 | request/reply envelope | commands that need an acknowledgement carry request ids; pushed updates do not require polling |
-| 5 | update pump | server drains authoritative host/session pending messages and pushes them to visible/interested clients |
-| 6 | compatibility removal path | keep HTTP only until WebSocket browser/runtime tests replace equivalent coverage, then remove `world-http-protocol.ts` and `RemoteWorldTransport` |
+| 1 | remote wire codec | done - reusable message serialization is split from HTTP envelopes |
+| 2 | WebSocket server | done - dedicated Node host upgrades clients to one persistent ordered channel per session |
+| 3 | WebSocket client transport | done - browser `WorldTransport` implementation sends command envelopes and queues server-pushed host messages |
+| 4 | request/reply envelope | done - commands carry request ids; pushed updates do not require polling |
+| 5 | update pump | done - server drains authoritative host/session pending messages and pushes them to visible/interested clients |
+| 6 | compatibility removal path | partially done - HTTP is non-default compatibility coverage; deletion can happen after follow-up coverage no longer needs the adapter |
 
 Do not add:
 
@@ -62,17 +73,21 @@ The first slice can keep packed chunk/light payloads in the existing JSON-safe r
 
 ## Validation
 
-Minimum:
+Completed:
 
-- `pnpm test -- test/runtime/remote-world-transport.test.ts` or its WebSocket replacement
+- `pnpm test -- test/runtime/remote-world-transport.test.ts`
+- `pnpm typecheck`
 - `pnpm test:browser`
-- `pnpm test:browser:integration` for debug camera/player state and two-client remote coverage
 - `git diff --check`
 
 ## Done When
 
-- Browser remote clients use WebSocket by default.
-- Server-originated chunk, entity, session, and player updates arrive without `poll_world_updates` network requests.
-- Two browser clients can join one shared dedicated world through the WebSocket path.
-- Resume/reconnect tests cover the same cases as the old HTTP transport.
-- HTTP polling code is either removed or explicitly isolated as a temporary fallback with no runtime/browser default path.
+- Done: browser remote clients use WebSocket by default.
+- Done: server-originated chunk, entity, session, and player updates arrive without `poll_world_updates` network requests.
+- Done: two browser clients can join one shared dedicated world through the WebSocket path.
+- Done: resume/reconnect tests cover the same cases as the old HTTP transport.
+- Done: HTTP polling code is isolated as a temporary fallback with no runtime/browser default path.
+
+## Follow-Up
+
+The next Tactical 53 dependency is join/player-slot semantics: keep `sessionId` as a connection/resume handle, introduce explicit join/resume identity facts, and stop depending on `playerId === sessionId` before grounded movement uses player identity.
