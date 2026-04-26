@@ -1,9 +1,16 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 
+const DEFAULT_DEV_SERVER_PORT = 5173;
+
+function readDevServerPort(): number {
+  const parsed = Number.parseInt(process.env.VITE_PORT ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DEV_SERVER_PORT;
+}
+
 export default defineConfig({
   server: {
-    port: 5173,
+    port: readDevServerPort(),
     strictPort: true,
   },
   build: {

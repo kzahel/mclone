@@ -19,7 +19,7 @@ import { scaleProgress } from "./loading-progress";
 import { BlockColors } from "./block/block-colors";
 import { BlockRenderDispatcher } from "./block/block-render-dispatcher";
 import { ChunkRenderDispatcher } from "./chunk/chunk-render-dispatcher";
-import { createRenderWorldWorker, RenderWorldWorkerClient, RenderWorldWorkerUpdateSink } from "./chunk/render-world-worker-client";
+import { RenderWorldWorkerClient, RenderWorldWorkerUpdateSink } from "./chunk/render-world-worker-client";
 import { ChunkBufferBuilderPack } from "./chunk-buffer-builder-pack";
 import { BlockModelShaper } from "./model/block-model-shaper";
 import { BuiltInModel } from "./model/built-in-model";
@@ -37,7 +37,7 @@ import { type CompositeRenderType, RenderType } from "./render-type";
 import { ViewArea } from "./view-area";
 import { Vec3 } from "../world/phys/vec3";
 import type { VertexBuffer } from "./vertex/vertex-buffer";
-import { configureBrowserCanvasTarget, requestWebGpuDeviceContext } from "./webgpu-target";
+import { BROWSER_RENDERER_HOST, type BrowserRendererHost } from "./renderer-host";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
 const GRASS_COLORMAP_LOCATION = new ResourceLocation("minecraft:colormap/grass");
@@ -67,6 +67,7 @@ export interface SceneInitOptions {
   readonly skyColor?: Vec3;
   readonly clearColorScale?: number;
   readonly onProgress?: LoadingProgressSink;
+  readonly rendererHost?: BrowserRendererHost;
 }
 
 export interface RendererScene {
@@ -474,7 +475,8 @@ export async function initializeRendererScene(
   canvas: HTMLCanvasElement,
   options: SceneInitOptions,
 ): Promise<SceneInitResult> {
-  const deviceContextResult = await requestWebGpuDeviceContext({
+  const rendererHost = options.rendererHost ?? BROWSER_RENDERER_HOST;
+  const deviceContextResult = await rendererHost.requestWebGpuDeviceContext({
     onRequestAdapter: () => options.onProgress?.({ stage: "Requesting WebGPU adapter", fraction: 0.02 }),
     onRequestDevice: () => options.onProgress?.({ stage: "Requesting WebGPU device", fraction: 0.04 }),
   });
@@ -483,7 +485,7 @@ export async function initializeRendererScene(
   }
   const { adapter, device, format } = deviceContextResult.context;
   resizeCanvasToDisplaySize(canvas, device.limits.maxTextureDimension2D);
-  const target = configureBrowserCanvasTarget(canvas, device, format);
+  const target = rendererHost.createCanvasTarget(canvas, device, format);
   if (!target) return { ok: false, reason: "canvas.getContext('webgpu') returned null" };
   const ctx = target.ctx;
 
@@ -518,7 +520,7 @@ export async function initializeRendererScene(
 
   options.onProgress?.({ stage: "Initializing render worker", fraction: 0.5 });
   const renderWorldWorker = new RenderWorldWorkerClient(
-    createRenderWorldWorker(),
+    rendererHost.createRenderWorldWorkerEndpoint(),
     scaleProgress(options.onProgress, 0.5, 0.9, "Initializing render worker"),
   );
   await renderWorldWorker.initialize({

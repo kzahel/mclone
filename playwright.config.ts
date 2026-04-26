@@ -1,5 +1,14 @@
 import { defineConfig } from "@playwright/test";
 
+const DEFAULT_DEV_SERVER_PORT = 5173;
+
+function readDevServerPort(): number {
+  const parsed = Number.parseInt(process.env.VITE_PORT ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DEV_SERVER_PORT;
+}
+
+const devServerPort = readDevServerPort();
+
 export default defineConfig({
   testDir: "test/browser",
   testMatch: ["**/smoke.test.ts"],
@@ -7,7 +16,7 @@ export default defineConfig({
   workers: 1,
   reporter: [["list"]],
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: `http://localhost:${devServerPort.toString()}`,
     channel: "chrome",
     launchOptions: {
       args: ["--enable-unsafe-webgpu"],
@@ -17,7 +26,7 @@ export default defineConfig({
   webServer: [
     {
       command: "pnpm dev:browser",
-      port: 5173,
+      port: devServerPort,
       reuseExistingServer: !process.env.CI,
       stdout: "pipe",
       stderr: "pipe",

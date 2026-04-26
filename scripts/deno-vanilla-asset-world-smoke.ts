@@ -3,7 +3,8 @@ import type { ChunkSnapshotMessage } from "../src/runtime/protocol/world-message
 import { RenderWorldWorkerClient, RenderWorldWorkerUpdateSink, type RenderWorldWorkerClientEndpoint } from "../src/renderer/chunk/render-world-worker-client.ts";
 import { ChunkRenderDispatcher } from "../src/renderer/chunk/chunk-render-dispatcher.ts";
 import { ChunkBufferBuilderPack } from "../src/renderer/chunk-buffer-builder-pack.ts";
-import { createOffscreenTextureTarget, readTextureRgba8, requestWebGpuDeviceContext } from "../src/renderer/webgpu-target.ts";
+import { createHeadlessRendererHost } from "../src/renderer/renderer-host.ts";
+import { readTextureRgba8 } from "../src/renderer/webgpu-target.ts";
 import { GameRenderer } from "../src/renderer/game-renderer.ts";
 import { LevelRenderer, type LevelRenderFrame } from "../src/renderer/level-renderer.ts";
 import { LightTexture } from "../src/renderer/light-texture.ts";
@@ -46,7 +47,14 @@ const SKY_COLOR = new Vec3(0.55, 0.7, 1.0);
 const RENDER_DISTANCE = 128;
 const MIN_NON_CLEAR_PIXELS = 1_000;
 
-const contextResult = await requestWebGpuDeviceContext();
+const rendererHost = createHeadlessRendererHost(() => new Worker(
+  new URL("./deno-vanilla-asset-world-worker.ts", import.meta.url),
+  {
+    type: "module",
+    name: "mclone-deno-vanilla-asset-world-worker",
+  },
+) as unknown as RenderWorldWorkerClientEndpoint);
+const contextResult = await rendererHost.requestWebGpuDeviceContext();
 if (!contextResult.ok) {
   throw new Error(contextResult.reason);
 }
@@ -59,10 +67,7 @@ atlas.reload(device, assetResources.preparations);
 const stoneSprite = atlas.getSprite(DENO_VANILLA_ASSET_WORLD_STONE_TEXTURE);
 
 const renderWorldWorker = new RenderWorldWorkerClient(
-  new Worker(new URL("./deno-vanilla-asset-world-worker.ts", import.meta.url), {
-    type: "module",
-    name: "mclone-deno-vanilla-asset-world-worker",
-  }) as unknown as RenderWorldWorkerClientEndpoint,
+  rendererHost.createRenderWorldWorkerEndpoint(),
 );
 await renderWorldWorker.initialize({
   type: "initialize_render_world",
@@ -118,7 +123,7 @@ if (solidDrawCount <= 0) {
   throw new Error("Deno vanilla asset world smoke produced no chunk draws");
 }
 
-const target = createOffscreenTextureTarget(device, WIDTH, HEIGHT, FORMAT);
+const target = rendererHost.createOffscreenTarget(device, WIDTH, HEIGHT, FORMAT);
 const depthTarget = createSceneDepthTarget(device, WIDTH, HEIGHT);
 const scene = createHeadlessScene(device, atlas, renderWorldUpdateSink, viewArea, chunkDispatcher, levelRenderer, gameRenderer, lightTexture);
 const encoder = device.createCommandEncoder();
