@@ -1,6 +1,13 @@
 # Gui0: WebGPU GUI Foundation and DOM UI Replacement
 
-Status: next GUI arc.
+Status: active GUI arc.
+
+Current implementation state:
+
+- Gui0 foundation exists under `src/client/gui/` and `src/renderer/gui/`.
+- The opt-in GPU title flow can show title, loading progress, and a live generated world.
+- `Esc` opens a minimal GPU-rendered `PauseScreen` over the live world; Back to Game closes it and gameplay input resumes.
+- Full options/debug settings, quit-to-title, and visible DOM deletion remain later slices.
 
 Durable architecture: [`../gui.md`](../gui.md).
 

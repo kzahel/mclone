@@ -50,14 +50,15 @@ export interface GpuTitleBootResult {
 
 interface GpuGuiRuntimeState {
   ready: boolean;
-  mode: "title" | "loading" | "world" | "error";
+  mode: "title" | "loading" | "world" | "paused" | "error";
   screenTitle: string;
-  lastAction?: "continue" | "start_world" | "options";
+  lastAction?: "continue" | "start_world" | "options" | "back_to_game";
   loadingStage?: string;
   loadingDetail?: string;
   loadingProgress?: number;
   worldReady?: boolean;
   worldResult?: BootResult;
+  pauseScreenActive?: boolean;
   frameCount: number;
   inputEventCount: number;
   cameraPosition?: readonly [number, number, number];
@@ -200,7 +201,12 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
   let host: GuiOverlayHost | undefined;
   const renderGuiFrameNow = (): void => {
     const activeHost = host;
-    if (activeHost === undefined || screenManager.currentScreen === null || state.mode === "world") {
+    if (
+      activeHost === undefined
+      || screenManager.currentScreen === null
+      || state.mode === "world"
+      || state.mode === "paused"
+    ) {
       return;
     }
 
@@ -239,6 +245,12 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
   let startWorldPromise: Promise<BootResult> | undefined;
   const startWorld = (): void => {
     state.lastAction = "start_world";
+    const guiOverlayHost = host;
+    if (guiOverlayHost === undefined) {
+      state.mode = "error";
+      state.error = "GUI overlay host is not initialized";
+      return;
+    }
     if (startWorldPromise !== undefined) {
       return;
     }
@@ -248,6 +260,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
       url,
       deviceContext: deviceContextResult.context,
       target,
+      guiOverlayHost,
       controller,
       screenManager,
       state,
@@ -286,6 +299,7 @@ interface StartGpuTitleWorldOptions {
   readonly url: URL;
   readonly deviceContext: WebGpuDeviceContext;
   readonly target: BrowserCanvasTarget;
+  readonly guiOverlayHost: GuiOverlayHost;
   readonly controller: GpuGuiRuntimeController;
   readonly screenManager: ScreenManager;
   readonly state: GpuGuiRuntimeState;
@@ -321,6 +335,7 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<B
 
     options.state.mode = "world";
     options.state.screenTitle = "";
+    options.state.pauseScreenActive = false;
     options.state.worldResult = bootResult.run.result;
     options.screenManager.setScreen(null);
     options.state.frameCount = 0;
@@ -328,6 +343,8 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<B
     options.controller.worldRuntime = await startGpuWorldRuntime({
       scene: bootResult.scene,
       canvas: options.canvas,
+      screenManager: options.screenManager,
+      guiOverlayHost: options.guiOverlayHost,
       initialCamera: bootResult.camera,
       initialFrame: bootResult.run.frame,
       state: options.state,

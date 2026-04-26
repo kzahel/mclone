@@ -1,4 +1,6 @@
 import type { SetChunkViewRequest } from "../../runtime/protocol/world-messages";
+import type { ScreenManager } from "../../client/gui/screen-manager";
+import { PauseScreen } from "../../client/gui/screens/pause-screen";
 import {
   applyRenderWorldDirtySections,
   createSceneDepthTarget,
@@ -20,12 +22,17 @@ import {
   createChunkViewRequestForCameraState,
   type DebugCameraState,
 } from "../debug/debug-player-controls";
+import type { GuiOverlayHost } from "./gui-overlay-host";
 
 const LIGHT_TICK_INTERVAL_MS = 1000.0;
 const WORLD_POLL_INTERVAL_MS = 50.0;
 
 export interface GpuWorldRuntimeState {
   ready: boolean;
+  mode?: string;
+  screenTitle?: string;
+  lastAction?: string;
+  pauseScreenActive?: boolean;
   frameCount: number;
   inputEventCount: number;
   cameraPosition?: readonly [number, number, number];
@@ -40,6 +47,8 @@ export interface GpuWorldRuntimeState {
 export interface GpuWorldRuntimeOptions {
   readonly scene: RendererScene;
   readonly canvas: HTMLCanvasElement;
+  readonly screenManager: ScreenManager;
+  readonly guiOverlayHost: GuiOverlayHost;
   readonly initialCamera: DebugCameraState;
   readonly initialFrame?: LevelRenderFrame;
   readonly state: GpuWorldRuntimeState;
@@ -72,7 +81,10 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
 
   public constructor(private readonly options: GpuWorldRuntimeOptions) {
     this.camera = options.initialCamera;
-    this.input = new GpuWorldInput(options.canvas);
+    this.input = new GpuWorldInput(options.canvas, {
+      isGuiActive: () => options.screenManager.currentScreen !== null,
+      openPauseMenu: () => this.openPauseMenu(),
+    });
   }
 
   public async start(): Promise<void> {
@@ -135,7 +147,11 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
 
       this.textureAnimationElapsedMs = advanceTextureAtlasAnimations(scene.atlas, this.textureAnimationElapsedMs + frameDeltaMs);
       this.resizeViewport();
-      this.camera = applyFreeCameraInput(this.camera, this.input.consumeFrame(), dtSeconds);
+      if (this.options.screenManager.currentScreen === null) {
+        this.camera = applyFreeCameraInput(this.camera, this.input.consumeFrame(), dtSeconds);
+      } else {
+        this.input.consumeFrame();
+      }
 
       const chunkViewRequest = createChunkViewRequestForCameraState(this.camera, scene.viewDistance);
       if (!isSameChunkViewRequest(this.lastChunkViewRequest, chunkViewRequest)) {
@@ -191,24 +207,47 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
 
     const scene = this.options.scene;
     const encoder = scene.device.createCommandEncoder();
+    const view = scene.ctx.getCurrentTexture().createView();
     encodeSceneFrame(
       scene,
       frame,
       {
-        view: scene.ctx.getCurrentTexture().createView(),
+        view,
         depthView: depthTarget.view,
         format: scene.format,
       },
       encoder,
     );
+    this.options.guiOverlayHost.encode(encoder, view, scene.format, scene.canvas.width, scene.canvas.height);
     scene.device.queue.submit([encoder.finish()]);
     await scene.device.queue.onSubmittedWorkDone();
     this.options.state.frameCount++;
     this.updateState();
   }
 
+  private openPauseMenu(): void {
+    if (this.options.screenManager.currentScreen !== null) {
+      return;
+    }
+
+    this.options.screenManager.setScreen(new PauseScreen(true, {
+      onReturnToGame: () => {
+        this.options.state.lastAction = "back_to_game";
+        this.options.screenManager.setScreen(null);
+        this.updateState();
+      },
+    }));
+    this.updateState();
+  }
+
   private updateState(): void {
     const { scene, state } = this.options;
+    const currentScreen = this.options.screenManager.currentScreen;
+    state.pauseScreenActive = currentScreen !== null;
+    if (state.error === undefined) {
+      state.mode = currentScreen === null ? "world" : "paused";
+      state.screenTitle = currentScreen?.getTitle() ?? "";
+    }
     state.inputEventCount = this.input.getEventCount();
     state.cameraPosition = [this.camera.position.x, this.camera.position.y, this.camera.position.z];
     state.cameraYaw = this.camera.yRot;
@@ -217,6 +256,11 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
     state.renderWorldCounters = getSceneRenderWorldPerformanceCounters(scene);
     state.renderQueueStats = getSceneRenderQueueStats(scene);
   }
+}
+
+interface GpuWorldInputOptions {
+  readonly isGuiActive: () => boolean;
+  readonly openPauseMenu: () => void;
 }
 
 class GpuWorldInput {
@@ -228,9 +272,26 @@ class GpuWorldInput {
   private lastPointerY: number | undefined;
   private eventCount = 0;
 
-  public constructor(canvas: HTMLCanvasElement) {
+  public constructor(canvas: HTMLCanvasElement, private readonly options: GpuWorldInputOptions) {
     this.add(window, "keydown", (event) => {
       const keyboardEvent = event as KeyboardEvent;
+      if (keyboardEvent.defaultPrevented) {
+        return;
+      }
+      if (keyboardEvent.key === "Escape" || keyboardEvent.code === "Escape") {
+        if (!this.options.isGuiActive()) {
+          this.clearGameplayInput();
+          this.options.openPauseMenu();
+          keyboardEvent.preventDefault();
+          this.eventCount++;
+        }
+        return;
+      }
+      if (this.options.isGuiActive()) {
+        this.clearGameplayInput();
+        this.eventCount++;
+        return;
+      }
       if (isMovementKey(keyboardEvent.code)) {
         keyboardEvent.preventDefault();
       }
@@ -239,11 +300,28 @@ class GpuWorldInput {
     });
     this.add(window, "keyup", (event) => {
       const keyboardEvent = event as KeyboardEvent;
+      if (keyboardEvent.defaultPrevented) {
+        return;
+      }
+      if (this.options.isGuiActive()) {
+        this.heldKeys.delete(keyboardEvent.code);
+        this.clearGameplayInput();
+        this.eventCount++;
+        return;
+      }
       this.heldKeys.delete(keyboardEvent.code);
       this.eventCount++;
     });
     this.add(canvas, "pointermove", (event) => {
       const pointerEvent = event as PointerEvent;
+      if (this.options.isGuiActive()) {
+        this.lastPointerX = pointerEvent.clientX;
+        this.lastPointerY = pointerEvent.clientY;
+        this.mouseDeltaX = 0;
+        this.mouseDeltaY = 0;
+        this.eventCount++;
+        return;
+      }
       const movementX = pointerEvent.movementX !== 0 || this.lastPointerX === undefined
         ? pointerEvent.movementX
         : pointerEvent.clientX - this.lastPointerX;
@@ -263,6 +341,11 @@ class GpuWorldInput {
   }
 
   public consumeFrame(): DebugInputFrame {
+    if (this.options.isGuiActive()) {
+      this.clearGameplayInput();
+      return emptyInputFrame();
+    }
+
     const frame: DebugInputFrame = {
       heldKeys: new Set(this.heldKeys),
       mouseDeltaX: this.mouseDeltaX,
@@ -296,6 +379,27 @@ class GpuWorldInput {
     target.addEventListener(type, listener);
     this.listeners.push([target, type, listener]);
   }
+
+  private clearGameplayInput(): void {
+    this.heldKeys.clear();
+    this.mouseDeltaX = 0;
+    this.mouseDeltaY = 0;
+  }
+}
+
+function emptyInputFrame(): DebugInputFrame {
+  return {
+    heldKeys: new Set<string>(),
+    mouseDeltaX: 0,
+    mouseDeltaY: 0,
+    locked: false,
+    joystickX: 0,
+    joystickY: 0,
+    moveForward: false,
+    moveBack: false,
+    flyUp: false,
+    flyDown: false,
+  };
 }
 
 function applyFreeCameraInput(

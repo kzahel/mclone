@@ -5,15 +5,18 @@ import { FAST_VISUAL_PROBE_TIMEOUTS } from "./fast-visual-probe-config";
 
 const GPU_TITLE_LOADING_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-loading.png";
 const GPU_TITLE_WORLD_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-world.png";
+const GPU_TITLE_PAUSE_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-pause.png";
 
 interface GpuGuiState {
   readonly ready: boolean;
-  readonly mode: "title" | "loading" | "world" | "error";
+  readonly mode: "title" | "loading" | "world" | "paused" | "error";
+  readonly screenTitle: string;
   readonly lastAction?: string;
   readonly loadingStage?: string;
   readonly loadingProgress?: number;
   readonly worldReady?: boolean;
   readonly worldResult?: BootResult;
+  readonly pauseScreenActive?: boolean;
   readonly frameCount: number;
   readonly inputEventCount: number;
   readonly cameraPosition?: readonly [number, number, number];
@@ -105,4 +108,57 @@ test("starts the generated world from the GPU title screen without DOM controls"
   expect(movedState.inputEventCount).toBeGreaterThan(liveState.inputEventCount);
   expect(movedState.cameraPosition).toBeDefined();
   expect(movedState.cameraPosition).not.toEqual(liveState.cameraPosition);
+
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(
+    () => window.__mcloneGui?.state.mode === "paused",
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
+  await expect(page.locator("button, input, select, textarea")).toHaveCount(0);
+  await page.locator("#renderer").screenshot({ path: GPU_TITLE_PAUSE_SCREENSHOT_PATH });
+
+  const pausedState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  expect(pausedState.pauseScreenActive).toBe(true);
+  expect(pausedState.screenTitle).toBe("menu.game");
+  expect(pausedState.cameraPosition).toBeDefined();
+
+  await page.keyboard.down("w");
+  await page.mouse.move(liveBox!.x + (liveBox!.width / 2) + 48, liveBox!.y + (liveBox!.height / 2) + 12, { steps: 3 });
+  await page.waitForFunction(
+    ({ frameCount }) => {
+      const state = window.__mcloneGui?.state;
+      return state !== undefined
+        && state.mode === "paused"
+        && state.frameCount >= frameCount + 3;
+    },
+    { frameCount: pausedState.frameCount },
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
+  await page.keyboard.up("w");
+  const pausedInputState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  expect(pausedInputState.cameraPosition).toEqual(pausedState.cameraPosition);
+
+  const backToGameCenterY = (Math.floor(pausedInputState.height / 4) + 24 - 16 + 10) / pausedInputState.height;
+  await page.mouse.click(liveBox!.x + (liveBox!.width / 2), liveBox!.y + (liveBox!.height * backToGameCenterY));
+  await page.waitForFunction(
+    () => window.__mcloneGui?.state.mode === "world" && window.__mcloneGui?.state.pauseScreenActive === false,
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
+
+  const resumedState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  await page.keyboard.down("w");
+  await page.waitForFunction(
+    ({ frameCount, cameraPosition }) => {
+      const state = window.__mcloneGui?.state;
+      return state !== undefined
+        && state.mode === "world"
+        && state.frameCount >= frameCount + 3
+        && JSON.stringify(state.cameraPosition) !== JSON.stringify(cameraPosition);
+    },
+    { frameCount: resumedState.frameCount, cameraPosition: resumedState.cameraPosition },
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
+  await page.keyboard.up("w");
 });

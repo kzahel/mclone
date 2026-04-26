@@ -4,6 +4,7 @@ import { Font } from "../../../src/client/gui/font";
 import { GuiComponent } from "../../../src/client/gui/gui-component";
 import { ScreenManager } from "../../../src/client/gui/screen-manager";
 import { ProgressScreen } from "../../../src/client/gui/screens/progress-screen";
+import { PauseScreen } from "../../../src/client/gui/screens/pause-screen";
 import { Screen } from "../../../src/client/gui/screens/screen";
 import { TitleScreen } from "../../../src/client/gui/screens/title-screen";
 import { GuiDrawList } from "../../../src/renderer/gui/gui-draw-list";
@@ -80,6 +81,26 @@ describe("Gui0 model foundation", () => {
     expect(drawList.getCommands().length).toBeGreaterThan(4);
     expect(drawList.getCommands().some((command) => command.type === "solid_rect")).toBe(true);
     expect(drawList.getCommands().some((command) => command.type === "textured_quad")).toBe(true);
+  });
+
+  it("lays out the pause menu and returns to gameplay", () => {
+    const manager = new ScreenManager(320, 240);
+    let returnedToGame = false;
+    manager.setScreen(new PauseScreen(true, {
+      onReturnToGame: () => {
+        returnedToGame = true;
+        manager.setScreen(null);
+      },
+    }));
+
+    const drawList = new GuiDrawList();
+    manager.render(drawList, 160, 78, 0);
+
+    expect(manager.currentScreen?.getTitle()).toBe("menu.game");
+    expect(drawList.getCommands().length).toBeGreaterThan(8);
+    expect(manager.mouseClicked(160, 78, 0)).toBe(true);
+    expect(returnedToGame).toBe(true);
+    expect(manager.currentScreen).toBeNull();
   });
 });
 
