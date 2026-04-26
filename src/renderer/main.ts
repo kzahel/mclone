@@ -1,25 +1,26 @@
 import { deleteIndexedDbWorldStorage } from "../runtime/storage/indexeddb-world-storage";
 import { Vec3 } from "../world/phys/vec3";
-import { Gui0ProbeScreen } from "../client/gui/screens/gui0-probe-screen";
 import { ProgressScreen } from "../client/gui/screens/progress-screen";
 import { TitleScreen } from "../client/gui/screens/title-screen";
 import { ScreenManager } from "../client/gui/screen-manager";
 import { type CameraState } from "./game-renderer";
 import {
-  initializeRendererScene,
   resizeCanvasToDisplaySize,
-  type RendererScene,
 } from "./scene-setup";
 import { readBrowserRenderConfig } from "./browser-render-config";
 import {
   getGeneratedWorldSmokeScenarioById,
 } from "./generated-world-smoke-scenario";
-import { createGeneratedWorldBrowserPresentationHost } from "./generated-world-browser-presentation-host";
 import {
-  runGeneratedWorldSmokeScenario,
-  type GeneratedWorldSmokeRun,
-  type GeneratedWorldSmokeScenarioResult,
-} from "./generated-world-smoke-runner";
+  createGeneratedWorldBrowserBootAdapter,
+  resolveGeneratedWorldBrowserCamera,
+  type GeneratedWorldBrowserWorldTransportConfig,
+} from "./generated-world-browser-boot";
+import {
+  runGeneratedWorldBoot,
+  type GeneratedWorldBootResult,
+} from "./generated-world-boot";
+import type { GeneratedWorldSmokeScenarioResult } from "./generated-world-smoke-runner";
 import { progressFraction, type LoadingProgress, type LoadingProgressSink } from "./loading-progress";
 import { BROWSER_RENDERER_HOST, type BrowserRendererHost } from "./renderer-host";
 import { GuiRenderer } from "./gui/gui-renderer";
@@ -31,8 +32,6 @@ import {
   type WebGpuDeviceContext,
 } from "./webgpu-target";
 import { startGpuWorldRuntime, type GpuWorldRuntime } from "./gui/gpu-world-runtime";
-
-type BootWorldTransport = "worker" | "remote";
 
 export type BootResult =
   | GeneratedWorldSmokeScenarioResult
@@ -85,10 +84,7 @@ declare global {
 
 const READBACK_FORMAT: GPUTextureFormat = "rgba8unorm";
 
-function readWorldTransport(): {
-  readonly worldTransport: BootWorldTransport;
-  readonly remoteWorldHostUrl?: string;
-} {
+function readWorldTransport(): GeneratedWorldBrowserWorldTransportConfig {
   if (typeof window === "undefined") {
     return { worldTransport: "worker" };
   }
@@ -153,20 +149,7 @@ interface GeneratedWorldSmokeBootOptions {
 }
 
 type GeneratedWorldSmokeBootResult =
-  | {
-    readonly ok: true;
-    readonly scene: RendererScene;
-    readonly run: GeneratedWorldSmokeRun;
-    readonly camera: CameraState;
-  }
-  | { readonly ok: false; readonly reason: string };
-
-async function createGuiProbeOverlay(scene: RendererScene): Promise<GuiOverlayHost> {
-  const size = GuiRenderer.calculateGuiSize(scene.canvas.width, scene.canvas.height);
-  const screenManager = new ScreenManager(size.guiWidth, size.guiHeight);
-  screenManager.setScreen(new Gui0ProbeScreen());
-  return GuiOverlayHost.create(scene.device, scene.canvas, screenManager);
-}
+  GeneratedWorldBootResult;
 
 async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBootResult> {
   const deviceContextResult = await requestWebGpuDeviceContext();
@@ -423,51 +406,22 @@ async function runGeneratedWorldSmokeBoot(
     }
   }
 
-  const sceneResult = await initializeRendererScene(canvas, {
-    seed: scenario.seed,
-    viewDistance: renderConfig.viewDistance,
-    renderDistance: renderConfig.renderDistance,
+  return runGeneratedWorldBoot({
+    scenario,
+    adapter: createGeneratedWorldBrowserBootAdapter({
+      canvas,
+      renderConfig,
+      runtimeConfig,
+      readbackFormat: READBACK_FORMAT,
+      rendererHost: options.rendererHost,
+      guiProbe: readGuiProbeEnabled(url),
+    }),
+    camera: resolveGeneratedWorldBrowserCamera(scenario.steps.length, scenario.camera, requestedCamera),
     worldTransport: runtimeConfig.worldTransport,
-    remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
-    preset: scenario.preset,
-    engineConfig: {
-      lightingMode: renderConfig.lightingMode,
-      liquidSimulationMode: renderConfig.liquidSimulationMode,
-    },
-    worldStorageMode: renderConfig.worldStorageMode,
-    skyColor: renderConfig.skyColor,
-    clearColorScale: renderConfig.clearColorScale,
+    lightingMode: renderConfig.lightingMode,
+    liquidSimulationMode: renderConfig.liquidSimulationMode,
     onProgress: options.onProgress,
-    rendererHost: options.rendererHost,
   });
-  if (!sceneResult.ok) {
-    return sceneResult;
-  }
-  const scene = sceneResult.scene;
-  const guiProbeOverlay = readGuiProbeEnabled(url) ? await createGuiProbeOverlay(scene) : undefined;
-  const camera = scenario.steps.length === 1 ? requestedCamera ?? scenario.camera : undefined;
-  const runtimeCamera = camera ?? scenario.steps[scenario.steps.length - 1]?.camera ?? scenario.camera;
-  try {
-    const run = await runGeneratedWorldSmokeScenario({
-      scene,
-      scenario,
-      camera,
-      presentationHost: createGeneratedWorldBrowserPresentationHost({
-        canvas,
-        guiProbeOverlay,
-        readbackFormat: READBACK_FORMAT,
-      }),
-      worldTransport: runtimeConfig.worldTransport,
-      format: scene.format,
-      lightingMode: renderConfig.lightingMode,
-      liquidSimulationMode: renderConfig.liquidSimulationMode,
-      onProgress: options.onProgress,
-    });
-    return { ok: true, scene, run, camera: runtimeCamera };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return { ok: false, reason };
-  }
 }
 
 if (typeof window !== "undefined") {

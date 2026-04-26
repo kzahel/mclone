@@ -1,11 +1,8 @@
 import { createIntegratedServer } from "../src/runtime/host/integrated-server.ts";
 import { WorkerWorldTransport, type WorldWorkerClientEndpoint } from "../src/runtime/transport/worker-world-transport.ts";
 import type { RenderWorldWorkerClientEndpoint } from "../src/renderer/chunk/render-world-worker-client.ts";
-import {
-  createGeneratedWorldHeadlessHarness,
-  type GeneratedWorldHeadlessHarness,
-} from "../src/renderer/generated-world-headless-harness.ts";
-import { createGeneratedWorldHeadlessPresentationHost } from "../src/renderer/generated-world-headless-presentation-host.ts";
+import { runGeneratedWorldBoot } from "../src/renderer/generated-world-boot.ts";
+import { createGeneratedWorldHeadlessBootAdapter } from "../src/renderer/generated-world-headless-boot.ts";
 import {
   GENERATED_WORLD_SMOKE_SCENARIO,
   GENERATED_WORLD_TICK_CADENCE_SCENARIO,
@@ -14,7 +11,6 @@ import {
   validateGeneratedWorldSmokeResult,
 } from "../src/renderer/generated-world-smoke-scenario.ts";
 import {
-  runGeneratedWorldSmokeScenario,
   type GeneratedWorldSmokeScenarioResult,
 } from "../src/renderer/generated-world-smoke-runner.ts";
 import { createHeadlessRendererHost } from "../src/renderer/renderer-host.ts";
@@ -49,43 +45,28 @@ async function runDenoGeneratedWorldScenario(
     }) as unknown as WorldWorkerClientEndpoint,
   ));
 
-  let harness: GeneratedWorldHeadlessHarness | undefined;
-  try {
-    harness = await createGeneratedWorldHeadlessHarness({
-      adapter,
+  const bootResult = await runGeneratedWorldBoot({
+    scenario,
+    worldTransport: "worker",
+    adapter: createGeneratedWorldHeadlessBootAdapter({
+      gpuAdapter: adapter,
       device,
       format,
       rendererHost,
       worldTransport,
       assetPack: createDenoExtractedAssetPack(),
-      seed: scenario.seed,
-      width: scenario.width,
-      height: scenario.height,
-      viewDistance: scenario.viewDistance,
-      renderDistance: scenario.renderDistance,
-      preset: scenario.preset,
-      engineConfig: scenario.engineConfig,
-      skyColor: scenario.skyColor,
-      clearColorScale: scenario.clearColorScale,
-    });
+      writePngArtifact: async ({ outputPath, width, height, pixels }) => {
+        await Deno.writeFile(outputPath, encodePngRgba(width, height, pixels));
+      },
+    }),
+  });
+  if (!bootResult.ok) {
+    throw new Error(bootResult.reason);
+  }
 
-    const run = await runGeneratedWorldSmokeScenario({
-      scene: harness.scene,
-      scenario,
-      worldTransport: "worker",
-      presentationHost: createGeneratedWorldHeadlessPresentationHost({
-        rendererHost,
-        width: scenario.width,
-        height: scenario.height,
-        format: scenario.renderTargetFormat,
-        writePngArtifact: async ({ outputPath, width, height, pixels }) => {
-          await Deno.writeFile(outputPath, encodePngRgba(width, height, pixels));
-        },
-      }),
-    });
-
+  try {
     const smokeResult = {
-      ...run.result,
+      ...bootResult.run.result,
       adapter: adapter.info ?? {},
     };
     const validationErrors = validateGeneratedWorldSmokeResult(smokeResult, {
@@ -100,7 +81,7 @@ async function runDenoGeneratedWorldScenario(
 
     return smokeResult;
   } finally {
-    harness?.close();
+    await bootResult.close();
   }
 }
 
