@@ -28,7 +28,7 @@ The project is past the “terrain demo” phase. The renderer is already consum
 - translated classic air carvers
 - translated first-pass biome decoration
 - translated common overworld ore generation, the active underground variety material blobs, the live badlands/mountain underground extras, glow lichen, rare dripstone, and soft disks
-- translated rendering for water, tint, dark-oak trees, acacia trees, jungle trees, bamboo, mega spruce / mega pine conifers, huge mushrooms, bee nests, grass, flowers, lily pads, seagrass, kelp, coral, sea pickles, mushrooms, cactus, sugar cane, vine, cocoa, melon, and related surface features
+- translated rendering for water, tint, dark-oak trees, acacia trees, jungle trees, bamboo, mega spruce / mega pine conifers, huge mushrooms, bee nests, grass, flowers, sunflowers, lily pads, seagrass, kelp, coral, sea pickles, mushrooms, cactus, sugar cane, vine, cocoa, melon, and related surface features
 
 Several later worldgen capabilities landed through renderer-driven tacticals rather than through the original worldgen arc, so this document should be treated as the authoritative status view when it disagrees with the older tactical sequence.
 
@@ -112,7 +112,7 @@ The current worldgen path covers a meaningful first-pass overworld set:
 - trees: oak, swamp oak, fancy oak, spruce, pine, mega pine, mega spruce, birch, tall birch, dark oak, acacia, jungle, mega jungle, jungle bush
 - bee follow-through: bee-decorated oak / birch / fancy-oak variants plus generated `bee_nest` block/render support
 - huge vegetation: huge brown mushroom, huge red mushroom
-- plants: grass, tall grass, fern, large fern, flowers, double flowers, berry bushes, mushrooms, pumpkins, melon, cactus, sugar cane, dead bush, vine, cocoa, bamboo
+- plants: grass, tall grass, fern, large fern, flowers, sunflowers, double flowers, berry bushes, mushrooms, pumpkins, melon, cactus, sugar cane, dead bush, vine, cocoa, bamboo
 - water/surface flora: lily pads, seagrass, tall seagrass
 - ocean flora: kelp, kelp plant, live/dead coral blocks/plants/fans/wall fans, sea pickles
 - cold-surface features: top-layer snow/ice freezing, packed-ice patches, ice spikes
@@ -156,7 +156,6 @@ No layered-overworld biome key in the current target still falls back to a carve
 
 The current tree system is enough to render believable forests, but not enough for broad vanilla parity. Notable missing classes of work:
 
-- sunflower-plains-specific `PATCH_SUNFLOWER`
 - remaining vine-placement consumers outside the current jungle-focused coverage
 - more biome-specific trunk/foliage/feature-size combinations
 
@@ -234,9 +233,8 @@ After the sand/gravel boundary target, use the full-block diff reports to choose
 
 ### 4. Finish the remaining simple surface-decorator ecosystems
 
-The current vegetation set is already enough to make scenes legible, and the bee follow-through removed the clearest remaining tree-decorator omission. The next leverage point is the still-missing simple decoration work that is both explicit in the vanilla tables and visibly testable:
+The current vegetation set is already enough to make scenes legible, and the bee and sunflower follow-through removed the clearest remaining explicit table omissions. The next leverage point is the still-missing simple decoration work that is both visible and narrow enough to validate directly:
 
-- sunflower-plains-specific `PATCH_SUNFLOWER`
 - remaining vine-placement consumers outside the current jungle-focused coverage
 - remaining biome-specific decorators and selector exactness
 

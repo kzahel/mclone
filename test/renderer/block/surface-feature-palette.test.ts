@@ -8,6 +8,7 @@ import { ItemBlockRenderTypes } from "../../../src/renderer/item-block-render-ty
 import { RenderType } from "../../../src/renderer/render-type";
 import { Block } from "../../../src/world/level/block/block";
 import { BlockStateProperties } from "../../../src/world/level/block/state/properties/block-state-properties";
+import { DoubleBlockHalf } from "../../../src/world/level/block/state/properties/double-block-half";
 import { DripstoneThickness } from "../../../src/world/level/block/state/properties/dripstone-thickness";
 import { StaticBlockAndTintGetter } from "../../../src/world/level/static-block-and-tint-getter";
 import { FoliageColor } from "../../../src/world/level/foliage-color";
@@ -79,6 +80,7 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:lily_pad"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:brown_mushroom"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:cactus"))).toBe(RenderType.cutout());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:sunflower"))).toBe(RenderType.cutout());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:tuff"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:clay"))).toBe(RenderType.solid());
@@ -119,6 +121,11 @@ describe("Surface feature palette", () => {
     expect(beeNest.getValue(BlockStateProperties.LEVEL_HONEY)).toBe(0);
     expect(palette.blockLocations.some((location) => location.toString() === "minecraft:bee_nest")).toBe(true);
     expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/bee_nest_front_honey")).toBe(true);
+
+    const sunflower = getState("minecraft:sunflower");
+    expect(sunflower.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)).toBe(DoubleBlockHalf.LOWER);
+    expect(palette.blockLocations.some((location) => location.toString() === "minecraft:sunflower")).toBe(true);
+    expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/sunflower_front")).toBe(true);
   });
 
   test("leaves stay non-occluding so adjacent terrain faces are not culled", () => {

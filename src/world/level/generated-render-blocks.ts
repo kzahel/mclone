@@ -108,6 +108,7 @@ const KELP_LOCATION = new ResourceLocation("minecraft:kelp");
 const KELP_PLANT_LOCATION = new ResourceLocation("minecraft:kelp_plant");
 const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
 const TALL_GRASS_LOCATION = new ResourceLocation("minecraft:tall_grass");
+const SUNFLOWER_LOCATION = new ResourceLocation("minecraft:sunflower");
 const LILAC_LOCATION = new ResourceLocation("minecraft:lilac");
 const ROSE_BUSH_LOCATION = new ResourceLocation("minecraft:rose_bush");
 const PEONY_LOCATION = new ResourceLocation("minecraft:peony");
@@ -273,6 +274,7 @@ const GENERATED_BLOCK_LOCATIONS = [
   KELP_PLANT_LOCATION,
   LILY_PAD_LOCATION,
   TALL_GRASS_LOCATION,
+  SUNFLOWER_LOCATION,
   LILAC_LOCATION,
   ROSE_BUSH_LOCATION,
   PEONY_LOCATION,
@@ -432,6 +434,10 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("lily_pad"),
   blockTexture("tall_grass_bottom"),
   blockTexture("tall_grass_top"),
+  blockTexture("sunflower_bottom"),
+  blockTexture("sunflower_back"),
+  blockTexture("sunflower_front"),
+  blockTexture("sunflower_top"),
   blockTexture("lilac_bottom"),
   blockTexture("lilac_top"),
   blockTexture("rose_bush_bottom"),
@@ -1063,6 +1069,10 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     TALL_GRASS_LOCATION,
     new DoublePlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
   ).defaultBlockState();
+  const sunflowerState = registerBlock(
+    SUNFLOWER_LOCATION,
+    new DoublePlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
+  ).defaultBlockState();
   const lilacState = registerBlock(
     LILAC_LOCATION,
     new DoublePlantBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().instabreak().sound(SoundType.GRASS).noOcclusion()),
@@ -1165,6 +1175,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(seaPickleState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(lilyPadState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(tallGrassState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(sunflowerState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(lilacState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(roseBushState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(peonyState.getBlock(), RenderType.cutout());

@@ -16,8 +16,10 @@ import { DecoratedFeatureConfiguration } from "../../../../src/worldgen/levelgen
 import type { DecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorator-configuration";
 import { FrequencyWithExtraChanceDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/frequency-with-extra-chance-decorator-configuration";
 import { ProbabilityFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/probability-feature-configuration";
+import { RandomPatchConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/random-patch-configuration";
 import { RandomFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/random-feature-configuration";
 import { Features } from "../../../../src/worldgen/levelgen/feature/features";
+import { SimpleStateProvider } from "../../../../src/worldgen/levelgen/feature/stateproviders/simple-state-provider";
 import { TreeFeatures } from "../../../../src/worldgen/levelgen/feature/tree-features";
 import { BeehiveDecorator } from "../../../../src/worldgen/levelgen/feature/treedecorators/beehive-decorator";
 import { VegetationFeatures } from "../../../../src/worldgen/levelgen/feature/vegetation-features";
@@ -241,6 +243,19 @@ function getTreeExtraCount(key: string): number {
   return countConfig!.count;
 }
 
+function isRandomPatchFeatureForState(feature: ConfiguredFeature<any, any>, location: string): boolean {
+  const { current } = unwrapConfiguredFeature(feature);
+  if (current.feature !== Features.RANDOM_PATCH || !(current.config instanceof RandomPatchConfiguration)) {
+    return false;
+  }
+
+  if (!(current.config.stateProvider instanceof SimpleStateProvider)) {
+    return false;
+  }
+
+  return current.config.stateProvider.getState(new WorldgenRandom(0n), BlockPos.ZERO).getBlock().getLocation()?.toString() === location;
+}
+
 describe("Vegetation parity", () => {
   beforeEach(() => {
     Registry.BLOCK.clear();
@@ -272,6 +287,18 @@ describe("Vegetation parity", () => {
     for (const location of placedLocations) {
       expect(FOREST_FLOWER_LOCATIONS.has(location)).toBe(true);
     }
+  });
+
+  test("PATCH_SUNFLOWER places only translated sunflower double-plant states", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+    const generator = createGenerator();
+
+    expect(VegetationFeatures.PATCH_SUNFLOWER.place(level, generator, new WorldgenRandom(2468n), new BlockPos(0, 0, 0))).toBe(true);
+
+    const placedLocations = collectPlacedLocations(level, 11, 12);
+    expect(placedLocations.length).toBeGreaterThan(0);
+    expect(placedLocations.every((location) => location === "minecraft:sunflower")).toBe(true);
   });
 
   test("dead-bush and seagrass vegetation place onto translated desert and swamp surfaces", () => {
@@ -557,6 +584,30 @@ describe("Vegetation parity", () => {
     expectBeeDecoratedTreeFeature(plainVegetationConfig.defaultFeature, 0.05);
   });
 
+  test("sunflower plains insert PATCH_SUNFLOWER and keep the vanilla vegetal ordering split", () => {
+    registerGeneratedRenderBlocks();
+
+    const plainsVegetal = getVegetalFeatures("minecraft:plains");
+    const sunflowerVegetal = getVegetalFeatures("minecraft:sunflower_plains");
+
+    expect(sunflowerVegetal.length).toBe(plainsVegetal.length + 1);
+
+    const tallGrassIndex = sunflowerVegetal.findIndex((feature) => isRandomPatchFeatureForState(feature, "minecraft:tall_grass"));
+    const sunflowerIndex = sunflowerVegetal.findIndex((feature) => isRandomPatchFeatureForState(feature, "minecraft:sunflower"));
+    const plainVegetationIndex = sunflowerVegetal.findIndex((feature) => unwrapConfiguredFeature(feature).current.feature === Features.RANDOM_SELECTOR);
+    const sugarCaneIndex = sunflowerVegetal.findIndex((feature) => isRandomPatchFeatureForState(feature, "minecraft:sugar_cane"));
+    const brownMushroomIndex = sunflowerVegetal.findIndex((feature) => isRandomPatchFeatureForState(feature, "minecraft:brown_mushroom"));
+
+    expect(tallGrassIndex).toBeGreaterThan(-1);
+    expect(sunflowerIndex).toBeGreaterThan(-1);
+    expect(plainVegetationIndex).toBeGreaterThan(-1);
+    expect(tallGrassIndex).toBeLessThan(sunflowerIndex);
+    expect(sunflowerIndex).toBeLessThan(plainVegetationIndex);
+    expect(sugarCaneIndex).toBeGreaterThan(-1);
+    expect(brownMushroomIndex).toBeGreaterThan(-1);
+    expect(sugarCaneIndex).toBeLessThan(brownMushroomIndex);
+  });
+
   test("overworld biome settings wire the shoreline, ocean, swamp, forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom, mountain, and badlands tables", () => {
     registerGeneratedRenderBlocks();
     const beachFeatures = getOverworldBiomeGenerationSettings("minecraft:beach").features().flat().map((supplier) => getBaseFeature(supplier()));
@@ -646,6 +697,11 @@ describe("Vegetation parity", () => {
       .flat()
       .map((supplier) => getBaseFeature(supplier()));
     const giantSpruceTaigaHillsFeatures = getOverworldBiomeGenerationSettings("minecraft:giant_spruce_taiga_hills")
+      .features()
+      .flat()
+      .map((supplier) => getBaseFeature(supplier()));
+    const plainsFeatures = getOverworldBiomeGenerationSettings("minecraft:plains").features().flat().map((supplier) => getBaseFeature(supplier()));
+    const sunflowerPlainsFeatures = getOverworldBiomeGenerationSettings("minecraft:sunflower_plains")
       .features()
       .flat()
       .map((supplier) => getBaseFeature(supplier()));
@@ -765,6 +821,10 @@ describe("Vegetation parity", () => {
     expect(giantTaigaHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(giantSpruceTaigaFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
     expect(giantSpruceTaigaHillsFeatures.some((feature) => feature === Features.RANDOM_SELECTOR)).toBe(true);
+    expect(plainsFeatures.filter((feature) => feature === Features.RANDOM_PATCH).length).toBeGreaterThan(0);
+    expect(sunflowerPlainsFeatures.filter((feature) => feature === Features.RANDOM_PATCH).length).toBe(
+      plainsFeatures.filter((feature) => feature === Features.RANDOM_PATCH).length + 1,
+    );
     expect(mountainsFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
     expect(woodedMountainsFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);
     expect(mountainEdgeFeatures.some((feature) => feature === Features.FLOWER)).toBe(true);

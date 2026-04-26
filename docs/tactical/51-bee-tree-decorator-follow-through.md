@@ -49,4 +49,4 @@ Finish the last broad, clearly known-missing tree-decorator slice by porting van
 
 ## Next
 
-Stay in the same "known missing simple decorations" lane and do sunflower plains next: port the sunflower-plains-specific `PATCH_SUNFLOWER` path and wire it into the existing plains / sunflower-plains biome tables before chasing narrower table exactness.
+Stay in the same "known missing simple decorations" lane and do sunflower plains next. That later landed as [`52-sunflower-plains-follow-through.md`](52-sunflower-plains-follow-through.md); the next remaining simple-decoration bucket after that is the still-missing vine-placement consumers outside the current jungle-focused coverage.

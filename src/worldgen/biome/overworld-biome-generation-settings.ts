@@ -199,6 +199,10 @@ function addPlainVegetation(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_GRASS_PLAIN);
 }
 
+function addSunflowerDecoration(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_SUNFLOWER);
+}
+
 function addSavannaTrees(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.TREES_SAVANNA);
 }
@@ -510,7 +514,7 @@ function buildBirchForestSettings(tall: boolean): BiomeGenerationSettings {
   return builder.build();
 }
 
-function buildPlainsSettings(): BiomeGenerationSettings {
+function buildPlainsSettings(sunflower = false): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
@@ -518,9 +522,19 @@ function buildPlainsSettings(): BiomeGenerationSettings {
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
   addPlainGrass(builder);
+  if (sunflower) {
+    addSunflowerDecoration(builder);
+  }
   addPlainVegetation(builder);
+  if (sunflower) {
+    builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_SUGAR_CANE);
+  }
   addDefaultMushrooms(builder);
-  addDefaultExtraVegetation(builder);
+  if (sunflower) {
+    builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_PUMPKIN);
+  } else {
+    addDefaultExtraVegetation(builder);
+  }
   addDefaultSprings(builder);
   addSurfaceFreezing(builder);
   return builder.build();
@@ -746,7 +760,7 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:snowy_taiga_mountains", buildSnowyTaigaSettings()],
   ["minecraft:snowy_tundra", buildSnowyTundraSettings()],
   ["minecraft:stone_shore", buildBeachSettings()],
-  ["minecraft:sunflower_plains", buildPlainsSettings()],
+  ["minecraft:sunflower_plains", buildPlainsSettings(true)],
   ["minecraft:swamp", buildSwampSettings(false)],
   ["minecraft:swamp_hills", buildSwampSettings(true)],
   ["minecraft:tall_birch_forest", buildBirchForestSettings(true)],

@@ -47,6 +47,7 @@ const POPPY_LOCATION = new ResourceLocation("minecraft:poppy");
 const DEAD_BUSH_LOCATION = new ResourceLocation("minecraft:dead_bush");
 const LILY_PAD_LOCATION = new ResourceLocation("minecraft:lily_pad");
 const TALL_GRASS_LOCATION = new ResourceLocation("minecraft:tall_grass");
+const SUNFLOWER_LOCATION = new ResourceLocation("minecraft:sunflower");
 const LILAC_LOCATION = new ResourceLocation("minecraft:lilac");
 const ROSE_BUSH_LOCATION = new ResourceLocation("minecraft:rose_bush");
 const PEONY_LOCATION = new ResourceLocation("minecraft:peony");
@@ -211,6 +212,16 @@ function createLargeFernConfig(): RandomPatchConfiguration {
 function createTallGrassConfig(): RandomPatchConfiguration {
   return RandomPatchConfiguration.grassConfigurationBuilder(
     new SimpleStateProvider(getRequiredState(TALL_GRASS_LOCATION)),
+    DoublePlantPlacer.INSTANCE,
+  )
+    .triesCount(64)
+    .noProjection()
+    .build();
+}
+
+function createSunflowerConfig(): RandomPatchConfiguration {
+  return RandomPatchConfiguration.grassConfigurationBuilder(
+    new SimpleStateProvider(getRequiredState(SUNFLOWER_LOCATION)),
     DoublePlantPlacer.INSTANCE,
   )
     .triesCount(64)
@@ -494,6 +505,13 @@ export class VegetationFeatures {
       .decorated(spread32AboveDecorator())
       .decorated(heightmapSquare())
       .count(7);
+  }
+
+  public static get PATCH_SUNFLOWER() {
+    return Features.RANDOM_PATCH.configured(createSunflowerConfig())
+      .decorated(spread32AboveDecorator())
+      .decorated(heightmapSquare())
+      .count(10);
   }
 
   public static get PATCH_WATERLILLY() {
