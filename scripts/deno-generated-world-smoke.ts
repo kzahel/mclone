@@ -7,15 +7,19 @@ import {
 } from "../src/renderer/generated-world-headless-harness.ts";
 import {
   GENERATED_WORLD_SMOKE_SCENARIO,
+  GENERATED_WORLD_TRANSITION_SCENARIO,
+  type GeneratedWorldSmokeScenario,
   validateGeneratedWorldSmokeResult,
 } from "../src/renderer/generated-world-smoke-scenario.ts";
-import { runGeneratedWorldSmokeScenario } from "../src/renderer/generated-world-smoke-runner.ts";
+import {
+  runGeneratedWorldSmokeScenario,
+  type GeneratedWorldSmokeRun,
+  type GeneratedWorldSmokeScenarioResult,
+} from "../src/renderer/generated-world-smoke-runner.ts";
 import { createHeadlessRendererHost } from "../src/renderer/renderer-host.ts";
 import { renderFrameToHeadlessTarget } from "../src/renderer/static-frame-harness.ts";
 import { createDenoExtractedAssetPack } from "./deno-file-asset-source.ts";
 import { encodePngRgba } from "./png-rgba.ts";
-
-const SCENARIO = GENERATED_WORLD_SMOKE_SCENARIO;
 
 const rendererHost = createHeadlessRendererHost(() => new Worker(
   new URL("./deno-generated-render-world-worker.ts", import.meta.url),
@@ -30,71 +34,103 @@ if (!contextResult.ok) {
 }
 
 const { adapter, device, format } = contextResult.context;
-const worldTransport = createIntegratedServer(new WorkerWorldTransport(
-  new Worker(new URL("./deno-generated-world-worker.ts", import.meta.url), {
-    type: "module",
-    name: "mclone-deno-generated-world-worker",
-  }) as unknown as WorldWorkerClientEndpoint,
-));
 
-let harness: GeneratedWorldHeadlessHarness | undefined;
-try {
-  harness = await createGeneratedWorldHeadlessHarness({
-    adapter,
-    device,
-    format,
-    rendererHost,
-    worldTransport,
-    assetPack: createDenoExtractedAssetPack(),
-    seed: SCENARIO.seed,
-    width: SCENARIO.width,
-    height: SCENARIO.height,
-    viewDistance: SCENARIO.viewDistance,
-    renderDistance: SCENARIO.renderDistance,
-    preset: SCENARIO.preset,
-    engineConfig: SCENARIO.engineConfig,
-    skyColor: SCENARIO.skyColor,
-    clearColorScale: SCENARIO.clearColorScale,
-  });
+type DenoGeneratedWorldScenarioResult = GeneratedWorldSmokeScenarioResult & {
+  readonly adapter: GPUAdapterInfo | Record<string, never>;
+};
 
-  const run = await runGeneratedWorldSmokeScenario({
-    scene: harness.scene,
-    scenario: SCENARIO,
-    worldTransport: "worker",
-    outputPath: SCENARIO.outputPath,
-    target: {
-      width: SCENARIO.width,
-      height: SCENARIO.height,
-      format: SCENARIO.renderTargetFormat,
-      renderFrame: ({ scene, frame }) => renderFrameToHeadlessTarget({
-        rendererHost,
-        scene,
-        frame,
-        width: SCENARIO.width,
-        height: SCENARIO.height,
-        format: SCENARIO.renderTargetFormat,
-      }),
-    },
-  });
-  if (run.readback.pixels === undefined) {
-    throw new Error("Deno generated-world smoke did not produce readback pixels");
+async function runDenoGeneratedWorldScenario(
+  scenario: GeneratedWorldSmokeScenario,
+): Promise<DenoGeneratedWorldScenarioResult> {
+  const worldTransport = createIntegratedServer(new WorkerWorldTransport(
+    new Worker(new URL("./deno-generated-world-worker.ts", import.meta.url), {
+      type: "module",
+      name: "mclone-deno-generated-world-worker",
+    }) as unknown as WorldWorkerClientEndpoint,
+  ));
+
+  let harness: GeneratedWorldHeadlessHarness | undefined;
+  try {
+    harness = await createGeneratedWorldHeadlessHarness({
+      adapter,
+      device,
+      format,
+      rendererHost,
+      worldTransport,
+      assetPack: createDenoExtractedAssetPack(),
+      seed: scenario.seed,
+      width: scenario.width,
+      height: scenario.height,
+      viewDistance: scenario.viewDistance,
+      renderDistance: scenario.renderDistance,
+      preset: scenario.preset,
+      engineConfig: scenario.engineConfig,
+      skyColor: scenario.skyColor,
+      clearColorScale: scenario.clearColorScale,
+    });
+
+    const run = await runGeneratedWorldSmokeScenario({
+      scene: harness.scene,
+      scenario,
+      worldTransport: "worker",
+      target: {
+        width: scenario.width,
+        height: scenario.height,
+        format: scenario.renderTargetFormat,
+        renderFrame: ({ scene, frame }) => renderFrameToHeadlessTarget({
+          rendererHost,
+          scene,
+          frame,
+          width: scenario.width,
+          height: scenario.height,
+          format: scenario.renderTargetFormat,
+        }),
+      },
+    });
+
+    await writeScenarioArtifacts(run);
+
+    const smokeResult = {
+      ...run.result,
+      adapter: adapter.info ?? {},
+    };
+    const validationErrors = validateGeneratedWorldSmokeResult(smokeResult, {
+      expectedWorldTransport: "worker",
+      requireReadback: true,
+      requirePlayerInput: true,
+      requireSteps: true,
+    }, scenario);
+    if (validationErrors.length > 0) {
+      throw new Error(`Deno generated-world scenario ${scenario.id} failed validation:\n${validationErrors.join("\n")}`);
+    }
+
+    return smokeResult;
+  } finally {
+    harness?.close();
   }
-  await Deno.writeFile(SCENARIO.outputPath, encodePngRgba(run.readback.width, run.readback.height, run.readback.pixels));
-
-  const smokeResult = {
-    ...run.result,
-    adapter: adapter.info ?? {},
-  };
-  const validationErrors = validateGeneratedWorldSmokeResult(smokeResult, {
-    expectedWorldTransport: "worker",
-    requireReadback: true,
-    requirePlayerInput: true,
-  }, SCENARIO);
-  if (validationErrors.length > 0) {
-    throw new Error(`Deno generated-world smoke failed validation:\n${validationErrors.join("\n")}`);
-  }
-
-  console.log(JSON.stringify(smokeResult));
-} finally {
-  harness?.close();
 }
+
+async function writeScenarioArtifacts(run: GeneratedWorldSmokeRun): Promise<void> {
+  for (const stepRun of run.stepRuns) {
+    const outputPath = stepRun.result.outputPath;
+    if (outputPath === undefined) {
+      continue;
+    }
+    if (stepRun.readback.pixels === undefined) {
+      throw new Error(`Deno generated-world step ${stepRun.result.stepName} did not produce readback pixels`);
+    }
+    await Deno.writeFile(outputPath, encodePngRgba(
+      stepRun.readback.width,
+      stepRun.readback.height,
+      stepRun.readback.pixels,
+    ));
+  }
+}
+
+const smokeResult = await runDenoGeneratedWorldScenario(GENERATED_WORLD_SMOKE_SCENARIO);
+const transitionResult = await runDenoGeneratedWorldScenario(GENERATED_WORLD_TRANSITION_SCENARIO);
+
+console.log(JSON.stringify({
+  ...smokeResult,
+  transition: transitionResult,
+}));

@@ -2,14 +2,21 @@ import { expect, test, type Page } from "./remote-world-host-fixture";
 import { type BootResult } from "../../src/renderer/main.ts";
 import {
   createGeneratedWorldSmokeSearchParams,
+  GENERATED_WORLD_SMOKE_SCENARIO,
+  GENERATED_WORLD_TRANSITION_SCENARIO,
+  type GeneratedWorldSmokeScenario,
   validateGeneratedWorldSmokeResult,
 } from "../../src/renderer/generated-world-smoke-scenario.ts";
 
 const REMOTE_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-remote-smoke.png";
 const WORKER_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-smoke.png";
+const WORKER_TRANSITION_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-transition-smoke.png";
 
-function createSmokeParams(extra: Record<string, string>): URLSearchParams {
-  return createGeneratedWorldSmokeSearchParams(extra);
+function createSmokeParams(
+  extra: Record<string, string>,
+  scenario: GeneratedWorldSmokeScenario = GENERATED_WORLD_SMOKE_SCENARIO,
+): URLSearchParams {
+  return createGeneratedWorldSmokeSearchParams(extra, scenario);
 }
 
 function createRemoteSmokeUrl(remoteWorldHostUrl: string): string {
@@ -26,6 +33,13 @@ function createWorkerSmokeUrl(): string {
   }).toString()}`;
 }
 
+function createWorkerTransitionSmokeUrl(): string {
+  return `/smoke.html?${createSmokeParams({
+    worldTransport: "worker",
+    worldStorageMode: "none",
+  }, GENERATED_WORLD_TRANSITION_SCENARIO).toString()}`;
+}
+
 async function bootPage(page: Page, url: string): Promise<BootResult> {
   await page.goto(url, { waitUntil: "load" });
   await page.waitForFunction(() => typeof window.__mcloneReady !== "undefined");
@@ -35,6 +49,7 @@ async function bootPage(page: Page, url: string): Promise<BootResult> {
 function expectRenderedSmokeResult(
   result: BootResult,
   expectedTransport: "worker" | "remote",
+  scenario: GeneratedWorldSmokeScenario = GENERATED_WORLD_SMOKE_SCENARIO,
 ): asserts result is Extract<BootResult, { ok: true }> {
   expect(result.ok, JSON.stringify(result)).toBe(true);
   if (!result.ok) {
@@ -48,10 +63,11 @@ function expectRenderedSmokeResult(
   expect(validateGeneratedWorldSmokeResult(result, {
     expectedWorldTransport: expectedTransport,
     requirePlayerInput: true,
-  })).toEqual([]);
+    requireSteps: true,
+  }, scenario)).toEqual([]);
 }
 
-test.setTimeout(30_000);
+test.setTimeout(45_000);
 
 test("WebGPU boot succeeds against the remote Node host with two browser clients", async ({ browser, remoteWorldHostUrl }) => {
   const context = await browser.newContext();
@@ -84,5 +100,18 @@ test("WebGPU boot succeeds against the worker integrated server", async ({ page 
   await page.locator("#renderer").screenshot({ path: WORKER_SMOKE_SCREENSHOT_PATH });
 
   expectRenderedSmokeResult(result, "worker");
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("WebGPU generated-world transition scenario settles against the worker integrated server", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(String(err)));
+
+  const result = await bootPage(page, createWorkerTransitionSmokeUrl());
+  await page.locator("#renderer").screenshot({ path: WORKER_TRANSITION_SMOKE_SCREENSHOT_PATH });
+
+  expectRenderedSmokeResult(result, "worker", GENERATED_WORLD_TRANSITION_SCENARIO);
+  expect(result.steps.map((step) => step.stepName)).toEqual(["initial", "shifted"]);
+  expect(result.steps[0]?.chunkCenter).not.toEqual(result.steps[1]?.chunkCenter);
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });

@@ -5,53 +5,22 @@ import {
   createSceneDepthTarget,
   encodeSceneFrame,
   initializeRendererScene,
-  type RenderSceneQueueStats,
-  type RenderWorldPerformanceCounters,
 } from "./scene-setup";
 import { readBrowserRenderConfig } from "./browser-render-config";
 import {
-  GENERATED_WORLD_SMOKE_SCENARIO,
+  getGeneratedWorldSmokeScenarioById,
 } from "./generated-world-smoke-scenario";
 import {
   runGeneratedWorldSmokeScenario,
   type GeneratedWorldSmokeRenderTarget,
+  type GeneratedWorldSmokeScenarioResult,
 } from "./generated-world-smoke-runner";
 import { readTextureRgba8 } from "./webgpu-target";
 
 type BootWorldTransport = "worker" | "remote";
 
 export type BootResult =
-  | {
-      ok: true;
-      worldTransport: BootWorldTransport;
-      meshTransport: "worker";
-      saveId: string;
-      sessionId?: string;
-      playerId?: string;
-      playerName?: string;
-      playerProfileId?: string;
-      sessionRevision?: number;
-      playerInputSequence?: number;
-      playerStateRevision?: number;
-      playerTick?: number;
-      playerPosition?: readonly [number, number, number];
-      format: GPUTextureFormat;
-      adapterInfo: string;
-      centerPixel: readonly [number, number, number, number];
-      terrainPixel: readonly [number, number, number, number];
-      clearPixel: readonly [number, number, number, number];
-      loadedChunkCount: number;
-      expectedLoadedChunkCount: number;
-      viewDistance: number;
-      renderDistance: number;
-      lightingMode: string;
-      liquidSimulationMode: string;
-      solidDrawCount: number;
-      cutoutDrawCount: number;
-      translucentDrawCount: number;
-      renderWorldCounters: RenderWorldPerformanceCounters;
-      renderQueueStats: RenderSceneQueueStats;
-    }
+  | GeneratedWorldSmokeScenarioResult
   | { ok: false; reason: string };
 
 declare global {
@@ -120,6 +89,7 @@ async function boot(): Promise<BootResult> {
 
   const runtimeConfig = readWorldTransport();
   const url = typeof window === "undefined" ? new URL("http://127.0.0.1/") : new URL(window.location.href);
+  const scenario = getGeneratedWorldSmokeScenarioById(url.searchParams.get("generatedWorldScenario"));
   const renderConfig = readBrowserRenderConfig(url);
   const requestedCamera = readSmokeCamera(url);
   if (readClearWorldStorage(url)) {
@@ -137,12 +107,12 @@ async function boot(): Promise<BootResult> {
   }
 
   const sceneResult = await initializeRendererScene(canvas, {
-    seed: GENERATED_WORLD_SMOKE_SCENARIO.seed,
+    seed: scenario.seed,
     viewDistance: renderConfig.viewDistance,
     renderDistance: renderConfig.renderDistance,
     worldTransport: runtimeConfig.worldTransport,
     remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
-    preset: GENERATED_WORLD_SMOKE_SCENARIO.preset,
+    preset: scenario.preset,
     engineConfig: {
       lightingMode: renderConfig.lightingMode,
       liquidSimulationMode: renderConfig.liquidSimulationMode,
@@ -155,11 +125,11 @@ async function boot(): Promise<BootResult> {
     return sceneResult;
   }
   const scene = sceneResult.scene;
-  const camera = requestedCamera ?? GENERATED_WORLD_SMOKE_SCENARIO.camera;
+  const camera = scenario.steps.length === 1 ? requestedCamera ?? scenario.camera : undefined;
   try {
     const run = await runGeneratedWorldSmokeScenario({
       scene,
-      scenario: GENERATED_WORLD_SMOKE_SCENARIO,
+      scenario,
       camera,
       target: createBrowserSmokeRenderTarget(canvas),
       worldTransport: runtimeConfig.worldTransport,

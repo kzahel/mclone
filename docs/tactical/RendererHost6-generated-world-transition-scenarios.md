@@ -1,6 +1,6 @@
 # RendererHost6: Generated World Transition Scenarios
 
-Status: next.
+Status: done.
 
 ## Goal
 
@@ -45,17 +45,26 @@ The runner should own sequencing and validation. Host adapters should remain lim
 
 The first transition should be conservative: move the camera enough to change chunk interest and render a second settled frame, then inject a later input sequence and verify the authoritative player acknowledgement advances. Avoid adding gameplay semantics beyond what the current runtime already supports.
 
+Landed shape:
+
+- `GeneratedWorldSmokeScenario.steps[]` now carries the host-neutral step contract: name, camera, optional player input, expected loaded chunk count/center, and readback artifact expectations.
+- `runGeneratedWorldSmokeScenario(...)` sequences every step: set chunk interest, wait for the loaded ring, verify the session chunk view, inject step input, render a settled frame, read back pixels, and report per-step counters/state.
+- The top-level smoke result remains the final step result plus the existing single-frame fields, with a `steps` array for transition comparisons.
+- Deno runs the original static smoke and the two-step transition scenario in one smoke command, writing step PNGs under `/tmp`.
+- Browser smoke can select the same transition scenario through `generatedWorldScenario=transition`; the worker-integrated browser lane now exercises it.
+
 ## Validation
 
-Required for completion:
+Completed:
 
-- `pnpm smoke:deno:generated-world`
-- `pnpm smoke:deno:world-assets`
-- focused renderer/runtime tests touched by the step runner
-- `pnpm typecheck`, with the known unrelated `WorldHostMessage.snapshot` failure documented if still present
+- `pnpm smoke:deno:generated-world` - passed; wrote `/tmp/mclone-deno-generated-world-smoke.png`, `/tmp/mclone-deno-generated-world-transition-01-initial.png`, and `/tmp/mclone-deno-generated-world-transition-02-shifted.png`
+- `pnpm smoke:deno:world-assets` - passed
+- `pnpm test -- test/renderer/generated-world-smoke-scenario.test.ts` - passed
+- `env VITE_PORT=35173 pnpm test:browser` - passed on Mac Chrome/WebGPU with remote, worker, and worker transition screenshots under `/tmp`
+- `pnpm typecheck` - passed
 - `git diff --check`
 
-Run browser smoke only on a host with usable Chrome WebGPU. On this headless Linux host, validate shared browser code through typecheck and Deno parity unless Chrome GPU support changes.
+Run browser smoke only on a host with usable Chrome WebGPU. On this Mac, use an unused `VITE_PORT` if another local app is already listening on the inherited port; Playwright has `reuseExistingServer` enabled outside CI.
 
 ## Done When
 
