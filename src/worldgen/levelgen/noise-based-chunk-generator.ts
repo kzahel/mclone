@@ -27,6 +27,7 @@ import { NoiseModifier } from "./noise-modifier.ts";
 import { NoiseGeneratorSettings } from "./noise-generator-settings.ts";
 import { NoiseSampler } from "./noise-sampler.ts";
 import { NaturalSpawner, type GenerationEntitySink, type NaturalSpawnerOptions } from "./natural-spawner.ts";
+import type { WorldGenerator } from "./world-generator.ts";
 
 const SURFACE_NOISE_OCTAVES = [-3, -2, -1, 0] as const;
 const DEPTH_NOISE_OCTAVES = [-15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0] as const;
@@ -107,7 +108,7 @@ export function buildTerrainChunk(chunk: MutableChunkBlockBuffer): TerrainChunk 
   };
 }
 
-export class NoiseBasedChunkGenerator {
+export class NoiseBasedChunkGenerator implements WorldGenerator {
   private readonly seed: bigint;
   private readonly cellHeight: number;
   private readonly cellWidth: number;
@@ -278,6 +279,14 @@ export class NoiseBasedChunkGenerator {
     }
 
     return this.baseStoneSource;
+  }
+
+  public getSeed(): bigint {
+    return this.seed;
+  }
+
+  public getBiomeSource(): NoiseBiomeSource {
+    return this.biomeSource;
   }
 
   private fillTerrainBlockBuffer(chunk: MutableChunkBlockBuffer): void {

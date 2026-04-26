@@ -9,12 +9,10 @@ import { DoublePlantBlock } from "../../../../src/world/level/block/double-plant
 import { SweetBerryBushBlock } from "../../../../src/world/level/block/sweet-berry-bush-block";
 import { DoubleBlockHalf } from "../../../../src/world/level/block/state/properties/double-block-half";
 import { Heightmap } from "../../../../src/worldgen/levelgen/heightmap";
-import { GenerationStep } from "../../../../src/worldgen/levelgen/generation-step";
 import { ColumnPlacer } from "../../../../src/worldgen/levelgen/feature/blockplacers/column-placer";
 import { DoublePlantPlacer } from "../../../../src/worldgen/levelgen/feature/blockplacers/double-plant-placer";
 import { SimpleBlockPlacer } from "../../../../src/worldgen/levelgen/feature/blockplacers/simple-block-placer";
 import { CountConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/count-configuration";
-import { CarvingMaskDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/carving-mask-decorator-configuration";
 import type { DecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorator-configuration";
 import { NoneFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/none-feature-configuration";
 import { ConfiguredFeature } from "../../../../src/worldgen/levelgen/feature/configured-feature";
@@ -25,7 +23,6 @@ import { NoneDecoratorConfiguration } from "../../../../src/worldgen/levelgen/fe
 import { RandomPatchConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/random-patch-configuration";
 import { SimpleBlockConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/simple-block-configuration";
 import { SimpleStateProvider } from "../../../../src/worldgen/levelgen/feature/stateproviders/simple-state-provider";
-import { VegetationFeatures } from "../../../../src/worldgen/levelgen/feature/vegetation-features";
 import { DecorationContext } from "../../../../src/worldgen/levelgen/placement/decoration-context";
 import type { ConfiguredDecorator } from "../../../../src/worldgen/levelgen/placement/configured-decorator";
 import { FeatureDecorators } from "../../../../src/worldgen/levelgen/placement/feature-decorators";
@@ -68,10 +65,6 @@ function createCountSquareHeightmapDecorator(count: number) {
   decorator = decorator.decorated(FeatureDecorators.SQUARE.configured(NoneDecoratorConfiguration.INSTANCE));
   decorator = decorator.decorated(FeatureDecorators.COUNT.configured(new CountConfiguration(count)));
   return decorator;
-}
-
-function carvingMaskIndex(localX: number, y: number, localZ: number, minBuildHeight: number): number {
-  return localX | (localZ << 4) | ((y - minBuildHeight) << 8);
 }
 
 describe("Feature placement", () => {
@@ -148,29 +141,6 @@ describe("Feature placement", () => {
     expect(origins).toEqual(expected);
   });
 
-  test("carving mask decorator replays stored liquid-carver positions for the origin chunk", () => {
-    const blocks = registerGeneratedRenderBlocks();
-    const level = createFlatLevel(blocks.airState, getState("minecraft:stone"));
-    const generator = createGenerator();
-    const mask = new Uint8Array(level.getHeight() * 16 * 16);
-    mask[carvingMaskIndex(3, 11, 4, level.getMinBuildHeight())] = 1;
-    mask[carvingMaskIndex(9, 21, 10, level.getMinBuildHeight())] = 1;
-    level.getChunk(0, 0)!.setCarvingMask(GenerationStep.Carving.LIQUID, mask);
-
-    const positions = Array.from(
-      FeatureDecorators.CARVING_MASK.configured(new CarvingMaskDecoratorConfiguration(GenerationStep.Carving.LIQUID)).getPositions(
-        new DecorationContext(level, generator),
-        new WorldgenRandom(12345n),
-        new BlockPos(0, 0, 0),
-      ),
-    );
-
-    expect(positions.map((pos) => `${pos.getX()},${pos.getY()},${pos.getZ()}`)).toEqual([
-      "3,11,4",
-      "9,21,10",
-    ]);
-  });
-
   test("random patch feature places vegetation onto the translated grass surface", () => {
     const blocks = registerGeneratedRenderBlocks();
     const level = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
@@ -229,51 +199,6 @@ describe("Feature placement", () => {
     dryLevel.setBlock(new BlockPos(8, 10, 8), sandState);
 
     expect(feature.place(dryLevel, generator, new WorldgenRandom(3n), new BlockPos(8, 11, 8))).toBe(false);
-  });
-
-  test("seagrass_simple places translated seagrass only on liquid-carver mask cells", () => {
-    const blocks = registerGeneratedRenderBlocks();
-    const level = createFlatLevel(blocks.airState, getState("minecraft:stone"));
-    const generator = createGenerator();
-    const seagrassState = getState("minecraft:seagrass");
-    const waterState = getState("minecraft:water");
-    const mask = new Uint8Array(level.getHeight() * 16 * 16);
-    const maskedTargets = [new BlockPos(4, 11, 4), new BlockPos(8, 11, 8), new BlockPos(12, 11, 12)];
-    for (const target of maskedTargets) {
-      mask[carvingMaskIndex(target.getX(), target.getY(), target.getZ(), level.getMinBuildHeight())] = 1;
-      level.setBlock(target, waterState);
-      level.setBlock(target.above(), waterState);
-    }
-    level.getChunk(0, 0)!.setCarvingMask(GenerationStep.Carving.LIQUID, mask);
-
-    let placed = false;
-    for (let seed = 0n; seed < 128n; seed++) {
-      const candidate = new StaticRenderLevel(blocks.airState, 15, 15, 0, 64);
-      for (let z = 0; z < 16; z++) {
-        for (let x = 0; x < 16; x++) {
-          candidate.setBlock(new BlockPos(x, 10, z), getState("minecraft:stone"));
-        }
-      }
-      for (const target of maskedTargets) {
-        candidate.setBlock(target, waterState);
-        candidate.setBlock(target.above(), waterState);
-      }
-      candidate.getChunk(0, 0)!.setCarvingMask(GenerationStep.Carving.LIQUID, mask);
-
-      if (VegetationFeatures.SEAGRASS_SIMPLE.place(candidate, generator, new WorldgenRandom(seed), new BlockPos(0, 0, 0))) {
-        let seagrassCount = 0;
-        for (const target of maskedTargets) {
-          if (candidate.getBlockState(target).is(seagrassState.getBlock())) {
-            seagrassCount++;
-          }
-        }
-        expect(seagrassCount).toBeGreaterThan(0);
-        placed = true;
-        break;
-      }
-    }
-
-    expect(placed).toBe(true);
   });
 
   test("large fern vegetation places lower and upper halves through the translated double-plant path", () => {

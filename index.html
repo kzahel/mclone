@@ -38,7 +38,8 @@
       }
 
       button,
-      input {
+      input,
+      select {
         font: inherit;
       }
 
@@ -172,6 +173,21 @@
         outline-offset: 2px;
       }
 
+      select {
+        width: 100%;
+        height: 42px;
+        border: 1px solid rgba(236, 231, 218, 0.24);
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.22);
+        color: var(--text);
+        padding: 0 12px;
+      }
+
+      select:focus {
+        outline: 2px solid rgba(185, 223, 115, 0.42);
+        outline-offset: 2px;
+      }
+
       .segmented {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -301,6 +317,15 @@
             <input id="seed" name="seed" type="text" inputmode="numeric" autocomplete="off" value="12345" />
           </div>
           <div class="field">
+            <label for="preset">World Preset</label>
+            <select id="preset" name="preset">
+              <option value="default">Vanilla Overworld</option>
+              <option value="flat_grass">Flat Grass</option>
+              <option value="small_island">Small Island</option>
+              <option value="browser_smoke">Smoke Fixture</option>
+            </select>
+          </div>
+          <div class="field">
             <div class="field-title">Movement Mode</div>
             <div class="segmented">
               <input id="mode-player" type="radio" name="movementMode" value="player" checked />
@@ -324,6 +349,7 @@
     </main>
     <script>
       const DEFAULT_SEED = "12345";
+      const DEFAULT_PRESET = "default";
       const DEFAULT_MOVEMENT_MODE = "player";
       const LAST_WORLD_KEY = "mclone.start.lastWorld.v1";
       const DEBUG_SESSION_CONFIG_KEY = "mclone.debug.sessionConfig.v1";
@@ -350,6 +376,7 @@
       ];
 
       const seedInput = document.querySelector("#seed");
+      const presetInput = document.querySelector("#preset");
       const startForm = document.querySelector("#start-form");
       const continueButton = document.querySelector("#continue");
       const quickstartButton = document.querySelector("#quickstart");
@@ -372,15 +399,33 @@
         return value === "freecam" ? "freecam" : DEFAULT_MOVEMENT_MODE;
       }
 
+      function normalizePreset(value) {
+        if (value === "browser_smoke" || value === "flat_grass" || value === "small_island") {
+          return value;
+        }
+
+        return DEFAULT_PRESET;
+      }
+
       function selectedMovementMode() {
         const checked = document.querySelector("input[name='movementMode']:checked");
         return normalizeMovementMode(checked?.value);
+      }
+
+      function selectedPreset() {
+        return normalizePreset(presetInput?.value);
       }
 
       function setMovementMode(mode) {
         const input = document.querySelector(`#mode-${normalizeMovementMode(mode)}`);
         if (input) {
           input.checked = true;
+        }
+      }
+
+      function setPreset(preset) {
+        if (presetInput) {
+          presetInput.value = normalizePreset(preset);
         }
       }
 
@@ -398,6 +443,7 @@
         if (last && typeof last.seed === "string") {
           return {
             seed: normalizeSeed(last.seed),
+            preset: normalizePreset(last.preset),
             movementMode: normalizeMovementMode(last.movementMode),
           };
         }
@@ -406,6 +452,7 @@
         if (session && typeof session.seed === "string") {
           return {
             seed: normalizeSeed(session.seed),
+            preset: normalizePreset(session.preset),
             movementMode: normalizeMovementMode(session.movementMode),
           };
         }
@@ -413,25 +460,27 @@
         return undefined;
       }
 
-      function rememberWorld(seed, movementMode) {
+      function rememberWorld(seed, movementMode, preset) {
         const record = {
           seed: normalizeSeed(seed),
+          preset: normalizePreset(preset),
           movementMode: normalizeMovementMode(movementMode),
           lastOpenedAtMs: Date.now(),
         };
         window.localStorage.setItem(LAST_WORLD_KEY, JSON.stringify(record));
         window.localStorage.setItem(DEBUG_SESSION_CONFIG_KEY, JSON.stringify({
           seed: record.seed,
+          preset: record.preset,
           movementMode: record.movementMode,
         }));
       }
 
-      function buildDebugUrl(seed, movementMode) {
+      function buildDebugUrl(seed, movementMode, preset) {
         const current = new URL(window.location.href);
         const target = new URL("/debug.html", window.location.origin);
         target.searchParams.set("seed", normalizeSeed(seed));
         target.searchParams.set("movementMode", normalizeMovementMode(movementMode));
-        target.searchParams.set("preset", "default");
+        target.searchParams.set("preset", normalizePreset(preset));
         for (const key of PASSTHROUGH_QUERY_KEYS) {
           const value = current.searchParams.get(key);
           if (value !== null && !target.searchParams.has(key)) {
@@ -442,11 +491,12 @@
         return `${target.pathname}${target.search}${target.hash}`;
       }
 
-      function openWorld(seed, movementMode, replace) {
+      function openWorld(seed, movementMode, preset, replace) {
         const normalizedSeed = normalizeSeed(seed);
         const normalizedMode = normalizeMovementMode(movementMode);
-        rememberWorld(normalizedSeed, normalizedMode);
-        const href = buildDebugUrl(normalizedSeed, normalizedMode);
+        const normalizedPreset = normalizePreset(preset);
+        rememberWorld(normalizedSeed, normalizedMode, normalizedPreset);
+        const href = buildDebugUrl(normalizedSeed, normalizedMode, normalizedPreset);
         if (replace) {
           window.location.replace(href);
         } else {
@@ -457,14 +507,16 @@
       function configureFromUrl() {
         const url = new URL(window.location.href);
         const seed = normalizeSeed(url.searchParams.get("seed") ?? DEFAULT_SEED);
+        const preset = normalizePreset(url.searchParams.get("preset"));
         const movementMode = normalizeMovementMode(url.searchParams.get("movementMode"));
         seedInput.value = seed;
+        setPreset(preset);
         setMovementMode(movementMode);
         const quickstart = url.searchParams.get("quickstart") === "1"
           || url.searchParams.get("quickStart") === "1"
           || url.searchParams.get("autoJoin") === "1";
         if (quickstart) {
-          openWorld(seed, movementMode, true);
+          openWorld(seed, movementMode, preset, true);
         }
       }
 
@@ -477,9 +529,9 @@
         }
 
         continueButton.disabled = false;
-        statusElement.textContent = `Previous world seed ${lastWorld.seed}.`;
+        statusElement.textContent = `Previous world: ${lastWorld.preset.replaceAll("_", " ")} seed ${lastWorld.seed}.`;
         continueButton.addEventListener("click", () => {
-          openWorld(lastWorld.seed, lastWorld.movementMode, false);
+          openWorld(lastWorld.seed, lastWorld.movementMode, lastWorld.preset, false);
         });
       }
 
@@ -488,10 +540,10 @@
 
       startForm.addEventListener("submit", (event) => {
         event.preventDefault();
-        openWorld(seedInput.value, selectedMovementMode(), false);
+        openWorld(seedInput.value, selectedMovementMode(), selectedPreset(), false);
       });
       quickstartButton.addEventListener("click", () => {
-        openWorld(DEFAULT_SEED, DEFAULT_MOVEMENT_MODE, false);
+        openWorld(DEFAULT_SEED, selectedMovementMode(), selectedPreset(), false);
       });
     </script>
   </body>

@@ -1,7 +1,8 @@
 import { BlockPos } from "../../core/block-pos";
 import { SectionPos } from "../../core/section-pos";
-import { OverworldBiomeSource } from "../../worldgen/biome/overworld-biome-source";
 import { ChunkBiomeContainer } from "../../worldgen/biome/chunk-biome-container";
+import { OverworldBiomeSource } from "../../worldgen/biome/overworld-biome-source";
+import type { NoiseBiomeSource } from "../../worldgen/biome/noise-biome-source";
 import { NoiseBasedChunkGenerator } from "../../worldgen/levelgen/noise-based-chunk-generator";
 import {
   buildChunkSnapshot,
@@ -47,6 +48,7 @@ import {
   type ScheduledTickSnapshot,
 } from "../../world/level/scheduled-tick";
 import { ServerTickList, type TickNextTickData } from "../../world/level/server-tick-list";
+import type { WorldGenerator } from "../../worldgen/levelgen/world-generator";
 import type { WorldHost } from "../protocol/world-host";
 import { drainWorldHostMessages } from "../protocol/world-message-queue";
 import {
@@ -157,6 +159,7 @@ export type GeneratedWorldLiquidSimulationMode = WorldEngineLiquidSimulationMode
 
 export interface GeneratedWorldHostOptions {
   readonly seed: bigint;
+  readonly generator?: WorldGenerator;
   readonly airState: BlockState;
   readonly blockStateById: readonly BlockState[];
   readonly blockStateIds: BlockStateIdMap;
@@ -303,8 +306,8 @@ function createGeneratedLevelCollisionWorld(level: GeneratedRenderLevel): Collis
 }
 
 export class GeneratedWorldHost implements WorldHost {
-  private readonly biomeSource;
-  private readonly generator;
+  private readonly biomeSource: NoiseBiomeSource;
+  private readonly generator: WorldGenerator;
   private readonly level;
   private readonly lightingService: LightingService | undefined;
   private readonly liquidLevel: LiquidSimulationLevel;
@@ -348,14 +351,12 @@ export class GeneratedWorldHost implements WorldHost {
     this.nowMs = options.nowMs ?? (() => Date.now());
     this.lastWorldTickAtMs = this.nowMs();
     this.lastPlayerTickAtMs = this.nowMs();
-    this.biomeSource = new OverworldBiomeSource(options.seed);
-    this.generator = new NoiseBasedChunkGenerator(this.biomeSource, options.seed);
+    this.generator = options.generator ?? new NoiseBasedChunkGenerator(new OverworldBiomeSource(options.seed), options.seed);
+    this.biomeSource = this.generator.getBiomeSource();
     this.resolveBlockState = createBlockStateResolver(options.airState);
     this.level = new GeneratedRenderLevel(
       options.airState,
       this.generator,
-      this.biomeSource,
-      options.seed,
       options.blockStateById,
     );
     this.lightingService = this.engineConfig.lightingMode === "none" ? undefined : options.lightingService;

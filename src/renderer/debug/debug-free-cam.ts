@@ -157,7 +157,7 @@ function parseMovementMode(value: unknown, fallback: DebugMovementMode): DebugMo
 }
 
 function parsePreset(value: unknown, fallback: OpenWorldPreset): OpenWorldPreset {
-  return value === "default" || value === "browser_smoke" ? value : fallback;
+  return value === "default" || value === "browser_smoke" || value === "flat_grass" || value === "small_island" ? value : fallback;
 }
 
 function readStoredDebugSessionConfig(
@@ -182,6 +182,7 @@ function readStoredDebugSessionConfig(
       ? parsed.movementMode
       : undefined;
     const preset = parsed.preset === "default" || parsed.preset === "browser_smoke"
+      || parsed.preset === "flat_grass" || parsed.preset === "small_island"
       ? parsed.preset
       : undefined;
     return {

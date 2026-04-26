@@ -91,7 +91,7 @@ function parseSeed(seed: string): string {
 }
 
 function parsePreset(preset: string): OpenWorldPreset {
-  if (preset === "default" || preset === "browser_smoke") {
+  if (preset === "default" || preset === "browser_smoke" || preset === "flat_grass" || preset === "small_island") {
     return preset;
   }
 

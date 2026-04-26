@@ -49,4 +49,4 @@ Finish the last broad, clearly known-missing tree-decorator slice by porting van
 
 ## Next
 
-Stay in the same "known missing simple decorations" lane and do sunflower plains next. That later landed as [`52-sunflower-plains-follow-through.md`](52-sunflower-plains-follow-through.md), the swamp-oak vine follow-through later landed as [`53-swamp-oak-vine-follow-through.md`](53-swamp-oak-vine-follow-through.md), and the `deep_warm_ocean` table exactness follow-through later landed as [`54-deep-warm-ocean-seagrass-simple-follow-through.md`](54-deep-warm-ocean-seagrass-simple-follow-through.md). After that, the remaining work is selector/decorator exactness rather than another equally crisp missing single-decoration slice.
+Stay in the same "known missing simple decorations" lane and do sunflower plains next. That later landed as [`52-sunflower-plains-follow-through.md`](52-sunflower-plains-follow-through.md), and the swamp-oak vine follow-through later landed as [`53-swamp-oak-vine-follow-through.md`](53-swamp-oak-vine-follow-through.md). The next remaining narrow visible-exactness slice after that is `deep_warm_ocean` `SEAGRASS_SIMPLE` / `CARVING_MASK`.

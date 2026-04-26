@@ -2,12 +2,13 @@ import { BlockPos } from "../../../core/block-pos";
 import type { BlockState } from "../../../world/level/block/state/block-state";
 import type { WorldGenLevel } from "../../../world/level/world-gen-level";
 import { Heightmap } from "../heightmap";
-import type { NoiseBasedChunkGenerator } from "../noise-based-chunk-generator";
+import { GenerationStep } from "../generation-step";
+import type { WorldGenerator } from "../world-generator";
 
 export class DecorationContext {
   public constructor(
     private readonly level: WorldGenLevel,
-    private readonly chunkGenerator: NoiseBasedChunkGenerator,
+    private readonly chunkGenerator: WorldGenerator,
   ) {}
 
   public getHeight(type: Heightmap.Types, x: number, z: number): number {
@@ -34,7 +35,11 @@ export class DecorationContext {
     return this.level;
   }
 
-  public getChunkGenerator(): NoiseBasedChunkGenerator {
+  public getCarvingMask(step: GenerationStep.Carving, chunkX: number, chunkZ: number): Uint8Array | undefined {
+    return this.level.getCarvingMask?.(step, chunkX, chunkZ);
+  }
+
+  public getChunkGenerator(): WorldGenerator {
     return this.chunkGenerator;
   }
 }

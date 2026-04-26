@@ -43,4 +43,4 @@ Finish the last clearly known missing overworld vine-decoration slice by restori
 
 ## Next
 
-Stay in the same narrow visible-exactness lane and do `deep_warm_ocean` `SEAGRASS_SIMPLE` / `CARVING_MASK` follow-through next. That later landed as [`54-deep-warm-ocean-seagrass-simple-follow-through.md`](54-deep-warm-ocean-seagrass-simple-follow-through.md), which also records the 1.17.1 Java source fact that the final ocean mix does not naturally emit `deep_warm_ocean`. After that, the next work in this lane is remaining selector/decorator exactness rather than another equally crisp missing single-decoration slice.
+Stay in the same narrow visible-exactness lane and do `deep_warm_ocean` `SEAGRASS_SIMPLE` / `CARVING_MASK` follow-through next.

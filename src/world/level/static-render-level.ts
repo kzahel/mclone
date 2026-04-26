@@ -16,7 +16,6 @@ import { RecordingTickAccess } from "./tick-access";
 import type { Fluid } from "./material/fluid";
 import type { Block } from "./block/block";
 import { serializeBlockTickTarget, serializeFluidTickTarget } from "./scheduled-tick";
-import { GenerationStep } from "../../worldgen/levelgen/generation-step";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -213,10 +212,6 @@ export class StaticRenderLevel implements BlockAndTintGetter, WorldGenLevel {
 
   public getLiquidTicks(): RecordingTickAccess<Fluid> {
     return this.liquidTicks;
-  }
-
-  public getCarvingMask(step: GenerationStep.Carving, chunkX: number, chunkZ: number): Uint8Array | undefined {
-    return this.getChunk(chunkX, chunkZ, false)?.getCarvingMask(step);
   }
 
   private isSkyVisible(pos: BlockPos): boolean {

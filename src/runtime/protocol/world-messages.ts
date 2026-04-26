@@ -2,7 +2,7 @@ import type { WorldSaveMetadata } from "../storage/world-storage";
 import type { LightingServicePerformanceCounters } from "../lighting/lighting-protocol";
 import type { PackedChunkLightDelta, PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
 
-export type OpenWorldPreset = "default" | "browser_smoke";
+export type OpenWorldPreset = "default" | "browser_smoke" | "flat_grass" | "small_island";
 export type WorldEngineLightingMode = "vanilla17" | "none";
 export type WorldEngineLiquidSimulationMode = "vanilla17" | "none";
 export type WorldStorageMode = "default" | "none";

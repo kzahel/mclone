@@ -852,7 +852,7 @@ const RiverMixerLayer: BinaryAreaTransformer = {
   },
 };
 
-export const OceanMixerLayer: BinaryAreaTransformer = {
+const OceanMixerLayer: BinaryAreaTransformer = {
   run(context, firstAreaFactory, secondAreaFactory) {
     return runAreaTransformer2(context, firstAreaFactory, secondAreaFactory, (_randomContext, firstArea, secondArea, x, z) => {
       const land = firstArea.get(x, z);

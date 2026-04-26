@@ -3,6 +3,7 @@ import { registerGeneratedRenderBlocks } from "../../world/level/generated-rende
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
+import { createWorldGeneratorForPreset } from "../../worldgen/levelgen/world-generator-factory";
 import type { OpenWorldRequest, WorldEngineLightingMode, WorldEngineLiquidSimulationMode } from "../protocol/world-messages";
 import type { LightingService } from "../lighting/lighting-protocol";
 import type { WorldStorage } from "../storage/world-storage";
@@ -29,9 +30,11 @@ export function createGeneratedWorldHostForRequest(
   options: CreateGeneratedWorldHostOptions = {},
 ): GeneratedWorldHost {
   const generatedBlocks = registerGeneratedRenderBlocks();
+  const generator = createWorldGeneratorForPreset(request.preset, request.seed);
 
   return new GeneratedWorldHost({
     seed: request.seed,
+    generator,
     airState: generatedBlocks.airState,
     blockStateById: generatedBlocks.blockStateById,
     blockStateIds: generatedBlocks.blockStateIds,

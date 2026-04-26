@@ -11,7 +11,6 @@ import { getOverworldBiomeGenerationSettings } from "../../../../src/worldgen/bi
 import { GenerationStep } from "../../../../src/worldgen/levelgen/generation-step";
 import { ConfiguredFeature } from "../../../../src/worldgen/levelgen/feature/configured-feature";
 import { CountConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/count-configuration";
-import { CarvingMaskDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/carving-mask-decorator-configuration";
 import { DecoratedDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorated-decorator-configuration";
 import { DecoratedFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorated-feature-configuration";
 import type { DecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorator-configuration";
@@ -19,7 +18,6 @@ import { FrequencyWithExtraChanceDecoratorConfiguration } from "../../../../src/
 import { ProbabilityFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/probability-feature-configuration";
 import { RandomPatchConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/random-patch-configuration";
 import { RandomFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/random-feature-configuration";
-import { SimpleBlockConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/simple-block-configuration";
 import { Features } from "../../../../src/worldgen/levelgen/feature/features";
 import { SimpleStateProvider } from "../../../../src/worldgen/levelgen/feature/stateproviders/simple-state-provider";
 import { TreeFeatures } from "../../../../src/worldgen/levelgen/feature/tree-features";
@@ -263,19 +261,6 @@ function isRandomPatchFeatureForState(feature: ConfiguredFeature<any, any>, loca
   }
 
   return current.config.stateProvider.getState(new WorldgenRandom(0n), BlockPos.ZERO).getBlock().getLocation()?.toString() === location;
-}
-
-function isSimpleBlockFeatureForState(feature: ConfiguredFeature<any, any>, location: string): boolean {
-  const { current } = unwrapConfiguredFeature(feature);
-  if (current.feature !== Features.SIMPLE_BLOCK || !(current.config instanceof SimpleBlockConfiguration)) {
-    return false;
-  }
-
-  if (!(current.config.toPlace instanceof SimpleStateProvider)) {
-    return false;
-  }
-
-  return current.config.toPlace.getState(new WorldgenRandom(0n), BlockPos.ZERO).getBlock().getLocation()?.toString() === location;
 }
 
 describe("Vegetation parity", () => {
@@ -639,26 +624,6 @@ describe("Vegetation parity", () => {
     expectLeafVineDecoratedTreeFeature(unwrapConfiguredFeature(VegetationFeatures.TREES_SWAMP).current);
   });
 
-  test("deep warm ocean adds vanilla seagrass_simple through the liquid carving mask decorator", () => {
-    registerGeneratedRenderBlocks();
-
-    const warmVegetal = getVegetalFeatures("minecraft:warm_ocean");
-    const deepWarmVegetal = getVegetalFeatures("minecraft:deep_warm_ocean");
-    expect(deepWarmVegetal.length).toBeLessThan(warmVegetal.length);
-
-    const seagrassSimple = deepWarmVegetal.find((feature) => isSimpleBlockFeatureForState(feature, "minecraft:seagrass"));
-    expect(seagrassSimple).toBeDefined();
-
-    const { decoratorConfigs } = unwrapConfiguredFeature(seagrassSimple!);
-    const carvingMaskConfig = decoratorConfigs.find(
-      (decoratorConfig): decoratorConfig is CarvingMaskDecoratorConfiguration =>
-        decoratorConfig instanceof CarvingMaskDecoratorConfiguration,
-    );
-    expect(carvingMaskConfig).toBeDefined();
-    expect(carvingMaskConfig!.step).toBe(GenerationStep.Carving.LIQUID);
-    expect(warmVegetal.some((feature) => isSimpleBlockFeatureForState(feature, "minecraft:seagrass"))).toBe(false);
-  });
-
   test("overworld biome settings wire the shoreline, ocean, swamp, forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom, mountain, and badlands tables", () => {
     registerGeneratedRenderBlocks();
     const beachFeatures = getOverworldBiomeGenerationSettings("minecraft:beach").features().flat().map((supplier) => getBaseFeature(supplier()));
@@ -809,12 +774,10 @@ describe("Vegetation parity", () => {
     expect(deepLukewarmOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
     expect(deepLukewarmOceanFeatures.some((feature) => feature === Features.KELP)).toBe(true);
     expect(warmOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
-    expect(warmOceanFeatures.some((feature) => feature === Features.SIMPLE_BLOCK)).toBe(false);
     expect(warmOceanFeatures.some((feature) => feature === Features.SIMPLE_RANDOM_SELECTOR)).toBe(true);
     expect(warmOceanFeatures.some((feature) => feature === Features.SEA_PICKLE)).toBe(true);
     expect(warmOceanFeatures.some((feature) => feature === Features.KELP)).toBe(false);
     expect(deepWarmOceanFeatures.some((feature) => feature === Features.SEAGRASS)).toBe(true);
-    expect(deepWarmOceanFeatures.some((feature) => feature === Features.SIMPLE_BLOCK)).toBe(true);
     expect(deepWarmOceanFeatures.some((feature) => feature === Features.SEA_PICKLE)).toBe(false);
     expect(deepWarmOceanFeatures.some((feature) => feature === Features.SIMPLE_RANDOM_SELECTOR)).toBe(false);
     expect(deepWarmOceanFeatures.some((feature) => feature === Features.KELP)).toBe(false);

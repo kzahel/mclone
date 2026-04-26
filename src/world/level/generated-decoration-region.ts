@@ -12,7 +12,6 @@ import type { Fluid } from "./material/fluid";
 import type { FluidState } from "./material/fluid-state";
 import type { WorldGenLevel } from "./world-gen-level";
 import type { GeneratedRenderLevel } from "./generated-render-level";
-import { GenerationStep } from "../../worldgen/levelgen/generation-step";
 
 export const FEATURES_CHUNK_DEPENDENCY_RADIUS = 8;
 export const FEATURES_WRITE_RADIUS_CUTOFF = 1;
@@ -177,10 +176,6 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
 
   public getLiquidTicks(): TickAccess<Fluid> {
     return this.liquidTicks;
-  }
-
-  public getCarvingMask(step: GenerationStep.Carving, chunkX: number, chunkZ: number): Uint8Array | undefined {
-    return this.getChunk(chunkX, chunkZ).getCarvingMask(step);
   }
 
   private getChunkForPos(pos: BlockPos): LevelChunk {

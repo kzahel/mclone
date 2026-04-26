@@ -30,7 +30,7 @@ function createGeneratedLevel(): GeneratedRenderLevel {
   const blocks = registerGeneratedRenderBlocks();
   const biomeSource = new OverworldBiomeSource(SEED);
   const generator = new NoiseBasedChunkGenerator(biomeSource, SEED);
-  return new GeneratedRenderLevel(blocks.airState, generator, biomeSource, SEED, blocks.blockStateById);
+  return new GeneratedRenderLevel(blocks.airState, generator, blocks.blockStateById);
 }
 
 function normalizeGeneratedEntity(entity: GeneratedMobEntity): NormalizedCreatureEntity {

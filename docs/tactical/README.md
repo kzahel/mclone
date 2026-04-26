@@ -81,7 +81,7 @@ Direct port of MC 1.17.1's client rendering stack to raw WebGPU. Target and skip
 | [`51-bee-tree-decorator-follow-through.md`](51-bee-tree-decorator-follow-through.md) | port `BeehiveDecorator`, register `minecraft:bee_nest`, and wire the vanilla bee-tagged tree variants back into the live selectors | unit + browser visual | **done** - bee-nest tree decoration and the live bee-tagged birch/oak/fancy-oak selector paths now match vanilla |
 | [`52-sunflower-plains-follow-through.md`](52-sunflower-plains-follow-through.md) | port `PATCH_SUNFLOWER`, register `minecraft:sunflower`, split `sunflower_plains` from `plains`, and validate a generated sunflower frame | unit + browser visual | **done** - sunflower plains now have their own translated patch feature and the rendered worker world shows generated sunflowers |
 | [`53-swamp-oak-vine-follow-through.md`](53-swamp-oak-vine-follow-through.md) | restore `LeaveVineDecorator` on `SWAMP_OAK`, keep the live swamp tree consumer on the vine-bearing config, and validate a worker swamp frame | unit + browser visual | **done** - swamp-oak generation now uses the vanilla leaf-vine decorator again and the live swamp tree path no longer falls back to the old bare tree config |
-| [`53-remote-player-integration-sequence.md`](53-remote-player-integration-sequence.md) | WebSocket remote transport, named join/player-slot semantics, grounded movement integration ordering | runtime + browser integration | **done** - R9, player-slot protocol cleanup, and basic movement physics/prediction integration are landed |
+| [`53-remote-player-integration-sequence.md`](53-remote-player-integration-sequence.md) | WebSocket remote transport, named join/player-slot semantics, grounded movement integration ordering | runtime + browser integration | **coordination / active ordering** - record that R9 comes first, player-slot protocol cleanup follows, then movement physics/prediction integration |
 
 Ordering rationale: `BlockState` prereqs (13) deferred until just before model baking (14a/b) since nothing before that needs them. WGSL shader ports (16) deferred until after the mesher (15) so we can verify geometry correctness with stub shaders first, then swap in real shaders. `ModelBakery` split from `BlockModel` parse (14a/b) because `ModelBakery` is one of the largest classes in the client and the data-loading and baking passes are independently testable.
 
@@ -173,7 +173,7 @@ Docs-only Client Runtime edits can stop at `git diff --check`. Pure type-only fa
 
 ## Player Movement / Netcode Arc
 
-Status: **basic integration landed; ready for spawn and collision polish**.
+Status: **ready to resume with a new integration tactical**.
 
 Player movement remains an important gameplay/runtime divergence: we still want FPS-style high-Hz command prediction/reconciliation, and we still do not want vanilla's 20 TPS position-packet model as the final protocol. The client runtime prerequisites that blocked this work are now landed through `ClientRuntime6`: `IntegratedServer`, `ClientRuntime`, `ClientWorld`, `PredictionService`, and presentation ownership exist for both worker singleplayer and remote clients.
 
@@ -184,11 +184,10 @@ Use [`../player-movement-netcode.md`](../player-movement-netcode.md) as constrai
 | [`Movement0-shared-movement-body-and-collision.md`](Movement0-shared-movement-body-and-collision.md) | movement body, fixed-step core, full-block collision, step-up/grounding, vanilla source review | unit | **done** - first shared movement core; no prediction or protocol migration yet |
 | [`Movement1-command-stream-and-local-prediction.md`](Movement1-command-stream-and-local-prediction.md) | sequenced commands, command quanta, ring buffer predictor, replay tests | unit + runtime | **done** - deterministic command timeline and local prediction |
 | [`Movement2-authoritative-host-command-integration.md`](Movement2-authoritative-host-command-integration.md) | host command queue, ack snapshots, `set_player_input` command records, processing budgets | runtime + browser | **done** - sequenced command stream authority over current local worker/HTTP adapters without making transport cadence the movement model |
-| [`Movement3-basic-player-movement-integration.md`](Movement3-basic-player-movement-integration.md) | shared movement physics in live player ticks, authoritative collision reads, browser prediction/reconcile, debug player input semantics | runtime + browser integration | **done** - local worker and remote WebSocket clients now share the host-authoritative movement command/snapshot path |
 
 The multiplayer identity shortcut is now removed from the remote runtime path: `sessionId` is a transport/session handle, while `playerId` is a tracked player slot with a join profile. Profile-based persisted-slot recovery remains future work and should be added explicitly before inventory, game mode, or long-lived player data depend on it.
 
-The live player path now integrates the shared movement body with host collision, client prediction, debug player input semantics, and singleplayer/remote parity from the current `ClientRuntime` / `ClientWorld` shape. The next movement work should replace the provisional fixed spawn height with surface-aware spawn/respawn placement, then widen collision fidelity beyond the current full-block baseline where basic play requires it.
+The next movement tactical should integrate the shared movement body with host collision, client prediction, debug player input semantics, and singleplayer/remote parity from the current `ClientRuntime` / `ClientWorld` shape.
 
 The ordering across transport, player-slot protocol, and movement integration is tracked in [`53-remote-player-integration-sequence.md`](53-remote-player-integration-sequence.md).
 

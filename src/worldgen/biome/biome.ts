@@ -10,7 +10,6 @@ import { BlockPos } from "../../core/block-pos";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import { LightLayer } from "../../world/level/light-layer";
 import { GenerationStep } from "../levelgen/generation-step";
-import type { NoiseBasedChunkGenerator } from "../levelgen/noise-based-chunk-generator";
 import type { CooperativeGenerationYield } from "../levelgen/cooperative-generation";
 import {
   describeConfiguredFeature,
@@ -22,6 +21,7 @@ import { WorldgenRandom } from "../prng/worldgen-random";
 import { Fluids } from "../../world/level/material/fluids";
 import { LiquidBlock } from "../../world/level/block/liquid-block";
 import type { Block } from "../../world/level/block/block";
+import type { WorldGenerator } from "../levelgen/world-generator";
 
 const SNOW_LOCATION = new ResourceLocation("minecraft:snow");
 
@@ -201,7 +201,7 @@ export class Biome implements NoiseBiome {
   }
 
   public generate(
-    chunkGenerator: NoiseBasedChunkGenerator,
+    chunkGenerator: WorldGenerator,
     level: WorldGenLevel,
     decorationSeed: bigint,
     random: WorldgenRandom,
@@ -234,7 +234,7 @@ export class Biome implements NoiseBiome {
   }
 
   public async generateCooperative(
-    chunkGenerator: NoiseBasedChunkGenerator,
+    chunkGenerator: WorldGenerator,
     level: WorldGenLevel,
     decorationSeed: bigint,
     random: WorldgenRandom,

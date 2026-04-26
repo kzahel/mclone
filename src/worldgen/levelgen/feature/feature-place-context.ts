@@ -1,13 +1,13 @@
 import { BlockPos } from "../../../core/block-pos";
 import type { WorldGenLevel } from "../../../world/level/world-gen-level";
 import type { SimpleRandomSource } from "../../prng/simple-random-source";
-import type { NoiseBasedChunkGenerator } from "../noise-based-chunk-generator";
 import type { FeatureConfiguration } from "./configurations/feature-configuration";
+import type { WorldGenerator } from "../world-generator";
 
 export class FeaturePlaceContext<FC extends FeatureConfiguration> {
   public constructor(
     private readonly levelValue: WorldGenLevel,
-    private readonly chunkGeneratorValue: NoiseBasedChunkGenerator,
+    private readonly chunkGeneratorValue: WorldGenerator,
     private readonly randomValue: SimpleRandomSource,
     private readonly originValue: BlockPos,
     private readonly configValue: FC,
@@ -17,7 +17,7 @@ export class FeaturePlaceContext<FC extends FeatureConfiguration> {
     return this.levelValue;
   }
 
-  public chunkGenerator(): NoiseBasedChunkGenerator {
+  public chunkGenerator(): WorldGenerator {
     return this.chunkGeneratorValue;
   }
 

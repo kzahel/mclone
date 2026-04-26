@@ -3,14 +3,13 @@ import { SectionPos } from "../../core/section-pos";
 import type { ColorResolver } from "./color-resolver";
 import type { Biome } from "../../worldgen/biome/biome";
 import { getBlockPositionBiome } from "../../worldgen/biome/biome-zoom";
-import type { NoiseBiomeSource } from "../../worldgen/biome/noise-biome-source";
 import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
 import { MutableChunkBlockBuffer } from "../../worldgen/chunk/chunk-block-buffer";
 import { GenerationStep } from "../../worldgen/levelgen/generation-step";
 import { Heightmap } from "../../worldgen/levelgen/heightmap";
-import { NoiseBasedChunkGenerator } from "../../worldgen/levelgen/noise-based-chunk-generator";
 import type { CooperativeGenerationYield } from "../../worldgen/levelgen/cooperative-generation";
 import type { BiomeDecorationProfiler } from "../../worldgen/levelgen/decoration-profiler";
+import type { WorldGenerator } from "../../worldgen/levelgen/world-generator";
 import { BlockStateProperties } from "./block/state/properties/block-state-properties";
 import { type BlockState } from "./block/state/block-state";
 import { LevelChunk } from "./chunk/level-chunk";
@@ -62,9 +61,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
 
   public constructor(
     airState: BlockState,
-    private readonly generator: NoiseBasedChunkGenerator,
-    private readonly biomeSource: NoiseBiomeSource,
-    private readonly biomeZoomSeed: bigint,
+    private readonly generator: WorldGenerator,
     private readonly blockStateById: readonly BlockState[],
     skyLight = 15,
     blockLight = 15,
@@ -216,12 +213,12 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       return -1;
     }
 
-    const biome = getBlockPositionBiome(this.biomeZoomSeed, pos.getX(), pos.getZ(), this.biomeSource) as Biome;
+    const biome = getBlockPositionBiome(this.generator.getSeed(), pos.getX(), pos.getZ(), this.generator.getBiomeSource()) as Biome;
     return resolver.getColor(biome, pos.getX(), pos.getZ());
   }
 
   public override getBiome(pos: BlockPos): Biome {
-    return getBlockPositionBiome(this.biomeZoomSeed, pos.getX(), pos.getZ(), this.biomeSource) as Biome;
+    return getBlockPositionBiome(this.generator.getSeed(), pos.getX(), pos.getZ(), this.generator.getBiomeSource()) as Biome;
   }
 
   public getAuthorityChunk(chunkX: number, chunkZ: number): LevelChunk | null {
@@ -647,6 +644,12 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       Heightmap.Types.OCEAN_FLOOR_WG,
       Heightmap.Types.WORLD_SURFACE_WG,
     ]);
+    for (const step of GenerationStep.CARVING_VALUES) {
+      const carvingMask = generated.getCarvingMask(step);
+      if (carvingMask !== undefined) {
+        chunk.setCarvingMask(step, carvingMask);
+      }
+    }
     chunk.appendBlockTicks(generated.getScheduledBlockTicks());
     chunk.appendLiquidTicks(generated.getScheduledLiquidTicks());
 

@@ -141,10 +141,6 @@ function addColdOceanExtraVegetation(builder: BiomeGenerationSettings.Builder): 
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.KELP_COLD);
 }
 
-function addDefaultSeagrass(builder: BiomeGenerationSettings.Builder): void {
-  builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.SEAGRASS_SIMPLE);
-}
-
 function addLukeWarmKelp(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.KELP_WARM);
 }
@@ -692,9 +688,6 @@ function buildOceanSettings(kind: OceanSettingsKind, deep: boolean): BiomeGenera
         GenerationStep.Decoration.VEGETAL_DECORATION,
         () => (deep ? VegetationFeatures.SEAGRASS_DEEP_WARM : VegetationFeatures.SEAGRASS_WARM),
       );
-      if (deep) {
-        addDefaultSeagrass(builder);
-      }
       if (!deep) {
         addWarmOceanVegetation(builder);
         addSeaPickles(builder);

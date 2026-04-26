@@ -51,8 +51,6 @@ export function applyOverworldCarvers(
       }
     }
   }
-
-  chunk.setCarvingMask(step, carvingMask);
 }
 
 export function applyOverworldAirCarvers(
