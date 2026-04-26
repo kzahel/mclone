@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { GpuTitleBootResult } from "../../../src/renderer/main";
 
-const GPU_TITLE_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-screen.png";
+const GPU_TITLE_SCREENSHOT_PATH = "/tmp/mclone-gpu-root-title-screen.png";
 
 interface GpuGuiState {
   readonly ready: boolean;
@@ -13,8 +13,8 @@ interface GpuGuiState {
 
 test.setTimeout(30_000);
 
-test("captures the opt-in GPU title screen and routes button clicks without visible DOM controls", async ({ page }) => {
-  await page.goto("/smoke.html?gpuTitle=1", { waitUntil: "load" });
+test("captures the root GPU title screen and routes button clicks without visible DOM controls", async ({ page }) => {
+  await page.goto("/", { waitUntil: "load" });
   await page.waitForFunction(() => typeof window.__mcloneReady !== "undefined");
   const result = (await page.evaluate(() => window.__mcloneReady)) as GpuTitleBootResult | { readonly ok: false; readonly reason: string };
   expect(result.ok, JSON.stringify(result)).toBe(true);

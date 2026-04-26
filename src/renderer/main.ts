@@ -140,7 +140,14 @@ function readGuiProbeEnabled(url: URL): boolean {
 
 function readGpuTitleEnabled(url: URL): boolean {
   const value = url.searchParams.get("gpuTitle");
-  return value === "1" || value === "true";
+  if (value === "0" || value === "false") {
+    return false;
+  }
+  if (value === "1" || value === "true") {
+    return true;
+  }
+
+  return !url.pathname.endsWith("/smoke.html");
 }
 
 interface GeneratedWorldSmokeBootOptions {
