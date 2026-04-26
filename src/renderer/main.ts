@@ -1,14 +1,17 @@
 import { deleteIndexedDbWorldStorage } from "../runtime/storage/indexeddb-world-storage";
 import { Vec3 } from "../world/phys/vec3";
 import { Gui0ProbeScreen } from "../client/gui/screens/gui0-probe-screen";
+import { ProgressScreen } from "../client/gui/screens/progress-screen";
 import { TitleScreen } from "../client/gui/screens/title-screen";
 import { ScreenManager } from "../client/gui/screen-manager";
 import { type CameraState } from "./game-renderer";
+import type { LevelRenderFrame } from "./level-renderer";
 import {
   createSceneDepthTarget,
   encodeSceneFrame,
   initializeRendererScene,
   resizeCanvasToDisplaySize,
+  type RendererScene,
 } from "./scene-setup";
 import { readBrowserRenderConfig } from "./browser-render-config";
 import {
@@ -16,12 +19,21 @@ import {
 } from "./generated-world-smoke-scenario";
 import {
   runGeneratedWorldSmokeScenario,
+  type GeneratedWorldSmokeRun,
   type GeneratedWorldSmokeRenderTarget,
   type GeneratedWorldSmokeScenarioResult,
 } from "./generated-world-smoke-runner";
+import { progressFraction, type LoadingProgress, type LoadingProgressSink } from "./loading-progress";
+import { BROWSER_RENDERER_HOST, type BrowserRendererHost } from "./renderer-host";
 import { GuiRenderer } from "./gui/gui-renderer";
 import { GuiOverlayHost } from "./gui/gui-overlay-host";
-import { configureBrowserCanvasTarget, readTextureRgba8, requestWebGpuDeviceContext } from "./webgpu-target";
+import {
+  configureBrowserCanvasTarget,
+  readTextureRgba8,
+  requestWebGpuDeviceContext,
+  type BrowserCanvasTarget,
+  type WebGpuDeviceContext,
+} from "./webgpu-target";
 
 type BootWorldTransport = "worker" | "remote";
 
@@ -41,15 +53,22 @@ export interface GpuTitleBootResult {
 
 interface GpuGuiRuntimeState {
   ready: boolean;
-  mode: "title";
+  mode: "title" | "loading" | "world" | "error";
   screenTitle: string;
   lastAction?: "continue" | "start_world" | "options";
+  loadingStage?: string;
+  loadingDetail?: string;
+  loadingProgress?: number;
+  worldReady?: boolean;
+  worldResult?: BootResult;
+  error?: string;
   width: number;
   height: number;
 }
 
 interface GpuGuiRuntimeController {
   readonly state: GpuGuiRuntimeState;
+  worldReady?: Promise<BootResult>;
 }
 
 declare global {
@@ -123,7 +142,20 @@ function readGpuTitleEnabled(url: URL): boolean {
   return value === "1" || value === "true";
 }
 
-async function createGuiProbeOverlay(scene: import("./scene-setup").RendererScene): Promise<GuiOverlayHost> {
+interface GeneratedWorldSmokeBootOptions {
+  readonly rendererHost?: BrowserRendererHost;
+  readonly onProgress?: LoadingProgressSink;
+}
+
+type GeneratedWorldSmokeBootResult =
+  | {
+    readonly ok: true;
+    readonly scene: RendererScene;
+    readonly run: GeneratedWorldSmokeRun;
+  }
+  | { readonly ok: false; readonly reason: string };
+
+async function createGuiProbeOverlay(scene: RendererScene): Promise<GuiOverlayHost> {
   const size = GuiRenderer.calculateGuiSize(scene.canvas.width, scene.canvas.height);
   const screenManager = new ScreenManager(size.guiWidth, size.guiHeight);
   screenManager.setScreen(new Gui0ProbeScreen());
@@ -145,7 +177,7 @@ function encodeGuiProbeOverlay(
   overlay.encode(encoder, view, format, pixelWidth, pixelHeight);
 }
 
-async function bootGpuTitle(canvas: HTMLCanvasElement): Promise<MainBootResult> {
+async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBootResult> {
   const deviceContextResult = await requestWebGpuDeviceContext();
   if (!deviceContextResult.ok) {
     return deviceContextResult;
@@ -167,65 +199,85 @@ async function bootGpuTitle(canvas: HTMLCanvasElement): Promise<MainBootResult> 
     width: size.guiWidth,
     height: size.guiHeight,
   };
+  const controller: GpuGuiRuntimeController = { state };
   if (typeof window !== "undefined") {
-    window.__mcloneGui = { state };
+    window.__mcloneGui = controller;
   }
 
   let renderQueued = false;
   let host: GuiOverlayHost | undefined;
-  const render = (): void => {
+  const renderGuiFrameNow = (): void => {
+    const activeHost = host;
+    if (activeHost === undefined || screenManager.currentScreen === null || state.mode === "world") {
+      return;
+    }
+
+    const resized = resizeCanvasToDisplaySize(canvas, device.limits.maxTextureDimension2D);
+    const guiSize = GuiRenderer.calculateGuiSize(resized.width, resized.height);
+    state.width = guiSize.guiWidth;
+    state.height = guiSize.guiHeight;
+    const view = target.ctx.getCurrentTexture().createView();
+    const encoder = device.createCommandEncoder();
+    const clearPass = encoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view,
+          clearValue: { r: 0.06, g: 0.07, b: 0.08, a: 1 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+    });
+    clearPass.end();
+    activeHost.encode(encoder, view, target.format, resized.width, resized.height);
+    device.queue.submit([encoder.finish()]);
+  };
+  const scheduleGuiFrame = (): void => {
     if (host === undefined || renderQueued) {
       return;
     }
 
     renderQueued = true;
     requestAnimationFrame(() => {
-      const activeHost = host;
-      if (activeHost === undefined) {
-        renderQueued = false;
-        return;
-      }
-
       renderQueued = false;
-      const resized = resizeCanvasToDisplaySize(canvas, device.limits.maxTextureDimension2D);
-      const guiSize = GuiRenderer.calculateGuiSize(resized.width, resized.height);
-      state.width = guiSize.guiWidth;
-      state.height = guiSize.guiHeight;
-      const view = target.ctx.getCurrentTexture().createView();
-      const encoder = device.createCommandEncoder();
-      const clearPass = encoder.beginRenderPass({
-        colorAttachments: [
-          {
-            view,
-            clearValue: { r: 0.06, g: 0.07, b: 0.08, a: 1 },
-            loadOp: "clear",
-            storeOp: "store",
-          },
-        ],
-      });
-      clearPass.end();
-      activeHost.encode(encoder, view, target.format, resized.width, resized.height);
-      device.queue.submit([encoder.finish()]);
+      renderGuiFrameNow();
     });
+  };
+
+  let startWorldPromise: Promise<BootResult> | undefined;
+  const startWorld = (): void => {
+    state.lastAction = "start_world";
+    if (startWorldPromise !== undefined) {
+      return;
+    }
+
+    startWorldPromise = startGpuTitleWorld({
+      canvas,
+      url,
+      deviceContext: deviceContextResult.context,
+      target,
+      screenManager,
+      state,
+      renderGuiFrameNow,
+    });
+    controller.worldReady = startWorldPromise;
   };
 
   const titleScreen = new TitleScreen({
     onContinue: () => {
       state.lastAction = "continue";
     },
-    onStartWorld: () => {
-      state.lastAction = "start_world";
-    },
+    onStartWorld: startWorld,
     onOptions: () => {
       state.lastAction = "options";
     },
   });
   screenManager.setScreen(titleScreen);
   host = await GuiOverlayHost.create(device, canvas, screenManager);
-  host.attachInput(render);
-  window.addEventListener("resize", render);
+  host.attachInput(scheduleGuiFrame);
+  window.addEventListener("resize", scheduleGuiFrame);
   state.ready = true;
-  render();
+  scheduleGuiFrame();
 
   return {
     ok: true,
@@ -236,16 +288,126 @@ async function bootGpuTitle(canvas: HTMLCanvasElement): Promise<MainBootResult> 
   };
 }
 
+interface StartGpuTitleWorldOptions {
+  readonly canvas: HTMLCanvasElement;
+  readonly url: URL;
+  readonly deviceContext: WebGpuDeviceContext;
+  readonly target: BrowserCanvasTarget;
+  readonly screenManager: ScreenManager;
+  readonly state: GpuGuiRuntimeState;
+  readonly renderGuiFrameNow: () => void;
+}
+
+async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<BootResult> {
+  const progressScreen = new ProgressScreen(true);
+  options.state.mode = "loading";
+  options.state.screenTitle = "Progress Screen";
+  options.screenManager.setScreen(progressScreen);
+
+  const reportProgress = (progress: LoadingProgress): void => {
+    progressScreen.updateProgress(progress);
+    options.state.loadingStage = progress.stage;
+    options.state.loadingDetail = progress.detail;
+    options.state.loadingProgress = progressFraction(progress);
+    options.renderGuiFrameNow();
+  };
+
+  reportProgress({ stage: "Opening world", fraction: 0 });
+  try {
+    const bootResult = await runGeneratedWorldSmokeBoot(options.canvas, options.url, {
+      rendererHost: createPinnedBrowserRendererHost(options.deviceContext, options.target),
+      onProgress: reportProgress,
+    });
+    if (!bootResult.ok) {
+      options.state.mode = "error";
+      options.state.error = bootResult.reason;
+      reportProgress({ stage: "Error", detail: bootResult.reason, fraction: 1 });
+      return bootResult;
+    }
+
+    options.state.mode = "world";
+    options.state.screenTitle = "";
+    options.state.worldReady = true;
+    options.state.worldResult = bootResult.run.result;
+    options.screenManager.setScreen(null);
+    await renderWorldFrameToCanvas(bootResult.scene, options.canvas, bootResult.run.frame);
+    return bootResult.run.result;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    options.state.mode = "error";
+    options.state.error = reason;
+    reportProgress({ stage: "Error", detail: reason, fraction: 1 });
+    return { ok: false, reason };
+  }
+}
+
+function createPinnedBrowserRendererHost(
+  deviceContext: WebGpuDeviceContext,
+  target: BrowserCanvasTarget,
+): BrowserRendererHost {
+  return {
+    requestWebGpuDeviceContext: async (progress) => {
+      progress?.onRequestAdapter?.();
+      progress?.onRequestDevice?.();
+      return { ok: true, context: deviceContext };
+    },
+    createCanvasTarget: () => target,
+    createRenderWorldWorkerEndpoint: () => BROWSER_RENDERER_HOST.createRenderWorldWorkerEndpoint(),
+  };
+}
+
+async function renderWorldFrameToCanvas(
+  scene: RendererScene,
+  canvas: HTMLCanvasElement,
+  frame: LevelRenderFrame,
+): Promise<void> {
+  const depthTarget = createSceneDepthTarget(scene.device, canvas.width, canvas.height);
+  try {
+    const encoder = scene.device.createCommandEncoder();
+    encodeSceneFrame(
+      scene,
+      frame,
+      {
+        view: scene.ctx.getCurrentTexture().createView(),
+        depthView: depthTarget.view,
+        format: scene.format,
+      },
+      encoder,
+    );
+    scene.device.queue.submit([encoder.finish()]);
+    await scene.device.queue.onSubmittedWorkDone();
+  } finally {
+    depthTarget.texture.destroy();
+  }
+}
+
 async function boot(): Promise<MainBootResult> {
   const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
   if (!canvas) return { ok: false, reason: "canvas #renderer not found" };
 
-  const runtimeConfig = readWorldTransport();
   const url = typeof window === "undefined" ? new URL("http://127.0.0.1/") : new URL(window.location.href);
   if (readGpuTitleEnabled(url)) {
-    return bootGpuTitle(canvas);
+    return bootGpuTitle(canvas, url);
   }
 
+  return bootGeneratedWorldSmoke(canvas, url);
+}
+
+async function bootGeneratedWorldSmoke(
+  canvas: HTMLCanvasElement,
+  url: URL,
+  options: GeneratedWorldSmokeBootOptions = {},
+): Promise<BootResult> {
+  const bootResult = await runGeneratedWorldSmokeBoot(canvas, url, options);
+  return bootResult.ok ? bootResult.run.result : bootResult;
+}
+
+async function runGeneratedWorldSmokeBoot(
+  canvas: HTMLCanvasElement,
+  url: URL,
+  options: GeneratedWorldSmokeBootOptions = {},
+): Promise<GeneratedWorldSmokeBootResult> {
+  const runtimeConfig = readWorldTransport();
   const scenario = getGeneratedWorldSmokeScenarioById(url.searchParams.get("generatedWorldScenario"));
   const renderConfig = readBrowserRenderConfig(url);
   const requestedCamera = readSmokeCamera(url);
@@ -277,6 +439,8 @@ async function boot(): Promise<MainBootResult> {
     worldStorageMode: renderConfig.worldStorageMode,
     skyColor: renderConfig.skyColor,
     clearColorScale: renderConfig.clearColorScale,
+    onProgress: options.onProgress,
+    rendererHost: options.rendererHost,
   });
   if (!sceneResult.ok) {
     return sceneResult;
@@ -294,8 +458,9 @@ async function boot(): Promise<MainBootResult> {
       format: scene.format,
       lightingMode: renderConfig.lightingMode,
       liquidSimulationMode: renderConfig.liquidSimulationMode,
+      onProgress: options.onProgress,
     });
-    return run.result;
+    return { ok: true, scene, run };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { ok: false, reason };

@@ -27,9 +27,9 @@ test("captures the opt-in GPU title screen and routes button clicks without visi
   const box = await page.locator("#renderer").boundingBox();
   expect(box).not.toBeNull();
   const stateBeforeClick = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
-  const startWorldCenterY = (Math.floor(stateBeforeClick.height / 4) + 48 + 24 + 10) / stateBeforeClick.height;
-  await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * startWorldCenterY));
+  const optionsCenterY = (Math.floor(stateBeforeClick.height / 4) + 48 + (24 * 2) + 10) / stateBeforeClick.height;
+  await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * optionsCenterY));
   const state = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
   expect(state.mode).toBe("title");
-  expect(state.lastAction).toBe("start_world");
+  expect(state.lastAction).toBe("options");
 });

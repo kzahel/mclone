@@ -1,6 +1,7 @@
 import type { ClientRuntime } from "../runtime/client/client-runtime";
 import type { CameraState } from "./game-renderer";
 import type { LevelRenderFrame } from "./level-renderer";
+import type { LoadingProgressSink } from "./loading-progress";
 import { RenderType } from "./render-type";
 import {
   applyRenderWorldDirtySections,
@@ -155,6 +156,7 @@ export interface GeneratedWorldSmokeRunOptions {
   readonly liquidSimulationMode?: string;
   readonly validatePipelines?: boolean;
   readonly validatePipelineFormats?: readonly GPUTextureFormat[];
+  readonly onProgress?: LoadingProgressSink;
 }
 
 export interface GeneratedWorldSmokeRun {
@@ -211,6 +213,7 @@ async function prepareGeneratedWorldSmokeStep(
   camera: CameraState,
   expectedLoadedChunkCount: number,
   expectedChunkCenter: GeneratedWorldSmokeChunkCenter,
+  onProgress?: LoadingProgressSink,
 ): Promise<PreparedGeneratedWorldSmokeStep> {
   const chunkCenter = getGeneratedWorldSmokeCameraChunkCenter(camera);
   if (await scene.clientRuntime.setChunkInterest({
@@ -223,7 +226,7 @@ async function prepareGeneratedWorldSmokeStep(
     scene.levelRenderer.allChanged();
   }
 
-  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, { maxAttempts: 1800 })) {
+  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, { maxAttempts: 1800, onProgress })) {
     throw new Error(
       `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`,
     );
@@ -298,6 +301,7 @@ async function runGeneratedWorldSmokeScenarioStep(
     step.camera,
     expectedLoadedChunkCount,
     getGeneratedWorldSmokeStepExpectedChunkCenter(step),
+    options.onProgress,
   );
   if (step.playerInput !== undefined) {
     await runGeneratedWorldSmokePlayerInputCommand(options.scene, step.playerInput);
@@ -305,6 +309,7 @@ async function runGeneratedWorldSmokeScenarioStep(
   await waitForGeneratedWorldSmokePresentationDelay(options.scene, step, scenario);
 
   options.scene.levelRenderer.allChanged();
+  options.onProgress?.({ stage: "Building first frame", fraction: 0.98 });
   const frameResult = collectGeneratedWorldSmokeFrameResult(
     options.scene,
     await renderSceneUntilSettled(options.scene, step.camera),

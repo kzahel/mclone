@@ -3,6 +3,7 @@ import { Button } from "../../../src/client/gui/components/button";
 import { Font } from "../../../src/client/gui/font";
 import { GuiComponent } from "../../../src/client/gui/gui-component";
 import { ScreenManager } from "../../../src/client/gui/screen-manager";
+import { ProgressScreen } from "../../../src/client/gui/screens/progress-screen";
 import { Screen } from "../../../src/client/gui/screens/screen";
 import { TitleScreen } from "../../../src/client/gui/screens/title-screen";
 import { GuiDrawList } from "../../../src/renderer/gui/gui-draw-list";
@@ -64,6 +65,21 @@ describe("Gui0 model foundation", () => {
     expect(manager.mouseClicked(160, 132, 0)).toBe(true);
     expect(actions).toEqual(["start_world"]);
     expect(manager.keyPressed(256, 0, 0)).toBe(false);
+  });
+
+  it("renders vanilla-style progress text and a GPU progress bar", () => {
+    const manager = new ScreenManager(320, 240);
+    const progressScreen = new ProgressScreen(true);
+    manager.setScreen(progressScreen);
+    progressScreen.progressStart("Loading world");
+    progressScreen.updateProgress({ stage: "Loading terrain chunks", current: 3, total: 10 });
+
+    const drawList = new GuiDrawList();
+    manager.render(drawList, 0, 0, 0);
+
+    expect(drawList.getCommands().length).toBeGreaterThan(4);
+    expect(drawList.getCommands().some((command) => command.type === "solid_rect")).toBe(true);
+    expect(drawList.getCommands().some((command) => command.type === "textured_quad")).toBe(true);
   });
 });
 
