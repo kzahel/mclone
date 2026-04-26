@@ -39,6 +39,8 @@ export type BootResult =
       saveId: string;
       sessionId?: string;
       playerId?: string;
+      playerName?: string;
+      playerProfileId?: string;
       sessionRevision?: number;
       playerInputSequence?: number;
       playerStateRevision?: number;
@@ -364,6 +366,8 @@ async function boot(): Promise<BootResult> {
     saveId: scene.saveMetadata.saveId,
     sessionId: sessionState?.sessionId,
     playerId: sessionState?.playerId,
+    playerName: sessionState?.playerProfile.name,
+    playerProfileId: sessionState?.playerProfile.profileId,
     sessionRevision: sessionState?.revision,
     playerInputSequence: playerState?.acknowledgedInputSequence,
     playerStateRevision: playerState?.revision,

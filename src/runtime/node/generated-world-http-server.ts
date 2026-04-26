@@ -35,12 +35,14 @@ import {
 import { drainWorldHostMessages } from "../protocol/world-message-queue";
 import {
   isDefaultWorldEngineConfig,
+  normalizePlayerProfile,
   normalizeWorldEngineConfig,
   type ClientSessionState,
   type EntitySnapshot,
   type ClientPlayerState,
   type OpenWorldRequest,
   type PollWorldUpdatesRequest,
+  type PlayerProfile,
   type SetPlayerInputRequest,
   type SessionChunkViewState,
   type SetChunkViewRequest,
@@ -101,10 +103,15 @@ type SessionRecord = {
   chunkView: SetChunkViewRequest | undefined;
   visibleChunks: Set<string>;
   revision: number;
-  playerState: ClientPlayerState;
-  playerCommandQueue: PlayerCommandQueue;
   pendingMessages: WorldHostMessage[];
-  playerAnchoredToChunkView: boolean;
+};
+
+type PlayerSlotRecord = {
+  readonly id: string;
+  readonly profile: PlayerProfile;
+  state: ClientPlayerState;
+  commandQueue: PlayerCommandQueue;
+  anchoredToChunkView: boolean;
 };
 
 type SharedWorldRecord = {
@@ -112,6 +119,7 @@ type SharedWorldRecord = {
   readonly host: WorldHost;
   readonly worldOpened: WorldOpenedMessage;
   readonly sessionIds: Set<string>;
+  readonly playerSlots: Map<string, PlayerSlotRecord>;
   readonly loadedSnapshots: Map<string, PackedChunkSnapshot>;
   readonly loadedEntitySnapshots: Map<number, EntitySnapshot>;
   aggregateChunkView: SetChunkViewRequest | undefined;
@@ -217,14 +225,36 @@ function createSessionChunkViewState(chunkView: SetChunkViewRequest | undefined)
   };
 }
 
+function createPlayerSlot(profile: PlayerProfile): PlayerSlotRecord {
+  const playerId = `player-${randomUUID()}`;
+  return {
+    id: playerId,
+    profile,
+    state: createInitialPlayerState(playerId),
+    commandQueue: createPlayerCommandQueue(),
+    anchoredToChunkView: false,
+  };
+}
+
+function getSessionPlayer(world: SharedWorldRecord, session: SessionRecord): PlayerSlotRecord {
+  const player = world.playerSlots.get(session.playerId);
+  if (player === undefined) {
+    throw new GeneratedWorldRemoteServiceError(`Unknown player slot ${session.playerId}`, "unknown_session", 404);
+  }
+
+  return player;
+}
+
 function createSessionStateMessage(
   session: SessionRecord,
   world: SharedWorldRecord,
   resumed: boolean,
 ): Extract<WorldHostMessage, { type: "session_state" }> {
+  const player = getSessionPlayer(world, session);
   const state: ClientSessionState = {
     sessionId: session.id,
-    playerId: session.playerId,
+    playerId: player.id,
+    playerProfile: player.profile,
     saveId: world.saveId,
     resumed,
     revision: session.revision,
@@ -236,16 +266,16 @@ function createSessionStateMessage(
   };
 }
 
-function createPlayerStateMessage(session: SessionRecord): Extract<WorldHostMessage, { type: "player_state" }> {
+function createPlayerStateMessage(player: PlayerSlotRecord): Extract<WorldHostMessage, { type: "player_state" }> {
   return {
     type: "player_state",
-    state: session.playerState,
+    state: player.state,
   };
 }
 
-function enqueuePlayerStateMessage(session: SessionRecord): void {
+function enqueuePlayerStateMessage(session: SessionRecord, player: PlayerSlotRecord): void {
   session.pendingMessages = session.pendingMessages.filter((message) => message.type !== "player_state");
-  session.pendingMessages.push(createPlayerStateMessage(session));
+  session.pendingMessages.push(createPlayerStateMessage(player));
 }
 
 function drainPendingMessages(session: SessionRecord, maxMessages: number | undefined): readonly WorldHostMessage[] {
@@ -529,25 +559,24 @@ export class GeneratedWorldRemoteService {
 
     const world = await this.getOrCreateWorld(request);
     const sessionId = randomUUID();
+    const player = createPlayerSlot(normalizePlayerProfile(request.playerProfile));
+    world.playerSlots.set(player.id, player);
     const session: SessionRecord = {
       id: sessionId,
-      playerId: sessionId,
+      playerId: player.id,
       worldSaveId: world.saveId,
       openWorldRequest: request,
       chunkView: undefined,
       visibleChunks: new Set<string>(),
       revision: 0,
-      playerState: createInitialPlayerState(sessionId),
-      playerCommandQueue: createPlayerCommandQueue(),
       pendingMessages: [],
-      playerAnchoredToChunkView: false,
     };
     this.sessions.set(sessionId, session);
     world.sessionIds.add(sessionId);
     return [
       world.worldOpened,
       createSessionStateMessage(session, world, false),
-      createPlayerStateMessage(session),
+      createPlayerStateMessage(player),
     ];
   }
 
@@ -579,6 +608,7 @@ export class GeneratedWorldRemoteService {
       if (queuedWorld === undefined) {
         throw new GeneratedWorldRemoteServiceError(`Unknown world ${queuedSession.worldSaveId}`, "unknown_session", 404);
       }
+      const player = getSessionPlayer(queuedWorld, queuedSession);
 
       const previousChunkView = queuedSession.chunkView;
       const previousVisibleChunks = new Set(queuedSession.visibleChunks);
@@ -600,14 +630,14 @@ export class GeneratedWorldRemoteService {
 
       const visibleChunks = getSessionVisibleChunks(queuedSession.chunkView);
       const responseMessages: WorldHostMessage[] = [createSessionStateMessage(queuedSession, queuedWorld, false)];
-      if (!queuedSession.playerAnchoredToChunkView) {
-        queuedSession.playerState = anchorPlayerStateToChunkView(
-          queuedSession.playerState,
+      if (!player.anchoredToChunkView) {
+        player.state = anchorPlayerStateToChunkView(
+          player.state,
           createSessionChunkViewState(request)!,
-          queuedSession.playerState.tick,
+          player.state.tick,
         );
-        queuedSession.playerAnchoredToChunkView = true;
-        responseMessages.push(createPlayerStateMessage(queuedSession));
+        player.anchoredToChunkView = true;
+        responseMessages.push(createPlayerStateMessage(player));
       }
 
       for (const key of previousVisibleChunks) {
@@ -655,8 +685,9 @@ export class GeneratedWorldRemoteService {
     if (world === undefined) {
       throw new GeneratedWorldRemoteServiceError(`Unknown world ${session.worldSaveId}`, "unknown_session", 404);
     }
+    const player = getSessionPlayer(world, session);
 
-    if (enqueuePlayerInputCommand(session.playerCommandQueue, session.playerState, request.input)) {
+    if (enqueuePlayerInputCommand(player.commandQueue, player.state, request.input)) {
       session.revision++;
     }
     return [
@@ -701,14 +732,19 @@ export class GeneratedWorldRemoteService {
     for (let tickIndex = 0; tickIndex < tickCount; tickIndex++) {
       this.currentTick++;
       for (const session of this.sessions.values()) {
+        const world = this.worlds.get(session.worldSaveId);
+        if (world === undefined) {
+          continue;
+        }
+        const player = getSessionPlayer(world, session);
         const nextPlayerState = tickPlayerStateWithCommandQueue(
-          session.playerState,
-          session.playerCommandQueue,
+          player.state,
+          player.commandQueue,
           this.currentTick,
         );
-        if (nextPlayerState !== session.playerState) {
-          session.playerState = nextPlayerState;
-          enqueuePlayerStateMessage(session);
+        if (nextPlayerState !== player.state) {
+          player.state = nextPlayerState;
+          enqueuePlayerStateMessage(session, player);
         }
       }
     }
@@ -728,6 +764,7 @@ export class GeneratedWorldRemoteService {
     this.sessions.clear();
     for (const world of this.worlds.values()) {
       world.sessionIds.clear();
+      world.playerSlots.clear();
       world.aggregateChunkView = undefined;
     }
   }
@@ -759,11 +796,12 @@ export class GeneratedWorldRemoteService {
     if (world === undefined) {
       throw new GeneratedWorldRemoteServiceError(`Unknown world ${session.worldSaveId}`, "unknown_session", 404);
     }
+    const player = getSessionPlayer(world, session);
 
     const messages: WorldHostMessage[] = [
       world.worldOpened,
       createSessionStateMessage(session, world, true),
-      createPlayerStateMessage(session),
+      createPlayerStateMessage(player),
     ];
     for (const key of session.visibleChunks) {
       const snapshot = world.loadedSnapshots.get(key);
@@ -799,6 +837,7 @@ export class GeneratedWorldRemoteService {
         host,
         worldOpened: extractWorldOpened(messages),
         sessionIds: new Set<string>(),
+        playerSlots: new Map<string, PlayerSlotRecord>(),
         loadedSnapshots: new Map<string, PackedChunkSnapshot>(),
         loadedEntitySnapshots: new Map<number, EntitySnapshot>(),
         aggregateChunkView: undefined,
@@ -1259,6 +1298,9 @@ class GeneratedWorldWebSocketConnection {
 
       await this.handleRequest(frame as Extract<WorldSocketClientFrame, { kind: "request" }>);
     } catch (error) {
+      if (error instanceof GeneratedWorldRemoteServiceError && error.code === "unknown_session") {
+        this.sessionId = undefined;
+      }
       this.sendError(typeof frame.requestId === "number" ? frame.requestId : undefined, error);
     }
   }

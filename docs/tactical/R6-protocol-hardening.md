@@ -39,7 +39,7 @@ We still do not have player movement, ticking, or unsolicited world updates. Bec
 
 The runtime protocol now includes baseline session state:
 
-- `session_state` messages carry `sessionId`, `playerId`, `saveId`, `revision`, `resumed`, and the current chunk-view state
+- `session_state` messages carry `sessionId`, `playerId`, `playerProfile`, `saveId`, `revision`, `resumed`, and the current chunk-view state
 - `TransportWorldClient` stores that state alongside the read-only client chunk cache
 - browser boot results expose the active session/player ids in the smoke path
 

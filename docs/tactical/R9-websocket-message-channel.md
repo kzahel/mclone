@@ -90,4 +90,4 @@ Completed:
 
 ## Follow-Up
 
-The next Tactical 53 dependency is join/player-slot semantics: keep `sessionId` as a connection/resume handle, introduce explicit join/resume identity facts, and stop depending on `playerId === sessionId` before grounded movement uses player identity.
+Join/player-slot semantics are now landed on top of R9: `sessionId` is a connection/resume handle, `playerId` is a separate player slot, and `session_state` carries the player profile. The next Tactical 53 dependency is grounded player movement integration over the existing WebSocket transport and identity model.

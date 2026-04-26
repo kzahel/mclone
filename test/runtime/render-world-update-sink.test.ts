@@ -33,6 +33,7 @@ const OPENED: WorldOpenedMessage = {
 const SESSION_STATE: ClientSessionState = {
   sessionId: "session",
   playerId: "player",
+  playerProfile: { name: "Player" },
   saveId: "test-save",
   resumed: false,
   revision: 1,

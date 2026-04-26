@@ -7,6 +7,7 @@ import type {
   SessionStateMessage,
   WorldErrorMessage,
   OpenWorldPreset,
+  PlayerProfile,
   PollWorldUpdatesRequest,
   SetChunkViewRequest,
   SetPlayerInputRequest,
@@ -18,6 +19,7 @@ import type {
   WorldProgressMessage,
   WorldStorageMode,
 } from "./world-messages";
+import { normalizePlayerProfile } from "./world-messages";
 import {
   deserializePackedChunkLightDelta,
   deserializePackedChunkSnapshot,
@@ -27,7 +29,7 @@ import {
   type SerializedPackedChunkSnapshot,
 } from "./packed-chunk-wire";
 
-export const WORLD_REMOTE_PROTOCOL_VERSION = 6;
+export const WORLD_REMOTE_PROTOCOL_VERSION = 7;
 
 export type WorldRemoteErrorCode =
   | "protocol_version_mismatch"
@@ -42,6 +44,7 @@ export interface SerializedOpenWorldRequest {
   readonly preset: OpenWorldPreset;
   readonly config?: WorldEngineConfig;
   readonly storageMode?: WorldStorageMode;
+  readonly playerProfile?: PlayerProfile;
 }
 
 export type SerializedSetChunkViewRequest = SetChunkViewRequest;
@@ -122,6 +125,7 @@ export function serializeWorldClientMessage(message: WorldClientMessage): Serial
         preset: message.preset,
         ...(message.config === undefined ? {} : { config: message.config }),
         ...(message.storageMode === undefined ? {} : { storageMode: message.storageMode }),
+        ...(message.playerProfile === undefined ? {} : { playerProfile: normalizePlayerProfile(message.playerProfile) }),
       };
     case "set_chunk_view":
       return message;
@@ -141,6 +145,7 @@ export function deserializeWorldClientMessage(message: SerializedWorldClientMess
         preset: message.preset,
         ...(message.config === undefined ? {} : { config: message.config }),
         ...(message.storageMode === undefined ? {} : { storageMode: message.storageMode }),
+        ...(message.playerProfile === undefined ? {} : { playerProfile: normalizePlayerProfile(message.playerProfile) }),
       };
     case "set_chunk_view":
       return message;

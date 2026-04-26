@@ -49,6 +49,7 @@ import { ServerTickList, type TickNextTickData } from "../../world/level/server-
 import type { WorldHost } from "../protocol/world-host";
 import { drainWorldHostMessages } from "../protocol/world-message-queue";
 import {
+  DEFAULT_PLAYER_PROFILE,
   normalizeWorldEngineConfig,
   type ClientPlayerState,
   type ClientSessionState,
@@ -167,7 +168,8 @@ export interface GeneratedWorldHostOptions {
   readonly lightingService?: LightingService;
 }
 
-const LOCAL_WORLD_SESSION_ID = "local";
+const LOCAL_WORLD_SESSION_ID = "local-session";
+const LOCAL_PLAYER_ID = "local-player";
 const COOPERATIVE_CHUNK_PHASE_BUDGET_MS = 8;
 const LIGHTING_RESULT_BATCH_SIZE = 64;
 const LIQUID_TICK_READ_RADIUS_BLOCKS = 4;
@@ -1960,13 +1962,14 @@ export class GeneratedWorldHost implements WorldHost {
 
     this.sessionState ??= {
       sessionId: LOCAL_WORLD_SESSION_ID,
-      playerId: LOCAL_WORLD_SESSION_ID,
+      playerId: LOCAL_PLAYER_ID,
+      playerProfile: DEFAULT_PLAYER_PROFILE,
       saveId: this.worldOpened.saveMetadata.saveId,
       resumed: false,
       revision: 0,
       chunkView: undefined,
     };
-    this.playerState ??= createInitialPlayerState(LOCAL_WORLD_SESSION_ID);
+    this.playerState ??= createInitialPlayerState(LOCAL_PLAYER_ID);
   }
 
   private updateSessionState(): void {

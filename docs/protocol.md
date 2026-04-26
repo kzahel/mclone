@@ -86,7 +86,7 @@ Keep connection/session identity separate from player identity:
 - resuming by `sessionId` reconnects the same active session and therefore the same player slot while the session exists.
 - future profile-based resume may reclaim a persisted player slot even after the transport session expired, but that should be explicit and not inferred from a random session id.
 
-The current implementation still folds open/create and join into `open_world`, and the remote debug path currently uses `playerId === sessionId` as a compatibility shortcut. Do not build grounded movement, inventory, or persisted player state on that shortcut. The next multiplayer-facing runtime slice should split or model join semantics so a session references a tracked player slot with a name/profile instead of being the player slot.
+The current implementation still folds open/create and join into `open_world`, but the command can now carry a `playerProfile`. Local singleplayer defaults to `Player`; remote sessions allocate a separate player slot and return the associated profile in `session_state`. Do not infer persisted player recovery from `sessionId`; profile-based persisted-slot recovery remains a future explicit lifecycle step.
 
 ## Client Commands
 
@@ -94,7 +94,7 @@ Current and near-term client-to-host commands:
 
 | Command | Purpose |
 |---|---|
-| `open_world` | open/create a world and establish baseline metadata |
+| `open_world` | open/create a world and establish baseline metadata; currently also carries the transitional join/profile fact |
 | `set_chunk_view` | current view-shaped chunk-interest command |
 | `set_player_input` | send sequenced movement command records to authoritative host |
 | `poll_world_updates` | drain queued server-originated updates on polling transports |
@@ -119,7 +119,7 @@ Current and near-term host-to-client updates:
 | Update | Purpose |
 |---|---|
 | `world_opened` | world dimensions and save metadata |
-| `session_state` | session/player/save ids, revision, current interest state |
+| `session_state` | session/player/save ids, player profile, revision, current interest state |
 | `player_state` | authoritative player position/rotation/tick/revision |
 | `chunk_snapshot` | baseline chunk facts |
 | `chunk_light_delta` | stored light changes for an already loaded chunk |

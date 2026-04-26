@@ -2,7 +2,7 @@ import { ResourceLocation } from "../core/resource-location";
 import { SectionPos } from "../core/section-pos";
 import { type ClientRuntime, WorldClientRuntimeFacade } from "../runtime/client/client-runtime";
 import { createBrowserIntegratedServer } from "../runtime/host/browser-integrated-server";
-import type { OpenWorldPreset, WorldEngineConfig, WorldProgressMessage, WorldStorageMode } from "../runtime/protocol/world-messages";
+import { DEFAULT_PLAYER_PROFILE, type OpenWorldPreset, type PlayerProfile, type WorldEngineConfig, type WorldProgressMessage, type WorldStorageMode } from "../runtime/protocol/world-messages";
 import type { WorldSaveMetadata } from "../runtime/storage/world-storage";
 import { RemoteWorldClient, RemoteWorldWebSocketTransport } from "../runtime/transport/remote-world-transport";
 import { TransportWorldClient } from "../runtime/transport/local-world-transport";
@@ -62,6 +62,7 @@ export interface SceneInitOptions {
   readonly preset?: OpenWorldPreset;
   readonly engineConfig?: WorldEngineConfig;
   readonly worldStorageMode?: WorldStorageMode;
+  readonly playerProfile?: PlayerProfile;
   readonly skyColor?: Vec3;
   readonly clearColorScale?: number;
   readonly onProgress?: LoadingProgressSink;
@@ -511,6 +512,7 @@ export async function initializeRendererScene(
     seed: options.seed,
     preset: options.preset ?? "browser_smoke",
     config: options.engineConfig,
+    playerProfile: options.playerProfile ?? DEFAULT_PLAYER_PROFILE,
     ...(storageMode === undefined || storageMode === "default" ? {} : { storageMode }),
   });
   const compatibilityLevel = clientRuntime.getClientWorld().getRenderView().getRenderLevel();

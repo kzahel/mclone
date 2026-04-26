@@ -77,7 +77,9 @@ function expectRenderedSmokeResult(
 
 function expectAuthoritativePlayerLoop(result: Extract<BootResult, { ok: true }>): void {
   expect(result.sessionId).toBeDefined();
-  expect(result.playerId).toBe(result.sessionId);
+  expect(result.playerId).toBeDefined();
+  expect(result.playerId).not.toBe(result.sessionId);
+  expect(result.playerName).toBe("Player");
   expect(result.sessionRevision).toBeGreaterThan(0);
   expect(result.playerInputSequence).toBe(1);
   expect(result.playerStateRevision).toBeGreaterThan(0);
@@ -107,6 +109,7 @@ test("WebGPU boot succeeds against the remote Node host with two browser clients
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
   expect(firstResult.saveId).toBe(secondResult.saveId);
   expect(firstResult.sessionId).not.toBe(secondResult.sessionId);
+  expect(firstResult.playerId).not.toBe(secondResult.playerId);
   expectAuthoritativePlayerLoop(firstResult);
   expectAuthoritativePlayerLoop(secondResult);
 });

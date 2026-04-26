@@ -18,7 +18,7 @@ import {
   type WorldHttpErrorCode,
   type WorldHttpErrorResponse,
 } from "../../src/runtime/protocol/world-http-protocol";
-import type { ChunkSnapshotMessage, EntitySnapshot, WorldHostMessage } from "../../src/runtime/protocol/world-messages";
+import type { ChunkSnapshotMessage, ClientSessionState, EntitySnapshot, WorldHostMessage } from "../../src/runtime/protocol/world-messages";
 import { RemoteWorldClient, RemoteWorldTransport, RemoteWorldWebSocketTransport } from "../../src/runtime/transport/remote-world-transport";
 import type { WorldTransport } from "../../src/runtime/transport/local-world-transport";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
@@ -30,6 +30,9 @@ import type { CreatureGenerationFixture } from "../../src/oracle/integration/cre
 const TEMP_DIRECTORIES: string[] = [];
 const REMOTE_SERVERS: GeneratedWorldHttpServer[] = [];
 const creatureFixture = fixture as unknown as CreatureGenerationFixture;
+const REMOTE_PLAYER_PROFILE = {
+  name: "Remote Player",
+} as const;
 const OPEN_WORLD_REQUEST = {
   type: "open_world",
   seed: 12345n,
@@ -37,6 +40,7 @@ const OPEN_WORLD_REQUEST = {
   config: {
     lightingMode: "none",
   },
+  playerProfile: REMOTE_PLAYER_PROFILE,
 } as const;
 const OPEN_CREATURE_WORLD_REQUEST = {
   type: "open_world",
@@ -46,6 +50,7 @@ const OPEN_CREATURE_WORLD_REQUEST = {
   config: {
     lightingMode: "none",
   },
+  playerProfile: REMOTE_PLAYER_PROFILE,
 } as const;
 const REMOTE_WORLD_TRANSPORT_TIMEOUT_MS = 30_000;
 
@@ -293,13 +298,17 @@ function createRemoteWorldWebSocketClient(baseUrl: string, sessionId?: string): 
   return createRemoteWorldClientForTransport(new RemoteWorldWebSocketTransport(baseUrl, { sessionId }));
 }
 
-function findSessionId(messages: readonly WorldHostMessage[]): string {
+function findSessionState(messages: readonly WorldHostMessage[]): ClientSessionState {
   const sessionState = messages.find((message) => message.type === "session_state");
   if (sessionState?.type !== "session_state") {
     throw new Error("expected session_state message");
   }
 
-  return sessionState.state.sessionId;
+  return sessionState.state;
+}
+
+function findSessionId(messages: readonly WorldHostMessage[]): string {
+  return findSessionState(messages).sessionId;
 }
 
 function chunkSnapshots(messages: readonly WorldHostMessage[]): ChunkSnapshotMessage[] {
@@ -427,6 +436,7 @@ describe("RemoteWorld transport", () => {
     expect(client.getSessionState()).toEqual({
       sessionId: expect.any(String),
       playerId: expect.any(String),
+      playerProfile: REMOTE_PLAYER_PROFILE,
       saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
       resumed: false,
       revision: 1,
@@ -436,6 +446,7 @@ describe("RemoteWorld transport", () => {
         radius: 1,
       },
     });
+    expect(client.getSessionState()?.playerId).not.toBe(client.getSessionState()?.sessionId);
     expect(service.getSessionCount()).toBe(1);
     expect(service.getWorldCount()).toBe(1);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
@@ -451,6 +462,7 @@ describe("RemoteWorld transport", () => {
       sessionState: {
         sessionId: expect.any(String),
         playerId: expect.any(String),
+        playerProfile: REMOTE_PLAYER_PROFILE,
         saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
         resumed: false,
         revision: 0,
@@ -461,6 +473,9 @@ describe("RemoteWorld transport", () => {
       },
       entities: [],
     });
+    const openedPresentation = runtime.publishPresentationState();
+    expect(openedPresentation.sessionState?.playerId).not.toBe(openedPresentation.sessionState?.sessionId);
+    expect(openedPresentation.localPlayerState?.playerId).toBe(openedPresentation.sessionState?.playerId);
 
     expect(await runtime.setChunkInterest({
       type: "set_chunk_view",
@@ -652,9 +667,17 @@ describe("RemoteWorld transport", () => {
 
     const firstClient = createRemoteWorldClient("http://127.0.0.1:4173", fetchImpl);
     const secondClient = createRemoteWorldClient("http://127.0.0.1:4173", fetchImpl);
+    const firstRequest = {
+      ...OPEN_WORLD_REQUEST,
+      playerProfile: { name: "Remote Player One" },
+    } as const;
+    const secondRequest = {
+      ...OPEN_WORLD_REQUEST,
+      playerProfile: { name: "Remote Player Two" },
+    } as const;
     const [firstOpened, secondOpened] = await Promise.all([
-      firstClient.openWorld(OPEN_WORLD_REQUEST),
-      secondClient.openWorld(OPEN_WORLD_REQUEST),
+      firstClient.openWorld(firstRequest),
+      secondClient.openWorld(secondRequest),
     ]);
 
     expect(firstOpened.saveMetadata.saveId).toBe(secondOpened.saveMetadata.saveId);
@@ -681,6 +704,11 @@ describe("RemoteWorld transport", () => {
     expect(secondClient.getLevel().getLoadedChunkCount()).toBe(25);
     expect(service.getSessionCount()).toBe(2);
     expect(service.getWorldCount()).toBe(1);
+    expect(firstClient.getSessionState()?.playerId).not.toBe(firstClient.getSessionState()?.sessionId);
+    expect(secondClient.getSessionState()?.playerId).not.toBe(secondClient.getSessionState()?.sessionId);
+    expect(firstClient.getSessionState()?.playerId).not.toBe(secondClient.getSessionState()?.playerId);
+    expect(firstClient.getSessionState()?.playerProfile).toEqual(firstRequest.playerProfile);
+    expect(secondClient.getSessionState()?.playerProfile).toEqual(secondRequest.playerProfile);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("resumes an existing remote session and resyncs its visible chunks", async () => {
@@ -700,7 +728,9 @@ describe("RemoteWorld transport", () => {
     await drainRemoteClientChunks(firstClient, 25);
 
     const sessionId = firstClient.getSessionState()?.sessionId;
+    const playerId = firstClient.getSessionState()?.playerId;
     expect(sessionId).toBeDefined();
+    expect(playerId).toBeDefined();
 
     const resumedClient = createRemoteWorldClient("http://127.0.0.1:4173", fetchImpl, sessionId);
     await resumedClient.openWorld(OPEN_WORLD_REQUEST);
@@ -708,7 +738,8 @@ describe("RemoteWorld transport", () => {
     expect(resumedClient.getLevel().getLoadedChunkCount()).toBe(25);
     expect(resumedClient.getSessionState()).toEqual({
       sessionId,
-      playerId: sessionId,
+      playerId,
+      playerProfile: REMOTE_PLAYER_PROFILE,
       saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
       resumed: true,
       revision: 1,
@@ -718,6 +749,7 @@ describe("RemoteWorld transport", () => {
         radius: 1,
       },
     });
+    expect(resumedClient.getSessionState()?.playerId).not.toBe(resumedClient.getSessionState()?.sessionId);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("reopens and resyncs automatically when a remote session disappears", async () => {
@@ -750,6 +782,7 @@ describe("RemoteWorld transport", () => {
     await drainRemoteClientChunks(client, 25);
     expect(client.getLevel().getLoadedChunkCount()).toBe(25);
     expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
+    expect(client.getSessionState()?.playerId).not.toBe(client.getSessionState()?.sessionId);
     expect(client.getSessionState()?.resumed).toBe(false);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
@@ -789,6 +822,7 @@ describe("RemoteWorld transport", () => {
     expect(await client.pollUpdates()).toBe(true);
 
     expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
+    expect(client.getSessionState()?.playerId).not.toBe(client.getSessionState()?.sessionId);
     expect(client.getPlayerState()?.acknowledgedInputSequence).toBe(2);
     expect(client.getPlayerState()?.tick).toBeGreaterThan(0);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
@@ -825,6 +859,7 @@ describe("RemoteWorld transport", () => {
     expect(client.getSessionState()).toEqual({
       sessionId: expect.any(String),
       playerId: expect.any(String),
+      playerProfile: REMOTE_PLAYER_PROFILE,
       saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
       resumed: false,
       revision: 1,
@@ -834,6 +869,7 @@ describe("RemoteWorld transport", () => {
         radius: 1,
       },
     });
+    expect(client.getSessionState()?.playerId).not.toBe(client.getSessionState()?.sessionId);
     expect(server.getSessionCount()).toBe(1);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
@@ -877,9 +913,17 @@ describe("RemoteWorld transport", () => {
     const server = await createRemoteServer();
     const firstClient = createRemoteWorldWebSocketClient(server.getBaseUrl());
     const secondClient = createRemoteWorldWebSocketClient(server.getBaseUrl());
+    const firstRequest = {
+      ...OPEN_WORLD_REQUEST,
+      playerProfile: { name: "Remote Player One" },
+    } as const;
+    const secondRequest = {
+      ...OPEN_WORLD_REQUEST,
+      playerProfile: { name: "Remote Player Two" },
+    } as const;
     const [firstOpened, secondOpened] = await Promise.all([
-      firstClient.openWorld(OPEN_WORLD_REQUEST),
-      secondClient.openWorld(OPEN_WORLD_REQUEST),
+      firstClient.openWorld(firstRequest),
+      secondClient.openWorld(secondRequest),
     ]);
 
     expect(firstOpened.saveMetadata.saveId).toBe(secondOpened.saveMetadata.saveId);
@@ -905,6 +949,11 @@ describe("RemoteWorld transport", () => {
     expect(firstClient.getLevel().getLoadedChunkCount()).toBe(25);
     expect(secondClient.getLevel().getLoadedChunkCount()).toBe(25);
     expect(server.getSessionCount()).toBe(2);
+    expect(firstClient.getSessionState()?.playerId).not.toBe(firstClient.getSessionState()?.sessionId);
+    expect(secondClient.getSessionState()?.playerId).not.toBe(secondClient.getSessionState()?.sessionId);
+    expect(firstClient.getSessionState()?.playerId).not.toBe(secondClient.getSessionState()?.playerId);
+    expect(firstClient.getSessionState()?.playerProfile).toEqual(firstRequest.playerProfile);
+    expect(secondClient.getSessionState()?.playerProfile).toEqual(secondRequest.playerProfile);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("resumes an existing WebSocket session and resyncs visible chunks", async () => {
@@ -920,7 +969,9 @@ describe("RemoteWorld transport", () => {
     await drainRemoteClientChunks(firstClient, 25);
 
     const sessionId = firstClient.getSessionState()?.sessionId;
+    const playerId = firstClient.getSessionState()?.playerId;
     expect(sessionId).toBeDefined();
+    expect(playerId).toBeDefined();
     firstClient.close();
 
     const resumedClient = createRemoteWorldWebSocketClient(server.getBaseUrl(), sessionId);
@@ -929,7 +980,8 @@ describe("RemoteWorld transport", () => {
     expect(resumedClient.getLevel().getLoadedChunkCount()).toBe(25);
     expect(resumedClient.getSessionState()).toEqual({
       sessionId,
-      playerId: expect.any(String),
+      playerId,
+      playerProfile: REMOTE_PLAYER_PROFILE,
       saveId: createGeneratedWorldSaveId(12345n, "browser_smoke"),
       resumed: true,
       revision: 1,
@@ -939,6 +991,7 @@ describe("RemoteWorld transport", () => {
         radius: 1,
       },
     });
+    expect(resumedClient.getSessionState()?.playerId).not.toBe(resumedClient.getSessionState()?.sessionId);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 
   test("reopens and resyncs automatically when a WebSocket session disappears", async () => {
@@ -968,6 +1021,7 @@ describe("RemoteWorld transport", () => {
     await drainRemoteClientChunks(client, 25);
     expect(client.getLevel().getLoadedChunkCount()).toBe(25);
     expect(client.getSessionState()?.sessionId).not.toBe(previousSessionId);
+    expect(client.getSessionState()?.playerId).not.toBe(client.getSessionState()?.sessionId);
     expect(client.getSessionState()?.resumed).toBe(false);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 

@@ -27,12 +27,13 @@ Landed in this slice:
 - remote dedicated browser play uses a persistent WebSocket message channel by default
 - server-originated session, player, chunk, light, and entity updates are pushed into the client drain queue
 - reusable remote message serialization lives outside the HTTP envelope module
+- browser joins carry a default player profile, and remote host sessions now point at separate player slots
 
 Still temporary:
 
 - HTTP polling remains as a non-default compatibility adapter and test surface
 - `open_world` still folds world open/create and session join together
-- remote debug sessions use `playerId === sessionId`
+- profile-based persisted player-slot recovery is not implemented yet
 - live player movement snapshots still come from a compatibility fly body
 - debug player input still emits camera-space `moveX/moveY/moveZ`
 
@@ -58,16 +59,16 @@ Do not add grounded movement physics in this slice.
 
 ### 2. Join And Player Slot Semantics
 
-This is the next slice. Keep it narrow: identity cleanup should make player-slot facts explicit without reopening transport mechanics or implementing grounded movement.
+Status: done.
 
-Required outcomes:
+Required outcomes landed:
 
-- introduce an explicit join/resume shape, even if the wire command remains transitional
-- client join includes a player name/profile fact
-- host allocates or resumes a stable `playerId` for a world/save
+- `open_world` remains the transitional join command, but it now carries an optional `playerProfile`
+- browser joins send the default `Player` profile
+- the remote host allocates a separate player slot id and keeps it stable across session resume
 - `sessionId` remains a connection/resume handle and no longer doubles as the player slot
-- `ClientSessionState` exposes enough identity facts for UI/debug overlays and future persistence
-- reconnect by session preserves the active player slot; profile-based persisted-slot recovery can remain future work, but must be deliberately represented
+- `ClientSessionState` exposes `playerProfile` alongside session, player, save, revision, and interest facts
+- profile-based persisted-slot recovery is documented as future work instead of inferred from a session id
 
 Do not add inventory, authentication, permissions, or full persisted player data in this slice.
 
@@ -116,11 +117,15 @@ After R9:
 
 After join/player-slot cleanup:
 
-- remote two-client test proves distinct sessions can join one world with distinct names and player ids
-- resume test proves the same session resumes the same player id
-- browser smoke no longer assumes `playerId === sessionId`
-- `pnpm typecheck`
-- `git diff --check`
+- done: remote two-client test proves distinct sessions can join one world with distinct player ids
+- done: remote two-client test proves distinct join profiles are preserved
+- done: resume tests prove the same session resumes the same player id
+- done: browser smoke no longer assumes `playerId === sessionId`
+- done: `pnpm typecheck`
+- done: `pnpm test -- test/runtime/remote-world-transport.test.ts`
+- done: `pnpm test:browser`
+- done: `pnpm test:browser:integration`
+- done: `git diff --check`
 
 After movement integration:
 

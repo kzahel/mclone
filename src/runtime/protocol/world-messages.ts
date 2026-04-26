@@ -7,6 +7,23 @@ export type WorldEngineLightingMode = "vanilla17" | "none";
 export type WorldEngineLiquidSimulationMode = "vanilla17" | "none";
 export type WorldStorageMode = "default" | "none";
 
+export interface PlayerProfile {
+  readonly name: string;
+  readonly profileId?: string;
+}
+
+export const DEFAULT_PLAYER_NAME = "Player";
+export const DEFAULT_PLAYER_PROFILE: PlayerProfile = { name: DEFAULT_PLAYER_NAME };
+
+export function normalizePlayerProfile(profile: PlayerProfile | undefined): PlayerProfile {
+  const name = profile?.name.trim() || DEFAULT_PLAYER_NAME;
+  const profileId = profile?.profileId?.trim();
+  return {
+    name,
+    ...(profileId === undefined || profileId.length === 0 ? {} : { profileId }),
+  };
+}
+
 export interface WorldEngineConfig {
   readonly lightingMode?: WorldEngineLightingMode;
   readonly liquidSimulationMode?: WorldEngineLiquidSimulationMode;
@@ -35,6 +52,7 @@ export interface OpenWorldRequest {
   readonly preset: OpenWorldPreset;
   readonly config?: WorldEngineConfig;
   readonly storageMode?: WorldStorageMode;
+  readonly playerProfile?: PlayerProfile;
 }
 
 export interface SetChunkViewRequest {
@@ -79,6 +97,7 @@ export interface SessionChunkViewState {
 export interface ClientSessionState {
   readonly sessionId: string;
   readonly playerId: string;
+  readonly playerProfile: PlayerProfile;
   readonly saveId: string;
   readonly resumed: boolean;
   readonly revision: number;

@@ -96,4 +96,4 @@ Minimum:
 
 ## Next Step
 
-Redraft the next movement tactical from the landed `ClientRuntime` / `ClientWorld` / `PredictionService` architecture. The next implementation work should replace the compatibility fly body with shared movement physics and collision on the host, wire client prediction through `PredictionService`, and avoid baking in the current `playerId === sessionId` debug shortcut.
+Redraft the next movement tactical from the landed `ClientRuntime` / `ClientWorld` / `PredictionService` architecture. The next implementation work should replace the compatibility fly body with shared movement physics and collision on the host, wire client prediction through `PredictionService`, and keep using the separate session/player identity model introduced by Tactical 53.
