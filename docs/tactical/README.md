@@ -204,8 +204,9 @@ This arc is for browser-free renderer validation. It does not replace the browse
 |---|---|---|---|
 | [`Deno0-headless-webgpu-smoke.md`](Deno0-headless-webgpu-smoke.md) | shared WebGPU target helpers, repo-owned Deno offscreen clear/readback smoke, `/tmp` PNG artifact | Deno WebGPU smoke + browser smoke | **done** — official Chrome-free WebGPU smoke lane is available as `pnpm smoke:deno:webgpu` |
 | [`Deno1-render-pipeline-smoke.md`](Deno1-render-pipeline-smoke.md) | `RenderPipelineCache`, `position_color` shader, `POSITION_COLOR` triangle, shared PNG encoder | Deno WebGPU smoke | **done** — `pnpm smoke:deno:pipeline` draws known geometry through a real renderer pipeline |
-| `Deno2-` | non-browser asset/image decode seam for atlas inputs | Deno WebGPU smoke + unit | unblock texture/atlas smoke outside browser image APIs |
-| `Deno3-` | minimal chunk/world frame from authoritative snapshots | Deno WebGPU visual | first page-free terrain screenshot/probe candidate |
+| [`Deno2-texture-decode-smoke.md`](Deno2-texture-decode-smoke.md) | `NativeImageDecoder`, PNG decode, `NativeImage` upload, `position_tex` textured quad | Deno WebGPU smoke | **done** — `pnpm smoke:deno:texture` decodes and samples a PNG texture without browser image APIs |
+| `Deno3-` | in-memory Deno `TextureAtlasSource`, atlas stitch/reload smoke | Deno WebGPU smoke + unit | prove atlas preparation/upload outside browser asset/image APIs |
+| `Deno4-` | minimal chunk/world frame from authoritative snapshots | Deno WebGPU visual | first page-free terrain screenshot/probe candidate |
 
 ## Runtime / host arc (rough, cross-cutting)
 

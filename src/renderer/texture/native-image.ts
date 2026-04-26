@@ -37,6 +37,16 @@ export class NativeImage {
     return image;
   }
 
+  public static fromRgbaPixels(width: number, height: number, pixels: Uint8Array): NativeImage {
+    if (pixels.byteLength !== width * height * RGBA_COMPONENTS) {
+      throw new Error(`Invalid RGBA pixel buffer size for ${width}x${height}: ${pixels.byteLength.toString()} bytes`);
+    }
+
+    const image = new NativeImage(width, height, false);
+    image.pixels.set(pixels);
+    return image;
+  }
+
   public static getA(value: number): number {
     return (value >>> OFFSET_A) & 0xff;
   }

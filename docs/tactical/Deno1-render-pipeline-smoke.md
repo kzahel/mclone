@@ -84,4 +84,4 @@ Completed:
 
 ## Follow-Up
 
-Next likely tactical: `Deno2` should introduce a non-browser asset/image decode seam so the Deno lane can load a tiny texture or atlas input without browser `createImageBitmap`, `HTMLCanvasElement`, or `OffscreenCanvas`.
+Completed by [`Deno2-texture-decode-smoke.md`](Deno2-texture-decode-smoke.md): introduce a non-browser image decode seam so the Deno lane can load and sample a PNG texture without browser `createImageBitmap`, `HTMLCanvasElement`, or `OffscreenCanvas`.

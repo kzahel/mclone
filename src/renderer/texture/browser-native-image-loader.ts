@@ -3,6 +3,7 @@ import type { AssetPack } from "../assets/asset-pack";
 import { AnimationFrame } from "./animation-frame";
 import { AnimationMetadataSection } from "./animation-metadata-section";
 import { NativeImage } from "./native-image";
+import { loadNativeImageFromBlobWithDecoder, loadNativeImageFromUrlWithDecoder, type NativeImageDecoder } from "./native-image-decoder";
 import { TextureAtlas } from "./texture-atlas";
 import { TextureAtlasSprite, TextureAtlasSpriteInfo } from "./texture-atlas-sprite";
 
@@ -17,42 +18,38 @@ function createScratchCanvas(width: number, height: number): OffscreenCanvas | H
   return canvas;
 }
 
-export async function loadNativeImageFromUrl(url: string): Promise<NativeImage> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Unable to load image ${url}: ${response.status} ${response.statusText}`);
-  }
+export class BrowserNativeImageDecoder implements NativeImageDecoder {
+  public async decode(blob: Blob): Promise<NativeImage> {
+    const bitmap = await createImageBitmap(blob);
+    try {
+      const canvas = createScratchCanvas(bitmap.width, bitmap.height);
+      const context = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
+      if (!context) {
+        throw new Error("Unable to acquire a 2d canvas context for image decoding");
+      }
 
-  const blob = await response.blob();
-  const bitmap = await createImageBitmap(blob);
-  try {
-    const canvas = createScratchCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
-    if (!context) {
-      throw new Error("Unable to acquire a 2d canvas context for image decoding");
+      context.drawImage(bitmap, 0, 0);
+      return NativeImage.fromImageData(context.getImageData(0, 0, bitmap.width, bitmap.height));
+    } finally {
+      bitmap.close();
     }
-
-    context.drawImage(bitmap, 0, 0);
-    return NativeImage.fromImageData(context.getImageData(0, 0, bitmap.width, bitmap.height));
-  } finally {
-    bitmap.close();
   }
 }
 
-export async function loadNativeImageFromBlob(blob: Blob): Promise<NativeImage> {
-  const bitmap = await createImageBitmap(blob);
-  try {
-    const canvas = createScratchCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext("2d") as OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null;
-    if (!context) {
-      throw new Error("Unable to acquire a 2d canvas context for image decoding");
-    }
+const BROWSER_NATIVE_IMAGE_DECODER = new BrowserNativeImageDecoder();
 
-    context.drawImage(bitmap, 0, 0);
-    return NativeImage.fromImageData(context.getImageData(0, 0, bitmap.width, bitmap.height));
-  } finally {
-    bitmap.close();
-  }
+export async function loadNativeImageFromUrl(
+  url: string,
+  decoder: NativeImageDecoder = BROWSER_NATIVE_IMAGE_DECODER,
+): Promise<NativeImage> {
+  return loadNativeImageFromUrlWithDecoder(url, decoder);
+}
+
+export async function loadNativeImageFromBlob(
+  blob: Blob,
+  decoder: NativeImageDecoder = BROWSER_NATIVE_IMAGE_DECODER,
+): Promise<NativeImage> {
+  return loadNativeImageFromBlobWithDecoder(blob, decoder);
 }
 
 export async function loadColorMapPixels(url: string): Promise<readonly number[]> {
@@ -150,7 +147,10 @@ export class BrowserTextureAtlasSource {
   private readonly cache = new Map<string, Promise<NativeImage>>();
   private readonly metadataCache = new Map<string, Promise<AnimationMetadataSection>>();
 
-  public constructor(private readonly assetPack: AssetPack) {}
+  public constructor(
+    private readonly assetPack: AssetPack,
+    private readonly imageDecoder: NativeImageDecoder = BROWSER_NATIVE_IMAGE_DECODER,
+  ) {}
 
   public resolveTexturePath(location: ResourceLocation): string {
     return `assets/${location.getNamespace()}/textures/${location.getPath()}.png`;
@@ -167,7 +167,7 @@ export class BrowserTextureAtlasSource {
       throw new Error(`Unable to load image asset ${path}`);
     }
 
-    return loadNativeImageFromBlob(blob);
+    return loadNativeImageFromBlob(blob, this.imageDecoder);
   }
 
   public async loadColorMap(location: ResourceLocation): Promise<readonly number[]> {

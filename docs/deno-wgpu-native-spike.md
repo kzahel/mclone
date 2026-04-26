@@ -184,6 +184,45 @@ PNG image data, 64 x 64, 8-bit/color RGBA, non-interlaced
 
 The image is a black background with a green triangle. This validates shader JSON import, WGSL generation, pipeline creation, uniform binding, vertex buffer layout, draw submission, GPU readback, and PNG artifact generation in Deno.
 
+## Texture decode smoke result: 2026-04-26
+
+The first non-browser image decode and sampled texture smoke passed on macOS:
+
+```bash
+pnpm smoke:deno:texture
+```
+
+The command runs:
+
+```bash
+npx -y deno@2.7.13 run --unstable-webgpu --allow-write=/tmp ./scripts/deno-texture-decode-smoke.ts
+```
+
+The script:
+
+- creates a small PNG in memory
+- decodes that PNG through `PngNativeImageDecoder`, not browser image/canvas APIs
+- builds a `NativeImage` from decoded RGBA bytes
+- uploads the `NativeImage` into a sampled `GPUTexture`
+- verifies the uploaded source texture through readback
+- draws a textured quad through the repo `position_tex` shader
+- validates the center pixel
+- encodes `/tmp/mclone-deno-texture-decode-smoke.png`
+
+Observed output:
+
+```json
+{"ok":true,"outputPath":"/tmp/mclone-deno-texture-decode-smoke.png","width":64,"height":64,"format":"rgba8unorm","sourceWidth":64,"sourceHeight":64,"renderType":"deno_position_tex_quad","shader":"position_tex","centerPixel":[230,76,13,255],"byteLength":16384,"adapter":{}}
+```
+
+`file /tmp/mclone-deno-texture-decode-smoke.png` reports:
+
+```text
+PNG image data, 64 x 64, 8-bit/color RGBA, non-interlaced
+```
+
+The image is an orange square on black. This validates the image-decoder seam, Deno PNG decode, `NativeImage` construction, texture upload, sampled texture binding, textured draw submission, readback, and PNG artifact generation without Chrome.
+
 ## Refactor seams to preserve
 
 - Simulation and protocol messages stay serializable and renderer-neutral.
