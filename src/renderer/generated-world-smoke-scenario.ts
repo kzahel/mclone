@@ -86,7 +86,7 @@ export interface GeneratedWorldSmokeValidationOptions {
 
 const STATIC_CAMERA: CameraState = {
   position: new Vec3(960.5, 132.0, -8127.5),
-  xRot: 60.0,
+  xRot: 72.0,
   yRot: 225.0,
 };
 
@@ -101,7 +101,7 @@ const STATIC_PLAYER_INPUT: SetPlayerInputRequest["input"] = {
 
 const TRANSITION_CAMERA: CameraState = {
   position: new Vec3(992.5, 136.0, -8095.5),
-  xRot: 60.0,
+  xRot: 72.0,
   yRot: 225.0,
 };
 
@@ -118,12 +118,12 @@ export const GENERATED_WORLD_SMOKE_SCENARIO: GeneratedWorldSmokeScenario = {
   id: "static",
   seed: 12_345n,
   preset: "browser_smoke",
-  width: 256,
-  height: 256,
+  width: 1024,
+  height: 768,
   outputPath: "/tmp/mclone-deno-generated-world-smoke.png",
   renderTargetFormat: "rgba8unorm",
-  viewDistance: 1,
-  renderDistance: getDefaultRenderDistance(1),
+  viewDistance: 2,
+  renderDistance: getDefaultRenderDistance(2),
   engineConfig: {
     lightingMode: "none",
     liquidSimulationMode: "none",
