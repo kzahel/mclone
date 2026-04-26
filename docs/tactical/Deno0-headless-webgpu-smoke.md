@@ -60,6 +60,8 @@ Expected first pixel:
 [26, 102, 204, 255]
 ```
 
+The smoke accepts a one-byte channel tolerance because Deno/wgpu backends can round normalized clear colors differently.
+
 ## Validation
 
 Completed:

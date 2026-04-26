@@ -16,6 +16,7 @@
     "smoke:deno:webgpu": "npx -y deno@2.7.13 run --unstable-webgpu --allow-write=/tmp ./scripts/deno-webgpu-smoke.ts",
     "smoke:deno:pipeline": "npx -y deno@2.7.13 run --unstable-webgpu --allow-write=/tmp ./scripts/deno-render-pipeline-smoke.ts",
     "smoke:deno:texture": "npx -y deno@2.7.13 run --unstable-webgpu --allow-write=/tmp ./scripts/deno-texture-decode-smoke.ts",
+    "smoke:deno:atlas": "npx -y deno@2.7.13 run --unstable-webgpu --allow-write=/tmp ./scripts/deno-texture-atlas-smoke.ts",
     "dev:browser": "vite",
     "host:node": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/headless-generated-world-host.ts",
     "host:remote": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/generated-world-http-server.ts",

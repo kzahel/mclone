@@ -11,6 +11,7 @@ const FORMAT: GPUTextureFormat = "rgba8unorm";
 const OUTPUT_PATH = "/tmp/mclone-deno-webgpu-smoke.png";
 const CLEAR_COLOR = { r: 0.1, g: 0.4, b: 0.8, a: 1 } satisfies GPUColorDict;
 const EXPECTED_PIXEL = new Uint8Array([26, 102, 204, 255]);
+const PIXEL_TOLERANCE = 1;
 
 const contextResult = await requestWebGpuDeviceContext();
 if (!contextResult.ok) {
@@ -36,7 +37,7 @@ const pixels = await readTextureRgba8(device, target.texture, target.width, targ
 target.texture.destroy();
 
 const firstPixel = pixels.slice(0, 4);
-assertPixel(firstPixel, EXPECTED_PIXEL);
+assertPixel(firstPixel, EXPECTED_PIXEL, PIXEL_TOLERANCE);
 await Deno.writeFile(OUTPUT_PATH, encodePngRgba(target.width, target.height, pixels));
 
 console.log(JSON.stringify({
@@ -50,11 +51,13 @@ console.log(JSON.stringify({
   adapter: adapter.info ?? {},
 }));
 
-function assertPixel(actual: Uint8Array, expected: Uint8Array): void {
+function assertPixel(actual: Uint8Array, expected: Uint8Array, tolerance: number): void {
   for (let i = 0; i < expected.length; i++) {
-    if (actual[i] !== expected[i]) {
+    const actualValue = actual[i];
+    const expectedValue = expected[i]!;
+    if (actualValue === undefined || Math.abs(actualValue - expectedValue) > tolerance) {
       throw new Error(
-        `Deno WebGPU smoke pixel mismatch at channel ${i.toString()}: expected ${expected[i]!.toString()}, got ${actual[i]?.toString() ?? "undefined"}`,
+        `Deno WebGPU smoke pixel mismatch at channel ${i.toString()}: expected ${expectedValue.toString()} +/- ${tolerance.toString()}, got ${actualValue?.toString() ?? "undefined"}`,
       );
     }
   }

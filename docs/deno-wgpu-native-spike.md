@@ -86,17 +86,22 @@ The first useful test target is `OffscreenTextureTarget`. It should be able to r
    - Import the smallest renderer module set that can compile shaders and render known geometry.
    - Avoid DOM, page input, localStorage, and IndexedDB.
 
-3. **Renderer target refactor**
+3. **Deno texture atlas smoke**
+   - Run the repo-owned `pnpm smoke:deno:atlas` command.
+   - Build a memory `TextureAtlasSource`, stitch/reload the atlas, and sample from the uploaded atlas texture.
+   - Keep filesystem-backed asset loading and chunk/world rendering out of this step.
+
+4. **Renderer target refactor**
    - Move canvas acquisition/configuration behind a target interface.
    - Keep `GPUDevice` and `GPUTexture` below the renderer boundary.
    - Keep world/runtime/client modules free of DOM and WebGPU handles.
 
-4. **Asset/input/storage adapters**
+5. **Asset/input/storage adapters**
    - Replace browser image/canvas decode with an asset decoder interface.
    - Keep browser `document`/pointer-lock/debug form code in browser-only entry points.
    - Add native/headless storage choices only behind existing persistence contracts.
 
-5. **Rust native host spike**
+6. **Rust native host spike**
    - Create a Rust `wgpu` offscreen clear/readback equivalent.
    - Embed Deno/deno_core only after the Deno CLI harness proves the engine-side seams are right.
    - Add windowed and OpenXR presenters after headless/native flat rendering works.
@@ -222,6 +227,44 @@ PNG image data, 64 x 64, 8-bit/color RGBA, non-interlaced
 ```
 
 The image is an orange square on black. This validates the image-decoder seam, Deno PNG decode, `NativeImage` construction, texture upload, sampled texture binding, textured draw submission, readback, and PNG artifact generation without Chrome.
+
+## Texture atlas smoke result: 2026-04-26
+
+The first browser-free texture atlas smoke passed on Linux:
+
+```bash
+pnpm smoke:deno:atlas
+```
+
+The command runs:
+
+```bash
+npx -y deno@2.7.13 run --unstable-webgpu --allow-write=/tmp ./scripts/deno-texture-atlas-smoke.ts
+```
+
+The script:
+
+- creates two 16x16 `NativeImage` sprites in memory
+- implements `TextureAtlasSource` without browser asset-pack or image APIs
+- runs `TextureAtlas.prepareToStitch(...)`, including the normal `missingno` insertion
+- runs `TextureAtlas.reload(...)` to upload the stitched atlas into a WebGPU texture
+- samples the uploaded atlas through the repo `position_tex` shader
+- validates known left/right pixels
+- encodes `/tmp/mclone-deno-texture-atlas-smoke.png`
+
+Observed output:
+
+```json
+{"ok":true,"outputPath":"/tmp/mclone-deno-texture-atlas-smoke.png","width":64,"height":64,"format":"rgba8unorm","atlasWidth":32,"atlasHeight":32,"mipLevel":0,"renderType":"deno_texture_atlas_quads","shader":"position_tex","leftPixel":[230,76,13,255],"rightPixel":[13,188,230,255],"byteLength":16384,"adapter":{}}
+```
+
+`file /tmp/mclone-deno-texture-atlas-smoke.png` reports:
+
+```text
+PNG image data, 64 x 64, 8-bit/color RGBA, non-interlaced
+```
+
+The image is an orange quad on the left and a teal quad on the right with a black background/gap. This validates atlas preparation, stitching, atlas texture upload, sampled atlas binding, readback, and PNG artifact generation without Chrome.
 
 ## Refactor seams to preserve
 

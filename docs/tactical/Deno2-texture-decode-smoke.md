@@ -89,4 +89,4 @@ Also run:
 
 ## Follow-Up
 
-Next likely tactical: `Deno3` should create an in-memory `TextureAtlasSource` for Deno and run `TextureAtlas.prepareToStitch(...)` / `TextureAtlas.reload(...)` without browser asset-pack or image APIs. That is the last small texture-system step before a minimal chunk/world frame.
+Completed by [`Deno3-texture-atlas-smoke.md`](Deno3-texture-atlas-smoke.md): create an in-memory `TextureAtlasSource` for Deno and run `TextureAtlas.prepareToStitch(...)` / `TextureAtlas.reload(...)` without browser asset-pack or image APIs.

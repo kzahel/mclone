@@ -3,6 +3,11 @@ const OFFSET_A = 24;
 const OFFSET_B = 16;
 const OFFSET_G = 8;
 const OFFSET_R = 0;
+const WEBGPU_COPY_BYTES_PER_ROW_ALIGNMENT = 256;
+
+function alignTo(value: number, alignment: number): number {
+  return Math.ceil(value / alignment) * alignment;
+}
 
 function assertInsideBounds(width: number, height: number, x: number, y: number): void {
   if (x < 0 || x >= width || y < 0 || y >= height) {
@@ -86,6 +91,23 @@ export class NativeImage {
     }
 
     return bytes;
+  }
+
+  private paddedSubImageBytes(x: number, y: number, width: number, height: number): { readonly bytes: Uint8Array; readonly bytesPerRow: number } {
+    const unpaddedBytesPerRow = width * RGBA_COMPONENTS;
+    const bytesPerRow = alignTo(unpaddedBytesPerRow, WEBGPU_COPY_BYTES_PER_ROW_ALIGNMENT);
+    if (bytesPerRow === unpaddedBytesPerRow) {
+      return { bytes: this.subImageBytes(x, y, width, height), bytesPerRow };
+    }
+
+    const bytes = new Uint8Array(bytesPerRow * height);
+    for (let row = 0; row < height; row++) {
+      const sourceStart = this.pixelOffset(x, y + row);
+      const targetStart = row * bytesPerRow;
+      bytes.set(this.pixels.subarray(sourceStart, sourceStart + unpaddedBytesPerRow), targetStart);
+    }
+
+    return { bytes, bytesPerRow };
   }
 
   public close(): void {
@@ -213,8 +235,8 @@ export class NativeImage {
     height: number,
   ): void {
     this.checkAllocated();
-    const bytes = this.subImageBytes(x, y, width, height);
-    const uploadBytes = new Uint8Array(bytes.length);
+    const { bytes, bytesPerRow } = this.paddedSubImageBytes(x, y, width, height);
+    const uploadBytes = new Uint8Array(bytes.byteLength);
     uploadBytes.set(bytes);
     queue.writeTexture(
       {
@@ -224,7 +246,7 @@ export class NativeImage {
       },
       uploadBytes,
       {
-        bytesPerRow: width * RGBA_COMPONENTS,
+        bytesPerRow,
         rowsPerImage: height,
       },
       { width, height },
