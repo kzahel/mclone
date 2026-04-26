@@ -89,4 +89,4 @@ Also run:
 
 ## Follow-Up
 
-Next likely tactical: `Deno4` should render a minimal chunk/world frame from authoritative snapshots without a browser page. Keep the input small: use existing renderer draw paths, a prepared atlas, and a static snapshot before attempting live host/client orchestration.
+Completed by [`Deno4-static-world-worker-frame.md`](Deno4-static-world-worker-frame.md): render a minimal chunk/world frame from packed authoritative snapshots through a Deno render-world worker and offscreen WebGPU target.

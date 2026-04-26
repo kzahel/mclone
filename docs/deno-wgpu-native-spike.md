@@ -91,17 +91,23 @@ The first useful test target is `OffscreenTextureTarget`. It should be able to r
    - Build a memory `TextureAtlasSource`, stitch/reload the atlas, and sample from the uploaded atlas texture.
    - Keep filesystem-backed asset loading and chunk/world rendering out of this step.
 
-4. **Renderer target refactor**
+4. **Deno static world worker frame**
+   - Run the repo-owned `pnpm smoke:deno:world` command.
+   - Spawn a Deno module worker for render-world mesh ownership.
+   - Transfer packed static chunk snapshots into that worker, build section meshes there, then upload/draw on the main Deno WebGPU thread.
+   - Keep live host/client orchestration and browser asset loading out of this step.
+
+5. **Renderer target refactor**
    - Move canvas acquisition/configuration behind a target interface.
    - Keep `GPUDevice` and `GPUTexture` below the renderer boundary.
    - Keep world/runtime/client modules free of DOM and WebGPU handles.
 
-5. **Asset/input/storage adapters**
+6. **Asset/input/storage adapters**
    - Replace browser image/canvas decode with an asset decoder interface.
    - Keep browser `document`/pointer-lock/debug form code in browser-only entry points.
    - Add native/headless storage choices only behind existing persistence contracts.
 
-6. **Rust native host spike**
+7. **Rust native host spike**
    - Create a Rust `wgpu` offscreen clear/readback equivalent.
    - Embed Deno/deno_core only after the Deno CLI harness proves the engine-side seams are right.
    - Add windowed and OpenXR presenters after headless/native flat rendering works.
@@ -265,6 +271,46 @@ PNG image data, 64 x 64, 8-bit/color RGBA, non-interlaced
 ```
 
 The image is an orange quad on the left and a teal quad on the right with a black background/gap. This validates atlas preparation, stitching, atlas texture upload, sampled atlas binding, readback, and PNG artifact generation without Chrome.
+
+## Static world worker smoke result: 2026-04-26
+
+The first browser-free worker-backed chunk/world frame passed on Linux:
+
+```bash
+pnpm smoke:deno:world
+```
+
+The command runs:
+
+```bash
+npx -y deno@2.7.13 run --unstable-webgpu --allow-read=. --allow-write=/tmp ./scripts/deno-static-world-smoke.ts
+```
+
+The script:
+
+- prepares an in-memory atlas for a deterministic stone sprite
+- builds a 3x3 static authoritative chunk set with a 16x16 stone wall
+- packs those chunks with `buildChunkSnapshot(...)` / `packChunkSnapshot(...)`
+- spawns a Deno module worker through `RenderWorldWorkerClient`
+- transfers the packed snapshots to the worker through `RenderWorldWorkerUpdateSink`
+- builds section meshes in the worker from a `ClientChunkCache`
+- renders through `ChunkRenderDispatcher`, `LevelRenderer`, `GameRenderer`, and `encodeSceneFrame(...)`
+- validates readback pixels
+- encodes `/tmp/mclone-deno-static-world-smoke.png`
+
+Observed output:
+
+```json
+{"ok":true,"outputPath":"/tmp/mclone-deno-static-world-smoke.png","width":128,"height":128,"format":"rgba8unorm","atlasWidth":32,"atlasHeight":16,"stoneSprite":{"u0":0,"u1":0.5,"v0":0,"v1":1},"dirtySectionCount":25,"renderedChunkCount":1,"solidDrawCount":1,"nonClearPixels":2916,"centerPixel":[141,141,141,255],"byteLength":65536,"workerCounters":{"ingestBatchCount":1,"meshBuildRequestCount":3,"meshNotReadyResponseCount":2,"meshCompletionCount":1},"adapter":{}}
+```
+
+`file /tmp/mclone-deno-static-world-smoke.png` reports:
+
+```text
+PNG image data, 128 x 128, 8-bit/color RGBA, non-interlaced
+```
+
+The image is a blue sky background with a centered gray stone wall. This validates Deno module workers, packed snapshot transfer, worker-owned render-world mesh builds, main-thread GPU upload, chunk render pipeline draw submission, readback, and PNG artifact generation without a browser page.
 
 ## Refactor seams to preserve
 

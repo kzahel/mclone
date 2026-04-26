@@ -208,7 +208,8 @@ This arc is for browser-free renderer validation. It does not replace the browse
 | [`Deno1-render-pipeline-smoke.md`](Deno1-render-pipeline-smoke.md) | `RenderPipelineCache`, `position_color` shader, `POSITION_COLOR` triangle, shared PNG encoder | Deno WebGPU smoke | **done** — `pnpm smoke:deno:pipeline` draws known geometry through a real renderer pipeline |
 | [`Deno2-texture-decode-smoke.md`](Deno2-texture-decode-smoke.md) | `NativeImageDecoder`, PNG decode, `NativeImage` upload, `position_tex` textured quad | Deno WebGPU smoke | **done** — `pnpm smoke:deno:texture` decodes and samples a PNG texture without browser image APIs |
 | [`Deno3-texture-atlas-smoke.md`](Deno3-texture-atlas-smoke.md) | in-memory Deno `TextureAtlasSource`, atlas stitch/reload smoke, sampled atlas PNG | Deno WebGPU smoke | **done** — `pnpm smoke:deno:atlas` prepares, uploads, and samples a stitched atlas without browser asset/image APIs |
-| `Deno4-` | minimal chunk/world frame from authoritative snapshots | Deno WebGPU visual | first page-free terrain screenshot/probe candidate |
+| [`Deno4-static-world-worker-frame.md`](Deno4-static-world-worker-frame.md) | Deno module worker, packed static chunk snapshots, chunk mesh build, offscreen chunk draw PNG | Deno WebGPU visual | **done** — `pnpm smoke:deno:world` renders a worker-built static chunk frame without a browser page |
+| `Deno5-` | filesystem-backed Deno asset source for a tiny vanilla block palette | Deno WebGPU visual | replace synthetic model/texture helpers with extracted vanilla assets without browser APIs |
 
 ## Runtime / host arc (rough, cross-cutting)
 
