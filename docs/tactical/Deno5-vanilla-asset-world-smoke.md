@@ -14,7 +14,7 @@ Add:
 
 | # | Module | Expected result |
 |---|---|---|
-| 1 | `scripts/deno-file-asset-source.ts` | done - file-backed `AssetPack` plus Deno `TextureAtlasSource` that reads extracted assets, decodes PNG bytes through `PngNativeImageDecoder`, and parses `.mcmeta` when present |
+| 1 | `scripts/deno-file-asset-source.ts` | done - thin Deno host adapter for source-level file-backed asset and atlas-source modules |
 | 2 | `scripts/deno-vanilla-asset-world-smoke-shared.ts` | done - shared stone asset constants, required-asset checks, vanilla atlas preparation, sprite lookup, and focused stone model baking |
 | 3 | `scripts/deno-vanilla-asset-world-worker.ts` | done - Deno module worker that prepares matching sprite UVs from extracted assets and builds section meshes with the real baked stone model |
 | 4 | `scripts/deno-vanilla-asset-world-smoke.ts` | done - main-thread smoke that reloads the vanilla stone atlas into WebGPU, sends packed static chunk snapshots to the worker, draws the worker-built mesh, validates pixels, and writes `/tmp/mclone-deno-vanilla-asset-world-smoke.png` |
@@ -119,4 +119,4 @@ Observed output:
 
 ## Follow-Up
 
-Next likely tactical: `Deno6` should expand this from one stone block to a tiny real block palette loaded from extracted assets, still with Deno workers and no browser APIs. Start with opaque terrain blocks that avoid biome tint and liquids, then add color maps/special renderers as a separate step.
+Completed by [`RendererHost0-shared-file-asset-adapters.md`](RendererHost0-shared-file-asset-adapters.md): extract the Deno file-backed asset and native atlas-loading logic into reusable source-level host adapters instead of continuing with script-local Deno shims.

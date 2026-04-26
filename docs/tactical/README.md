@@ -198,9 +198,11 @@ The ordering across transport, player-slot protocol, and movement integration is
 - **Unit**: dump atlas UVs, baked-model quads, and section visibility graphs from MC as JSON; exact-diff those. Catches most correctness bugs before pixels are involved.
 - **Visual inspection**: run the browser harness from [`09a-renderer-browser-harness.md`](09a-renderer-browser-harness.md) — system Chrome via Playwright `channel: "chrome"` against a Vite-served page. Take a screenshot and look at it. Does the geometry look right? Are colors and UVs sensible? This is a human (or agent) eyeball check, not an automated diff.
 
-## Headless Deno Renderer Validation Arc
+## Headless / Native Renderer Host Arc
 
-This arc is for browser-free renderer validation. It does not replace the browser harness yet; it creates a second lane that can render to offscreen WebGPU textures, read pixels back, and write PNGs without Chrome, Playwright, Vite, DOM, or an HTML canvas. Use [`../deno-wgpu-native-spike.md`](../deno-wgpu-native-spike.md) for the durable native-host sketch.
+The goal is not a pile of Deno-only smoke shims. The goal is one engine/runtime surface where browser, Deno headless, and future native hosts provide adapters for assets, image decode, workers, render targets, input, storage, and clocks. Deno is the first non-browser host because it gives us WebGPU, module workers, filesystem access, and `/tmp` PNG artifacts on this headless Linux machine.
+
+Deno0-Deno5 were capability probes that proved the hard pieces work outside Chrome. Active work now moves those pieces behind shared host/platform contracts so browser smoke/probe lanes and Deno headless lanes can call the same renderer setup instead of drifting apart. Use [`../deno-wgpu-native-spike.md`](../deno-wgpu-native-spike.md) for the durable native-host sketch.
 
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
@@ -210,7 +212,9 @@ This arc is for browser-free renderer validation. It does not replace the browse
 | [`Deno3-texture-atlas-smoke.md`](Deno3-texture-atlas-smoke.md) | in-memory Deno `TextureAtlasSource`, atlas stitch/reload smoke, sampled atlas PNG | Deno WebGPU smoke | **done** — `pnpm smoke:deno:atlas` prepares, uploads, and samples a stitched atlas without browser asset/image APIs |
 | [`Deno4-static-world-worker-frame.md`](Deno4-static-world-worker-frame.md) | Deno module worker, packed static chunk snapshots, chunk mesh build, offscreen chunk draw PNG | Deno WebGPU visual | **done** — `pnpm smoke:deno:world` renders a worker-built static chunk frame without a browser page |
 | [`Deno5-vanilla-asset-world-smoke.md`](Deno5-vanilla-asset-world-smoke.md) | Deno file asset source, native PNG decode, vanilla stone blockstate/model/texture, worker-built offscreen frame | Deno WebGPU visual | **done** — `pnpm smoke:deno:world-assets` renders the static worker frame with extracted vanilla stone assets |
-| `Deno6-` | tiny filesystem-backed vanilla terrain palette | Deno WebGPU visual | expand beyond stone while still avoiding browser APIs, biome tint, and liquids |
+| [`RendererHost0-shared-file-asset-adapters.md`](RendererHost0-shared-file-asset-adapters.md) | source-level `FileAssetPack`, `AssetPackTextureAtlasSource`, thin Deno filesystem adapter | Deno WebGPU visual + focused renderer tests | **done** — Deno vanilla-asset smoke now uses reusable host-neutral asset and atlas adapters |
+| `RendererHost1-` | renderer target and worker factory boundary | Deno WebGPU visual + browser smoke | make Deno headless and browser setup call a common platform shape for target ownership and render-world worker construction |
+| `RendererHost2-` | shared static/generated frame harness with injectable scene/input | Deno WebGPU visual + browser probe | replace duplicated smoke orchestration with one harness that can drive browser canvas or headless texture targets |
 
 ## Runtime / host arc (rough, cross-cutting)
 

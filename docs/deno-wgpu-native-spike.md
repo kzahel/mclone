@@ -103,17 +103,22 @@ The first useful test target is `OffscreenTextureTarget`. It should be able to r
    - Decode PNG bytes through the native decoder, stitch/reload the block atlas, bake the vanilla stone model, and render the worker-built static frame with real texture UVs.
    - Keep the block palette tiny until the asset adapter and worker UV parity are stable.
 
-6. **Renderer target refactor**
+6. **Promote host adapters**
+   - Move proven Deno-only asset/image/worker/target pieces behind source-level host contracts.
+   - Keep Deno entry points as thin platform adapters.
+   - Keep browser entry points on the same contracts instead of forking renderer setup.
+
+7. **Renderer target refactor**
    - Move canvas acquisition/configuration behind a target interface.
    - Keep `GPUDevice` and `GPUTexture` below the renderer boundary.
    - Keep world/runtime/client modules free of DOM and WebGPU handles.
 
-7. **Asset/input/storage adapters**
+8. **Asset/input/storage adapters**
    - Replace browser image/canvas decode with an asset decoder interface.
    - Keep browser `document`/pointer-lock/debug form code in browser-only entry points.
    - Add native/headless storage choices only behind existing persistence contracts.
 
-8. **Rust native host spike**
+9. **Rust native host spike**
    - Create a Rust `wgpu` offscreen clear/readback equivalent.
    - Embed Deno/deno_core only after the Deno CLI harness proves the engine-side seams are right.
    - Add windowed and OpenXR presenters after headless/native flat rendering works.
@@ -357,6 +362,16 @@ PNG image data, 128 x 128, 8-bit/color RGBA, non-interlaced
 ```
 
 The image is a blue sky background with a centered, textured Minecraft stone wall. This validates filesystem-backed extracted asset reads, native PNG decode, vanilla stone model baking, atlas UV parity between the main Deno thread and worker, chunk draw submission, readback, and PNG artifact generation without a browser page.
+
+## Shared file asset adapter result: 2026-04-26
+
+After the Deno capability probes proved real asset loading worked, the file-backed pieces were promoted into source-level host contracts:
+
+- `src/renderer/assets/file-asset-pack.ts` owns the reusable `AssetPack` implementation with injected filesystem operations.
+- `src/renderer/texture/asset-pack-texture-atlas-source.ts` owns native atlas loading from any `AssetPack`.
+- `scripts/deno-file-asset-source.ts` is now only the Deno filesystem adapter.
+
+This is the direction for the rest of the headless/native work: Deno validates non-browser capability, but durable code lives behind host-neutral engine APIs. Browser and Deno lanes should converge on those APIs rather than accumulating separate smoke setup.
 
 ## Refactor seams to preserve
 

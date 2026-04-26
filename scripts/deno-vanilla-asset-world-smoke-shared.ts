@@ -8,13 +8,15 @@ import { BlockModelShaper } from "../src/renderer/model/block-model-shaper.ts";
 import { ModelBakery } from "../src/renderer/model/model-bakery.ts";
 import { ModelManager } from "../src/renderer/model/model-manager.ts";
 import { preloadBlockModelSource } from "../src/renderer/model/browser-block-model-source.ts";
+import type { FileAssetPack } from "../src/renderer/assets/file-asset-pack.ts";
+import { AssetPackTextureAtlasSource } from "../src/renderer/texture/asset-pack-texture-atlas-source.ts";
 import { MissingTextureAtlasSprite } from "../src/renderer/texture/missing-texture-atlas-sprite.ts";
 import { TextureAtlas, type TextureAtlasPreparations } from "../src/renderer/texture/texture-atlas.ts";
 import type { TextureAtlasSprite } from "../src/renderer/texture/texture-atlas-sprite.ts";
 import type { Block } from "../src/world/level/block/block.ts";
 import { registerGeneratedRenderBlocks } from "../src/world/level/generated-render-blocks.ts";
 import { ChunkBlockId } from "../src/worldgen/chunk/chunk-block-buffer.ts";
-import { DenoFileAssetPack, DenoFileTextureAtlasSource } from "./deno-file-asset-source.ts";
+import { createDenoExtractedAssetPack } from "./deno-file-asset-source.ts";
 
 export const DENO_VANILLA_ASSET_WORLD_SEED = 12345n;
 export const DENO_VANILLA_ASSET_WORLD_MIN_BUILD_HEIGHT = 0;
@@ -27,17 +29,17 @@ export const DENO_VANILLA_ASSET_WORLD_BLOCKS = [DENO_VANILLA_ASSET_WORLD_STONE_B
 export const DENO_VANILLA_ASSET_WORLD_SPRITES = [DENO_VANILLA_ASSET_WORLD_STONE_TEXTURE] as const;
 
 export interface DenoVanillaAssetAtlasResources {
-  readonly assetPack: DenoFileAssetPack;
-  readonly atlasSource: DenoFileTextureAtlasSource;
+  readonly assetPack: FileAssetPack;
+  readonly atlasSource: AssetPackTextureAtlasSource;
   readonly preparations: TextureAtlasPreparations;
 }
 
 export async function prepareDenoVanillaAssetAtlasResources(
   atlas: TextureAtlas,
 ): Promise<DenoVanillaAssetAtlasResources> {
-  const assetPack = new DenoFileAssetPack();
+  const assetPack = createDenoExtractedAssetPack();
   assertRequiredAssets(assetPack);
-  const atlasSource = new DenoFileTextureAtlasSource(assetPack);
+  const atlasSource = new AssetPackTextureAtlasSource(assetPack);
   const preparations = await atlas.prepareToStitch(
     atlasSource,
     DENO_VANILLA_ASSET_WORLD_SPRITES,
@@ -89,7 +91,7 @@ export function createSpriteLookup(sprites: readonly TextureAtlasSprite[]): (loc
   return (location) => spritesByName.get(location.toString()) ?? missing;
 }
 
-function assertRequiredAssets(assetPack: DenoFileAssetPack): void {
+function assertRequiredAssets(assetPack: FileAssetPack): void {
   for (const path of [
     "assets/minecraft/blockstates/stone.json",
     "assets/minecraft/models/block/stone.json",
