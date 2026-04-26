@@ -33,6 +33,7 @@ Already GPU-backed:
 - live generated world after title start
 - `Esc` pause menu over the live world
 - Back to Game input suppression/resume
+- minimal GPU `OptionsScreen` reachable from root title and pause, with view/render distance sliders, lighting cycle, and water simulation checkbox persisted through the browser render config
 
 Still DOM-backed:
 
@@ -46,7 +47,7 @@ Still DOM-backed:
 |---|---|---|
 | 1 | Root shell cutover | **done** - `index.html` is canvas-only and boots GPU title by default; `/smoke.html` still direct-boots smoke scenarios |
 | 2 | GPU world setup | seed, preset, movement mode, storage, and quickstart/continue behavior move from `index.html` JS into GPU screens |
-| 3 | GPU options/debug settings | `PauseScreen` Options and Debug Settings open GPU screens with sliders/cycle buttons/checkboxes |
+| 3 | GPU options/debug settings | **partial** - `OptionsScreen` has GPU sliders/cycle/checkbox controls; Debug Settings screen is still pending |
 | 4 | Debug harness migration | `debug.html` becomes canvas-only or aliases the root shell; `__mcloneDebug` remains as a machine API |
 | 5 | Error/confirm/quit flow | loading errors, storage reset, save-and-quit, and return-to-title use GPU screens |
 | 6 | DOM deletion sweep | remove obsolete HTML/CSS/DOM mutation code and update tests/probes to use GPU surfaces or hooks |

@@ -1,5 +1,6 @@
 import type { SetChunkViewRequest } from "../../runtime/protocol/world-messages";
 import type { ScreenManager } from "../../client/gui/screen-manager";
+import { OptionsScreen, type GuiOptionsState } from "../../client/gui/screens/options-screen";
 import { PauseScreen } from "../../client/gui/screens/pause-screen";
 import {
   applyRenderWorldDirtySections,
@@ -52,6 +53,8 @@ export interface GpuWorldRuntimeOptions {
   readonly initialCamera: DebugCameraState;
   readonly initialFrame?: LevelRenderFrame;
   readonly state: GpuWorldRuntimeState;
+  readonly optionsState: GuiOptionsState;
+  readonly onOptionsChanged: () => void;
   readonly onError?: (message: string) => void;
 }
 
@@ -230,10 +233,29 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
       return;
     }
 
-    this.options.screenManager.setScreen(new PauseScreen(true, {
+    const pauseScreen = new PauseScreen(true, {
       onReturnToGame: () => {
         this.options.state.lastAction = "back_to_game";
         this.options.screenManager.setScreen(null);
+        this.updateState();
+      },
+      onOptions: () => {
+        this.openOptionsScreen(pauseScreen);
+      },
+    });
+    this.options.screenManager.setScreen(pauseScreen);
+    this.updateState();
+  }
+
+  private openOptionsScreen(lastScreen: PauseScreen): void {
+    this.options.state.lastAction = "options";
+    this.options.screenManager.setScreen(new OptionsScreen(lastScreen, this.options.optionsState, {
+      onChanged: () => {
+        this.options.onOptionsChanged();
+        this.updateState();
+      },
+      onDone: () => {
+        this.options.state.lastAction = "options_done";
         this.updateState();
       },
     }));

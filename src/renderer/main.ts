@@ -2,12 +2,13 @@ import { deleteIndexedDbWorldStorage } from "../runtime/storage/indexeddb-world-
 import { Vec3 } from "../world/phys/vec3";
 import { ProgressScreen } from "../client/gui/screens/progress-screen";
 import { TitleScreen } from "../client/gui/screens/title-screen";
+import { OptionsScreen, type GuiOptionsState } from "../client/gui/screens/options-screen";
 import { ScreenManager } from "../client/gui/screen-manager";
 import { type CameraState } from "./game-renderer";
 import {
   resizeCanvasToDisplaySize,
 } from "./scene-setup";
-import { readBrowserRenderConfig } from "./browser-render-config";
+import { readBrowserRenderConfig, writeStoredBrowserRenderConfig } from "./browser-render-config";
 import {
   getGeneratedWorldSmokeScenarioById,
 } from "./generated-world-smoke-scenario";
@@ -49,9 +50,9 @@ export interface GpuTitleBootResult {
 
 interface GpuGuiRuntimeState {
   ready: boolean;
-  mode: "title" | "loading" | "world" | "paused" | "error";
+  mode: "title" | "options" | "loading" | "world" | "paused" | "error";
   screenTitle: string;
-  lastAction?: "continue" | "start_world" | "options" | "back_to_game";
+  lastAction?: "continue" | "start_world" | "options" | "options_done" | "back_to_game";
   loadingStage?: string;
   loadingDetail?: string;
   loadingProgress?: number;
@@ -64,6 +65,7 @@ interface GpuGuiRuntimeState {
   cameraYaw?: number;
   cameraPitch?: number;
   loadedChunkCount?: number;
+  options?: GuiOptionsState;
   error?: string;
   width: number;
   height: number;
@@ -150,6 +152,48 @@ function readGpuTitleEnabled(url: URL): boolean {
   return !url.pathname.endsWith("/smoke.html");
 }
 
+function browserRenderConfigStorage(): Storage | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function readGuiOptionsState(url: URL): GuiOptionsState {
+  const config = readBrowserRenderConfig(url, browserRenderConfigStorage());
+  return {
+    viewDistance: config.viewDistance,
+    renderDistance: config.renderDistance,
+    lightingMode: config.lightingMode,
+    liquidSimulationMode: config.liquidSimulationMode,
+  };
+}
+
+function copyGuiOptionsState(options: GuiOptionsState): GuiOptionsState {
+  return {
+    viewDistance: options.viewDistance,
+    renderDistance: options.renderDistance,
+    lightingMode: options.lightingMode,
+    liquidSimulationMode: options.liquidSimulationMode,
+  };
+}
+
+function persistGuiOptionsState(options: GuiOptionsState): void {
+  const storage = browserRenderConfigStorage();
+  if (storage === undefined) {
+    return;
+  }
+  try {
+    writeStoredBrowserRenderConfig(storage, options);
+  } catch {
+    // WebGPU: localStorage may be unavailable in strict browser contexts; keep the in-memory GUI state usable.
+  }
+}
+
 interface GeneratedWorldSmokeBootOptions {
   readonly rendererHost?: BrowserRendererHost;
   readonly onProgress?: LoadingProgressSink;
@@ -173,12 +217,14 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
 
   const size = GuiRenderer.calculateGuiSize(canvas.width, canvas.height);
   const screenManager = new ScreenManager(size.guiWidth, size.guiHeight);
+  const optionsState = readGuiOptionsState(url);
   const state: GpuGuiRuntimeState = {
     ready: false,
     mode: "title",
     screenTitle: "Title Screen",
     frameCount: 0,
     inputEventCount: 0,
+    options: copyGuiOptionsState(optionsState),
     width: size.guiWidth,
     height: size.guiHeight,
   };
@@ -233,6 +279,10 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
   };
 
   let startWorldPromise: Promise<BootResult> | undefined;
+  const onOptionsChanged = (): void => {
+    persistGuiOptionsState(optionsState);
+    state.options = copyGuiOptionsState(optionsState);
+  };
   const startWorld = (): void => {
     state.lastAction = "start_world";
     const guiOverlayHost = host;
@@ -254,19 +304,34 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
       controller,
       screenManager,
       state,
+      optionsState,
+      onOptionsChanged,
       renderGuiFrameNow,
     });
     controller.worldReady = startWorldPromise;
   };
 
-  const titleScreen = new TitleScreen({
+  let titleScreen: TitleScreen;
+  const openOptions = (): void => {
+    state.lastAction = "options";
+    state.mode = "options";
+    state.screenTitle = "options.title";
+    screenManager.setScreen(new OptionsScreen(titleScreen, optionsState, {
+      onChanged: onOptionsChanged,
+      onDone: () => {
+        state.lastAction = "options_done";
+        state.mode = "title";
+        state.screenTitle = "Title Screen";
+      },
+    }));
+    scheduleGuiFrame();
+  };
+  titleScreen = new TitleScreen({
     onContinue: () => {
       state.lastAction = "continue";
     },
     onStartWorld: startWorld,
-    onOptions: () => {
-      state.lastAction = "options";
-    },
+    onOptions: openOptions,
   });
   screenManager.setScreen(titleScreen);
   host = await GuiOverlayHost.create(device, canvas, screenManager);
@@ -293,6 +358,8 @@ interface StartGpuTitleWorldOptions {
   readonly controller: GpuGuiRuntimeController;
   readonly screenManager: ScreenManager;
   readonly state: GpuGuiRuntimeState;
+  readonly optionsState: GuiOptionsState;
+  readonly onOptionsChanged: () => void;
   readonly renderGuiFrameNow: () => void;
 }
 
@@ -338,6 +405,8 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<B
       initialCamera: bootResult.camera,
       initialFrame: bootResult.run.frame,
       state: options.state,
+      optionsState: options.optionsState,
+      onOptionsChanged: options.onOptionsChanged,
       onError: (message) => {
         options.state.mode = "error";
         options.state.error = message;
@@ -397,7 +466,7 @@ async function runGeneratedWorldSmokeBoot(
 ): Promise<GeneratedWorldSmokeBootResult> {
   const runtimeConfig = readWorldTransport();
   const scenario = getGeneratedWorldSmokeScenarioById(url.searchParams.get("generatedWorldScenario"));
-  const renderConfig = readBrowserRenderConfig(url);
+  const renderConfig = readBrowserRenderConfig(url, browserRenderConfigStorage());
   const requestedCamera = readSmokeCamera(url);
   if (readClearWorldStorage(url)) {
     if (typeof indexedDB === "undefined") {

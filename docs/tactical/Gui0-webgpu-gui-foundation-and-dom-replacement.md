@@ -7,7 +7,8 @@ Current implementation state:
 - Gui0 foundation exists under `src/client/gui/` and `src/renderer/gui/`.
 - The opt-in GPU title flow can show title, loading progress, and a live generated world.
 - `Esc` opens a minimal GPU-rendered `PauseScreen` over the live world; Back to Game closes it and gameplay input resumes.
-- Full options/debug settings, quit-to-title, and visible DOM deletion remain later slices.
+- A minimal GPU-rendered `OptionsScreen` is reachable from title and pause, with sliders/cycle/checkbox controls for browser render settings.
+- Debug settings, quit-to-title, and the remaining visible DOM deletion remain later slices.
 
 Durable architecture: [`../gui.md`](../gui.md).
 

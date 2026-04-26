@@ -5,6 +5,7 @@ import { GuiComponent } from "../../../src/client/gui/gui-component";
 import { ScreenManager } from "../../../src/client/gui/screen-manager";
 import { ProgressScreen } from "../../../src/client/gui/screens/progress-screen";
 import { PauseScreen } from "../../../src/client/gui/screens/pause-screen";
+import { OptionsScreen, type GuiOptionsState } from "../../../src/client/gui/screens/options-screen";
 import { Screen } from "../../../src/client/gui/screens/screen";
 import { TitleScreen } from "../../../src/client/gui/screens/title-screen";
 import { GuiDrawList } from "../../../src/renderer/gui/gui-draw-list";
@@ -101,6 +102,66 @@ describe("Gui0 model foundation", () => {
     expect(manager.mouseClicked(160, 78, 0)).toBe(true);
     expect(returnedToGame).toBe(true);
     expect(manager.currentScreen).toBeNull();
+  });
+
+  it("edits browser render options with sliders, cycle buttons, and a checkbox", () => {
+    const manager = new ScreenManager(320, 240);
+    const titleScreen = new TitleScreen({
+      onContinue: () => {},
+      onStartWorld: () => {},
+      onOptions: () => {},
+    });
+    const options: GuiOptionsState = {
+      viewDistance: 6,
+      renderDistance: 192,
+      lightingMode: "vanilla17",
+      liquidSimulationMode: "vanilla17",
+    };
+    let changedState: GuiOptionsState | undefined;
+    let done = false;
+    manager.setScreen(new OptionsScreen(titleScreen, options, {
+      onChanged: (state) => {
+        changedState = { ...state };
+      },
+      onDone: () => {
+        done = true;
+      },
+    }));
+
+    expect(manager.currentScreen?.getTitle()).toBe("options.title");
+    expect(manager.mouseClicked(151, 38, 0)).toBe(true);
+    expect(options.viewDistance).toBe(16);
+    expect(manager.mouseClicked(80, 62, 0)).toBe(true);
+    expect(options.lightingMode).toBe("none");
+    expect(manager.mouseClicked(175, 62, 0)).toBe(true);
+    expect(options.liquidSimulationMode).toBe("none");
+    expect(manager.mouseClicked(160, 146, 0)).toBe(true);
+    expect(done).toBe(true);
+    expect(changedState).toEqual(options);
+    expect(manager.currentScreen).toBe(titleScreen);
+  });
+
+  it("opens the GPU options screen from pause when the action exists", () => {
+    const manager = new ScreenManager(320, 240);
+    const options: GuiOptionsState = {
+      viewDistance: 6,
+      renderDistance: 192,
+      lightingMode: "vanilla17",
+      liquidSimulationMode: "vanilla17",
+    };
+    let pauseScreen!: PauseScreen;
+    pauseScreen = new PauseScreen(true, {
+      onReturnToGame: () => {},
+      onOptions: () => {
+        manager.setScreen(new OptionsScreen(pauseScreen, options));
+      },
+    });
+    manager.setScreen(pauseScreen);
+
+    expect(manager.mouseClicked(110, 150, 0)).toBe(true);
+    expect(manager.currentScreen?.getTitle()).toBe("options.title");
+    expect(manager.mouseClicked(160, 146, 0)).toBe(true);
+    expect(manager.currentScreen).toBe(pauseScreen);
   });
 });
 

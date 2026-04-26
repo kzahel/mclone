@@ -2,13 +2,21 @@ import { expect, test } from "@playwright/test";
 import type { GpuTitleBootResult } from "../../../src/renderer/main";
 
 const GPU_TITLE_SCREENSHOT_PATH = "/tmp/mclone-gpu-root-title-screen.png";
+const GPU_OPTIONS_SCREENSHOT_PATH = "/tmp/mclone-gpu-root-options-screen.png";
 
 interface GpuGuiState {
   readonly ready: boolean;
-  readonly mode: "title";
+  readonly mode: "title" | "options";
+  readonly screenTitle: string;
   readonly lastAction?: string;
   readonly width: number;
   readonly height: number;
+  readonly options?: {
+    readonly viewDistance: number;
+    readonly renderDistance: number;
+    readonly lightingMode: string;
+    readonly liquidSimulationMode: string;
+  };
 }
 
 test.setTimeout(30_000);
@@ -29,7 +37,16 @@ test("captures the root GPU title screen and routes button clicks without visibl
   const stateBeforeClick = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
   const optionsCenterY = (Math.floor(stateBeforeClick.height / 4) + 48 + (24 * 2) + 10) / stateBeforeClick.height;
   await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * optionsCenterY));
+  await page.waitForFunction(() => window.__mcloneGui?.state.mode === "options");
   const state = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
-  expect(state.mode).toBe("title");
+  expect(state.screenTitle).toBe("options.title");
   expect(state.lastAction).toBe("options");
+  expect(state.options).toBeDefined();
+  await page.locator("#renderer").screenshot({ path: GPU_OPTIONS_SCREENSHOT_PATH });
+
+  const doneCenterY = (Math.min(state.height - 28, (Math.floor(state.height / 6) - 12) + (24 * 4) + 12) + 10) / state.height;
+  await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * doneCenterY));
+  await page.waitForFunction(() => window.__mcloneGui?.state.mode === "title");
+  const titleState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  expect(titleState.lastAction).toBe("options_done");
 });

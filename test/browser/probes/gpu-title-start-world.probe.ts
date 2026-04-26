@@ -6,6 +6,7 @@ import { FAST_VISUAL_PROBE_TIMEOUTS } from "./fast-visual-probe-config";
 const GPU_TITLE_LOADING_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-loading.png";
 const GPU_TITLE_WORLD_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-world.png";
 const GPU_TITLE_PAUSE_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-pause.png";
+const GPU_TITLE_PAUSE_OPTIONS_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-pause-options.png";
 
 interface GpuGuiState {
   readonly ready: boolean;
@@ -22,6 +23,12 @@ interface GpuGuiState {
   readonly cameraPosition?: readonly [number, number, number];
   readonly cameraYaw?: number;
   readonly cameraPitch?: number;
+  readonly options?: {
+    readonly viewDistance: number;
+    readonly renderDistance: number;
+    readonly lightingMode: string;
+    readonly liquidSimulationMode: string;
+  };
   readonly error?: string;
   readonly width: number;
   readonly height: number;
@@ -123,6 +130,30 @@ test("starts the generated world from the GPU title screen without DOM controls"
   expect(pausedState.screenTitle).toBe("menu.game");
   expect(pausedState.cameraPosition).toBeDefined();
 
+  const pauseOptionsCenterX = (Math.floor(pausedState.width / 2) - 53) / pausedState.width;
+  const pauseOptionsCenterY = (Math.floor(pausedState.height / 4) + 96 - 16 + 10) / pausedState.height;
+  await page.mouse.click(liveBox!.x + (liveBox!.width * pauseOptionsCenterX), liveBox!.y + (liveBox!.height * pauseOptionsCenterY));
+  await page.waitForFunction(
+    () => window.__mcloneGui?.state.screenTitle === "options.title",
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
+  const optionsState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  expect(optionsState.mode).toBe("paused");
+  expect(optionsState.lastAction).toBe("options");
+  expect(optionsState.options?.viewDistance).toBeGreaterThan(0);
+  await page.locator("#renderer").screenshot({ path: GPU_TITLE_PAUSE_OPTIONS_SCREENSHOT_PATH });
+
+  const optionsDoneCenterY = (Math.min(optionsState.height - 28, (Math.floor(optionsState.height / 6) - 12) + (24 * 4) + 12) + 10) / optionsState.height;
+  await page.mouse.click(liveBox!.x + (liveBox!.width / 2), liveBox!.y + (liveBox!.height * optionsDoneCenterY));
+  await page.waitForFunction(
+    () => window.__mcloneGui?.state.screenTitle === "menu.game",
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
+  const pauseBaselineState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  expect(pauseBaselineState.lastAction).toBe("options_done");
+
   await page.keyboard.down("w");
   await page.mouse.move(liveBox!.x + (liveBox!.width / 2) + 48, liveBox!.y + (liveBox!.height / 2) + 12, { steps: 3 });
   await page.waitForFunction(
@@ -132,12 +163,12 @@ test("starts the generated world from the GPU title screen without DOM controls"
         && state.mode === "paused"
         && state.frameCount >= frameCount + 3;
     },
-    { frameCount: pausedState.frameCount },
+    { frameCount: pauseBaselineState.frameCount },
     { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
   );
   await page.keyboard.up("w");
   const pausedInputState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
-  expect(pausedInputState.cameraPosition).toEqual(pausedState.cameraPosition);
+  expect(pausedInputState.cameraPosition).toEqual(pauseBaselineState.cameraPosition);
 
   const backToGameCenterY = (Math.floor(pausedInputState.height / 4) + 24 - 16 + 10) / pausedInputState.height;
   await page.mouse.click(liveBox!.x + (liveBox!.width / 2), liveBox!.y + (liveBox!.height * backToGameCenterY));
