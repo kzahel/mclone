@@ -196,6 +196,17 @@ The ordering across transport, player-slot protocol, and movement integration is
 - **Unit**: dump atlas UVs, baked-model quads, and section visibility graphs from MC as JSON; exact-diff those. Catches most correctness bugs before pixels are involved.
 - **Visual inspection**: run the browser harness from [`09a-renderer-browser-harness.md`](09a-renderer-browser-harness.md) — system Chrome via Playwright `channel: "chrome"` against a Vite-served page. Take a screenshot and look at it. Does the geometry look right? Are colors and UVs sensible? This is a human (or agent) eyeball check, not an automated diff.
 
+## Headless Deno Renderer Validation Arc
+
+This arc is for browser-free renderer validation. It does not replace the browser harness yet; it creates a second lane that can render to offscreen WebGPU textures, read pixels back, and write PNGs without Chrome, Playwright, Vite, DOM, or an HTML canvas. Use [`../deno-wgpu-native-spike.md`](../deno-wgpu-native-spike.md) for the durable native-host sketch.
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| [`Deno0-headless-webgpu-smoke.md`](Deno0-headless-webgpu-smoke.md) | shared WebGPU target helpers, repo-owned Deno offscreen clear/readback smoke, `/tmp` PNG artifact | Deno WebGPU smoke + browser smoke | **done** — official Chrome-free WebGPU smoke lane is available as `pnpm smoke:deno:webgpu` |
+| `Deno1-` | minimal real renderer pipeline/shader draw through offscreen target | Deno WebGPU smoke | draw known geometry without DOM/browser canvas before touching assets or chunks |
+| `Deno2-` | non-browser asset/image decode seam for atlas inputs | Deno WebGPU smoke + unit | unblock texture/atlas smoke outside browser image APIs |
+| `Deno3-` | minimal chunk/world frame from authoritative snapshots | Deno WebGPU visual | first page-free terrain screenshot/probe candidate |
+
 ## Runtime / host arc (rough, cross-cutting)
 
 This arc is intentionally separate from the numbered worldgen and renderer translation arcs above. It is about correcting the current execution model so the engine can support browser singleplayer without main-thread stalls, browser multiplayer clients, and a headless Node host.

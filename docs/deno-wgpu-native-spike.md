@@ -1,0 +1,162 @@
+# Deno / wgpu native spike
+
+This is a concrete spike plan for a native runtime path that keeps the current TypeScript engine code while removing the browser as a hard dependency for renderer validation and, later, OpenXR.
+
+It does not replace the browser target. The browser WebGPU build remains the default product target until this path proves useful.
+
+## Motivation
+
+There are two separate reasons to explore this:
+
+- **Headless renderer validation:** render into a GPU texture, copy pixels into a CPU buffer, and compare or write PNGs without Playwright/Chrome/browser page state.
+- **OpenXR:** own the native frame loop and XR session directly instead of waiting for browser WebXR/WebGPU support to become adequate.
+
+The first reason is the start gate. If a browser-free WebGPU render-to-buffer smoke test is not reliable, the larger native-host idea should stop there.
+
+## Proposed shape
+
+Use Deno first as a browser-shaped, headless JavaScript runtime:
+
+```text
+Deno process
+  TypeScript engine modules
+  Web Worker-like runtime where available
+  navigator.gpu with offscreen render targets
+  test harness writes PNGs / compares pixels
+```
+
+If that works, use Rust later as the native host:
+
+```text
+Rust executable
+  window / OpenXR / native event loop
+  wgpu device, queues, surfaces, offscreen targets
+  embedded Deno runtime or deno_core isolates
+  Worker/postMessage/transfer host services
+  filesystem, asset, input, and storage adapters
+
+TypeScript engine
+  simulation / host / client runtime
+  workers as separate JS isolates
+  meshing and renderer-neutral draw payloads
+```
+
+Rust owns native presentation and OpenXR timing. TypeScript continues to own parity-critical simulation and high-level runtime orchestration.
+
+## Worker model
+
+The durable mapping is:
+
+```text
+browser Worker = native thread + separate JS isolate + event loop + message queue
+```
+
+For the early Deno CLI spike, prefer Deno's built-in `Worker` behavior. For embedded Rust, model each worker as a Deno/deno_core runtime on its own thread.
+
+Start with message copying for correctness. Add true transfer after the message surface is stable:
+
+1. Clone small structured messages.
+2. Transfer large `ArrayBuffer` payloads by moving backing storage and detaching the sender side.
+3. Use `SharedArrayBuffer` only for a measured queue/ring-buffer need.
+
+The repo is already close to this shape because chunk, light, and render-world payloads collect explicit transfer lists.
+
+## Renderer target model
+
+Split render targets by capability instead of assuming a browser canvas:
+
+- `BrowserCanvasTarget`: `HTMLCanvasElement` + `GPUCanvasContext`.
+- `OffscreenTextureTarget`: `GPUTexture` + readback buffer for tests.
+- `NativeWindowTarget`: Rust/wgpu surface for flat desktop mode.
+- `OpenXrTarget`: OpenXR swapchain-backed presentation path.
+
+The first useful test target is `OffscreenTextureTarget`. It should be able to render one frame, copy the color target into a mapped buffer, and write `/tmp/mclone-deno-webgpu-smoke.png`.
+
+## Validation sequence
+
+1. **Deno WebGPU smoke**
+   - Run the repo-owned `pnpm smoke:deno:webgpu` command.
+   - Create `navigator.gpu` adapter/device.
+   - Clear or draw into an offscreen `GPUTexture`.
+   - Copy texture to a readback buffer.
+   - Encode a PNG in `/tmp` and inspect it.
+
+2. **Deno harness around existing renderer code**
+   - Add a repo script only if step 1 works.
+   - Import the smallest renderer module set that can compile shaders and render a known frame.
+   - Avoid DOM, page input, localStorage, and IndexedDB.
+
+3. **Renderer target refactor**
+   - Move canvas acquisition/configuration behind a target interface.
+   - Keep `GPUDevice` and `GPUTexture` below the renderer boundary.
+   - Keep world/runtime/client modules free of DOM and WebGPU handles.
+
+4. **Asset/input/storage adapters**
+   - Replace browser image/canvas decode with an asset decoder interface.
+   - Keep browser `document`/pointer-lock/debug form code in browser-only entry points.
+   - Add native/headless storage choices only behind existing persistence contracts.
+
+5. **Rust native host spike**
+   - Create a Rust `wgpu` offscreen clear/readback equivalent.
+   - Embed Deno/deno_core only after the Deno CLI harness proves the engine-side seams are right.
+   - Add windowed and OpenXR presenters after headless/native flat rendering works.
+
+## Spike result: 2026-04-26
+
+The first smoke passed on macOS and has been promoted to a repo command:
+
+```bash
+pnpm smoke:deno:webgpu
+```
+
+Observed runtime:
+
+```text
+deno 2.7.13
+v8 14.7.173.20-rusty
+typescript 5.9.2
+```
+
+The command runs:
+
+```bash
+npx -y deno@2.7.13 run --unstable-webgpu --allow-write=/tmp ./scripts/deno-webgpu-smoke.ts
+```
+
+The script:
+
+- created `navigator.gpu` adapter/device
+- rendered a clear pass into an offscreen `rgba8unorm` `GPUTexture`
+- copied the texture to a mapped readback buffer
+- encoded `/tmp/mclone-deno-webgpu-smoke.png`
+
+Observed output:
+
+```json
+{"ok":true,"adapter":{},"outputPath":"/tmp/mclone-deno-webgpu-smoke.png","firstPixel":[26,102,204,255],"byteLength":16384}
+```
+
+`file /tmp/mclone-deno-webgpu-smoke.png` reports:
+
+```text
+PNG image data, 64 x 64, 8-bit/color RGBA, non-interlaced
+```
+
+The image is a solid blue clear color, matching the expected `[26, 102, 204, 255]` readback pixel. This validates the basic Deno WebGPU path for offscreen render, GPU readback, and PNG artifact generation.
+
+## Refactor seams to preserve
+
+- Simulation and protocol messages stay serializable and renderer-neutral.
+- Workers are used through endpoint interfaces, not concrete browser globals.
+- Texture/image loading is an adapter.
+- Canvas/window/input/UI are entry-point concerns.
+- Browser debug overlays remain browser-only; native HUD/debug UI should be renderer-owned or native-host owned.
+
+## Stop conditions
+
+Pause this path if:
+
+- Deno WebGPU cannot reliably render and read back pixels on target machines.
+- The first useful harness requires broad DOM emulation.
+- Worker transfer semantics require invasive changes above existing transport/message boundaries.
+- OpenXR swapchain integration forces renderer assumptions that would contaminate simulation/runtime code.

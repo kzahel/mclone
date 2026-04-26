@@ -13,6 +13,7 @@
     "probe:browser:fast": "playwright test --config playwright.probes.fast.config.ts",
     "probe:browser:parity": "playwright test --config playwright.probes.parity.config.ts",
     "probe:browser:regression": "playwright test --config playwright.probes.regression.config.ts",
+    "smoke:deno:webgpu": "npx -y deno@2.7.13 run --unstable-webgpu --allow-write=/tmp ./scripts/deno-webgpu-smoke.ts",
     "dev:browser": "vite",
     "host:node": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/headless-generated-world-host.ts",
     "host:remote": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/generated-world-http-server.ts",

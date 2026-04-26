@@ -4,6 +4,8 @@ A future-looking note on preserving a possible native host/renderer path for `mc
 
 This does not change the current roadmap. The browser WebGPU build remains the default and primary target, and the committed implementation stack remains TypeScript-first. This document exists so today's architectural decisions keep a native option open if we later have a concrete reason to pursue it.
 
+For a concrete Deno/WebGPU validation path, see [`deno-wgpu-native-spike.md`](./deno-wgpu-native-spike.md).
+
 ## Motivation
 
 The browser build remains the main product. A native target only matters for narrower cases where the browser is a poor fit:

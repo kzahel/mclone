@@ -37,6 +37,7 @@ import { type CompositeRenderType, RenderType } from "./render-type";
 import { ViewArea } from "./view-area";
 import { Vec3 } from "../world/phys/vec3";
 import type { VertexBuffer } from "./vertex/vertex-buffer";
+import { configureBrowserCanvasTarget, requestWebGpuDeviceContext } from "./webgpu-target";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
 const GRASS_COLORMAP_LOCATION = new ResourceLocation("minecraft:colormap/grass");
@@ -473,20 +474,18 @@ export async function initializeRendererScene(
   canvas: HTMLCanvasElement,
   options: SceneInitOptions,
 ): Promise<SceneInitResult> {
-  if (!navigator.gpu) return { ok: false, reason: "navigator.gpu missing (no WebGPU)" };
-
-  options.onProgress?.({ stage: "Requesting WebGPU adapter", fraction: 0.02 });
-  const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter) return { ok: false, reason: "requestAdapter returned null" };
-
-  options.onProgress?.({ stage: "Requesting WebGPU device", fraction: 0.04 });
-  const device = await adapter.requestDevice();
+  const deviceContextResult = await requestWebGpuDeviceContext({
+    onRequestAdapter: () => options.onProgress?.({ stage: "Requesting WebGPU adapter", fraction: 0.02 }),
+    onRequestDevice: () => options.onProgress?.({ stage: "Requesting WebGPU device", fraction: 0.04 }),
+  });
+  if (!deviceContextResult.ok) {
+    return deviceContextResult;
+  }
+  const { adapter, device, format } = deviceContextResult.context;
   resizeCanvasToDisplaySize(canvas, device.limits.maxTextureDimension2D);
-  const ctx = canvas.getContext("webgpu");
-  if (!ctx) return { ok: false, reason: "canvas.getContext('webgpu') returned null" };
-
-  const format = navigator.gpu.getPreferredCanvasFormat();
-  ctx.configure({ device, format, alphaMode: "opaque" });
+  const target = configureBrowserCanvasTarget(canvas, device, format);
+  if (!target) return { ok: false, reason: "canvas.getContext('webgpu') returned null" };
+  const ctx = target.ctx;
 
   const generatedBlocks = registerGeneratedRenderBlocks();
   options.onProgress?.({ stage: "Loading asset pack", fraction: 0.05 });
