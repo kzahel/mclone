@@ -5,6 +5,7 @@ import {
   createGeneratedWorldHeadlessHarness,
   type GeneratedWorldHeadlessHarness,
 } from "../src/renderer/generated-world-headless-harness.ts";
+import { createGeneratedWorldHeadlessPresentationHost } from "../src/renderer/generated-world-headless-presentation-host.ts";
 import {
   GENERATED_WORLD_SMOKE_SCENARIO,
   GENERATED_WORLD_TICK_CADENCE_SCENARIO,
@@ -14,11 +15,9 @@ import {
 } from "../src/renderer/generated-world-smoke-scenario.ts";
 import {
   runGeneratedWorldSmokeScenario,
-  type GeneratedWorldSmokeRun,
   type GeneratedWorldSmokeScenarioResult,
 } from "../src/renderer/generated-world-smoke-runner.ts";
 import { createHeadlessRendererHost } from "../src/renderer/renderer-host.ts";
-import { renderFrameToHeadlessTarget } from "../src/renderer/static-frame-harness.ts";
 import { createDenoExtractedAssetPack } from "./deno-file-asset-source.ts";
 import { encodePngRgba } from "./png-rgba.ts";
 
@@ -74,22 +73,16 @@ async function runDenoGeneratedWorldScenario(
       scene: harness.scene,
       scenario,
       worldTransport: "worker",
-      target: {
+      presentationHost: createGeneratedWorldHeadlessPresentationHost({
+        rendererHost,
         width: scenario.width,
         height: scenario.height,
         format: scenario.renderTargetFormat,
-        renderFrame: ({ scene, frame }) => renderFrameToHeadlessTarget({
-          rendererHost,
-          scene,
-          frame,
-          width: scenario.width,
-          height: scenario.height,
-          format: scenario.renderTargetFormat,
-        }),
-      },
+        writePngArtifact: async ({ outputPath, width, height, pixels }) => {
+          await Deno.writeFile(outputPath, encodePngRgba(width, height, pixels));
+        },
+      }),
     });
-
-    await writeScenarioArtifacts(run);
 
     const smokeResult = {
       ...run.result,
@@ -108,23 +101,6 @@ async function runDenoGeneratedWorldScenario(
     return smokeResult;
   } finally {
     harness?.close();
-  }
-}
-
-async function writeScenarioArtifacts(run: GeneratedWorldSmokeRun): Promise<void> {
-  for (const stepRun of run.stepRuns) {
-    const outputPath = stepRun.result.outputPath;
-    if (outputPath === undefined) {
-      continue;
-    }
-    if (stepRun.readback.pixels === undefined) {
-      throw new Error(`Deno generated-world step ${stepRun.result.stepName} did not produce readback pixels`);
-    }
-    await Deno.writeFile(outputPath, encodePngRgba(
-      stepRun.readback.width,
-      stepRun.readback.height,
-      stepRun.readback.pixels,
-    ));
   }
 }
 

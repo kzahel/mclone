@@ -51,9 +51,9 @@ export interface GeneratedWorldSmokeTargetReadback {
   readonly height: number;
   readonly format: GPUTextureFormat;
   readonly pixels?: Uint8Array;
-  readonly centerPixel?: readonly number[];
-  readonly terrainPixel?: readonly number[];
-  readonly clearPixel?: readonly number[];
+  readonly centerPixel?: ArrayLike<number>;
+  readonly terrainPixel?: ArrayLike<number>;
+  readonly clearPixel?: ArrayLike<number>;
   readonly nonClearPixels?: number;
   readonly byteLength?: number;
 }
@@ -84,6 +84,34 @@ export interface GeneratedWorldSmokeRenderTarget {
   readonly height: number;
   readonly format: GPUTextureFormat;
   renderFrame(context: GeneratedWorldSmokeRenderTargetContext): Promise<GeneratedWorldSmokeTargetReadback>;
+}
+
+export interface GeneratedWorldSmokePresentationDelayContext {
+  readonly scene: RendererScene;
+  readonly scenario: GeneratedWorldSmokeScenario;
+  readonly step: GeneratedWorldSmokeScenarioStep;
+  readonly stepIndex: number;
+  readonly delayMs: number;
+}
+
+export interface GeneratedWorldSmokeStepArtifactContext {
+  readonly scenario: GeneratedWorldSmokeScenario;
+  readonly stepRun: GeneratedWorldSmokeStepRun;
+  readonly outputPath: string;
+}
+
+export interface GeneratedWorldSmokePresentationHost {
+  readonly target: GeneratedWorldSmokeRenderTarget;
+  waitForPresentationDelay?(context: GeneratedWorldSmokePresentationDelayContext): Promise<void>;
+  writeStepArtifact?(context: GeneratedWorldSmokeStepArtifactContext): Promise<void>;
+  close?(): Promise<void> | void;
+}
+
+export interface CreateGeneratedWorldSmokePresentationHostOptions {
+  readonly target: GeneratedWorldSmokeRenderTarget;
+  readonly waitForPresentationDelay?: (context: GeneratedWorldSmokePresentationDelayContext) => Promise<void>;
+  readonly writeStepArtifact?: (context: GeneratedWorldSmokeStepArtifactContext) => Promise<void>;
+  readonly close?: () => Promise<void> | void;
 }
 
 export interface GeneratedWorldSmokeScenarioResult extends GeneratedWorldSmokeResultLike {
@@ -144,7 +172,7 @@ export interface GeneratedWorldSmokeStepResult extends GeneratedWorldSmokeResult
 
 export interface GeneratedWorldSmokeRunOptions {
   readonly scene: RendererScene;
-  readonly target: GeneratedWorldSmokeRenderTarget;
+  readonly presentationHost: GeneratedWorldSmokePresentationHost;
   readonly worldTransport: GeneratedWorldSmokeWorldTransport;
   readonly scenario?: GeneratedWorldSmokeScenario;
   readonly camera?: CameraState;
@@ -190,6 +218,17 @@ const VALIDATED_RENDER_TYPES = [
   RenderType.lines(),
   RenderType.lineStrip(),
 ] as const;
+
+export function createGeneratedWorldSmokePresentationHost(
+  options: CreateGeneratedWorldSmokePresentationHostOptions,
+): GeneratedWorldSmokePresentationHost {
+  return {
+    target: options.target,
+    waitForPresentationDelay: options.waitForPresentationDelay ?? waitForGeneratedWorldSmokePresentationDelayDefault,
+    writeStepArtifact: options.writeStepArtifact,
+    close: options.close,
+  };
+}
 
 export async function renderGeneratedWorldSmokeFrame(
   scene: RendererScene,
@@ -243,49 +282,55 @@ async function prepareGeneratedWorldSmokeStep(
 export async function runGeneratedWorldSmokeScenario(
   options: GeneratedWorldSmokeRunOptions,
 ): Promise<GeneratedWorldSmokeRun> {
-  const scenario = options.scenario ?? GENERATED_WORLD_SMOKE_SCENARIO;
-  const steps = resolveGeneratedWorldSmokeRunSteps(scenario, options.camera);
-  if (steps.length <= 0) {
-    throw new Error(`generated-world smoke scenario ${scenario.id} has no steps`);
-  }
-
-  if (options.validatePipelines !== false) {
-    await validateGeneratedWorldSmokePipelines(
-      options.scene,
-      options.validatePipelineFormats ?? [options.format ?? options.scene.format, options.target.format],
-    );
-  }
-
-  const stepRuns: GeneratedWorldSmokeStepRun[] = [];
-  let expectedPlayerInputSequence: number | undefined;
-  for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
-    const step = steps[stepIndex]!;
-    if (step.playerInput !== undefined) {
-      expectedPlayerInputSequence = step.playerInput.sequence;
+  try {
+    const scenario = options.scenario ?? GENERATED_WORLD_SMOKE_SCENARIO;
+    const steps = resolveGeneratedWorldSmokeRunSteps(scenario, options.camera);
+    if (steps.length <= 0) {
+      throw new Error(`generated-world smoke scenario ${scenario.id} has no steps`);
     }
-    stepRuns.push(await runGeneratedWorldSmokeScenarioStep(
-      options,
-      scenario,
-      step,
-      stepIndex,
-      expectedPlayerInputSequence,
-    ));
+
+    if (options.validatePipelines !== false) {
+      await validateGeneratedWorldSmokePipelines(
+        options.scene,
+        options.validatePipelineFormats ?? [options.format ?? options.scene.format, options.presentationHost.target.format],
+      );
+    }
+
+    const stepRuns: GeneratedWorldSmokeStepRun[] = [];
+    let expectedPlayerInputSequence: number | undefined;
+    for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+      const step = steps[stepIndex]!;
+      if (step.playerInput !== undefined) {
+        expectedPlayerInputSequence = step.playerInput.sequence;
+      }
+      const stepRun = await runGeneratedWorldSmokeScenarioStep(
+        options,
+        scenario,
+        step,
+        stepIndex,
+        expectedPlayerInputSequence,
+      );
+      await writeGeneratedWorldSmokeStepArtifact(options.presentationHost, scenario, stepRun);
+      stepRuns.push(stepRun);
+    }
+
+    const lastRun = stepRuns[stepRuns.length - 1]!;
+
+    return {
+      frame: lastRun.frame,
+      readback: lastRun.readback,
+      stepRuns,
+      result: {
+        ...lastRun.result,
+        ok: true,
+        saveId: options.scene.saveMetadata.saveId,
+        adapterInfo: options.adapterInfo ?? describeGpuAdapter(options.scene.adapter),
+        steps: stepRuns.map((run) => run.result),
+      },
+    };
+  } finally {
+    await options.presentationHost.close?.();
   }
-
-  const lastRun = stepRuns[stepRuns.length - 1]!;
-
-  return {
-    frame: lastRun.frame,
-    readback: lastRun.readback,
-    stepRuns,
-    result: {
-      ...lastRun.result,
-      ok: true,
-      saveId: options.scene.saveMetadata.saveId,
-      adapterInfo: options.adapterInfo ?? describeGpuAdapter(options.scene.adapter),
-      steps: stepRuns.map((run) => run.result),
-    },
-  };
 }
 
 async function runGeneratedWorldSmokeScenarioStep(
@@ -306,7 +351,7 @@ async function runGeneratedWorldSmokeScenarioStep(
   if (step.playerInput !== undefined) {
     await runGeneratedWorldSmokePlayerInputCommand(options.scene, step.playerInput);
   }
-  await waitForGeneratedWorldSmokePresentationDelay(options.scene, step, scenario);
+  await waitForGeneratedWorldSmokePresentationDelay(options.presentationHost, options.scene, scenario, step, stepIndex);
 
   options.scene.levelRenderer.allChanged();
   options.onProgress?.({ stage: "Building first frame", fraction: 0.98 });
@@ -325,7 +370,7 @@ async function runGeneratedWorldSmokeScenarioStep(
     scenario,
     step,
     stepIndex,
-    options.target,
+    options.presentationHost.target,
   );
   return {
     step,
@@ -402,20 +447,54 @@ async function runGeneratedWorldSmokePlayerInputCommandForRuntime(
 }
 
 async function waitForGeneratedWorldSmokePresentationDelay(
+  presentationHost: GeneratedWorldSmokePresentationHost,
   scene: RendererScene,
-  step: GeneratedWorldSmokeScenarioStep,
   scenario: GeneratedWorldSmokeScenario,
+  step: GeneratedWorldSmokeScenarioStep,
+  stepIndex: number,
 ): Promise<void> {
-  const delayMs = step.presentationDelayMs ?? scenario.cadence?.intervalMs ?? 0;
+  const delayMs = getGeneratedWorldSmokePresentationDelayMs(scenario, step);
   if (delayMs <= 0) {
     return;
   }
 
-  await sleep(delayMs);
-  if (await scene.clientRuntime.drainTransportUpdates()) {
-    applyRenderWorldDirtySections(scene);
-    scene.levelRenderer.allChanged();
+  await (presentationHost.waitForPresentationDelay ?? waitForGeneratedWorldSmokePresentationDelayDefault)({
+    scene,
+    scenario,
+    step,
+    stepIndex,
+    delayMs,
+  });
+}
+
+export async function waitForGeneratedWorldSmokePresentationDelayDefault(
+  context: GeneratedWorldSmokePresentationDelayContext,
+): Promise<void> {
+  await sleep(context.delayMs);
+  if (await context.scene.clientRuntime.drainTransportUpdates()) {
+    applyRenderWorldDirtySections(context.scene);
+    context.scene.levelRenderer.allChanged();
   }
+}
+
+export function getGeneratedWorldSmokePresentationDelayMs(
+  scenario: GeneratedWorldSmokeScenario,
+  step: GeneratedWorldSmokeScenarioStep,
+): number {
+  return step.presentationDelayMs ?? scenario.cadence?.intervalMs ?? 0;
+}
+
+async function writeGeneratedWorldSmokeStepArtifact(
+  presentationHost: GeneratedWorldSmokePresentationHost,
+  scenario: GeneratedWorldSmokeScenario,
+  stepRun: GeneratedWorldSmokeStepRun,
+): Promise<void> {
+  const outputPath = stepRun.result.outputPath;
+  if (outputPath === undefined || presentationHost.writeStepArtifact === undefined) {
+    return;
+  }
+
+  await presentationHost.writeStepArtifact({ scenario, stepRun, outputPath });
 }
 
 export async function validateGeneratedWorldSmokePipelines(

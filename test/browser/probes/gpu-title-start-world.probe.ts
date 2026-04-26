@@ -14,6 +14,11 @@ interface GpuGuiState {
   readonly loadingProgress?: number;
   readonly worldReady?: boolean;
   readonly worldResult?: BootResult;
+  readonly frameCount: number;
+  readonly inputEventCount: number;
+  readonly cameraPosition?: readonly [number, number, number];
+  readonly cameraYaw?: number;
+  readonly cameraPitch?: number;
   readonly error?: string;
   readonly width: number;
   readonly height: number;
@@ -68,6 +73,36 @@ test("starts the generated world from the GPU title screen without DOM controls"
     requireSteps: true,
   })).toEqual([]);
 
+  await page.waitForFunction(
+    () => (window.__mcloneGui?.state.frameCount ?? 0) >= 3,
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
+
   await expect(page.locator("button, input, select, textarea")).toHaveCount(0);
   await page.locator("#renderer").screenshot({ path: GPU_TITLE_WORLD_SCREENSHOT_PATH });
+
+  const liveState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  const liveBox = await page.locator("#renderer").boundingBox();
+  expect(liveBox).not.toBeNull();
+  await page.mouse.move(liveBox!.x + (liveBox!.width / 2), liveBox!.y + (liveBox!.height / 2));
+  await page.keyboard.down("w");
+  await page.mouse.move(liveBox!.x + (liveBox!.width / 2) + 24, liveBox!.y + (liveBox!.height / 2) + 6, { steps: 3 });
+  await page.waitForFunction(
+    ({ frameCount, inputEventCount }) => {
+      const state = window.__mcloneGui?.state;
+      return state !== undefined
+        && state.frameCount >= frameCount + 3
+        && state.inputEventCount > inputEventCount;
+    },
+    { frameCount: liveState.frameCount, inputEventCount: liveState.inputEventCount },
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
+  await page.keyboard.up("w");
+
+  const movedState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  expect(movedState.frameCount).toBeGreaterThan(liveState.frameCount);
+  expect(movedState.inputEventCount).toBeGreaterThan(liveState.inputEventCount);
+  expect(movedState.cameraPosition).toBeDefined();
+  expect(movedState.cameraPosition).not.toEqual(liveState.cameraPosition);
 });

@@ -5,10 +5,7 @@ import { ProgressScreen } from "../client/gui/screens/progress-screen";
 import { TitleScreen } from "../client/gui/screens/title-screen";
 import { ScreenManager } from "../client/gui/screen-manager";
 import { type CameraState } from "./game-renderer";
-import type { LevelRenderFrame } from "./level-renderer";
 import {
-  createSceneDepthTarget,
-  encodeSceneFrame,
   initializeRendererScene,
   resizeCanvasToDisplaySize,
   type RendererScene,
@@ -17,10 +14,10 @@ import { readBrowserRenderConfig } from "./browser-render-config";
 import {
   getGeneratedWorldSmokeScenarioById,
 } from "./generated-world-smoke-scenario";
+import { createGeneratedWorldBrowserPresentationHost } from "./generated-world-browser-presentation-host";
 import {
   runGeneratedWorldSmokeScenario,
   type GeneratedWorldSmokeRun,
-  type GeneratedWorldSmokeRenderTarget,
   type GeneratedWorldSmokeScenarioResult,
 } from "./generated-world-smoke-runner";
 import { progressFraction, type LoadingProgress, type LoadingProgressSink } from "./loading-progress";
@@ -29,11 +26,11 @@ import { GuiRenderer } from "./gui/gui-renderer";
 import { GuiOverlayHost } from "./gui/gui-overlay-host";
 import {
   configureBrowserCanvasTarget,
-  readTextureRgba8,
   requestWebGpuDeviceContext,
   type BrowserCanvasTarget,
   type WebGpuDeviceContext,
 } from "./webgpu-target";
+import { startGpuWorldRuntime, type GpuWorldRuntime } from "./gui/gpu-world-runtime";
 
 type BootWorldTransport = "worker" | "remote";
 
@@ -61,6 +58,12 @@ interface GpuGuiRuntimeState {
   loadingProgress?: number;
   worldReady?: boolean;
   worldResult?: BootResult;
+  frameCount: number;
+  inputEventCount: number;
+  cameraPosition?: readonly [number, number, number];
+  cameraYaw?: number;
+  cameraPitch?: number;
+  loadedChunkCount?: number;
   error?: string;
   width: number;
   height: number;
@@ -69,6 +72,7 @@ interface GpuGuiRuntimeState {
 interface GpuGuiRuntimeController {
   readonly state: GpuGuiRuntimeState;
   worldReady?: Promise<BootResult>;
+  worldRuntime?: GpuWorldRuntime;
 }
 
 declare global {
@@ -152,6 +156,7 @@ type GeneratedWorldSmokeBootResult =
     readonly ok: true;
     readonly scene: RendererScene;
     readonly run: GeneratedWorldSmokeRun;
+    readonly camera: CameraState;
   }
   | { readonly ok: false; readonly reason: string };
 
@@ -160,21 +165,6 @@ async function createGuiProbeOverlay(scene: RendererScene): Promise<GuiOverlayHo
   const screenManager = new ScreenManager(size.guiWidth, size.guiHeight);
   screenManager.setScreen(new Gui0ProbeScreen());
   return GuiOverlayHost.create(scene.device, scene.canvas, screenManager);
-}
-
-function encodeGuiProbeOverlay(
-  overlay: GuiOverlayHost | undefined,
-  encoder: GPUCommandEncoder,
-  view: GPUTextureView,
-  format: GPUTextureFormat,
-  pixelWidth: number,
-  pixelHeight: number,
-): void {
-  if (overlay === undefined) {
-    return;
-  }
-
-  overlay.encode(encoder, view, format, pixelWidth, pixelHeight);
 }
 
 async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBootResult> {
@@ -196,6 +186,8 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
     ready: false,
     mode: "title",
     screenTitle: "Title Screen",
+    frameCount: 0,
+    inputEventCount: 0,
     width: size.guiWidth,
     height: size.guiHeight,
   };
@@ -256,6 +248,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
       url,
       deviceContext: deviceContextResult.context,
       target,
+      controller,
       screenManager,
       state,
       renderGuiFrameNow,
@@ -293,6 +286,7 @@ interface StartGpuTitleWorldOptions {
   readonly url: URL;
   readonly deviceContext: WebGpuDeviceContext;
   readonly target: BrowserCanvasTarget;
+  readonly controller: GpuGuiRuntimeController;
   readonly screenManager: ScreenManager;
   readonly state: GpuGuiRuntimeState;
   readonly renderGuiFrameNow: () => void;
@@ -327,10 +321,22 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<B
 
     options.state.mode = "world";
     options.state.screenTitle = "";
-    options.state.worldReady = true;
     options.state.worldResult = bootResult.run.result;
     options.screenManager.setScreen(null);
-    await renderWorldFrameToCanvas(bootResult.scene, options.canvas, bootResult.run.frame);
+    options.state.frameCount = 0;
+    options.state.inputEventCount = 0;
+    options.controller.worldRuntime = await startGpuWorldRuntime({
+      scene: bootResult.scene,
+      canvas: options.canvas,
+      initialCamera: bootResult.camera,
+      initialFrame: bootResult.run.frame,
+      state: options.state,
+      onError: (message) => {
+        options.state.mode = "error";
+        options.state.error = message;
+      },
+    });
+    options.state.worldReady = true;
     return bootResult.run.result;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -354,31 +360,6 @@ function createPinnedBrowserRendererHost(
     createCanvasTarget: () => target,
     createRenderWorldWorkerEndpoint: () => BROWSER_RENDERER_HOST.createRenderWorldWorkerEndpoint(),
   };
-}
-
-async function renderWorldFrameToCanvas(
-  scene: RendererScene,
-  canvas: HTMLCanvasElement,
-  frame: LevelRenderFrame,
-): Promise<void> {
-  const depthTarget = createSceneDepthTarget(scene.device, canvas.width, canvas.height);
-  try {
-    const encoder = scene.device.createCommandEncoder();
-    encodeSceneFrame(
-      scene,
-      frame,
-      {
-        view: scene.ctx.getCurrentTexture().createView(),
-        depthView: depthTarget.view,
-        format: scene.format,
-      },
-      encoder,
-    );
-    scene.device.queue.submit([encoder.finish()]);
-    await scene.device.queue.onSubmittedWorkDone();
-  } finally {
-    depthTarget.texture.destroy();
-  }
 }
 
 async function boot(): Promise<MainBootResult> {
@@ -448,86 +429,28 @@ async function runGeneratedWorldSmokeBoot(
   const scene = sceneResult.scene;
   const guiProbeOverlay = readGuiProbeEnabled(url) ? await createGuiProbeOverlay(scene) : undefined;
   const camera = scenario.steps.length === 1 ? requestedCamera ?? scenario.camera : undefined;
+  const runtimeCamera = camera ?? scenario.steps[scenario.steps.length - 1]?.camera ?? scenario.camera;
   try {
     const run = await runGeneratedWorldSmokeScenario({
       scene,
       scenario,
       camera,
-      target: createBrowserSmokeRenderTarget(canvas, guiProbeOverlay),
+      presentationHost: createGeneratedWorldBrowserPresentationHost({
+        canvas,
+        guiProbeOverlay,
+        readbackFormat: READBACK_FORMAT,
+      }),
       worldTransport: runtimeConfig.worldTransport,
       format: scene.format,
       lightingMode: renderConfig.lightingMode,
       liquidSimulationMode: renderConfig.liquidSimulationMode,
       onProgress: options.onProgress,
     });
-    return { ok: true, scene, run };
+    return { ok: true, scene, run, camera: runtimeCamera };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { ok: false, reason };
   }
-}
-
-function createBrowserSmokeRenderTarget(canvas: HTMLCanvasElement, guiProbeOverlay?: GuiOverlayHost): GeneratedWorldSmokeRenderTarget {
-  return {
-    get width() {
-      return canvas.width;
-    },
-    get height() {
-      return canvas.height;
-    },
-    format: READBACK_FORMAT,
-    renderFrame: async ({ scene, frame }) => {
-      const canvasDepthTarget = createSceneDepthTarget(scene.device, canvas.width, canvas.height);
-      const readbackDepthTarget = createSceneDepthTarget(scene.device, canvas.width, canvas.height);
-      const canvasTexture = scene.ctx.getCurrentTexture();
-      const canvasWorldView = canvasTexture.createView();
-      const canvasGuiView = canvasTexture.createView();
-      const readbackTexture = scene.device.createTexture({
-        size: { width: canvas.width, height: canvas.height },
-        format: READBACK_FORMAT,
-        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
-      });
-      try {
-        const encoder = scene.device.createCommandEncoder();
-        encodeSceneFrame(
-          scene,
-          frame,
-          {
-            view: canvasWorldView,
-            depthView: canvasDepthTarget.view,
-            format: scene.format,
-          },
-          encoder,
-        );
-        encodeGuiProbeOverlay(guiProbeOverlay, encoder, canvasGuiView, scene.format, canvas.width, canvas.height);
-        const readbackWorldView = readbackTexture.createView();
-        const readbackGuiView = readbackTexture.createView();
-        encodeSceneFrame(
-          scene,
-          frame,
-          {
-            view: readbackWorldView,
-            depthView: readbackDepthTarget.view,
-            format: READBACK_FORMAT,
-          },
-          encoder,
-        );
-        encodeGuiProbeOverlay(guiProbeOverlay, encoder, readbackGuiView, READBACK_FORMAT, canvas.width, canvas.height);
-        scene.device.queue.submit([encoder.finish()]);
-        await scene.device.queue.onSubmittedWorkDone();
-        return {
-          width: canvas.width,
-          height: canvas.height,
-          format: READBACK_FORMAT,
-          pixels: await readTextureRgba8(scene.device, readbackTexture, canvas.width, canvas.height),
-        };
-      } finally {
-        canvasDepthTarget.texture.destroy();
-        readbackDepthTarget.texture.destroy();
-        readbackTexture.destroy();
-      }
-    },
-  };
 }
 
 if (typeof window !== "undefined") {
