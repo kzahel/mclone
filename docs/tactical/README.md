@@ -171,20 +171,21 @@ Docs-only Client Runtime edits can stop at `git diff --check`. Pure type-only fa
 
 ## Player Movement / Netcode Arc
 
-Status: **paused**.
+Status: **ready to resume with a new integration tactical**.
 
-Player movement remains an important future gameplay/runtime divergence: we still want FPS-style high-Hz command prediction/reconciliation, and we still do not want vanilla's 20 TPS position-packet model as the final protocol. But the next movement work cannot be planned correctly until the client runtime arc defines `IntegratedServer`, `ClientRuntime`, `ClientWorld`, `PredictionService`, and presentation ownership.
+Player movement remains an important gameplay/runtime divergence: we still want FPS-style high-Hz command prediction/reconciliation, and we still do not want vanilla's 20 TPS position-packet model as the final protocol. The client runtime prerequisites that blocked this work are now landed through `ClientRuntime6`: `IntegratedServer`, `ClientRuntime`, `ClientWorld`, `PredictionService`, and presentation ownership exist for both worker singleplayer and remote clients.
 
-Use [`../player-movement-netcode.md`](../player-movement-netcode.md) only as constraint notes. The old `Movement3+` direction has been cleared out.
+Use [`../player-movement-netcode.md`](../player-movement-netcode.md) as constraint notes, not as a stale step-by-step implementation plan. The old `Movement3+` direction has been cleared out; redraft the next movement tactical from the current client-runtime architecture.
 
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
 | [`Movement0-shared-movement-body-and-collision.md`](Movement0-shared-movement-body-and-collision.md) | movement body, fixed-step core, full-block collision, step-up/grounding, vanilla source review | unit | **done** - first shared movement core; no prediction or protocol migration yet |
 | [`Movement1-command-stream-and-local-prediction.md`](Movement1-command-stream-and-local-prediction.md) | sequenced commands, command quanta, ring buffer predictor, replay tests | unit + runtime | **done** - deterministic command timeline and local prediction |
 | [`Movement2-authoritative-host-command-integration.md`](Movement2-authoritative-host-command-integration.md) | host command queue, ack snapshots, `set_player_input` command records, processing budgets | runtime + browser | **done** - sequenced command stream authority over current local worker/HTTP adapters without making transport cadence the movement model |
-| [`Movement3-client-prediction-runtime-ownership.md`](Movement3-client-prediction-runtime-ownership.md) | old client-prediction ownership tactical | docs | **paused** - superseded by the Client Runtime / Integrated Server arc |
 
-Movement resumes only after the client runtime arc provides a bounded client-world prediction view and proves singleplayer and multiplayer hydrate the same client replica. Redraft the next movement tactical from that architecture instead of continuing the old `Movement3` plan.
+Before grounded player physics depends on persisted/player-owned state, fix the remaining multiplayer identity shortcut: `sessionId` is a transport/session handle, while `playerId` should be a tracked player slot with a join name/profile. The current remote debug path still uses `playerId === sessionId`; do not carry that shortcut into movement, inventory, or persistence integration.
+
+The next movement tactical should integrate the shared movement body with host collision, client prediction, debug player input semantics, and singleplayer/remote parity from the current `ClientRuntime` / `ClientWorld` shape.
 
 ## Renderer oracle approach
 
@@ -222,9 +223,9 @@ WebRTC is intentionally deferred. The preferred path is:
 | [`R6-protocol-hardening.md`](R6-protocol-hardening.md) | protocol hardening: reconnect/resync, chunk interest management, baseline player/session state sync, error handling and versioning discipline | integration | **done** — the remote path now has versioned envelopes, resumable sessions, per-session chunk interest, and shared dedicated-host authority per save instead of one host per remote session |
 | [`R7-authoritative-player-loop.md`](R7-authoritative-player-loop.md) | authoritative player/session loop: player input commands, authoritative player-state snapshots, server-driven update flow, dedicated-host shared-session ticking | integration + browser smoke | **done** — the host/client boundary now carries player input, authoritative player-state snapshots, and polled server-originated updates on top of shared session authority |
 | [`R8-authoritative-browser-control-integration.md`](R8-authoritative-browser-control-integration.md) | authoritative browser control/camera integration: bind debug/browser camera to `player_state`, translate browser input to `set_player_input`, schedule live update polling, keep renderer presentation-only | browser smoke + live debug path | **done** — the live browser debug path now drives authoritative player input/state against the same host boundary as remote clients, and chunk interest follows authoritative player state instead of a renderer-owned free-cam |
-| `R9-` | optional browser-hosted peer/server or push-capable transport: WebSocket/WebTransport/WebRTC-style adapter reusing the same protocol and host boundary if polling stops fitting | integration | slot in a different transport later without redesigning the engine around it up front |
+| [`R9-websocket-message-channel.md`](R9-websocket-message-channel.md) | WebSocket remote transport, request/reply command envelopes, server-pushed updates, reusable remote wire codec, HTTP polling retirement path | integration + browser smoke | **next** - make the dedicated remote path a persistent message channel before grounding movement/player-state traffic on it |
 
-This `R` arc records the landed host/transport foundation. New runtime work should continue through the Client Runtime / Integrated Server arc instead of adding `R9` transport work by default.
+This `R` arc records the landed host/transport foundation. The client runtime arc is now landed far enough that `R9` can replace the remote HTTP polling adapter without reopening the authority split.
 
 ## Runtime data / protocol / loading arc (rough, cross-cutting)
 

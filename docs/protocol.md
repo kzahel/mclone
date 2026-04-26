@@ -60,7 +60,7 @@ The durable lifecycle should be explicit even if current code still folds some s
    The host validates save id, seed, preset, storage schema, and world metadata. If a requested save does not exist and creation is allowed, the host creates metadata.
 
 2. **Join session**
-   The client receives a session id, player id, world metadata, and initial authoritative state.
+   The client presents a player name/profile for the world. The host allocates or resumes an authoritative player slot, then returns a session id, player id, player name/profile facts, world metadata, and initial authoritative state.
 
 3. **Resume session**
    A client can present a previous session id. The host either resumes it or returns a stable error that lets the client reopen and resync.
@@ -75,6 +75,18 @@ The durable lifecycle should be explicit even if current code still folds some s
    The host can eventually release per-session interest and player state while preserving world/save state.
 
 Current protocol names may evolve incrementally, but the semantics should move toward this lifecycle.
+
+## Player Identity And Slots
+
+Keep connection/session identity separate from player identity:
+
+- `sessionId` is a connection/resume handle. It owns transport state, chunk interest, pending messages, and reconnect behavior.
+- `playerId` is the authoritative player slot inside a world/save. Movement, inventory, game mode, spawn position, and future persistence attach to this slot.
+- player name/profile data is the human-facing join identity. Local singleplayer can default it, but multiplayer joins should provide it explicitly.
+- resuming by `sessionId` reconnects the same active session and therefore the same player slot while the session exists.
+- future profile-based resume may reclaim a persisted player slot even after the transport session expired, but that should be explicit and not inferred from a random session id.
+
+The current implementation still folds open/create and join into `open_world`, and the remote debug path currently uses `playerId === sessionId` as a compatibility shortcut. Do not build grounded movement, inventory, or persisted player state on that shortcut. The next multiplayer-facing runtime slice should split or model join semantics so a session references a tracked player slot with a name/profile instead of being the player slot.
 
 ## Client Commands
 
@@ -93,7 +105,7 @@ Likely future commands:
 
 | Command | Purpose |
 |---|---|
-| `join_world` / `resume_session` | split session semantics from world creation/opening if useful |
+| `join_world` / `resume_session` | split named player-slot join semantics from world creation/opening |
 | `set_chunk_interest` | generalize beyond camera-centered chunk views |
 | `ack_world_updates` | support reliable streaming transports |
 | `interact_block` / `use_item` | server-authoritative gameplay commands |
@@ -187,11 +199,11 @@ Do not send hot chunk payloads as large name/property object graphs once the pac
 
 For remote transports, it is acceptable to keep small control messages in JSON while moving chunk section payloads to binary records or transferable buffers.
 
-## Polling And Push Transports
+## WebSocket Remote Transport
 
-HTTP polling is acceptable as an interim transport because the current gameplay loop is still small.
+The next remote transport target is a persistent WebSocket-backed message channel.
 
-Do not redesign authority around polling. The logical protocol should be ready to move to push delivery when measurements or gameplay needs require it.
+Do not redesign authority around WebSocket. The transport changes delivery mechanics only; logical messages, host authority, client-world hydration, prediction facts, and chunk ownership remain the same.
 
 Transport adapters should preserve three logical lanes:
 
@@ -199,12 +211,14 @@ Transport adapters should preserve three logical lanes:
 - realtime superseding lane: movement command bundles and player/entity snapshots where newer data can replace older unprocessed data
 - bulk/binary lane: packed chunk, light, and similar large payloads; these may use binary framing or transferables, but remain logically reliable unless a later protocol explicitly says otherwise
 
-Movement correctness must not depend on HTTP request cadence. A polling response may carry movement commands and snapshots today, but the movement model is sequenced command records plus authoritative ack snapshots. WebSocket, WebTransport, or WebRTC adapters later should implement the same logical records rather than inventing a new gameplay protocol.
+Movement correctness must not depend on transport cadence. The movement model is sequenced command records plus authoritative ack snapshots. WebSocket should carry those same logical records instead of inventing a different gameplay protocol.
 
-A push-capable transport becomes justified when:
+The current HTTP polling implementation is now a compatibility adapter, not the target remote path. WebSocket migration should:
 
-- player/entity update frequency makes polling latency or overhead visible
-- block/entity updates need server-initiated delivery between client commands
-- reconnect/replay semantics are clear enough to preserve correctness
+- replace remote `poll_world_updates` network requests with server-pushed updates
+- keep a local drain API on `ClientRuntime` so the presentation loop can hydrate queued pushed messages without owning sockets
+- split the existing HTTP-specific envelope code from reusable message serialization
+- keep session resume, player slot identity, chunk interest, and reconnect behavior explicit
+- make packed chunk/light payloads ready for binary WebSocket frames after the initial JSON message-channel migration is stable
 
-Moving to WebSocket or another push transport should not change world ownership or message meaning. WebSocket is the first likely push lane because it preserves reliable ordered delivery. WebRTC/WebTransport datagram lanes are later options only if measurements justify lossy realtime traffic, and they require explicit command bundling, sequence-gap handling, authoritative acknowledgements, periodic baselines, and reliable control/chunk lanes.
+WebRTC/WebTransport datagram lanes are later options only if measurements justify lossy realtime traffic, and they require explicit command bundling, sequence-gap handling, authoritative acknowledgements, periodic baselines, and reliable control/chunk lanes.

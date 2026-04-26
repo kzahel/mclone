@@ -73,7 +73,7 @@ Do not add:
 - Commands are ordered records. Do not introduce or depend on a mutable latest-input slot.
 - `commandQuantumUs` and `stepCount` are the only movement time source in this layer.
 - A command with `stepCount = 2` must simulate two fixed steps, not one doubled step.
-- Snap/replay mutates simulation truth. Any smoothing belongs to `Movement3`.
+- Snap/replay mutates simulation truth. Any smoothing belongs to a later presentation/integration slice.
 - The predictor must keep enough diagnostics to distinguish replay backlog, command dt mismatch, physics revision mismatch, collision revision mismatch, position error, velocity error, grounded flip, jump-state mismatch, and missing collision data.
 - This slice may define a protocol-ready command shape, but it must not wire that shape into the live host/client message model yet.
 

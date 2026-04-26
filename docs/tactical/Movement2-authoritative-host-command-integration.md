@@ -96,4 +96,4 @@ Minimum:
 
 ## Next Step
 
-`Movement3-client-prediction-runtime-ownership.md`: decide the client-side prediction owner before adding smoothing. The render/UI thread should stay lightweight; command buffering, replay, collision-relevant prediction facts, and reconciliation need a client runtime boundary that works for both local singleplayer and remote multiplayer.
+Redraft the next movement tactical from the landed `ClientRuntime` / `ClientWorld` / `PredictionService` architecture. The next implementation work should replace the compatibility fly body with shared movement physics and collision on the host, wire client prediction through `PredictionService`, and avoid baking in the current `playerId === sessionId` debug shortcut.

@@ -1,10 +1,10 @@
 # Player Movement And Netcode Notes
 
-Status: **paused as an implementation plan**.
+Status: **constraint notes for the resumed movement work**.
 
-The old movement/netcode sketch was useful for recording command-stream and prediction constraints, but it assumed too much about where the client prediction world lives. After the vanilla networking/client-world source review in [`minecraft-client-replica-research.md`](./minecraft-client-replica-research.md), future movement work must wait for the client runtime architecture arc in [`tactical/README.md`](./tactical/README.md).
+The old movement/netcode sketch was useful for recording command-stream and prediction constraints, but it assumed too much about where the client prediction world lives. The client runtime architecture arc in [`tactical/README.md`](./tactical/README.md) has now landed the needed `IntegratedServer`, `ClientRuntime`, `ClientWorld`, `PredictionService`, and presentation ownership surfaces.
 
-Do not start new `Movement3+` tactical work from this document. Treat it as constraint notes only until `mclone` has a clean integrated-server, client-world, prediction-service, and presentation-thread split.
+Do not resurrect the old `Movement3+` tactical direction from this document. Treat this file as constraint notes for a fresh movement integration tactical based on the current client-runtime architecture.
 
 ## What Stays True
 
@@ -134,7 +134,7 @@ This is not yet an implementation plan. The missing prerequisite is the client r
 
 ## Resume Criteria
 
-Draft a new movement tactical only after the client runtime arc has established:
+The previous resume criteria are now satisfied by the client runtime arc:
 
 - an `IntegratedServer` / authoritative host facade for browser singleplayer
 - a `ClientRuntime` that consumes the same logical protocol in singleplayer and multiplayer
@@ -143,4 +143,4 @@ Draft a new movement tactical only after the client runtime arc has established:
 - a prediction-service API that can read a bounded collision/entity view without host access
 - tests or probes proving singleplayer and remote clients use the same client-world hydration path
 
-At that point, redraft movement from first principles. Do not continue the old `Movement3` text.
+The next movement tactical should be redrafted from first principles. It should also account for named join/player-slot semantics before player movement becomes persistent state: a session is a transport/resume handle, while a player id should refer to an authoritative player slot in a world/save.
