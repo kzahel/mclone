@@ -21,13 +21,10 @@ import {
   type RendererScene,
 } from "./scene-setup";
 import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "./browser-render-config";
-
-const GENERATED_SEED = 12_345n;
-const DEFAULT_SMOKE_CAMERA = {
-  position: new Vec3(960.5, 132.0, -8127.5),
-  xRot: 60.0,
-  yRot: 225.0,
-} as const satisfies CameraState;
+import {
+  GENERATED_WORLD_SMOKE_SCENARIO,
+  runGeneratedWorldSmokePlayerInput,
+} from "./generated-world-smoke-scenario";
 
 type BootWorldTransport = "worker" | "remote";
 
@@ -145,12 +142,6 @@ function rgba8FromColor(color: readonly [number, number, number, number]): reado
   ];
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 function validateShaderPipelines(
   pipelineCache: RenderPipelineCache,
   colorFormat: GPUTextureFormat,
@@ -244,11 +235,12 @@ async function boot(): Promise<BootResult> {
   }
 
   const sceneResult = await initializeRendererScene(canvas, {
-    seed: GENERATED_SEED,
+    seed: GENERATED_WORLD_SMOKE_SCENARIO.seed,
     viewDistance: renderConfig.viewDistance,
     renderDistance: renderConfig.renderDistance,
     worldTransport: runtimeConfig.worldTransport,
     remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
+    preset: GENERATED_WORLD_SMOKE_SCENARIO.preset,
     engineConfig: {
       lightingMode: renderConfig.lightingMode,
       liquidSimulationMode: renderConfig.liquidSimulationMode,
@@ -262,7 +254,7 @@ async function boot(): Promise<BootResult> {
   }
   const scene = sceneResult.scene;
   const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
-  const camera = requestedCamera ?? DEFAULT_SMOKE_CAMERA;
+  const camera = requestedCamera ?? GENERATED_WORLD_SMOKE_SCENARIO.camera;
   let frame: LevelRenderFrame;
   try {
     frame = await renderSmokeCamera(scene, camera, expectedLoadedChunkCount);
@@ -278,30 +270,7 @@ async function boot(): Promise<BootResult> {
     return { ok: false, reason: "camera-driven level renderer produced no solid drawables for the generated terrain scene" };
   }
 
-  const initialPlayerState = scene.clientRuntime.publishPresentationState().localPlayerState;
-  if (initialPlayerState !== undefined) {
-    await scene.clientRuntime.sendPlayerCommand({
-      type: "set_player_input",
-      input: {
-        sequence: 1,
-        moveX: 1,
-        moveY: 0,
-        moveZ: 0,
-        yaw: 180,
-        pitch: 60,
-      },
-    });
-    for (let attempt = 0; attempt < 5; attempt++) {
-      await sleep(60);
-      if (await scene.clientRuntime.drainTransportUpdates()) {
-        applyRenderWorldDirtySections(scene);
-      }
-      const updatedPlayerState = scene.clientRuntime.publishPresentationState().localPlayerState;
-      if (updatedPlayerState !== undefined && updatedPlayerState.revision > initialPlayerState.revision) {
-        break;
-      }
-    }
-  }
+  await runGeneratedWorldSmokePlayerInput(scene, GENERATED_WORLD_SMOKE_SCENARIO);
 
   scene.device.pushErrorScope("validation");
   validateShaderPipelines(scene.pipelineCache, scene.format, SCENE_DEPTH_FORMAT);
