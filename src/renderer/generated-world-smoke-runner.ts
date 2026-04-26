@@ -92,6 +92,8 @@ export interface GeneratedWorldSmokeScenarioResult extends GeneratedWorldSmokeRe
   readonly saveId: string;
   readonly stepName: string;
   readonly stepIndex: number;
+  readonly frameIndex?: number;
+  readonly presentationDelayMs?: number;
   readonly chunkCenter: GeneratedWorldSmokeChunkCenter;
   readonly expectedChunkCenter: GeneratedWorldSmokeChunkCenter;
   readonly sessionChunkCenter?: GeneratedWorldSmokeChunkCenter;
@@ -118,6 +120,8 @@ export interface GeneratedWorldSmokeStepResult extends GeneratedWorldSmokeResult
   readonly meshTransport: "worker";
   readonly stepName: string;
   readonly stepIndex: number;
+  readonly frameIndex?: number;
+  readonly presentationDelayMs?: number;
   readonly chunkCenter: GeneratedWorldSmokeChunkCenter;
   readonly expectedChunkCenter: GeneratedWorldSmokeChunkCenter;
   readonly sessionChunkCenter?: GeneratedWorldSmokeChunkCenter;
@@ -298,6 +302,7 @@ async function runGeneratedWorldSmokeScenarioStep(
   if (step.playerInput !== undefined) {
     await runGeneratedWorldSmokePlayerInputCommand(options.scene, step.playerInput);
   }
+  await waitForGeneratedWorldSmokePresentationDelay(options.scene, step, scenario);
 
   options.scene.levelRenderer.allChanged();
   const frameResult = collectGeneratedWorldSmokeFrameResult(
@@ -391,6 +396,23 @@ async function runGeneratedWorldSmokePlayerInputCommandForRuntime(
   }
 }
 
+async function waitForGeneratedWorldSmokePresentationDelay(
+  scene: RendererScene,
+  step: GeneratedWorldSmokeScenarioStep,
+  scenario: GeneratedWorldSmokeScenario,
+): Promise<void> {
+  const delayMs = step.presentationDelayMs ?? scenario.cadence?.intervalMs ?? 0;
+  if (delayMs <= 0) {
+    return;
+  }
+
+  await sleep(delayMs);
+  if (await scene.clientRuntime.drainTransportUpdates()) {
+    applyRenderWorldDirtySections(scene);
+    scene.levelRenderer.allChanged();
+  }
+}
+
 export async function validateGeneratedWorldSmokePipelines(
   scene: RendererScene,
   colorFormats: readonly GPUTextureFormat[],
@@ -469,6 +491,8 @@ function createGeneratedWorldSmokeStepResult(
     meshTransport: options.meshTransport ?? "worker",
     stepName: step.name,
     stepIndex,
+    frameIndex: step.frameIndex,
+    presentationDelayMs: step.presentationDelayMs ?? scenario.cadence?.intervalMs,
     chunkCenter: frameResult.chunkCenter,
     expectedChunkCenter: frameResult.expectedChunkCenter,
     sessionChunkCenter: sessionChunkView === undefined

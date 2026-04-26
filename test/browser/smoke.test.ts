@@ -3,6 +3,7 @@ import { type BootResult } from "../../src/renderer/main.ts";
 import {
   createGeneratedWorldSmokeSearchParams,
   GENERATED_WORLD_SMOKE_SCENARIO,
+  GENERATED_WORLD_TICK_CADENCE_SCENARIO,
   GENERATED_WORLD_TRANSITION_SCENARIO,
   type GeneratedWorldSmokeScenario,
   validateGeneratedWorldSmokeResult,
@@ -11,6 +12,7 @@ import {
 const REMOTE_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-remote-smoke.png";
 const WORKER_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-smoke.png";
 const WORKER_TRANSITION_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-transition-smoke.png";
+const WORKER_TICK_CADENCE_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-tick-cadence-smoke.png";
 
 function createSmokeParams(
   extra: Record<string, string>,
@@ -40,6 +42,13 @@ function createWorkerTransitionSmokeUrl(): string {
   }, GENERATED_WORLD_TRANSITION_SCENARIO).toString()}`;
 }
 
+function createWorkerTickCadenceSmokeUrl(): string {
+  return `/smoke.html?${createSmokeParams({
+    worldTransport: "worker",
+    worldStorageMode: "none",
+  }, GENERATED_WORLD_TICK_CADENCE_SCENARIO).toString()}`;
+}
+
 async function bootPage(page: Page, url: string): Promise<BootResult> {
   await page.goto(url, { waitUntil: "load" });
   await page.waitForFunction(() => typeof window.__mcloneReady !== "undefined");
@@ -67,7 +76,7 @@ function expectRenderedSmokeResult(
   }, scenario)).toEqual([]);
 }
 
-test.setTimeout(45_000);
+test.setTimeout(60_000);
 
 test("WebGPU boot succeeds against the remote Node host with two browser clients", async ({ browser, remoteWorldHostUrl }) => {
   const context = await browser.newContext();
@@ -113,5 +122,27 @@ test("WebGPU generated-world transition scenario settles against the worker inte
   expectRenderedSmokeResult(result, "worker", GENERATED_WORLD_TRANSITION_SCENARIO);
   expect(result.steps.map((step) => step.stepName)).toEqual(["initial", "shifted"]);
   expect(result.steps[0]?.chunkCenter).not.toEqual(result.steps[1]?.chunkCenter);
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("WebGPU generated-world tick cadence scenario advances against the worker integrated server", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(String(err)));
+
+  const result = await bootPage(page, createWorkerTickCadenceSmokeUrl());
+  await page.locator("#renderer").screenshot({ path: WORKER_TICK_CADENCE_SMOKE_SCREENSHOT_PATH });
+
+  expectRenderedSmokeResult(result, "worker", GENERATED_WORLD_TICK_CADENCE_SCENARIO);
+  expect(result.steps.map((step) => step.stepName)).toEqual([
+    "tick-01-forward",
+    "tick-02-diagonal",
+    "tick-03-strafe",
+    "tick-04-release",
+  ]);
+  expect(result.steps.map((step) => step.playerInputSequence)).toEqual([1, 2, 3, 4]);
+  expect(result.steps.map((step) => step.frameIndex)).toEqual([0, 1, 2, 3]);
+  expect(result.steps.at(-1)?.playerTick).toBeGreaterThan(result.steps[0]?.playerTick ?? 0);
+  expect(result.steps.at(-1)?.playerStateRevision).toBeGreaterThan(result.steps[0]?.playerStateRevision ?? 0);
+  expect(result.steps.at(-1)?.playerPosition).not.toEqual(result.steps[0]?.playerPosition);
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });

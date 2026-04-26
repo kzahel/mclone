@@ -7,6 +7,7 @@ import {
 } from "../src/renderer/generated-world-headless-harness.ts";
 import {
   GENERATED_WORLD_SMOKE_SCENARIO,
+  GENERATED_WORLD_TICK_CADENCE_SCENARIO,
   GENERATED_WORLD_TRANSITION_SCENARIO,
   type GeneratedWorldSmokeScenario,
   validateGeneratedWorldSmokeResult,
@@ -129,8 +130,10 @@ async function writeScenarioArtifacts(run: GeneratedWorldSmokeRun): Promise<void
 
 const smokeResult = await runDenoGeneratedWorldScenario(GENERATED_WORLD_SMOKE_SCENARIO);
 const transitionResult = await runDenoGeneratedWorldScenario(GENERATED_WORLD_TRANSITION_SCENARIO);
+const tickCadenceResult = await runDenoGeneratedWorldScenario(GENERATED_WORLD_TICK_CADENCE_SCENARIO);
 
 console.log(JSON.stringify({
   ...smokeResult,
   transition: transitionResult,
+  tickCadence: tickCadenceResult,
 }));

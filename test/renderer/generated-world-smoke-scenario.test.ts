@@ -2,7 +2,9 @@ import { describe, expect, test } from "vitest";
 import {
   createGeneratedWorldSmokeSearchParams,
   GENERATED_WORLD_SMOKE_SCENARIO,
+  GENERATED_WORLD_TICK_CADENCE_SCENARIO,
   GENERATED_WORLD_TRANSITION_SCENARIO,
+  getGeneratedWorldSmokeScenarioById,
   getGeneratedWorldSmokeStepExpectedChunkCenter,
   getGeneratedWorldSmokeStepExpectedLoadedChunkCount,
   type GeneratedWorldSmokeResultLike,
@@ -36,6 +38,17 @@ describe("generated-world smoke scenarios", () => {
     );
   });
 
+  test("tick cadence scenario declares repeated input frames", () => {
+    expect(getGeneratedWorldSmokeScenarioById("tick-cadence")).toBe(GENERATED_WORLD_TICK_CADENCE_SCENARIO);
+    expect(GENERATED_WORLD_TICK_CADENCE_SCENARIO.cadence?.intervalMs).toBe(50);
+    expect(GENERATED_WORLD_TICK_CADENCE_SCENARIO.steps.map((step) => step.frameIndex)).toEqual([0, 1, 2, 3]);
+    expect(GENERATED_WORLD_TICK_CADENCE_SCENARIO.steps.map((step) => step.playerInput?.sequence)).toEqual([1, 2, 3, 4]);
+    expect(new Set(GENERATED_WORLD_TICK_CADENCE_SCENARIO.steps.map((step) => {
+      const center = getGeneratedWorldSmokeStepExpectedChunkCenter(step);
+      return `${center.x.toString()},${center.z.toString()}`;
+    }))).toHaveLength(1);
+  });
+
   test("search params carry scenario id and first-step camera", () => {
     const params = createGeneratedWorldSmokeSearchParams(
       { worldTransport: "worker" },
@@ -45,6 +58,44 @@ describe("generated-world smoke scenarios", () => {
     expect(params.get("generatedWorldScenario")).toBe("transition");
     expect(params.get("cameraX")).toBe(GENERATED_WORLD_TRANSITION_SCENARIO.steps[0]!.camera.position.x.toString());
     expect(params.get("worldTransport")).toBe("worker");
+  });
+
+  test("validation accepts per-step tick cadence results", () => {
+    const stepResults = GENERATED_WORLD_TICK_CADENCE_SCENARIO.steps.map((step, stepIndex) =>
+      makeStepResult(GENERATED_WORLD_TICK_CADENCE_SCENARIO, step, stepIndex)
+    );
+    const result: GeneratedWorldSmokeResultLike = {
+      ...stepResults[stepResults.length - 1]!,
+      steps: stepResults,
+    };
+
+    expect(validateGeneratedWorldSmokeResult(result, {
+      expectedWorldTransport: "worker",
+      requireReadback: true,
+      requirePlayerInput: true,
+      requireSteps: true,
+    }, GENERATED_WORLD_TICK_CADENCE_SCENARIO)).toEqual([]);
+  });
+
+  test("tick cadence validation rejects stalled player progression", () => {
+    const stepResults = GENERATED_WORLD_TICK_CADENCE_SCENARIO.steps.map((step, stepIndex) =>
+      makeStepResult(GENERATED_WORLD_TICK_CADENCE_SCENARIO, step, stepIndex)
+    );
+    stepResults[2] = {
+      ...stepResults[2]!,
+      playerTick: stepResults[1]!.playerTick,
+    };
+    const result: GeneratedWorldSmokeResultLike = {
+      ...stepResults[stepResults.length - 1]!,
+      steps: stepResults,
+    };
+
+    expect(validateGeneratedWorldSmokeResult(result, {
+      expectedWorldTransport: "worker",
+      requireReadback: true,
+      requirePlayerInput: true,
+      requireSteps: true,
+    }, GENERATED_WORLD_TICK_CADENCE_SCENARIO)).toContain("steps[2].expected playerTick to advance past 2, got 2");
   });
 
   test("validation accepts per-step transition results", () => {
@@ -91,6 +142,8 @@ function makeStepResult(
     worldTransport: "worker",
     stepName: step.name,
     stepIndex,
+    frameIndex: step.frameIndex,
+    presentationDelayMs: step.presentationDelayMs ?? scenario.cadence?.intervalMs,
     chunkCenter,
     expectedChunkCenter: chunkCenter,
     sessionChunkCenter: chunkCenter,
@@ -115,6 +168,6 @@ function makeStepResult(
     playerInputSequence: inputSequence,
     playerStateRevision: stepIndex + 1,
     playerTick: stepIndex + 1,
-    playerPosition: [0, 1, 2],
+    playerPosition: [stepIndex, 1, 2],
   };
 }

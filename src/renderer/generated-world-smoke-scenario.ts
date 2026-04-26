@@ -17,11 +17,18 @@ export interface GeneratedWorldSmokeReadbackExpectation {
 
 export interface GeneratedWorldSmokeScenarioStep {
   readonly name: string;
+  readonly frameIndex?: number;
   readonly camera: CameraState;
   readonly playerInput?: SetPlayerInputRequest["input"];
+  readonly presentationDelayMs?: number;
   readonly expectedLoadedChunkCount?: number;
   readonly expectedChunkCenter?: GeneratedWorldSmokeChunkCenter;
   readonly readback?: GeneratedWorldSmokeReadbackExpectation;
+}
+
+export interface GeneratedWorldSmokeScenarioCadence {
+  readonly intervalMs: number;
+  readonly requirePlayerProgression?: boolean;
 }
 
 export interface GeneratedWorldSmokeScenario {
@@ -41,6 +48,7 @@ export interface GeneratedWorldSmokeScenario {
   readonly fogColorHex: string;
   readonly minimumNonClearPixels: number;
   readonly playerInput: SetPlayerInputRequest["input"];
+  readonly cadence?: GeneratedWorldSmokeScenarioCadence;
   readonly steps: readonly GeneratedWorldSmokeScenarioStep[];
 }
 
@@ -48,6 +56,8 @@ export interface GeneratedWorldSmokeResultLike {
   readonly worldTransport?: "worker" | "remote";
   readonly stepName?: string;
   readonly stepIndex?: number;
+  readonly frameIndex?: number;
+  readonly presentationDelayMs?: number;
   readonly chunkCenter?: GeneratedWorldSmokeChunkCenter;
   readonly expectedChunkCenter?: GeneratedWorldSmokeChunkCenter;
   readonly sessionChunkCenter?: GeneratedWorldSmokeChunkCenter;
@@ -114,6 +124,55 @@ const TRANSITION_PLAYER_INPUT: SetPlayerInputRequest["input"] = {
   pitch: 60,
 };
 
+const TICK_CADENCE_INTERVAL_MS = 50;
+
+const TICK_CADENCE_PLAYER_INPUTS: readonly SetPlayerInputRequest["input"][] = [
+  {
+    sequence: 1,
+    moveX: 0,
+    moveY: 0,
+    moveZ: 1,
+    yaw: 225,
+    pitch: 60,
+    clientTimeUs: 50_000,
+    commandQuantumUs: 50_000,
+    stepCount: 1,
+  },
+  {
+    sequence: 2,
+    moveX: 1,
+    moveY: 0,
+    moveZ: 1,
+    yaw: 225,
+    pitch: 60,
+    clientTimeUs: 100_000,
+    commandQuantumUs: 50_000,
+    stepCount: 1,
+  },
+  {
+    sequence: 3,
+    moveX: -1,
+    moveY: 0,
+    moveZ: 0,
+    yaw: 210,
+    pitch: 60,
+    clientTimeUs: 150_000,
+    commandQuantumUs: 50_000,
+    stepCount: 1,
+  },
+  {
+    sequence: 4,
+    moveX: 0,
+    moveY: 0,
+    moveZ: 0,
+    yaw: 210,
+    pitch: 60,
+    clientTimeUs: 200_000,
+    commandQuantumUs: 50_000,
+    stepCount: 1,
+  },
+];
+
 export const GENERATED_WORLD_SMOKE_SCENARIO: GeneratedWorldSmokeScenario = {
   id: "static",
   seed: 12_345n,
@@ -137,6 +196,7 @@ export const GENERATED_WORLD_SMOKE_SCENARIO: GeneratedWorldSmokeScenario = {
   steps: [
     {
       name: "static",
+      frameIndex: 0,
       camera: STATIC_CAMERA,
       playerInput: STATIC_PLAYER_INPUT,
       readback: {
@@ -154,6 +214,7 @@ export const GENERATED_WORLD_TRANSITION_SCENARIO: GeneratedWorldSmokeScenario = 
   steps: [
     {
       name: "initial",
+      frameIndex: 0,
       camera: STATIC_CAMERA,
       playerInput: STATIC_PLAYER_INPUT,
       readback: {
@@ -162,6 +223,7 @@ export const GENERATED_WORLD_TRANSITION_SCENARIO: GeneratedWorldSmokeScenario = 
     },
     {
       name: "shifted",
+      frameIndex: 1,
       camera: TRANSITION_CAMERA,
       playerInput: TRANSITION_PLAYER_INPUT,
       readback: {
@@ -171,15 +233,70 @@ export const GENERATED_WORLD_TRANSITION_SCENARIO: GeneratedWorldSmokeScenario = 
   ],
 };
 
+export const GENERATED_WORLD_TICK_CADENCE_SCENARIO: GeneratedWorldSmokeScenario = {
+  ...GENERATED_WORLD_SMOKE_SCENARIO,
+  id: "tick-cadence",
+  outputPath: "/tmp/mclone-deno-generated-world-tick-cadence-04-release.png",
+  playerInput: TICK_CADENCE_PLAYER_INPUTS[TICK_CADENCE_PLAYER_INPUTS.length - 1]!,
+  cadence: {
+    intervalMs: TICK_CADENCE_INTERVAL_MS,
+    requirePlayerProgression: true,
+  },
+  steps: [
+    {
+      name: "tick-01-forward",
+      frameIndex: 0,
+      camera: STATIC_CAMERA,
+      playerInput: TICK_CADENCE_PLAYER_INPUTS[0]!,
+      readback: {
+        outputPath: "/tmp/mclone-deno-generated-world-tick-cadence-01-forward.png",
+      },
+    },
+    {
+      name: "tick-02-diagonal",
+      frameIndex: 1,
+      camera: STATIC_CAMERA,
+      playerInput: TICK_CADENCE_PLAYER_INPUTS[1]!,
+      readback: {
+        outputPath: "/tmp/mclone-deno-generated-world-tick-cadence-02-diagonal.png",
+      },
+    },
+    {
+      name: "tick-03-strafe",
+      frameIndex: 2,
+      camera: STATIC_CAMERA,
+      playerInput: TICK_CADENCE_PLAYER_INPUTS[2]!,
+      readback: {
+        outputPath: "/tmp/mclone-deno-generated-world-tick-cadence-03-strafe.png",
+      },
+    },
+    {
+      name: "tick-04-release",
+      frameIndex: 3,
+      camera: STATIC_CAMERA,
+      playerInput: TICK_CADENCE_PLAYER_INPUTS[3]!,
+      readback: {
+        outputPath: "/tmp/mclone-deno-generated-world-tick-cadence-04-release.png",
+      },
+    },
+  ],
+};
+
 export const GENERATED_WORLD_SMOKE_SCENARIOS = {
   static: GENERATED_WORLD_SMOKE_SCENARIO,
   transition: GENERATED_WORLD_TRANSITION_SCENARIO,
+  tickCadence: GENERATED_WORLD_TICK_CADENCE_SCENARIO,
 } as const;
 
 export function getGeneratedWorldSmokeScenarioById(id: string | null | undefined): GeneratedWorldSmokeScenario {
-  return id === GENERATED_WORLD_TRANSITION_SCENARIO.id
-    ? GENERATED_WORLD_TRANSITION_SCENARIO
-    : GENERATED_WORLD_SMOKE_SCENARIO;
+  switch (id) {
+    case GENERATED_WORLD_TRANSITION_SCENARIO.id:
+      return GENERATED_WORLD_TRANSITION_SCENARIO;
+    case GENERATED_WORLD_TICK_CADENCE_SCENARIO.id:
+      return GENERATED_WORLD_TICK_CADENCE_SCENARIO;
+    default:
+      return GENERATED_WORLD_SMOKE_SCENARIO;
+  }
 }
 
 export function getGeneratedWorldSmokeExpectedLoadedChunkCount(
@@ -287,6 +404,9 @@ export function validateGeneratedWorldSmokeResult(
     for (let index = 0; index < stepCount; index++) {
       validateGeneratedWorldSmokeStepResult(stepResults[index]!, scenario, steps[index]!, index, options, errors);
     }
+    if (scenario.cadence?.requirePlayerProgression === true) {
+      validateGeneratedWorldSmokeStepProgression(stepResults, errors);
+    }
   }
 
   return errors;
@@ -306,7 +426,65 @@ function validateGeneratedWorldSmokeStepResult(
   if (result.stepIndex !== stepIndex) {
     errors.push(`expected steps[${stepIndex.toString()}].stepIndex=${stepIndex.toString()}, got ${result.stepIndex?.toString() ?? "undefined"}`);
   }
+  if (step.frameIndex !== undefined && result.frameIndex !== step.frameIndex) {
+    errors.push(`expected steps[${stepIndex.toString()}].frameIndex=${step.frameIndex.toString()}, got ${result.frameIndex?.toString() ?? "undefined"}`);
+  }
+  if (step.presentationDelayMs !== undefined && result.presentationDelayMs !== step.presentationDelayMs) {
+    errors.push(`expected steps[${stepIndex.toString()}].presentationDelayMs=${step.presentationDelayMs.toString()}, got ${result.presentationDelayMs?.toString() ?? "undefined"}`);
+  } else if (scenario.cadence !== undefined && result.presentationDelayMs !== scenario.cadence.intervalMs) {
+    errors.push(`expected steps[${stepIndex.toString()}].presentationDelayMs=${scenario.cadence.intervalMs.toString()}, got ${result.presentationDelayMs?.toString() ?? "undefined"}`);
+  }
   validateGeneratedWorldSmokeResultAgainstStep(result, options, scenario, step, errors, `steps[${stepIndex.toString()}].`);
+}
+
+function validateGeneratedWorldSmokeStepProgression(
+  stepResults: readonly GeneratedWorldSmokeResultLike[],
+  errors: string[],
+): void {
+  let previousInputSequence: number | undefined;
+  let previousPlayerStateRevision: number | undefined;
+  let previousPlayerTick: number | undefined;
+  let firstPlayerPosition: readonly number[] | undefined;
+  let lastPlayerPosition: readonly number[] | undefined;
+
+  for (let index = 0; index < stepResults.length; index++) {
+    const result = stepResults[index]!;
+    const prefix = `steps[${index.toString()}].`;
+    if (result.playerInputSequence === undefined) {
+      errors.push(`${prefix}expected playerInputSequence for cadence progression`);
+    } else if (previousInputSequence !== undefined && result.playerInputSequence <= previousInputSequence) {
+      errors.push(`${prefix}expected playerInputSequence to advance past ${previousInputSequence.toString()}, got ${result.playerInputSequence.toString()}`);
+    }
+    if (result.playerStateRevision === undefined) {
+      errors.push(`${prefix}expected playerStateRevision for cadence progression`);
+    } else if (previousPlayerStateRevision !== undefined && result.playerStateRevision <= previousPlayerStateRevision) {
+      errors.push(`${prefix}expected playerStateRevision to advance past ${previousPlayerStateRevision.toString()}, got ${result.playerStateRevision.toString()}`);
+    }
+    if (result.playerTick === undefined) {
+      errors.push(`${prefix}expected playerTick for cadence progression`);
+    } else if (previousPlayerTick !== undefined && result.playerTick <= previousPlayerTick) {
+      errors.push(`${prefix}expected playerTick to advance past ${previousPlayerTick.toString()}, got ${result.playerTick.toString()}`);
+    }
+
+    previousInputSequence = result.playerInputSequence;
+    previousPlayerStateRevision = result.playerStateRevision;
+    previousPlayerTick = result.playerTick;
+
+    if (result.playerPosition !== undefined) {
+      firstPlayerPosition ??= result.playerPosition;
+      lastPlayerPosition = result.playerPosition;
+    }
+  }
+
+  if (
+    firstPlayerPosition !== undefined
+    && lastPlayerPosition !== undefined
+    && firstPlayerPosition.length === 3
+    && lastPlayerPosition.length === 3
+    && firstPlayerPosition.every((value, index) => Math.abs(value - lastPlayerPosition![index]!) < 0.000_001)
+  ) {
+    errors.push("expected cadence playerPosition to change across steps");
+  }
 }
 
 function validateGeneratedWorldSmokeResultAgainstStep(
