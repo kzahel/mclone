@@ -80,4 +80,4 @@ Completed:
 
 ## Follow-Up
 
-Next likely tactical: `Deno1` should import a small real renderer pipeline/shader path and draw known geometry through the offscreen target. It should still avoid DOM, browser asset decode, world/chunk rendering, and OpenXR.
+Completed by [`Deno1-render-pipeline-smoke.md`](Deno1-render-pipeline-smoke.md): import a small real renderer pipeline/shader path and draw known geometry through the offscreen target.

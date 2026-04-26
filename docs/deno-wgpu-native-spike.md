@@ -82,8 +82,8 @@ The first useful test target is `OffscreenTextureTarget`. It should be able to r
    - Encode a PNG in `/tmp` and inspect it.
 
 2. **Deno harness around existing renderer code**
-   - Add a repo script only if step 1 works.
-   - Import the smallest renderer module set that can compile shaders and render a known frame.
+   - Run the repo-owned `pnpm smoke:deno:pipeline` command.
+   - Import the smallest renderer module set that can compile shaders and render known geometry.
    - Avoid DOM, page input, localStorage, and IndexedDB.
 
 3. **Renderer target refactor**
@@ -143,6 +143,46 @@ PNG image data, 64 x 64, 8-bit/color RGBA, non-interlaced
 ```
 
 The image is a solid blue clear color, matching the expected `[26, 102, 204, 255]` readback pixel. This validates the basic Deno WebGPU path for offscreen render, GPU readback, and PNG artifact generation.
+
+## Pipeline smoke result: 2026-04-26
+
+The first renderer-pipeline smoke also passed on macOS:
+
+```bash
+pnpm smoke:deno:pipeline
+```
+
+The command runs:
+
+```bash
+npx -y deno@2.7.13 run --unstable-webgpu --allow-write=/tmp ./scripts/deno-render-pipeline-smoke.ts
+```
+
+The script:
+
+- creates `navigator.gpu` adapter/device
+- creates an offscreen `rgba8unorm` `GPUTexture`
+- builds a custom `POSITION_COLOR` triangle `RenderType`
+- compiles the repo `position_color` shader through `RenderPipelineCache`
+- creates the shader uniform buffer and bind group through `ShaderProgramDefinition`
+- draws a green triangle into the offscreen target
+- copies the texture to a mapped readback buffer
+- validates the center pixel
+- encodes `/tmp/mclone-deno-render-pipeline-smoke.png`
+
+Observed output:
+
+```json
+{"ok":true,"outputPath":"/tmp/mclone-deno-render-pipeline-smoke.png","width":64,"height":64,"format":"rgba8unorm","renderType":"deno_position_color_triangle","shader":"position_color","centerPixel":[51,204,77,255],"byteLength":16384,"adapter":{}}
+```
+
+`file /tmp/mclone-deno-render-pipeline-smoke.png` reports:
+
+```text
+PNG image data, 64 x 64, 8-bit/color RGBA, non-interlaced
+```
+
+The image is a black background with a green triangle. This validates shader JSON import, WGSL generation, pipeline creation, uniform binding, vertex buffer layout, draw submission, GPU readback, and PNG artifact generation in Deno.
 
 ## Refactor seams to preserve
 

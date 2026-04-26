@@ -203,7 +203,7 @@ This arc is for browser-free renderer validation. It does not replace the browse
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
 | [`Deno0-headless-webgpu-smoke.md`](Deno0-headless-webgpu-smoke.md) | shared WebGPU target helpers, repo-owned Deno offscreen clear/readback smoke, `/tmp` PNG artifact | Deno WebGPU smoke + browser smoke | **done** — official Chrome-free WebGPU smoke lane is available as `pnpm smoke:deno:webgpu` |
-| `Deno1-` | minimal real renderer pipeline/shader draw through offscreen target | Deno WebGPU smoke | draw known geometry without DOM/browser canvas before touching assets or chunks |
+| [`Deno1-render-pipeline-smoke.md`](Deno1-render-pipeline-smoke.md) | `RenderPipelineCache`, `position_color` shader, `POSITION_COLOR` triangle, shared PNG encoder | Deno WebGPU smoke | **done** — `pnpm smoke:deno:pipeline` draws known geometry through a real renderer pipeline |
 | `Deno2-` | non-browser asset/image decode seam for atlas inputs | Deno WebGPU smoke + unit | unblock texture/atlas smoke outside browser image APIs |
 | `Deno3-` | minimal chunk/world frame from authoritative snapshots | Deno WebGPU visual | first page-free terrain screenshot/probe candidate |
 
