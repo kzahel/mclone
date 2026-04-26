@@ -101,7 +101,7 @@ describe("Headless Node host", () => {
       }),
       expect.objectContaining({
         chunkChanged: true,
-        snapshotCount: 25,
+        snapshotCount: 10,
         unloadCount: 10,
       }),
     ]);
