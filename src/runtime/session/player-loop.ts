@@ -1,24 +1,30 @@
 import { SectionPos } from "../../core/section-pos";
 import type { ClientPlayerState, PlayerInputCommand, SessionChunkViewState } from "../protocol/world-messages";
-import { validatePlayerMoveCommand, type PlayerMoveCommand } from "../movement/movement-command";
+import type { CollisionWorld } from "../movement/collision-world";
+import {
+  DEFAULT_MOVEMENT_PHYSICS,
+  createStandingMovementBody,
+  simulatePlayerMoveCommand,
+  validatePlayerMoveCommand,
+  type MovementBody,
+  type PlayerMoveCommand,
+} from "../movement";
+import { AABB } from "../../world/phys/aabb";
+import { Vec3 } from "../../world/phys/vec3";
 
 export const PLAYER_TICK_INTERVAL_MS = 50;
 export const PLAYER_COMMAND_QUANTUM_US = 8_333;
-export const PLAYER_MOVE_SPEED_BLOCKS_PER_TICK = 0.4;
-export const PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND =
-  PLAYER_MOVE_SPEED_BLOCKS_PER_TICK * (1000.0 / PLAYER_TICK_INTERVAL_MS);
 export const PLAYER_MOVEMENT_PHYSICS_REVISION = 1;
 export const PLAYER_COLLISION_REVISION = 0;
 export const PLAYER_MAX_COMMAND_STEP_COUNT = 8;
 export const PLAYER_MAX_COMMANDS_PER_TICK = 16;
-const DEFAULT_PLAYER_Y = 104.0;
+const DEFAULT_PLAYER_Y = 168.0;
 const PLAYER_WIDTH = 0.6;
 const PLAYER_HEIGHT = 1.8;
 const PLAYER_MAX_COMMAND_QUANTUM_US = PLAYER_TICK_INTERVAL_MS * 1000;
 
 export interface QueuedPlayerMoveCommand {
   readonly command: PlayerMoveCommand;
-  readonly legacyMoveY: number;
 }
 
 export interface PlayerCommandQueue {
@@ -56,27 +62,60 @@ function boundedSafeInteger(value: number | undefined, fallback: number, min: nu
   return Math.max(min, Math.min(max, integer));
 }
 
+function movementBodyFromPlayerState(playerState: ClientPlayerState): MovementBody {
+  const snapshot = playerState.movementBody;
+  if (snapshot === undefined) {
+    return createStandingMovementBody({
+      position: new Vec3(playerState.position.x, playerState.position.y, playerState.position.z),
+      width: PLAYER_WIDTH,
+      height: PLAYER_HEIGHT,
+    });
+  }
+
+  return {
+    position: new Vec3(snapshot.position.x, snapshot.position.y, snapshot.position.z),
+    velocity: new Vec3(snapshot.velocity.x, snapshot.velocity.y, snapshot.velocity.z),
+    bounds: new AABB(
+      snapshot.bounds.minX,
+      snapshot.bounds.minY,
+      snapshot.bounds.minZ,
+      snapshot.bounds.maxX,
+      snapshot.bounds.maxY,
+      snapshot.bounds.maxZ,
+    ),
+    onGround: snapshot.onGround,
+    mode: snapshot.mode,
+    jumpHeld: snapshot.jumpHeld,
+  };
+}
+
 function createMovementBodySnapshot(
-  position: ClientPlayerState["position"],
-  velocity: NonNullable<ClientPlayerState["movementBody"]>["velocity"],
+  body: MovementBody,
   lastProcessedCommandSequence: number,
   commandQuantumUs = PLAYER_COMMAND_QUANTUM_US,
 ): NonNullable<ClientPlayerState["movementBody"]> {
-  const halfWidth = PLAYER_WIDTH / 2.0;
   return {
-    position,
-    velocity,
-    bounds: {
-      minX: position.x - halfWidth,
-      minY: position.y,
-      minZ: position.z - halfWidth,
-      maxX: position.x + halfWidth,
-      maxY: position.y + PLAYER_HEIGHT,
-      maxZ: position.z + halfWidth,
+    position: {
+      x: body.position.x,
+      y: body.position.y,
+      z: body.position.z,
     },
-    onGround: false,
-    mode: "flying",
-    jumpHeld: false,
+    velocity: {
+      x: body.velocity.x,
+      y: body.velocity.y,
+      z: body.velocity.z,
+    },
+    bounds: {
+      minX: body.bounds.minX,
+      minY: body.bounds.minY,
+      minZ: body.bounds.minZ,
+      maxX: body.bounds.maxX,
+      maxY: body.bounds.maxY,
+      maxZ: body.bounds.maxZ,
+    },
+    onGround: body.onGround,
+    mode: body.mode,
+    jumpHeld: body.jumpHeld,
     physicsRevision: PLAYER_MOVEMENT_PHYSICS_REVISION,
     collisionRevision: PLAYER_COLLISION_REVISION,
     commandQuantumUs,
@@ -85,14 +124,19 @@ function createMovementBodySnapshot(
 }
 
 export function createInitialPlayerState(playerId: string): ClientPlayerState {
-  const position = {
-    x: 8.5,
-    y: DEFAULT_PLAYER_Y,
-    z: 8.5,
-  };
+  const body = createStandingMovementBody({
+    position: new Vec3(8.5, DEFAULT_PLAYER_Y, 8.5),
+    width: PLAYER_WIDTH,
+    height: PLAYER_HEIGHT,
+    onGround: true,
+  });
   return {
     playerId,
-    position,
+    position: {
+      x: body.position.x,
+      y: body.position.y,
+      z: body.position.z,
+    },
     rotation: {
       yaw: 0.0,
       pitch: 0.0,
@@ -100,7 +144,7 @@ export function createInitialPlayerState(playerId: string): ClientPlayerState {
     acknowledgedInputSequence: 0,
     tick: 0,
     revision: 0,
-    movementBody: createMovementBodySnapshot(position, { x: 0.0, y: 0.0, z: 0.0 }, 0),
+    movementBody: createMovementBodySnapshot(body, 0),
   };
 }
 
@@ -109,10 +153,24 @@ export function anchorPlayerStateToChunkView(
   chunkView: SessionChunkViewState,
   tick: number,
 ): ClientPlayerState {
+  const previousBody = movementBodyFromPlayerState(playerState);
+  const body = createStandingMovementBody({
+    position: new Vec3(
+      SectionPos.sectionToBlockCoord(chunkView.centerChunkX) + 8.5,
+      playerState.position.y,
+      SectionPos.sectionToBlockCoord(chunkView.centerChunkZ) + 8.5,
+    ),
+    velocity: Vec3.ZERO,
+    width: PLAYER_WIDTH,
+    height: PLAYER_HEIGHT,
+    onGround: previousBody.onGround,
+    mode: previousBody.mode,
+    jumpHeld: previousBody.jumpHeld,
+  });
   const position = {
-    x: SectionPos.sectionToBlockCoord(chunkView.centerChunkX) + 8.5,
-    y: playerState.position.y,
-    z: SectionPos.sectionToBlockCoord(chunkView.centerChunkZ) + 8.5,
+    x: body.position.x,
+    y: body.position.y,
+    z: body.position.z,
   };
   if (
     playerState.position.x === position.x
@@ -125,11 +183,7 @@ export function anchorPlayerStateToChunkView(
   return {
     ...playerState,
     position,
-    movementBody: createMovementBodySnapshot(
-      position,
-      { x: 0.0, y: 0.0, z: 0.0 },
-      playerState.acknowledgedInputSequence,
-    ),
+    movementBody: createMovementBodySnapshot(body, playerState.acknowledgedInputSequence),
     tick,
     revision: playerState.revision + 1,
   };
@@ -182,7 +236,6 @@ export function playerInputToQueuedMoveCommand(
   validatePlayerMoveCommand(command);
   return {
     command,
-    legacyMoveY: clampAxis(finiteOr(input.moveY, 0.0)),
   };
 }
 
@@ -204,65 +257,53 @@ export function enqueuePlayerInputCommand(
   return true;
 }
 
-function nextPositionForCommandStep(
-  position: ClientPlayerState["position"],
-  command: QueuedPlayerMoveCommand,
-): {
-  readonly position: ClientPlayerState["position"];
-  readonly velocity: NonNullable<ClientPlayerState["movementBody"]>["velocity"];
-} {
-  const moveX = clampAxis(command.command.wishX);
-  const moveY = clampAxis(command.legacyMoveY);
-  const moveZ = clampAxis(command.command.wishZ);
-  const magnitude = Math.hypot(moveX, moveY, moveZ);
-  const speedScale = magnitude > 1.0 ? PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND / magnitude : PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND;
-  const velocity = {
-    x: moveX * speedScale,
-    y: moveY * speedScale,
-    z: moveZ * speedScale,
-  };
-  const dtSeconds = command.command.commandQuantumUs / 1_000_000.0;
-  return {
-    position: {
-      x: position.x + velocity.x * dtSeconds,
-      y: position.y + velocity.y * dtSeconds,
-      z: position.z + velocity.z * dtSeconds,
-    },
-    velocity,
-  };
+interface PlayerCommandTickResult {
+  readonly playerState: ClientPlayerState;
+  readonly processedCommandCount: number;
 }
 
-export function tickPlayerStateFromCommands(
+function tickPlayerStateFromCommandsInternal(
   playerState: ClientPlayerState,
   commands: readonly QueuedPlayerMoveCommand[],
   tick: number,
-): ClientPlayerState {
+  world: CollisionWorld,
+): PlayerCommandTickResult {
   if (commands.length === 0) {
-    return playerState;
+    return { playerState, processedCommandCount: 0 };
   }
 
-  let nextPosition = playerState.position;
-  let nextVelocity: NonNullable<ClientPlayerState["movementBody"]>["velocity"] = { x: 0.0, y: 0.0, z: 0.0 };
+  let nextBody = movementBodyFromPlayerState(playerState);
   let nextRotation = playerState.rotation;
   let acknowledgedInputSequence = playerState.acknowledgedInputSequence;
   let movementQuantumUs = playerState.movementBody?.commandQuantumUs ?? PLAYER_COMMAND_QUANTUM_US;
+  let processedCommandCount = 0;
 
   for (const queuedCommand of commands) {
     validatePlayerMoveCommand(queuedCommand.command);
-    for (let step = 0; step < queuedCommand.command.stepCount; step++) {
-      const stepResult = nextPositionForCommandStep(nextPosition, queuedCommand);
-      nextPosition = stepResult.position;
-      nextVelocity = stepResult.velocity;
+    const commandResult = simulatePlayerMoveCommand(nextBody, queuedCommand.command, world, DEFAULT_MOVEMENT_PHYSICS);
+    if (commandResult.missingCollision) {
+      break;
     }
+    nextBody = commandResult.body;
     nextRotation = {
       yaw: normalizeDegrees(queuedCommand.command.yaw),
       pitch: clampPitch(queuedCommand.command.pitch),
     };
     acknowledgedInputSequence = Math.max(acknowledgedInputSequence, queuedCommand.command.sequence);
     movementQuantumUs = queuedCommand.command.commandQuantumUs;
+    processedCommandCount++;
   }
 
-  const movementBody = createMovementBodySnapshot(nextPosition, nextVelocity, acknowledgedInputSequence, movementQuantumUs);
+  if (processedCommandCount === 0) {
+    return { playerState, processedCommandCount };
+  }
+
+  const nextPosition = {
+    x: nextBody.position.x,
+    y: nextBody.position.y,
+    z: nextBody.position.z,
+  };
+  const movementBody = createMovementBodySnapshot(nextBody, acknowledgedInputSequence, movementQuantumUs);
   if (
     nextPosition.x === playerState.position.x
     && nextPosition.y === playerState.position.y
@@ -271,39 +312,57 @@ export function tickPlayerStateFromCommands(
     && nextRotation.pitch === playerState.rotation.pitch
     && acknowledgedInputSequence === playerState.acknowledgedInputSequence
   ) {
-    return playerState;
+    return { playerState, processedCommandCount };
   }
 
   return {
-    ...playerState,
-    position: nextPosition,
-    rotation: nextRotation,
-    acknowledgedInputSequence,
-    movementBody,
-    tick,
-    revision: playerState.revision + 1,
+    playerState: {
+      ...playerState,
+      position: nextPosition,
+      rotation: nextRotation,
+      acknowledgedInputSequence,
+      movementBody,
+      tick,
+      revision: playerState.revision + 1,
+    },
+    processedCommandCount,
   };
+}
+
+export function tickPlayerStateFromCommands(
+  playerState: ClientPlayerState,
+  commands: readonly QueuedPlayerMoveCommand[],
+  tick: number,
+  world: CollisionWorld,
+): ClientPlayerState {
+  return tickPlayerStateFromCommandsInternal(playerState, commands, tick, world).playerState;
 }
 
 export function tickPlayerStateWithCommandQueue(
   playerState: ClientPlayerState,
   queue: PlayerCommandQueue,
   tick: number,
+  world: CollisionWorld,
   maxCommands = PLAYER_MAX_COMMANDS_PER_TICK,
 ): ClientPlayerState {
   const commandCount = boundedSafeInteger(maxCommands, PLAYER_MAX_COMMANDS_PER_TICK, 1, PLAYER_MAX_COMMANDS_PER_TICK);
-  const commands = queue.commands.splice(0, commandCount);
-  return tickPlayerStateFromCommands(playerState, commands, tick);
+  const commands = queue.commands.slice(0, commandCount);
+  const result = tickPlayerStateFromCommandsInternal(playerState, commands, tick, world);
+  if (result.processedCommandCount > 0) {
+    queue.commands.splice(0, result.processedCommandCount);
+  }
+  return result.playerState;
 }
 
 export function tickPlayerState(
   playerState: ClientPlayerState,
   input: PlayerInputCommand | undefined,
   tick: number,
+  world: CollisionWorld,
 ): ClientPlayerState {
   if (input === undefined) {
     return playerState;
   }
 
-  return tickPlayerStateFromCommands(playerState, [playerInputToQueuedMoveCommand(playerState.playerId, input)], tick);
+  return tickPlayerStateFromCommands(playerState, [playerInputToQueuedMoveCommand(playerState.playerId, input)], tick, world);
 }

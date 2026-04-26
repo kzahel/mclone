@@ -1,5 +1,6 @@
 import { Registry } from "../../../core/registry";
 import { CountConfiguration } from "../feature/configurations/count-configuration";
+import { CarvingMaskDecoratorConfiguration } from "../feature/configurations/carving-mask-decorator-configuration";
 import { ChanceDecoratorConfiguration } from "../feature/configurations/chance-decorator-configuration";
 import { DecoratedDecoratorConfiguration } from "../feature/configurations/decorated-decorator-configuration";
 import type { DecoratorConfiguration } from "../feature/configurations/decorator-configuration";
@@ -11,6 +12,7 @@ import { NoneDecoratorConfiguration } from "../feature/configurations/none-decor
 import { RangeDecoratorConfiguration } from "../feature/configurations/range-decorator-configuration";
 import { WaterDepthThresholdConfiguration } from "../feature/configurations/water-depth-threshold-configuration";
 import { ChanceDecorator } from "./chance-decorator";
+import { CarvingMaskDecorator } from "./carving-mask-decorator";
 import { CountNoiseDecorator } from "./count-noise-decorator";
 import { CountDecorator } from "./count-decorator";
 import { CountNoiseBiasedDecorator } from "./count-noise-biased-decorator";
@@ -37,6 +39,7 @@ export const FeatureDecorators = {
   SQUARE: register("square", new SquareDecorator()),
   DARK_OAK_TREE: register("dark_oak_tree", new DarkOakTreePlacementDecorator()),
   CHANCE: register("chance", new ChanceDecorator()),
+  CARVING_MASK: register("carving_mask", new CarvingMaskDecorator()),
   LAVA_LAKE: register("lava_lake", new LakeLavaPlacementDecorator()),
   COUNT: register("count", new CountDecorator()),
   COUNT_NOISE: register("count_noise", new CountNoiseDecorator()),
@@ -52,6 +55,7 @@ export const FeatureDecorators = {
 export type SimpleFeatureDecorator =
   | FeatureDecorator<NoneDecoratorConfiguration>
   | FeatureDecorator<ChanceDecoratorConfiguration>
+  | FeatureDecorator<CarvingMaskDecoratorConfiguration>
   | FeatureDecorator<CountConfiguration>
   | FeatureDecorator<NoiseDependantDecoratorConfiguration>
   | FeatureDecorator<NoiseCountFactorDecoratorConfiguration>

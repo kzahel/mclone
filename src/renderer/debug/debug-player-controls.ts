@@ -1,5 +1,5 @@
 import { SectionPos } from "../../core/section-pos";
-import { PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND } from "../../runtime/session/player-loop";
+import { MOVEMENT_COMMAND_BUTTONS, type MovementBody } from "../../runtime/movement";
 import type { PlayerInputCommand, SetChunkViewRequest } from "../../runtime/protocol/world-messages";
 import type { ClientPlayerState } from "../../runtime/protocol/world-messages";
 import { Vec3 } from "../../world/phys/vec3";
@@ -8,6 +8,7 @@ import type { DebugInputFrame } from "./debug-input";
 const MOUSE_SENS_DEG_PER_PIXEL = 0.15;
 const JOYSTICK_LOOK_DEG_PER_SEC = 120.0;
 const MAX_PITCH = 89.0;
+const PLAYER_EYE_HEIGHT = 1.62;
 
 export interface DebugCameraState {
   readonly position: Vec3;
@@ -82,14 +83,27 @@ export function mergeDebugInputFrame(frame: DebugInputFrame, injectedInput: Debu
 }
 
 export function createCameraStateFromPlayerState(playerState: ClientPlayerState): DebugCameraState {
+  const position = playerState.movementBody?.position ?? playerState.position;
   return {
     position: new Vec3(
-      playerState.position.x,
-      playerState.position.y,
-      playerState.position.z,
+      position.x,
+      position.y + PLAYER_EYE_HEIGHT,
+      position.z,
     ),
     xRot: playerState.rotation.pitch,
     yRot: playerState.rotation.yaw,
+  };
+}
+
+export function createCameraStateFromMovementBody(
+  body: MovementBody,
+  yaw: number,
+  pitch: number,
+): DebugCameraState {
+  return {
+    position: new Vec3(body.position.x, body.position.y + PLAYER_EYE_HEIGHT, body.position.z),
+    xRot: pitch,
+    yRot: yaw,
   };
 }
 
@@ -113,20 +127,36 @@ export function applyPredictedCameraInput(
   const fixedCommandSeconds = input.commandQuantumUs !== undefined && input.stepCount !== undefined
     ? (input.commandQuantumUs * input.stepCount) / 1_000_000.0
     : dtSeconds;
-  const moveMagnitude = Math.hypot(input.moveX, input.moveY, input.moveZ);
+  const move = buildCameraDeltaWorld(input.yaw, input.pitch, input.moveZ, input.moveX, input.moveY);
+  const moveMagnitude = Math.hypot(move.x, move.y, move.z);
+  const speedBlocksPerSecond = 8.0;
   const moveScale = moveMagnitude > 1.0
-    ? (PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND * fixedCommandSeconds) / moveMagnitude
-    : PLAYER_MOVE_SPEED_BLOCKS_PER_SECOND * fixedCommandSeconds;
+    ? (speedBlocksPerSecond * fixedCommandSeconds) / moveMagnitude
+    : speedBlocksPerSecond * fixedCommandSeconds;
 
   return {
     position: new Vec3(
-      camera.position.x + input.moveX * moveScale,
-      camera.position.y + input.moveY * moveScale,
-      camera.position.z + input.moveZ * moveScale,
+      camera.position.x + move.x * moveScale,
+      camera.position.y + move.y * moveScale,
+      camera.position.z + move.z * moveScale,
     ),
     xRot: input.pitch,
     yRot: input.yaw,
   };
+}
+
+export function getDebugPlayerButtonMask(frame: DebugInputFrame): number {
+  let buttons = 0;
+  if (frame.heldKeys.has("Space") || frame.flyUp) {
+    buttons |= MOVEMENT_COMMAND_BUTTONS.JUMP;
+  }
+  if (frame.heldKeys.has("ShiftLeft") || frame.heldKeys.has("ShiftRight") || frame.flyDown) {
+    buttons |= MOVEMENT_COMMAND_BUTTONS.CROUCH;
+  }
+  if (frame.heldKeys.has("ControlLeft") || frame.heldKeys.has("ControlRight")) {
+    buttons |= MOVEMENT_COMMAND_BUTTONS.SPRINT;
+  }
+  return buttons;
 }
 
 export function createChunkViewRequestForCameraState(camera: DebugCameraState, radius: number): SetChunkViewRequest {
@@ -179,11 +209,45 @@ export function buildPlayerInputCommand(
   const rightAxis =
     (frame.heldKeys.has("KeyD") ? 1 : 0)
     - (frame.heldKeys.has("KeyA") ? 1 : 0);
+
+  return {
+    sequence,
+    moveX: rightAxis,
+    moveY: 0,
+    moveZ: forwardAxis,
+    yaw,
+    pitch,
+    buttons: getDebugPlayerButtonMask(frame),
+    edgeButtons: 0,
+    ...options,
+  };
+}
+
+export function buildFreeCameraInputCommand(
+  baseYaw: number,
+  basePitch: number,
+  frame: DebugInputFrame,
+  dtSeconds: number,
+  sequence: number,
+): PlayerInputCommand {
+  const yawDelta =
+    frame.mouseDeltaX * MOUSE_SENS_DEG_PER_PIXEL
+    + frame.joystickX * JOYSTICK_LOOK_DEG_PER_SEC * dtSeconds;
+  const pitchDelta =
+    frame.mouseDeltaY * MOUSE_SENS_DEG_PER_PIXEL
+    - frame.joystickY * JOYSTICK_LOOK_DEG_PER_SEC * dtSeconds;
+  const yaw = baseYaw + yawDelta;
+  const pitch = clampPitch(basePitch + pitchDelta);
+  const forwardAxis =
+    (frame.heldKeys.has("KeyW") || frame.moveForward ? 1 : 0)
+    - (frame.heldKeys.has("KeyS") || frame.moveBack ? 1 : 0);
+  const rightAxis =
+    (frame.heldKeys.has("KeyD") ? 1 : 0)
+    - (frame.heldKeys.has("KeyA") ? 1 : 0);
   const upAxis =
     (frame.heldKeys.has("Space") || frame.flyUp ? 1 : 0)
     - (frame.heldKeys.has("ShiftLeft") || frame.heldKeys.has("ShiftRight") || frame.flyDown ? 1 : 0);
   const move = buildCameraDeltaWorld(yaw, pitch, forwardAxis, rightAxis, upAxis);
-
   return {
     sequence,
     moveX: move.x,
@@ -191,7 +255,6 @@ export function buildPlayerInputCommand(
     moveZ: move.z,
     yaw,
     pitch,
-    ...options,
   };
 }
 
@@ -207,5 +270,7 @@ export function isSamePlayerInput(
     && left.moveY === right.moveY
     && left.moveZ === right.moveZ
     && left.yaw === right.yaw
-    && left.pitch === right.pitch;
+    && left.pitch === right.pitch
+    && (left.buttons ?? 0) === (right.buttons ?? 0)
+    && (left.edgeButtons ?? 0) === (right.edgeButtons ?? 0);
 }

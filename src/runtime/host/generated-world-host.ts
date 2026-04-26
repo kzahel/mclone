@@ -25,6 +25,7 @@ import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
 import type { LevelChunk } from "../../world/level/chunk/level-chunk";
 import { LEVEL_CHUNK_SECTION_SIZE } from "../../world/level/chunk/level-chunk-section";
 import { FullChunkStatus } from "../../world/level/entity/full-chunk-status";
+import type { AABB } from "../../world/phys/aabb";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
@@ -80,6 +81,7 @@ import {
   tickPlayerStateWithCommandQueue,
   type PlayerCommandQueue,
 } from "../session/player-loop";
+import { blockGetterCollisionWorld, type CollisionWorld } from "../movement/collision-world";
 import {
   createWorldSaveMetadata,
   type OpenWorldStorageRequest,
@@ -272,6 +274,31 @@ function createSessionChunkViewState(request: SetChunkViewRequest | undefined): 
     centerChunkX: request.centerChunkX,
     centerChunkZ: request.centerChunkZ,
     radius: request.radius,
+  };
+}
+
+function createGeneratedLevelCollisionWorld(level: GeneratedRenderLevel): CollisionWorld {
+  const loadedWorld = blockGetterCollisionWorld(level);
+  return {
+    queryBlockCollisions(bounds: AABB) {
+      const epsilon = 1.0e-7;
+      const minChunkX = SectionPos.blockToSectionCoord(Math.floor(bounds.minX - epsilon));
+      const maxChunkX = SectionPos.blockToSectionCoord(Math.floor(bounds.maxX + epsilon));
+      const minChunkZ = SectionPos.blockToSectionCoord(Math.floor(bounds.minZ - epsilon));
+      const maxChunkZ = SectionPos.blockToSectionCoord(Math.floor(bounds.maxZ + epsilon));
+      for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+        for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+          if (level.getAuthorityChunk(chunkX, chunkZ) === null) {
+            return {
+              type: "missing",
+              reason: `missing_authority_chunk:${chunkX.toString()},${chunkZ.toString()}`,
+            };
+          }
+        }
+      }
+
+      return loadedWorld.queryBlockCollisions(bounds);
+    },
   };
 }
 
@@ -2009,6 +2036,7 @@ export class GeneratedWorldHost implements WorldHost {
         this.playerState,
         this.playerCommandQueue,
         this.playerState.tick + 1,
+        createGeneratedLevelCollisionWorld(this.level),
       );
       if (nextPlayerState !== this.playerState) {
         this.playerState = nextPlayerState;

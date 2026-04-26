@@ -6,7 +6,13 @@ import path from "node:path";
 import process from "node:process";
 import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
+import { SectionPos } from "../../core/section-pos";
+import type { AABB } from "../../world/phys/aabb";
 import { applyPackedChunkLightDeltaToSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import { ClientChunkCache } from "../../world/level/client-chunk-cache";
+import { createBlockStateResolver } from "../../world/level/chunk-snapshot";
+import { registerGeneratedRenderBlocks, type GeneratedRenderBlockPalette } from "../../world/level/generated-render-blocks";
+import { OverworldBiomeSource } from "../../worldgen/biome/overworld-biome-source";
 import { createGeneratedWorldHostForRequest } from "../host/generated-world-host-factory";
 import { createNodeLightingService } from "../lighting/node-lighting-worker-client";
 import { createGeneratedWorldSaveId, getGeneratedWorldViewChunkRadius } from "../host/generated-world-host";
@@ -59,6 +65,7 @@ import {
   tickPlayerStateWithCommandQueue,
   type PlayerCommandQueue,
 } from "../session/player-loop";
+import { blockGetterCollisionWorld, type CollisionWorld } from "../movement/collision-world";
 import { FileWorldStorage } from "../storage/file-world-storage";
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -118,6 +125,7 @@ type SharedWorldRecord = {
   readonly saveId: string;
   readonly host: WorldHost;
   readonly worldOpened: WorldOpenedMessage;
+  readonly collisionLevel: ClientChunkCache;
   readonly sessionIds: Set<string>;
   readonly playerSlots: Map<string, PlayerSlotRecord>;
   readonly loadedSnapshots: Map<string, PackedChunkSnapshot>;
@@ -225,6 +233,47 @@ function createSessionChunkViewState(chunkView: SetChunkViewRequest | undefined)
   };
 }
 
+function createRemoteCollisionLevel(
+  request: OpenWorldRequest,
+  worldOpened: WorldOpenedMessage,
+  generatedBlocks: GeneratedRenderBlockPalette,
+): ClientChunkCache {
+  return new ClientChunkCache({
+    airState: generatedBlocks.airState,
+    minBuildHeight: worldOpened.minBuildHeight,
+    height: worldOpened.height,
+    biomeSource: new OverworldBiomeSource(request.seed),
+    biomeZoomSeed: request.seed,
+    blockStateResolver: createBlockStateResolver(generatedBlocks.airState),
+    blockStateIds: generatedBlocks.blockStateIds,
+  });
+}
+
+function createSharedWorldCollisionWorld(world: SharedWorldRecord): CollisionWorld {
+  const loadedWorld = blockGetterCollisionWorld(world.collisionLevel);
+  return {
+    queryBlockCollisions(bounds: AABB) {
+      const epsilon = 1.0e-7;
+      const minChunkX = SectionPos.blockToSectionCoord(Math.floor(bounds.minX - epsilon));
+      const maxChunkX = SectionPos.blockToSectionCoord(Math.floor(bounds.maxX + epsilon));
+      const minChunkZ = SectionPos.blockToSectionCoord(Math.floor(bounds.minZ - epsilon));
+      const maxChunkZ = SectionPos.blockToSectionCoord(Math.floor(bounds.maxZ + epsilon));
+      for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+        for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+          if (!world.loadedSnapshots.has(chunkKey(chunkX, chunkZ))) {
+            return {
+              type: "missing",
+              reason: `missing_snapshot_chunk:${chunkX.toString()},${chunkZ.toString()}`,
+            };
+          }
+        }
+      }
+
+      return loadedWorld.queryBlockCollisions(bounds);
+    },
+  };
+}
+
 function createPlayerSlot(profile: PlayerProfile): PlayerSlotRecord {
   const playerId = `player-${randomUUID()}`;
   return {
@@ -307,6 +356,7 @@ function applyAuthoritativeMessages(world: SharedWorldRecord, messages: readonly
         break;
       case "chunk_snapshot":
         world.loadedSnapshots.set(chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ), message.snapshot);
+        world.collisionLevel.applyPackedChunkSnapshot(message.snapshot);
         break;
       case "chunk_light_delta": {
         const key = chunkKey(message.chunkX, message.chunkZ);
@@ -320,6 +370,7 @@ function applyAuthoritativeMessages(world: SharedWorldRecord, messages: readonly
         {
           const key = chunkKey(message.chunkX, message.chunkZ);
           world.loadedSnapshots.delete(key);
+          world.collisionLevel.applyChunkUnload(message.chunkX, message.chunkZ);
           for (const [entityId, entity] of world.loadedEntitySnapshots) {
             if (entitySnapshotChunkKey(entity) === key) {
               world.loadedEntitySnapshots.delete(entityId);
@@ -741,6 +792,7 @@ export class GeneratedWorldRemoteService {
           player.state,
           player.commandQueue,
           this.currentTick,
+          createSharedWorldCollisionWorld(world),
         );
         if (nextPlayerState !== player.state) {
           player.state = nextPlayerState;
@@ -830,12 +882,15 @@ export class GeneratedWorldRemoteService {
     }
 
     const creation = (async () => {
+      const collisionBlocks = registerGeneratedRenderBlocks();
       const host = this.createSessionHost(request);
       const messages = await host.openWorld(request);
+      const worldOpened = extractWorldOpened(messages);
       const world: SharedWorldRecord = {
         saveId,
         host,
-        worldOpened: extractWorldOpened(messages),
+        worldOpened,
+        collisionLevel: createRemoteCollisionLevel(request, worldOpened, collisionBlocks),
         sessionIds: new Set<string>(),
         playerSlots: new Map<string, PlayerSlotRecord>(),
         loadedSnapshots: new Map<string, PackedChunkSnapshot>(),
@@ -933,6 +988,7 @@ export class GeneratedWorldRemoteService {
         case "chunk_snapshot": {
           const key = chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ);
           world.loadedSnapshots.set(key, message.snapshot);
+          world.collisionLevel.applyPackedChunkSnapshot(message.snapshot);
           for (const session of this.getWorldSessions(world)) {
             if (session.visibleChunks.has(key)) {
               session.pendingMessages.push(message);
@@ -956,6 +1012,7 @@ export class GeneratedWorldRemoteService {
         case "chunk_unload": {
           const key = chunkKey(message.chunkX, message.chunkZ);
           world.loadedSnapshots.delete(key);
+          world.collisionLevel.applyChunkUnload(message.chunkX, message.chunkZ);
           for (const [entityId, entity] of world.loadedEntitySnapshots) {
             if (entitySnapshotChunkKey(entity) === key) {
               world.loadedEntitySnapshots.delete(entityId);

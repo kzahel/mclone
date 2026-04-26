@@ -655,7 +655,7 @@ describe("RemoteWorld transport", () => {
         lastProcessedCommandSequence: 1,
       },
     });
-    expect(client.getPlayerState()!.position.x).toBeGreaterThan(initialPlayerState!.position.x);
+    expect(client.getPlayerState()!.position).not.toEqual(initialPlayerState!.position);
     expect(client.getPlayerState()!.revision).toBeGreaterThan(initialPlayerState!.revision);
   }, REMOTE_WORLD_TRANSPORT_TIMEOUT_MS);
 

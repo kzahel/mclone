@@ -33,7 +33,33 @@ describe("debug player controls", () => {
     expect(command.sequence).toBe(7);
     expect(command.yaw).toBe(180);
     expect(command.pitch).toBe(30);
-    expect(command.moveZ).toBeLessThan(0);
+    expect(command.moveX).toBe(0);
+    expect(command.moveY).toBe(0);
+    expect(command.moveZ).toBe(1);
+  });
+
+  test("maps player jump and crouch inputs to button bits without flight moveY", () => {
+    const command = buildPlayerInputCommand(
+      0,
+      0,
+      {
+        heldKeys: new Set(["Space", "ShiftLeft"]),
+        mouseDeltaX: 0,
+        mouseDeltaY: 0,
+        locked: true,
+        joystickX: 0,
+        joystickY: 0,
+        moveForward: false,
+        moveBack: false,
+        flyUp: false,
+        flyDown: false,
+      },
+      1 / 60,
+      8,
+    );
+
+    expect(command.moveY).toBe(0);
+    expect(command.buttons).toBe(3);
   });
 
   test("merges injected debug input over the live frame", () => {

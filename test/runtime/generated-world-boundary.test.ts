@@ -316,7 +316,7 @@ describe("GeneratedWorld boundary", () => {
       yaw: 90,
       pitch: 15,
     });
-    expect(client.getPlayerState()!.position.x).toBeGreaterThan(initialPlayerState!.position.x);
+    expect(client.getPlayerState()!.position).not.toEqual(initialPlayerState!.position);
     expect(client.getPlayerState()!.revision).toBeGreaterThan(initialPlayerState!.revision);
   }, GENERATED_WORLD_LIGHTING_TIMEOUT_MS);
 });

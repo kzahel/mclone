@@ -4,6 +4,7 @@ import {
   createScheduledTickSnapshot,
   type ScheduledTickSnapshot,
 } from "../../world/level/scheduled-tick";
+import { GenerationStep } from "../levelgen/generation-step";
 
 export const CHUNK_WIDTH = 16;
 export const SECTION_HEIGHT = 16;
@@ -165,6 +166,7 @@ export class MutableChunkBlockBuffer {
   public readonly blocks: Uint8Array;
   private readonly blockTicks: ScheduledTickSnapshot[] = [];
   private readonly liquidTicks: ScheduledTickSnapshot[] = [];
+  private readonly carvingMasks = new Map<GenerationStep.Carving, Uint8Array>();
 
   public constructor(
     public readonly chunkX: number,
@@ -228,5 +230,13 @@ export class MutableChunkBlockBuffer {
     for (const tick of ticks) {
       this.liquidTicks.push(cloneScheduledTickSnapshot(tick));
     }
+  }
+
+  public setCarvingMask(step: GenerationStep.Carving, mask: Uint8Array): void {
+    this.carvingMasks.set(step, Uint8Array.from(mask));
+  }
+
+  public getCarvingMask(step: GenerationStep.Carving): Uint8Array | undefined {
+    return this.carvingMasks.get(step);
   }
 }

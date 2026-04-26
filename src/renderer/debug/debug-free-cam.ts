@@ -1,12 +1,13 @@
 // Debug tooling — see tactical 40. Throwaway when real Player/Input lands.
 
 import { SectionPos } from "../../core/section-pos";
-import { MovementCommandClock } from "../../runtime/movement";
+import { DEFAULT_MOVEMENT_PHYSICS, MovementCommandClock } from "../../runtime/movement";
 import type { OpenWorldPreset, PlayerInputCommand, SetChunkViewRequest, WorldPerformanceSnapshot } from "../../runtime/protocol/world-messages";
 import {
   PLAYER_COLLISION_REVISION,
   PLAYER_COMMAND_QUANTUM_US,
   PLAYER_MOVEMENT_PHYSICS_REVISION,
+  playerInputToQueuedMoveCommand,
 } from "../../runtime/session/player-loop";
 import { deleteIndexedDbWorldStorage } from "../../runtime/storage/indexeddb-world-storage";
 import { Vec3 } from "../../world/phys/vec3";
@@ -41,12 +42,14 @@ import { advanceTextureAtlasAnimations } from "../texture/texture-atlas";
 import { DebugInput } from "./debug-input";
 import {
   applyPredictedCameraInput,
+  buildFreeCameraInputCommand,
   buildPlayerInputCommand,
+  createCameraStateFromMovementBody,
   createChunkViewRequestForCameraState,
   createChunkViewRequestForPlayerState,
+  getDebugPlayerButtonMask,
   isSamePlayerInput,
   mergeDebugInputFrame,
-  reconcilePredictedCameraState,
   type DebugCameraState,
   type DebugInjectedInput,
 } from "./debug-player-controls";
@@ -463,7 +466,7 @@ function applyFreeCameraInput(
   inputFrame: ReturnType<DebugInput["consumeFrame"]>,
   dtSeconds: number,
 ): DebugCameraState {
-  const inputCommand = buildPlayerInputCommand(camera.yRot, camera.xRot, inputFrame, dtSeconds, 0);
+  const inputCommand = buildFreeCameraInputCommand(camera.yRot, camera.xRot, inputFrame, dtSeconds, 0);
   return applyPredictedCameraInput(camera, inputCommand, dtSeconds);
 }
 
@@ -563,6 +566,7 @@ async function boot(): Promise<void> {
   let lastInputCommand: PlayerInputCommand | undefined;
   const queuedPlayerInputs: PlayerInputCommand[] = [];
   let playerInputSendInFlight = false;
+  let lastPlayerButtonMask = 0;
   let lastChunkViewRequest: SetChunkViewRequest | undefined;
   const playerCommandClock = new MovementCommandClock({
     commandQuantumUs: PLAYER_COMMAND_QUANTUM_US,
@@ -609,15 +613,16 @@ async function boot(): Promise<void> {
       || (inputCommand.edgeButtons ?? 0) !== 0;
   }
 
-  function queuePlayerInput(inputCommand: PlayerInputCommand): void {
+  function queuePlayerInput(inputCommand: PlayerInputCommand): boolean {
     if (!shouldQueuePlayerInput(inputCommand)) {
-      return;
+      return false;
     }
 
     lastInputCommand = inputCommand;
     nextInputSequence++;
     queuedPlayerInputs.push(inputCommand);
     void flushPlayerInputQueue();
+    return true;
   }
 
   // Prime chunks at the start so the first frame has something to draw.
@@ -640,6 +645,8 @@ async function boot(): Promise<void> {
       moveZ: 0,
       yaw: initialCamera.yRot,
       pitch: initialCamera.xRot,
+      buttons: 0,
+      edgeButtons: 0,
     };
     if (await scene.clientRuntime.sendPlayerCommand({
       type: "set_player_input",
@@ -770,29 +777,43 @@ async function boot(): Promise<void> {
 
     if (playerState !== undefined) {
       if (drivesPlayer) {
+        const predictionView = scene.clientRuntime.getClientWorld().getPredictionView();
+        const predictionService = scene.clientRuntime.getPredictionService();
+        const reconcileResult = predictionService.reconcileClientWorldSnapshot({
+          clientWorld: predictionView,
+          physicsParams: DEFAULT_MOVEMENT_PHYSICS,
+        });
+        const reconciledBody = reconcileResult?.body ?? predictionService.getPredictedBody();
+        const authoritativeYaw = lastInputCommand?.yaw ?? playerState.rotation.yaw;
+        const authoritativePitch = lastInputCommand?.pitch ?? playerState.rotation.pitch;
         if (!preserveInitialCamera) {
-          camera = reconcilePredictedCameraState(camera, playerState, lastInputCommand);
+          camera = createCameraStateFromMovementBody(reconciledBody, authoritativeYaw, authoritativePitch);
         }
         const baseYaw = preserveInitialCamera ? (lastInputCommand?.yaw ?? playerState.rotation.yaw) : camera.yRot;
         const basePitch = preserveInitialCamera ? (lastInputCommand?.pitch ?? playerState.rotation.pitch) : camera.xRot;
         const commandStepCounts = playerCommandClock.consumeElapsedUs(Math.max(0, Math.round(dtSeconds * 1_000_000.0)));
-        const predictedCommandSeconds = commandStepCounts.reduce(
-          (sum, stepCount) => sum + ((stepCount * PLAYER_COMMAND_QUANTUM_US) / 1_000_000.0),
-          0.0,
-        );
-        const sampledPlayerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence);
-        if (!preserveInitialCamera) {
-          camera = applyPredictedCameraInput(camera, sampledPlayerInput, predictedCommandSeconds);
-        }
+        const currentButtonMask = getDebugPlayerButtonMask(inputFrame);
+        let edgeButtonMask = currentButtonMask & ~lastPlayerButtonMask;
+        lastPlayerButtonMask = currentButtonMask;
         for (const stepCount of commandStepCounts) {
           const playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, nextInputSequence, {
             clientTimeUs: Math.max(0, Math.round(now * 1_000.0)),
             commandQuantumUs: PLAYER_COMMAND_QUANTUM_US,
             stepCount,
+            buttons: currentButtonMask,
+            edgeButtons: edgeButtonMask,
             physicsRevision: PLAYER_MOVEMENT_PHYSICS_REVISION,
             collisionRevision: PLAYER_COLLISION_REVISION,
           });
-          queuePlayerInput(playerInput);
+          edgeButtonMask = 0;
+          if (queuePlayerInput(playerInput) && !preserveInitialCamera) {
+            const predictedBody = predictionService.advanceCommandReplay({
+              command: playerInputToQueuedMoveCommand(playerState.playerId, playerInput).command,
+              clientWorld: predictionView,
+              physicsParams: DEFAULT_MOVEMENT_PHYSICS,
+            });
+            camera = createCameraStateFromMovementBody(predictedBody, playerInput.yaw, playerInput.pitch);
+          }
         }
 
         const chunkViewRequest = preserveInitialCamera

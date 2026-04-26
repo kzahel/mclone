@@ -1,6 +1,6 @@
 # Tactical 53 - Remote Player Integration Sequence
 
-Status: coordination tactical / active ordering record.
+Status: implementation sequence complete; follow-up movement polish remains.
 
 This tactical coordinates the cross-cutting work needed before `movementMode=player` becomes real grounded player movement in both browser singleplayer and remote multiplayer. It exists because the next work spans transport, join/session semantics, and movement integration; doing those in the wrong order would bake temporary debug shortcuts into the player simulation.
 
@@ -21,21 +21,25 @@ Already landed:
 - `R0` through `R8`: authoritative host/client boundary, worker singleplayer, dedicated Node host, remote clients, protocol hardening, authoritative player command queue, and debug browser authority integration
 - `ClientRuntime0` through `ClientRuntime6`: `IntegratedServer`, `ClientRuntime`, `ClientWorld`, prediction views, presentation state, and entity interpolation boundary
 - `Movement0` through `Movement2`: shared movement body, fixed command stream, prediction core, host command queue, and ack snapshots
+- `Movement3`: live host player ticks now use the shared movement body, host collision reads, explicit missing-collision handling, browser prediction/reconcile, and player-mode input semantics
 
-Landed in this slice:
+Landed through this sequence:
 
 - remote dedicated browser play uses a persistent WebSocket message channel by default
 - server-originated session, player, chunk, light, and entity updates are pushed into the client drain queue
 - reusable remote message serialization lives outside the HTTP envelope module
 - browser joins carry a default player profile, and remote host sessions now point at separate player slots
+- local worker singleplayer and remote WebSocket clients share the same command/snapshot movement path
+- debug player mode emits local wish axes plus jump/crouch/sprint buttons; `moveY` no longer means flight in player mode
+- browser debug player prediction uses `ClientRuntime.getPredictionService()` over `ClientWorldPredictionView`
+- player camera position is derived from predicted or authoritative movement body position plus eye height
 
 Still temporary:
 
 - HTTP polling remains as a non-default compatibility adapter and test surface
 - `open_world` still folds world open/create and session join together
 - profile-based persisted player-slot recovery is not implemented yet
-- live player movement snapshots still come from a compatibility fly body
-- debug player input still emits camera-space `moveX/moveY/moveZ`
+- player spawn height is still provisional; surface-aware spawn/respawn is a follow-up movement slice
 
 ## Required Order
 
@@ -74,11 +78,15 @@ Do not add inventory, authentication, permissions, or full persisted player data
 
 ### 3. Basic Player Movement Integration
 
-Draft this after R9 and player-slot semantics are in place. It should replace the compatibility fly path without reopening transport or identity work.
+Owner doc: [`Movement3-basic-player-movement-integration.md`](Movement3-basic-player-movement-integration.md).
 
-Required outcomes:
+Status: done.
 
-- host player ticks use `simulatePlayerMoveCommands(...)` / `simulateMovementStep(...)` instead of the legacy `nextPositionForCommandStep(...)` fly integrator
+This replaced the compatibility fly path without reopening transport or identity work.
+
+Required outcomes landed:
+
+- host player ticks use `simulatePlayerMoveCommand(...)` / `simulateMovementStep(...)` instead of the legacy `nextPositionForCommandStep(...)` fly integrator
 - host movement reads collision through an authoritative `CollisionWorld`
 - missing collision data is explicit and does not silently consume commands as successful movement
 - debug player input emits local `wishX/wishZ` plus jump/crouch/sprint button bits
@@ -129,13 +137,13 @@ After join/player-slot cleanup:
 
 After movement integration:
 
-- movement unit tests still pass
-- player-loop tests cover gravity, jump, collision, missing collision, and no phantom movement
-- client prediction service tests cover replay/reconcile against hydrated client chunks
-- remote WebSocket integration proves player movement changes authoritative state and chunk interest follows the player
-- `pnpm test:browser:integration`
-- smallest relevant browser probe/screenshot for player-mode visual validation
-- `git diff --check`
+- done: `pnpm test -- test/runtime/player-loop.test.ts test/renderer/debug-player-controls.test.ts`
+- done: `pnpm test -- test/runtime/movement/movement-step.test.ts test/runtime/movement/movement-command.test.ts test/runtime/movement/movement-predictor.test.ts test/runtime/client-prediction-service.test.ts test/runtime/generated-world-boundary.test.ts test/runtime/generated-world-host-scheduler.test.ts`
+- done: `pnpm test -- test/runtime/remote-world-transport.test.ts`
+- done: `pnpm typecheck`
+- done: `pnpm test:browser:integration`
+- done: `pnpm test:browser`
+- done: `git diff --check`
 
 ## Done When
 
