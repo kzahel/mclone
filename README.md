@@ -8,12 +8,12 @@ Runtime/host arc status: `R0` through `R8` are landed: browser singleplayer, ded
 
 ## Stack
 
-- **Language:** TypeScript end-to-end — host, workers, worldgen, meshing. No Rust.
+- **Language:** TypeScript end-to-end — host, workers, worldgen, meshing.
 - **Renderer:** WebGPU. Greedy-meshed chunks packed into instanced buffers.
 - **Worldgen:** TS translation of MC 1.17.1's pipeline; bit-exact seed parity is the correctness bar. See `docs/tactical/`.
 - **Chunk storage:** engine-native chunk records behind adapters; IndexedDB is the browser baseline, with OPFS still open for large binary blobs.
 - **Host:** Vite + workers. Main thread handles input/UI/GPU submission; workers own the authoritative local host and client meshing.
-- **Perf escape hatch:** any measured-hot module can move to WASM-from-C (not Rust). Default stack is pure TS; no WASM unless measurement says so.
+- **Perf escape hatch:** any measured-hot module can move to WASM-from-C. Default stack is pure TS; no WASM unless measurement says so.
 
 [`docs/native-target.md`](docs/native-target.md) is an exploratory architecture note only. It does not change the current TS-first roadmap or imply committed native-host work.
 
