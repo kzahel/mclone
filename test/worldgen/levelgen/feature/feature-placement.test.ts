@@ -7,7 +7,9 @@ import { OverworldBiomeSource } from "../../../../src/worldgen/biome/overworld-b
 import { NoiseBasedChunkGenerator } from "../../../../src/worldgen/levelgen/noise-based-chunk-generator";
 import { DoublePlantBlock } from "../../../../src/world/level/block/double-plant-block";
 import { SweetBerryBushBlock } from "../../../../src/world/level/block/sweet-berry-bush-block";
+import { BlockStateProperties } from "../../../../src/world/level/block/state/properties/block-state-properties";
 import { DoubleBlockHalf } from "../../../../src/world/level/block/state/properties/double-block-half";
+import { SlabType } from "../../../../src/world/level/block/state/properties/slab-type";
 import { Heightmap } from "../../../../src/worldgen/levelgen/heightmap";
 import { GenerationStep } from "../../../../src/worldgen/levelgen/generation-step";
 import { ColumnPlacer } from "../../../../src/worldgen/levelgen/feature/blockplacers/column-placer";
@@ -402,5 +404,55 @@ describe("Feature placement", () => {
 
     expect(foundBerry).toBe(true);
     expect(tallestSugarCane).toBeGreaterThan(1);
+  });
+
+  test("desert well places the translated sandstone, slab, and water pattern only on supported sand", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const level = new StaticRenderLevel(blocks.airState, 15, 15, 0, 64);
+    const generator = createGenerator();
+    const sandState = getState("minecraft:sand");
+    const sandstoneState = getState("minecraft:sandstone");
+    const sandstoneSlabState = getState("minecraft:sandstone_slab");
+    const waterState = getState("minecraft:water");
+
+    for (let z = 0; z < 48; z++) {
+      for (let x = 0; x < 48; x++) {
+        level.setBlock(new BlockPos(x, 8, z), sandstoneState);
+        level.setBlock(new BlockPos(x, 9, z), sandstoneState);
+        level.setBlock(new BlockPos(x, 10, z), sandState);
+      }
+    }
+
+    expect(Features.DESERT_WELL.configured(NoneFeatureConfiguration.INSTANCE).place(level, generator, new WorldgenRandom(12345n), new BlockPos(16, 10, 16)))
+      .toBe(true);
+
+    expect(level.getBlockState(new BlockPos(16, 10, 16)).is(waterState.getBlock())).toBe(true);
+    expect(level.getBlockState(new BlockPos(17, 10, 16)).is(waterState.getBlock())).toBe(true);
+    expect(level.getBlockState(new BlockPos(15, 10, 16)).is(waterState.getBlock())).toBe(true);
+    expect(level.getBlockState(new BlockPos(16, 10, 17)).is(waterState.getBlock())).toBe(true);
+    expect(level.getBlockState(new BlockPos(16, 10, 15)).is(waterState.getBlock())).toBe(true);
+    expect(level.getBlockState(new BlockPos(18, 11, 16)).is(sandstoneSlabState.getBlock())).toBe(true);
+    expect(level.getBlockState(new BlockPos(18, 11, 16)).getValue(BlockStateProperties.SLAB_TYPE)).toBe(SlabType.BOTTOM);
+    expect(level.getBlockState(new BlockPos(16, 14, 16)).is(sandstoneState.getBlock())).toBe(true);
+    expect(level.getBlockState(new BlockPos(15, 14, 16)).is(sandstoneSlabState.getBlock())).toBe(true);
+    expect(level.getBlockState(new BlockPos(15, 12, 15)).is(sandstoneState.getBlock())).toBe(true);
+
+    const unsupportedLevel = new StaticRenderLevel(blocks.airState, 15, 15, 0, 64);
+    for (let z = 0; z < 48; z++) {
+      for (let x = 0; x < 48; x++) {
+        unsupportedLevel.setBlock(new BlockPos(x, 10, z), sandState);
+      }
+    }
+    unsupportedLevel.setBlock(new BlockPos(16, 9, 16), blocks.airState);
+    unsupportedLevel.setBlock(new BlockPos(16, 8, 16), blocks.airState);
+
+    expect(
+      Features.DESERT_WELL.configured(NoneFeatureConfiguration.INSTANCE).place(
+        unsupportedLevel,
+        generator,
+        new WorldgenRandom(67890n),
+        new BlockPos(16, 10, 16),
+      ),
+    ).toBe(false);
   });
 });

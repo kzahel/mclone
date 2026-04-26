@@ -6,6 +6,7 @@ import { DoubleBlockHalf } from "./double-block-half";
 import { DirectionProperty } from "./direction-property";
 import { EnumProperty } from "./enum-property";
 import { IntegerProperty } from "./integer-property";
+import { SlabType } from "./slab-type";
 
 export class BlockStateProperties {
   public static readonly AGE_1 = IntegerProperty.create("age", 0, 1);
@@ -33,6 +34,7 @@ export class BlockStateProperties {
   public static readonly VERTICAL_DIRECTION = DirectionProperty.create("vertical_direction", Direction.UP, Direction.DOWN);
   public static readonly DRIPSTONE_THICKNESS = EnumProperty.create("thickness", DripstoneThickness);
   public static readonly DOUBLE_BLOCK_HALF = EnumProperty.create("half", DoubleBlockHalf);
+  public static readonly SLAB_TYPE = EnumProperty.create("type", SlabType);
   public static readonly HORIZONTAL_AXIS = EnumProperty.create("axis", Direction.Axis, Direction.Axis.X, Direction.Axis.Z);
   public static readonly BAMBOO_LEAVES = EnumProperty.create("leaves", BambooLeaves);
   public static readonly WATERLOGGED = BooleanProperty.create("waterlogged");

@@ -31,6 +31,7 @@ import { PointedDripstoneBlock } from "./block/pointed-dripstone-block";
 import { RotatedPillarBlock } from "./block/rotated-pillar-block";
 import { SeagrassBlock } from "./block/seagrass-block";
 import { SeaPickleBlock } from "./block/sea-pickle-block";
+import { SlabBlock } from "./block/slab-block";
 import { SnowLayerBlock } from "./block/snow-layer-block";
 import { SnowyDirtBlock } from "./block/snowy-dirt-block";
 import { SugarCaneBlock } from "./block/sugar-cane-block";
@@ -167,6 +168,7 @@ const GREEN_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:green_terracot
 const RED_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:red_terracotta");
 const BLACK_TERRACOTTA_LOCATION = new ResourceLocation("minecraft:black_terracotta");
 const SANDSTONE_LOCATION = new ResourceLocation("minecraft:sandstone");
+const SANDSTONE_SLAB_LOCATION = new ResourceLocation("minecraft:sandstone_slab");
 const RED_SANDSTONE_LOCATION = new ResourceLocation("minecraft:red_sandstone");
 const PACKED_ICE_LOCATION = new ResourceLocation("minecraft:packed_ice");
 const RED_SAND_LOCATION = new ResourceLocation("minecraft:red_sand");
@@ -333,6 +335,7 @@ const GENERATED_BLOCK_LOCATIONS = [
   RED_TERRACOTTA_LOCATION,
   BLACK_TERRACOTTA_LOCATION,
   SANDSTONE_LOCATION,
+  SANDSTONE_SLAB_LOCATION,
   RED_SANDSTONE_LOCATION,
   PACKED_ICE_LOCATION,
   RED_SAND_LOCATION,
@@ -793,6 +796,10 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     SANDSTONE_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.SAND).requiresCorrectToolForDrops().strength(0.8)),
   ).defaultBlockState();
+  const sandstoneSlabState = registerBlock(
+    SANDSTONE_SLAB_LOCATION,
+    new SlabBlock(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.SAND).requiresCorrectToolForDrops().strength(0.8).noOcclusion()),
+  ).defaultBlockState();
   const redSandstoneState = registerBlock(
     RED_SANDSTONE_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.STONE, MaterialColor.COLOR_ORANGE).requiresCorrectToolForDrops().strength(0.8)),
@@ -1186,6 +1193,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(sugarCaneState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(vineState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(cocoaState.getBlock(), RenderType.cutout());
+  ItemBlockRenderTypes.setRenderLayer(sandstoneSlabState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(clayState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(calciteState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(dripstoneBlockState.getBlock(), RenderType.solid());

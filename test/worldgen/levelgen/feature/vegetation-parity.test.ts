@@ -12,6 +12,7 @@ import { GenerationStep } from "../../../../src/worldgen/levelgen/generation-ste
 import { ConfiguredFeature } from "../../../../src/worldgen/levelgen/feature/configured-feature";
 import { CountConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/count-configuration";
 import { CarvingMaskDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/carving-mask-decorator-configuration";
+import { ChanceDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/chance-decorator-configuration";
 import { DecoratedDecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorated-decorator-configuration";
 import { DecoratedFeatureConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorated-feature-configuration";
 import type { DecoratorConfiguration } from "../../../../src/worldgen/levelgen/feature/configurations/decorator-configuration";
@@ -628,6 +629,23 @@ describe("Vegetation parity", () => {
     expect(sugarCaneIndex).toBeGreaterThan(-1);
     expect(brownMushroomIndex).toBeGreaterThan(-1);
     expect(sugarCaneIndex).toBeLessThan(brownMushroomIndex);
+  });
+
+  test("desert biome settings carry the translated SURFACE_STRUCTURES desert well path", () => {
+    registerGeneratedRenderBlocks();
+
+    const desertSurfaceStructures = (getOverworldBiomeGenerationSettings("minecraft:desert").features()[GenerationStep.Decoration.SURFACE_STRUCTURES] ?? [])
+      .map((supplier) => supplier());
+    expect(desertSurfaceStructures).toHaveLength(1);
+
+    const desertWell = desertSurfaceStructures[0]!;
+    expect(unwrapConfiguredFeature(desertWell).current.feature).toBe(Features.DESERT_WELL);
+
+    const chanceConfig = unwrapConfiguredFeature(desertWell).decoratorConfigs.find(
+      (decoratorConfig): decoratorConfig is ChanceDecoratorConfiguration => decoratorConfig instanceof ChanceDecoratorConfiguration,
+    );
+    expect(chanceConfig).toBeDefined();
+    expect(chanceConfig!.chance).toBe(1000);
   });
 
   test("swamp vegetation uses the translated swamp-oak leaf-vine tree path", () => {

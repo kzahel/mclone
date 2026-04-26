@@ -10,6 +10,7 @@ import { Block } from "../../../src/world/level/block/block";
 import { BlockStateProperties } from "../../../src/world/level/block/state/properties/block-state-properties";
 import { DoubleBlockHalf } from "../../../src/world/level/block/state/properties/double-block-half";
 import { DripstoneThickness } from "../../../src/world/level/block/state/properties/dripstone-thickness";
+import { SlabType } from "../../../src/world/level/block/state/properties/slab-type";
 import { StaticBlockAndTintGetter } from "../../../src/world/level/static-block-and-tint-getter";
 import { FoliageColor } from "../../../src/world/level/foliage-color";
 import { GrassColor } from "../../../src/world/level/grass-color";
@@ -99,6 +100,7 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:bee_nest"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:birch_leaves"))).toBe(RenderType.cutoutMipped());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:pumpkin"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:sandstone_slab"))).toBe(RenderType.solid());
     expect(getState("minecraft:deepslate").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
     expect(getState("minecraft:infested_deepslate").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
 
@@ -126,6 +128,10 @@ describe("Surface feature palette", () => {
     expect(sunflower.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)).toBe(DoubleBlockHalf.LOWER);
     expect(palette.blockLocations.some((location) => location.toString() === "minecraft:sunflower")).toBe(true);
     expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/sunflower_front")).toBe(true);
+
+    const sandstoneSlab = getState("minecraft:sandstone_slab");
+    expect(sandstoneSlab.getValue(BlockStateProperties.SLAB_TYPE)).toBe(SlabType.BOTTOM);
+    expect(palette.blockLocations.some((location) => location.toString() === "minecraft:sandstone_slab")).toBe(true);
   });
 
   test("leaves stay non-occluding so adjacent terrain faces are not culled", () => {

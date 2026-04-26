@@ -1,5 +1,6 @@
 import { Registry } from "../../../core/registry";
 import { DefaultFlowerFeature } from "./default-flower-feature";
+import { DesertWellFeature } from "./desert-well-feature";
 import { DecoratedFeature } from "./decorated-feature";
 import { LakeFeature } from "./lake-feature";
 import { BambooFeature } from "./bamboo-feature";
@@ -79,6 +80,7 @@ export const Features = {
   HUGE_RED_MUSHROOM: register("huge_red_mushroom", new HugeRedMushroomFeature()),
   HUGE_BROWN_MUSHROOM: register("huge_brown_mushroom", new HugeBrownMushroomFeature()),
   ICE_SPIKE: register("ice_spike", new IceSpikeFeature()),
+  DESERT_WELL: register("desert_well", new DesertWellFeature()),
   FREEZE_TOP_LAYER: register("freeze_top_layer", new SnowAndFreezeFeature()),
   VINES: register("vines", new VinesFeature()),
   DISK: register("disk", new DiskReplaceFeature()),

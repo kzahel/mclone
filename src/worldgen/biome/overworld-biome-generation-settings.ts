@@ -176,6 +176,10 @@ function addDesertVegetation(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_DEAD_BUSH_2);
 }
 
+function addDesertExtraDecoration(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.SURFACE_STRUCTURES, () => VegetationFeatures.WELL);
+}
+
 function addDesertExtraVegetation(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_SUGAR_CANE_DESERT);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_PUMPKIN);
@@ -414,6 +418,7 @@ function buildDesertSettings(): BiomeGenerationSettings {
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
   addDefaultMushrooms(builder);
+  addDesertExtraDecoration(builder);
   addDesertVegetation(builder);
   addDesertExtraVegetation(builder);
   addDefaultSprings(builder);

@@ -709,6 +709,10 @@ export class VegetationFeatures {
     return Features.ICE_SPIKE.configured(NoneFeatureConfiguration.INSTANCE).decorated(heightmapSquare()).count(3);
   }
 
+  public static get WELL() {
+    return Features.DESERT_WELL.configured(NoneFeatureConfiguration.INSTANCE).decorated(heightmapSquare()).rarity(1000);
+  }
+
   public static get ICE_PATCH() {
     return Features.ICE_PATCH.configured(createIcePatchConfig()).decorated(heightmapSquare()).count(2);
   }
