@@ -21,13 +21,20 @@ export class PngNativeImageDecoder implements NativeImageDecoder {
 }
 
 export async function decodePngNativeImage(bytes: Uint8Array): Promise<NativeImage> {
-  const { header, idat } = parsePng(bytes);
-  validateSupportedHeader(header);
+  const { header, idat, palette, transparency } = parsePng(bytes);
+  validateSupportedHeader(header, palette);
   const inflated = await inflateZlib(idat);
-  return NativeImage.fromRgbaPixels(header.width, header.height, unfilterRgbaRows(header.width, header.height, inflated));
+  const components = componentsForColorType(header.colorType);
+  const pixels = unfilterRows(header.width, header.height, inflated, components);
+  return NativeImage.fromRgbaPixels(header.width, header.height, expandToRgba(pixels, header.colorType, palette, transparency));
 }
 
-function parsePng(bytes: Uint8Array): { readonly header: PngHeader; readonly idat: Uint8Array } {
+function parsePng(bytes: Uint8Array): {
+  readonly header: PngHeader;
+  readonly idat: Uint8Array;
+  readonly palette?: Uint8Array;
+  readonly transparency?: Uint8Array;
+} {
   if (bytes.byteLength < PNG_SIGNATURE.length) {
     throw new Error("PNG data is shorter than the signature");
   }
@@ -40,6 +47,8 @@ function parsePng(bytes: Uint8Array): { readonly header: PngHeader; readonly ida
 
   let offset = PNG_SIGNATURE.length;
   let header: PngHeader | undefined;
+  let palette: Uint8Array | undefined;
+  let transparency: Uint8Array | undefined;
   const idatChunks: Uint8Array[] = [];
   while (offset < bytes.byteLength) {
     if (offset + 8 > bytes.byteLength) {
@@ -57,6 +66,10 @@ function parsePng(bytes: Uint8Array): { readonly header: PngHeader; readonly ida
     const data = bytes.subarray(dataStart, dataEnd);
     if (type === "IHDR") {
       header = parseHeader(data);
+    } else if (type === "PLTE") {
+      palette = new Uint8Array(data);
+    } else if (type === "tRNS") {
+      transparency = new Uint8Array(data);
     } else if (type === "IDAT") {
       idatChunks.push(data);
     } else if (type === "IEND") {
@@ -73,7 +86,7 @@ function parsePng(bytes: Uint8Array): { readonly header: PngHeader; readonly ida
     throw new Error("PNG is missing IDAT");
   }
 
-  return { header, idat: concatBytes(idatChunks) };
+  return { header, idat: concatBytes(idatChunks), palette, transparency };
 }
 
 function parseHeader(data: Uint8Array): PngHeader {
@@ -92,17 +105,41 @@ function parseHeader(data: Uint8Array): PngHeader {
   };
 }
 
-function validateSupportedHeader(header: PngHeader): void {
+function validateSupportedHeader(header: PngHeader, palette?: Uint8Array): void {
   if (header.width <= 0 || header.height <= 0) {
     throw new Error(`Invalid PNG size ${header.width.toString()}x${header.height.toString()}`);
   }
-  if (header.bitDepth !== 8 || header.colorType !== 6) {
+  if (header.bitDepth !== 8 || !isSupportedColorType(header.colorType)) {
     throw new Error(`Unsupported PNG format: bitDepth=${header.bitDepth.toString()} colorType=${header.colorType.toString()}`);
+  }
+  if (header.colorType === 3 && (palette === undefined || palette.byteLength === 0 || palette.byteLength % 3 !== 0)) {
+    throw new Error("Indexed PNG is missing a valid PLTE chunk");
   }
   if (header.compressionMethod !== 0 || header.filterMethod !== 0 || header.interlaceMethod !== 0) {
     throw new Error(
       `Unsupported PNG methods: compression=${header.compressionMethod.toString()} filter=${header.filterMethod.toString()} interlace=${header.interlaceMethod.toString()}`,
     );
+  }
+}
+
+function isSupportedColorType(colorType: number): boolean {
+  return colorType === 0 || colorType === 2 || colorType === 3 || colorType === 4 || colorType === 6;
+}
+
+function componentsForColorType(colorType: number): number {
+  switch (colorType) {
+    case 0:
+      return 1;
+    case 2:
+      return 3;
+    case 3:
+      return 1;
+    case 4:
+      return 2;
+    case 6:
+      return 4;
+    default:
+      throw new Error(`Unsupported PNG color type ${colorType.toString()}`);
   }
 }
 
@@ -169,8 +206,8 @@ function inflateStoredZlib(bytes: Uint8Array): Uint8Array {
   return concatBytes(chunks);
 }
 
-function unfilterRgbaRows(width: number, height: number, bytes: Uint8Array): Uint8Array {
-  const rowStride = width * RGBA_COMPONENTS;
+function unfilterRows(width: number, height: number, bytes: Uint8Array, components: number): Uint8Array {
+  const rowStride = width * components;
   const expectedSize = (rowStride + 1) * height;
   if (bytes.byteLength !== expectedSize) {
     throw new Error(`Inflated PNG payload size mismatch: expected ${expectedSize.toString()} bytes, got ${bytes.byteLength.toString()}`);
@@ -184,14 +221,74 @@ function unfilterRgbaRows(width: number, height: number, bytes: Uint8Array): Uin
     const previousRowOffset = rowOffset - rowStride;
     for (let x = 0; x < rowStride; x++) {
       const raw = bytes[inputOffset++]!;
-      const left = x >= RGBA_COMPONENTS ? pixels[rowOffset + x - RGBA_COMPONENTS]! : 0;
+      const left = x >= components ? pixels[rowOffset + x - components]! : 0;
       const up = y > 0 ? pixels[previousRowOffset + x]! : 0;
-      const upLeft = y > 0 && x >= RGBA_COMPONENTS ? pixels[previousRowOffset + x - RGBA_COMPONENTS]! : 0;
+      const upLeft = y > 0 && x >= components ? pixels[previousRowOffset + x - components]! : 0;
       pixels[rowOffset + x] = unfilterByte(filter, raw, left, up, upLeft);
     }
   }
 
   return pixels;
+}
+
+function expandToRgba(
+  pixels: Uint8Array,
+  colorType: number,
+  palette?: Uint8Array,
+  transparency?: Uint8Array,
+): Uint8Array {
+  if (colorType === 6) {
+    return pixels;
+  }
+
+  const components = componentsForColorType(colorType);
+  const pixelCount = pixels.byteLength / components;
+  const rgba = new Uint8Array(pixelCount * RGBA_COMPONENTS);
+  for (let pixel = 0; pixel < pixelCount; pixel++) {
+    const sourceOffset = pixel * components;
+    const targetOffset = pixel * RGBA_COMPONENTS;
+    switch (colorType) {
+      case 0: {
+        const value = pixels[sourceOffset]!;
+        rgba[targetOffset] = value;
+        rgba[targetOffset + 1] = value;
+        rgba[targetOffset + 2] = value;
+        rgba[targetOffset + 3] = 0xff;
+        break;
+      }
+      case 2:
+        rgba[targetOffset] = pixels[sourceOffset]!;
+        rgba[targetOffset + 1] = pixels[sourceOffset + 1]!;
+        rgba[targetOffset + 2] = pixels[sourceOffset + 2]!;
+        rgba[targetOffset + 3] = 0xff;
+        break;
+      case 3: {
+        const index = pixels[sourceOffset]!;
+        const paletteOffset = index * 3;
+        if (palette === undefined || paletteOffset + 2 >= palette.byteLength) {
+          throw new Error(`Indexed PNG pixel references missing palette index ${index.toString()}`);
+        }
+
+        rgba[targetOffset] = palette[paletteOffset]!;
+        rgba[targetOffset + 1] = palette[paletteOffset + 1]!;
+        rgba[targetOffset + 2] = palette[paletteOffset + 2]!;
+        rgba[targetOffset + 3] = transparency?.[index] ?? 0xff;
+        break;
+      }
+      case 4: {
+        const value = pixels[sourceOffset]!;
+        rgba[targetOffset] = value;
+        rgba[targetOffset + 1] = value;
+        rgba[targetOffset + 2] = value;
+        rgba[targetOffset + 3] = pixels[sourceOffset + 1]!;
+        break;
+      }
+      default:
+        throw new Error(`Unsupported PNG color type ${colorType.toString()}`);
+    }
+  }
+
+  return rgba;
 }
 
 function unfilterByte(filter: number, raw: number, left: number, up: number, upLeft: number): number {

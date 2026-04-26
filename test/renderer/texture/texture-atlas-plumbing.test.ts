@@ -8,6 +8,7 @@ import {
 } from "../../../src/renderer/texture/browser-native-image-loader";
 import { MipmapGenerator } from "../../../src/renderer/texture/mipmap-generator";
 import { NativeImage } from "../../../src/renderer/texture/native-image";
+import { decodePngNativeImage } from "../../../src/renderer/texture/png-native-image-decoder";
 import { Stitcher } from "../../../src/renderer/texture/stitcher";
 import {
   advanceTextureAtlasAnimations,
@@ -30,6 +31,87 @@ function solidImage(width: number, height: number, color: number): NativeImage {
 
 function rgba8(pixel: number): readonly [number, number, number, number] {
   return [NativeImage.getR(pixel), NativeImage.getG(pixel), NativeImage.getB(pixel), NativeImage.getA(pixel)];
+}
+
+function createPng(
+  colorType: number,
+  width: number,
+  height: number,
+  rows: Uint8Array,
+  extraChunks: readonly Uint8Array[] = [],
+): Uint8Array {
+  const header = new Uint8Array(13);
+  writeU32(header, 0, width);
+  writeU32(header, 4, height);
+  header[8] = 8;
+  header[9] = colorType;
+  const idat = createStoredZlib(rows);
+  return concatBytes([
+    new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    createPngChunk("IHDR", header),
+    ...extraChunks,
+    createPngChunk("IDAT", idat),
+    createPngChunk("IEND", new Uint8Array()),
+  ]);
+}
+
+function createPngChunk(type: string, data: Uint8Array): Uint8Array {
+  const chunk = new Uint8Array(12 + data.byteLength);
+  writeU32(chunk, 0, data.byteLength);
+  for (let i = 0; i < 4; i++) {
+    chunk[4 + i] = type.charCodeAt(i);
+  }
+  chunk.set(data, 8);
+  return chunk;
+}
+
+function createStoredZlib(data: Uint8Array): Uint8Array {
+  if (data.byteLength > 0xffff) {
+    throw new Error("test PNG data is too large for one stored zlib block");
+  }
+
+  const zlib = new Uint8Array(2 + 5 + data.byteLength + 4);
+  zlib[0] = 0x78;
+  zlib[1] = 0x01;
+  zlib[2] = 0x01;
+  zlib[3] = data.byteLength & 0xff;
+  zlib[4] = data.byteLength >>> 8;
+  const nlength = data.byteLength ^ 0xffff;
+  zlib[5] = nlength & 0xff;
+  zlib[6] = nlength >>> 8;
+  zlib.set(data, 7);
+  writeU32(zlib, 7 + data.byteLength, adler32(data));
+  return zlib;
+}
+
+function adler32(data: Uint8Array): number {
+  let a = 1;
+  let b = 0;
+  for (const value of data) {
+    a = (a + value) % 65521;
+    b = (b + a) % 65521;
+  }
+
+  return ((b << 16) | a) >>> 0;
+}
+
+function writeU32(bytes: Uint8Array, offset: number, value: number): void {
+  bytes[offset] = (value >>> 24) & 0xff;
+  bytes[offset + 1] = (value >>> 16) & 0xff;
+  bytes[offset + 2] = (value >>> 8) & 0xff;
+  bytes[offset + 3] = value & 0xff;
+}
+
+function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
+  const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.byteLength;
+  }
+
+  return bytes;
 }
 
 class MemoryTextureAtlasSource implements TextureAtlasSource {
@@ -75,6 +157,42 @@ describe("Texture atlas plumbing", () => {
     const image = new NativeImage(1, 1, false);
     image.setPixelRGBA(0, 0, NativeImage.combine(0x44, 0x33, 0x22, 0x11));
     expect(rgba8(image.getPixelRGBA(0, 0))).toEqual([0x11, 0x22, 0x33, 0x44]);
+  });
+
+  test("PngNativeImageDecoder expands grayscale alpha PNGs to RGBA pixels", async () => {
+    const image = await decodePngNativeImage(createPng(4, 2, 1, new Uint8Array([
+      0,
+      0x20,
+      0x40,
+      0x80,
+      0xc0,
+    ])));
+
+    expect(rgba8(image.getPixelRGBA(0, 0))).toEqual([0x20, 0x20, 0x20, 0x40]);
+    expect(rgba8(image.getPixelRGBA(1, 0))).toEqual([0x80, 0x80, 0x80, 0xc0]);
+  });
+
+  test("PngNativeImageDecoder expands indexed PNGs with palette transparency", async () => {
+    const image = await decodePngNativeImage(createPng(
+      3,
+      2,
+      1,
+      new Uint8Array([0, 0, 1]),
+      [
+        createPngChunk("PLTE", new Uint8Array([
+          0x10,
+          0x20,
+          0x30,
+          0xa0,
+          0xb0,
+          0xc0,
+        ])),
+        createPngChunk("tRNS", new Uint8Array([0x40])),
+      ],
+    ));
+
+    expect(rgba8(image.getPixelRGBA(0, 0))).toEqual([0x10, 0x20, 0x30, 0x40]);
+    expect(rgba8(image.getPixelRGBA(1, 0))).toEqual([0xa0, 0xb0, 0xc0, 0xff]);
   });
 
   test("MipmapGenerator keeps a solid color stable across mip levels", () => {

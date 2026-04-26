@@ -1,6 +1,6 @@
 # RendererHost3: Generated World Headless Runtime
 
-Status: next.
+Status: done.
 
 ## Goal
 
@@ -14,11 +14,13 @@ Add or update:
 
 | # | Module | Expected result |
 |---|---|---|
-| 1 | generated-world headless harness entry | Deno can boot the generated-world worker/integrated-server path, set chunk interest from an injected camera, wait for the loaded chunk ring, render one settled frame, and write `/tmp` PNG output |
-| 2 | shared runtime/renderer helper | reuse browser `ClientRuntime` and renderer setup concepts without requiring DOM canvas, browser storage, or Chrome-only APIs |
-| 3 | input/camera injection | represent the smoke camera and minimal command input as host-provided data instead of browser event state |
-| 4 | validation result | return loaded chunk count, render-world counters, draw counts, queue stats, center/terrain pixels, and output path in the same spirit as browser smoke |
-| 5 | docs | record which browser assumptions remain and which host adapters are now shared |
+| 1 | `scripts/deno-generated-world-smoke.ts` / `package.json` | done - `pnpm smoke:deno:generated-world` boots generated-world runtime, sets chunk interest from an injected camera, waits for the loaded chunk ring, renders one settled frame, and writes `/tmp/mclone-deno-generated-world-smoke.png` |
+| 2 | `src/renderer/generated-world-headless-harness.ts` | done - reusable headless generated-world harness over `ClientRuntime`, integrated-server transport, render-world worker ingestion, frame settling, and counter collection |
+| 3 | `scripts/deno-generated-world-worker.ts` | done - Deno module worker runs the generated-world host behind the same world-worker transport/integrated-server shape as browser singleplayer |
+| 4 | `scripts/deno-generated-render-world-worker.ts` / `src/renderer/chunk/render-world-worker-handler.ts` | done - Deno render-world worker reuses the shared render-world protocol handler with a Deno file-backed asset context |
+| 5 | `src/renderer/chunk/asset-pack-mesh-context.ts` | done - source-level asset-pack model/atlas/biome-color context for Deno render-world worker and headless main-thread renderer setup |
+| 6 | `src/renderer/texture/png-native-image-decoder.ts` | done - native PNG decoder now supports the vanilla grayscale-alpha and indexed-palette PNGs needed by the full generated block atlas |
+| 7 | docs | done - record which browser assumptions remain and which host adapters are now shared |
 
 Do not add:
 
@@ -46,24 +48,31 @@ Prefer extracting browser smoke setup into shared runtime/renderer helpers only 
 
 ## Validation
 
-Required for completion:
+Completed:
 
-- generated-world Deno smoke command, added to `package.json`
-- inspect generated-world PNG under `/tmp`
-- focused runtime/renderer tests touched by helper extraction
-- `pnpm smoke:deno:world-assets` to prove the static harness still works
-- `pnpm typecheck`, with the known unrelated `WorldHostMessage.snapshot` failure documented if still present
+- `pnpm smoke:deno:generated-world` - passed
+- inspected `/tmp/mclone-deno-generated-world-smoke.png`: blue sky with a generated textured terrain island/mountain visible in frame
+- `file /tmp/mclone-deno-generated-world-smoke.png` - reported `PNG image data, 256 x 256, 8-bit/color RGBA, non-interlaced`
+- `pnpm smoke:deno:world-assets` - passed, proving the earlier static vanilla-asset lane still works
+- `pnpm test -- test/renderer/texture/texture-atlas-plumbing.test.ts test/renderer/chunk/render-world-worker-client.test.ts test/renderer/chunk/render-world-worker.test.ts test/renderer/chunk/chunk-render-infrastructure.test.ts` - passed
+- `pnpm typecheck` - still blocked only by the unrelated existing `test/runtime/generated-world-host-factory.test.ts(43,43)` `WorldHostMessage.snapshot` error
 - `git diff --check`
+
+Observed generated-world output:
+
+```json
+{"ok":true,"outputPath":"/tmp/mclone-deno-generated-world-smoke.png","width":256,"height":256,"format":"rgba8unorm","saveId":"generated-world-v5-browser_smoke-12345-liquid-none","expectedLoadedChunkCount":25,"loadedChunkCount":25,"viewDistance":1,"renderDistance":112,"solidDrawCount":8,"nonClearPixels":9004,"centerPixel":[143,184,255,255],"terrainPixel":[79,105,79,255],"byteLength":262144,"renderWorldCounters":{"ingestBatchCount":7,"meshBuildRequestCount":106,"meshNotReadyResponseCount":83,"meshCompletionCount":23,"mainThreadGpuUploadCount":20},"renderQueueStats":{"renderedChunkCount":8,"pendingVisibleChunkCompileCount":0,"queuedChunkBuildCount":0,"activeChunkBuildCount":0},"sessionId":"local-session","playerId":"local-player","playerTick":0,"playerPosition":[968.5,168,-8119.5],"adapter":{}}
+```
 
 Browser smoke can remain documented as unavailable on this headless Linux host because Chrome headless WebGPU fails at `GPUQueue.onSubmittedWorkDone()`. Do not block this Deno slice on Chrome here.
 
 ## Done When
 
-- Deno renders a generated-world frame through shared runtime/client/render-world setup.
-- The camera/chunk-interest input is injected by the host instead of read from DOM events.
-- The output PNG and counters prove real generated chunks reached mesh upload and draw submission.
-- Static Deno smokes continue to pass through `src/renderer/static-frame-harness.ts`.
+- Done: Deno renders a generated-world frame through shared runtime/client/render-world setup.
+- Done: the camera/chunk-interest input is injected by the host instead of read from DOM events.
+- Done: the output PNG and counters prove real generated chunks reached mesh upload and draw submission.
+- Done: static Deno smokes continue to pass through `src/renderer/static-frame-harness.ts`.
 
 ## Follow-Up
 
-After this, move toward reusable harness parity for browser probes and headless Deno generated-world probes: one set of scenario inputs, two target adapters.
+Next tactical: [`RendererHost4-shared-generated-world-scenarios.md`](RendererHost4-shared-generated-world-scenarios.md) should move toward reusable harness parity for browser probes and headless Deno generated-world probes: one set of scenario inputs, two target adapters.

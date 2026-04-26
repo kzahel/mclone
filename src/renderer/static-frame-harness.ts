@@ -102,6 +102,24 @@ export interface HeadlessFrameReadbackResult {
   readonly byteLength: number;
 }
 
+export interface RendererHarnessSceneOptions {
+  readonly device: GPUDevice;
+  readonly atlas: TextureAtlas;
+  readonly renderWorldUpdateSink: RenderWorldWorkerUpdateSink;
+  readonly viewArea: ViewArea;
+  readonly chunkDispatcher: ChunkRenderDispatcher;
+  readonly levelRenderer: LevelRenderer;
+  readonly gameRenderer: GameRenderer;
+  readonly lightTexture: LightTexture;
+  readonly minBuildHeight: number;
+  readonly worldHeight: number;
+  readonly viewDistance: number;
+  readonly adapter?: GPUAdapter;
+  readonly format?: GPUTextureFormat;
+  readonly saveMetadata?: RendererScene["saveMetadata"];
+  readonly clientRuntime?: RendererScene["clientRuntime"];
+}
+
 export function createStoneWallChunkSnapshotMessages(options: StoneWallSnapshotOptions): ChunkSnapshotMessage[] {
   const chunkRadius = options.chunkRadius ?? 1;
   const biomeSource = new OverworldBiomeSource(options.seed);
@@ -208,19 +226,19 @@ export async function createStaticRendererFrameHarness(
       options.minBuildHeight,
       options.worldHeight,
     );
-    const scene = createStaticRendererScene(
-      options.device,
-      options.atlas,
+    const scene = createRendererHarnessScene({
+      device: options.device,
+      atlas: options.atlas,
       renderWorldUpdateSink,
       viewArea,
       chunkDispatcher,
       levelRenderer,
       gameRenderer,
       lightTexture,
-      options.minBuildHeight,
-      options.worldHeight,
-      options.viewDistance,
-    );
+      minBuildHeight: options.minBuildHeight,
+      worldHeight: options.worldHeight,
+      viewDistance: options.viewDistance,
+    });
 
     if (lightTexture === undefined || chunkDispatcher === undefined || viewArea === undefined) {
       throw new Error("static renderer frame harness was not fully initialized");
@@ -391,45 +409,37 @@ function applyDirtySections(
   return dirtyCount;
 }
 
-function createStaticRendererScene(
-  device: GPUDevice,
-  atlas: TextureAtlas,
-  renderWorldUpdateSink: RenderWorldWorkerUpdateSink,
-  viewArea: ViewArea,
-  chunkDispatcher: ChunkRenderDispatcher,
-  levelRenderer: LevelRenderer,
-  gameRenderer: GameRenderer,
-  lightTexture: LightTexture,
-  minBuildHeight: number,
-  worldHeight: number,
-  viewDistance: number,
-): RendererScene {
+export function createRendererHarnessScene(options: RendererHarnessSceneOptions): RendererScene {
   return {
-    device,
-    atlas,
-    renderWorldUpdateSink,
-    viewArea,
-    chunkDispatcher,
-    levelRenderer,
-    gameRenderer,
-    lightTexture,
-    pipelineCache: new RenderPipelineCache(device),
-    textureSamplers: createTextureSamplers(device),
-    lightSampler: device.createSampler({
+    adapter: options.adapter,
+    device: options.device,
+    format: options.format,
+    saveMetadata: options.saveMetadata,
+    clientRuntime: options.clientRuntime,
+    atlas: options.atlas,
+    renderWorldUpdateSink: options.renderWorldUpdateSink,
+    viewArea: options.viewArea,
+    chunkDispatcher: options.chunkDispatcher,
+    levelRenderer: options.levelRenderer,
+    gameRenderer: options.gameRenderer,
+    lightTexture: options.lightTexture,
+    pipelineCache: new RenderPipelineCache(options.device),
+    textureSamplers: createRendererTextureSamplers(options.device),
+    lightSampler: options.device.createSampler({
       magFilter: "linear",
       minFilter: "linear",
       mipmapFilter: "nearest",
     }),
     worldBounds: {
-      minBuildHeight,
-      maxBuildHeight: minBuildHeight + worldHeight,
+      minBuildHeight: options.minBuildHeight,
+      maxBuildHeight: options.minBuildHeight + options.worldHeight,
     },
-    viewDistance,
+    viewDistance: options.viewDistance,
     chunkDrawResources: new WeakMap(),
   } as unknown as RendererScene;
 }
 
-function createTextureSamplers(device: GPUDevice): ReadonlyMap<string, GPUSampler> {
+export function createRendererTextureSamplers(device: GPUDevice): ReadonlyMap<string, GPUSampler> {
   const samplers = new Map<string, GPUSampler>();
   for (const state of [
     { blur: false, mipmap: false },
