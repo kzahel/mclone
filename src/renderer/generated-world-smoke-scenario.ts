@@ -1,10 +1,8 @@
 import { Vec3 } from "../world/phys/vec3";
-import type { ClientRuntime } from "../runtime/client/client-runtime";
 import type { NormalizedWorldEngineConfig, SetPlayerInputRequest } from "../runtime/protocol/world-messages";
 import { getDefaultRenderDistance, getExpectedLoadedChunkCount } from "./browser-render-config";
 import type { CameraState } from "./game-renderer";
-import type { RenderSceneQueueStats, RenderWorldPerformanceCounters, RendererScene } from "./scene-setup";
-import { applyRenderWorldDirtySections } from "./scene-setup";
+import type { RenderSceneQueueStats, RenderWorldPerformanceCounters } from "./scene-setup";
 
 export interface GeneratedWorldSmokeScenario {
   readonly seed: bigint;
@@ -41,6 +39,7 @@ export interface GeneratedWorldSmokeResultLike {
   readonly sessionId?: string;
   readonly playerId?: string;
   readonly playerName?: string;
+  readonly playerProfileId?: string;
   readonly sessionRevision?: number;
   readonly playerInputSequence?: number;
   readonly playerStateRevision?: number;
@@ -109,41 +108,6 @@ export function createGeneratedWorldSmokeSearchParams(
     cameraPitch: scenario.camera.xRot.toString(),
     ...extra,
   });
-}
-
-export async function runGeneratedWorldSmokePlayerInput(
-  scene: RendererScene,
-  scenario: GeneratedWorldSmokeScenario = GENERATED_WORLD_SMOKE_SCENARIO,
-): Promise<void> {
-  await runGeneratedWorldSmokePlayerInputForRuntime(scene.clientRuntime, () => {
-    applyRenderWorldDirtySections(scene);
-  }, scenario);
-}
-
-export async function runGeneratedWorldSmokePlayerInputForRuntime(
-  clientRuntime: ClientRuntime,
-  onTransportDrained?: () => void,
-  scenario: GeneratedWorldSmokeScenario = GENERATED_WORLD_SMOKE_SCENARIO,
-): Promise<void> {
-  const initialPlayerState = clientRuntime.publishPresentationState().localPlayerState;
-  if (initialPlayerState === undefined) {
-    return;
-  }
-
-  await clientRuntime.sendPlayerCommand({
-    type: "set_player_input",
-    input: scenario.playerInput,
-  });
-  for (let attempt = 0; attempt < 5; attempt++) {
-    await sleep(60);
-    if (await clientRuntime.drainTransportUpdates()) {
-      onTransportDrained?.();
-    }
-    const updatedPlayerState = clientRuntime.publishPresentationState().localPlayerState;
-    if (updatedPlayerState !== undefined && updatedPlayerState.revision > initialPlayerState.revision) {
-      break;
-    }
-  }
 }
 
 export function validateGeneratedWorldSmokeResult(
@@ -256,10 +220,4 @@ function validatePixel(label: string, pixel: readonly number[] | undefined, erro
   if (pixel.length !== 4) {
     errors.push(`expected ${label} to have four RGBA channels`);
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }

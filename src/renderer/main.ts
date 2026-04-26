@@ -1,30 +1,22 @@
-import { SectionPos } from "../core/section-pos";
 import { deleteIndexedDbWorldStorage } from "../runtime/storage/indexeddb-world-storage";
 import { Vec3 } from "../world/phys/vec3";
-import { type LevelRenderFrame } from "./level-renderer";
 import { type CameraState } from "./game-renderer";
-import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
-import { RenderType } from "./render-type";
 import {
-  applyRenderWorldDirtySections,
-  createSceneDepthView,
+  createSceneDepthTarget,
   encodeSceneFrame,
-  getSceneLoadedChunkCount,
-  getSceneRenderQueueStats,
-  getSceneRenderWorldPerformanceCounters,
   initializeRendererScene,
-  renderSceneUntilSettled,
-  SCENE_DEPTH_FORMAT,
-  waitForLoadedChunkRing,
   type RenderSceneQueueStats,
   type RenderWorldPerformanceCounters,
-  type RendererScene,
 } from "./scene-setup";
-import { getExpectedLoadedChunkCount, readBrowserRenderConfig } from "./browser-render-config";
+import { readBrowserRenderConfig } from "./browser-render-config";
 import {
   GENERATED_WORLD_SMOKE_SCENARIO,
-  runGeneratedWorldSmokePlayerInput,
 } from "./generated-world-smoke-scenario";
+import {
+  runGeneratedWorldSmokeScenario,
+  type GeneratedWorldSmokeRenderTarget,
+} from "./generated-world-smoke-runner";
+import { readTextureRgba8 } from "./webgpu-target";
 
 type BootWorldTransport = "worker" | "remote";
 
@@ -69,17 +61,6 @@ declare global {
 }
 
 const READBACK_FORMAT: GPUTextureFormat = "rgba8unorm";
-const VALIDATED_RENDER_TYPES = [
-  RenderType.solid(),
-  RenderType.cutoutMipped(),
-  RenderType.cutout(),
-  RenderType.translucent(),
-  RenderType.translucentMovingBlock(),
-  RenderType.translucentNoCrumbling(),
-  RenderType.tripwire(),
-  RenderType.lines(),
-  RenderType.lineStrip(),
-] as const;
 
 function readWorldTransport(): {
   readonly worldTransport: BootWorldTransport;
@@ -133,85 +114,6 @@ function readClearWorldStorage(url: URL): boolean {
   return value === "1" || value === "true";
 }
 
-function rgba8FromColor(color: readonly [number, number, number, number]): readonly [number, number, number, number] {
-  return [
-    Math.round(color[0] * 255),
-    Math.round(color[1] * 255),
-    Math.round(color[2] * 255),
-    Math.round(color[3] * 255),
-  ];
-}
-
-function validateShaderPipelines(
-  pipelineCache: RenderPipelineCache,
-  colorFormat: GPUTextureFormat,
-  depthFormat: GPUTextureFormat,
-): void {
-  for (const renderType of VALIDATED_RENDER_TYPES) {
-    pipelineCache.getOrCreate(renderType, colorFormat, depthFormat);
-  }
-}
-
-async function popValidationError(device: GPUDevice, label: string): Promise<string | undefined> {
-  const error = await device.popErrorScope();
-  return error ? `${label}: ${error.message}` : undefined;
-}
-
-async function readPixel(
-  device: GPUDevice,
-  texture: GPUTexture,
-  x: number,
-  y: number,
-): Promise<readonly [number, number, number, number]> {
-  const readback = device.createBuffer({
-    size: 256,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-  });
-  const encoder = device.createCommandEncoder();
-  encoder.copyTextureToBuffer(
-    {
-      texture,
-      origin: { x, y },
-    },
-    {
-      buffer: readback,
-      bytesPerRow: 256,
-      rowsPerImage: 1,
-    },
-    { width: 1, height: 1 },
-  );
-  device.queue.submit([encoder.finish()]);
-  await device.queue.onSubmittedWorkDone();
-  await readback.mapAsync(GPUMapMode.READ);
-  const bytes = new Uint8Array(readback.getMappedRange()).slice(0, 4);
-  readback.unmap();
-  readback.destroy();
-  return [bytes[0]!, bytes[1]!, bytes[2]!, bytes[3]!];
-}
-
-async function renderSmokeCamera(scene: RendererScene, camera: CameraState, expectedLoadedChunkCount: number): Promise<LevelRenderFrame> {
-  if (await scene.clientRuntime.setChunkInterest({
-    type: "set_chunk_view",
-    centerChunkX: SectionPos.posToSectionCoord(camera.position.x),
-    centerChunkZ: SectionPos.posToSectionCoord(camera.position.z),
-    radius: scene.viewDistance,
-  })) {
-    applyRenderWorldDirtySections(scene);
-    scene.levelRenderer.allChanged();
-  }
-
-  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, { maxAttempts: 1800 })) {
-    throw new Error(
-      `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`,
-    );
-  }
-
-  // Mesh requests issued before the full chunk ring arrives can legitimately
-  // return "not ready"; force one visibility pass after the ring is present.
-  scene.levelRenderer.allChanged();
-  return renderSceneUntilSettled(scene, camera);
-}
-
 async function boot(): Promise<BootResult> {
   const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
   if (!canvas) return { ok: false, reason: "canvas #renderer not found" };
@@ -253,111 +155,78 @@ async function boot(): Promise<BootResult> {
     return sceneResult;
   }
   const scene = sceneResult.scene;
-  const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
   const camera = requestedCamera ?? GENERATED_WORLD_SMOKE_SCENARIO.camera;
-  let frame: LevelRenderFrame;
   try {
-    frame = await renderSmokeCamera(scene, camera, expectedLoadedChunkCount);
+    const run = await runGeneratedWorldSmokeScenario({
+      scene,
+      scenario: GENERATED_WORLD_SMOKE_SCENARIO,
+      camera,
+      target: createBrowserSmokeRenderTarget(canvas),
+      worldTransport: runtimeConfig.worldTransport,
+      format: scene.format,
+      lightingMode: renderConfig.lightingMode,
+      liquidSimulationMode: renderConfig.liquidSimulationMode,
+    });
+    return run.result;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { ok: false, reason };
   }
+}
 
-  const solidDraws = frame.layerDraws.get(RenderType.solid()) ?? [];
-  const cutoutDraws = frame.layerDraws.get(RenderType.cutout()) ?? [];
-  const translucentDraws = frame.layerDraws.get(RenderType.translucent()) ?? [];
-  if (solidDraws.length === 0) {
-    return { ok: false, reason: "camera-driven level renderer produced no solid drawables for the generated terrain scene" };
-  }
-
-  await runGeneratedWorldSmokePlayerInput(scene, GENERATED_WORLD_SMOKE_SCENARIO);
-
-  scene.device.pushErrorScope("validation");
-  validateShaderPipelines(scene.pipelineCache, scene.format, SCENE_DEPTH_FORMAT);
-  const pipelineError = await popValidationError(scene.device, "WebGPU pipeline validation failed");
-  if (pipelineError) {
-    return { ok: false, reason: pipelineError };
-  }
-
-  const canvasDepthView = createSceneDepthView(scene.device, canvas.width, canvas.height);
-  const readbackDepthView = createSceneDepthView(scene.device, canvas.width, canvas.height);
-  const readbackTexture = scene.device.createTexture({
-    size: { width: canvas.width, height: canvas.height },
-    format: READBACK_FORMAT,
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
-  });
-
-  scene.device.pushErrorScope("validation");
-  const encoder = scene.device.createCommandEncoder();
-  encodeSceneFrame(
-    scene,
-    frame,
-    {
-      view: scene.ctx.getCurrentTexture().createView(),
-      depthView: canvasDepthView,
-      format: scene.format,
-    },
-    encoder,
-  );
-  encodeSceneFrame(
-    scene,
-    frame,
-    {
-      view: readbackTexture.createView(),
-      depthView: readbackDepthView,
-      format: READBACK_FORMAT,
-    },
-    encoder,
-  );
-  scene.device.queue.submit([encoder.finish()]);
-  await scene.device.queue.onSubmittedWorkDone();
-  const submissionError = await popValidationError(scene.device, "WebGPU submission validation failed");
-  if (submissionError) {
-    return { ok: false, reason: submissionError };
-  }
-
-  const centerPixel = await readPixel(scene.device, readbackTexture, Math.floor(canvas.width / 2), Math.floor(canvas.height / 2));
-  const terrainPixel = await readPixel(scene.device, readbackTexture, Math.floor(canvas.width / 2), Math.floor((canvas.height * 3) / 4));
-  const clearPixel = rgba8FromColor(frame.fogColor);
-
-  const info = scene.adapter.info ?? {};
-  const adapterInfo = [info.vendor, info.architecture, info.device, info.description]
-    .filter(Boolean)
-    .join(" / ") || "unknown";
-  const presentation = scene.clientRuntime.publishPresentationState();
-  const sessionState = presentation.sessionState;
-  const playerState = presentation.localPlayerState;
-
+function createBrowserSmokeRenderTarget(canvas: HTMLCanvasElement): GeneratedWorldSmokeRenderTarget {
   return {
-    ok: true,
-    worldTransport: runtimeConfig.worldTransport,
-    meshTransport: "worker",
-    saveId: scene.saveMetadata.saveId,
-    sessionId: sessionState?.sessionId,
-    playerId: sessionState?.playerId,
-    playerName: sessionState?.playerProfile.name,
-    playerProfileId: sessionState?.playerProfile.profileId,
-    sessionRevision: sessionState?.revision,
-    playerInputSequence: playerState?.acknowledgedInputSequence,
-    playerStateRevision: playerState?.revision,
-    playerTick: playerState?.tick,
-    playerPosition: playerState ? [playerState.position.x, playerState.position.y, playerState.position.z] : undefined,
-    format: scene.format,
-    adapterInfo,
-    centerPixel,
-    terrainPixel,
-    clearPixel,
-    loadedChunkCount: getSceneLoadedChunkCount(scene),
-    expectedLoadedChunkCount,
-    viewDistance: scene.viewDistance,
-    renderDistance: scene.gameRenderer.getRenderDistance(),
-    lightingMode: renderConfig.lightingMode,
-    liquidSimulationMode: renderConfig.liquidSimulationMode,
-    solidDrawCount: solidDraws.length,
-    cutoutDrawCount: cutoutDraws.length,
-    translucentDrawCount: translucentDraws.length,
-    renderWorldCounters: getSceneRenderWorldPerformanceCounters(scene),
-    renderQueueStats: getSceneRenderQueueStats(scene),
+    get width() {
+      return canvas.width;
+    },
+    get height() {
+      return canvas.height;
+    },
+    format: READBACK_FORMAT,
+    renderFrame: async ({ scene, frame }) => {
+      const canvasDepthTarget = createSceneDepthTarget(scene.device, canvas.width, canvas.height);
+      const readbackDepthTarget = createSceneDepthTarget(scene.device, canvas.width, canvas.height);
+      const readbackTexture = scene.device.createTexture({
+        size: { width: canvas.width, height: canvas.height },
+        format: READBACK_FORMAT,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+      });
+      try {
+        const encoder = scene.device.createCommandEncoder();
+        encodeSceneFrame(
+          scene,
+          frame,
+          {
+            view: scene.ctx.getCurrentTexture().createView(),
+            depthView: canvasDepthTarget.view,
+            format: scene.format,
+          },
+          encoder,
+        );
+        encodeSceneFrame(
+          scene,
+          frame,
+          {
+            view: readbackTexture.createView(),
+            depthView: readbackDepthTarget.view,
+            format: READBACK_FORMAT,
+          },
+          encoder,
+        );
+        scene.device.queue.submit([encoder.finish()]);
+        await scene.device.queue.onSubmittedWorkDone();
+        return {
+          width: canvas.width,
+          height: canvas.height,
+          format: READBACK_FORMAT,
+          pixels: await readTextureRgba8(scene.device, readbackTexture, canvas.width, canvas.height),
+        };
+      } finally {
+        canvasDepthTarget.texture.destroy();
+        readbackDepthTarget.texture.destroy();
+        readbackTexture.destroy();
+      }
+    },
   };
 }
 

@@ -1,4 +1,3 @@
-import { SectionPos } from "../core/section-pos";
 import type { AssetPack } from "./assets/asset-pack";
 import { prepareAssetPackRendererResources } from "./chunk/asset-pack-mesh-context";
 import { ChunkRenderDispatcher } from "./chunk/chunk-render-dispatcher";
@@ -9,20 +8,9 @@ import { LevelRenderer } from "./level-renderer";
 import { LightTexture } from "./light-texture";
 import { type LoadingProgressSink } from "./loading-progress";
 import type { RenderWorldWorkerEndpointFactory } from "./renderer-host";
-import {
-  applyRenderWorldDirtySections,
-  getSceneLoadedChunkCount,
-  getSceneRenderQueueStats,
-  getSceneRenderWorldPerformanceCounters,
-  renderSceneUntilSettled,
-  waitForLoadedChunkRing,
-  type RenderSceneQueueStats,
-  type RenderWorldPerformanceCounters,
-  type RendererScene,
-} from "./scene-setup";
+import { type RendererScene } from "./scene-setup";
 import { createRendererHarnessScene } from "./static-frame-harness";
 import { TextureAtlas } from "./texture/texture-atlas";
-import { RenderType } from "./render-type";
 import { ViewArea } from "./view-area";
 import { DEFAULT_PLAYER_PROFILE, type OpenWorldPreset, type PlayerProfile, type WorldEngineConfig } from "../runtime/protocol/world-messages";
 import type { WorldSaveMetadata } from "../runtime/storage/world-storage";
@@ -34,6 +22,7 @@ import { ClientChunkCache } from "../world/level/client-chunk-cache";
 import { registerGeneratedRenderBlocks } from "../world/level/generated-render-blocks";
 import { Vec3 } from "../world/phys/vec3";
 import { OverworldBiomeSource } from "../worldgen/biome/overworld-biome-source";
+import { renderGeneratedWorldSmokeFrame, type GeneratedWorldSmokeFrameResult } from "./generated-world-smoke-runner";
 
 export interface GeneratedWorldHeadlessHarnessOptions {
   readonly adapter: GPUAdapter;
@@ -65,13 +54,7 @@ export interface GeneratedWorldHeadlessHarness {
   close(): void;
 }
 
-export interface GeneratedWorldHeadlessFrameResult {
-  readonly frame: import("./level-renderer").LevelRenderFrame;
-  readonly loadedChunkCount: number;
-  readonly renderWorldCounters: RenderWorldPerformanceCounters;
-  readonly renderQueueStats: RenderSceneQueueStats;
-  readonly solidDrawCount: number;
-}
+export type GeneratedWorldHeadlessFrameResult = GeneratedWorldSmokeFrameResult;
 
 export async function createGeneratedWorldHeadlessHarness(
   options: GeneratedWorldHeadlessHarnessOptions,
@@ -214,30 +197,5 @@ export async function renderGeneratedWorldHeadlessFrame(
   camera: CameraState,
   expectedLoadedChunkCount: number,
 ): Promise<GeneratedWorldHeadlessFrameResult> {
-  if (await harness.clientRuntime.setChunkInterest({
-    type: "set_chunk_view",
-    centerChunkX: SectionPos.posToSectionCoord(camera.position.x),
-    centerChunkZ: SectionPos.posToSectionCoord(camera.position.z),
-    radius: harness.scene.viewDistance,
-  })) {
-    applyRenderWorldDirtySections(harness.scene);
-    harness.scene.levelRenderer.allChanged();
-  }
-
-  if (!await waitForLoadedChunkRing(harness.scene, expectedLoadedChunkCount, { maxAttempts: 1800 })) {
-    throw new Error(
-      `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${harness.scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(harness.scene).toString()}`,
-    );
-  }
-
-  harness.scene.levelRenderer.allChanged();
-  const frame = await renderSceneUntilSettled(harness.scene, camera);
-  const renderQueueStats = getSceneRenderQueueStats(harness.scene);
-  return {
-    frame,
-    loadedChunkCount: getSceneLoadedChunkCount(harness.scene),
-    renderWorldCounters: getSceneRenderWorldPerformanceCounters(harness.scene),
-    renderQueueStats,
-    solidDrawCount: frame.layerDraws.get(RenderType.solid())?.length ?? 0,
-  };
+  return renderGeneratedWorldSmokeFrame(harness.scene, camera, expectedLoadedChunkCount);
 }
