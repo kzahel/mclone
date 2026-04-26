@@ -13,6 +13,10 @@ export interface DebugInputFrame {
   readonly flyDown: boolean;
 }
 
+export interface DebugInputOptions {
+  readonly isGuiActive?: () => boolean;
+}
+
 // Port of tilefun/src/input/TouchJoystick.ts — fixed-center virtual joystick.
 const JOYSTICK_MAX_DISTANCE = 50;
 const JOYSTICK_DEAD_ZONE = 10;
@@ -44,14 +48,11 @@ export class DebugInput {
   private flyUp = false;
   private flyDown = false;
 
-  private readonly joystickBase: HTMLElement | null;
-  private readonly joystickKnob: HTMLElement | null;
-
-  public constructor(canvas: HTMLCanvasElement) {
-    this.joystickBase = document.getElementById("joystick-base");
-    this.joystickKnob = document.getElementById("joystick-knob");
-
+  public constructor(canvas: HTMLCanvasElement, private readonly options: DebugInputOptions = {}) {
     canvas.addEventListener("click", () => {
+      if (this.isGuiActive()) {
+        return;
+      }
       if (!this.locked) {
         canvas.requestPointerLock().catch(() => {
           // Mobile / no pointer-lock — touch handlers take over.
@@ -67,6 +68,13 @@ export class DebugInput {
       }
     });
     document.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      if (this.isGuiActive()) {
+        this.clearGameplayInput();
+        return;
+      }
       if (!this.locked) return;
       this.heldKeys.add(event.code);
       if (event.code === "Space" || event.code.startsWith("Arrow")) {
@@ -74,9 +82,20 @@ export class DebugInput {
       }
     });
     document.addEventListener("keyup", (event) => {
+      if (event.defaultPrevented) {
+        return;
+      }
       this.heldKeys.delete(event.code);
     });
     document.addEventListener("mousemove", (event) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      if (this.isGuiActive()) {
+        this.mouseDeltaX = 0;
+        this.mouseDeltaY = 0;
+        return;
+      }
       if (!this.locked) return;
       this.mouseDeltaX += event.movementX;
       this.mouseDeltaY += event.movementY;
@@ -86,14 +105,12 @@ export class DebugInput {
     canvas.addEventListener("touchmove", (event) => this.onTouchMove(event), { passive: false });
     canvas.addEventListener("touchend", (event) => this.onTouchEnd(event), { passive: false });
     canvas.addEventListener("touchcancel", (event) => this.onTouchEnd(event), { passive: false });
-
-    this.bindFlyButton("move-fwd", (held) => { this.moveForward = held; });
-    this.bindFlyButton("move-back", (held) => { this.moveBack = held; });
-    this.bindFlyButton("fly-up", (held) => { this.flyUp = held; });
-    this.bindFlyButton("fly-down", (held) => { this.flyDown = held; });
   }
 
   public consumeFrame(): DebugInputFrame {
+    if (this.isGuiActive()) {
+      this.clearGameplayInput();
+    }
     const [jx, jy] = this.readJoystickAxes();
     const frame: DebugInputFrame = {
       heldKeys: new Set(this.heldKeys),
@@ -130,6 +147,10 @@ export class DebugInput {
   }
 
   private onTouchStart(event: TouchEvent, canvas: HTMLCanvasElement): void {
+    if (this.isGuiActive()) {
+      this.clearGameplayInput();
+      return;
+    }
     event.preventDefault();
     const midpoint = canvas.clientWidth / 2;
     for (const touch of Array.from(event.changedTouches)) {
@@ -154,6 +175,10 @@ export class DebugInput {
   }
 
   private onTouchMove(event: TouchEvent): void {
+    if (this.isGuiActive()) {
+      this.clearGameplayInput();
+      return;
+    }
     event.preventDefault();
     for (const touch of Array.from(event.changedTouches)) {
       if (this.joystickTouch && touch.identifier === this.joystickTouch.id) {
@@ -178,6 +203,10 @@ export class DebugInput {
   }
 
   private onTouchEnd(event: TouchEvent): void {
+    if (this.isGuiActive()) {
+      this.clearGameplayInput();
+      return;
+    }
     event.preventDefault();
     for (const touch of Array.from(event.changedTouches)) {
       if (this.joystickTouch && touch.identifier === this.joystickTouch.id) {
@@ -190,30 +219,24 @@ export class DebugInput {
   }
 
   private renderJoystick(): void {
-    if (!this.joystickBase || !this.joystickKnob) return;
-    if (!this.joystickTouch) {
-      this.joystickBase.classList.remove("active");
-      this.joystickKnob.classList.remove("active");
-      return;
-    }
-    this.joystickBase.style.left = `${this.joystickTouch.baseX}px`;
-    this.joystickBase.style.top = `${this.joystickTouch.baseY}px`;
-    this.joystickKnob.style.left = `${this.joystickTouch.thumbX}px`;
-    this.joystickKnob.style.top = `${this.joystickTouch.thumbY}px`;
-    this.joystickBase.classList.add("active");
-    this.joystickKnob.classList.add("active");
+    // WebGPU: touch joystick state is input-only until a GPU touch HUD replaces the removed DOM controls.
   }
 
-  private bindFlyButton(id: string, setHeld: (held: boolean) => void): void {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const press = (event: Event) => { event.preventDefault(); el.classList.add("active"); setHeld(true); };
-    const release = (event: Event) => { event.preventDefault(); el.classList.remove("active"); setHeld(false); };
-    el.addEventListener("touchstart", press, { passive: false });
-    el.addEventListener("touchend", release, { passive: false });
-    el.addEventListener("touchcancel", release, { passive: false });
-    el.addEventListener("mousedown", press);
-    el.addEventListener("mouseup", release);
-    el.addEventListener("mouseleave", release);
+  private clearGameplayInput(): void {
+    this.heldKeys.clear();
+    this.mouseDeltaX = 0;
+    this.mouseDeltaY = 0;
+    this.moveForward = false;
+    this.moveBack = false;
+    this.flyUp = false;
+    this.flyDown = false;
+    this.joystickTouch = null;
+    this.lookTouch = null;
+    this.renderJoystick();
   }
+
+  private isGuiActive(): boolean {
+    return this.options.isGuiActive?.() === true;
+  }
+
 }

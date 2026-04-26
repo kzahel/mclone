@@ -3,258 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-    <title>mclone — debug free-cam</title>
+    <title>mclone debug</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #111; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #ccc; overscroll-behavior: none; }
-      body { touch-action: none; }
-      canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
-      #debug-overlay {
-        position: fixed;
-        top: 8px;
-        left: 8px;
-        padding: 6px 10px;
-        background: rgba(0, 0, 0, 0.55);
-        border-radius: 4px;
-        font-size: 12px;
-        line-height: 1.4;
-        pointer-events: none;
-        white-space: pre;
-        max-width: calc(100vw - 16px);
-      }
-      #debug-progress {
-        position: fixed;
-        top: 42px;
-        left: 8px;
-        width: min(420px, calc(100vw - 16px));
-        height: 6px;
-        background: rgba(255, 255, 255, 0.16);
-        border-radius: 3px;
-        overflow: hidden;
-        pointer-events: none;
-      }
-      #debug-progress.hidden { display: none; }
-      #debug-progress-bar {
-        width: 0%;
-        height: 100%;
-        background: #78a7ff;
-        transition: width 120ms linear;
-      }
-      #debug-config {
-        position: fixed;
-        top: 8px;
-        right: 8px;
-        width: min(320px, calc(100vw - 16px));
-        background: rgba(9, 12, 16, 0.82);
-        border: 1px solid rgba(255, 255, 255, 0.18);
-        border-radius: 6px;
-        color: #e6edf3;
-        font-size: 12px;
-        line-height: 1.3;
-        pointer-events: auto;
-        user-select: none;
-        -webkit-user-select: none;
-      }
-      #debug-config summary {
-        cursor: pointer;
-        list-style: none;
-        padding: 8px 10px;
-        font-weight: 700;
-      }
-      #debug-config summary::-webkit-details-marker { display: none; }
-      #debug-config summary::after {
-        content: "+";
-        float: right;
-        color: #9fb5d1;
-      }
-      #debug-config[open] summary::after { content: "-"; }
-      .debug-config-body {
-        display: grid;
-        gap: 8px;
-        padding: 0 10px 10px;
-      }
-      .debug-config-row {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 74px;
-        gap: 8px;
-        align-items: center;
-      }
-      .debug-config-row input[type="number"],
-      .debug-config-row input[type="text"] {
-        width: 100%;
-        box-sizing: border-box;
-        border: 1px solid rgba(255, 255, 255, 0.22);
-        border-radius: 4px;
-        background: rgba(255, 255, 255, 0.08);
-        color: #f4f7fb;
-        padding: 5px 6px;
-        font: inherit;
-      }
-      .debug-config-field {
-        display: grid;
-        gap: 6px;
-      }
-      .debug-config-field-title {
-        color: #e6edf3;
-      }
-      .debug-config-segmented {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 2px;
-        padding: 2px;
-        border: 1px solid rgba(255, 255, 255, 0.22);
-        border-radius: 4px;
-        background: rgba(255, 255, 255, 0.08);
-      }
-      .debug-config-segmented input {
-        position: absolute;
-        opacity: 0;
-        pointer-events: none;
-      }
-      .debug-config-segmented label {
-        display: grid;
-        min-height: 28px;
-        place-items: center;
-        border-radius: 2px;
-        color: #dce7f5;
-        cursor: pointer;
-      }
-      .debug-config-segmented input:checked + label {
-        background: rgba(120, 167, 255, 0.28);
-        color: #fff;
-      }
-      .debug-config-toggle {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-      }
-      .debug-config-toggle input {
-        width: 16px;
-        height: 16px;
+      html, body {
         margin: 0;
+        height: 100%;
+        background: #111;
+        overscroll-behavior: none;
       }
-      #debug-config-chunk-count {
-        color: #9fb5d1;
-        min-height: 16px;
-      }
-      .debug-config-actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-      }
-      .debug-config-actions button {
-        border: 1px solid rgba(255, 255, 255, 0.24);
-        border-radius: 4px;
-        background: rgba(120, 167, 255, 0.18);
-        color: #f4f7fb;
-        padding: 6px 8px;
-        font: inherit;
-        cursor: pointer;
-      }
-      .debug-config-actions button[type="button"] {
-        background: rgba(255, 255, 255, 0.08);
-      }
-      #debug-delete-indexed-db {
-        grid-column: 1 / -1;
-        border-color: rgba(255, 106, 106, 0.42);
-        background: rgba(255, 106, 106, 0.16);
-      }
-      .joystick-el {
-        position: fixed;
-        left: 0;
-        top: 0;
-        border-radius: 50%;
-        background: #fff;
-        pointer-events: none;
-        transform: translate(-50%, -50%);
-        opacity: 0;
-        transition: opacity 80ms linear;
-        will-change: left, top, opacity;
-      }
-      #joystick-base { width: 120px; height: 120px; }
-      #joystick-knob { width: 56px; height: 56px; }
-      #joystick-base.active { opacity: 0.25; }
-      #joystick-knob.active { opacity: 0.4; }
-      .fly-btn {
-        position: fixed;
-        right: 16px;
-        width: 64px;
-        height: 64px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.12);
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        color: #eee;
-        font-size: 28px;
-        line-height: 64px;
-        text-align: center;
-        user-select: none;
-        -webkit-user-select: none;
+
+      body {
         touch-action: none;
       }
-      .fly-btn.active { background: rgba(255, 255, 255, 0.28); }
-      .fly-btn.text { font-size: 14px; font-weight: 600; letter-spacing: 0.5px; }
-      #move-fwd { bottom: 272px; }
-      #move-back { bottom: 192px; }
-      #fly-up { bottom: 112px; }
-      #fly-down { bottom: 32px; }
-      @media (hover: hover) and (pointer: fine) {
-        .fly-btn { display: none; }
+
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        touch-action: none;
       }
     </style>
   </head>
   <body>
     <canvas id="renderer" width="800" height="600"></canvas>
-    <div id="debug-overlay">loading...</div>
-    <div id="debug-progress"><div id="debug-progress-bar"></div></div>
-    <details id="debug-config">
-      <summary>Debug Config</summary>
-      <form id="debug-config-form" class="debug-config-body">
-        <label class="debug-config-row" for="debug-view-distance">
-          <span>View Chunks</span>
-          <input id="debug-view-distance" name="viewDistance" type="number" min="1" max="16" step="1" inputmode="numeric" />
-        </label>
-        <label class="debug-config-row" for="debug-render-distance">
-          <span>Render Blocks</span>
-          <input id="debug-render-distance" name="renderDistance" type="number" min="16" max="512" step="16" inputmode="numeric" />
-        </label>
-        <label class="debug-config-row" for="debug-seed">
-          <span>Seed</span>
-          <input id="debug-seed" name="seed" type="text" inputmode="numeric" autocomplete="off" />
-        </label>
-        <div class="debug-config-field">
-          <div class="debug-config-field-title">Movement Mode</div>
-          <div class="debug-config-segmented">
-            <input id="debug-mode-player" name="movementMode" type="radio" value="player" />
-            <label for="debug-mode-player">Player</label>
-            <input id="debug-mode-freecam" name="movementMode" type="radio" value="freecam" />
-            <label for="debug-mode-freecam">Free Cam</label>
-          </div>
-        </div>
-        <label class="debug-config-toggle" for="debug-disable-lighting">
-          <input id="debug-disable-lighting" name="disableLighting" type="checkbox" />
-          <span>Disable Lighting</span>
-        </label>
-        <label class="debug-config-toggle" for="debug-disable-water-sim">
-          <input id="debug-disable-water-sim" name="disableWaterSim" type="checkbox" />
-          <span>Disable Water Sim</span>
-        </label>
-        <label class="debug-config-toggle" for="debug-disable-indexed-db">
-          <input id="debug-disable-indexed-db" name="disableIndexedDb" type="checkbox" />
-          <span>Disable IndexedDB</span>
-        </label>
-        <output id="debug-config-chunk-count"></output>
-        <div class="debug-config-actions">
-          <button type="submit">Apply &amp; Reload</button>
-          <button id="debug-config-reset" type="button">Reset</button>
-          <button id="debug-delete-indexed-db" type="button">Delete IndexedDB &amp; Reload</button>
-        </div>
-      </form>
-    </details>
-    <div id="joystick-base" class="joystick-el"></div>
-    <div id="joystick-knob" class="joystick-el"></div>
-    <div id="move-fwd" class="fly-btn text">FWD</div>
-    <div id="move-back" class="fly-btn text">BACK</div>
-    <div id="fly-up" class="fly-btn">&#x25B2;</div>
-    <div id="fly-down" class="fly-btn">&#x25BC;</div>
     <script type="module" src="/src/renderer/debug/debug-free-cam.ts"></script>
   </body>
 </html>

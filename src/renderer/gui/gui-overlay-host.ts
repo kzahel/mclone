@@ -6,6 +6,8 @@ export interface GuiInputAttachment {
   dispose(): void;
 }
 
+export type GuiOverlayRenderer = (drawList: GuiDrawList, mouseX: number, mouseY: number, partialTick: number) => void;
+
 export class GuiOverlayHost {
   private readonly drawList = new GuiDrawList();
   private mouseX = -1;
@@ -15,14 +17,16 @@ export class GuiOverlayHost {
     private readonly canvas: HTMLCanvasElement,
     private readonly screenManager: ScreenManager,
     private readonly renderer: GuiRenderer,
+    private readonly renderOverlay: GuiOverlayRenderer = () => {},
   ) {}
 
   public static async create(
     device: GPUDevice,
     canvas: HTMLCanvasElement,
     screenManager: ScreenManager,
+    renderOverlay?: GuiOverlayRenderer,
   ): Promise<GuiOverlayHost> {
-    return new GuiOverlayHost(canvas, screenManager, await GuiRenderer.create(device));
+    return new GuiOverlayHost(canvas, screenManager, await GuiRenderer.create(device), renderOverlay);
   }
 
   public attachInput(onInput?: () => void): GuiInputAttachment {
@@ -108,6 +112,7 @@ export class GuiOverlayHost {
     this.screenManager.tick();
     this.drawList.clear();
     this.screenManager.render(this.drawList, this.mouseX, this.mouseY, 0);
+    this.renderOverlay(this.drawList, this.mouseX, this.mouseY, 0);
     this.renderer.render(
       this.drawList,
       {

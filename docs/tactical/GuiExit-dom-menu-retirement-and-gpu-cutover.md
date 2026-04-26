@@ -35,12 +35,15 @@ Already GPU-backed:
 - Back to Game input suppression/resume
 - minimal GPU `OptionsScreen` reachable from root title and pause, with view/render distance sliders, lighting cycle, and water simulation checkbox persisted through the browser render config
 - minimal GPU `DebugSettingsScreen` reachable from root title and pause, with movement/preset/storage cycle controls persisted through the existing debug session config
+- `/debug.html` canvas-only shell with GPU loading/progress, error alert, HUD text, pause/options/debug settings, and input suppression while menus are open
+- `window.__mcloneDebug` machine state for automation without visible DOM controls
 
-Still DOM-backed:
+Still open:
 
-- `debug.html` settings panel, progress overlay, text overlay, joystick, fly buttons
-- debug-free-cam DOM progress/error/config plumbing
-- debug input mobile controls
+- arbitrary world setup/seed entry parity
+- quit-to-title / save-and-quit lifecycle
+- destructive confirm screens such as clear-storage confirmation
+- richer touch HUD if touch controls remain a supported debug surface
 
 ## Implementation Plan
 
@@ -48,8 +51,8 @@ Still DOM-backed:
 |---|---|---|
 | 1 | Root shell cutover | **done** - `index.html` is canvas-only and boots GPU title by default; `/smoke.html` still direct-boots smoke scenarios |
 | 2 | GPU world setup | seed, preset, movement mode, storage, and quickstart/continue behavior move from `index.html` JS into GPU screens |
-| 3 | GPU options/debug settings | **partial** - `OptionsScreen` and a minimal `DebugSettingsScreen` are GPU-backed; `debug.html` still needs migration to stop owning visible controls |
-| 4 | Debug harness migration | `debug.html` becomes canvas-only or aliases the root shell; `__mcloneDebug` remains as a machine API |
+| 3 | GPU options/debug settings | **done for current controls** - `OptionsScreen` and a minimal `DebugSettingsScreen` are GPU-backed from root, pause, and debug flows |
+| 4 | Debug harness migration | **done** - `debug.html` is canvas-only; `__mcloneDebug` remains as a machine API |
 | 5 | Error/confirm/quit flow | loading errors, storage reset, save-and-quit, and return-to-title use GPU screens |
 | 6 | DOM deletion sweep | remove obsolete HTML/CSS/DOM mutation code and update tests/probes to use GPU surfaces or hooks |
 

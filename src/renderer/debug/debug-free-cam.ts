@@ -11,6 +11,13 @@ import {
 } from "../../runtime/session/player-loop";
 import { deleteIndexedDbWorldStorage } from "../../runtime/storage/indexeddb-world-storage";
 import { Vec3 } from "../../world/phys/vec3";
+import { AlertScreen } from "../../client/gui/screens/alert-screen";
+import { DebugSettingsScreen, type GuiDebugSettingsState } from "../../client/gui/screens/debug-settings-screen";
+import { OptionsScreen, type GuiOptionsState } from "../../client/gui/screens/options-screen";
+import { PauseScreen } from "../../client/gui/screens/pause-screen";
+import { ProgressScreen } from "../../client/gui/screens/progress-screen";
+import { GuiComponent } from "../../client/gui/gui-component";
+import { ScreenManager } from "../../client/gui/screen-manager";
 import {
   applyRenderWorldDirtySections,
   createSceneDepthTarget,
@@ -27,23 +34,20 @@ import {
   type RendererScene,
 } from "../scene-setup";
 import {
-  BROWSER_RENDER_CONFIG_QUERY_KEYS,
-  clearStoredBrowserRenderConfig,
-  getDefaultRenderDistance,
   getExpectedLoadedChunkCount,
   readBrowserRenderConfig,
   writeStoredBrowserRenderConfig,
   type BrowserRenderConfig,
-  type StoredBrowserRenderConfig,
 } from "../browser-render-config";
+import { GuiOverlayHost } from "../gui/gui-overlay-host";
+import { GuiRenderer } from "../gui/gui-renderer";
 import type { LoadingProgress } from "../loading-progress";
 import { progressFraction } from "../loading-progress";
+import { BROWSER_RENDERER_HOST, type BrowserRendererHost } from "../renderer-host";
 import { advanceTextureAtlasAnimations } from "../texture/texture-atlas";
+import type { BrowserCanvasTarget, WebGpuDeviceContext } from "../webgpu-target";
 import { DebugInput } from "./debug-input";
 import {
-  DEBUG_SESSION_CONFIG_QUERY_KEYS,
-  clearStoredDebugSessionConfig,
-  parseSeedValue,
   readDebugSessionConfig,
   writeStartLastWorld,
   writeStoredDebugSessionConfig,
@@ -71,9 +75,15 @@ const DEFAULT_INITIAL_POSITION = new Vec3(8.5, 104.0, 40.5);
 const DEFAULT_INITIAL_X_ROT = 30.0;
 const DEFAULT_INITIAL_Y_ROT = 180.0;
 
+let showGlobalErrorScreen: ((message: string) => void) | undefined;
+
 interface DebugRuntimeState {
   ready: boolean;
   readonly worldTransport: "worker" | "remote";
+  mode?: "loading" | "world" | "paused" | "error";
+  screenTitle?: string;
+  lastAction?: string;
+  pauseScreenActive?: boolean;
   seed: string;
   movementMode: DebugMovementMode;
   preset: DebugSessionConfig["preset"];
@@ -91,11 +101,15 @@ interface DebugRuntimeState {
   chunkViewCenterZ?: number;
   loadedChunkCount: number;
   expectedLoadedChunkCount?: number;
+  width?: number;
+  height?: number;
   viewDistance?: number;
   renderDistance?: number;
   lightingMode?: BrowserRenderConfig["lightingMode"];
   liquidSimulationMode?: BrowserRenderConfig["liquidSimulationMode"];
   worldStorageMode?: BrowserRenderConfig["worldStorageMode"];
+  options?: GuiOptionsState;
+  debugSettings?: GuiDebugSettingsState;
   frameCount: number;
   renderWorldCounters?: RenderWorldPerformanceCounters;
   renderQueueStats?: RenderSceneQueueStats;
@@ -177,6 +191,9 @@ function createDebugRuntimeController(
   let injectedInput: DebugInjectedInput | null = null;
   const state: DebugRuntimeState = {
     ready: false,
+    mode: "loading",
+    screenTitle: "narrator.screen.progress",
+    pauseScreenActive: false,
     worldTransport,
     seed: sessionConfig.seed.toString(),
     movementMode: sessionConfig.movementMode,
@@ -197,58 +214,6 @@ function createDebugRuntimeController(
   };
 }
 
-function showOverlayMessage(message: string): void {
-  const overlay = document.querySelector<HTMLElement>("#debug-overlay");
-  if (overlay) {
-    overlay.textContent = message;
-    overlay.style.display = "";
-  }
-}
-
-function showLoadingProgress(progress: LoadingProgress): void {
-  const fraction = progressFraction(progress);
-  const detail = progress.detail
-    ?? (progress.current !== undefined && progress.total !== undefined ? `${progress.current.toString()} / ${progress.total.toString()}` : undefined);
-  showOverlayMessage(detail === undefined ? progress.stage : `${progress.stage}\n${detail}`);
-
-  const progressElement = document.querySelector<HTMLElement>("#debug-progress");
-  const progressBar = document.querySelector<HTMLElement>("#debug-progress-bar");
-  progressElement?.classList.remove("hidden");
-  if (progressBar) {
-    progressBar.style.width = `${Math.round((fraction ?? 0) * 100).toString()}%`;
-  }
-}
-
-function hideLoadingProgress(): void {
-  document.querySelector<HTMLElement>("#debug-progress")?.classList.add("hidden");
-}
-
-function clampInteger(value: number, fallback: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) {
-    return fallback;
-  }
-
-  return Math.min(max, Math.max(min, Math.trunc(value)));
-}
-
-function reloadWithoutBrowserConfigQueryParams(): void {
-  const url = new URL(window.location.href);
-  for (const key of BROWSER_RENDER_CONFIG_QUERY_KEYS) {
-    url.searchParams.delete(key);
-  }
-  for (const key of DEBUG_SESSION_CONFIG_QUERY_KEYS) {
-    url.searchParams.delete(key);
-  }
-
-  window.location.href = `${url.pathname}${url.search}${url.hash}`;
-}
-
-function reloadWithClearWorldStorage(): void {
-  const url = new URL(window.location.href);
-  url.searchParams.set("clearWorldStorage", "1");
-  window.location.href = `${url.pathname}${url.search}${url.hash}`;
-}
-
 function clearTransientWorldStorageQueryParam(): void {
   const url = new URL(window.location.href);
   if (!url.searchParams.has("clearWorldStorage")) {
@@ -259,91 +224,68 @@ function clearTransientWorldStorageQueryParam(): void {
   window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-function configureDebugSettingsMenu(config: BrowserRenderConfig, sessionConfig: DebugSessionConfig): void {
-  const form = document.querySelector<HTMLFormElement>("#debug-config-form");
-  const viewDistanceInput = document.querySelector<HTMLInputElement>("#debug-view-distance");
-  const renderDistanceInput = document.querySelector<HTMLInputElement>("#debug-render-distance");
-  const seedInput = document.querySelector<HTMLInputElement>("#debug-seed");
-  const playerModeInput = document.querySelector<HTMLInputElement>("#debug-mode-player");
-  const freeCamModeInput = document.querySelector<HTMLInputElement>("#debug-mode-freecam");
-  const disableLightingInput = document.querySelector<HTMLInputElement>("#debug-disable-lighting");
-  const disableWaterSimInput = document.querySelector<HTMLInputElement>("#debug-disable-water-sim");
-  const disableIndexedDbInput = document.querySelector<HTMLInputElement>("#debug-disable-indexed-db");
-  const chunkCountOutput = document.querySelector<HTMLOutputElement>("#debug-config-chunk-count");
-  const resetButton = document.querySelector<HTMLButtonElement>("#debug-config-reset");
-  const deleteIndexedDbButton = document.querySelector<HTMLButtonElement>("#debug-delete-indexed-db");
-  if (
-    form === null
-    || viewDistanceInput === null
-    || renderDistanceInput === null
-    || seedInput === null
-    || playerModeInput === null
-    || freeCamModeInput === null
-    || disableLightingInput === null
-    || disableWaterSimInput === null
-    || disableIndexedDbInput === null
-  ) {
-    return;
-  }
-
-  const renderChunkCount = (): void => {
-    if (chunkCountOutput === null) {
-      return;
-    }
-
-    const viewDistance = clampInteger(Number.parseInt(viewDistanceInput.value, 10), config.viewDistance, 1, 16);
-    chunkCountOutput.value = `${getExpectedLoadedChunkCount(viewDistance).toString()} loaded host chunks`;
+function createGuiOptionsState(config: BrowserRenderConfig): GuiOptionsState {
+  return {
+    viewDistance: config.viewDistance,
+    renderDistance: config.renderDistance,
+    lightingMode: config.lightingMode,
+    liquidSimulationMode: config.liquidSimulationMode,
   };
+}
 
-  viewDistanceInput.value = config.viewDistance.toString();
-  renderDistanceInput.value = config.renderDistance.toString();
-  seedInput.value = sessionConfig.seed.toString();
-  playerModeInput.checked = sessionConfig.movementMode === "player";
-  freeCamModeInput.checked = sessionConfig.movementMode === "freecam";
-  disableLightingInput.checked = config.lightingMode === "none";
-  disableWaterSimInput.checked = config.liquidSimulationMode === "none";
-  disableIndexedDbInput.checked = config.worldStorageMode === "none";
-  renderChunkCount();
+function createGuiDebugSettingsState(config: BrowserRenderConfig, sessionConfig: DebugSessionConfig): GuiDebugSettingsState {
+  return {
+    movementMode: sessionConfig.movementMode,
+    preset: sessionConfig.preset,
+    worldStorageMode: config.worldStorageMode,
+  };
+}
 
-  viewDistanceInput.addEventListener("input", () => {
-    const viewDistance = clampInteger(Number.parseInt(viewDistanceInput.value, 10), config.viewDistance, 1, 16);
-    renderDistanceInput.value = getDefaultRenderDistance(viewDistance).toString();
-    renderChunkCount();
-  });
-  renderDistanceInput.addEventListener("input", renderChunkCount);
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const viewDistance = clampInteger(Number.parseInt(viewDistanceInput.value, 10), config.viewDistance, 1, 16);
-    const renderDistance = clampInteger(Number.parseInt(renderDistanceInput.value, 10), getDefaultRenderDistance(viewDistance), 16, 512);
-    const nextConfig: StoredBrowserRenderConfig = {
-      viewDistance,
-      renderDistance,
-      lightingMode: disableLightingInput.checked ? "none" : "vanilla17",
-      liquidSimulationMode: disableWaterSimInput.checked ? "none" : "vanilla17",
-      worldStorageMode: disableIndexedDbInput.checked ? "none" : "default",
-    };
-    writeStoredBrowserRenderConfig(window.localStorage, nextConfig);
-    const nextSessionConfig: DebugSessionConfig = {
-      seed: parseSeedValue(seedInput.value, sessionConfig.seed),
-      movementMode: freeCamModeInput.checked ? "freecam" : "player",
-      preset: sessionConfig.preset,
-    };
-    writeStoredDebugSessionConfig(window.localStorage, nextSessionConfig);
-    writeStartLastWorld(window.localStorage, nextSessionConfig);
-    reloadWithoutBrowserConfigQueryParams();
-  });
-  resetButton?.addEventListener("click", () => {
-    clearStoredBrowserRenderConfig(window.localStorage);
-    clearStoredDebugSessionConfig(window.localStorage);
-    reloadWithoutBrowserConfigQueryParams();
-  });
-  deleteIndexedDbButton?.addEventListener("click", () => {
-    if (!window.confirm("Delete mclone IndexedDB world storage and reload?")) {
-      return;
-    }
+function copyGuiOptionsState(options: GuiOptionsState): GuiOptionsState {
+  return {
+    viewDistance: options.viewDistance,
+    renderDistance: options.renderDistance,
+    lightingMode: options.lightingMode,
+    liquidSimulationMode: options.liquidSimulationMode,
+  };
+}
 
-    reloadWithClearWorldStorage();
-  });
+function copyGuiDebugSettingsState(settings: GuiDebugSettingsState): GuiDebugSettingsState {
+  return {
+    movementMode: settings.movementMode,
+    preset: settings.preset,
+    worldStorageMode: settings.worldStorageMode,
+  };
+}
+
+function createPinnedBrowserRendererHost(
+  deviceContext: WebGpuDeviceContext,
+  target: BrowserCanvasTarget,
+): BrowserRendererHost {
+  return {
+    requestWebGpuDeviceContext: async (progress) => {
+      progress?.onRequestAdapter?.();
+      progress?.onRequestDevice?.();
+      return { ok: true, context: deviceContext };
+    },
+    createCanvasTarget: () => target,
+    createRenderWorldWorkerEndpoint: () => BROWSER_RENDERER_HOST.createRenderWorldWorkerEndpoint(),
+  };
+}
+
+function emptyDebugInputFrame(): ReturnType<DebugInput["consumeFrame"]> {
+  return {
+    heldKeys: new Set(),
+    mouseDeltaX: 0,
+    mouseDeltaY: 0,
+    locked: false,
+    joystickX: 0,
+    joystickY: 0,
+    moveForward: false,
+    moveBack: false,
+    flyUp: false,
+    flyDown: false,
+  };
 }
 
 function formatUnknownError(error: unknown): string {
@@ -372,7 +314,8 @@ function applyFreeCameraInput(
 async function boot(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>("#renderer");
   if (!canvas) {
-    showOverlayMessage("error: canvas #renderer not found");
+    // eslint-disable-next-line no-console
+    console.error("error: canvas #renderer not found");
     return;
   }
   const rendererCanvas = canvas;
@@ -381,19 +324,124 @@ async function boot(): Promise<void> {
   const url = new URL(window.location.href);
   const renderConfig = readBrowserRenderConfig(url, window.localStorage);
   const sessionConfig = readDebugSessionConfig(url, window.localStorage);
-  configureDebugSettingsMenu(renderConfig, sessionConfig);
+  const optionsState = createGuiOptionsState(renderConfig);
+  const debugSettingsState = createGuiDebugSettingsState(renderConfig, sessionConfig);
   const initialCamera = readInitialCamera();
   const preserveInitialCamera = readPreserveInitialCamera();
   const debugRuntime = createDebugRuntimeController(runtimeConfig.worldTransport, sessionConfig);
+  debugRuntime.controller.state.options = copyGuiOptionsState(optionsState);
+  debugRuntime.controller.state.debugSettings = copyGuiDebugSettingsState(debugSettingsState);
   window.__mcloneDebug = debugRuntime.controller;
-  let showInitialLoadingUi = true;
+
+  const deviceContextResult = await BROWSER_RENDERER_HOST.requestWebGpuDeviceContext();
+  if (!deviceContextResult.ok) {
+    debugRuntime.controller.state.mode = "error";
+    debugRuntime.controller.state.error = deviceContextResult.reason;
+    return;
+  }
+  const { device, format } = deviceContextResult.context;
+  resizeCanvasToDisplaySize(rendererCanvas, device.limits.maxTextureDimension2D);
+  const target = BROWSER_RENDERER_HOST.createCanvasTarget(rendererCanvas, device, format);
+  if (target === undefined) {
+    debugRuntime.controller.state.mode = "error";
+    debugRuntime.controller.state.error = "canvas.getContext('webgpu') returned null";
+    return;
+  }
+
+  const guiSize = GuiRenderer.calculateGuiSize(rendererCanvas.width, rendererCanvas.height);
+  const screenManager = new ScreenManager(guiSize.guiWidth, guiSize.guiHeight);
+  const progressScreen = new ProgressScreen(false);
+  progressScreen.progressStartNoAbort("Loading world");
+  screenManager.setScreen(progressScreen);
+
+  let debugHudText = "";
+  const guiOverlayHost = await GuiOverlayHost.create(device, rendererCanvas, screenManager, (drawList) => {
+    if (screenManager.currentScreen !== null || debugHudText.length === 0) {
+      return;
+    }
+    // WebGPU: lightweight debug HUD is drawn into the GUI pass instead of a DOM text overlay.
+    GuiComponent.drawString(drawList, screenManager.font, debugHudText, 2, 2, 0xffffffff);
+  });
+  const renderGuiFrameNow = (): void => {
+    const resized = resizeCanvasToDisplaySize(rendererCanvas, device.limits.maxTextureDimension2D);
+    const size = GuiRenderer.calculateGuiSize(resized.width, resized.height);
+    debugRuntime.controller.state.width = size.guiWidth;
+    debugRuntime.controller.state.height = size.guiHeight;
+    const view = target.ctx.getCurrentTexture().createView();
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view,
+          clearValue: { r: 0.06, g: 0.07, b: 0.08, a: 1 },
+          loadOp: "clear",
+          storeOp: "store",
+        },
+      ],
+    });
+    pass.end();
+    guiOverlayHost.encode(encoder, view, target.format, resized.width, resized.height);
+    device.queue.submit([encoder.finish()]);
+  };
+  guiOverlayHost.attachInput(() => {
+    if (debugRuntime.controller.state.ready !== true) {
+      renderGuiFrameNow();
+    }
+  });
+
+  const updateGuiState = (): void => {
+    const currentScreen = screenManager.currentScreen;
+    const size = GuiRenderer.calculateGuiSize(rendererCanvas.width, rendererCanvas.height);
+    debugRuntime.controller.state.width = size.guiWidth;
+    debugRuntime.controller.state.height = size.guiHeight;
+    debugRuntime.controller.state.pauseScreenActive = currentScreen !== null && debugRuntime.controller.state.ready;
+    if (debugRuntime.controller.state.error === undefined) {
+      debugRuntime.controller.state.mode = debugRuntime.controller.state.ready
+        ? (currentScreen === null ? "world" : "paused")
+        : "loading";
+      debugRuntime.controller.state.screenTitle = currentScreen?.getTitle() ?? "";
+    }
+    debugRuntime.controller.state.options = copyGuiOptionsState(optionsState);
+    debugRuntime.controller.state.debugSettings = copyGuiDebugSettingsState(debugSettingsState);
+  };
+  const persistGuiSettings = (): void => {
+    writeStoredBrowserRenderConfig(window.localStorage, {
+      ...optionsState,
+      worldStorageMode: debugSettingsState.worldStorageMode,
+    });
+    const nextSessionConfig: DebugSessionConfig = {
+      seed: sessionConfig.seed,
+      movementMode: debugSettingsState.movementMode,
+      preset: debugSettingsState.preset,
+    };
+    writeStoredDebugSessionConfig(window.localStorage, nextSessionConfig);
+    writeStartLastWorld(window.localStorage, nextSessionConfig);
+    debugRuntime.controller.state.movementMode = nextSessionConfig.movementMode;
+    debugRuntime.controller.state.preset = nextSessionConfig.preset;
+    debugRuntime.controller.state.viewDistance = optionsState.viewDistance;
+    debugRuntime.controller.state.renderDistance = optionsState.renderDistance;
+    debugRuntime.controller.state.lightingMode = optionsState.lightingMode;
+    debugRuntime.controller.state.liquidSimulationMode = optionsState.liquidSimulationMode;
+    debugRuntime.controller.state.worldStorageMode = debugSettingsState.worldStorageMode;
+    updateGuiState();
+  };
+  const setErrorScreen = (message: string): void => {
+    debugRuntime.controller.state.mode = "error";
+    debugRuntime.controller.state.error = message;
+    screenManager.setScreen(new AlertScreen(() => {}, "Debug Error", message, "Back"));
+    debugRuntime.controller.state.screenTitle = "Debug Error";
+    updateGuiState();
+    renderGuiFrameNow();
+  };
+  showGlobalErrorScreen = setErrorScreen;
+
   const reportLoadingProgress = (progress: LoadingProgress): void => {
     debugRuntime.controller.state.loadingStage = progress.stage;
     debugRuntime.controller.state.loadingDetail = progress.detail;
     debugRuntime.controller.state.loadingProgress = progressFraction(progress);
-    if (showInitialLoadingUi) {
-      showLoadingProgress(progress);
-    }
+    progressScreen.updateProgress(progress);
+    updateGuiState();
+    renderGuiFrameNow();
   };
   reportLoadingProgress({ stage: "Starting renderer", fraction: 0 });
   if (readClearWorldStorage()) {
@@ -419,11 +467,12 @@ async function boot(): Promise<void> {
     skyColor: renderConfig.skyColor,
     clearColorScale: renderConfig.clearColorScale,
     worldStorageMode: renderConfig.worldStorageMode,
+    rendererHost: createPinnedBrowserRendererHost(deviceContextResult.context, target),
     onProgress: reportLoadingProgress,
   });
   if (!sceneResult.ok) {
     debugRuntime.controller.state.error = sceneResult.reason;
-    showOverlayMessage(`error: ${sceneResult.reason}`);
+    setErrorScreen(sceneResult.reason);
     return;
   }
   writeStoredDebugSessionConfig(window.localStorage, sessionConfig);
@@ -432,7 +481,6 @@ async function boot(): Promise<void> {
   const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
   debugRuntime.controller.state.expectedLoadedChunkCount = expectedLoadedChunkCount;
 
-  const input = new DebugInput(rendererCanvas);
   let depthTarget: ReturnType<typeof createSceneDepthTarget> | undefined;
 
   function resizeViewport(): void {
@@ -447,6 +495,61 @@ async function boot(): Promise<void> {
   }
 
   resizeViewport();
+
+  const openOptionsScreen = (lastScreen: PauseScreen): void => {
+    debugRuntime.controller.state.lastAction = "options";
+    screenManager.setScreen(new OptionsScreen(lastScreen, optionsState, {
+      onChanged: persistGuiSettings,
+      onDone: () => {
+        debugRuntime.controller.state.lastAction = "options_done";
+        updateGuiState();
+      },
+    }));
+    updateGuiState();
+  };
+  const openDebugSettingsScreen = (lastScreen: PauseScreen): void => {
+    debugRuntime.controller.state.lastAction = "debug_settings";
+    screenManager.setScreen(new DebugSettingsScreen(lastScreen, debugSettingsState, {
+      onChanged: persistGuiSettings,
+      onDone: () => {
+        debugRuntime.controller.state.lastAction = "debug_settings_done";
+        updateGuiState();
+      },
+    }));
+    updateGuiState();
+  };
+  const openPauseMenu = (): void => {
+    if (!debugRuntime.controller.state.ready || screenManager.currentScreen !== null) {
+      return;
+    }
+    if (document.pointerLockElement === rendererCanvas) {
+      void document.exitPointerLock();
+    }
+    const pauseScreen = new PauseScreen(true, {
+      onReturnToGame: () => {
+        debugRuntime.controller.state.lastAction = "back_to_game";
+        screenManager.setScreen(null);
+        updateGuiState();
+      },
+      onOptions: () => openOptionsScreen(pauseScreen),
+      onDebugSettings: () => openDebugSettingsScreen(pauseScreen),
+    });
+    screenManager.setScreen(pauseScreen);
+    updateGuiState();
+  };
+  window.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented || event.key !== "Escape") {
+      return;
+    }
+    if (screenManager.currentScreen === null) {
+      openPauseMenu();
+      event.preventDefault();
+    }
+  });
+
+  const input = new DebugInput(rendererCanvas, {
+    isGuiActive: () => screenManager.currentScreen !== null,
+  });
 
   let camera = {
     position: initialCamera.position,
@@ -491,7 +594,7 @@ async function boot(): Promise<void> {
     } catch (error) {
       const message = formatUnknownError(error);
       debugRuntime.controller.state.error = message;
-      showOverlayMessage(`error: ${message}`);
+      setErrorScreen(message);
       // eslint-disable-next-line no-console
       console.error(error);
     } finally {
@@ -563,7 +666,7 @@ async function boot(): Promise<void> {
   })) {
     debugRuntime.controller.state.error =
       `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`;
-    showOverlayMessage(`error: ${debugRuntime.controller.state.error}`);
+    setErrorScreen(debugRuntime.controller.state.error);
     return;
   }
 
@@ -574,16 +677,18 @@ async function boot(): Promise<void> {
   scene.levelRenderer.allChanged();
   const initialFrame = await renderSceneUntilSettled(scene, camera);
   const initialEncoder = scene.device.createCommandEncoder();
+  const initialView = scene.ctx.getCurrentTexture().createView();
   encodeSceneFrame(
     scene,
     initialFrame,
     {
-      view: scene.ctx.getCurrentTexture().createView(),
+      view: initialView,
       depthView: depthTarget!.view,
       format: scene.format,
     },
     initialEncoder,
   );
+  guiOverlayHost.encode(initialEncoder, initialView, scene.format, scene.canvas.width, scene.canvas.height);
   scene.device.queue.submit([initialEncoder.finish()]);
   await scene.device.queue.onSubmittedWorkDone();
   totalFrameCount++;
@@ -622,9 +727,9 @@ async function boot(): Promise<void> {
   debugRuntime.controller.state.liquidSimulationMode = renderConfig.liquidSimulationMode;
   debugRuntime.controller.state.worldStorageMode = renderConfig.worldStorageMode;
   debugRuntime.controller.state.frameCount = totalFrameCount;
+  screenManager.setScreen(null);
+  updateGuiState();
 
-  showInitialLoadingUi = false;
-  hideLoadingProgress();
   updateRuntimeDebugOverlay(undefined);
 
   function updateRuntimeDebugOverlay(fps: number | undefined): void {
@@ -633,9 +738,8 @@ async function boot(): Promise<void> {
       return;
     }
 
-    showOverlayMessage(
-      `fps ${fps === undefined ? "--" : fps.toFixed(0)}  mode ${sessionConfig.movementMode}  pos ${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}  yaw ${camera.yRot.toFixed(0)}  pitch ${camera.xRot.toFixed(0)}  tick ${playerStateForOverlay.tick.toString()}`,
-    );
+    debugHudText =
+      `fps ${fps === undefined ? "--" : fps.toFixed(0)}  mode ${sessionConfig.movementMode}  pos ${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}  yaw ${camera.yRot.toFixed(0)}  pitch ${camera.xRot.toFixed(0)}  tick ${playerStateForOverlay.tick.toString()}`;
   }
 
   async function tick(): Promise<void> {
@@ -647,7 +751,11 @@ async function boot(): Promise<void> {
     textureAnimationElapsedMs = advanceTextureAtlasAnimations(scene.atlas, textureAnimationElapsedMs + frameDeltaMs);
     resizeViewport();
 
-    const inputFrame = mergeDebugInputFrame(input.consumeFrame(), debugRuntime.getInjectedInput());
+    const guiActive = screenManager.currentScreen !== null;
+    const rawInputFrame = input.consumeFrame();
+    const inputFrame = guiActive
+      ? emptyDebugInputFrame()
+      : mergeDebugInputFrame(rawInputFrame, debugRuntime.getInjectedInput());
 
     if (now - lastWorldPollMs >= WORLD_POLL_INTERVAL_MS) {
       if (await scene.clientRuntime.drainTransportUpdates()) {
@@ -756,16 +864,18 @@ async function boot(): Promise<void> {
           { waitForChunkTasks: false },
         );
         const encoder = scene.device.createCommandEncoder();
+        const view = scene.ctx.getCurrentTexture().createView();
         encodeSceneFrame(
           scene,
           renderedFrame,
           {
-            view: scene.ctx.getCurrentTexture().createView(),
+            view,
             depthView: depthTarget!.view,
             format: scene.format,
           },
           encoder,
         );
+        guiOverlayHost.encode(encoder, view, scene.format, scene.canvas.width, scene.canvas.height);
         scene.device.queue.submit([encoder.finish()]);
         totalFrameCount++;
         fpsFrameCount++;
@@ -797,23 +907,26 @@ if (typeof window !== "undefined") {
   boot().catch((err: unknown) => {
     const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     if (window.__mcloneDebug) {
+      window.__mcloneDebug.state.mode = "error";
       window.__mcloneDebug.state.error = message;
     }
-    showOverlayMessage(`error: ${message}`);
+    showGlobalErrorScreen?.(message);
     // eslint-disable-next-line no-console
     console.error(err);
   });
   window.addEventListener("error", (ev) => {
     if (window.__mcloneDebug) {
+      window.__mcloneDebug.state.mode = "error";
       window.__mcloneDebug.state.error = ev.message;
     }
-    showOverlayMessage(`error: ${ev.message}`);
+    showGlobalErrorScreen?.(ev.message);
   });
   window.addEventListener("unhandledrejection", (ev) => {
     const reason = ev.reason instanceof Error ? ev.reason.message : String(ev.reason);
     if (window.__mcloneDebug) {
+      window.__mcloneDebug.state.mode = "error";
       window.__mcloneDebug.state.error = reason;
     }
-    showOverlayMessage(`error: ${reason}`);
+    showGlobalErrorScreen?.(reason);
   });
 }

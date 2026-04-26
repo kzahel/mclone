@@ -9,7 +9,8 @@ Current implementation state:
 - `Esc` opens a minimal GPU-rendered `PauseScreen` over the live world; Back to Game closes it and gameplay input resumes.
 - A minimal GPU-rendered `OptionsScreen` is reachable from title and pause, with sliders/cycle/checkbox controls for browser render settings.
 - A minimal GPU-rendered `DebugSettingsScreen` is reachable from title and pause, sharing the existing debug session storage keys.
-- Quit-to-title and the remaining visible DOM deletion remain later slices.
+- `debug.html` is now a canvas-only debug entrypoint. Its loading/progress/error/HUD text and pause/options/debug-settings flows render through the WebGPU GUI pass, and `window.__mcloneDebug` remains as a machine API.
+- Quit-to-title, destructive confirm screens, and any richer touch HUD remain later slices.
 
 Durable architecture: [`../gui.md`](../gui.md).
 
@@ -26,9 +27,9 @@ Visible DOM surfaces to replace:
 | Surface | Current role | Replacement |
 |---|---|---|
 | `index.html` start shell | seed/preset/movement form, continue/quickstart links, CSS background | WebGPU title and world setup screens |
-| `debug.html` shell | live debug page UI and overlays | canvas-only shell or alias into the same game shell with debug query params |
-| `src/renderer/debug/debug-free-cam.ts` overlay helpers | loading/error text, progress bar, debug settings form binding | WebGPU loading/error/options screens |
-| `src/renderer/debug/debug-input.ts` DOM joystick/buttons | mobile/touch debug controls | WebGPU touch widgets or remove until a real touch HUD lands |
+| `debug.html` shell | retired visible debug page UI and overlays | canvas-only shell or alias into the same game shell with debug query params |
+| `src/renderer/debug/debug-free-cam.ts` overlay helpers | retired loading/error text, progress bar, debug settings form binding | WebGPU loading/error/options screens |
+| `src/renderer/debug/debug-input.ts` DOM joystick/buttons | retired mobile/touch debug controls | WebGPU touch widgets or remove until a real touch HUD lands |
 | browser confirm dialogs | destructive reset confirmation | WebGPU confirm screen |
 
 Non-visible browser APIs remain allowed: canvas, event listeners, localStorage, IndexedDB, pointer lock, clipboard, tests, and machine-readable globals.
@@ -49,7 +50,7 @@ Non-visible browser APIs remain allowed: canvas, event listeners, localStorage, 
 | Gui0 | GUI primitives, screen manager, WebGPU overlay pass, bitmap text, buttons, loading screen probe | unit + browser probe | a GPU-rendered screen with text/buttons/progress draws over the world/clear frame |
 | Gui1 | Canvas-only title/start flow replacing `index.html` UI | browser smoke + probe | `/` shows a WebGPU title screen and can start/continue a world without visible DOM |
 | Gui2 | Loading and error screens wired to real `LoadingProgress` and scene init | browser smoke + probe | world boot progress/status renders through WebGPU from existing progress sources |
-| Gui3 | Pause/options/debug settings screens replacing `debug.html` form/overlay | browser integration + probe | live world uses `Esc`/menu flow for settings, no DOM debug panel remains |
+| Gui3 | Pause/options/debug settings screens replacing `debug.html` form/overlay | browser integration + probe | **done for debug shell** - live world uses `Esc`/menu flow for settings, no DOM debug panel remains |
 | Gui4 | In-game menu lifecycle and quit-to-title/reset flow | browser integration | save/quit/disconnect/clear-storage confirmation flows use WebGPU screens |
 | Gui5 | HUD/touch-control cleanup and DOM deletion pass | browser integration + mobile/touch probe if kept | DOM joystick/buttons and obsolete CSS UI are gone; HUD/touch controls are GPU widgets |
 

@@ -275,8 +275,8 @@ Use [`../gui.md`](../gui.md) as the durable architecture before tactical GUI wor
 
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
-| [`Gui0-webgpu-gui-foundation-and-dom-replacement.md`](Gui0-webgpu-gui-foundation-and-dom-replacement.md) | GUI primitives, screen manager, WebGPU overlay pass, bitmap font, loading/title/pause flow, DOM UI replacement sequence | unit + browser visual | **active** - foundation is landed; title/loading/live-world/pause are GPU-backed |
-| [`GuiExit-dom-menu-retirement-and-gpu-cutover.md`](GuiExit-dom-menu-retirement-and-gpu-cutover.md) | root/debug HTML shell cutover, GPU world setup/options/debug/error/confirm screens, DOM deletion sweep | browser visual + integration | **active cutover** - retire visible HTML menus and make WebGPU screens the only visible UI |
+| [`Gui0-webgpu-gui-foundation-and-dom-replacement.md`](Gui0-webgpu-gui-foundation-and-dom-replacement.md) | GUI primitives, screen manager, WebGPU overlay pass, bitmap font, loading/title/pause flow, DOM UI replacement sequence | unit + browser visual | **active** - foundation is landed; title/loading/live-world/pause/options/debug settings are GPU-backed |
+| [`GuiExit-dom-menu-retirement-and-gpu-cutover.md`](GuiExit-dom-menu-retirement-and-gpu-cutover.md) | root/debug HTML shell cutover, GPU world setup/options/debug/error/confirm screens, DOM deletion sweep | browser visual + integration | **active cutover** - root and debug shells are canvas-only; quit/confirm/world-setup parity remains |
 
 ## Runtime data / protocol / loading arc (rough, cross-cutting)
 

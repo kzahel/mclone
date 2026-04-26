@@ -110,6 +110,7 @@ function expectRenderQueueSettled(state: DebugRuntimeState): void {
 test("debug free-cam follows authoritative player_state and moves chunk interest with remote input", async ({ page, remoteWorldHostUrl }) => {
   await page.goto(createDebugUrl(remoteWorldHostUrl), { waitUntil: "load" });
   await waitForDebugReady(page);
+  await expect(page.locator("button, input, select, textarea, details, form")).toHaveCount(0);
   await page.waitForFunction(
     (expectedLoadedChunkCount) => {
       const state = window.__mcloneDebug?.state;

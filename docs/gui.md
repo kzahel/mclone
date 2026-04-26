@@ -294,17 +294,17 @@ Initial screens:
 
 Remote multiplayer can reuse the same screen system later with a connection screen and disconnect screen.
 
-## Current UI Replacement Targets
+## UI Replacement Targets
 
-Replace these visible DOM surfaces:
+Replace or keep retired these visible DOM surfaces:
 
 | Current surface | Replacement |
 |---|---|
 | `index.html` start menu | WebGPU `TitleScreen` / `WorldSetupScreen` |
 | `index.html` CSS world-preview background | WebGPU title background or simple rendered world/panorama later |
-| `debug.html` visible overlay/settings | WebGPU pause/options/debug settings screens |
-| `src/renderer/debug/debug-free-cam.ts` DOM loading/error overlay | WebGPU `LoadingScreen` / error screen |
-| `src/renderer/debug/debug-input.ts` DOM joystick and fly buttons | WebGPU touch-control widgets or remove if not needed |
+| `debug.html` visible overlay/settings | retired; WebGPU pause/options/debug settings screens |
+| `src/renderer/debug/debug-free-cam.ts` DOM loading/error overlay | retired; WebGPU loading/progress/error screens |
+| `src/renderer/debug/debug-input.ts` DOM joystick and fly buttons | retired; WebGPU touch-control widgets or remove if not needed |
 | browser `window.confirm` for destructive world storage reset | WebGPU confirm screen |
 
 Keep machine hooks where tests need them. Visible test control must not become product UI.
