@@ -1,6 +1,6 @@
 # Tactical docs
 
-Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For vanilla chunk-status order, deterministic decoration finality, lighting gates, and publication gates, see [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For vanilla overworld structure generation architecture and suggested implementation order, see [`../structures.md`](../structures.md). For runtime/host boundaries and durable data/protocol/loading contracts, see [`../architecture.md`](../architecture.md), [`../runtime-data-model.md`](../runtime-data-model.md), [`../protocol.md`](../protocol.md), and [`../loading-persistence.md`](../loading-persistence.md). For the vanilla client-replica source review that drives the active client runtime arc, see [`../minecraft-client-replica-research.md`](../minecraft-client-replica-research.md). For liquid simulation architecture, see [`../liquids.md`](../liquids.md). For paused high-rate movement constraints, see [`../player-movement-netcode.md`](../player-movement-netcode.md).
+Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For vanilla chunk-status order, deterministic decoration finality, lighting gates, and publication gates, see [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For vanilla overworld structure generation architecture and suggested implementation order, see [`../structures.md`](../structures.md). For runtime/host boundaries and durable data/protocol/loading contracts, see [`../architecture.md`](../architecture.md), [`../runtime-data-model.md`](../runtime-data-model.md), [`../protocol.md`](../protocol.md), and [`../loading-persistence.md`](../loading-persistence.md). For the WebGPU-only vanilla-shaped GUI architecture, see [`../gui.md`](../gui.md). For the vanilla client-replica source review that drives the active client runtime arc, see [`../minecraft-client-replica-research.md`](../minecraft-client-replica-research.md). For liquid simulation architecture, see [`../liquids.md`](../liquids.md). For paused high-rate movement constraints, see [`../player-movement-netcode.md`](../player-movement-netcode.md).
 
 ## Rule of thumb
 
@@ -193,6 +193,14 @@ The live player path now integrates the shared movement body with host collision
 
 The ordering across transport, player-slot protocol, and movement integration is tracked in [`53-remote-player-integration-sequence.md`](53-remote-player-integration-sequence.md).
 
+## Recent worldgen follow-through
+
+- [`51-bee-tree-decorator-follow-through.md`](51-bee-tree-decorator-follow-through.md)
+- [`52-sunflower-plains-follow-through.md`](52-sunflower-plains-follow-through.md)
+- [`53-swamp-oak-vine-follow-through.md`](53-swamp-oak-vine-follow-through.md)
+- [`54-deep-warm-ocean-seagrass-simple-follow-through.md`](54-deep-warm-ocean-seagrass-simple-follow-through.md)
+- [`55-desert-well-follow-through.md`](55-desert-well-follow-through.md)
+
 ## Renderer oracle approach
 
 - **Unit**: dump atlas UVs, baked-model quads, and section visibility graphs from MC as JSON; exact-diff those. Catches most correctness bugs before pixels are involved.
@@ -220,6 +228,7 @@ Deno0-Deno5 were capability probes that proved the hard pieces work outside Chro
 | [`RendererHost5-host-neutral-generated-world-runner.md`](RendererHost5-host-neutral-generated-world-runner.md) | shared generated-world scenario runner with host adapters for targets/assets/workers/artifacts | Deno WebGPU visual + browser probe | **done** — browser and Deno generated-world lanes now share one runner for chunk interest, frame settle, input injection, readback normalization, validation, and result construction |
 | [`RendererHost6-generated-world-transition-scenarios.md`](RendererHost6-generated-world-transition-scenarios.md) | multi-step generated-world scenario contract for camera/chunk-interest transitions and injected input sequences | Deno WebGPU visual + browser probe | **done** — headless and browser harnesses now run the same step-shaped generated-world API for camera/chunk-interest movement, input acknowledgement, settled frames, and per-step readbacks |
 | [`RendererHost7-generated-world-tick-cadence.md`](RendererHost7-generated-world-tick-cadence.md) | tick-cadence generated-world scenario with repeated input and presentation checkpoints | Deno WebGPU visual + browser probe | **done** — browser and Deno now share a cadence-shaped scenario that advances player input, player tick, state revision, settled frames, and `/tmp` artifacts |
+| [`RendererHost8-generated-world-presentation-host.md`](RendererHost8-generated-world-presentation-host.md) | generated-world presentation host for frame timing, target readback, artifacts, and cleanup | Deno WebGPU visual + browser probe | **done** — browser and Deno now pass a shared presentation-host adapter into the generated-world runner instead of duplicating target/artifact lifecycle code |
 
 ## Runtime / host arc (rough, cross-cutting)
 
@@ -257,6 +266,14 @@ WebRTC is intentionally deferred. The preferred path is:
 This `R` arc records the landed host/transport foundation. The remote browser path now uses the WebSocket message channel by default, so the next multiplayer-facing dependency is player-slot semantics rather than another transport migration.
 
 The broader R9 -> player-slot cleanup -> movement integration order is tracked in [`53-remote-player-integration-sequence.md`](53-remote-player-integration-sequence.md).
+
+## GUI / Screen Arc
+
+Use [`../gui.md`](../gui.md) as the durable architecture before tactical GUI work. The target is a vanilla-shaped `Screen` / widget model rendered entirely through WebGPU. The DOM remains a canvas/input/platform shell only; visible menus, loading status, settings, debug settings, HUD, and touch controls should not use DOM.
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| [`Gui0-webgpu-gui-foundation-and-dom-replacement.md`](Gui0-webgpu-gui-foundation-and-dom-replacement.md) | GUI primitives, screen manager, WebGPU overlay pass, bitmap font, loading/title/options flow, DOM UI replacement sequence | unit + browser visual | **next GUI** - replace the current index/debug visible DOM UI with a vanilla-shaped WebGPU GUI kit while preserving useful loading status |
 
 ## Runtime data / protocol / loading arc (rough, cross-cutting)
 

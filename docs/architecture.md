@@ -14,6 +14,7 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `loading-persistence.md`: world creation/open/join flow, chunk lifecycle, and save/eviction policy
 - `authoritative-host-scheduling.md`: how player/session authority stays responsive while chunk jobs run
 - `minecraft-client-replica-research.md`: vanilla integrated-server, client-world, lighting, fluid, entity-interpolation, and networking source review
+- `gui.md`: WebGPU-only, vanilla-shaped 2D GUI architecture for menus, loading status, HUD, options, debug settings, and touch UI
 - `player-movement-netcode.md`: paused high-rate player movement and netcode constraint notes
 - `structures.md`: vanilla overworld structure starts, references, placement, and implementation order
 - `worker-ownership.md`: concrete worker/cache ownership and the no-hangs baseline for UI/GPU and host ticks
