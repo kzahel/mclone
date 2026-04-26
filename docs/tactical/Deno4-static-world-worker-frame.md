@@ -107,4 +107,4 @@ Observed output:
 
 ## Follow-Up
 
-Next likely tactical: `Deno5` should replace the synthetic cube model/texture with a small filesystem-backed asset source for extracted vanilla assets, still without browser APIs. Load only the minimal stone blockstate/model/texture set first, then expand to a tiny real block palette once the Deno asset adapter is stable.
+Completed by [`Deno5-vanilla-asset-world-smoke.md`](Deno5-vanilla-asset-world-smoke.md): replace the synthetic cube model/texture with extracted vanilla stone blockstate/model/texture loading while preserving the Deno render-world worker and offscreen WebGPU target.

@@ -97,17 +97,23 @@ The first useful test target is `OffscreenTextureTarget`. It should be able to r
    - Transfer packed static chunk snapshots into that worker, build section meshes there, then upload/draw on the main Deno WebGPU thread.
    - Keep live host/client orchestration and browser asset loading out of this step.
 
-5. **Renderer target refactor**
+5. **Deno vanilla asset world frame**
+   - Run the repo-owned `pnpm smoke:deno:world-assets` command.
+   - Read extracted vanilla stone blockstate/model/texture assets from disk.
+   - Decode PNG bytes through the native decoder, stitch/reload the block atlas, bake the vanilla stone model, and render the worker-built static frame with real texture UVs.
+   - Keep the block palette tiny until the asset adapter and worker UV parity are stable.
+
+6. **Renderer target refactor**
    - Move canvas acquisition/configuration behind a target interface.
    - Keep `GPUDevice` and `GPUTexture` below the renderer boundary.
    - Keep world/runtime/client modules free of DOM and WebGPU handles.
 
-6. **Asset/input/storage adapters**
+7. **Asset/input/storage adapters**
    - Replace browser image/canvas decode with an asset decoder interface.
    - Keep browser `document`/pointer-lock/debug form code in browser-only entry points.
    - Add native/headless storage choices only behind existing persistence contracts.
 
-7. **Rust native host spike**
+8. **Rust native host spike**
    - Create a Rust `wgpu` offscreen clear/readback equivalent.
    - Embed Deno/deno_core only after the Deno CLI harness proves the engine-side seams are right.
    - Add windowed and OpenXR presenters after headless/native flat rendering works.
@@ -311,6 +317,46 @@ PNG image data, 128 x 128, 8-bit/color RGBA, non-interlaced
 ```
 
 The image is a blue sky background with a centered gray stone wall. This validates Deno module workers, packed snapshot transfer, worker-owned render-world mesh builds, main-thread GPU upload, chunk render pipeline draw submission, readback, and PNG artifact generation without a browser page.
+
+## Vanilla asset world smoke result: 2026-04-26
+
+The first browser-free chunk/world frame using extracted vanilla assets passed on Linux:
+
+```bash
+pnpm smoke:deno:world-assets
+```
+
+The command runs:
+
+```bash
+npx -y deno@2.7.13 run --unstable-webgpu --allow-read=. --allow-write=/tmp ./scripts/deno-vanilla-asset-world-smoke.ts
+```
+
+The script:
+
+- reads extracted Minecraft assets from `reference/minecraft-1.17.1/extracted/assets`
+- loads vanilla stone blockstate/model JSON through a file-backed `AssetPack`
+- decodes `textures/block/stone.png` through `PngNativeImageDecoder`
+- prepares and reloads the block atlas with the real stone texture
+- bakes the vanilla stone model through `ModelBakery`
+- spawns a Deno module render-world worker that prepares matching sprite UVs from the same files
+- builds the static wall mesh in the worker and draws it on the main WebGPU thread
+- validates readback pixels
+- encodes `/tmp/mclone-deno-vanilla-asset-world-smoke.png`
+
+Observed output:
+
+```json
+{"ok":true,"outputPath":"/tmp/mclone-deno-vanilla-asset-world-smoke.png","width":128,"height":128,"format":"rgba8unorm","atlasWidth":32,"atlasHeight":16,"mipLevel":0,"stoneTexture":"minecraft:block/stone","stoneSprite":{"u0":0,"u1":0.5,"v0":0,"v1":1},"dirtySectionCount":25,"renderedChunkCount":1,"solidDrawCount":1,"nonClearPixels":2916,"centerPixel":[93,93,93,255],"byteLength":65536,"workerCounters":{"ingestBatchCount":1,"meshBuildRequestCount":3,"meshNotReadyResponseCount":2,"meshCompletionCount":1},"adapter":{}}
+```
+
+`file /tmp/mclone-deno-vanilla-asset-world-smoke.png` reports:
+
+```text
+PNG image data, 128 x 128, 8-bit/color RGBA, non-interlaced
+```
+
+The image is a blue sky background with a centered, textured Minecraft stone wall. This validates filesystem-backed extracted asset reads, native PNG decode, vanilla stone model baking, atlas UV parity between the main Deno thread and worker, chunk draw submission, readback, and PNG artifact generation without a browser page.
 
 ## Refactor seams to preserve
 

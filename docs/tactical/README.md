@@ -209,7 +209,8 @@ This arc is for browser-free renderer validation. It does not replace the browse
 | [`Deno2-texture-decode-smoke.md`](Deno2-texture-decode-smoke.md) | `NativeImageDecoder`, PNG decode, `NativeImage` upload, `position_tex` textured quad | Deno WebGPU smoke | **done** — `pnpm smoke:deno:texture` decodes and samples a PNG texture without browser image APIs |
 | [`Deno3-texture-atlas-smoke.md`](Deno3-texture-atlas-smoke.md) | in-memory Deno `TextureAtlasSource`, atlas stitch/reload smoke, sampled atlas PNG | Deno WebGPU smoke | **done** — `pnpm smoke:deno:atlas` prepares, uploads, and samples a stitched atlas without browser asset/image APIs |
 | [`Deno4-static-world-worker-frame.md`](Deno4-static-world-worker-frame.md) | Deno module worker, packed static chunk snapshots, chunk mesh build, offscreen chunk draw PNG | Deno WebGPU visual | **done** — `pnpm smoke:deno:world` renders a worker-built static chunk frame without a browser page |
-| `Deno5-` | filesystem-backed Deno asset source for a tiny vanilla block palette | Deno WebGPU visual | replace synthetic model/texture helpers with extracted vanilla assets without browser APIs |
+| [`Deno5-vanilla-asset-world-smoke.md`](Deno5-vanilla-asset-world-smoke.md) | Deno file asset source, native PNG decode, vanilla stone blockstate/model/texture, worker-built offscreen frame | Deno WebGPU visual | **done** — `pnpm smoke:deno:world-assets` renders the static worker frame with extracted vanilla stone assets |
+| `Deno6-` | tiny filesystem-backed vanilla terrain palette | Deno WebGPU visual | expand beyond stone while still avoiding browser APIs, biome tint, and liquids |
 
 ## Runtime / host arc (rough, cross-cutting)
 
