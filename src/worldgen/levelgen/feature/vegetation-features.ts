@@ -21,8 +21,10 @@ import { ProbabilityFeatureConfiguration } from "./configurations/probability-fe
 import { RandomBooleanFeatureConfiguration } from "./configurations/random-boolean-feature-configuration";
 import { RandomFeatureConfiguration } from "./configurations/random-feature-configuration";
 import { RandomPatchConfiguration } from "./configurations/random-patch-configuration";
+import { SimpleBlockConfiguration } from "./configurations/simple-block-configuration";
 import { SimpleRandomFeatureConfiguration } from "./configurations/simple-random-feature-configuration";
 import { WaterDepthThresholdConfiguration } from "./configurations/water-depth-threshold-configuration";
+import { CarvingMaskDecoratorConfiguration } from "./configurations/carving-mask-decorator-configuration";
 import { ColumnPlacer } from "./blockplacers/column-placer";
 import { DoublePlantPlacer } from "./blockplacers/double-plant-placer";
 import { SimpleBlockPlacer } from "./blockplacers/simple-block-placer";
@@ -34,6 +36,7 @@ import { WeightedStateProvider } from "./stateproviders/weighted-state-provider"
 import { TreeFeatures } from "./tree-features";
 import { FeatureDecorators } from "../placement/feature-decorators";
 import { NoneDecoratorConfiguration } from "./configurations/none-decorator-configuration";
+import { GenerationStep } from "../generation-step";
 
 const GRASS_LOCATION = new ResourceLocation("minecraft:grass");
 const FERN_LOCATION = new ResourceLocation("minecraft:fern");
@@ -62,6 +65,9 @@ const MYCELIUM_LOCATION = new ResourceLocation("minecraft:mycelium");
 const PACKED_ICE_LOCATION = new ResourceLocation("minecraft:packed_ice");
 const SNOW_BLOCK_LOCATION = new ResourceLocation("minecraft:snow_block");
 const ICE_LOCATION = new ResourceLocation("minecraft:ice");
+const STONE_LOCATION = new ResourceLocation("minecraft:stone");
+const WATER_LOCATION = new ResourceLocation("minecraft:water");
+const SEAGRASS_LOCATION = new ResourceLocation("minecraft:seagrass");
 const SUGAR_CANE_LOCATION = new ResourceLocation("minecraft:sugar_cane");
 const CACTUS_LOCATION = new ResourceLocation("minecraft:cactus");
 const RED_MUSHROOM_BLOCK_LOCATION = new ResourceLocation("minecraft:red_mushroom_block");
@@ -321,6 +327,15 @@ function createMelonConfig(): RandomPatchConfiguration {
     .build();
 }
 
+function createSimpleSeagrassConfig(): SimpleBlockConfiguration {
+  return new SimpleBlockConfiguration(
+    new SimpleStateProvider(getRequiredState(SEAGRASS_LOCATION)),
+    [getRequiredState(STONE_LOCATION)],
+    [getRequiredState(WATER_LOCATION)],
+    [getRequiredState(WATER_LOCATION)],
+  );
+}
+
 function createSugarCaneConfig(): RandomPatchConfiguration {
   return RandomPatchConfiguration.grassConfigurationBuilder(
     new SimpleStateProvider(getRequiredState(SUGAR_CANE_LOCATION)),
@@ -548,6 +563,12 @@ export class VegetationFeatures {
 
   public static get SEAGRASS_DEEP_WARM() {
     return Features.SEAGRASS.configured(new ProbabilityFeatureConfiguration(0.8)).count(80).decorated(heightmapTopSolidSquare());
+  }
+
+  public static get SEAGRASS_SIMPLE() {
+    return Features.SIMPLE_BLOCK.configured(createSimpleSeagrassConfig())
+      .rarity(10)
+      .decorated(FeatureDecorators.CARVING_MASK.configured(new CarvingMaskDecoratorConfiguration(GenerationStep.Carving.LIQUID)));
   }
 
   public static get SEA_PICKLE() {
