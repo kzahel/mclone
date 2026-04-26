@@ -276,7 +276,9 @@ export class TreeFeatures {
         new SimpleStateProvider(getRequiredState(OAK_SAPLING_LOCATION)),
         new BlobFoliagePlacer(ConstantInt.of(3), ConstantInt.of(0), 3),
         new TwoLayersFeatureSize(1, 0, 1),
-      ).build(),
+      )
+        .decorators([LeaveVineDecorator.INSTANCE])
+        .build(),
     );
   }
 

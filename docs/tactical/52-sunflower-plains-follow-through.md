@@ -47,4 +47,4 @@ Finish the next clearly known-missing simple decoration slice by porting vanilla
 
 ## Next
 
-Stay in the same lane and do the remaining vine-placement consumers outside the current jungle-focused coverage.
+Stay in the same lane and do the remaining vine-placement consumers outside the current jungle-focused coverage. That later landed as [`53-swamp-oak-vine-follow-through.md`](53-swamp-oak-vine-follow-through.md); the next narrow visible-exactness slice after that is `deep_warm_ocean` `SEAGRASS_SIMPLE` / `CARVING_MASK`.

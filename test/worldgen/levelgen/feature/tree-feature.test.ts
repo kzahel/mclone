@@ -249,6 +249,43 @@ describe("TreeFeature", () => {
     expect(cocoaCount).toBeGreaterThan(0);
   });
 
+  test("swamp-oak placement uses the translated leaf-vine decorator", () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const generator = createGenerator();
+    const feature = TreeFeatures.SWAMP_OAK;
+    const vineState = getState("minecraft:vine");
+    const origin = new BlockPos(16, 11, 16);
+
+    let placedLevel: StaticRenderLevel | undefined;
+    let vineCount = 0;
+    for (let seed = 0n; seed < 512n; seed++) {
+      const candidate = createFlatLevel(blocks.airState, getState("minecraft:grass_block"));
+      if (!feature.place(candidate, generator, new WorldgenRandom(seed), origin)) {
+        continue;
+      }
+
+      let candidateVineCount = 0;
+      for (let y = 11; y < 32; y++) {
+        for (let z = 0; z < 32; z++) {
+          for (let x = 0; x < 32; x++) {
+            if (candidate.getBlockState(new BlockPos(x, y, z)).is(vineState.getBlock())) {
+              candidateVineCount++;
+            }
+          }
+        }
+      }
+
+      if (candidateVineCount > 0) {
+        placedLevel = candidate;
+        vineCount = candidateVineCount;
+        break;
+      }
+    }
+
+    expect(placedLevel).toBeDefined();
+    expect(vineCount).toBeGreaterThan(0);
+  });
+
   test("bee-decorated oak placement can emit a translated bee nest block", () => {
     const blocks = registerGeneratedRenderBlocks();
     const generator = createGenerator();

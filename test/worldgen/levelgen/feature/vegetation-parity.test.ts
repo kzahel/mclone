@@ -22,6 +22,7 @@ import { Features } from "../../../../src/worldgen/levelgen/feature/features";
 import { SimpleStateProvider } from "../../../../src/worldgen/levelgen/feature/stateproviders/simple-state-provider";
 import { TreeFeatures } from "../../../../src/worldgen/levelgen/feature/tree-features";
 import { BeehiveDecorator } from "../../../../src/worldgen/levelgen/feature/treedecorators/beehive-decorator";
+import { LeaveVineDecorator } from "../../../../src/worldgen/levelgen/feature/treedecorators/leave-vine-decorator";
 import { VegetationFeatures } from "../../../../src/worldgen/levelgen/feature/vegetation-features";
 import { NoiseBasedChunkGenerator } from "../../../../src/worldgen/levelgen/noise-based-chunk-generator";
 import { WorldgenRandom } from "../../../../src/worldgen/prng/worldgen-random";
@@ -222,6 +223,12 @@ function expectBeeDecoratedTreeFeature(feature: ConfiguredFeature<any, any>, pro
   expect(treeConfig.decorators).toHaveLength(1);
   expect(treeConfig.decorators[0]).toBeInstanceOf(BeehiveDecorator);
   expect((treeConfig.decorators[0] as { readonly probability: number }).probability).toBeCloseTo(probability);
+}
+
+function expectLeafVineDecoratedTreeFeature(feature: ConfiguredFeature<any, any>): void {
+  const treeConfig = feature.config as { readonly decorators: readonly unknown[] };
+  expect(treeConfig.decorators).toHaveLength(1);
+  expect(treeConfig.decorators[0]).toBeInstanceOf(LeaveVineDecorator);
 }
 
 function getVegetalFeatures(key: string): ConfiguredFeature<any, any>[] {
@@ -606,6 +613,15 @@ describe("Vegetation parity", () => {
     expect(sugarCaneIndex).toBeGreaterThan(-1);
     expect(brownMushroomIndex).toBeGreaterThan(-1);
     expect(sugarCaneIndex).toBeLessThan(brownMushroomIndex);
+  });
+
+  test("swamp vegetation uses the translated swamp-oak leaf-vine tree path", () => {
+    registerGeneratedRenderBlocks();
+
+    const swampTreeFeature = getVegetalFeatures("minecraft:swamp").find((feature) => unwrapConfiguredFeature(feature).current.feature === Features.TREE);
+    expect(swampTreeFeature).toBeDefined();
+    expectLeafVineDecoratedTreeFeature(unwrapConfiguredFeature(swampTreeFeature!).current);
+    expectLeafVineDecoratedTreeFeature(unwrapConfiguredFeature(VegetationFeatures.TREES_SWAMP).current);
   });
 
   test("overworld biome settings wire the shoreline, ocean, swamp, forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom, mountain, and badlands tables", () => {

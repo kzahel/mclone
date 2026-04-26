@@ -49,4 +49,4 @@ Finish the last broad, clearly known-missing tree-decorator slice by porting van
 
 ## Next
 
-Stay in the same "known missing simple decorations" lane and do sunflower plains next. That later landed as [`52-sunflower-plains-follow-through.md`](52-sunflower-plains-follow-through.md); the next remaining simple-decoration bucket after that is the still-missing vine-placement consumers outside the current jungle-focused coverage.
+Stay in the same "known missing simple decorations" lane and do sunflower plains next. That later landed as [`52-sunflower-plains-follow-through.md`](52-sunflower-plains-follow-through.md), and the swamp-oak vine follow-through later landed as [`53-swamp-oak-vine-follow-through.md`](53-swamp-oak-vine-follow-through.md). The next remaining narrow visible-exactness slice after that is `deep_warm_ocean` `SEAGRASS_SIMPLE` / `CARVING_MASK`.
