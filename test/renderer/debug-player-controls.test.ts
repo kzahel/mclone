@@ -62,6 +62,48 @@ describe("debug player controls", () => {
     expect(command.buttons).toBe(3);
   });
 
+  test("maps player strafe keys to movement-core local axes", () => {
+    const left = buildPlayerInputCommand(
+      0,
+      0,
+      {
+        heldKeys: new Set(["KeyA"]),
+        mouseDeltaX: 0,
+        mouseDeltaY: 0,
+        locked: true,
+        joystickX: 0,
+        joystickY: 0,
+        moveForward: false,
+        moveBack: false,
+        flyUp: false,
+        flyDown: false,
+      },
+      1 / 60,
+      9,
+    );
+    const right = buildPlayerInputCommand(
+      0,
+      0,
+      {
+        heldKeys: new Set(["KeyD"]),
+        mouseDeltaX: 0,
+        mouseDeltaY: 0,
+        locked: true,
+        joystickX: 0,
+        joystickY: 0,
+        moveForward: false,
+        moveBack: false,
+        flyUp: false,
+        flyDown: false,
+      },
+      1 / 60,
+      10,
+    );
+
+    expect(left.moveX).toBe(1);
+    expect(right.moveX).toBe(-1);
+  });
+
   test("merges injected debug input over the live frame", () => {
     const merged = mergeDebugInputFrame(
       {

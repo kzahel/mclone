@@ -206,13 +206,13 @@ export function buildPlayerInputCommand(
   const forwardAxis =
     (frame.heldKeys.has("KeyW") || frame.moveForward ? 1 : 0)
     - (frame.heldKeys.has("KeyS") || frame.moveBack ? 1 : 0);
-  const rightAxis =
-    (frame.heldKeys.has("KeyD") ? 1 : 0)
-    - (frame.heldKeys.has("KeyA") ? 1 : 0);
+  const strafeAxis =
+    (frame.heldKeys.has("KeyA") ? 1 : 0)
+    - (frame.heldKeys.has("KeyD") ? 1 : 0);
 
   return {
     sequence,
-    moveX: rightAxis,
+    moveX: strafeAxis,
     moveY: 0,
     moveZ: forwardAxis,
     yaw,
