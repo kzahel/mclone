@@ -1,6 +1,6 @@
 # EntityRender0 - Vanilla-shaped entity renderer foundation
 
-Status: **in progress**. The cleanup slice removes the standalone player renderer; the next implementation slice is `MultiBufferSource` / `RenderBuffers`.
+Status: **in progress**. The cleanup slice removed the standalone player renderer, and `MultiBufferSource` / `RenderBuffers` are now landed. The next implementation slice is entity `RenderType` and shader support.
 
 This replaces the old placeholder-first rendering direction from [`Creatures3-render-entity-placeholders.md`](Creatures3-render-entity-placeholders.md). Remote player snapshots are useful protocol data, but player rendering must not land as a standalone Steve-specific WebGPU renderer.
 
@@ -62,6 +62,12 @@ This makes future parity easier because every later entity renderer can reuse th
 | 6 | Integrate with `LevelRenderer` | entity batches are collected in `LevelRenderFrame` alongside chunk `layerDraws`; `encodeSceneFrame` draws batches generically |
 | 7 | Validate pixels | smallest browser or Deno WebGPU smoke captures and inspects a remote player rendered through the dispatcher path |
 
+## Progress
+
+- [x] Standalone Steve/player WebGPU renderer removed.
+- [x] `MultiBufferSource.BufferSource` and a renderer-owned `RenderBuffers` equivalent ported.
+- [x] Focused unit tests prove shared-builder switching, fixed-buffer flushing, and `RenderBuffers` fixed-pack lookup.
+
 ## Protocol Input
 
 Remote players should remain normal entity snapshots:
@@ -109,4 +115,4 @@ On a headless host without browser WebGPU, prefer Deno WebGPU smokes and documen
 
 ## Next Step
 
-Port `MultiBufferSource.BufferSource` and a renderer-owned `RenderBuffers` equivalent, then add a small unit test that proves batches start, switch, and flush by `RenderType` without drawing pixels yet.
+Add entity-specific `RenderType` factories and shader support for the first player skin path: `entityTranslucent`, `entityCutout`, `entityCutoutNoCull`, and `entitySolid` using `DefaultVertexFormat.NEW_ENTITY`, texture-specific state, overlay/lightmap bindings, and WGSL translated from vanilla `rendertype_entity_translucent`.
