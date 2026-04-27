@@ -13,6 +13,7 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `protocol.md`: the logical host/client message model and transport-codec boundaries
 - `loading-persistence.md`: world creation/open/join flow, chunk lifecycle, and save/eviction policy
 - `authoritative-host-scheduling.md`: how player/session authority stays responsive while chunk jobs run
+- `multiplayer-hosting.md`: local, dedicated, future P2P, transport, asset-hosting, and server-config shape
 - `minecraft-client-replica-research.md`: vanilla integrated-server, client-world, lighting, fluid, entity-interpolation, and networking source review
 - `gui.md`: WebGPU-only, vanilla-shaped 2D GUI architecture for menus, loading status, HUD, options, debug settings, and touch UI
 - `player-movement-netcode.md`: paused high-rate player movement and netcode constraint notes
@@ -102,7 +103,8 @@ World state and chunk records should have an engine-defined logical shape. Brows
 Likewise, local singleplayer and remote multiplayer should share the same message model, with different transports:
 
 - local: `postMessage` / `MessagePort`
-- remote: HTTP request/response today; WebSocket or another push transport later if measurements require it
+- remote dedicated: WebSocket by default, with HTTP retained only as non-default compatibility coverage
+- future P2P or high-rate snapshot lanes: WebRTC only if the protocol needs it
 
 ### 5. Parity and custom gameplay are policies, not architectural forks
 
@@ -348,12 +350,14 @@ Do not let browser persistence choices leak into the simulation core.
 The message model should be shared between local singleplayer and multiplayer.
 
 The durable logical protocol and wire-codec split lives in [`protocol.md`](./protocol.md).
+The hosting/product shape lives in [`multiplayer-hosting.md`](./multiplayer-hosting.md).
 
 That means:
 
 - browser singleplayer uses the same command/update protocol shape over `postMessage`
-- the first remote dedicated-host path uses the same serialized message shapes over HTTP request/response sessions
-- later push-driven remote transports can move those same shapes onto WebSocket or another persistent transport if the protocol actually needs server-initiated updates
+- remote dedicated play uses the same serialized message shapes over a persistent WebSocket channel by default
+- HTTP request/response remains temporary compatibility coverage, not the user-facing remote mode
+- future WebRTC or other transports must carry the same logical messages instead of redefining authority
 
 `R6` landed the first hardening pass on that rule:
 
