@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 
-const DEFAULT_DEV_SERVER_PORT = 5173;
+const DEFAULT_DEV_SERVER_PORT = 5670;
 
 function readDevServerPort(): number {
   const parsed = Number.parseInt(process.env.VITE_PORT ?? "", 10);
@@ -10,8 +10,10 @@ function readDevServerPort(): number {
 
 export default defineConfig({
   server: {
+    host: "0.0.0.0",
     port: readDevServerPort(),
     strictPort: true,
+    allowedHosts: ["mclone.graehlarts.com"],
   },
   build: {
     rollupOptions: {
