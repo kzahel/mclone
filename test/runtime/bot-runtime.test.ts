@@ -255,6 +255,15 @@ describe("bot client CLI config", () => {
     });
   });
 
+  test("parses walk-to-point goal mode", () => {
+    expect(parseBotClientConfig([
+      "--goal",
+      "walk-to-point",
+    ])).toMatchObject({
+      goal: "walk-to-point",
+    });
+  });
+
   test("rejects invalid options", () => {
     expect(() => parseBotClientConfig(["--seed", "nope"])).toThrow("Expected seed");
     expect(() => parseBotClientConfig(["--goal", "nope"])).toThrow("Unsupported bot goal");

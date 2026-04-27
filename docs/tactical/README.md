@@ -201,11 +201,14 @@ The bot client should behave like a headless human player: it joins through the 
 
 The first useful behavior is a "good view" bot: it scans loaded terrain, chooses a reachable high vantage point, walks there, and looks around. Keep the reusable layers split so headless tests can use the same client bootstrap and observation code without depending on that specific personality.
 
+A simpler flat-world walk goal now exists as a movement acceptance baseline. Use it before debugging higher-level behavior when the symptom is rubber-banding, rejected inputs, missing collision, or stale authoritative player state.
+
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
 | [`Bot0-headless-client-runtime.md`](Bot0-headless-client-runtime.md) | `src/runtime/bot/`, Node bot CLI, reusable `ClientRuntime` bootstrap, injected transports, minimal idle/wander controller | runtime + integration | **done** - renderer-free client shell and `pnpm bot:client` entrypoint are landed |
 | [`Bot1-client-world-observation-and-navigation.md`](Bot1-client-world-observation-and-navigation.md) | bot observation snapshots, loaded/missing block queries, standable-surface scans, coarse path planner, waypoint steering | unit + runtime | **done** - bot memory inspection and simple navigation are reusable |
 | [`Bot2-good-view-goal.md`](Bot2-good-view-goal.md) | bot goal lifecycle, high-vantage scoring, path following, arrival/stuck handling, `--goal good-view` CLI mode | unit + manual dedicated smoke | **done** - first meaningful bot behavior, a player that likes finding a good view, is landed |
+| [`Bot3-flat-walk-acceptance.md`](Bot3-flat-walk-acceptance.md) | `WalkToPointBotController`, `--goal walk-to-point`, flat-grass remote-service bot movement acceptance | runtime integration | **done** - simple movement goal verifies the bot can reach a nearby authoritative target without rubber-banding |
 
 Do not add mining, building, inventory, chat, or combat until the host/client protocol has explicit authoritative commands for those actions.
 

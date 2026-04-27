@@ -1,11 +1,11 @@
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
-import { BotRuntime, GoodViewBotController, IdleBotController, WanderBotController, createBotClientRuntime, type BotController, type BotLogger } from "../bot";
+import { BotRuntime, GoodViewBotController, IdleBotController, WalkToPointBotController, WanderBotController, createBotClientRuntime, type BotController, type BotLogger } from "../bot";
 import type { OpenWorldPreset } from "../protocol/world-messages";
 import { RemoteWorldWebSocketTransport } from "../transport/remote-world-transport";
 
-type BotClientGoal = "idle" | "wander" | "good-view";
+type BotClientGoal = "idle" | "wander" | "good-view" | "walk-to-point";
 
 interface BotClientConfig {
   readonly url: string;
@@ -86,7 +86,7 @@ function parsePreset(preset: string): OpenWorldPreset {
 }
 
 function parseGoal(value: string): BotClientGoal {
-  if (value === "idle" || value === "wander" || value === "good-view") {
+  if (value === "idle" || value === "wander" || value === "good-view" || value === "walk-to-point") {
     return value;
   }
 
@@ -172,6 +172,8 @@ function createController(name: BotClientConfig["goal"]): BotController {
       return new WanderBotController();
     case "good-view":
       return new GoodViewBotController();
+    case "walk-to-point":
+      return new WalkToPointBotController();
   }
 }
 
