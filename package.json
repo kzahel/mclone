@@ -29,6 +29,7 @@
     "bot:client": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/bot-client.ts",
     "perf:worldgen": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./scripts/worldgen-phase-baseline.ts",
     "perf:worldgen:flyby": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./scripts/worldgen-host-flyby.ts",
+    "perf:worldgen:browser-flyby": "playwright test --config playwright.worldgen-perf.config.ts --workers=1",
     "build": "vite build",
     "deploy": "bash ./scripts/deploy.sh",
     "assets:pack": "node ./scripts/build-reference-asset-pack.mjs",
