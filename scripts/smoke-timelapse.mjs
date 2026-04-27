@@ -35,12 +35,11 @@ for (const t of [0, 1000, 3000, 6000]) {
   console.log(`[${t}ms] ${out}`);
 }
 
-const overlay = await page
-  .locator("#debug-overlay")
-  .textContent()
-  .catch(() => null);
-console.log("=== overlay ===");
-console.log(overlay);
+const domControlCount = await page.locator("button, input, select, textarea, details, form").count();
+const runtimeState = await page.evaluate(() => window.__mcloneDebug?.state ?? window.__mcloneGui?.state ?? null);
+console.log("=== gpu runtime state ===");
+console.log(JSON.stringify(runtimeState, null, 2));
+console.log(`DOM controls: ${domControlCount}`);
 console.log("=== logs (last 40) ===");
 console.log(logs.slice(-40).join("\n"));
 console.log("=== not-ok responses ===");

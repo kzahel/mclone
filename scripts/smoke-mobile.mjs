@@ -74,11 +74,11 @@ await page.evaluate(
 await page.waitForTimeout(200);
 await page.screenshot({ path: outDuring, fullPage: false });
 
-const overlay = await page.locator("#debug-overlay").textContent().catch(() => null);
-const baseActive = await page.locator("#joystick-base").evaluate((el) => el.classList.contains("active")).catch(() => null);
-console.log("=== overlay ===");
-console.log(overlay);
-console.log(`joystick-base.active: ${baseActive}`);
+const domControlCount = await page.locator("button, input, select, textarea, details, form").count();
+const runtimeState = await page.evaluate(() => window.__mcloneDebug?.state ?? window.__mcloneGui?.state ?? null);
+console.log("=== gpu runtime state ===");
+console.log(JSON.stringify(runtimeState, null, 2));
+console.log(`DOM controls: ${domControlCount}`);
 console.log("=== logs (last 15) ===");
 console.log(logs.slice(-15).join("\n"));
 console.log(`=== before: ${outBefore}`);
