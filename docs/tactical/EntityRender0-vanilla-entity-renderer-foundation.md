@@ -1,6 +1,6 @@
 # EntityRender0 - Vanilla-shaped entity renderer foundation
 
-Status: **in progress**. The cleanup slice removed the standalone player renderer, `MultiBufferSource` / `RenderBuffers` are landed, and the first entity `RenderType` / shader support is landed. The next implementation slice is model geometry foundation.
+Status: **in progress**. The cleanup slice removed the standalone player renderer, `MultiBufferSource` / `RenderBuffers` are landed, entity `RenderType` / shader support is landed, and the model geometry foundation is landed. The next implementation slice is the first model/renderer stack.
 
 This replaces the old placeholder-first rendering direction from [`Creatures3-render-entity-placeholders.md`](Creatures3-render-entity-placeholders.md). Remote player snapshots are useful protocol data, but player rendering must not land as a standalone Steve-specific WebGPU renderer.
 
@@ -69,6 +69,8 @@ This makes future parity easier because every later entity renderer can reuse th
 - [x] Focused unit tests prove shared-builder switching, fixed-buffer flushing, and `RenderBuffers` fixed-pack lookup.
 - [x] Entity `RenderType` factories for `entitySolid`, `entityCutout`, `entityCutoutNoCull`, and `entityTranslucent` are memoized by texture location and use `DefaultVertexFormat.NEW_ENTITY`.
 - [x] Entity shader JSON/WGSL support covers UV0 texture, UV1 overlay, UV2 lightmap, normal lighting, fog, and alpha discard for the first player skin path.
+- [x] `ModelPart`, cube builders, `PartPose`, `MeshDefinition`, `PartDefinition`, and `LayerDefinition` are ported and emit `DefaultVertexFormat.NEW_ENTITY` vertices through `VertexConsumer`.
+- [x] Geometry-only `HumanoidModel.createMesh(...)` and `PlayerModel.createMesh(...)` factories bake vanilla default and slim player layer roots for the next renderer slice.
 
 ## Protocol Input
 
@@ -117,4 +119,4 @@ On a headless host without browser WebGPU, prefer Deno WebGPU smokes and documen
 
 ## Next Step
 
-Port the model geometry foundation: `ModelPart`, cube builders, `CubeDeformation`, `PartPose`, `MeshDefinition`, `PartDefinition`, and `LayerDefinition`, with enough coverage to bake the vanilla `PLAYER` and `PLAYER_SLIM` layer roots before introducing `PlayerModel`.
+Port the first neutral-pose model/renderer stack over the baked geometry: `EntityModel`, `ListModel` / `AgeableListModel` shape as needed, instance `HumanoidModel` / `PlayerModel` fields and `renderToBuffer(...)`, then `EntityRenderer`, `LivingEntityRenderer`, and `PlayerRenderer` enough to produce remote-player entity batches through `MultiBufferSource`. Keep limb animation, layers, equipment, and name tags deferred.

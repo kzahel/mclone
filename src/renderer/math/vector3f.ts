@@ -34,10 +34,19 @@ export class Vector3f {
     this.zValue = z;
   }
 
-  public mul(value: number): void {
-    this.xValue *= value;
-    this.yValue *= value;
-    this.zValue *= value;
+  public mul(value: number): void;
+  public mul(x: number, y: number, z: number): void;
+  public mul(x: number, y?: number, z?: number): void {
+    if (y === undefined || z === undefined) {
+      this.xValue *= x;
+      this.yValue *= x;
+      this.zValue *= x;
+      return;
+    }
+
+    this.xValue *= x;
+    this.yValue *= y;
+    this.zValue *= z;
   }
 
   public add(x: number, y: number, z: number): void {
@@ -99,6 +108,10 @@ export class Vector3f {
 
   public rotationDegrees(degrees: number): Quaternion {
     const radians = degrees * (Math.PI / 180.0);
+    return this.rotation(radians);
+  }
+
+  public rotation(radians: number): Quaternion {
     const sine = Math.sin(radians / 2.0);
     const cosine = Math.cos(radians / 2.0);
     return new Quaternion(this.xValue * sine, this.yValue * sine, this.zValue * sine, cosine);
