@@ -26,7 +26,7 @@ The current debug URL:
 http://localhost:5173/?mode=debug&viewDistance=1
 ```
 
-uses the local browser worker transport unless `worldTransport=remote` is explicitly present. So visible walking stutter at that URL is not an HTTP or Node-host problem. It is evidence that the local authoritative host worker and/or debug client loop can stall movement while chunk work happens.
+uses the local browser worker transport unless `worldTransport=remote` or `worldAuthority=dedicated` is explicitly present. So visible walking stutter at that URL is not a dedicated WebSocket or Node-host problem. It is evidence that the local authoritative host worker and/or debug client loop can stall movement while chunk work happens.
 
 Current repo mismatch:
 

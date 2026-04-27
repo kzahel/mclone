@@ -20,12 +20,15 @@ import {
 } from "./scene-setup";
 import { getExpectedLoadedChunkCount, readBrowserRenderConfig, writeStoredBrowserRenderConfig } from "./browser-render-config";
 import {
+  readBrowserWorldTransportConfig,
+  type BrowserWorldTransportConfig,
+} from "./browser-world-transport-config";
+import {
   getGeneratedWorldSmokeScenarioById,
 } from "./generated-world-smoke-scenario";
 import {
   createGeneratedWorldBrowserBootAdapter,
   resolveGeneratedWorldBrowserCamera,
-  type GeneratedWorldBrowserWorldTransportConfig,
 } from "./generated-world-browser-boot";
 import {
   runGeneratedWorldBoot,
@@ -150,21 +153,12 @@ interface LiveWorldBootResult {
   readonly expectedLoadedChunkCount: number;
 }
 
-function readWorldTransport(): GeneratedWorldBrowserWorldTransportConfig {
+function readWorldTransport(): BrowserWorldTransportConfig {
   if (typeof window === "undefined") {
     return { worldTransport: "worker" };
   }
 
-  const url = new URL(window.location.href);
-  const worldTransport = url.searchParams.get("worldTransport");
-  if (worldTransport === "remote") {
-    return {
-      worldTransport: "remote",
-      remoteWorldHostUrl: url.searchParams.get("worldHostUrl") ?? undefined,
-    };
-  }
-
-  return { worldTransport: "worker" };
+  return readBrowserWorldTransportConfig(new URL(window.location.href));
 }
 
 function parseOptionalFloat(url: URL, key: string): number | undefined {

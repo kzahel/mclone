@@ -1,6 +1,6 @@
 # R10: Dedicated Server Ergonomics
 
-Status: active - script alias and headless dedicated-startup coverage landed.
+Status: active - script alias, config startup coverage, and dedicated WebSocket query auto-start coverage landed.
 
 `R9` landed the persistent WebSocket remote channel. The next small multiplayer-facing cleanup is not another transport experiment. It is making the dedicated server shape clear and testable for humans:
 
@@ -26,9 +26,9 @@ Add or update:
 | 2 | docs/help output | docs and server startup JSON use "dedicated" wording where user-facing |
 | 3 | config-file test | done - spawned server starts from `--config <path>` with host/port/saveRoot and serves `/healthz` |
 | 4 | WebSocket config integration test | done - `RemoteWorldWebSocketTransport` opens a world and receives chunk snapshots against a server started from config |
-| 5 | browser query aliases | parse `worldAuthority=local|dedicated`, `dedicatedHostUrl`, and `netTransport=websocket` as aliases for the current remote path |
+| 5 | browser query aliases | done - parse `worldAuthority=local|dedicated`, `dedicatedSocketUrl`, compatibility `dedicatedHostUrl`, and `netTransport=websocket` into the current WebSocket remote path |
 | 6 | GUI settings | add a title/debug settings control for Local Singleplayer vs Dedicated Server and a dedicated-server URL input |
-| 7 | browser smoke | focused browser smoke proves a query/UI-selected dedicated WebSocket session reaches `worldTransport=remote` and loads the expected chunk ring |
+| 7 | browser smoke | partial - focused browser smoke covers query-param auto-start against a dedicated WebSocket session; UI-selected coverage belongs with row 6 |
 
 Preserve:
 
@@ -58,15 +58,18 @@ Current supported shape:
 Add aliases:
 
 ```text
-/?mode=debug&worldAuthority=dedicated&dedicatedHostUrl=http://127.0.0.1:4173&netTransport=websocket
+/?mode=debug&worldAuthority=dedicated&dedicatedSocketUrl=ws://127.0.0.1:4173/api/world/socket&netTransport=websocket
+/?mode=debug&startWorld=1&worldAuthority=dedicated&dedicatedSocketUrl=127.0.0.1:4173&netTransport=websocket
 /?mode=debug&worldAuthority=local
 ```
 
 Rules:
 
-- `worldTransport` remains authoritative if both old and new params are present in a conflicting way, until migration is complete.
+- `worldAuthority` is authoritative when present; otherwise the old `worldTransport=worker|remote` params remain supported.
+- `dedicatedSocketUrl` is the preferred dedicated address param. It accepts a full `ws://` or `wss://` URL, an `http://` or `https://` compatibility URL that is converted to WebSocket, or a `host:port` shorthand that defaults to `/api/world/socket`.
+- `dedicatedHostUrl` remains a compatibility spelling but should not be used in new docs or UI copy.
 - `netTransport=websocket` is the only accepted dedicated transport for this slice.
-- Unknown `netTransport` values should fall back to WebSocket or report a clear UI error; do not silently imply WebRTC support.
+- Unknown `netTransport` values report a clear error; do not silently imply WebRTC support.
 - UI should persist the selected authority and URL in localStorage, but direct query params should override stored state.
 - The title/debug settings screen should make "Dedicated Server" visibly distinct from local singleplayer before starting the world.
 
@@ -126,6 +129,7 @@ Minimum:
 ```bash
 pnpm test -- test/runtime/dedicated-server-startup.test.ts
 pnpm test -- test/runtime/remote-world-transport.test.ts
+pnpm test -- test/renderer/browser-world-transport-config.test.ts
 pnpm typecheck
 ```
 

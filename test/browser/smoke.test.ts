@@ -10,6 +10,7 @@ import {
 } from "../../src/renderer/generated-world-smoke-scenario.ts";
 
 const REMOTE_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-remote-smoke.png";
+const DEDICATED_QUERY_AUTO_START_SCREENSHOT_PATH = "/tmp/mclone-browser-dedicated-query-auto-start-smoke.png";
 const WORKER_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-smoke.png";
 const WORKER_TRANSITION_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-transition-smoke.png";
 const WORKER_TICK_CADENCE_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-tick-cadence-smoke.png";
@@ -23,6 +24,7 @@ interface GpuGuiState {
   readonly pauseScreenActive?: boolean;
   readonly frameCount: number;
   readonly inputEventCount: number;
+  readonly worldTransport?: "worker" | "remote";
   readonly cameraPosition?: readonly [number, number, number];
   readonly cameraYaw?: number;
   readonly cameraPitch?: number;
@@ -42,6 +44,17 @@ function createRemoteSmokeUrl(remoteWorldHostUrl: string): string {
   return `/smoke.html?${createSmokeParams({
     worldTransport: "remote",
     worldHostUrl: remoteWorldHostUrl,
+  }).toString()}`;
+}
+
+function createDedicatedQueryAutoStartUrl(remoteWorldHostUrl: string): string {
+  const dedicatedSocketUrl = new URL(remoteWorldHostUrl).host;
+  return `/smoke.html?${createSmokeParams({
+    worldAuthority: "dedicated",
+    dedicatedSocketUrl,
+    netTransport: "websocket",
+    startWorld: "1",
+    gpuTitle: "1",
   }).toString()}`;
 }
 
@@ -120,6 +133,29 @@ test("WebGPU boot succeeds against the remote Node host with two browser clients
   expect(firstResult.saveId).toBe(secondResult.saveId);
   expect(firstResult.sessionId).not.toBe(secondResult.sessionId);
   expect(firstResult.playerId).not.toBe(secondResult.playerId);
+});
+
+test("GPU title auto-starts a dedicated WebSocket session from query params", async ({ page, remoteWorldHostUrl }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(String(err)));
+
+  await page.goto(createDedicatedQueryAutoStartUrl(remoteWorldHostUrl), { waitUntil: "load" });
+  await page.waitForFunction(() => typeof window.__mcloneReady !== "undefined");
+  const titleResult = (await page.evaluate(() => window.__mcloneReady)) as GpuTitleBootResult | { readonly ok: false; readonly reason: string };
+  expect(titleResult.ok, JSON.stringify(titleResult)).toBe(true);
+
+  await page.waitForFunction(
+    () => window.__mcloneGui?.state.worldReady === true || window.__mcloneGui?.state.mode === "error",
+    undefined,
+    { timeout: 100_000 },
+  );
+  await page.locator("#renderer").screenshot({ path: DEDICATED_QUERY_AUTO_START_SCREENSHOT_PATH });
+
+  const state = await readGpuGuiState(page);
+  expect(state.mode, state.error).toBe("world");
+  expect(state.worldTransport).toBe("remote");
+  expect(state.worldReady).toBe(true);
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });
 
 test("WebGPU boot succeeds against the worker integrated server", async ({ page }) => {

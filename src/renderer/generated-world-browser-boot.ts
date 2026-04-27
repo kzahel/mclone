@@ -13,16 +13,14 @@ import { createGeneratedWorldBrowserPresentationHost } from "./generated-world-b
 import { GuiOverlayHost } from "./gui/gui-overlay-host";
 import { GuiRenderer } from "./gui/gui-renderer";
 import type { BrowserRendererHost } from "./renderer-host";
+import type { BrowserWorldTransportConfig } from "./browser-world-transport-config";
 import {
   closeRendererScene,
   initializeRendererScene,
   type RendererScene,
 } from "./scene-setup";
 
-export interface GeneratedWorldBrowserWorldTransportConfig {
-  readonly worldTransport: "worker" | "remote";
-  readonly remoteWorldHostUrl?: string;
-}
+export type GeneratedWorldBrowserWorldTransportConfig = BrowserWorldTransportConfig;
 
 export interface GeneratedWorldBrowserBootAdapterOptions {
   readonly canvas: HTMLCanvasElement;
