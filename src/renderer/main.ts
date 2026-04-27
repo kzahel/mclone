@@ -7,9 +7,15 @@ import { DebugSettingsScreen, type GuiDebugSettingsState } from "../client/gui/s
 import { ScreenManager } from "../client/gui/screen-manager";
 import { type CameraState } from "./game-renderer";
 import {
+  applyRenderWorldDirtySections,
+  getSceneLoadedChunkCount,
+  initializeRendererScene,
+  renderSceneUntilSettled,
   resizeCanvasToDisplaySize,
+  waitForLoadedChunkRing,
+  type RendererScene,
 } from "./scene-setup";
-import { readBrowserRenderConfig, writeStoredBrowserRenderConfig } from "./browser-render-config";
+import { getExpectedLoadedChunkCount, readBrowserRenderConfig, writeStoredBrowserRenderConfig } from "./browser-render-config";
 import {
   getGeneratedWorldSmokeScenarioById,
 } from "./generated-world-smoke-scenario";
@@ -22,6 +28,7 @@ import {
   runGeneratedWorldBoot,
   type GeneratedWorldBootResult,
 } from "./generated-world-boot";
+import type { LevelRenderFrame } from "./level-renderer";
 import type { GeneratedWorldSmokeScenarioResult } from "./generated-world-smoke-runner";
 import { progressFraction, type LoadingProgress, type LoadingProgressSink } from "./loading-progress";
 import {
@@ -40,11 +47,13 @@ import {
   type WebGpuDeviceContext,
 } from "./webgpu-target";
 import { startGpuWorldRuntime, type GpuWorldRuntime } from "./gui/gpu-world-runtime";
+import { createChunkViewRequestForCameraState } from "./debug/debug-player-controls";
 
 export type BootResult =
   | GeneratedWorldSmokeScenarioResult
   | { ok: false; reason: string };
 
+type GpuTitleWorldResult = BootResult | LiveWorldBootResult;
 type MainBootResult = BootResult | GpuTitleBootResult;
 
 export interface GpuTitleBootResult {
@@ -64,7 +73,7 @@ interface GpuGuiRuntimeState {
   loadingDetail?: string;
   loadingProgress?: number;
   worldReady?: boolean;
-  worldResult?: BootResult;
+  worldResult?: GpuTitleWorldResult;
   pauseScreenActive?: boolean;
   frameCount: number;
   inputEventCount: number;
@@ -81,7 +90,7 @@ interface GpuGuiRuntimeState {
 
 interface GpuGuiRuntimeController {
   readonly state: GpuGuiRuntimeState;
-  worldReady?: Promise<BootResult>;
+  worldReady?: Promise<GpuTitleWorldResult>;
   worldRuntime?: GpuWorldRuntime;
 }
 
@@ -93,6 +102,24 @@ declare global {
 }
 
 const READBACK_FORMAT: GPUTextureFormat = "rgba8unorm";
+const DEFAULT_TITLE_WORLD_CAMERA: CameraState = {
+  position: new Vec3(8.5, 104.0, 40.5),
+  xRot: 30.0,
+  yRot: 180.0,
+};
+
+interface LiveWorldBootResult {
+  readonly ok: true;
+  readonly mode: "live_world";
+  readonly worldTransport: "worker" | "remote";
+  readonly saveId: string;
+  readonly viewDistance: number;
+  readonly renderDistance: number;
+  readonly lightingMode: string;
+  readonly liquidSimulationMode: string;
+  readonly loadedChunkCount: number;
+  readonly expectedLoadedChunkCount: number;
+}
 
 function readWorldTransport(): GeneratedWorldBrowserWorldTransportConfig {
   if (typeof window === "undefined") {
@@ -324,7 +351,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
     });
   };
 
-  let startWorldPromise: Promise<BootResult> | undefined;
+  let startWorldPromise: Promise<GpuTitleWorldResult> | undefined;
   const onSettingsChanged = (): void => {
     debugSettingsState.debugSession = {
       seed: debugSettingsState.debugSession.seed,
@@ -358,6 +385,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
       state,
       optionsState,
       onOptionsChanged: onSettingsChanged,
+      debugSession: debugSettingsState.debugSession,
       debugSettingsState: debugSettingsState.debugSettings,
       onDebugSettingsChanged: onSettingsChanged,
       renderGuiFrameNow,
@@ -429,12 +457,13 @@ interface StartGpuTitleWorldOptions {
   readonly state: GpuGuiRuntimeState;
   readonly optionsState: GuiOptionsState;
   readonly onOptionsChanged: () => void;
+  readonly debugSession: DebugSessionConfig;
   readonly debugSettingsState: GuiDebugSettingsState;
   readonly onDebugSettingsChanged: () => void;
   readonly renderGuiFrameNow: () => void;
 }
 
-async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<BootResult> {
+async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<GpuTitleWorldResult> {
   const progressScreen = new ProgressScreen(true);
   options.state.mode = "loading";
   options.state.screenTitle = "Progress Screen";
@@ -450,10 +479,9 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<B
 
   reportProgress({ stage: "Opening world", fraction: 0 });
   try {
-    const bootResult = await runGeneratedWorldSmokeBoot(options.canvas, options.url, {
-      rendererHost: createPinnedBrowserRendererHost(options.deviceContext, options.target),
-      onProgress: reportProgress,
-    });
+    const bootResult = shouldUseSmokeTitleWorldStart(options.url)
+      ? await runGpuTitleSmokeWorldBoot(options, reportProgress)
+      : await runGpuTitleLiveWorldBoot(options, reportProgress);
     if (!bootResult.ok) {
       options.state.mode = "error";
       options.state.error = bootResult.reason;
@@ -461,20 +489,21 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<B
       return bootResult;
     }
 
+    const scene = bootResult.scene;
     options.state.mode = "world";
     options.state.screenTitle = "";
     options.state.pauseScreenActive = false;
-    options.state.worldResult = bootResult.run.result;
+    options.state.worldResult = bootResult.result;
     options.screenManager.setScreen(null);
     options.state.frameCount = 0;
     options.state.inputEventCount = 0;
     options.controller.worldRuntime = await startGpuWorldRuntime({
-      scene: bootResult.scene,
+      scene,
       canvas: options.canvas,
       screenManager: options.screenManager,
       guiOverlayHost: options.guiOverlayHost,
       initialCamera: bootResult.camera,
-      initialFrame: bootResult.run.frame,
+      initialFrame: bootResult.frame,
       state: options.state,
       optionsState: options.optionsState,
       onOptionsChanged: options.onOptionsChanged,
@@ -486,7 +515,7 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<B
       },
     });
     options.state.worldReady = true;
-    return bootResult.run.result;
+    return bootResult.result;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     options.state.mode = "error";
@@ -494,6 +523,122 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<B
     reportProgress({ stage: "Error", detail: reason, fraction: 1 });
     return { ok: false, reason };
   }
+}
+
+function shouldUseSmokeTitleWorldStart(url: URL): boolean {
+  return url.pathname.endsWith("/smoke.html");
+}
+
+type GpuTitleWorldBootRun =
+  | {
+    readonly ok: true;
+    readonly scene: RendererScene;
+    readonly frame: LevelRenderFrame;
+    readonly camera: CameraState;
+    readonly result: GeneratedWorldSmokeScenarioResult | LiveWorldBootResult;
+  }
+  | { readonly ok: false; readonly reason: string };
+
+async function runGpuTitleSmokeWorldBoot(
+  options: StartGpuTitleWorldOptions,
+  onProgress: LoadingProgressSink,
+): Promise<GpuTitleWorldBootRun> {
+  const bootResult = await runGeneratedWorldSmokeBoot(options.canvas, options.url, {
+    rendererHost: createPinnedBrowserRendererHost(options.deviceContext, options.target),
+    onProgress,
+  });
+  if (!bootResult.ok) {
+    return bootResult;
+  }
+
+  return {
+    ok: true,
+    scene: bootResult.scene,
+    frame: bootResult.run.frame,
+    camera: bootResult.camera,
+    result: bootResult.run.result,
+  };
+}
+
+async function runGpuTitleLiveWorldBoot(
+  options: StartGpuTitleWorldOptions,
+  onProgress: LoadingProgressSink,
+): Promise<GpuTitleWorldBootRun> {
+  const runtimeConfig = readWorldTransport();
+  const renderConfig = readBrowserRenderConfig(options.url, browserRenderConfigStorage());
+  if (readClearWorldStorage(options.url)) {
+    onProgress({ stage: "Clearing stored world", fraction: 0.01 });
+    if (typeof indexedDB === "undefined") {
+      return { ok: false, reason: "clearWorldStorage requested but IndexedDB is unavailable" };
+    }
+    await deleteIndexedDbWorldStorage(indexedDB);
+  }
+
+  const sceneResult = await initializeRendererScene(options.canvas, {
+    seed: options.debugSession.seed,
+    preset: options.debugSettingsState.preset,
+    viewDistance: options.optionsState.viewDistance,
+    renderDistance: options.optionsState.renderDistance,
+    engineConfig: {
+      lightingMode: options.optionsState.lightingMode,
+      liquidSimulationMode: options.optionsState.liquidSimulationMode,
+    },
+    worldTransport: runtimeConfig.worldTransport,
+    remoteWorldHostUrl: runtimeConfig.remoteWorldHostUrl,
+    skyColor: renderConfig.skyColor,
+    clearColorScale: renderConfig.clearColorScale,
+    worldStorageMode: options.debugSettingsState.worldStorageMode,
+    rendererHost: createPinnedBrowserRendererHost(options.deviceContext, options.target),
+    onProgress,
+  });
+  if (!sceneResult.ok) {
+    return sceneResult;
+  }
+
+  const scene = sceneResult.scene;
+  const camera = readSmokeCamera(options.url) ?? DEFAULT_TITLE_WORLD_CAMERA;
+  const chunkViewRequest = createChunkViewRequestForCameraState(camera, scene.viewDistance);
+  if (await scene.clientRuntime.setChunkInterest(chunkViewRequest)) {
+    applyRenderWorldDirtySections(scene);
+    scene.levelRenderer.allChanged();
+  }
+
+  const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
+  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, {
+    maxAttempts: Math.max(2400, expectedLoadedChunkCount * 32),
+    onProgress: (progress) => onProgress({
+      ...progress,
+      fraction: 0.92 + ((progressFraction(progress) ?? 0) * 0.06),
+    }),
+  })) {
+    return {
+      ok: false,
+      reason: `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`,
+    };
+  }
+
+  onProgress({ stage: "Building first frame", fraction: 0.98 });
+  scene.levelRenderer.allChanged();
+  const frame = await renderSceneUntilSettled(scene, camera);
+  const loadedChunkCount = getSceneLoadedChunkCount(scene);
+  return {
+    ok: true,
+    scene,
+    frame,
+    camera,
+    result: {
+      ok: true,
+      mode: "live_world",
+      worldTransport: runtimeConfig.worldTransport,
+      saveId: scene.saveMetadata.saveId,
+      viewDistance: scene.viewDistance,
+      renderDistance: scene.gameRenderer.getRenderDistance(),
+      lightingMode: options.optionsState.lightingMode,
+      liquidSimulationMode: options.optionsState.liquidSimulationMode,
+      loadedChunkCount,
+      expectedLoadedChunkCount,
+    },
+  };
 }
 
 function createPinnedBrowserRendererHost(

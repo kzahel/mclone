@@ -51,7 +51,7 @@ export class GuiOverlayHost {
     add(this.canvas, "pointerdown", (event) => {
       const pointerEvent = event as PointerEvent;
       this.updateMouseFromClient(pointerEvent.clientX, pointerEvent.clientY);
-      this.canvas.setPointerCapture(pointerEvent.pointerId);
+      this.capturePointer(pointerEvent.pointerId);
       if (this.screenManager.mouseClicked(this.mouseX, this.mouseY, pointerEvent.button)) {
         pointerEvent.preventDefault();
       }
@@ -138,6 +138,20 @@ export class GuiOverlayHost {
     const cssY = rect.height <= 0 ? 0 : clientY - rect.top;
     this.mouseX = Math.floor((cssX / Math.max(1, rect.width)) * size.guiWidth);
     this.mouseY = Math.floor((cssY / Math.max(1, rect.height)) * size.guiHeight);
+  }
+
+  private capturePointer(pointerId: number): void {
+    if (this.canvas.hasPointerCapture(pointerId)) {
+      return;
+    }
+
+    try {
+      this.canvas.setPointerCapture(pointerId);
+    } catch (error) {
+      if (!(error instanceof DOMException) || (error.name !== "InvalidStateError" && error.name !== "NotFoundError")) {
+        throw error;
+      }
+    }
   }
 }
 
