@@ -14,13 +14,33 @@ export interface AssetPack {
   readBlob(path: string, contentType?: string): Promise<Blob | undefined>;
 }
 
-interface AssetPackManifest {
+export interface AssetPackManifest {
   readonly version?: string;
   readonly zip?: string;
   readonly sha256?: string;
   readonly size?: number;
   readonly fileCount?: number;
 }
+
+export interface AssetPackByteCacheRecord {
+  readonly zipUrl: string;
+  readonly sha256: string;
+  readonly size?: number;
+  readonly bytes: Blob | ArrayBuffer;
+  readonly savedAtMs?: number;
+}
+
+export interface AssetPackByteCache {
+  load(zipUrl: string): Promise<AssetPackByteCacheRecord | undefined>;
+
+  save(record: AssetPackByteCacheRecord): Promise<void>;
+
+  delete(zipUrl: string): Promise<void>;
+}
+
+const ASSET_PACK_CACHE_DATABASE_NAME = "mclone-asset-pack-cache";
+const ASSET_PACK_CACHE_DATABASE_VERSION = 1;
+const ASSET_PACK_CACHE_STORE = "assetPacks";
 
 class ZipAssetPack implements AssetPack {
   public constructor(private readonly entries: Readonly<Record<string, ZipEntry>>) {}
@@ -49,6 +69,8 @@ class ZipAssetPack implements AssetPack {
 }
 
 let browserAssetPackPromise: Promise<AssetPack> | undefined;
+let browserAssetPackByteCache: AssetPackByteCache | undefined;
+let warnedAssetPackByteCache = false;
 
 function normalizeAssetPath(path: string): string {
   return path.replace(/^\/+/, "");
@@ -71,6 +93,90 @@ async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
   }
 
   return bytesToHex(await globalThis.crypto.subtle.digest("SHA-256", buffer));
+}
+
+function waitForTransaction(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
+  });
+}
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+  });
+}
+
+function openAssetPackCacheDatabase(factory: IDBFactory): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = factory.open(ASSET_PACK_CACHE_DATABASE_NAME, ASSET_PACK_CACHE_DATABASE_VERSION);
+    request.onerror = () => reject(request.error ?? new Error(`Unable to open ${ASSET_PACK_CACHE_DATABASE_NAME}`));
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(ASSET_PACK_CACHE_STORE)) {
+        database.createObjectStore(ASSET_PACK_CACHE_STORE, { keyPath: "zipUrl" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+class IndexedDbAssetPackByteCache implements AssetPackByteCache {
+  private databasePromise: Promise<IDBDatabase> | undefined;
+
+  public constructor(private readonly factory: IDBFactory) {}
+
+  public async load(zipUrl: string): Promise<AssetPackByteCacheRecord | undefined> {
+    const database = await this.getDatabase();
+    const transaction = database.transaction(ASSET_PACK_CACHE_STORE, "readonly");
+    const record = await requestToPromise(transaction.objectStore(ASSET_PACK_CACHE_STORE).get(zipUrl)) as AssetPackByteCacheRecord | undefined;
+    await waitForTransaction(transaction);
+    return record;
+  }
+
+  public async save(record: AssetPackByteCacheRecord): Promise<void> {
+    const database = await this.getDatabase();
+    const transaction = database.transaction(ASSET_PACK_CACHE_STORE, "readwrite");
+    transaction.objectStore(ASSET_PACK_CACHE_STORE).put({
+      ...record,
+      bytes: record.bytes instanceof Blob ? record.bytes : new Blob([record.bytes], { type: "application/zip" }),
+      savedAtMs: record.savedAtMs ?? Date.now(),
+    } satisfies AssetPackByteCacheRecord);
+    await waitForTransaction(transaction);
+  }
+
+  public async delete(zipUrl: string): Promise<void> {
+    const database = await this.getDatabase();
+    const transaction = database.transaction(ASSET_PACK_CACHE_STORE, "readwrite");
+    transaction.objectStore(ASSET_PACK_CACHE_STORE).delete(zipUrl);
+    await waitForTransaction(transaction);
+  }
+
+  private getDatabase(): Promise<IDBDatabase> {
+    this.databasePromise ??= openAssetPackCacheDatabase(this.factory);
+    return this.databasePromise;
+  }
+}
+
+function getBrowserAssetPackByteCache(): AssetPackByteCache | undefined {
+  if (typeof indexedDB === "undefined") {
+    return undefined;
+  }
+
+  browserAssetPackByteCache ??= new IndexedDbAssetPackByteCache(indexedDB);
+  return browserAssetPackByteCache;
+}
+
+function warnAssetPackByteCache(action: string, error: unknown): void {
+  if (warnedAssetPackByteCache) {
+    return;
+  }
+
+  warnedAssetPackByteCache = true;
+  console.warn(`Unable to ${action} persistent asset pack cache; falling back to HTTP cache`, error);
 }
 
 async function fetchJsonIfPresent(url: string): Promise<AssetPackManifest | undefined> {
@@ -158,14 +264,127 @@ async function verifyZipBytes(buffer: ArrayBuffer, manifest: AssetPackManifest, 
   return true;
 }
 
-async function loadZipBytes(zipUrl: string, manifest: AssetPackManifest, onProgress?: LoadingProgressSink): Promise<ArrayBuffer> {
+function cacheableManifestHash(manifest: AssetPackManifest): string | undefined {
+  const hash = manifest.sha256?.trim().toLowerCase();
+  return hash === "" ? undefined : hash;
+}
+
+async function cachedRecordBytes(record: AssetPackByteCacheRecord): Promise<ArrayBuffer> {
+  if (record.bytes instanceof ArrayBuffer) {
+    return record.bytes.slice(0);
+  }
+
+  return record.bytes.arrayBuffer();
+}
+
+async function deleteCachedZipBytes(cache: AssetPackByteCache, zipUrl: string): Promise<void> {
+  try {
+    await cache.delete(zipUrl);
+  } catch (error) {
+    warnAssetPackByteCache("delete from", error);
+  }
+}
+
+async function loadCachedZipBytes(
+  zipUrl: string,
+  manifest: AssetPackManifest,
+  cache: AssetPackByteCache,
+  onProgress?: LoadingProgressSink,
+): Promise<ArrayBuffer | undefined> {
+  const manifestHash = cacheableManifestHash(manifest);
+  if (manifestHash === undefined) {
+    return undefined;
+  }
+
+  onProgress?.({ stage: "Checking cached asset pack", fraction: 0 });
+
+  let record: AssetPackByteCacheRecord | undefined;
+  try {
+    record = await cache.load(zipUrl);
+  } catch (error) {
+    warnAssetPackByteCache("read from", error);
+    return undefined;
+  }
+
+  if (record === undefined) {
+    return undefined;
+  }
+
+  const recordHash = typeof record.sha256 === "string" ? record.sha256.toLowerCase() : undefined;
+  if (recordHash !== manifestHash || (manifest.size !== undefined && record.size !== manifest.size)) {
+    await deleteCachedZipBytes(cache, zipUrl);
+    return undefined;
+  }
+
+  try {
+    const bytes = await cachedRecordBytes(record);
+    if (await verifyZipBytes(bytes, manifest, zipUrl)) {
+      onProgress?.({
+        stage: "Loaded cached asset pack",
+        current: bytes.byteLength,
+        total: bytes.byteLength,
+        fraction: 1,
+      });
+      return bytes;
+    }
+  } catch {
+    // Fall through and replace the corrupt cache entry from the network.
+  }
+
+  await deleteCachedZipBytes(cache, zipUrl);
+  return undefined;
+}
+
+async function saveCachedZipBytes(
+  zipUrl: string,
+  manifest: AssetPackManifest,
+  bytes: ArrayBuffer,
+  cache: AssetPackByteCache,
+): Promise<void> {
+  const manifestHash = cacheableManifestHash(manifest);
+  if (manifestHash === undefined) {
+    return;
+  }
+
+  try {
+    await cache.save({
+      zipUrl,
+      sha256: manifestHash,
+      size: manifest.size,
+      bytes: new Blob([bytes.slice(0)], { type: "application/zip" }),
+      savedAtMs: Date.now(),
+    });
+  } catch (error) {
+    warnAssetPackByteCache("write to", error);
+  }
+}
+
+export async function loadZipBytes(
+  zipUrl: string,
+  manifest: AssetPackManifest,
+  onProgress?: LoadingProgressSink,
+  cache = getBrowserAssetPackByteCache(),
+): Promise<ArrayBuffer> {
+  if (cache !== undefined) {
+    const cachedBuffer = await loadCachedZipBytes(zipUrl, manifest, cache, onProgress);
+    if (cachedBuffer !== undefined) {
+      return cachedBuffer;
+    }
+  }
+
   const firstBuffer = await fetchZipBytes(zipUrl, "default", onProgress);
   if (await verifyZipBytes(firstBuffer, manifest, zipUrl)) {
+    if (cache !== undefined) {
+      await saveCachedZipBytes(zipUrl, manifest, firstBuffer, cache);
+    }
     return firstBuffer;
   }
 
   const reloadedBuffer = await fetchZipBytes(zipUrl, "reload", onProgress);
   if (await verifyZipBytes(reloadedBuffer, manifest, zipUrl)) {
+    if (cache !== undefined) {
+      await saveCachedZipBytes(zipUrl, manifest, reloadedBuffer, cache);
+    }
     return reloadedBuffer;
   }
 

@@ -16,7 +16,7 @@ This tactical is done only when all of the following are true:
 - `/smoke.html` remains a canvas-only test harness with no visible DOM controls.
 - `/debug.html` is either removed, redirected to the same canvas shell, or reduced to a canvas-only debug entrypoint.
 - No visible DOM menu/control/status nodes remain in game entry HTML: no `<button>`, `<form>`, `<input>`, `<select>`, `<textarea>`, visible `<details>`, debug overlays, CSS menus, CSS joystick, or HTML progress/status bars.
-- `src/renderer/debug/debug-free-cam.ts` no longer mutates visible DOM for loading, error, config, performance, or progress UI.
+- the former debug/freecam launch path runs through `src/renderer/main.ts` and the shared GPU world runtime instead of a separate DOM-mutating module.
 - `src/renderer/debug/debug-input.ts` no longer creates or reads visible DOM joystick/fly buttons. Touch input is either removed or rendered as GPU widgets.
 - `TitleScreen`, `WorldSetupScreen`, `ProgressScreen`, `ErrorScreen`, `PauseScreen`, `OptionsScreen`, `DebugSettingsScreen`, and required confirm/quit screens are GPU screens.
 - Existing machine hooks remain available for automation: `window.__mcloneReady`, `window.__mcloneGui`, and, until its callers migrate, `window.__mcloneDebug`.

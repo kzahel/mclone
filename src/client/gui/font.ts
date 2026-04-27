@@ -12,8 +12,16 @@ export interface GlyphInfo {
 const ASCII_TEXTURE_SIZE = 128;
 const ASCII_CELL_SIZE = 8;
 const ASCII_COLUMNS = 16;
-const DEFAULT_GLYPH_ADVANCE = 6;
-const SPACE_ADVANCE = 4;
+const FIRST_PRINTABLE_ASCII = 32;
+const LAST_PRINTABLE_ASCII = 126;
+const ASCII_GLYPH_ADVANCES = [
+  4, 2, 4, 6, 6, 6, 6, 2, 4, 4, 4, 6, 2, 6, 2, 6,
+  6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 2, 2, 5, 6, 5, 6,
+  7, 6, 6, 6, 6, 6, 6, 6, 6, 4, 6, 6, 6, 6, 6, 6,
+  6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 4, 6, 4, 6, 6,
+  3, 6, 6, 6, 6, 6, 5, 6, 6, 2, 6, 5, 3, 6, 6, 6,
+  6, 6, 6, 6, 4, 6, 6, 6, 6, 6, 6, 4, 2, 4, 7,
+] as const;
 
 export class Font {
   public readonly lineHeight = 9;
@@ -53,14 +61,14 @@ export class Font {
   }
 
   public getGlyphInfo(codePoint: number): GlyphInfo {
-    const resolvedCodePoint = codePoint >= 32 && codePoint <= 126 ? codePoint : 63;
+    const resolvedCodePoint = codePoint >= FIRST_PRINTABLE_ASCII && codePoint <= LAST_PRINTABLE_ASCII ? codePoint : 63;
     return {
       codePoint: resolvedCodePoint,
       x: (resolvedCodePoint % ASCII_COLUMNS) * ASCII_CELL_SIZE,
       y: Math.floor(resolvedCodePoint / ASCII_COLUMNS) * ASCII_CELL_SIZE,
       width: ASCII_CELL_SIZE,
       height: ASCII_CELL_SIZE,
-      advance: resolvedCodePoint === 32 ? SPACE_ADVANCE : DEFAULT_GLYPH_ADVANCE,
+      advance: ASCII_GLYPH_ADVANCES[resolvedCodePoint - FIRST_PRINTABLE_ASCII] ?? ASCII_GLYPH_ADVANCES[63 - FIRST_PRINTABLE_ASCII]!,
     };
   }
 

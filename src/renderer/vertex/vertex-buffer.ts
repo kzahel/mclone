@@ -92,11 +92,9 @@ function uploadBuffer(
   previous?.destroy();
   const buffer = device.createBuffer({
     size: roundToward(data.byteLength, 4),
-    usage,
-    mappedAtCreation: true,
+    usage: usage | GPUBufferUsage.COPY_DST,
   });
-  new Uint8Array(buffer.getMappedRange()).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-  buffer.unmap();
+  device.queue.writeBuffer(buffer, 0, data.buffer, data.byteOffset, data.byteLength);
   return buffer;
 }
 

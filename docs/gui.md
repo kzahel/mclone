@@ -16,7 +16,7 @@ This applies to:
 - touch controls and mobile affordances
 - future inventory / chat / social / world-selection surfaces
 
-The current DOM start page, debug settings form, loading overlay, and touch joystick are transitional surfaces. They should be replaced, not preserved as a UI architecture.
+Older DOM start/debug/loading/touch surfaces were transitional. Keep replacing any remaining visible browser UI with GPU screens instead of preserving it as an architecture.
 
 ## Vanilla Reference Shape
 

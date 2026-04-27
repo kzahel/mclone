@@ -45,7 +45,7 @@ Current browser entrypoints:
 |---|---|
 | `index.html -> src/renderer/main.ts` | Canvas-only root shell. Boots GPU title by default, can start a generated world, and can also run direct smoke mode depending on URL/path. |
 | `smoke.html -> src/renderer/main.ts` | Browser smoke harness. Bypasses title by default and runs generated-world smoke scenarios via `window.__mcloneReady`. |
-| `debug.html -> src/renderer/debug/debug-free-cam.ts` | Separate debug/freecam app with its own URL parsing, config UI, loading progress, input, render loop, chunk-interest loop, and debug state. It is still the practical "main game" path in several ways. |
+| `debug.html -> src/renderer/main.ts` | Canvas-only debug launch alias. It auto-starts the same GPU title/world lifecycle with debug launch config, pointer lock enabled, and the `window.__mcloneDebug` machine hook. |
 
 Current headless and host entrypoints:
 
@@ -66,7 +66,7 @@ There is no literal `main-headless.ts` today. Deno headless behavior lives in sc
 - `runGeneratedWorldBoot(...)` has a `close()` result, but browser scene creation does not currently provide a real scene close hook. Deno benefits from harness close because the headless adapter wraps `GeneratedWorldHeadlessHarness.close()`.
 - `RendererScene` has `clientRuntime.close()`, render-world worker ownership, GPU resources, chunk dispatcher state, and texture resources, but no single scene/session disposal API.
 - Browser smoke returns a result to tests and then depends mostly on page lifetime for cleanup.
-- `debug-free-cam.ts` duplicates game-client responsibilities instead of being a launch preset or debug screen inside the main client shell.
+- `main.ts` now also owns the debug launch alias, so the former `debug-free-cam.ts` lifecycle split is gone. The remaining cleanup is to keep thinning `main.ts` into a small shell around explicit client/session objects.
 - Quit-to-title is not a real lifecycle transition yet. The GPU pause menu can return to game, but it cannot centrally close the world and restore title state.
 
 ## Target Shape
@@ -102,13 +102,13 @@ smoke.html / Playwright / Deno script
   -> close session
 ```
 
-Debug/freecam should become a launch mode or debug screen:
+Debug/freecam is a launch mode/debug screen rather than a separate app:
 
 ```text
 ?mode=debug&seed=12345&preset=browser_smoke&movementMode=freecam
 ```
 
-That can still expose `window.__mcloneDebug` for automation, but it should not own a parallel UI, loading, or lifecycle path.
+It still exposes `window.__mcloneDebug` for automation, but it does not own a parallel UI, loading, or lifecycle path.
 
 ## Lifecycle Contract
 

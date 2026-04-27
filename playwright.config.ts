@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const DEFAULT_DEV_SERVER_PORT = 5670;
+const DEFAULT_DEV_SERVER_PORT = 5073;
 
 function readDevServerPort(): number {
   const parsed = Number.parseInt(process.env.VITE_PORT ?? "", 10);

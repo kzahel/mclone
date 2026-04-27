@@ -7,6 +7,7 @@ export interface GuiInputAttachment {
 }
 
 export type GuiOverlayRenderer = (drawList: GuiDrawList, mouseX: number, mouseY: number, partialTick: number) => void;
+const NOOP_GUI_OVERLAY_RENDERER: GuiOverlayRenderer = () => {};
 
 export class GuiOverlayHost {
   private readonly drawList = new GuiDrawList();
@@ -17,7 +18,7 @@ export class GuiOverlayHost {
     private readonly canvas: HTMLCanvasElement,
     private readonly screenManager: ScreenManager,
     private readonly renderer: GuiRenderer,
-    private readonly renderOverlay: GuiOverlayRenderer = () => {},
+    private renderOverlay: GuiOverlayRenderer = NOOP_GUI_OVERLAY_RENDERER,
   ) {}
 
   public static async create(
@@ -98,6 +99,10 @@ export class GuiOverlayHost {
         }
       },
     };
+  }
+
+  public setOverlayRenderer(renderOverlay?: GuiOverlayRenderer): void {
+    this.renderOverlay = renderOverlay ?? NOOP_GUI_OVERLAY_RENDERER;
   }
 
   public encode(

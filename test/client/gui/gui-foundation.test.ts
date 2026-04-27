@@ -16,10 +16,22 @@ describe("Gui0 model foundation", () => {
     const font = new Font();
     const drawList = new GuiDrawList();
 
-    expect(font.width("Gui0")).toBe(24);
+    expect(font.width("Gui0")).toBe(20);
+    expect(font.width("il")).toBe(5);
     expect(font.drawShadow(drawList, "A", 4, 5, 0xffffff)).toBe(11);
     expect(drawList.getCommands()).toHaveLength(2);
     expect(drawList.getCommands().every((command) => command.type === "textured_quad")).toBe(true);
+  });
+
+  it("uses vanilla-style narrow ASCII advances when placing glyph quads", () => {
+    const font = new Font();
+    const drawList = new GuiDrawList();
+
+    expect(font.draw(drawList, "il", 10, 20, 0xffffff)).toBe(15);
+    expect(drawList.getCommands()).toEqual([
+      expect.objectContaining({ type: "textured_quad", x: 10, y: 20 }),
+      expect.objectContaining({ type: "textured_quad", x: 12, y: 20 }),
+    ]);
   });
 
   it("routes button clicks through vanilla-style rectangle hit testing", () => {

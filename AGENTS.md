@@ -65,6 +65,14 @@ Before doing oracle work, make sure the local Minecraft artifacts are actually h
 
 For any slice that produces pixels, **capture a screenshot and look at it before moving on.** Do not finish a whole slice and then check. Check at the first drawable milestone — even a solid-color quad or a clear-color frame — then keep checking as complexity increases.
 
+### Host capability check
+
+Before choosing browser/WebGPU validation on an unfamiliar host, run `pnpm host:check`. The script reports whether the host has a display session, visible GPU devices, Chrome/Chromium, Playwright, and which validation lanes are expected to work.
+
+- On a headless Linux host with no `DISPLAY` / `WAYLAND_DISPLAY`, Chrome/WebGPU Playwright lanes are expected to be unavailable. Do not treat failures from `pnpm test:browser`, `pnpm test:browser:integration`, or `pnpm probe:browser ...` as renderer regressions until they reproduce on a host with a working Chrome GPU/browser path.
+- On that kind of host, prefer display-independent validation: `pnpm test`, `pnpm typecheck`, Node headless host tests, and focused Deno WebGPU smokes such as `pnpm smoke:deno:webgpu`, `pnpm smoke:deno:pipeline`, `pnpm smoke:deno:world-assets`, or `pnpm smoke:deno:generated-world`.
+- To run an actual Deno WebGPU capability probe through the checker, use `pnpm host:check -- --probe-deno-webgpu`. To confirm a Chrome/WebGPU browser path on a display/GPU host, use `pnpm host:check -- --probe-browser-webgpu`.
+
 Concretely:
 - `pnpm test:browser` is the fast automatic WebGPU smoke lane. Run it for browser boot, WebGPU setup, remote-host smoke, and changes that could break the default browser entrypoint.
 - `pnpm test:browser:integration` is the slower automatic browser integration lane. Run it when touching remote player state, debug camera controls, resize/backing-buffer logic, or chunk-interest movement.
