@@ -1,7 +1,7 @@
 import { SectionPos } from "../../core/section-pos";
 import { MovementCommandClock } from "../movement/movement-command-clock";
-import type { ClientPresentationState, ClientRuntime } from "../client/client-runtime";
-import type { ClientWorldRevisionFacts } from "../client/client-world";
+import type { ClientRuntime } from "../client/client-runtime";
+import { createBotObservation, type BotObservation } from "./bot-observation";
 import {
   PLAYER_COLLISION_REVISION,
   PLAYER_COMMAND_QUANTUM_US,
@@ -10,7 +10,6 @@ import {
 } from "../session/player-loop";
 import type {
   ClientPlayerState,
-  ClientSessionState,
   OpenWorldRequest,
   PlayerInputCommand,
   SetChunkViewRequest,
@@ -24,15 +23,6 @@ export interface BotMovementIntent {
   readonly pitch: number;
   readonly buttons?: number;
   readonly edgeButtons?: number;
-}
-
-export interface BotObservation {
-  readonly sessionState?: ClientSessionState;
-  readonly playerState?: ClientPlayerState;
-  readonly presentation: ClientPresentationState;
-  readonly revisionFacts: ClientWorldRevisionFacts;
-  readonly loadedChunkCount: number;
-  readonly entityCount: number;
 }
 
 export interface BotControllerTickContext {
@@ -289,16 +279,7 @@ export class BotRuntime {
   }
 
   public observe(): BotObservation {
-    const presentation = this.options.clientRuntime.publishPresentationState();
-    const clientWorld = this.options.clientRuntime.getClientWorld();
-    return {
-      sessionState: presentation.sessionState,
-      playerState: presentation.localPlayerState,
-      presentation,
-      revisionFacts: clientWorld.getRevisionFacts(),
-      loadedChunkCount: clientWorld.getRenderView().getRenderLevel().getLoadedChunkCount(),
-      entityCount: presentation.entities.length,
-    };
+    return createBotObservation(this.options.clientRuntime);
   }
 
   private async updateChunkInterest(playerState: ClientPlayerState | undefined): Promise<boolean> {

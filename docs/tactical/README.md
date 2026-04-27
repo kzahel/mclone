@@ -204,7 +204,7 @@ The first useful behavior is a "good view" bot: it scans loaded terrain, chooses
 | Doc | Modules | Validation tier | Purpose |
 |---|---|---|---|
 | [`Bot0-headless-client-runtime.md`](Bot0-headless-client-runtime.md) | `src/runtime/bot/`, Node bot CLI, reusable `ClientRuntime` bootstrap, injected transports, minimal idle/wander controller | runtime + integration | **done** - renderer-free client shell and `pnpm bot:client` entrypoint are landed |
-| [`Bot1-client-world-observation-and-navigation.md`](Bot1-client-world-observation-and-navigation.md) | bot observation snapshots, loaded/missing block queries, standable-surface scans, coarse path planner, waypoint steering | unit + runtime | planned - make bot memory inspection and simple navigation reusable |
+| [`Bot1-client-world-observation-and-navigation.md`](Bot1-client-world-observation-and-navigation.md) | bot observation snapshots, loaded/missing block queries, standable-surface scans, coarse path planner, waypoint steering | unit + runtime | **done** - bot memory inspection and simple navigation are reusable |
 | [`Bot2-good-view-goal.md`](Bot2-good-view-goal.md) | bot goal lifecycle, high-vantage scoring, path following, arrival/stuck handling, `--goal good-view` CLI mode | unit + manual dedicated smoke | planned - first meaningful bot behavior, a player that likes finding a good view |
 
 Do not add mining, building, inventory, chat, or combat until the host/client protocol has explicit authoritative commands for those actions.

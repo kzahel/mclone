@@ -2,7 +2,9 @@
 
 Standing after [`Bot0-headless-client-runtime.md`](Bot0-headless-client-runtime.md). `Bot0` gives bots the same client runtime and command path as a browser player. This slice makes the bot able to inspect its client-world replica in reusable, testable ways.
 
-Status: planned.
+Status: **done**.
+
+Landed result: `src/runtime/bot/` now has reusable client-world observation, safe loaded/missing block queries, standable-surface scanning with a revision-aware spatial cache, a bounded coarse path planner, and waypoint steering that produces normal bot movement intent. These utilities operate on hydrated `ClientWorld` facts and do not read host internals or run worldgen.
 
 ## Goal
 
@@ -60,13 +62,13 @@ This slice should not port those vanilla classes. They are reference material fo
 
 | # | Work | Expected result |
 |---|---|---|
-| 1 | Observation snapshot | Add a `BotObservation` record with session state, player state, position/body, loaded chunks, entities, revision facts, and missing-data diagnostics |
-| 2 | Block query helpers | Add safe block lookup APIs that return `loaded`/`missing` results for world positions and chunk ranges |
-| 3 | Surface scanning | Find simple standable surfaces within a bounded X/Z/Y window using hydrated block states and full-block collision assumptions |
-| 4 | Spatial cache | Add a small per-revision cache for scanned surfaces so goal logic does not rescan entire views every tick |
-| 5 | Coarse path planner | Add a bounded A* or best-first planner over standable cells in loaded chunks, with explicit failure reasons |
-| 6 | Waypoint steering | Convert next waypoint into yaw plus local `wishX`/`wishZ` movement intent, without bypassing command sequencing |
-| 7 | Tests | Unit-test block lookup, missing-data handling, standable-surface detection, path success/failure, and steering output |
+| 1 | Observation snapshot | done - `BotObservation` carries session state, player state, loaded chunks, entities, and revision facts |
+| 2 | Block query helpers | done - safe block lookup APIs return `loaded`/`missing` results for world positions |
+| 3 | Surface scanning | done - standable surfaces are found within bounded X/Z/Y windows using hydrated block states and full-block collision assumptions |
+| 4 | Spatial cache | done - `BotSpatialIndex` caches scans by bounds, revision facts, and loaded chunk set |
+| 5 | Coarse path planner | done - bounded A* over standable cells returns loaded path, missing data, or blocked failure states |
+| 6 | Waypoint steering | done - waypoint steering emits yaw and local `moveZ` intent without bypassing command sequencing |
+| 7 | Tests | done - unit coverage proves block lookup, missing-data handling, standable-surface detection, path success/failure, and steering output |
 
 ## Observation Rules
 
@@ -105,7 +107,7 @@ This planner is for player-like bot goals, not vanilla mob parity. Later, if hos
 
 ## Validation
 
-Minimum:
+Completed:
 
 ```bash
 pnpm test -- test/runtime/bot-observation.test.ts test/runtime/bot-navigation.test.ts
@@ -113,6 +115,8 @@ pnpm test -- test/runtime/movement/movement-command.test.ts test/runtime/player-
 pnpm typecheck
 git diff --check
 ```
+
+Also reran `test/runtime/bot-runtime.test.ts` with the Bot1 tests because `BotRuntime.observe()` now delegates to the shared observation helper.
 
 If the implementation changes shared `ClientWorld` or `ClientChunkCache` public surfaces, also run:
 
@@ -123,12 +127,12 @@ pnpm test:browser
 
 ## Done When
 
-- Bot code can inspect loaded client-world block/entity/player facts without host access.
-- Missing chunks are surfaced as explicit query failures.
-- Standable-surface scanning works over hydrated chunk snapshots.
-- A bounded path planner can produce a path across simple loaded terrain.
-- A steering helper can turn a path waypoint into normal player input commands.
-- Headless tests and future bot behaviors can share the same observation/navigation APIs.
+- [x] Bot code can inspect loaded client-world block/entity/player facts without host access.
+- [x] Missing chunks are surfaced as explicit query failures.
+- [x] Standable-surface scanning works over hydrated chunk snapshots.
+- [x] A bounded path planner can produce a path across simple loaded terrain.
+- [x] A steering helper can turn a path waypoint into normal player input commands.
+- [x] Headless tests and future bot behaviors can share the same observation/navigation APIs.
 
 ## Next Step
 
