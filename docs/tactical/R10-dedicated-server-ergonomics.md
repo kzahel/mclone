@@ -1,6 +1,6 @@
 # R10: Dedicated Server Ergonomics
 
-Status: active - script alias, config startup coverage, and dedicated WebSocket query auto-start coverage landed.
+Status: active - script alias, config startup coverage, dedicated WebSocket query auto-start, and GPU debug-settings selection landed.
 
 `R9` landed the persistent WebSocket remote channel. The next small multiplayer-facing cleanup is not another transport experiment. It is making the dedicated server shape clear and testable for humans:
 
@@ -27,7 +27,7 @@ Add or update:
 | 3 | config-file test | done - spawned server starts from `--config <path>` with host/port/saveRoot and serves `/healthz` |
 | 4 | WebSocket config integration test | done - `RemoteWorldWebSocketTransport` opens a world and receives chunk snapshots against a server started from config |
 | 5 | browser query aliases | done - parse `worldAuthority=local|dedicated`, `dedicatedSocketUrl`, compatibility `dedicatedHostUrl`, and `netTransport=websocket` into the current WebSocket remote path |
-| 6 | GUI settings | add a title/debug settings control for Local Singleplayer vs Dedicated Server and a dedicated-server URL input |
+| 6 | GUI settings | done - Debug Settings has a Local Singleplayer/Dedicated Server selector plus a dedicated server socket URL edit box persisted in localStorage |
 | 7 | browser smoke | partial - focused browser smoke covers query-param auto-start against a dedicated WebSocket session; UI-selected coverage belongs with row 6 |
 
 Preserve:
@@ -71,7 +71,7 @@ Rules:
 - `netTransport=websocket` is the only accepted dedicated transport for this slice.
 - Unknown `netTransport` values report a clear error; do not silently imply WebRTC support.
 - UI should persist the selected authority and URL in localStorage, but direct query params should override stored state.
-- The title/debug settings screen should make "Dedicated Server" visibly distinct from local singleplayer before starting the world.
+- The title/debug settings screen makes "Dedicated Server" visibly distinct from local singleplayer before starting the world.
 
 ## Config Test Shape
 
@@ -130,6 +130,7 @@ Minimum:
 pnpm test -- test/runtime/dedicated-server-startup.test.ts
 pnpm test -- test/runtime/remote-world-transport.test.ts
 pnpm test -- test/renderer/browser-world-transport-config.test.ts
+pnpm test -- test/client/gui/gui-foundation.test.ts
 pnpm typecheck
 ```
 

@@ -83,6 +83,8 @@ Supported dedicated query aliases:
 
 The old `worldTransport=remote` and `worldHostUrl` names keep working until all tests, docs, and saved localStorage state are migrated. `dedicatedHostUrl=http://...` is accepted as a compatibility spelling, but the user-facing dedicated gameplay transport is WebSocket. HTTP endpoints on the dedicated process are for health, static assets, and compatibility/testing surfaces.
 
+The GPU Debug Settings screen exposes the same choice as a Local Singleplayer/Dedicated Server selector plus a dedicated socket URL field. Those GUI values are persisted locally; direct query params still override the stored authority and URL for shareable links and tests.
+
 ### Dedicated Server Config
 
 The dedicated server should be configured by a file, not mainly by browser query params. Browser clients join a server-owned world; they do not casually redefine the server seed.

@@ -1,39 +1,124 @@
 export type BrowserWorldTransport = "worker" | "remote";
+export type BrowserWorldAuthority = "local" | "dedicated";
 
 export interface BrowserWorldTransportConfig {
   readonly worldTransport: BrowserWorldTransport;
   readonly remoteWorldHostUrl?: string;
 }
 
+export interface BrowserWorldTransportSettings {
+  readonly worldAuthority: BrowserWorldAuthority;
+  readonly dedicatedSocketUrl: string;
+}
+
 export const DEFAULT_DEDICATED_WORLD_SOCKET_URL = "ws://127.0.0.1:4173/api/world/socket";
+export const BROWSER_WORLD_TRANSPORT_SETTINGS_STORAGE_KEY = "mclone.world.transport.v1";
 
 const DEFAULT_DEDICATED_WORLD_SOCKET_PATH = "/api/world/socket";
 const ABSOLUTE_URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
+const DEFAULT_BROWSER_WORLD_TRANSPORT_SETTINGS: BrowserWorldTransportSettings = {
+  worldAuthority: "local",
+  dedicatedSocketUrl: DEFAULT_DEDICATED_WORLD_SOCKET_URL,
+};
 
-export function readBrowserWorldTransportConfig(url: URL): BrowserWorldTransportConfig {
-  const worldAuthority = url.searchParams.get("worldAuthority");
-  if (worldAuthority !== null) {
-    return readWorldAuthorityTransportConfig(url, worldAuthority);
-  }
+export function readBrowserWorldTransportConfig(
+  url: URL,
+  storage?: Pick<Storage, "getItem">,
+): BrowserWorldTransportConfig {
+  return resolveBrowserWorldTransportConfig(readBrowserWorldTransportSettings(url, storage));
+}
 
-  const worldTransport = url.searchParams.get("worldTransport");
-  if (worldTransport === "remote") {
-    const remoteWorldHostUrl = url.searchParams.get("worldHostUrl");
+export function resolveBrowserWorldTransportConfig(settings: BrowserWorldTransportSettings): BrowserWorldTransportConfig {
+  if (settings.worldAuthority === "dedicated") {
     return {
       worldTransport: "remote",
-      remoteWorldHostUrl: remoteWorldHostUrl === null ? undefined : normalizeDedicatedWorldSocketUrl(remoteWorldHostUrl),
+      remoteWorldHostUrl: normalizeDedicatedWorldSocketUrl(settings.dedicatedSocketUrl),
     };
   }
 
   return { worldTransport: "worker" };
 }
 
-export function normalizeDedicatedWorldSocketUrl(value: string | null | undefined): string {
-  const trimmed = value?.trim();
-  if (trimmed === undefined || trimmed.length === 0) {
-    return DEFAULT_DEDICATED_WORLD_SOCKET_URL;
+export function readBrowserWorldTransportSettings(
+  url: URL,
+  storage?: Pick<Storage, "getItem">,
+): BrowserWorldTransportSettings {
+  const stored = readStoredBrowserWorldTransportSettings(storage);
+  let worldAuthority = stored.worldAuthority ?? DEFAULT_BROWSER_WORLD_TRANSPORT_SETTINGS.worldAuthority;
+  let dedicatedSocketUrl = stored.dedicatedSocketUrl ?? DEFAULT_BROWSER_WORLD_TRANSPORT_SETTINGS.dedicatedSocketUrl;
+
+  const worldAuthorityParam = url.searchParams.get("worldAuthority");
+  const worldTransport = url.searchParams.get("worldTransport");
+  if (worldAuthorityParam !== null) {
+    if (worldAuthorityParam !== "local" && worldAuthorityParam !== "dedicated") {
+      throw new Error(`Unsupported worldAuthority=${worldAuthorityParam}`);
+    }
+    worldAuthority = worldAuthorityParam;
+  } else if (worldTransport === "remote") {
+    worldAuthority = "dedicated";
+  } else if (worldTransport === "worker") {
+    worldAuthority = "local";
   }
 
+  const dedicatedSocketUrlParam = url.searchParams.get("dedicatedSocketUrl")
+    ?? url.searchParams.get("dedicatedHostUrl")
+    ?? url.searchParams.get("worldHostUrl");
+  if (dedicatedSocketUrlParam !== null) {
+    dedicatedSocketUrl = sanitizeDedicatedWorldSocketInput(dedicatedSocketUrlParam);
+  }
+
+  const netTransport = url.searchParams.get("netTransport");
+  if (worldAuthority === "dedicated" && netTransport !== null && netTransport !== "websocket") {
+    throw new Error(`Dedicated worldAuthority currently supports netTransport=websocket only, got ${netTransport}`);
+  }
+
+  return {
+    worldAuthority,
+    dedicatedSocketUrl,
+  };
+}
+
+export function readStoredBrowserWorldTransportSettings(
+  storage: Pick<Storage, "getItem"> | undefined,
+): Partial<BrowserWorldTransportSettings> {
+  if (storage === undefined) {
+    return {};
+  }
+
+  try {
+    const raw = storage.getItem(BROWSER_WORLD_TRANSPORT_SETTINGS_STORAGE_KEY);
+    if (raw === null) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) {
+      return {};
+    }
+
+    return {
+      worldAuthority: parseWorldAuthority(parsed.worldAuthority),
+      dedicatedSocketUrl: typeof parsed.dedicatedSocketUrl === "string"
+        ? sanitizeDedicatedWorldSocketInput(parsed.dedicatedSocketUrl)
+        : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+export function writeStoredBrowserWorldTransportSettings(
+  storage: Pick<Storage, "setItem">,
+  settings: BrowserWorldTransportSettings,
+): void {
+  storage.setItem(BROWSER_WORLD_TRANSPORT_SETTINGS_STORAGE_KEY, JSON.stringify({
+    worldAuthority: settings.worldAuthority,
+    dedicatedSocketUrl: sanitizeDedicatedWorldSocketInput(settings.dedicatedSocketUrl),
+  }));
+}
+
+export function normalizeDedicatedWorldSocketUrl(value: string | null | undefined): string {
+  const trimmed = sanitizeDedicatedWorldSocketInput(value);
   const url = new URL(ABSOLUTE_URL_SCHEME.test(trimmed) ? trimmed : `ws://${trimmed}`);
   if (url.protocol === "http:") {
     url.protocol = "ws:";
@@ -51,25 +136,18 @@ export function normalizeDedicatedWorldSocketUrl(value: string | null | undefine
   return url.href;
 }
 
-function readWorldAuthorityTransportConfig(url: URL, worldAuthority: string): BrowserWorldTransportConfig {
-  if (worldAuthority === "local") {
-    return { worldTransport: "worker" };
+function sanitizeDedicatedWorldSocketInput(value: string | null | undefined): string {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || trimmed.length === 0) {
+    return DEFAULT_DEDICATED_WORLD_SOCKET_URL;
   }
-  if (worldAuthority !== "dedicated") {
-    throw new Error(`Unsupported worldAuthority=${worldAuthority}`);
-  }
+  return trimmed;
+}
 
-  const netTransport = url.searchParams.get("netTransport");
-  if (netTransport !== null && netTransport !== "websocket") {
-    throw new Error(`Dedicated worldAuthority currently supports netTransport=websocket only, got ${netTransport}`);
-  }
+function parseWorldAuthority(value: unknown): BrowserWorldAuthority | undefined {
+  return value === "local" || value === "dedicated" ? value : undefined;
+}
 
-  return {
-    worldTransport: "remote",
-    remoteWorldHostUrl: normalizeDedicatedWorldSocketUrl(
-      url.searchParams.get("dedicatedSocketUrl")
-      ?? url.searchParams.get("dedicatedHostUrl")
-      ?? url.searchParams.get("worldHostUrl"),
-    ),
-  };
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

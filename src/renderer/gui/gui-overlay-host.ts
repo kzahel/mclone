@@ -79,7 +79,12 @@ export class GuiOverlayHost {
     });
     add(window, "keydown", (event) => {
       const keyboardEvent = event as KeyboardEvent;
-      if (this.screenManager.keyPressed(keyCodeFromKeyboardEvent(keyboardEvent), 0, keyboardModifiers(keyboardEvent))) {
+      const modifiers = keyboardModifiers(keyboardEvent);
+      let handled = this.screenManager.keyPressed(keyCodeFromKeyboardEvent(keyboardEvent), 0, modifiers);
+      if (!handled && shouldDispatchCharTyped(keyboardEvent)) {
+        handled = this.screenManager.charTyped(keyboardEvent.key, modifiers);
+      }
+      if (handled) {
         keyboardEvent.preventDefault();
       }
       onInput?.();
@@ -166,12 +171,20 @@ function keyCodeFromKeyboardEvent(event: KeyboardEvent): number {
       return 256;
     case "Enter":
       return 257;
+    case "Backspace":
+      return 259;
+    case "Delete":
+      return 261;
     case "Tab":
       return 258;
     case "ArrowLeft":
       return 263;
     case "ArrowRight":
       return 262;
+    case "Home":
+      return 268;
+    case "End":
+      return 269;
     case " ":
       return 32;
     default:
@@ -184,4 +197,8 @@ function keyboardModifiers(event: KeyboardEvent): number {
     | (event.ctrlKey ? 2 : 0)
     | (event.altKey ? 4 : 0)
     | (event.metaKey ? 8 : 0);
+}
+
+function shouldDispatchCharTyped(event: KeyboardEvent): boolean {
+  return event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey;
 }

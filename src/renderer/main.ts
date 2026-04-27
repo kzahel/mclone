@@ -21,7 +21,10 @@ import {
 import { getExpectedLoadedChunkCount, readBrowserRenderConfig, writeStoredBrowserRenderConfig } from "./browser-render-config";
 import {
   readBrowserWorldTransportConfig,
+  readBrowserWorldTransportSettings,
+  resolveBrowserWorldTransportConfig,
   type BrowserWorldTransportConfig,
+  writeStoredBrowserWorldTransportSettings,
 } from "./browser-world-transport-config";
 import {
   getGeneratedWorldSmokeScenarioById,
@@ -83,6 +86,8 @@ interface GpuGuiRuntimeState {
   worldReady?: boolean;
   worldResult?: GpuTitleWorldResult;
   worldTransport?: "worker" | "remote";
+  worldAuthority?: "local" | "dedicated";
+  dedicatedSocketUrl?: string;
   seed?: string;
   movementMode?: DebugMovementMode;
   preset?: OpenWorldPreset;
@@ -153,12 +158,12 @@ interface LiveWorldBootResult {
   readonly expectedLoadedChunkCount: number;
 }
 
-function readWorldTransport(): BrowserWorldTransportConfig {
+function readWorldTransport(url?: URL): BrowserWorldTransportConfig {
   if (typeof window === "undefined") {
     return { worldTransport: "worker" };
   }
 
-  return readBrowserWorldTransportConfig(new URL(window.location.href));
+  return readBrowserWorldTransportConfig(url ?? new URL(window.location.href), browserRenderConfigStorage());
 }
 
 function parseOptionalFloat(url: URL, key: string): number | undefined {
@@ -267,6 +272,7 @@ function readGuiDebugSettingsState(url: URL): GuiDebugSettingsBundle {
   const storage = browserRenderConfigStorage();
   const renderConfig = readBrowserRenderConfig(url, storage);
   const debugSession = readDebugSessionConfig(url, storage);
+  const worldTransportSettings = readBrowserWorldTransportSettings(url, storage);
   return {
     debugSession,
     debugSettings: {
@@ -274,6 +280,8 @@ function readGuiDebugSettingsState(url: URL): GuiDebugSettingsBundle {
       preset: debugSession.preset,
       worldStorageMode: renderConfig.worldStorageMode,
       showDebugInfo: debugSession.showDebugInfo,
+      worldAuthority: worldTransportSettings.worldAuthority,
+      dedicatedSocketUrl: worldTransportSettings.dedicatedSocketUrl,
     },
   };
 }
@@ -293,7 +301,16 @@ function copyGuiDebugSettingsState(debugSettings: GuiDebugSettingsState): GuiDeb
     preset: debugSettings.preset,
     worldStorageMode: debugSettings.worldStorageMode,
     showDebugInfo: debugSettings.showDebugInfo,
+    worldAuthority: debugSettings.worldAuthority,
+    dedicatedSocketUrl: debugSettings.dedicatedSocketUrl,
   };
+}
+
+function resolveGuiWorldTransportConfig(debugSettings: GuiDebugSettingsState): BrowserWorldTransportConfig {
+  return resolveBrowserWorldTransportConfig({
+    worldAuthority: debugSettings.worldAuthority,
+    dedicatedSocketUrl: debugSettings.dedicatedSocketUrl,
+  });
 }
 
 function persistGuiSettingsState(
@@ -312,6 +329,10 @@ function persistGuiSettingsState(
     });
     writeStoredDebugSessionConfig(storage, debugSession);
     writeStartLastWorld(storage, debugSession);
+    writeStoredBrowserWorldTransportSettings(storage, {
+      worldAuthority: debugSettings.worldAuthority,
+      dedicatedSocketUrl: debugSettings.dedicatedSocketUrl,
+    });
   } catch {
     // WebGPU: localStorage may be unavailable in strict browser contexts; keep the in-memory GUI state usable.
   }
@@ -330,7 +351,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
   const screenManager = new ScreenManager(initialSize.guiWidth, initialSize.guiHeight);
   const optionsState = readGuiOptionsState(url);
   const debugSettingsState = readGuiDebugSettingsState(url);
-  const runtimeConfig = readWorldTransport();
+  const runtimeConfig = resolveGuiWorldTransportConfig(debugSettingsState.debugSettings);
   const debugLaunch = readDebugLaunchEnabled(url);
   const autoStartWorld = readAutoStartWorldEnabled(url);
   const state: GpuGuiRuntimeState = {
@@ -340,6 +361,8 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
     frameCount: 0,
     inputEventCount: 0,
     worldTransport: runtimeConfig.worldTransport,
+    worldAuthority: debugSettingsState.debugSettings.worldAuthority,
+    dedicatedSocketUrl: debugSettingsState.debugSettings.dedicatedSocketUrl,
     seed: debugSettingsState.debugSession.seed.toString(),
     movementMode: debugSettingsState.debugSession.movementMode,
     preset: debugSettingsState.debugSession.preset,
@@ -452,6 +475,9 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
     state.lightingMode = optionsState.lightingMode;
     state.liquidSimulationMode = optionsState.liquidSimulationMode;
     state.worldStorageMode = debugSettingsState.debugSettings.worldStorageMode;
+    state.worldAuthority = debugSettingsState.debugSettings.worldAuthority;
+    state.dedicatedSocketUrl = debugSettingsState.debugSettings.dedicatedSocketUrl;
+    state.worldTransport = resolveGuiWorldTransportConfig(debugSettingsState.debugSettings).worldTransport;
   };
   const startWorld = (): void => {
     state.lastAction = "start_world";
@@ -754,7 +780,7 @@ async function runGpuTitleLiveWorldBoot(
   options: StartGpuTitleWorldOptions,
   onProgress: LoadingProgressSink,
 ): Promise<GpuTitleWorldBootRun> {
-  const runtimeConfig = readWorldTransport();
+  const runtimeConfig = resolveGuiWorldTransportConfig(options.debugSettingsState);
   const renderConfig = readBrowserRenderConfig(options.url, browserRenderConfigStorage());
   if (readClearWorldStorage(options.url)) {
     onProgress({ stage: "Clearing stored world", fraction: 0.01 });
@@ -889,7 +915,7 @@ async function runGeneratedWorldSmokeBoot(
   url: URL,
   options: GeneratedWorldSmokeBootOptions = {},
 ): Promise<GeneratedWorldSmokeBootResult> {
-  const runtimeConfig = readWorldTransport();
+  const runtimeConfig = readWorldTransport(url);
   const scenario = getGeneratedWorldSmokeScenarioById(url.searchParams.get("generatedWorldScenario"));
   const renderConfig = readBrowserRenderConfig(url, browserRenderConfigStorage());
   const requestedCamera = readSmokeCamera(url);

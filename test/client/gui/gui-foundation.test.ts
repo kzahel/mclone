@@ -207,6 +207,8 @@ describe("Gui0 model foundation", () => {
       preset: "browser_smoke",
       worldStorageMode: "default",
       showDebugInfo: false,
+      worldAuthority: "local",
+      dedicatedSocketUrl: "localhost:4173",
     };
     let changedState: GuiDebugSettingsState | undefined;
     let done = false;
@@ -228,6 +230,11 @@ describe("Gui0 model foundation", () => {
     expect(settings.worldStorageMode).toBe("none");
     expect(manager.mouseClicked(170, 62, 0)).toBe(true);
     expect(settings.showDebugInfo).toBe(true);
+    expect(manager.mouseClicked(160, 86, 0)).toBe(true);
+    expect(settings.worldAuthority).toBe("dedicated");
+    expect(manager.mouseClicked(80, 110, 0)).toBe(true);
+    expect(manager.charTyped("x", 0)).toBe(true);
+    expect(settings.dedicatedSocketUrl).toBe("localhost:4173x");
     expect(manager.mouseClicked(160, 146, 0)).toBe(true);
     expect(done).toBe(true);
     expect(changedState).toEqual(settings);

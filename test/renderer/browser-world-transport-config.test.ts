@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
   DEFAULT_DEDICATED_WORLD_SOCKET_URL,
+  BROWSER_WORLD_TRANSPORT_SETTINGS_STORAGE_KEY,
   normalizeDedicatedWorldSocketUrl,
   readBrowserWorldTransportConfig,
+  readBrowserWorldTransportSettings,
+  writeStoredBrowserWorldTransportSettings,
 } from "../../src/renderer/browser-world-transport-config";
 
 describe("browser world transport config", () => {
@@ -69,8 +72,54 @@ describe("browser world transport config", () => {
       "netTransport=websocket",
     );
   });
+
+  test("reads persisted authority when query params are absent", () => {
+    const storage = new MemoryStorage();
+    writeStoredBrowserWorldTransportSettings(storage, {
+      worldAuthority: "dedicated",
+      dedicatedSocketUrl: "localhost:4179",
+    });
+
+    expect(readBrowserWorldTransportSettings(url("/?mode=debug"), storage)).toEqual({
+      worldAuthority: "dedicated",
+      dedicatedSocketUrl: "localhost:4179",
+    });
+    expect(readBrowserWorldTransportConfig(url("/?mode=debug"), storage)).toEqual({
+      worldTransport: "remote",
+      remoteWorldHostUrl: "ws://localhost:4179/api/world/socket",
+    });
+  });
+
+  test("lets query params override persisted authority and socket independently", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(BROWSER_WORLD_TRANSPORT_SETTINGS_STORAGE_KEY, JSON.stringify({
+      worldAuthority: "dedicated",
+      dedicatedSocketUrl: "localhost:4179",
+    }));
+
+    expect(readBrowserWorldTransportSettings(url("/?worldAuthority=local"), storage)).toEqual({
+      worldAuthority: "local",
+      dedicatedSocketUrl: "localhost:4179",
+    });
+    expect(readBrowserWorldTransportSettings(url("/?worldAuthority=dedicated&dedicatedSocketUrl=localhost:4180"), storage)).toEqual({
+      worldAuthority: "dedicated",
+      dedicatedSocketUrl: "localhost:4180",
+    });
+  });
 });
 
 function url(path: string): URL {
   return new URL(path, "http://127.0.0.1/");
+}
+
+class MemoryStorage {
+  private readonly values = new Map<string, string>();
+
+  public getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  public setItem(key: string, value: string): void {
+    this.values.set(key, value);
+  }
 }

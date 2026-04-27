@@ -3,16 +3,20 @@ import type { GuiDrawList } from "../../../renderer/gui/gui-draw-list";
 import { Button } from "../components/button";
 import { Checkbox } from "../components/checkbox";
 import { CycleButton } from "../components/cycle-button";
+import { EditBox } from "../components/edit-box";
 import { GuiComponent } from "../gui-component";
 import { Screen } from "./screen";
 
 export type GuiDebugMovementMode = "player" | "freecam";
+export type GuiWorldAuthority = "local" | "dedicated";
 
 export interface GuiDebugSettingsState {
   movementMode: GuiDebugMovementMode;
   preset: OpenWorldPreset;
   worldStorageMode: WorldStorageMode;
   showDebugInfo: boolean;
+  worldAuthority: GuiWorldAuthority;
+  dedicatedSocketUrl: string;
 }
 
 export interface DebugSettingsScreenActions {
@@ -22,6 +26,8 @@ export interface DebugSettingsScreenActions {
 }
 
 export class DebugSettingsScreen extends Screen {
+  private dedicatedSocketUrlBox: EditBox | undefined;
+
   public constructor(
     private readonly lastScreen: Screen,
     private readonly settings: GuiDebugSettingsState,
@@ -97,7 +103,46 @@ export class DebugSettingsScreen extends Screen {
         this.onChanged();
       },
     ));
+    this.addRenderableWidget(new CycleButton<GuiWorldAuthority>(
+      leftX,
+      topY + (rowSpacing * 2),
+      310,
+      20,
+      "World",
+      this.getFont(),
+      ["local", "dedicated"],
+      this.settings.worldAuthority,
+      formatWorldAuthority,
+      (_button, value) => {
+        this.settings.worldAuthority = value;
+        this.updateDedicatedSocketUrlBox();
+        this.onChanged();
+      },
+    ));
+    this.dedicatedSocketUrlBox = this.addRenderableWidget(new EditBox(
+      leftX,
+      topY + (rowSpacing * 3),
+      310,
+      20,
+      "Server",
+      this.getFont(),
+      this.settings.dedicatedSocketUrl,
+      160,
+      (value) => {
+        this.settings.dedicatedSocketUrl = value;
+        this.onChanged();
+      },
+    ));
+    this.updateDedicatedSocketUrlBox();
     this.addRenderableWidget(new Button(centerX - 100, doneY, 200, 20, "Done", this.getFont(), () => this.onClose()));
+  }
+
+  public override mouseClicked(mouseX: number, mouseY: number, button: number): boolean {
+    const handled = super.mouseClicked(mouseX, mouseY, button);
+    if (this.dedicatedSocketUrlBox !== undefined && !this.dedicatedSocketUrlBox.isMouseOver(mouseX, mouseY)) {
+      this.dedicatedSocketUrlBox.setFocusedForInput(false);
+    }
+    return handled;
   }
 
   public override onClose(): void {
@@ -117,6 +162,12 @@ export class DebugSettingsScreen extends Screen {
 
   private onChanged(): void {
     this.actions.onChanged?.(this.settings);
+  }
+
+  private updateDedicatedSocketUrlBox(): void {
+    if (this.dedicatedSocketUrlBox !== undefined) {
+      this.dedicatedSocketUrlBox.active = this.settings.worldAuthority === "dedicated";
+    }
   }
 }
 
@@ -139,4 +190,8 @@ function formatPreset(value: OpenWorldPreset): string {
 
 function formatWorldStorageMode(value: WorldStorageMode): string {
   return value === "none" ? "Off" : "IndexedDB";
+}
+
+function formatWorldAuthority(value: GuiWorldAuthority): string {
+  return value === "dedicated" ? "Dedicated Server" : "Local Singleplayer";
 }
