@@ -219,6 +219,10 @@ export class RenderStateShards {
   public static readonly RENDERTYPE_TRIPWIRE_SHADER = new ShaderStateShard("rendertype_tripwire");
   public static readonly RENDERTYPE_LINES_SHADER = new ShaderStateShard("rendertype_lines");
   public static readonly RENDERTYPE_LIGHTNING_SHADER = new ShaderStateShard("position_color");
+  public static readonly RENDERTYPE_ENTITY_SOLID_SHADER = new ShaderStateShard("rendertype_entity_solid");
+  public static readonly RENDERTYPE_ENTITY_CUTOUT_SHADER = new ShaderStateShard("rendertype_entity_cutout");
+  public static readonly RENDERTYPE_ENTITY_CUTOUT_NO_CULL_SHADER = new ShaderStateShard("rendertype_entity_cutout_no_cull");
+  public static readonly RENDERTYPE_ENTITY_TRANSLUCENT_SHADER = new ShaderStateShard("rendertype_entity_translucent");
 
   public static readonly BLOCK_SHEET_MIPPED = new TextureStateShard("minecraft:textures/atlas/blocks.png", false, true);
   public static readonly BLOCK_SHEET = new TextureStateShard("minecraft:textures/atlas/blocks.png", false, false);

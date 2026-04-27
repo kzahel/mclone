@@ -1,6 +1,6 @@
 # EntityRender0 - Vanilla-shaped entity renderer foundation
 
-Status: **in progress**. The cleanup slice removed the standalone player renderer, and `MultiBufferSource` / `RenderBuffers` are now landed. The next implementation slice is entity `RenderType` and shader support.
+Status: **in progress**. The cleanup slice removed the standalone player renderer, `MultiBufferSource` / `RenderBuffers` are landed, and the first entity `RenderType` / shader support is landed. The next implementation slice is model geometry foundation.
 
 This replaces the old placeholder-first rendering direction from [`Creatures3-render-entity-placeholders.md`](Creatures3-render-entity-placeholders.md). Remote player snapshots are useful protocol data, but player rendering must not land as a standalone Steve-specific WebGPU renderer.
 
@@ -67,6 +67,8 @@ This makes future parity easier because every later entity renderer can reuse th
 - [x] Standalone Steve/player WebGPU renderer removed.
 - [x] `MultiBufferSource.BufferSource` and a renderer-owned `RenderBuffers` equivalent ported.
 - [x] Focused unit tests prove shared-builder switching, fixed-buffer flushing, and `RenderBuffers` fixed-pack lookup.
+- [x] Entity `RenderType` factories for `entitySolid`, `entityCutout`, `entityCutoutNoCull`, and `entityTranslucent` are memoized by texture location and use `DefaultVertexFormat.NEW_ENTITY`.
+- [x] Entity shader JSON/WGSL support covers UV0 texture, UV1 overlay, UV2 lightmap, normal lighting, fog, and alpha discard for the first player skin path.
 
 ## Protocol Input
 
@@ -115,4 +117,4 @@ On a headless host without browser WebGPU, prefer Deno WebGPU smokes and documen
 
 ## Next Step
 
-Add entity-specific `RenderType` factories and shader support for the first player skin path: `entityTranslucent`, `entityCutout`, `entityCutoutNoCull`, and `entitySolid` using `DefaultVertexFormat.NEW_ENTITY`, texture-specific state, overlay/lightmap bindings, and WGSL translated from vanilla `rendertype_entity_translucent`.
+Port the model geometry foundation: `ModelPart`, cube builders, `CubeDeformation`, `PartPose`, `MeshDefinition`, `PartDefinition`, and `LayerDefinition`, with enough coverage to bake the vanilla `PLAYER` and `PLAYER_SLIM` layer roots before introducing `PlayerModel`.

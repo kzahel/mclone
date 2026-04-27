@@ -1,7 +1,46 @@
 import { DefaultVertexFormat } from "./vertex/default-vertex-format";
 import { BufferBuilder } from "./vertex/buffer-builder";
 import { VertexFormat, VertexFormatMode } from "./vertex/vertex-format";
-import { LineStateShard, RenderStateShard, RenderStateShards, type CullStateShard, type DepthTestStateShard, type EmptyTextureStateShard, type LayeringStateShard, type LightmapStateShard, type OutputStateShard, type OverlayStateShard, type ShaderStateShard, type TexturingStateShard, type TransparencyStateShard, type WriteMaskStateShard } from "./render-state-shard";
+import { LineStateShard, RenderStateShard, RenderStateShards, TextureStateShard, type CullStateShard, type DepthTestStateShard, type EmptyTextureStateShard, type LayeringStateShard, type LightmapStateShard, type OutputStateShard, type OverlayStateShard, type ShaderStateShard, type TexturingStateShard, type TransparencyStateShard, type WriteMaskStateShard } from "./render-state-shard";
+
+type TextureLocation = string | { toString(): string };
+
+function textureLocationString(location: TextureLocation): string {
+  return typeof location === "string" ? location : location.toString();
+}
+
+function memoizeTextureRenderType(factory: (location: string) => CompositeRenderType): (location: TextureLocation) => CompositeRenderType {
+  const cache = new Map<string, CompositeRenderType>();
+  return (location) => {
+    const key = textureLocationString(location);
+    const cached = cache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const created = factory(key);
+    cache.set(key, created);
+    return created;
+  };
+}
+
+function memoizeTextureBooleanRenderType(
+  factory: (location: string, flag: boolean) => CompositeRenderType,
+): (location: TextureLocation, flag?: boolean) => CompositeRenderType {
+  const cache = new Map<string, CompositeRenderType>();
+  return (location, flag = true) => {
+    const locationKey = textureLocationString(location);
+    const key = `${locationKey}|${flag ? "true" : "false"}`;
+    const cached = cache.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const created = factory(locationKey, flag);
+    cache.set(key, created);
+    return created;
+  };
+}
 
 export class RenderType extends RenderStateShard {
   private readonly asOptionalValue: RenderType | undefined;
@@ -106,6 +145,22 @@ export class RenderType extends RenderStateShard {
 
   public static lineStrip(): CompositeRenderType {
     return LINE_STRIP;
+  }
+
+  public static entitySolid(location: TextureLocation): CompositeRenderType {
+    return ENTITY_SOLID(location);
+  }
+
+  public static entityCutout(location: TextureLocation): CompositeRenderType {
+    return ENTITY_CUTOUT(location);
+  }
+
+  public static entityCutoutNoCull(location: TextureLocation, outline = true): CompositeRenderType {
+    return ENTITY_CUTOUT_NO_CULL(location, outline);
+  }
+
+  public static entityTranslucent(location: TextureLocation, outline = true): CompositeRenderType {
+    return ENTITY_TRANSLUCENT(location, outline);
   }
 
   public static chunkBufferLayers(): readonly RenderType[] {
@@ -388,6 +443,52 @@ function tripwireState(): RenderTypeCompositeState {
     .setOutputState(RenderStateShards.WEATHER_TARGET)
     .createCompositeState(true);
 }
+
+const ENTITY_SOLID = memoizeTextureRenderType((location) => {
+  const state = RenderTypeCompositeState.builder()
+    .setShaderState(RenderStateShards.RENDERTYPE_ENTITY_SOLID_SHADER)
+    .setTextureState(new TextureStateShard(location, false, false))
+    .setTransparencyState(RenderStateShards.NO_TRANSPARENCY)
+    .setLightmapState(RenderStateShards.LIGHTMAP)
+    .setOverlayState(RenderStateShards.OVERLAY)
+    .createCompositeState(true);
+  return RenderType.create("entity_solid", DefaultVertexFormat.NEW_ENTITY, VertexFormat.Mode.QUADS, 256, true, false, state);
+});
+
+const ENTITY_CUTOUT = memoizeTextureRenderType((location) => {
+  const state = RenderTypeCompositeState.builder()
+    .setShaderState(RenderStateShards.RENDERTYPE_ENTITY_CUTOUT_SHADER)
+    .setTextureState(new TextureStateShard(location, false, false))
+    .setTransparencyState(RenderStateShards.NO_TRANSPARENCY)
+    .setLightmapState(RenderStateShards.LIGHTMAP)
+    .setOverlayState(RenderStateShards.OVERLAY)
+    .createCompositeState(true);
+  return RenderType.create("entity_cutout", DefaultVertexFormat.NEW_ENTITY, VertexFormat.Mode.QUADS, 256, true, false, state);
+});
+
+const ENTITY_CUTOUT_NO_CULL = memoizeTextureBooleanRenderType((location, outline) => {
+  const state = RenderTypeCompositeState.builder()
+    .setShaderState(RenderStateShards.RENDERTYPE_ENTITY_CUTOUT_NO_CULL_SHADER)
+    .setTextureState(new TextureStateShard(location, false, false))
+    .setTransparencyState(RenderStateShards.NO_TRANSPARENCY)
+    .setCullState(RenderStateShards.NO_CULL)
+    .setLightmapState(RenderStateShards.LIGHTMAP)
+    .setOverlayState(RenderStateShards.OVERLAY)
+    .createCompositeState(outline);
+  return RenderType.create("entity_cutout_no_cull", DefaultVertexFormat.NEW_ENTITY, VertexFormat.Mode.QUADS, 256, true, false, state);
+});
+
+const ENTITY_TRANSLUCENT = memoizeTextureBooleanRenderType((location, outline) => {
+  const state = RenderTypeCompositeState.builder()
+    .setShaderState(RenderStateShards.RENDERTYPE_ENTITY_TRANSLUCENT_SHADER)
+    .setTextureState(new TextureStateShard(location, false, false))
+    .setTransparencyState(RenderStateShards.TRANSLUCENT_TRANSPARENCY)
+    .setCullState(RenderStateShards.NO_CULL)
+    .setLightmapState(RenderStateShards.LIGHTMAP)
+    .setOverlayState(RenderStateShards.OVERLAY)
+    .createCompositeState(outline);
+  return RenderType.create("entity_translucent", DefaultVertexFormat.NEW_ENTITY, VertexFormat.Mode.QUADS, 256, true, true, state);
+});
 
 const SOLID = RenderType.create(
   "solid",
