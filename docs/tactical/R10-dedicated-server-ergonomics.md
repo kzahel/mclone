@@ -1,6 +1,6 @@
 # R10: Dedicated Server Ergonomics
 
-Status: active - script alias landed.
+Status: active - script alias and headless dedicated-startup coverage landed.
 
 `R9` landed the persistent WebSocket remote channel. The next small multiplayer-facing cleanup is not another transport experiment. It is making the dedicated server shape clear and testable for humans:
 
@@ -24,8 +24,8 @@ Add or update:
 |---|---|---|
 | 1 | npm scripts | done - `host:dedicated` starts `src/runtime/node/generated-world-http-server.ts`; `host:remote` remains as a compatibility alias |
 | 2 | docs/help output | docs and server startup JSON use "dedicated" wording where user-facing |
-| 3 | config-file test | spawned server can start from `--config <path>` with host/port/saveRoot and serve `/healthz` |
-| 4 | WebSocket config integration test | `RemoteWorldWebSocketTransport` can open a world against a server started from config |
+| 3 | config-file test | done - spawned server starts from `--config <path>` with host/port/saveRoot and serves `/healthz` |
+| 4 | WebSocket config integration test | done - `RemoteWorldWebSocketTransport` opens a world and receives chunk snapshots against a server started from config |
 | 5 | browser query aliases | parse `worldAuthority=local|dedicated`, `dedicatedHostUrl`, and `netTransport=websocket` as aliases for the current remote path |
 | 6 | GUI settings | add a title/debug settings control for Local Singleplayer vs Dedicated Server and a dedicated-server URL input |
 | 7 | browser smoke | focused browser smoke proves a query/UI-selected dedicated WebSocket session reaches `worldTransport=remote` and loads the expected chunk ring |
@@ -124,6 +124,7 @@ Do not add an unauthenticated browser command that can restart a dedicated serve
 Minimum:
 
 ```bash
+pnpm test -- test/runtime/dedicated-server-startup.test.ts
 pnpm test -- test/runtime/remote-world-transport.test.ts
 pnpm typecheck
 ```
