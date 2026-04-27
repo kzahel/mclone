@@ -31,7 +31,7 @@ describe("browser render config", () => {
 
     expect(config.viewDistance).toBe(7);
     expect(config.renderDistance).toBe(160);
-    expect(config.lightingMode).toBe("vanilla17");
+    expect(config.lightingMode).toBe("none");
     expect(config.liquidSimulationMode).toBe("vanilla17");
     expect(config.worldStorageMode).toBe("default");
     expect(config.skyColor.x).toBeCloseTo(0x8f / 255);
@@ -104,5 +104,19 @@ describe("browser render config", () => {
 
     clearStoredBrowserRenderConfig(storage);
     expect(readStoredBrowserRenderConfig(storage)).toEqual({});
+  });
+
+  test("defaults lighting off when storage and query params omit it", () => {
+    const storage = new TestStorage();
+    storage.setItem(BROWSER_RENDER_CONFIG_STORAGE_KEY, JSON.stringify({
+      viewDistance: 4,
+      renderDistance: 112,
+      liquidSimulationMode: "none",
+    }));
+
+    const config = readBrowserRenderConfig(new URL("http://127.0.0.1/"), storage);
+
+    expect(config.lightingMode).toBe("none");
+    expect(config.liquidSimulationMode).toBe("none");
   });
 });

@@ -36,14 +36,14 @@ export interface NormalizedWorldEngineConfig {
 
 export function normalizeWorldEngineConfig(config: WorldEngineConfig | undefined): NormalizedWorldEngineConfig {
   return {
-    lightingMode: config?.lightingMode === "none" ? "none" : "vanilla17",
+    lightingMode: config?.lightingMode === "vanilla17" ? "vanilla17" : "none",
     liquidSimulationMode: config?.liquidSimulationMode === "none" ? "none" : "vanilla17",
   };
 }
 
 export function isDefaultWorldEngineConfig(config: WorldEngineConfig | undefined): boolean {
   const normalized = normalizeWorldEngineConfig(config);
-  return normalized.lightingMode === "vanilla17" && normalized.liquidSimulationMode === "vanilla17";
+  return normalized.lightingMode === "none" && normalized.liquidSimulationMode === "vanilla17";
 }
 
 export interface OpenWorldRequest {

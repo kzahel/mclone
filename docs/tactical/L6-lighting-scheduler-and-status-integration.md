@@ -8,7 +8,7 @@ Status: proposed next lighting tactical.
 
 Make initial lighting a first-class `LIGHT` status scheduling problem instead of a late whole-view service phase.
 
-The target is not to weaken lighting or make `lightingMode: "none"` the practical default. The target is to overlap and prioritize lighting the way vanilla does: enqueue `LIGHT(C)` as soon as C has a completed `3x3 FEATURES` dependency, let the lighting worker make bounded progress, and publish each chunk after accepted light without waiting for unrelated chunks.
+The current runtime keeps lighting opt-in because the worker-backed vanilla path is still too expensive for default use. The target here is to overlap and prioritize lighting so `lightingMode: "vanilla17"` can eventually become practical again: enqueue `LIGHT(C)` as soon as C has a completed `3x3 FEATURES` dependency, let the lighting worker make bounded progress, and publish each chunk after accepted light without waiting for unrelated chunks.
 
 ## Source files
 
@@ -71,7 +71,7 @@ In scope:
 - prioritize visible/near chunks over halo/cache-warming chunks.
 - expose timing for `FEATURES ready`, `LIGHT queued`, `LIGHT accepted`, `FULL`, and `published`.
 - make progress reporting distinguish generation, decoration, lighting queue, propagation, and publication.
-- keep `lightingMode: "none"` as an explicit debug/profile mode, not the path needed for tolerable world load.
+- keep an explicit unlit mode available, but make the lit path performant enough that opting in is not punitive.
 
 Out of scope:
 

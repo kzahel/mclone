@@ -50,7 +50,7 @@ The host scheduling shape diverges from vanilla's threaded wrapper, but the init
 
 L3 is landed:
 
-- `GeneratedWorldHost` constructs a vanilla 1.17 `LevelLightEngine` by default and can omit it with `lightingMode: "none"` for debug/custom profiles.
+- `GeneratedWorldHost` can construct a vanilla 1.17 `LevelLightEngine` when `lightingMode: "vanilla17"` is explicitly requested; the current runtime default keeps lighting off until the worker-backed path is fast enough.
 - Generated chunks are initialized by scanning existing non-air entries instead of every block coordinate.
 - Initial lighting mirrors vanilla `lightChunk(...)`: active sections are marked non-empty, sky sources are enabled, emitting states call `onBlockEmissionIncrease(...)`, and propagation runs before snapshot packing.
 - Packed chunk snapshots now include `light.sky[]`, `light.block[]`, and `lightCorrect: true` when the vanilla backend is active.
@@ -83,4 +83,4 @@ pnpm test -- test/world/lighting/level-light-engine.test.ts test/world/packed-ch
 - hydrate light snapshots into the client/render-world chunk cache
 - expose light lookup on the client level implementation
 - mark render sections dirty when light facts arrive
-- keep `lightingMode: "none"` as an explicit non-vanilla/debug profile, not the default
+- when lighting is omitted, keep the runtime on the unlit path until the vanilla backend is performant enough to become the default again

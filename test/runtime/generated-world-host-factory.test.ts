@@ -22,6 +22,33 @@ describe("GeneratedWorldHost factory presets", () => {
     Registry.BLOCK.clear();
   });
 
+  test("omitted lighting config defaults to unlit worlds", async () => {
+    const host = createGeneratedWorldHostForRequest({
+      type: "open_world",
+      seed: 12345n,
+      preset: "flat_grass",
+    });
+
+    await host.openWorld({
+      type: "open_world",
+      seed: 12345n,
+      preset: "flat_grass",
+    });
+
+    const messages = await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    const centerSnapshot = messages.find(
+      (message): message is ChunkSnapshotMessage =>
+        message.type === "chunk_snapshot" && message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0,
+    );
+
+    expect(centerSnapshot?.snapshot.light).toBeUndefined();
+  });
+
   test("flat_grass preset publishes the demo grass plane through the host boundary", async () => {
     const blocks = registerGeneratedRenderBlocks();
     const host = createGeneratedWorldHostForRequest(OPEN_FLAT_WORLD_REQUEST);

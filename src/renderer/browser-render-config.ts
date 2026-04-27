@@ -14,7 +14,7 @@ export interface BrowserRenderConfig {
 const DEFAULT_VIEW_DISTANCE = 6;
 const DEFAULT_SKY_COLOR = new Vec3(0x8f / 255, 0xb8 / 255, 0xff / 255);
 const DEFAULT_CLEAR_COLOR_SCALE = 1.0;
-const DEFAULT_LIGHTING_MODE: WorldEngineLightingMode = "vanilla17";
+const DEFAULT_LIGHTING_MODE: WorldEngineLightingMode = "none";
 const DEFAULT_LIQUID_SIMULATION_MODE: WorldEngineLiquidSimulationMode = "vanilla17";
 const DEFAULT_WORLD_STORAGE_MODE: WorldStorageMode = "default";
 

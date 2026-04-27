@@ -1035,10 +1035,11 @@ export class GeneratedWorldRemoteService {
   }
 
   private createSessionHost(request: OpenWorldRequest): WorldHost {
+    const engineConfig = normalizeWorldEngineConfig(request.config);
     return createGeneratedWorldHostForRequest(request, {
       chunkViewScheduling: "cooperative",
       worldStorage: request.storageMode === "none" ? undefined : this.worldStorage,
-      lightingService: request.config?.lightingMode === "none" ? undefined : createNodeLightingService(),
+      lightingService: engineConfig.lightingMode === "none" ? undefined : createNodeLightingService(),
     });
   }
 }

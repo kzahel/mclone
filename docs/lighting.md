@@ -328,7 +328,7 @@ export type RenderLightingMode = "vanilla_lightmap" | "fullbright" | "raytraced"
 - `vanilla17`: default; runs the ported `LevelLightEngine`, persists light sections, and exposes `getBrightness(...)` for simulation.
 - `none`: debug/custom profile only; no vanilla light parity, no vanilla light-sensitive gameplay guarantees.
 
-The generated-world host currently exposes this as `lightingMode?: "vanilla17" | "none"`. The default is `vanilla17`; `none` is only for debug/custom profiles and future backend experiments.
+The generated-world host currently exposes this as `lightingMode?: "vanilla17" | "none"`. The default is `none` so lighting stays opt-in until the vanilla 1.17 path is fast enough for normal use. Set `lightingMode: "vanilla17"` when you explicitly want the worker-backed solver.
 
 `RenderLightingMode` controls presentation:
 
