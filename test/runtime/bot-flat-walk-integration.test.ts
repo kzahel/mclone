@@ -10,7 +10,7 @@ import {
   type BotClientRuntimeOptions,
 } from "../../src/runtime/bot";
 import type { ClientRuntime } from "../../src/runtime/client/client-runtime";
-import { GeneratedWorldRemoteService } from "../../src/runtime/node/generated-world-http-server";
+import { GeneratedWorldHttpServer, GeneratedWorldRemoteService } from "../../src/runtime/node/generated-world-http-server";
 import {
   WORLD_HTTP_PROTOCOL_VERSION,
   type OpenWorldSessionRequest,
@@ -23,10 +23,11 @@ import {
   serializeWorldHostMessages,
 } from "../../src/runtime/protocol/world-wire-protocol";
 import type { ClientPlayerState } from "../../src/runtime/protocol/world-messages";
-import { RemoteWorldTransport } from "../../src/runtime/transport/remote-world-transport";
+import { RemoteWorldTransport, RemoteWorldWebSocketTransport } from "../../src/runtime/transport/remote-world-transport";
 
 const TEMP_DIRECTORIES: string[] = [];
 const SERVICES: GeneratedWorldRemoteService[] = [];
+const SERVERS: GeneratedWorldHttpServer[] = [];
 
 async function createTempDirectory(): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), "mclone-bot-flat-walk-"));
@@ -133,8 +134,83 @@ function createRemoteBotClientRuntime(
   });
 }
 
+function createWebSocketBotClientRuntime(
+  server: GeneratedWorldHttpServer,
+  options: Omit<BotClientRuntimeOptions, "transport">,
+): ClientRuntime {
+  return createBotClientRuntime({
+    ...options,
+    transport: new RemoteWorldWebSocketTransport(server.getBaseUrl()),
+  });
+}
+
+function createWalkBot(
+  clientRuntime: ClientRuntime,
+  controller: WalkToPointBotController,
+): BotRuntime {
+  return new BotRuntime({
+    clientRuntime,
+    openWorldRequest: {
+      type: "open_world",
+      seed: 12345n,
+      preset: "flat_grass",
+      storageMode: "none",
+      config: {
+        lightingMode: "none",
+        liquidSimulationMode: "none",
+      },
+      playerProfile: {
+        name: "FlatWalkBot",
+      },
+    },
+    viewRadius: 0,
+    controller,
+  });
+}
+
+async function runWalkAcceptance(options: {
+  readonly bot: BotRuntime;
+  readonly clientRuntime: ClientRuntime;
+  readonly controller: WalkToPointBotController;
+  readonly advanceHost: () => Promise<void> | void;
+}): Promise<void> {
+  try {
+    await options.bot.open();
+    await drainCenterChunk(options.clientRuntime);
+    const startState = options.clientRuntime.publishPresentationState().localPlayerState;
+    expect(startState).toBeDefined();
+    const start = playerPosition(startState!);
+
+    for (let tick = 0; tick < 220 && !options.controller.getSnapshot().arrived; tick++) {
+      await options.bot.tick(50);
+      await options.advanceHost();
+      await options.clientRuntime.drainTransportUpdates();
+      await sleep(1);
+    }
+
+    const snapshot = options.controller.getSnapshot();
+    const finalState = options.clientRuntime.publishPresentationState().localPlayerState;
+    expect(snapshot.target).toBeDefined();
+    expect(snapshot.arrived).toBe(true);
+    expect(finalState).toBeDefined();
+
+    const final = playerPosition(finalState!);
+    expect(finalState!.acknowledgedInputSequence).toBeGreaterThan(10);
+    expect(finalState!.revision).toBeGreaterThan(startState!.revision);
+    expect(Math.hypot(final.x - start.x, final.z - start.z)).toBeGreaterThan(2.0);
+    expect(Math.hypot(final.x - snapshot.target!.x, final.z - snapshot.target!.z)).toBeLessThanOrEqual(1.0);
+    expect(final.y).toBeGreaterThanOrEqual(63.9);
+    expect(final.y).toBeLessThan(65.0);
+  } finally {
+    await options.bot.close();
+  }
+}
+
 describe("flat-grass bot walking acceptance", () => {
   afterEach(async () => {
+    for (const server of SERVERS.splice(0)) {
+      await server.stop();
+    }
     for (const service of SERVICES.splice(0)) {
       service.dispose();
     }
@@ -160,52 +236,39 @@ describe("flat-grass bot walking acceptance", () => {
       maxDistance: 4.0,
       arrivalRadius: 0.9,
     });
-    const bot = new BotRuntime({
+
+    await runWalkAcceptance({
+      bot: createWalkBot(clientRuntime, controller),
       clientRuntime,
-      openWorldRequest: {
-        type: "open_world",
-        seed: 12345n,
-        preset: "flat_grass",
-        storageMode: "none",
-        config: {
-          lightingMode: "none",
-          liquidSimulationMode: "none",
-        },
-        playerProfile: {
-          name: "FlatWalkBot",
-        },
-      },
-      viewRadius: 0,
       controller,
+      advanceHost: () => service.forceTick(1),
+    });
+  }, 20_000);
+
+  test("walk-to-point bot reaches a nearby target through the real WebSocket server", async () => {
+    const server = new GeneratedWorldHttpServer({
+      host: "127.0.0.1",
+      port: 0,
+      saveRoot: await createTempDirectory(),
+    });
+    await server.start();
+    SERVERS.push(server);
+    const clientRuntime = createWebSocketBotClientRuntime(server, {
+      seed: 12345n,
+      pollUpdateMaxMessages: 64,
+    });
+    const controller = new WalkToPointBotController({
+      randomSeed: 17,
+      minDistance: 4.0,
+      maxDistance: 4.0,
+      arrivalRadius: 0.9,
     });
 
-    try {
-      await bot.open();
-      await drainCenterChunk(clientRuntime);
-      const startState = clientRuntime.publishPresentationState().localPlayerState;
-      expect(startState).toBeDefined();
-      const start = playerPosition(startState!);
-
-      for (let tick = 0; tick < 220 && !controller.getSnapshot().arrived; tick++) {
-        await bot.tick(50);
-        service.forceTick(1);
-        await clientRuntime.drainTransportUpdates();
-      }
-
-      const snapshot = controller.getSnapshot();
-      const finalState = clientRuntime.publishPresentationState().localPlayerState;
-      expect(snapshot.target).toBeDefined();
-      expect(snapshot.arrived).toBe(true);
-      expect(finalState).toBeDefined();
-
-      const final = playerPosition(finalState!);
-      expect(finalState!.acknowledgedInputSequence).toBeGreaterThan(10);
-      expect(Math.hypot(final.x - start.x, final.z - start.z)).toBeGreaterThan(2.0);
-      expect(Math.hypot(final.x - snapshot.target!.x, final.z - snapshot.target!.z)).toBeLessThanOrEqual(1.0);
-      expect(final.y).toBeGreaterThanOrEqual(63.9);
-      expect(final.y).toBeLessThan(65.0);
-    } finally {
-      await bot.close();
-    }
+    await runWalkAcceptance({
+      bot: createWalkBot(clientRuntime, controller),
+      clientRuntime,
+      controller,
+      advanceHost: () => server.forceTick(1),
+    });
   }, 20_000);
 });

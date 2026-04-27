@@ -19,7 +19,12 @@ The good-view behavior proves bot-side observation and path selection, but it is
 - `--goal walk-to-point` in `pnpm bot:client`
 - `test/runtime/bot-flat-walk-integration.test.ts`
 
-The acceptance test opens a `flat_grass` remote service world through `RemoteWorldTransport`, boots a real `BotRuntime`, waits for the center chunk, advances the authoritative host tick, drains client updates, and confirms the bot reaches its deterministic nearby target.
+The acceptance test opens a `flat_grass` world in two ways:
+
+- in-memory remote service through `RemoteWorldTransport`
+- real localhost `GeneratedWorldHttpServer` through `RemoteWorldWebSocketTransport`
+
+Both cases boot a real `BotRuntime`, wait for the center chunk, advance the authoritative host tick, drain client updates, and confirm the bot reaches its deterministic nearby target.
 
 ## Validation
 
@@ -28,6 +33,8 @@ Completed:
 ```bash
 pnpm test -- test/runtime/bot-flat-walk-integration.test.ts
 ```
+
+The sandboxed run hits `listen EPERM` for the WebSocket case on hosts that disallow localhost binding. Rerun the same command with approval; the WebSocket lane passed under that path.
 
 Run with related bot coverage:
 
@@ -39,4 +46,4 @@ git diff --check
 
 ## Next Step
 
-Use this test as the baseline for any movement-authority debugging. If rubber-banding still appears manually, run the same goal against the real WebSocket server and compare command acknowledgements, player-state revisions, and final authoritative position against this in-memory remote-service acceptance path.
+Use this test as the baseline for any movement-authority debugging. If rubber-banding still appears manually, run `--goal walk-to-point` against a long-lived dedicated server and compare command acknowledgements, player-state revisions, and final authoritative position against this passing WebSocket acceptance path.
