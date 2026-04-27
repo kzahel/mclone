@@ -1,9 +1,11 @@
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
-import { BotRuntime, IdleBotController, WanderBotController, createBotClientRuntime, type BotController, type BotLogger } from "../bot";
+import { BotRuntime, GoodViewBotController, IdleBotController, WanderBotController, createBotClientRuntime, type BotController, type BotLogger } from "../bot";
 import type { OpenWorldPreset } from "../protocol/world-messages";
 import { RemoteWorldWebSocketTransport } from "../transport/remote-world-transport";
+
+type BotClientGoal = "idle" | "wander" | "good-view";
 
 interface BotClientConfig {
   readonly url: string;
@@ -12,7 +14,7 @@ interface BotClientConfig {
   readonly preset: OpenWorldPreset;
   readonly radius: number;
   readonly tickRate: number;
-  readonly controller: "idle" | "wander";
+  readonly goal: BotClientGoal;
   readonly maxTicks?: number;
 }
 
@@ -23,7 +25,7 @@ interface MutableBotClientConfig {
   preset?: OpenWorldPreset;
   radius?: number;
   tickRate?: number;
-  controller?: "idle" | "wander";
+  goal?: BotClientGoal;
   maxTicks?: number;
 }
 
@@ -34,7 +36,7 @@ const DEFAULT_CONFIG: BotClientConfig = {
   preset: "default",
   radius: 2,
   tickRate: 20,
-  controller: "wander",
+  goal: "wander",
 };
 
 function formatUnknownError(error: unknown): string {
@@ -83,12 +85,20 @@ function parsePreset(preset: string): OpenWorldPreset {
   throw new Error(`Unsupported preset ${preset}`);
 }
 
-function parseController(value: string): "idle" | "wander" {
+function parseGoal(value: string): BotClientGoal {
+  if (value === "idle" || value === "wander" || value === "good-view") {
+    return value;
+  }
+
+  throw new Error(`Unsupported bot goal ${value}`);
+}
+
+function parseControllerAlias(value: string): BotClientGoal {
   if (value === "idle" || value === "wander") {
     return value;
   }
 
-  throw new Error(`Unsupported bot controller ${value}`);
+  throw new Error(`Unsupported bot controller ${value}; use --goal good-view for goal policies`);
 }
 
 export function parseBotClientConfig(argv: readonly string[]): BotClientConfig {
@@ -131,8 +141,11 @@ export function parseBotClientConfig(argv: readonly string[]): BotClientConfig {
       case "--tick-rate":
         parsed.tickRate = parsePositiveIntegerOption("tick-rate", value);
         break;
+      case "--goal":
+        parsed.goal = parseGoal(value);
+        break;
       case "--controller":
-        parsed.controller = parseController(value);
+        parsed.goal = parseControllerAlias(value);
         break;
       case "--max-ticks":
         parsed.maxTicks = parseNonNegativeIntegerOption("max-ticks", value);
@@ -151,12 +164,14 @@ export function parseBotClientConfig(argv: readonly string[]): BotClientConfig {
   };
 }
 
-function createController(name: BotClientConfig["controller"]): BotController {
+function createController(name: BotClientConfig["goal"]): BotController {
   switch (name) {
     case "idle":
       return new IdleBotController();
     case "wander":
       return new WanderBotController();
+    case "good-view":
+      return new GoodViewBotController();
   }
 }
 
@@ -189,7 +204,7 @@ export async function runBotClient(config: BotClientConfig): Promise<void> {
       playerProfile: { name: config.name },
     },
     viewRadius: config.radius,
-    controller: createController(config.controller),
+    controller: createController(config.goal),
     logger,
   });
   const abortController = new AbortController();
@@ -201,7 +216,7 @@ export async function runBotClient(config: BotClientConfig): Promise<void> {
 
   try {
     await bot.open();
-    logger.info(`bot ${config.name} running controller=${config.controller} radius=${config.radius.toString()} tickRate=${config.tickRate.toString()}`);
+    logger.info(`bot ${config.name} running goal=${config.goal} radius=${config.radius.toString()} tickRate=${config.tickRate.toString()}`);
     await bot.runUntilStopped({
       tickIntervalMs: Math.max(1, Math.round(1000 / config.tickRate)),
       maxTicks: config.maxTicks,

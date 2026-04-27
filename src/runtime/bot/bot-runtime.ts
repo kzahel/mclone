@@ -1,5 +1,6 @@
 import { SectionPos } from "../../core/section-pos";
 import { MovementCommandClock } from "../movement/movement-command-clock";
+import type { ClientWorld } from "../client/client-world";
 import type { ClientRuntime } from "../client/client-runtime";
 import { createBotObservation, type BotObservation } from "./bot-observation";
 import {
@@ -26,6 +27,7 @@ export interface BotMovementIntent {
 }
 
 export interface BotControllerTickContext {
+  readonly clientWorld: ClientWorld;
   readonly observation: BotObservation;
   readonly elapsedMs: number;
   readonly nowMs: number;
@@ -40,6 +42,20 @@ export interface BotController {
   onStart?(context: BotControllerTickContext): Promise<void> | void;
   tick(context: BotControllerTickContext): Promise<BotControllerTickResult> | BotControllerTickResult;
   onStop?(): Promise<void> | void;
+}
+
+export interface BotGoalEvaluation {
+  readonly type: "activate" | "wait" | "complete" | "fail";
+  readonly status: string;
+}
+
+export interface BotGoal<TEvaluation extends BotGoalEvaluation = BotGoalEvaluation> {
+  evaluate(context: BotControllerTickContext): TEvaluation;
+  activate(context: BotControllerTickContext, evaluation: TEvaluation): void;
+  tick(context: BotControllerTickContext): BotControllerTickResult;
+  complete(context: BotControllerTickContext): boolean;
+  fail(context: BotControllerTickContext, reason: string): void;
+  explain(): string;
 }
 
 export interface BotLogger {
@@ -183,6 +199,7 @@ export class BotRuntime {
   private lastChunkView: SetChunkViewRequest | undefined;
   private lastInput: PlayerInputCommand | undefined;
   private lastNowMs: number | undefined;
+  private lastReportedStatus: string | undefined;
 
   public constructor(private readonly options: BotRuntimeOptions) {
     this.viewRadius = options.viewRadius ?? DEFAULT_VIEW_RADIUS;
@@ -204,7 +221,9 @@ export class BotRuntime {
     this.opened = true;
     this.lastNowMs = this.nowMs();
     const observation = this.observe();
+    const clientWorld = this.options.clientRuntime.getClientWorld();
     await this.controller.onStart?.({
+      clientWorld,
       observation,
       elapsedMs: 0,
       nowMs: this.lastNowMs,
@@ -222,14 +241,17 @@ export class BotRuntime {
 
     const transportChanged = await this.options.clientRuntime.drainTransportUpdates();
     const observation = this.observe();
+    const clientWorld = this.options.clientRuntime.getClientWorld();
     const chunkInterestChanged = await this.updateChunkInterest(observation.playerState);
     const controllerResult = await this.controller.tick({
+      clientWorld,
       observation,
       elapsedMs: frameElapsedMs,
       nowMs,
     });
     const movement = controllerResult.movement ?? defaultMovementIntent(observation.playerState);
     const commandCount = await this.sendMovementCommands(movement, frameElapsedMs, nowMs);
+    this.reportStatus(controllerResult.status);
     this.tickCount++;
 
     return {
@@ -330,6 +352,15 @@ export class BotRuntime {
       commandCount++;
     }
     return commandCount;
+  }
+
+  private reportStatus(status: string | undefined): void {
+    if (status === undefined || status === this.lastReportedStatus) {
+      return;
+    }
+
+    this.lastReportedStatus = status;
+    this.options.logger?.info(`bot ${this.options.openWorldRequest.playerProfile?.name ?? "Bot"} ${status}`);
   }
 
   private assertOpen(operation: string): void {

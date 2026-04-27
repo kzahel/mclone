@@ -241,13 +241,23 @@ describe("bot client CLI config", () => {
       preset: "browser_smoke",
       radius: 4,
       tickRate: 10,
-      controller: "idle",
+      goal: "idle",
       maxTicks: 12,
+    });
+  });
+
+  test("parses good-view goal mode", () => {
+    expect(parseBotClientConfig([
+      "--goal",
+      "good-view",
+    ])).toMatchObject({
+      goal: "good-view",
     });
   });
 
   test("rejects invalid options", () => {
     expect(() => parseBotClientConfig(["--seed", "nope"])).toThrow("Expected seed");
-    expect(() => parseBotClientConfig(["--controller", "good-view"])).toThrow("Unsupported bot controller");
+    expect(() => parseBotClientConfig(["--goal", "nope"])).toThrow("Unsupported bot goal");
+    expect(() => parseBotClientConfig(["--controller", "good-view"])).toThrow("use --goal good-view");
   });
 });

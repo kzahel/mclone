@@ -2,7 +2,9 @@
 
 Standing after [`Bot1-client-world-observation-and-navigation.md`](Bot1-client-world-observation-and-navigation.md). Bots can join as headless clients, inspect hydrated client-world facts, identify standable surfaces, and steer toward path waypoints. This slice gives the first bot a personality-shaped objective: it likes finding a good view.
 
-Status: planned.
+Status: done.
+
+Landed result: `src/runtime/bot/bot-good-view-goal.ts` now exposes a reusable `BotGoal`-backed good-view policy. `pnpm bot:client -- --goal good-view` launches a renderer-free client that scores loaded standable surfaces, requires loaded visibility/path data, walks to a reachable high target through normal movement commands, stops on arrival, and reports wait/failure states for missing chunks, unavailable targets, and stuck movement.
 
 ## Goal
 
@@ -66,14 +68,14 @@ This is not a vanilla mob-goal port. The bot is a client-controlled player polic
 
 | # | Work | Expected result |
 |---|---|---|
-| 1 | Goal interface | Add a small `BotGoal` lifecycle: evaluate, activate, tick, complete/fail, and explain current state |
-| 2 | Good-view scorer | Score loaded standable surfaces by height, openness, simple horizon exposure, distance, and reachability |
-| 3 | Target selection | Pick the best reachable candidate, keep the selected target stable until arrival/failure or a major world revision |
-| 4 | Path following | Use `Bot1` navigation and waypoint steering to walk toward the target through sequenced player input commands |
-| 5 | Arrival behavior | Stop near the target, rotate slowly, and keep chunk interest centered on the player |
-| 6 | Stuck handling | Detect lack of progress, blocked paths, missing chunks, or command ack stalls and select a new target or wait |
-| 7 | CLI mode | Add `--goal good-view` as the first non-idle bot mode |
-| 8 | Tests | Cover scoring, target selection, stable retargeting, path-following decisions, arrival, and stuck/failure reporting |
+| 1 | Goal interface | done - `BotGoal` lifecycle covers evaluate, activate, tick, complete/fail, and explain |
+| 2 | Good-view scorer | done - scores height, openness, horizon exposure, distance, and path cost from loaded client-world facts |
+| 3 | Target selection | done - selects reachable loaded targets, rate-limits rescans, and keeps targets stable without meaningful score gain |
+| 4 | Path following | done - uses `Bot1` path planning and waypoint steering to emit normal player input commands |
+| 5 | Arrival behavior | done - stops near the target and rotates slowly in place |
+| 6 | Stuck handling | done - reports missing chunks, unavailable targets, blocked searches, and lack of progress |
+| 7 | CLI mode | done - `--goal good-view` selects the first non-idle goal policy; `--controller idle|wander` remains a compatibility alias |
+| 8 | Tests | done - scoring/selection, target stability, path-following, arrival, missing data, stuck handling, and CLI parsing are covered |
 
 ## Target Selection Rules
 
@@ -134,6 +136,15 @@ pnpm typecheck
 git diff --check
 ```
 
+Completed:
+
+- `pnpm test -- test/runtime/bot-good-view-goal.test.ts test/runtime/bot-navigation.test.ts test/runtime/bot-runtime.test.ts`
+- `pnpm test -- test/runtime/remote-world-transport.test.ts test/runtime/player-loop.test.ts`
+  - sandboxed run hit `listen EPERM` on localhost WebSocket binding
+  - rerun with command approval passed
+- `pnpm typecheck`
+- `git diff --check`
+
 Useful manual smoke with a running dedicated server:
 
 ```bash
@@ -149,13 +160,13 @@ pnpm test:browser:integration
 
 ## Done When
 
-- `--goal good-view` launches a bot that joins a dedicated server and selects a reachable high viewpoint from loaded client-world facts.
-- Target scoring is deterministic in unit tests.
-- The bot follows a path by sending normal player input commands.
-- Missing chunks and blocked paths produce explicit wait/failure states.
-- The bot can arrive, stop, and look around without spamming commands or retargeting every tick.
-- The behavior remains outside host authority and renderer code.
+- [x] `--goal good-view` launches a bot that joins a dedicated server and selects a reachable high viewpoint from loaded client-world facts.
+- [x] Target scoring is deterministic in unit tests.
+- [x] The bot follows a path by sending normal player input commands.
+- [x] Missing chunks and blocked paths produce explicit wait/failure states.
+- [x] The bot can arrive, stop, and look around without spamming commands or retargeting every tick.
+- [x] The behavior remains outside host authority and renderer code.
 
 ## Next Step
 
-After `Bot2`, choose the next bot behavior based on what is most useful for testing: patrol between viewpoints, follow another player, inspect nearest generated entity, or wait for block interaction commands before adding mining/building goals.
+Recommended next slice: add a patrol-between-viewpoints goal on top of good-view selection. It should temporarily blacklist the current arrived target, choose another reachable viewpoint, and keep moving for a long-running dedicated-server smoke without requiring new block interaction or inventory protocol.
