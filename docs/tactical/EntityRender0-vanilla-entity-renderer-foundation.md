@@ -1,6 +1,6 @@
 # EntityRender0 - Vanilla-shaped entity renderer foundation
 
-Status: **in progress**. The cleanup slice removed the standalone player renderer, `MultiBufferSource` / `RenderBuffers` are landed, entity `RenderType` / shader support is landed, the model geometry foundation is landed, and the first neutral-pose player renderer stack is landed. The next implementation slice is `LevelRenderer` / GPU integration for entity batches.
+Status: **landed through first WebGPU integration**. The cleanup slice removed the standalone player renderer, `MultiBufferSource` / `RenderBuffers` are landed, entity `RenderType` / shader support is landed, the model geometry foundation is landed, the first neutral-pose player renderer stack is landed, and `LevelRenderer` now carries entity batches into the scene encoder.
 
 This replaces the old placeholder-first rendering direction from [`Creatures3-render-entity-placeholders.md`](Creatures3-render-entity-placeholders.md). Remote player snapshots are useful protocol data, but player rendering must not land as a standalone Steve-specific WebGPU renderer.
 
@@ -59,8 +59,8 @@ This makes future parity easier because every later entity renderer can reuse th
 | 3 | Add entity shader support | WGSL ports cover the first player skin path, including UV0, UV1 overlay, UV2 lightmap, color, normal, fog, alpha discard |
 | 4 | Port model geometry foundation | `ModelPart`, cube builders, layer definitions, and baked model-layer roots support `PLAYER` and `PLAYER_SLIM` first |
 | 5 | Port first renderer stack | `EntityRenderDispatcher`, `EntityRenderer`, `LivingEntityRenderer`, `PlayerRenderer`, `HumanoidModel`, and `PlayerModel` render neutral-pose remote players |
-| 6 | Integrate with `LevelRenderer` | entity batches are collected in `LevelRenderFrame` alongside chunk `layerDraws`; `encodeSceneFrame` draws batches generically |
-| 7 | Validate pixels | smallest browser or Deno WebGPU smoke captures and inspects a remote player rendered through the dispatcher path |
+| 6 | Integrate with `LevelRenderer` | done - entity batches are collected in `LevelRenderFrame` alongside chunk `layerDraws`; `encodeSceneFrame` draws batches generically |
+| 7 | Validate pixels | done for headless WebGPU - Deno smoke captures and inspects a neutral player rendered through the dispatcher path |
 
 ## Progress
 
@@ -74,6 +74,11 @@ This makes future parity easier because every later entity renderer can reuse th
 - [x] `Model`, `EntityModel`, `AgeableListModel`, instance `HumanoidModel` / `PlayerModel`, `EntityRenderDispatcher`, `EntityRenderer`, `LivingEntityRenderer`, and `PlayerRenderer` are ported far enough to render neutral-pose remote players through `MultiBufferSource`.
 - [x] Snapshot presentation state adapts to a renderable player object, including default/slim model selection and skin texture location.
 - [x] Focused tests prove the dispatcher emits `DefaultVertexFormat.NEW_ENTITY` player geometry through `RenderType.entityTranslucent(...)` batches.
+- [x] `LevelRenderer` collects current client presentation entities camera-relative through `EntityRenderDispatcher` and carries generic `EntityRenderBatch` data in `LevelRenderFrame`.
+- [x] `encodeSceneFrame` uploads frame-local entity batches to `VertexBuffer`s, binds texture-specific entity `RenderType`s with skin, overlay, and lightmap resources, and draws them after existing chunk layers.
+- [x] `EntityTextureManager` preloads the vanilla Steve texture for browser/headless asset-pack scenes and supplies fallback/overlay textures for render harnesses.
+- [x] `renderSceneUntilSettled` and the live GPU world runtime pass `ClientRuntime.publishPresentationState().entityPresentation` into the renderer.
+- [x] Headless Deno smoke `scripts/deno-entity-render-smoke.ts` rendered one neutral player batch through `encodeSceneFrame` and wrote `/tmp/mclone-deno-entity-render-smoke.png`.
 
 ## Protocol Input
 
@@ -94,6 +99,7 @@ Renderer dispatch must use `typeId`; any `data.kind` field is metadata, not the 
 - crouching, swimming, sleeping, fall flying, riding, attack poses
 - armor, held items, arrows, bee stingers, cape, elytra, ears, parrots
 - name tags, outlines, shadows, hitboxes
+- custom skin loading beyond the preloaded default Steve texture
 - entity removal/delta protocol beyond current snapshot/unload behavior
 - full `AbstractClientPlayer` / skin profile behavior
 
@@ -114,12 +120,12 @@ On a headless host without browser WebGPU, prefer Deno WebGPU smokes and documen
 ## Done When
 
 - [x] no standalone Steve/player WebGPU renderer remains
-- [ ] entity buffers are produced through `MultiBufferSource` and `RenderType`
-- [ ] player geometry comes from the ported `PlayerModel` / `ModelPart` path
-- [ ] `LevelRenderer` owns entity render collection and returns generic entity draw batches
-- [ ] remote multiplayer player snapshots render through `EntityRenderDispatcher`
-- [ ] first visual smoke/probe screenshot confirms a nonblank neutral-pose player in world depth/fog/light context
+- [x] entity buffers are produced through `MultiBufferSource` and `RenderType`
+- [x] player geometry comes from the ported `PlayerModel` / `ModelPart` path
+- [x] `LevelRenderer` owns entity render collection and returns generic entity draw batches
+- [x] remote multiplayer player snapshots render through `EntityRenderDispatcher`
+- [x] first visual smoke/probe screenshot confirms a nonblank neutral-pose player in WebGPU depth/fog/light context
 
 ## Next Step
 
-Integrate entity batches into `LevelRenderer`: collect current client presentation entities, render them camera-relative through `EntityRenderDispatcher` into `MultiBufferSource`, carry generic entity batch data in `LevelRenderFrame`, upload those buffers to `VertexBuffer`s, and teach `encodeSceneFrame` to draw texture-specific entity `RenderType`s after the chunk layers. Then run the smallest visual lane that can show a remote player.
+Run a browser multiplayer visual probe on a host with a real Chrome/WebGPU display path so the asset-pack Steve texture, live remote-player snapshots, and terrain depth composition are inspected together. After that, the next renderer parity slice should tighten vanilla entity behavior around `EntityRenderDispatcher.shouldRender(...)` culling, chunk/translucent ordering, and the first animation/body-part metadata inputs instead of adding any standalone player draw path.

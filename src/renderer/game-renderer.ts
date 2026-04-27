@@ -5,6 +5,7 @@ import { LevelRenderer, type LevelRenderFrame } from "./level-renderer";
 import { LightTexture } from "./light-texture";
 import { PoseStack } from "./vertex/pose-stack";
 import { Vec3 } from "../world/phys/vec3";
+import type { ClientEntityPresentationState } from "../runtime/client/entity-interpolation-service";
 
 export type CameraState = {
   readonly position: Vec3;
@@ -14,6 +15,7 @@ export type CameraState = {
 
 export interface RenderLevelOptions {
   readonly waitForChunkTasks?: boolean;
+  readonly entityPresentation?: readonly ClientEntityPresentationState[];
 }
 
 export class GameRenderer {

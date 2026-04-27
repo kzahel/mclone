@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { Vec3 } from "../../../src/world/phys/vec3";
 import { LightTexture } from "../../../src/renderer/light-texture";
+import { collectEntityRenderBatches } from "../../../src/renderer/entity/entity-batch-renderer";
 import { EntityRenderDispatcher } from "../../../src/renderer/entity/entity-render-dispatcher";
 import {
   DEFAULT_PLAYER_SKIN,
@@ -9,10 +10,12 @@ import {
 } from "../../../src/renderer/entity/renderable-entity";
 import { MultiBufferSource } from "../../../src/renderer/multi-buffer-source";
 import { RenderType } from "../../../src/renderer/render-type";
+import { resolveEntityTexturePath } from "../../../src/renderer/texture/entity-texture-manager";
 import { DefaultVertexFormat } from "../../../src/renderer/vertex/default-vertex-format";
 import { BufferBuilder } from "../../../src/renderer/vertex/buffer-builder";
 import { PoseStack } from "../../../src/renderer/vertex/pose-stack";
 import type { ClientEntityPresentationState } from "../../../src/runtime/client/entity-interpolation-service";
+import type { BlockAndTintGetter } from "../../../src/world/level/block-and-tint-getter";
 
 function playerState(overrides: Partial<ClientEntityPresentationState> = {}): ClientEntityPresentationState {
   const authoritative = {
@@ -67,6 +70,10 @@ class RecordingBufferSource extends MultiBufferSource.BufferSource {
   }
 }
 
+const FULL_BRIGHT_LEVEL = {
+  getBrightness: () => 15,
+} as unknown as BlockAndTintGetter;
+
 describe("Player entity renderer", () => {
   test("snapshot adapter creates renderable player state and ignores unsupported entities", () => {
     const state = playerState({
@@ -113,5 +120,29 @@ describe("Player entity renderer", () => {
     expect(drawState.indexCount()).toBe(432);
     expect(drawState.sequentialIndex()).toBe(false);
     expect(buffer.length).toBeGreaterThan(drawState.vertexBufferSize());
+  });
+
+  test("entity batch collection preserves render type and NEW_ENTITY draw state", () => {
+    const dispatcher = new EntityRenderDispatcher();
+    const entity = new SnapshotRenderablePlayer(playerState());
+
+    const batches = collectEntityRenderBatches({
+      level: FULL_BRIGHT_LEVEL,
+      entities: [entity],
+      cameraPosition: new Vec3(8, 65, 8),
+      partialTick: 0,
+      dispatcher,
+    });
+
+    expect(batches).toHaveLength(1);
+    expect(batches[0]!.renderType).toBe(RenderType.entityTranslucent(DEFAULT_PLAYER_SKIN));
+    expect(batches[0]!.drawState.format()).toBe(DefaultVertexFormat.NEW_ENTITY);
+    expect(batches[0]!.drawState.vertexCount()).toBe(288);
+    expect(batches[0]!.buffer.length).toBeGreaterThan(batches[0]!.drawState.vertexBufferSize());
+  });
+
+  test("entity texture paths resolve vanilla full texture locations directly", () => {
+    expect(resolveEntityTexturePath(DEFAULT_PLAYER_SKIN)).toBe("assets/minecraft/textures/entity/steve.png");
+    expect(resolveEntityTexturePath("minecraft:entity/custom_remote")).toBe("assets/minecraft/textures/entity/custom_remote.png");
   });
 });

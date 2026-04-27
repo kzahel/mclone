@@ -29,14 +29,15 @@ import { ModelManager } from "./model/model-manager";
 import { LevelRenderer, type LevelRenderFrame } from "./level-renderer";
 import { LightTexture } from "./light-texture";
 import { GameRenderer, type CameraState } from "./game-renderer";
+import { EntityTextureManager } from "./texture/entity-texture-manager";
 import { BrowserTextureAtlasSource } from "./texture/browser-native-image-loader";
 import { DEFAULT_BLOCK_ATLAS_MIP_LEVEL, TextureAtlas } from "./texture/texture-atlas";
 import { MissingTextureAtlasSprite } from "./texture/missing-texture-atlas-sprite";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
-import { type CompositeRenderType, RenderType } from "./render-type";
+import { CompositeRenderType, RenderType } from "./render-type";
 import { ViewArea } from "./view-area";
 import { Vec3 } from "../world/phys/vec3";
-import type { VertexBuffer } from "./vertex/vertex-buffer";
+import { VertexBuffer } from "./vertex/vertex-buffer";
 import { BROWSER_RENDERER_HOST, type BrowserRendererHost } from "./renderer-host";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
@@ -85,12 +86,20 @@ export interface RendererScene {
   readonly gameRenderer: GameRenderer;
   readonly lightTexture: LightTexture;
   readonly pipelineCache: RenderPipelineCache;
+  readonly entityTextureManager: EntityTextureManager;
   readonly textureSamplers: ReadonlyMap<string, GPUSampler>;
   readonly lightSampler: GPUSampler;
   readonly viewDistance: number;
   readonly viewArea: ViewArea;
   readonly chunkDispatcher: ChunkRenderDispatcher;
   readonly chunkDrawResources: WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>;
+  readonly entityFrameResources: EntityFrameGpuResources[];
+  entityFrameBufferFrameId: number | undefined;
+}
+
+export interface EntityFrameGpuResources {
+  readonly vertexBuffer: VertexBuffer;
+  readonly uniformBuffer: GPUBuffer;
 }
 
 export interface RenderWorldBounds {
@@ -288,11 +297,21 @@ export function getSceneRenderQueueStats(scene: RendererScene): RenderSceneQueue
   };
 }
 
+export function closeEntityFrameBuffers(scene: RendererScene): void {
+  for (const resource of scene.entityFrameResources) {
+    resource.vertexBuffer.close();
+    resource.uniformBuffer.destroy();
+  }
+  scene.entityFrameResources.length = 0;
+}
+
 export function closeRendererScene(scene: RendererScene): void {
   scene.clientRuntime.close();
   scene.viewArea.releaseAllBuffers();
   scene.chunkDispatcher.dispose();
   scene.lightTexture.close();
+  closeEntityFrameBuffers(scene);
+  scene.entityTextureManager.close();
   scene.atlas.clearTextureData();
 }
 
@@ -381,7 +400,10 @@ export async function renderSceneUntilSettled(
       scene.levelRenderer,
       scene.lightTexture,
       camera,
-      { waitForChunkTasks: true },
+      {
+        waitForChunkTasks: true,
+        entityPresentation: scene.clientRuntime.publishPresentationState().entityPresentation,
+      },
     );
 
     const queueStats = getSceneRenderQueueStats(scene);
@@ -573,6 +595,7 @@ export async function initializeRendererScene(
   lightTexture.tick();
 
   const pipelineCache = new RenderPipelineCache(device);
+  const entityTextureManager = await EntityTextureManager.create(device, assetPack);
   const textureSamplers = createTextureSamplers(device);
   const lightSampler = device.createSampler({
     magFilter: "linear",
@@ -602,18 +625,21 @@ export async function initializeRendererScene(
       gameRenderer,
       lightTexture,
       pipelineCache,
+      entityTextureManager,
       textureSamplers,
       lightSampler,
       viewDistance: options.viewDistance,
       viewArea,
       chunkDispatcher,
       chunkDrawResources: new WeakMap<VertexBuffer, Map<GPUBindGroupLayout, CachedChunkDrawResources>>(),
+      entityFrameResources: [],
+      entityFrameBufferFrameId: undefined,
     },
   };
 }
 
-interface ChunkDrawEntry {
-  readonly draw: import("./level-renderer").ChunkLayerDraw;
+interface DrawEntry {
+  readonly vertexBuffer: VertexBuffer;
   readonly bindGroup: GPUBindGroup;
 }
 
@@ -629,10 +655,25 @@ interface CachedChunkDrawResources {
 
 interface PassLayer {
   readonly pipeline: GPURenderPipeline;
-  readonly draws: readonly ChunkDrawEntry[];
+  readonly draws: readonly DrawEntry[];
 }
 
 const COLOR_MODULATOR = [1, 1, 1, 1] as const;
+const LEVEL_DIFFUSE_LIGHT_0 = normalizeVector3([0.2, 1.0, -0.7]);
+const LEVEL_DIFFUSE_LIGHT_1 = normalizeVector3([-0.2, 1.0, 0.7]);
+
+function normalizeVector3(value: readonly [number, number, number]): readonly [number, number, number] {
+  const length = Math.hypot(value[0], value[1], value[2]);
+  return [value[0] / length, value[1] / length, value[2] / length];
+}
+
+function transformDirection(matrix: Float32Array, value: readonly [number, number, number]): readonly [number, number, number] {
+  return [
+    (matrix[0]! * value[0]) + (matrix[4]! * value[1]) + (matrix[8]! * value[2]),
+    (matrix[1]! * value[0]) + (matrix[5]! * value[1]) + (matrix[9]! * value[2]),
+    (matrix[2]! * value[0]) + (matrix[6]! * value[1]) + (matrix[10]! * value[2]),
+  ];
+}
 
 function createChunkDrawResources(
   scene: RendererScene,
@@ -745,11 +786,99 @@ function createChunkBindGroupEntry(
   draw: import("./level-renderer").ChunkLayerDraw,
   renderType: CompositeRenderType,
   atlasTexture: GPUTextureView,
-): ChunkDrawEntry {
+): DrawEntry {
   return {
-    draw,
+    vertexBuffer: draw.vertexBuffer,
     bindGroup: createChunkBindGroup(scene, pipeline, frame, draw, renderType, atlasTexture),
   };
+}
+
+function prepareEntityFrameBufferEpoch(scene: RendererScene, frame: LevelRenderFrame): void {
+  if (scene.entityFrameBufferFrameId === frame.frameId) {
+    return;
+  }
+
+  closeEntityFrameBuffers(scene);
+  scene.entityFrameBufferFrameId = frame.frameId;
+}
+
+function createEntityBindGroupEntry(
+  scene: RendererScene,
+  pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
+  frame: LevelRenderFrame,
+  renderType: CompositeRenderType,
+  batch: import("./entity/entity-batch-renderer").EntityRenderBatch,
+): DrawEntry {
+  const vertexBuffer = new VertexBuffer(scene.device);
+  vertexBuffer.uploadRaw(batch.drawState, batch.buffer);
+  const uniformBuffer = scene.device.createBuffer({
+    size: Math.max(4, pipeline.shaderProgram.uniformBufferSize),
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  const uniformBytes = new Uint8Array(pipeline.shaderProgram.uniformBufferSize);
+  const light0 = transformDirection(frame.modelViewMatrix, LEVEL_DIFFUSE_LIGHT_0);
+  const light1 = transformDirection(frame.modelViewMatrix, LEVEL_DIFFUSE_LIGHT_1);
+  pipeline.shaderProgram.writeUniformBufferBytes(uniformBytes, {
+    ModelViewMat: frame.modelViewMatrix,
+    ProjMat: frame.projectionMatrix,
+    ColorModulator: COLOR_MODULATOR,
+    Light0_Direction: light0,
+    Light1_Direction: light1,
+    FogStart: [frame.fogStart],
+    FogEnd: [frame.fogEnd],
+    FogColor: frame.fogColor,
+  });
+  scene.device.queue.writeBuffer(uniformBuffer, 0, uniformBytes as Uint8Array<ArrayBuffer>);
+
+  scene.entityFrameResources.push({
+    vertexBuffer,
+    uniformBuffer,
+  });
+  return {
+    vertexBuffer,
+    bindGroup: pipeline.shaderProgram.createBindGroup(scene.device, pipeline.bindGroupLayout, {
+      uniformBuffer,
+      samplers: {
+        Sampler0: getAtlasSampler(scene, renderType),
+        Sampler1: getTextureSampler(scene, { blur: false, mipmap: false }),
+        Sampler2: scene.lightSampler,
+      },
+      textures: {
+        Sampler0: scene.entityTextureManager.getTextureView(renderType.state().textureState.cutoutTexture()),
+        Sampler1: scene.entityTextureManager.getOverlayTextureView(),
+        Sampler2: frame.lightTexture,
+      },
+    }),
+  };
+}
+
+function appendEntityPassLayers(
+  scene: RendererScene,
+  frame: LevelRenderFrame,
+  target: DrawTarget,
+  layers: PassLayer[],
+): void {
+  prepareEntityFrameBufferEpoch(scene, frame);
+  for (const batch of frame.entityBatches) {
+    const renderType = batch.renderType;
+    if (!(renderType instanceof CompositeRenderType)) {
+      throw new Error("entity batch render type must be a composite render type");
+    }
+
+    if (batch.drawState.format() !== renderType.format()) {
+      throw new Error("render type format does not match an entity batch vertex format");
+    }
+
+    if (batch.drawState.vertexCount() === 0) {
+      continue;
+    }
+
+    const pipeline = scene.pipelineCache.getOrCreate(renderType, target.format, SCENE_DEPTH_FORMAT);
+    layers.push({
+      pipeline: pipeline.pipeline,
+      draws: [createEntityBindGroupEntry(scene, pipeline, frame, renderType, batch)],
+    });
+  }
 }
 
 export function encodeSceneFrame(
@@ -778,6 +907,7 @@ export function encodeSceneFrame(
       draws: drawEntries.map((draw) => createChunkBindGroupEntry(scene, pipeline, frame, draw, renderType, atlasTexture)),
     });
   }
+  appendEntityPassLayers(scene, frame, target, layers);
 
   const clearColor: GPUColor = {
     r: frame.fogColor[0],
@@ -805,7 +935,7 @@ export function encodeSceneFrame(
     pass.setPipeline(layer.pipeline);
     for (const entry of layer.draws) {
       pass.setBindGroup(0, entry.bindGroup);
-      entry.draw.vertexBuffer.draw(pass);
+      entry.vertexBuffer.draw(pass);
     }
   }
   pass.end();

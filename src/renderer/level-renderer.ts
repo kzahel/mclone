@@ -10,6 +10,8 @@ import { Vec3 } from "../world/phys/vec3";
 import { Camera } from "./camera";
 import { ChunkRenderDispatcher } from "./chunk/chunk-render-dispatcher";
 import { Frustum } from "./culling/frustum";
+import { collectPresentationEntityRenderBatches, type EntityRenderBatch } from "./entity/entity-batch-renderer";
+import { EntityRenderDispatcher } from "./entity/entity-render-dispatcher";
 import { FogMode, FogRenderer } from "./fog-renderer";
 import { GameRenderer, type RenderLevelOptions } from "./game-renderer";
 import { LightTexture } from "./light-texture";
@@ -27,6 +29,7 @@ export type ChunkLayerDraw = {
 };
 
 export type LevelRenderFrame = {
+  readonly frameId: number;
   readonly modelViewMatrix: Float32Array;
   readonly projectionMatrix: Float32Array;
   readonly fogStart: number;
@@ -34,6 +37,7 @@ export type LevelRenderFrame = {
   readonly fogColor: readonly [number, number, number, number];
   readonly lightTexture: GPUTextureView;
   readonly layerDraws: ReadonlyMap<RenderType, readonly ChunkLayerDraw[]>;
+  readonly entityBatches: readonly EntityRenderBatch[];
 };
 
 export class LevelRenderer {
@@ -58,6 +62,7 @@ export class LevelRenderer {
   private cullingFrustum: Frustum | undefined;
   private needsUpdate = true;
   private frameId = 0;
+  private readonly entityRenderDispatcher = new EntityRenderDispatcher();
 
   public setLevel(level: StaticRenderLevel, chunkRenderDispatcher: ChunkRenderDispatcher, viewArea: ViewArea, viewDistance: number): void {
     this.level = level;
@@ -132,9 +137,10 @@ export class LevelRenderer {
   ): Promise<LevelRenderFrame> {
     const level = this.level!;
     const frustum = this.cullingFrustum!;
+    const frameId = this.frameId++;
     FogRenderer.setupColor(camera, partialTick, level, this.lastViewDistance * 16, gameRenderer.getDarkenWorldAmount(partialTick));
     FogRenderer.setupFog(camera, FogMode.FOG_TERRAIN, Math.max(gameRenderer.getRenderDistance() - 16.0, 32.0), false);
-    this.setupRender(camera, frustum, false, this.frameId++, false);
+    this.setupRender(camera, frustum, false, frameId, false);
     await this.compileChunksUntil(finishTimeNano);
     if (options.waitForChunkTasks && this.chunkRenderDispatcher !== undefined && !this.chunkRenderDispatcher.isQueueEmpty()) {
       await this.chunkRenderDispatcher.awaitAllTasks();
@@ -148,8 +154,16 @@ export class LevelRenderer {
         layerDraws.set(renderType, draws);
       }
     }
+    const entityBatches = collectPresentationEntityRenderBatches({
+      level,
+      presentation: options.entityPresentation ?? [],
+      cameraPosition,
+      partialTick,
+      dispatcher: this.entityRenderDispatcher,
+    });
 
     return {
+      frameId,
       modelViewMatrix: poseStack.last().pose().toFloat32Array(),
       projectionMatrix: projectionMatrix.toFloat32Array(),
       fogStart: FogRenderer.getShaderFogStart(),
@@ -157,6 +171,7 @@ export class LevelRenderer {
       fogColor: FogRenderer.getShaderFogColor(),
       lightTexture: lightTexture.turnOnLightLayer(),
       layerDraws,
+      entityBatches,
     };
   }
 

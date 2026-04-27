@@ -126,7 +126,7 @@ Entities are authoritative simulation data. Use [`../entities.md`](../entities.m
 | [`Creatures1-generation-passive-spawning.md`](Creatures1-generation-passive-spawning.md) | passive `CREATURE` generation path, spawn settings, placements, sheep color | unit + fixture | **done** — generation-time passive spawning matches the committed fixture through the runtime sink |
 | [`Creatures2-host-entity-publication.md`](Creatures2-host-entity-publication.md) | generated-world host entity runtime, entity snapshots, local/remote client caches | runtime | **done** — generated original mobs now publish as authoritative protocol data |
 | [`Creatures3-render-entity-placeholders.md`](Creatures3-render-entity-placeholders.md) | browser presentation of authoritative entity snapshots | browser visual | **superseded** — placeholder-first rendering was replaced by the vanilla-shaped entity renderer plan |
-| [`EntityRender0-vanilla-entity-renderer-foundation.md`](EntityRender0-vanilla-entity-renderer-foundation.md) | `MultiBufferSource`, entity `RenderType`s, `ModelPart`/player model, dispatcher integration | unit + visual | **active** — render remote players through the vanilla-shaped entity renderer path instead of a standalone Steve pipeline |
+| [`EntityRender0-vanilla-entity-renderer-foundation.md`](EntityRender0-vanilla-entity-renderer-foundation.md) | `MultiBufferSource`, entity `RenderType`s, `ModelPart`/player model, dispatcher + `LevelRenderer` integration | unit + Deno visual | **done** — remote player snapshots now enter the vanilla-shaped entity renderer path instead of a standalone Steve pipeline |
 
 ## Client Runtime / Integrated Server Arc
 

@@ -8,8 +8,9 @@ import { LevelRenderer } from "./level-renderer";
 import { LightTexture } from "./light-texture";
 import { type LoadingProgressSink } from "./loading-progress";
 import type { RenderWorldWorkerEndpointFactory } from "./renderer-host";
-import { type RendererScene } from "./scene-setup";
+import { closeEntityFrameBuffers, type RendererScene } from "./scene-setup";
 import { createRendererHarnessScene } from "./static-frame-harness";
+import { EntityTextureManager } from "./texture/entity-texture-manager";
 import { TextureAtlas } from "./texture/texture-atlas";
 import { ViewArea } from "./view-area";
 import { DEFAULT_PLAYER_PROFILE, type OpenWorldPreset, type PlayerProfile, type WorldEngineConfig } from "../runtime/protocol/world-messages";
@@ -74,6 +75,7 @@ export async function createGeneratedWorldHeadlessHarness(
   let lightTexture: LightTexture | undefined;
   let chunkDispatcher: ChunkRenderDispatcher | undefined;
   let viewArea: ViewArea | undefined;
+  let entityTextureManager: EntityTextureManager | undefined;
   try {
     const biomeSource = new OverworldBiomeSource(options.seed);
     const blockStateResolver = createBlockStateResolver(generatedBlocks.airState);
@@ -137,6 +139,7 @@ export async function createGeneratedWorldHeadlessHarness(
     const gameRenderer = new GameRenderer(options.width, options.height, options.renderDistance);
     lightTexture = new LightTexture(gameRenderer, compatibilityLevel, options.device);
     lightTexture.tick();
+    entityTextureManager = await EntityTextureManager.create(options.device, options.assetPack);
 
     const scene = createRendererHarnessScene({
       adapter: options.adapter,
@@ -151,6 +154,7 @@ export async function createGeneratedWorldHeadlessHarness(
       levelRenderer,
       gameRenderer,
       lightTexture,
+      entityTextureManager,
       minBuildHeight: compatibilityLevel.getMinBuildHeight(),
       worldHeight: compatibilityLevel.getHeight(),
       viewDistance: options.viewDistance,
@@ -173,6 +177,8 @@ export async function createGeneratedWorldHeadlessHarness(
         viewArea!.releaseAllBuffers();
         chunkDispatcher!.dispose();
         lightTexture!.close();
+        closeEntityFrameBuffers(scene);
+        entityTextureManager!.close();
         clientRuntime!.close();
         atlas.clearTextureData();
         assetResources.atlasSource.close();
@@ -182,6 +188,7 @@ export async function createGeneratedWorldHeadlessHarness(
     viewArea?.releaseAllBuffers();
     chunkDispatcher?.dispose();
     lightTexture?.close();
+    entityTextureManager?.close();
     if (chunkDispatcher === undefined) {
       renderWorldWorker?.close();
     }

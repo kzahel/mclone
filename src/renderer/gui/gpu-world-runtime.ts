@@ -423,13 +423,17 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
       if (!this.renderInFlight) {
         this.renderInFlight = true;
         try {
+          const entityPresentation = scene.clientRuntime.publishPresentationState().entityPresentation;
           await this.renderFrame(await scene.gameRenderer.renderLevel(
             0.0,
             Number.MAX_SAFE_INTEGER,
             scene.levelRenderer,
             scene.lightTexture,
             this.camera,
-            { waitForChunkTasks: false },
+            {
+              waitForChunkTasks: false,
+              entityPresentation,
+            },
           ));
         } finally {
           this.renderInFlight = false;

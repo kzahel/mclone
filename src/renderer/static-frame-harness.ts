@@ -24,11 +24,13 @@ import { LightTexture } from "./light-texture";
 import { RenderPipelineCache } from "./pipeline/render-pipeline-cache";
 import type { HeadlessRendererHost, RenderWorldWorkerEndpointFactory } from "./renderer-host";
 import {
+  closeEntityFrameBuffers,
   createSceneDepthTarget,
   encodeSceneFrame,
   type DrawTarget,
   type RendererScene,
 } from "./scene-setup";
+import { EntityTextureManager } from "./texture/entity-texture-manager";
 import { TextureAtlas } from "./texture/texture-atlas";
 import { ViewArea } from "./view-area";
 import { readTextureRgba8 } from "./webgpu-target";
@@ -111,6 +113,7 @@ export interface RendererHarnessSceneOptions {
   readonly levelRenderer: LevelRenderer;
   readonly gameRenderer: GameRenderer;
   readonly lightTexture: LightTexture;
+  readonly entityTextureManager?: EntityTextureManager;
   readonly minBuildHeight: number;
   readonly worldHeight: number;
   readonly viewDistance: number;
@@ -267,6 +270,8 @@ export async function createStaticRendererFrameHarness(
         openViewArea.releaseAllBuffers();
         openChunkDispatcher.dispose();
         openLightTexture.close();
+        closeEntityFrameBuffers(scene);
+        scene.entityTextureManager.close();
       },
     };
   } catch (error) {
@@ -346,7 +351,7 @@ export function countFrameDraws(frame: LevelRenderFrame): number {
     count += draws.length;
   }
 
-  return count;
+  return count + frame.entityBatches.length;
 }
 
 export function readPixel(pixels: Uint8Array, width: number, x: number, y: number): Uint8Array {
@@ -424,6 +429,7 @@ export function createRendererHarnessScene(options: RendererHarnessSceneOptions)
     gameRenderer: options.gameRenderer,
     lightTexture: options.lightTexture,
     pipelineCache: new RenderPipelineCache(options.device),
+    entityTextureManager: options.entityTextureManager ?? EntityTextureManager.createFallback(options.device),
     textureSamplers: createRendererTextureSamplers(options.device),
     lightSampler: options.device.createSampler({
       magFilter: "linear",
@@ -436,6 +442,8 @@ export function createRendererHarnessScene(options: RendererHarnessSceneOptions)
     },
     viewDistance: options.viewDistance,
     chunkDrawResources: new WeakMap(),
+    entityFrameResources: [],
+    entityFrameBufferFrameId: undefined,
   } as unknown as RendererScene;
 }
 
