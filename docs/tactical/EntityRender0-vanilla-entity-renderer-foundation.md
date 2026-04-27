@@ -1,6 +1,6 @@
 # EntityRender0 - Vanilla-shaped entity renderer foundation
 
-Status: **in progress**. The cleanup slice removed the standalone player renderer, `MultiBufferSource` / `RenderBuffers` are landed, entity `RenderType` / shader support is landed, and the model geometry foundation is landed. The next implementation slice is the first model/renderer stack.
+Status: **in progress**. The cleanup slice removed the standalone player renderer, `MultiBufferSource` / `RenderBuffers` are landed, entity `RenderType` / shader support is landed, the model geometry foundation is landed, and the first neutral-pose player renderer stack is landed. The next implementation slice is `LevelRenderer` / GPU integration for entity batches.
 
 This replaces the old placeholder-first rendering direction from [`Creatures3-render-entity-placeholders.md`](Creatures3-render-entity-placeholders.md). Remote player snapshots are useful protocol data, but player rendering must not land as a standalone Steve-specific WebGPU renderer.
 
@@ -71,6 +71,9 @@ This makes future parity easier because every later entity renderer can reuse th
 - [x] Entity shader JSON/WGSL support covers UV0 texture, UV1 overlay, UV2 lightmap, normal lighting, fog, and alpha discard for the first player skin path.
 - [x] `ModelPart`, cube builders, `PartPose`, `MeshDefinition`, `PartDefinition`, and `LayerDefinition` are ported and emit `DefaultVertexFormat.NEW_ENTITY` vertices through `VertexConsumer`.
 - [x] Geometry-only `HumanoidModel.createMesh(...)` and `PlayerModel.createMesh(...)` factories bake vanilla default and slim player layer roots for the next renderer slice.
+- [x] `Model`, `EntityModel`, `AgeableListModel`, instance `HumanoidModel` / `PlayerModel`, `EntityRenderDispatcher`, `EntityRenderer`, `LivingEntityRenderer`, and `PlayerRenderer` are ported far enough to render neutral-pose remote players through `MultiBufferSource`.
+- [x] Snapshot presentation state adapts to a renderable player object, including default/slim model selection and skin texture location.
+- [x] Focused tests prove the dispatcher emits `DefaultVertexFormat.NEW_ENTITY` player geometry through `RenderType.entityTranslucent(...)` batches.
 
 ## Protocol Input
 
@@ -119,4 +122,4 @@ On a headless host without browser WebGPU, prefer Deno WebGPU smokes and documen
 
 ## Next Step
 
-Port the first neutral-pose model/renderer stack over the baked geometry: `EntityModel`, `ListModel` / `AgeableListModel` shape as needed, instance `HumanoidModel` / `PlayerModel` fields and `renderToBuffer(...)`, then `EntityRenderer`, `LivingEntityRenderer`, and `PlayerRenderer` enough to produce remote-player entity batches through `MultiBufferSource`. Keep limb animation, layers, equipment, and name tags deferred.
+Integrate entity batches into `LevelRenderer`: collect current client presentation entities, render them camera-relative through `EntityRenderDispatcher` into `MultiBufferSource`, carry generic entity batch data in `LevelRenderFrame`, upload those buffers to `VertexBuffer`s, and teach `encodeSceneFrame` to draw texture-specific entity `RenderType`s after the chunk layers. Then run the smallest visual lane that can show a remote player.

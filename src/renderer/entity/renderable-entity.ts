@@ -1,0 +1,177 @@
+import { ResourceLocation } from "../../core/resource-location";
+import type { ClientEntityPresentationState } from "../../runtime/client/entity-interpolation-service";
+import { PLAYER_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
+
+export const DEFAULT_PLAYER_SKIN = new ResourceLocation("minecraft", "textures/entity/steve.png");
+
+export type PlayerSkinModel = "default" | "slim";
+
+export interface RenderableEntity {
+  readonly entityId: number;
+  readonly uuid: string;
+  readonly typeId: string;
+  readonly tickCount: number;
+  readonly yBodyRot: number;
+  readonly yBodyRotO: number;
+  readonly yHeadRot: number;
+  readonly yHeadRotO: number;
+  readonly xRotO: number;
+  getX(): number;
+  getY(): number;
+  getZ(): number;
+  getXRot(): number;
+  getYRot(): number;
+  getBbWidth(): number;
+  getBbHeight(): number;
+  isInvisible(): boolean;
+  isSpectator(): boolean;
+  isPassenger(): boolean;
+  isAlive(): boolean;
+  isBaby(): boolean;
+}
+
+export interface RenderablePlayer extends RenderableEntity {
+  getModelName(): PlayerSkinModel;
+  getSkinTextureLocation(): ResourceLocation;
+  isCrouching(): boolean;
+  hasChestEquipment(): boolean;
+}
+
+export class SnapshotRenderablePlayer implements RenderablePlayer {
+  public readonly entityId: number;
+  public readonly uuid: string;
+  public readonly typeId = PLAYER_ENTITY_TYPE_ID;
+  public readonly tickCount: number;
+  public readonly yBodyRot: number;
+  public readonly yBodyRotO: number;
+  public readonly yHeadRot: number;
+  public readonly yHeadRotO: number;
+  public readonly xRotO: number;
+
+  private readonly x: number;
+  private readonly y: number;
+  private readonly z: number;
+  private readonly yaw: number;
+  private readonly pitch: number;
+  private readonly width: number;
+  private readonly height: number;
+  private readonly skinModel: PlayerSkinModel;
+  private readonly skinTextureLocation: ResourceLocation;
+  private readonly crouching: boolean;
+
+  public constructor(state: ClientEntityPresentationState) {
+    this.entityId = state.entityId;
+    this.uuid = state.uuid;
+    this.x = state.interpolatedPosition.x;
+    this.y = state.interpolatedPosition.y;
+    this.z = state.interpolatedPosition.z;
+    this.yaw = state.interpolatedRotation.yaw;
+    this.pitch = state.interpolatedRotation.pitch;
+    this.width = state.width;
+    this.height = state.height;
+    this.tickCount = state.age ?? 0;
+    this.yBodyRot = this.yaw;
+    this.yBodyRotO = state.previousAuthoritative?.rotation.yaw ?? this.yaw;
+    this.yHeadRot = this.yaw;
+    this.yHeadRotO = this.yBodyRotO;
+    this.xRotO = state.previousAuthoritative?.rotation.pitch ?? this.pitch;
+    this.skinModel = readSkinModel(state.data?.skinModel);
+    this.skinTextureLocation = readSkinTextureLocation(state.data?.skinTexture);
+    this.crouching = state.data?.crouching === true;
+  }
+
+  public getX(): number {
+    return this.x;
+  }
+
+  public getY(): number {
+    return this.y;
+  }
+
+  public getZ(): number {
+    return this.z;
+  }
+
+  public getXRot(): number {
+    return this.pitch;
+  }
+
+  public getYRot(): number {
+    return this.yaw;
+  }
+
+  public getBbWidth(): number {
+    return this.width;
+  }
+
+  public getBbHeight(): number {
+    return this.height;
+  }
+
+  public isInvisible(): boolean {
+    return false;
+  }
+
+  public isSpectator(): boolean {
+    return false;
+  }
+
+  public isPassenger(): boolean {
+    return false;
+  }
+
+  public isAlive(): boolean {
+    return true;
+  }
+
+  public isBaby(): boolean {
+    return false;
+  }
+
+  public getModelName(): PlayerSkinModel {
+    return this.skinModel;
+  }
+
+  public getSkinTextureLocation(): ResourceLocation {
+    return this.skinTextureLocation;
+  }
+
+  public isCrouching(): boolean {
+    return this.crouching;
+  }
+
+  public hasChestEquipment(): boolean {
+    return false;
+  }
+}
+
+export function createRenderableEntity(state: ClientEntityPresentationState): RenderableEntity | undefined {
+  if (state.typeId === PLAYER_ENTITY_TYPE_ID) {
+    return new SnapshotRenderablePlayer(state);
+  }
+
+  return undefined;
+}
+
+export function createRenderableEntities(states: readonly ClientEntityPresentationState[]): readonly RenderableEntity[] {
+  return states.flatMap((state) => {
+    const entity = createRenderableEntity(state);
+    return entity === undefined ? [] : [entity];
+  });
+}
+
+function readSkinModel(value: unknown): PlayerSkinModel {
+  return value === "slim" ? "slim" : "default";
+}
+
+function readSkinTextureLocation(value: unknown): ResourceLocation {
+  if (typeof value !== "string") {
+    return DEFAULT_PLAYER_SKIN;
+  }
+
+  try {
+    return new ResourceLocation(value);
+  } catch {
+    return DEFAULT_PLAYER_SKIN;
+  }
+}
