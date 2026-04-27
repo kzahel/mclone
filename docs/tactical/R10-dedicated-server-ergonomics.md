@@ -1,6 +1,6 @@
 # R10: Dedicated Server Ergonomics
 
-Status: proposed.
+Status: active - script alias landed.
 
 `R9` landed the persistent WebSocket remote channel. The next small multiplayer-facing cleanup is not another transport experiment. It is making the dedicated server shape clear and testable for humans:
 
@@ -22,7 +22,7 @@ Add or update:
 
 | # | Area | Expected result |
 |---|---|---|
-| 1 | npm scripts | add `host:dedicated` for `src/runtime/node/generated-world-http-server.ts`; keep `host:remote` as an alias |
+| 1 | npm scripts | done - `host:dedicated` starts `src/runtime/node/generated-world-http-server.ts`; `host:remote` remains as a compatibility alias |
 | 2 | docs/help output | docs and server startup JSON use "dedicated" wording where user-facing |
 | 3 | config-file test | spawned server can start from `--config <path>` with host/port/saveRoot and serve `/healthz` |
 | 4 | WebSocket config integration test | `RemoteWorldWebSocketTransport` can open a world against a server started from config |
