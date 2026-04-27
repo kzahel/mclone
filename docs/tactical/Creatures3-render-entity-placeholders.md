@@ -1,12 +1,14 @@
 # Creatures3 - Render entity placeholders
 
-Status: **next**.
+Status: **superseded** by [`EntityRender0-vanilla-entity-renderer-foundation.md`](EntityRender0-vanilla-entity-renderer-foundation.md).
 
 Standing after [`ClientRuntime6-entity-interpolation-and-ai-bridge.md`](ClientRuntime6-entity-interpolation-and-ai-bridge.md), which made authoritative entity snapshots available as visual-only interpolated presentation state through `ClientRuntime`.
 
 ## Goal
 
 Render simple browser-visible placeholders for authoritative entity snapshots.
+
+This placeholder-first direction is no longer the active plan for player rendering. Entity presentation should now proceed through the vanilla-shaped renderer stack recorded in [`EntityRender0-vanilla-entity-renderer-foundation.md`](EntityRender0-vanilla-entity-renderer-foundation.md).
 
 This is deliberately a presentation slice:
 

@@ -43,6 +43,8 @@ import {
   isDefaultWorldEngineConfig,
   normalizePlayerProfile,
   normalizeWorldEngineConfig,
+  PLAYER_ENTITY_DATA_KIND,
+  PLAYER_ENTITY_TYPE_ID,
   type ClientSessionState,
   type EntitySnapshot,
   type ClientPlayerState,
@@ -115,6 +117,7 @@ type SessionRecord = {
 
 type PlayerSlotRecord = {
   readonly id: string;
+  readonly entityId: number;
   readonly profile: PlayerProfile;
   state: ClientPlayerState;
   commandQueue: PlayerCommandQueue;
@@ -130,6 +133,7 @@ type SharedWorldRecord = {
   readonly playerSlots: Map<string, PlayerSlotRecord>;
   readonly loadedSnapshots: Map<string, PackedChunkSnapshot>;
   readonly loadedEntitySnapshots: Map<number, EntitySnapshot>;
+  nextPlayerEntityId: number;
   aggregateChunkView: SetChunkViewRequest | undefined;
   pendingOperation: Promise<void>;
   pendingHostDrain: Promise<void> | undefined;
@@ -274,14 +278,52 @@ function createSharedWorldCollisionWorld(world: SharedWorldRecord): CollisionWor
   };
 }
 
-function createPlayerSlot(profile: PlayerProfile): PlayerSlotRecord {
+function createPlayerSlot(profile: PlayerProfile, entityId: number): PlayerSlotRecord {
   const playerId = `player-${randomUUID()}`;
   return {
     id: playerId,
+    entityId,
     profile,
     state: createInitialPlayerState(playerId),
     commandQueue: createPlayerCommandQueue(),
     anchoredToChunkView: false,
+  };
+}
+
+function createRemotePlayerEntitySnapshot(player: PlayerSlotRecord): EntitySnapshot {
+  const state = player.state;
+  const position = state.movementBody?.position ?? state.position;
+  return {
+    id: player.entityId,
+    uuid: `mclone:player/${player.id}`,
+    typeId: PLAYER_ENTITY_TYPE_ID,
+    category: "misc",
+    chunkX: SectionPos.blockToSectionCoord(position.x),
+    chunkZ: SectionPos.blockToSectionCoord(position.z),
+    position: {
+      x: position.x,
+      y: position.y,
+      z: position.z,
+    },
+    rotation: {
+      yaw: state.rotation.yaw,
+      pitch: state.rotation.pitch,
+    },
+    width: 0.6,
+    height: 1.8,
+    onGround: state.movementBody?.onGround ?? true,
+    data: {
+      kind: PLAYER_ENTITY_DATA_KIND,
+      playerId: player.id,
+      name: player.profile.name,
+    },
+  };
+}
+
+function createRemotePlayerEntitySnapshotMessage(player: PlayerSlotRecord): Extract<WorldHostMessage, { type: "entity_snapshot" }> {
+  return {
+    type: "entity_snapshot",
+    entity: createRemotePlayerEntitySnapshot(player),
   };
 }
 
@@ -403,8 +445,16 @@ function getSessionVisibleChunks(chunkView: SetChunkViewRequest | undefined): Se
 function getEntitySnapshotMessagesForChunk(
   world: SharedWorldRecord,
   key: string,
+  excludePlayerId?: string,
 ): Extract<WorldHostMessage, { type: "entity_snapshot" }>[] {
-  return [...world.loadedEntitySnapshots.values()]
+  const snapshots = [
+    ...world.loadedEntitySnapshots.values(),
+    ...[...world.playerSlots.values()]
+      .filter((player) => player.anchoredToChunkView && player.id !== excludePlayerId)
+      .map((player) => createRemotePlayerEntitySnapshot(player)),
+  ];
+
+  return snapshots
     .filter((entity) => entitySnapshotChunkKey(entity) === key)
     .sort((left, right) => left.id - right.id)
     .map((entity) => ({
@@ -610,7 +660,7 @@ export class GeneratedWorldRemoteService {
 
     const world = await this.getOrCreateWorld(request);
     const sessionId = randomUUID();
-    const player = createPlayerSlot(normalizePlayerProfile(request.playerProfile));
+    const player = createPlayerSlot(normalizePlayerProfile(request.playerProfile), world.nextPlayerEntityId--);
     world.playerSlots.set(player.id, player);
     const session: SessionRecord = {
       id: sessionId,
@@ -689,6 +739,7 @@ export class GeneratedWorldRemoteService {
         );
         player.anchoredToChunkView = true;
         responseMessages.push(createPlayerStateMessage(player));
+        this.enqueueRemotePlayerEntitySnapshot(queuedWorld, player, queuedSession.id);
       }
 
       for (const key of previousVisibleChunks) {
@@ -710,7 +761,7 @@ export class GeneratedWorldRemoteService {
               snapshot,
             });
           }
-          queuedSession.pendingMessages.push(...getEntitySnapshotMessagesForChunk(queuedWorld, key));
+          queuedSession.pendingMessages.push(...getEntitySnapshotMessagesForChunk(queuedWorld, key, queuedSession.playerId));
         }
       }
 
@@ -797,8 +848,31 @@ export class GeneratedWorldRemoteService {
         if (nextPlayerState !== player.state) {
           player.state = nextPlayerState;
           enqueuePlayerStateMessage(session, player);
+          this.enqueueRemotePlayerEntitySnapshot(world, player, session.id);
         }
       }
+    }
+  }
+
+  private enqueueRemotePlayerEntitySnapshot(
+    world: SharedWorldRecord,
+    player: PlayerSlotRecord,
+    excludeSessionId?: string,
+  ): void {
+    if (!player.anchoredToChunkView) {
+      return;
+    }
+
+    const message = createRemotePlayerEntitySnapshotMessage(player);
+    for (const session of this.getWorldSessions(world)) {
+      if (session.id === excludeSessionId) {
+        continue;
+      }
+
+      session.pendingMessages = session.pendingMessages.filter(
+        (pending) => pending.type !== "entity_snapshot" || pending.entity.id !== player.entityId,
+      );
+      session.pendingMessages.push(message);
     }
   }
 
@@ -863,7 +937,7 @@ export class GeneratedWorldRemoteService {
           snapshot,
         });
       }
-      messages.push(...getEntitySnapshotMessagesForChunk(world, key));
+      messages.push(...getEntitySnapshotMessagesForChunk(world, key, session.playerId));
     }
 
     return messages;
@@ -895,6 +969,7 @@ export class GeneratedWorldRemoteService {
         playerSlots: new Map<string, PlayerSlotRecord>(),
         loadedSnapshots: new Map<string, PackedChunkSnapshot>(),
         loadedEntitySnapshots: new Map<number, EntitySnapshot>(),
+        nextPlayerEntityId: -1,
         aggregateChunkView: undefined,
         pendingOperation: Promise.resolve(),
         pendingHostDrain: undefined,

@@ -160,6 +160,9 @@ export type EntitySnapshotCategory =
   | "water_ambient"
   | "misc";
 
+export const PLAYER_ENTITY_TYPE_ID = "minecraft:player";
+export const PLAYER_ENTITY_DATA_KIND = "player";
+
 export interface EntitySnapshot {
   readonly id: number;
   readonly uuid: string;
