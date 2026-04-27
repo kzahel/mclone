@@ -42,7 +42,7 @@ test("root title starts a live world without routing through the smoke scenario"
   const box = await page.locator("#renderer").boundingBox();
   expect(box).not.toBeNull();
   const titleState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
-  const startWorldCenterY = (Math.floor(titleState.height / 4) + 48 + 24 + 10) / titleState.height;
+  const startWorldCenterY = (Math.floor(titleState.height / 4) + 48 + 10) / titleState.height;
   await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * startWorldCenterY));
   await page.waitForFunction(() => window.__mcloneGui?.state.mode === "loading", undefined, {
     timeout: FAST_VISUAL_PROBE_TIMEOUTS.ready,

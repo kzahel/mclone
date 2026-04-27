@@ -68,7 +68,6 @@ describe("Gui0 model foundation", () => {
     const manager = new ScreenManager(320, 240);
     const actions: string[] = [];
     manager.setScreen(new TitleScreen({
-      onContinue: () => actions.push("continue"),
       onStartWorld: () => actions.push("start_world"),
       onOptions: () => actions.push("options"),
       onDebugSettings: () => actions.push("debug_settings"),
@@ -78,7 +77,7 @@ describe("Gui0 model foundation", () => {
     manager.render(drawList, 160, 132, 0);
 
     expect(drawList.getCommands().length).toBeGreaterThan(0);
-    expect(manager.mouseClicked(160, 132, 0)).toBe(true);
+    expect(manager.mouseClicked(160, 118, 0)).toBe(true);
     expect(actions).toEqual(["start_world"]);
     expect(manager.keyPressed(256, 0, 0)).toBe(false);
   });
@@ -118,10 +117,27 @@ describe("Gui0 model foundation", () => {
     expect(manager.currentScreen).toBeNull();
   });
 
+  it("routes the pause-menu save-and-quit action when the handler exists", () => {
+    const manager = new ScreenManager(320, 240);
+    let quitToTitle = false;
+    manager.setScreen(new PauseScreen(true, {
+      onReturnToGame: () => {},
+      onDisconnect: () => {
+        quitToTitle = true;
+      },
+    }));
+
+    const drawList = new GuiDrawList();
+    manager.render(drawList, 160, 174, 0);
+
+    expect(manager.currentScreen?.getTitle()).toBe("menu.game");
+    expect(manager.mouseClicked(160, 174, 0)).toBe(true);
+    expect(quitToTitle).toBe(true);
+  });
+
   it("edits browser render options with sliders, cycle buttons, and a checkbox", () => {
     const manager = new ScreenManager(320, 240);
     const titleScreen = new TitleScreen({
-      onContinue: () => {},
       onStartWorld: () => {},
       onOptions: () => {},
       onDebugSettings: () => {},
@@ -182,7 +198,6 @@ describe("Gui0 model foundation", () => {
   it("edits debug settings with GPU cycle buttons", () => {
     const manager = new ScreenManager(320, 240);
     const titleScreen = new TitleScreen({
-      onContinue: () => {},
       onStartWorld: () => {},
       onOptions: () => {},
       onDebugSettings: () => {},
@@ -191,6 +206,7 @@ describe("Gui0 model foundation", () => {
       movementMode: "player",
       preset: "browser_smoke",
       worldStorageMode: "default",
+      showDebugInfo: false,
     };
     let changedState: GuiDebugSettingsState | undefined;
     let done = false;
@@ -210,6 +226,8 @@ describe("Gui0 model foundation", () => {
     expect(settings.preset).toBe("default");
     expect(manager.mouseClicked(80, 62, 0)).toBe(true);
     expect(settings.worldStorageMode).toBe("none");
+    expect(manager.mouseClicked(170, 62, 0)).toBe(true);
+    expect(settings.showDebugInfo).toBe(true);
     expect(manager.mouseClicked(160, 146, 0)).toBe(true);
     expect(done).toBe(true);
     expect(changedState).toEqual(settings);

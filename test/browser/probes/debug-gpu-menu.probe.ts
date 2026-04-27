@@ -19,7 +19,7 @@ interface DebugRuntimeState {
 
 test.setTimeout(60_000);
 
-test("debug.html uses GPU menus without visible DOM controls", async ({ page }) => {
+test("/?mode=debug uses GPU menus without visible DOM controls", async ({ page }) => {
   const viewDistance = 1;
   const params = new URLSearchParams({
     worldTransport: "worker",
@@ -32,7 +32,7 @@ test("debug.html uses GPU menus without visible DOM controls", async ({ page }) 
     liquidSimulationMode: "none",
   });
 
-  await page.goto(`/debug.html?${params.toString()}`, { waitUntil: "load" });
+  await page.goto(`/?mode=debug&${params.toString()}`, { waitUntil: "load" });
   await expect(page.locator("button, input, select, textarea, details, form")).toHaveCount(0);
   await page.waitForFunction(() => typeof window.__mcloneDebug !== "undefined", undefined, {
     timeout: FAST_VISUAL_PROBE_TIMEOUTS.ready,

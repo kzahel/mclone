@@ -1,6 +1,6 @@
 import { chromium } from "@playwright/test";
 
-const url = process.argv[2] ?? "https://mclone.kzahel.com/debug.html";
+const url = process.argv[2] ?? "https://mclone.kzahel.com/?mode=debug";
 
 const browser = await chromium.launch({
   channel: "chrome",

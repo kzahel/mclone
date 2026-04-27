@@ -1,6 +1,7 @@
 import type { OpenWorldPreset, WorldStorageMode } from "../../../runtime/protocol/world-messages";
 import type { GuiDrawList } from "../../../renderer/gui/gui-draw-list";
 import { Button } from "../components/button";
+import { Checkbox } from "../components/checkbox";
 import { CycleButton } from "../components/cycle-button";
 import { GuiComponent } from "../gui-component";
 import { Screen } from "./screen";
@@ -11,6 +12,7 @@ export interface GuiDebugSettingsState {
   movementMode: GuiDebugMovementMode;
   preset: OpenWorldPreset;
   worldStorageMode: WorldStorageMode;
+  showDebugInfo: boolean;
 }
 
 export interface DebugSettingsScreenActions {
@@ -78,6 +80,20 @@ export class DebugSettingsScreen extends Screen {
       formatWorldStorageMode,
       (_button, value) => {
         this.settings.worldStorageMode = value;
+        this.onChanged();
+      },
+    ));
+    this.addRenderableWidget(new Checkbox(
+      rightX,
+      topY + rowSpacing,
+      150,
+      20,
+      "Show Debug Info",
+      this.getFont(),
+      this.settings.showDebugInfo,
+      true,
+      (_checkbox, selected) => {
+        this.settings.showDebugInfo = selected;
         this.onChanged();
       },
     ));

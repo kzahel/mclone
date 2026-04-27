@@ -18,6 +18,7 @@ export interface DebugInputFrame {
 export interface DebugInputOptions {
   readonly isGuiActive?: () => boolean;
   readonly requirePointerLock?: boolean;
+  readonly onPointerLockChange?: (locked: boolean) => void;
 }
 
 export interface TouchJoystickState {
@@ -90,6 +91,7 @@ export class DebugInput {
         this.mouseDeltaX = 0;
         this.mouseDeltaY = 0;
       }
+      this.options.onPointerLockChange?.(this.locked);
     });
     this.add(document, "keydown", (event) => {
       const keyboardEvent = event as KeyboardEvent;

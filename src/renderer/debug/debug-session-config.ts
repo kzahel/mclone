@@ -3,9 +3,10 @@ import type { OpenWorldPreset } from "../../runtime/protocol/world-messages";
 export const DEFAULT_DEBUG_SEED = 12_345n;
 export const DEFAULT_DEBUG_PRESET: OpenWorldPreset = "browser_smoke";
 export const DEFAULT_DEBUG_MOVEMENT_MODE: DebugMovementMode = "player";
+export const DEFAULT_DEBUG_SHOW_INFO = false;
 export const DEBUG_SESSION_CONFIG_STORAGE_KEY = "mclone.debug.sessionConfig.v1";
 export const START_LAST_WORLD_STORAGE_KEY = "mclone.start.lastWorld.v1";
-export const DEBUG_SESSION_CONFIG_QUERY_KEYS = ["seed", "movementMode", "preset"] as const;
+export const DEBUG_SESSION_CONFIG_QUERY_KEYS = ["seed", "movementMode", "preset", "showDebugInfo"] as const;
 
 export type DebugMovementMode = "player" | "freecam";
 
@@ -13,6 +14,7 @@ export interface DebugSessionConfig {
   readonly seed: bigint;
   readonly movementMode: DebugMovementMode;
   readonly preset: OpenWorldPreset;
+  readonly showDebugInfo: boolean;
 }
 
 export function parseSeedValue(value: string | null | undefined, fallback: bigint): bigint {
@@ -33,6 +35,16 @@ export function parseMovementMode(value: unknown, fallback: DebugMovementMode): 
 
 export function parsePreset(value: unknown, fallback: OpenWorldPreset): OpenWorldPreset {
   return value === "default" || value === "browser_smoke" || value === "flat_grass" || value === "small_island" ? value : fallback;
+}
+
+export function parseBooleanValue(value: unknown, fallback: boolean): boolean {
+  if (value === true || value === "true" || value === 1 || value === "1") {
+    return true;
+  }
+  if (value === false || value === "false" || value === 0 || value === "0") {
+    return false;
+  }
+  return fallback;
 }
 
 export function readStoredDebugSessionConfig(
@@ -60,10 +72,14 @@ export function readStoredDebugSessionConfig(
       || parsed.preset === "flat_grass" || parsed.preset === "small_island"
       ? parsed.preset
       : undefined;
+    const showDebugInfo = typeof parsed.showDebugInfo === "boolean"
+      ? parsed.showDebugInfo
+      : undefined;
     return {
       seed: typeof parsed.seed === "string" ? parseSeedValue(parsed.seed, DEFAULT_DEBUG_SEED) : undefined,
       movementMode,
       preset,
+      showDebugInfo,
     };
   } catch {
     return {};
@@ -75,10 +91,12 @@ export function readDebugSessionConfig(url: URL, storage?: Pick<Storage, "getIte
   const storedSeed = stored.seed ?? DEFAULT_DEBUG_SEED;
   const storedMovementMode = stored.movementMode ?? DEFAULT_DEBUG_MOVEMENT_MODE;
   const storedPreset = stored.preset ?? DEFAULT_DEBUG_PRESET;
+  const storedShowDebugInfo = stored.showDebugInfo ?? DEFAULT_DEBUG_SHOW_INFO;
   return {
     seed: parseSeedValue(url.searchParams.get("seed"), storedSeed),
     movementMode: parseMovementMode(url.searchParams.get("movementMode"), storedMovementMode),
     preset: parsePreset(url.searchParams.get("preset"), storedPreset),
+    showDebugInfo: parseBooleanValue(url.searchParams.get("showDebugInfo"), storedShowDebugInfo),
   };
 }
 
@@ -90,6 +108,7 @@ export function writeStoredDebugSessionConfig(
     seed: config.seed.toString(),
     movementMode: config.movementMode,
     preset: config.preset,
+    showDebugInfo: config.showDebugInfo,
   }));
 }
 
@@ -101,6 +120,7 @@ export function writeStartLastWorld(
     seed: config.seed.toString(),
     movementMode: config.movementMode,
     preset: config.preset,
+    showDebugInfo: config.showDebugInfo,
     lastOpenedAtMs: Date.now(),
   }));
 }

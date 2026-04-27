@@ -23,7 +23,7 @@ This is true for both browser singleplayer and dedicated Node hosting. Browser s
 The current debug URL:
 
 ```text
-http://localhost:5173/debug.html?viewDistance=1
+http://localhost:5173/?mode=debug&viewDistance=1
 ```
 
 uses the local browser worker transport unless `worldTransport=remote` is explicitly present. So visible walking stutter at that URL is not an HTTP or Node-host problem. It is evidence that the local authoritative host worker and/or debug client loop can stall movement while chunk work happens.

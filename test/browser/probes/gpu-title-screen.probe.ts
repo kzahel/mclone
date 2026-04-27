@@ -41,7 +41,7 @@ test("captures the root GPU title screen and routes button clicks without visibl
   const box = await page.locator("#renderer").boundingBox();
   expect(box).not.toBeNull();
   const stateBeforeClick = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
-  const optionsCenterY = (Math.floor(stateBeforeClick.height / 4) + 48 + (24 * 2) + 10) / stateBeforeClick.height;
+  const optionsCenterY = (Math.floor(stateBeforeClick.height / 4) + 48 + 24 + 10) / stateBeforeClick.height;
   await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * optionsCenterY));
   await page.waitForFunction(() => window.__mcloneGui?.state.mode === "options");
   const state = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
@@ -56,7 +56,7 @@ test("captures the root GPU title screen and routes button clicks without visibl
   const titleState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
   expect(titleState.lastAction).toBe("options_done");
 
-  const debugSettingsCenterY = (Math.floor(titleState.height / 4) + 48 + (24 * 3) + 10) / titleState.height;
+  const debugSettingsCenterY = (Math.floor(titleState.height / 4) + 48 + (24 * 2) + 10) / titleState.height;
   await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * debugSettingsCenterY));
   await page.waitForFunction(() => window.__mcloneGui?.state.mode === "debug_settings");
   const debugState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);

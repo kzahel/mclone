@@ -21,7 +21,7 @@ test.setTimeout(FAST_VISUAL_PROBE_TIMEOUTS.test);
 
 test("captures exposed mountain emerald ore in the worker-generated world", async ({ page }) => {
   await page.goto(
-    `/debug.html?${new URLSearchParams({
+    `/?mode=debug&${new URLSearchParams({
       ...FAST_VISUAL_PROBE_PARAMS,
       worldTransport: "worker",
       clearWorldStorage: "1",

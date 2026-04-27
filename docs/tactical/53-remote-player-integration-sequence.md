@@ -149,6 +149,6 @@ After movement integration:
 
 - The default remote path is WebSocket-backed.
 - Joining a world creates or resumes a named player slot instead of using the session id as the player id.
-- Player mode in `debug.html` no longer behaves as free flight.
+- Player mode in `/?mode=debug` no longer behaves as free flight.
 - Host and client prediction use the same command records, movement body shape, and collision facts.
 - Singleplayer and remote clients share the same `ClientRuntime` / `ClientWorld` / `PredictionService` path for movement.

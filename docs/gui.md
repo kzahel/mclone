@@ -71,7 +71,7 @@ Default implementation posture:
 - Do not use DOM elements for visible in-game UI, menus, options, debug overlays, HUD, or touch controls.
 - Do not adopt a broad retained web-app UI framework.
 - Do not pull in a large immediate-mode GUI library as the default path. `egui` works well in Rust projects, but this repo is TypeScript-first and already has a vanilla GUI reference to translate.
-- Do not keep the current `index.html` / `debug.html` UI layout shape for compatibility. Only keep useful behavior.
+- Do not keep old DOM shell layout shapes for compatibility. Only keep useful behavior.
 - Do not implement every vanilla GUI screen before replacing the current UI. Start with the minimum real flow, then expand.
 
 ## Platform Boundary
@@ -302,7 +302,7 @@ Replace or keep retired these visible DOM surfaces:
 |---|---|
 | `index.html` start menu | WebGPU `TitleScreen` / `WorldSetupScreen` |
 | `index.html` CSS world-preview background | WebGPU title background or simple rendered world/panorama later |
-| `debug.html` visible overlay/settings | retired; WebGPU pause/options/debug settings screens |
+| old debug visible overlay/settings | retired; WebGPU pause/options/debug settings screens |
 | `src/renderer/debug/debug-free-cam.ts` DOM loading/error overlay | retired; WebGPU loading/progress/error screens |
 | `src/renderer/debug/debug-input.ts` DOM joystick and fly buttons | retired; WebGPU touch-control widgets or remove if not needed |
 | browser `window.confirm` for destructive world storage reset | WebGPU confirm screen |

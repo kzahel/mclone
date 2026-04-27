@@ -89,7 +89,7 @@ const SURFACE_FRAMES: readonly SurfaceFrame[] = [
 ] as const;
 
 function createSurfaceUrl(frame: SurfaceFrame): string {
-  return `/debug.html?${new URLSearchParams({
+  return `/?mode=debug&${new URLSearchParams({
     ...FAST_VISUAL_PROBE_PARAMS,
     worldTransport: "worker",
     clearWorldStorage: "1",

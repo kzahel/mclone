@@ -21,7 +21,7 @@ interface DebugRuntimeState {
 }
 
 function createCaveMouthUrl(remoteWorldHostUrl: string): string {
-  return `/debug.html?${new URLSearchParams({
+  return `/?mode=debug&${new URLSearchParams({
     ...FAST_VISUAL_PROBE_PARAMS,
     worldTransport: "remote",
     worldHostUrl: remoteWorldHostUrl,

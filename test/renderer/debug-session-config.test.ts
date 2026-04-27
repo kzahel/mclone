@@ -16,10 +16,11 @@ describe("debug session config", () => {
       seed: 99n,
       movementMode: "freecam",
       preset: "flat_grass",
+      showDebugInfo: true,
     });
 
     const config = readDebugSessionConfig(
-      new URL("http://127.0.0.1/debug.html?seed=123&movementMode=player&preset=small_island"),
+      new URL("http://127.0.0.1/?mode=debug&seed=123&movementMode=player&preset=small_island&showDebugInfo=0"),
       storage,
     );
 
@@ -27,21 +28,24 @@ describe("debug session config", () => {
       seed: 123n,
       movementMode: "player",
       preset: "small_island",
+      showDebugInfo: false,
     });
   });
 
-  it("persists and clears the same keys used by debug.html", () => {
+  it("persists and clears the same keys used by /?mode=debug", () => {
     const storage = new MemoryStorage();
     const config = {
       seed: 12_345n,
       movementMode: "player" as const,
       preset: "browser_smoke" as const,
+      showDebugInfo: true,
     };
 
     writeStoredDebugSessionConfig(storage, config);
     writeStartLastWorld(storage, config);
     expect(storage.getItem(DEBUG_SESSION_CONFIG_STORAGE_KEY)).toContain("\"preset\":\"browser_smoke\"");
     expect(storage.getItem(START_LAST_WORLD_STORAGE_KEY)).toContain("\"movementMode\":\"player\"");
+    expect(storage.getItem(START_LAST_WORLD_STORAGE_KEY)).toContain("\"showDebugInfo\":true");
 
     clearStoredDebugSessionConfig(storage);
     expect(storage.getItem(DEBUG_SESSION_CONFIG_STORAGE_KEY)).toBeNull();

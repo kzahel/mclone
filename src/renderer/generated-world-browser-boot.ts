@@ -14,6 +14,7 @@ import { GuiOverlayHost } from "./gui/gui-overlay-host";
 import { GuiRenderer } from "./gui/gui-renderer";
 import type { BrowserRendererHost } from "./renderer-host";
 import {
+  closeRendererScene,
   initializeRendererScene,
   type RendererScene,
 } from "./scene-setup";
@@ -57,7 +58,7 @@ async function createGeneratedWorldBrowserScene(
   options: GeneratedWorldBrowserBootAdapterOptions,
   context: GeneratedWorldBootSceneContext,
 ): Promise<GeneratedWorldBootSceneResult> {
-  return initializeRendererScene(options.canvas, {
+  const sceneResult = await initializeRendererScene(options.canvas, {
     seed: context.scenario.seed,
     viewDistance: options.renderConfig.viewDistance,
     renderDistance: options.renderConfig.renderDistance,
@@ -74,6 +75,17 @@ async function createGeneratedWorldBrowserScene(
     onProgress: context.onProgress,
     rendererHost: options.rendererHost,
   });
+  if (!sceneResult.ok) {
+    return sceneResult;
+  }
+
+  return {
+    ok: true,
+    scene: sceneResult.scene,
+    close: () => {
+      closeRendererScene(sceneResult.scene);
+    },
+  };
 }
 
 async function createGuiProbeOverlay(scene: RendererScene): Promise<GuiOverlayHost> {

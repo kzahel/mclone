@@ -14,7 +14,7 @@ This tactical is done only when all of the following are true:
 
 - `/` and `/index.html` render a WebGPU `TitleScreen` directly in the canvas.
 - `/smoke.html` remains a canvas-only test harness with no visible DOM controls.
-- `/debug.html` is either removed, redirected to the same canvas shell, or reduced to a canvas-only debug entrypoint.
+- the old debug HTML shell is removed; `/?mode=debug` uses the same root canvas shell.
 - No visible DOM menu/control/status nodes remain in game entry HTML: no `<button>`, `<form>`, `<input>`, `<select>`, `<textarea>`, visible `<details>`, debug overlays, CSS menus, CSS joystick, or HTML progress/status bars.
 - the former debug/freecam launch path runs through `src/renderer/main.ts` and the shared GPU world runtime instead of a separate DOM-mutating module.
 - `src/renderer/debug/debug-input.ts` no longer creates or reads visible DOM joystick/fly buttons. Touch input is either removed or rendered as GPU widgets.
@@ -35,7 +35,7 @@ Already GPU-backed:
 - Back to Game input suppression/resume
 - minimal GPU `OptionsScreen` reachable from root title and pause, with view/render distance sliders, lighting cycle, and water simulation checkbox persisted through the browser render config
 - minimal GPU `DebugSettingsScreen` reachable from root title and pause, with movement/preset/storage cycle controls persisted through the existing debug session config
-- `/debug.html` canvas-only shell with GPU loading/progress, error alert, HUD text, pause/options/debug settings, and input suppression while menus are open
+- `/?mode=debug` root launch mode with GPU loading/progress, error alert, HUD text, pause/options/debug settings, and input suppression while menus are open
 - `window.__mcloneDebug` machine state for automation without visible DOM controls
 
 Still open:
@@ -52,7 +52,7 @@ Still open:
 | 1 | Root shell cutover | **done** - `index.html` is canvas-only and boots GPU title by default; `/smoke.html` still direct-boots smoke scenarios |
 | 2 | GPU world setup | seed, preset, movement mode, storage, and quickstart/continue behavior move from `index.html` JS into GPU screens |
 | 3 | GPU options/debug settings | **done for current controls** - `OptionsScreen` and a minimal `DebugSettingsScreen` are GPU-backed from root, pause, and debug flows |
-| 4 | Debug harness migration | **done** - `debug.html` is canvas-only; `__mcloneDebug` remains as a machine API |
+| 4 | Debug harness migration | **done** - `/?mode=debug` runs through the root shell; `__mcloneDebug` remains as a machine API |
 | 5 | Error/confirm/quit flow | loading errors, storage reset, save-and-quit, and return-to-title use GPU screens |
 | 6 | DOM deletion sweep | remove obsolete HTML/CSS/DOM mutation code and update tests/probes to use GPU surfaces or hooks |
 
@@ -76,7 +76,7 @@ Use pinned `VITE_PORT` values when a local dev server is already running so Play
 DOM retirement grep at the final deletion step:
 
 ```bash
-rg -n "button|form|input|select|textarea|details|debug-overlay|debug-progress|debug-config|joystick|fly-btn|textContent|innerHTML|style\\.display|classList" index.html debug.html smoke.html src/renderer
+rg -n "button|form|input|select|textarea|details|debug-overlay|debug-progress|debug-config|joystick|fly-btn|textContent|innerHTML|style\\.display|classList" index.html smoke.html src/renderer
 ```
 
 Expected final grep result: only non-visible platform plumbing, test hooks, or comments remain, and each remaining hit is deliberately justified.

@@ -8,6 +8,8 @@ const GPU_TITLE_WORLD_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-world.png";
 const GPU_TITLE_PAUSE_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-pause.png";
 const GPU_TITLE_PAUSE_OPTIONS_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-pause-options.png";
 const GPU_TITLE_PAUSE_DEBUG_SETTINGS_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-pause-debug-settings.png";
+const GPU_TITLE_RETURNED_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-returned-title.png";
+const GPU_TITLE_RESTARTED_WORLD_SCREENSHOT_PATH = "/tmp/mclone-gpu-title-restarted-world.png";
 
 interface GpuGuiState {
   readonly ready: boolean;
@@ -64,7 +66,7 @@ test("starts the generated world from the GPU title screen without DOM controls"
   const box = await page.locator("#renderer").boundingBox();
   expect(box).not.toBeNull();
   const titleState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
-  const startWorldCenterY = (Math.floor(titleState.height / 4) + 48 + 24 + 10) / titleState.height;
+  const startWorldCenterY = (Math.floor(titleState.height / 4) + 48 + 10) / titleState.height;
   await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * startWorldCenterY));
 
   await page.waitForFunction(
@@ -101,7 +103,12 @@ test("starts the generated world from the GPU title screen without DOM controls"
   const liveState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
   const liveBox = await page.locator("#renderer").boundingBox();
   expect(liveBox).not.toBeNull();
-  await page.mouse.move(liveBox!.x + (liveBox!.width / 2), liveBox!.y + (liveBox!.height / 2));
+  await page.mouse.click(liveBox!.x + (liveBox!.width / 2), liveBox!.y + (liveBox!.height / 2));
+  await page.waitForFunction(
+    () => document.pointerLockElement === document.querySelector("#renderer"),
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
   await page.keyboard.down("w");
   await page.mouse.move(liveBox!.x + (liveBox!.width / 2) + 24, liveBox!.y + (liveBox!.height / 2) + 6, { steps: 3 });
   await page.waitForFunction(
@@ -209,6 +216,12 @@ test("starts the generated world from the GPU title screen without DOM controls"
   );
 
   const resumedState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  await page.mouse.click(liveBox!.x + (liveBox!.width / 2), liveBox!.y + (liveBox!.height / 2));
+  await page.waitForFunction(
+    () => document.pointerLockElement === document.querySelector("#renderer"),
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
   await page.keyboard.down("w");
   await page.waitForFunction(
     ({ frameCount, cameraPosition }) => {
@@ -222,4 +235,38 @@ test("starts the generated world from the GPU title screen without DOM controls"
     { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
   );
   await page.keyboard.up("w");
+
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(
+    () => window.__mcloneGui?.state.mode === "paused",
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
+  const quitPauseState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  const disconnectCenterY = (Math.floor(quitPauseState.height / 4) + 120 - 16 + 10) / quitPauseState.height;
+  await page.mouse.click(liveBox!.x + (liveBox!.width / 2), liveBox!.y + (liveBox!.height * disconnectCenterY));
+  await page.waitForFunction(
+    () => window.__mcloneGui?.state.mode === "title" && window.__mcloneGui?.state.screenTitle === "Title Screen",
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.ready },
+  );
+  const returnedTitleState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  expect(returnedTitleState.lastAction).toBe("disconnect");
+  await page.locator("#renderer").screenshot({ path: GPU_TITLE_RETURNED_SCREENSHOT_PATH });
+
+  const restartStartWorldCenterY = (Math.floor(returnedTitleState.height / 4) + 48 + 10) / returnedTitleState.height;
+  await page.mouse.click(liveBox!.x + (liveBox!.width / 2), liveBox!.y + (liveBox!.height * restartStartWorldCenterY));
+  await page.waitForFunction(
+    () => window.__mcloneGui?.state.worldReady === true || window.__mcloneGui?.state.mode === "error",
+    undefined,
+    { timeout: 100_000 },
+  );
+  await page.waitForFunction(
+    () => (window.__mcloneGui?.state.frameCount ?? 0) >= 3,
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame },
+  );
+  const restartedWorldState = await page.evaluate(() => window.__mcloneGui!.state as GpuGuiState);
+  expect(restartedWorldState.mode, restartedWorldState.error).toBe("world");
+  await page.locator("#renderer").screenshot({ path: GPU_TITLE_RESTARTED_WORLD_SCREENSHOT_PATH });
 });

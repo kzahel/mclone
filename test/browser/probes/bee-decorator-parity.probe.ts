@@ -21,7 +21,7 @@ test.setTimeout(FAST_VISUAL_PROBE_TIMEOUTS.test);
 
 test("debug free-cam captures a generated bee nest in the worker world", async ({ page }) => {
   await page.goto(
-    `/debug.html?${new URLSearchParams({
+    `/?mode=debug&${new URLSearchParams({
       ...FAST_VISUAL_PROBE_PARAMS,
       worldTransport: "worker",
       clearWorldStorage: "1",

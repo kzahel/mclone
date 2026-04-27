@@ -4,8 +4,6 @@ import { GuiComponent } from "../gui-component";
 import { Screen } from "./screen";
 
 export interface TitleScreenActions {
-  onContinue(): void;
-
   onStartWorld(): void;
 
   onOptions(): void;
@@ -32,19 +30,15 @@ export class TitleScreen extends Screen {
   protected override init(): void {
     const spacing = 24;
     const top = Math.floor(this.height / 4) + 48;
-    this.addRenderableWidget(new Button(this.width / 2 - 100, top, 200, 20, "Continue", this.getFont(), () => {
-      this.statusMessage = "Continue selected";
-      this.actions.onContinue();
-    }));
-    this.addRenderableWidget(new Button(this.width / 2 - 100, top + spacing, 200, 20, "Start World", this.getFont(), () => {
+    this.addRenderableWidget(new Button(this.width / 2 - 100, top, 200, 20, "Start World", this.getFont(), () => {
       this.statusMessage = "Start World selected";
       this.actions.onStartWorld();
     }));
-    this.addRenderableWidget(new Button(this.width / 2 - 100, top + (spacing * 2), 200, 20, "Options", this.getFont(), () => {
+    this.addRenderableWidget(new Button(this.width / 2 - 100, top + spacing, 200, 20, "Options", this.getFont(), () => {
       this.statusMessage = "Options selected";
       this.actions.onOptions();
     }));
-    this.addRenderableWidget(new Button(this.width / 2 - 100, top + (spacing * 3), 200, 20, "Debug Settings", this.getFont(), () => {
+    this.addRenderableWidget(new Button(this.width / 2 - 100, top + (spacing * 2), 200, 20, "Debug Settings", this.getFont(), () => {
       this.statusMessage = "Debug Settings selected";
       this.actions.onDebugSettings();
     }));
@@ -61,18 +55,16 @@ export class TitleScreen extends Screen {
       GuiComponent.drawCenteredString(drawList, this.getFont(), this.statusMessage, Math.floor(this.width / 2), Math.floor(this.height / 4) + 132, 0xffa0ffa0);
     }
     const versionText = "Minecraft 1.17.1 target";
-    const copyright = "Copyright Mojang AB.";
-    const distribution = "Do not distribute!";
+    const copyright = "Copyright Graehl Arts 2026";
     const rightMargin = 8;
     const versionWidth = this.getFont().width(versionText);
-    const copyrightWidth = this.getFont().width(`${copyright} ${distribution}`);
+    const copyrightWidth = this.getFont().width(copyright);
     if (versionWidth + copyrightWidth + rightMargin + 4 <= this.width) {
       GuiComponent.drawString(drawList, this.getFont(), versionText, 2, this.height - 10, 0xffffffff);
-      GuiComponent.drawString(drawList, this.getFont(), `${copyright} ${distribution}`, this.width - copyrightWidth - rightMargin, this.height - 10, 0xffffffff);
+      GuiComponent.drawString(drawList, this.getFont(), copyright, this.width - copyrightWidth - rightMargin, this.height - 10, 0xffffffff);
     } else {
-      GuiComponent.drawString(drawList, this.getFont(), versionText, 2, this.height - 30, 0xffffffff);
-      GuiComponent.drawString(drawList, this.getFont(), copyright, this.width - this.getFont().width(copyright) - rightMargin, this.height - 20, 0xffffffff);
-      GuiComponent.drawString(drawList, this.getFont(), distribution, this.width - this.getFont().width(distribution) - rightMargin, this.height - 10, 0xffffffff);
+      GuiComponent.drawString(drawList, this.getFont(), versionText, 2, this.height - 20, 0xffffffff);
+      GuiComponent.drawString(drawList, this.getFont(), copyright, this.width - copyrightWidth - rightMargin, this.height - 10, 0xffffffff);
     }
   }
 

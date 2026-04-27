@@ -8,6 +8,7 @@ import { ScreenManager } from "../client/gui/screen-manager";
 import { type CameraState } from "./game-renderer";
 import {
   applyRenderWorldDirtySections,
+  closeRendererScene,
   getSceneLoadedChunkCount,
   initializeRendererScene,
   renderSceneUntilSettled,
@@ -72,7 +73,7 @@ interface GpuGuiRuntimeState {
   ready: boolean;
   mode: "title" | "options" | "debug_settings" | "loading" | "world" | "paused" | "error";
   screenTitle: string;
-  lastAction?: "continue" | "start_world" | "options" | "options_done" | "debug_settings" | "debug_settings_done" | "back_to_game";
+  lastAction?: "start_world" | "options" | "options_done" | "debug_settings" | "debug_settings_done" | "back_to_game" | "disconnect";
   loadingStage?: string;
   loadingDetail?: string;
   loadingProgress?: number;
@@ -216,7 +217,7 @@ function readDebugLaunchEnabled(url: URL): boolean {
   if (mode === "title") {
     return false;
   }
-  return url.pathname.endsWith("/debug.html");
+  return false;
 }
 
 function readAutoStartWorldEnabled(url: URL): boolean {
@@ -278,6 +279,7 @@ function readGuiDebugSettingsState(url: URL): GuiDebugSettingsBundle {
       movementMode: debugSession.movementMode,
       preset: debugSession.preset,
       worldStorageMode: renderConfig.worldStorageMode,
+      showDebugInfo: debugSession.showDebugInfo,
     },
   };
 }
@@ -296,6 +298,7 @@ function copyGuiDebugSettingsState(debugSettings: GuiDebugSettingsState): GuiDeb
     movementMode: debugSettings.movementMode,
     preset: debugSettings.preset,
     worldStorageMode: debugSettings.worldStorageMode,
+    showDebugInfo: debugSettings.showDebugInfo,
   };
 }
 
@@ -442,6 +445,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
       seed: debugSettingsState.debugSession.seed,
       movementMode: debugSettingsState.debugSettings.movementMode,
       preset: debugSettingsState.debugSettings.preset,
+      showDebugInfo: debugSettingsState.debugSettings.showDebugInfo,
     };
     persistGuiSettingsState(optionsState, debugSettingsState.debugSession, debugSettingsState.debugSettings);
     state.options = copyGuiOptionsState(optionsState);
@@ -457,6 +461,9 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
   };
   const startWorld = (): void => {
     state.lastAction = "start_world";
+    state.error = undefined;
+    state.worldReady = undefined;
+    state.worldResult = undefined;
     const guiOverlayHost = host;
     if (guiOverlayHost === undefined) {
       state.mode = "error";
@@ -467,7 +474,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
       return;
     }
 
-    startWorldPromise = startGpuTitleWorld({
+    const worldPromise = startGpuTitleWorld({
       canvas,
       url,
       deviceContext: deviceContextResult.context,
@@ -481,11 +488,21 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
       debugSession: debugSettingsState.debugSession,
       debugSettingsState: debugSettingsState.debugSettings,
       onDebugSettingsChanged: onSettingsChanged,
+      onDisconnectFromWorld: disconnectToTitle,
       renderGuiFrameNow,
       debugLaunch,
       getPendingInjectedInput: () => pendingInjectedInput,
     });
-    controller.worldReady = startWorldPromise;
+    startWorldPromise = worldPromise;
+    controller.worldReady = worldPromise;
+    void worldPromise.finally(() => {
+      if (startWorldPromise === worldPromise && controller.worldRuntime === undefined) {
+        startWorldPromise = undefined;
+        if (controller.worldReady === worldPromise) {
+          controller.worldReady = undefined;
+        }
+      }
+    });
   };
 
   let titleScreen: TitleScreen;
@@ -517,10 +534,69 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
     }));
     scheduleGuiFrame();
   };
+  const resetTitleState = (): void => {
+    state.ready = true;
+    state.mode = "title";
+    state.screenTitle = "Title Screen";
+    state.worldReady = undefined;
+    state.worldResult = undefined;
+    state.pauseScreenActive = false;
+    state.loadingStage = undefined;
+    state.loadingDetail = undefined;
+    state.loadingProgress = undefined;
+    state.saveId = undefined;
+    state.sessionId = undefined;
+    state.playerId = undefined;
+    state.playerTick = undefined;
+    state.playerPosition = undefined;
+    state.playerChunkX = undefined;
+    state.playerChunkZ = undefined;
+    state.chunkViewCenterX = undefined;
+    state.chunkViewCenterZ = undefined;
+    state.expectedLoadedChunkCount = undefined;
+    state.frameCount = 0;
+    state.inputEventCount = 0;
+    state.cameraPosition = undefined;
+    state.cameraYaw = undefined;
+    state.cameraPitch = undefined;
+    state.loadedChunkCount = undefined;
+    state.renderWorldCounters = undefined;
+    state.renderQueueStats = undefined;
+    state.worldPerformance = undefined;
+    state.error = undefined;
+  };
+  const disconnectToTitle = async (closeWorld: () => Promise<void> | void): Promise<void> => {
+    startWorldPromise = undefined;
+    controller.worldReady = undefined;
+    controller.worldRuntime = undefined;
+    const progressScreen = new ProgressScreen(true);
+    progressScreen.progressStart("Saving world");
+    progressScreen.updateProgress({ stage: "Closing world", fraction: 0 });
+    state.mode = "loading";
+    state.screenTitle = "Progress Screen";
+    state.pauseScreenActive = false;
+    state.loadingStage = "Closing world";
+    state.loadingDetail = undefined;
+    state.loadingProgress = 0;
+    screenManager.setScreen(progressScreen);
+    renderGuiFrameNow();
+
+    try {
+      await closeWorld();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      state.mode = "error";
+      state.error = reason;
+      progressScreen.updateProgress({ stage: "Error", detail: reason, fraction: 1 });
+      renderGuiFrameNow();
+      return;
+    }
+
+    resetTitleState();
+    screenManager.setScreen(titleScreen);
+    scheduleGuiFrame();
+  };
   titleScreen = new TitleScreen({
-    onContinue: () => {
-      state.lastAction = "continue";
-    },
     onStartWorld: startWorld,
     onOptions: openOptions,
     onDebugSettings: openDebugSettings,
@@ -561,6 +637,7 @@ interface StartGpuTitleWorldOptions {
   readonly debugSession: DebugSessionConfig;
   readonly debugSettingsState: GuiDebugSettingsState;
   readonly onDebugSettingsChanged: () => void;
+  readonly onDisconnectFromWorld: (closeWorld: () => Promise<void> | void) => Promise<void>;
   readonly renderGuiFrameNow: () => void;
   readonly debugLaunch: boolean;
   readonly getPendingInjectedInput: () => DebugInjectedInput | null;
@@ -581,6 +658,7 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<G
   };
 
   reportProgress({ stage: "Opening world", fraction: 0 });
+  let closeWorld: (() => Promise<void> | void) | undefined;
   try {
     const bootResult = shouldUseSmokeTitleWorldStart(options.url)
       ? await runGpuTitleSmokeWorldBoot(options, reportProgress)
@@ -593,6 +671,7 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<G
     }
 
     const scene = bootResult.scene;
+    closeWorld = bootResult.close;
     options.state.mode = "world";
     options.state.screenTitle = "";
     options.state.pauseScreenActive = false;
@@ -614,7 +693,10 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<G
       onDebugSettingsChanged: options.onDebugSettingsChanged,
       movementMode: options.debugSettingsState.movementMode,
       preserveInitialCamera: readPreserveInitialCamera(options.url),
-      requirePointerLock: options.debugLaunch,
+      requirePointerLock: true,
+      onDisconnect: async () => {
+        await options.onDisconnectFromWorld(closeWorld!);
+      },
       onError: (message) => {
         options.state.mode = "error";
         options.state.error = message;
@@ -625,6 +707,11 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<G
     return bootResult.result;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
+    if (closeWorld !== undefined) {
+      try {
+        await closeWorld();
+      } catch {}
+    }
     options.state.mode = "error";
     options.state.error = reason;
     reportProgress({ stage: "Error", detail: reason, fraction: 1 });
@@ -643,6 +730,7 @@ type GpuTitleWorldBootRun =
     readonly frame: LevelRenderFrame;
     readonly camera: CameraState;
     readonly result: GeneratedWorldSmokeScenarioResult | LiveWorldBootResult;
+    close(): Promise<void> | void;
   }
   | { readonly ok: false; readonly reason: string };
 
@@ -664,6 +752,7 @@ async function runGpuTitleSmokeWorldBoot(
     frame: bootResult.run.frame,
     camera: bootResult.camera,
     result: bootResult.run.result,
+    close: bootResult.close,
   };
 }
 
@@ -703,57 +792,66 @@ async function runGpuTitleLiveWorldBoot(
   }
 
   const scene = sceneResult.scene;
-  const camera = readSmokeCamera(options.url) ?? DEFAULT_TITLE_WORLD_CAMERA;
-  const chunkViewRequest = createChunkViewRequestForCameraState(camera, scene.viewDistance);
-  if (await scene.clientRuntime.setChunkInterest(chunkViewRequest)) {
-    applyRenderWorldDirtySections(scene);
+  try {
+    const camera = readSmokeCamera(options.url) ?? DEFAULT_TITLE_WORLD_CAMERA;
+    const chunkViewRequest = createChunkViewRequestForCameraState(camera, scene.viewDistance);
+    if (await scene.clientRuntime.setChunkInterest(chunkViewRequest)) {
+      applyRenderWorldDirtySections(scene);
+      scene.levelRenderer.allChanged();
+    }
+
+    const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
+    options.state.expectedLoadedChunkCount = expectedLoadedChunkCount;
+    options.state.saveId = scene.saveMetadata.saveId;
+    options.state.viewDistance = scene.viewDistance;
+    options.state.renderDistance = scene.gameRenderer.getRenderDistance();
+    options.state.lightingMode = options.optionsState.lightingMode;
+    options.state.liquidSimulationMode = options.optionsState.liquidSimulationMode;
+    options.state.worldStorageMode = options.debugSettingsState.worldStorageMode;
+    if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, {
+      maxAttempts: Math.max(2400, expectedLoadedChunkCount * 32),
+      onProgress: (progress) => onProgress({
+        ...progress,
+        fraction: 0.92 + ((progressFraction(progress) ?? 0) * 0.06),
+      }),
+    })) {
+      closeRendererScene(scene);
+      return {
+        ok: false,
+        reason: `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`,
+      };
+    }
+
+    onProgress({ stage: "Building first frame", fraction: 0.98 });
     scene.levelRenderer.allChanged();
-  }
-
-  const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
-  options.state.expectedLoadedChunkCount = expectedLoadedChunkCount;
-  options.state.saveId = scene.saveMetadata.saveId;
-  options.state.viewDistance = scene.viewDistance;
-  options.state.renderDistance = scene.gameRenderer.getRenderDistance();
-  options.state.lightingMode = options.optionsState.lightingMode;
-  options.state.liquidSimulationMode = options.optionsState.liquidSimulationMode;
-  options.state.worldStorageMode = options.debugSettingsState.worldStorageMode;
-  if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, {
-    maxAttempts: Math.max(2400, expectedLoadedChunkCount * 32),
-    onProgress: (progress) => onProgress({
-      ...progress,
-      fraction: 0.92 + ((progressFraction(progress) ?? 0) * 0.06),
-    }),
-  })) {
+    const frame = await renderSceneUntilSettled(scene, camera);
+    const loadedChunkCount = getSceneLoadedChunkCount(scene);
+    options.state.loadedChunkCount = loadedChunkCount;
     return {
-      ok: false,
-      reason: `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`,
-    };
-  }
-
-  onProgress({ stage: "Building first frame", fraction: 0.98 });
-  scene.levelRenderer.allChanged();
-  const frame = await renderSceneUntilSettled(scene, camera);
-  const loadedChunkCount = getSceneLoadedChunkCount(scene);
-  options.state.loadedChunkCount = loadedChunkCount;
-  return {
-    ok: true,
-    scene,
-    frame,
-    camera,
-    result: {
       ok: true,
-      mode: "live_world",
-      worldTransport: runtimeConfig.worldTransport,
-      saveId: scene.saveMetadata.saveId,
-      viewDistance: scene.viewDistance,
-      renderDistance: scene.gameRenderer.getRenderDistance(),
-      lightingMode: options.optionsState.lightingMode,
-      liquidSimulationMode: options.optionsState.liquidSimulationMode,
-      loadedChunkCount,
-      expectedLoadedChunkCount,
-    },
-  };
+      scene,
+      frame,
+      camera,
+      close: () => {
+        closeRendererScene(scene);
+      },
+      result: {
+        ok: true,
+        mode: "live_world",
+        worldTransport: runtimeConfig.worldTransport,
+        saveId: scene.saveMetadata.saveId,
+        viewDistance: scene.viewDistance,
+        renderDistance: scene.gameRenderer.getRenderDistance(),
+        lightingMode: options.optionsState.lightingMode,
+        liquidSimulationMode: options.optionsState.liquidSimulationMode,
+        loadedChunkCount,
+        expectedLoadedChunkCount,
+      },
+    };
+  } catch (error) {
+    closeRendererScene(scene);
+    throw error;
+  }
 }
 
 function createPinnedBrowserRendererHost(

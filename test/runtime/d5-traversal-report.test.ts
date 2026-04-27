@@ -60,7 +60,7 @@ function createPassingReport(): D5TraversalReportWithoutGates {
     config: {
       seed: "12345",
       preset: "browser_smoke",
-      page: "/debug.html",
+      page: "/?mode=debug",
       transport: "remote",
       host: "dedicated_node",
       viewDistance: 8,

@@ -36,7 +36,7 @@ const EXPECTED_LOADED_CHUNK_COUNT = 25;
 const D5_CONFIG = {
   seed: "12345",
   preset: "browser_smoke",
-  page: "/debug.html",
+  page: "/?mode=debug",
   transport: "remote",
   host: "dedicated_node",
   viewDistance: 1,
@@ -152,7 +152,7 @@ const SETTLED_FRAME_TIMEOUT_MS = 60_000;
 test.setTimeout(D5_TEST_TIMEOUT_MS);
 
 function createDebugUrl(remoteWorldHostUrl: string): string {
-  return `/debug.html?${new URLSearchParams({
+  return `/?mode=debug&${new URLSearchParams({
     worldTransport: "remote",
     worldHostUrl: remoteWorldHostUrl,
     cameraX: D5_CONFIG.startPosition[0].toString(),

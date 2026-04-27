@@ -24,7 +24,7 @@ interface DebugRuntimeState {
 }
 
 function createCullUrl(yaw: string, y: string, clearWorldStorage: boolean): string {
-  return `/debug.html?${new URLSearchParams({
+  return `/?mode=debug&${new URLSearchParams({
     ...FAST_VISUAL_PROBE_PARAMS,
     worldTransport: "worker",
     preserveInitialCamera: "1",

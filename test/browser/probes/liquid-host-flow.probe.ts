@@ -14,7 +14,7 @@ interface DebugRuntimeState {
 }
 
 function createLiquidFlowUrl(): string {
-  return `/debug.html?${new URLSearchParams({
+  return `/?mode=debug&${new URLSearchParams({
     ...FAST_LIQUID_VISUAL_PROBE_PARAMS,
     worldTransport: "worker",
     clearWorldStorage: "1",

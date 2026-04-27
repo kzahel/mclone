@@ -52,7 +52,7 @@ interface CanvasMetrics {
 }
 
 function createDebugUrl(remoteWorldHostUrl: string): string {
-  return `/debug.html?${new URLSearchParams({
+  return `/?mode=debug&${new URLSearchParams({
     worldTransport: "remote",
     worldHostUrl: remoteWorldHostUrl,
     preserveInitialCamera: "1",

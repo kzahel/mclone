@@ -1,6 +1,6 @@
 import { chromium, devices } from "@playwright/test";
 
-const url = process.argv[2] ?? "https://mclone.kzahel.com/debug.html";
+const url = process.argv[2] ?? "https://mclone.kzahel.com/?mode=debug";
 const outBefore = "/tmp/mclone-smoke-mobile-before.png";
 const outDuring = "/tmp/mclone-smoke-mobile-during.png";
 

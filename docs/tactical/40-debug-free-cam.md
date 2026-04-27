@@ -33,8 +33,8 @@ A single parallel entry point that shares world setup with the existing smoke bu
 | 1 | `src/renderer/debug/scene-setup.ts` | Extract the shared init block out of `main.ts` (atlas, models, world, dispatchers, `GameRenderer`, `LightTexture`) into one helper returning the assembled scene. `main.ts` and the new debug entry both consume it. |
 | 2 | `src/renderer/debug/debug-input.ts` | Pointer-lock request on click, keydown/keyup → key-state set, mouse-delta → yaw/pitch accumulators. Plain object, no classes that mimic `Input`. |
 | 3 | `src/renderer/debug/debug-free-cam.ts` | Browser entry. Calls scene-setup, installs input listeners, runs `requestAnimationFrame` loop: read input → update `position`/`xRot`/`yRot` → `worldClient.setChunkView(...)` → `gameRenderer.renderLevel(...)` → encode draws (ported from `main.ts`'s one-shot draw path). |
-| 4 | `debug.html` | Sibling of `index.html`. `<canvas id="renderer">` + `<script type="module" src="/src/renderer/debug/debug-free-cam.ts">`. Instructions overlay ("click to capture, WASD + mouse, Esc to release"). |
-| 5 | `package.json` script | `"dev:free-cam": "vite"` pointing at `debug.html` — or just document navigating to `http://localhost:5173/debug.html` under `pnpm dev:browser`. Prefer the latter (less surface). |
+| 4 | `/?mode=debug` | Root shell debug launch mode. `<canvas id="renderer">` + `<script type="module" src="/src/renderer/main.ts">`, auto-start world config, pointer lock, and `window.__mcloneDebug`. |
+| 5 | `package.json` script | `"dev:free-cam": "vite"` is unnecessary; document navigating to `http://localhost:5173/?mode=debug` under `pnpm dev:browser`. Prefer the latter (less surface). |
 
 ## Input → camera math
 
@@ -74,10 +74,10 @@ Depth view and readback texture get recreated per frame today (fine for a 2-step
 
 ## Done when
 
-- `pnpm dev:browser`, navigate to `http://localhost:5173/debug.html`, click the canvas, and fly around the generated world with WASD + mouse-look.
+- `pnpm dev:browser`, navigate to `http://localhost:5173/?mode=debug`, click the canvas, and fly around the generated world with WASD + mouse-look.
 - Existing `pnpm test:browser` still passes (smoke harness untouched).
 - `pnpm typecheck` and `pnpm test` stay green.
-- `main.ts` no longer duplicates scene setup — it and `debug-free-cam.ts` both call `scene-setup.ts`.
+- `main.ts` owns the debug launch path without a separate debug HTML or `debug-free-cam.ts` lifecycle.
 - A one-line `> Debug tooling — see tactical 40` banner at the top of every file under `src/renderer/debug/`, so the temp scope is obvious at a glance.
 
 ## The real path (not this slice)

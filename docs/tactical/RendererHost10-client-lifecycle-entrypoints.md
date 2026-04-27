@@ -45,7 +45,7 @@ Current browser entrypoints:
 |---|---|
 | `index.html -> src/renderer/main.ts` | Canvas-only root shell. Boots GPU title by default, can start a generated world, and can also run direct smoke mode depending on URL/path. |
 | `smoke.html -> src/renderer/main.ts` | Browser smoke harness. Bypasses title by default and runs generated-world smoke scenarios via `window.__mcloneReady`. |
-| `debug.html -> src/renderer/main.ts` | Canvas-only debug launch alias. It auto-starts the same GPU title/world lifecycle with debug launch config, pointer lock enabled, and the `window.__mcloneDebug` machine hook. |
+| `index.html?mode=debug -> src/renderer/main.ts` | Root debug launch mode. It auto-starts the same GPU title/world lifecycle with debug launch config, pointer lock enabled, and the `window.__mcloneDebug` machine hook. |
 
 Current headless and host entrypoints:
 
@@ -55,9 +55,9 @@ Current headless and host entrypoints:
 | Other `scripts/deno-*.ts` | Lower-level WebGPU, pipeline, texture, atlas, static-world, and vanilla-asset smoke capability probes. |
 | `src/runtime/node/headless-generated-world-host.ts` | Node headless world host CLI. |
 | `src/runtime/node/generated-world-http-server.ts` | Remote/generated-world HTTP host for browser clients and tests. |
-| Playwright tests/probes | Test harness entrypoints that drive `smoke.html`, `index.html`, or `debug.html` and save screenshots under `/tmp`. |
+| Playwright tests/probes | Test harness entrypoints that drive `smoke.html` or `index.html` with URL launch params and save screenshots under `/tmp`. |
 
-There is no literal `main-headless.ts` today. Deno headless behavior lives in scripts, Node host behavior lives under `src/runtime/node/`, and browser smoke/debug are separate HTML/module entrypoints.
+There is no literal `main-headless.ts` today. Deno headless behavior lives in scripts, Node host behavior lives under `src/runtime/node/`, and browser smoke/debug are URL launch modes over the shared browser module.
 
 ## What Is Ad Hoc Today
 
@@ -151,7 +151,7 @@ The rule should be: shortcuts produce a `LaunchRequest`; they do not create sepa
 | Lifecycle1 | Add `closeRendererScene(...)` / `WorldSession.close()` and wire `runGeneratedWorldBoot(...).close()` for browser and Deno | focused unit tests, `pnpm smoke:deno:generated-world`, `pnpm test:browser`, `git diff --check` |
 | Lifecycle2 | Introduce a small browser `GameClient` shell so `main.ts` delegates title/loading/world/quit-to-title policy | browser title probe, `pnpm test:browser`, screenshot inspection |
 | Lifecycle3 | Add Save and Quit to Title to the GPU pause flow using the same close path, then restart a world in the same page | browser integration start -> pause -> quit -> title -> start, screenshot inspection |
-| Lifecycle4 | Fold `debug-free-cam` behavior into launch requests/debug screens; reduce `debug.html` to a canvas-only alias or retire it | browser integration/probe coverage for debug movement/config hooks |
+| Lifecycle4 | Fold `debug-free-cam` behavior into launch requests/debug screens; retire the separate debug HTML shell | browser integration/probe coverage for debug movement/config hooks |
 | Lifecycle5 | Make Deno headless run two independent world sessions in one process through the same lifecycle API, proving close/open parity outside browser pages | Deno generated-world smoke with repeated sessions and PNG artifacts |
 
 ## Done When

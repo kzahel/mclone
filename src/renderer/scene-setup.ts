@@ -288,6 +288,14 @@ export function getSceneRenderQueueStats(scene: RendererScene): RenderSceneQueue
   };
 }
 
+export function closeRendererScene(scene: RendererScene): void {
+  scene.clientRuntime.close();
+  scene.viewArea.releaseAllBuffers();
+  scene.chunkDispatcher.dispose();
+  scene.lightTexture.close();
+  scene.atlas.clearTextureData();
+}
+
 export function applyRenderWorldDirtySections(scene: RendererScene): number {
   let dirtyCount = 0;
   for (const dirtySection of scene.renderWorldUpdateSink.drainDirtySections()) {

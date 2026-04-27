@@ -126,7 +126,7 @@ Primary config:
 |---|---|
 | seed | `12345` |
 | preset | `browser_smoke` |
-| page | `/debug.html` |
+| page | `/?mode=debug` |
 | transport | `remote` dedicated Node host |
 | host | per-test `GeneratedWorldHttpServer` on random localhost port |
 | view distance | `6` |
@@ -515,7 +515,7 @@ Visual inspection: the start screenshot shows a filled cliff/cave face, and the 
 
 Interpretation: the measured bottleneck was host chunk scheduling, not push transport, `SharedArrayBuffer`, or render-world subworkers. The phase split brought traversal `poll_world_updates` p99 from the prior `238.7 ms` to `19.8 ms` and chunk-bearing poll p99 to `23.8 ms`.
 
-Manual validation on `debug.html?viewDistance=1`: walking behavior is much improved, and no stalls were noticed. D5's decision is to accept the current polling/packed-snapshot/render-world architecture for now, with the D6 cooperative host scheduler as the fix for the measured stutter. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction from this result.
+Manual validation on `/?mode=debug&viewDistance=1`: walking behavior is much improved, and no stalls were noticed. D5's decision is to accept the current polling/packed-snapshot/render-world architecture for now, with the D6 cooperative host scheduler as the fix for the measured stutter. Do not start push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction from this result.
 
 ## Post-lighting regression gate update - 2026-04-24
 

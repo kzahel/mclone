@@ -89,7 +89,7 @@ const SHORELINE_FRAMES: readonly ShorelineFrame[] = [
 ] as const;
 
 function createFrameUrl(frame: ShorelineFrame): string {
-  return `/debug.html?${new URLSearchParams({
+  return `/?mode=debug&${new URLSearchParams({
     ...FAST_VISUAL_PROBE_PARAMS,
     worldTransport: "worker",
     clearWorldStorage: "1",

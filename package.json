@@ -21,6 +21,7 @@
     "smoke:deno:world-assets": "npx -y deno@2.7.13 run --unstable-webgpu --allow-read=. --allow-write=/tmp ./scripts/deno-vanilla-asset-world-smoke.ts",
     "smoke:deno:generated-world": "npx -y deno@2.7.13 run --unstable-webgpu --allow-read=. --allow-write=/tmp ./scripts/deno-generated-world-smoke.ts",
     "dev:browser": "vite",
+    "dev:lan": "node ./scripts/dev-lan.mjs",
     "host:check": "node ./scripts/check-host-capabilities.mjs",
     "host:node": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/headless-generated-world-host.ts",
     "host:remote": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/generated-world-http-server.ts",

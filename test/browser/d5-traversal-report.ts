@@ -12,7 +12,7 @@ export type D5TransportCommand =
 export interface D5TraversalConfig {
   readonly seed: string;
   readonly preset: "browser_smoke";
-  readonly page: "/debug.html";
+  readonly page: "/?mode=debug";
   readonly transport: "remote";
   readonly host: "dedicated_node";
   readonly viewDistance: number;

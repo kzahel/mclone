@@ -112,7 +112,7 @@ The first D6 slice should fix the host scheduler direction first. A later small 
 
 5. Update local browser worker creation to use scheduler mode.
 
-   Browser singleplayer is the user-visible stutter path for `debug.html?viewDistance=1`, so it should get the first scheduler slice.
+   Browser singleplayer is the user-visible stutter path for `/?mode=debug&viewDistance=1`, so it should get the first scheduler slice.
 
 6. Update tests that should use the new semantics.
 
@@ -252,7 +252,7 @@ Visual inspection: the start screenshot shows a filled cliff/cave face, and the 
 
 Interpretation: the host single-chunk quantum was the measured bottleneck. Splitting chunk work into status-like cooperative phases brought `poll_world_updates` p99 down from the previous `238.7 ms` to `19.8 ms`, while frame pacing stayed clean and chunk-bearing polls remained capped. The remaining D6 risk was subjective low-view walking plus the response max and player tick max around `26-119 ms`.
 
-Manual validation on `debug.html?viewDistance=1`: walking behavior is much improved, and no stalls were noticed. Treat D6 as complete for the current architecture. Do not continue into push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction from this result.
+Manual validation on `/?mode=debug&viewDistance=1`: walking behavior is much improved, and no stalls were noticed. Treat D6 as complete for the current architecture. Do not continue into push transport, `SharedArrayBuffer`, render-world subworkers, or client-side prediction from this result.
 
 ## D6 completion acceptance
 

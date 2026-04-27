@@ -63,7 +63,7 @@ The new `debug-player-controls` helper:
 
 The browser validation matrix now includes a live debug path against the dedicated Node host:
 
-- Playwright opens `debug.html` against the remote host transport
+- Playwright opens `/?mode=debug` against the remote host transport
 - the test injects forward input through the debug runtime controller
 - the authoritative player tick advances
 - authoritative player position changes

@@ -42,6 +42,7 @@ import {
   type DebugCameraState,
   type DebugInjectedInput,
 } from "../debug/debug-player-controls";
+import { GuiComponent } from "../../client/gui/gui-component";
 import type { GuiDrawList } from "./gui-draw-list";
 import type { GuiOverlayHost } from "./gui-overlay-host";
 import { renderTouchControlsHud } from "./touch-joystick-hud";
@@ -92,6 +93,7 @@ export interface GpuWorldRuntimeOptions {
   readonly movementMode?: GpuWorldMovementMode;
   readonly preserveInitialCamera?: boolean;
   readonly requirePointerLock?: boolean;
+  readonly onDisconnect?: () => Promise<void> | void;
   readonly onError?: (message: string) => void;
 }
 
@@ -105,6 +107,66 @@ export async function startGpuWorldRuntime(options: GpuWorldRuntimeOptions): Pro
   const runtime = new BrowserGpuWorldRuntime(options);
   await runtime.start();
   return runtime;
+}
+
+export function shouldQueuePlayerInput(
+  previousInputCommand: PlayerInputCommand | undefined,
+  inputCommand: PlayerInputCommand,
+): boolean {
+  if ((inputCommand.stepCount ?? 0) > 0) {
+    return true;
+  }
+
+  if (!isSamePlayerInput(previousInputCommand, inputCommand)) {
+    return true;
+  }
+
+  return Math.hypot(inputCommand.moveX, inputCommand.moveY, inputCommand.moveZ) > 0.0
+    || (inputCommand.buttons ?? 0) !== 0
+    || (inputCommand.edgeButtons ?? 0) !== 0;
+}
+
+export function buildDebugOverlayLines(
+  state: Pick<
+    GpuWorldRuntimeState,
+    "cameraPosition"
+    | "cameraYaw"
+    | "cameraPitch"
+    | "playerTick"
+    | "playerPosition"
+    | "playerChunkX"
+    | "playerChunkZ"
+    | "chunkViewCenterX"
+    | "chunkViewCenterZ"
+    | "loadedChunkCount"
+  >,
+  movementMode: GpuWorldMovementMode,
+): string[] {
+  const position = movementMode === "player"
+    ? (state.playerPosition ?? state.cameraPosition)
+    : state.cameraPosition;
+  const lines: string[] = [];
+
+  if (position !== undefined) {
+    lines.push(`XYZ: ${position.map((value) => value.toFixed(3)).join(" / ")}`);
+  }
+  if (state.cameraPitch !== undefined || state.cameraYaw !== undefined) {
+    lines.push(`Pitch/Yaw: ${formatDebugValue(state.cameraPitch, 1)} / ${formatDebugValue(state.cameraYaw, 1)}`);
+  }
+  if (state.playerTick !== undefined) {
+    lines.push(`# Ticks: ${state.playerTick.toString()}`);
+  }
+  if (movementMode === "player" && state.playerChunkX !== undefined && state.playerChunkZ !== undefined) {
+    lines.push(`Chunk: ${state.playerChunkX.toString()}, ${state.playerChunkZ.toString()}`);
+  }
+  if (state.chunkViewCenterX !== undefined && state.chunkViewCenterZ !== undefined) {
+    lines.push(`View Chunk: ${state.chunkViewCenterX.toString()}, ${state.chunkViewCenterZ.toString()}`);
+  }
+  if (state.loadedChunkCount !== undefined) {
+    lines.push(`Loaded Chunks: ${state.loadedChunkCount.toString()}`);
+  }
+  lines.push(`Mode: ${movementMode === "player" ? "Player" : "Free Cam"}`);
+  return lines;
 }
 
 class BrowserGpuWorldRuntime implements GpuWorldRuntime {
@@ -126,6 +188,7 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
   private readonly queuedPlayerInputs: PlayerInputCommand[] = [];
   private playerInputSendInFlight = false;
   private lastPlayerButtonMask = 0;
+  private disconnectInFlight = false;
   private readonly playerCommandClock = new MovementCommandClock({
     commandQuantumUs: PLAYER_COMMAND_QUANTUM_US,
     maxStepCountPerCommand: 4,
@@ -137,8 +200,14 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
     this.input = new DebugInput(options.canvas, {
       isGuiActive: () => options.screenManager.currentScreen !== null,
       requirePointerLock: options.requirePointerLock,
+      onPointerLockChange: (locked) => {
+        if (!locked && options.requirePointerLock !== false && options.screenManager.currentScreen === null) {
+          this.openPauseMenu();
+        }
+      },
     });
     options.guiOverlayHost.setOverlayRenderer((drawList) => {
+      this.renderDebugOverlay(drawList);
       this.renderTouchHud(drawList);
     });
     this.add(window, "keydown", (event) => {
@@ -204,6 +273,28 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
       cssWidth: rect.width,
       cssHeight: rect.height,
     });
+  }
+
+  private renderDebugOverlay(drawList: GuiDrawList): void {
+    if (!this.options.debugSettingsState.showDebugInfo || this.options.screenManager.currentScreen !== null) {
+      return;
+    }
+
+    const lines = buildDebugOverlayLines(this.options.state, this.options.movementMode ?? "freecam");
+    if (lines.length === 0) {
+      return;
+    }
+
+    const font = this.options.screenManager.font;
+    const textX = 2;
+    const textY = 2;
+    const maxWidth = lines.reduce((width, line) => Math.max(width, font.width(line)), 0);
+    const boxWidth = maxWidth + 8;
+    const boxHeight = (lines.length * font.lineHeight) + 7;
+    GuiComponent.fill(drawList, 0, 0, boxWidth, boxHeight, 0x70000000);
+    for (const [index, line] of lines.entries()) {
+      GuiComponent.drawString(drawList, font, line, textX, textY + (index * font.lineHeight), 0xffffffff);
+    }
   }
 
   private resizeViewport(): void {
@@ -281,13 +372,7 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
   }
 
   private shouldQueuePlayerInput(inputCommand: PlayerInputCommand): boolean {
-    if (!isSamePlayerInput(this.lastInputCommand, inputCommand)) {
-      return true;
-    }
-
-    return Math.hypot(inputCommand.moveX, inputCommand.moveY, inputCommand.moveZ) > 0.0
-      || (inputCommand.buttons ?? 0) !== 0
-      || (inputCommand.edgeButtons ?? 0) !== 0;
+    return shouldQueuePlayerInput(this.lastInputCommand, inputCommand);
   }
 
   private queuePlayerInput(inputCommand: PlayerInputCommand): boolean {
@@ -461,10 +546,10 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
       },
       encoder,
     );
+    this.updateState();
     this.options.guiOverlayHost.encode(encoder, view, scene.format, scene.canvas.width, scene.canvas.height);
     scene.device.queue.submit([encoder.finish()]);
     this.options.state.frameCount++;
-    this.updateState();
   }
 
   private openPauseMenu(): void {
@@ -486,6 +571,24 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
       },
       onDebugSettings: () => {
         this.openDebugSettingsScreen(pauseScreen);
+      },
+      onDisconnect: this.options.onDisconnect === undefined ? undefined : () => {
+        if (this.disconnectInFlight) {
+          return;
+        }
+
+        this.disconnectInFlight = true;
+        this.options.state.lastAction = "disconnect";
+        this.stop();
+        void Promise.resolve(this.options.onDisconnect?.()).catch((error) => {
+          const message = formatUnknownError(error);
+          this.options.state.error = message;
+          this.options.onError?.(message);
+          // eslint-disable-next-line no-console
+          console.error(error);
+        }).finally(() => {
+          this.disconnectInFlight = false;
+        });
       },
     });
     this.options.screenManager.setScreen(pauseScreen);
@@ -591,4 +694,8 @@ function isSameChunkViewRequest(
 
 function formatUnknownError(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function formatDebugValue(value: number | undefined, digits: number): string {
+  return value === undefined ? "n/a" : value.toFixed(digits);
 }
