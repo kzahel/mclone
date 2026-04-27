@@ -193,6 +193,22 @@ The live player path now integrates the shared movement body with host collision
 
 The ordering across transport, player-slot protocol, and movement integration is tracked in [`53-remote-player-integration-sequence.md`](53-remote-player-integration-sequence.md).
 
+## Bot Client Arc
+
+Status: **planned**.
+
+The bot client should behave like a headless human player: it joins through the same `ClientRuntime` / `ClientWorld` path as a browser client, observes only hydrated client-replica facts, and acts by sending the same sequenced player input commands. It is not a server-side NPC system and should not become the implementation path for vanilla mob AI.
+
+The first useful behavior is a "good view" bot: it scans loaded terrain, chooses a reachable high vantage point, walks there, and looks around. Keep the reusable layers split so headless tests can use the same client bootstrap and observation code without depending on that specific personality.
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| [`Bot0-headless-client-runtime.md`](Bot0-headless-client-runtime.md) | `src/runtime/bot/`, Node bot CLI, reusable `ClientRuntime` bootstrap, injected transports, minimal idle/wander controller | runtime + integration | **done** - renderer-free client shell and `pnpm bot:client` entrypoint are landed |
+| [`Bot1-client-world-observation-and-navigation.md`](Bot1-client-world-observation-and-navigation.md) | bot observation snapshots, loaded/missing block queries, standable-surface scans, coarse path planner, waypoint steering | unit + runtime | planned - make bot memory inspection and simple navigation reusable |
+| [`Bot2-good-view-goal.md`](Bot2-good-view-goal.md) | bot goal lifecycle, high-vantage scoring, path following, arrival/stuck handling, `--goal good-view` CLI mode | unit + manual dedicated smoke | planned - first meaningful bot behavior, a player that likes finding a good view |
+
+Do not add mining, building, inventory, chat, or combat until the host/client protocol has explicit authoritative commands for those actions.
+
 ## Recent worldgen follow-through
 
 - [`51-bee-tree-decorator-follow-through.md`](51-bee-tree-decorator-follow-through.md)

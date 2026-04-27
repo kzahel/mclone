@@ -26,6 +26,7 @@
     "host:node": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/headless-generated-world-host.ts",
     "host:dedicated": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/generated-world-http-server.ts",
     "host:remote": "pnpm host:dedicated",
+    "bot:client": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./src/runtime/node/bot-client.ts",
     "perf:worldgen": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./scripts/worldgen-phase-baseline.ts",
     "build": "vite build",
     "deploy": "bash ./scripts/deploy.sh",
