@@ -2,9 +2,9 @@ import { performance } from "node:perf_hooks";
 import process from "node:process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { OverworldBiomeSource } from "../src/worldgen/biome/overworld-biome-source";
+import type { NoiseBiomeSource } from "../src/worldgen/biome/noise-biome-source";
 import { ChunkBiomeContainer } from "../src/worldgen/biome/chunk-biome-container";
-import { NoiseBasedChunkGenerator } from "../src/worldgen/levelgen/noise-based-chunk-generator";
+import { createWorldGeneratorForPreset } from "../src/worldgen/levelgen/world-generator-factory";
 import { GeneratedRenderLevel } from "../src/world/level/generated-render-level";
 import {
   FEATURES_CHUNK_DEPENDENCY_RADIUS,
@@ -158,7 +158,7 @@ function parseFloatOption(name: string, value: string): number {
 }
 
 function parsePreset(value: string): OpenWorldPreset {
-  if (value === "default" || value === "browser_smoke") {
+  if (value === "default" || value === "browser_smoke" || value === "flat_grass" || value === "small_island") {
     return value;
   }
 
@@ -517,17 +517,22 @@ function createPalette(): GeneratedPalette {
   };
 }
 
-function createLevel(seed: bigint, centerChunkX: number, centerChunkZ: number, radius: number, palette: GeneratedPalette): {
+function createLevel(
+  seed: bigint,
+  preset: OpenWorldPreset,
+  centerChunkX: number,
+  centerChunkZ: number,
+  radius: number,
+  palette: GeneratedPalette,
+): {
   readonly level: GeneratedRenderLevel;
-  readonly biomeSource: OverworldBiomeSource;
+  readonly biomeSource: NoiseBiomeSource;
 } {
-  const biomeSource = new OverworldBiomeSource(seed);
-  const generator = new NoiseBasedChunkGenerator(biomeSource, seed);
+  const generator = createWorldGeneratorForPreset(preset, seed);
+  const biomeSource = generator.getBiomeSource();
   const level = new GeneratedRenderLevel(
     palette.airState,
     generator,
-    biomeSource,
-    seed,
     palette.blockStateById,
   );
   level.updateChunkView(centerChunkX, centerChunkZ, radius);
@@ -546,7 +551,7 @@ function packedChunkBytes(snapshot: PackedChunkSnapshot): number {
 
 function packSnapshotForChunk(
   level: GeneratedRenderLevel,
-  biomeSource: OverworldBiomeSource,
+  biomeSource: NoiseBiomeSource,
   palette: GeneratedPalette,
   resolveBlockState: BlockStateResolver,
   chunkX: number,
@@ -577,7 +582,14 @@ function packSnapshotForChunk(
 
 async function runDirectBenchmark(options: CliOptions, mode: DirectMode, window: ChunkWindow): Promise<DirectBenchmarkResult> {
   const palette = createPalette();
-  const { level, biomeSource } = createLevel(options.seed, options.centerChunkX, options.centerChunkZ, options.radius, palette);
+  const { level, biomeSource } = createLevel(
+    options.seed,
+    options.preset,
+    options.centerChunkX,
+    options.centerChunkZ,
+    options.radius,
+    palette,
+  );
   const terrainHaloChunks = chunkCoordinates(
     options.centerChunkX,
     options.centerChunkZ,
@@ -900,6 +912,42 @@ function formatLightingCounters(counters: LightingServicePerformanceCounters | u
   ].join("; ");
 }
 
+function formatWorldgenCounts(counts: Readonly<Record<string, number>> | undefined): string {
+  if (counts === undefined) {
+    return "{}";
+  }
+
+  const entries = Object.entries(counts)
+    .filter(([, value]) => value !== 0)
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  if (entries.length === 0) {
+    return "{}";
+  }
+
+  return entries.map(([key, value]) => `${key}=${value.toString()}`).join(", ");
+}
+
+function formatTopWorldgenPhases(
+  phases: Readonly<Record<string, { readonly count: number; readonly totalMs: number; readonly maxMs: number }>> | undefined,
+): string {
+  if (phases === undefined) {
+    return "none";
+  }
+
+  const entries = Object.entries(phases)
+    .sort((a, b) => b[1].totalMs - a[1].totalMs)
+    .slice(0, 8);
+  if (entries.length === 0) {
+    return "none";
+  }
+
+  return entries
+    .map(([name, counters]) =>
+      `${name} count=${counters.count.toString()} total=${formatMs(counters.totalMs)} max=${formatMs(counters.maxMs)}`
+    )
+    .join("; ");
+}
+
 function printReport(report: BenchmarkReport): void {
   process.stdout.write(
     `worldgen phase baseline seed=${report.seed} preset=${report.preset} `
@@ -927,6 +975,8 @@ function printReport(report: BenchmarkReport): void {
     printPhaseRows(`host:${result.mode}`, result.phases);
     process.stdout.write(`${"".padEnd(26)} progress: ${summarizeProgress(result.progress)}\n`);
     process.stdout.write(`${"".padEnd(26)} lighting: ${formatLightingCounters(result.performance?.lighting)}\n`);
+    process.stdout.write(`${"".padEnd(26)} worldgen counts: ${formatWorldgenCounts(result.performance?.worldgen?.counts)}\n`);
+    process.stdout.write(`${"".padEnd(26)} worldgen phases: ${formatTopWorldgenPhases(result.performance?.worldgen?.phases)}\n`);
   }
 }
 

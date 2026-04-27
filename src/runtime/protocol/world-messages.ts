@@ -234,8 +234,23 @@ export interface WorldProgressMessage {
   readonly total: number;
 }
 
+export interface WorldgenPhasePerformanceCounters {
+  readonly count: number;
+  readonly totalMs: number;
+  readonly maxMs: number;
+}
+
+export interface WorldgenPerformanceCounters {
+  readonly phases: Readonly<Record<string, WorldgenPhasePerformanceCounters>>;
+  readonly counts: Readonly<Record<string, number>>;
+  readonly maxPendingMessages: number;
+  readonly currentPendingMessages: number;
+  readonly activeChunkViewJobRevision?: number;
+}
+
 export interface WorldPerformanceSnapshot {
   readonly lighting?: LightingServicePerformanceCounters;
+  readonly worldgen?: WorldgenPerformanceCounters;
 }
 
 export interface WorldPerformanceMessage {

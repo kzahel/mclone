@@ -347,6 +347,8 @@ Recommended sequence:
 
 With the runtime arc accepted and the spawn full-decorated fixture exact, the next highest-value content-parity slice is no longer broad biome-table breadth. Tactical [`50`](50-beach-river-full-decorated-parity.md) should extend the exact full-block harness to seed `12345`, chunk `(5,115)`, the existing sand/gravel surface-oracle target, and prove legitimate shoreline/river loose material plus decoration parity under a scheduler-pinned server fixture. Tactical [`49`](49-vanilla-status-futures-and-partial-chunks.md) remains the separate status-orchestration and throughput follow-through for replacing the flattened authority terrain window.
 
+For measured worldgen throughput and phone-stutter investigation, use Tactical [`56`](56-worldgen-performance-investigation.md). It starts with headless host/worldgen instrumentation that can run on non-browser hosts, then adds a browser fly-by lane for frame pacing and mobile validation on hosts with a real browser/WebGPU path.
+
 ## Skipped entirely (for renderer MVP)
 
 `entity/`, `blockentity/`, `item/`, `PostChain` post-processing, particles, GUI, `CubeMap`/`PanoramaRenderer`, sounds (`com.mojang.blaze3d.audio`), `OutlineBufferSource`, `DimensionSpecialEffects` beyond overworld defaults.

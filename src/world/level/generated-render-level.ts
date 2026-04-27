@@ -39,6 +39,8 @@ interface GeneratedChunkRecord {
   readonly hasBlockSections: boolean;
 }
 
+export type GeneratedLevelPhaseRecorder = (phase: string, elapsedMs: number) => void;
+
 const FULL_PUBLICATION_NEIGHBOR_RADIUS = 1;
 const LIGHT_FEATURES_NEIGHBOR_RADIUS = 1;
 
@@ -58,6 +60,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   private readonly chunkRecords = new Map<string, GeneratedChunkRecord>();
   private readonly advancingFeatureChunks = new Set<string>();
   private automaticDecorationEnabled = true;
+  private phaseRecorder: GeneratedLevelPhaseRecorder | undefined;
 
   public constructor(
     airState: BlockState,
@@ -69,6 +72,10 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     height = 256,
   ) {
     super(airState, skyLight, blockLight, minBuildHeight, height);
+  }
+
+  public setPhaseRecorder(recorder: GeneratedLevelPhaseRecorder | undefined): void {
+    this.phaseRecorder = recorder;
   }
 
   public override getChunk(chunkX: number, chunkZ: number, create = true): LevelChunk | null {
@@ -366,14 +373,14 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     }
 
     this.advanceNoopPreNoiseStatuses(chunkX, chunkZ);
-    const generated = this.generator.fillFromNoise(chunkX, chunkZ);
+    const generated = this.recordPhase("terrain.fill_from_noise", () => this.generator.fillFromNoise(chunkX, chunkZ));
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.NOISE);
-    this.generator.buildSurfaceAndBedrock(generated);
+    this.recordPhase("terrain.surface_bedrock", () => this.generator.buildSurfaceAndBedrock(generated));
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.SURFACE);
-    this.generator.applyCarvers(generated, GenerationStep.Carving.AIR);
+    this.recordPhase("terrain.carvers_air", () => this.generator.applyCarvers(generated, GenerationStep.Carving.AIR));
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.CARVERS);
-    this.generator.applyCarvers(generated, GenerationStep.Carving.LIQUID);
-    const chunk = this.copyGeneratedChunk(chunkX, chunkZ, generated);
+    this.recordPhase("terrain.carvers_liquid", () => this.generator.applyCarvers(generated, GenerationStep.Carving.LIQUID));
+    const chunk = this.recordPhase("terrain.copy_to_level_chunk", () => this.copyGeneratedChunk(chunkX, chunkZ, generated));
     super.setChunk(chunk);
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS);
     return chunk;
@@ -395,17 +402,17 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     }
 
     this.advanceNoopPreNoiseStatuses(chunkX, chunkZ);
-    const generated = this.generator.fillFromNoise(chunkX, chunkZ);
+    const generated = this.recordPhase("terrain.fill_from_noise", () => this.generator.fillFromNoise(chunkX, chunkZ));
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.NOISE);
     await yieldStep();
-    this.generator.buildSurfaceAndBedrock(generated);
+    this.recordPhase("terrain.surface_bedrock", () => this.generator.buildSurfaceAndBedrock(generated));
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.SURFACE);
     await yieldStep();
-    this.generator.applyCarvers(generated, GenerationStep.Carving.AIR);
+    this.recordPhase("terrain.carvers_air", () => this.generator.applyCarvers(generated, GenerationStep.Carving.AIR));
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.CARVERS);
     await yieldStep();
-    this.generator.applyCarvers(generated, GenerationStep.Carving.LIQUID);
-    const chunk = this.copyGeneratedChunk(chunkX, chunkZ, generated);
+    this.recordPhase("terrain.carvers_liquid", () => this.generator.applyCarvers(generated, GenerationStep.Carving.LIQUID));
+    const chunk = this.recordPhase("terrain.copy_to_level_chunk", () => this.copyGeneratedChunk(chunkX, chunkZ, generated));
     super.setChunk(chunk);
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS);
     await yieldStep();
@@ -428,14 +435,14 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
 
     this.advancingFeatureChunks.add(key);
     try {
-      this.ensureDecorationStatusWindow(chunkX, chunkZ);
-      this.primeFeatureHeightmaps(chunkX, chunkZ);
-      this.generator.applyBiomeDecoration(
+      this.recordPhase("features.ensure_status_window", () => this.ensureDecorationStatusWindow(chunkX, chunkZ));
+      this.recordPhase("features.prime_heightmaps", () => this.primeFeatureHeightmaps(chunkX, chunkZ));
+      this.recordPhase("features.apply_biome_decoration", () => this.generator.applyBiomeDecoration(
         new GeneratedDecorationRegion(this, chunkX, chunkZ, undefined, undefined, options),
         chunkX,
         chunkZ,
         options.profiler,
-      );
+      ));
       this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.FEATURES);
     } finally {
       this.advancingFeatureChunks.delete(key);
@@ -459,15 +466,17 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
 
     this.advancingFeatureChunks.add(key);
     try {
-      await this.ensureDecorationStatusWindowCooperative(chunkX, chunkZ, yieldStep);
-      this.primeFeatureHeightmaps(chunkX, chunkZ);
-      await this.generator.applyBiomeDecorationCooperative(
+      await this.recordPhaseAsync("features.ensure_status_window", () =>
+        this.ensureDecorationStatusWindowCooperative(chunkX, chunkZ, yieldStep)
+      );
+      this.recordPhase("features.prime_heightmaps", () => this.primeFeatureHeightmaps(chunkX, chunkZ));
+      await this.recordPhaseAsync("features.apply_biome_decoration", () => this.generator.applyBiomeDecorationCooperative(
         new GeneratedDecorationRegion(this, chunkX, chunkZ, undefined, undefined, options),
         chunkX,
         chunkZ,
         yieldStep,
         options.profiler,
-      );
+      ));
       this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.FEATURES);
     } finally {
       this.advancingFeatureChunks.delete(key);
@@ -700,5 +709,23 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     };
     this.chunkRecords.set(key, record);
     return record;
+  }
+
+  private recordPhase<T>(phase: string, run: () => T): T {
+    const startedAtMs = performance.now();
+    try {
+      return run();
+    } finally {
+      this.phaseRecorder?.(phase, performance.now() - startedAtMs);
+    }
+  }
+
+  private async recordPhaseAsync<T>(phase: string, run: () => Promise<T>): Promise<T> {
+    const startedAtMs = performance.now();
+    try {
+      return await run();
+    } finally {
+      this.phaseRecorder?.(phase, performance.now() - startedAtMs);
+    }
   }
 }

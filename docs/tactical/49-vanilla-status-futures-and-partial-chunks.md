@@ -23,9 +23,9 @@ The canonical ordering contract is [`../worldgen-deterministic-order.md`](../wor
 
 ## Current gap
 
-The current generated runtime has explicit status names and finality gates, but it still prepares dependency inputs with a flattened authority terrain radius. For `viewDistance=1`, that means 625 chunks are advanced to the carved terrain boundary so 81 chunks can run `FEATURES`.
+The current generated runtime has explicit status names, finality gates, and a TypeScript copy of vanilla's dependency-status rule. It no longer needs to promote the full `FEATURES` radius-8 dependency square to terrain: a radius-1 performance run generated `121` terrain chunks and `81` `FEATURES` chunks to publish `25` chunks. That is the expected materialized write window for the current all-`5x5`-snapshots-are-normal-publication policy.
 
-Vanilla does not do that. It requests exact statuses through `ChunkHolder` futures. A `FEATURES` task has range `8`, but its input statuses are mixed:
+The remaining gap is not the radius-8 metadata ring. The remaining gap is that the host still schedules a whole view-level job list, keeps only coarse status records, and persists generated data only after a publishable snapshot is built. Vanilla requests exact statuses through `ChunkHolder` futures. A `FEATURES` task has range `8`, but its input statuses are mixed:
 
 ```text
 offset radius 0: parent of FEATURES -> LIQUID_CARVERS
@@ -33,7 +33,19 @@ offset radius 1: STATUS_BY_RANGE[2] -> LIQUID_CARVERS
 offset radius 2..8: STATUS_BY_RANGE[3..9] -> STRUCTURE_STARTS
 ```
 
-The outer ring is metadata, not terrain. Promoting it to `LIQUID_CARVERS` is both slower and less faithful.
+The outer ring is metadata, not terrain. Promoting it to `LIQUID_CARVERS` would be both slower and less faithful; the current runtime should preserve the existing metadata-only behavior while replacing the view-level batch runner with vanilla-shaped holder/status futures.
+
+## Vanilla reuse and coalescing
+
+Vanilla's reuse model is `ChunkHolder`, not "current view job":
+
+- one `CompletableFuture` slot per `ChunkStatus` lives on the holder ([`ChunkHolder.java:52`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java), [`ChunkHolder.java:53`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java))
+- `getOrScheduleFuture(status, chunkMap)` returns the existing future unless that future already completed as an unloaded/failure result; otherwise it schedules exactly one new status future and stores it back into the slot ([`ChunkHolder.java:247`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java), [`ChunkHolder.java:249`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java), [`ChunkHolder.java:253`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java), [`ChunkHolder.java:259`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java), [`ChunkHolder.java:261`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java))
+- `ChunkMap.schedule(...)` recursively requests the parent status or schedules generation for the requested status; the task input is the mixed-status dependency list, not a prebuilt view batch ([`ChunkMap.java:450`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:459`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:467`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:512`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:514`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java))
+- `chunkToSave` tracks the latest generated `ChunkAccess`, so partial `ProtoChunk` progress is eligible for later save/unload handling ([`ChunkHolder.java:59`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java), [`ChunkHolder.java:260`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java), [`ChunkHolder.java:268`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java), [`ChunkHolder.java:273`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java))
+- when a holder is dropped, vanilla waits for `chunkToSave` to settle and saves the resulting chunk access if present; `ProtoChunk.setStatus(...)` marks the chunk unsaved, and `ChunkMap.save(...)` writes unsaved proto chunks except for vanilla's explicit empty/existing-full skip cases ([`ChunkMap.java:411`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:412`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:423`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ProtoChunk.java:265`](../../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ProtoChunk.java), [`ProtoChunk.java:267`](../../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ProtoChunk.java), [`ChunkMap.java:627`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:636`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java), [`ChunkMap.java:648`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java))
+
+Optimization rule: do not add a throughput shortcut unless it can be described as one of those vanilla mechanisms in browser/Node form. Per-chunk/status in-flight coalescing, status-request reprioritization, and partial `ProtoChunk` save/resume are valid. Discarding partial chunks for speed, weakening the `3x3 FULL` publication gate, or treating a normal published chunk as final after only a `7x7` `FEATURES` window are not valid.
 
 ## Target model
 
@@ -42,6 +54,7 @@ Add host-owned generated chunk records that can represent:
 - current requested/completed `ChunkStatus`
 - one pending/completed future or job per status, shaped like `ChunkHolder`
 - `ProtoChunk`-like partial data: structure starts, structure references, biome container when present, optional block sections, carving masks, ticks, postprocessing, light positions, dirty/unsaved flags
+- a `chunkToSave`-style latest generated partial/full record for save and unload
 - `LevelChunk`/packed snapshot data only after the `FULL` conversion path
 
 Status requests should be expressed as:
@@ -61,11 +74,13 @@ The browser/Node scheduler can stay cooperative and host-owned, but the requeste
    - Keep current `LevelChunk`/snapshot path for full chunks.
    - Add a `GeneratedProtoChunk` or equivalent record for partial statuses and metadata.
    - Preserve current block storage only where a status has actually materialized sections.
+   - Track dirty/unsaved state and the latest generated partial/full record separately from "published snapshot".
 
 2. **Port the status future graph**
    - Add per-status job/future slots on the host-side chunk record.
    - Implement `getDependencyStatus(requestedStatus, radius)` from `ChunkMap`.
    - Implement range-future gathering that returns mixed-status records, not a flat terrain window.
+   - Reuse the same in-flight status job for duplicate requests instead of scheduling another view-level runner.
 
 3. **Split existing stage methods behind `ensureStatus(...)`**
    - `STRUCTURE_STARTS` and `STRUCTURE_REFERENCES` remain no-op/metadata placeholders until real structures land, but they must be real statuses.
@@ -73,11 +88,16 @@ The browser/Node scheduler can stay cooperative and host-owned, but the requeste
    - `FEATURES` receives a `WorldGenRegion`-style mixed-status input cache.
 
 4. **Remove flattened authority terrain preparation**
-   - Replace `ensureDecorationTerrainWindow(...)` with status dependency scheduling.
+   - Replace view-level terrain/decorate batch preparation with status dependency scheduling.
    - Keep 3x3 `FEATURES` stability and 3x3 `FULL` publish gates.
    - Keep cooperative yielding around status jobs, not around fake flattened phases.
 
-5. **Measure again**
+5. **Persist partial progress like vanilla**
+   - Save unsaved generated partial chunks on unload, not only publishable packed snapshots.
+   - Reload saved partial statuses and resume from the stored status.
+   - Keep the current packed-publish cache as a client/durable transport optimization only after it is clearly separate from proto/full status storage.
+
+6. **Measure again**
    - Run `pnpm perf:worldgen -- --radius 1`.
    - Run the smallest screenshot probe with lighting disabled.
    - Compare terrain and decoration chunk counts against the vanilla status graph.

@@ -72,6 +72,8 @@ import {
   type WorldHostMessage,
   type WorldOpenedMessage,
   type WorldPerformanceMessage,
+  type WorldgenPerformanceCounters,
+  type WorldgenPhasePerformanceCounters,
   type WorldProgressMessage,
 } from "../protocol/world-messages";
 import {
@@ -212,6 +214,18 @@ interface PendingLightBlockChange {
   readonly newBlockStateId: number;
 }
 
+interface MutableWorldgenPhasePerformanceCounters {
+  count: number;
+  totalMs: number;
+  maxMs: number;
+}
+
+interface MutableWorldgenPerformanceCounters {
+  readonly phases: Map<string, MutableWorldgenPhasePerformanceCounters>;
+  readonly counts: Map<string, number>;
+  maxPendingMessages: number;
+}
+
 function monotonicNowMs(): number {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
@@ -337,6 +351,11 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly dirtyChunksForPublication = new Set<string>();
   private readonly dirtyDurableChunks = new Set<string>();
   private readonly spawnedOriginalMobChunks = new Set<string>();
+  private readonly worldgenPerformance: MutableWorldgenPerformanceCounters = {
+    phases: new Map(),
+    counts: new Map(),
+    maxPendingMessages: 0,
+  };
   private opened = false;
   private chunkViewJobRevision = 0;
   private activeChunkViewJobRevision: number | undefined;
@@ -359,6 +378,7 @@ export class GeneratedWorldHost implements WorldHost {
       this.generator,
       options.blockStateById,
     );
+    this.level.setPhaseRecorder((phase, elapsedMs) => this.recordWorldgenDuration(phase, elapsedMs));
     this.lightingService = this.engineConfig.lightingMode === "none" ? undefined : options.lightingService;
     if (this.engineConfig.lightingMode !== "none" && this.lightingService === undefined) {
       throw new Error("GeneratedWorldHost requires a worker-backed LightingService when lightingMode is vanilla17");
@@ -467,7 +487,8 @@ export class GeneratedWorldHost implements WorldHost {
         this.isChunkInCurrentAuthorityView(chunkX, chunkZ)
         && !this.level.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS)
       ) {
-        this.level.generateChunkTerrain(chunkX, chunkZ);
+        this.recordWorldgenPhase("host.generate_chunk_terrain", () => this.level.generateChunkTerrain(chunkX, chunkZ));
+        this.incrementWorldgenCount("terrain_chunks_generated");
       }
     }
 
@@ -477,7 +498,8 @@ export class GeneratedWorldHost implements WorldHost {
         && this.level.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS)
         && !this.level.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)
       ) {
-        this.level.decorateChunk(chunkX, chunkZ);
+        this.recordWorldgenPhase("host.decorate_chunk", () => this.level.decorateChunk(chunkX, chunkZ));
+        this.incrementWorldgenCount("feature_chunks_decorated");
       }
     }
 
@@ -486,8 +508,12 @@ export class GeneratedWorldHost implements WorldHost {
 
     for (const chunk of update.removedChunks) {
       await this.saveDirtyChunkBeforeUnload(chunk);
-      await this.storageSession?.chunks.evictChunk(chunk.chunkX, chunk.chunkZ);
+      if (this.storageSession !== undefined) {
+        await this.recordWorldgenPhaseAsync("storage.evict_chunk", () => this.storageSession!.chunks.evictChunk(chunk.chunkX, chunk.chunkZ));
+        this.incrementWorldgenCount("storage_evicts");
+      }
       this.discardUnloadedChunkState(chunk.chunkX, chunk.chunkZ);
+      this.incrementWorldgenCount("chunks_removed");
     }
 
     for (const chunk of update.unloadedChunks) {
@@ -497,6 +523,7 @@ export class GeneratedWorldHost implements WorldHost {
         chunkX: chunk.chunkX,
         chunkZ: chunk.chunkZ,
       });
+      this.incrementWorldgenCount("chunk_unloads_sent");
     }
 
     await this.publishReadyChunksForCurrentView(this.chunkViewJobRevision, undefined, {
@@ -528,6 +555,7 @@ export class GeneratedWorldHost implements WorldHost {
     for (const chunk of update.removedChunks) {
       this.queueStorageSideEffect(this.queueEvictAfterDirtySave(chunk));
       this.discardUnloadedChunkState(chunk.chunkX, chunk.chunkZ);
+      this.incrementWorldgenCount("chunks_removed");
     }
 
     for (const chunk of update.unloadedChunks) {
@@ -537,6 +565,7 @@ export class GeneratedWorldHost implements WorldHost {
         chunkX: chunk.chunkX,
         chunkZ: chunk.chunkZ,
       });
+      this.incrementWorldgenCount("chunk_unloads_sent");
     }
 
     const chunkViewJobRevision = chunkViewChanged ? ++this.chunkViewJobRevision : this.chunkViewJobRevision;
@@ -545,6 +574,7 @@ export class GeneratedWorldHost implements WorldHost {
       return messages;
     }
 
+    this.incrementWorldgenCount("chunk_view_jobs_scheduled");
     const chunkViewJob = this.runChunkViewJobs(this.collectChunkViewJobs(update.missingChunks), chunkViewJobRevision);
     chunkViewJob.catch((error: unknown) => {
       this.enqueueWorldError(error);
@@ -646,15 +676,18 @@ export class GeneratedWorldHost implements WorldHost {
 
   private async preloadStoredChunk(chunkX: number, chunkZ: number): Promise<StoredChunkPreloadResult> {
     if (this.level.getChunk(chunkX, chunkZ, false) !== null) {
+      this.incrementWorldgenCount("storage_preload_already_loaded");
       return "already_loaded";
     }
 
     if (this.storageSession === undefined) {
+      this.incrementWorldgenCount("storage_preload_missing");
       return "missing";
     }
 
-    const snapshot = await this.storageSession.chunks.loadChunk(chunkX, chunkZ);
+    const snapshot = await this.recordWorldgenPhaseAsync("storage.preload", () => this.storageSession!.chunks.loadChunk(chunkX, chunkZ));
     if (snapshot === undefined) {
+      this.incrementWorldgenCount("storage_preload_missing");
       return "missing";
     }
 
@@ -666,6 +699,7 @@ export class GeneratedWorldHost implements WorldHost {
       ),
       true,
     );
+    this.incrementWorldgenCount("storage_preload_loaded");
     return "loaded";
   }
 
@@ -684,7 +718,10 @@ export class GeneratedWorldHost implements WorldHost {
       return;
     }
 
-    await this.storageSession.chunks.saveChunk(withoutPersistedLight(snapshot));
+    await this.recordWorldgenPhaseAsync("storage.cache_generated_chunk", () =>
+      this.storageSession!.chunks.saveChunk(withoutPersistedLight(snapshot))
+    );
+    this.incrementWorldgenCount("storage_cache_saves");
   }
 
   private async saveDirtyChunkSnapshot(key: string, snapshot: PackedChunkSnapshot): Promise<void> {
@@ -693,7 +730,10 @@ export class GeneratedWorldHost implements WorldHost {
       return;
     }
 
-    await this.storageSession.chunks.saveChunk(withoutPersistedLight(snapshot));
+    await this.recordWorldgenPhaseAsync("storage.save_dirty_chunk", () =>
+      this.storageSession!.chunks.saveChunk(withoutPersistedLight(snapshot))
+    );
+    this.incrementWorldgenCount("storage_dirty_saves");
     this.dirtyDurableChunks.delete(key);
   }
 
@@ -715,7 +755,10 @@ export class GeneratedWorldHost implements WorldHost {
       this.dirtyDurableChunks.delete(key);
     }
 
-    await this.storageSession?.chunks.evictChunk(chunk.chunkX, chunk.chunkZ);
+    if (this.storageSession !== undefined) {
+      await this.recordWorldgenPhaseAsync("storage.evict_chunk", () => this.storageSession!.chunks.evictChunk(chunk.chunkX, chunk.chunkZ));
+      this.incrementWorldgenCount("storage_evicts");
+    }
   }
 
   private async runChunkViewJobs(
@@ -723,8 +766,14 @@ export class GeneratedWorldHost implements WorldHost {
     chunkViewJobRevision: number,
   ): Promise<void> {
     this.activeChunkViewJobRevision = chunkViewJobRevision;
+    this.incrementWorldgenCount("chunk_view_jobs_started");
     try {
       await this.runChunkViewJobsInternal(missingChunks, chunkViewJobRevision);
+      if (this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+        this.incrementWorldgenCount("chunk_view_jobs_completed");
+      } else {
+        this.incrementWorldgenCount("chunk_view_jobs_cancelled");
+      }
     } finally {
       if (this.activeChunkViewJobRevision === chunkViewJobRevision) {
         this.activeChunkViewJobRevision = undefined;
@@ -800,7 +849,10 @@ export class GeneratedWorldHost implements WorldHost {
         this.isChunkInCurrentAuthorityView(job.chunkX, job.chunkZ)
         && !this.level.hasChunkStatus(job.chunkX, job.chunkZ, GeneratedChunkStatus.LIQUID_CARVERS)
       ) {
-        await this.level.generateChunkTerrainCooperative(job.chunkX, job.chunkZ, yieldStep);
+        await this.recordWorldgenPhaseAsync("host.generate_chunk_terrain", () =>
+          this.level.generateChunkTerrainCooperative(job.chunkX, job.chunkZ, yieldStep)
+        );
+        this.incrementWorldgenCount("terrain_chunks_generated");
       }
 
       terrainDone++;
@@ -826,7 +878,10 @@ export class GeneratedWorldHost implements WorldHost {
         && this.level.hasChunkStatus(job.chunkX, job.chunkZ, GeneratedChunkStatus.LIQUID_CARVERS)
         && !this.level.hasChunkStatus(job.chunkX, job.chunkZ, GeneratedChunkStatus.FEATURES)
       ) {
-        await this.level.decorateChunkCooperative(job.chunkX, job.chunkZ, yieldStep);
+        await this.recordWorldgenPhaseAsync("host.decorate_chunk", () =>
+          this.level.decorateChunkCooperative(job.chunkX, job.chunkZ, yieldStep)
+        );
+        this.incrementWorldgenCount("feature_chunks_decorated");
       }
 
       decorationDone++;
@@ -953,6 +1008,7 @@ export class GeneratedWorldHost implements WorldHost {
       };
     this.pendingMessages = this.pendingMessages.filter((message) => message.type !== "world_progress");
     this.pendingMessages.push(progress);
+    this.notePendingMessageBacklog();
   }
 
   private isChunkInCurrentPublishView(chunkX: number, chunkZ: number): boolean {
@@ -1061,6 +1117,7 @@ export class GeneratedWorldHost implements WorldHost {
 
     this.level.markChunkLighted(chunk.chunkX, chunk.chunkZ);
     this.level.markChunkFull(chunk.chunkX, chunk.chunkZ);
+    this.incrementWorldgenCount("chunks_marked_full_without_lighting");
   }
 
   private markChunkFullAfterAcceptedLight(chunkX: number, chunkZ: number): void {
@@ -1070,6 +1127,7 @@ export class GeneratedWorldHost implements WorldHost {
 
     this.level.markChunkLighted(chunkX, chunkZ);
     this.level.markChunkFull(chunkX, chunkZ);
+    this.incrementWorldgenCount("chunks_marked_full_after_light");
   }
 
   private async publishReadyChunksForCurrentView(
@@ -1316,7 +1374,7 @@ export class GeneratedWorldHost implements WorldHost {
         continue;
       }
 
-      const snapshot = this.buildPackedChunkSnapshot(chunk);
+      const snapshot = this.recordWorldgenPhase("snapshot.build_pack_dirty", () => this.buildPackedChunkSnapshot(chunk));
       await this.writeChunkSnapshotByPolicy(snapshot);
       if (!this.isChunkInCurrentPublishView(chunkX, chunkZ) || !this.publishedChunkSnapshots.has(key)) {
         this.dirtyChunksForPublication.delete(key);
@@ -1327,6 +1385,8 @@ export class GeneratedWorldHost implements WorldHost {
         type: "chunk_snapshot",
         snapshot,
       });
+      this.incrementWorldgenCount("dirty_chunk_snapshots_published");
+      this.notePendingMessageBacklog();
       this.dirtyChunksForPublication.delete(key);
     }
   }
@@ -1373,13 +1433,15 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     this.ensureOriginalMobsForChunk(chunk);
-    const snapshot = this.buildPackedChunkSnapshot(chunk);
+    const snapshot = this.recordWorldgenPhase("snapshot.build_pack_for_publish", () => this.buildPackedChunkSnapshot(chunk));
     const messages = targetMessages ?? this.pendingMessages;
     messages.push({
       type: "chunk_snapshot",
       snapshot,
     });
     this.markChunkSnapshotPublished(chunk.chunkX, chunk.chunkZ);
+    this.incrementWorldgenCount("chunk_snapshots_published");
+    this.notePendingMessageBacklog();
     this.publishEntitySnapshotsForChunk(chunk.chunkX, chunk.chunkZ, messages);
     const writeTask = this.writeChunkSnapshotByPolicy(snapshot);
     if (awaitStorage) {
@@ -1391,10 +1453,11 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private buildPackedChunkSnapshot(chunk: GeneratedLevelChunk): PackedChunkSnapshot {
+    this.incrementWorldgenCount("chunk_snapshots_built");
     if (this.liquidSimulationEnabled) {
       this.hydrateLiquidTicksFromChunk(chunk);
     }
-    const snapshot = this.withPendingLiquidTicks(
+    const snapshot = this.recordWorldgenPhase("snapshot.build_logical", () => this.withPendingLiquidTicks(
       buildChunkSnapshot(
         chunk,
         new ChunkBiomeContainer(
@@ -1408,14 +1471,14 @@ export class GeneratedWorldHost implements WorldHost {
         this.level.getHeight(),
       ),
       chunk,
-    );
+    ));
     const light = this.getAcceptedCurrentChunkLight(chunk.chunkX, chunk.chunkZ);
 
-    return packChunkSnapshot(
+    return this.recordWorldgenPhase("snapshot.pack", () => packChunkSnapshot(
       light === undefined ? snapshot : { ...snapshot, light },
       this.options.blockStateIds,
       this.resolveBlockState,
-    );
+    ));
   }
 
   private ensureOriginalMobsForChunk(chunk: GeneratedLevelChunk): void {
@@ -1453,6 +1516,10 @@ export class GeneratedWorldHost implements WorldHost {
       .map((entity) => this.createEntitySnapshotMessage(entity));
 
     messages.push(...snapshots);
+    if (snapshots.length > 0) {
+      this.incrementWorldgenCount("entity_snapshots_published", snapshots.length);
+      this.notePendingMessageBacklog();
+    }
   }
 
   private createEntitySnapshotMessage(entity: GeneratedMobEntity): EntitySnapshotMessage {
@@ -2051,14 +2118,17 @@ export class GeneratedWorldHost implements WorldHost {
   private enqueuePlayerStateMessage(): void {
     this.pendingMessages = this.pendingMessages.filter((message) => message.type !== "player_state");
     this.pendingMessages.push(this.createPlayerStateMessage());
+    this.notePendingMessageBacklog();
   }
 
   private enqueueWorldError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     this.pendingMessages.push({ type: "world_error", message });
+    this.notePendingMessageBacklog();
   }
 
   private drainPendingMessages(maxMessages: number | undefined): readonly WorldHostMessage[] {
+    this.notePendingMessageBacklog();
     const drained = drainWorldHostMessages(this.pendingMessages, maxMessages);
     this.pendingMessages = drained.remaining;
     return [...drained.messages, this.createWorldPerformanceMessage()];
@@ -2069,7 +2139,72 @@ export class GeneratedWorldHost implements WorldHost {
       type: "world_perf",
       performance: {
         lighting: this.lightingService?.getPerformanceCounters?.(),
+        worldgen: this.createWorldgenPerformanceCounters(),
       },
+    };
+  }
+
+  private incrementWorldgenCount(name: string, amount = 1): void {
+    this.worldgenPerformance.counts.set(name, (this.worldgenPerformance.counts.get(name) ?? 0) + amount);
+  }
+
+  private recordWorldgenDuration(phase: string, elapsedMs: number): void {
+    const existing = this.worldgenPerformance.phases.get(phase);
+    if (existing === undefined) {
+      this.worldgenPerformance.phases.set(phase, {
+        count: 1,
+        totalMs: elapsedMs,
+        maxMs: elapsedMs,
+      });
+      return;
+    }
+
+    existing.count++;
+    existing.totalMs += elapsedMs;
+    existing.maxMs = Math.max(existing.maxMs, elapsedMs);
+  }
+
+  private recordWorldgenPhase<T>(phase: string, run: () => T): T {
+    const startedAtMs = monotonicNowMs();
+    try {
+      return run();
+    } finally {
+      this.recordWorldgenDuration(phase, monotonicNowMs() - startedAtMs);
+    }
+  }
+
+  private async recordWorldgenPhaseAsync<T>(phase: string, run: () => Promise<T>): Promise<T> {
+    const startedAtMs = monotonicNowMs();
+    try {
+      return await run();
+    } finally {
+      this.recordWorldgenDuration(phase, monotonicNowMs() - startedAtMs);
+    }
+  }
+
+  private notePendingMessageBacklog(): void {
+    this.worldgenPerformance.maxPendingMessages = Math.max(
+      this.worldgenPerformance.maxPendingMessages,
+      this.pendingMessages.length,
+    );
+  }
+
+  private createWorldgenPerformanceCounters(): WorldgenPerformanceCounters {
+    const phases: Record<string, WorldgenPhasePerformanceCounters> = {};
+    for (const [name, counters] of this.worldgenPerformance.phases) {
+      phases[name] = {
+        count: counters.count,
+        totalMs: counters.totalMs,
+        maxMs: counters.maxMs,
+      };
+    }
+
+    return {
+      phases,
+      counts: Object.fromEntries(this.worldgenPerformance.counts),
+      maxPendingMessages: this.worldgenPerformance.maxPendingMessages,
+      currentPendingMessages: this.pendingMessages.length,
+      ...(this.activeChunkViewJobRevision === undefined ? {} : { activeChunkViewJobRevision: this.activeChunkViewJobRevision }),
     };
   }
 }
