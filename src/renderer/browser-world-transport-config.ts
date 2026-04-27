@@ -49,11 +49,14 @@ export function readBrowserWorldTransportSettings(
 
   const worldAuthorityParam = url.searchParams.get("worldAuthority");
   const worldTransport = url.searchParams.get("worldTransport");
+  const serverParam = url.searchParams.get("server");
   if (worldAuthorityParam !== null) {
     if (worldAuthorityParam !== "local" && worldAuthorityParam !== "dedicated") {
       throw new Error(`Unsupported worldAuthority=${worldAuthorityParam}`);
     }
     worldAuthority = worldAuthorityParam;
+  } else if (serverParam !== null) {
+    worldAuthority = "dedicated";
   } else if (worldTransport === "remote") {
     worldAuthority = "dedicated";
   } else if (worldTransport === "worker") {
@@ -62,7 +65,8 @@ export function readBrowserWorldTransportSettings(
 
   const dedicatedSocketUrlParam = url.searchParams.get("dedicatedSocketUrl")
     ?? url.searchParams.get("dedicatedHostUrl")
-    ?? url.searchParams.get("worldHostUrl");
+    ?? url.searchParams.get("worldHostUrl")
+    ?? serverParam;
   if (dedicatedSocketUrlParam !== null) {
     dedicatedSocketUrl = sanitizeDedicatedWorldSocketInput(dedicatedSocketUrlParam);
   }
@@ -76,6 +80,10 @@ export function readBrowserWorldTransportSettings(
     worldAuthority,
     dedicatedSocketUrl,
   };
+}
+
+export function hasDedicatedServerJoinParam(url: URL): boolean {
+  return url.searchParams.has("server");
 }
 
 export function readStoredBrowserWorldTransportSettings(

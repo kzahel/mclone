@@ -77,9 +77,12 @@ Current query shape:
 Supported dedicated query aliases:
 
 ```text
+/?server=https://mclone-host.graehlarts.com
 /?mode=debug&worldAuthority=dedicated&dedicatedSocketUrl=ws://127.0.0.1:4173/api/world/socket&netTransport=websocket
 /?mode=debug&startWorld=1&worldAuthority=dedicated&dedicatedSocketUrl=127.0.0.1:4173&netTransport=websocket
 ```
+
+The short `server=` form is the mobile/shareable join URL. It implies `worldAuthority=dedicated`, defaults `netTransport` to WebSocket, maps `https://` to `wss://`, appends `/api/world/socket` when no socket path is provided, and auto-starts the world unless `startWorld=0` or `autoStartWorld=0` is explicitly present.
 
 The old `worldTransport=remote` and `worldHostUrl` names keep working until all tests, docs, and saved localStorage state are migrated. `dedicatedHostUrl=http://...` is accepted as a compatibility spelling, but the user-facing dedicated gameplay transport is WebSocket. HTTP endpoints on the dedicated process are for health, static assets, and compatibility/testing surfaces.
 

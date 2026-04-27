@@ -27,6 +27,10 @@ import {
   writeStoredBrowserWorldTransportSettings,
 } from "./browser-world-transport-config";
 import {
+  readAutoStartWorldEnabled,
+  readDebugLaunchEnabled,
+} from "./browser-world-launch-config";
+import {
   getGeneratedWorldSmokeScenarioById,
 } from "./generated-world-smoke-scenario";
 import {
@@ -206,28 +210,6 @@ function readPreserveInitialCamera(url: URL): boolean {
 function readGuiProbeEnabled(url: URL): boolean {
   const value = url.searchParams.get("guiProbe");
   return value === "1" || value === "true";
-}
-
-function readDebugLaunchEnabled(url: URL): boolean {
-  const mode = url.searchParams.get("mode");
-  if (mode === "debug") {
-    return true;
-  }
-  if (mode === "title") {
-    return false;
-  }
-  return false;
-}
-
-function readAutoStartWorldEnabled(url: URL): boolean {
-  const value = url.searchParams.get("autoStartWorld") ?? url.searchParams.get("startWorld");
-  if (value === "1" || value === "true") {
-    return true;
-  }
-  if (value === "0" || value === "false") {
-    return false;
-  }
-  return readDebugLaunchEnabled(url);
 }
 
 function readGpuTitleEnabled(url: URL): boolean {

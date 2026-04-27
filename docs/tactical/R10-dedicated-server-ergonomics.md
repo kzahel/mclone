@@ -58,6 +58,7 @@ Current supported shape:
 Add aliases:
 
 ```text
+/?server=https://mclone-host.graehlarts.com
 /?mode=debug&worldAuthority=dedicated&dedicatedSocketUrl=ws://127.0.0.1:4173/api/world/socket&netTransport=websocket
 /?mode=debug&startWorld=1&worldAuthority=dedicated&dedicatedSocketUrl=127.0.0.1:4173&netTransport=websocket
 /?mode=debug&worldAuthority=local
@@ -66,6 +67,7 @@ Add aliases:
 Rules:
 
 - `worldAuthority` is authoritative when present; otherwise the old `worldTransport=worker|remote` params remain supported.
+- `server=<base URL>` is the short mobile/shareable join form. It implies dedicated authority and auto-start unless `startWorld=0` or `autoStartWorld=0` is explicit.
 - `dedicatedSocketUrl` is the preferred dedicated address param. It accepts a full `ws://` or `wss://` URL, an `http://` or `https://` compatibility URL that is converted to WebSocket, or a `host:port` shorthand that defaults to `/api/world/socket`.
 - `dedicatedHostUrl` remains a compatibility spelling but should not be used in new docs or UI copy.
 - `netTransport=websocket` is the only accepted dedicated transport for this slice.
@@ -130,6 +132,7 @@ Minimum:
 pnpm test -- test/runtime/dedicated-server-startup.test.ts
 pnpm test -- test/runtime/remote-world-transport.test.ts
 pnpm test -- test/renderer/browser-world-transport-config.test.ts
+pnpm test -- test/renderer/browser-world-launch-config.test.ts
 pnpm test -- test/client/gui/gui-foundation.test.ts
 pnpm typecheck
 ```

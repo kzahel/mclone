@@ -32,6 +32,17 @@ describe("browser world transport config", () => {
     });
   });
 
+  test("treats server as a dedicated server base URL alias", () => {
+    expect(readBrowserWorldTransportSettings(url("/?server=https://mclone-host.graehlarts.com"))).toEqual({
+      worldAuthority: "dedicated",
+      dedicatedSocketUrl: "https://mclone-host.graehlarts.com",
+    });
+    expect(readBrowserWorldTransportConfig(url("/?server=https://mclone-host.graehlarts.com"))).toEqual({
+      worldTransport: "remote",
+      remoteWorldHostUrl: "wss://mclone-host.graehlarts.com/api/world/socket",
+    });
+  });
+
   test("defaults dedicated authority to the local dedicated socket", () => {
     expect(readBrowserWorldTransportConfig(url("/?worldAuthority=dedicated"))).toEqual({
       worldTransport: "remote",
