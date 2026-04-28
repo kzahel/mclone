@@ -7,9 +7,12 @@ import {
   DEFAULT_COW_TEXTURE,
   DEFAULT_PIG_TEXTURE,
   DEFAULT_PLAYER_SKIN,
+  DEFAULT_SHEEP_FUR_TEXTURE,
+  DEFAULT_SHEEP_TEXTURE,
   SnapshotRenderableCow,
   SnapshotRenderablePig,
   SnapshotRenderablePlayer,
+  SnapshotRenderableSheep,
   createRenderableEntity,
 } from "../../../src/renderer/entity/renderable-entity";
 import { MultiBufferSource } from "../../../src/renderer/multi-buffer-source";
@@ -129,6 +132,43 @@ function pigState(overrides: Partial<ClientEntityPresentationState> = {}): Clien
   };
 }
 
+function sheepState(overrides: Partial<ClientEntityPresentationState> = {}): ClientEntityPresentationState {
+  const authoritative = {
+    id: 10,
+    uuid: "00000000-0000-0000-0000-000000000010",
+    typeId: "minecraft:sheep",
+    category: "creature" as const,
+    chunkX: 0,
+    chunkZ: 0,
+    position: { x: 8, y: 65, z: 8 },
+    rotation: { yaw: 45, pitch: 0 },
+    width: 0.9,
+    height: 1.3,
+    onGround: true,
+    age: 0,
+    data: { Color: 12 },
+  };
+  return {
+    entityId: authoritative.id,
+    uuid: authoritative.uuid,
+    typeId: authoritative.typeId,
+    category: authoritative.category,
+    chunkX: authoritative.chunkX,
+    chunkZ: authoritative.chunkZ,
+    width: authoritative.width,
+    height: authoritative.height,
+    onGround: authoritative.onGround,
+    age: authoritative.age,
+    data: authoritative.data,
+    interpolatedPosition: authoritative.position,
+    interpolatedRotation: authoritative.rotation,
+    interpolationAlpha: 1,
+    authoritative,
+    aiAuthority: "host",
+    ...overrides,
+  };
+}
+
 class RecordingBufferSource extends MultiBufferSource.BufferSource {
   public readonly requested: RenderType[] = [];
 
@@ -168,8 +208,8 @@ describe("Entity renderer", () => {
 
     expect(createRenderableEntity({
       ...state,
-      typeId: "minecraft:sheep",
-      authoritative: { ...state.authoritative, typeId: "minecraft:sheep" },
+      typeId: "minecraft:chicken",
+      authoritative: { ...state.authoritative, typeId: "minecraft:chicken" },
     })).toBeUndefined();
 
     const cow = createRenderableEntity(cowState());
@@ -177,6 +217,10 @@ describe("Entity renderer", () => {
 
     const pig = createRenderableEntity(pigState());
     expect(pig).toBeInstanceOf(SnapshotRenderablePig);
+
+    const sheep = createRenderableEntity(sheepState());
+    expect(sheep).toBeInstanceOf(SnapshotRenderableSheep);
+    expect((sheep as SnapshotRenderableSheep).getColor()).toBe(12);
   });
 
   test("dispatcher renders a neutral remote player through entityTranslucent NEW_ENTITY batches", () => {
@@ -292,10 +336,45 @@ describe("Entity renderer", () => {
     expect(buffer.length).toBe(drawState.vertexBufferSize());
   });
 
+  test("dispatcher renders a neutral sheep with a colored fur layer", () => {
+    const dispatcher = new EntityRenderDispatcher();
+    const entity = new SnapshotRenderableSheep(sheepState());
+    const builder = new BufferBuilder(256);
+    const bufferSource = new RecordingBufferSource(builder);
+
+    dispatcher.renderEntity(
+      entity,
+      new Vec3(8, 65, 8),
+      new PoseStack(),
+      bufferSource,
+      LightTexture.pack(15, 15),
+      0,
+    );
+    bufferSource.endBatch();
+
+    expect(new Set(bufferSource.requested)).toEqual(new Set([
+      RenderType.entityCutoutNoCull(DEFAULT_SHEEP_TEXTURE),
+      RenderType.entityCutoutNoCull(DEFAULT_SHEEP_FUR_TEXTURE),
+    ]));
+    const base = bufferSource.pop();
+    expect(base.drawState.format()).toBe(DefaultVertexFormat.NEW_ENTITY);
+    expect(base.drawState.vertexCount()).toBe(144);
+    expect(base.drawState.indexCount()).toBe(216);
+    expect(base.buffer.length).toBe(base.drawState.vertexBufferSize());
+
+    const fur = bufferSource.pop();
+    expect(fur.drawState.format()).toBe(DefaultVertexFormat.NEW_ENTITY);
+    expect(fur.drawState.vertexCount()).toBe(144);
+    expect(fur.drawState.indexCount()).toBe(216);
+    expect(fur.buffer.length).toBe(fur.drawState.vertexBufferSize());
+  });
+
   test("entity texture paths resolve vanilla full texture locations directly", () => {
     expect(resolveEntityTexturePath(DEFAULT_PLAYER_SKIN)).toBe("assets/minecraft/textures/entity/steve.png");
     expect(resolveEntityTexturePath(DEFAULT_COW_TEXTURE)).toBe("assets/minecraft/textures/entity/cow/cow.png");
     expect(resolveEntityTexturePath(DEFAULT_PIG_TEXTURE)).toBe("assets/minecraft/textures/entity/pig/pig.png");
+    expect(resolveEntityTexturePath(DEFAULT_SHEEP_TEXTURE)).toBe("assets/minecraft/textures/entity/sheep/sheep.png");
+    expect(resolveEntityTexturePath(DEFAULT_SHEEP_FUR_TEXTURE)).toBe("assets/minecraft/textures/entity/sheep/sheep_fur.png");
     expect(resolveEntityTexturePath("minecraft:entity/custom_remote")).toBe("assets/minecraft/textures/entity/custom_remote.png");
   });
 });

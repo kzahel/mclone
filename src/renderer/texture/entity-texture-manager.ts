@@ -1,6 +1,12 @@
 import { ResourceLocation } from "../../core/resource-location";
 import type { AssetPack } from "../assets/asset-pack";
-import { DEFAULT_COW_TEXTURE, DEFAULT_PIG_TEXTURE, DEFAULT_PLAYER_SKIN } from "../entity/renderable-entity";
+import {
+  DEFAULT_COW_TEXTURE,
+  DEFAULT_PIG_TEXTURE,
+  DEFAULT_PLAYER_SKIN,
+  DEFAULT_SHEEP_FUR_TEXTURE,
+  DEFAULT_SHEEP_TEXTURE,
+} from "../entity/renderable-entity";
 import { NativeImage } from "./native-image";
 import { decodePngNativeImage } from "./png-native-image-decoder";
 
@@ -55,7 +61,13 @@ export class EntityTextureManager {
   public static async create(
     device: GPUDevice,
     assetPack: AssetPack,
-    initialLocations: readonly TextureLocation[] = [DEFAULT_PLAYER_SKIN, DEFAULT_COW_TEXTURE, DEFAULT_PIG_TEXTURE],
+    initialLocations: readonly TextureLocation[] = [
+      DEFAULT_PLAYER_SKIN,
+      DEFAULT_COW_TEXTURE,
+      DEFAULT_PIG_TEXTURE,
+      DEFAULT_SHEEP_TEXTURE,
+      DEFAULT_SHEEP_FUR_TEXTURE,
+    ],
   ): Promise<EntityTextureManager> {
     const manager = EntityTextureManager.createFallback(device);
     for (const location of initialLocations) {

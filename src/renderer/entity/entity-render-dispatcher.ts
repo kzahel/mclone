@@ -1,4 +1,4 @@
-import { COW_ENTITY_TYPE_ID, PIG_ENTITY_TYPE_ID, PLAYER_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
+import { COW_ENTITY_TYPE_ID, PIG_ENTITY_TYPE_ID, PLAYER_ENTITY_TYPE_ID, SHEEP_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
 import { Vec3 } from "../../world/phys/vec3";
 import { LightTexture } from "../light-texture";
 import type { MultiBufferSource } from "../multi-buffer-source";
@@ -9,6 +9,7 @@ import type { EntityRenderer } from "./entity-renderer";
 import { CowRenderer } from "./cow-renderer";
 import { PigRenderer } from "./pig-renderer";
 import { PlayerRenderer } from "./player-renderer";
+import { SheepRenderer } from "./sheep-renderer";
 import type { RenderableEntity, RenderablePlayer, RenderableTexturedMob } from "./renderable-entity";
 
 export class EntityRenderDispatcher {
@@ -20,6 +21,7 @@ export class EntityRenderDispatcher {
     this.renderers = new Map([
       [COW_ENTITY_TYPE_ID, new CowRenderer(context) as EntityRenderer<RenderableEntity>],
       [PIG_ENTITY_TYPE_ID, new PigRenderer(context) as EntityRenderer<RenderableEntity>],
+      [SHEEP_ENTITY_TYPE_ID, new SheepRenderer(context) as EntityRenderer<RenderableEntity>],
     ]);
     this.playerRenderers = new Map([
       ["default", new PlayerRenderer(context, false)],

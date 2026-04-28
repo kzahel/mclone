@@ -1,10 +1,12 @@
 import { ResourceLocation } from "../../core/resource-location";
 import type { ClientEntityPresentationState } from "../../runtime/client/entity-interpolation-service";
-import { COW_ENTITY_TYPE_ID, PIG_ENTITY_TYPE_ID, PLAYER_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
+import { COW_ENTITY_TYPE_ID, PIG_ENTITY_TYPE_ID, PLAYER_ENTITY_TYPE_ID, SHEEP_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
 
 export const DEFAULT_PLAYER_SKIN = new ResourceLocation("minecraft", "textures/entity/steve.png");
 export const DEFAULT_COW_TEXTURE = new ResourceLocation("minecraft", "textures/entity/cow/cow.png");
 export const DEFAULT_PIG_TEXTURE = new ResourceLocation("minecraft", "textures/entity/pig/pig.png");
+export const DEFAULT_SHEEP_TEXTURE = new ResourceLocation("minecraft", "textures/entity/sheep/sheep.png");
+export const DEFAULT_SHEEP_FUR_TEXTURE = new ResourceLocation("minecraft", "textures/entity/sheep/sheep_fur.png");
 
 export type PlayerSkinModel = "default" | "slim";
 
@@ -46,6 +48,13 @@ export interface RenderableTexturedMob extends RenderableEntity {
 export interface RenderableCow extends RenderableTexturedMob {}
 
 export interface RenderablePig extends RenderableTexturedMob {}
+
+export interface RenderableSheep extends RenderableTexturedMob {
+  getColor(): number;
+  isSheared(): boolean;
+  getHeadEatPositionScale(partialTick: number): number;
+  getHeadEatAngleScale(partialTick: number): number;
+}
 
 export class SnapshotRenderablePlayer implements RenderablePlayer {
   public readonly entityId: number;
@@ -263,6 +272,33 @@ export class SnapshotRenderablePig extends SnapshotRenderableTexturedMob impleme
   }
 }
 
+export class SnapshotRenderableSheep extends SnapshotRenderableTexturedMob implements RenderableSheep {
+  private readonly color: number;
+  private readonly sheared: boolean;
+
+  public constructor(state: ClientEntityPresentationState) {
+    super(state, DEFAULT_SHEEP_TEXTURE);
+    this.color = readSheepColor(state.data?.Color);
+    this.sheared = state.data?.Sheared === true;
+  }
+
+  public getColor(): number {
+    return this.color;
+  }
+
+  public isSheared(): boolean {
+    return this.sheared;
+  }
+
+  public getHeadEatPositionScale(_partialTick: number): number {
+    return 0.0;
+  }
+
+  public getHeadEatAngleScale(_partialTick: number): number {
+    return this.getXRot() * (Math.PI / 180.0);
+  }
+}
+
 export function createRenderableEntity(state: ClientEntityPresentationState): RenderableEntity | undefined {
   if (state.typeId === PLAYER_ENTITY_TYPE_ID) {
     return new SnapshotRenderablePlayer(state);
@@ -274,6 +310,10 @@ export function createRenderableEntity(state: ClientEntityPresentationState): Re
 
   if (state.typeId === PIG_ENTITY_TYPE_ID) {
     return new SnapshotRenderablePig(state);
+  }
+
+  if (state.typeId === SHEEP_ENTITY_TYPE_ID) {
+    return new SnapshotRenderableSheep(state);
   }
 
   return undefined;
@@ -300,4 +340,8 @@ function readSkinTextureLocation(value: unknown): ResourceLocation {
   } catch {
     return DEFAULT_PLAYER_SKIN;
   }
+}
+
+function readSheepColor(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 15 ? value : 0;
 }

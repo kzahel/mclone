@@ -63,9 +63,11 @@ describe("demo world generators", () => {
       nextEntityUuid: (id) => `mclone:test/small-island-mob/${id.toString()}`,
     });
 
-    expect(spawned).toHaveLength(8);
+    expect(spawned).toHaveLength(12);
     expect(spawned.filter((entity) => entity.typeId === "minecraft:cow")).toHaveLength(4);
     expect(spawned.filter((entity) => entity.typeId === "minecraft:pig")).toHaveLength(4);
+    expect(spawned.filter((entity) => entity.typeId === "minecraft:sheep")).toHaveLength(4);
+    expect(spawned.filter((entity) => entity.typeId === "minecraft:sheep").every((entity) => typeof entity.data.Color === "number")).toBe(true);
     expect(spawned.every((entity) => entity.onGround)).toBe(true);
     expect(spawned.map((entity) => [entity.position.x, entity.position.z])).toEqual([
       [6.5, 6.5],
@@ -76,6 +78,10 @@ describe("demo world generators", () => {
       [4.5, 13.5],
       [13.5, 4.5],
       [14.5, 9.5],
+      [5.5, 3.5],
+      [9.5, 3.5],
+      [3.5, 5.5],
+      [11.5, 14.5],
     ]);
     expect(spawned.every((entity) => entity.position.y > 62)).toBe(true);
 

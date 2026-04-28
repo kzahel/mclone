@@ -160,4 +160,28 @@ describe("passive mob AI foundation", () => {
     expect(mob.position.z).toBe(0.5);
     expect(mob.isOnGround()).toBe(true);
   });
+
+  test("generated sheep use vanilla passive attributes and shared ground navigation", () => {
+    const sheep = new GeneratedMobEntity({
+      id: 4,
+      uuid: "mclone:test/sheep-ground-navigation",
+      entityType: EntityTypes.SHEEP,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+    });
+    sheep.setAiLevel(new FlatMobAiLevel());
+
+    expect(sheep.getAttributeValue(MobAttribute.MAX_HEALTH)).toBe(8.0);
+    expect(sheep.getAttributeValue(MobAttribute.MOVEMENT_SPEED)).toBe(0.23);
+    expect(typeof sheep.data.Color).toBe("number");
+    expect(sheep.getNavigation().moveTo(4.5, 64, 0.5, 1.0)).toBe(true);
+
+    sheep.tickServerAi({ resetNoActionTime: true });
+
+    expect(sheep.position.x).not.toBe(0.5);
+    expect(sheep.position.y).toBe(64);
+  });
 });

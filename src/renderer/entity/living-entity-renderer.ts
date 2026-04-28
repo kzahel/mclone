@@ -45,9 +45,22 @@ export abstract class LivingEntityRenderer<T extends RenderableEntity, M extends
       this.model.renderToBuffer(matrixStack, vertexConsumer, packedLight, overlay, 1.0, 1.0, 1.0, 1.0);
     }
 
+    this.renderLayers(entity, entityYaw, partialTicks, matrixStack, buffer, packedLight, ageInTicks, netHeadYaw, headPitch);
     matrixStack.popPose();
     super.render(entity, entityYaw, partialTicks, matrixStack, buffer, packedLight);
   }
+
+  protected renderLayers(
+    _entity: T,
+    _entityYaw: number,
+    _partialTicks: number,
+    _matrixStack: PoseStack,
+    _buffer: MultiBufferSource,
+    _packedLight: number,
+    _ageInTicks: number,
+    _netHeadYaw: number,
+    _headPitch: number,
+  ): void {}
 
   protected getRenderType(entity: T, bodyVisible: boolean, translucent: boolean, glowing: boolean): RenderType | undefined {
     const textureLocation = this.getTextureLocation(entity);

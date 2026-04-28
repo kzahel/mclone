@@ -19,6 +19,8 @@ export class ModelLayers {
   public static readonly PIG = register("pig");
   public static readonly PLAYER = register("player");
   public static readonly PLAYER_SLIM = register("player_slim");
+  public static readonly SHEEP = register("sheep");
+  public static readonly SHEEP_FUR = register("sheep", "fur");
 
   public static getKnownLocations(): readonly ModelLayerLocation[] {
     return [...ALL_MODELS.values()];

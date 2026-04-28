@@ -56,9 +56,9 @@ This document is a reference for future creature work. It is not a tactical slic
 
 `CreatureMovement3` replaced live generated-mob direct steering with `GroundPathNavigation` path following. Generated mobs now create vanilla-shaped paths, hand waypoints through `MoveControl`, and apply host-authoritative collision-checked movement steps without Y drift.
 
-`Creatures6` has started the farm-animal island expansion with pigs: vanilla-shaped pig model/renderer/texture hydration, pig max-health and movement-speed attributes, pig `WaterAvoidingRandomStrollGoal` through the shared generated-mob stack, and small-island starter pigs beside the cows.
+`Creatures6` has started the farm-animal island expansion with pigs and sheep: vanilla-shaped pig/sheep model/renderer/texture hydration, sheep wool color hydration and fur-layer tinting, pig/sheep movement attributes, pig/sheep `WaterAvoidingRandomStrollGoal` through the shared generated-mob stack, and small-island starter pigs/sheep beside the cows.
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics, persistence adapters beyond the in-memory runtime path, sheep/chicken renderers and island starters, and cow/pig gameplay interactions.
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics, persistence adapters beyond the in-memory runtime path, chicken renderer and island starters, and cow/pig/sheep gameplay interactions.
 
 ## Reference Source Map
 

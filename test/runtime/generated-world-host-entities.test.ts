@@ -240,12 +240,16 @@ describe("GeneratedWorldHost entity publication", () => {
 
     const farmAnimals = messages
       .filter((message): message is EntitySnapshotMessage => message.type === "entity_snapshot"
-        && (message.entity.typeId === "minecraft:cow" || message.entity.typeId === "minecraft:pig"))
+        && (message.entity.typeId === "minecraft:cow" || message.entity.typeId === "minecraft:pig" || message.entity.typeId === "minecraft:sheep"))
       .sort((left, right) => left.entity.id - right.entity.id);
 
-    expect(farmAnimals).toHaveLength(8);
+    expect(farmAnimals).toHaveLength(12);
     expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:cow")).toHaveLength(4);
     expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:pig")).toHaveLength(4);
+    expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:sheep")).toHaveLength(4);
+    expect(farmAnimals
+      .filter((message) => message.entity.typeId === "minecraft:sheep")
+      .every((message) => typeof message.entity.data?.Color === "number")).toBe(true);
     expect(farmAnimals.map((message) => [message.entity.position.x, message.entity.position.z])).toEqual([
       [6.5, 6.5],
       [10.5, 7.5],
@@ -255,6 +259,10 @@ describe("GeneratedWorldHost entity publication", () => {
       [4.5, 13.5],
       [13.5, 4.5],
       [14.5, 9.5],
+      [5.5, 3.5],
+      [9.5, 3.5],
+      [3.5, 5.5],
+      [11.5, 14.5],
     ]);
     expect(farmAnimals.every((message) => message.entity.chunkX === 0 && message.entity.chunkZ === 0)).toBe(true);
   });

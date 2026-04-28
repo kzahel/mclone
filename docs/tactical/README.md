@@ -148,7 +148,7 @@ Entities are authoritative simulation data. Use [`../entities.md`](../entities.m
 | [`CreatureMovement1-path-node-foundation.md`](CreatureMovement1-path-node-foundation.md) | `BlockPathTypes`, `Node`, `Target`, `Path`, `BinaryHeap` | unit | **done** - data-only vanilla path model is landed for the next evaluator/search slice |
 | [`CreatureMovement2-walk-node-evaluator-and-pathfinder.md`](CreatureMovement2-walk-node-evaluator-and-pathfinder.md) | `NodeEvaluator`, `WalkNodeEvaluator`, `PathFinder`, `PathNavigationRegion` | unit | **done** - vanilla weighted A*-style ground path search now runs over shared block collision/path types in synthetic worlds |
 | [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md) | replace temporary direct steering with `GroundPathNavigation` path following | runtime + unit | **done** - generated passive mobs now consume vanilla-shaped paths and collision-checked movement steps |
-| [`Creatures6-friendly-island-mobs-and-basic-behaviors.md`](Creatures6-friendly-island-mobs-and-basic-behaviors.md) | starter island cows, pigs, sheep, chickens with shared movement and basic passive goals | runtime + visual | in progress - pig render/spawn/shared navigation slice landed; sheep and chicken remain |
+| [`Creatures6-friendly-island-mobs-and-basic-behaviors.md`](Creatures6-friendly-island-mobs-and-basic-behaviors.md) | starter island cows, pigs, sheep, chickens with shared movement and basic passive goals | runtime + visual | in progress - pig and sheep render/spawn/shared navigation slices landed; chicken remains |
 
 ## Client Runtime / Integrated Server Arc
 

@@ -55,8 +55,8 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     this.moveControl = new MoveControl(this);
     this.age = options.age ?? 0;
     this.onGround = options.onGround ?? false;
-    this.data = options.data ?? {};
     this.random = new WorldgenRandom(options.randomSeed ?? generatedEntityRandomSeed(options.id, options.uuid));
+    this.data = options.data ?? this.entityType.createDefaultData(this.random);
     if (this.entityType.category === MobCategory.CREATURE) {
       this.setPathfindingMalus(BlockPathTypes.DANGER_FIRE, 16.0);
       this.setPathfindingMalus(BlockPathTypes.DAMAGE_FIRE, -1.0);
@@ -229,6 +229,10 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     }
     if (this.entityType.id === EntityTypes.PIG.id) {
       this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 1.0));
+      return;
+    }
+    if (this.entityType.id === EntityTypes.SHEEP.id) {
+      this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 1.0));
     }
   }
 
@@ -331,6 +335,10 @@ export class EntityType {
     return this.attributes[attribute];
   }
 
+  public createDefaultData(random: { nextInt(bound: number): number }): Readonly<Record<string, number | boolean | string>> {
+    return this.defaultDataFactory?.(random) ?? {};
+  }
+
   public createGeneratedMob(
     id: number,
     uuid: string,
@@ -350,7 +358,7 @@ export class EntityType {
       z,
       yaw,
       pitch,
-      data: this.defaultDataFactory?.(random),
+      data: this.createDefaultData(random),
     });
   }
 
@@ -382,7 +390,10 @@ function creature(id: string, width: number, height: number, options: Omit<Entit
 }
 
 export const EntityTypes = {
-  SHEEP: creature("minecraft:sheep", 0.9, 1.3, { defaultData: (random) => ({ Color: sheepColor(random) }) }),
+  SHEEP: creature("minecraft:sheep", 0.9, 1.3, {
+    attributes: { [MobAttribute.MAX_HEALTH]: 8.0, [MobAttribute.MOVEMENT_SPEED]: 0.23 },
+    defaultData: (random) => ({ Color: sheepColor(random) }),
+  }),
   PIG: creature("minecraft:pig", 0.9, 0.9, { attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.25 } }),
   CHICKEN: creature("minecraft:chicken", 0.4, 0.7),
   COW: creature("minecraft:cow", 0.9, 1.4, { attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.2 } }),
