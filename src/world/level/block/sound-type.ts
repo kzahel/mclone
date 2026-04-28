@@ -6,6 +6,7 @@ export class SoundType {
   public static readonly BAMBOO_SAPLING = new SoundType(1.0, 1.0);
   public static readonly SNOW = new SoundType(1.0, 1.0);
   public static readonly STONE = new SoundType(1.0, 1.0);
+  public static readonly BONE_BLOCK = new SoundType(1.0, 1.0);
   public static readonly DEEPSLATE = new SoundType(1.0, 1.0);
   public static readonly TUFF = new SoundType(1.0, 1.0);
   public static readonly CALCITE = new SoundType(1.0, 1.0);

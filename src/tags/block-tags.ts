@@ -26,7 +26,11 @@ export class BlockTag {
 }
 
 export class BlockTags {
-  public static readonly FEATURES_CANNOT_REPLACE = new BlockTag("minecraft:features_cannot_replace", []);
+  public static readonly FEATURES_CANNOT_REPLACE = new BlockTag("minecraft:features_cannot_replace", [
+    "minecraft:bedrock",
+    "minecraft:spawner",
+    "minecraft:chest",
+  ]);
 
   public static readonly BAMBOO_PLANTABLE_ON = new BlockTag("minecraft:bamboo_plantable_on", [
     "minecraft:sand",

@@ -96,6 +96,7 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:infested_deepslate"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:cobblestone"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:mossy_cobblestone"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:bone_block"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:spawner"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:chest"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate_redstone_ore"))).toBe(RenderType.solid());
@@ -105,6 +106,7 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:birch_leaves"))).toBe(RenderType.cutoutMipped());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:pumpkin"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:sandstone_slab"))).toBe(RenderType.solid());
+    expect(getState("minecraft:bone_block").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
     expect(getState("minecraft:deepslate").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
     expect(getState("minecraft:infested_deepslate").getValue(BlockStateProperties.AXIS)).toBe(Direction.Axis.Y);
 
@@ -138,10 +140,13 @@ describe("Surface feature palette", () => {
     expect(palette.blockLocations.some((location) => location.toString() === "minecraft:sandstone_slab")).toBe(true);
     expect(palette.blockLocations.some((location) => location.toString() === "minecraft:cobblestone")).toBe(true);
     expect(palette.blockLocations.some((location) => location.toString() === "minecraft:mossy_cobblestone")).toBe(true);
+    expect(palette.blockLocations.some((location) => location.toString() === "minecraft:bone_block")).toBe(true);
     expect(palette.blockLocations.some((location) => location.toString() === "minecraft:spawner")).toBe(true);
     expect(palette.blockLocations.some((location) => location.toString() === "minecraft:chest")).toBe(true);
     expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/cobblestone")).toBe(true);
     expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/mossy_cobblestone")).toBe(true);
+    expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/bone_block_top")).toBe(true);
+    expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/bone_block_side")).toBe(true);
     expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/spawner")).toBe(true);
     expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/oak_planks")).toBe(true);
   });

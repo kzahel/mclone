@@ -114,7 +114,7 @@ Several vanilla worldgen features look like structures but do not use the start/
 
 Implement these through the existing configured-feature/decorator path, not through `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES`.
 
-For sequencing: monster rooms and desert wells are already in that ordinary-feature lane. Overworld fossils are the remaining small structure-looking configured feature and should stay ahead of true `StructureFeature` work.
+For sequencing: that ordinary-feature lane is now complete. Desert wells, monster rooms, and overworld fossils are already covered through the configured-feature/decorator path and should stay outside true `StructureFeature` work.
 
 ## Scheduling And Finality Implications
 
@@ -132,10 +132,10 @@ For a `vanilla17` profile, structure work must be status-aware even if the runti
 
 Do not start with villages. They combine jigsaw pools, templates, processors, terrain blending, and settlement-specific interactions.
 
-1. **Finish the remaining ordinary configured-feature oddity first**
-   - Monster rooms and desert wells are already covered through the normal feature/decorator path.
-   - Overworld fossils are still ordinary configured `Feature.FOSSIL`, not true structure-start work.
-   - Land that slice before starting larger `StructureFeature` families.
+1. **Keep the ordinary configured-feature oddities out of structure work**
+   - Desert wells, monster rooms, and overworld fossils are already landed through the normal feature/decorator path.
+   - Do not reimplement them as `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES` work just because they look structure-like.
+   - The next structure slice should be a real `StructureFeature` foundation, not more configured-feature backfill.
 
 2. **Status and metadata foundation**
    - Add `STRUCTURE_STARTS` and `STRUCTURE_REFERENCES` concepts to the local generation model.

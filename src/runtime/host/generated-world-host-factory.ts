@@ -1,17 +1,31 @@
 import { BlockPos } from "../../core/block-pos";
+import { Registry } from "../../core/registry";
+import { ResourceLocation } from "../../core/resource-location";
 import { registerGeneratedRenderBlocks } from "../../world/level/generated-render-blocks";
+import { BoundingBox } from "../../world/level/levelgen/structure/bounding-box";
+import type { Block } from "../../world/level/block/block";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import { ChunkBlockId } from "../../worldgen/chunk/chunk-block-buffer";
 import { createWorldGeneratorForPreset } from "../../worldgen/levelgen/world-generator-factory";
 import type { WorldGenerator } from "../../worldgen/levelgen/world-generator";
 import { NoneFeatureConfiguration } from "../../worldgen/levelgen/feature/configurations/none-feature-configuration";
+import { OVERWORLD_FOSSIL_CONFIGURATION } from "../../worldgen/levelgen/feature/fossil-feature-defaults";
 import { Features } from "../../worldgen/levelgen/feature/features";
 import { WorldgenRandom } from "../../worldgen/prng/worldgen-random";
 import type { OpenWorldRequest, WorldEngineLightingMode, WorldEngineLiquidSimulationMode } from "../protocol/world-messages";
 import type { LightingService } from "../lighting/lighting-protocol";
 import type { WorldStorage } from "../storage/world-storage";
 import { GeneratedWorldHost } from "./generated-world-host";
+
+function getRequiredState(location: string): BlockState {
+  const block = Registry.BLOCK.get(new ResourceLocation(location)) as Block | undefined;
+  if (block === undefined) {
+    throw new Error(`Missing registered block ${location}`);
+  }
+
+  return block.defaultBlockState();
+}
 
 function applySmokeWorldMutations(
   level: WorldGenLevel,
@@ -70,6 +84,106 @@ function applySmokeWorldMutations(
   for (let offsetX = minX; offsetX <= maxX; offsetX++) {
     for (let offsetZ = minZ; offsetZ <= maxZ; offsetZ++) {
       level.setBlock(monsterRoomCenter.offset(offsetX, 4, offsetZ), airState, 2);
+    }
+  }
+
+  const fossilOrigin = new BlockPos(48, 0, 48);
+  const boneBlock = getRequiredState("minecraft:bone_block").getBlock();
+  const coalOreBlock = getRequiredState("minecraft:coal_ore").getBlock();
+  const fossilFeature = Features.FOSSIL.configured(OVERWORLD_FOSSIL_CONFIGURATION);
+  let fossilBlocks: { pos: BlockPos, state: BlockState }[] = [];
+
+  for (let attempt = 0n; attempt < 256n; attempt++) {
+    for (let y = 0; y <= 63; y++) {
+      for (let z = 40; z <= 63; z++) {
+        for (let x = 40; x <= 63; x++) {
+          level.setBlock(new BlockPos(x, y, z), stoneState, 2);
+        }
+      }
+    }
+
+    const placed = fossilFeature.place(level, generator, new WorldgenRandom((seed ^ 0xf0551n) + attempt), fossilOrigin);
+    if (!placed) {
+      continue;
+    }
+
+    const candidateBlocks: { pos: BlockPos, state: BlockState }[] = [];
+    let hasBone = false;
+    let hasCoal = false;
+    for (let y = level.getMinBuildHeight(); y < level.getMaxBuildHeight(); y++) {
+      for (let z = 48; z <= 63; z++) {
+        for (let x = 48; x <= 63; x++) {
+          const pos = new BlockPos(x, y, z);
+          const state = level.getBlockState(pos);
+          if (state.is(boneBlock) || state.is(coalOreBlock)) {
+            candidateBlocks.push({ pos, state });
+            hasBone ||= state.is(boneBlock);
+            hasCoal ||= state.is(coalOreBlock);
+          }
+        }
+      }
+    }
+
+    if (hasBone && hasCoal) {
+      fossilBlocks = candidateBlocks;
+      break;
+    }
+  }
+
+  const fossilBox = BoundingBox.encapsulatingPositions(fossilBlocks.map((block) => block.pos));
+  if (fossilBox === undefined) {
+    throw new Error("Could not place a deterministic fossil in the browser_smoke world");
+  }
+
+  const fossilWidth = fossilBox.getXSpan();
+  const fossilHeight = fossilBox.getYSpan();
+  const fossilDepth = fossilBox.getZSpan();
+  const normalizedBlocks = fossilBlocks.map((block) => ({
+    pos: new BlockPos(
+      block.pos.getX() - fossilBox.minX(),
+      block.pos.getY() - fossilBox.minY(),
+      block.pos.getZ() - fossilBox.minZ(),
+    ),
+    state: block.state,
+  }));
+  const galleryShell = new BoundingBox(48, 28, 48, 94, 52, 94);
+  const galleryCenterX = Math.floor((galleryShell.minX() + galleryShell.maxX()) / 2);
+  const galleryCenterZ = Math.floor((galleryShell.minZ() + galleryShell.maxZ()) / 2);
+  const centeredCopyX = galleryCenterX - Math.floor(fossilWidth / 2);
+  const centeredCopyZ = galleryCenterZ - Math.floor(fossilDepth / 2);
+  const wallMargin = 3;
+  const floorY = galleryShell.minY() + 1;
+  const displayOrigins = [
+    new BlockPos(centeredCopyX, floorY, centeredCopyZ),
+    new BlockPos(centeredCopyX, floorY, galleryShell.minZ() + wallMargin),
+    new BlockPos(centeredCopyX, floorY, galleryShell.maxZ() - wallMargin - fossilDepth + 1),
+    new BlockPos(galleryShell.minX() + wallMargin, floorY, galleryCenterZ - Math.floor(fossilDepth / 2)),
+    new BlockPos(galleryShell.maxX() - wallMargin - fossilWidth + 1, floorY, galleryCenterZ - Math.floor(fossilDepth / 2)),
+    new BlockPos(centeredCopyX, galleryShell.maxY() - wallMargin - fossilHeight + 1, centeredCopyZ),
+  ];
+
+  for (let y = galleryShell.minY(); y <= galleryShell.maxY(); y++) {
+    for (let z = galleryShell.minZ(); z <= galleryShell.maxZ(); z++) {
+      for (let x = galleryShell.minX(); x <= galleryShell.maxX(); x++) {
+        const isShell =
+          x === galleryShell.minX() ||
+          x === galleryShell.maxX() ||
+          y === galleryShell.minY() ||
+          y === galleryShell.maxY() ||
+          z === galleryShell.minZ() ||
+          z === galleryShell.maxZ();
+        level.setBlock(new BlockPos(x, y, z), isShell ? sandstoneState : airState, 2);
+      }
+    }
+  }
+
+  for (const origin of displayOrigins) {
+    for (const fossilBlock of normalizedBlocks) {
+      level.setBlock(
+        origin.offset(fossilBlock.pos.getX(), fossilBlock.pos.getY(), fossilBlock.pos.getZ()),
+        fossilBlock.state,
+        2,
+      );
     }
   }
 }

@@ -48,6 +48,10 @@ function addDefaultMonsterRoom(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_STRUCTURES, () => UndergroundFeatures.MONSTER_ROOM);
 }
 
+function addFossilDecoration(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_STRUCTURES, () => UndergroundFeatures.FOSSIL);
+}
+
 function addDefaultUndergroundVariety(builder: BiomeGenerationSettings.Builder, skipGlowLichen = false): void {
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_DIRT);
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_ORES, () => OreFeatures.ORE_GRAVEL);
@@ -421,10 +425,13 @@ function buildMushroomFieldSettings(): BiomeGenerationSettings {
   return builder.build();
 }
 
-function buildDesertSettings(): BiomeGenerationSettings {
+function buildDesertSettings(hasFossils = false): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  if (hasFossils) {
+    addFossilDecoration(builder);
+  }
   addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
@@ -570,6 +577,9 @@ function buildPlainsSettings(sunflower = false): BiomeGenerationSettings {
 function buildSwampSettings(swampHills: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
+  if (!swampHills) {
+    addFossilDecoration(builder);
+  }
   addDefaultLakes(builder);
   addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
@@ -579,7 +589,9 @@ function buildSwampSettings(swampHills: boolean): BiomeGenerationSettings {
   addDefaultMushrooms(builder);
   addSwampExtraVegetation(builder);
   addDefaultSprings(builder);
-  if (!swampHills) {
+  if (swampHills) {
+    addFossilDecoration(builder);
+  } else {
     builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.SEAGRASS_SWAMP);
   }
   addSurfaceFreezing(builder);
@@ -743,7 +755,7 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:birch_forest", buildBirchForestSettings(false)],
   ["minecraft:birch_forest_hills", buildBirchForestSettings(false)],
   ["minecraft:cold_ocean", buildOceanSettings("cold", false)],
-  ["minecraft:desert", buildDesertSettings()],
+  ["minecraft:desert", buildDesertSettings(true)],
   ["minecraft:desert_hills", buildDesertSettings()],
   ["minecraft:desert_lakes", buildDesertSettings()],
   ["minecraft:dark_forest", buildDarkForestSettings(false)],

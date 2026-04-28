@@ -1,5 +1,6 @@
 import { bottom, top } from "../../carver/carver-config";
 import { NoneFeatureConfiguration } from "./configurations/none-feature-configuration";
+import { OVERWORLD_FOSSIL_CONFIGURATION } from "./fossil-feature-defaults";
 import { Features } from "./features";
 
 export class UndergroundFeatures {
@@ -8,5 +9,9 @@ export class UndergroundFeatures {
       .rangeUniform(bottom(), top())
       .squared()
       .count(8);
+  }
+
+  public static get FOSSIL() {
+    return Features.FOSSIL.configured(OVERWORLD_FOSSIL_CONFIGURATION).rarity(64);
   }
 }

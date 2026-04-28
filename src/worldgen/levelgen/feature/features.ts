@@ -29,6 +29,7 @@ import { IceSpikeFeature } from "./ice-spike-feature";
 import { KelpFeature } from "./kelp-feature";
 import { OreFeature } from "./ore-feature";
 import { MonsterRoomFeature } from "./monster-room-feature";
+import { FossilFeature } from "./fossil-feature";
 import { CoralClawFeature } from "./coral-claw-feature";
 import { CoralMushroomFeature } from "./coral-mushroom-feature";
 import { CoralTreeFeature } from "./coral-tree-feature";
@@ -48,6 +49,7 @@ import { SpringFeature } from "./spring-feature";
 import { TreeFeature } from "./tree-feature";
 import type { FeatureConfiguration } from "./configurations/feature-configuration";
 import { NoneFeatureConfiguration } from "./configurations/none-feature-configuration";
+import { FossilFeatureConfiguration } from "./configurations/fossil-feature-configuration";
 import { VinesFeature } from "./vines-feature";
 
 function register<C extends FeatureConfiguration, F extends Feature<C>>(name: string, feature: F): F {
@@ -72,6 +74,7 @@ export const Features = {
   BAMBOO: register("bamboo", new BambooFeature()),
   ORE: register("ore", new OreFeature()),
   MONSTER_ROOM: register("monster_room", new MonsterRoomFeature()),
+  FOSSIL: register("fossil", new FossilFeature()),
   GLOW_LICHEN: register("glow_lichen", new GlowLichenFeature()),
   DRIPSTONE_CLUSTER: register("dripstone_cluster", new DripstoneClusterFeature()),
   SMALL_DRIPSTONE: register("small_dripstone", new SmallDripstoneFeature()),
@@ -106,4 +109,5 @@ export type SimpleVegetationFeature =
   | Feature<ReplaceBlockConfiguration>
   | Feature<SpringConfiguration>
   | Feature<ProbabilityFeatureConfiguration>
+  | Feature<FossilFeatureConfiguration>
   | Feature<NoneFeatureConfiguration>;

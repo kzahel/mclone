@@ -131,6 +131,7 @@ const POINTED_DRIPSTONE_LOCATION = new ResourceLocation("minecraft:pointed_drips
 const GLOW_LICHEN_LOCATION = new ResourceLocation("minecraft:glow_lichen");
 const TUFF_LOCATION = new ResourceLocation("minecraft:tuff");
 const DEEPSLATE_LOCATION = new ResourceLocation("minecraft:deepslate");
+const BONE_BLOCK_LOCATION = new ResourceLocation("minecraft:bone_block");
 const COAL_ORE_LOCATION = new ResourceLocation("minecraft:coal_ore");
 const DEEPSLATE_COAL_ORE_LOCATION = new ResourceLocation("minecraft:deepslate_coal_ore");
 const IRON_ORE_LOCATION = new ResourceLocation("minecraft:iron_ore");
@@ -302,6 +303,7 @@ const GENERATED_BLOCK_LOCATIONS = [
   GLOW_LICHEN_LOCATION,
   TUFF_LOCATION,
   DEEPSLATE_LOCATION,
+  BONE_BLOCK_LOCATION,
   COAL_ORE_LOCATION,
   DEEPSLATE_COAL_ORE_LOCATION,
   IRON_ORE_LOCATION,
@@ -489,6 +491,8 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("tuff"),
   blockTexture("deepslate"),
   blockTexture("deepslate_top"),
+  blockTexture("bone_block_top"),
+  blockTexture("bone_block_side"),
   blockTexture("coal_ore"),
   blockTexture("deepslate_coal_ore"),
   blockTexture("iron_ore"),
@@ -714,6 +718,12 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     DEEPSLATE_LOCATION,
     new RotatedPillarBlock(
       BlockBehaviour.Properties.of(Material.STONE, MaterialColor.DEEPSLATE).requiresCorrectToolForDrops().strength(3.0, 6.0).sound(SoundType.DEEPSLATE),
+    ),
+  ).defaultBlockState();
+  const boneBlockState = registerBlock(
+    BONE_BLOCK_LOCATION,
+    new RotatedPillarBlock(
+      BlockBehaviour.Properties.of(Material.STONE, MaterialColor.SAND).requiresCorrectToolForDrops().strength(2.0).sound(SoundType.BONE_BLOCK),
     ),
   ).defaultBlockState();
   const coalOreState = registerBlock(COAL_ORE_LOCATION, new Block(stoneOreProperties())).defaultBlockState();
@@ -1155,6 +1165,7 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
   ItemBlockRenderTypes.setRenderLayer(obsidianState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(magmaBlockState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(waterState.getBlock(), RenderType.translucent());
+  ItemBlockRenderTypes.setRenderLayer(boneBlockState.getBlock(), RenderType.solid());
   ItemBlockRenderTypes.setRenderLayer(grassPlantState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(fernState.getBlock(), RenderType.cutout());
   ItemBlockRenderTypes.setRenderLayer(dandelionState.getBlock(), RenderType.cutout());

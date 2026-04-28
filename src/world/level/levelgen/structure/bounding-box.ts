@@ -15,6 +15,17 @@ export class BoundingBox {
     }
   }
 
+  public static fromCorners(first: Vec3i, second: Vec3i): BoundingBox {
+    return new BoundingBox(
+      Math.min(first.getX(), second.getX()),
+      Math.min(first.getY(), second.getY()),
+      Math.min(first.getZ(), second.getZ()),
+      Math.max(first.getX(), second.getX()),
+      Math.max(first.getY(), second.getY()),
+      Math.max(first.getZ(), second.getZ()),
+    );
+  }
+
   public static encapsulatingPositions(positions: Iterable<BlockPos>): BoundingBox | undefined {
     const iterator = positions[Symbol.iterator]();
     const first = iterator.next();
@@ -46,6 +57,22 @@ export class BoundingBox {
     this.maxXValue = Math.max(this.maxXValue, pos.getX());
     this.maxYValue = Math.max(this.maxYValue, pos.getY());
     this.maxZValue = Math.max(this.maxZValue, pos.getZ());
+    return this;
+  }
+
+  public move(x: number, y: number, z: number): BoundingBox;
+  public move(vector: Vec3i): BoundingBox;
+  public move(first: number | Vec3i, second?: number, third?: number): BoundingBox {
+    if (typeof first !== "number") {
+      return this.move(first.getX(), first.getY(), first.getZ());
+    }
+
+    this.minXValue += first;
+    this.minYValue += second ?? 0;
+    this.minZValue += third ?? 0;
+    this.maxXValue += first;
+    this.maxYValue += second ?? 0;
+    this.maxZValue += third ?? 0;
     return this;
   }
 
@@ -94,6 +121,18 @@ export class BoundingBox {
 
   public maxZ(): number {
     return this.maxZValue;
+  }
+
+  public forAllCorners(consumer: (pos: BlockPos) => void): void {
+    const pos = new BlockPos.MutableBlockPos();
+    consumer(pos.set(this.maxXValue, this.maxYValue, this.maxZValue));
+    consumer(pos.set(this.minXValue, this.maxYValue, this.maxZValue));
+    consumer(pos.set(this.maxXValue, this.minYValue, this.maxZValue));
+    consumer(pos.set(this.minXValue, this.minYValue, this.maxZValue));
+    consumer(pos.set(this.maxXValue, this.maxYValue, this.minZValue));
+    consumer(pos.set(this.minXValue, this.maxYValue, this.minZValue));
+    consumer(pos.set(this.maxXValue, this.minYValue, this.minZValue));
+    consumer(pos.set(this.minXValue, this.minYValue, this.minZValue));
   }
 
   public toString(): string {

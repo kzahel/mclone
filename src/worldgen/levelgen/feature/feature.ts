@@ -1,6 +1,6 @@
 import { BlockPos } from "../../../core/block-pos";
 import { Direction } from "../../../core/direction";
-import { BlockTags } from "../../../tags/block-tags";
+import { BlockTag, BlockTags } from "../../../tags/block-tags";
 import type { BlockState } from "../../../world/level/block/state/block-state";
 import type { LevelSimulatedReader } from "../../../world/level/level-simulated-reader";
 import type { WorldGenLevel } from "../../../world/level/world-gen-level";
@@ -31,6 +31,10 @@ export abstract class Feature<FC extends FeatureConfiguration> {
 
   public static isGrassOrDirt(level: LevelSimulatedReader, pos: BlockPos): boolean {
     return level.isStateAtPosition(pos, Feature.isDirt);
+  }
+
+  public static isReplaceable(tag: BlockTag): (state: BlockState) => boolean {
+    return (state) => !state.is(tag);
   }
 
   public static isAir(level: LevelSimulatedReader, pos: BlockPos): boolean {
