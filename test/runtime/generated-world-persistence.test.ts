@@ -161,6 +161,85 @@ class BlockingWorldStorage implements WorldStorage {
   }
 }
 
+class FirstSaveBlockingChunkStorage implements ChunkStorage {
+  public readonly records = new Map<string, PackedChunkSnapshot>();
+  public readonly generatedRecords = new Map<string, GeneratedChunkStorageRecord>();
+  public saveStarted = 0;
+  private firstSaveResolver: (() => void) | undefined;
+  private firstSaveBlocked = false;
+
+  public async loadChunk(_chunkX: number, _chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
+    return undefined;
+  }
+
+  public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
+    this.saveStarted++;
+    if (!this.firstSaveBlocked) {
+      this.firstSaveBlocked = true;
+      await new Promise<void>((resolve) => {
+        this.firstSaveResolver = () => {
+          this.records.set(`${snapshot.chunkX.toString()},${snapshot.chunkZ.toString()}`, clonePackedChunkSnapshot(snapshot));
+          resolve();
+        };
+      });
+      return;
+    }
+
+    this.records.set(`${snapshot.chunkX.toString()},${snapshot.chunkZ.toString()}`, clonePackedChunkSnapshot(snapshot));
+  }
+
+  public async loadGeneratedChunk(_chunkX: number, _chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
+    return undefined;
+  }
+
+  public async saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void> {
+    this.generatedRecords.set(`${record.chunkX.toString()},${record.chunkZ.toString()}`, cloneGeneratedChunkStorageRecord(record));
+  }
+
+  public async evictChunk(_chunkX: number, _chunkZ: number): Promise<void> {}
+
+  public releaseFirstSave(): void {
+    this.firstSaveResolver?.();
+    this.firstSaveResolver = undefined;
+  }
+}
+
+class FirstSaveBlockingWorldStorageSession implements WorldStorageSession {
+  public constructor(
+    public readonly metadata: WorldSaveMetadata,
+    public readonly chunks: FirstSaveBlockingChunkStorage,
+  ) {}
+
+  public async close(): Promise<void> {}
+}
+
+class FirstSaveBlockingWorldStorage implements WorldStorage {
+  public readonly chunks = new FirstSaveBlockingChunkStorage();
+  public metadata: WorldSaveMetadata | undefined;
+
+  public async openWorld(request: OpenWorldStorageRequest): Promise<WorldStorageSession> {
+    this.metadata = createWorldSaveMetadata(request);
+    return new FirstSaveBlockingWorldStorageSession(this.metadata, this.chunks);
+  }
+}
+
+async function waitForCondition(
+  predicate: () => boolean,
+  message: string,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+
+    await sleep(1);
+  }
+
+  throw new Error(message);
+}
+
 describe("GeneratedWorld persistence", () => {
   afterEach(() => {
     Registry.BLOCK.clear();
@@ -265,6 +344,43 @@ describe("GeneratedWorld persistence", () => {
     storage.chunks.releaseAllSaves();
     await host.flushStorageSideEffects();
     expect(storage.chunks.records.size).toBeGreaterThan(0);
+  });
+
+  test("runs unrelated generated-cache writes while one chunk save is blocked", async () => {
+    const storage = new FirstSaveBlockingWorldStorage();
+    const blocks = registerGeneratedRenderBlocks();
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      worldStorage: storage,
+    });
+    await host.openWorld({
+      type: "open_world",
+      seed: 12345n,
+      preset: "flat_grass",
+    });
+
+    const messages = await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    expect(chunkSnapshots(messages)).toHaveLength(25);
+
+    await waitForCondition(
+      () => storage.chunks.saveStarted > 1 && storage.chunks.records.size > 0,
+      "Expected an unrelated generated-cache save to complete while the first save is blocked",
+    );
+    expect(storage.chunks.saveStarted).toBeGreaterThan(1);
+    expect(storage.chunks.records.size).toBeGreaterThan(0);
+
+    storage.chunks.releaseFirstSave();
+    await host.flushStorageSideEffects();
+    expect(storage.chunks.records.size).toBe(25);
   });
 
   test("saves dirty authoritative chunks before eviction", async () => {

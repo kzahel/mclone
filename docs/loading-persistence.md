@@ -292,6 +292,7 @@ That means persisted light is currently not authoritative for host reload. A lig
 `mclone` currently has lazy generated-cache persistence plus explicit dirty saves:
 
 - Published generated-clean chunks queue discardable cache writes as storage side effects instead of blocking publication.
+- Queued storage side effects are keyed by chunk coordinate and run with bounded concurrency, so a slow save for one chunk does not block unrelated chunk cache writes. Same-chunk queued work remains ordered.
 - Dirty chunks still use the durable save path before dirty chunk data is discarded.
 - Generated status progress also marks the resident holder's proto/full `chunkToSave` access unsaved; host flush and holder pruning queue those generated records for storage.
 - Holders pruned while a generated-record save is pending stay in a pending-unload map; if interest returns before the save completes, the holder is resurrected instead of reading stale storage or regenerating.

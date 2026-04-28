@@ -2,7 +2,7 @@
 
 Make generated chunk unload/save/load ordering predictable like vanilla `ChunkMap`, so async persistence cannot cause duplicate generation, stale reloads, or older partial records overwriting newer chunk state.
 
-Status: pending-unload resurrection, generated-record write-version, stale-preload rejection, and storage-session epoch slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results. Storage adapters reject operations from superseded sessions after reopen/reset/close.
+Status: pending-unload resurrection, generated-record write-version, stale-preload rejection, storage-session epoch, and keyed storage side-effect slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results. Storage adapters reject operations from superseded sessions after reopen/reset/close. Queued same-chunk side effects stay ordered without blocking unrelated chunk writes.
 
 ## Vanilla source anchors
 
@@ -38,7 +38,8 @@ Status: pending-unload resurrection, generated-record write-version, stale-prelo
 
 5. **Global queue instead of per-chunk ordering**
    - Risk: the serialized global queue is safe but blunt; it can block unrelated chunks behind one slow write and does not encode same-key dependencies explicitly.
-   - Remaining gap: introduce per-chunk storage operations or keyed barriers so loads wait for same-key pending saves without blocking unrelated chunks.
+   - Current protection: `GeneratedWorldHost` now keys queued side effects by chunk coordinate and runs up to four independent keys concurrently. Same-key operations retain FIFO order.
+   - Remaining gap: adapter reads do not yet read through host-side pending write data the way vanilla `IOWorker.pendingWrites` does; current protection is ordering and stale/CAS guards, not full read-through.
 
 6. **Authority-square unload instead of ticket unload**
    - Risk: pruning is immediate and deterministic rather than ticket-level driven with budgets.
@@ -76,10 +77,19 @@ Status: pending-unload resurrection, generated-record write-version, stale-prelo
 - Stale-session loads return missing; stale-session `saveChunk(...)`, `saveGeneratedChunk(...)`, and `evictChunk(...)` calls are skipped.
 - Regression coverage verifies memory and file storage ignore writes from superseded sessions, including stale writes attempted after incompatible reset.
 
+## Landed fifth slice
+
+- `GeneratedWorldHost` replaced its single global `storageSideEffectQueue` with a keyed storage side-effect scheduler.
+- Chunk cache writes, generated-record saves, evicts, dirty-before-evict work, and per-chunk light-removal messages use the chunk coordinate as their key.
+- Tasks for the same key chain behind the previous same-key task; unrelated keys enter a ready queue and run with bounded concurrency (`STORAGE_SIDE_EFFECT_MAX_CONCURRENCY = 4`).
+- `flushStorageSideEffects()` waits until all queued/running side effects drain, including side effects queued by side effects.
+- New counters: `storage_side_effects_active_current`, `storage_side_effects_active_max`, `storage_side_effect_keys_current`, and `storage_side_effect_keys_max`.
+- Regression coverage blocks the first generated-cache save, verifies another chunk cache save completes before the first one is released, then flushes and confirms all 25 published cache writes landed.
+
 ## Next implementation slices
 
-1. Split the global storage queue into keyed same-chunk ordering plus bounded global concurrency.
-2. Replace authority-square pruning with a ticket-shaped pending unload queue and processing budget.
+1. Replace authority-square pruning with a ticket-shaped pending unload queue and processing budget.
+2. Add host-side pending-write read-through for same-key loads if future load paths can overlap queued saves.
 3. Consider a cross-tab/cross-process save lock for IndexedDB/file storage if we start supporting multiple authorities against the same save.
 
 ## Validation

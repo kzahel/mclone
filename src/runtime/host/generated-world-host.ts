@@ -266,6 +266,8 @@ const LOCAL_PLAYER_ID = "local-player";
 const COOPERATIVE_CHUNK_PHASE_BUDGET_MS = 8;
 const LIGHTING_RESULT_BATCH_SIZE = 64;
 const LIQUID_TICK_READ_RADIUS_BLOCKS = 4;
+const STORAGE_SIDE_EFFECT_MAX_CONCURRENCY = 4;
+const GLOBAL_STORAGE_SIDE_EFFECT_KEY = "global";
 
 type GeneratedChunkStatusJobState = "pending" | "fulfilled" | "rejected";
 
@@ -323,6 +325,12 @@ type StoredChunkPreloadResult = "loaded" | "already_loaded" | "missing" | "stale
 type GeneratedLevelChunk = LevelChunk;
 
 type StorageSideEffectTask = () => Promise<void>;
+
+interface QueuedStorageSideEffect {
+  readonly task: StorageSideEffectTask;
+  readonly key: string;
+  readonly resolve: () => void;
+}
 
 interface QueuedGeneratedChunkAccessSave {
   readonly record: GeneratedChunkStorageRecord;
@@ -481,8 +489,11 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly pendingUnloadChunkHolders = new Map<string, GeneratedPendingUnloadHolder>();
   private readonly generatedCacheWriteVersions = new Map<string, number>();
   private readonly generatedChunkRecordWriteVersions = new Map<string, number>();
-  private storageSideEffectQueue: Promise<void> = Promise.resolve();
+  private readonly storageSideEffectKeyTails = new Map<string, Promise<void>>();
+  private readonly readyStorageSideEffects: QueuedStorageSideEffect[] = [];
+  private readonly storageSideEffectIdleResolvers: Array<() => void> = [];
   private pendingStorageSideEffects = 0;
+  private activeStorageSideEffects = 0;
   private readonly worldgenPerformance: MutableWorldgenPerformanceCounters = {
     phases: new Map(),
     counts: new Map(),
@@ -631,7 +642,7 @@ export class GeneratedWorldHost implements WorldHost {
 
     for (const chunk of update.removedChunks) {
       await this.saveDirtyChunkBeforeUnload(chunk);
-      this.queueStorageSideEffect(() => this.evictStoredChunk(chunk.chunkX, chunk.chunkZ));
+      this.queueStorageSideEffect(() => this.evictStoredChunk(chunk.chunkX, chunk.chunkZ), chunkKey(chunk.chunkX, chunk.chunkZ));
       this.discardUnloadedChunkState(chunk.chunkX, chunk.chunkZ);
       this.incrementWorldgenCount("chunks_removed");
     }
@@ -676,7 +687,7 @@ export class GeneratedWorldHost implements WorldHost {
     this.pruneChunkHoldersOutsideCurrentAuthority(update.removedChunks);
 
     for (const chunk of update.removedChunks) {
-      this.queueStorageSideEffect(() => this.queueEvictAfterDirtySave(chunk));
+      this.queueStorageSideEffect(() => this.queueEvictAfterDirtySave(chunk), chunkKey(chunk.chunkX, chunk.chunkZ));
       this.discardUnloadedChunkState(chunk.chunkX, chunk.chunkZ);
       this.incrementWorldgenCount("chunks_removed");
     }
@@ -747,11 +758,9 @@ export class GeneratedWorldHost implements WorldHost {
   public async flushStorageSideEffects(): Promise<void> {
     this.queueSaveResidentGeneratedChunkAccesses();
     while (this.pendingStorageSideEffects > 0) {
-      const pendingQueue = this.storageSideEffectQueue;
-      await pendingQueue;
-      if (pendingQueue === this.storageSideEffectQueue) {
-        break;
-      }
+      await new Promise<void>((resolve) => {
+        this.storageSideEffectIdleResolvers.push(resolve);
+      });
     }
   }
 
@@ -1433,7 +1442,7 @@ export class GeneratedWorldHost implements WorldHost {
       ) {
         access.isUnsaved = false;
       }
-    });
+    }, key);
     return promise === undefined ? undefined : { record, promise };
   }
 
@@ -1500,7 +1509,7 @@ export class GeneratedWorldHost implements WorldHost {
       }
 
       await this.cacheGeneratedChunkSnapshot(snapshot, generatedRecordWriteVersion);
-    });
+    }, key);
   }
 
   private bumpGeneratedCacheWriteVersion(key: string): number {
@@ -2126,7 +2135,10 @@ export class GeneratedWorldHost implements WorldHost {
     }
   }
 
-  private queueStorageSideEffect(task: StorageSideEffectTask | undefined): Promise<void> | undefined {
+  private queueStorageSideEffect(
+    task: StorageSideEffectTask | undefined,
+    key = GLOBAL_STORAGE_SIDE_EFFECT_KEY,
+  ): Promise<void> | undefined {
     if (task === undefined) {
       return undefined;
     }
@@ -2134,21 +2146,69 @@ export class GeneratedWorldHost implements WorldHost {
     this.pendingStorageSideEffects++;
     this.incrementWorldgenCount("storage_side_effects_queued");
     this.noteStorageSideEffectQueueDepth();
-    const run = async (): Promise<void> => {
-      try {
-        await task();
-        this.incrementWorldgenCount("storage_side_effects_completed");
-      } catch (error) {
-        this.incrementWorldgenCount("storage_side_effects_failed");
-        this.enqueueWorldError(error);
-      } finally {
-        this.pendingStorageSideEffects--;
-        this.noteStorageSideEffectQueueDepth();
+    let resolveQueued!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      resolveQueued = resolve;
+    });
+    const previousKeyTail = this.storageSideEffectKeyTails.get(key) ?? Promise.resolve();
+    const queued = previousKeyTail.then(() => {
+      this.readyStorageSideEffects.push({
+        task,
+        key,
+        resolve: resolveQueued,
+      });
+      this.pumpStorageSideEffects();
+      return ready;
+    });
+    this.storageSideEffectKeyTails.set(key, queued);
+    this.noteStorageSideEffectKeyCount();
+    void queued.finally(() => {
+      if (this.storageSideEffectKeyTails.get(key) === queued) {
+        this.storageSideEffectKeyTails.delete(key);
+        this.noteStorageSideEffectKeyCount();
       }
-    };
-    const queued = this.storageSideEffectQueue.then(run, run);
-    this.storageSideEffectQueue = queued;
+    });
     return queued;
+  }
+
+  private pumpStorageSideEffects(): void {
+    while (
+      this.activeStorageSideEffects < STORAGE_SIDE_EFFECT_MAX_CONCURRENCY
+      && this.readyStorageSideEffects.length > 0
+    ) {
+      const queued = this.readyStorageSideEffects.shift()!;
+      this.activeStorageSideEffects++;
+      this.noteActiveStorageSideEffectCount();
+      void this.runStorageSideEffect(queued);
+    }
+  }
+
+  private async runStorageSideEffect(queued: QueuedStorageSideEffect): Promise<void> {
+    try {
+      await queued.task();
+      this.incrementWorldgenCount("storage_side_effects_completed");
+    } catch (error) {
+      this.incrementWorldgenCount("storage_side_effects_failed");
+      this.enqueueWorldError(error);
+    } finally {
+      this.activeStorageSideEffects--;
+      this.pendingStorageSideEffects--;
+      queued.resolve();
+      this.noteActiveStorageSideEffectCount();
+      this.noteStorageSideEffectQueueDepth();
+      this.pumpStorageSideEffects();
+      this.resolveStorageSideEffectIdleIfNeeded();
+    }
+  }
+
+  private resolveStorageSideEffectIdleIfNeeded(): void {
+    if (this.pendingStorageSideEffects > 0) {
+      return;
+    }
+
+    while (this.storageSideEffectIdleResolvers.length > 0) {
+      this.storageSideEffectIdleResolvers.shift()?.();
+    }
   }
 
   private async publishChunkSnapshotIfReady(
@@ -2960,7 +3020,7 @@ export class GeneratedWorldHost implements WorldHost {
         chunkX,
         chunkZ,
         chunkRevision,
-      }));
+      }), key);
     }
   }
 
@@ -3112,6 +3172,22 @@ export class GeneratedWorldHost implements WorldHost {
     this.setWorldgenCount(
       "storage_side_effect_queue_depth_max",
       Math.max(this.worldgenPerformance.counts.get("storage_side_effect_queue_depth_max") ?? 0, this.pendingStorageSideEffects),
+    );
+  }
+
+  private noteActiveStorageSideEffectCount(): void {
+    this.setWorldgenCount("storage_side_effects_active_current", this.activeStorageSideEffects);
+    this.setWorldgenCount(
+      "storage_side_effects_active_max",
+      Math.max(this.worldgenPerformance.counts.get("storage_side_effects_active_max") ?? 0, this.activeStorageSideEffects),
+    );
+  }
+
+  private noteStorageSideEffectKeyCount(): void {
+    this.setWorldgenCount("storage_side_effect_keys_current", this.storageSideEffectKeyTails.size);
+    this.setWorldgenCount(
+      "storage_side_effect_keys_max",
+      Math.max(this.worldgenPerformance.counts.get("storage_side_effect_keys_max") ?? 0, this.storageSideEffectKeyTails.size),
     );
   }
 
