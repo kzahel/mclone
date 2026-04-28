@@ -132,6 +132,55 @@ export function shouldQueuePlayerInput(
     || (inputCommand.edgeButtons ?? 0) !== 0;
 }
 
+export interface PlayerPhysicsCommandFrameOptions {
+  readonly commandClock: MovementCommandClock;
+  readonly inputFrame: DebugInputFrame;
+  readonly requirePointerLock?: boolean;
+  readonly baseYaw: number;
+  readonly basePitch: number;
+  readonly dtSeconds: number;
+  readonly nowMs: number;
+  readonly nextInputSequence: number;
+  readonly lastPlayerButtonMask: number;
+}
+
+export interface PlayerPhysicsCommandFrameResult {
+  readonly inputCommands: readonly PlayerInputCommand[];
+  readonly lastPlayerButtonMask: number;
+  readonly acceptsGameplayInput: boolean;
+}
+
+export function consumePlayerPhysicsCommandsForFrame(
+  options: PlayerPhysicsCommandFrameOptions,
+): PlayerPhysicsCommandFrameResult {
+  // Pointer lock gates captured look/move intent, not fixed-step physics time.
+  const acceptsGameplayInput = options.requirePointerLock === false || options.inputFrame.locked;
+  const inputFrame = acceptsGameplayInput ? options.inputFrame : emptyInputFrame();
+  const commandStepCounts = options.commandClock.consumeElapsedUs(Math.max(0, Math.round(options.dtSeconds * 1_000_000.0)));
+  const currentButtonMask = getDebugPlayerButtonMask(inputFrame);
+  let edgeButtonMask = currentButtonMask & ~options.lastPlayerButtonMask;
+  let nextInputSequence = options.nextInputSequence;
+  const inputCommands: PlayerInputCommand[] = [];
+  for (const stepCount of commandStepCounts) {
+    inputCommands.push(buildPlayerInputCommand(options.baseYaw, options.basePitch, inputFrame, options.dtSeconds, nextInputSequence++, {
+      clientTimeUs: Math.max(0, Math.round(options.nowMs * 1_000.0)),
+      commandQuantumUs: PLAYER_COMMAND_QUANTUM_US,
+      stepCount,
+      buttons: currentButtonMask,
+      edgeButtons: edgeButtonMask,
+      physicsRevision: PLAYER_MOVEMENT_PHYSICS_REVISION,
+      collisionRevision: PLAYER_COLLISION_REVISION,
+    }));
+    edgeButtonMask = 0;
+  }
+
+  return {
+    inputCommands,
+    lastPlayerButtonMask: currentButtonMask,
+    acceptsGameplayInput,
+  };
+}
+
 function movementIntentFromPlayerInput(input: PlayerInputCommand): MovementIntent {
   const buttons = input.buttons ?? 0;
   const edgeButtons = input.edgeButtons ?? 0;
@@ -503,7 +552,7 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
     if (this.options.preserveInitialCamera !== true) {
       this.camera = createCameraStateFromMovementBody(reconciledBody, authoritativeYaw, authoritativePitch);
     }
-    if (this.options.requirePointerLock !== false && !inputFrame.locked) {
+    if (this.options.screenManager.currentScreen !== null) {
       this.lastPlayerButtonMask = 0;
       const chunkViewRequest = this.options.preserveInitialCamera === true
         ? createChunkViewRequestForPlayerState(playerState, scene.viewDistance)
@@ -517,21 +566,20 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
     const basePitch = this.options.preserveInitialCamera === true
       ? (this.lastInputCommand?.pitch ?? playerState.rotation.pitch)
       : this.camera.xRot;
-    const commandStepCounts = this.playerCommandClock.consumeElapsedUs(Math.max(0, Math.round(dtSeconds * 1_000_000.0)));
-    const currentButtonMask = getDebugPlayerButtonMask(inputFrame);
-    let edgeButtonMask = currentButtonMask & ~this.lastPlayerButtonMask;
-    this.lastPlayerButtonMask = currentButtonMask;
+    const physicsCommands = consumePlayerPhysicsCommandsForFrame({
+      commandClock: this.playerCommandClock,
+      inputFrame,
+      requirePointerLock: this.options.requirePointerLock,
+      baseYaw,
+      basePitch,
+      dtSeconds,
+      nowMs,
+      nextInputSequence: this.nextInputSequence,
+      lastPlayerButtonMask: this.lastPlayerButtonMask,
+    });
+    this.lastPlayerButtonMask = physicsCommands.lastPlayerButtonMask;
     let autoJumpEdgeAvailable = this.options.optionsState.autoJump;
-    for (const stepCount of commandStepCounts) {
-      let playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, this.nextInputSequence, {
-        clientTimeUs: Math.max(0, Math.round(nowMs * 1_000.0)),
-        commandQuantumUs: PLAYER_COMMAND_QUANTUM_US,
-        stepCount,
-        buttons: currentButtonMask,
-        edgeButtons: edgeButtonMask,
-        physicsRevision: PLAYER_MOVEMENT_PHYSICS_REVISION,
-        collisionRevision: PLAYER_COLLISION_REVISION,
-      });
+    for (let playerInput of physicsCommands.inputCommands) {
       if (
         autoJumpEdgeAvailable
         && ((playerInput.buttons ?? 0) & MOVEMENT_COMMAND_BUTTONS.JUMP) === 0
@@ -549,7 +597,6 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
         };
         autoJumpEdgeAvailable = false;
       }
-      edgeButtonMask = 0;
       if (this.queuePlayerInput(playerInput) && this.options.preserveInitialCamera !== true) {
         const predictedBody = predictionService.advanceCommandReplay({
           command: playerInputToQueuedMoveCommand(playerState.playerId, playerInput).command,

@@ -28,6 +28,7 @@ interface GpuGuiState {
   readonly cameraPosition?: readonly [number, number, number];
   readonly cameraYaw?: number;
   readonly cameraPitch?: number;
+  readonly playerTick?: number;
   readonly error?: string;
   readonly width: number;
   readonly height: number;
@@ -204,7 +205,7 @@ test("WebGPU generated-world tick cadence scenario advances against the worker i
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });
 
-test("GPU title-started world requires pointer lock before mouse-look and pauses on Escape", async ({ page }) => {
+test("GPU title-started world requires pointer lock before mouse-look but not physics stepping", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(String(err)));
 
@@ -241,15 +242,21 @@ test("GPU title-started world requires pointer lock before mouse-look and pauses
   expect(unlockedState.mode, unlockedState.error).toBe("world");
   expect(unlockedState.cameraYaw).toBeDefined();
   expect(unlockedState.cameraPitch).toBeDefined();
+  expect(unlockedState.playerTick).toBeDefined();
   await page.mouse.move(box!.x + (box!.width / 2), box!.y + (box!.height / 2));
   await page.mouse.move(box!.x + (box!.width / 2) + 24, box!.y + (box!.height / 2) + 6, { steps: 3 });
   await page.waitForFunction(
-    ({ frameCount }) => (window.__mcloneGui?.state.frameCount ?? 0) >= frameCount + 3,
-    { frameCount: unlockedState.frameCount },
+    ({ frameCount, playerTick }) => {
+      const state = window.__mcloneGui?.state;
+      return state !== undefined
+        && state.frameCount >= frameCount + 3
+        && (state.playerTick ?? playerTick) > playerTick;
+    },
+    { frameCount: unlockedState.frameCount, playerTick: unlockedState.playerTick ?? -1 },
     { timeout: 20_000 },
   );
   const stillUnlockedState = await readGpuGuiState(page);
-  expect(stillUnlockedState.cameraPosition).toEqual(unlockedState.cameraPosition);
+  expect(stillUnlockedState.playerTick).toBeGreaterThan(unlockedState.playerTick ?? -1);
   expect(stillUnlockedState.cameraYaw).toBe(unlockedState.cameraYaw);
   expect(stillUnlockedState.cameraPitch).toBe(unlockedState.cameraPitch);
 
