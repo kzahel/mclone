@@ -12,6 +12,7 @@ import {
 } from "../../world/level/chunk-snapshot";
 import {
   applyPackedChunkLightDelta,
+  clonePackedChunkSnapshot,
   packChunkSnapshot,
   unpackChunkSnapshot,
   type PackedChunkLight,
@@ -30,6 +31,7 @@ import {
   createGeneratedProtoChunk,
   createGeneratedChunkAccessFromStorageRecord,
   createGeneratedChunkStorageRecord,
+  cloneGeneratedChunkStorageRecord,
   type GeneratedChunkAccess,
   type GeneratedChunkAccessDebugRecord,
   type GeneratedChunkStorageRecord,
@@ -345,6 +347,19 @@ interface QueuedGeneratedChunkAccessSave {
   readonly promise: Promise<void>;
 }
 
+interface PendingStorageWrite {
+  readonly key: string;
+  readonly snapshot: PackedChunkSnapshot | undefined;
+  readonly generatedRecord: GeneratedChunkStorageRecord | undefined;
+  readonly isCurrent: () => boolean;
+}
+
+interface RegisteredPendingStorageWrite {
+  readonly snapshot: PackedChunkSnapshot | undefined;
+  readonly generatedRecord: GeneratedChunkStorageRecord | undefined;
+  clear: () => void;
+}
+
 interface PendingLightBlockChange {
   readonly x: number;
   readonly y: number;
@@ -498,6 +513,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly pendingUnloadChunkHolders = new Map<string, GeneratedPendingUnloadHolder>();
   private readonly generatedCacheWriteVersions = new Map<string, number>();
   private readonly generatedChunkRecordWriteVersions = new Map<string, number>();
+  private readonly pendingStorageWrites = new Map<string, PendingStorageWrite>();
   private readonly storageSideEffectKeyTails = new Map<string, Promise<void>>();
   private readonly readyStorageSideEffects: QueuedStorageSideEffect[] = [];
   private readonly storageSideEffectIdleResolvers: Array<() => void> = [];
@@ -1343,7 +1359,8 @@ export class GeneratedWorldHost implements WorldHost {
       return "missing";
     }
 
-    const generatedRecord = await this.recordWorldgenPhaseAsync("storage.preload_generated_chunk", () =>
+    const pendingGeneratedRecord = this.loadPendingGeneratedChunkRecord(chunkX, chunkZ);
+    const generatedRecord = pendingGeneratedRecord ?? await this.recordWorldgenPhaseAsync("storage.preload_generated_chunk", () =>
       this.storageSession!.chunks.loadGeneratedChunk(chunkX, chunkZ)
     );
     if (!this.shouldAcceptStoredChunkPreload(chunkX, chunkZ, chunkViewJobRevision)) {
@@ -1352,6 +1369,9 @@ export class GeneratedWorldHost implements WorldHost {
 
     if (generatedRecord !== undefined) {
       if (this.restoreStoredGeneratedChunk(generatedRecord)) {
+        if (pendingGeneratedRecord !== undefined) {
+          this.incrementWorldgenCount("storage_preload_loaded_pending_generated_chunk");
+        }
         this.incrementWorldgenCount("storage_preload_loaded_generated_chunk");
         this.incrementWorldgenCount("storage_preload_loaded");
         return "loaded";
@@ -1360,7 +1380,8 @@ export class GeneratedWorldHost implements WorldHost {
       this.incrementWorldgenCount("storage_preload_generated_chunk_rejected");
     }
 
-    const snapshot = await this.recordWorldgenPhaseAsync("storage.preload", () => this.storageSession!.chunks.loadChunk(chunkX, chunkZ));
+    const pendingSnapshot = this.loadPendingChunkSnapshot(chunkX, chunkZ);
+    const snapshot = pendingSnapshot ?? await this.recordWorldgenPhaseAsync("storage.preload", () => this.storageSession!.chunks.loadChunk(chunkX, chunkZ));
     if (!this.shouldAcceptStoredChunkPreload(chunkX, chunkZ, chunkViewJobRevision)) {
       return "stale";
     }
@@ -1389,6 +1410,9 @@ export class GeneratedWorldHost implements WorldHost {
       writeVersion: 0,
       snapshot,
     });
+    if (pendingSnapshot !== undefined) {
+      this.incrementWorldgenCount("storage_preload_loaded_pending_chunk");
+    }
     this.incrementWorldgenCount("storage_preload_loaded");
     return "loaded";
   }
@@ -1408,6 +1432,42 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     return accepted;
+  }
+
+  private loadPendingGeneratedChunkRecord(chunkX: number, chunkZ: number): GeneratedChunkStorageRecord | undefined {
+    const pending = this.currentPendingStorageWrite(chunkX, chunkZ);
+    if (pending?.generatedRecord === undefined) {
+      return undefined;
+    }
+
+    this.incrementWorldgenCount("storage_pending_writes_read_generated_chunk");
+    return cloneGeneratedChunkStorageRecord(pending.generatedRecord);
+  }
+
+  private loadPendingChunkSnapshot(chunkX: number, chunkZ: number): PackedChunkSnapshot | undefined {
+    const pending = this.currentPendingStorageWrite(chunkX, chunkZ);
+    if (pending?.snapshot === undefined) {
+      return undefined;
+    }
+
+    this.incrementWorldgenCount("storage_pending_writes_read_chunk");
+    return clonePackedChunkSnapshot(pending.snapshot);
+  }
+
+  private currentPendingStorageWrite(chunkX: number, chunkZ: number): PendingStorageWrite | undefined {
+    const key = chunkKey(chunkX, chunkZ);
+    const pending = this.pendingStorageWrites.get(key);
+    if (pending === undefined) {
+      return undefined;
+    }
+    if (pending.isCurrent()) {
+      return pending;
+    }
+
+    this.pendingStorageWrites.delete(key);
+    this.incrementWorldgenCount("storage_pending_writes_dropped_stale");
+    this.notePendingStorageWriteCount();
+    return undefined;
   }
 
   private async preloadStoredChunkCoalesced(
@@ -1542,16 +1602,21 @@ export class GeneratedWorldHost implements WorldHost {
       return undefined;
     }
 
+    const pending = this.registerPendingGeneratedChunkRecordWrite(record);
     const promise = this.queueStorageSideEffect(async () => {
-      await this.saveGeneratedChunkRecord(record);
-      if (
-        holder?.chunkToSave === access
-        && access.type === record.type
-        && access.status === record.status
-        && access.hasBlockSections === record.hasBlockSections
-        && access.contentVersion === record.contentVersion
-      ) {
-        access.isUnsaved = false;
+      try {
+        await this.saveGeneratedChunkRecord(record);
+        if (
+          holder?.chunkToSave === access
+          && access.type === record.type
+          && access.status === record.status
+          && access.hasBlockSections === record.hasBlockSections
+          && access.contentVersion === record.contentVersion
+        ) {
+          access.isUnsaved = false;
+        }
+      } finally {
+        pending.clear();
       }
     }, key);
     return promise === undefined ? undefined : { record, promise };
@@ -1576,6 +1641,78 @@ export class GeneratedWorldHost implements WorldHost {
     return createGeneratedChunkStorageRecord(access, snapshot, writeVersion);
   }
 
+  private createFullGeneratedChunkStorageRecord(
+    snapshot: PackedChunkSnapshot,
+    writeVersion: number,
+  ): GeneratedChunkStorageRecord {
+    return createGeneratedChunkStorageRecord(
+      {
+        type: "level",
+        chunkX: snapshot.chunkX,
+        chunkZ: snapshot.chunkZ,
+        status: GeneratedChunkStatus.FULL,
+        hasBlockSections: true,
+        isUnsaved: false,
+        contentVersion: GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+      },
+      snapshot,
+      writeVersion,
+    );
+  }
+
+  private registerPendingGeneratedChunkRecordWrite(
+    record: GeneratedChunkStorageRecord,
+    isCurrent: () => boolean = () => true,
+  ): RegisteredPendingStorageWrite {
+    return this.registerPendingStorageWrite({
+      key: chunkKey(record.chunkX, record.chunkZ),
+      snapshot: undefined,
+      generatedRecord: cloneGeneratedChunkStorageRecord(record),
+      isCurrent,
+    });
+  }
+
+  private registerPendingChunkSnapshotWrite(
+    snapshot: PackedChunkSnapshot,
+    generatedRecordWriteVersion: number,
+    isCurrent: () => boolean = () => true,
+  ): RegisteredPendingStorageWrite {
+    const snapshotWithoutLight = clonePackedChunkSnapshot(withoutPersistedLight(snapshot));
+    return this.registerPendingStorageWrite({
+      key: chunkKey(snapshot.chunkX, snapshot.chunkZ),
+      snapshot: snapshotWithoutLight,
+      generatedRecord: this.createFullGeneratedChunkStorageRecord(snapshotWithoutLight, generatedRecordWriteVersion),
+      isCurrent,
+    });
+  }
+
+  private registerPendingStorageWrite(write: PendingStorageWrite): RegisteredPendingStorageWrite {
+    if (this.storageSession === undefined) {
+      return {
+        snapshot: write.snapshot,
+        generatedRecord: write.generatedRecord,
+        clear: () => {},
+      };
+    }
+
+    this.pendingStorageWrites.set(write.key, write);
+    this.incrementWorldgenCount("storage_pending_writes_registered");
+    this.notePendingStorageWriteCount();
+    return {
+      snapshot: write.snapshot,
+      generatedRecord: write.generatedRecord,
+      clear: () => {
+        if (this.pendingStorageWrites.get(write.key) !== write) {
+          return;
+        }
+
+        this.pendingStorageWrites.delete(write.key);
+        this.incrementWorldgenCount("storage_pending_writes_cleared");
+        this.notePendingStorageWriteCount();
+      },
+    };
+  }
+
   private async saveGeneratedChunkRecord(record: GeneratedChunkStorageRecord): Promise<void> {
     if (this.storageSession === undefined) {
       return;
@@ -1595,7 +1732,12 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     const writeVersion = this.bumpGeneratedChunkRecordWriteVersion(key);
-    await this.cacheGeneratedChunkSnapshot(snapshot, writeVersion);
+    const pending = this.registerPendingChunkSnapshotWrite(snapshot, writeVersion);
+    try {
+      await this.cacheGeneratedChunkSnapshot(pending.snapshot ?? snapshot, writeVersion);
+    } finally {
+      pending.clear();
+    }
   }
 
   private async cacheGeneratedChunkSnapshot(snapshot: PackedChunkSnapshot, generatedRecordWriteVersion: number): Promise<void> {
@@ -1613,13 +1755,22 @@ export class GeneratedWorldHost implements WorldHost {
     const key = chunkKey(snapshot.chunkX, snapshot.chunkZ);
     const version = this.bumpGeneratedCacheWriteVersion(key);
     const generatedRecordWriteVersion = this.bumpGeneratedChunkRecordWriteVersion(key);
+    const pending = this.registerPendingChunkSnapshotWrite(
+      snapshot,
+      generatedRecordWriteVersion,
+      () => this.generatedCacheWriteVersions.get(key) === version && !this.dirtyDurableChunks.has(key),
+    );
     this.queueStorageSideEffect(async () => {
-      if (this.generatedCacheWriteVersions.get(key) !== version || this.dirtyDurableChunks.has(key)) {
-        this.incrementWorldgenCount("storage_cache_saves_skipped_stale");
-        return;
-      }
+      try {
+        if (this.generatedCacheWriteVersions.get(key) !== version || this.dirtyDurableChunks.has(key)) {
+          this.incrementWorldgenCount("storage_cache_saves_skipped_stale");
+          return;
+        }
 
-      await this.cacheGeneratedChunkSnapshot(snapshot, generatedRecordWriteVersion);
+        await this.cacheGeneratedChunkSnapshot(pending.snapshot ?? snapshot, generatedRecordWriteVersion);
+      } finally {
+        pending.clear();
+      }
     }, key);
   }
 
@@ -1649,11 +1800,16 @@ export class GeneratedWorldHost implements WorldHost {
       return;
     }
 
-    await this.recordWorldgenPhaseAsync("storage.save_dirty_chunk", () =>
-      this.storageSession!.chunks.saveChunk(withoutPersistedLight(snapshot), { generatedRecordWriteVersion })
-    );
-    this.incrementWorldgenCount("storage_dirty_saves");
-    this.dirtyDurableChunks.delete(key);
+    const pending = this.registerPendingChunkSnapshotWrite(snapshot, generatedRecordWriteVersion);
+    try {
+      await this.recordWorldgenPhaseAsync("storage.save_dirty_chunk", () =>
+        this.storageSession!.chunks.saveChunk(pending.snapshot ?? withoutPersistedLight(snapshot), { generatedRecordWriteVersion })
+      );
+      this.incrementWorldgenCount("storage_dirty_saves");
+      this.dirtyDurableChunks.delete(key);
+    } finally {
+      pending.clear();
+    }
   }
 
   private async saveDirtyChunkBeforeUnload(chunk: GeneratedLevelChunk): Promise<void> {
@@ -3341,6 +3497,15 @@ export class GeneratedWorldHost implements WorldHost {
     this.setWorldgenCount(
       "chunk_holders_unload_queue_max",
       Math.max(this.worldgenPerformance.counts.get("chunk_holders_unload_queue_max") ?? 0, count),
+    );
+  }
+
+  private notePendingStorageWriteCount(): void {
+    const count = this.pendingStorageWrites.size;
+    this.setWorldgenCount("storage_pending_writes_current", count);
+    this.setWorldgenCount(
+      "storage_pending_writes_max",
+      Math.max(this.worldgenPerformance.counts.get("storage_pending_writes_max") ?? 0, count),
     );
   }
 

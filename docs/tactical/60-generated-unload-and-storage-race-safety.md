@@ -2,7 +2,7 @@
 
 Make generated chunk unload/save/load ordering predictable like vanilla `ChunkMap`, so async persistence cannot cause duplicate generation, stale reloads, or older partial records overwriting newer chunk state.
 
-Status: pending-unload resurrection, generated-record write-version, stale-preload rejection, storage-session epoch, keyed storage side-effect, and budgeted holder-unload slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results. Storage adapters reject operations from superseded sessions after reopen/reset/close. Queued same-chunk side effects stay ordered without blocking unrelated chunk writes. Holder drops now enter a `toDrop`-style queue and process with a vanilla-sized 200-holder normal budget before moving into pending unload/save.
+Status: pending-unload resurrection, generated-record write-version, stale-preload rejection, storage-session epoch, keyed storage side-effect, budgeted holder-unload, and pending-write read-through slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results. Storage adapters reject operations from superseded sessions after reopen/reset/close. Queued same-chunk side effects stay ordered without blocking unrelated chunk writes, and host preloads read through same-chunk pending writes before adapter loads. Holder drops now enter a `toDrop`-style queue and process with a vanilla-sized 200-holder normal budget before moving into pending unload/save.
 
 ## Vanilla source anchors
 
@@ -13,6 +13,7 @@ Status: pending-unload resurrection, generated-record write-version, stale-prelo
 | [`ChunkMap.scheduleUnload(...)`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java) | waits for `chunkToSave`; reschedules if `chunkToSave` changes before unload completes |
 | [`ChunkHolder.updateChunkToSave(...)`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java) | chains latest successful `ChunkAccess` futures into the save target |
 | [`ChunkMap.save(...)`](../../reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java) | dirty-gated save; avoids proto-over-existing-full cases |
+| [`IOWorker.pendingWrites`](../../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/storage/IOWorker.java) | queued stores are visible to reads before region-file writes finish |
 
 ## Race risks to close
 
@@ -38,8 +39,8 @@ Status: pending-unload resurrection, generated-record write-version, stale-prelo
 
 5. **Global queue instead of per-chunk ordering**
    - Risk: the serialized global queue is safe but blunt; it can block unrelated chunks behind one slow write and does not encode same-key dependencies explicitly.
-   - Current protection: `GeneratedWorldHost` now keys queued side effects by chunk coordinate and runs up to four independent keys concurrently. Same-key operations retain FIFO order.
-   - Remaining gap: adapter reads do not yet read through host-side pending write data the way vanilla `IOWorker.pendingWrites` does; current protection is ordering and stale/CAS guards, not full read-through.
+   - Current protection: `GeneratedWorldHost` now keys queued side effects by chunk coordinate and runs up to four independent keys concurrently. Same-key operations retain FIFO order. Pending generated-record and packed-snapshot writes are also registered in host memory and consulted before adapter reads, mirroring vanilla `IOWorker.pendingWrites`.
+   - Remaining gap: pending-write visibility is currently host-local. That matches the single-authority host shape, but it is not a cross-process shared pending-write table.
 
 6. **Authority-square unload instead of ticket unload**
    - Risk: pruning is immediate and deterministic rather than ticket-level driven with budgets.
@@ -97,10 +98,20 @@ Status: pending-unload resurrection, generated-record write-version, stale-prelo
 - New counters: `chunk_holders_unload_queued`, `chunk_holders_unload_processed`, `chunk_holders_unload_cancelled`, `chunk_holders_unload_queue_current`, `chunk_holders_unload_queue_max`, `chunk_holders_unload_restored`, `chunk_holders_unload_restore_skipped`, `chunk_holders_unload_restore_rejected`, and `chunk_holders_unload_skipped_stale`.
 - Regression coverage walks far enough to queue 625 holder drops, verifies only 200 process before settling, then flushes and verifies the expected 625 current holder records remain.
 
+## Landed seventh slice
+
+- `GeneratedWorldHost` now tracks `pendingStorageWrites` keyed by chunk coordinate.
+- Generated-record saves, generated-clean cache writes, direct generated-clean snapshot saves, and dirty snapshot saves register their latest generated record and/or packed snapshot before the storage adapter write reaches disk/IndexedDB/memory.
+- `preloadStoredChunk(...)` checks pending generated records before `loadGeneratedChunk(...)` and pending packed snapshots before `loadChunk(...)`.
+- Pending generated-cache writes include a stale predicate, so a later dirty/save-worthy version stops old cache data from being served.
+- Pending entries clear only if the completing write still owns the key, so an older queued write cannot clear a newer pending write.
+- New counters: `storage_pending_writes_registered`, `storage_pending_writes_cleared`, `storage_pending_writes_current`, `storage_pending_writes_max`, `storage_pending_writes_dropped_stale`, `storage_pending_writes_read_generated_chunk`, `storage_pending_writes_read_chunk`, `storage_preload_loaded_pending_generated_chunk`, and `storage_preload_loaded_pending_chunk`.
+- Regression coverage blocks the first generated-cache save, removes that chunk from the in-memory level, then verifies preload restores it from the host pending write without calling adapter `loadGeneratedChunk(...)` or `loadChunk(...)`.
+
 ## Next implementation slices
 
-1. Add host-side pending-write read-through for same-key loads if future load paths can overlap queued saves.
-2. Replace the derived authority-square residency input with explicit ticket sources once generation, lighting, entities, forced chunks, and player interest can express independent tickets.
+1. Replace the derived authority-square residency input with explicit ticket sources once generation, lighting, entities, forced chunks, and player interest can express independent tickets.
+2. Add a public host/protocol flush or close acknowledgement so browser/Node shutdown can deliberately wait for dirty saves.
 3. Consider a cross-tab/cross-process save lock for IndexedDB/file storage if we start supporting multiple authorities against the same save.
 
 ## Validation

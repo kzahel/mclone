@@ -58,7 +58,7 @@ Landed so far:
    - Holders with queued generated-record saves stay in a pending-unload map and can be resurrected before the save reaches storage.
 
 3. **Storage queue policy**
-   - Keep side effects serialized or otherwise bounded.
+   - Landed: side effects are keyed by chunk coordinate, globally bounded, and visible to same-host preloads through a pending-write read-through map.
    - Add a public host/protocol flush or close operation so tests, Node hosts, and browser shutdown can wait for dirty saves deliberately.
    - Separate discardable generated-cache writes from durable dirty saves at the storage adapter boundary if the adapter needs different priorities.
 

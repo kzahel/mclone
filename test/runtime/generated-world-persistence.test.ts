@@ -165,10 +165,14 @@ class FirstSaveBlockingChunkStorage implements ChunkStorage {
   public readonly records = new Map<string, PackedChunkSnapshot>();
   public readonly generatedRecords = new Map<string, GeneratedChunkStorageRecord>();
   public saveStarted = 0;
+  public loadChunkCalls = 0;
+  public loadGeneratedChunkCalls = 0;
+  public firstBlockedSnapshot: PackedChunkSnapshot | undefined;
   private firstSaveResolver: (() => void) | undefined;
   private firstSaveBlocked = false;
 
   public async loadChunk(_chunkX: number, _chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
+    this.loadChunkCalls++;
     return undefined;
   }
 
@@ -176,6 +180,7 @@ class FirstSaveBlockingChunkStorage implements ChunkStorage {
     this.saveStarted++;
     if (!this.firstSaveBlocked) {
       this.firstSaveBlocked = true;
+      this.firstBlockedSnapshot = clonePackedChunkSnapshot(snapshot);
       await new Promise<void>((resolve) => {
         this.firstSaveResolver = () => {
           this.records.set(`${snapshot.chunkX.toString()},${snapshot.chunkZ.toString()}`, clonePackedChunkSnapshot(snapshot));
@@ -189,6 +194,7 @@ class FirstSaveBlockingChunkStorage implements ChunkStorage {
   }
 
   public async loadGeneratedChunk(_chunkX: number, _chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
+    this.loadGeneratedChunkCalls++;
     return undefined;
   }
 
@@ -221,6 +227,18 @@ class FirstSaveBlockingWorldStorage implements WorldStorage {
     this.metadata = createWorldSaveMetadata(request);
     return new FirstSaveBlockingWorldStorageSession(this.metadata, this.chunks);
   }
+}
+
+interface PendingWriteReadThroughDebugHost {
+  readonly chunkViewJobRevision: number;
+  readonly level: {
+    removeChunk(chunkX: number, chunkZ: number): unknown;
+  };
+  preloadStoredChunk(
+    chunkX: number,
+    chunkZ: number,
+    chunkViewJobRevision: number,
+  ): Promise<"loaded" | "already_loaded" | "missing" | "stale">;
 }
 
 async function waitForCondition(
@@ -381,6 +399,52 @@ describe("GeneratedWorld persistence", () => {
     storage.chunks.releaseFirstSave();
     await host.flushStorageSideEffects();
     expect(storage.chunks.records.size).toBe(25);
+  });
+
+  test("preloads from pending generated-cache writes before queued saves reach storage", async () => {
+    const storage = new FirstSaveBlockingWorldStorage();
+    const blocks = registerGeneratedRenderBlocks();
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      worldStorage: storage,
+    });
+    await host.openWorld({
+      type: "open_world",
+      seed: 12345n,
+      preset: "flat_grass",
+    });
+
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    await waitForCondition(
+      () => storage.chunks.firstBlockedSnapshot !== undefined,
+      "Expected first generated-cache save to block",
+    );
+
+    const pendingSnapshot = storage.chunks.firstBlockedSnapshot!;
+    storage.chunks.loadChunkCalls = 0;
+    storage.chunks.loadGeneratedChunkCalls = 0;
+    const debugHost = host as unknown as PendingWriteReadThroughDebugHost;
+    debugHost.level.removeChunk(pendingSnapshot.chunkX, pendingSnapshot.chunkZ);
+
+    await expect(debugHost.preloadStoredChunk(
+      pendingSnapshot.chunkX,
+      pendingSnapshot.chunkZ,
+      debugHost.chunkViewJobRevision,
+    )).resolves.toBe("loaded");
+    expect(storage.chunks.loadGeneratedChunkCalls).toBe(0);
+    expect(storage.chunks.loadChunkCalls).toBe(0);
+
+    storage.chunks.releaseFirstSave();
+    await host.flushStorageSideEffects();
   });
 
   test("saves dirty authoritative chunks before eviction", async () => {
