@@ -85,6 +85,24 @@ export class GeneratedChunkTicketSet {
     return bounds;
   }
 
+  public getCoveredChunkCount(): number {
+    const bounds = this.getBounds();
+    if (bounds === undefined) {
+      return 0;
+    }
+
+    let count = 0;
+    for (let chunkZ = bounds.minChunkZ; chunkZ <= bounds.maxChunkZ; chunkZ++) {
+      for (let chunkX = bounds.minChunkX; chunkX <= bounds.maxChunkX; chunkX++) {
+        if (this.contains(chunkX, chunkZ)) {
+          count++;
+        }
+      }
+    }
+
+    return count;
+  }
+
   public getDebugRecords(): readonly GeneratedChunkTicketDebugRecord[] {
     return [...this.tickets.values()]
       .map((ticket) => ({

@@ -178,6 +178,12 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     this.viewCenterX = centerChunkX;
     this.viewCenterZ = centerChunkZ;
     this.publishChunkRadius = nextPublishRadius;
+    this.authorityTickets.replaceSource("player_view", [{
+      source: "player_view",
+      centerChunkX,
+      centerChunkZ,
+      radius: nextPublishRadius,
+    }]);
     this.authorityTickets.replaceSource("generation_dependency", [{
       source: "generation_dependency",
       centerChunkX,

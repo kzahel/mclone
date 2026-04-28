@@ -276,7 +276,8 @@ const STORAGE_SIDE_EFFECT_MAX_CONCURRENCY = 4;
 const GLOBAL_STORAGE_SIDE_EFFECT_KEY = "global";
 const CHUNK_HOLDER_UNLOADS_PER_PASS = 200;
 const CHUNK_HOLDER_UNLOAD_BACKLOG_THRESHOLD = 2_000;
-const GENERATED_RESIDENCY_TICKET_SOURCE = "generation_dependency";
+const GENERATED_PLAYER_VIEW_TICKET_SOURCE = "player_view";
+const GENERATED_DEPENDENCY_TICKET_SOURCE = "generation_dependency";
 
 type GeneratedChunkStatusJobState = "pending" | "fulfilled" | "rejected";
 
@@ -824,8 +825,14 @@ export class GeneratedWorldHost implements WorldHost {
 
   private updateChunkResidencyTickets(request: SetChunkViewRequest): void {
     const previousSignature = this.chunkResidencyTickets.getSignature();
-    this.chunkResidencyTickets.replaceSource(GENERATED_RESIDENCY_TICKET_SOURCE, [{
-      source: GENERATED_RESIDENCY_TICKET_SOURCE,
+    this.chunkResidencyTickets.replaceSource(GENERATED_PLAYER_VIEW_TICKET_SOURCE, [{
+      source: GENERATED_PLAYER_VIEW_TICKET_SOURCE,
+      centerChunkX: request.centerChunkX,
+      centerChunkZ: request.centerChunkZ,
+      radius: getGeneratedWorldViewChunkRadius(request.radius),
+    }]);
+    this.chunkResidencyTickets.replaceSource(GENERATED_DEPENDENCY_TICKET_SOURCE, [{
+      source: GENERATED_DEPENDENCY_TICKET_SOURCE,
       centerChunkX: request.centerChunkX,
       centerChunkZ: request.centerChunkZ,
       radius: getGeneratedWorldAuthorityChunkRadius(request.radius),
@@ -3523,7 +3530,7 @@ export class GeneratedWorldHost implements WorldHost {
 
   private noteChunkResidencyTicketCount(): void {
     const tickets = this.chunkResidencyTickets.getDebugRecords();
-    const ticketedChunks = tickets.reduce((sum, ticket) => sum + ticket.chunkCount, 0);
+    const ticketedChunks = this.chunkResidencyTickets.getCoveredChunkCount();
     this.setWorldgenCount("chunk_residency_tickets_current", tickets.length);
     this.setWorldgenCount("chunk_residency_ticketed_chunks_current", ticketedChunks);
     this.setWorldgenCount(

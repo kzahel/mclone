@@ -2,7 +2,7 @@
 
 Make generated chunk residency and storage IO closer to vanilla `ChunkMap`: memory-first holder reuse, bounded holder eviction, dirty-gated durable saves, and lazy discardable generated-cache writes.
 
-Status: holder residency gauges, a named residency-ticket source, budgeted holder unloads, pending-unload resurrection, and keyed storage side effects have landed. Generated-clean publish cache writes are queued instead of blocking publication; dirty durable saves still run before the host forgets dirty chunk data.
+Status: holder residency gauges, named player/generation residency-ticket sources, budgeted holder unloads, pending-unload resurrection, and keyed storage side effects have landed. Generated-clean publish cache writes are queued instead of blocking publication; dirty durable saves still run before the host forgets dirty chunk data.
 
 ## Source files
 
@@ -32,12 +32,12 @@ The useful parity target is therefore:
 
 ## Current `mclone` shape
 
-The generated host now has a small ticket-set primitive, but it currently installs one derived `generation_dependency` ticket for the same deterministic authority square used before. For the current publication policy, that ticket is intentionally large enough for `FULL`, `LIGHT`, and `FEATURES` dependencies. That is acceptable until separate ticket sources exist, but holder lifetime must be bounded by ticketed residency rather than ad hoc radius checks.
+The generated host now has a small ticket-set primitive and installs separate `player_view` and `generation_dependency` tickets. The generation ticket still covers the same deterministic authority square used before, intentionally large enough for `FULL`, `LIGHT`, and `FEATURES` dependencies. That is acceptable until the remaining runtime subsystems own their ticket sources, but holder lifetime is now bounded by ticketed residency rather than ad hoc radius checks.
 
 Landed so far:
 
 - `GeneratedWorldHost` queues `GeneratedChunkHolder` records outside the current authority window, processes normal unload passes with a 200-holder budget, and drains that queue during explicit flush.
-- `GeneratedChunkTicketSet` records named square tickets; host holder residency and `GeneratedRenderLevel` authority checks now go through a `generation_dependency` ticket.
+- `GeneratedChunkTicketSet` records named square tickets; host holder residency and `GeneratedRenderLevel` authority checks now go through `player_view` and `generation_dependency` tickets.
 - Worldgen perf counters report resident holder counts, unload-queue backlog, processed/cancelled holder drops, pending unloads, and storage side-effect depth/activity.
 - Storage side effects are keyed by chunk coordinate and run with bounded global concurrency.
 - Generated-clean cache writes from publish are queued lazily.
@@ -49,14 +49,14 @@ Landed so far:
 ## Remaining work
 
 1. **Ticket-shaped residency**
-   - Landed: the single authority square is represented as a named `generation_dependency` ticket instead of direct radius math.
-   - Remaining: split that monolithic ticket into explicit player view, generation, lighting, entity, and future forced-chunk tickets.
+   - Landed: visible player interest and hidden generation dependency interest are separate `player_view` and `generation_dependency` tickets.
+   - Remaining: add explicit lighting, entity, and future forced-chunk tickets.
    - Keep the existing radius helpers as derived policy until each runtime subsystem owns its ticket source.
 
 2. **Unload queue parity**
    - Landed: holder drops use a budgeted unload queue similar to vanilla's `processUnloads(...)`.
    - Keep dirty-save-before-forget semantics for dirty chunks.
-   - Remaining: drive the queue from multiple explicit ticket levels instead of the single derived `generation_dependency` ticket.
+   - Remaining: drive the queue from multiple explicit ticket levels instead of only unioned square tickets.
    - Holders with queued generated-record saves stay in a pending-unload map and can be resurrected before the save reaches storage.
 
 3. **Storage queue policy**
