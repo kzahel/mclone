@@ -286,7 +286,7 @@ The not-allowed divergence for vanilla-profile behavior:
 
 ## Protocol Implications
 
-`entity_snapshot` and `entity_delta` should be separate host-to-client updates, not fields inside `chunk_snapshot`.
+`entity_snapshot`, `entity_update`, and `entity_remove` are separate host-to-client updates, not fields inside `chunk_snapshot`.
 
 `chunk_snapshot` establishes block, biome, light, and scheduled-tick facts for meshing. Entity churn has a different cadence, tracking range, and ordering requirement. Meshing should not rebuild because a cow moved.
 
@@ -301,22 +301,27 @@ Suggested baseline facts for `entity_snapshot`:
 - pose or minimal flags needed by presentation
 - initial tracked data subset
 
-The current landed `entity_snapshot` is the first baseline form for generated original mobs: id/UUID, type/category, owning chunk, position/rotation, dimensions, on-ground, age, and small type-specific data. Add tick/revision before introducing `entity_delta` or movement interpolation.
+The current landed `entity_snapshot` is the first baseline form for generated original mobs: id/UUID, type/category, owning chunk, position/rotation, dimensions, on-ground, age, and small type-specific data.
 
-Suggested baseline facts for `entity_delta`:
+Current baseline facts for `entity_update`:
 
-- protocol type: `entity_delta`
 - authoritative runtime id
-- tick and revision
 - optional position/rotation/velocity update
 - optional owning section/chunk change
 - optional tracked-data patch
-- optional removed reason
+
+Current baseline facts for `entity_remove`:
+
+- authoritative runtime id
+- optional UUID-equivalent identity
+- optional removal/untrack reason
+
+Add tick/revision before cow wandering or any high-frequency entity movement depends on ordered deltas.
 
 Ordering rules:
 
 - A client should receive an `entity_snapshot` before deltas for that entity.
-- Removal should be a delta, not an implicit disappearance caused by a chunk mesh update.
+- Removal should be explicit, not an implicit disappearance caused by a chunk mesh update.
 - Entity updates should carry tick/revision context like `player_state`.
 - Entity updates should be filterable per session by tracking range and interest.
 - `chunk_unload` should either be paired with entity removals for entities no longer tracked by that client, or client cache semantics must define that unloading a chunk invalidates its tracked entities.

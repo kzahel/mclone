@@ -47,6 +47,7 @@ import {
   PLAYER_ENTITY_TYPE_ID,
   type ClientSessionState,
   type EntitySnapshot,
+  type EntityUpdate,
   type ClientPlayerState,
   type OpenWorldRequest,
   type PollWorldUpdatesRequest,
@@ -190,6 +191,54 @@ function createChunkUnloadMessage(key: string): Extract<WorldHostMessage, { type
 
 function entitySnapshotChunkKey(entity: EntitySnapshot): string {
   return chunkKey(entity.chunkX, entity.chunkZ);
+}
+
+function applyEntityUpdateToSnapshot(entity: EntitySnapshot, update: EntityUpdate): EntitySnapshot {
+  const position = update.position ?? entity.position;
+  return {
+    ...entity,
+    chunkX: update.chunkX ?? (update.position === undefined ? entity.chunkX : SectionPos.blockToSectionCoord(position.x)),
+    chunkZ: update.chunkZ ?? (update.position === undefined ? entity.chunkZ : SectionPos.blockToSectionCoord(position.z)),
+    position,
+    rotation: update.rotation ?? entity.rotation,
+    width: update.width ?? entity.width,
+    height: update.height ?? entity.height,
+    onGround: update.onGround ?? entity.onGround,
+    age: update.age ?? entity.age,
+    data: update.data ?? entity.data,
+  };
+}
+
+function createEntityUpdateMessage(
+  entity: EntitySnapshot,
+): Extract<WorldHostMessage, { type: "entity_update" }> {
+  return {
+    type: "entity_update",
+    update: {
+      id: entity.id,
+      chunkX: entity.chunkX,
+      chunkZ: entity.chunkZ,
+      position: entity.position,
+      rotation: entity.rotation,
+      width: entity.width,
+      height: entity.height,
+      onGround: entity.onGround,
+      age: entity.age,
+      data: entity.data,
+    },
+  };
+}
+
+function createEntityRemoveMessage(
+  entity: EntitySnapshot,
+  reason: string,
+): Extract<WorldHostMessage, { type: "entity_remove" }> {
+  return {
+    type: "entity_remove",
+    entityId: entity.id,
+    uuid: entity.uuid,
+    reason,
+  };
 }
 
 function isSameChunkView(left: SetChunkViewRequest | undefined, right: SetChunkViewRequest | undefined): boolean {
@@ -396,6 +445,16 @@ function applyAuthoritativeMessages(world: SharedWorldRecord, messages: readonly
       case "entity_snapshot":
         world.loadedEntitySnapshots.set(message.entity.id, message.entity);
         break;
+      case "entity_update": {
+        const existing = world.loadedEntitySnapshots.get(message.update.id);
+        if (existing !== undefined) {
+          world.loadedEntitySnapshots.set(message.update.id, applyEntityUpdateToSnapshot(existing, message.update));
+        }
+        break;
+      }
+      case "entity_remove":
+        world.loadedEntitySnapshots.delete(message.entityId);
+        break;
       case "chunk_snapshot":
         world.loadedSnapshots.set(chunkKey(message.snapshot.chunkX, message.snapshot.chunkZ), message.snapshot);
         world.collisionLevel.applyPackedChunkSnapshot(message.snapshot);
@@ -442,11 +501,11 @@ function getSessionVisibleChunks(chunkView: SetChunkViewRequest | undefined): Se
   return keys;
 }
 
-function getEntitySnapshotMessagesForChunk(
+function getVisibleEntitySnapshotsForChunk(
   world: SharedWorldRecord,
   key: string,
   excludePlayerId?: string,
-): Extract<WorldHostMessage, { type: "entity_snapshot" }>[] {
+): readonly EntitySnapshot[] {
   const snapshots = [
     ...world.loadedEntitySnapshots.values(),
     ...[...world.playerSlots.values()]
@@ -456,11 +515,28 @@ function getEntitySnapshotMessagesForChunk(
 
   return snapshots
     .filter((entity) => entitySnapshotChunkKey(entity) === key)
-    .sort((left, right) => left.id - right.id)
+    .sort((left, right) => left.id - right.id);
+}
+
+function getEntitySnapshotMessagesForChunk(
+  world: SharedWorldRecord,
+  key: string,
+  excludePlayerId?: string,
+): Extract<WorldHostMessage, { type: "entity_snapshot" }>[] {
+  return getVisibleEntitySnapshotsForChunk(world, key, excludePlayerId)
     .map((entity) => ({
       type: "entity_snapshot",
       entity,
     }));
+}
+
+function getEntityRemoveMessagesForChunk(
+  world: SharedWorldRecord,
+  key: string,
+  excludePlayerId?: string,
+): Extract<WorldHostMessage, { type: "entity_remove" }>[] {
+  return getVisibleEntitySnapshotsForChunk(world, key, excludePlayerId)
+    .map((entity) => createEntityRemoveMessage(entity, "unloaded_to_chunk"));
 }
 
 function computeAggregateChunkView(sessions: Iterable<SessionRecord>): SetChunkViewRequest | undefined {
@@ -744,6 +820,7 @@ export class GeneratedWorldRemoteService {
 
       for (const key of previousVisibleChunks) {
         if (!visibleChunks.has(key)) {
+          responseMessages.push(...getEntityRemoveMessagesForChunk(queuedWorld, key, queuedSession.playerId));
           responseMessages.push(createChunkUnloadMessage(key));
         }
       }
@@ -839,6 +916,7 @@ export class GeneratedWorldRemoteService {
           continue;
         }
         const player = getSessionPlayer(world, session);
+        const previousEntity = player.anchoredToChunkView ? createRemotePlayerEntitySnapshot(player) : undefined;
         const nextPlayerState = tickPlayerStateWithCommandQueue(
           player.state,
           player.commandQueue,
@@ -848,10 +926,18 @@ export class GeneratedWorldRemoteService {
         if (nextPlayerState !== player.state) {
           player.state = nextPlayerState;
           enqueuePlayerStateMessage(session, player);
-          this.enqueueRemotePlayerEntitySnapshot(world, player, session.id);
+          if (previousEntity !== undefined) {
+            this.enqueueRemotePlayerEntityUpdate(world, previousEntity, player, session.id);
+          }
         }
       }
     }
+  }
+
+  private isPendingEntityLifecycleMessageForId(message: WorldHostMessage, entityId: number): boolean {
+    return (message.type === "entity_snapshot" && message.entity.id === entityId)
+      || (message.type === "entity_update" && message.update.id === entityId)
+      || (message.type === "entity_remove" && message.entityId === entityId);
   }
 
   private enqueueRemotePlayerEntitySnapshot(
@@ -864,15 +950,60 @@ export class GeneratedWorldRemoteService {
     }
 
     const message = createRemotePlayerEntitySnapshotMessage(player);
+    const key = entitySnapshotChunkKey(message.entity);
     for (const session of this.getWorldSessions(world)) {
       if (session.id === excludeSessionId) {
         continue;
       }
 
-      session.pendingMessages = session.pendingMessages.filter(
-        (pending) => pending.type !== "entity_snapshot" || pending.entity.id !== player.entityId,
-      );
-      session.pendingMessages.push(message);
+      if (session.visibleChunks.has(key)) {
+        session.pendingMessages = session.pendingMessages.filter(
+          (pending) => !this.isPendingEntityLifecycleMessageForId(pending, player.entityId),
+        );
+        session.pendingMessages.push(message);
+      }
+    }
+  }
+
+  private enqueueRemotePlayerEntityUpdate(
+    world: SharedWorldRecord,
+    previousEntity: EntitySnapshot,
+    player: PlayerSlotRecord,
+    excludeSessionId?: string,
+  ): void {
+    if (!player.anchoredToChunkView) {
+      return;
+    }
+
+    const nextEntity = createRemotePlayerEntitySnapshot(player);
+    const previousKey = entitySnapshotChunkKey(previousEntity);
+    const nextKey = entitySnapshotChunkKey(nextEntity);
+    for (const session of this.getWorldSessions(world)) {
+      if (session.id === excludeSessionId) {
+        continue;
+      }
+
+      const sawPrevious = session.visibleChunks.has(previousKey);
+      const seesNext = session.visibleChunks.has(nextKey);
+      if (sawPrevious && seesNext) {
+        session.pendingMessages = session.pendingMessages.filter(
+          (pending) => pending.type !== "entity_update" || pending.update.id !== player.entityId,
+        );
+        session.pendingMessages.push(createEntityUpdateMessage(nextEntity));
+      } else if (sawPrevious) {
+        session.pendingMessages = session.pendingMessages.filter(
+          (pending) => !this.isPendingEntityLifecycleMessageForId(pending, player.entityId),
+        );
+        session.pendingMessages.push(createEntityRemoveMessage(previousEntity, "changed_chunk"));
+      } else if (seesNext) {
+        session.pendingMessages = session.pendingMessages.filter(
+          (pending) => !this.isPendingEntityLifecycleMessageForId(pending, player.entityId),
+        );
+        session.pendingMessages.push({
+          type: "entity_snapshot",
+          entity: nextEntity,
+        });
+      }
     }
   }
 
@@ -883,7 +1014,35 @@ export class GeneratedWorldRemoteService {
     }
 
     this.sessions.delete(sessionId);
-    this.worlds.get(session.worldSaveId)?.sessionIds.delete(sessionId);
+    const world = this.worlds.get(session.worldSaveId);
+    if (world === undefined) {
+      return;
+    }
+
+    world.sessionIds.delete(sessionId);
+    const player = world.playerSlots.get(session.playerId);
+    if (player === undefined) {
+      return;
+    }
+
+    world.playerSlots.delete(session.playerId);
+    if (!player.anchoredToChunkView) {
+      return;
+    }
+
+    const entity = createRemotePlayerEntitySnapshot(player);
+    const key = entitySnapshotChunkKey(entity);
+    const message = createEntityRemoveMessage(entity, "unloaded_with_player");
+    for (const remainingSession of this.getWorldSessions(world)) {
+      if (!remainingSession.visibleChunks.has(key)) {
+        continue;
+      }
+
+      remainingSession.pendingMessages = remainingSession.pendingMessages.filter(
+        (pending) => !this.isPendingEntityLifecycleMessageForId(pending, player.entityId),
+      );
+      remainingSession.pendingMessages.push(message);
+    }
   }
 
   public clearSessions(): void {
@@ -1053,6 +1212,53 @@ export class GeneratedWorldRemoteService {
         case "entity_snapshot": {
           const key = entitySnapshotChunkKey(message.entity);
           world.loadedEntitySnapshots.set(message.entity.id, message.entity);
+          for (const session of this.getWorldSessions(world)) {
+            if (session.visibleChunks.has(key)) {
+              session.pendingMessages.push(message);
+            }
+          }
+          break;
+        }
+        case "entity_update": {
+          const previous = world.loadedEntitySnapshots.get(message.update.id);
+          if (previous === undefined) {
+            break;
+          }
+
+          const next = applyEntityUpdateToSnapshot(previous, message.update);
+          world.loadedEntitySnapshots.set(next.id, next);
+          const previousKey = entitySnapshotChunkKey(previous);
+          const nextKey = entitySnapshotChunkKey(next);
+          const updateMessage = createEntityUpdateMessage(next);
+          const snapshotMessage = {
+            type: "entity_snapshot",
+            entity: next,
+          } satisfies Extract<WorldHostMessage, { type: "entity_snapshot" }>;
+          const removeMessage = createEntityRemoveMessage(previous, "changed_chunk");
+          for (const session of this.getWorldSessions(world)) {
+            const sawPrevious = session.visibleChunks.has(previousKey);
+            const seesNext = session.visibleChunks.has(nextKey);
+            if (sawPrevious && seesNext) {
+              session.pendingMessages.push(updateMessage);
+            } else if (sawPrevious) {
+              session.pendingMessages.push(removeMessage);
+            } else if (seesNext) {
+              session.pendingMessages.push(snapshotMessage);
+            }
+          }
+          break;
+        }
+        case "entity_remove": {
+          const previous = world.loadedEntitySnapshots.get(message.entityId);
+          world.loadedEntitySnapshots.delete(message.entityId);
+          if (previous === undefined) {
+            for (const session of this.getWorldSessions(world)) {
+              session.pendingMessages.push(message);
+            }
+            break;
+          }
+
+          const key = entitySnapshotChunkKey(previous);
           for (const session of this.getWorldSessions(world)) {
             if (session.visibleChunks.has(key)) {
               session.pendingMessages.push(message);

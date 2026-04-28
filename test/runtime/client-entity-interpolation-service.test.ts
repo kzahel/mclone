@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { WorldClientRuntimeFacade } from "../../src/runtime/client/client-runtime";
 import { ClientEntityInterpolationService } from "../../src/runtime/client";
+import { HostMessageClientWorld } from "../../src/runtime/client/client-world";
 import { TransportWorldClient, type WorldTransport } from "../../src/runtime/transport/local-world-transport";
 import type { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
 import type {
@@ -70,6 +71,36 @@ class PollMessagesTransport implements WorldTransport {
 }
 
 describe("Client entity interpolation service", () => {
+  test("hydrates entity update and remove lifecycle messages", async () => {
+    const first = entity();
+    const clientWorld = new HostMessageClientWorld(() => ({}) as ClientChunkCache);
+
+    await clientWorld.hydrateHostMessages([OPENED, { type: "entity_snapshot", entity: first }]);
+    await clientWorld.hydrateHostMessages([{
+      type: "entity_update",
+      update: {
+        id: first.id,
+        position: { x: 32, y: 65, z: -1 },
+        rotation: { yaw: 10, pitch: 5 },
+        onGround: false,
+        age: 3,
+      },
+    }]);
+
+    expect(clientWorld.getEntitySnapshots()).toEqual([{
+      ...first,
+      chunkX: 2,
+      chunkZ: -1,
+      position: { x: 32, y: 65, z: -1 },
+      rotation: { yaw: 10, pitch: 5 },
+      onGround: false,
+      age: 3,
+    }]);
+
+    await clientWorld.hydrateHostMessages([{ type: "entity_remove", entityId: first.id, reason: "discarded" }]);
+    expect(clientWorld.getEntitySnapshots()).toEqual([]);
+  });
+
   test("buffers authoritative entity snapshots for visual-only interpolation", () => {
     const service = new ClientEntityInterpolationService({ interpolationDurationMs: 100 });
     const first = entity();

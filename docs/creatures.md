@@ -30,7 +30,16 @@ This document is a reference for future creature work. It is not a tactical slic
 
 `Creatures2` wires that generation path into `GeneratedWorldHost`: generated original mobs enter the host-owned `EntityRuntime`, publish `entity_snapshot` protocol records, flow through local and remote clients, and clear when their chunk unloads.
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, meaningful entity ticking behavior, AI/pathfinding, entity deltas/removal messages, persistence adapters beyond the in-memory runtime path, and rendering.
+`Creatures4` lands the first cow baseline:
+
+- committed vanilla cow fixture for seed `12345`, chunk `(2, -18)`
+- cow fixture/runtime publication coverage alongside the sheep fixture
+- `entity_update` and `entity_remove` protocol records beside `entity_snapshot`
+- client hydration for entity add/update/remove lifecycle
+- explicit remove/untrack messages for unloaded interest and dropped remote player slots
+- vanilla-shaped cow renderer/model registration and extracted cow texture loading
+
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, meaningful cow ticking behavior, AI/pathfinding/wandering, persistence adapters beyond the in-memory runtime path, and cow gameplay interactions.
 
 ## Reference Source Map
 

@@ -15,6 +15,7 @@ import type {
   ClientPlayerState,
   ClientSessionState,
   EntitySnapshot,
+  EntityUpdate,
   WorldHostMessage,
   WorldOpenedMessage,
   WorldPerformanceSnapshot,
@@ -275,6 +276,12 @@ export class HostMessageClientWorld implements ClientWorldHydrationTarget {
           this.entitySnapshots.set(message.entity.id, message.entity);
           messageChanged = true;
           break;
+        case "entity_update":
+          messageChanged = this.applyEntityUpdate(message.update) || messageChanged;
+          break;
+        case "entity_remove":
+          messageChanged = this.entitySnapshots.delete(message.entityId) || messageChanged;
+          break;
         case "chunk_snapshot":
           pendingChunkUpdates.push(message);
           this.getLevel().applyPackedChunkSnapshot(message.snapshot);
@@ -329,6 +336,29 @@ export class HostMessageClientWorld implements ClientWorldHydrationTarget {
     this.entitySnapshots.clear();
     this.performanceSnapshot = undefined;
     return loadedChunks.length > 0;
+  }
+
+  private applyEntityUpdate(update: EntityUpdate): boolean {
+    const entity = this.entitySnapshots.get(update.id);
+    if (entity === undefined) {
+      return false;
+    }
+
+    const position = update.position ?? entity.position;
+    const next: EntitySnapshot = {
+      ...entity,
+      chunkX: update.chunkX ?? (update.position === undefined ? entity.chunkX : SectionPos.blockToSectionCoord(position.x)),
+      chunkZ: update.chunkZ ?? (update.position === undefined ? entity.chunkZ : SectionPos.blockToSectionCoord(position.z)),
+      position,
+      rotation: update.rotation ?? entity.rotation,
+      width: update.width ?? entity.width,
+      height: update.height ?? entity.height,
+      onGround: update.onGround ?? entity.onGround,
+      age: update.age ?? entity.age,
+      data: update.data ?? entity.data,
+    };
+    this.entitySnapshots.set(update.id, next);
+    return true;
   }
 }
 

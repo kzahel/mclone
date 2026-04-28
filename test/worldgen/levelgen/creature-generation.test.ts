@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "vitest";
 
-import fixture from "../../fixtures/creatures/overworld-seed-12345-chunk--7--15-entities.json";
+import cowFixture from "../../fixtures/creatures/overworld-seed-12345-chunk-2--18-entities.json";
+import sheepFixture from "../../fixtures/creatures/overworld-seed-12345-chunk--7--15-entities.json";
 import { Registry } from "../../../src/core/registry.ts";
 import { SectionPos } from "../../../src/core/section-pos.ts";
 import { EntityRuntime } from "../../../src/runtime/host/entity-runtime.ts";
@@ -19,17 +20,19 @@ import { OverworldBiomeSource } from "../../../src/worldgen/biome/overworld-biom
 import { NoiseBasedChunkGenerator } from "../../../src/worldgen/levelgen/noise-based-chunk-generator.ts";
 import { WorldgenRandom } from "../../../src/worldgen/prng/worldgen-random.ts";
 
-const creatureFixture = fixture as unknown as CreatureGenerationFixture;
-const SEED = BigInt(creatureFixture.seed);
+const creatureFixtures = [
+  sheepFixture as unknown as CreatureGenerationFixture,
+  cowFixture as unknown as CreatureGenerationFixture,
+];
 
 afterEach(() => {
   Registry.BLOCK.clear();
 });
 
-function createGeneratedLevel(): GeneratedRenderLevel {
+function createGeneratedLevel(seed: bigint): GeneratedRenderLevel {
   const blocks = registerGeneratedRenderBlocks();
-  const biomeSource = new OverworldBiomeSource(SEED);
-  const generator = new NoiseBasedChunkGenerator(biomeSource, SEED);
+  const biomeSource = new OverworldBiomeSource(seed);
+  const generator = new NoiseBasedChunkGenerator(biomeSource, seed);
   return new GeneratedRenderLevel(blocks.airState, generator, blocks.blockStateById);
 }
 
@@ -49,16 +52,17 @@ function normalizeGeneratedEntity(entity: GeneratedMobEntity): NormalizedCreatur
 }
 
 describe("passive creature generation", () => {
-  test("ports NaturalSpawner chunk-generation sheep into the host entity runtime", () => {
+  test.each(creatureFixtures)("ports NaturalSpawner chunk-generation $entities.0.type into the host entity runtime", (creatureFixture) => {
+    const seed = BigInt(creatureFixture.seed);
     const chunk = creatureFixture.chunks[0]!;
-    const level = createGeneratedLevel();
+    const level = createGeneratedLevel(seed);
     level.updateChunkView(chunk.chunkX, chunk.chunkZ, 1);
     expect(level.getChunk(chunk.chunkX, chunk.chunkZ, true)).not.toBeNull();
 
     const runtime = new EntityRuntime<GeneratedMobEntity>();
     runtime.updateChunkStatus(chunk.chunkX, chunk.chunkZ, FullChunkStatus.BORDER);
     const spawned: GeneratedMobEntity[] = [];
-    const generator = new NoiseBasedChunkGenerator(new OverworldBiomeSource(SEED), SEED);
+    const generator = new NoiseBasedChunkGenerator(new OverworldBiomeSource(seed), seed);
 
     generator.spawnOriginalMobs(
       level,

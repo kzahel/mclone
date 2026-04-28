@@ -1,8 +1,9 @@
 import { ResourceLocation } from "../../core/resource-location";
 import type { ClientEntityPresentationState } from "../../runtime/client/entity-interpolation-service";
-import { PLAYER_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
+import { COW_ENTITY_TYPE_ID, PLAYER_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
 
 export const DEFAULT_PLAYER_SKIN = new ResourceLocation("minecraft", "textures/entity/steve.png");
+export const DEFAULT_COW_TEXTURE = new ResourceLocation("minecraft", "textures/entity/cow/cow.png");
 
 export type PlayerSkinModel = "default" | "slim";
 
@@ -35,6 +36,10 @@ export interface RenderablePlayer extends RenderableEntity {
   getSkinTextureLocation(): ResourceLocation;
   isCrouching(): boolean;
   hasChestEquipment(): boolean;
+}
+
+export interface RenderableCow extends RenderableEntity {
+  getTextureLocation(): ResourceLocation;
 }
 
 export class SnapshotRenderablePlayer implements RenderablePlayer {
@@ -145,9 +150,105 @@ export class SnapshotRenderablePlayer implements RenderablePlayer {
   }
 }
 
+export class SnapshotRenderableCow implements RenderableCow {
+  public readonly entityId: number;
+  public readonly uuid: string;
+  public readonly typeId = COW_ENTITY_TYPE_ID;
+  public readonly tickCount: number;
+  public readonly yBodyRot: number;
+  public readonly yBodyRotO: number;
+  public readonly yHeadRot: number;
+  public readonly yHeadRotO: number;
+  public readonly xRotO: number;
+
+  private readonly x: number;
+  private readonly y: number;
+  private readonly z: number;
+  private readonly yaw: number;
+  private readonly pitch: number;
+  private readonly width: number;
+  private readonly height: number;
+  private readonly baby: boolean;
+
+  public constructor(state: ClientEntityPresentationState) {
+    this.entityId = state.entityId;
+    this.uuid = state.uuid;
+    this.x = state.interpolatedPosition.x;
+    this.y = state.interpolatedPosition.y;
+    this.z = state.interpolatedPosition.z;
+    this.yaw = state.interpolatedRotation.yaw;
+    this.pitch = state.interpolatedRotation.pitch;
+    this.width = state.width;
+    this.height = state.height;
+    this.tickCount = state.age ?? 0;
+    this.yBodyRot = this.yaw;
+    this.yBodyRotO = state.previousAuthoritative?.rotation.yaw ?? this.yaw;
+    this.yHeadRot = this.yaw;
+    this.yHeadRotO = this.yBodyRotO;
+    this.xRotO = state.previousAuthoritative?.rotation.pitch ?? this.pitch;
+    this.baby = typeof state.age === "number" && state.age < 0;
+  }
+
+  public getX(): number {
+    return this.x;
+  }
+
+  public getY(): number {
+    return this.y;
+  }
+
+  public getZ(): number {
+    return this.z;
+  }
+
+  public getXRot(): number {
+    return this.pitch;
+  }
+
+  public getYRot(): number {
+    return this.yaw;
+  }
+
+  public getBbWidth(): number {
+    return this.width;
+  }
+
+  public getBbHeight(): number {
+    return this.height;
+  }
+
+  public isInvisible(): boolean {
+    return false;
+  }
+
+  public isSpectator(): boolean {
+    return false;
+  }
+
+  public isPassenger(): boolean {
+    return false;
+  }
+
+  public isAlive(): boolean {
+    return true;
+  }
+
+  public isBaby(): boolean {
+    return this.baby;
+  }
+
+  public getTextureLocation(): ResourceLocation {
+    return DEFAULT_COW_TEXTURE;
+  }
+}
+
 export function createRenderableEntity(state: ClientEntityPresentationState): RenderableEntity | undefined {
   if (state.typeId === PLAYER_ENTITY_TYPE_ID) {
     return new SnapshotRenderablePlayer(state);
+  }
+
+  if (state.typeId === COW_ENTITY_TYPE_ID) {
+    return new SnapshotRenderableCow(state);
   }
 
   return undefined;

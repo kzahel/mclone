@@ -38,6 +38,22 @@ const ENTITY_SNAPSHOT_MESSAGE = {
   },
 } satisfies WorldHostMessage;
 
+const ENTITY_UPDATE_MESSAGE = {
+  type: "entity_update",
+  update: {
+    id: 1,
+    position: { x: 1, y: 64, z: 0 },
+    rotation: { yaw: 5, pitch: 0 },
+  },
+} satisfies WorldHostMessage;
+
+const ENTITY_REMOVE_MESSAGE = {
+  type: "entity_remove",
+  entityId: 1,
+  uuid: "test:entity/1",
+  reason: "discarded",
+} satisfies WorldHostMessage;
+
 describe("world host message queue draining", () => {
   test("keeps player and session messages ahead of bulk chunk snapshots when capped", () => {
     const firstChunk = {
@@ -115,6 +131,32 @@ describe("world host message queue draining", () => {
 
     expect(drained.messages).toEqual([playerState]);
     expect(drained.remaining).toEqual([ENTITY_SNAPSHOT_MESSAGE]);
+  });
+
+  test("keeps entity updates behind session-critical messages when capped", () => {
+    const playerState = {
+      type: "player_state",
+      state: {
+        playerId: "test",
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { yaw: 0, pitch: 0 },
+        acknowledgedInputSequence: 1,
+        tick: 1,
+        revision: 1,
+      },
+    } satisfies WorldHostMessage;
+
+    const drained = drainWorldHostMessages([ENTITY_UPDATE_MESSAGE, playerState], 1);
+
+    expect(drained.messages).toEqual([playerState]);
+    expect(drained.remaining).toEqual([ENTITY_UPDATE_MESSAGE]);
+  });
+
+  test("keeps entity removes in the session-critical lane when capped", () => {
+    const drained = drainWorldHostMessages([CHUNK_MESSAGE, ENTITY_REMOVE_MESSAGE], 1);
+
+    expect(drained.messages).toEqual([ENTITY_REMOVE_MESSAGE]);
+    expect(drained.remaining).toEqual([CHUNK_MESSAGE]);
   });
 
   test("drains latest progress outside the bulk message cap", () => {

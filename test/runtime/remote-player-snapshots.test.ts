@@ -87,4 +87,56 @@ describe("remote player entity snapshots", () => {
       service.clearSessions();
     }
   });
+
+  test("removes dropped player slots with explicit entity lifecycle messages", async () => {
+    const service = new GeneratedWorldRemoteService({
+      saveRoot: await mkdtemp(path.join(tmpdir(), "mclone-remote-player-updates-")),
+    });
+    try {
+      const firstOpen = await service.openWorldMessages({
+        ...OPEN_WORLD_REQUEST,
+        playerProfile: { name: "Remote Player One" },
+      });
+      const secondOpen = await service.openWorldMessages({
+        ...OPEN_WORLD_REQUEST,
+        playerProfile: { name: "Remote Player Two" },
+      });
+      const firstSession = findSessionState(firstOpen);
+      const secondSession = findSessionState(secondOpen);
+
+      await service.setChunkViewMessages(firstSession.sessionId, {
+        type: "set_chunk_view",
+        centerChunkX: 0,
+        centerChunkZ: 0,
+        radius: 1,
+      });
+      await service.setChunkViewMessages(secondSession.sessionId, {
+        type: "set_chunk_view",
+        centerChunkX: 0,
+        centerChunkZ: 0,
+        radius: 1,
+      });
+      const initialUpdates = await service.drainSessionUpdates(firstSession.sessionId, {
+        type: "poll_world_updates",
+        maxMessages: 200,
+      });
+      const remotePlayer = remotePlayerEntities(initialUpdates).find((entity) => entity.data?.playerId === secondSession.playerId);
+      expect(remotePlayer).toBeDefined();
+
+      service.dropSession(secondSession.sessionId);
+      const removalUpdates = await service.drainSessionUpdates(firstSession.sessionId, {
+        type: "poll_world_updates",
+        maxMessages: 200,
+      });
+      expect(removalUpdates).toContainEqual({
+        type: "entity_remove",
+        entityId: remotePlayer!.id,
+        uuid: remotePlayer!.uuid,
+        reason: "unloaded_with_player",
+      });
+    } finally {
+      service.dispose();
+      service.clearSessions();
+    }
+  });
 });

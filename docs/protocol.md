@@ -125,6 +125,8 @@ Current and near-term host-to-client updates:
 | `chunk_light_delta` | stored light changes for an already loaded chunk |
 | `chunk_unload` | release a chunk from client view/cache |
 | `entity_snapshot` | authoritative generated entity baseline data for a visible chunk |
+| `entity_update` | partial authoritative entity position/rotation/chunk/tracked-data update after a baseline |
+| `entity_remove` | explicit entity untrack/remove fact for the client replica |
 | `world_error` | stable failure surface |
 
 Likely future updates:
@@ -132,13 +134,12 @@ Likely future updates:
 | Update | Purpose |
 |---|---|
 | `chunk_delta` | block, section, light, and block-entity mutations |
-| `entity_delta` | authoritative entity movement, metadata changes, and removals after an entity baseline exists |
 | `tick` / `time_state` | world time and tick metadata |
 | `inventory_state` | player inventory and container state |
 
 Updates should carry revision or tick context where ordering matters.
 
-`entity_snapshot` is currently a baseline/interested-chunk update, similar to chunk snapshots. Polling transports should keep session/player state ahead of entity snapshots when capped, then drain entity snapshots with other chunk-interest bulk data.
+`entity_snapshot` is the baseline/interested-chunk update. `entity_update` carries partial changes for an already known entity, and `entity_remove` explicitly clears entities when interest or lifecycle ends. Polling transports keep session/player state and entity removals ahead of capped bulk data, then drain chunk snapshots, light deltas, entity snapshots, and entity updates with other chunk-interest bulk data.
 
 ## Client Replica And Prediction Inputs
 

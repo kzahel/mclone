@@ -162,6 +162,7 @@ export type EntitySnapshotCategory =
 
 export const PLAYER_ENTITY_TYPE_ID = "minecraft:player";
 export const PLAYER_ENTITY_DATA_KIND = "player";
+export const COW_ENTITY_TYPE_ID = "minecraft:cow";
 
 export interface EntitySnapshot {
   readonly id: number;
@@ -182,6 +183,26 @@ export interface EntitySnapshot {
   readonly width: number;
   readonly height: number;
   readonly onGround: boolean;
+  readonly age?: number;
+  readonly data?: Readonly<Record<string, number | boolean | string>>;
+}
+
+export interface EntityUpdate {
+  readonly id: number;
+  readonly chunkX?: number;
+  readonly chunkZ?: number;
+  readonly position?: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
+  readonly rotation?: {
+    readonly yaw: number;
+    readonly pitch: number;
+  };
+  readonly width?: number;
+  readonly height?: number;
+  readonly onGround?: boolean;
   readonly age?: number;
   readonly data?: Readonly<Record<string, number | boolean | string>>;
 }
@@ -224,6 +245,18 @@ export interface ChunkLightDeltaMessage {
 export interface EntitySnapshotMessage {
   readonly type: "entity_snapshot";
   readonly entity: EntitySnapshot;
+}
+
+export interface EntityUpdateMessage {
+  readonly type: "entity_update";
+  readonly update: EntityUpdate;
+}
+
+export interface EntityRemoveMessage {
+  readonly type: "entity_remove";
+  readonly entityId: number;
+  readonly uuid?: string;
+  readonly reason?: string;
 }
 
 export interface WorldProgressMessage {
@@ -269,6 +302,8 @@ export type WorldHostMessage =
   | SessionStateMessage
   | PlayerStateMessage
   | EntitySnapshotMessage
+  | EntityUpdateMessage
+  | EntityRemoveMessage
   | ChunkSnapshotMessage
   | ChunkLightDeltaMessage
   | ChunkUnloadMessage

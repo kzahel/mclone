@@ -8,6 +8,7 @@ export interface DrainedWorldHostMessages {
 function isCappedBulkMessage(message: WorldHostMessage): boolean {
   return message.type === "chunk_snapshot"
     || message.type === "chunk_light_delta"
+    || message.type === "entity_update"
     || message.type === "entity_snapshot";
 }
 

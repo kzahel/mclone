@@ -692,9 +692,27 @@ export class RemoteWorldWebSocketTransport implements WorldTransport {
         case "player_state":
           this.pendingPushMessages = this.pendingPushMessages.filter((pending) => pending.type !== message.type);
           break;
+        case "entity_snapshot":
+          this.pendingPushMessages = this.pendingPushMessages.filter((pending) =>
+            (pending.type !== "entity_snapshot" || pending.entity.id !== message.entity.id)
+            && (pending.type !== "entity_update" || pending.update.id !== message.entity.id)
+            && (pending.type !== "entity_remove" || pending.entityId !== message.entity.id)
+          );
+          break;
+        case "entity_update":
+          this.pendingPushMessages = this.pendingPushMessages.filter((pending) =>
+            pending.type !== "entity_update" || pending.update.id !== message.update.id
+          );
+          break;
+        case "entity_remove":
+          this.pendingPushMessages = this.pendingPushMessages.filter((pending) =>
+            (pending.type !== "entity_snapshot" || pending.entity.id !== message.entityId)
+            && (pending.type !== "entity_update" || pending.update.id !== message.entityId)
+            && (pending.type !== "entity_remove" || pending.entityId !== message.entityId)
+          );
+          break;
         case "world_opened":
         case "session_state":
-        case "entity_snapshot":
         case "chunk_snapshot":
         case "chunk_light_delta":
         case "chunk_unload":

@@ -538,6 +538,7 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     for (const chunk of update.unloadedChunks) {
+      messages.push(...this.createEntityRemoveMessagesForChunk(chunk.chunkX, chunk.chunkZ));
       this.discardUnloadedChunkState(chunk.chunkX, chunk.chunkZ);
       messages.push({
         type: "chunk_unload",
@@ -580,6 +581,7 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     for (const chunk of update.unloadedChunks) {
+      messages.push(...this.createEntityRemoveMessagesForChunk(chunk.chunkX, chunk.chunkZ));
       this.discardUnloadedChunkState(chunk.chunkX, chunk.chunkZ);
       messages.push({
         type: "chunk_unload",
@@ -1781,6 +1783,22 @@ export class GeneratedWorldHost implements WorldHost {
       type: "entity_snapshot",
       entity: snapshot,
     };
+  }
+
+  private createEntityRemoveMessagesForChunk(
+    chunkX: number,
+    chunkZ: number,
+  ): Extract<WorldHostMessage, { type: "entity_remove" }>[] {
+    return this.entityRuntime.manager.getEntityGetter().getAll()
+      .filter((entity) => SectionPos.blockToSectionCoord(entity.blockPosition().getX()) === chunkX
+        && SectionPos.blockToSectionCoord(entity.blockPosition().getZ()) === chunkZ)
+      .sort((left, right) => left.id - right.id)
+      .map((entity) => ({
+        type: "entity_remove",
+        entityId: entity.id,
+        uuid: entity.uuid,
+        reason: "unloaded_to_chunk",
+      }));
   }
 
   private getAcceptedCurrentChunkLight(chunkX: number, chunkZ: number): PackedChunkLight | undefined {

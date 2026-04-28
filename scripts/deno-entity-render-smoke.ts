@@ -6,13 +6,14 @@ import {
   encodeSceneFrame,
 } from "../src/renderer/scene-setup.ts";
 import { collectEntityRenderBatches } from "../src/renderer/entity/entity-batch-renderer.ts";
-import { SnapshotRenderablePlayer } from "../src/renderer/entity/renderable-entity.ts";
+import { SnapshotRenderableCow, SnapshotRenderablePlayer } from "../src/renderer/entity/renderable-entity.ts";
 import { GameRenderer } from "../src/renderer/game-renderer.ts";
 import { EntityTextureManager } from "../src/renderer/texture/entity-texture-manager.ts";
 import { Matrix4f } from "../src/renderer/math/matrix4f.ts";
 import { RenderPipelineCache } from "../src/renderer/pipeline/render-pipeline-cache.ts";
 import { createOffscreenTextureTarget, readTextureRgba8, requestWebGpuDeviceContext } from "../src/renderer/webgpu-target.ts";
 import { Vec3 } from "../src/world/phys/vec3.ts";
+import { createDenoExtractedAssetPack } from "./deno-file-asset-source.ts";
 import { encodePngRgba } from "./png-rgba.ts";
 
 const WIDTH = 128;
@@ -27,18 +28,19 @@ if (!contextResult.ok) {
 }
 
 const { adapter, device } = contextResult.context;
-const entityTextureManager = EntityTextureManager.createFallback(device);
+const entityTextureManager = await EntityTextureManager.create(device, createDenoExtractedAssetPack());
 const atlasTexture = createSolidTexture(device, [255, 255, 255, 255], 1, 1);
 const lightTexture = createSolidTexture(device, [255, 255, 255, 255], 16, 16);
 const target = createOffscreenTextureTarget(device, WIDTH, HEIGHT, FORMAT);
 const depthTarget = createSceneDepthTarget(device, WIDTH, HEIGHT);
 
 const player = new SnapshotRenderablePlayer(playerState());
+const cow = new SnapshotRenderableCow(cowState());
 const entityBatches = collectEntityRenderBatches({
   level: {
     getBrightness: () => 15,
   } as never,
-  entities: [player],
+  entities: [player, cow],
   cameraPosition: Vec3.ZERO,
   partialTick: 0,
 });
@@ -130,10 +132,45 @@ function playerState(): ClientEntityPresentationState {
     category: "misc" as const,
     chunkX: 0,
     chunkZ: 0,
-    position: { x: 0, y: -0.9, z: -3 },
+    position: { x: -0.65, y: -0.9, z: -3.1 },
     rotation: { yaw: 180, pitch: 0 },
     width: 0.6,
     height: 1.8,
+    onGround: true,
+    age: 0,
+  };
+  return {
+    entityId: authoritative.id,
+    uuid: authoritative.uuid,
+    typeId: authoritative.typeId,
+    category: authoritative.category,
+    chunkX: authoritative.chunkX,
+    chunkZ: authoritative.chunkZ,
+    width: authoritative.width,
+    height: authoritative.height,
+    onGround: authoritative.onGround,
+    age: authoritative.age,
+    data: {},
+    interpolatedPosition: authoritative.position,
+    interpolatedRotation: authoritative.rotation,
+    interpolationAlpha: 1,
+    authoritative,
+    aiAuthority: "host",
+  };
+}
+
+function cowState(): ClientEntityPresentationState {
+  const authoritative = {
+    id: 8,
+    uuid: "00000000-0000-0000-0000-000000000008",
+    typeId: "minecraft:cow",
+    category: "creature" as const,
+    chunkX: 0,
+    chunkZ: 0,
+    position: { x: 0.75, y: -1.0, z: -3.0 },
+    rotation: { yaw: 210, pitch: 0 },
+    width: 0.9,
+    height: 1.4,
     onGround: true,
     age: 0,
   };

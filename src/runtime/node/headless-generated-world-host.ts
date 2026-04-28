@@ -262,6 +262,9 @@ function expectWorldOpened(messages: readonly WorldHostMessage[]): WorldOpenedMe
       case "chunk_snapshot":
       case "chunk_light_delta":
       case "chunk_unload":
+      case "entity_snapshot":
+      case "entity_update":
+      case "entity_remove":
       case "session_state":
       case "player_state":
       case "world_progress":
@@ -296,6 +299,9 @@ function summarizeChunkViewMessages(
         break;
       case "world_error":
         throw new Error(message.message);
+      case "entity_snapshot":
+      case "entity_update":
+      case "entity_remove":
       case "world_opened":
       case "session_state":
       case "player_state":

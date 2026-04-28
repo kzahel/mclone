@@ -1,4 +1,4 @@
-import { PLAYER_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
+import { COW_ENTITY_TYPE_ID, PLAYER_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
 import { Vec3 } from "../../world/phys/vec3";
 import { LightTexture } from "../light-texture";
 import type { MultiBufferSource } from "../multi-buffer-source";
@@ -6,15 +6,19 @@ import { EntityModelSet } from "../model/geom/entity-model-set";
 import { PoseStack } from "../vertex/pose-stack";
 import { EntityRendererProvider } from "./entity-renderer-provider";
 import type { EntityRenderer } from "./entity-renderer";
+import { CowRenderer } from "./cow-renderer";
 import { PlayerRenderer } from "./player-renderer";
-import type { RenderableEntity, RenderablePlayer } from "./renderable-entity";
+import type { RenderableCow, RenderableEntity, RenderablePlayer } from "./renderable-entity";
 
 export class EntityRenderDispatcher {
+  private readonly renderers: ReadonlyMap<string, EntityRenderer<RenderableEntity>>;
   private readonly playerRenderers: ReadonlyMap<string, EntityRenderer<RenderablePlayer>>;
 
   public constructor(modelSet = EntityModelSet.createDefault()) {
-    // EntityRender0: register only player renderers until other entity types are ported.
     const context = new EntityRendererProvider.Context(this, modelSet);
+    this.renderers = new Map([
+      [COW_ENTITY_TYPE_ID, new CowRenderer(context) as EntityRenderer<RenderableEntity>],
+    ]);
     this.playerRenderers = new Map([
       ["default", new PlayerRenderer(context, false)],
       ["slim", new PlayerRenderer(context, true)],
@@ -29,6 +33,15 @@ export class EntityRenderDispatcher {
       }
 
       return renderer as unknown as EntityRenderer<T>;
+    }
+
+    if (isRenderableCow(entity)) {
+      const renderer = this.renderers.get(COW_ENTITY_TYPE_ID);
+      if (renderer === undefined) {
+        throw new Error("Cow renderer is not registered");
+      }
+
+      return renderer as EntityRenderer<T>;
     }
 
     throw new Error(`No entity renderer for ${entity.typeId}`);
@@ -78,4 +91,8 @@ export class EntityRenderDispatcher {
 
 function isRenderablePlayer(entity: RenderableEntity): entity is RenderablePlayer {
   return entity.typeId === PLAYER_ENTITY_TYPE_ID && "getModelName" in entity && typeof entity.getModelName === "function";
+}
+
+function isRenderableCow(entity: RenderableEntity): entity is RenderableCow {
+  return entity.typeId === COW_ENTITY_TYPE_ID && "getTextureLocation" in entity && typeof entity.getTextureLocation === "function";
 }

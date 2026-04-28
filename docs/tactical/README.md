@@ -131,7 +131,7 @@ Entities are authoritative simulation data. Use [`../entities.md`](../entities.m
 | [`Creatures2-host-entity-publication.md`](Creatures2-host-entity-publication.md) | generated-world host entity runtime, entity snapshots, local/remote client caches | runtime | **done** — generated original mobs now publish as authoritative protocol data |
 | [`Creatures3-render-entity-placeholders.md`](Creatures3-render-entity-placeholders.md) | browser presentation of authoritative entity snapshots | browser visual | **superseded** — placeholder-first rendering was replaced by the vanilla-shaped entity renderer plan |
 | [`EntityRender0-vanilla-entity-renderer-foundation.md`](EntityRender0-vanilla-entity-renderer-foundation.md) | `MultiBufferSource`, entity `RenderType`s, `ModelPart`/player model, dispatcher + `LevelRenderer` integration | unit + Deno visual | **done** — remote player snapshots now enter the vanilla-shaped entity renderer path instead of a standalone Steve pipeline |
-| [`Creatures4-cow-baseline-lifecycle.md`](Creatures4-cow-baseline-lifecycle.md) | cow-first passive mob lifecycle, entity deltas/removal, cow renderer, then vanilla-shaped wandering | oracle + runtime + visual | **planned** — use `minecraft:cow` as the first exact passive mob baseline before sheep/pig/chicken |
+| [`Creatures4-cow-baseline-lifecycle.md`](Creatures4-cow-baseline-lifecycle.md) | cow-first passive mob lifecycle, entity deltas/removal, cow renderer, then vanilla-shaped wandering | oracle + runtime + visual | **baseline landed** — stationary generated cows now publish/render through the entity path; vanilla-shaped cow ticking/wandering is next |
 
 ## Client Runtime / Integrated Server Arc
 

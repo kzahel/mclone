@@ -4,7 +4,9 @@ import { LightTexture } from "../../../src/renderer/light-texture";
 import { collectEntityRenderBatches } from "../../../src/renderer/entity/entity-batch-renderer";
 import { EntityRenderDispatcher } from "../../../src/renderer/entity/entity-render-dispatcher";
 import {
+  DEFAULT_COW_TEXTURE,
   DEFAULT_PLAYER_SKIN,
+  SnapshotRenderableCow,
   SnapshotRenderablePlayer,
   createRenderableEntity,
 } from "../../../src/renderer/entity/renderable-entity";
@@ -31,6 +33,42 @@ function playerState(overrides: Partial<ClientEntityPresentationState> = {}): Cl
     height: 1.8,
     onGround: true,
     age: 42,
+  };
+  return {
+    entityId: authoritative.id,
+    uuid: authoritative.uuid,
+    typeId: authoritative.typeId,
+    category: authoritative.category,
+    chunkX: authoritative.chunkX,
+    chunkZ: authoritative.chunkZ,
+    width: authoritative.width,
+    height: authoritative.height,
+    onGround: authoritative.onGround,
+    age: authoritative.age,
+    data: {},
+    interpolatedPosition: authoritative.position,
+    interpolatedRotation: authoritative.rotation,
+    interpolationAlpha: 1,
+    authoritative,
+    aiAuthority: "host",
+    ...overrides,
+  };
+}
+
+function cowState(overrides: Partial<ClientEntityPresentationState> = {}): ClientEntityPresentationState {
+  const authoritative = {
+    id: 8,
+    uuid: "00000000-0000-0000-0000-000000000008",
+    typeId: "minecraft:cow",
+    category: "creature" as const,
+    chunkX: 0,
+    chunkZ: 0,
+    position: { x: 8, y: 65, z: 8 },
+    rotation: { yaw: 45, pitch: 0 },
+    width: 0.9,
+    height: 1.4,
+    onGround: true,
+    age: 0,
   };
   return {
     entityId: authoritative.id,
@@ -95,6 +133,9 @@ describe("Player entity renderer", () => {
       typeId: "minecraft:sheep",
       authoritative: { ...state.authoritative, typeId: "minecraft:sheep" },
     })).toBeUndefined();
+
+    const cow = createRenderableEntity(cowState());
+    expect(cow).toBeInstanceOf(SnapshotRenderableCow);
   });
 
   test("dispatcher renders a neutral remote player through entityTranslucent NEW_ENTITY batches", () => {
@@ -141,8 +182,53 @@ describe("Player entity renderer", () => {
     expect(batches[0]!.buffer.length).toBeGreaterThan(batches[0]!.drawState.vertexBufferSize());
   });
 
+  test("dispatcher renders a neutral cow through entityCutoutNoCull NEW_ENTITY batches", () => {
+    const dispatcher = new EntityRenderDispatcher();
+    const entity = new SnapshotRenderableCow(cowState());
+    const builder = new BufferBuilder(256);
+    const bufferSource = new RecordingBufferSource(builder);
+
+    dispatcher.renderEntity(
+      entity,
+      new Vec3(8, 65, 8),
+      new PoseStack(),
+      bufferSource,
+      LightTexture.pack(15, 15),
+      0,
+    );
+    bufferSource.endBatch();
+
+    expect(new Set(bufferSource.requested)).toEqual(new Set([RenderType.entityCutoutNoCull(DEFAULT_COW_TEXTURE)]));
+    const { drawState, buffer } = bufferSource.pop();
+    expect(drawState.format()).toBe(DefaultVertexFormat.NEW_ENTITY);
+    expect(drawState.vertexCount()).toBe(216);
+    expect(drawState.indexCount()).toBe(324);
+    expect(drawState.sequentialIndex()).toBe(true);
+    expect(buffer.length).toBe(drawState.vertexBufferSize());
+  });
+
+  test("entity batch collection includes cow render batches", () => {
+    const dispatcher = new EntityRenderDispatcher();
+    const entity = new SnapshotRenderableCow(cowState());
+
+    const batches = collectEntityRenderBatches({
+      level: FULL_BRIGHT_LEVEL,
+      entities: [entity],
+      cameraPosition: new Vec3(8, 65, 8),
+      partialTick: 0,
+      dispatcher,
+    });
+
+    expect(batches).toHaveLength(1);
+    expect(batches[0]!.renderType).toBe(RenderType.entityCutoutNoCull(DEFAULT_COW_TEXTURE));
+    expect(batches[0]!.drawState.format()).toBe(DefaultVertexFormat.NEW_ENTITY);
+    expect(batches[0]!.drawState.vertexCount()).toBe(216);
+    expect(batches[0]!.buffer.length).toBe(batches[0]!.drawState.vertexBufferSize());
+  });
+
   test("entity texture paths resolve vanilla full texture locations directly", () => {
     expect(resolveEntityTexturePath(DEFAULT_PLAYER_SKIN)).toBe("assets/minecraft/textures/entity/steve.png");
+    expect(resolveEntityTexturePath(DEFAULT_COW_TEXTURE)).toBe("assets/minecraft/textures/entity/cow/cow.png");
     expect(resolveEntityTexturePath("minecraft:entity/custom_remote")).toBe("assets/minecraft/textures/entity/custom_remote.png");
   });
 });
