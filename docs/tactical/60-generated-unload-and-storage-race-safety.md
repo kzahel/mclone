@@ -2,7 +2,7 @@
 
 Make generated chunk unload/save/load ordering predictable like vanilla `ChunkMap`, so async persistence cannot cause duplicate generation, stale reloads, or older partial records overwriting newer chunk state.
 
-Status: pending-unload resurrection, generated-record write-version, stale-preload rejection, storage-session epoch, keyed storage side-effect, budgeted holder-unload, pending-write read-through, first ticket-source slices, and the tracked/entity-ticking split landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results. Storage adapters reject operations from superseded sessions after reopen/reset/close. Queued same-chunk side effects stay ordered without blocking unrelated chunk writes, and host preloads read through same-chunk pending writes before adapter loads. Holder drops now enter a `toDrop`-style queue and process with a vanilla-sized 200-holder normal budget before moving into pending unload/save. Host residency now checks named `player_view`, `entity`, and `generation_dependency` ticket sources instead of direct radius math.
+Status: pending-unload resurrection, generated-record write-version, stale-preload rejection, storage-session epoch, keyed storage side-effect, budgeted holder-unload, pending-write read-through, first ticket-source slices, tracked/entity-ticking split, and holder-owned full-status entity updates landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results. Storage adapters reject operations from superseded sessions after reopen/reset/close. Queued same-chunk side effects stay ordered without blocking unrelated chunk writes, and host preloads read through same-chunk pending writes before adapter loads. Holder drops now enter a `toDrop`-style queue and process with a vanilla-sized 200-holder normal budget before moving into pending unload/save. Host residency now checks named `player_view`, `entity`, and `generation_dependency` ticket sources instead of direct radius math, and generated holders own the full-status value used to update entity visibility/ticking.
 
 ## Vanilla source anchors
 
@@ -45,7 +45,7 @@ Status: pending-unload resurrection, generated-record write-version, stale-prelo
 6. **Authority-square unload instead of ticket unload**
    - Risk: pruning is immediate and deterministic rather than ticket-level driven with budgets.
    - Current protection: holders outside the current union of `player_view` and `generation_dependency` residency tickets enter a `chunkHolderUnloadQueue`; normal passes process 200 holders, backlog above 2000 bypasses the normal budget, and flush drains the queue.
-   - Remaining gap: the input policy still lacks real ticket levels and independent lighting/forced tickets. The `entity` source is now split from `player_view`, but the split is still helper-derived rather than holder/full-status-derived.
+   - Remaining gap: the input policy still lacks real ticket levels and independent lighting/forced tickets. The `entity` source is now split from `player_view`, and holders now own full status, but the split is still helper-derived rather than ticket-level-derived.
 
 ## Landed first slice
 
@@ -138,10 +138,17 @@ Status: pending-unload resurrection, generated-record write-version, stale-prelo
 - `GeneratedRenderLevel` records the same smaller `entity` source so host and render-level authority debug data stay aligned.
 - Regression coverage keeps the 5/7/9/11 chunk-generation walk counts unchanged and adds a visible-but-not-ticking moving-cow case for the border ring.
 
+## Landed twelfth slice
+
+- `GeneratedChunkHolder` now stores current `FullChunkStatus`, and entity manager updates are emitted from holder full-status transitions.
+- Current holder full-status counters expose the radius-0 distribution as 625 holders: 600 `INACCESSIBLE`, 24 `BORDER`, and 1 `ENTITY_TICKING`.
+- New transition coverage walks one chunk through `BORDER -> ENTITY_TICKING -> BORDER -> INACCESSIBLE` and verifies the entity status view follows the holder-owned state.
+- This closes direct publication/radius promotion as the entity status owner; the remaining parity gap is replacing helper-derived statuses with vanilla-like ticket-level propagation.
+
 ## Next implementation slices
 
-1. Move ticket-derived entity status behind a holder/full-status owner and add explicit `BORDER -> ENTITY_TICKING -> BORDER -> INACCESSIBLE` transition tests.
-2. Add explicit lighting and forced-ticket sources, then start replacing derived radius helpers with subsystem-owned ticket updates.
+1. Add explicit lighting and forced-ticket sources, then start replacing derived radius helpers with subsystem-owned ticket updates and vanilla-like ticket-level propagation.
+2. Add entity persistence adapters with pending-load/unload and pending-write read-through parity.
 3. Add a public host/protocol flush or close acknowledgement so browser/Node shutdown can deliberately wait for dirty saves.
 4. Consider a cross-tab/cross-process save lock for IndexedDB/file storage if we start supporting multiple authorities against the same save.
 

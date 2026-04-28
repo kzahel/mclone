@@ -310,6 +310,7 @@ interface GeneratedChunkPreloadJob {
 interface GeneratedChunkHolder {
   readonly chunkX: number;
   readonly chunkZ: number;
+  fullStatus: FullChunkStatus;
   preloadJob: GeneratedChunkPreloadJob | undefined;
   readonly statusJobs: Map<GeneratedChunkStatus, GeneratedChunkStatusJob>;
   chunkToSave: GeneratedChunkAccess | undefined;
@@ -335,6 +336,12 @@ interface GeneratedChunkStatusTarget {
 }
 
 export interface GeneratedEntityChunkStatusDebugRecord {
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly status: FullChunkStatus;
+}
+
+export interface GeneratedChunkFullStatusDebugRecord {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly status: FullChunkStatus;
@@ -850,6 +857,16 @@ export class GeneratedWorldHost implements WorldHost {
       .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX);
   }
 
+  public getDebugChunkFullStatusRecords(): readonly GeneratedChunkFullStatusDebugRecord[] {
+    return [...this.chunkHolders.values()]
+      .map((holder) => ({
+        chunkX: holder.chunkX,
+        chunkZ: holder.chunkZ,
+        status: holder.fullStatus,
+      }))
+      .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX);
+  }
+
   public getDebugChunkTicketRecords(): readonly GeneratedChunkTicketDebugRecord[] {
     return this.chunkResidencyTickets.getDebugRecords();
   }
@@ -879,11 +896,16 @@ export class GeneratedWorldHost implements WorldHost {
       this.incrementWorldgenCount("chunk_residency_tickets_updated");
     }
     this.noteChunkResidencyTicketCount();
-    this.syncEntityChunkStatuses(request);
+    this.syncChunkHolderFullStatuses(request);
   }
 
-  private syncEntityChunkStatuses(request: SetChunkViewRequest): void {
+  private syncChunkHolderFullStatuses(request: SetChunkViewRequest): void {
     const keys = new Set(this.entityChunkStatuses.keys());
+    for (const [key, holder] of this.chunkHolders) {
+      if (holder.fullStatus !== FullChunkStatus.INACCESSIBLE) {
+        keys.add(key);
+      }
+    }
     this.addChunkSquareKeys(
       keys,
       request.centerChunkX,
@@ -902,13 +924,18 @@ export class GeneratedWorldHost implements WorldHost {
       const [chunkXRaw, chunkZRaw] = key.split(",");
       const chunkX = Number(chunkXRaw);
       const chunkZ = Number(chunkZRaw);
-      changed = this.applyEntityChunkStatus(chunkX, chunkZ, this.getCurrentEntityChunkStatus(chunkX, chunkZ)) || changed;
+      const status = this.getCurrentChunkHolderFullStatus(chunkX, chunkZ);
+      const holder = this.chunkHolders.get(key) ?? (status === FullChunkStatus.INACCESSIBLE ? undefined : this.getChunkHolder(chunkX, chunkZ));
+      changed = holder === undefined
+        ? this.applyEntityChunkStatus(chunkX, chunkZ, FullChunkStatus.INACCESSIBLE) || changed
+        : this.updateChunkHolderFullStatus(holder, status) || changed;
     }
 
     if (changed) {
       this.entityRuntime.processLifecycle();
-      this.noteEntityChunkStatusCounts();
     }
+    this.noteChunkFullStatusCounts();
+    this.noteEntityChunkStatusCounts();
   }
 
   private addChunkSquareKeys(keys: Set<string>, centerChunkX: number, centerChunkZ: number, radius: number): void {
@@ -919,7 +946,7 @@ export class GeneratedWorldHost implements WorldHost {
     }
   }
 
-  private getCurrentEntityChunkStatus(chunkX: number, chunkZ: number): FullChunkStatus {
+  private getCurrentChunkHolderFullStatus(chunkX: number, chunkZ: number): FullChunkStatus {
     if (this.chunkResidencyTickets.containsForSource(GENERATED_ENTITY_TICKET_SOURCE, chunkX, chunkZ)) {
       return FullChunkStatus.ENTITY_TICKING;
     }
@@ -927,6 +954,16 @@ export class GeneratedWorldHost implements WorldHost {
       return FullChunkStatus.BORDER;
     }
     return FullChunkStatus.INACCESSIBLE;
+  }
+
+  private updateChunkHolderFullStatus(holder: GeneratedChunkHolder, status: FullChunkStatus): boolean {
+    if (holder.fullStatus === status) {
+      return false;
+    }
+
+    holder.fullStatus = status;
+    this.incrementWorldgenCount(`chunk_full_status_updates.${status}`);
+    return this.applyEntityChunkStatus(holder.chunkX, holder.chunkZ, status);
   }
 
   private applyEntityChunkStatus(chunkX: number, chunkZ: number, status: FullChunkStatus): boolean {
@@ -968,18 +1005,21 @@ export class GeneratedWorldHost implements WorldHost {
       this.incrementWorldgenCount("chunk_holders_pending_unload_resurrected");
       this.notePendingUnloadChunkHolderCount();
       this.noteChunkHolderCount();
+      this.noteChunkFullStatusCounts();
       return pendingUnload.holder;
     }
 
     const holder: GeneratedChunkHolder = {
       chunkX,
       chunkZ,
+      fullStatus: FullChunkStatus.INACCESSIBLE,
       preloadJob: undefined,
       statusJobs: new Map(),
       chunkToSave: undefined,
     };
     this.chunkHolders.set(key, holder);
     this.noteChunkHolderCount();
+    this.noteChunkFullStatusCounts();
     return holder;
   }
 
@@ -1045,6 +1085,10 @@ export class GeneratedWorldHost implements WorldHost {
         continue;
       }
 
+      if (this.updateChunkHolderFullStatus(queuedUnload.holder, FullChunkStatus.INACCESSIBLE)) {
+        this.entityRuntime.processLifecycle();
+        this.noteEntityChunkStatusCounts();
+      }
       this.schedulePendingUnloadChunkHolder(key, queuedUnload.holder, queuedUnload.sourceChunk);
       this.chunkHolders.delete(key);
       this.generatedCacheWriteVersions.delete(key);
@@ -1060,6 +1104,7 @@ export class GeneratedWorldHost implements WorldHost {
     }
     this.noteChunkHolderUnloadQueueCount();
     this.noteChunkHolderCount();
+    this.noteChunkFullStatusCounts();
   }
 
   private cancelQueuedChunkHolderUnload(key: string, restore: boolean): boolean {
@@ -1105,6 +1150,10 @@ export class GeneratedWorldHost implements WorldHost {
     holder: GeneratedChunkHolder,
     sourceChunk?: GeneratedLevelChunk,
   ): void {
+    if (this.updateChunkHolderFullStatus(holder, FullChunkStatus.INACCESSIBLE)) {
+      this.entityRuntime.processLifecycle();
+      this.noteEntityChunkStatusCounts();
+    }
     const queuedSave = this.queueSaveGeneratedChunkAccess(holder.chunkToSave, sourceChunk, holder);
     if (queuedSave === undefined) {
       return;
@@ -3598,9 +3647,14 @@ export class GeneratedWorldHost implements WorldHost {
     this.publishedChunkSnapshots.delete(key);
     this.forgetPublishedEntitiesForChunk(chunkX, chunkZ);
     this.dirtyChunksForPublication.delete(key);
-    if (this.applyEntityChunkStatus(chunkX, chunkZ, this.getCurrentEntityChunkStatus(chunkX, chunkZ))) {
+    const holder = this.chunkHolders.get(key);
+    const changed = holder === undefined
+      ? this.applyEntityChunkStatus(chunkX, chunkZ, FullChunkStatus.INACCESSIBLE)
+      : this.updateChunkHolderFullStatus(holder, this.getCurrentChunkHolderFullStatus(chunkX, chunkZ));
+    if (changed) {
       this.entityRuntime.processLifecycle();
       this.noteEntityChunkStatusCounts();
+      this.noteChunkFullStatusCounts();
     }
     this.discardChunkLighting(chunkX, chunkZ);
   }
@@ -3751,6 +3805,35 @@ export class GeneratedWorldHost implements WorldHost {
       "chunk_residency_ticketed_chunks_max",
       Math.max(this.worldgenPerformance.counts.get("chunk_residency_ticketed_chunks_max") ?? 0, ticketedChunks),
     );
+  }
+
+  private noteChunkFullStatusCounts(): void {
+    let inaccessible = 0;
+    let border = 0;
+    let ticking = 0;
+    let entityTicking = 0;
+    for (const holder of this.chunkHolders.values()) {
+      switch (holder.fullStatus) {
+        case FullChunkStatus.INACCESSIBLE:
+          inaccessible++;
+          break;
+        case FullChunkStatus.BORDER:
+          border++;
+          break;
+        case FullChunkStatus.TICKING:
+          ticking++;
+          break;
+        case FullChunkStatus.ENTITY_TICKING:
+          entityTicking++;
+          break;
+      }
+    }
+
+    this.setWorldgenCount("chunk_full_status_holders_current", this.chunkHolders.size);
+    this.setWorldgenCount("chunk_full_statuses_inaccessible_current", inaccessible);
+    this.setWorldgenCount("chunk_full_statuses_border_current", border);
+    this.setWorldgenCount("chunk_full_statuses_ticking_current", ticking);
+    this.setWorldgenCount("chunk_full_statuses_entity_ticking_current", entityTicking);
   }
 
   private noteEntityChunkStatusCounts(): void {

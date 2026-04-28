@@ -598,6 +598,10 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(initialPerformance.counts.entity_chunk_statuses_current).toBe(25);
     expect(initialPerformance.counts.entity_chunk_statuses_ticking_current).toBe(1);
     expect(initialPerformance.counts.entity_chunk_statuses_tracked_current).toBe(24);
+    expect(initialPerformance.counts.chunk_full_status_holders_current).toBe(625);
+    expect(initialPerformance.counts.chunk_full_statuses_inaccessible_current).toBe(600);
+    expect(initialPerformance.counts.chunk_full_statuses_border_current).toBe(24);
+    expect(initialPerformance.counts.chunk_full_statuses_entity_ticking_current).toBe(1);
     expect(countChunkAccessByExactStatus(initialAccessRecords)).toEqual({
       [GeneratedChunkStatus.STRUCTURE_STARTS]: 504,
       [GeneratedChunkStatus.LIQUID_CARVERS]: 40,
@@ -713,6 +717,10 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(movedPerformance.counts.entity_chunk_statuses_current).toBe(25);
     expect(movedPerformance.counts.entity_chunk_statuses_ticking_current).toBe(1);
     expect(movedPerformance.counts.entity_chunk_statuses_tracked_current).toBe(24);
+    expect(movedPerformance.counts.chunk_full_status_holders_current).toBe(625);
+    expect(movedPerformance.counts.chunk_full_statuses_inaccessible_current).toBe(600);
+    expect(movedPerformance.counts.chunk_full_statuses_border_current).toBe(24);
+    expect(movedPerformance.counts.chunk_full_statuses_entity_ticking_current).toBe(1);
     expect(countChunkAccessByExactStatus(movedAccessRecords)).toEqual({
       [GeneratedChunkStatus.STRUCTURE_STARTS]: 493,
       [GeneratedChunkStatus.LIQUID_CARVERS]: 42,

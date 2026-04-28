@@ -240,6 +240,12 @@ function statusChunkPairs(host: GeneratedWorldHost): readonly string[] {
     .map((record) => `${record.chunkX.toString()},${record.chunkZ.toString()}:${record.status}`);
 }
 
+function chunkFullStatusFor(host: GeneratedWorldHost, chunkX: number, chunkZ: number): FullChunkStatus | undefined {
+  return host.getDebugChunkFullStatusRecords()
+    .find((record) => record.chunkX === chunkX && record.chunkZ === chunkZ)
+    ?.status;
+}
+
 describe("GeneratedWorldHost entity publication", () => {
   afterEach(() => {
     Registry.BLOCK.clear();
@@ -376,6 +382,60 @@ describe("GeneratedWorldHost entity publication", () => {
     expect(statusChunkPairs(host).some((entry) => entry.startsWith("-2,0:"))).toBe(false);
     expect(statusChunkPairs(host)).toContain(`1,0:${FullChunkStatus.ENTITY_TICKING}`);
     expect(statusChunkPairs(host)).toContain(`3,0:${FullChunkStatus.BORDER}`);
+  });
+
+  test("drives entity chunk visibility from holder full-status transitions", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      generator: new FlatGrassWorldGenerator(12345n),
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      liquidSimulationMode: "none",
+    });
+
+    await host.openWorld({ ...OPEN_WORLD_REQUEST, preset: "flat_grass" });
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+
+    expect(chunkFullStatusFor(host, 2, 0)).toBe(FullChunkStatus.BORDER);
+    expect(statusChunkPairs(host)).toContain(`2,0:${FullChunkStatus.BORDER}`);
+
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 2,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+
+    expect(chunkFullStatusFor(host, 2, 0)).toBe(FullChunkStatus.ENTITY_TICKING);
+    expect(statusChunkPairs(host)).toContain(`2,0:${FullChunkStatus.ENTITY_TICKING}`);
+
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+
+    expect(chunkFullStatusFor(host, 2, 0)).toBe(FullChunkStatus.BORDER);
+    expect(statusChunkPairs(host)).toContain(`2,0:${FullChunkStatus.BORDER}`);
+
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 5,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+
+    expect(chunkFullStatusFor(host, 2, 0)).toBe(FullChunkStatus.INACCESSIBLE);
+    expect(statusChunkPairs(host).some((entry) => entry.startsWith("2,0:"))).toBe(false);
   });
 
   test("keeps border-ring entity snapshots visible without ticking until promoted", async () => {
