@@ -2,7 +2,7 @@
 
 Status: planned.
 
-This tactical follows [`CreatureMovement2-walk-node-evaluator-and-pathfinder.md`](CreatureMovement2-walk-node-evaluator-and-pathfinder.md). It replaces the temporary direct steering internals with a vanilla-shaped `GroundPathNavigation` path-following stack.
+This tactical follows [`CreatureMovement2-walk-node-evaluator-and-pathfinder.md`](CreatureMovement2-walk-node-evaluator-and-pathfinder.md) and assumes [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md) has landed. It replaces the temporary direct steering internals with a vanilla-shaped `GroundPathNavigation` path-following stack.
 
 ## Vanilla Sources To Read
 
@@ -19,7 +19,7 @@ This tactical follows [`CreatureMovement2-walk-node-evaluator-and-pathfinder.md`
 - Replace `SimpleGroundPathNavigation` with a direct `GroundPathNavigation` port for generated mobs.
 - Keep `MoveControl` as the movement handoff and remove the temporary direct-waypoint target as the source of truth.
 - Add path following, waypoint advancement, stuck detection, recomputation hooks, and max-distance-to-waypoint behavior.
-- Introduce the minimum collision-resolved mob travel needed for passive land walking to consume wanted movement without tunneling or Y drift.
+- Introduce the minimum collision-resolved mob travel needed for passive land walking to consume wanted movement without tunneling or Y drift, reusing the same collision-shape query path as player movement.
 - Keep the host authoritative: generated mobs tick on the server/host path and publish normal `entity_update` deltas.
 
 ## Out Of Scope

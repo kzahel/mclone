@@ -43,4 +43,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-Proceed to [`CreatureMovement1-path-node-foundation.md`](CreatureMovement1-path-node-foundation.md): port the vanilla path data model (`BlockPathTypes`, `Node`, `Target`, `Path`) with fixture-style unit coverage before replacing the temporary navigation internals.
+Proceed to [`CreatureMovement1-path-node-foundation.md`](CreatureMovement1-path-node-foundation.md) for data-only path primitives. [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md) is now landed, so `CreatureMovement2` can read the shared collision model when it ports `WalkNodeEvaluator`.

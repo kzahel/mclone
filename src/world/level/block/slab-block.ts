@@ -1,10 +1,16 @@
+import type { BlockPos } from "../../../core/block-pos";
 import { Block } from "./block";
+import type { BlockGetter } from "../block-getter";
 import { BlockBehaviour } from "./state/block-behaviour";
 import { StateDefinition } from "./state/state-definition";
 import { BlockStateProperties } from "./state/properties/block-state-properties";
 import { EnumProperty } from "./state/properties/enum-property";
 import { SlabType } from "./state/properties/slab-type";
 import type { BlockState } from "./state/block-state";
+import { Shapes, type VoxelShape } from "../../phys/shapes/voxel-shape";
+
+const BOTTOM_SHAPE = Shapes.box(0.0, 0.0, 0.0, 1.0, 0.5, 1.0);
+const TOP_SHAPE = Shapes.box(0.0, 0.5, 0.0, 1.0, 1.0, 1.0);
 
 export class SlabBlock extends Block {
   public static readonly TYPE: EnumProperty<SlabType> = BlockStateProperties.SLAB_TYPE;
@@ -16,6 +22,14 @@ export class SlabBlock extends Block {
 
   public override useShapeForLightOcclusion(state: BlockState): boolean {
     return state.getValue(SlabBlock.TYPE) !== SlabType.DOUBLE;
+  }
+
+  public override getShape(state: BlockState, _level: BlockGetter, _pos: BlockPos): VoxelShape {
+    const type = state.getValue(SlabBlock.TYPE);
+    if (type === SlabType.DOUBLE) {
+      return Shapes.block();
+    }
+    return type === SlabType.TOP ? TOP_SHAPE : BOTTOM_SHAPE;
   }
 
   protected override createBlockStateDefinition(builder: StateDefinition.Builder<Block, BlockState>): void {

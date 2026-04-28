@@ -120,6 +120,14 @@ Liquids are authoritative simulation data and renderer input. Use [`../liquids.m
 | [`Liquid1-liquid-simulation-foundation.md`](Liquid1-liquid-simulation-foundation.md) | `FluidState`, `FlowingFluid`, `WaterFluid`, `LiquidBlock` level mapping, vanilla-shaped liquid tick queue, first fixture comparison | unit + server oracle | **done** — test-local water simulation matches the Liquid0 water-slope fixture exactly |
 | [`Liquid2-authoritative-host-integration.md`](Liquid2-authoritative-host-integration.md) | host-owned liquid tick queue, chunk tick hydration, runtime water execution, dirty chunk snapshot publication, pending tick persistence | runtime + unit | **done** — generated/stored pending liquid ticks now execute through the authoritative host and republish dirty chunks through the existing snapshot protocol |
 
+## Shared Collision / Movement Environment Arc
+
+Block collision semantics are shared gameplay data. Player movement, creature travel/pathfinding, spawn obstruction, support checks, and suffocation should consume one block collision-shape model instead of each deriving its own solidity shortcut.
+
+| Doc | Modules | Validation tier | Purpose |
+|---|---|---|---|
+| [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md) | `BlockBehaviour`/`BlockState` shape accessors, minimal collision shapes, collision-world shape queries | unit | **done** - render occlusion is split from collision shapes so leaves, plants, slabs, players, and mobs agree on block collision facts |
+
 ## Creature / Entity Arc
 
 Entities are authoritative simulation data. Use [`../entities.md`](../entities.md) and [`../creatures.md`](../creatures.md) as the durable references before tactical creature work.
@@ -136,7 +144,7 @@ Entities are authoritative simulation data. Use [`../entities.md`](../entities.m
 | [`Creatures5-cow-tick-wander-foundation.md`](Creatures5-cow-tick-wander-foundation.md) | cow AI tick state, goal selector, first random-stroll movement, entity updates | runtime | **foundation landed** — generated cows now tick in entity-ticking chunks and publish movement updates; full vanilla ground pathfinding is next |
 | [`CreatureMovement0-grounded-mob-travel.md`](CreatureMovement0-grounded-mob-travel.md) | reusable host-supplied standing Y for temporary generated-mob steering | unit + runtime | **done** - generated mobs no longer lerp vertically toward arbitrary waypoint Y while direct steering is still in place |
 | [`CreatureMovement1-path-node-foundation.md`](CreatureMovement1-path-node-foundation.md) | `BlockPathTypes`, `Node`, `Target`, `Path`, `BinaryHeap` | unit | planned - data-only vanilla path model |
-| [`CreatureMovement2-walk-node-evaluator-and-pathfinder.md`](CreatureMovement2-walk-node-evaluator-and-pathfinder.md) | `NodeEvaluator`, `WalkNodeEvaluator`, `PathFinder`, `PathNavigationRegion` | unit | planned - vanilla ground path search over loaded host blocks |
+| [`CreatureMovement2-walk-node-evaluator-and-pathfinder.md`](CreatureMovement2-walk-node-evaluator-and-pathfinder.md) | `NodeEvaluator`, `WalkNodeEvaluator`, `PathFinder`, `PathNavigationRegion` | unit | planned - vanilla ground path search over loaded host block collision shapes |
 | [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md) | replace temporary direct steering with `GroundPathNavigation` path following | runtime + browser integration | planned - reusable passive land-mob navigation |
 | [`Creatures6-friendly-island-mobs-and-basic-behaviors.md`](Creatures6-friendly-island-mobs-and-basic-behaviors.md) | starter island cows, pigs, sheep, chickens with shared movement and basic passive goals | runtime + visual | planned - add farm-animal debug coverage after shared movement/render support |
 
@@ -200,6 +208,7 @@ Use [`../player-movement-netcode.md`](../player-movement-netcode.md) as constrai
 | [`Movement2-authoritative-host-command-integration.md`](Movement2-authoritative-host-command-integration.md) | host command queue, ack snapshots, `set_player_input` command records, processing budgets | runtime + browser | **done** - sequenced command stream authority over current local worker/HTTP adapters without making transport cadence the movement model |
 | [`Movement3-basic-player-movement-integration.md`](Movement3-basic-player-movement-integration.md) | shared movement physics in live player ticks, authoritative collision reads, browser prediction/reconcile, debug player input semantics | runtime + browser integration | **done** - local worker and remote WebSocket clients now share the host-authoritative movement command/snapshot path |
 | [`Movement4-sprint-and-auto-jump.md`](Movement4-sprint-and-auto-jump.md) | shift sprint input, options-backed auto-jump, prediction-view obstacle probe | unit + browser visual | **done** - player-mode Shift emits sprint and Auto-Jump is persisted/emitted as normal jump edges on the existing command stream |
+| [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md) | shared block collision-shape facts for player and mob movement | unit | **done** - full-block collision no longer depends on render occlusion |
 
 The multiplayer identity shortcut is now removed from the remote runtime path: `sessionId` is a transport/session handle, while `playerId` is a tracked player slot with a join profile. Profile-based persisted-slot recovery remains future work and should be added explicitly before inventory, game mode, or long-lived player data depend on it.
 

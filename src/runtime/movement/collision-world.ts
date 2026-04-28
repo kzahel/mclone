@@ -1,7 +1,6 @@
 import { BlockPos } from "../../core/block-pos";
 import type { BlockGetter } from "../../world/level/block-getter";
 import { AABB } from "../../world/phys/aabb";
-import { Vec3 } from "../../world/phys/vec3";
 
 export interface LoadedCollisionQuery {
   readonly type: "loaded";
@@ -56,13 +55,20 @@ export function blockGetterCollisionWorld(level: BlockGetter): CollisionWorld {
           for (let x = minX; x <= maxX; x++) {
             pos.set(x, y, z);
             const state = level.getBlockState(pos);
-            if (state.isAir() || !state.getBlock().hasCollision || !state.isCollisionShapeFullBlock(level, pos)) {
+            if (state.isAir()) {
               continue;
             }
 
-            const blockBox = AABB.unitCubeFromLowerCorner(new Vec3(x, y, z));
-            if (blockBox.intersects(bounds)) {
-              boxes.push(blockBox);
+            const shape = state.getCollisionShape(level, pos);
+            if (shape.isEmpty()) {
+              continue;
+            }
+
+            for (const box of shape.toAabbs()) {
+              const blockBox = box.move(x, y, z);
+              if (blockBox.intersects(bounds)) {
+                boxes.push(blockBox);
+              }
             }
           }
         }

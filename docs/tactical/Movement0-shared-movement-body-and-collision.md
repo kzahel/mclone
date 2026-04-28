@@ -24,7 +24,7 @@ Landed shape:
 - `src/runtime/movement/` contains movement body, intent, params, collision-world adapter, fixed-step simulation, and a barrel export.
 - `src/world/phys/vec3.ts` and `src/world/phys/aabb.ts` now include the vanilla-shaped vector and box helpers needed by collision and movement.
 - `test/runtime/movement/movement-step.test.ts` covers grounded movement, gravity/landing, wall collision, edge grounding, jump-held behavior, low step-up, missing collision data, deterministic repeatability, and zero-`dt` no-op behavior.
-- The first collision scope is solid full-block AABBs only. Non-full block shapes, liquids, crouch resize, dynamic collision revisions, entity collision, command prediction, and protocol migration remain out of scope.
+- The first collision scope started as solid full-block AABBs only. [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md) now supplies minimal block collision shapes for leaves, plants, and slabs without making this slice responsible for full vanilla shape parity. Liquids, crouch resize, dynamic collision revisions, entity collision, command prediction, and protocol migration remain out of scope here.
 
 ## Reference Source
 
@@ -214,4 +214,4 @@ Landed validation:
 
 ## Next Step
 
-`Movement1-command-stream-and-local-prediction.md`: add sequenced fixed-quantum movement commands, a local predictor ring buffer, snap-and-replay reconciliation tests, and drift diagnostics without changing the movement body API unless `Movement0` exposed a real gap.
+`Movement1-command-stream-and-local-prediction.md` landed the command stream, and [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md) now separates render occlusion from collision shape facts. Deeper player collision polish should build on that shared shape path.

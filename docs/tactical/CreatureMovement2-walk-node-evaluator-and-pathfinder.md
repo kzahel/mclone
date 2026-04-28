@@ -2,7 +2,7 @@
 
 Status: planned.
 
-This tactical follows [`CreatureMovement1-path-node-foundation.md`](CreatureMovement1-path-node-foundation.md). It ports the vanilla path search core and the ground-mob node evaluator against the host's loaded block/collision view.
+This tactical follows [`CreatureMovement1-path-node-foundation.md`](CreatureMovement1-path-node-foundation.md) and depends on [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md). It ports the vanilla path search core and the ground-mob node evaluator against the host's loaded block/collision view.
 
 ## Vanilla Sources To Read
 
@@ -17,7 +17,7 @@ This tactical follows [`CreatureMovement1-path-node-foundation.md`](CreatureMove
 ## Scope
 
 - Add a host-neutral `PathNavigationRegion` adapter over loaded chunks/block states.
-- Port `NodeEvaluator` and `WalkNodeEvaluator` directly enough for common passive land mobs.
+- Port `NodeEvaluator` and `WalkNodeEvaluator` directly enough for common passive land mobs, using shared collision shapes rather than a mob-only solidity shortcut.
 - Port `PathFinder.findPath(...)` and path reconstruction.
 - Preserve vanilla malus defaults and `BlockPathTypes` behavior for open, blocked, water, fence, danger, damage, and walkable nodes where the required block tags/materials already exist.
 - Add unit tests against small synthetic worlds for flat ground, one-block step, blocked wall, water avoidance, unreachable target, and partial path behavior.
@@ -25,7 +25,7 @@ This tactical follows [`CreatureMovement1-path-node-foundation.md`](CreatureMove
 ## Deliberate Deferrals
 
 - Door opening/breaking behavior if the required block APIs are not present yet.
-- Full collision shapes for every block until the shared collision system exposes the needed voxel-shape queries.
+- Full collision shapes for every special block beyond the minimal shared shape system from `BlockCollision0`.
 - Mob-specific pathfinding malus overrides beyond the passive animal defaults already required by cows, pigs, sheep, and chickens.
 
 ## Validation

@@ -14,6 +14,7 @@ import { StateHolder } from "./state-holder";
 import type { BlockState } from "./block-state";
 import type { Property } from "./properties/property";
 import { Vec3 } from "../../../phys/vec3";
+import { Shapes, type VoxelShape } from "../../../phys/shapes/voxel-shape";
 import type { FluidState } from "../../material/fluid-state";
 import { BlockTag } from "../../../../tags/block-tags";
 
@@ -89,8 +90,24 @@ export abstract class BlockBehaviour {
     return state.isCollisionShapeFullBlock(level, pos) ? 0.2 : 1.0;
   }
 
-  public isCollisionShapeFullBlock(state: BlockState, _level: BlockGetter, _pos: BlockPos): boolean {
-    return state.canOcclude();
+  public getShape(_state: BlockState, _level: BlockGetter, _pos: BlockPos): VoxelShape {
+    return Shapes.block();
+  }
+
+  public getCollisionShape(state: BlockState, level: BlockGetter, pos: BlockPos): VoxelShape {
+    return this.hasCollision ? state.getShape(level, pos) : Shapes.empty();
+  }
+
+  public getOcclusionShape(state: BlockState, level: BlockGetter, pos: BlockPos): VoxelShape {
+    return state.getShape(level, pos);
+  }
+
+  public getBlockSupportShape(state: BlockState, level: BlockGetter, pos: BlockPos): VoxelShape {
+    return this.getCollisionShape(state, level, pos);
+  }
+
+  public isCollisionShapeFullBlock(state: BlockState, level: BlockGetter, pos: BlockPos): boolean {
+    return state.getCollisionShape(level, pos).isFullBlock();
   }
 
   public propagatesSkylightDown(state: BlockState, _level: BlockGetter, _pos: BlockPos): boolean {
@@ -220,8 +237,8 @@ export namespace BlockBehaviour {
       return this.requiresCorrectToolForDropsValue;
     }
 
-    public isFaceSturdy(_level: BlockGetter, _pos: BlockPos, direction: Direction): boolean {
-      return direction === Direction.UP && this.canOcclude();
+    public isFaceSturdy(level: BlockGetter, pos: BlockPos, _direction: Direction): boolean {
+      return this.isCollisionShapeFullBlock(level, pos);
     }
 
     public getLightBlock(level: BlockGetter, pos: BlockPos): number {
@@ -242,6 +259,22 @@ export namespace BlockBehaviour {
 
     public getSeed(pos: BlockPos): bigint {
       return this.getBlock().getSeed(this.asState(), pos);
+    }
+
+    public getShape(level: BlockGetter, pos: BlockPos): VoxelShape {
+      return this.getBlock().getShape(this.asState(), level, pos);
+    }
+
+    public getCollisionShape(level: BlockGetter, pos: BlockPos): VoxelShape {
+      return this.getBlock().getCollisionShape(this.asState(), level, pos);
+    }
+
+    public getOcclusionShape(level: BlockGetter, pos: BlockPos): VoxelShape {
+      return this.getBlock().getOcclusionShape(this.asState(), level, pos);
+    }
+
+    public getBlockSupportShape(level: BlockGetter, pos: BlockPos): VoxelShape {
+      return this.getBlock().getBlockSupportShape(this.asState(), level, pos);
     }
 
     public isCollisionShapeFullBlock(level: BlockGetter, pos: BlockPos): boolean {

@@ -55,6 +55,7 @@ Minecraft Java 1.17.1 is still the reference for lower movement and entity conce
 
 | Concern | Source |
 |---|---|
+| Shared block collision, occlusion, and shape semantics | `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/state/BlockBehaviour.java`, `reference/minecraft-1.17.1/src/net/minecraft/world/level/CollisionGetter.java`, `reference/minecraft-1.17.1/src/net/minecraft/world/level/CollisionSpliterator.java` |
 | Shared collision/resolution | `reference/minecraft-1.17.1/src/net/minecraft/world/entity/Entity.java` |
 | Shared living movement modes | `reference/minecraft-1.17.1/src/net/minecraft/world/entity/LivingEntity.java` |
 | Player-specific travel/flying/swimming hooks | `reference/minecraft-1.17.1/src/net/minecraft/world/entity/player/Player.java` |
@@ -75,6 +76,8 @@ Vanilla should inform the client replica topology:
 - the client does not run worldgen, persistence, block ticks, or liquid ticks
 - remote entities are interpolated from authoritative updates
 - fluids are server-authoritative and arrive as block/fluid state changes
+
+Block collision facts are shared below both player and mob movement. `noOcclusion()` is a render/light concept, not a movement concept; `noCollission()` is the block-property path that removes collision. [`tactical/BlockCollision0-render-occlusion-vs-collision-shapes.md`](./tactical/BlockCollision0-render-occlusion-vs-collision-shapes.md) lands the first shared collision-shape split.
 
 ## Tilefun Guidance
 
