@@ -4,9 +4,9 @@ Replace the current generated/decorated/published lifecycle with an explicit van
 
 This tactical intentionally precedes [`46-full-decorated-spawn-chunk-parity.md`](46-full-decorated-spawn-chunk-parity.md). Tactical 46 should run on top of the `FEATURES`, initial lighting, and publication gates made explicit here.
 
-Status: implemented for explicit status names, finality gates, and publish/light checks. Follow-up required: the current runtime still uses view-level batch preparation and coarse status records. That must be replaced with vanilla-shaped status futures and partial `ProtoChunk`-like records before treating the scheduler as parity-complete.
+Status: implemented for explicit status names, finality gates, and publish/light checks. Follow-up status futures landed in Tactical 57. The remaining parity gap is partial `ProtoChunk`-like records and save/resume in Tactical 58.
 
-Post-implementation finding, 2026-04-25: [`worldgen-deterministic-order.md`](../worldgen-deterministic-order.md) now documents the missing metadata-only path. In vanilla, a `FEATURES` range-8 dependency list is not all `LIQUID_CARVERS`; the center plus radius `1` are `LIQUID_CARVERS`, while radii `2..8` are only `STRUCTURE_STARTS`. The current `GeneratedRenderLevel.ensureDecorationTerrainWindow(...)` shape is therefore an over-generation shortcut and should be replaced, not optimized in place.
+Post-implementation finding, 2026-04-25: [`worldgen-deterministic-order.md`](../worldgen-deterministic-order.md) now documents the missing metadata-only path. In vanilla, a `FEATURES` range-8 dependency list is not all `LIQUID_CARVERS`; the center plus radius `1` are `LIQUID_CARVERS`, while radii `2..8` are only `STRUCTURE_STARTS`. Tactical 57 replaced the earlier flattened terrain window with recursive status requests that preserve this metadata-only outer ring.
 
 ## Source files (read before writing)
 
@@ -32,7 +32,7 @@ The current generated-world path has useful pieces, but the lifecycle is still n
 - `GeneratedWorldHost` publishes chunks after local decoration plus accepted light, but it does not have an explicit `3x3 FULL` publication gate.
 - Initial lighting requests require 3x3 light-input chunks, but the host does not yet express the stronger rule that those inputs correspond to completed `FEATURES` for the whole 3x3 neighborhood.
 - Structure statuses do not exist yet, so future structures would have to retrofit the pipeline while also porting structure-specific logic.
-- The post-47 implementation added status labels but still flattens part of the dependency graph into an eager terrain authority radius. Vanilla schedules mixed-status futures and permits metadata-only chunks in the outer dependency rings.
+- The post-57 implementation now schedules mixed-status futures in memory, but it still stores partial progress as runtime status labels instead of vanilla-shaped `ProtoChunk` records.
 
 The practical risk is that tactical 46 can burn down mismatches against an ordering model that is still too weak. We need the order model first.
 

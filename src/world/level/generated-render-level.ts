@@ -330,6 +330,31 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     return isGeneratedChunkStatusAtLeast(this.getChunkStatus(chunkX, chunkZ), status);
   }
 
+  public markMetadataStatusAtLeast(chunkX: number, chunkZ: number, status: GeneratedChunkStatusName): boolean {
+    if (!this.inAuthorityRange(chunkX, chunkZ)) {
+      return false;
+    }
+
+    switch (status) {
+      case GeneratedChunkStatus.EMPTY:
+        return true;
+      case GeneratedChunkStatus.STRUCTURE_STARTS:
+        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
+        return true;
+      case GeneratedChunkStatus.STRUCTURE_REFERENCES:
+        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
+        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES);
+        return true;
+      case GeneratedChunkStatus.BIOMES:
+        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
+        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES);
+        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.BIOMES);
+        return true;
+      default:
+        return this.hasChunkStatus(chunkX, chunkZ, status);
+    }
+  }
+
   public hasStatusWindow(
     centerChunkX: number,
     centerChunkZ: number,

@@ -2,7 +2,7 @@
 
 Replace the generated host's view-level status batching with vanilla-shaped status futures and partial chunk records.
 
-Status: proposed. This tactical should run before more screenshot-throughput tuning and before using decorated parity failures as signal.
+Status: partial. Tactical 57 landed holder-owned status futures and recursive status scheduling; Tactical 58 remains for partial `ProtoChunk` records and save/resume.
 
 ## Source files
 
@@ -25,7 +25,7 @@ The canonical ordering contract is [`../worldgen-deterministic-order.md`](../wor
 
 The current generated runtime has explicit status names, finality gates, and a TypeScript copy of vanilla's dependency-status rule. It no longer needs to promote the full `FEATURES` radius-8 dependency square to terrain: a radius-1 performance run generated `121` terrain chunks and `81` `FEATURES` chunks to publish `25` chunks. That is the expected materialized write window for the current all-`5x5`-snapshots-are-normal-publication policy.
 
-The remaining gap is not the radius-8 metadata ring. The remaining gap is that the host still schedules a whole view-level job list, keeps only coarse status records, and persists generated data only after a publishable snapshot is built. Vanilla requests exact statuses through `ChunkHolder` futures. A `FEATURES` task has range `8`, but its input statuses are mixed:
+The remaining gap is not the radius-8 metadata ring. Tactical 57 replaced the generated host's flattened view-level terrain/features batches with holder-owned status jobs and recursive status requests. The gap that remains under Tactical 49 is that those status jobs still operate on coarse `GeneratedRenderLevel` records and generated data is durable only after a publishable snapshot is built. Vanilla requests exact statuses through `ChunkHolder` futures and carries partial `ChunkAccess` state through `chunkToSave`. A `FEATURES` task has range `8`, but its input statuses are mixed:
 
 ```text
 offset radius 0: parent of FEATURES -> LIQUID_CARVERS
@@ -33,7 +33,7 @@ offset radius 1: STATUS_BY_RANGE[2] -> LIQUID_CARVERS
 offset radius 2..8: STATUS_BY_RANGE[3..9] -> STRUCTURE_STARTS
 ```
 
-The outer ring is metadata, not terrain. Promoting it to `LIQUID_CARVERS` would be both slower and less faithful; the current runtime should preserve the existing metadata-only behavior while replacing the view-level batch runner with vanilla-shaped holder/status futures.
+The outer ring is metadata, not terrain. Promoting it to `LIQUID_CARVERS` would be both slower and less faithful; the current runtime must preserve the existing metadata-only behavior while the next storage slice adds vanilla-shaped partial `ProtoChunk` records.
 
 ## Boundary-crossing acceptance counts
 
@@ -54,7 +54,7 @@ The focused runtime test [`generated-world-host-chunk-crossing.test.ts`](../../t
 - route changes do not discard partial status work earlier than the vanilla-equivalent unload/save boundary
 - metadata-only records stay metadata-only instead of being promoted to terrain sections
 
-Tactical [`57`](57-generated-chunk-holder-status-futures.md) has landed the first holder/coalescing layer around the existing host phases. The remaining Tactical 49 scheduler work is to invert view changes into recursive `ensureStatus(pos, status)` requests and then persist partial state through Tactical [`58`](58-generated-protochunk-partial-state-and-persistence.md).
+Tactical [`57`](57-generated-chunk-holder-status-futures.md) has landed the holder/coalescing layer and recursive `ensureStatus(pos, status)` scheduling for the current generated phases. The remaining Tactical 49 work is to persist partial state through Tactical [`58`](58-generated-protochunk-partial-state-and-persistence.md), then route status jobs over real proto/full chunk records instead of the current runtime status labels.
 
 If a later UX policy wants only the five newly visible chunks to materialize terrain on a one-chunk move, it must explicitly split normal published/ticking chunks from a weaker visual/cache halo. That is not the same acceptance target as vanilla publication parity.
 
@@ -93,29 +93,29 @@ The browser/Node scheduler can stay cooperative and host-owned, but the requeste
 
 ## Implementation plan
 
-1. **Introduce partial chunk records**
+1. **Introduce partial chunk records** - remaining
    - Keep current `LevelChunk`/snapshot path for full chunks.
    - Add a `GeneratedProtoChunk` or equivalent record for partial statuses and metadata.
    - Preserve current block storage only where a status has actually materialized sections.
    - Track dirty/unsaved state and the latest generated partial/full record separately from "published snapshot".
 
-2. **Port the status future graph**
+2. **Port the status future graph** - landed for in-memory generated statuses
    - Add per-status job/future slots on the host-side chunk record.
    - Implement `getDependencyStatus(requestedStatus, radius)` from `ChunkMap`.
    - Implement range-future gathering that returns mixed-status records, not a flat terrain window.
    - Reuse the same in-flight status job for duplicate requests instead of scheduling another view-level runner.
 
-3. **Split existing stage methods behind `ensureStatus(...)`**
+3. **Split existing stage methods behind `ensureStatus(...)`** - landed for current generated stages
    - `STRUCTURE_STARTS` and `STRUCTURE_REFERENCES` remain no-op/metadata placeholders until real structures land, but they must be real statuses.
    - `BIOMES`, `NOISE`, `SURFACE`, `CARVERS`, and `LIQUID_CARVERS` advance only the chunks whose requested status requires them.
    - `FEATURES` receives a `WorldGenRegion`-style mixed-status input cache.
 
-4. **Remove view-level batch preparation**
+4. **Remove view-level batch preparation** - landed
    - Replace view-level terrain/decorate batch preparation with status dependency scheduling.
    - Keep 3x3 `FEATURES` stability and 3x3 `FULL` publish gates.
    - Keep cooperative yielding around status jobs, not around fake flattened phases.
 
-5. **Persist partial progress like vanilla**
+5. **Persist partial progress like vanilla** - remaining
    - Save unsaved generated partial chunks on unload, not only publishable packed snapshots.
    - Reload saved partial statuses and resume from the stored status.
    - Keep the current packed-publish cache as a client/durable transport optimization only after it is clearly separate from proto/full status storage.

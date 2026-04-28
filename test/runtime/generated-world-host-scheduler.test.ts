@@ -82,7 +82,7 @@ describe("GeneratedWorldHost cooperative chunk scheduler", () => {
     expect(initialProgress).toHaveLength(1);
     expect(initialProgress[0]).toMatchObject({
       type: "world_progress",
-      stage: "Checking saved chunks",
+      stage: "Advancing statuses",
     });
     expect(initialProgress[0]!.total).toBeGreaterThanOrEqual(countExpectedChunks(1));
 

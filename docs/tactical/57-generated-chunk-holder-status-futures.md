@@ -2,7 +2,7 @@
 
 Replace the generated host's view-level status batching with per-chunk, per-status request coalescing shaped like vanilla `ChunkHolder`.
 
-Status: partial. The first behavior-preserving coalescing slice is implemented around the existing host phases. Recursive `ensureStatus(...)` scheduling is still the follow-up before Tactical 57 is complete.
+Status: implemented. The generated host now has holder-owned status jobs plus recursive `ensureStatus(...)` scheduling for the current terrain, features, and no-light full paths. Partial `ProtoChunk` data and save/resume remain Tactical 58.
 
 ## Goal
 
@@ -16,20 +16,23 @@ Make status requests durable enough in memory that walking across a chunk bounda
 
 This tactical does not try to reduce the vanilla-shaped closure for normal publication. For the current 5x5 normal publication square, the acceptable warm one-chunk move still creates `5` published snapshots, `7` `FULL`, `9` `FEATURES`, `11` materialized terrain chunks, and `25` metadata-status records if each status is needed once.
 
-## Landed first slice
+## Landed
 
 The generated host now has a `GeneratedChunkHolder` table with:
 
 - a coalesced preload/load future, corresponding to vanilla's `EMPTY` load side of the status graph
 - per-status job slots for `LIQUID_CARVERS`, `FEATURES`, and no-light `FULL` promotion
+- recursive status requests that gather `FEATURES` dependencies through `getGeneratedChunkDependencyStatus(...)`
+- metadata-only `STRUCTURE_STARTS`, `STRUCTURE_REFERENCES`, and `BIOMES` advancement for outer dependency rings
+- chunk-view scheduling expressed as current-view status targets instead of a flattened preload/terrain/features job list
 - worldgen counters for status requests, pending coalesces, completed reuses, job starts, completions, skips, and failures
 
-The current implementation deliberately keeps the existing view-level job collection underneath this holder layer. That means overlapping cooperative view jobs no longer duplicate completed preload work and same-status jobs have a place to coalesce, but the scheduler still has not been inverted into a recursive `ensureStatus(pos, status)` graph.
+The implementation still stores generated terrain/features in the existing `GeneratedRenderLevel` records. It does not persist partial proto-style status data, carving masks, structure starts/references, or `chunkToSave` state; that is the Tactical 58 storage slice.
 
 The focused test [`generated-world-host-chunk-crossing.test.ts`](../../test/runtime/generated-world-host-chunk-crossing.test.ts) now covers both:
 
 - settled radius-0 crossing counts: `5` publish, `7` full, `9` features, `11` terrain, and no duplicate terrain/decor calls
-- a superseded cooperative nearby view where preload results are reused and terrain/decor calls remain unique across overlapping jobs
+- repeated cooperative requests for the same view where pending `FEATURES` status work coalesces and terrain/decor calls remain unique
 
 ## Source files
 
@@ -65,40 +68,39 @@ The scheduler may stay cooperative and browser/Node-owned. The request graph, de
 
 ## Implementation plan
 
-1. **Introduce `GeneratedChunkHolder`** - first slice landed
-   - Store chunk key, completed status, current partial/full chunk data reference, ticket/interest metadata, and one status job slot per status.
+1. **Introduce `GeneratedChunkHolder`** - landed
+   - Store chunk key, preload/load job state, and one status job slot per generated status.
    - Keep holder lifetime separate from the current visible snapshot set.
-   - Keep existing status records during migration, but make holder state the authoritative runtime source.
+   - Keep existing status and chunk data records during migration; Tactical 58 will move partial/full chunk data into a proto-shaped holder record.
 
-2. **Add recursive `ensureStatus(...)`** - remaining
+2. **Add recursive `ensureStatus(...)`** - landed
    - Implement parent recursion and dependency gathering from `ChunkMap.getDependencyStatus(...)`.
    - Store the pending job before awaiting dependencies so duplicate calls coalesce.
-   - Return mixed-status chunk records to status tasks instead of building a flattened view batch.
+   - Request mixed dependency statuses instead of building a flattened view batch.
 
-3. **Wrap existing stage methods** - first slice partly landed
+3. **Wrap existing stage methods** - landed for current generated stages
    - Start by routing existing terrain, features, full, lighting-disabled, and snapshot paths through status requests.
    - Preserve current status order and the exact flat-world crossing counts.
    - Leave real partial persistence to Tactical 58, but expose the hook where `chunkToSave` will attach.
 
-4. **Replace view-level job collection** - remaining
+4. **Replace view-level job collection** - landed
    - Convert chunk-view changes into status requests for the chunks that must become publishable.
    - Let dependency requests fan out through `ensureStatus(...)`.
    - Keep cooperative yields by status quantum, not by a synthetic "terrain all, then features all" phase.
 
-5. **Instrument coalescing** - first slice landed
+5. **Instrument coalescing** - landed
    - Count status requests, pending coalesces, completed reuses, generated executions, cancellations, failures, and unload skips.
    - Include the counters in `world_perf` and host fly-by reports.
 
 ## Tests
 
-Add focused tests for:
+Focused coverage:
 
-- two same-turn `ensureStatus(chunk, FEATURES)` calls schedule one status job
 - a repeated settled view schedules no new terrain/features/full/snapshot work
 - the flat-world one-chunk crossing preserves the expected `5/7/9/11/25` warm deltas
-- a route reversal reuses retained holder status results while the holder is still resident
+- repeated cooperative requests for the same view coalesce pending `FEATURES` status work
 - `FEATURES` dependencies at radii `2..8` remain metadata-only and do not request terrain statuses
-- cancellation of a superseded view does not discard an already-completed status future
+- scheduler progress still streams snapshots through the cooperative path and drops stale snapshots after a newer view
 
 ## Validation
 
