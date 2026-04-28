@@ -37,4 +37,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-`CreatureMovement2` has landed the path search and walk-node evaluator foundation. Proceed to [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md).
+`CreatureMovement2` and `CreatureMovement3` have landed path search plus live path consumption. Proceed to [`Creatures6-friendly-island-mobs-and-basic-behaviors.md`](Creatures6-friendly-island-mobs-and-basic-behaviors.md).

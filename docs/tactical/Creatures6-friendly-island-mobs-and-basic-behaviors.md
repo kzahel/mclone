@@ -51,4 +51,4 @@ Use the browser probe once pig/sheep/chicken renderers are wired, and save scree
 
 ## Next Step
 
-After `CreatureMovement3`, implement render/model coverage for one additional farm animal first, then add that type to the island preset and reuse the same tests for the remaining passive animals.
+Implement render/model coverage for one additional farm animal first, then add that type to the island preset and reuse the same tests for the remaining passive animals.

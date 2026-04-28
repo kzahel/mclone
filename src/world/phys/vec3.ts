@@ -21,6 +21,25 @@ export class Vec3 {
     return new Vec3(this.x - other.x, this.y - other.y, this.z - other.z);
   }
 
+  public distanceToSqr(other: Vec3): number {
+    const dx = other.x - this.x;
+    const dy = other.y - this.y;
+    const dz = other.z - this.z;
+    return (dx * dx) + (dy * dy) + (dz * dz);
+  }
+
+  public distanceTo(other: Vec3): number {
+    return Math.sqrt(this.distanceToSqr(other));
+  }
+
+  public closerThan(other: Vec3, distance: number): boolean {
+    return this.distanceToSqr(other) < distance * distance;
+  }
+
+  public dot(other: Vec3): number {
+    return (this.x * other.x) + (this.y * other.y) + (this.z * other.z);
+  }
+
   public multiply(x: number, y: number, z: number): Vec3 {
     return new Vec3(this.x * x, this.y * y, this.z * z);
   }

@@ -3,6 +3,7 @@ import type { MobAttribute } from "../attribute";
 import type { AABB } from "../../phys/aabb";
 import type { Fluid } from "../../level/material/fluid";
 import type { BlockPathTypes } from "../../level/pathfinder/block-path-types";
+import type { PathNavigationRegion } from "../../level/pathfinder/path-navigation-region";
 
 export interface MobRandom {
   nextInt(bound: number): number;
@@ -10,7 +11,7 @@ export interface MobRandom {
   nextDouble(): number;
 }
 
-export interface MobAiLevel {
+export interface MobAiLevel extends PathNavigationRegion {
   getMinBuildHeight(): number;
   getMaxBuildHeight(): number;
   findStableStandingY(x: number, z: number, nearY: number): number | undefined;
@@ -57,6 +58,7 @@ export interface PathfinderMob {
   getAiLevel(): MobAiLevel | undefined;
   getPathfindingMalus(type: BlockPathTypes): number;
   setPathfindingMalus(type: BlockPathTypes, priority: number): void;
+  canCutCorner(type: BlockPathTypes): boolean;
   getAttributeValue(attribute: MobAttribute): number;
   setSpeed(speed: number): void;
   setZza(forward: number): void;

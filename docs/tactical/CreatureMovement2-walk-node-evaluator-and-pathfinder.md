@@ -1,6 +1,6 @@
 # CreatureMovement2 - Walk node evaluator and pathfinder
 
-Status: landed as a unit-tested path search foundation; live generated mobs still use temporary direct steering until `CreatureMovement3`.
+Status: landed as a unit-tested path search foundation; live generated mobs consume it through `CreatureMovement3`.
 
 This tactical follows [`CreatureMovement1-path-node-foundation.md`](CreatureMovement1-path-node-foundation.md) and depends on [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md). It ports the vanilla path search core and the ground-mob node evaluator against the host's loaded block/collision view.
 
@@ -40,7 +40,7 @@ This tactical follows [`CreatureMovement1-path-node-foundation.md`](CreatureMove
 - Door opening/breaking, rails, fence gates, trapdoors, campfire `LIT`, and related block-state properties where those block classes/properties are not ported yet. The evaluator keeps vanilla-shaped branches so those become data follow-throughs instead of search rewrites.
 - Full collision shapes for every special block beyond the minimal shared shape system from `BlockCollision0`; current coverage is enough for passive land mobs over ordinary full blocks, slabs, leaves, plants, water, cactus, berry bushes, lava/fire-like blocks by tag/location, honey by location, and cocoa.
 - Mob-specific pathfinding malus overrides beyond the passive animal defaults already required by cows, pigs, sheep, and chickens.
-- Live `GroundPathNavigation` path following. This slice produces vanilla-shaped paths in tests but does not replace `SimpleGroundPathNavigation`.
+- Full block-property follow-through for the door/fence/trapdoor/rail deferrals above.
 
 ## Validation
 
@@ -51,4 +51,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-Proceed to [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md).
+`CreatureMovement3` has landed live path consumption. Proceed to [`Creatures6-friendly-island-mobs-and-basic-behaviors.md`](Creatures6-friendly-island-mobs-and-basic-behaviors.md).

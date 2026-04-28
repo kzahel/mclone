@@ -27,22 +27,22 @@ This tactical follows [`Creatures4-cow-baseline-lifecycle.md`](Creatures4-cow-ba
 - `EntityRuntime` exposes lifecycle processing separately from entity ticking so chunk status changes can start/stop ticking without advancing AI during publication.
 - `GeneratedWorldHost` promotes published generated chunks to `ENTITY_TICKING` for entity activity, ticks generated entities on the world tick, and publishes `entity_update` messages when position/rotation/chunk-owned facts change.
 - Entity snapshots and movement updates now carry authoritative `tick` context.
-- Follow-up grounded travel in [`CreatureMovement0-grounded-mob-travel.md`](CreatureMovement0-grounded-mob-travel.md) keeps temporary direct steering on a host-supplied standing surface instead of interpolating mob Y toward arbitrary waypoints.
+- Follow-up grounded travel in [`CreatureMovement0-grounded-mob-travel.md`](CreatureMovement0-grounded-mob-travel.md) kept temporary direct steering on a host-supplied standing surface instead of interpolating mob Y toward arbitrary waypoints.
+- Follow-up navigation in [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md) now routes live generated mobs through `GroundPathNavigation` and `MoveControl`.
 - Focused tests cover entity-ticking chunk gating, forced cow `WaterAvoidingRandomStrollGoal` movement, and host-side `entity_update` publication for a moving generated cow.
 
 ## Deliberate Runtime Divergences
 
 Two pieces are intentionally incomplete and should not be mistaken for full vanilla cow parity:
 
-- `SimpleGroundPathNavigation` steers directly toward the chosen waypoint. Vanilla uses `PathNavigation`, `GroundPathNavigation`, `PathFinder`, `WalkNodeEvaluator`, `Path`, `Node`, and `BlockPathTypes`. `CreatureMovement1` has landed the data model and `CreatureMovement2` has landed unit-tested path search, but live cows still need `GroundPathNavigation` integration before they consume those paths.
+- Generated mobs now consume `GroundPathNavigation` paths, but movement remains a narrow passive-land travel approximation. Full vanilla `LivingEntity.travel(...)`, `Entity.move(...)`, jump control, friction, fluids, and block speed-factor behavior remain open.
 - `GeneratedWorldHost` uses current chunk-view interest as the no-action reset proxy until player tickets, surface-aware spawn placement, and natural-spawn distance ownership are wired to entity ticking.
 
 Both divergences are narrow. The random-stroll goal, goal selector, target generation, entity section movement callback, and host protocol update path are in place so the next slice can replace navigation internals without changing entity ownership.
 
 ## Deferred
 
-- Live `GroundPathNavigation` path following and full collision-resolved travel over the landed `PathFinder` / `WalkNodeEvaluator` foundation.
-- Collision-resolved `LivingEntity.travel(...)` movement, friction, step-up, jumps, fluid movement, and path stuck detection.
+- Full collision-resolved `LivingEntity.travel(...)` / `Entity.move(...)` parity over the landed `PathFinder` / `WalkNodeEvaluator` / `GroundPathNavigation` foundation, including friction, step-up, jumps, fluids, and path stuck detection.
 - Cow despawn rules, health/damage/death, sounds, drops, breeding, milking, and interactions.
 - Durable entity persistence beyond the current in-memory runtime path.
 - Per-session entity tracking range beyond the current published chunk-interest baseline.
@@ -56,4 +56,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-Continue the reusable movement stack in [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md): replace temporary direct steering with `GroundPathNavigation` path following and collision-resolved mob travel.
+Proceed to [`Creatures6-friendly-island-mobs-and-basic-behaviors.md`](Creatures6-friendly-island-mobs-and-basic-behaviors.md): add the remaining friendly farm animals after render/model support for each type.

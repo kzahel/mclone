@@ -38,7 +38,7 @@ import { GeneratedRenderLevel, type GeneratedChunkStatusDebugRecord } from "../.
 import type { LevelChunk } from "../../world/level/chunk/level-chunk";
 import { LEVEL_CHUNK_SECTION_SIZE } from "../../world/level/chunk/level-chunk-section";
 import { FullChunkStatus } from "../../world/level/entity/full-chunk-status";
-import type { AABB } from "../../world/phys/aabb";
+import { AABB } from "../../world/phys/aabb";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
@@ -2452,7 +2452,12 @@ export class GeneratedWorldHost implements WorldHost {
   private tickGeneratedEntity(entity: GeneratedMobEntity): void {
     entity.setAiLevel({
       getMinBuildHeight: () => this.level.getMinBuildHeight(),
+      getHeight: () => this.level.getHeight(),
       getMaxBuildHeight: () => this.level.getMaxBuildHeight(),
+      getBlockState: (pos) => this.getMobPathfindingBlockState(pos),
+      getFluidState: (pos) => this.getMobPathfindingBlockState(pos).getFluidState(),
+      getMaxLightLevel: () => 15,
+      noCollision: (_entity, collisionBox) => this.noMobPathCollision(collisionBox),
       findStableStandingY: (x, z, nearY) => this.findStableMobStandingY(x, z, nearY),
       isStableDestination: (pos) => this.isStableMobDestination(pos),
       isWater: (pos) => this.isWaterMobPosition(pos),
@@ -2516,6 +2521,62 @@ export class GeneratedWorldHost implements WorldHost {
 
   private isSolidMobPosition(pos: BlockPos): boolean {
     return this.getLoadedBlockState(pos)?.getMaterial().isSolid() ?? false;
+  }
+
+  private getMobPathfindingBlockState(pos: BlockPos): BlockState {
+    return this.getLoadedBlockState(pos) ?? this.getMobMissingPathBlockState();
+  }
+
+  private getMobMissingPathBlockState(): BlockState {
+    return this.options.blockStateById.find((state) => !state.isAir() && state.getMaterial().blocksMotion()) ?? this.options.airState;
+  }
+
+  private noMobPathCollision(bounds: AABB): boolean {
+    const epsilon = AABB.epsilon();
+    const minX = Math.floor(bounds.minX - epsilon);
+    const minY = Math.floor(bounds.minY - epsilon);
+    const minZ = Math.floor(bounds.minZ - epsilon);
+    const maxX = Math.floor(bounds.maxX + epsilon);
+    const maxY = Math.floor(bounds.maxY + epsilon);
+    const maxZ = Math.floor(bounds.maxZ + epsilon);
+    const pos = new BlockPos.MutableBlockPos();
+    const blockGetter = this.createMobPathBlockGetter();
+
+    for (let y = minY; y <= maxY; y++) {
+      for (let z = minZ; z <= maxZ; z++) {
+        for (let x = minX; x <= maxX; x++) {
+          pos.set(x, y, z);
+          const state = this.getLoadedBlockState(pos);
+          if (state === undefined) {
+            return false;
+          }
+          if (state.isAir()) {
+            continue;
+          }
+
+          const shape = state.getCollisionShape(blockGetter, pos);
+          if (shape.isEmpty()) {
+            continue;
+          }
+
+          for (const box of shape.toAabbs()) {
+            if (box.move(x, y, z).intersects(bounds)) {
+              return false;
+            }
+          }
+        }
+      }
+    }
+
+    return true;
+  }
+
+  private createMobPathBlockGetter() {
+    return {
+      getBlockState: (pos: BlockPos) => this.getMobPathfindingBlockState(pos),
+      getFluidState: (pos: BlockPos) => this.getMobPathfindingBlockState(pos).getFluidState(),
+      getMaxLightLevel: () => 15,
+    };
   }
 
   private getLoadedBlockState(pos: BlockPos): BlockState | undefined {

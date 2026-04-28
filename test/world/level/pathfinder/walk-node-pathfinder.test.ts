@@ -178,6 +178,13 @@ class TestMob implements PathfinderMob {
     this.malus.set(type, priority);
   }
 
+  public canCutCorner(type: BlockPathTypes): boolean {
+    return type !== BlockPathTypes.DANGER_FIRE
+      && type !== BlockPathTypes.DANGER_CACTUS
+      && type !== BlockPathTypes.DANGER_OTHER
+      && type !== BlockPathTypes.WALKABLE_DOOR;
+  }
+
   public getAttributeValue(attribute: MobAttribute): number {
     return attribute === MobAttribute.MOVEMENT_SPEED ? 0.2 : 0.0;
   }

@@ -54,7 +54,9 @@ This document is a reference for future creature work. It is not a tactical slic
 
 `CreatureMovement2` landed the unit-tested vanilla weighted A*-style path search foundation: `PathNavigationRegion`, `NodeEvaluator`, `WalkNodeEvaluator`, `PathFinder`, block `isPathfindable(...)`, passive-animal malus defaults, and synthetic-world coverage for flat ground, one-block steps, blocked targets, water malus, partial paths, and common block path types.
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, live `GroundPathNavigation` path following for generated mobs, collision-resolved living-entity travel, persistence adapters beyond the in-memory runtime path, additional farm animal renderers, and cow gameplay interactions.
+`CreatureMovement3` replaced live generated-mob direct steering with `GroundPathNavigation` path following. Generated mobs now create vanilla-shaped paths, hand waypoints through `MoveControl`, and apply host-authoritative collision-checked movement steps without Y drift.
+
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics, persistence adapters beyond the in-memory runtime path, additional farm animal renderers, and cow gameplay interactions.
 
 ## Reference Source Map
 

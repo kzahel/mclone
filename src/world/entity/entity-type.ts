@@ -5,7 +5,7 @@ import { DEFAULT_MOB_ATTRIBUTES, MobAttribute, type MobAttribute as MobAttribute
 import { GoalSelector } from "./ai/goal/goal-selector";
 import { WaterAvoidingRandomStrollGoal } from "./ai/goal/water-avoiding-random-stroll-goal";
 import { MoveControl } from "./ai/control/move-control";
-import { SimpleGroundPathNavigation } from "./ai/navigation/simple-ground-path-navigation";
+import { GroundPathNavigation } from "./ai/navigation/ground-path-navigation";
 import type { MobAiLevel, MobRandom, PathfinderMob } from "./ai/pathfinder-mob";
 import { MobCategory } from "./mob-category";
 import { WorldgenRandom } from "../../worldgen/prng/worldgen-random";
@@ -28,7 +28,7 @@ export interface GeneratedMobTickOptions {
 export class GeneratedMobEntity extends SyntheticRuntimeEntity implements PathfinderMob {
   public readonly entityType: EntityType;
   public readonly goalSelector = new GoalSelector();
-  public readonly navigation: SimpleGroundPathNavigation;
+  public readonly navigation: GroundPathNavigation;
   public readonly moveControl: MoveControl;
   public readonly age: number;
   public onGround: boolean;
@@ -51,7 +51,7 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
       height: options.entityType.height,
     });
     this.entityType = options.entityType;
-    this.navigation = new SimpleGroundPathNavigation(this);
+    this.navigation = new GroundPathNavigation(this);
     this.moveControl = new MoveControl(this);
     this.age = options.age ?? 0;
     this.onGround = options.onGround ?? false;
@@ -133,7 +133,7 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     return this.noActionTime;
   }
 
-  public getNavigation(): SimpleGroundPathNavigation {
+  public getNavigation(): GroundPathNavigation {
     return this.navigation;
   }
 
@@ -151,6 +151,13 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
 
   public setPathfindingMalus(type: BlockPathType, priority: number): void {
     this.pathfindingMalus.set(type, priority);
+  }
+
+  public canCutCorner(type: BlockPathType): boolean {
+    return type !== BlockPathTypes.DANGER_FIRE
+      && type !== BlockPathTypes.DANGER_CACTUS
+      && type !== BlockPathTypes.DANGER_OTHER
+      && type !== BlockPathTypes.WALKABLE_DOOR;
   }
 
   public setSpeed(speed: number): void {
@@ -208,7 +215,6 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   }
 
   public hasPathfindingMalus(_pos: BlockPos): boolean {
-    // Runtime: BlockPathTypes/WalkNodeEvaluator malus table is deferred to the full pathfinding port.
     return false;
   }
 
@@ -223,37 +229,54 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   }
 
   private applyControlledTravel(): void {
-    const target = this.navigation.getTarget();
-    if (target === undefined || this.speed <= 0.0 || this.zza === 0.0) {
+    if (this.speed <= 0.0 || this.zza === 0.0) {
       return;
     }
 
-    const dx = target.x - this.position.x;
-    const dz = target.z - this.position.z;
+    const targetX = this.moveControl.getWantedX();
+    const targetY = this.moveControl.getWantedY();
+    const targetZ = this.moveControl.getWantedZ();
+    const dx = targetX - this.position.x;
+    const dz = targetZ - this.position.z;
     const horizontalDistance = Math.sqrt((dx * dx) + (dz * dz));
     if (horizontalDistance <= 1.0e-6) {
-      this.navigation.stop();
+      this.setZza(0.0);
       return;
     }
 
     const step = Math.min(Math.abs(this.speed * this.zza), horizontalDistance);
     const nextX = this.position.x + ((dx / horizontalDistance) * step);
     const nextZ = this.position.z + ((dz / horizontalDistance) * step);
-    const stableY = this.aiLevel?.findStableStandingY(nextX, nextZ, this.position.y);
+    const stableY = this.aiLevel?.findStableStandingY(nextX, nextZ, targetY);
     if (stableY === undefined && this.aiLevel !== undefined) {
       this.navigation.stop();
       this.setZza(0.0);
       return;
     }
 
-    this.setPosition(nextX, stableY ?? this.position.y, nextZ);
+    const nextY = stableY ?? this.position.y;
+    if (this.aiLevel !== undefined && !this.aiLevel.noCollision(this, this.createMobBoundingBox(nextX, nextY, nextZ))) {
+      this.navigation.stop();
+      this.setZza(0.0);
+      return;
+    }
+
+    this.setPosition(nextX, nextY, nextZ);
     if (stableY !== undefined) {
       this.onGround = true;
     }
+  }
 
-    if (step >= horizontalDistance) {
-      this.navigation.stop();
-    }
+  private createMobBoundingBox(x: number, y: number, z: number): AABB {
+    const halfWidth = this.getBbWidth() / 2.0;
+    return new AABB(
+      x - halfWidth,
+      y,
+      z - halfWidth,
+      x + halfWidth,
+      y + this.getBbHeight(),
+      z + halfWidth,
+    );
   }
 }
 

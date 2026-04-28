@@ -1,9 +1,87 @@
 import { describe, expect, test } from "vitest";
 
+import { BlockPos } from "../../../src/core/block-pos";
 import { EntityRuntime } from "../../../src/runtime/host/entity-runtime";
 import { EntityTypes, GeneratedMobEntity } from "../../../src/world/entity/entity-type";
 import { WaterAvoidingRandomStrollGoal } from "../../../src/world/entity/ai/goal/water-avoiding-random-stroll-goal";
+import type { MobAiLevel, PathfinderMob } from "../../../src/world/entity/ai/pathfinder-mob";
+import { AirBlock } from "../../../src/world/level/block/air-block";
+import { Block } from "../../../src/world/level/block/block";
+import { BlockBehaviour } from "../../../src/world/level/block/state/block-behaviour";
+import type { BlockState } from "../../../src/world/level/block/state/block-state";
+import type { FluidState } from "../../../src/world/level/material/fluid-state";
+import { Material } from "../../../src/world/level/material/material";
 import { FullChunkStatus } from "../../../src/world/level/entity/full-chunk-status";
+import { blockGetterPathNavigationRegion } from "../../../src/world/level/pathfinder";
+import type { AABB } from "../../../src/world/phys/aabb";
+
+const AIR = new AirBlock(BlockBehaviour.Properties.of(Material.AIR).noCollission().noOcclusion().air()).defaultBlockState();
+const STONE = new Block(BlockBehaviour.Properties.of(Material.STONE)).defaultBlockState();
+
+class FlatMobAiLevel implements MobAiLevel {
+  private readonly blocks = new Map<string, BlockState>();
+
+  public constructor(
+    private readonly minBuildHeight = 0,
+    private readonly height = 256,
+  ) {
+    for (let x = -32; x <= 32; x++) {
+      for (let z = -32; z <= 32; z++) {
+        this.blocks.set(key(x, 63, z), STONE);
+      }
+    }
+  }
+
+  public getBlockState(pos: BlockPos): BlockState {
+    return this.blocks.get(key(pos.getX(), pos.getY(), pos.getZ())) ?? AIR;
+  }
+
+  public getFluidState(pos: BlockPos): FluidState {
+    return this.getBlockState(pos).getFluidState();
+  }
+
+  public getMaxLightLevel(): number {
+    return 15;
+  }
+
+  public getMinBuildHeight(): number {
+    return this.minBuildHeight;
+  }
+
+  public getHeight(): number {
+    return this.height;
+  }
+
+  public getMaxBuildHeight(): number {
+    return this.minBuildHeight + this.height;
+  }
+
+  public noCollision(_entity: PathfinderMob | undefined, box: AABB): boolean {
+    return blockGetterPathNavigationRegion(this, this.minBuildHeight, this.height).noCollision(_entity, box);
+  }
+
+  public findStableStandingY(x: number, z: number, _nearY: number): number | undefined {
+    return this.isStableDestination(new BlockPos(x, 64, z)) ? 64 : undefined;
+  }
+
+  public isStableDestination(pos: BlockPos): boolean {
+    return !this.getBlockState(pos).getMaterial().blocksMotion()
+      && !this.getBlockState(pos.above()).getMaterial().blocksMotion()
+      && this.getBlockState(pos.below()).getMaterial().isSolid();
+  }
+
+  public isWater(_pos: BlockPos): boolean {
+    return false;
+  }
+
+  public isSolid(pos: BlockPos): boolean {
+    return this.getBlockState(pos).getMaterial().isSolid();
+  }
+}
+
+function key(x: number, y: number, z: number): string {
+  return `${x},${y},${z}`;
+}
 
 describe("cow AI foundation", () => {
   test("ticks generated cows only after their chunk reaches ENTITY_TICKING", () => {
@@ -44,14 +122,7 @@ describe("cow AI foundation", () => {
       onGround: true,
       randomSeed: 0,
     });
-    cow.setAiLevel({
-      getMinBuildHeight: () => 0,
-      getMaxBuildHeight: () => 256,
-      findStableStandingY: () => 64,
-      isStableDestination: () => true,
-      isWater: () => false,
-      isSolid: () => false,
-    });
+    cow.setAiLevel(new FlatMobAiLevel());
     const goal = new WaterAvoidingRandomStrollGoal(cow, 1.0);
     goal.trigger();
     cow.goalSelector.addGoal(0, goal);
@@ -62,7 +133,7 @@ describe("cow AI foundation", () => {
     expect(cow.position).not.toEqual({ x: 0.5, y: 64, z: 0.5 });
   });
 
-  test("direct ground steering keeps generated mob Y on the stable standing surface", () => {
+  test("ground path navigation keeps generated mob Y on the stable standing surface", () => {
     const mob = new GeneratedMobEntity({
       id: 3,
       uuid: "mclone:test/mob-grounded-steering",
@@ -73,16 +144,11 @@ describe("cow AI foundation", () => {
       onGround: true,
       randomSeed: 0,
     });
-    mob.setAiLevel({
-      getMinBuildHeight: () => 0,
-      getMaxBuildHeight: () => 256,
-      findStableStandingY: () => 64,
-      isStableDestination: () => true,
-      isWater: () => false,
-      isSolid: () => false,
-    });
+    mob.setAiLevel(new FlatMobAiLevel());
 
     expect(mob.getNavigation().moveTo(4.5, 70, 0.5, 1.0)).toBe(true);
+    expect(mob.getNavigation().getPath()?.canReach()).toBe(true);
+    expect(mob.getNavigation().getPath()?.getTarget()).toEqual(new BlockPos(4, 64, 0));
 
     mob.tickServerAi({ resetNoActionTime: true });
 

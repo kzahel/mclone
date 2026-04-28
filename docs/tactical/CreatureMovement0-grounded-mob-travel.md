@@ -1,6 +1,6 @@
 # CreatureMovement0 - Grounded mob travel
 
-Status: landed as a reusable movement foundation; full vanilla `LivingEntity.travel(...)` and `GroundPathNavigation` parity remain open.
+Status: landed as a reusable movement bridge; live `GroundPathNavigation` landed later in `CreatureMovement3`, while full vanilla `LivingEntity.travel(...)` remains open.
 
 This tactical follows [`Creatures5-cow-tick-wander-foundation.md`](Creatures5-cow-tick-wander-foundation.md). It fixes the temporary direct steering layer so generated mobs do not interpolate their Y position toward a random target waypoint. The stack remains generic for all generated mobs, not cow-specific.
 
@@ -43,4 +43,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-`CreatureMovement1` and `CreatureMovement2` have landed the data-only path primitives plus unit-tested weighted A*-style path search over the shared collision model. Proceed to [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md) to replace temporary direct steering with live `GroundPathNavigation`.
+`CreatureMovement1`, `CreatureMovement2`, and `CreatureMovement3` have landed path primitives, weighted A*-style path search, and live `GroundPathNavigation` consumption. The remaining movement gap is full vanilla `LivingEntity.travel(...)` / `Entity.move(...)` parity.
