@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
+const DEFAULT_BROWSER_TEST_PORT = "5073";
 const args = new Set(process.argv.slice(2).filter((arg) => arg !== "--"));
 
 if (args.has("-h") || args.has("--help")) {
@@ -64,6 +65,9 @@ function readHostFacts() {
     MIR_SOCKET: process.env.MIR_SOCKET ?? "",
   };
   const hasDisplay = Object.values(displayVars).some((value) => value.length > 0);
+  const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR ?? "";
+  const waylandSockets = findWaylandSockets(xdgRuntimeDir);
+  const inferredWaylandDisplay = displayVars.WAYLAND_DISPLAY || waylandSockets[0] || "";
   const driPath = "/dev/dri";
   const driDevices = existsSync(driPath)
     ? readdirSync(driPath).filter((entry) => entry !== "." && entry !== "..").sort()
@@ -76,10 +80,41 @@ function readHostFacts() {
     ci: Boolean(process.env.CI),
     displayVars,
     hasDisplay,
-    xdgRuntimeDir: process.env.XDG_RUNTIME_DIR ?? "",
+    xdgRuntimeDir,
+    xdgSessionType: process.env.XDG_SESSION_TYPE ?? "",
+    waylandSockets,
+    inferredWaylandDisplay,
+    suggestedWaylandBrowserEnv: createSuggestedWaylandBrowserEnv(inferredWaylandDisplay),
+    vitePort: process.env.VITE_PORT ?? "",
     driPathExists: existsSync(driPath),
     driDevices,
     likelyHeadless: process.platform === "linux" && !hasDisplay,
+  };
+}
+
+function findWaylandSockets(xdgRuntimeDir) {
+  if (!xdgRuntimeDir || !existsSync(xdgRuntimeDir)) {
+    return [];
+  }
+
+  try {
+    return readdirSync(xdgRuntimeDir)
+      .filter((entry) => /^wayland-\d+$/u.test(entry))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+function createSuggestedWaylandBrowserEnv(waylandDisplay) {
+  if (!waylandDisplay) {
+    return undefined;
+  }
+  return {
+    VITE_PORT: DEFAULT_BROWSER_TEST_PORT,
+    CI: "1",
+    WAYLAND_DISPLAY: waylandDisplay,
+    XDG_SESSION_TYPE: "wayland",
   };
 }
 
@@ -193,6 +228,7 @@ function normalizeCommandResult(command, result) {
 
 function classifyCapabilities(checks) {
   const headless = checks.host.likelyHeadless;
+  const hasWaylandSocket = checks.host.waylandSockets.length > 0;
   const hasPnpm = checks.commands.pnpm.ok;
   const hasDri = checks.host.driDevices.length > 0;
   const hasChrome = checks.chrome.ok;
@@ -205,12 +241,16 @@ function classifyCapabilities(checks) {
     denoHeadlessWebGpu: hasPnpm
       ? "candidate: run pnpm host:check -- --probe-deno-webgpu, or the focused pnpm smoke:deno:* lane for renderer validation"
       : "blocked: pnpm is not available on PATH",
-    playwrightChromeWebGpu: headless
+    playwrightChromeWebGpu: headless && hasWaylandSocket && hasChrome && hasPlaywright
+      ? "candidate via headed Wayland: WAYLAND_DISPLAY is not exported, but a Wayland socket was detected; use the recommended env command below"
+      : headless
       ? "expected unavailable on this host: no DISPLAY/WAYLAND display was detected, so Chrome/WebGPU Playwright failures are expected"
       : hasChrome && hasPlaywright
         ? "candidate: a display is present and Chrome plus @playwright/test were found; confirm with pnpm host:check -- --probe-browser-webgpu"
         : "blocked or incomplete: display is present, but Chrome or @playwright/test was not found",
-    browserScreenshotsAndProbes: headless
+    browserScreenshotsAndProbes: headless && hasWaylandSocket && hasChrome && hasPlaywright
+      ? "candidate via headed Wayland: run Playwright with --headed and the recommended WAYLAND_DISPLAY env"
+      : headless
       ? "skip here: run pnpm test:browser, pnpm test:browser:integration, and pnpm probe:browser only on a host with a working Chrome GPU/browser path"
       : "candidate: run the smallest relevant Playwright lane and inspect screenshots under /tmp",
     hardwareGpuDevices: hasDri
@@ -298,6 +338,12 @@ function printReport(checks) {
   console.log(`  CI: ${host.ci ? "yes" : "no"}`);
   console.log(`  display: ${host.hasDisplay ? "present" : "none"}${formatDisplayVars(host.displayVars)}`);
   console.log(`  XDG_RUNTIME_DIR: ${host.xdgRuntimeDir || "(unset)"}`);
+  console.log(`  XDG_SESSION_TYPE: ${host.xdgSessionType || "(unset)"}`);
+  console.log(`  Wayland sockets: ${host.waylandSockets.length > 0 ? host.waylandSockets.join(", ") : "(none detected)"}`);
+  if (!host.displayVars.WAYLAND_DISPLAY && host.inferredWaylandDisplay) {
+    console.log(`  inferred WAYLAND_DISPLAY: ${host.inferredWaylandDisplay}`);
+  }
+  console.log(`  VITE_PORT: ${host.vitePort || `(unset; default ${DEFAULT_BROWSER_TEST_PORT})`}`);
   console.log(`  /dev/dri: ${host.driPathExists ? host.driDevices.join(", ") || "(empty)" : "(missing)"}`);
   console.log(`  likely headless: ${host.likelyHeadless ? "yes" : "no"}`);
   console.log("");
@@ -328,12 +374,41 @@ function printReport(checks) {
 
   console.log("");
   console.log("Recommended lanes");
-  if (host.likelyHeadless) {
+  if (host.suggestedWaylandBrowserEnv) {
+    console.log(
+      `  run browser WebGPU on Wayland: ${
+        formatEnvCommand(
+          host.suggestedWaylandBrowserEnv,
+          "pnpm exec playwright test --config playwright.config.ts --headed",
+        )
+      }`,
+    );
+    console.log(
+      `  run browser integration on Wayland: ${
+        formatEnvCommand(
+          host.suggestedWaylandBrowserEnv,
+          "pnpm exec playwright test --config playwright.integration.config.ts --headed",
+        )
+      }`,
+    );
+    console.log(
+      `  run a Wayland screenshot probe: ${
+        formatEnvCommand(
+          host.suggestedWaylandBrowserEnv,
+          "pnpm exec playwright test --config playwright.probes.config.ts --headed test/browser/probes/<name>.probe.ts",
+        )
+      }`,
+    );
+    console.log("  note: headed Wayland is the browser GPU lane validated on this host; headless Chrome may fail even when Deno WebGPU passes");
+  } else if (host.likelyHeadless) {
     console.log("  run: pnpm test, pnpm typecheck, and focused pnpm smoke:deno:* commands");
     console.log("  skip here: pnpm test:browser, pnpm test:browser:integration, and pnpm probe:browser");
   } else {
     console.log("  run: the smallest relevant pnpm test:browser / probe:browser lane for browser pixels");
     console.log("  also run: focused pnpm smoke:deno:* commands when touching headless renderer hosts");
+  }
+  if (host.vitePort && host.vitePort !== DEFAULT_BROWSER_TEST_PORT) {
+    console.log(`  warning: VITE_PORT is currently ${host.vitePort}; set VITE_PORT=${DEFAULT_BROWSER_TEST_PORT} CI=1 for clean Playwright webServer startup`);
   }
   console.log("  verify Deno WebGPU now: pnpm host:check -- --probe-deno-webgpu");
   console.log("  verify Chrome WebGPU now: pnpm host:check -- --probe-browser-webgpu");
@@ -369,6 +444,21 @@ function formatDisplayVars(displayVars) {
     .filter(([, value]) => value.length > 0)
     .map(([key, value]) => `${key}=${value}`);
   return populated.length > 0 ? ` (${populated.join(", ")})` : " (DISPLAY/WAYLAND_DISPLAY unset)";
+}
+
+function formatEnvCommand(env, command) {
+  const envPrefix = Object.entries(env)
+    .map(([key, value]) => `${key}=${shellWord(value)}`)
+    .join(" ");
+  return `env ${envPrefix} ${command}`;
+}
+
+function shellWord(value) {
+  const text = String(value);
+  if (/^[A-Za-z0-9_./:=-]+$/u.test(text)) {
+    return text;
+  }
+  return `'${text.replace(/'/gu, "'\\''")}'`;
 }
 
 function firstLine(value) {

@@ -70,6 +70,12 @@ For any slice that produces pixels, **capture a screenshot and look at it before
 Before choosing browser/WebGPU validation on an unfamiliar host, run `pnpm host:check`. The script reports whether the host has a display session, visible GPU devices, Chrome/Chromium, Playwright, and which validation lanes are expected to work.
 
 - On a headless Linux host with no `DISPLAY` / `WAYLAND_DISPLAY`, Chrome/WebGPU Playwright lanes are expected to be unavailable. Do not treat failures from `pnpm test:browser`, `pnpm test:browser:integration`, or `pnpm probe:browser ...` as renderer regressions until they reproduce on a host with a working Chrome GPU/browser path.
+- On this Linux Wayland host, the shell may have `WAYLAND_DISPLAY` unset even though `$XDG_RUNTIME_DIR/wayland-0` exists. For browser GPU validation here, run Playwright headed with an explicit Wayland display and a clean Vite port:
+  - Browser smoke: `env VITE_PORT=5073 CI=1 WAYLAND_DISPLAY=wayland-0 XDG_SESSION_TYPE=wayland pnpm exec playwright test --config playwright.config.ts --headed`
+  - Browser integration: `env VITE_PORT=5073 CI=1 WAYLAND_DISPLAY=wayland-0 XDG_SESSION_TYPE=wayland pnpm exec playwright test --config playwright.integration.config.ts --headed`
+  - Browser probe: `env VITE_PORT=5073 CI=1 WAYLAND_DISPLAY=wayland-0 XDG_SESSION_TYPE=wayland pnpm exec playwright test --config playwright.probes.config.ts --headed test/browser/probes/<name>.probe.ts`
+  - `CI=1` prevents Playwright from reusing an unrelated dev server, and `VITE_PORT=5073` avoids the user shell's `VITE_PORT=3402` override. Plain `pnpm test:browser` can reuse the wrong app on port 3402.
+  - Headless Chrome on this host can fail WebGPU with `Instance dropped in popErrorScope` and black screenshots even when headed Wayland Chrome renders correctly. Prefer the headed Wayland command for browser-GPU validation; use Deno smokes as the headless WebGPU control.
 - On that kind of host, prefer display-independent validation: `pnpm test`, `pnpm typecheck`, Node headless host tests, and focused Deno WebGPU smokes such as `pnpm smoke:deno:webgpu`, `pnpm smoke:deno:pipeline`, `pnpm smoke:deno:world-assets`, or `pnpm smoke:deno:generated-world`.
 - To run an actual Deno WebGPU capability probe through the checker, use `pnpm host:check -- --probe-deno-webgpu`. To confirm a Chrome/WebGPU browser path on a display/GPU host, use `pnpm host:check -- --probe-browser-webgpu`.
 
