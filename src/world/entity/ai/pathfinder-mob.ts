@@ -1,5 +1,8 @@
 import type { BlockPos } from "../../../core/block-pos";
 import type { MobAttribute } from "../attribute";
+import type { AABB } from "../../phys/aabb";
+import type { Fluid } from "../../level/material/fluid";
+import type { BlockPathTypes } from "../../level/pathfinder/block-path-types";
 
 export interface MobRandom {
   nextInt(bound: number): number;
@@ -36,21 +39,29 @@ export interface PathfinderMob {
   };
 
   blockPosition(): BlockPos;
+  getBoundingBox(): AABB;
   getX(): number;
   getY(): number;
   getZ(): number;
+  getBlockY(): number;
   getYRot(): number;
   setYRot(yaw: number): void;
   getBbWidth(): number;
+  getBbHeight(): number;
+  getMaxUpStep(): number;
+  getMaxFallDistance(): number;
   getRandom(): MobRandom;
   getNoActionTime(): number;
   getNavigation(): MobNavigation;
   getMoveControl(): MobMoveControl;
   getAiLevel(): MobAiLevel | undefined;
+  getPathfindingMalus(type: BlockPathTypes): number;
+  setPathfindingMalus(type: BlockPathTypes, priority: number): void;
   getAttributeValue(attribute: MobAttribute): number;
   setSpeed(speed: number): void;
   setZza(forward: number): void;
   setXxa(strafe: number): void;
+  canStandOnFluid(fluid: Fluid): boolean;
   isVehicle(): boolean;
   isOnGround(): boolean;
   isInWaterOrBubble(): boolean;

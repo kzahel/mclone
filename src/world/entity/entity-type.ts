@@ -9,6 +9,9 @@ import { SimpleGroundPathNavigation } from "./ai/navigation/simple-ground-path-n
 import type { MobAiLevel, MobRandom, PathfinderMob } from "./ai/pathfinder-mob";
 import { MobCategory } from "./mob-category";
 import { WorldgenRandom } from "../../worldgen/prng/worldgen-random";
+import { floor } from "../../util/mth";
+import type { Fluid } from "../level/material/fluid";
+import { BlockPathTypes, type BlockPathTypes as BlockPathType } from "../level/pathfinder/block-path-types";
 
 export interface GeneratedMobEntityOptions extends SyntheticRuntimeEntityOptions {
   readonly entityType: EntityType;
@@ -38,6 +41,7 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   private zza = 0.0;
   private restrictCenter = BlockPos.ZERO;
   private restrictRadius = -1.0;
+  private readonly pathfindingMalus = new Map<BlockPathType, number>();
 
   public constructor(options: GeneratedMobEntityOptions) {
     super({
@@ -53,6 +57,10 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     this.onGround = options.onGround ?? false;
     this.data = options.data ?? {};
     this.random = new WorldgenRandom(options.randomSeed ?? generatedEntityRandomSeed(options.id, options.uuid));
+    if (this.entityType.category === MobCategory.CREATURE) {
+      this.setPathfindingMalus(BlockPathTypes.DANGER_FIRE, 16.0);
+      this.setPathfindingMalus(BlockPathTypes.DAMAGE_FIRE, -1.0);
+    }
     this.registerGoals();
   }
 
@@ -89,6 +97,10 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     return this.position.z;
   }
 
+  public getBlockY(): number {
+    return floor(this.position.y);
+  }
+
   public getYRot(): number {
     return this.rotation.yaw;
   }
@@ -99,6 +111,18 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
 
   public getBbWidth(): number {
     return this.entityType.width;
+  }
+
+  public getBbHeight(): number {
+    return this.entityType.height;
+  }
+
+  public getMaxUpStep(): number {
+    return 0.6;
+  }
+
+  public getMaxFallDistance(): number {
+    return 3;
   }
 
   public getRandom(): MobRandom {
@@ -121,6 +145,14 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     return this.entityType.getAttributeValue(attribute);
   }
 
+  public getPathfindingMalus(type: BlockPathType): number {
+    return this.pathfindingMalus.get(type) ?? type.getMalus();
+  }
+
+  public setPathfindingMalus(type: BlockPathType, priority: number): void {
+    this.pathfindingMalus.set(type, priority);
+  }
+
   public setSpeed(speed: number): void {
     this.speed = speed;
   }
@@ -133,6 +165,10 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   }
 
   public isVehicle(): boolean {
+    return false;
+  }
+
+  public canStandOnFluid(_fluid: Fluid): boolean {
     return false;
   }
 

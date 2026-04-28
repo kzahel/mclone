@@ -215,6 +215,10 @@ export class AABB {
     return this.maxZ - this.minZ;
   }
 
+  public getSize(): number {
+    return (this.getXsize() + this.getYsize() + this.getZsize()) / 3.0;
+  }
+
   public getCenter(): Vec3 {
     return new Vec3((this.minX + this.maxX) * 0.5, (this.minY + this.maxY) * 0.5, (this.minZ + this.maxZ) * 0.5);
   }

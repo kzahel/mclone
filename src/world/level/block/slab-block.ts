@@ -8,6 +8,8 @@ import { EnumProperty } from "./state/properties/enum-property";
 import { SlabType } from "./state/properties/slab-type";
 import type { BlockState } from "./state/block-state";
 import { Shapes, type VoxelShape } from "../../phys/shapes/voxel-shape";
+import { Fluids } from "../material/fluids";
+import { PathComputationType, type PathComputationType as PathComputationTypeValue } from "../pathfinder/path-computation-type";
 
 const BOTTOM_SHAPE = Shapes.box(0.0, 0.0, 0.0, 1.0, 0.5, 1.0);
 const TOP_SHAPE = Shapes.box(0.0, 0.5, 0.0, 1.0, 1.0, 1.0);
@@ -30,6 +32,16 @@ export class SlabBlock extends Block {
       return Shapes.block();
     }
     return type === SlabType.TOP ? TOP_SHAPE : BOTTOM_SHAPE;
+  }
+
+  public override isPathfindable(_state: BlockState, level: BlockGetter, pos: BlockPos, type: PathComputationTypeValue): boolean {
+    switch (type) {
+      case PathComputationType.LAND:
+      case PathComputationType.AIR:
+        return false;
+      case PathComputationType.WATER:
+        return level.getFluidState(pos).getType().isSame(Fluids.WATER);
+    }
   }
 
   protected override createBlockStateDefinition(builder: StateDefinition.Builder<Block, BlockState>): void {

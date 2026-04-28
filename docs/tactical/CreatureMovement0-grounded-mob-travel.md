@@ -43,4 +43,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-`CreatureMovement1` has landed the data-only path primitives. Proceed to [`CreatureMovement2-walk-node-evaluator-and-pathfinder.md`](CreatureMovement2-walk-node-evaluator-and-pathfinder.md), which can now use the shared collision model from [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md) while porting `WalkNodeEvaluator`.
+`CreatureMovement1` and `CreatureMovement2` have landed the data-only path primitives plus unit-tested weighted A*-style path search over the shared collision model. Proceed to [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md) to replace temporary direct steering with live `GroundPathNavigation`.

@@ -10,6 +10,8 @@ import type { FluidState } from "../material/fluid-state";
 import type { FlowingFluid } from "../material/flowing-fluid";
 import type { WorldGenLevel } from "../world-gen-level";
 import type { BlockGetter } from "../block-getter";
+import { Fluids } from "../material/fluids";
+import { PathComputationType, type PathComputationType as PathComputationTypeValue } from "../pathfinder/path-computation-type";
 
 export class LiquidBlock extends Block {
   public static readonly LEVEL = BlockStateProperties.LEVEL;
@@ -42,6 +44,16 @@ export class LiquidBlock extends Block {
 
   public override getRenderShape(_state: BlockState): RenderShape {
     return RenderShape.INVISIBLE;
+  }
+
+  public override isPathfindable(_state: BlockState, level: BlockGetter, pos: BlockPos, type: PathComputationTypeValue): boolean {
+    switch (type) {
+      case PathComputationType.LAND:
+      case PathComputationType.WATER:
+        return !this.fluid.isSame(Fluids.LAVA) && level.getFluidState(pos).getType().isSame(this.fluid);
+      case PathComputationType.AIR:
+        return false;
+    }
   }
 
   public override onPlace(state: BlockState, level: WorldGenLevel, pos: BlockPos, _oldState: BlockState, _movedByPiston: boolean): void {

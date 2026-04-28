@@ -17,6 +17,7 @@ import { Vec3 } from "../../../phys/vec3";
 import { Shapes, type VoxelShape } from "../../../phys/shapes/voxel-shape";
 import type { FluidState } from "../../material/fluid-state";
 import { BlockTag } from "../../../../tags/block-tags";
+import type { PathComputationType } from "../../pathfinder/path-computation-type";
 
 export abstract class BlockBehaviour {
   public readonly material: Material;
@@ -279,6 +280,10 @@ export namespace BlockBehaviour {
 
     public isCollisionShapeFullBlock(level: BlockGetter, pos: BlockPos): boolean {
       return this.getBlock().isCollisionShapeFullBlock(this.asState(), level, pos);
+    }
+
+    public isPathfindable(level: BlockGetter, pos: BlockPos, type: PathComputationType): boolean {
+      return this.getBlock().isPathfindable(this.asState(), level, pos, type);
     }
   }
 

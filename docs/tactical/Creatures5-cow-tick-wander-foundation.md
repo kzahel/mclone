@@ -34,14 +34,14 @@ This tactical follows [`Creatures4-cow-baseline-lifecycle.md`](Creatures4-cow-ba
 
 Two pieces are intentionally incomplete and should not be mistaken for full vanilla cow parity:
 
-- `SimpleGroundPathNavigation` steers directly toward the chosen waypoint. Vanilla uses `PathNavigation`, `GroundPathNavigation`, `PathFinder`, `WalkNodeEvaluator`, `Path`, `Node`, and `BlockPathTypes`. `CreatureMovement1` has landed the data model for those paths and `CreatureMovement0` narrows the temporary behavior by preserving a stable standing Y, but this is still not a real pathfinder or collision-resolved travel port.
+- `SimpleGroundPathNavigation` steers directly toward the chosen waypoint. Vanilla uses `PathNavigation`, `GroundPathNavigation`, `PathFinder`, `WalkNodeEvaluator`, `Path`, `Node`, and `BlockPathTypes`. `CreatureMovement1` has landed the data model and `CreatureMovement2` has landed unit-tested path search, but live cows still need `GroundPathNavigation` integration before they consume those paths.
 - `GeneratedWorldHost` uses current chunk-view interest as the no-action reset proxy until player tickets, surface-aware spawn placement, and natural-spawn distance ownership are wired to entity ticking.
 
 Both divergences are narrow. The random-stroll goal, goal selector, target generation, entity section movement callback, and host protocol update path are in place so the next slice can replace navigation internals without changing entity ownership.
 
 ## Deferred
 
-- Full `PathFinder` / `WalkNodeEvaluator` parity and live use of `BlockPathTypes` malus handling.
+- Live `GroundPathNavigation` path following and full collision-resolved travel over the landed `PathFinder` / `WalkNodeEvaluator` foundation.
 - Collision-resolved `LivingEntity.travel(...)` movement, friction, step-up, jumps, fluid movement, and path stuck detection.
 - Cow despawn rules, health/damage/death, sounds, drops, breeding, milking, and interactions.
 - Durable entity persistence beyond the current in-memory runtime path.
@@ -56,4 +56,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-Continue the reusable movement stack in [`CreatureMovement2-walk-node-evaluator-and-pathfinder.md`](CreatureMovement2-walk-node-evaluator-and-pathfinder.md): port `WalkNodeEvaluator`, `PathFinder`, and the loaded-world path search region before `GroundPathNavigation` integration.
+Continue the reusable movement stack in [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md): replace temporary direct steering with `GroundPathNavigation` path following and collision-resolved mob travel.

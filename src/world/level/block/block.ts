@@ -12,6 +12,7 @@ import { StateDefinition } from "./state/state-definition";
 import type { Property } from "./state/properties/property";
 import { Fluids } from "../material/fluids";
 import type { FluidState } from "../material/fluid-state";
+import { PathComputationType, type PathComputationType as PathComputationTypeValue } from "../pathfinder/path-computation-type";
 
 function copyProperty<T>(from: BlockState, to: BlockState, property: Property<T>): BlockState {
   return to.setValue(property, from.getValue(property));
@@ -133,5 +134,15 @@ export class Block extends BlockBehaviour {
 
   public isSolidRender(state: BlockState, _level: BlockGetter): boolean {
     return state.canOcclude();
+  }
+
+  public isPathfindable(state: BlockState, level: BlockGetter, pos: BlockPos, type: PathComputationTypeValue): boolean {
+    switch (type) {
+      case PathComputationType.LAND:
+      case PathComputationType.AIR:
+        return !state.isCollisionShapeFullBlock(level, pos);
+      case PathComputationType.WATER:
+        return level.getFluidState(pos).getType().isSame(Fluids.WATER);
+    }
   }
 }

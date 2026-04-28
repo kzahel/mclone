@@ -37,4 +37,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-Proceed to [`CreatureMovement2-walk-node-evaluator-and-pathfinder.md`](CreatureMovement2-walk-node-evaluator-and-pathfinder.md).
+`CreatureMovement2` has landed the path search and walk-node evaluator foundation. Proceed to [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md).

@@ -168,4 +168,42 @@ export class BlockTags {
   ]);
 
   public static readonly LAVA_POOL_STONE_CANNOT_REPLACE = new BlockTag("minecraft:lava_pool_stone_cannot_replace", []);
+
+  public static readonly TRAPDOORS = new BlockTag("minecraft:trapdoors", [
+    "minecraft:oak_trapdoor",
+    "minecraft:spruce_trapdoor",
+    "minecraft:birch_trapdoor",
+    "minecraft:jungle_trapdoor",
+    "minecraft:acacia_trapdoor",
+    "minecraft:dark_oak_trapdoor",
+    "minecraft:iron_trapdoor",
+  ]);
+
+  public static readonly FENCES = new BlockTag("minecraft:fences", [
+    "minecraft:oak_fence",
+    "minecraft:spruce_fence",
+    "minecraft:birch_fence",
+    "minecraft:jungle_fence",
+    "minecraft:acacia_fence",
+    "minecraft:dark_oak_fence",
+    "minecraft:nether_brick_fence",
+  ]);
+
+  public static readonly WALLS = new BlockTag("minecraft:walls", [
+    "minecraft:cobblestone_wall",
+    "minecraft:mossy_cobblestone_wall",
+    "minecraft:stone_brick_wall",
+    "minecraft:andesite_wall",
+    "minecraft:diorite_wall",
+    "minecraft:granite_wall",
+    "minecraft:sandstone_wall",
+    "minecraft:red_sandstone_wall",
+    "minecraft:brick_wall",
+    "minecraft:nether_brick_wall",
+  ]);
+
+  public static readonly FIRE = new BlockTag("minecraft:fire", [
+    "minecraft:fire",
+    "minecraft:soul_fire",
+  ]);
 }
