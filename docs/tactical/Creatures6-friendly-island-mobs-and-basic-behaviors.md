@@ -34,7 +34,7 @@ This tactical follows the `CreatureMovement` stack. It expands the small island 
 - Added vanilla-shaped chicken render/model/texture coverage through `ChickenModel`, `ChickenRenderer`, `ModelLayers.CHICKEN`, and renderable snapshot hydration.
 - Registered chicken passive movement attributes from vanilla: max health `4.0`, movement speed `0.25`.
 - Registered chicken `WaterAvoidingRandomStrollGoal` through the shared generated-mob stack at vanilla priority `5`, and set its water pathfinding malus to `0.0` like vanilla.
-- Hydrated chicken `Flap`, `FlapSpeed`, `OFlap`, `OFlapSpeed`, `Flapping`, `EggLayTime`, and `IsChickenJockey` data for generated chicken construction paths; live flap/egg ticking remains deferred.
+- Hydrated chicken `Flap`, `FlapSpeed`, `OFlap`, `OFlapSpeed`, `Flapping`, `EggLayTime`, and `IsChickenJockey` data for generated chicken construction paths; live flap/egg ticking lands in `Creatures9`.
 - Expanded `SmallIslandWorldGenerator` starter entities near the spawn chunk from cows only to cows, pigs, sheep, and chickens in separate visible groups.
 - Kept the island mobs on the authoritative generated-entity lifecycle with normal host publication, client hydration, and `GroundPathNavigation` movement.
 - Kept these as debug starter entities, not a replacement for generation-time original mobs or live natural spawning.
@@ -42,7 +42,7 @@ This tactical follows the `CreatureMovement` stack. It expands the small island 
 
 ## Deferred Scope
 
-- Port live chicken flap and egg-timer ticking, including egg item spawning once item entities exist.
+- Add egg item spawning once item entities exist.
 - Port sheep `EatBlockGoal`, grass mutation, sheared-state persistence, and eating animation.
 - Port pig saddle/boost/riding hooks once items, interactions, and passenger entities exist.
 - Add breeding, food interactions, drops, sounds, damage/death, and loot tables through later entity/gameplay tacticals.
@@ -76,4 +76,4 @@ The Deno entity smoke writes `/tmp/mclone-deno-entity-render-smoke.png`. Use a b
 
 ## Next Step
 
-Continue with animal-specific behaviors such as chicken flap/egg ticking and sheep grass eating on top of the shared movement, push, and passive look goal stack.
+Continue with sheep grass eating and egg item spawning on top of the shared movement, push, passive look, and chicken data-tick stack.

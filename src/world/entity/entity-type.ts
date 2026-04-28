@@ -12,9 +12,19 @@ import { GroundPathNavigation } from "./ai/navigation/ground-path-navigation";
 import type { MobAiLevel, MobRandom, PathfinderMob } from "./ai/pathfinder-mob";
 import { MobCategory } from "./mob-category";
 import { WorldgenRandom } from "../../worldgen/prng/worldgen-random";
-import { floor } from "../../util/mth";
+import { clamp, floor } from "../../util/mth";
 import type { Fluid } from "../level/material/fluid";
 import { BlockPathTypes, type BlockPathTypes as BlockPathType } from "../level/pathfinder/block-path-types";
+
+interface GeneratedChickenRuntimeData {
+  flap: number;
+  flapSpeed: number;
+  oFlap: number;
+  oFlapSpeed: number;
+  flapping: number;
+  eggLayTime: number;
+  isChickenJockey: boolean;
+}
 
 export interface GeneratedMobEntityOptions extends SyntheticRuntimeEntityOptions {
   readonly entityType: EntityType;
@@ -51,6 +61,7 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   private yHeadRot = 0.0;
   private yHeadRotO = 0.0;
   private xRotO = 0.0;
+  private chickenRuntimeData: GeneratedChickenRuntimeData | undefined;
 
   public constructor(options: GeneratedMobEntityOptions) {
     super({
@@ -78,6 +89,7 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     }
     if (this.entityType.id === EntityTypes.CHICKEN.id) {
       this.setPathfindingMalus(BlockPathTypes.WATER, 0.0);
+      this.chickenRuntimeData = createChickenRuntimeData(this.data, this.random);
     }
     this.registerGoals();
   }
@@ -103,6 +115,7 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     this.moveControl.tick();
     this.lookControl.tick();
     this.applyControlledTravel();
+    this.customAiStep();
   }
 
   public getX(): number {
@@ -207,8 +220,14 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   }
 
   public getSnapshotData(): Readonly<Record<string, number | boolean | string>> {
+    const data = this.chickenRuntimeData === undefined
+      ? this.data
+      : {
+        ...this.data,
+        ...createChickenRuntimeDataSnapshot(this.chickenRuntimeData),
+      };
     return {
-      ...this.data,
+      ...data,
       YBodyRot: this.yBodyRot,
       YBodyRotO: this.yBodyRotO,
       YHeadRot: this.yHeadRot,
@@ -332,6 +351,41 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     this.yBodyRotO = this.yBodyRot;
     this.yHeadRotO = this.yHeadRot;
     this.xRotO = this.rotation.pitch;
+  }
+
+  private customAiStep(): void {
+    if (this.entityType.id === EntityTypes.CHICKEN.id) {
+      this.tickChickenAiStep();
+    }
+  }
+
+  private tickChickenAiStep(): void {
+    const data = this.chickenRuntimeData;
+    if (data === undefined) {
+      return;
+    }
+
+    data.oFlap = data.flap;
+    data.oFlapSpeed = data.flapSpeed;
+    data.flapSpeed = clamp(data.flapSpeed + ((this.onGround ? -1.0 : 4.0) * 0.3), 0.0, 1.0);
+    if (!this.onGround && data.flapping < 1.0) {
+      data.flapping = 1.0;
+    }
+
+    data.flapping *= 0.9;
+    data.flap += data.flapping * 2.0;
+
+    if (this.isAlive() && !this.isBaby() && !data.isChickenJockey) {
+      data.eggLayTime--;
+      if (data.eggLayTime <= 0) {
+        // Entity runtime: egg item spawning and chicken egg sound wait for item entities and sound events.
+        data.eggLayTime = 6000 + this.random.nextInt(6000);
+      }
+    }
+  }
+
+  private isBaby(): boolean {
+    return this.age < 0;
   }
 
   private applyControlledTravel(): void {
@@ -500,6 +554,41 @@ function chickenData(random: { nextInt(bound: number): number }): Readonly<Recor
     EggLayTime: 6000 + random.nextInt(6000),
     IsChickenJockey: false,
   };
+}
+
+function createChickenRuntimeData(
+  data: Readonly<Record<string, number | boolean | string>>,
+  random: { nextInt(bound: number): number },
+): GeneratedChickenRuntimeData {
+  return {
+    flap: readNumberData(data.Flap, 0.0),
+    flapSpeed: readNumberData(data.FlapSpeed, 0.0),
+    oFlap: readNumberData(data.OFlap, 0.0),
+    oFlapSpeed: readNumberData(data.OFlapSpeed, 0.0),
+    flapping: readNumberData(data.Flapping, 1.0),
+    eggLayTime: readIntegerData(data.EggLayTime, 6000 + random.nextInt(6000)),
+    isChickenJockey: data.IsChickenJockey === true,
+  };
+}
+
+function createChickenRuntimeDataSnapshot(data: GeneratedChickenRuntimeData): Readonly<Record<string, number | boolean | string>> {
+  return {
+    Flap: data.flap,
+    FlapSpeed: data.flapSpeed,
+    OFlap: data.oFlap,
+    OFlapSpeed: data.oFlapSpeed,
+    Flapping: data.flapping,
+    EggLayTime: data.eggLayTime,
+    IsChickenJockey: data.isChickenJockey,
+  };
+}
+
+function readNumberData(value: number | boolean | string | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function readIntegerData(value: number | boolean | string | undefined, fallback: number): number {
+  return Math.trunc(readNumberData(value, fallback));
 }
 
 export const EntityTypes = {

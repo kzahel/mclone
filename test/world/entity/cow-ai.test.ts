@@ -239,9 +239,93 @@ describe("passive mob AI foundation", () => {
     expect(chicken.position.y).toBe(64);
   });
 
+  test("generated chickens tick vanilla flap state and egg timer into snapshot data", () => {
+    const chicken = new GeneratedMobEntity({
+      id: 6,
+      uuid: "mclone:test/chicken-live-flap",
+      entityType: EntityTypes.CHICKEN,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+      data: {
+        Flap: 0.0,
+        FlapSpeed: 0.0,
+        OFlap: 0.0,
+        OFlapSpeed: 0.0,
+        Flapping: 1.0,
+        EggLayTime: 3,
+        IsChickenJockey: false,
+      },
+    });
+
+    chicken.tickServerAi({ resetNoActionTime: true });
+    const firstSnapshot = chicken.getSnapshotData();
+    expect(firstSnapshot.OFlap).toBe(0.0);
+    expect(firstSnapshot.OFlapSpeed).toBe(0.0);
+    expect(firstSnapshot.FlapSpeed).toBe(0.0);
+    expect(firstSnapshot.Flapping).toBeCloseTo(0.9);
+    expect(firstSnapshot.Flap).toBeCloseTo(1.8);
+    expect(firstSnapshot.EggLayTime).toBe(2);
+
+    chicken.tickServerAi({ resetNoActionTime: true });
+    const secondSnapshot = chicken.getSnapshotData();
+    expect(secondSnapshot.OFlap).toBeCloseTo(1.8);
+    expect(secondSnapshot.OFlapSpeed).toBe(0.0);
+    expect(secondSnapshot.Flapping).toBeCloseTo(0.81);
+    expect(secondSnapshot.Flap).toBeCloseTo(3.42);
+    expect(secondSnapshot.EggLayTime).toBe(1);
+  });
+
+  test("generated chickens reset egg timer without spawning item entities yet", () => {
+    const chicken = new GeneratedMobEntity({
+      id: 7,
+      uuid: "mclone:test/chicken-egg-reset",
+      entityType: EntityTypes.CHICKEN,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+      data: {
+        EggLayTime: 1,
+        IsChickenJockey: false,
+      },
+    });
+
+    chicken.tickServerAi({ resetNoActionTime: true });
+    const eggLayTime = chicken.getSnapshotData().EggLayTime;
+    expect(typeof eggLayTime).toBe("number");
+    expect(eggLayTime).toBeGreaterThanOrEqual(6000);
+    expect(eggLayTime).toBeLessThan(12000);
+  });
+
+  test("generated chicken jockeys do not decrement egg timers", () => {
+    const chicken = new GeneratedMobEntity({
+      id: 8,
+      uuid: "mclone:test/chicken-jockey-egg-timer",
+      entityType: EntityTypes.CHICKEN,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+      data: {
+        EggLayTime: 3,
+        IsChickenJockey: true,
+      },
+    });
+
+    chicken.tickServerAi({ resetNoActionTime: true });
+
+    expect(chicken.getSnapshotData().EggLayTime).toBe(3);
+    expect(chicken.getSnapshotData().IsChickenJockey).toBe(true);
+  });
+
   test("generated passive mobs expose vanilla standing eye heights for shared look control", () => {
     expect(new GeneratedMobEntity({
-      id: 6,
+      id: 9,
       uuid: "mclone:test/cow-eye-height",
       entityType: EntityTypes.COW,
       x: 0.5,
@@ -250,7 +334,7 @@ describe("passive mob AI foundation", () => {
     }).getEyeY()).toBeCloseTo(65.3);
 
     expect(new GeneratedMobEntity({
-      id: 7,
+      id: 10,
       uuid: "mclone:test/sheep-eye-height",
       entityType: EntityTypes.SHEEP,
       x: 0.5,
@@ -259,7 +343,7 @@ describe("passive mob AI foundation", () => {
     }).getEyeY()).toBeCloseTo(65.235);
 
     expect(new GeneratedMobEntity({
-      id: 8,
+      id: 11,
       uuid: "mclone:test/chicken-eye-height",
       entityType: EntityTypes.CHICKEN,
       x: 0.5,
@@ -270,7 +354,7 @@ describe("passive mob AI foundation", () => {
 
   test("LookControl rotates generated mob head and publishes render rotation data", () => {
     const cow = new GeneratedMobEntity({
-      id: 9,
+      id: 12,
       uuid: "mclone:test/cow-look-control",
       entityType: EntityTypes.COW,
       x: 0.5,
@@ -293,7 +377,7 @@ describe("passive mob AI foundation", () => {
   test("LookAtPlayerGoal acquires the nearest player through the mob level", () => {
     const level = new FlatMobAiLevel();
     const cow = new GeneratedMobEntity({
-      id: 10,
+      id: 13,
       uuid: "mclone:test/cow-look-at-player",
       entityType: EntityTypes.COW,
       x: 0.5,

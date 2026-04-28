@@ -57,7 +57,7 @@ The snapshot rotation fields are also a protocol bridge. Vanilla tracks living-e
 - Full `TargetingConditions` parity, including visibility, spectator, riding, predicate, and non-player living-entity targeting.
 - Remote player look targets in the dedicated/HTTP multiplayer path after remote players share the same entity query model.
 - Full `LivingEntity` rotation/body animation update loop beyond the current generated-mob head/body fields.
-- Animal-specific passive behaviors: chicken flap and egg ticking, sheep grass eating, pig saddle/boost hooks, cow milking/interactions, breeding, food, sounds, damage/death, and loot.
+- Animal-specific passive behaviors beyond `Creatures9`: sheep grass eating, pig saddle/boost hooks, cow milking/interactions, breeding, food, sounds, damage/death, and loot.
 - Item entity spawning for eggs, drops, and interaction results.
 
 ## Validation
@@ -69,4 +69,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-Start `Creatures9` with chicken live flap and egg-timer ticking. It is the next small animal-specific behavior that can publish visible state through the entity data path, while actual egg item spawning can remain deferred until item entities exist.
+Chicken live flap and egg-timer ticking is now tracked in `Creatures9`. Start `Creatures10` with sheep `EatBlockGoal`, grass mutation, and eating head animation.
