@@ -15,7 +15,7 @@ describe("GeneratedChunkTicketSet", () => {
       source: "player_view",
       centerChunkX: 0,
       centerChunkZ: 0,
-      radius: 2,
+      radius: 0,
       level: GENERATED_CHUNK_ENTITY_TICKING_LEVEL,
     }]);
 
@@ -23,6 +23,8 @@ describe("GeneratedChunkTicketSet", () => {
     expect(tickets.getFullStatus(1, 0)).toBe(FullChunkStatus.TICKING);
     expect(tickets.getFullStatus(2, 0)).toBe(FullChunkStatus.BORDER);
     expect(tickets.getFullStatus(3, 0)).toBe(FullChunkStatus.INACCESSIBLE);
+    expect(tickets.getCoveredChunkCount()).toBe(1);
+    expect(tickets.getDebugLevelRecords()).toHaveLength(25);
   });
 
   test("coalesces a source area before propagating ticket levels", () => {
@@ -41,6 +43,9 @@ describe("GeneratedChunkTicketSet", () => {
     expect(tickets.getFullStatus(2, 0)).toBe(FullChunkStatus.TICKING);
     expect(tickets.getFullStatus(3, 0)).toBe(FullChunkStatus.BORDER);
     expect(tickets.getFullStatus(4, 0)).toBe(FullChunkStatus.INACCESSIBLE);
+    expect(tickets.getDebugLevelRecords().filter((record) => record.status === FullChunkStatus.ENTITY_TICKING)).toHaveLength(9);
+    expect(tickets.getDebugLevelRecords().filter((record) => record.status === FullChunkStatus.TICKING)).toHaveLength(16);
+    expect(tickets.getDebugLevelRecords().filter((record) => record.status === FullChunkStatus.BORDER)).toHaveLength(24);
   });
 
   test("derives light and forced full status through the same level path", () => {

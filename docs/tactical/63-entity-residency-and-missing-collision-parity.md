@@ -2,7 +2,7 @@
 
 Bring runtime entity loading, ticking, unloading, and "player outruns terrain" behavior to a vanilla-shaped architecture. The goal is not to make missing chunks feel good by inventing terrain; it is to make the host keep the right chunks available through tickets/statuses, and to fail closed when authoritative collision is unavailable.
 
-Status: first five implementation slices landed. Generated entity chunk status now comes from generated-holder full-status transitions, those holder statuses are derived from numeric ticket levels on explicit `entity` / `player_view` / `light` / `forced` ticket sources, and the entity-ticking source area uses the vanilla-shaped two-ring interior of the published player view. Later slices should replace the bounded square/source-radius ticket approximation with fuller `DistanceManager`-style propagation, add entity persistence, resolve player-as-entity treatment, and add dynamic collision.
+Status: first six implementation slices landed. Generated entity chunk status now comes from generated-holder full-status transitions, those holder statuses are derived from numeric ticket levels on explicit `entity` / `player_view` / `light` / `forced` ticket sources, and those levels are propagated through a `ChunkTracker`-style fixed-point graph. Later slices should replace the coalesced synchronous player-view source with fuller `DistanceManager.PlayerTicketTracker` materialization/throttling, add entity persistence, resolve player-as-entity treatment, and add dynamic collision.
 
 ## Vanilla source anchors
 
@@ -49,17 +49,17 @@ Status: first five implementation slices landed. Generated entity chunk status n
 1. **Entity status ownership**
    - Status: landed for generated-host ownership.
    - Landed: entity chunk status is no longer promoted by chunk publication; generated holders own current full status, and entity visibility/ticking updates are emitted from full-status transitions.
-   - Remaining gap: those holder statuses are still computed from bounded square/source-radius ticket coverage rather than the full vanilla `DistanceManager` graph/update pipeline.
+   - Remaining gap: those holder statuses now come from an 8-neighbor fixed-point graph, but the graph is rebuilt synchronously from coalesced sources rather than driven by vanilla's incremental `DistanceManager` update queues.
    - Parity target: entity status is derived from full-status state, then handed to `PersistentEntitySectionManager.updateChunkStatus(...)`.
 
 2. **Tracked ring vs entity-ticking ring**
    - Status: landed for generated host ticket/status behavior.
-   - Remaining gap: the split now uses numeric ticket levels and coalesced source radii, but the source tickets are still mclone tickets rather than vanilla player-distance trackers plus throttled `PLAYER` tickets.
+   - Remaining gap: the split now uses numeric ticket levels and graph propagation, but the source tickets are still coalesced mclone tickets rather than vanilla player-distance trackers plus throttled `PLAYER` tickets.
    - Parity target: distinguish tracked chunks from entity-ticking chunks. Published chunks can be tracked without ticking; only `ENTITY_TICKING` chunks tick ordinary entities.
 
 3. **Ticket levels instead of radius helper decisions**
    - Status: landed for current generated-host ticket sources.
-   - Remaining gap: propagation is still represented by bounded square/source-radius tickets instead of vanilla's dynamic fixed-point graph, and forced tickets do not yet have a public protocol/command owner.
+   - Remaining gap: propagation now uses a dynamic fixed-point graph, but source replacement is still synchronous and coalesced. Forced tickets do not yet have a public protocol/command owner.
    - Parity target: `ChunkHolder`-like records own full status, and entity manager updates are a consequence of full-status promotion/demotion from ticket levels.
 
 4. **Entity persistence backend**
@@ -116,24 +116,34 @@ Status: first five implementation slices landed. Generated entity chunk status n
    - Added host-owned `forced` tickets at level `31`, including the propagated `TICKING` and `BORDER` rings.
    - Holder full-status sync now scans all level-carrying ticket sources.
 
-6. **Entity storage integration**
+6. **ChunkTracker-style level propagation**
+   - Status: landed.
+   - Materialized coalesced source areas into source chunks, then propagated levels through all 8 chunk neighbors using the existing `DynamicGraphMinFixedPoint` port.
+   - Kept host movement/entity/lighting counts stable while replacing direct Chebyshev lookup math.
+
+7. **PlayerTicketTracker materialization and throttling**
+   - Add an explicit generated-world player-distance tracker.
+   - Materialize `PLAYER` tickets for chunks whose player distance is `<= viewDistance - 2`.
+   - Model vanilla's delayed release path instead of swapping the whole coalesced `player_view` source synchronously.
+
+8. **Entity storage integration**
    - Add host-provided entity storage adapters for memory/file/IndexedDB.
    - Apply pending-write read-through and session epoch protections.
    - Test unload while entity save is pending, immediate return, and stale write rejection.
 
-7. **Fast movement settling harness**
+9. **Fast movement settling harness**
    - Create a controlled host test that blocks generation, sends movement across a chunk boundary, verifies missing collision leaves input queued, releases generation, then verifies final chunk/entity states and processed input order.
    - Track whether the result is a mclone safety divergence or vanilla-equivalent behavior.
 
-8. **Player/entity bridge**
+10. **Player/entity bridge**
    - Decide whether to place players in the section manager as always-ticking entities or keep a documented session-state bridge.
    - Prove chunk tickets, tracking, and dynamic collision see players consistently.
 
-9. **Ground and spawn parity**
+11. **Ground and spawn parity**
    - Replace provisional spawn height with loaded-chunk/heightmap scans.
    - Missing chunk data must return a not-ready result, not a generated fallback.
 
-10. **Dynamic collision**
+12. **Dynamic collision**
    - Extend collision worlds with entity shapes from accessible sections.
    - Keep missing entity/collision windows explicit in prediction diagnostics.
 
@@ -182,3 +192,10 @@ Status: first five implementation slices landed. Generated entity chunk status n
 - `light` tickets participate at level `33` while initial light is pending and are removed when that light work settles.
 - `forced` tickets participate at level `31` through `GeneratedWorldHost.setForcedChunk(...)`, including propagated `TICKING` and `BORDER` rings.
 - Tests cover source-radius propagation, light/forced ticket status derivation, forced holder statuses, and light-ticket lifetime during blocked initial lighting.
+
+## Landed sixth slice
+
+- `GeneratedChunkTicketSet` now builds a small `DynamicGraphMinFixedPoint` tracker from level-carrying ticket source chunks.
+- Ticket levels propagate through all eight neighboring chunks like vanilla `ChunkTracker`, and `getFullStatus(...)` reads the fixed-point graph result.
+- A point level-31 ticket now yields the expected 5x5 vanilla full-status closure even though its source coverage count is one.
+- Existing generated-host walk/entity/lighting tests keep the same published chunk counts and entity status counts after the graph swap.

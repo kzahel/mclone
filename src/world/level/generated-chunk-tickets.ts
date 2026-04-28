@@ -1,4 +1,6 @@
+import { ChunkPos } from "../../core/chunk-pos";
 import { FullChunkStatus } from "./entity/full-chunk-status";
+import { DynamicGraphMinFixedPoint } from "./lighting/dynamic-graph-min-fixed-point";
 
 export type GeneratedChunkTicketSource =
   | "player_view"
@@ -35,8 +37,16 @@ export interface GeneratedChunkTicketDebugRecord extends GeneratedChunkTicket {
   readonly chunkCount: number;
 }
 
+export interface GeneratedChunkTicketLevelDebugRecord {
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly level: number;
+  readonly status: FullChunkStatus;
+}
+
 export class GeneratedChunkTicketSet {
   private readonly tickets = new Map<string, GeneratedChunkTicket>();
+  private levelTracker = GeneratedChunkTicketLevelTracker.fromTickets([]);
 
   public replaceSource(source: GeneratedChunkTicketSource, tickets: readonly GeneratedChunkTicket[]): void {
     for (const [key, ticket] of this.tickets) {
@@ -74,6 +84,8 @@ export class GeneratedChunkTicketSet {
 
       this.tickets.set(generatedChunkTicketKey(ticket), ticket);
     }
+
+    this.rebuildLevelTracker();
   }
 
   public clearSource(source: GeneratedChunkTicketSource): void {
@@ -94,21 +106,7 @@ export class GeneratedChunkTicketSet {
   }
 
   public getLevel(chunkX: number, chunkZ: number): number {
-    let level = GENERATED_CHUNK_INACCESSIBLE_LEVEL;
-    for (const ticket of this.tickets.values()) {
-      if (ticket.level === undefined) {
-        continue;
-      }
-
-      const distance = generatedChunkTicketDistance(ticket, chunkX, chunkZ);
-      if (distance === undefined) {
-        continue;
-      }
-
-      level = Math.min(level, ticket.level + distance);
-    }
-
-    return level;
+    return this.levelTracker.getTicketLevel(chunkX, chunkZ);
   }
 
   public getFullStatus(chunkX: number, chunkZ: number): FullChunkStatus {
@@ -130,17 +128,7 @@ export class GeneratedChunkTicketSet {
   }
 
   public forEachLeveledChunk(callback: (chunkX: number, chunkZ: number) => void): void {
-    for (const ticket of this.tickets.values()) {
-      if (ticket.level === undefined) {
-        continue;
-      }
-
-      for (let chunkZ = ticket.centerChunkZ - ticket.radius; chunkZ <= ticket.centerChunkZ + ticket.radius; chunkZ++) {
-        for (let chunkX = ticket.centerChunkX - ticket.radius; chunkX <= ticket.centerChunkX + ticket.radius; chunkX++) {
-          callback(chunkX, chunkZ);
-        }
-      }
-    }
+    this.levelTracker.forEachAccessibleChunk(callback);
   }
 
   public getBounds(): GeneratedChunkTicketBounds | undefined {
@@ -198,6 +186,10 @@ export class GeneratedChunkTicketSet {
       );
   }
 
+  public getDebugLevelRecords(): readonly GeneratedChunkTicketLevelDebugRecord[] {
+    return this.levelTracker.getDebugRecords();
+  }
+
   public getSignature(): string {
     return this.getDebugRecords()
       .map((ticket) => [
@@ -210,6 +202,10 @@ export class GeneratedChunkTicketSet {
         ticket.level?.toString() ?? "",
       ].join(":"))
       .join("|");
+  }
+
+  private rebuildLevelTracker(): void {
+    this.levelTracker = GeneratedChunkTicketLevelTracker.fromTickets(this.tickets.values());
   }
 }
 
@@ -226,18 +222,144 @@ export function fullStatusFromGeneratedTicketLevel(level: number): FullChunkStat
   return FullChunkStatus.INACCESSIBLE;
 }
 
-function generatedChunkTicketDistance(ticket: GeneratedChunkTicket, chunkX: number, chunkZ: number): number | undefined {
-  const distance = Math.max(
-    Math.abs(chunkX - ticket.centerChunkX),
-    Math.abs(chunkZ - ticket.centerChunkZ),
-  );
-  if (distance > ticket.radius) {
-    return undefined;
-  }
-
-  return Math.max(0, distance - (ticket.sourceRadius ?? 0));
-}
-
 function generatedChunkTicketKey(ticket: GeneratedChunkTicket): string {
   return `${ticket.source}:${ticket.id ?? `${ticket.centerChunkX.toString()},${ticket.centerChunkZ.toString()},${ticket.radius.toString()},${ticket.sourceRadius?.toString() ?? ""},${ticket.level?.toString() ?? ""}`}`;
+}
+
+const GENERATED_CHUNK_TICKET_LEVEL_COUNT = GENERATED_CHUNK_INACCESSIBLE_LEVEL + 1;
+const GENERATED_CHUNK_SOURCE_POS = 9223372036854775807n;
+
+class GeneratedChunkTicketLevelTracker extends DynamicGraphMinFixedPoint {
+  private readonly levels = new Map<bigint, number>();
+  private readonly sourceLevels = new Map<bigint, number>();
+
+  private constructor() {
+    super(GENERATED_CHUNK_TICKET_LEVEL_COUNT);
+  }
+
+  public static fromTickets(tickets: Iterable<GeneratedChunkTicket>): GeneratedChunkTicketLevelTracker {
+    const tracker = new GeneratedChunkTicketLevelTracker();
+    for (const ticket of tickets) {
+      if (ticket.level === undefined) {
+        continue;
+      }
+
+      const sourceRadius = ticket.sourceRadius ?? 0;
+      for (let chunkZ = ticket.centerChunkZ - sourceRadius; chunkZ <= ticket.centerChunkZ + sourceRadius; chunkZ++) {
+        for (let chunkX = ticket.centerChunkX - sourceRadius; chunkX <= ticket.centerChunkX + sourceRadius; chunkX++) {
+          tracker.setSourceLevel(ChunkPos.asLong(chunkX, chunkZ), ticket.level);
+        }
+      }
+    }
+
+    for (const [pos, level] of tracker.sourceLevels) {
+      tracker.update(pos, level, true);
+    }
+    tracker.runAllUpdates();
+    return tracker;
+  }
+
+  public getTicketLevel(chunkX: number, chunkZ: number): number {
+    return this.getLevel(ChunkPos.asLong(chunkX, chunkZ));
+  }
+
+  public forEachAccessibleChunk(callback: (chunkX: number, chunkZ: number) => void): void {
+    for (const pos of this.levels.keys()) {
+      callback(ChunkPos.getX(pos), ChunkPos.getZ(pos));
+    }
+  }
+
+  public getDebugRecords(): readonly GeneratedChunkTicketLevelDebugRecord[] {
+    return [...this.levels]
+      .map(([pos, level]) => ({
+        chunkX: ChunkPos.getX(pos),
+        chunkZ: ChunkPos.getZ(pos),
+        level,
+        status: fullStatusFromGeneratedTicketLevel(level),
+      }))
+      .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX);
+  }
+
+  private setSourceLevel(pos: bigint, level: number): void {
+    const previous = this.sourceLevels.get(pos);
+    if (previous === undefined || level < previous) {
+      this.sourceLevels.set(pos, level);
+    }
+  }
+
+  private update(pos: bigint, level: number, decrease: boolean): void {
+    this.checkEdge(GENERATED_CHUNK_SOURCE_POS, pos, level, decrease);
+  }
+
+  private runAllUpdates(): void {
+    this.runUpdatesForGraph(Number.MAX_SAFE_INTEGER);
+  }
+
+  protected override isSource(pos: bigint): boolean {
+    return pos === GENERATED_CHUNK_SOURCE_POS;
+  }
+
+  protected override checkNeighborsAfterUpdate(pos: bigint, level: number, decrease: boolean): void {
+    const chunkX = ChunkPos.getX(pos);
+    const chunkZ = ChunkPos.getZ(pos);
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dz === 0) {
+          continue;
+        }
+
+        this.checkNeighbor(pos, ChunkPos.asLong(chunkX + dx, chunkZ + dz), level, decrease);
+      }
+    }
+  }
+
+  protected override getComputedLevel(pos: bigint, excludedSource: bigint, candidateLevel: number): number {
+    let level = candidateLevel;
+    const chunkX = ChunkPos.getX(pos);
+    const chunkZ = ChunkPos.getZ(pos);
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        let neighbor = ChunkPos.asLong(chunkX + dx, chunkZ + dz);
+        if (neighbor === pos) {
+          neighbor = GENERATED_CHUNK_SOURCE_POS;
+        }
+
+        if (neighbor === excludedSource) {
+          continue;
+        }
+
+        const computedLevel = this.computeLevelFromNeighbor(neighbor, pos, this.getLevel(neighbor));
+        if (level > computedLevel) {
+          level = computedLevel;
+        }
+
+        if (level === 0) {
+          return level;
+        }
+      }
+    }
+
+    return level;
+  }
+
+  protected override getLevel(pos: bigint): number {
+    return this.levels.get(pos) ?? GENERATED_CHUNK_INACCESSIBLE_LEVEL;
+  }
+
+  protected override setLevel(pos: bigint, level: number): void {
+    if (level >= GENERATED_CHUNK_INACCESSIBLE_LEVEL) {
+      this.levels.delete(pos);
+      return;
+    }
+
+    this.levels.set(pos, level);
+  }
+
+  protected override computeLevelFromNeighbor(source: bigint, target: bigint, sourceLevel: number): number {
+    return source === GENERATED_CHUNK_SOURCE_POS ? this.getLevelFromSource(target) : sourceLevel + 1;
+  }
+
+  private getLevelFromSource(pos: bigint): number {
+    return this.sourceLevels.get(pos) ?? GENERATED_CHUNK_INACCESSIBLE_LEVEL;
+  }
 }
