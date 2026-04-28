@@ -229,7 +229,8 @@ For each chunk job:
 3. If storage misses, the host advances explicit generated chunk statuses through the terrain/carver boundary.
 4. Newly generated chunks advance through `FEATURES` in the deterministic status order.
 5. The host computes lighting only after the 3x3 `FEATURES` input is ready.
-6. The host marks chunks `FULL`, publishes only chunks that satisfy the publication gate, queues persistence as a storage side effect, and may later publish light deltas.
+6. The host records the latest generated proto/full access in the resident holder's `chunkToSave` slot.
+7. The host marks chunks `FULL`, publishes only chunks that satisfy the publication gate, queues persistence as a storage side effect, and may later publish light deltas.
 
 The important point: current code checks storage before generation and now reports that as a distinct `Checking saved chunks` phase with stored/existing/missing counts. Missing chunks then move through `Generating status chunks`, `Advancing FEATURES`, `Computing light`, and `Publishing chunks`.
 
@@ -259,6 +260,17 @@ It does not contain:
 
 Hydration currently restores blocks and scheduled ticks. It ignores persisted biomes; biomes are regenerated from the current biome source when snapshots are rebuilt. The storage write path omits packed light, so persisted chunk records no longer carry light bytes.
 
+### Current Proto/ChunkAccess Facts
+
+`mclone` now has an in-memory generated chunk access shape for holder-owned generation progress:
+
+- `GeneratedProtoChunk` records chunk position, completed status, section presence, unsaved state, and generated-content version.
+- `GeneratedChunkHolder.chunkToSave` tracks the latest proto/full access while the holder is resident.
+- Metadata-only status records can exist without block sections.
+- `FULL` promotion converts the holder access to a full/level access.
+
+This is not persisted yet. Storage still reads and writes packed full snapshots, so partial proto state is lost if the holder leaves memory before the future partial-save/resume path lands.
+
 ### Current Light Behavior
 
 The host writes light into packed snapshots sent to clients, but stored light is not hydrated back into the host light engine. The storage write path strips light from chunk records. On reload, stored chunks are hydrated as blocks, then `buildPackedChunkSnapshot(...)` calls lighting setup and recomputes light from current block state.
@@ -273,6 +285,7 @@ That means persisted light is currently not authoritative for host reload. A lig
 
 - Published generated-clean chunks queue discardable cache writes as storage side effects instead of blocking publication.
 - Dirty chunks still use the durable save path before dirty chunk data is discarded.
+- Generated status progress also marks the resident holder's proto/full `chunkToSave` access unsaved, but that unsaved flag is not yet wired to disk persistence for partial chunks.
 - Host block mutations mark the owning chunk dirty and mark published chunks for replacement snapshot publication.
 - Dirty published chunks are saved when flushed.
 - Dirty chunks are saved before eviction; clean eviction still only records adapter-local `lastEvictedAtMs`.
@@ -303,9 +316,9 @@ Fresh Playwright contexts reduce leakage, but the explicit query is the determin
 |---|---|---|---|---|
 | Authority | Integrated/dedicated server owns chunks, simulation, lighting, save policy | Host worker/Node service owns chunks; renderer is a client cache | Good architectural match | Keep |
 | Physical storage | Region/NBT plus `DataVersion` and DataFixer | Engine-native snapshots in IndexedDB or JSON files | Intentional platform divergence | Keep adapter boundary |
-| Chunk status | Explicit persisted `ChunkStatus`; resume partial generation | Explicit runtime status labels exist, but no persisted status; chunks are absent, generated terrain, decorated, or published | Future parity work can become harder if status does not fit later | Tactical 58 |
-| Status future coalescing | `ChunkHolder` owns one future per `ChunkStatus` and reuses pending/completed work | Generated host now has holder slots for preload, terrain, features, and no-light full promotion; current chunk views request recursive statuses instead of building separate terrain/features batches | Remaining gap is partial proto data and persisted save/resume, not in-flight same-status coalescing | Tactical 57 landed; Tactical 58 next |
-| Partial proto save/resume | `chunkToSave` tracks latest `ProtoChunk`/`LevelChunk`; unsaved partials can save on unload | Published snapshots are cached; partial terrain/features/status records are not durable | Route/unload can lose status progress that vanilla would save or resume | Tactical 58 |
+| Chunk status | Explicit persisted `ChunkStatus`; resume partial generation | Explicit runtime status labels and holder-owned proto/full access records exist, but status is not persisted | Future parity work can become harder if status storage does not land | Tactical 58 |
+| Status future coalescing | `ChunkHolder` owns one future per `ChunkStatus` and reuses pending/completed work | Generated host now has holder slots for preload, status jobs, and `chunkToSave`; current chunk views request recursive statuses instead of building separate terrain/features batches | Remaining gap is persisted save/resume, not in-flight same-status coalescing | Tactical 57 landed; Tactical 58 first slice landed |
+| Partial proto save/resume | `chunkToSave` tracks latest `ProtoChunk`/`LevelChunk`; unsaved partials can save on unload | Holder `chunkToSave` records exist in memory; packed snapshots are still the only stored generated chunk data | Route/unload can lose status progress that vanilla would save or resume | Tactical 58 storage slice next |
 | Load before generate | Disk load at `EMPTY`, then generate missing statuses | Storage lookup before terrain generation | Match in principle | Keep |
 | Generated clean persistence | Dirty/save policy; not every publish writes | Published generated-clean chunks now queue lazy discardable cache writes; stale queued cache writes skip if a dirty save supersedes them | Still lacks a full flush/close protocol and adapter-level priority split | Tactical 59 |
 | Dirty tracking | `isUnsaved` gates save | Host block mutations mark durable dirty chunks; future gameplay domains still need to join that policy | Entity/block-entity/player state could bypass dirty saving until implemented | Extend with each gameplay domain |

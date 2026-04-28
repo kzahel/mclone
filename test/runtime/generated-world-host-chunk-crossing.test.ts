@@ -12,6 +12,7 @@ import {
   GeneratedChunkStatus,
   type GeneratedChunkStatus as GeneratedChunkStatusName,
 } from "../../src/world/level/generated-chunk-status";
+import type { GeneratedChunkAccessDebugRecord } from "../../src/world/level/generated-proto-chunk";
 import type { GeneratedChunkStatusDebugRecord } from "../../src/world/level/generated-render-level";
 import { FlatGrassWorldGenerator } from "../../src/worldgen/levelgen/demo-world-generators";
 import { GenerationStep } from "../../src/worldgen/levelgen/generation-step";
@@ -241,7 +242,22 @@ function countByExactStatus(
   return counts;
 }
 
+function countChunkAccessByExactStatus(
+  records: readonly GeneratedChunkAccessDebugRecord[],
+): Partial<Record<GeneratedChunkStatusName, number>> {
+  const counts: Partial<Record<GeneratedChunkStatusName, number>> = {};
+  for (const record of records) {
+    counts[record.status] = (counts[record.status] ?? 0) + 1;
+  }
+
+  return counts;
+}
+
 function countMaterialized(records: readonly GeneratedChunkStatusDebugRecord[]): number {
+  return records.filter((record) => record.hasBlockSections).length;
+}
+
+function countMaterializedChunkAccess(records: readonly GeneratedChunkAccessDebugRecord[]): number {
   return records.filter((record) => record.hasBlockSections).length;
 }
 
@@ -352,6 +368,18 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
       [GeneratedChunkStatus.FULL]: 49,
     });
 
+    const initialAccessRecords = host.getDebugGeneratedChunkAccessRecords();
+    expect(initialAccessRecords).toHaveLength(625);
+    expect(countMaterializedChunkAccess(initialAccessRecords)).toBe(121);
+    expect(initialAccessRecords.filter((record) => record.type === "level")).toHaveLength(49);
+    expect(initialAccessRecords.every((record) => record.isUnsaved)).toBe(true);
+    expect(countChunkAccessByExactStatus(initialAccessRecords)).toEqual({
+      [GeneratedChunkStatus.STRUCTURE_STARTS]: 504,
+      [GeneratedChunkStatus.LIQUID_CARVERS]: 40,
+      [GeneratedChunkStatus.FEATURES]: 32,
+      [GeneratedChunkStatus.FULL]: 49,
+    });
+
     const repeatMessages = await host.setChunkView({
       type: "set_chunk_view",
       centerChunkX: 0,
@@ -422,6 +450,18 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(movedPerformance.counts.chunk_holders_pruned_outside_authority ?? 0).toBeGreaterThan(0);
     expect(countMaterialized(movedStatusRecords)).toBe(132);
     expect(countByExactStatus(movedStatusRecords)).toEqual({
+      [GeneratedChunkStatus.STRUCTURE_STARTS]: 493,
+      [GeneratedChunkStatus.LIQUID_CARVERS]: 42,
+      [GeneratedChunkStatus.FEATURES]: 34,
+      [GeneratedChunkStatus.FULL]: 56,
+    });
+
+    const movedAccessRecords = host.getDebugGeneratedChunkAccessRecords();
+    expect(movedAccessRecords).toHaveLength(625);
+    expect(countMaterializedChunkAccess(movedAccessRecords)).toBe(132);
+    expect(movedAccessRecords.filter((record) => record.type === "level")).toHaveLength(56);
+    expect(movedAccessRecords.every((record) => record.isUnsaved)).toBe(true);
+    expect(countChunkAccessByExactStatus(movedAccessRecords)).toEqual({
       [GeneratedChunkStatus.STRUCTURE_STARTS]: 493,
       [GeneratedChunkStatus.LIQUID_CARVERS]: 42,
       [GeneratedChunkStatus.FEATURES]: 34,

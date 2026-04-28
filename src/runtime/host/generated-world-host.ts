@@ -24,6 +24,12 @@ import {
   GeneratedChunkStatus,
   getGeneratedChunkDependencyStatus,
 } from "../../world/level/generated-chunk-status";
+import {
+  advanceGeneratedChunkAccessStatus,
+  createGeneratedProtoChunk,
+  type GeneratedChunkAccess,
+  type GeneratedChunkAccessDebugRecord,
+} from "../../world/level/generated-proto-chunk";
 import { GeneratedRenderLevel, type GeneratedChunkStatusDebugRecord } from "../../world/level/generated-render-level";
 import type { LevelChunk } from "../../world/level/chunk/level-chunk";
 import { LEVEL_CHUNK_SECTION_SIZE } from "../../world/level/chunk/level-chunk-section";
@@ -273,6 +279,7 @@ interface GeneratedChunkHolder {
   readonly chunkZ: number;
   preloadJob: GeneratedChunkPreloadJob | undefined;
   readonly statusJobs: Map<GeneratedChunkStatus, GeneratedChunkStatusJob>;
+  chunkToSave: GeneratedChunkAccess | undefined;
 }
 
 interface GeneratedChunkStatusTarget {
@@ -713,6 +720,22 @@ export class GeneratedWorldHost implements WorldHost {
     return this.level.getDebugChunkStatusRecords();
   }
 
+  public getDebugGeneratedChunkAccessRecords(): readonly GeneratedChunkAccessDebugRecord[] {
+    return [...this.chunkHolders.values()]
+      .map((holder) => holder.chunkToSave)
+      .filter((access): access is GeneratedChunkAccess => access !== undefined)
+      .map((access) => ({
+        chunkX: access.chunkX,
+        chunkZ: access.chunkZ,
+        type: access.type,
+        status: access.status,
+        hasBlockSections: access.hasBlockSections,
+        isUnsaved: access.isUnsaved,
+        contentVersion: access.contentVersion,
+      }))
+      .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX);
+  }
+
   private getChunkHolder(chunkX: number, chunkZ: number): GeneratedChunkHolder {
     const key = chunkKey(chunkX, chunkZ);
     const existing = this.chunkHolders.get(key);
@@ -725,6 +748,7 @@ export class GeneratedWorldHost implements WorldHost {
       chunkZ,
       preloadJob: undefined,
       statusJobs: new Map(),
+      chunkToSave: undefined,
     };
     this.chunkHolders.set(key, holder);
     this.noteChunkHolderCount();
@@ -748,6 +772,32 @@ export class GeneratedWorldHost implements WorldHost {
     this.noteChunkHolderCount();
   }
 
+  private recordGeneratedChunkAccessStatus(chunkX: number, chunkZ: number): void {
+    if (!this.isChunkInCurrentAuthorityView(chunkX, chunkZ)) {
+      return;
+    }
+
+    const holder = this.getChunkHolder(chunkX, chunkZ);
+    const access = holder.chunkToSave ?? createGeneratedProtoChunk(chunkX, chunkZ);
+    const previousType = access.type;
+    const previousStatus = access.status;
+    const previousHasBlockSections = access.hasBlockSections;
+    const previousIsUnsaved = access.isUnsaved;
+    holder.chunkToSave = advanceGeneratedChunkAccessStatus(
+      access,
+      this.level.getChunkStatus(chunkX, chunkZ),
+      this.level.hasMaterializedChunk(chunkX, chunkZ),
+    );
+    if (
+      holder.chunkToSave.type !== previousType
+      || holder.chunkToSave.status !== previousStatus
+      || holder.chunkToSave.hasBlockSections !== previousHasBlockSections
+      || holder.chunkToSave.isUnsaved !== previousIsUnsaved
+    ) {
+      this.incrementWorldgenCount(`chunk_to_save_updated.${holder.chunkToSave.status}`);
+    }
+  }
+
   private async ensureGeneratedChunkStatus(
     chunkX: number,
     chunkZ: number,
@@ -756,6 +806,7 @@ export class GeneratedWorldHost implements WorldHost {
   ): Promise<boolean> {
     this.incrementWorldgenCount(`status_requests.${status}`);
     if (this.level.hasChunkStatus(chunkX, chunkZ, status)) {
+      this.recordGeneratedChunkAccessStatus(chunkX, chunkZ);
       this.incrementWorldgenCount(`status_reused_completed.${status}`);
       return true;
     }
@@ -801,6 +852,9 @@ export class GeneratedWorldHost implements WorldHost {
         const result = await run();
         job.state = "fulfilled";
         job.result = result;
+        if (result) {
+          this.recordGeneratedChunkAccessStatus(chunkX, chunkZ);
+        }
         this.incrementWorldgenCount(result ? `status_jobs_completed.${status}` : `status_jobs_skipped.${status}`);
         if (!result) {
           holder.statusJobs.delete(status);
@@ -1459,6 +1513,7 @@ export class GeneratedWorldHost implements WorldHost {
 
     this.level.markChunkLighted(chunk.chunkX, chunk.chunkZ);
     this.level.markChunkFull(chunk.chunkX, chunk.chunkZ);
+    this.recordGeneratedChunkAccessStatus(chunk.chunkX, chunk.chunkZ);
     this.incrementWorldgenCount("chunks_marked_full_without_lighting");
     return this.level.isChunkFull(chunk.chunkX, chunk.chunkZ);
   }
@@ -1470,6 +1525,7 @@ export class GeneratedWorldHost implements WorldHost {
 
     this.level.markChunkLighted(chunkX, chunkZ);
     this.level.markChunkFull(chunkX, chunkZ);
+    this.recordGeneratedChunkAccessStatus(chunkX, chunkZ);
     this.incrementWorldgenCount("chunks_marked_full_after_light");
   }
 

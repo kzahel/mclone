@@ -42,6 +42,7 @@ The first slice landed:
 - Generated-clean cache writes from publish are queued lazily.
 - Dirty durable saves still run before dirty chunk data is discarded.
 - Queued generated-clean cache writes carry a per-chunk version and skip if a later dirty/save-worthy write supersedes them.
+- Tactical 58 now gives resident holders a proto/full `chunkToSave` access record in memory. This queue still needs to save those partial records on unload/flush instead of only handling packed full snapshots.
 
 ## Remaining work
 
@@ -60,7 +61,7 @@ The first slice landed:
    - Separate discardable generated-cache writes from durable dirty saves at the storage adapter boundary if the adapter needs different priorities.
 
 4. **Integrate Tactical 58**
-   - Move `chunkToSave` from packed snapshots to the proto/full generated chunk record.
+   - Save `chunkToSave` proto/full generated chunk records on unload or explicit flush.
    - Save unsaved partial records on unload/flush; treat generated-clean partial records as versioned cache.
 
 ## Tests
