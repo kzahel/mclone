@@ -150,6 +150,7 @@ Entities are authoritative simulation data. Use [`../entities.md`](../entities.m
 | [`CreatureMovement3-ground-path-navigation-integration.md`](CreatureMovement3-ground-path-navigation-integration.md) | replace temporary direct steering with `GroundPathNavigation` path following | runtime + unit | **done** - generated passive mobs now consume vanilla-shaped paths and collision-checked movement steps |
 | [`Creatures6-friendly-island-mobs-and-basic-behaviors.md`](Creatures6-friendly-island-mobs-and-basic-behaviors.md) | starter island cows, pigs, sheep, chickens with shared movement and basic passive goals | runtime + visual | **baseline landed** - starter cows, pigs, sheep, and chickens render, publish, hydrate, and use shared navigation; shared look/idle and animal-specific behaviors remain follow-up work |
 | [`Creatures7-living-entity-push-interactions.md`](Creatures7-living-entity-push-interactions.md) | vanilla-shaped living-entity push separation for generated mobs and the local player | runtime + unit | **baseline landed** - overlapping passive mobs and the local player now separate through the authoritative host without becoming path obstacles |
+| [`63-entity-residency-and-missing-collision-parity.md`](63-entity-residency-and-missing-collision-parity.md) | entity residency tickets, missing-collision source review, unload/tick parity gaps | runtime + source review | **first slice landed** - generated entity chunk status now syncs from an explicit `entity` ticket instead of chunk publication |
 
 ## Client Runtime / Integrated Server Arc
 

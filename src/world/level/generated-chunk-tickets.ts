@@ -63,6 +63,20 @@ export class GeneratedChunkTicketSet {
     return false;
   }
 
+  public containsForSource(source: GeneratedChunkTicketSource, chunkX: number, chunkZ: number): boolean {
+    for (const ticket of this.tickets.values()) {
+      if (
+        ticket.source === source
+        && Math.abs(chunkX - ticket.centerChunkX) <= ticket.radius
+        && Math.abs(chunkZ - ticket.centerChunkZ) <= ticket.radius
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   public getBounds(): GeneratedChunkTicketBounds | undefined {
     let bounds: GeneratedChunkTicketBounds | undefined;
     for (const ticket of this.tickets.values()) {

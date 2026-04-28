@@ -123,9 +123,17 @@ Status: pending-unload resurrection, generated-record write-version, stale-prelo
 - `GeneratedChunkTicketSet` now reports covered chunk count as a union, so overlapping ticket counters remain at 625 resident chunks for the radius-0 flat-grass case instead of summing 625 + 25.
 - Regression coverage verifies the two ticket records and preserves the existing one-chunk walk generation deltas.
 
+## Landed tenth slice
+
+- `GeneratedWorldHost` now installs an `entity` ticket for the current entity-ticking window.
+- Entity chunk status is synchronized from `entity` and `player_view` ticket state into `PersistentEntitySectionManager` instead of being promoted from chunk publication.
+- `GeneratedRenderLevel` records the same `entity` source in its authority ticket set, keeping visible, entity, and generation-dependency ownership explicit.
+- New counters: `entity_chunk_statuses_current`, `entity_chunk_statuses_ticking_current`, `entity_chunk_statuses_tracked_current`, and `entity_chunk_status_updates.<status>`.
+- Regression coverage verifies radius-0 flat-grass still keeps 625 resident holder chunks, now with three overlapping ticket sources, and that a one-chunk walk settles to the expected 25 `ENTITY_TICKING` chunks.
+
 ## Next implementation slices
 
-1. Add explicit lighting, entity, and forced-ticket sources, then start replacing derived radius helpers with subsystem-owned ticket updates.
+1. Add explicit lighting and forced-ticket sources, then start replacing derived radius helpers with subsystem-owned ticket updates.
 2. Add a public host/protocol flush or close acknowledgement so browser/Node shutdown can deliberately wait for dirty saves.
 3. Consider a cross-tab/cross-process save lock for IndexedDB/file storage if we start supporting multiple authorities against the same save.
 

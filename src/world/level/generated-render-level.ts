@@ -184,6 +184,12 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       centerChunkZ,
       radius: nextPublishRadius,
     }]);
+    this.authorityTickets.replaceSource("entity", [{
+      source: "entity",
+      centerChunkX,
+      centerChunkZ,
+      radius: nextPublishRadius,
+    }]);
     this.authorityTickets.replaceSource("generation_dependency", [{
       source: "generation_dependency",
       centerChunkX,

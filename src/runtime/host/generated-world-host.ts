@@ -240,6 +240,10 @@ export function getGeneratedWorldViewChunkRadius(radius: number): number {
   return Math.max(1, radius) + 1;
 }
 
+export function getGeneratedWorldEntityChunkRadius(radius: number): number {
+  return getGeneratedWorldViewChunkRadius(radius);
+}
+
 export function getGeneratedWorldFullChunkRadius(radius: number): number {
   return getGeneratedWorldViewChunkRadius(radius) + 1;
 }
@@ -282,6 +286,7 @@ const CHUNK_HOLDER_UNLOADS_PER_PASS = 200;
 const CHUNK_HOLDER_UNLOAD_BACKLOG_THRESHOLD = 2_000;
 const GENERATED_PLAYER_VIEW_TICKET_SOURCE = "player_view";
 const GENERATED_DEPENDENCY_TICKET_SOURCE = "generation_dependency";
+const GENERATED_ENTITY_TICKET_SOURCE = "entity";
 
 type GeneratedChunkStatusJobState = "pending" | "fulfilled" | "rejected";
 
@@ -325,6 +330,12 @@ interface GeneratedChunkStatusTarget {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly status: GeneratedChunkStatus;
+}
+
+export interface GeneratedEntityChunkStatusDebugRecord {
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly status: FullChunkStatus;
 }
 
 interface EnsureLightingOptions {
@@ -510,6 +521,7 @@ export class GeneratedWorldHost implements WorldHost {
   private playerAnchoredToChunkView = false;
   private readonly publishedChunkSnapshots = new Set<string>();
   private readonly publishedEntitySnapshots = new Map<number, EntitySnapshot>();
+  private readonly entityChunkStatuses = new Map<string, FullChunkStatus>();
   private readonly chunkRevisions = new Map<string, number>();
   private readonly sentLightInputRevisions = new Map<string, number>();
   private readonly acceptedChunkLight = new Map<string, PackedChunkLight>();
@@ -823,6 +835,19 @@ export class GeneratedWorldHost implements WorldHost {
       .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX);
   }
 
+  public getDebugEntityChunkStatusRecords(): readonly GeneratedEntityChunkStatusDebugRecord[] {
+    return [...this.entityChunkStatuses]
+      .map(([key, status]) => {
+        const [chunkXRaw, chunkZRaw] = key.split(",");
+        return {
+          chunkX: Number(chunkXRaw),
+          chunkZ: Number(chunkZRaw),
+          status,
+        };
+      })
+      .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX);
+  }
+
   public getDebugChunkTicketRecords(): readonly GeneratedChunkTicketDebugRecord[] {
     return this.chunkResidencyTickets.getDebugRecords();
   }
@@ -835,6 +860,12 @@ export class GeneratedWorldHost implements WorldHost {
       centerChunkZ: request.centerChunkZ,
       radius: getGeneratedWorldViewChunkRadius(request.radius),
     }]);
+    this.chunkResidencyTickets.replaceSource(GENERATED_ENTITY_TICKET_SOURCE, [{
+      source: GENERATED_ENTITY_TICKET_SOURCE,
+      centerChunkX: request.centerChunkX,
+      centerChunkZ: request.centerChunkZ,
+      radius: getGeneratedWorldEntityChunkRadius(request.radius),
+    }]);
     this.chunkResidencyTickets.replaceSource(GENERATED_DEPENDENCY_TICKET_SOURCE, [{
       source: GENERATED_DEPENDENCY_TICKET_SOURCE,
       centerChunkX: request.centerChunkX,
@@ -846,6 +877,74 @@ export class GeneratedWorldHost implements WorldHost {
       this.incrementWorldgenCount("chunk_residency_tickets_updated");
     }
     this.noteChunkResidencyTicketCount();
+    this.syncEntityChunkStatuses(request);
+  }
+
+  private syncEntityChunkStatuses(request: SetChunkViewRequest): void {
+    const keys = new Set(this.entityChunkStatuses.keys());
+    this.addChunkSquareKeys(
+      keys,
+      request.centerChunkX,
+      request.centerChunkZ,
+      getGeneratedWorldViewChunkRadius(request.radius),
+    );
+    this.addChunkSquareKeys(
+      keys,
+      request.centerChunkX,
+      request.centerChunkZ,
+      getGeneratedWorldEntityChunkRadius(request.radius),
+    );
+
+    let changed = false;
+    for (const key of [...keys].sort()) {
+      const [chunkXRaw, chunkZRaw] = key.split(",");
+      const chunkX = Number(chunkXRaw);
+      const chunkZ = Number(chunkZRaw);
+      changed = this.applyEntityChunkStatus(chunkX, chunkZ, this.getCurrentEntityChunkStatus(chunkX, chunkZ)) || changed;
+    }
+
+    if (changed) {
+      this.entityRuntime.processLifecycle();
+      this.noteEntityChunkStatusCounts();
+    }
+  }
+
+  private addChunkSquareKeys(keys: Set<string>, centerChunkX: number, centerChunkZ: number, radius: number): void {
+    for (let chunkZ = centerChunkZ - radius; chunkZ <= centerChunkZ + radius; chunkZ++) {
+      for (let chunkX = centerChunkX - radius; chunkX <= centerChunkX + radius; chunkX++) {
+        keys.add(chunkKey(chunkX, chunkZ));
+      }
+    }
+  }
+
+  private getCurrentEntityChunkStatus(chunkX: number, chunkZ: number): FullChunkStatus {
+    if (this.chunkResidencyTickets.containsForSource(GENERATED_ENTITY_TICKET_SOURCE, chunkX, chunkZ)) {
+      return FullChunkStatus.ENTITY_TICKING;
+    }
+    if (this.chunkResidencyTickets.containsForSource(GENERATED_PLAYER_VIEW_TICKET_SOURCE, chunkX, chunkZ)) {
+      return FullChunkStatus.BORDER;
+    }
+    return FullChunkStatus.INACCESSIBLE;
+  }
+
+  private applyEntityChunkStatus(chunkX: number, chunkZ: number, status: FullChunkStatus): boolean {
+    const key = chunkKey(chunkX, chunkZ);
+    const previous = this.entityChunkStatuses.get(key);
+    if (previous === status) {
+      return false;
+    }
+    if (previous === undefined && status === FullChunkStatus.INACCESSIBLE) {
+      return false;
+    }
+
+    if (status === FullChunkStatus.INACCESSIBLE) {
+      this.entityChunkStatuses.delete(key);
+    } else {
+      this.entityChunkStatuses.set(key, status);
+    }
+    this.entityRuntime.updateChunkStatus(chunkX, chunkZ, status);
+    this.incrementWorldgenCount(`entity_chunk_status_updates.${status}`);
+    return true;
   }
 
   private getChunkHolder(chunkX: number, chunkZ: number): GeneratedChunkHolder {
@@ -2596,8 +2695,6 @@ export class GeneratedWorldHost implements WorldHost {
 
   private ensureOriginalMobsForChunk(chunk: GeneratedLevelChunk): void {
     const key = chunkKey(chunk.chunkX, chunk.chunkZ);
-    this.entityRuntime.updateChunkStatus(chunk.chunkX, chunk.chunkZ, FullChunkStatus.ENTITY_TICKING);
-    this.entityRuntime.processLifecycle();
     if (this.spawnedOriginalMobChunks.has(key)) {
       return;
     }
@@ -2866,8 +2963,7 @@ export class GeneratedWorldHost implements WorldHost {
 
     const chunkX = SectionPos.blockToSectionCoord(entity.blockPosition().getX());
     const chunkZ = SectionPos.blockToSectionCoord(entity.blockPosition().getZ());
-    // Runtime: current chunk-view interest is the entity-ticking proxy until player tickets own mob activity.
-    return this.currentChunkView !== undefined && this.isChunkInCurrentPublishView(chunkX, chunkZ);
+    return this.entityChunkStatuses.get(chunkKey(chunkX, chunkZ)) === FullChunkStatus.ENTITY_TICKING;
   }
 
   private isStableMobDestination(pos: BlockPos): boolean {
@@ -3475,8 +3571,10 @@ export class GeneratedWorldHost implements WorldHost {
     this.publishedChunkSnapshots.delete(key);
     this.forgetPublishedEntitiesForChunk(chunkX, chunkZ);
     this.dirtyChunksForPublication.delete(key);
-    this.entityRuntime.updateChunkStatus(chunkX, chunkZ, FullChunkStatus.INACCESSIBLE);
-    this.entityRuntime.processLifecycle();
+    if (this.applyEntityChunkStatus(chunkX, chunkZ, this.getCurrentEntityChunkStatus(chunkX, chunkZ))) {
+      this.entityRuntime.processLifecycle();
+      this.noteEntityChunkStatusCounts();
+    }
     this.discardChunkLighting(chunkX, chunkZ);
   }
 
@@ -3626,6 +3724,22 @@ export class GeneratedWorldHost implements WorldHost {
       "chunk_residency_ticketed_chunks_max",
       Math.max(this.worldgenPerformance.counts.get("chunk_residency_ticketed_chunks_max") ?? 0, ticketedChunks),
     );
+  }
+
+  private noteEntityChunkStatusCounts(): void {
+    let ticking = 0;
+    let tracked = 0;
+    for (const status of this.entityChunkStatuses.values()) {
+      if (status === FullChunkStatus.ENTITY_TICKING) {
+        ticking++;
+      } else {
+        tracked++;
+      }
+    }
+
+    this.setWorldgenCount("entity_chunk_statuses_current", this.entityChunkStatuses.size);
+    this.setWorldgenCount("entity_chunk_statuses_ticking_current", ticking);
+    this.setWorldgenCount("entity_chunk_statuses_tracked_current", tracked);
   }
 
   private notePendingStorageWriteCount(): void {

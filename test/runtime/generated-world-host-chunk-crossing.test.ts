@@ -572,6 +572,13 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(initialAccessRecords.every((record) => record.isUnsaved)).toBe(true);
     expect(host.getDebugChunkTicketRecords()).toEqual([
       {
+        source: "entity",
+        centerChunkX: 0,
+        centerChunkZ: 0,
+        radius: 2,
+        chunkCount: 25,
+      },
+      {
         source: "generation_dependency",
         centerChunkX: 0,
         centerChunkZ: 0,
@@ -586,8 +593,11 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
         chunkCount: 25,
       },
     ]);
-    expect(initialPerformance.counts.chunk_residency_tickets_current).toBe(2);
+    expect(initialPerformance.counts.chunk_residency_tickets_current).toBe(3);
     expect(initialPerformance.counts.chunk_residency_ticketed_chunks_current).toBe(625);
+    expect(initialPerformance.counts.entity_chunk_statuses_current).toBe(25);
+    expect(initialPerformance.counts.entity_chunk_statuses_ticking_current).toBe(25);
+    expect(initialPerformance.counts.entity_chunk_statuses_tracked_current).toBe(0);
     expect(countChunkAccessByExactStatus(initialAccessRecords)).toEqual({
       [GeneratedChunkStatus.STRUCTURE_STARTS]: 504,
       [GeneratedChunkStatus.LIQUID_CARVERS]: 40,
@@ -678,6 +688,13 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(movedAccessRecords.every((record) => record.isUnsaved)).toBe(true);
     expect(host.getDebugChunkTicketRecords()).toEqual([
       {
+        source: "entity",
+        centerChunkX: 1,
+        centerChunkZ: 0,
+        radius: 2,
+        chunkCount: 25,
+      },
+      {
         source: "generation_dependency",
         centerChunkX: 1,
         centerChunkZ: 0,
@@ -693,6 +710,9 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
       },
     ]);
     expect(movedPerformance.counts.chunk_residency_tickets_updated).toBe(2);
+    expect(movedPerformance.counts.entity_chunk_statuses_current).toBe(25);
+    expect(movedPerformance.counts.entity_chunk_statuses_ticking_current).toBe(25);
+    expect(movedPerformance.counts.entity_chunk_statuses_tracked_current).toBe(0);
     expect(countChunkAccessByExactStatus(movedAccessRecords)).toEqual({
       [GeneratedChunkStatus.STRUCTURE_STARTS]: 493,
       [GeneratedChunkStatus.LIQUID_CARVERS]: 42,
