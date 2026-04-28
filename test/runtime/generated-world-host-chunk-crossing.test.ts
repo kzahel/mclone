@@ -274,6 +274,60 @@ class BlockingGeneratedWorldStorage implements WorldStorage {
   }
 }
 
+class BlockingPreloadChunkStorage implements ChunkStorage {
+  public generatedLoadStarted = 0;
+  public chunkLoadStarted = 0;
+  private firstGeneratedLoadBlocked = false;
+  private firstGeneratedLoadResolver: (() => void) | undefined;
+
+  public async loadChunk(_chunkX: number, _chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
+    this.chunkLoadStarted++;
+    return undefined;
+  }
+
+  public async saveChunk(_snapshot: PackedChunkSnapshot): Promise<void> {}
+
+  public async loadGeneratedChunk(_chunkX: number, _chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
+    this.generatedLoadStarted++;
+    if (!this.firstGeneratedLoadBlocked) {
+      this.firstGeneratedLoadBlocked = true;
+      await new Promise<void>((resolve) => {
+        this.firstGeneratedLoadResolver = resolve;
+      });
+    }
+
+    return undefined;
+  }
+
+  public async saveGeneratedChunk(_record: GeneratedChunkStorageRecord): Promise<void> {}
+
+  public async evictChunk(_chunkX: number, _chunkZ: number): Promise<void> {}
+
+  public releaseFirstGeneratedLoad(): void {
+    this.firstGeneratedLoadResolver?.();
+    this.firstGeneratedLoadResolver = undefined;
+  }
+}
+
+class BlockingPreloadWorldStorageSession implements WorldStorageSession {
+  public constructor(
+    public readonly metadata: WorldSaveMetadata,
+    public readonly chunks: BlockingPreloadChunkStorage,
+  ) {}
+
+  public async close(): Promise<void> {}
+}
+
+class BlockingPreloadWorldStorage implements WorldStorage {
+  public readonly chunks = new BlockingPreloadChunkStorage();
+  public metadata: WorldSaveMetadata | undefined;
+
+  public async openWorld(request: OpenWorldStorageRequest): Promise<WorldStorageSession> {
+    this.metadata = createWorldSaveMetadata(request);
+    return new BlockingPreloadWorldStorageSession(this.metadata, this.chunks);
+  }
+}
+
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
 }
@@ -423,6 +477,22 @@ async function waitForGeneratedSaveStart(
   throw new Error("Expected a generated chunk save to start");
 }
 
+async function waitForGeneratedPreloadStart(
+  storage: BlockingPreloadChunkStorage,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (storage.generatedLoadStarted > 0) {
+      return;
+    }
+
+    await sleep(1);
+  }
+
+  throw new Error("Expected a generated chunk preload to start");
+}
+
 async function drainChunkSnapshots(
   host: GeneratedWorldHost,
   expectedCount: number,
@@ -484,10 +554,10 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     });
 
     const initialStatusRecords = host.getDebugChunkStatusRecords();
-    expect(initialStatusRecords).toHaveLength(625);
+    expect(initialStatusRecords).toHaveLength(729);
     expect(countMaterialized(initialStatusRecords)).toBe(121);
     expect(countByExactStatus(initialStatusRecords)).toEqual({
-      [GeneratedChunkStatus.STRUCTURE_STARTS]: 504,
+      [GeneratedChunkStatus.STRUCTURE_STARTS]: 608,
       [GeneratedChunkStatus.LIQUID_CARVERS]: 40,
       [GeneratedChunkStatus.FEATURES]: 32,
       [GeneratedChunkStatus.FULL]: 49,
@@ -570,12 +640,12 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     });
 
     const movedStatusRecords = host.getDebugChunkStatusRecords();
-    expect(movedStatusRecords).toHaveLength(625);
+    expect(movedStatusRecords).toHaveLength(756);
     expect(movedPerformance.counts.chunk_holders_resident_current).toBeLessThanOrEqual(625);
     expect(movedPerformance.counts.chunk_holders_pruned_outside_authority ?? 0).toBeGreaterThan(0);
     expect(countMaterialized(movedStatusRecords)).toBe(132);
     expect(countByExactStatus(movedStatusRecords)).toEqual({
-      [GeneratedChunkStatus.STRUCTURE_STARTS]: 493,
+      [GeneratedChunkStatus.STRUCTURE_STARTS]: 624,
       [GeneratedChunkStatus.LIQUID_CARVERS]: 42,
       [GeneratedChunkStatus.FEATURES]: 34,
       [GeneratedChunkStatus.FULL]: 56,
@@ -591,6 +661,69 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
       [GeneratedChunkStatus.LIQUID_CARVERS]: 42,
       [GeneratedChunkStatus.FEATURES]: 34,
       [GeneratedChunkStatus.FULL]: 56,
+    });
+
+    await host.flushStorageSideEffects();
+    const settledAccessRecords = host.getDebugGeneratedChunkAccessRecords();
+    expect(settledAccessRecords).toHaveLength(625);
+    expect(countMaterializedChunkAccess(settledAccessRecords)).toBe(132);
+    expect(settledAccessRecords.every((record) => !record.isUnsaved)).toBe(true);
+    expect(countChunkAccessByExactStatus(settledAccessRecords)).toEqual({
+      [GeneratedChunkStatus.STRUCTURE_STARTS]: 493,
+      [GeneratedChunkStatus.LIQUID_CARVERS]: 42,
+      [GeneratedChunkStatus.FEATURES]: 34,
+      [GeneratedChunkStatus.FULL]: 56,
+    });
+  });
+
+  test("drops stale preload results and settles expected chunk state after a walk", async () => {
+    const storage = new BlockingPreloadWorldStorage();
+    const { host } = createHost({ worldStorage: storage });
+    await host.openWorld(OPEN_WORLD_REQUEST);
+
+    const staleViewPromise = host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    await waitForGeneratedPreloadStart(storage.chunks);
+
+    const movedMessages = await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 1,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    storage.chunks.releaseFirstGeneratedLoad();
+    const staleMessages = await staleViewPromise;
+    await host.flushStorageSideEffects();
+    const performance = await readWorldgenPerformance(host);
+
+    expect(chunkSnapshots(movedMessages)).toHaveLength(25);
+    expect(chunkSnapshots(staleMessages)).toHaveLength(0);
+    expect(performance.counts.storage_preload_skipped_stale ?? 0).toBeGreaterThan(0);
+    expect(performance.counts.storage_preload_skipped_revision_changed ?? 0).toBeGreaterThan(0);
+
+    const settledStatusRecords = host.getDebugChunkStatusRecords();
+    expect(settledStatusRecords).toHaveLength(729);
+    expect(countMaterialized(settledStatusRecords)).toBe(121);
+    expect(countByExactStatus(settledStatusRecords)).toEqual({
+      [GeneratedChunkStatus.STRUCTURE_STARTS]: 608,
+      [GeneratedChunkStatus.LIQUID_CARVERS]: 40,
+      [GeneratedChunkStatus.FEATURES]: 32,
+      [GeneratedChunkStatus.FULL]: 49,
+    });
+
+    const settledAccessRecords = host.getDebugGeneratedChunkAccessRecords();
+    expect(settledAccessRecords).toHaveLength(625);
+    expect(countMaterializedChunkAccess(settledAccessRecords)).toBe(121);
+    expect(settledAccessRecords.every((record) => !record.isUnsaved)).toBe(true);
+    expect(countChunkAccessByExactStatus(settledAccessRecords)).toEqual({
+      [GeneratedChunkStatus.STRUCTURE_STARTS]: 504,
+      [GeneratedChunkStatus.LIQUID_CARVERS]: 40,
+      [GeneratedChunkStatus.FEATURES]: 32,
+      [GeneratedChunkStatus.FULL]: 49,
     });
   });
 

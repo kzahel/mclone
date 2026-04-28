@@ -271,12 +271,14 @@ type GeneratedChunkStatusJobState = "pending" | "fulfilled" | "rejected";
 
 interface GeneratedChunkStatusJob {
   readonly status: GeneratedChunkStatus;
+  readonly chunkViewJobRevision: number;
   readonly promise: Promise<boolean>;
   state: GeneratedChunkStatusJobState;
   result: boolean | undefined;
 }
 
 interface GeneratedChunkPreloadJob {
+  readonly chunkViewJobRevision: number;
   readonly promise: Promise<StoredChunkPreloadResult>;
   state: GeneratedChunkStatusJobState;
   result: StoredChunkPreloadResult | undefined;
@@ -316,7 +318,7 @@ interface PublishReadyChunksOptions {
   readonly onChunkPublished?: (publishedInPass: number) => void;
 }
 
-type StoredChunkPreloadResult = "loaded" | "already_loaded" | "missing";
+type StoredChunkPreloadResult = "loaded" | "already_loaded" | "missing" | "stale";
 
 type GeneratedLevelChunk = LevelChunk;
 
@@ -595,7 +597,12 @@ export class GeneratedWorldHost implements WorldHost {
       this.chunkViewJobRevision++;
       this.updateSessionState();
     }
-    await this.setLightingView(request, this.chunkViewJobRevision);
+    const chunkViewJobRevision = this.chunkViewJobRevision;
+    await this.setLightingView(request, chunkViewJobRevision);
+    if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+      this.incrementWorldgenCount("chunk_view_jobs_cancelled");
+      return [this.createSessionStateMessage()];
+    }
     this.pruneChunkHoldersOutsideCurrentAuthority(update.removedChunks);
 
     const messages: WorldHostMessage[] = [this.createSessionStateMessage()];
@@ -609,10 +616,18 @@ export class GeneratedWorldHost implements WorldHost {
       return messages;
     }
 
-    await this.ensureStatusTargetsForCurrentView();
+    await this.ensureStatusTargetsForCurrentView(undefined, chunkViewJobRevision);
+    if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+      this.incrementWorldgenCount("chunk_view_jobs_cancelled");
+      return messages;
+    }
 
     this.options.mutateWorld?.(this.liquidLevel);
-    await this.ensureFullStatusesForCurrentView(this.chunkViewJobRevision);
+    await this.ensureFullStatusesForCurrentView(chunkViewJobRevision);
+    if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+      this.incrementWorldgenCount("chunk_view_jobs_cancelled");
+      return messages;
+    }
 
     for (const chunk of update.removedChunks) {
       await this.saveDirtyChunkBeforeUnload(chunk);
@@ -871,6 +886,7 @@ export class GeneratedWorldHost implements WorldHost {
     chunkZ: number,
     status: GeneratedChunkStatus,
     run: () => Promise<boolean>,
+    chunkViewJobRevision = this.chunkViewJobRevision,
   ): Promise<boolean> {
     this.incrementWorldgenCount(`status_requests.${status}`);
     if (this.level.hasChunkStatus(chunkX, chunkZ, status)) {
@@ -887,9 +903,13 @@ export class GeneratedWorldHost implements WorldHost {
     const holder = this.getChunkHolder(chunkX, chunkZ);
     const existing = holder.statusJobs.get(status);
     if (existing !== undefined) {
-      if (existing.state === "pending") {
+      if (existing.state === "pending" && existing.chunkViewJobRevision === chunkViewJobRevision) {
         this.incrementWorldgenCount(`status_coalesced_pending.${status}`);
         return existing.promise;
+      }
+
+      if (existing.state === "pending") {
+        this.incrementWorldgenCount(`status_not_coalesced_revision_changed.${status}`);
       }
 
       if (existing.state === "fulfilled" && existing.result === true && this.level.hasChunkStatus(chunkX, chunkZ, status)) {
@@ -908,6 +928,7 @@ export class GeneratedWorldHost implements WorldHost {
     });
     const job: GeneratedChunkStatusJob = {
       status,
+      chunkViewJobRevision,
       promise,
       state: "pending",
       result: undefined,
@@ -924,14 +945,16 @@ export class GeneratedWorldHost implements WorldHost {
           this.recordGeneratedChunkAccessStatus(chunkX, chunkZ);
         }
         this.incrementWorldgenCount(result ? `status_jobs_completed.${status}` : `status_jobs_skipped.${status}`);
-        if (!result) {
+        if (!result && holder.statusJobs.get(status) === job) {
           holder.statusJobs.delete(status);
         }
         resolveJob(result);
       } catch (error) {
         job.state = "rejected";
         job.result = false;
-        holder.statusJobs.delete(status);
+        if (holder.statusJobs.get(status) === job) {
+          holder.statusJobs.delete(status);
+        }
         this.incrementWorldgenCount(`status_jobs_failed.${status}`);
         rejectJob(error);
       }
@@ -940,20 +963,34 @@ export class GeneratedWorldHost implements WorldHost {
     return promise;
   }
 
-  private async ensureFullStatusWithoutLighting(chunk: GeneratedLevelChunk): Promise<boolean> {
-    return this.ensureGeneratedChunkStatus(chunk.chunkX, chunk.chunkZ, GeneratedChunkStatus.FULL, async () =>
-      this.markChunkFullWithoutLighting(chunk)
+  private async ensureFullStatusWithoutLighting(
+    chunk: GeneratedLevelChunk,
+    chunkViewJobRevision = this.chunkViewJobRevision,
+  ): Promise<boolean> {
+    return this.ensureGeneratedChunkStatus(
+      chunk.chunkX,
+      chunk.chunkZ,
+      GeneratedChunkStatus.FULL,
+      async () => this.markChunkFullWithoutLighting(chunk),
+      chunkViewJobRevision,
     );
   }
 
   private async ensureFullStatusWithoutLightingCooperative(
     chunk: GeneratedLevelChunk,
     yieldStep: () => Promise<void>,
+    chunkViewJobRevision = this.chunkViewJobRevision,
   ): Promise<boolean> {
-    return this.ensureGeneratedChunkStatus(chunk.chunkX, chunk.chunkZ, GeneratedChunkStatus.FULL, async () => {
-      await yieldStep();
-      return this.markChunkFullWithoutLighting(chunk);
-    });
+    return this.ensureGeneratedChunkStatus(
+      chunk.chunkX,
+      chunk.chunkZ,
+      GeneratedChunkStatus.FULL,
+      async () => {
+        await yieldStep();
+        return this.markChunkFullWithoutLighting(chunk);
+      },
+      chunkViewJobRevision,
+    );
   }
 
   private async runTerrainStatus(chunkX: number, chunkZ: number): Promise<boolean> {
@@ -1037,11 +1074,18 @@ export class GeneratedWorldHost implements WorldHost {
     return targets;
   }
 
-  private async ensureStatusTargetsForCurrentView(yieldStep?: () => Promise<void>): Promise<number> {
+  private async ensureStatusTargetsForCurrentView(
+    yieldStep?: () => Promise<void>,
+    chunkViewJobRevision = this.chunkViewJobRevision,
+  ): Promise<number> {
     let completed = 0;
     for (const target of this.collectCurrentStatusTargets()) {
       await yieldStep?.();
-      if (await this.ensureChunkStatusRecursive(target.chunkX, target.chunkZ, target.status, yieldStep)) {
+      if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+        return completed;
+      }
+
+      if (await this.ensureChunkStatusRecursive(target.chunkX, target.chunkZ, target.status, yieldStep, chunkViewJobRevision)) {
         completed++;
       }
     }
@@ -1054,6 +1098,7 @@ export class GeneratedWorldHost implements WorldHost {
     chunkZ: number,
     status: GeneratedChunkStatus,
     yieldStep?: () => Promise<void>,
+    chunkViewJobRevision = this.chunkViewJobRevision,
   ): Promise<boolean> {
     return this.ensureGeneratedChunkStatus(chunkX, chunkZ, status, async () => {
       switch (status) {
@@ -1067,24 +1112,28 @@ export class GeneratedWorldHost implements WorldHost {
         case GeneratedChunkStatus.SURFACE:
         case GeneratedChunkStatus.CARVERS:
         case GeneratedChunkStatus.LIQUID_CARVERS:
-          return this.generateTerrainStatusRecursive(chunkX, chunkZ, yieldStep);
+          return this.generateTerrainStatusRecursive(chunkX, chunkZ, yieldStep, chunkViewJobRevision);
         case GeneratedChunkStatus.FEATURES:
-          return this.generateFeaturesStatusRecursive(chunkX, chunkZ, yieldStep);
+          return this.generateFeaturesStatusRecursive(chunkX, chunkZ, yieldStep, chunkViewJobRevision);
         case GeneratedChunkStatus.LIGHT:
         case GeneratedChunkStatus.SPAWN:
         case GeneratedChunkStatus.HEIGHTMAPS:
         case GeneratedChunkStatus.FULL:
-          return this.generateFullStatusRecursive(chunkX, chunkZ, yieldStep);
+          return this.generateFullStatusRecursive(chunkX, chunkZ, yieldStep, chunkViewJobRevision);
       }
-    });
+    }, chunkViewJobRevision);
   }
 
   private async generateTerrainStatusRecursive(
     chunkX: number,
     chunkZ: number,
     yieldStep?: () => Promise<void>,
+    chunkViewJobRevision = this.chunkViewJobRevision,
   ): Promise<boolean> {
-    const preloadResult = await this.preloadStoredChunkCoalesced(chunkX, chunkZ);
+    const preloadResult = await this.preloadStoredChunkCoalesced(chunkX, chunkZ, chunkViewJobRevision);
+    if (preloadResult === "stale") {
+      return false;
+    }
     if (
       (preloadResult === "loaded" || preloadResult === "already_loaded")
       && this.level.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS)
@@ -1103,13 +1152,14 @@ export class GeneratedWorldHost implements WorldHost {
     chunkX: number,
     chunkZ: number,
     yieldStep?: () => Promise<void>,
+    chunkViewJobRevision = this.chunkViewJobRevision,
   ): Promise<boolean> {
     for (let neighborChunkZ = chunkZ - FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkZ <= chunkZ + FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkZ++) {
       for (let neighborChunkX = chunkX - FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkX <= chunkX + FEATURES_CHUNK_DEPENDENCY_RADIUS; neighborChunkX++) {
         await yieldStep?.();
         const dependencyRadius = Math.max(Math.abs(neighborChunkX - chunkX), Math.abs(neighborChunkZ - chunkZ));
         const requiredStatus = getGeneratedChunkDependencyStatus(GeneratedChunkStatus.FEATURES, dependencyRadius);
-        if (!await this.ensureChunkStatusRecursive(neighborChunkX, neighborChunkZ, requiredStatus, yieldStep)) {
+        if (!await this.ensureChunkStatusRecursive(neighborChunkX, neighborChunkZ, requiredStatus, yieldStep, chunkViewJobRevision)) {
           return false;
         }
       }
@@ -1130,11 +1180,12 @@ export class GeneratedWorldHost implements WorldHost {
     chunkX: number,
     chunkZ: number,
     yieldStep?: () => Promise<void>,
+    chunkViewJobRevision = this.chunkViewJobRevision,
   ): Promise<boolean> {
     for (let neighborChunkZ = chunkZ - 1; neighborChunkZ <= chunkZ + 1; neighborChunkZ++) {
       for (let neighborChunkX = chunkX - 1; neighborChunkX <= chunkX + 1; neighborChunkX++) {
         await yieldStep?.();
-        if (!await this.ensureChunkStatusRecursive(neighborChunkX, neighborChunkZ, GeneratedChunkStatus.FEATURES, yieldStep)) {
+        if (!await this.ensureChunkStatusRecursive(neighborChunkX, neighborChunkZ, GeneratedChunkStatus.FEATURES, yieldStep, chunkViewJobRevision)) {
           return false;
         }
       }
@@ -1153,10 +1204,18 @@ export class GeneratedWorldHost implements WorldHost {
     return this.markChunkFullWithoutLighting(chunk);
   }
 
-  private async preloadStoredChunk(chunkX: number, chunkZ: number): Promise<StoredChunkPreloadResult> {
+  private async preloadStoredChunk(
+    chunkX: number,
+    chunkZ: number,
+    chunkViewJobRevision: number,
+  ): Promise<StoredChunkPreloadResult> {
     if (this.level.getChunk(chunkX, chunkZ, false) !== null) {
       this.incrementWorldgenCount("storage_preload_already_loaded");
       return "already_loaded";
+    }
+
+    if (!this.shouldAcceptStoredChunkPreload(chunkX, chunkZ, chunkViewJobRevision)) {
+      return "stale";
     }
 
     if (this.storageSession === undefined) {
@@ -1167,6 +1226,10 @@ export class GeneratedWorldHost implements WorldHost {
     const generatedRecord = await this.recordWorldgenPhaseAsync("storage.preload_generated_chunk", () =>
       this.storageSession!.chunks.loadGeneratedChunk(chunkX, chunkZ)
     );
+    if (!this.shouldAcceptStoredChunkPreload(chunkX, chunkZ, chunkViewJobRevision)) {
+      return "stale";
+    }
+
     if (generatedRecord !== undefined) {
       if (this.restoreStoredGeneratedChunk(generatedRecord)) {
         this.incrementWorldgenCount("storage_preload_loaded_generated_chunk");
@@ -1178,6 +1241,10 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     const snapshot = await this.recordWorldgenPhaseAsync("storage.preload", () => this.storageSession!.chunks.loadChunk(chunkX, chunkZ));
+    if (!this.shouldAcceptStoredChunkPreload(chunkX, chunkZ, chunkViewJobRevision)) {
+      return "stale";
+    }
+
     if (snapshot === undefined) {
       this.incrementWorldgenCount("storage_preload_missing");
       return "missing";
@@ -1206,7 +1273,28 @@ export class GeneratedWorldHost implements WorldHost {
     return "loaded";
   }
 
-  private async preloadStoredChunkCoalesced(chunkX: number, chunkZ: number): Promise<StoredChunkPreloadResult> {
+  private shouldAcceptStoredChunkPreload(chunkX: number, chunkZ: number, chunkViewJobRevision: number): boolean {
+    let accepted = true;
+    if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+      this.incrementWorldgenCount("storage_preload_skipped_revision_changed");
+      accepted = false;
+    }
+    if (!this.isChunkInCurrentAuthorityView(chunkX, chunkZ)) {
+      this.incrementWorldgenCount("storage_preload_skipped_outside_authority");
+      accepted = false;
+    }
+    if (!accepted) {
+      this.incrementWorldgenCount("storage_preload_skipped_stale");
+    }
+
+    return accepted;
+  }
+
+  private async preloadStoredChunkCoalesced(
+    chunkX: number,
+    chunkZ: number,
+    chunkViewJobRevision: number,
+  ): Promise<StoredChunkPreloadResult> {
     if (this.level.getChunk(chunkX, chunkZ, false) !== null) {
       this.incrementWorldgenCount("storage_preload_already_loaded");
       return "already_loaded";
@@ -1215,12 +1303,16 @@ export class GeneratedWorldHost implements WorldHost {
     const holder = this.getChunkHolder(chunkX, chunkZ);
     const existing = holder.preloadJob;
     if (existing !== undefined) {
-      if (existing.state === "pending") {
+      if (existing.state === "pending" && existing.chunkViewJobRevision === chunkViewJobRevision) {
         this.incrementWorldgenCount("storage_preload_coalesced_pending");
         return existing.promise;
       }
 
-      if (existing.state === "fulfilled" && existing.result !== undefined) {
+      if (existing.state === "pending") {
+        this.incrementWorldgenCount("storage_preload_not_coalesced_revision_changed");
+      }
+
+      if (existing.state === "fulfilled" && existing.result !== undefined && existing.result !== "stale") {
         this.incrementWorldgenCount(`storage_preload_reused_${existing.result}`);
         return existing.result;
       }
@@ -1235,6 +1327,7 @@ export class GeneratedWorldHost implements WorldHost {
       rejectJob = reject;
     });
     const job: GeneratedChunkPreloadJob = {
+      chunkViewJobRevision,
       promise,
       state: "pending",
       result: undefined,
@@ -1243,14 +1336,16 @@ export class GeneratedWorldHost implements WorldHost {
 
     void (async () => {
       try {
-        const result = await this.preloadStoredChunk(chunkX, chunkZ);
+        const result = await this.preloadStoredChunk(chunkX, chunkZ, chunkViewJobRevision);
         job.state = "fulfilled";
         job.result = result;
         resolveJob(result);
       } catch (error) {
         job.state = "rejected";
         job.result = undefined;
-        holder.preloadJob = undefined;
+        if (holder.preloadJob === job) {
+          holder.preloadJob = undefined;
+        }
         rejectJob(error);
       }
     })();
@@ -1509,7 +1604,7 @@ export class GeneratedWorldHost implements WorldHost {
         return;
       }
 
-      await this.ensureChunkStatusRecursive(target.chunkX, target.chunkZ, target.status, yieldStep);
+      await this.ensureChunkStatusRecursive(target.chunkX, target.chunkZ, target.status, yieldStep, chunkViewJobRevision);
       if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
         return;
       }
@@ -1591,7 +1686,7 @@ export class GeneratedWorldHost implements WorldHost {
           return;
         }
 
-        await this.ensureFullStatusWithoutLightingCooperative(chunk, yieldStep);
+        await this.ensureFullStatusWithoutLightingCooperative(chunk, yieldStep, chunkViewJobRevision);
       }
     }
     await publishReadyLightingBatch();
@@ -1722,7 +1817,10 @@ export class GeneratedWorldHost implements WorldHost {
     const chunks = this.collectFullStatusChunksForCurrentView();
     if (this.lightingService === undefined) {
       for (const chunk of chunks) {
-        await this.ensureFullStatusWithoutLighting(chunk);
+        if (!this.isCurrentChunkViewJob(chunkViewRevision)) {
+          return;
+        }
+        await this.ensureFullStatusWithoutLighting(chunk, chunkViewRevision);
       }
       return;
     }

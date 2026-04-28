@@ -2,7 +2,7 @@
 
 Make generated chunk unload/save/load ordering predictable like vanilla `ChunkMap`, so async persistence cannot cause duplicate generation, stale reloads, or older partial records overwriting newer chunk state.
 
-Status: pending-unload resurrection and generated-record write-version slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record.
+Status: pending-unload resurrection, generated-record write-version, and stale-preload rejection slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results.
 
 ## Vanilla source anchors
 
@@ -28,8 +28,8 @@ Status: pending-unload resurrection and generated-record write-version slices la
 
 3. **Hydrate after interest changed**
    - Risk: async preload completes after the chunk is no longer in the current authority window.
-   - Existing protection: cooperative chunk-view jobs use revisions around the outer loops.
-   - Remaining gap: storage preload restore should re-check authority/revision after each async read before hydrating into `GeneratedRenderLevel`.
+   - Current protection: storage preload restore re-checks chunk-view revision and authority after generated-record reads and legacy packed snapshot reads before hydrating into `GeneratedRenderLevel`.
+   - Remaining gap: status jobs still use a single holder-local pending slot per status; this is now revision-aware, but the future keyed queue should make same-chunk dependencies explicit outside generation status jobs.
 
 4. **Clear/reset while writes are queued**
    - Risk: a save reset or world clear runs while old queued writes are still alive, then those writes recreate old data.
@@ -59,12 +59,19 @@ Status: pending-unload resurrection and generated-record write-version slices la
 - Legacy generated records without `writeVersion` hydrate as version `0`, so the next host write advances them instead of treating old records as authoritative over new writes.
 - Regression coverage writes a newer generated record, then an older generated record for the same chunk, and verifies storage keeps the newer status/version.
 
+## Landed third slice
+
+- `GeneratedWorldHost` captures the chunk-view revision for status jobs and preload jobs.
+- Pending status/preload jobs coalesce only within the same chunk-view revision; a newer view does not wait on an obsolete pending job.
+- `preloadStoredChunk(...)` returns `stale` instead of hydrating when the issuing revision is no longer current or the chunk left the current authority window.
+- New counters: `storage_preload_skipped_stale`, `storage_preload_skipped_revision_changed`, `storage_preload_skipped_outside_authority`, `storage_preload_not_coalesced_revision_changed`, and `status_not_coalesced_revision_changed.<status>`.
+- Regression coverage starts a flat-grass view, blocks its generated preload, walks one chunk over, verifies the old preload produces no stale chunk snapshots, then flushes storage and checks the settled status/access counts.
+
 ## Next implementation slices
 
-1. Add authority/revision checks after generated-record and legacy snapshot preload reads.
-2. Add a storage/session epoch to reject queued writes after clear/reset/close.
-3. Split the global storage queue into keyed same-chunk ordering plus bounded global concurrency.
-4. Replace authority-square pruning with a ticket-shaped pending unload queue and processing budget.
+1. Add a storage/session epoch to reject queued writes after clear/reset/close.
+2. Split the global storage queue into keyed same-chunk ordering plus bounded global concurrency.
+3. Replace authority-square pruning with a ticket-shaped pending unload queue and processing budget.
 
 ## Validation
 
