@@ -2,7 +2,7 @@
 
 Make generated chunks status-shaped in storage and memory so partial work can be saved, loaded, and resumed like vanilla `ProtoChunk` state.
 
-Status: first in-memory slice landed. This follows or overlaps Tactical [`57`](57-generated-chunk-holder-status-futures.md) and completes the data-shape half of Tactical [`49`](49-vanilla-status-futures-and-partial-chunks.md).
+Status: partial save/load slice landed. This follows or overlaps Tactical [`57`](57-generated-chunk-holder-status-futures.md) and completes the data-shape half of Tactical [`49`](49-vanilla-status-futures-and-partial-chunks.md).
 
 ## Goal
 
@@ -33,7 +33,7 @@ Read these before writing code:
 
 ## Current gap
 
-The current generated host can label chunks by status in memory, but persisted generated data is only written after a publishable snapshot is built. Chunks outside the authority window can lose partial terrain/features/status records. That is not vanilla's shape: a holder tracks the latest generated `ChunkAccess` through `chunkToSave`, and `ProtoChunk` can carry meaningful status metadata before it is full or publishable.
+The generated host now labels chunks by status in memory and storage, but the proto object is still shallow compared with vanilla `ProtoChunk`. Chunks outside the authority window can save and reload partial status records, but future structures, heightmaps, carving masks, postprocessing, and proto tick/light state still need real homes inside the generated access record.
 
 Tactical [`59`](59-generated-holder-residency-and-save-queue.md) owns holder residency, unload/save queueing, and lazy generated-cache writes. This tactical owns the data shape that those queues should eventually save.
 
@@ -44,7 +44,7 @@ This matters for performance and parity:
 - future structures, carving masks, postprocessing, proto ticks, and light-correct state need a home before `FULL`
 - saved generated-cache records need content/status versions so algorithm changes can invalidate deterministic cache safely
 
-## Landed first slice
+## Landed slices
 
 The generated host now has a vanilla-shaped in-memory holder slot:
 
@@ -54,7 +54,13 @@ The generated host now has a vanilla-shaped in-memory holder slot:
 - `FULL` promotion converts the proto access to a full/level access; published snapshots are still transport/cache products.
 - Debug records expose exact holder-side access counts for tests.
 
-This does **not** persist partial chunks to disk yet. It gives the save queue a status-shaped object to save later instead of forcing persistence to be derived from packed published snapshots.
+The storage slice adds status-shaped generated records:
+
+- `ChunkStorage` now has `loadGeneratedChunk(...)` and `saveGeneratedChunk(...)` beside the legacy packed full-snapshot methods.
+- Memory, file, and IndexedDB adapters store generated records separately from packed snapshot cache records.
+- Generated records include status, type, section presence, unsaved state, content version, and an optional packed section snapshot for records with block sections.
+- Host preload reads generated records before falling back to old packed snapshots.
+- Host flush and holder pruning queue unsaved `chunkToSave` records, so metadata-only and sectioned partials can survive route changes or reopen.
 
 Observed flat-grass radius-0 crossing counts are now tested:
 
@@ -84,12 +90,13 @@ The same test still verifies generation call deltas: moving one published grid o
    - Save generated partial records with status and content version.
    - Treat generated-clean records as discardable cache and dirty/user-mutated records as durable state.
    - Keep packed client snapshots as derived cache after the proto/full state is authoritative, using the Tactical 59 lazy generated-cache queue.
+   - Landed so far: storage records load/save through the adapter contract; packed snapshots are still used as the section payload for sectioned generated records.
 
-4. **Wire unload and save policy - partly covered by Tactical 59**
+4. **Wire unload and save policy - partial save/load landed**
    - Add a `chunkToSave`-style latest partial/full reference to the generated holder.
    - Save unsaved partials on unload or host flush.
    - Do not delete partial records merely because a chunk left the current visual square if the storage policy says vanilla would save or keep it pending.
-   - Landed so far: holder reference exists in memory. Saving unsaved partial records remains open.
+   - Landed so far: resident flush and holder pruning queue generated records; a future ticket/unload queue can replace the current authority-square pruning trigger.
 
 5. **Version and invalidate cache**
    - Store generator profile, seed, dimension, content version, and lighting/status version.
@@ -107,18 +114,18 @@ The same test still verifies generation call deltas: moving one published grid o
 Add focused tests for:
 
 - a metadata-only `STRUCTURE_STARTS` or `STRUCTURE_REFERENCES` record has no block sections and still satisfies metadata dependencies - first coverage exists through the chunk-crossing holder access counts
-- a chunk saved at `LIQUID_CARVERS` reloads and resumes at `FEATURES` without rerunning terrain
-- a chunk saved at `FEATURES` reloads and can advance to `FULL` without rerunning decoration
+- a chunk saved at `LIQUID_CARVERS` reloads and resumes at `FEATURES` without rerunning terrain - covered by the flat-grass partial reload test
+- a chunk saved at `FEATURES` reloads and can advance to `FULL` without rerunning decoration - covered by the flat-grass partial reload test
 - dirty/user-mutated chunks are not discarded as generated cache on content-version mismatch
-- route changes preserve or save partial status progress instead of forcing a cold rerun
+- route changes preserve or save partial status progress instead of forcing a cold rerun - first coverage exists through holder-prune save plus reopen
 - packed published snapshots are rebuilt from stored proto/full state when needed
 
 ## Validation
 
 Required:
 
-- `pnpm vitest run test/runtime/generated-world-host-chunk-crossing.test.ts` - first in-memory slice passes
-- focused storage tests for partial save/load/resume
+- `pnpm vitest run test/runtime/generated-world-host-chunk-crossing.test.ts` - in-memory counts and partial save/load resume pass
+- focused storage tests for partial save/load/resume - covered by the chunk-crossing partial reload test
 - `pnpm perf:worldgen:flyby -- --preset flat_grass --radius 1`
 - `pnpm perf:worldgen:flyby -- --preset default --radius 1`
 - `pnpm typecheck`

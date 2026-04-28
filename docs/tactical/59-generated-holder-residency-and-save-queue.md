@@ -42,7 +42,7 @@ The first slice landed:
 - Generated-clean cache writes from publish are queued lazily.
 - Dirty durable saves still run before dirty chunk data is discarded.
 - Queued generated-clean cache writes carry a per-chunk version and skip if a later dirty/save-worthy write supersedes them.
-- Tactical 58 now gives resident holders a proto/full `chunkToSave` access record in memory. This queue still needs to save those partial records on unload/flush instead of only handling packed full snapshots.
+- Tactical 58 now gives resident holders a proto/full `chunkToSave` access record and saves those generated records on host flush or holder pruning.
 
 ## Remaining work
 
@@ -60,9 +60,10 @@ The first slice landed:
    - Add a public host/protocol flush or close operation so tests, Node hosts, and browser shutdown can wait for dirty saves deliberately.
    - Separate discardable generated-cache writes from durable dirty saves at the storage adapter boundary if the adapter needs different priorities.
 
-4. **Integrate Tactical 58**
+4. **Integrate Tactical 58 - partial save/load landed**
    - Save `chunkToSave` proto/full generated chunk records on unload or explicit flush.
    - Save unsaved partial records on unload/flush; treat generated-clean partial records as versioned cache.
+   - Remaining: move this from authority-square pruning onto the future ticket/unload queue and add adapter-level priority if generated-cache pressure becomes visible.
 
 ## Tests
 

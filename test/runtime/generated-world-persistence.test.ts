@@ -8,6 +8,10 @@ import { MemoryWorldStorage } from "../../src/runtime/storage/memory-world-stora
 import { LocalWorldClient, LocalWorldTransport } from "../../src/runtime/transport/local-world-transport";
 import { createBlockStateResolver, hydrateChunkFromSnapshot } from "../../src/world/level/chunk-snapshot";
 import { clonePackedChunkSnapshot, type PackedChunkSnapshot, unpackChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
+import {
+  cloneGeneratedChunkStorageRecord,
+  type GeneratedChunkStorageRecord,
+} from "../../src/world/level/generated-proto-chunk";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 import type { WorldGenLevel } from "../../src/world/level/world-gen-level";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
@@ -82,6 +86,7 @@ function sleep(ms = 0): Promise<void> {
 
 class BlockingChunkStorage implements ChunkStorage {
   public readonly records = new Map<string, PackedChunkSnapshot>();
+  public readonly generatedRecords = new Map<string, GeneratedChunkStorageRecord>();
   public saveStarted = 0;
   private readonly pendingSaveResolvers: Array<() => void> = [];
   private savesReleased = false;
@@ -103,6 +108,14 @@ class BlockingChunkStorage implements ChunkStorage {
         resolve();
       });
     });
+  }
+
+  public async loadGeneratedChunk(_chunkX: number, _chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
+    return undefined;
+  }
+
+  public async saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void> {
+    this.generatedRecords.set(`${record.chunkX.toString()},${record.chunkZ.toString()}`, cloneGeneratedChunkStorageRecord(record));
   }
 
   public async evictChunk(_chunkX: number, _chunkZ: number): Promise<void> {}

@@ -1,4 +1,10 @@
 import { clonePackedChunkSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import { GeneratedChunkStatus } from "../../world/level/generated-chunk-status";
+import {
+  GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+  cloneGeneratedChunkStorageRecord,
+  type GeneratedChunkStorageRecord,
+} from "../../world/level/generated-proto-chunk";
 import {
   createWorldSaveMetadata,
   isWorldSaveMetadataCompatible,
@@ -11,10 +17,12 @@ import {
 } from "./world-storage";
 
 export const INDEXED_DB_WORLD_STORAGE_DATABASE_NAME = "mclone-world-storage";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const WORLDS_STORE = "worlds";
 const CHUNKS_STORE = "chunks";
 const CHUNKS_BY_SAVE_INDEX = "chunks_by_save";
+const GENERATED_CHUNKS_STORE = "generated_chunks";
+const GENERATED_CHUNKS_BY_SAVE_INDEX = "generated_chunks_by_save";
 
 type IndexedDbChunkRecord = {
   readonly saveId: string;
@@ -25,6 +33,29 @@ type IndexedDbChunkRecord = {
   readonly lastLoadedAtMs?: number;
   readonly lastEvictedAtMs?: number;
 };
+
+type IndexedDbGeneratedChunkRecord = {
+  readonly saveId: string;
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly generatedChunk: GeneratedChunkStorageRecord;
+  readonly savedAtMs: number;
+  readonly lastLoadedAtMs?: number;
+  readonly lastEvictedAtMs?: number;
+};
+
+function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot): GeneratedChunkStorageRecord {
+  return {
+    chunkX: snapshot.chunkX,
+    chunkZ: snapshot.chunkZ,
+    type: "level",
+    status: GeneratedChunkStatus.FULL,
+    hasBlockSections: true,
+    isUnsaved: false,
+    contentVersion: GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+    snapshot: clonePackedChunkSnapshot(snapshot),
+  };
+}
 
 function openIndexedDb(factory: IDBFactory): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -41,6 +72,13 @@ function openIndexedDb(factory: IDBFactory): Promise<IDBDatabase> {
           keyPath: ["saveId", "chunkX", "chunkZ"],
         });
         store.createIndex(CHUNKS_BY_SAVE_INDEX, "saveId", { unique: false });
+      }
+
+      if (!database.objectStoreNames.contains(GENERATED_CHUNKS_STORE)) {
+        const store = database.createObjectStore(GENERATED_CHUNKS_STORE, {
+          keyPath: ["saveId", "chunkX", "chunkZ"],
+        });
+        store.createIndex(GENERATED_CHUNKS_BY_SAVE_INDEX, "saveId", { unique: false });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -90,12 +128,17 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
 }
 
 async function clearSaveChunks(database: IDBDatabase, saveId: string): Promise<void> {
-  const transaction = database.transaction(CHUNKS_STORE, "readwrite");
-  const store = transaction.objectStore(CHUNKS_STORE);
-  const index = store.index(CHUNKS_BY_SAVE_INDEX);
-  const keys = await requestToPromise(index.getAllKeys(saveId));
-  for (const key of keys) {
-    store.delete(key);
+  const transaction = database.transaction([CHUNKS_STORE, GENERATED_CHUNKS_STORE], "readwrite");
+  for (const [storeName, indexName] of [
+    [CHUNKS_STORE, CHUNKS_BY_SAVE_INDEX],
+    [GENERATED_CHUNKS_STORE, GENERATED_CHUNKS_BY_SAVE_INDEX],
+  ] as const) {
+    const store = transaction.objectStore(storeName);
+    const index = store.index(indexName);
+    const keys = await requestToPromise(index.getAllKeys(saveId));
+    for (const key of keys) {
+      store.delete(key);
+    }
   }
 
   await waitForTransaction(transaction);
@@ -125,25 +168,69 @@ class IndexedDbChunkStorage implements ChunkStorage {
   }
 
   public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
-    const transaction = this.database.transaction(CHUNKS_STORE, "readwrite");
+    const transaction = this.database.transaction([CHUNKS_STORE, GENERATED_CHUNKS_STORE], "readwrite");
+    const savedAtMs = this.now();
     transaction.objectStore(CHUNKS_STORE).put({
       saveId: this.saveId,
       chunkX: snapshot.chunkX,
       chunkZ: snapshot.chunkZ,
       snapshot: clonePackedChunkSnapshot(snapshot),
-      savedAtMs: this.now(),
+      savedAtMs,
     } satisfies IndexedDbChunkRecord);
+    transaction.objectStore(GENERATED_CHUNKS_STORE).put({
+      saveId: this.saveId,
+      chunkX: snapshot.chunkX,
+      chunkZ: snapshot.chunkZ,
+      generatedChunk: createFullGeneratedChunkRecord(snapshot),
+      savedAtMs,
+    } satisfies IndexedDbGeneratedChunkRecord);
+    await waitForTransaction(transaction);
+  }
+
+  public async loadGeneratedChunk(chunkX: number, chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
+    const transaction = this.database.transaction(GENERATED_CHUNKS_STORE, "readwrite");
+    const store = transaction.objectStore(GENERATED_CHUNKS_STORE);
+    const key = [this.saveId, chunkX, chunkZ];
+    const record = (await requestToPromise(store.get(key))) as IndexedDbGeneratedChunkRecord | undefined;
+    if (record !== undefined) {
+      store.put({
+        ...record,
+        lastLoadedAtMs: this.now(),
+      });
+    }
+
+    await waitForTransaction(transaction);
+    return record === undefined ? undefined : cloneGeneratedChunkStorageRecord(record.generatedChunk);
+  }
+
+  public async saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void> {
+    const transaction = this.database.transaction(GENERATED_CHUNKS_STORE, "readwrite");
+    transaction.objectStore(GENERATED_CHUNKS_STORE).put({
+      saveId: this.saveId,
+      chunkX: record.chunkX,
+      chunkZ: record.chunkZ,
+      generatedChunk: cloneGeneratedChunkStorageRecord(record),
+      savedAtMs: this.now(),
+    } satisfies IndexedDbGeneratedChunkRecord);
     await waitForTransaction(transaction);
   }
 
   public async evictChunk(chunkX: number, chunkZ: number): Promise<void> {
-    const transaction = this.database.transaction(CHUNKS_STORE, "readwrite");
-    const store = transaction.objectStore(CHUNKS_STORE);
+    const transaction = this.database.transaction([CHUNKS_STORE, GENERATED_CHUNKS_STORE], "readwrite");
     const key = [this.saveId, chunkX, chunkZ];
+    const store = transaction.objectStore(CHUNKS_STORE);
     const record = (await requestToPromise(store.get(key))) as IndexedDbChunkRecord | undefined;
     if (record !== undefined) {
       store.put({
         ...record,
+        lastEvictedAtMs: this.now(),
+      });
+    }
+    const generatedStore = transaction.objectStore(GENERATED_CHUNKS_STORE);
+    const generatedRecord = (await requestToPromise(generatedStore.get(key))) as IndexedDbGeneratedChunkRecord | undefined;
+    if (generatedRecord !== undefined) {
+      generatedStore.put({
+        ...generatedRecord,
         lastEvictedAtMs: this.now(),
       });
     }

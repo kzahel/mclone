@@ -1,4 +1,5 @@
 import type { PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import type { GeneratedChunkStorageRecord } from "../../world/level/generated-proto-chunk";
 import type { OpenWorldPreset } from "../protocol/world-messages";
 
 export interface WorldSaveMetadata {
@@ -26,6 +27,10 @@ export interface ChunkStorage {
   loadChunk(chunkX: number, chunkZ: number): Promise<PackedChunkSnapshot | undefined>;
 
   saveChunk(snapshot: PackedChunkSnapshot): Promise<void>;
+
+  loadGeneratedChunk(chunkX: number, chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined>;
+
+  saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void>;
 
   evictChunk(chunkX: number, chunkZ: number): Promise<void>;
 }

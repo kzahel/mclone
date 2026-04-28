@@ -1,4 +1,10 @@
 import { clonePackedChunkSnapshot, type PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import { GeneratedChunkStatus } from "../../world/level/generated-chunk-status";
+import {
+  GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+  cloneGeneratedChunkStorageRecord,
+  type GeneratedChunkStorageRecord,
+} from "../../world/level/generated-proto-chunk";
 import {
   createWorldSaveMetadata,
   isWorldSaveMetadataCompatible,
@@ -21,10 +27,31 @@ type MemoryChunkRecord = {
   lastEvictedAtMs?: number;
 };
 
+type MemoryGeneratedChunkRecord = {
+  generatedChunk: GeneratedChunkStorageRecord;
+  savedAtMs: number;
+  lastLoadedAtMs?: number;
+  lastEvictedAtMs?: number;
+};
+
 type MemoryWorldRecord = {
   metadata: WorldSaveMetadata;
   chunks: Map<string, MemoryChunkRecord>;
+  generatedChunks: Map<string, MemoryGeneratedChunkRecord>;
 };
+
+function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot): GeneratedChunkStorageRecord {
+  return {
+    chunkX: snapshot.chunkX,
+    chunkZ: snapshot.chunkZ,
+    type: "level",
+    status: GeneratedChunkStatus.FULL,
+    hasBlockSections: true,
+    isUnsaved: false,
+    contentVersion: GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+    snapshot: clonePackedChunkSnapshot(snapshot),
+  };
+}
 
 class MemoryChunkStorage implements ChunkStorage {
   public constructor(
@@ -43,10 +70,38 @@ class MemoryChunkStorage implements ChunkStorage {
   }
 
   public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
+    const savedAtMs = this.now();
     this.world.chunks.set(
       chunkKey(snapshot.chunkX, snapshot.chunkZ),
       {
         snapshot: clonePackedChunkSnapshot(snapshot),
+        savedAtMs,
+      },
+    );
+    this.world.generatedChunks.set(
+      chunkKey(snapshot.chunkX, snapshot.chunkZ),
+      {
+        generatedChunk: createFullGeneratedChunkRecord(snapshot),
+        savedAtMs,
+      },
+    );
+  }
+
+  public async loadGeneratedChunk(chunkX: number, chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
+    const record = this.world.generatedChunks.get(chunkKey(chunkX, chunkZ));
+    if (record === undefined) {
+      return undefined;
+    }
+
+    record.lastLoadedAtMs = this.now();
+    return cloneGeneratedChunkStorageRecord(record.generatedChunk);
+  }
+
+  public async saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void> {
+    this.world.generatedChunks.set(
+      chunkKey(record.chunkX, record.chunkZ),
+      {
+        generatedChunk: cloneGeneratedChunkStorageRecord(record),
         savedAtMs: this.now(),
       },
     );
@@ -59,6 +114,10 @@ class MemoryChunkStorage implements ChunkStorage {
     }
 
     record.lastEvictedAtMs = this.now();
+    const generatedRecord = this.world.generatedChunks.get(chunkKey(chunkX, chunkZ));
+    if (generatedRecord !== undefined) {
+      generatedRecord.lastEvictedAtMs = this.now();
+    }
   }
 }
 
@@ -91,6 +150,7 @@ export class MemoryWorldStorage implements WorldStorage {
     const world: MemoryWorldRecord = {
       metadata: createWorldSaveMetadata(request),
       chunks: new Map<string, MemoryChunkRecord>(),
+      generatedChunks: new Map<string, MemoryGeneratedChunkRecord>(),
     };
     this.worlds.set(request.saveId, world);
     return new MemoryWorldStorageSession(world.metadata, world, this.now);
@@ -102,5 +162,9 @@ export class MemoryWorldStorage implements WorldStorage {
 
   public getChunkRecord(saveId: string, chunkX: number, chunkZ: number): MemoryChunkRecord | undefined {
     return this.worlds.get(saveId)?.chunks.get(chunkKey(chunkX, chunkZ));
+  }
+
+  public getGeneratedChunkRecord(saveId: string, chunkX: number, chunkZ: number): MemoryGeneratedChunkRecord | undefined {
+    return this.worlds.get(saveId)?.generatedChunks.get(chunkKey(chunkX, chunkZ));
   }
 }

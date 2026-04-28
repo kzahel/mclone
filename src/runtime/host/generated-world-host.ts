@@ -25,10 +25,14 @@ import {
   getGeneratedChunkDependencyStatus,
 } from "../../world/level/generated-chunk-status";
 import {
+  GENERATED_PROTO_CHUNK_CONTENT_VERSION,
   advanceGeneratedChunkAccessStatus,
   createGeneratedProtoChunk,
+  createGeneratedChunkAccessFromStorageRecord,
+  createGeneratedChunkStorageRecord,
   type GeneratedChunkAccess,
   type GeneratedChunkAccessDebugRecord,
+  type GeneratedChunkStorageRecord,
 } from "../../world/level/generated-proto-chunk";
 import { GeneratedRenderLevel, type GeneratedChunkStatusDebugRecord } from "../../world/level/generated-render-level";
 import type { LevelChunk } from "../../world/level/chunk/level-chunk";
@@ -578,7 +582,7 @@ export class GeneratedWorldHost implements WorldHost {
       this.updateSessionState();
     }
     await this.setLightingView(request, this.chunkViewJobRevision);
-    this.pruneChunkHoldersOutsideCurrentAuthority();
+    this.pruneChunkHoldersOutsideCurrentAuthority(update.removedChunks);
 
     const messages: WorldHostMessage[] = [this.createSessionStateMessage()];
     if (!this.playerAnchoredToChunkView) {
@@ -640,6 +644,8 @@ export class GeneratedWorldHost implements WorldHost {
       messages.push(this.createPlayerStateMessage());
     }
 
+    this.pruneChunkHoldersOutsideCurrentAuthority(update.removedChunks);
+
     for (const chunk of update.removedChunks) {
       this.queueStorageSideEffect(() => this.queueEvictAfterDirtySave(chunk));
       this.discardUnloadedChunkState(chunk.chunkX, chunk.chunkZ);
@@ -659,7 +665,6 @@ export class GeneratedWorldHost implements WorldHost {
 
     const chunkViewJobRevision = chunkViewChanged ? ++this.chunkViewJobRevision : this.chunkViewJobRevision;
     await this.setLightingView(request, chunkViewJobRevision);
-    this.pruneChunkHoldersOutsideCurrentAuthority();
     if (!update.changed) {
       return messages;
     }
@@ -711,6 +716,7 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   public async flushStorageSideEffects(): Promise<void> {
+    this.queueSaveResidentGeneratedChunkAccesses();
     while (this.pendingStorageSideEffects > 0) {
       const pendingQueue = this.storageSideEffectQueue;
       await pendingQueue;
@@ -759,13 +765,15 @@ export class GeneratedWorldHost implements WorldHost {
     return holder;
   }
 
-  private pruneChunkHoldersOutsideCurrentAuthority(): void {
+  private pruneChunkHoldersOutsideCurrentAuthority(removedChunks: readonly GeneratedLevelChunk[] = []): void {
+    const removedChunkByKey = new Map(removedChunks.map((chunk) => [chunkKey(chunk.chunkX, chunk.chunkZ), chunk] as const));
     let removed = 0;
     for (const [key, holder] of this.chunkHolders) {
       if (this.isChunkInCurrentAuthorityView(holder.chunkX, holder.chunkZ)) {
         continue;
       }
 
+      this.queueSaveGeneratedChunkAccess(holder.chunkToSave, removedChunkByKey.get(key));
       this.chunkHolders.delete(key);
       removed++;
     }
@@ -1021,7 +1029,10 @@ export class GeneratedWorldHost implements WorldHost {
     yieldStep?: () => Promise<void>,
   ): Promise<boolean> {
     const preloadResult = await this.preloadStoredChunkCoalesced(chunkX, chunkZ);
-    if (preloadResult === "loaded" || preloadResult === "already_loaded") {
+    if (
+      (preloadResult === "loaded" || preloadResult === "already_loaded")
+      && this.level.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS)
+    ) {
       return this.level.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.LIQUID_CARVERS);
     }
 
@@ -1046,6 +1057,10 @@ export class GeneratedWorldHost implements WorldHost {
           return false;
         }
       }
+    }
+
+    if (this.level.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)) {
+      return true;
     }
 
     if (yieldStep === undefined) {
@@ -1093,6 +1108,19 @@ export class GeneratedWorldHost implements WorldHost {
       return "missing";
     }
 
+    const generatedRecord = await this.recordWorldgenPhaseAsync("storage.preload_generated_chunk", () =>
+      this.storageSession!.chunks.loadGeneratedChunk(chunkX, chunkZ)
+    );
+    if (generatedRecord !== undefined) {
+      if (this.restoreStoredGeneratedChunk(generatedRecord)) {
+        this.incrementWorldgenCount("storage_preload_loaded_generated_chunk");
+        this.incrementWorldgenCount("storage_preload_loaded");
+        return "loaded";
+      }
+
+      this.incrementWorldgenCount("storage_preload_generated_chunk_rejected");
+    }
+
     const snapshot = await this.recordWorldgenPhaseAsync("storage.preload", () => this.storageSession!.chunks.loadChunk(chunkX, chunkZ));
     if (snapshot === undefined) {
       this.incrementWorldgenCount("storage_preload_missing");
@@ -1107,6 +1135,16 @@ export class GeneratedWorldHost implements WorldHost {
       ),
       true,
     );
+    this.rememberStoredGeneratedChunkAccess({
+      chunkX,
+      chunkZ,
+      type: "level",
+      status: GeneratedChunkStatus.FULL,
+      hasBlockSections: true,
+      isUnsaved: false,
+      contentVersion: GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+      snapshot,
+    });
     this.incrementWorldgenCount("storage_preload_loaded");
     return "loaded";
   }
@@ -1161,6 +1199,107 @@ export class GeneratedWorldHost implements WorldHost {
     })();
 
     return promise;
+  }
+
+  private restoreStoredGeneratedChunk(record: GeneratedChunkStorageRecord): boolean {
+    if (record.snapshot !== undefined && (record.chunkX !== record.snapshot.chunkX || record.chunkZ !== record.snapshot.chunkZ)) {
+      return false;
+    }
+    if (record.contentVersion !== GENERATED_PROTO_CHUNK_CONTENT_VERSION) {
+      return false;
+    }
+    if (record.hasBlockSections && record.snapshot === undefined) {
+      return false;
+    }
+    if (!record.hasBlockSections && record.snapshot !== undefined) {
+      return false;
+    }
+
+    if (record.snapshot !== undefined) {
+      this.level.setChunk(
+        hydrateChunkFromSnapshot(
+          unpackChunkSnapshot(record.snapshot, this.options.blockStateIds),
+          this.options.airState,
+          this.resolveBlockState,
+        ),
+        record.status,
+      );
+    } else if (!this.level.restoreGeneratedChunkStatusRecord(record.chunkX, record.chunkZ, record.status, false)) {
+      return false;
+    }
+
+    this.rememberStoredGeneratedChunkAccess(record);
+    return true;
+  }
+
+  private rememberStoredGeneratedChunkAccess(record: GeneratedChunkStorageRecord): void {
+    this.getChunkHolder(record.chunkX, record.chunkZ).chunkToSave = createGeneratedChunkAccessFromStorageRecord({
+      ...record,
+      isUnsaved: false,
+    });
+  }
+
+  private queueSaveResidentGeneratedChunkAccesses(): void {
+    for (const holder of this.chunkHolders.values()) {
+      this.queueSaveGeneratedChunkAccess(holder.chunkToSave, this.level.getChunk(holder.chunkX, holder.chunkZ, false), holder);
+    }
+  }
+
+  private queueSaveGeneratedChunkAccess(
+    access: GeneratedChunkAccess | undefined,
+    sourceChunk?: GeneratedLevelChunk | null,
+    holder?: GeneratedChunkHolder,
+  ): void {
+    if (access === undefined || !access.isUnsaved) {
+      return;
+    }
+
+    const record = this.createGeneratedChunkStorageRecordForAccess(access, sourceChunk ?? undefined);
+    if (record === undefined) {
+      return;
+    }
+
+    this.queueStorageSideEffect(async () => {
+      await this.saveGeneratedChunkRecord(record);
+      if (
+        holder?.chunkToSave === access
+        && access.type === record.type
+        && access.status === record.status
+        && access.hasBlockSections === record.hasBlockSections
+        && access.contentVersion === record.contentVersion
+      ) {
+        access.isUnsaved = false;
+      }
+    });
+  }
+
+  private createGeneratedChunkStorageRecordForAccess(
+    access: GeneratedChunkAccess,
+    sourceChunk?: GeneratedLevelChunk,
+  ): GeneratedChunkStorageRecord | undefined {
+    let snapshot: PackedChunkSnapshot | undefined;
+    if (access.hasBlockSections) {
+      const chunk = sourceChunk ?? this.level.getChunk(access.chunkX, access.chunkZ, false);
+      if (chunk === null || chunk === undefined) {
+        this.incrementWorldgenCount("storage_generated_chunk_saves_skipped_missing_sections");
+        return undefined;
+      }
+
+      snapshot = withoutPersistedLight(this.buildPackedChunkSnapshot(chunk));
+    }
+
+    return createGeneratedChunkStorageRecord(access, snapshot);
+  }
+
+  private async saveGeneratedChunkRecord(record: GeneratedChunkStorageRecord): Promise<void> {
+    if (this.storageSession === undefined) {
+      return;
+    }
+
+    await this.recordWorldgenPhaseAsync("storage.save_generated_chunk", () =>
+      this.storageSession!.chunks.saveGeneratedChunk(record)
+    );
+    this.incrementWorldgenCount("storage_generated_chunk_saves");
   }
 
   private async writeChunkSnapshotByPolicy(snapshot: PackedChunkSnapshot): Promise<void> {

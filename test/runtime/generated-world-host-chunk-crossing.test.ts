@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { Registry } from "../../src/core/registry";
-import { GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
+import { createGeneratedWorldSaveId, GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
 import type {
   ChunkSnapshotMessage,
   WorldgenPerformanceCounters,
@@ -14,6 +14,7 @@ import {
 } from "../../src/world/level/generated-chunk-status";
 import type { GeneratedChunkAccessDebugRecord } from "../../src/world/level/generated-proto-chunk";
 import type { GeneratedChunkStatusDebugRecord } from "../../src/world/level/generated-render-level";
+import { MemoryWorldStorage } from "../../src/runtime/storage/memory-world-storage";
 import { FlatGrassWorldGenerator } from "../../src/worldgen/levelgen/demo-world-generators";
 import { GenerationStep } from "../../src/worldgen/levelgen/generation-step";
 import type { WorldGenerator } from "../../src/worldgen/levelgen/world-generator";
@@ -165,6 +166,14 @@ class CountingWorldGenerator implements WorldGenerator {
       uniqueMobSpawns: new Set(this.mobSpawnCalls).size,
     };
   }
+
+  public hasFillFromNoiseCall(chunkX: number, chunkZ: number): boolean {
+    return this.fillFromNoiseCalls.includes(chunkKey(chunkX, chunkZ));
+  }
+
+  public hasDecorationCall(chunkX: number, chunkZ: number): boolean {
+    return this.decorationCalls.includes(chunkKey(chunkX, chunkZ));
+  }
 }
 
 function chunkKey(chunkX: number, chunkZ: number): string {
@@ -264,6 +273,7 @@ function countMaterializedChunkAccess(records: readonly GeneratedChunkAccessDebu
 function createHost(options: {
   readonly chunkViewScheduling?: "synchronous" | "cooperative";
   readonly generatorOptions?: CountingWorldGeneratorOptions;
+  readonly worldStorage?: MemoryWorldStorage;
 } = {}): { readonly host: GeneratedWorldHost; readonly generator: CountingWorldGenerator } {
   const blocks = registerGeneratedRenderBlocks();
   const generator = new CountingWorldGenerator(12345n, options.generatorOptions);
@@ -274,6 +284,7 @@ function createHost(options: {
     blockStateById: blocks.blockStateById,
     blockStateIds: blocks.blockStateIds,
     chunkViewScheduling: options.chunkViewScheduling,
+    worldStorage: options.worldStorage,
     lightingMode: "none",
     liquidSimulationMode: "none",
   });
@@ -502,4 +513,43 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(generatorSnapshot.fillFromNoise).toBe(generatorSnapshot.uniqueFillFromNoise);
     expect(generatorSnapshot.decorations).toBe(generatorSnapshot.uniqueDecorations);
   }, 60_000);
+
+  test("reloads saved partial statuses without rerunning completed terrain or features", async () => {
+    const storage = new MemoryWorldStorage(() => 10_000);
+    const saveId = createGeneratedWorldSaveId(12345n, "flat_grass", OPEN_WORLD_REQUEST.config);
+    const first = createHost({ worldStorage: storage });
+    await first.host.openWorld(OPEN_WORLD_REQUEST);
+    await first.host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    await first.host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 32,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    await first.host.flushStorageSideEffects();
+
+    expect(storage.getGeneratedChunkRecord(saveId, 5, 0)?.generatedChunk.status).toBe(GeneratedChunkStatus.LIQUID_CARVERS);
+    expect(storage.getGeneratedChunkRecord(saveId, 4, 0)?.generatedChunk.status).toBe(GeneratedChunkStatus.FEATURES);
+
+    const second = createHost({ worldStorage: storage });
+    await second.host.openWorld(OPEN_WORLD_REQUEST);
+    await second.host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 2,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+
+    expect(second.generator.hasFillFromNoiseCall(5, 0)).toBe(false);
+    expect(second.generator.hasDecorationCall(4, 0)).toBe(false);
+    expect(second.host.getDebugGeneratedChunkAccessRecords().find((record) => record.chunkX === 5 && record.chunkZ === 0)?.status)
+      .toBe(GeneratedChunkStatus.FULL);
+    expect(second.host.getDebugGeneratedChunkAccessRecords().find((record) => record.chunkX === 4 && record.chunkZ === 0)?.status)
+      .toBe(GeneratedChunkStatus.FULL);
+  });
 });

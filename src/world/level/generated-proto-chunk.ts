@@ -3,6 +3,10 @@ import {
   generatedChunkStatusIndex,
   type GeneratedChunkStatus as GeneratedChunkStatusName,
 } from "./generated-chunk-status";
+import {
+  clonePackedChunkSnapshot,
+  type PackedChunkSnapshot,
+} from "./packed-chunk-snapshot";
 
 export const GENERATED_PROTO_CHUNK_CONTENT_VERSION = 1;
 
@@ -38,6 +42,17 @@ export interface GeneratedChunkAccessDebugRecord {
   readonly hasBlockSections: boolean;
   readonly isUnsaved: boolean;
   readonly contentVersion: number;
+}
+
+export interface GeneratedChunkStorageRecord {
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly type: GeneratedChunkAccessType;
+  readonly status: GeneratedChunkStatusName;
+  readonly hasBlockSections: boolean;
+  readonly isUnsaved: boolean;
+  readonly contentVersion: number;
+  readonly snapshot?: PackedChunkSnapshot;
 }
 
 export function createGeneratedProtoChunk(chunkX: number, chunkZ: number): GeneratedProtoChunk {
@@ -85,4 +100,66 @@ export function advanceGeneratedChunkAccessStatus(
   access.hasBlockSections ||= hasBlockSections;
   access.isUnsaved = true;
   return access;
+}
+
+export function createGeneratedChunkStorageRecord(
+  access: GeneratedChunkAccess,
+  snapshot?: PackedChunkSnapshot,
+): GeneratedChunkStorageRecord {
+  if (access.hasBlockSections && snapshot === undefined) {
+    throw new Error(`Generated chunk (${access.chunkX.toString()}, ${access.chunkZ.toString()}) with block sections needs a snapshot`);
+  }
+  if (snapshot !== undefined && (snapshot.chunkX !== access.chunkX || snapshot.chunkZ !== access.chunkZ)) {
+    throw new Error(
+      `Generated chunk snapshot (${snapshot.chunkX.toString()}, ${snapshot.chunkZ.toString()}) does not match access (${access.chunkX.toString()}, ${access.chunkZ.toString()})`,
+    );
+  }
+
+  const record: GeneratedChunkStorageRecord = {
+    chunkX: access.chunkX,
+    chunkZ: access.chunkZ,
+    type: access.type,
+    status: access.status,
+    hasBlockSections: access.hasBlockSections,
+    isUnsaved: false,
+    contentVersion: access.contentVersion,
+  };
+  return snapshot === undefined ? record : { ...record, snapshot: clonePackedChunkSnapshot(snapshot) };
+}
+
+export function cloneGeneratedChunkStorageRecord(record: GeneratedChunkStorageRecord): GeneratedChunkStorageRecord {
+  const clone: GeneratedChunkStorageRecord = {
+    chunkX: record.chunkX,
+    chunkZ: record.chunkZ,
+    type: record.type,
+    status: record.status,
+    hasBlockSections: record.hasBlockSections,
+    isUnsaved: record.isUnsaved,
+    contentVersion: record.contentVersion,
+  };
+  return record.snapshot === undefined ? clone : { ...clone, snapshot: clonePackedChunkSnapshot(record.snapshot) };
+}
+
+export function createGeneratedChunkAccessFromStorageRecord(record: GeneratedChunkStorageRecord): GeneratedChunkAccess {
+  if (record.type === "level") {
+    return {
+      type: "level",
+      chunkX: record.chunkX,
+      chunkZ: record.chunkZ,
+      status: GeneratedChunkStatus.FULL,
+      hasBlockSections: true,
+      isUnsaved: record.isUnsaved,
+      contentVersion: record.contentVersion,
+    };
+  }
+
+  return {
+    type: "proto",
+    chunkX: record.chunkX,
+    chunkZ: record.chunkZ,
+    status: record.status,
+    hasBlockSections: record.hasBlockSections,
+    isUnsaved: record.isUnsaved,
+    contentVersion: record.contentVersion,
+  };
 }

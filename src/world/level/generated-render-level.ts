@@ -355,6 +355,23 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     }
   }
 
+  public restoreGeneratedChunkStatusRecord(
+    chunkX: number,
+    chunkZ: number,
+    status: GeneratedChunkStatusName,
+    hasBlockSections: boolean,
+  ): boolean {
+    if (!this.inAuthorityRange(chunkX, chunkZ)) {
+      return false;
+    }
+    if (hasBlockSections && super.getChunk(chunkX, chunkZ, false) === null) {
+      return false;
+    }
+
+    this.setChunkStatus(chunkX, chunkZ, status);
+    return true;
+  }
+
   public hasStatusWindow(
     centerChunkX: number,
     centerChunkZ: number,
