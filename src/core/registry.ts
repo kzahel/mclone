@@ -30,6 +30,7 @@ class SimpleRegistry<T extends object> implements Iterable<T> {
 export class Registry {
   public static readonly BLOCK = new SimpleRegistry<object>();
   public static readonly FEATURE = new SimpleRegistry<object>();
+  public static readonly STRUCTURE_FEATURE = new SimpleRegistry<object>();
   public static readonly DECORATOR = new SimpleRegistry<object>();
   public static readonly BLOCKSTATE_PROVIDER_TYPE = new SimpleRegistry<object>();
   public static readonly BLOCK_PLACER_TYPE = new SimpleRegistry<object>();

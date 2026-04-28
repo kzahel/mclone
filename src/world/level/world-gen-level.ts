@@ -9,6 +9,7 @@ import type { Fluid } from "./material/fluid";
 import type { LevelSimulatedReader } from "./level-simulated-reader";
 import type { TickAccess } from "./tick-access";
 import { GenerationStep } from "../../worldgen/levelgen/generation-step";
+import type { StructureFeatureManager } from "./structure-feature-manager";
 
 export interface WorldGenLevel extends BlockGetter, LevelSimulatedReader {
   setBlock(pos: BlockPos, state: BlockState, flags?: number): boolean;
@@ -28,6 +29,8 @@ export interface WorldGenLevel extends BlockGetter, LevelSimulatedReader {
   getBlockTicks(): TickAccess<Block>;
 
   getLiquidTicks(): TickAccess<Fluid>;
+
+  getStructureFeatureManager?(): StructureFeatureManager;
 
   getCarvingMask?(step: GenerationStep.Carving, chunkX: number, chunkZ: number): Uint8Array | undefined;
 }

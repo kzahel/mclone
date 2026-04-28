@@ -13,6 +13,7 @@ import type { FluidState } from "./material/fluid-state";
 import type { WorldGenLevel } from "./world-gen-level";
 import type { GeneratedRenderLevel } from "./generated-render-level";
 import { GenerationStep } from "../../worldgen/levelgen/generation-step";
+import { StructureFeatureManager } from "./structure-feature-manager";
 
 export const FEATURES_CHUNK_DEPENDENCY_RADIUS = 8;
 export const FEATURES_WRITE_RADIUS_CUTOFF = 1;
@@ -70,6 +71,7 @@ function incrementMetric(
 
 // Runtime: WorldGenRegion-style FEATURES wrapper over GeneratedRenderLevel without exposing on-demand decoration.
 export class GeneratedDecorationRegion implements WorldGenLevel {
+  private structureFeatureManager: StructureFeatureManager | undefined;
   private readonly blockTicks: TickAccess<Block> = new RecordingTickAccess((pos, target, delay) => {
     incrementMetric(this.options.metrics, "blockTickSchedules");
     if (!this.ensureCanWrite(pos)) {
@@ -177,6 +179,11 @@ export class GeneratedDecorationRegion implements WorldGenLevel {
 
   public getLiquidTicks(): TickAccess<Fluid> {
     return this.liquidTicks;
+  }
+
+  public getStructureFeatureManager(): StructureFeatureManager {
+    this.structureFeatureManager ??= new StructureFeatureManager(this.level);
+    return this.structureFeatureManager;
   }
 
   public getCarvingMask(step: GenerationStep.Carving, chunkX: number, chunkZ: number): Uint8Array | undefined {

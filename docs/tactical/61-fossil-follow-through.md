@@ -48,4 +48,4 @@ Port vanilla 1.17.1 overworld fossils as the last small known-missing overworld 
 
 ## Next
 
-The ordinary configured-feature oddity lane is now complete: desert wells, monster rooms, and overworld fossils are all landed outside `StructureFeature` work. The next structure slice should be the real status/metadata foundation: `STRUCTURE_STARTS`, `STRUCTURE_REFERENCES`, chunk-owned starts/references, and clipped `StructureStart.placeInChunk(...)`, with desert pyramid as the first proof structure after that foundation exists.
+The ordinary configured-feature oddity lane is now complete: desert wells, monster rooms, and overworld fossils are all landed outside `StructureFeature` work. That next step landed in [`62`](./62-buried-treasure-structure-foundation.md): the real status/metadata foundation plus buried treasure as the first proof `StructureFeature`. After that, continue with desert pyramid as the next small custom structure.

@@ -22,6 +22,9 @@ import { Fluids } from "../../world/level/material/fluids";
 import { LiquidBlock } from "../../world/level/block/liquid-block";
 import type { Block } from "../../world/level/block/block";
 import type { WorldGenerator } from "../levelgen/world-generator";
+import { BoundingBox } from "../../world/level/levelgen/structure/bounding-box";
+import { ChunkPos } from "../../core/chunk-pos";
+import { SectionPos } from "../../core/section-pos";
 
 const SNOW_LOCATION = new ResourceLocation("minecraft:snow");
 
@@ -208,14 +211,43 @@ export class Biome implements NoiseBiome {
     origin: BlockPos,
     profiler?: BiomeDecorationProfiler,
   ): void {
+    const structureManager = level.getStructureFeatureManager?.();
+    const chunkX = SectionPos.blockToSectionCoord(origin.getX());
+    const chunkZ = SectionPos.blockToSectionCoord(origin.getZ());
+    const chunkPos = new ChunkPos(chunkX, chunkZ);
+    const chunkMinBlockX = chunkPos.getMinBlockX();
+    const chunkMinBlockZ = chunkPos.getMinBlockZ();
+    const structureBox = new BoundingBox(
+      chunkMinBlockX,
+      level.getMinBuildHeight() + 1,
+      chunkMinBlockZ,
+      chunkMinBlockX + 15,
+      level.getMaxBuildHeight() - 1,
+      chunkMinBlockZ + 15,
+    );
     const features = this.generationSettings.features();
-    // TypeScript: structure placement stays deferred here; only configured features run during biome decoration.
+    const structures = this.generationSettings.structures();
     for (let stepIndex = 0; stepIndex < GenerationStep.DECORATION_VALUES.length; stepIndex++) {
+      let featureIndex = 0;
+      if (structureManager !== undefined) {
+        for (const structureSupplier of structures) {
+          const structure = structureSupplier();
+          if (structure.step() !== stepIndex) {
+            continue;
+          }
+
+          random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
+          for (const start of structureManager.startsForFeature(chunkX, chunkZ, structure.feature)) {
+            start.placeInChunk(level, structureManager, chunkGenerator, random, structureBox, chunkPos);
+          }
+          featureIndex++;
+        }
+      }
+
       if (features.length <= stepIndex) {
         continue;
       }
 
-      let featureIndex = 0;
       for (const featureSupplier of features[stepIndex]!) {
         const feature = featureSupplier();
         random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
@@ -242,14 +274,44 @@ export class Biome implements NoiseBiome {
     yieldStep: CooperativeGenerationYield,
     profiler?: BiomeDecorationProfiler,
   ): Promise<void> {
+    const structureManager = level.getStructureFeatureManager?.();
+    const chunkX = SectionPos.blockToSectionCoord(origin.getX());
+    const chunkZ = SectionPos.blockToSectionCoord(origin.getZ());
+    const chunkPos = new ChunkPos(chunkX, chunkZ);
+    const chunkMinBlockX = chunkPos.getMinBlockX();
+    const chunkMinBlockZ = chunkPos.getMinBlockZ();
+    const structureBox = new BoundingBox(
+      chunkMinBlockX,
+      level.getMinBuildHeight() + 1,
+      chunkMinBlockZ,
+      chunkMinBlockX + 15,
+      level.getMaxBuildHeight() - 1,
+      chunkMinBlockZ + 15,
+    );
     const features = this.generationSettings.features();
-    // Host scheduling: same feature order as generate(), but yields between configured placement units.
+    const structures = this.generationSettings.structures();
     for (let stepIndex = 0; stepIndex < GenerationStep.DECORATION_VALUES.length; stepIndex++) {
+      let featureIndex = 0;
+      if (structureManager !== undefined) {
+        for (const structureSupplier of structures) {
+          const structure = structureSupplier();
+          if (structure.step() !== stepIndex) {
+            continue;
+          }
+
+          random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
+          for (const start of structureManager.startsForFeature(chunkX, chunkZ, structure.feature)) {
+            start.placeInChunk(level, structureManager, chunkGenerator, random, structureBox, chunkPos);
+          }
+          featureIndex++;
+          await yieldStep();
+        }
+      }
+
       if (features.length <= stepIndex) {
         continue;
       }
 
-      let featureIndex = 0;
       for (const featureSupplier of features[stepIndex]!) {
         const feature = featureSupplier();
         random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);

@@ -27,6 +27,9 @@ import {
   type GeneratedDecorationOptions,
 } from "./generated-decoration-region";
 import { StaticRenderLevel } from "./static-render-level";
+import { StructureFeatureManager } from "./structure-feature-manager";
+import type { StructureFeature } from "../../worldgen/levelgen/structure/structure-feature";
+import type { StructureStart } from "./levelgen/structure/structure-start";
 
 function generatedChunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -37,6 +40,10 @@ interface GeneratedChunkRecord {
   readonly chunkZ: number;
   readonly status: GeneratedChunkStatusName;
   readonly hasBlockSections: boolean;
+  readonly hasStructureStartsData: boolean;
+  readonly hasStructureReferencesData: boolean;
+  readonly structureStarts: ReadonlyMap<StructureFeature<any>, StructureStart<any>>;
+  readonly structureReferences: ReadonlyMap<StructureFeature<any>, ReadonlySet<bigint>>;
 }
 
 export interface GeneratedChunkStatusDebugRecord {
@@ -50,6 +57,7 @@ export type GeneratedLevelPhaseRecorder = (phase: string, elapsedMs: number) => 
 
 const FULL_PUBLICATION_NEIGHBOR_RADIUS = 1;
 const LIGHT_FEATURES_NEIGHBOR_RADIUS = 1;
+const STRUCTURE_REFERENCE_NEIGHBOR_RADIUS = 8;
 
 export interface GeneratedChunkViewUpdate {
   readonly changed: boolean;
@@ -66,6 +74,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   private authorityChunkRadius = -1;
   private readonly chunkRecords = new Map<string, GeneratedChunkRecord>();
   private readonly advancingFeatureChunks = new Set<string>();
+  private readonly structureFeatureManager = new StructureFeatureManager(this);
   private automaticDecorationEnabled = true;
   private phaseRecorder: GeneratedLevelPhaseRecorder | undefined;
 
@@ -153,12 +162,14 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     const previousCenterZ = this.viewCenterZ;
     const previousPublishRadius = this.publishChunkRadius;
     const nextPublishRadius = Math.max(1, viewDistance) + 1;
-    // Runtime: retain status records far enough for publishable 3x3 FULL, LIGHT's 3x3 FEATURES input, and FEATURES' dependency window.
+    // Runtime: retain status records far enough for publishable 3x3 FULL, LIGHT's 3x3 FEATURES input,
+    // FEATURES' dependency window, and the pre-noise ±8 structure-reference halo for authority-only terrain reads.
     const nextAuthorityRadius =
       nextPublishRadius
       + FULL_PUBLICATION_NEIGHBOR_RADIUS
       + LIGHT_FEATURES_NEIGHBOR_RADIUS
-      + FEATURES_CHUNK_DEPENDENCY_RADIUS;
+      + FEATURES_CHUNK_DEPENDENCY_RADIUS
+      + STRUCTURE_REFERENCE_NEIGHBOR_RADIUS;
     let changed =
       centerChunkX !== previousCenterX ||
       centerChunkZ !== previousCenterZ ||
@@ -237,6 +248,56 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
 
   public getAuthorityChunk(chunkX: number, chunkZ: number): LevelChunk | null {
     return super.getChunk(chunkX, chunkZ, false);
+  }
+
+  public getStartForFeature(
+    chunkX: number,
+    chunkZ: number,
+    structure: StructureFeature<any>,
+  ): StructureStart<any> | undefined {
+    return this.getChunkRecord(chunkX, chunkZ)?.structureStarts.get(structure);
+  }
+
+  public setStartForFeature(
+    chunkX: number,
+    chunkZ: number,
+    structure: StructureFeature<any>,
+    start: StructureStart<any> | undefined,
+  ): void {
+    const record = this.ensureChunkRecord(chunkX, chunkZ);
+    const structureStarts = new Map(record.structureStarts);
+    if (start === undefined) {
+      structureStarts.delete(structure);
+    } else {
+      structureStarts.set(structure, start);
+    }
+
+    this.chunkRecords.set(generatedChunkKey(chunkX, chunkZ), {
+      ...record,
+      hasStructureStartsData: true,
+      structureStarts,
+    });
+  }
+
+  public getAllStarts(chunkX: number, chunkZ: number): ReadonlyMap<StructureFeature<any>, StructureStart<any>> {
+    return this.getChunkRecord(chunkX, chunkZ)?.structureStarts ?? new Map();
+  }
+
+  public getReferencesForFeature(chunkX: number, chunkZ: number, structure: StructureFeature<any>): ReadonlySet<bigint> {
+    return this.getChunkRecord(chunkX, chunkZ)?.structureReferences.get(structure) ?? new Set();
+  }
+
+  public addReferenceForFeature(chunkX: number, chunkZ: number, structure: StructureFeature<any>, reference: bigint): void {
+    const record = this.ensureChunkRecord(chunkX, chunkZ);
+    const structureReferences = new Map(record.structureReferences);
+    const references = new Set(structureReferences.get(structure) ?? []);
+    references.add(reference);
+    structureReferences.set(structure, references);
+    this.chunkRecords.set(generatedChunkKey(chunkX, chunkZ), {
+      ...record,
+      hasStructureReferencesData: true,
+      structureReferences,
+    });
   }
 
   public getAuthorityBlockState(pos: BlockPos, metrics?: GeneratedDecorationMetrics): BlockState {
@@ -339,17 +400,11 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       case GeneratedChunkStatus.EMPTY:
         return true;
       case GeneratedChunkStatus.STRUCTURE_STARTS:
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
-        return true;
+        return this.ensureStructureStarts(chunkX, chunkZ);
       case GeneratedChunkStatus.STRUCTURE_REFERENCES:
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES);
-        return true;
+        return this.ensureStructureReferences(chunkX, chunkZ);
       case GeneratedChunkStatus.BIOMES:
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES);
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.BIOMES);
-        return true;
+        return this.ensureBiomeStatus(chunkX, chunkZ);
       default:
         return this.hasChunkStatus(chunkX, chunkZ, status);
     }
@@ -432,7 +487,9 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       return null;
     }
 
-    this.advanceNoopPreNoiseStatuses(chunkX, chunkZ);
+    if (!this.ensureBiomeStatus(chunkX, chunkZ)) {
+      throw new Error(`Missing authority structure window for terrain chunk (${chunkX.toString()}, ${chunkZ.toString()})`);
+    }
     const generated = this.recordPhase("terrain.fill_from_noise", () => this.generator.fillFromNoise(chunkX, chunkZ));
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.NOISE);
     this.recordPhase("terrain.surface_bedrock", () => this.generator.buildSurfaceAndBedrock(generated));
@@ -461,7 +518,9 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       return null;
     }
 
-    this.advanceNoopPreNoiseStatuses(chunkX, chunkZ);
+    if (!this.ensureBiomeStatus(chunkX, chunkZ)) {
+      throw new Error(`Missing authority structure window for terrain chunk (${chunkX.toString()}, ${chunkZ.toString()})`);
+    }
     const generated = this.recordPhase("terrain.fill_from_noise", () => this.generator.fillFromNoise(chunkX, chunkZ));
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.NOISE);
     await yieldStep();
@@ -610,16 +669,11 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       case GeneratedChunkStatus.EMPTY:
         return true;
       case GeneratedChunkStatus.STRUCTURE_STARTS:
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
-        return true;
+        return this.ensureStructureStarts(chunkX, chunkZ);
       case GeneratedChunkStatus.STRUCTURE_REFERENCES:
-        this.ensureChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES);
-        return true;
+        return this.ensureStructureReferences(chunkX, chunkZ);
       case GeneratedChunkStatus.BIOMES:
-        this.ensureChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES);
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.BIOMES);
-        return true;
+        return this.ensureBiomeStatus(chunkX, chunkZ);
       case GeneratedChunkStatus.NOISE:
       case GeneratedChunkStatus.SURFACE:
       case GeneratedChunkStatus.CARVERS:
@@ -655,16 +709,11 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       case GeneratedChunkStatus.EMPTY:
         return true;
       case GeneratedChunkStatus.STRUCTURE_STARTS:
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
-        return true;
+        return this.ensureStructureStarts(chunkX, chunkZ);
       case GeneratedChunkStatus.STRUCTURE_REFERENCES:
-        await this.ensureChunkStatusCooperative(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS, yieldStep);
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES);
-        return true;
+        return this.ensureStructureReferences(chunkX, chunkZ);
       case GeneratedChunkStatus.BIOMES:
-        await this.ensureChunkStatusCooperative(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES, yieldStep);
-        this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.BIOMES);
-        return true;
+        return this.ensureBiomeStatus(chunkX, chunkZ);
       case GeneratedChunkStatus.NOISE:
       case GeneratedChunkStatus.SURFACE:
       case GeneratedChunkStatus.CARVERS:
@@ -725,10 +774,56 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     return chunk;
   }
 
-  private advanceNoopPreNoiseStatuses(chunkX: number, chunkZ: number): void {
+  private ensureStructureStarts(chunkX: number, chunkZ: number): boolean {
+    const existing = this.getChunkRecord(chunkX, chunkZ);
+    if (existing?.hasStructureStartsData === true && this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS)) {
+      return true;
+    }
+
+    if (!this.inAuthorityRange(chunkX, chunkZ)) {
+      return false;
+    }
+
+    this.ensureChunkRecord(chunkX, chunkZ);
+    this.generator.createStructures(this.structureFeatureManager, chunkX, chunkZ);
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_STARTS);
+    return true;
+  }
+
+  private ensureStructureReferences(chunkX: number, chunkZ: number): boolean {
+    const existing = this.getChunkRecord(chunkX, chunkZ);
+    if (existing?.hasStructureReferencesData === true && this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES)) {
+      return true;
+    }
+
+    if (!this.ensureStructureStarts(chunkX, chunkZ)) {
+      return false;
+    }
+
+    for (let otherChunkZ = chunkZ - 8; otherChunkZ <= chunkZ + 8; otherChunkZ++) {
+      for (let otherChunkX = chunkX - 8; otherChunkX <= chunkX + 8; otherChunkX++) {
+        if (!this.ensureStructureStarts(otherChunkX, otherChunkZ)) {
+          return false;
+        }
+      }
+    }
+
+    this.generator.createReferences(this.structureFeatureManager, chunkX, chunkZ);
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.STRUCTURE_REFERENCES);
+    return true;
+  }
+
+  private ensureBiomeStatus(chunkX: number, chunkZ: number): boolean {
+    if (this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.BIOMES)) {
+      return true;
+    }
+
+    if (!this.ensureStructureReferences(chunkX, chunkZ)) {
+      return false;
+    }
+
     this.setChunkStatusAtLeast(chunkX, chunkZ, GeneratedChunkStatus.BIOMES);
+    return true;
   }
 
   private setChunkStatusAtLeast(chunkX: number, chunkZ: number, status: GeneratedChunkStatusName): void {
@@ -747,7 +842,31 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       chunkZ,
       status,
       hasBlockSections: (existing?.hasBlockSections ?? false) || super.getChunk(chunkX, chunkZ, false) !== null,
+      hasStructureStartsData: existing?.hasStructureStartsData ?? false,
+      hasStructureReferencesData: existing?.hasStructureReferencesData ?? false,
+      structureStarts: existing?.structureStarts ?? new Map(),
+      structureReferences: existing?.structureReferences ?? new Map(),
     });
+  }
+
+  private ensureChunkRecord(chunkX: number, chunkZ: number): GeneratedChunkRecord {
+    const existing = this.getChunkRecord(chunkX, chunkZ);
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const record: GeneratedChunkRecord = {
+      chunkX,
+      chunkZ,
+      status: GeneratedChunkStatus.EMPTY,
+      hasBlockSections: super.getChunk(chunkX, chunkZ, false) !== null,
+      hasStructureStartsData: false,
+      hasStructureReferencesData: false,
+      structureStarts: new Map(),
+      structureReferences: new Map(),
+    };
+    this.chunkRecords.set(generatedChunkKey(chunkX, chunkZ), record);
+    return record;
   }
 
   private getChunkRecord(chunkX: number, chunkZ: number): GeneratedChunkRecord | undefined {
@@ -766,6 +885,10 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       chunkZ,
       status: GeneratedChunkStatus.LIQUID_CARVERS,
       hasBlockSections: true,
+      hasStructureStartsData: false,
+      hasStructureReferencesData: false,
+      structureStarts: new Map(),
+      structureReferences: new Map(),
     };
     this.chunkRecords.set(key, record);
     return record;

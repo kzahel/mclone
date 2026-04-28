@@ -9,6 +9,7 @@ import { VegetationFeatures } from "../levelgen/feature/vegetation-features";
 import { OreFeatures } from "../levelgen/feature/ore-features";
 import { UndergroundFeatures } from "../levelgen/feature/underground-features";
 import { WaterFeatures } from "../levelgen/feature/water-features";
+import { ConfiguredStructureFeatures } from "../levelgen/structure/structure-features";
 
 const OCEAN_BIOME_KEYS = new Set([
   "minecraft:ocean",
@@ -50,6 +51,10 @@ function addDefaultMonsterRoom(builder: BiomeGenerationSettings.Builder): void {
 
 function addFossilDecoration(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.UNDERGROUND_STRUCTURES, () => UndergroundFeatures.FOSSIL);
+}
+
+function addBuriedTreasure(builder: BiomeGenerationSettings.Builder): void {
+  builder.addStructureStart(() => ConfiguredStructureFeatures.BURIED_TREASURE);
 }
 
 function addDefaultUndergroundVariety(builder: BiomeGenerationSettings.Builder, skipGlowLichen = false): void {
@@ -652,9 +657,12 @@ function buildJungleSettings(edge: boolean, bamboo = false, modified = false): B
   return builder.build();
 }
 
-function buildBeachSettings(): BiomeGenerationSettings {
+function buildBeachSettings(withBuriedTreasure = true): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
+  if (withBuriedTreasure) {
+    addBuriedTreasure(builder);
+  }
   addDefaultLakes(builder);
   addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
@@ -751,7 +759,7 @@ function buildOceanSettings(kind: OceanSettingsKind, deep: boolean): BiomeGenera
 const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:badlands", buildBadlandsSettings()],
   ["minecraft:badlands_plateau", buildBadlandsSettings()],
-  ["minecraft:beach", buildBeachSettings()],
+  ["minecraft:beach", buildBeachSettings(true)],
   ["minecraft:birch_forest", buildBirchForestSettings(false)],
   ["minecraft:birch_forest_hills", buildBirchForestSettings(false)],
   ["minecraft:cold_ocean", buildOceanSettings("cold", false)],
@@ -802,12 +810,12 @@ const SETTINGS_BY_KEY = new Map<string, BiomeGenerationSettings>([
   ["minecraft:shattered_savanna", buildSavannaSettings(true)],
   ["minecraft:shattered_savanna_plateau", buildSavannaSettings(true)],
   ["minecraft:snowy_mountains", buildSnowyTundraSettings()],
-  ["minecraft:snowy_beach", buildBeachSettings()],
+  ["minecraft:snowy_beach", buildBeachSettings(true)],
   ["minecraft:snowy_taiga", buildSnowyTaigaSettings()],
   ["minecraft:snowy_taiga_hills", buildSnowyTaigaSettings()],
   ["minecraft:snowy_taiga_mountains", buildSnowyTaigaSettings()],
   ["minecraft:snowy_tundra", buildSnowyTundraSettings()],
-  ["minecraft:stone_shore", buildBeachSettings()],
+  ["minecraft:stone_shore", buildBeachSettings(false)],
   ["minecraft:sunflower_plains", buildPlainsSettings(true)],
   ["minecraft:swamp", buildSwampSettings(false)],
   ["minecraft:swamp_hills", buildSwampSettings(true)],

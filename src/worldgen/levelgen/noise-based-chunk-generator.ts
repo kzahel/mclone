@@ -6,7 +6,9 @@ import { BlockPos } from "../../core/block-pos.ts";
 import { Registry } from "../../core/registry.ts";
 import { ResourceLocation } from "../../core/resource-location.ts";
 import type { WorldGenLevel } from "../../world/level/world-gen-level.ts";
+import type { StructureFeatureManager } from "../../world/level/structure-feature-manager.ts";
 import type { Block } from "../../world/level/block/block.ts";
+import { ChunkPos } from "../../core/chunk-pos.ts";
 import { applyOverworldCarvers } from "../carver/overworld-carvers.ts";
 import type { CooperativeGenerationYield } from "./cooperative-generation.ts";
 import type { BiomeDecorationProfiler } from "./decoration-profiler.ts";
@@ -28,6 +30,7 @@ import { NoiseGeneratorSettings } from "./noise-generator-settings.ts";
 import { NoiseSampler } from "./noise-sampler.ts";
 import { NaturalSpawner, type GenerationEntitySink, type NaturalSpawnerOptions } from "./natural-spawner.ts";
 import type { WorldGenerator } from "./world-generator.ts";
+import { OVERWORLD_STRUCTURE_SETTINGS } from "./structure/structure-features.ts";
 
 const SURFACE_NOISE_OCTAVES = [-3, -2, -1, 0] as const;
 const DEPTH_NOISE_OCTAVES = [-15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0] as const;
@@ -127,6 +130,7 @@ export class NoiseBasedChunkGenerator implements WorldGenerator {
     private readonly biomeSource: NoiseBiomeSource,
     seed: LongSeed,
     private readonly settings = NoiseGeneratorSettings.overworld(),
+    private readonly structureSettings = OVERWORLD_STRUCTURE_SETTINGS,
   ) {
     if (
       settings.isAquifersEnabled() ||
@@ -289,6 +293,48 @@ export class NoiseBasedChunkGenerator implements WorldGenerator {
     return this.biomeSource;
   }
 
+  public getSeaLevel(): number {
+    return this.seaLevel;
+  }
+
+  public getPrimaryBiome(chunkX: number, chunkZ: number): Biome {
+    return this.biomeSource.getNoiseBiome((chunkX << 2) + 2, 0, (chunkZ << 2) + 2) as Biome;
+  }
+
+  public createStructures(structureManager: StructureFeatureManager, chunkX: number, chunkZ: number): void {
+    const chunkPos = new ChunkPos(chunkX, chunkZ);
+    const biome = this.getPrimaryBiome(chunkX, chunkZ);
+    for (const structureSupplier of biome.getGenerationSettings().structures()) {
+      const structure = structureSupplier();
+      const structureConfiguration = this.structureSettings.getConfig(structure.feature);
+      if (structureConfiguration === undefined) {
+        continue;
+      }
+
+      const existing = structureManager.getStartForFeature(chunkX, chunkZ, structure.feature);
+      const start = structure.generate(this, chunkPos, biome, existing?.getReferences() ?? 0, structureConfiguration);
+      structureManager.setStartForFeature(chunkX, chunkZ, structure.feature, start);
+    }
+  }
+
+  public createReferences(structureManager: StructureFeatureManager, chunkX: number, chunkZ: number): void {
+    const chunkPos = new ChunkPos(chunkX, chunkZ);
+    const minBlockX = chunkPos.getMinBlockX();
+    const minBlockZ = chunkPos.getMinBlockZ();
+    for (let otherChunkZ = chunkZ - 8; otherChunkZ <= chunkZ + 8; otherChunkZ++) {
+      for (let otherChunkX = chunkX - 8; otherChunkX <= chunkX + 8; otherChunkX++) {
+        const reference = ChunkPos.asLong(otherChunkX, otherChunkZ);
+        for (const start of structureManager.getAllStarts(otherChunkX, otherChunkZ).values()) {
+          if (!start.isValid() || !start.getBoundingBox().intersects(minBlockX, minBlockZ, minBlockX + 15, minBlockZ + 15)) {
+            continue;
+          }
+
+          structureManager.addReferenceForFeature(chunkX, chunkZ, start.getFeature(), reference);
+        }
+      }
+    }
+  }
+
   private fillTerrainBlockBuffer(chunk: MutableChunkBlockBuffer): void {
     const noiseColumns = this.createNoiseColumns(chunk.chunkX, chunk.chunkZ);
     const blocks = chunk.blocks;
@@ -385,10 +431,6 @@ export class NoiseBasedChunkGenerator implements WorldGenerator {
         `chunk buffer minY/height (${chunk.minY}, ${chunk.height}) did not match generator (${this.minY}, ${this.height})`,
       );
     }
-  }
-
-  private getPrimaryBiome(chunkX: number, chunkZ: number): Biome {
-    return this.biomeSource.getNoiseBiome((chunkX << 2) + 2, 0, (chunkZ << 2) + 2) as Biome;
   }
 
   private buildSurface(chunk: MutableChunkBlockBuffer, random: WorldgenRandom): void {

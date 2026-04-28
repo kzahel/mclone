@@ -20,6 +20,7 @@ import type { BiomeDecorationProfiler } from "./decoration-profiler";
 import type { GenerationStep } from "./generation-step";
 import type { GenerationEntitySink, NaturalSpawnerOptions } from "./natural-spawner";
 import type { WorldGenerator } from "./world-generator";
+import type { StructureFeatureManager } from "../../world/level/structure-feature-manager";
 
 const MIN_BUILD_HEIGHT = 0;
 const WORLD_HEIGHT = 256;
@@ -188,11 +189,23 @@ abstract class DemoWorldGeneratorBase implements WorldGenerator {
     return this.baseStoneSource;
   }
 
+  public getSeaLevel(): number {
+    return DEFAULT_SEA_LEVEL;
+  }
+
+  public getPrimaryBiome(chunkX: number, chunkZ: number): Biome {
+    return this.biomeSource.getNoiseBiome((chunkX << 2) + 2, 0, (chunkZ << 2) + 2) as Biome;
+  }
+
   public buildSurfaceAndBedrock(_chunk: MutableChunkBlockBuffer): void {}
 
   public applyCarvers(_chunk: MutableChunkBlockBuffer, _step?: GenerationStep.Carving): void {}
 
   public async applyCarversCooperative(_chunk: MutableChunkBlockBuffer, _yieldStep: CooperativeGenerationYield): Promise<void> {}
+
+  public createStructures(_structureManager: StructureFeatureManager, _chunkX: number, _chunkZ: number): void {}
+
+  public createReferences(_structureManager: StructureFeatureManager, _chunkX: number, _chunkZ: number): void {}
 
   public applyBiomeDecoration(
     _level: WorldGenLevel,

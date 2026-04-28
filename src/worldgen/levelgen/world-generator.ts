@@ -6,15 +6,21 @@ import type { BiomeDecorationProfiler } from "./decoration-profiler";
 import type { GenerationEntitySink, NaturalSpawnerOptions } from "./natural-spawner";
 import type { BaseStoneSource } from "./base-stone-source";
 import type { GenerationStep } from "./generation-step";
+import type { Biome } from "../biome/biome";
+import type { StructureFeatureManager } from "../../world/level/structure-feature-manager";
 
 export interface WorldGenerator {
   getSeed(): bigint;
   getBiomeSource(): NoiseBiomeSource;
   getBaseStoneSource(): BaseStoneSource;
+  getSeaLevel(): number;
+  getPrimaryBiome(chunkX: number, chunkZ: number): Biome;
   fillFromNoise(chunkX: number, chunkZ: number): MutableChunkBlockBuffer;
   buildSurfaceAndBedrock(chunk: MutableChunkBlockBuffer): void;
   applyCarvers(chunk: MutableChunkBlockBuffer, step?: GenerationStep.Carving): void;
   applyCarversCooperative(chunk: MutableChunkBlockBuffer, yieldStep: CooperativeGenerationYield): Promise<void>;
+  createStructures(structureManager: StructureFeatureManager, chunkX: number, chunkZ: number): void;
+  createReferences(structureManager: StructureFeatureManager, chunkX: number, chunkZ: number): void;
   applyBiomeDecoration(
     level: WorldGenLevel,
     chunkX: number,

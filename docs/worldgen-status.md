@@ -28,6 +28,7 @@ The project is past the “terrain demo” phase. The renderer is already consum
 - translated classic air carvers
 - translated first-pass biome decoration
 - translated common overworld ore generation, the active underground variety material blobs, the live badlands/mountain underground extras, glow lichen, rare dripstone, soft disks, monster rooms, and overworld fossils
+- translated chunk-owned structure starts/references plus the first true `StructureFeature` slice via buried treasure
 - translated rendering for water, tint, dark-oak trees, acacia trees, jungle trees, bamboo, mega spruce / mega pine conifers, huge mushrooms, bee nests, desert wells, grass, flowers, sunflowers, lily pads, seagrass, kelp, coral, sea pickles, mushrooms, cactus, sugar cane, vine, cocoa, melon, and related surface features
 
 Several later worldgen capabilities landed through renderer-driven tacticals rather than through the original worldgen arc, so this document should be treated as the authoritative status view when it disagrees with the older tactical sequence.
@@ -52,7 +53,7 @@ The main remaining gap is not foundational plumbing. It is parity breadth and co
 | Surface vegetation + water decoration | `84-91%` | First substantial overworld set landed, now including dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, cold-surface identity, and the translated desert-well `SURFACE_STRUCTURES` oddity | [`20`](./tactical/20-surface-special-blocks-and-biome-tint.md), [`21`](./tactical/21-surface-feature-palette-expansion.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`55`](./tactical/55-desert-well-follow-through.md) |
 | Biome decoration table coverage | `88-93%` | The full layered-overworld biome key set now has non-empty translated settings, including the last mountain / modified-jungle / badlands aliases and the non-natural `deep_warm_ocean` seagrass exactness follow-through; remaining gaps are narrower table exactness and confidence, not broad empty-table coverage | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md), [`45`](./tactical/45-overworld-biome-table-aliases-and-exactness.md), [`54`](./tactical/54-deep-warm-ocean-seagrass-simple-follow-through.md) |
 | Ore generation / underground decoration | `65-70%` | The live overworld underground helper stack is now translated: common ores, underground variety, biome-specific badlands/mountain extras, glow lichen, rare dripstone, soft disks, monster rooms, overworld fossils, target-rule plumbing, replace-single-block support, block/palette coverage, and biome-table wiring all landed; the main remaining gaps are stronger decorated-stage confidence/oracle coverage and later underground feature families outside this helper surface | [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md), [`60`](./tactical/60-monster-room-follow-through.md), [`61`](./tactical/61-fossil-follow-through.md) |
-| Structures | `0-5%` | Still intentionally absent as a real start/reference pipeline; the structure-looking ordinary configured features are now done, so the next work here is the true structure metadata/start/reference path | [`structures.md`](./structures.md), [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) |
+| Structures | `10-15%` | Early but real: chunk-owned `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES`, clipped `FEATURES` placement, and buried treasure are landed; persistence, block-entity state, template/jigsaw stacks, `Beardifier`, and almost every other structure family are still missing | [`structures.md`](./structures.md), [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md), [`62`](./tactical/62-buried-treasure-structure-foundation.md) |
 
 If you compress all of that to one number, the project is roughly `60-70%` of the way to “recognizable vanilla-overworld worldgen,” but much less complete than that for broad biome/decor/structure parity.
 
@@ -108,6 +109,16 @@ The project now has translated support for:
 - biome-specific underground extras: badlands extra gold, mountain emeralds, and mountain infested stone
 - monster rooms / dungeons and overworld fossils through the ordinary configured-feature path
 
+### Structure foundation
+
+The structure path now has its first real vanilla-shaped slice:
+
+- `STRUCTURE_STARTS` and `STRUCTURE_REFERENCES` are real generated statuses instead of placeholders.
+- Generated chunks now own starts-by-feature and references-by-feature metadata, and `StructureFeatureManager` lookups read that metadata during decoration.
+- `Biome.generate(...)` now places referenced structure starts before ordinary configured features in the same decoration step, clipped to the current chunk through `StructureStart.placeInChunk(...)`.
+- `BuriedTreasureFeature` is the first landed true `StructureFeature`, wired through beach and snowy-beach biome tables with vanilla spacing/probability selection.
+- The current limitation is scope, not shape: metadata persistence, loot/block-entity state, noise-affecting `Beardifier` support, and the rest of the structure families still remain.
+
 ### Current tree / plant / water feature families
 
 The current worldgen path covers a meaningful first-pass overworld set:
@@ -153,7 +164,7 @@ Every layered-overworld biome key in the current target now resolves to a non-em
 
 No layered-overworld biome key in the current target still falls back to a carver-only settings table. The remaining biome-table gaps are narrow exactness issues rather than broad missing families.
 
-One important clarification from tactical [`54`](./tactical/54-deep-warm-ocean-seagrass-simple-follow-through.md): `deep_warm_ocean` now has the translated `SEAGRASS_SIMPLE` table path, but the live 1.17.1 Java `OceanMixerLayer` does not naturally surface that biome in normal overworld generation. Tacticals [`55`](./tactical/55-desert-well-follow-through.md) and [`61`](./tactical/61-fossil-follow-through.md) also close the separate structure-looking configured-feature oddities that do not belong in the deferred structure-start pipeline. Later coral state/death-tick behavior is still an optional narrow ocean follow-through if it becomes worth another slice.
+One important clarification from tactical [`54`](./tactical/54-deep-warm-ocean-seagrass-simple-follow-through.md): `deep_warm_ocean` now has the translated `SEAGRASS_SIMPLE` table path, but the live 1.17.1 Java `OceanMixerLayer` does not naturally surface that biome in normal overworld generation. Tacticals [`55`](./tactical/55-desert-well-follow-through.md), [`60`](./tactical/60-monster-room-follow-through.md), and [`61`](./tactical/61-fossil-follow-through.md) closed the separate structure-looking configured-feature oddities before true structure work resumed in [`62`](./tactical/62-buried-treasure-structure-foundation.md). Later coral state/death-tick behavior is still an optional narrow ocean follow-through if it becomes worth another slice.
 
 ### Tree and decorator parity gaps
 
@@ -172,11 +183,12 @@ The project now covers the full live vanilla overworld underground-helper surfac
 
 ### Structures
 
-Structure generation is still effectively absent:
+Structure generation is no longer absent, but it is still very early:
 
-- no village/structure placement pipeline
-- no start/piece/jigsaw system
-- no generated structure injection into chunks
+- real `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES` metadata generation now exists
+- chunk-local structure placement during `FEATURES` now exists
+- buried treasure is landed as the first proof `StructureFeature`
+- villages, jigsaw/template stacks, noise-affecting structures, stronghold placement, mineshafts, most custom pieces, and durable structure persistence are still missing
 
 Desert wells, monster rooms, and overworld fossils are not part of this missing bucket because they are ordinary configured features, not `StructureFeature`s.
 
@@ -264,7 +276,7 @@ Tacticals 42 through 44 landed the live overworld underground-helper surface. Th
 
 Structures are important for parity, but they should not displace the terrain/carver/biome-decor core unless priorities change.
 
-The ordinary configured-feature oddity lane is now complete: desert wells, monster rooms, and overworld fossils all landed outside `StructureFeature` work. From here, follow [`structures.md`](./structures.md) and keep the orchestration aligned with [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md): start with structure status/metadata and simple custom structures, then mineshafts, template-backed structures, strongholds/terrain blending, large structures, and finally jigsaw villages/outposts.
+The ordinary configured-feature oddity lane is complete and was the right first priority before larger structure work: desert wells, monster rooms, and overworld fossils all landed outside `StructureFeature` work before the real pipeline resumed. The first true structure slice is now landed through [`62`](./tactical/62-buried-treasure-structure-foundation.md): chunk-owned starts/references plus buried treasure. From here, follow [`structures.md`](./structures.md) and keep the orchestration aligned with [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md): continue with the next small custom structures, then mineshafts, template-backed structures, strongholds/terrain blending, large structures, and finally jigsaw villages/outposts.
 
 ## Update rules
 

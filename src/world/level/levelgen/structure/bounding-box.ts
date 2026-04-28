@@ -50,6 +50,10 @@ export class BoundingBox {
     return box;
   }
 
+  public static fromBlockPos(pos: BlockPos): BoundingBox {
+    return new BoundingBox(pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ());
+  }
+
   public encapsulate(pos: Vec3i): BoundingBox {
     this.minXValue = Math.min(this.minXValue, pos.getX());
     this.minYValue = Math.min(this.minYValue, pos.getY());
@@ -87,6 +91,26 @@ export class BoundingBox {
     );
   }
 
+  public intersects(other: BoundingBox): boolean;
+  public intersects(minX: number, minZ: number, maxX: number, maxZ: number): boolean;
+  public intersects(first: BoundingBox | number, second?: number, third?: number, fourth?: number): boolean {
+    if (first instanceof BoundingBox) {
+      return (
+        this.minXValue <= first.maxXValue &&
+        this.maxXValue >= first.minXValue &&
+        this.minYValue <= first.maxYValue &&
+        this.maxYValue >= first.minYValue &&
+        this.minZValue <= first.maxZValue &&
+        this.maxZValue >= first.minZValue
+      );
+    }
+
+    return this.minXValue <= third!
+      && this.maxXValue >= first
+      && this.minZValue <= fourth!
+      && this.maxZValue >= second!;
+  }
+
   public getXSpan(): number {
     return this.maxXValue - this.minXValue + 1;
   }
@@ -121,6 +145,14 @@ export class BoundingBox {
 
   public maxZ(): number {
     return this.maxZValue;
+  }
+
+  public getCenter(): BlockPos {
+    return new BlockPos(
+      this.minXValue + Math.floor((this.maxXValue - this.minXValue + 1) / 2),
+      this.minYValue + Math.floor((this.maxYValue - this.minYValue + 1) / 2),
+      this.minZValue + Math.floor((this.maxZValue - this.minZValue + 1) / 2),
+    );
   }
 
   public forAllCorners(consumer: (pos: BlockPos) => void): void {
