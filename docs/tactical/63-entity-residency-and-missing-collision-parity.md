@@ -2,7 +2,7 @@
 
 Bring runtime entity loading, ticking, unloading, and "player outruns terrain" behavior to a vanilla-shaped architecture. The goal is not to make missing chunks feel good by inventing terrain; it is to make the host keep the right chunks available through tickets/statuses, and to fail closed when authoritative collision is unavailable.
 
-Status: first four implementation slices landed. Generated entity chunk status now comes from generated-holder full-status transitions, those holder statuses are derived from numeric ticket levels on explicit `entity` / `player_view` ticket sources, and the entity-ticking ticket uses the vanilla-shaped two-ring interior of the published player view. Later slices should replace the square-ticket approximation with fuller `DistanceManager`-style propagation, add entity persistence, resolve player-as-entity treatment, and add dynamic collision.
+Status: first five implementation slices landed. Generated entity chunk status now comes from generated-holder full-status transitions, those holder statuses are derived from numeric ticket levels on explicit `entity` / `player_view` / `light` / `forced` ticket sources, and the entity-ticking source area uses the vanilla-shaped two-ring interior of the published player view. Later slices should replace the bounded square/source-radius ticket approximation with fuller `DistanceManager`-style propagation, add entity persistence, resolve player-as-entity treatment, and add dynamic collision.
 
 ## Vanilla source anchors
 
@@ -35,7 +35,7 @@ Status: first four implementation slices landed. Generated entity chunk status n
 ## Current mclone behavior
 
 - `EntityRuntime` and `PersistentEntitySectionManager` already port the vanilla-shaped add/move/remove/load/unload/status semantics.
-- `GeneratedWorldHost` now installs level-carrying `player_view` and `entity` tickets and stores the current `FullChunkStatus` on generated chunk holders. Entity manager updates are emitted from holder full-status transitions via `PersistentEntitySectionManager.updateChunkStatus(...)`.
+- `GeneratedWorldHost` now installs level-carrying `player_view`, `entity`, transient `light`, and host-owned `forced` tickets and stores the current `FullChunkStatus` on generated chunk holders. Entity manager updates are emitted from holder full-status transitions via `PersistentEntitySectionManager.updateChunkStatus(...)`.
 - `ensureOriginalMobsForChunk(...)` no longer promotes chunks to `ENTITY_TICKING`; publication only creates and sends snapshots for entities that the entity manager already considers tracked.
 - `player_view` chunks derive full status from propagated ticket levels. At radius 0 this means 25 published/tracked chunks: 1 `ENTITY_TICKING` center chunk, 8 `TICKING` chunks, and 16 `BORDER` chunks. `TICKING` and `BORDER` are both tracked-only for entity visibility.
 - `discardUnloadedChunkState(...)` re-applies the current ticket-derived holder full status instead of blindly hiding the chunk, so chunks outside the published/entity ticket become hidden while tracked-only chunks remain accessible.
@@ -49,17 +49,17 @@ Status: first four implementation slices landed. Generated entity chunk status n
 1. **Entity status ownership**
    - Status: landed for generated-host ownership.
    - Landed: entity chunk status is no longer promoted by chunk publication; generated holders own current full status, and entity visibility/ticking updates are emitted from full-status transitions.
-   - Remaining gap: those holder statuses are still computed from square ticket coverage rather than the full vanilla `DistanceManager` graph/update pipeline.
+   - Remaining gap: those holder statuses are still computed from bounded square/source-radius ticket coverage rather than the full vanilla `DistanceManager` graph/update pipeline.
    - Parity target: entity status is derived from full-status state, then handed to `PersistentEntitySectionManager.updateChunkStatus(...)`.
 
 2. **Tracked ring vs entity-ticking ring**
    - Status: landed for generated host ticket/status behavior.
-   - Remaining gap: the split now uses numeric ticket levels, but the source tickets are still mclone square tickets rather than vanilla player-distance trackers plus throttled `PLAYER` tickets.
+   - Remaining gap: the split now uses numeric ticket levels and coalesced source radii, but the source tickets are still mclone tickets rather than vanilla player-distance trackers plus throttled `PLAYER` tickets.
    - Parity target: distinguish tracked chunks from entity-ticking chunks. Published chunks can be tracked without ticking; only `ENTITY_TICKING` chunks tick ordinary entities.
 
 3. **Ticket levels instead of radius helper decisions**
-   - Status: first slice landed for `player_view` / `entity`.
-   - Remaining gap: lighting and forced ticket sources do not yet participate in level-derived holder status, and the propagation model is still a bounded square approximation.
+   - Status: landed for current generated-host ticket sources.
+   - Remaining gap: propagation is still represented by bounded square/source-radius tickets instead of vanilla's dynamic fixed-point graph, and forced tickets do not yet have a public protocol/command owner.
    - Parity target: `ChunkHolder`-like records own full status, and entity manager updates are a consequence of full-status promotion/demotion from ticket levels.
 
 4. **Entity persistence backend**
@@ -104,29 +104,36 @@ Status: first four implementation slices landed. Generated entity chunk status n
    - Added status counters and a transition test for `BORDER -> ENTITY_TICKING -> BORDER -> INACCESSIBLE`.
 
 4. **Ticket-level full-status derivation**
-   - Status: first slice landed.
+   - Status: landed.
    - Added numeric generated ticket levels and `FullChunkStatus` derivation equivalent to vanilla's `ChunkHolder.getFullChunkStatus(level)` thresholds.
-   - `player_view` tickets use a level that makes the published edge `BORDER`, the next inner ring `TICKING`, and the interior `ENTITY_TICKING`.
+   - `player_view` tickets use ticket levels/source radii that make the published edge `BORDER`, the next inner ring `TICKING`, and the interior `ENTITY_TICKING`.
    - Holder full status now comes from the best propagated ticket level instead of direct source membership checks.
 
-5. **Entity storage integration**
+5. **Source-radius, light, and forced tickets**
+   - Status: landed.
+   - Added `sourceRadius` to coalesce square source areas before ticket-level propagation.
+   - Added transient `light` tickets at level `33` while initial light is pending.
+   - Added host-owned `forced` tickets at level `31`, including the propagated `TICKING` and `BORDER` rings.
+   - Holder full-status sync now scans all level-carrying ticket sources.
+
+6. **Entity storage integration**
    - Add host-provided entity storage adapters for memory/file/IndexedDB.
    - Apply pending-write read-through and session epoch protections.
    - Test unload while entity save is pending, immediate return, and stale write rejection.
 
-6. **Fast movement settling harness**
+7. **Fast movement settling harness**
    - Create a controlled host test that blocks generation, sends movement across a chunk boundary, verifies missing collision leaves input queued, releases generation, then verifies final chunk/entity states and processed input order.
    - Track whether the result is a mclone safety divergence or vanilla-equivalent behavior.
 
-7. **Player/entity bridge**
+8. **Player/entity bridge**
    - Decide whether to place players in the section manager as always-ticking entities or keep a documented session-state bridge.
    - Prove chunk tickets, tracking, and dynamic collision see players consistently.
 
-8. **Ground and spawn parity**
+9. **Ground and spawn parity**
    - Replace provisional spawn height with loaded-chunk/heightmap scans.
    - Missing chunk data must return a not-ready result, not a generated fallback.
 
-9. **Dynamic collision**
+10. **Dynamic collision**
    - Extend collision worlds with entity shapes from accessible sections.
    - Keep missing entity/collision windows explicit in prediction diagnostics.
 
@@ -167,3 +174,11 @@ Status: first four implementation slices landed. Generated entity chunk status n
 - Level thresholds match the vanilla `ChunkHolder.getFullChunkStatus(level)` shape used by 1.17.1: `<=31` is `ENTITY_TICKING`, `32` is `TICKING`, `33` is `BORDER`, and `>=34` is `INACCESSIBLE`.
 - `player_view` tickets now carry a level chosen so the published edge is `BORDER`. For radius 0, the published 5x5 status distribution is 1 `ENTITY_TICKING`, 8 `TICKING`, and 16 `BORDER`.
 - Entity ticking counts stay unchanged because `TICKING` maps to tracked-only in `Visibility.fromFullChunkStatus(...)`.
+
+## Landed fifth slice
+
+- `GeneratedChunkTicketSet` now supports `sourceRadius`, matching the effect of multiple neighboring vanilla source tickets without reintroducing direct radius promotion code.
+- `player_view` now uses level `31` plus the entity-ticking source radius; the visible edge still settles to `BORDER`.
+- `light` tickets participate at level `33` while initial light is pending and are removed when that light work settles.
+- `forced` tickets participate at level `31` through `GeneratedWorldHost.setForcedChunk(...)`, including propagated `TICKING` and `BORDER` rings.
+- Tests cover source-radius propagation, light/forced ticket status derivation, forced holder statuses, and light-ticket lifetime during blocked initial lighting.

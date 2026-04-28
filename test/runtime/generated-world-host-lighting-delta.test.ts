@@ -110,6 +110,87 @@ class RecordingLightingService implements LightingService {
   }
 }
 
+class BlockingInitialLightingService implements LightingService {
+  public readonly initialLightRequests: RequestInitialLightRequest[] = [];
+  public readonly upsertRequests: UpsertLightChunkRequest[] = [];
+  private readonly results: LightingResult[] = [];
+  private readonly initialRequestResolvers: Array<() => void> = [];
+  private released = false;
+
+  public configureWorld(_request: ConfigureLightingWorldRequest): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public setView(_request: SetLightingViewRequest): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public upsertChunk(request: UpsertLightChunkRequest): Promise<void> {
+    this.upsertRequests.push(request);
+    return Promise.resolve();
+  }
+
+  public removeChunk(_request: RemoveLightChunkRequest): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public requestInitialLight(request: RequestInitialLightRequest): Promise<void> {
+    this.initialLightRequests.push(request);
+    while (this.initialRequestResolvers.length > 0) {
+      this.initialRequestResolvers.shift()?.();
+    }
+    if (this.released) {
+      this.enqueueLightReady(request);
+    }
+    return Promise.resolve();
+  }
+
+  public enqueueBlockChanges(_request: LightBlockChangeBatchRequest): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public pollResults(request: PollLightingResultsRequest): Promise<LightingResultBatch> {
+    const maxResults = request.maxResults ?? this.results.length;
+    return Promise.resolve({
+      type: "lighting_result_batch",
+      results: this.results.splice(0, maxResults),
+      pendingResultCount: this.results.length,
+    });
+  }
+
+  public waitForInitialRequest(): Promise<void> {
+    if (this.initialLightRequests.length > 0) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      this.initialRequestResolvers.push(resolve);
+    });
+  }
+
+  public releaseAll(): void {
+    this.released = true;
+    for (const request of this.initialLightRequests) {
+      this.enqueueLightReady(request);
+    }
+  }
+
+  private enqueueLightReady(request: RequestInitialLightRequest): void {
+    this.results.push({
+      type: "chunk_light_ready",
+      chunkViewRevision: request.chunkViewRevision,
+      chunkX: request.chunkX,
+      chunkZ: request.chunkZ,
+      chunkRevision: request.chunkRevision,
+      light: {
+        sky: [],
+        block: [],
+        lightCorrect: true,
+      },
+    });
+  }
+}
+
 function chunkSnapshots(messages: readonly WorldHostMessage[]): ChunkSnapshotMessage[] {
   return messages.filter((message): message is ChunkSnapshotMessage => message.type === "chunk_snapshot");
 }
@@ -133,6 +214,7 @@ describe("GeneratedWorldHost lighting deltas", () => {
       blockStateById: blocks.blockStateById,
       blockStateIds: blocks.blockStateIds,
       lightingService,
+      lightingMode: "vanilla17",
       worldTickIntervalMs: 1,
       nowMs: () => nowMs,
     });
@@ -171,6 +253,51 @@ describe("GeneratedWorldHost lighting deltas", () => {
     });
   }, 30_000);
 
+  test("keeps light tickets in holder status while initial light is pending", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const lightingService = new BlockingInitialLightingService();
+    const host = new GeneratedWorldHost({
+      seed: OPEN_WORLD_REQUEST.seed,
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingService,
+      lightingMode: "vanilla17",
+    });
+
+    await host.openWorld(OPEN_WORLD_REQUEST);
+    const viewPromise = host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    await Promise.race([
+      lightingService.waitForInitialRequest(),
+      viewPromise.then(() => {
+        throw new Error("setChunkView completed before initial light was blocked");
+      }),
+    ]);
+
+    const lightTickets = host.getDebugChunkTicketRecords().filter((ticket) => ticket.source === "light");
+    expect(lightTickets.length).toBeGreaterThan(0);
+    expect(lightTickets).toContainEqual({
+      source: "light",
+      id: "0,0",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+      level: 33,
+      chunkCount: 1,
+    });
+    expect(lightTickets.every((ticket) => ticket.radius === 0 && ticket.level === 33)).toBe(true);
+
+    lightingService.releaseAll();
+    await viewPromise;
+
+    expect(host.getDebugChunkTicketRecords().filter((ticket) => ticket.source === "light")).toEqual([]);
+  }, 30_000);
+
   test("requests initial light only from feature-complete 3x3 inputs", async () => {
     const blocks = registerGeneratedRenderBlocks();
     const lightingService = new RecordingLightingService();
@@ -180,6 +307,7 @@ describe("GeneratedWorldHost lighting deltas", () => {
       blockStateById: blocks.blockStateById,
       blockStateIds: blocks.blockStateIds,
       lightingService,
+      lightingMode: "vanilla17",
     });
 
     await host.openWorld(OPEN_WORLD_REQUEST);

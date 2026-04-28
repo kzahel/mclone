@@ -27,7 +27,6 @@ import {
   type GeneratedDecorationOptions,
 } from "./generated-decoration-region";
 import {
-  GENERATED_CHUNK_BORDER_LEVEL,
   GENERATED_CHUNK_ENTITY_TICKING_LEVEL,
   GeneratedChunkTicketSet,
   type GeneratedChunkTicketDebugRecord,
@@ -169,7 +168,6 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     const previousAuthoritySignature = this.authorityTickets.getSignature();
     const nextPublishRadius = Math.max(1, viewDistance) + 1;
     const nextEntityRadius = Math.max(0, nextPublishRadius - 2);
-    const nextPlayerViewTicketLevel = GENERATED_CHUNK_BORDER_LEVEL - nextPublishRadius;
     // Runtime: retain status records far enough for publishable 3x3 FULL, LIGHT's 3x3 FEATURES input,
     // FEATURES' dependency window, and the pre-noise ±8 structure-reference halo for authority-only terrain reads.
     const nextAuthorityRadius =
@@ -187,13 +185,15 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       centerChunkX,
       centerChunkZ,
       radius: nextPublishRadius,
-      level: nextPlayerViewTicketLevel,
+      sourceRadius: nextEntityRadius,
+      level: GENERATED_CHUNK_ENTITY_TICKING_LEVEL,
     }]);
     this.authorityTickets.replaceSource("entity", [{
       source: "entity",
       centerChunkX,
       centerChunkZ,
       radius: nextEntityRadius,
+      sourceRadius: nextEntityRadius,
       level: GENERATED_CHUNK_ENTITY_TICKING_LEVEL,
     }]);
     this.authorityTickets.replaceSource("generation_dependency", [{

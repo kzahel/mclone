@@ -28,9 +28,11 @@ import {
   getGeneratedChunkDependencyStatus,
 } from "../../world/level/generated-chunk-status";
 import {
-  GENERATED_CHUNK_BORDER_LEVEL,
   GENERATED_CHUNK_ENTITY_TICKING_LEVEL,
+  GENERATED_CHUNK_FORCED_LEVEL,
+  GENERATED_CHUNK_LIGHT_LEVEL,
   GeneratedChunkTicketSet,
+  type GeneratedChunkTicket,
   type GeneratedChunkTicketDebugRecord,
 } from "../../world/level/generated-chunk-tickets";
 import {
@@ -251,10 +253,6 @@ export function getGeneratedWorldEntityChunkRadius(radius: number): number {
   return Math.max(0, getGeneratedWorldViewChunkRadius(radius) - 2);
 }
 
-export function getGeneratedWorldPlayerViewTicketLevel(radius: number): number {
-  return GENERATED_CHUNK_BORDER_LEVEL - getGeneratedWorldViewChunkRadius(radius);
-}
-
 export function getGeneratedWorldFullChunkRadius(radius: number): number {
   return getGeneratedWorldViewChunkRadius(radius) + 1;
 }
@@ -298,6 +296,8 @@ const CHUNK_HOLDER_UNLOAD_BACKLOG_THRESHOLD = 2_000;
 const GENERATED_PLAYER_VIEW_TICKET_SOURCE = "player_view";
 const GENERATED_DEPENDENCY_TICKET_SOURCE = "generation_dependency";
 const GENERATED_ENTITY_TICKET_SOURCE = "entity";
+const GENERATED_LIGHT_TICKET_SOURCE = "light";
+const GENERATED_FORCED_TICKET_SOURCE = "forced";
 
 type GeneratedChunkStatusJobState = "pending" | "fulfilled" | "rejected";
 
@@ -550,6 +550,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly spawnedOriginalMobChunks = new Set<string>();
   private readonly chunkHolders = new Map<string, GeneratedChunkHolder>();
   private readonly chunkResidencyTickets = new GeneratedChunkTicketSet();
+  private readonly forcedChunkKeys = new Set<string>();
   private readonly chunkHolderUnloadQueue = new Map<string, QueuedChunkHolderUnload>();
   private readonly pendingUnloadChunkHolders = new Map<string, GeneratedPendingUnloadHolder>();
   private readonly generatedCacheWriteVersions = new Map<string, number>();
@@ -568,6 +569,7 @@ export class GeneratedWorldHost implements WorldHost {
   private opened = false;
   private chunkViewJobRevision = 0;
   private activeChunkViewJobRevision: number | undefined;
+  private activeLightTicketRevision: number | undefined;
   private nextLightBlockChangeBatchId = 1;
   private nextGeneratedEntityId = 1;
 
@@ -880,20 +882,46 @@ export class GeneratedWorldHost implements WorldHost {
     return this.chunkResidencyTickets.getDebugRecords();
   }
 
+  public setForcedChunk(chunkX: number, chunkZ: number, forced: boolean): void {
+    const key = chunkKey(chunkX, chunkZ);
+    if (forced) {
+      if (this.forcedChunkKeys.has(key)) {
+        return;
+      }
+      this.forcedChunkKeys.add(key);
+    } else {
+      if (!this.forcedChunkKeys.delete(key)) {
+        return;
+      }
+    }
+
+    const previousSignature = this.chunkResidencyTickets.getSignature();
+    this.replaceForcedChunkTickets();
+    this.finalizeChunkResidencyTicketUpdate(previousSignature);
+    if (!forced) {
+      this.queueChunkHolderUnloadsOutsideCurrentAuthority();
+    }
+  }
+
   private updateChunkResidencyTickets(request: SetChunkViewRequest): void {
     const previousSignature = this.chunkResidencyTickets.getSignature();
+    const viewRadius = getGeneratedWorldViewChunkRadius(request.radius);
+    const entityRadius = getGeneratedWorldEntityChunkRadius(request.radius);
+    this.activeLightTicketRevision = undefined;
     this.chunkResidencyTickets.replaceSource(GENERATED_PLAYER_VIEW_TICKET_SOURCE, [{
       source: GENERATED_PLAYER_VIEW_TICKET_SOURCE,
       centerChunkX: request.centerChunkX,
       centerChunkZ: request.centerChunkZ,
-      radius: getGeneratedWorldViewChunkRadius(request.radius),
-      level: getGeneratedWorldPlayerViewTicketLevel(request.radius),
+      radius: viewRadius,
+      sourceRadius: entityRadius,
+      level: GENERATED_CHUNK_ENTITY_TICKING_LEVEL,
     }]);
     this.chunkResidencyTickets.replaceSource(GENERATED_ENTITY_TICKET_SOURCE, [{
       source: GENERATED_ENTITY_TICKET_SOURCE,
       centerChunkX: request.centerChunkX,
       centerChunkZ: request.centerChunkZ,
-      radius: getGeneratedWorldEntityChunkRadius(request.radius),
+      radius: entityRadius,
+      sourceRadius: entityRadius,
       level: GENERATED_CHUNK_ENTITY_TICKING_LEVEL,
     }]);
     this.chunkResidencyTickets.replaceSource(GENERATED_DEPENDENCY_TICKET_SOURCE, [{
@@ -902,33 +930,78 @@ export class GeneratedWorldHost implements WorldHost {
       centerChunkZ: request.centerChunkZ,
       radius: getGeneratedWorldAuthorityChunkRadius(request.radius),
     }]);
+    this.chunkResidencyTickets.clearSource(GENERATED_LIGHT_TICKET_SOURCE);
+    this.replaceForcedChunkTickets();
+    this.finalizeChunkResidencyTicketUpdate(previousSignature);
+  }
+
+  private replaceForcedChunkTickets(): void {
+    const radius = GENERATED_CHUNK_LIGHT_LEVEL - GENERATED_CHUNK_FORCED_LEVEL;
+    const tickets: GeneratedChunkTicket[] = [...this.forcedChunkKeys].sort().map((key) => {
+      const [chunkXRaw, chunkZRaw] = key.split(",");
+      return {
+        source: GENERATED_FORCED_TICKET_SOURCE,
+        id: key,
+        centerChunkX: Number(chunkXRaw),
+        centerChunkZ: Number(chunkZRaw),
+        radius,
+        level: GENERATED_CHUNK_FORCED_LEVEL,
+      };
+    });
+    this.chunkResidencyTickets.replaceSource(
+      GENERATED_FORCED_TICKET_SOURCE,
+      tickets,
+    );
+  }
+
+  private replaceLightChunkTickets(chunks: readonly GeneratedLevelChunk[], chunkViewRevision: number): void {
+    const previousSignature = this.chunkResidencyTickets.getSignature();
+    this.activeLightTicketRevision = chunks.length === 0 ? undefined : chunkViewRevision;
+    const tickets: GeneratedChunkTicket[] = chunks.map((chunk) => ({
+      source: GENERATED_LIGHT_TICKET_SOURCE,
+      id: chunkKey(chunk.chunkX, chunk.chunkZ),
+      centerChunkX: chunk.chunkX,
+      centerChunkZ: chunk.chunkZ,
+      radius: 0,
+      level: GENERATED_CHUNK_LIGHT_LEVEL,
+    }));
+    this.chunkResidencyTickets.replaceSource(
+      GENERATED_LIGHT_TICKET_SOURCE,
+      tickets,
+    );
+    this.finalizeChunkResidencyTicketUpdate(previousSignature);
+  }
+
+  private clearLightChunkTickets(chunkViewRevision: number): void {
+    if (this.activeLightTicketRevision !== chunkViewRevision) {
+      return;
+    }
+
+    const previousSignature = this.chunkResidencyTickets.getSignature();
+    this.activeLightTicketRevision = undefined;
+    this.chunkResidencyTickets.clearSource(GENERATED_LIGHT_TICKET_SOURCE);
+    this.finalizeChunkResidencyTicketUpdate(previousSignature);
+  }
+
+  private finalizeChunkResidencyTicketUpdate(previousSignature: string): void {
     const nextSignature = this.chunkResidencyTickets.getSignature();
     if (nextSignature !== previousSignature) {
       this.incrementWorldgenCount("chunk_residency_tickets_updated");
     }
     this.noteChunkResidencyTicketCount();
-    this.syncChunkHolderFullStatuses(request);
+    this.syncChunkHolderFullStatuses();
   }
 
-  private syncChunkHolderFullStatuses(request: SetChunkViewRequest): void {
+  private syncChunkHolderFullStatuses(): void {
     const keys = new Set(this.entityChunkStatuses.keys());
     for (const [key, holder] of this.chunkHolders) {
       if (holder.fullStatus !== FullChunkStatus.INACCESSIBLE) {
         keys.add(key);
       }
     }
-    this.addChunkSquareKeys(
-      keys,
-      request.centerChunkX,
-      request.centerChunkZ,
-      getGeneratedWorldViewChunkRadius(request.radius),
-    );
-    this.addChunkSquareKeys(
-      keys,
-      request.centerChunkX,
-      request.centerChunkZ,
-      getGeneratedWorldEntityChunkRadius(request.radius),
-    );
+    this.chunkResidencyTickets.forEachLeveledChunk((chunkX, chunkZ) => {
+      keys.add(chunkKey(chunkX, chunkZ));
+    });
 
     let changed = false;
     for (const key of [...keys].sort()) {
@@ -947,14 +1020,6 @@ export class GeneratedWorldHost implements WorldHost {
     }
     this.noteChunkFullStatusCounts();
     this.noteEntityChunkStatusCounts();
-  }
-
-  private addChunkSquareKeys(keys: Set<string>, centerChunkX: number, centerChunkZ: number, radius: number): void {
-    for (let chunkZ = centerChunkZ - radius; chunkZ <= centerChunkZ + radius; chunkZ++) {
-      for (let chunkX = centerChunkX - radius; chunkX <= centerChunkX + radius; chunkX++) {
-        keys.add(chunkKey(chunkX, chunkZ));
-      }
-    }
   }
 
   private getCurrentChunkHolderFullStatus(chunkX: number, chunkZ: number): FullChunkStatus {
@@ -3219,93 +3284,98 @@ export class GeneratedWorldHost implements WorldHost {
       return;
     }
 
-    const dependencyChunks = this.collectLightingDependencyChunks(lightEligibleChunks);
-    for (const chunk of dependencyChunks) {
-      await yieldStep();
-      if (options.isCancelled?.() === true) {
-        return;
-      }
-      await this.upsertLightInputChunk(chunk, chunkViewRevision);
-    }
-
-    const pending = new Map<string, number>();
-    let acceptedBeforeRequests = false;
-    for (const chunk of lightEligibleChunks) {
-      if (options.isCancelled?.() === true) {
-        return;
-      }
-
-      const key = chunkKey(chunk.chunkX, chunk.chunkZ);
-      const chunkRevision = this.getChunkRevision(chunk.chunkX, chunk.chunkZ);
-      const accepted = this.getAcceptedCurrentChunkLight(chunk.chunkX, chunk.chunkZ);
-      if (accepted !== undefined && accepted.lightCorrect && this.sentLightInputRevisions.get(key) === chunkRevision) {
-        this.markChunkFullAfterAcceptedLight(chunk.chunkX, chunk.chunkZ);
-        await options.onInitialLightReady?.(chunk);
-        acceptedBeforeRequests = true;
-        continue;
-      }
-
-      const neighbors = this.collectInitialLightNeighborRevisions(chunk);
-      await lightingService.requestInitialLight({
-        type: "request_initial_light",
-        chunkViewRevision,
-        chunkX: chunk.chunkX,
-        chunkZ: chunk.chunkZ,
-        chunkRevision,
-        neighbors,
-      });
-      pending.set(key, chunkRevision);
-    }
-    if (acceptedBeforeRequests) {
-      await options.onInitialLightBatchReady?.();
-    }
-
-    while (pending.size > 0) {
-      await yieldStep();
-      if (options.isCancelled?.() === true) {
-        return;
-      }
-      const batch = await lightingService.pollResults({
-        type: "poll_light_results",
-        maxResults: LIGHTING_RESULT_BATCH_SIZE,
-      });
-      if (batch.results.length === 0) {
-        await yieldToEventLoop();
-        continue;
-      }
-
-      let acceptedInBatch = false;
-      for (const result of batch.results) {
-        switch (result.type) {
-          case "chunk_light_ready": {
-            const accepted = this.acceptInitialLightResult(result, pending, chunkViewRevision);
-            if (accepted) {
-              const chunk = this.level.getChunk(result.chunkX, result.chunkZ, false);
-              if (chunk !== null) {
-                this.markChunkFullAfterAcceptedLight(chunk.chunkX, chunk.chunkZ);
-                await options.onInitialLightReady?.(chunk);
-                acceptedInBatch = true;
-              }
-            }
-            break;
-          }
-          case "chunk_light_delta":
-            this.acceptLightDeltaResult(result, chunkViewRevision);
-            break;
-          case "block_light_update_complete":
-          case "light_performance":
-            break;
-          case "light_progress":
-            options.onLightProgress?.(result);
-            break;
-          case "light_error":
-            this.handleLightError(result, chunkViewRevision);
-            break;
+    this.replaceLightChunkTickets(lightEligibleChunks, chunkViewRevision);
+    try {
+      const dependencyChunks = this.collectLightingDependencyChunks(lightEligibleChunks);
+      for (const chunk of dependencyChunks) {
+        await yieldStep();
+        if (options.isCancelled?.() === true) {
+          return;
         }
+        await this.upsertLightInputChunk(chunk, chunkViewRevision);
       }
-      if (acceptedInBatch) {
+
+      const pending = new Map<string, number>();
+      let acceptedBeforeRequests = false;
+      for (const chunk of lightEligibleChunks) {
+        if (options.isCancelled?.() === true) {
+          return;
+        }
+
+        const key = chunkKey(chunk.chunkX, chunk.chunkZ);
+        const chunkRevision = this.getChunkRevision(chunk.chunkX, chunk.chunkZ);
+        const accepted = this.getAcceptedCurrentChunkLight(chunk.chunkX, chunk.chunkZ);
+        if (accepted !== undefined && accepted.lightCorrect && this.sentLightInputRevisions.get(key) === chunkRevision) {
+          this.markChunkFullAfterAcceptedLight(chunk.chunkX, chunk.chunkZ);
+          await options.onInitialLightReady?.(chunk);
+          acceptedBeforeRequests = true;
+          continue;
+        }
+
+        const neighbors = this.collectInitialLightNeighborRevisions(chunk);
+        await lightingService.requestInitialLight({
+          type: "request_initial_light",
+          chunkViewRevision,
+          chunkX: chunk.chunkX,
+          chunkZ: chunk.chunkZ,
+          chunkRevision,
+          neighbors,
+        });
+        pending.set(key, chunkRevision);
+      }
+      if (acceptedBeforeRequests) {
         await options.onInitialLightBatchReady?.();
       }
+
+      while (pending.size > 0) {
+        await yieldStep();
+        if (options.isCancelled?.() === true) {
+          return;
+        }
+        const batch = await lightingService.pollResults({
+          type: "poll_light_results",
+          maxResults: LIGHTING_RESULT_BATCH_SIZE,
+        });
+        if (batch.results.length === 0) {
+          await yieldToEventLoop();
+          continue;
+        }
+
+        let acceptedInBatch = false;
+        for (const result of batch.results) {
+          switch (result.type) {
+            case "chunk_light_ready": {
+              const accepted = this.acceptInitialLightResult(result, pending, chunkViewRevision);
+              if (accepted) {
+                const chunk = this.level.getChunk(result.chunkX, result.chunkZ, false);
+                if (chunk !== null) {
+                  this.markChunkFullAfterAcceptedLight(chunk.chunkX, chunk.chunkZ);
+                  await options.onInitialLightReady?.(chunk);
+                  acceptedInBatch = true;
+                }
+              }
+              break;
+            }
+            case "chunk_light_delta":
+              this.acceptLightDeltaResult(result, chunkViewRevision);
+              break;
+            case "block_light_update_complete":
+            case "light_performance":
+              break;
+            case "light_progress":
+              options.onLightProgress?.(result);
+              break;
+            case "light_error":
+              this.handleLightError(result, chunkViewRevision);
+              break;
+          }
+        }
+        if (acceptedInBatch) {
+          await options.onInitialLightBatchReady?.();
+        }
+      }
+    } finally {
+      this.clearLightChunkTickets(chunkViewRevision);
     }
   }
 

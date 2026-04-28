@@ -11,12 +11,15 @@ export const GENERATED_CHUNK_ENTITY_TICKING_LEVEL = 31;
 export const GENERATED_CHUNK_TICKING_LEVEL = 32;
 export const GENERATED_CHUNK_BORDER_LEVEL = 33;
 export const GENERATED_CHUNK_INACCESSIBLE_LEVEL = 34;
+export const GENERATED_CHUNK_FORCED_LEVEL = GENERATED_CHUNK_ENTITY_TICKING_LEVEL;
+export const GENERATED_CHUNK_LIGHT_LEVEL = GENERATED_CHUNK_BORDER_LEVEL;
 
 export interface GeneratedChunkTicket {
   readonly source: GeneratedChunkTicketSource;
   readonly centerChunkX: number;
   readonly centerChunkZ: number;
   readonly radius: number;
+  readonly sourceRadius?: number;
   readonly level?: number;
   readonly id?: string;
 }
@@ -48,6 +51,22 @@ export class GeneratedChunkTicketSet {
       }
       if (ticket.radius < 0) {
         throw new Error(`Generated chunk ticket radius must be non-negative, got ${ticket.radius.toString()}`);
+      }
+      if (!Number.isInteger(ticket.radius)) {
+        throw new Error(`Generated chunk ticket radius must be an integer, got ${ticket.radius.toString()}`);
+      }
+      if (ticket.sourceRadius !== undefined) {
+        if (!Number.isInteger(ticket.sourceRadius)) {
+          throw new Error(`Generated chunk ticket source radius must be an integer, got ${ticket.sourceRadius.toString()}`);
+        }
+        if (ticket.sourceRadius < 0) {
+          throw new Error(`Generated chunk ticket source radius must be non-negative, got ${ticket.sourceRadius.toString()}`);
+        }
+        if (ticket.sourceRadius > ticket.radius) {
+          throw new Error(
+            `Generated chunk ticket source radius ${ticket.sourceRadius.toString()} exceeded ticket radius ${ticket.radius.toString()}`,
+          );
+        }
       }
       if (ticket.level !== undefined && !Number.isInteger(ticket.level)) {
         throw new Error(`Generated chunk ticket level must be an integer, got ${ticket.level.toString()}`);
@@ -81,11 +100,8 @@ export class GeneratedChunkTicketSet {
         continue;
       }
 
-      const distance = Math.max(
-        Math.abs(chunkX - ticket.centerChunkX),
-        Math.abs(chunkZ - ticket.centerChunkZ),
-      );
-      if (distance > ticket.radius) {
+      const distance = generatedChunkTicketDistance(ticket, chunkX, chunkZ);
+      if (distance === undefined) {
         continue;
       }
 
@@ -111,6 +127,20 @@ export class GeneratedChunkTicketSet {
     }
 
     return false;
+  }
+
+  public forEachLeveledChunk(callback: (chunkX: number, chunkZ: number) => void): void {
+    for (const ticket of this.tickets.values()) {
+      if (ticket.level === undefined) {
+        continue;
+      }
+
+      for (let chunkZ = ticket.centerChunkZ - ticket.radius; chunkZ <= ticket.centerChunkZ + ticket.radius; chunkZ++) {
+        for (let chunkX = ticket.centerChunkX - ticket.radius; chunkX <= ticket.centerChunkX + ticket.radius; chunkX++) {
+          callback(chunkX, chunkZ);
+        }
+      }
+    }
   }
 
   public getBounds(): GeneratedChunkTicketBounds | undefined {
@@ -176,6 +206,7 @@ export class GeneratedChunkTicketSet {
         ticket.centerChunkX.toString(),
         ticket.centerChunkZ.toString(),
         ticket.radius.toString(),
+        ticket.sourceRadius?.toString() ?? "",
         ticket.level?.toString() ?? "",
       ].join(":"))
       .join("|");
@@ -195,6 +226,18 @@ export function fullStatusFromGeneratedTicketLevel(level: number): FullChunkStat
   return FullChunkStatus.INACCESSIBLE;
 }
 
+function generatedChunkTicketDistance(ticket: GeneratedChunkTicket, chunkX: number, chunkZ: number): number | undefined {
+  const distance = Math.max(
+    Math.abs(chunkX - ticket.centerChunkX),
+    Math.abs(chunkZ - ticket.centerChunkZ),
+  );
+  if (distance > ticket.radius) {
+    return undefined;
+  }
+
+  return Math.max(0, distance - (ticket.sourceRadius ?? 0));
+}
+
 function generatedChunkTicketKey(ticket: GeneratedChunkTicket): string {
-  return `${ticket.source}:${ticket.id ?? `${ticket.centerChunkX.toString()},${ticket.centerChunkZ.toString()},${ticket.radius.toString()},${ticket.level?.toString() ?? ""}`}`;
+  return `${ticket.source}:${ticket.id ?? `${ticket.centerChunkX.toString()},${ticket.centerChunkZ.toString()},${ticket.radius.toString()},${ticket.sourceRadius?.toString() ?? ""},${ticket.level?.toString() ?? ""}`}`;
 }

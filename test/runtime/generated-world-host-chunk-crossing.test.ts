@@ -16,6 +16,7 @@ import {
   type WorldStorageSession,
 } from "../../src/runtime/storage/world-storage";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
+import { FullChunkStatus } from "../../src/world/level/entity/full-chunk-status";
 import {
   GeneratedChunkStatus,
   type GeneratedChunkStatus as GeneratedChunkStatusName,
@@ -519,6 +520,32 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     Registry.BLOCK.clear();
   });
 
+  test("applies forced chunk tickets through holder full status", () => {
+    const { host } = createHost();
+
+    host.setForcedChunk(20, 0, true);
+
+    expect(host.getDebugChunkTicketRecords()).toEqual([
+      {
+        source: "forced",
+        id: "20,0",
+        centerChunkX: 20,
+        centerChunkZ: 0,
+        radius: 2,
+        level: 31,
+        chunkCount: 25,
+      },
+    ]);
+    expect(host.getDebugChunkFullStatusRecords().filter((record) => record.status === FullChunkStatus.ENTITY_TICKING)).toHaveLength(1);
+    expect(host.getDebugChunkFullStatusRecords().filter((record) => record.status === FullChunkStatus.TICKING)).toHaveLength(8);
+    expect(host.getDebugChunkFullStatusRecords().filter((record) => record.status === FullChunkStatus.BORDER)).toHaveLength(16);
+
+    host.setForcedChunk(20, 0, false);
+
+    expect(host.getDebugChunkTicketRecords()).toEqual([]);
+    expect(host.getDebugEntityChunkStatusRecords()).toEqual([]);
+  });
+
   test("coalesces a flat-grass chunk-view crossing without regenerating overlapping chunks", async () => {
     const { host, generator } = createHost();
     await host.openWorld(OPEN_WORLD_REQUEST);
@@ -576,6 +603,7 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
         centerChunkX: 0,
         centerChunkZ: 0,
         radius: 0,
+        sourceRadius: 0,
         level: 31,
         chunkCount: 1,
       },
@@ -591,6 +619,7 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
         centerChunkX: 0,
         centerChunkZ: 0,
         radius: 2,
+        sourceRadius: 0,
         level: 31,
         chunkCount: 25,
       },
@@ -699,6 +728,7 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
         centerChunkX: 1,
         centerChunkZ: 0,
         radius: 0,
+        sourceRadius: 0,
         level: 31,
         chunkCount: 1,
       },
@@ -714,6 +744,7 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
         centerChunkX: 1,
         centerChunkZ: 0,
         radius: 2,
+        sourceRadius: 0,
         level: 31,
         chunkCount: 25,
       },
