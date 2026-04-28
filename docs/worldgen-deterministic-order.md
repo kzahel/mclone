@@ -13,6 +13,8 @@ Related docs:
 - [`structures.md`](structures.md): structure-specific starts, references, pieces, templates, and implementation order
 - [`lighting.md`](lighting.md): light engine data structures and propagation algorithm
 - [`tactical/47-generated-chunk-status-orchestration.md`](tactical/47-generated-chunk-status-orchestration.md): implementation slice that made this order model explicit in the generated runtime
+- [`tactical/49-vanilla-status-futures-and-partial-chunks.md`](tactical/49-vanilla-status-futures-and-partial-chunks.md): remaining status-future and partial-`ProtoChunk` runtime work
+- [`tactical/56-worldgen-performance-investigation.md`](tactical/56-worldgen-performance-investigation.md): measured host/worldgen throughput and chunk-crossing counters
 
 ## Scope
 
@@ -184,6 +186,42 @@ Faithful publication rule:
 initial LIGHT(C) waits for 3x3 FEATURES around C
 client publication/ticking for C waits for 3x3 FULL around C
 ```
+
+## Normal Publication Count Model
+
+For a square of chunks that are all treated as ordinary vanilla client publications, the status closure is larger than the published square. This is expected work, not by itself evidence of duplicate generation.
+
+Let `P` be the Chebyshev radius of the normal published square:
+
+| Required state | Union radius | Chunk count |
+|---|---:|---:|
+| Published/sent chunks | `P` | `(2P + 1)^2` |
+| `FULL` chunks needed by the 3x3 send gate around every published chunk | `P + 1` | `(2P + 3)^2` |
+| `FEATURES` chunks needed by the `LIGHT` parent/gate for those full chunks | `P + 2` | `(2P + 5)^2` |
+| Materialized terrain chunks needed by the `FEATURES` center-plus-radius-1 `LIQUID_CARVERS` input | `P + 3` | `(2P + 7)^2` |
+| Metadata-only `STRUCTURE_STARTS` records touched by the outer `FEATURES` dependency range | `P + 10` | `(2P + 21)^2` |
+
+The current `mclone` radius-0 generated-host policy publishes a 5x5 square, so `P = 2`. The vanilla-shaped closure for that policy is:
+
+```text
+25 published snapshots
+49 FULL chunks
+81 FEATURES chunks
+121 materialized terrain chunks through LIQUID_CARVERS
+625 STRUCTURE_STARTS metadata records
+```
+
+After a warm steady-state move by one chunk along one axis, each square adds one new strip:
+
+```text
+5 new published snapshots
+7 new FULL chunks
+9 new FEATURES chunks
+11 new materialized terrain chunks
+25 new STRUCTURE_STARTS metadata records
+```
+
+Those are the target counts if all 5x5 snapshots are normal vanilla publications and each chunk/status is generated once. If we want a move to materialize only the 5 newly visible terrain chunks, that is a different policy: only those 5 can be treated as normal publishable chunks, while the rest of the visual/cache halo must be represented as non-ticking cache data with explicitly weaker vanilla guarantees. Do not silently weaken the 3x3 `FULL` send gate to obtain the smaller number.
 
 ## Player View Distance And Tickets
 

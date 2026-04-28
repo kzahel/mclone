@@ -2,7 +2,7 @@
 
 Build a repeatable performance investigation harness before choosing Rust/C/WASM, worker pools, or more aggressive TypeScript optimization.
 
-Status: proposed. This tactical should run before broad worldgen optimization work. It can run before or after [`49-vanilla-status-futures-and-partial-chunks.md`](49-vanilla-status-futures-and-partial-chunks.md), but the results should be interpreted with the known flattened-status gap in mind.
+Status: proposed. This tactical should run before broad worldgen optimization work. It can run before or after [`49-vanilla-status-futures-and-partial-chunks.md`](49-vanilla-status-futures-and-partial-chunks.md), but the results should be interpreted with the known status-future and partial-state gap in mind.
 
 ## Goal
 
@@ -10,7 +10,7 @@ Separate the current stutter risk into measurable causes:
 
 - raw chunk generation cost
 - oversized cooperative work quanta that block host input/poll/player ticks
-- overgeneration from the flattened authority/status window
+- normal-publication status closure size, duplicate in-flight work, and missing partial-status reuse
 - snapshot packing, transfer, render-world ingest, mesh build, and GPU upload cost
 - browser frame pacing cost on real browser/GPU/mobile hosts
 
@@ -35,7 +35,7 @@ Existing evidence:
 
 Known caveat:
 
-[`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md) says the current flattened authority terrain window is not vanilla-shaped. For `viewDistance=1`, the host may still prepare far more terrain than a mixed-status vanilla future graph would. Treat that as a likely first-order throughput issue, not as proof that JavaScript cannot keep up.
+[`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md) records the expected status-closure counts. For the current 5x5 normal-publication policy, `121` materialized terrain chunks and `81` `FEATURES` chunks are vanilla-shaped closure, not proof of duplicate generation. Treat the remaining performance question as: are we doing each required chunk/status once, are in-flight requests coalesced like `ChunkHolder`, and can partial `ProtoChunk`-like state survive route changes/unload/save instead of being recomputed?
 
 ## Host capability policy
 
@@ -199,7 +199,7 @@ Use this matrix before choosing implementation work:
 | `flat_grass` has frame/poll stalls | investigate snapshot transfer, render-world ingest, mesh upload, or scheduling; not noise worldgen |
 | `flat_grass` is smooth but `default terrain-only` stalls | inspect `fillFromNoise`, `NoiseSampler`, `BlendedNoise`, allocation in density fill |
 | terrain is smooth but `features` stalls | split decoration units further, profile feature/decorator hot spots, check heightmap/block-read volume |
-| default generates far more terrain chunks than status theory requires | prioritize Tactical 49 mixed-status futures before low-level optimization |
+| status/job counters show duplicate same-status work, reruns after cancellation, or lost partial progress | prioritize Tactical 57/58 before low-level optimization |
 | p95 is fine but max/p99 has a large single quantum | split the responsible phase or add a cooperative yield point |
 | total work is high but quanta are bounded | consider prioritization, background prefetch, status orchestration, or a worker pool |
 | one narrow numeric kernel dominates after status fixes | write a WASM spike for that module only, behind chunk-sized typed-array boundaries |
@@ -212,7 +212,7 @@ Use this matrix before choosing implementation work:
 Do not start Rust/C/WASM until all are true:
 
 - the benchmark names the hot function or module
-- the hot work remains hot after Tactical 49 or another overgeneration fix if applicable
+- the hot work remains hot after status-future coalescing and partial-state reuse work
 - cooperative scheduling cannot solve the user-visible stall by itself
 - the boundary can stay chunk-sized or section-sized
 - the port does not obscure seed-parity testing against the Java oracle
@@ -291,7 +291,8 @@ Radius-1 phase baseline, no lighting/liquid:
 Important count signal:
 
 - all three presets generated `121` terrain chunks and decorated `81` feature chunks to publish `25` chunks
-- that confirms the current flattened status/authority window is a major throughput factor to keep in view
+- that confirms the normal-publication status closure is large; by itself it is expected for a 5x5 normal published square
+- use future counters to separate expected closure from duplicate in-flight work, route-cancel reruns, or lost partial state
 
 Vanilla dependency check for the `7x7` vs `9x9` question:
 
@@ -324,6 +325,6 @@ Artifacts:
 Interpretation:
 
 - Host command responsiveness is good in the headless synthetic lane; `set_chunk_view`, input, and poll calls stay low-latency while jobs run.
-- Default worldgen cost is real, but the benchmark also shows a substantial dependency window: for radius 1, the host advances far more terrain/feature chunks than the published view. The `9x9` feature count is vanilla-shaped for normal publication of all `5x5` snapshots, but it is still a performance target if we split normal publication from cache/halo snapshots.
+- Default worldgen cost is real, and the benchmark shows the substantial dependency closure of normal publication. The `9x9` feature count and `11x11` terrain count are vanilla-shaped for normal publication of all `5x5` snapshots, but they remain a performance-policy target if we explicitly split normal publication from cache/halo snapshots.
 - Flat-world cost is not zero; chunk copy and snapshot packing are meaningful baseline costs even without noise or real decoration.
 - The next implementation step should be Tactical 49's mixed-status futures / partial chunks before a WASM rewrite. If default still has large single quanta after that, inspect `features.apply_biome_decoration`, air carvers, and density fill as narrow candidates.

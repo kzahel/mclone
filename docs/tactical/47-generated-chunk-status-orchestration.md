@@ -4,7 +4,7 @@ Replace the current generated/decorated/published lifecycle with an explicit van
 
 This tactical intentionally precedes [`46-full-decorated-spawn-chunk-parity.md`](46-full-decorated-spawn-chunk-parity.md). Tactical 46 should run on top of the `FEATURES`, initial lighting, and publication gates made explicit here.
 
-Status: implemented for explicit status names, finality gates, and publish/light checks. Follow-up required: the current runtime still uses a flattened hidden authority terrain window for some dependency preparation. That must be replaced with vanilla-shaped status futures and partial `ProtoChunk`-like records before treating the scheduler as parity-complete.
+Status: implemented for explicit status names, finality gates, and publish/light checks. Follow-up required: the current runtime still uses view-level batch preparation and coarse status records. That must be replaced with vanilla-shaped status futures and partial `ProtoChunk`-like records before treating the scheduler as parity-complete.
 
 Post-implementation finding, 2026-04-25: [`worldgen-deterministic-order.md`](../worldgen-deterministic-order.md) now documents the missing metadata-only path. In vanilla, a `FEATURES` range-8 dependency list is not all `LIQUID_CARVERS`; the center plus radius `1` are `LIQUID_CARVERS`, while radii `2..8` are only `STRUCTURE_STARTS`. The current `GeneratedRenderLevel.ensureDecorationTerrainWindow(...)` shape is therefore an over-generation shortcut and should be replaced, not optimized in place.
 
@@ -48,7 +48,7 @@ In scope:
 - make initial lighting requests require `decoration_stable(C)`
 - make publishability require the documented `3x3 FULL` gate, or explicitly encode and test a temporary divergence if full vanilla gating is too large for the current runtime path
 - keep hidden authority chunks resident separately from chunks sent to clients
-- replace flattened authority terrain generation with status requests whose dependency inputs match `ChunkMap.getDependencyStatus(...)`
+- replace view-level terrain/decorate job collection with status requests whose dependency inputs match `ChunkMap.getDependencyStatus(...)`
 - represent metadata-only `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES` inputs without materializing block sections
 - keep host-owned deterministic status advancement; workers may compute results but must not directly mutate neighboring authoritative chunks
 - add tests that fail if light or publication happens from weaker inputs

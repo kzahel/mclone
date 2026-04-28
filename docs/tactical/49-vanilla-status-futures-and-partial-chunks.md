@@ -1,6 +1,6 @@
 # Tactical 49 — Vanilla status futures and partial chunks
 
-Replace the generated host's flattened hidden authority terrain window with vanilla-shaped status futures and partial chunk records.
+Replace the generated host's view-level status batching with vanilla-shaped status futures and partial chunk records.
 
 Status: proposed. This tactical should run before more screenshot-throughput tuning and before using decorated parity failures as signal.
 
@@ -34,6 +34,29 @@ offset radius 2..8: STATUS_BY_RANGE[3..9] -> STRUCTURE_STARTS
 ```
 
 The outer ring is metadata, not terrain. Promoting it to `LIQUID_CARVERS` would be both slower and less faithful; the current runtime should preserve the existing metadata-only behavior while replacing the view-level batch runner with vanilla-shaped holder/status futures.
+
+## Boundary-crossing acceptance counts
+
+The target is not "only five generated chunks" for the current radius-0 host policy. The current policy publishes a 5x5 square as normal chunk data. For a normal published radius `P = 2`, vanilla-shaped closure requires:
+
+| State | Cold count | One-chunk axis move, warm count |
+|---|---:|---:|
+| published snapshots | `25` | `5` new |
+| `FULL` chunks | `49` | `7` new |
+| `FEATURES` chunks | `81` | `9` new |
+| materialized terrain through `LIQUID_CARVERS` | `121` | `11` new |
+| metadata `STRUCTURE_STARTS` records | `625` | `25` new |
+
+The focused runtime test [`generated-world-host-chunk-crossing.test.ts`](../../test/runtime/generated-world-host-chunk-crossing.test.ts) records the current flat-world chunk-crossing shape. Tactical 49 should keep these closure counts when all 5x5 chunks are normal publications, while improving the reuse guarantees:
+
+- each chunk/status has at most one in-flight job
+- repeated requests coalesce to the existing pending/completed status future
+- route changes do not discard partial status work earlier than the vanilla-equivalent unload/save boundary
+- metadata-only records stay metadata-only instead of being promoted to terrain sections
+
+Tactical [`57`](57-generated-chunk-holder-status-futures.md) has landed the first holder/coalescing layer around the existing host phases. The remaining Tactical 49 scheduler work is to invert view changes into recursive `ensureStatus(pos, status)` requests and then persist partial state through Tactical [`58`](58-generated-protochunk-partial-state-and-persistence.md).
+
+If a later UX policy wants only the five newly visible chunks to materialize terrain on a one-chunk move, it must explicitly split normal published/ticking chunks from a weaker visual/cache halo. That is not the same acceptance target as vanilla publication parity.
 
 ## Vanilla reuse and coalescing
 
@@ -87,7 +110,7 @@ The browser/Node scheduler can stay cooperative and host-owned, but the requeste
    - `BIOMES`, `NOISE`, `SURFACE`, `CARVERS`, and `LIQUID_CARVERS` advance only the chunks whose requested status requires them.
    - `FEATURES` receives a `WorldGenRegion`-style mixed-status input cache.
 
-4. **Remove flattened authority terrain preparation**
+4. **Remove view-level batch preparation**
    - Replace view-level terrain/decorate batch preparation with status dependency scheduling.
    - Keep 3x3 `FEATURES` stability and 3x3 `FULL` publish gates.
    - Keep cooperative yielding around status jobs, not around fake flattened phases.

@@ -218,11 +218,13 @@ Tactical [`50`](./tactical/50-beach-river-full-decorated-parity.md) is the next 
 
 This target should generate a scheduler-pinned full decorated fixture, measure the static and generated-liquid-tick diffs, then burn down exact mismatches. It specifically validates the risk that tactical 46 could not: legitimate shoreline/river loose material and soft-disk behavior in the same full-block harness that now catches tree, fluid, plant, ore, and edge-write drift.
 
-### 2. Replace flattened authority terrain with vanilla status futures
+### 2. Replace view-level status batching with vanilla status futures
 
-The current runtime now has explicit status labels and gates, but it still over-generates a hidden authority terrain window. That is not the vanilla mechanism. Tactical [`49`](./tactical/49-vanilla-status-futures-and-partial-chunks.md) should model `ChunkHolder`-style status futures and partial `ProtoChunk`-like records: metadata-only `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES` inputs must stay metadata-only, and a `FEATURES` range-8 dependency must use the mixed-status window selected by `ChunkMap.getDependencyStatus(...)` instead of promoting every dependency chunk to `LIQUID_CARVERS`. The source contract is [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md).
+The current runtime now has explicit status labels and gates, and its normal-publication closure is mostly vanilla-shaped: a 5x5 published square legitimately implies a 7x7 `FULL` gate, a 9x9 `FEATURES` gate, an 11x11 materialized terrain window, and a 25x25 metadata-status window. That count is recorded in [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md); do not treat it as accidental overgeneration by itself.
 
-This is both a parity-shape fix and the likely screenshot-throughput fix, but it is no longer a blocker for the spawn exactness claim.
+The remaining gap is reuse and data shape. Tactical [`49`](./tactical/49-vanilla-status-futures-and-partial-chunks.md) is the umbrella. Tactical [`57`](./tactical/57-generated-chunk-holder-status-futures.md) now has the first holder/coalescing slice around existing phases, but still needs recursive `ensureStatus(...)` scheduling to replace view-level job collection. Tactical [`58`](./tactical/58-generated-protochunk-partial-state-and-persistence.md) splits out partial `ProtoChunk`-like save/resume. Metadata-only `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES` inputs must stay metadata-only, and a `FEATURES` range-8 dependency must use the mixed-status window selected by `ChunkMap.getDependencyStatus(...)`.
+
+This is a parity-shape and throughput fix, but it is no longer a blocker for the spawn exactness claim.
 
 ### 3. Add more narrow full-decorated fixtures only when the diff points there
 
