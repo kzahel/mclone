@@ -23,10 +23,14 @@ export interface OpenWorldStorageRequest {
   readonly openedAtMs: number;
 }
 
+export interface SaveChunkOptions {
+  readonly generatedRecordWriteVersion?: number;
+}
+
 export interface ChunkStorage {
   loadChunk(chunkX: number, chunkZ: number): Promise<PackedChunkSnapshot | undefined>;
 
-  saveChunk(snapshot: PackedChunkSnapshot): Promise<void>;
+  saveChunk(snapshot: PackedChunkSnapshot, options?: SaveChunkOptions): Promise<void>;
 
   loadGeneratedChunk(chunkX: number, chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined>;
 

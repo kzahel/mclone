@@ -8,7 +8,9 @@ import { MemoryWorldStorage } from "../../src/runtime/storage/memory-world-stora
 import { LocalWorldClient, LocalWorldTransport } from "../../src/runtime/transport/local-world-transport";
 import { createBlockStateResolver, hydrateChunkFromSnapshot } from "../../src/world/level/chunk-snapshot";
 import { clonePackedChunkSnapshot, type PackedChunkSnapshot, unpackChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
+import { GeneratedChunkStatus } from "../../src/world/level/generated-chunk-status";
 import {
+  GENERATED_PROTO_CHUNK_CONTENT_VERSION,
   cloneGeneratedChunkStorageRecord,
   type GeneratedChunkStorageRecord,
 } from "../../src/world/level/generated-proto-chunk";
@@ -328,5 +330,40 @@ describe("GeneratedWorld persistence", () => {
       .find((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0);
     expect(publishedCenter?.snapshot.light).toBeUndefined();
     expect(storage.getChunkRecord(opened.saveMetadata.saveId, 0, 0)?.snapshot.light).toBeUndefined();
+  });
+
+  test("rejects stale generated chunk record writes", async () => {
+    const storage = new MemoryWorldStorage(() => 5_000);
+    const session = await storage.openWorld({
+      saveId: "generated-cas-test",
+      storageVersion: 1,
+      seed: "12345",
+      preset: "flat_grass",
+      minBuildHeight: 0,
+      height: 256,
+      openedAtMs: 5_000,
+    });
+    const staleRecord: GeneratedChunkStorageRecord = {
+      chunkX: 4,
+      chunkZ: -3,
+      type: "proto",
+      status: GeneratedChunkStatus.STRUCTURE_STARTS,
+      hasBlockSections: false,
+      isUnsaved: false,
+      contentVersion: GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+      writeVersion: 1,
+    };
+    const newerRecord: GeneratedChunkStorageRecord = {
+      ...staleRecord,
+      status: GeneratedChunkStatus.STRUCTURE_REFERENCES,
+      writeVersion: 2,
+    };
+
+    await session.chunks.saveGeneratedChunk(newerRecord);
+    await session.chunks.saveGeneratedChunk(staleRecord);
+
+    const loaded = await session.chunks.loadGeneratedChunk(4, -3);
+    expect(loaded?.status).toBe(GeneratedChunkStatus.STRUCTURE_REFERENCES);
+    expect(loaded?.writeVersion).toBe(2);
   });
 });

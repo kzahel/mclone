@@ -52,6 +52,7 @@ export interface GeneratedChunkStorageRecord {
   readonly hasBlockSections: boolean;
   readonly isUnsaved: boolean;
   readonly contentVersion: number;
+  readonly writeVersion: number;
   readonly snapshot?: PackedChunkSnapshot;
 }
 
@@ -105,6 +106,7 @@ export function advanceGeneratedChunkAccessStatus(
 export function createGeneratedChunkStorageRecord(
   access: GeneratedChunkAccess,
   snapshot?: PackedChunkSnapshot,
+  writeVersion = 0,
 ): GeneratedChunkStorageRecord {
   if (access.hasBlockSections && snapshot === undefined) {
     throw new Error(`Generated chunk (${access.chunkX.toString()}, ${access.chunkZ.toString()}) with block sections needs a snapshot`);
@@ -123,6 +125,7 @@ export function createGeneratedChunkStorageRecord(
     hasBlockSections: access.hasBlockSections,
     isUnsaved: false,
     contentVersion: access.contentVersion,
+    writeVersion,
   };
   return snapshot === undefined ? record : { ...record, snapshot: clonePackedChunkSnapshot(snapshot) };
 }
@@ -136,6 +139,7 @@ export function cloneGeneratedChunkStorageRecord(record: GeneratedChunkStorageRe
     hasBlockSections: record.hasBlockSections,
     isUnsaved: record.isUnsaved,
     contentVersion: record.contentVersion,
+    writeVersion: record.writeVersion,
   };
   return record.snapshot === undefined ? clone : { ...clone, snapshot: clonePackedChunkSnapshot(record.snapshot) };
 }

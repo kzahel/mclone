@@ -18,6 +18,7 @@ import {
   touchWorldSaveMetadata,
   type ChunkStorage,
   type OpenWorldStorageRequest,
+  type SaveChunkOptions,
   type WorldSaveMetadata,
   type WorldStorage,
   type WorldStorageSession,
@@ -40,7 +41,8 @@ interface FileChunkRecord {
   readonly lastEvictedAtMs?: number;
 }
 
-interface SerializedGeneratedChunkStorageRecord extends Omit<GeneratedChunkStorageRecord, "snapshot"> {
+interface SerializedGeneratedChunkStorageRecord extends Omit<GeneratedChunkStorageRecord, "snapshot" | "writeVersion"> {
+  readonly writeVersion?: number;
   readonly snapshot?: SerializedPackedChunkSnapshot;
 }
 
@@ -55,7 +57,7 @@ interface FileGeneratedChunkRecord {
   readonly lastEvictedAtMs?: number;
 }
 
-function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot): GeneratedChunkStorageRecord {
+function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot, writeVersion: number): GeneratedChunkStorageRecord {
   return {
     chunkX: snapshot.chunkX,
     chunkZ: snapshot.chunkZ,
@@ -64,6 +66,7 @@ function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot): Generate
     hasBlockSections: true,
     isUnsaved: false,
     contentVersion: GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+    writeVersion,
     snapshot,
   };
 }
@@ -77,6 +80,7 @@ function serializeGeneratedChunkStorageRecord(record: GeneratedChunkStorageRecor
     hasBlockSections: record.hasBlockSections,
     isUnsaved: record.isUnsaved,
     contentVersion: record.contentVersion,
+    writeVersion: record.writeVersion,
   };
   return record.snapshot === undefined ? serialized : { ...serialized, snapshot: serializePackedChunkSnapshot(record.snapshot) };
 }
@@ -90,6 +94,7 @@ function deserializeGeneratedChunkStorageRecord(record: SerializedGeneratedChunk
     hasBlockSections: record.hasBlockSections,
     isUnsaved: record.isUnsaved,
     contentVersion: record.contentVersion,
+    writeVersion: record.writeVersion ?? 0,
   };
   return record.snapshot === undefined ? deserialized : { ...deserialized, snapshot: deserializePackedChunkSnapshot(record.snapshot) };
 }
@@ -165,8 +170,11 @@ class FileChunkStorage implements ChunkStorage {
     return deserializePackedChunkSnapshot(record.snapshot);
   }
 
-  public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
+  public async saveChunk(snapshot: PackedChunkSnapshot, options?: SaveChunkOptions): Promise<void> {
     const savedAtMs = this.now();
+    const existingGeneratedRecord = await this.loadGeneratedChunkRecord(snapshot.chunkX, snapshot.chunkZ);
+    const generatedRecordWriteVersion = options?.generatedRecordWriteVersion
+      ?? ((existingGeneratedRecord?.generatedChunk.writeVersion ?? 0) + 1);
     await writeJsonFile(
       getFileChunkRecordPath(this.rootDirectory, this.saveId, snapshot.chunkX, snapshot.chunkZ),
       {
@@ -178,17 +186,14 @@ class FileChunkStorage implements ChunkStorage {
         savedAtMs,
       } satisfies FileChunkRecord,
     );
-    await this.saveGeneratedChunkRecord(createFullGeneratedChunkRecord(snapshot), savedAtMs);
+    await this.saveGeneratedChunkRecord(createFullGeneratedChunkRecord(snapshot, generatedRecordWriteVersion), savedAtMs);
   }
 
   public async loadGeneratedChunk(chunkX: number, chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
     const filePath = getFileGeneratedChunkRecordPath(this.rootDirectory, this.saveId, chunkX, chunkZ);
-    const record = await readJsonFile<FileGeneratedChunkRecord>(filePath);
+    const record = await this.loadGeneratedChunkRecord(chunkX, chunkZ);
     if (record === undefined) {
       return undefined;
-    }
-    if (record.schemaVersion !== FILE_GENERATED_CHUNK_RECORD_SCHEMA_VERSION) {
-      throw new Error(`Unsupported file generated chunk record schemaVersion ${String(record.schemaVersion)} in ${filePath}`);
     }
 
     await writeJsonFile(filePath, {
@@ -203,6 +208,11 @@ class FileChunkStorage implements ChunkStorage {
   }
 
   private async saveGeneratedChunkRecord(record: GeneratedChunkStorageRecord, savedAtMs: number): Promise<void> {
+    const existing = await this.loadGeneratedChunkRecord(record.chunkX, record.chunkZ);
+    if (existing !== undefined && (existing.generatedChunk.writeVersion ?? 0) > record.writeVersion) {
+      return;
+    }
+
     await writeJsonFile(
       getFileGeneratedChunkRecordPath(this.rootDirectory, this.saveId, record.chunkX, record.chunkZ),
       {
@@ -214,6 +224,22 @@ class FileChunkStorage implements ChunkStorage {
         savedAtMs,
       } satisfies FileGeneratedChunkRecord,
     );
+  }
+
+  private async loadGeneratedChunkRecord(chunkX: number, chunkZ: number): Promise<FileGeneratedChunkRecord | undefined> {
+    const filePath = getFileGeneratedChunkRecordPath(this.rootDirectory, this.saveId, chunkX, chunkZ);
+    const record = await readJsonFile<FileGeneratedChunkRecord>(filePath);
+    if (record === undefined) {
+      return undefined;
+    }
+    if (record.schemaVersion !== FILE_GENERATED_CHUNK_RECORD_SCHEMA_VERSION) {
+      throw new Error(`Unsupported file generated chunk record schemaVersion ${String(record.schemaVersion)} in ${filePath}`);
+    }
+
+    return {
+      ...record,
+      generatedChunk: serializeGeneratedChunkStorageRecord(deserializeGeneratedChunkStorageRecord(record.generatedChunk)),
+    };
   }
 
   public async evictChunk(chunkX: number, chunkZ: number): Promise<void> {

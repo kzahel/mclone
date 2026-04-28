@@ -274,6 +274,7 @@ Storage now has generated records beside packed full snapshots:
 - `loadGeneratedChunk(...)` / `saveGeneratedChunk(...)` read and write status-shaped generated access records.
 - Metadata-only records persist without block sections.
 - Sectioned partials persist their status plus a packed section snapshot so `LIQUID_CARVERS` and `FEATURES` work can resume without rerunning completed phases.
+- Generated records carry a per-chunk `writeVersion`; storage adapters reject lower-version generated-record writes so older queued partial records cannot overwrite newer full/dirty generated state.
 - Host preload checks generated records before falling back to legacy packed snapshots.
 
 This is still not a full vanilla `ProtoChunk`. The record does not yet store real structures, heightmaps, carving masks beyond the existing section snapshot path, postprocessing offsets, entities/block entities, inhabited time, or trusted light state.
@@ -294,6 +295,7 @@ That means persisted light is currently not authoritative for host reload. A lig
 - Dirty chunks still use the durable save path before dirty chunk data is discarded.
 - Generated status progress also marks the resident holder's proto/full `chunkToSave` access unsaved; host flush and holder pruning queue those generated records for storage.
 - Holders pruned while a generated-record save is pending stay in a pending-unload map; if interest returns before the save completes, the holder is resurrected instead of reading stale storage or regenerating.
+- Partial generated records, generated-clean full cache records, and dirty full records use the same host-owned generated-record write-version stream; stale lower-version generated records are skipped by memory, file, and IndexedDB storage.
 - Host block mutations mark the owning chunk dirty and mark published chunks for replacement snapshot publication.
 - Dirty published chunks are saved when flushed.
 - Dirty chunks are saved before eviction; clean eviction still only records adapter-local `lastEvictedAtMs`.

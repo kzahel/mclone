@@ -11,6 +11,7 @@ import {
   touchWorldSaveMetadata,
   type ChunkStorage,
   type OpenWorldStorageRequest,
+  type SaveChunkOptions,
   type WorldSaveMetadata,
   type WorldStorage,
   type WorldStorageSession,
@@ -44,7 +45,7 @@ type IndexedDbGeneratedChunkRecord = {
   readonly lastEvictedAtMs?: number;
 };
 
-function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot): GeneratedChunkStorageRecord {
+function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot, writeVersion: number): GeneratedChunkStorageRecord {
   return {
     chunkX: snapshot.chunkX,
     chunkZ: snapshot.chunkZ,
@@ -53,8 +54,21 @@ function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot): Generate
     hasBlockSections: true,
     isUnsaved: false,
     contentVersion: GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+    writeVersion,
     snapshot: clonePackedChunkSnapshot(snapshot),
   };
+}
+
+function cloneStoredGeneratedChunkRecord(record: GeneratedChunkStorageRecord): GeneratedChunkStorageRecord {
+  const storedRecord = record as GeneratedChunkStorageRecord & { readonly writeVersion?: number };
+  return cloneGeneratedChunkStorageRecord({
+    ...record,
+    writeVersion: storedRecord.writeVersion ?? 0,
+  });
+}
+
+function generatedChunkRecordWriteVersion(record: GeneratedChunkStorageRecord): number {
+  return (record as GeneratedChunkStorageRecord & { readonly writeVersion?: number }).writeVersion ?? 0;
 }
 
 function openIndexedDb(factory: IDBFactory): Promise<IDBDatabase> {
@@ -167,9 +181,14 @@ class IndexedDbChunkStorage implements ChunkStorage {
     return record === undefined ? undefined : clonePackedChunkSnapshot(record.snapshot);
   }
 
-  public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
+  public async saveChunk(snapshot: PackedChunkSnapshot, options?: SaveChunkOptions): Promise<void> {
     const transaction = this.database.transaction([CHUNKS_STORE, GENERATED_CHUNKS_STORE], "readwrite");
     const savedAtMs = this.now();
+    const key = [this.saveId, snapshot.chunkX, snapshot.chunkZ];
+    const generatedStore = transaction.objectStore(GENERATED_CHUNKS_STORE);
+    const existingGeneratedRecord = (await requestToPromise(generatedStore.get(key))) as IndexedDbGeneratedChunkRecord | undefined;
+    const generatedRecordWriteVersion = options?.generatedRecordWriteVersion
+      ?? ((existingGeneratedRecord === undefined ? 0 : generatedChunkRecordWriteVersion(existingGeneratedRecord.generatedChunk)) + 1);
     transaction.objectStore(CHUNKS_STORE).put({
       saveId: this.saveId,
       chunkX: snapshot.chunkX,
@@ -177,13 +196,15 @@ class IndexedDbChunkStorage implements ChunkStorage {
       snapshot: clonePackedChunkSnapshot(snapshot),
       savedAtMs,
     } satisfies IndexedDbChunkRecord);
-    transaction.objectStore(GENERATED_CHUNKS_STORE).put({
-      saveId: this.saveId,
-      chunkX: snapshot.chunkX,
-      chunkZ: snapshot.chunkZ,
-      generatedChunk: createFullGeneratedChunkRecord(snapshot),
-      savedAtMs,
-    } satisfies IndexedDbGeneratedChunkRecord);
+    if (existingGeneratedRecord === undefined || generatedChunkRecordWriteVersion(existingGeneratedRecord.generatedChunk) <= generatedRecordWriteVersion) {
+      generatedStore.put({
+        saveId: this.saveId,
+        chunkX: snapshot.chunkX,
+        chunkZ: snapshot.chunkZ,
+        generatedChunk: createFullGeneratedChunkRecord(snapshot, generatedRecordWriteVersion),
+        savedAtMs,
+      } satisfies IndexedDbGeneratedChunkRecord);
+    }
     await waitForTransaction(transaction);
   }
 
@@ -195,21 +216,30 @@ class IndexedDbChunkStorage implements ChunkStorage {
     if (record !== undefined) {
       store.put({
         ...record,
+        generatedChunk: cloneStoredGeneratedChunkRecord(record.generatedChunk),
         lastLoadedAtMs: this.now(),
       });
     }
 
     await waitForTransaction(transaction);
-    return record === undefined ? undefined : cloneGeneratedChunkStorageRecord(record.generatedChunk);
+    return record === undefined ? undefined : cloneStoredGeneratedChunkRecord(record.generatedChunk);
   }
 
   public async saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void> {
     const transaction = this.database.transaction(GENERATED_CHUNKS_STORE, "readwrite");
-    transaction.objectStore(GENERATED_CHUNKS_STORE).put({
+    const store = transaction.objectStore(GENERATED_CHUNKS_STORE);
+    const key = [this.saveId, record.chunkX, record.chunkZ];
+    const existingGeneratedRecord = (await requestToPromise(store.get(key))) as IndexedDbGeneratedChunkRecord | undefined;
+    if (existingGeneratedRecord !== undefined && generatedChunkRecordWriteVersion(existingGeneratedRecord.generatedChunk) > record.writeVersion) {
+      await waitForTransaction(transaction);
+      return;
+    }
+
+    store.put({
       saveId: this.saveId,
       chunkX: record.chunkX,
       chunkZ: record.chunkZ,
-      generatedChunk: cloneGeneratedChunkStorageRecord(record),
+      generatedChunk: cloneStoredGeneratedChunkRecord(record),
       savedAtMs: this.now(),
     } satisfies IndexedDbGeneratedChunkRecord);
     await waitForTransaction(transaction);

@@ -478,6 +478,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly chunkHolders = new Map<string, GeneratedChunkHolder>();
   private readonly pendingUnloadChunkHolders = new Map<string, GeneratedPendingUnloadHolder>();
   private readonly generatedCacheWriteVersions = new Map<string, number>();
+  private readonly generatedChunkRecordWriteVersions = new Map<string, number>();
   private storageSideEffectQueue: Promise<void> = Promise.resolve();
   private pendingStorageSideEffects = 0;
   private readonly worldgenPerformance: MutableWorldgenPerformanceCounters = {
@@ -1198,6 +1199,7 @@ export class GeneratedWorldHost implements WorldHost {
       hasBlockSections: true,
       isUnsaved: false,
       contentVersion: GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+      writeVersion: 0,
       snapshot,
     });
     this.incrementWorldgenCount("storage_preload_loaded");
@@ -1296,6 +1298,7 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private rememberStoredGeneratedChunkAccess(record: GeneratedChunkStorageRecord): void {
+    this.noteGeneratedChunkRecordWriteVersion(chunkKey(record.chunkX, record.chunkZ), record.writeVersion);
     this.getChunkHolder(record.chunkX, record.chunkZ).chunkToSave = createGeneratedChunkAccessFromStorageRecord({
       ...record,
       isUnsaved: false,
@@ -1317,7 +1320,9 @@ export class GeneratedWorldHost implements WorldHost {
       return undefined;
     }
 
-    const record = this.createGeneratedChunkStorageRecordForAccess(access, sourceChunk ?? undefined);
+    const key = chunkKey(access.chunkX, access.chunkZ);
+    const writeVersion = this.bumpGeneratedChunkRecordWriteVersion(key);
+    const record = this.createGeneratedChunkStorageRecordForAccess(access, sourceChunk ?? undefined, writeVersion);
     if (record === undefined) {
       return undefined;
     }
@@ -1340,6 +1345,7 @@ export class GeneratedWorldHost implements WorldHost {
   private createGeneratedChunkStorageRecordForAccess(
     access: GeneratedChunkAccess,
     sourceChunk?: GeneratedLevelChunk,
+    writeVersion = 0,
   ): GeneratedChunkStorageRecord | undefined {
     let snapshot: PackedChunkSnapshot | undefined;
     if (access.hasBlockSections) {
@@ -1352,7 +1358,7 @@ export class GeneratedWorldHost implements WorldHost {
       snapshot = withoutPersistedLight(this.buildPackedChunkSnapshot(chunk));
     }
 
-    return createGeneratedChunkStorageRecord(access, snapshot);
+    return createGeneratedChunkStorageRecord(access, snapshot, writeVersion);
   }
 
   private async saveGeneratedChunkRecord(record: GeneratedChunkStorageRecord): Promise<void> {
@@ -1373,16 +1379,17 @@ export class GeneratedWorldHost implements WorldHost {
       return;
     }
 
-    await this.cacheGeneratedChunkSnapshot(snapshot);
+    const writeVersion = this.bumpGeneratedChunkRecordWriteVersion(key);
+    await this.cacheGeneratedChunkSnapshot(snapshot, writeVersion);
   }
 
-  private async cacheGeneratedChunkSnapshot(snapshot: PackedChunkSnapshot): Promise<void> {
+  private async cacheGeneratedChunkSnapshot(snapshot: PackedChunkSnapshot, generatedRecordWriteVersion: number): Promise<void> {
     if (this.storageSession === undefined) {
       return;
     }
 
     await this.recordWorldgenPhaseAsync("storage.cache_generated_chunk", () =>
-      this.storageSession!.chunks.saveChunk(withoutPersistedLight(snapshot))
+      this.storageSession!.chunks.saveChunk(withoutPersistedLight(snapshot), { generatedRecordWriteVersion })
     );
     this.incrementWorldgenCount("storage_cache_saves");
   }
@@ -1390,13 +1397,14 @@ export class GeneratedWorldHost implements WorldHost {
   private queueGeneratedCacheChunkSnapshot(snapshot: PackedChunkSnapshot): void {
     const key = chunkKey(snapshot.chunkX, snapshot.chunkZ);
     const version = this.bumpGeneratedCacheWriteVersion(key);
+    const generatedRecordWriteVersion = this.bumpGeneratedChunkRecordWriteVersion(key);
     this.queueStorageSideEffect(async () => {
       if (this.generatedCacheWriteVersions.get(key) !== version || this.dirtyDurableChunks.has(key)) {
         this.incrementWorldgenCount("storage_cache_saves_skipped_stale");
         return;
       }
 
-      await this.cacheGeneratedChunkSnapshot(snapshot);
+      await this.cacheGeneratedChunkSnapshot(snapshot, generatedRecordWriteVersion);
     });
   }
 
@@ -1406,15 +1414,28 @@ export class GeneratedWorldHost implements WorldHost {
     return version;
   }
 
+  private bumpGeneratedChunkRecordWriteVersion(key: string): number {
+    const version = (this.generatedChunkRecordWriteVersions.get(key) ?? 0) + 1;
+    this.generatedChunkRecordWriteVersions.set(key, version);
+    return version;
+  }
+
+  private noteGeneratedChunkRecordWriteVersion(key: string, writeVersion: number): void {
+    if ((this.generatedChunkRecordWriteVersions.get(key) ?? 0) < writeVersion) {
+      this.generatedChunkRecordWriteVersions.set(key, writeVersion);
+    }
+  }
+
   private async saveDirtyChunkSnapshot(key: string, snapshot: PackedChunkSnapshot): Promise<void> {
     this.bumpGeneratedCacheWriteVersion(key);
+    const generatedRecordWriteVersion = this.bumpGeneratedChunkRecordWriteVersion(key);
     if (this.storageSession === undefined) {
       this.dirtyDurableChunks.delete(key);
       return;
     }
 
     await this.recordWorldgenPhaseAsync("storage.save_dirty_chunk", () =>
-      this.storageSession!.chunks.saveChunk(withoutPersistedLight(snapshot))
+      this.storageSession!.chunks.saveChunk(withoutPersistedLight(snapshot), { generatedRecordWriteVersion })
     );
     this.incrementWorldgenCount("storage_dirty_saves");
     this.dirtyDurableChunks.delete(key);

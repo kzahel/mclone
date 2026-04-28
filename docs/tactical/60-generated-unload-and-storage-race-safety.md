@@ -2,7 +2,7 @@
 
 Make generated chunk unload/save/load ordering predictable like vanilla `ChunkMap`, so async persistence cannot cause duplicate generation, stale reloads, or older partial records overwriting newer chunk state.
 
-Status: first pending-unload resurrection slice landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating.
+Status: pending-unload resurrection and generated-record write-version slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record.
 
 ## Vanilla source anchors
 
@@ -23,8 +23,8 @@ Status: first pending-unload resurrection slice landed. The generated host keeps
 
 2. **Stale partial write after newer state**
    - Risk: an older generated partial save writes after a newer full/dirty state.
-   - Existing protection: generated-clean packed snapshot writes have per-chunk stale-write versions.
-   - Remaining gap: generated partial records need the same per-chunk version/CAS policy.
+   - Current protection: generated partial records, generated-clean packed snapshot writes, and dirty saves share a per-chunk generated-record write-version stream. Storage adapters reject lower-version generated-record writes.
+   - Remaining gap: packed snapshot bytes still rely on the host's generated-cache stale guards and the serialized queue; a later keyed storage queue should make same-chunk ordering explicit.
 
 3. **Hydrate after interest changed**
    - Risk: async preload completes after the chunk is no longer in the current authority window.
@@ -51,13 +51,20 @@ Status: first pending-unload resurrection slice landed. The generated host keeps
 - New counters: `chunk_holders_pending_unload_scheduled`, `chunk_holders_pending_unload_resurrected`, `chunk_holders_pending_unload_completed`, `chunk_holders_pending_unload_current`, and `chunk_holders_pending_unload_max`.
 - Regression coverage blocks generated-record saves, moves away, immediately moves back, and asserts the original chunk is not regenerated while storage still has no saved generated record.
 
+## Landed second slice
+
+- `GeneratedChunkStorageRecord` now includes a per-chunk `writeVersion`.
+- `GeneratedWorldHost` owns a `generatedChunkRecordWriteVersions` map and bumps it for generated partial saves, generated-clean full cache writes, and dirty full saves.
+- Storage adapters use compare-and-skip semantics for generated records: `MemoryWorldStorage`, `FileWorldStorage`, and `IndexedDbWorldStorage` reject an incoming generated record when storage already has a higher `writeVersion`.
+- Legacy generated records without `writeVersion` hydrate as version `0`, so the next host write advances them instead of treating old records as authoritative over new writes.
+- Regression coverage writes a newer generated record, then an older generated record for the same chunk, and verifies storage keeps the newer status/version.
+
 ## Next implementation slices
 
-1. Add per-chunk generated-record write versions so stale partial writes cannot overwrite newer full/dirty records.
-2. Add authority/revision checks after generated-record and legacy snapshot preload reads.
-3. Add a storage/session epoch to reject queued writes after clear/reset/close.
+1. Add authority/revision checks after generated-record and legacy snapshot preload reads.
+2. Add a storage/session epoch to reject queued writes after clear/reset/close.
+3. Split the global storage queue into keyed same-chunk ordering plus bounded global concurrency.
 4. Replace authority-square pruning with a ticket-shaped pending unload queue and processing budget.
-5. Split the global storage queue into keyed same-chunk ordering plus bounded global concurrency.
 
 ## Validation
 

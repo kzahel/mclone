@@ -11,6 +11,7 @@ import {
   touchWorldSaveMetadata,
   type ChunkStorage,
   type OpenWorldStorageRequest,
+  type SaveChunkOptions,
   type WorldSaveMetadata,
   type WorldStorage,
   type WorldStorageSession,
@@ -40,7 +41,7 @@ type MemoryWorldRecord = {
   generatedChunks: Map<string, MemoryGeneratedChunkRecord>;
 };
 
-function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot): GeneratedChunkStorageRecord {
+function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot, writeVersion: number): GeneratedChunkStorageRecord {
   return {
     chunkX: snapshot.chunkX,
     chunkZ: snapshot.chunkZ,
@@ -49,8 +50,16 @@ function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot): Generate
     hasBlockSections: true,
     isUnsaved: false,
     contentVersion: GENERATED_PROTO_CHUNK_CONTENT_VERSION,
+    writeVersion,
     snapshot: clonePackedChunkSnapshot(snapshot),
   };
+}
+
+function isStaleGeneratedChunkWrite(
+  existing: MemoryGeneratedChunkRecord | undefined,
+  incomingWriteVersion: number,
+): boolean {
+  return existing !== undefined && existing.generatedChunk.writeVersion > incomingWriteVersion;
 }
 
 class MemoryChunkStorage implements ChunkStorage {
@@ -69,19 +78,27 @@ class MemoryChunkStorage implements ChunkStorage {
     return clonePackedChunkSnapshot(record.snapshot);
   }
 
-  public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
+  public async saveChunk(snapshot: PackedChunkSnapshot, options?: SaveChunkOptions): Promise<void> {
     const savedAtMs = this.now();
+    const key = chunkKey(snapshot.chunkX, snapshot.chunkZ);
     this.world.chunks.set(
-      chunkKey(snapshot.chunkX, snapshot.chunkZ),
+      key,
       {
         snapshot: clonePackedChunkSnapshot(snapshot),
         savedAtMs,
       },
     );
+    const existingGeneratedRecord = this.world.generatedChunks.get(key);
+    const writeVersion = options?.generatedRecordWriteVersion
+      ?? ((existingGeneratedRecord?.generatedChunk.writeVersion ?? 0) + 1);
+    if (isStaleGeneratedChunkWrite(existingGeneratedRecord, writeVersion)) {
+      return;
+    }
+
     this.world.generatedChunks.set(
-      chunkKey(snapshot.chunkX, snapshot.chunkZ),
+      key,
       {
-        generatedChunk: createFullGeneratedChunkRecord(snapshot),
+        generatedChunk: createFullGeneratedChunkRecord(snapshot, writeVersion),
         savedAtMs,
       },
     );
@@ -98,6 +115,11 @@ class MemoryChunkStorage implements ChunkStorage {
   }
 
   public async saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void> {
+    const existingGeneratedRecord = this.world.generatedChunks.get(chunkKey(record.chunkX, record.chunkZ));
+    if (isStaleGeneratedChunkWrite(existingGeneratedRecord, record.writeVersion)) {
+      return;
+    }
+
     this.world.generatedChunks.set(
       chunkKey(record.chunkX, record.chunkZ),
       {
