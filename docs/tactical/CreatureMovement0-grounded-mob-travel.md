@@ -29,7 +29,7 @@ The browser host still lacks that full stack. This slice introduces a narrow tem
 
 ## Deferred
 
-- Full `Path`, `Node`, `Target`, `BlockPathTypes`, `NodeEvaluator`, `WalkNodeEvaluator`, and `PathFinder` ports.
+- Full `NodeEvaluator`, `WalkNodeEvaluator`, `PathFinder`, and live `PathNavigation` integration. `CreatureMovement1` has landed the data-only `Path`, `Node`, `Target`, `BlockPathTypes`, and `BinaryHeap` foundation.
 - Collision-shape based `Entity.move(...)`, step-up, edge handling, gravity, block friction, stuck detection, and fluids.
 - Door/fence/malus handling and per-mob pathfinding penalties.
 - Real terrain traversal over drops, climbs, water, fences, leaves, and partial block collision shapes.
@@ -43,4 +43,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-Proceed to [`CreatureMovement1-path-node-foundation.md`](CreatureMovement1-path-node-foundation.md) for data-only path primitives. [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md) is now landed, so `CreatureMovement2` can read the shared collision model when it ports `WalkNodeEvaluator`.
+`CreatureMovement1` has landed the data-only path primitives. Proceed to [`CreatureMovement2-walk-node-evaluator-and-pathfinder.md`](CreatureMovement2-walk-node-evaluator-and-pathfinder.md), which can now use the shared collision model from [`BlockCollision0-render-occlusion-vs-collision-shapes.md`](BlockCollision0-render-occlusion-vs-collision-shapes.md) while porting `WalkNodeEvaluator`.

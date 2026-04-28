@@ -50,6 +50,8 @@ This document is a reference for future creature work. It is not a tactical slic
 
 `BlockCollision0` landed the shared collision prerequisite for real creature movement: mob floor checks, pathfinding, and travel should consume the same block collision shapes as player movement instead of deriving mob-only solidity from render occlusion.
 
+`CreatureMovement1` landed the data-only vanilla path model: `BlockPathTypes`, `Node`, `Target`, `Path`, and `BinaryHeap`. The evaluator/search/navigation pieces still need to be wired to the shared collision model before generated mobs can stop using temporary direct steering.
+
 Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla ground pathfinding, collision-resolved living-entity travel, persistence adapters beyond the in-memory runtime path, additional farm animal renderers, and cow gameplay interactions.
 
 ## Reference Source Map

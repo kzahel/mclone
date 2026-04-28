@@ -18,7 +18,7 @@ This tactical follows [`CreatureMovement1-path-node-foundation.md`](CreatureMove
 
 - Add a host-neutral `PathNavigationRegion` adapter over loaded chunks/block states.
 - Port `NodeEvaluator` and `WalkNodeEvaluator` directly enough for common passive land mobs, using shared collision shapes rather than a mob-only solidity shortcut.
-- Port `PathFinder.findPath(...)` and path reconstruction.
+- Port `PathFinder.findPath(...)` and path reconstruction on top of the `CreatureMovement1` `Path`, `Node`, `Target`, and `BinaryHeap` primitives.
 - Preserve vanilla malus defaults and `BlockPathTypes` behavior for open, blocked, water, fence, danger, damage, and walkable nodes where the required block tags/materials already exist.
 - Add unit tests against small synthetic worlds for flat ground, one-block step, blocked wall, water avoidance, unreachable target, and partial path behavior.
 
