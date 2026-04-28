@@ -1,5 +1,6 @@
 import { Registry } from "../../core/registry";
 import { ResourceLocation } from "../../core/resource-location";
+import { EntityTypes, GeneratedMobEntity } from "../../world/entity/entity-type";
 import type { Block } from "../../world/level/block/block";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
@@ -24,6 +25,12 @@ const MIN_BUILD_HEIGHT = 0;
 const WORLD_HEIGHT = 256;
 const DEFAULT_SEA_LEVEL = 62;
 const STONE_LOCATION = new ResourceLocation("minecraft:stone");
+const SMALL_ISLAND_STARTER_COWS = [
+  { x: 6.5, z: 6.5, yaw: 45.0 },
+  { x: 10.5, z: 7.5, yaw: 135.0 },
+  { x: 7.5, z: 11.5, yaw: 225.0 },
+  { x: 12.5, z: 12.5, yaw: 315.0 },
+] as const;
 
 function normalizeLongSeed(seed: LongSeed): bigint {
   if (typeof seed === "bigint") {
@@ -309,5 +316,42 @@ export class SmallIslandWorldGenerator extends DemoWorldGeneratorBase {
     }
 
     return chunk;
+  }
+
+  public override spawnOriginalMobs(
+    _level: WorldGenLevel,
+    chunkX: number,
+    chunkZ: number,
+    sink: GenerationEntitySink,
+    options: NaturalSpawnerOptions = {},
+  ): void {
+    for (let index = 0; index < SMALL_ISLAND_STARTER_COWS.length; index++) {
+      const spawn = SMALL_ISLAND_STARTER_COWS[index]!;
+      const spawnChunkX = Math.floor(spawn.x / CHUNK_WIDTH);
+      const spawnChunkZ = Math.floor(spawn.z / CHUNK_WIDTH);
+      if (spawnChunkX !== chunkX || spawnChunkZ !== chunkZ) {
+        continue;
+      }
+
+      const column = describeSmallIslandColumn(this.getSeed(), Math.floor(spawn.x), Math.floor(spawn.z));
+      if (column.biomeBand !== "plains") {
+        continue;
+      }
+
+      const entityId = options.nextEntityId?.() ?? index + 1;
+      const entity = new GeneratedMobEntity({
+        id: entityId,
+        uuid: options.nextEntityUuid?.(entityId) ?? `mclone:small-island/cow/${entityId.toString()}`,
+        entityType: EntityTypes.COW,
+        x: spawn.x,
+        y: column.surfaceY + 1,
+        z: spawn.z,
+        yaw: spawn.yaw,
+        pitch: 0.0,
+        onGround: true,
+        randomSeed: BigInt.asIntN(64, (this.getSeed() * 31n) + BigInt(index)),
+      });
+      sink.addFreshEntityWithPassengers(entity);
+    }
   }
 }

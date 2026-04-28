@@ -13,7 +13,7 @@ import type { WorldGenLevel } from "../../src/world/level/world-gen-level";
 import { EntityTypes, GeneratedMobEntity } from "../../src/world/entity/entity-type";
 import { Goal, GoalFlag } from "../../src/world/entity/ai/goal/goal";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
-import { FlatGrassWorldGenerator } from "../../src/worldgen/levelgen/demo-world-generators";
+import { FlatGrassWorldGenerator, SmallIslandWorldGenerator } from "../../src/worldgen/levelgen/demo-world-generators";
 import type { GenerationEntitySink, NaturalSpawnerOptions } from "../../src/worldgen/levelgen/natural-spawner";
 import {
   type CreatureGenerationFixture,
@@ -212,5 +212,43 @@ describe("GeneratedWorldHost entity publication", () => {
     });
     expect(cowUpdate!.update.position).toBeDefined();
     expect(cowUpdate!.update.position).not.toEqual(initialCow!.entity.position);
+  });
+
+  test("publishes small-island starter cows near the origin chunk", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      generator: new SmallIslandWorldGenerator(12345n),
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      liquidSimulationMode: "none",
+    });
+
+    await host.openWorld({
+      type: "open_world",
+      seed: 12345n,
+      preset: "small_island",
+    });
+    const messages = await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    const cows = messages
+      .filter((message): message is EntitySnapshotMessage => message.type === "entity_snapshot" && message.entity.typeId === "minecraft:cow")
+      .sort((left, right) => left.entity.id - right.entity.id);
+
+    expect(cows).toHaveLength(4);
+    expect(cows.map((message) => [message.entity.position.x, message.entity.position.z])).toEqual([
+      [6.5, 6.5],
+      [10.5, 7.5],
+      [7.5, 11.5],
+      [12.5, 12.5],
+    ]);
+    expect(cows.every((message) => message.entity.chunkX === 0 && message.entity.chunkZ === 0)).toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { getLayeredBiomeByKey } from "../../../src/worldgen/biome/biome-data";
 import type { MutableChunkBlockBuffer } from "../../../src/worldgen/chunk/chunk-block-buffer";
+import type { GeneratedMobEntity } from "../../../src/world/entity/entity-type";
 import { ChunkBlockId } from "../../../src/worldgen/chunk/chunk-block-buffer";
 import { FlatGrassWorldGenerator, SmallIslandWorldGenerator } from "../../../src/worldgen/levelgen/demo-world-generators";
 
@@ -46,5 +47,39 @@ describe("demo world generators", () => {
     expect(farSurface.y).toBeLessThanOrEqual(62);
     expect(farSurface.blockId).toBe(ChunkBlockId.WATER);
     expect(farBiomeIds.has(getLayeredBiomeByKey("minecraft:ocean").getId())).toBe(true);
+  });
+
+  test("small island generator places visible starter cows near the origin", () => {
+    const generator = new SmallIslandWorldGenerator(12345n);
+    const spawned: GeneratedMobEntity[] = [];
+    let nextId = 100;
+
+    generator.spawnOriginalMobs({} as never, 0, 0, {
+      addFreshEntityWithPassengers: (entity) => {
+        spawned.push(entity);
+      },
+    }, {
+      nextEntityId: () => nextId++,
+      nextEntityUuid: (id) => `mclone:test/small-island-cow/${id.toString()}`,
+    });
+
+    expect(spawned).toHaveLength(4);
+    expect(spawned.every((entity) => entity.typeId === "minecraft:cow")).toBe(true);
+    expect(spawned.every((entity) => entity.onGround)).toBe(true);
+    expect(spawned.map((entity) => [entity.position.x, entity.position.z])).toEqual([
+      [6.5, 6.5],
+      [10.5, 7.5],
+      [7.5, 11.5],
+      [12.5, 12.5],
+    ]);
+    expect(spawned.every((entity) => entity.position.y > 62)).toBe(true);
+
+    const farSpawned: GeneratedMobEntity[] = [];
+    generator.spawnOriginalMobs({} as never, 1, 0, {
+      addFreshEntityWithPassengers: (entity) => {
+        farSpawned.push(entity);
+      },
+    });
+    expect(farSpawned).toEqual([]);
   });
 });
