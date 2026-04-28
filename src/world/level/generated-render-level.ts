@@ -39,6 +39,13 @@ interface GeneratedChunkRecord {
   readonly hasBlockSections: boolean;
 }
 
+export interface GeneratedChunkStatusDebugRecord {
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly status: GeneratedChunkStatusName;
+  readonly hasBlockSections: boolean;
+}
+
 export type GeneratedLevelPhaseRecorder = (phase: string, elapsedMs: number) => void;
 
 const FULL_PUBLICATION_NEIGHBOR_RADIUS = 1;
@@ -306,6 +313,17 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
 
   public hasMaterializedChunk(chunkX: number, chunkZ: number): boolean {
     return this.getChunkRecord(chunkX, chunkZ)?.hasBlockSections ?? false;
+  }
+
+  public getDebugChunkStatusRecords(): readonly GeneratedChunkStatusDebugRecord[] {
+    return [...this.chunkRecords.values()]
+      .map((record) => ({
+        chunkX: record.chunkX,
+        chunkZ: record.chunkZ,
+        status: record.status,
+        hasBlockSections: record.hasBlockSections,
+      }))
+      .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX);
   }
 
   public hasChunkStatus(chunkX: number, chunkZ: number, status: GeneratedChunkStatusName): boolean {
@@ -686,7 +704,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       chunkX,
       chunkZ,
       status,
-      hasBlockSections: existing?.hasBlockSections ?? (super.getChunk(chunkX, chunkZ, false) !== null),
+      hasBlockSections: (existing?.hasBlockSections ?? false) || super.getChunk(chunkX, chunkZ, false) !== null,
     });
   }
 

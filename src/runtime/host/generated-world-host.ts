@@ -22,7 +22,7 @@ import {
   FEATURES_WRITE_RADIUS_CUTOFF,
 } from "../../world/level/generated-decoration-region";
 import { GeneratedChunkStatus } from "../../world/level/generated-chunk-status";
-import { GeneratedRenderLevel } from "../../world/level/generated-render-level";
+import { GeneratedRenderLevel, type GeneratedChunkStatusDebugRecord } from "../../world/level/generated-render-level";
 import type { LevelChunk } from "../../world/level/chunk/level-chunk";
 import { LEVEL_CHUNK_SECTION_SIZE } from "../../world/level/chunk/level-chunk-section";
 import { FullChunkStatus } from "../../world/level/entity/full-chunk-status";
@@ -672,6 +672,10 @@ export class GeneratedWorldHost implements WorldHost {
 
   public close(): void {
     this.lightingService?.close?.();
+  }
+
+  public getDebugChunkStatusRecords(): readonly GeneratedChunkStatusDebugRecord[] {
+    return this.level.getDebugChunkStatusRecords();
   }
 
   private async preloadStoredChunk(chunkX: number, chunkZ: number): Promise<StoredChunkPreloadResult> {
