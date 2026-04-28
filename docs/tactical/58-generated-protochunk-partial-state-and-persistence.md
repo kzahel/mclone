@@ -35,6 +35,8 @@ Read these before writing code:
 
 The current generated host can label chunks by status in memory, but persisted generated data is only written after a publishable snapshot is built. Chunks outside the authority window can lose partial terrain/features/status records. That is not vanilla's shape: a holder tracks the latest generated `ChunkAccess` through `chunkToSave`, and `ProtoChunk` can carry meaningful status metadata before it is full or publishable.
 
+Tactical [`59`](59-generated-holder-residency-and-save-queue.md) owns holder residency, unload/save queueing, and lazy generated-cache writes. This tactical owns the data shape that those queues should eventually save.
+
 This matters for performance and parity:
 
 - metadata rings for structures should not require terrain sections
@@ -58,7 +60,7 @@ This matters for performance and parity:
    - Load stored records at `EMPTY` before generating missing statuses.
    - Save generated partial records with status and content version.
    - Treat generated-clean records as discardable cache and dirty/user-mutated records as durable state.
-   - Keep packed client snapshots as derived cache after the proto/full state is authoritative.
+   - Keep packed client snapshots as derived cache after the proto/full state is authoritative, using the Tactical 59 lazy generated-cache queue.
 
 4. **Wire unload and save policy**
    - Add a `chunkToSave`-style latest partial/full reference to the generated holder.

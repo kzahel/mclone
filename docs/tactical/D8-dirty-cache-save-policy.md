@@ -25,7 +25,7 @@ Do not add:
 
 Vanilla keeps chunk dirtiness as server state. A chunk save is not just a render-cache write: block mutations, scheduled ticks, entities, block entities, and other durable facts mark the chunk unsaved, and the server saves dirty chunks before unload/flush/close.
 
-`mclone` still uses engine-native packed snapshots instead of Anvil NBT, and it still eagerly caches generated-clean chunks for faster reloads. The important D8 change is that the host code now names those writes differently and gives dirty mutations durable-save semantics before eviction.
+`mclone` still uses engine-native packed snapshots instead of Anvil NBT. Tactical 59 moved generated-clean publish cache writes onto a lazy host queue; the important D8 distinction remains that dirty mutations use durable-save semantics before eviction.
 
 ## Landed Shape
 
@@ -45,7 +45,7 @@ The storage adapter interface is unchanged. Browser IndexedDB and Node/file stor
 
 ## Behavior
 
-- Initial generated chunks may still be cached eagerly.
+- Initial generated-clean chunks are queued as discardable cache writes.
 - Host block mutations mark the owning chunk dirty.
 - Dirty chunks flushed for publication are saved through the dirty path.
 - Dirty chunks leaving the sync view are saved before `evictChunk(...)`.
@@ -66,7 +66,7 @@ Validation run:
 ## Remaining Gaps
 
 - No public `closeWorld` / `flushWorld` command exists yet, so dirty-on-close parity is still deferred.
-- Generated-clean cache writes are still eager; they are now named as cache writes but not yet lazy.
+- Generated-clean cache writes are now lazy host side effects, but there is still no public flush/close protocol that matches vanilla save/stop semantics.
 - There is still no persisted `ChunkStatus`, partial-generation resume, or status-aware save pipeline.
 - Dirty state currently covers host block mutations and liquid-driven scheduled updates, not future entities/block entities/inventories.
 

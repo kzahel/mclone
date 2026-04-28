@@ -418,6 +418,8 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
 
     const movedStatusRecords = host.getDebugChunkStatusRecords();
     expect(movedStatusRecords).toHaveLength(625);
+    expect(movedPerformance.counts.chunk_holders_resident_current).toBeLessThanOrEqual(625);
+    expect(movedPerformance.counts.chunk_holders_pruned_outside_authority ?? 0).toBeGreaterThan(0);
     expect(countMaterialized(movedStatusRecords)).toBe(132);
     expect(countByExactStatus(movedStatusRecords)).toEqual({
       [GeneratedChunkStatus.STRUCTURE_STARTS]: 493,

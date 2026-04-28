@@ -7,11 +7,12 @@ import type { ChunkSnapshotMessage, WorldHostMessage, WorldOpenedMessage } from 
 import { MemoryWorldStorage } from "../../src/runtime/storage/memory-world-storage";
 import { LocalWorldClient, LocalWorldTransport } from "../../src/runtime/transport/local-world-transport";
 import { createBlockStateResolver, hydrateChunkFromSnapshot } from "../../src/world/level/chunk-snapshot";
-import { unpackChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
+import { clonePackedChunkSnapshot, type PackedChunkSnapshot, unpackChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 import type { WorldGenLevel } from "../../src/world/level/world-gen-level";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
+import { createWorldSaveMetadata, type ChunkStorage, type OpenWorldStorageRequest, type WorldSaveMetadata, type WorldStorage, type WorldStorageSession } from "../../src/runtime/storage/world-storage";
 
 const OPEN_WORLD_REQUEST = {
   type: "open_world",
@@ -73,6 +74,70 @@ function chunkSnapshots(messages: readonly WorldHostMessage[]): ChunkSnapshotMes
   return messages.filter((message): message is ChunkSnapshotMessage => message.type === "chunk_snapshot");
 }
 
+function sleep(ms = 0): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+class BlockingChunkStorage implements ChunkStorage {
+  public readonly records = new Map<string, PackedChunkSnapshot>();
+  public saveStarted = 0;
+  private readonly pendingSaveResolvers: Array<() => void> = [];
+  private savesReleased = false;
+
+  public async loadChunk(_chunkX: number, _chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
+    return undefined;
+  }
+
+  public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
+    this.saveStarted++;
+    if (this.savesReleased) {
+      this.records.set(`${snapshot.chunkX.toString()},${snapshot.chunkZ.toString()}`, clonePackedChunkSnapshot(snapshot));
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      this.pendingSaveResolvers.push(() => {
+        this.records.set(`${snapshot.chunkX.toString()},${snapshot.chunkZ.toString()}`, clonePackedChunkSnapshot(snapshot));
+        resolve();
+      });
+    });
+  }
+
+  public async evictChunk(_chunkX: number, _chunkZ: number): Promise<void> {}
+
+  public releaseOneSave(): void {
+    this.pendingSaveResolvers.shift()?.();
+  }
+
+  public releaseAllSaves(): void {
+    this.savesReleased = true;
+    while (this.pendingSaveResolvers.length > 0) {
+      this.releaseOneSave();
+    }
+  }
+}
+
+class BlockingWorldStorageSession implements WorldStorageSession {
+  public constructor(
+    public readonly metadata: WorldSaveMetadata,
+    public readonly chunks: BlockingChunkStorage,
+  ) {}
+
+  public async close(): Promise<void> {}
+}
+
+class BlockingWorldStorage implements WorldStorage {
+  public readonly chunks = new BlockingChunkStorage();
+  public metadata: WorldSaveMetadata | undefined;
+
+  public async openWorld(request: OpenWorldStorageRequest): Promise<WorldStorageSession> {
+    this.metadata = createWorldSaveMetadata(request);
+    return new BlockingWorldStorageSession(this.metadata, this.chunks);
+  }
+}
+
 describe("GeneratedWorld persistence", () => {
   afterEach(() => {
     Registry.BLOCK.clear();
@@ -117,23 +182,66 @@ describe("GeneratedWorld persistence", () => {
 
   test("records chunk eviction hooks when the authoritative view slides away", async () => {
     const storage = new MemoryWorldStorage(() => 2_000);
-    const client = createWorldClient(storage);
+    const host = createWorldHost(storage);
 
-    const opened = await client.openWorld(OPEN_WORLD_REQUEST);
-    await client.setChunkView({
+    const opened = worldOpenedMessage(await host.openWorld(OPEN_WORLD_REQUEST));
+    await host.setChunkView({
       type: "set_chunk_view",
       centerChunkX: 0,
       centerChunkZ: 0,
       radius: 1,
     });
-    await client.setChunkView({
+    await host.setChunkView({
       type: "set_chunk_view",
       centerChunkX: 32,
       centerChunkZ: 0,
       radius: 1,
     });
+    await host.flushStorageSideEffects();
 
     expect(storage.getChunkRecord(opened.saveMetadata.saveId, -2, 0)?.lastEvictedAtMs).toBe(2_000);
+  });
+
+  test("queues generated-clean cache writes without blocking publication", async () => {
+    const storage = new BlockingWorldStorage();
+    const blocks = registerGeneratedRenderBlocks();
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      worldStorage: storage,
+    });
+    await host.openWorld({
+      type: "open_world",
+      seed: 12345n,
+      preset: "flat_grass",
+    });
+
+    const viewPromise = host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    const result = await Promise.race([
+      viewPromise.then((messages) => ({ type: "returned" as const, messages })),
+      sleep(100).then(() => ({ type: "blocked" as const, messages: [] as readonly WorldHostMessage[] })),
+    ]);
+    if (result.type === "blocked") {
+      storage.chunks.releaseAllSaves();
+      await viewPromise;
+    }
+
+    expect(result.type).toBe("returned");
+    expect(chunkSnapshots(result.messages)).toHaveLength(25);
+    expect(storage.chunks.records.size).toBe(0);
+    expect(storage.chunks.saveStarted).toBeGreaterThan(0);
+
+    storage.chunks.releaseAllSaves();
+    await host.flushStorageSideEffects();
+    expect(storage.chunks.records.size).toBeGreaterThan(0);
   });
 
   test("saves dirty authoritative chunks before eviction", async () => {
@@ -177,6 +285,7 @@ describe("GeneratedWorld persistence", () => {
       centerChunkZ: 0,
       radius: 1,
     });
+    await host.flushStorageSideEffects();
 
     const savedRecord = storage.getChunkRecord(opened.saveMetadata.saveId, 0, 0);
     expect(savedRecord?.lastEvictedAtMs).toBe(4_001);
@@ -200,6 +309,7 @@ describe("GeneratedWorld persistence", () => {
       centerChunkZ: 0,
       radius: 1,
     });
+    await host.flushStorageSideEffects();
 
     const publishedCenter = chunkSnapshots(messages)
       .find((message) => message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0);

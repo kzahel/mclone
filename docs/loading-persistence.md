@@ -212,7 +212,7 @@ unloaded
   -> decorated
   -> light computed
   -> snapshot published
-  -> eagerly saved
+  -> generated-clean cache write queued
   -> evicted from in-memory view when outside interest
 ```
 
@@ -269,10 +269,10 @@ That means persisted light is currently not authoritative for host reload. A lig
 
 ### Current Save Policy
 
-`mclone` currently has eager generated-cache persistence plus explicit dirty saves:
+`mclone` currently has lazy generated-cache persistence plus explicit dirty saves:
 
-- The synchronous path writes all loaded chunks after a changed view, using a policy helper that treats dirty chunks as durable saves and clean chunks as generated-cache writes.
-- The cooperative path publishes each chunk snapshot, then queues the same policy write as a storage side effect.
+- Published generated-clean chunks queue discardable cache writes as storage side effects instead of blocking publication.
+- Dirty chunks still use the durable save path before dirty chunk data is discarded.
 - Host block mutations mark the owning chunk dirty and mark published chunks for replacement snapshot publication.
 - Dirty published chunks are saved when flushed.
 - Dirty chunks are saved before eviction; clean eviction still only records adapter-local `lastEvictedAtMs`.
@@ -307,7 +307,7 @@ Fresh Playwright contexts reduce leakage, but the explicit query is the determin
 | Status future coalescing | `ChunkHolder` owns one future per `ChunkStatus` and reuses pending/completed work | Generated host now has holder slots for preload, terrain, features, and no-light full promotion; current chunk views request recursive statuses instead of building separate terrain/features batches | Remaining gap is partial proto data and persisted save/resume, not in-flight same-status coalescing | Tactical 57 landed; Tactical 58 next |
 | Partial proto save/resume | `chunkToSave` tracks latest `ProtoChunk`/`LevelChunk`; unsaved partials can save on unload | Published snapshots are cached; partial terrain/features/status records are not durable | Route/unload can lose status progress that vanilla would save or resume | Tactical 58 |
 | Load before generate | Disk load at `EMPTY`, then generate missing statuses | Storage lookup before terrain generation | Match in principle | Keep |
-| Generated clean persistence | Dirty/save policy; not every publish writes | Eager cache save of published-clean chunks; cooperative publish no longer blocks on the write | Excess IO, stale generated cache after content changes | Keep named as cache; make lazy later if needed |
+| Generated clean persistence | Dirty/save policy; not every publish writes | Published generated-clean chunks now queue lazy discardable cache writes; stale queued cache writes skip if a dirty save supersedes them | Still lacks a full flush/close protocol and adapter-level priority split | Tactical 59 |
 | Dirty tracking | `isUnsaved` gates save | Host block mutations mark durable dirty chunks; future gameplay domains still need to join that policy | Entity/block-entity/player state could bypass dirty saving until implemented | Extend with each gameplay domain |
 | Light persistence | Saved and hydrated only through `isLightOn`/light-correct trust path | Sent to clients but omitted from storage; recomputed on reload | Cannot benefit from trusted saved light yet | Keep until trusted-light hydration exists |
 | Tick persistence | Proto/full tick lists preserved; unpacked into server tick lists when accessible | Block/liquid tick snapshots restored into chunks; liquid host hydrates published chunk ticks | Reasonable partial match for liquid work | Continue parity work |
@@ -357,7 +357,7 @@ Target policy:
 
 - Mutations mark chunks dirty.
 - Dirty chunks are persisted before eviction and on world close/flush.
-- Generated-clean chunks may be cached eagerly or lazily, but the cache must be versioned and discardable.
+- Generated-clean chunks may be cached lazily, but the cache must be versioned and discardable.
 - If a chunk is both generated and mutated, durable mutation semantics win.
 - Adapter-level `lastLoadedAtMs` and `lastEvictedAtMs` are diagnostics, not simulation state.
 
