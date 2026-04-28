@@ -576,6 +576,7 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
         centerChunkX: 0,
         centerChunkZ: 0,
         radius: 0,
+        level: 31,
         chunkCount: 1,
       },
       {
@@ -590,6 +591,7 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
         centerChunkX: 0,
         centerChunkZ: 0,
         radius: 2,
+        level: 31,
         chunkCount: 25,
       },
     ]);
@@ -600,7 +602,8 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(initialPerformance.counts.entity_chunk_statuses_tracked_current).toBe(24);
     expect(initialPerformance.counts.chunk_full_status_holders_current).toBe(625);
     expect(initialPerformance.counts.chunk_full_statuses_inaccessible_current).toBe(600);
-    expect(initialPerformance.counts.chunk_full_statuses_border_current).toBe(24);
+    expect(initialPerformance.counts.chunk_full_statuses_border_current).toBe(16);
+    expect(initialPerformance.counts.chunk_full_statuses_ticking_current).toBe(8);
     expect(initialPerformance.counts.chunk_full_statuses_entity_ticking_current).toBe(1);
     expect(countChunkAccessByExactStatus(initialAccessRecords)).toEqual({
       [GeneratedChunkStatus.STRUCTURE_STARTS]: 504,
@@ -696,6 +699,7 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
         centerChunkX: 1,
         centerChunkZ: 0,
         radius: 0,
+        level: 31,
         chunkCount: 1,
       },
       {
@@ -710,6 +714,7 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
         centerChunkX: 1,
         centerChunkZ: 0,
         radius: 2,
+        level: 31,
         chunkCount: 25,
       },
     ]);
@@ -719,7 +724,8 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(movedPerformance.counts.entity_chunk_statuses_tracked_current).toBe(24);
     expect(movedPerformance.counts.chunk_full_status_holders_current).toBe(625);
     expect(movedPerformance.counts.chunk_full_statuses_inaccessible_current).toBe(600);
-    expect(movedPerformance.counts.chunk_full_statuses_border_current).toBe(24);
+    expect(movedPerformance.counts.chunk_full_statuses_border_current).toBe(16);
+    expect(movedPerformance.counts.chunk_full_statuses_ticking_current).toBe(8);
     expect(movedPerformance.counts.chunk_full_statuses_entity_ticking_current).toBe(1);
     expect(countChunkAccessByExactStatus(movedAccessRecords)).toEqual({
       [GeneratedChunkStatus.STRUCTURE_STARTS]: 493,

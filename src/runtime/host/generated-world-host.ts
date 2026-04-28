@@ -26,6 +26,8 @@ import {
   getGeneratedChunkDependencyStatus,
 } from "../../world/level/generated-chunk-status";
 import {
+  GENERATED_CHUNK_BORDER_LEVEL,
+  GENERATED_CHUNK_ENTITY_TICKING_LEVEL,
   GeneratedChunkTicketSet,
   type GeneratedChunkTicketDebugRecord,
 } from "../../world/level/generated-chunk-tickets";
@@ -244,6 +246,10 @@ export function getGeneratedWorldViewChunkRadius(radius: number): number {
 
 export function getGeneratedWorldEntityChunkRadius(radius: number): number {
   return Math.max(0, getGeneratedWorldViewChunkRadius(radius) - 2);
+}
+
+export function getGeneratedWorldPlayerViewTicketLevel(radius: number): number {
+  return GENERATED_CHUNK_BORDER_LEVEL - getGeneratedWorldViewChunkRadius(radius);
 }
 
 export function getGeneratedWorldFullChunkRadius(radius: number): number {
@@ -878,12 +884,14 @@ export class GeneratedWorldHost implements WorldHost {
       centerChunkX: request.centerChunkX,
       centerChunkZ: request.centerChunkZ,
       radius: getGeneratedWorldViewChunkRadius(request.radius),
+      level: getGeneratedWorldPlayerViewTicketLevel(request.radius),
     }]);
     this.chunkResidencyTickets.replaceSource(GENERATED_ENTITY_TICKET_SOURCE, [{
       source: GENERATED_ENTITY_TICKET_SOURCE,
       centerChunkX: request.centerChunkX,
       centerChunkZ: request.centerChunkZ,
       radius: getGeneratedWorldEntityChunkRadius(request.radius),
+      level: GENERATED_CHUNK_ENTITY_TICKING_LEVEL,
     }]);
     this.chunkResidencyTickets.replaceSource(GENERATED_DEPENDENCY_TICKET_SOURCE, [{
       source: GENERATED_DEPENDENCY_TICKET_SOURCE,
@@ -947,13 +955,7 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private getCurrentChunkHolderFullStatus(chunkX: number, chunkZ: number): FullChunkStatus {
-    if (this.chunkResidencyTickets.containsForSource(GENERATED_ENTITY_TICKET_SOURCE, chunkX, chunkZ)) {
-      return FullChunkStatus.ENTITY_TICKING;
-    }
-    if (this.chunkResidencyTickets.containsForSource(GENERATED_PLAYER_VIEW_TICKET_SOURCE, chunkX, chunkZ)) {
-      return FullChunkStatus.BORDER;
-    }
-    return FullChunkStatus.INACCESSIBLE;
+    return this.chunkResidencyTickets.getFullStatus(chunkX, chunkZ);
   }
 
   private updateChunkHolderFullStatus(holder: GeneratedChunkHolder, status: FullChunkStatus): boolean {

@@ -1,3 +1,5 @@
+import { FullChunkStatus } from "./entity/full-chunk-status";
+
 export type GeneratedChunkTicketSource =
   | "player_view"
   | "generation_dependency"
@@ -5,11 +7,17 @@ export type GeneratedChunkTicketSource =
   | "entity"
   | "forced";
 
+export const GENERATED_CHUNK_ENTITY_TICKING_LEVEL = 31;
+export const GENERATED_CHUNK_TICKING_LEVEL = 32;
+export const GENERATED_CHUNK_BORDER_LEVEL = 33;
+export const GENERATED_CHUNK_INACCESSIBLE_LEVEL = 34;
+
 export interface GeneratedChunkTicket {
   readonly source: GeneratedChunkTicketSource;
   readonly centerChunkX: number;
   readonly centerChunkZ: number;
   readonly radius: number;
+  readonly level?: number;
   readonly id?: string;
 }
 
@@ -41,6 +49,9 @@ export class GeneratedChunkTicketSet {
       if (ticket.radius < 0) {
         throw new Error(`Generated chunk ticket radius must be non-negative, got ${ticket.radius.toString()}`);
       }
+      if (ticket.level !== undefined && !Number.isInteger(ticket.level)) {
+        throw new Error(`Generated chunk ticket level must be an integer, got ${ticket.level.toString()}`);
+      }
 
       this.tickets.set(generatedChunkTicketKey(ticket), ticket);
     }
@@ -61,6 +72,31 @@ export class GeneratedChunkTicketSet {
     }
 
     return false;
+  }
+
+  public getLevel(chunkX: number, chunkZ: number): number {
+    let level = GENERATED_CHUNK_INACCESSIBLE_LEVEL;
+    for (const ticket of this.tickets.values()) {
+      if (ticket.level === undefined) {
+        continue;
+      }
+
+      const distance = Math.max(
+        Math.abs(chunkX - ticket.centerChunkX),
+        Math.abs(chunkZ - ticket.centerChunkZ),
+      );
+      if (distance > ticket.radius) {
+        continue;
+      }
+
+      level = Math.min(level, ticket.level + distance);
+    }
+
+    return level;
+  }
+
+  public getFullStatus(chunkX: number, chunkZ: number): FullChunkStatus {
+    return fullStatusFromGeneratedTicketLevel(this.getLevel(chunkX, chunkZ));
   }
 
   public containsForSource(source: GeneratedChunkTicketSource, chunkX: number, chunkZ: number): boolean {
@@ -140,11 +176,25 @@ export class GeneratedChunkTicketSet {
         ticket.centerChunkX.toString(),
         ticket.centerChunkZ.toString(),
         ticket.radius.toString(),
+        ticket.level?.toString() ?? "",
       ].join(":"))
       .join("|");
   }
 }
 
+export function fullStatusFromGeneratedTicketLevel(level: number): FullChunkStatus {
+  if (level <= GENERATED_CHUNK_ENTITY_TICKING_LEVEL) {
+    return FullChunkStatus.ENTITY_TICKING;
+  }
+  if (level === GENERATED_CHUNK_TICKING_LEVEL) {
+    return FullChunkStatus.TICKING;
+  }
+  if (level === GENERATED_CHUNK_BORDER_LEVEL) {
+    return FullChunkStatus.BORDER;
+  }
+  return FullChunkStatus.INACCESSIBLE;
+}
+
 function generatedChunkTicketKey(ticket: GeneratedChunkTicket): string {
-  return `${ticket.source}:${ticket.id ?? `${ticket.centerChunkX.toString()},${ticket.centerChunkZ.toString()},${ticket.radius.toString()}`}`;
+  return `${ticket.source}:${ticket.id ?? `${ticket.centerChunkX.toString()},${ticket.centerChunkZ.toString()},${ticket.radius.toString()},${ticket.level?.toString() ?? ""}`}`;
 }

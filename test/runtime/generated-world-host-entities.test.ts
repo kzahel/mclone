@@ -362,8 +362,10 @@ describe("GeneratedWorldHost entity publication", () => {
     const initialStatuses = host.getDebugEntityChunkStatusRecords();
     expect(initialStatuses).toHaveLength(25);
     expect(initialStatuses.filter((record) => record.status === FullChunkStatus.ENTITY_TICKING)).toHaveLength(1);
-    expect(initialStatuses.filter((record) => record.status === FullChunkStatus.BORDER)).toHaveLength(24);
+    expect(initialStatuses.filter((record) => record.status === FullChunkStatus.TICKING)).toHaveLength(8);
+    expect(initialStatuses.filter((record) => record.status === FullChunkStatus.BORDER)).toHaveLength(16);
     expect(statusChunkPairs(host)).toContain(`0,0:${FullChunkStatus.ENTITY_TICKING}`);
+    expect(statusChunkPairs(host)).toContain(`1,0:${FullChunkStatus.TICKING}`);
     expect(statusChunkPairs(host)).toContain(`-2,0:${FullChunkStatus.BORDER}`);
     expect(statusChunkPairs(host)).toContain(`2,0:${FullChunkStatus.BORDER}`);
 
@@ -378,9 +380,11 @@ describe("GeneratedWorldHost entity publication", () => {
     const settledStatuses = host.getDebugEntityChunkStatusRecords();
     expect(settledStatuses).toHaveLength(25);
     expect(settledStatuses.filter((record) => record.status === FullChunkStatus.ENTITY_TICKING)).toHaveLength(1);
-    expect(settledStatuses.filter((record) => record.status === FullChunkStatus.BORDER)).toHaveLength(24);
+    expect(settledStatuses.filter((record) => record.status === FullChunkStatus.TICKING)).toHaveLength(8);
+    expect(settledStatuses.filter((record) => record.status === FullChunkStatus.BORDER)).toHaveLength(16);
     expect(statusChunkPairs(host).some((entry) => entry.startsWith("-2,0:"))).toBe(false);
     expect(statusChunkPairs(host)).toContain(`1,0:${FullChunkStatus.ENTITY_TICKING}`);
+    expect(statusChunkPairs(host)).toContain(`2,0:${FullChunkStatus.TICKING}`);
     expect(statusChunkPairs(host)).toContain(`3,0:${FullChunkStatus.BORDER}`);
   });
 
