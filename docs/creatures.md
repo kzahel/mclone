@@ -56,9 +56,9 @@ This document is a reference for future creature work. It is not a tactical slic
 
 `CreatureMovement3` replaced live generated-mob direct steering with `GroundPathNavigation` path following. Generated mobs now create vanilla-shaped paths, hand waypoints through `MoveControl`, and apply host-authoritative collision-checked movement steps without Y drift.
 
-`Creatures6` has started the farm-animal island expansion with pigs and sheep: vanilla-shaped pig/sheep model/renderer/texture hydration, sheep wool color hydration and fur-layer tinting, pig/sheep movement attributes, pig/sheep `WaterAvoidingRandomStrollGoal` through the shared generated-mob stack, and small-island starter pigs/sheep beside the cows.
+`Creatures6` lands the starter farm-animal island baseline: vanilla-shaped pig/sheep/chicken model/renderer/texture hydration, sheep wool color hydration and fur-layer tinting, chicken flap/egg timer data placeholders, pig/sheep/chicken movement attributes, pig/sheep/chicken `WaterAvoidingRandomStrollGoal` through the shared generated-mob stack, and small-island starter pigs/sheep/chickens beside the cows.
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics, persistence adapters beyond the in-memory runtime path, chicken renderer and island starters, and cow/pig/sheep gameplay interactions.
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics, persistence adapters beyond the in-memory runtime path, shared passive look/idle goals, chicken live flapping/egg-laying behavior, and cow/pig/sheep gameplay interactions.
 
 ## Reference Source Map
 
@@ -342,7 +342,7 @@ Today the repo has authoritative host/session plumbing, chunk snapshots, an earl
 | `src/runtime/node/generated-world-http-server.ts` | dedicated host path with the same logical ownership and per-session entity snapshot replay |
 | `src/worldgen/biome/` | biome source exists, with the first passive spawn settings needed for generation-time creatures |
 | `src/world/level/chunk-snapshot.ts` | carries blocks/biomes/ticks, not entities |
-| `src/renderer/` | renders chunks and debug camera state, not mobs |
+| `src/renderer/` | renders chunks, debug camera state, and authoritative entity snapshots through vanilla-shaped entity renderers |
 
 The first creature architecture should therefore add entities as authoritative world state, not as renderer-side decorations.
 

@@ -162,6 +162,7 @@ export type EntitySnapshotCategory =
 
 export const PLAYER_ENTITY_TYPE_ID = "minecraft:player";
 export const PLAYER_ENTITY_DATA_KIND = "player";
+export const CHICKEN_ENTITY_TYPE_ID = "minecraft:chicken";
 export const COW_ENTITY_TYPE_ID = "minecraft:cow";
 export const PIG_ENTITY_TYPE_ID = "minecraft:pig";
 export const SHEEP_ENTITY_TYPE_ID = "minecraft:sheep";

@@ -240,13 +240,22 @@ describe("GeneratedWorldHost entity publication", () => {
 
     const farmAnimals = messages
       .filter((message): message is EntitySnapshotMessage => message.type === "entity_snapshot"
-        && (message.entity.typeId === "minecraft:cow" || message.entity.typeId === "minecraft:pig" || message.entity.typeId === "minecraft:sheep"))
+        && (
+          message.entity.typeId === "minecraft:chicken"
+          || message.entity.typeId === "minecraft:cow"
+          || message.entity.typeId === "minecraft:pig"
+          || message.entity.typeId === "minecraft:sheep"
+        ))
       .sort((left, right) => left.entity.id - right.entity.id);
 
-    expect(farmAnimals).toHaveLength(12);
+    expect(farmAnimals).toHaveLength(16);
+    expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:chicken")).toHaveLength(4);
     expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:cow")).toHaveLength(4);
     expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:pig")).toHaveLength(4);
     expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:sheep")).toHaveLength(4);
+    expect(farmAnimals
+      .filter((message) => message.entity.typeId === "minecraft:chicken")
+      .every((message) => typeof message.entity.data?.EggLayTime === "number")).toBe(true);
     expect(farmAnimals
       .filter((message) => message.entity.typeId === "minecraft:sheep")
       .every((message) => typeof message.entity.data?.Color === "number")).toBe(true);
@@ -263,6 +272,10 @@ describe("GeneratedWorldHost entity publication", () => {
       [9.5, 3.5],
       [3.5, 5.5],
       [11.5, 14.5],
+      [2.5, 8.5],
+      [8.5, 2.5],
+      [15.5, 6.5],
+      [6.5, 15.5],
     ]);
     expect(farmAnimals.every((message) => message.entity.chunkX === 0 && message.entity.chunkZ === 0)).toBe(true);
   });

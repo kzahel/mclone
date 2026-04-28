@@ -7,6 +7,7 @@ import {
 } from "../src/renderer/scene-setup.ts";
 import { collectEntityRenderBatches } from "../src/renderer/entity/entity-batch-renderer.ts";
 import {
+  SnapshotRenderableChicken,
   SnapshotRenderableCow,
   SnapshotRenderablePig,
   SnapshotRenderablePlayer,
@@ -43,11 +44,12 @@ const player = new SnapshotRenderablePlayer(playerState());
 const cow = new SnapshotRenderableCow(cowState());
 const pig = new SnapshotRenderablePig(pigState());
 const sheep = new SnapshotRenderableSheep(sheepState());
+const chicken = new SnapshotRenderableChicken(chickenState());
 const entityBatches = collectEntityRenderBatches({
   level: {
     getBrightness: () => 15,
   } as never,
-  entities: [player, cow, pig, sheep],
+  entities: [player, cow, pig, sheep, chicken],
   cameraPosition: Vec3.ZERO,
   partialTick: 0,
 });
@@ -139,7 +141,7 @@ function playerState(): ClientEntityPresentationState {
     category: "misc" as const,
     chunkX: 0,
     chunkZ: 0,
-    position: { x: -1.55, y: -0.9, z: -3.1 },
+    position: { x: -1.65, y: -0.9, z: -3.1 },
     rotation: { yaw: 180, pitch: 0 },
     width: 0.6,
     height: 1.8,
@@ -174,7 +176,7 @@ function cowState(): ClientEntityPresentationState {
     category: "creature" as const,
     chunkX: 0,
     chunkZ: 0,
-    position: { x: 1.45, y: -1.0, z: -3.2 },
+    position: { x: 1.55, y: -1.0, z: -3.2 },
     rotation: { yaw: 210, pitch: 0 },
     width: 0.9,
     height: 1.4,
@@ -209,7 +211,7 @@ function pigState(): ClientEntityPresentationState {
     category: "creature" as const,
     chunkX: 0,
     chunkZ: 0,
-    position: { x: 0.45, y: -1.0, z: -2.9 },
+    position: { x: 0.65, y: -1.0, z: -2.85 },
     rotation: { yaw: 190, pitch: 0 },
     width: 0.9,
     height: 0.9,
@@ -244,13 +246,57 @@ function sheepState(): ClientEntityPresentationState {
     category: "creature" as const,
     chunkX: 0,
     chunkZ: 0,
-    position: { x: -0.45, y: -1.0, z: -3.0 },
+    position: { x: -0.65, y: -1.0, z: -3.0 },
     rotation: { yaw: 170, pitch: 0 },
     width: 0.9,
     height: 1.3,
     onGround: true,
     age: 0,
     data: { Color: 12 },
+  };
+  return {
+    entityId: authoritative.id,
+    uuid: authoritative.uuid,
+    typeId: authoritative.typeId,
+    category: authoritative.category,
+    chunkX: authoritative.chunkX,
+    chunkZ: authoritative.chunkZ,
+    width: authoritative.width,
+    height: authoritative.height,
+    onGround: authoritative.onGround,
+    age: authoritative.age,
+    data: authoritative.data,
+    interpolatedPosition: authoritative.position,
+    interpolatedRotation: authoritative.rotation,
+    interpolationAlpha: 1,
+    authoritative,
+    aiAuthority: "host",
+  };
+}
+
+function chickenState(): ClientEntityPresentationState {
+  const authoritative = {
+    id: 11,
+    uuid: "00000000-0000-0000-0000-000000000011",
+    typeId: "minecraft:chicken",
+    category: "creature" as const,
+    chunkX: 0,
+    chunkZ: 0,
+    position: { x: 0.0, y: -1.0, z: -2.35 },
+    rotation: { yaw: 180, pitch: 0 },
+    width: 0.4,
+    height: 0.7,
+    onGround: true,
+    age: 0,
+    data: {
+      Flap: 0.4,
+      FlapSpeed: 0.5,
+      OFlap: 0.0,
+      OFlapSpeed: 0.25,
+      Flapping: 1.0,
+      EggLayTime: 9000,
+      IsChickenJockey: false,
+    },
   };
   return {
     entityId: authoritative.id,

@@ -4,11 +4,13 @@ import { LightTexture } from "../../../src/renderer/light-texture";
 import { collectEntityRenderBatches } from "../../../src/renderer/entity/entity-batch-renderer";
 import { EntityRenderDispatcher } from "../../../src/renderer/entity/entity-render-dispatcher";
 import {
+  DEFAULT_CHICKEN_TEXTURE,
   DEFAULT_COW_TEXTURE,
   DEFAULT_PIG_TEXTURE,
   DEFAULT_PLAYER_SKIN,
   DEFAULT_SHEEP_FUR_TEXTURE,
   DEFAULT_SHEEP_TEXTURE,
+  SnapshotRenderableChicken,
   SnapshotRenderableCow,
   SnapshotRenderablePig,
   SnapshotRenderablePlayer,
@@ -169,6 +171,51 @@ function sheepState(overrides: Partial<ClientEntityPresentationState> = {}): Cli
   };
 }
 
+function chickenState(overrides: Partial<ClientEntityPresentationState> = {}): ClientEntityPresentationState {
+  const authoritative = {
+    id: 11,
+    uuid: "00000000-0000-0000-0000-000000000011",
+    typeId: "minecraft:chicken",
+    category: "creature" as const,
+    chunkX: 0,
+    chunkZ: 0,
+    position: { x: 8, y: 65, z: 8 },
+    rotation: { yaw: 45, pitch: 0 },
+    width: 0.4,
+    height: 0.7,
+    onGround: true,
+    age: 0,
+    data: {
+      Flap: 0.25,
+      FlapSpeed: 0.5,
+      OFlap: 0.0,
+      OFlapSpeed: 0.25,
+      Flapping: 1.0,
+      EggLayTime: 9000,
+      IsChickenJockey: false,
+    },
+  };
+  return {
+    entityId: authoritative.id,
+    uuid: authoritative.uuid,
+    typeId: authoritative.typeId,
+    category: authoritative.category,
+    chunkX: authoritative.chunkX,
+    chunkZ: authoritative.chunkZ,
+    width: authoritative.width,
+    height: authoritative.height,
+    onGround: authoritative.onGround,
+    age: authoritative.age,
+    data: authoritative.data,
+    interpolatedPosition: authoritative.position,
+    interpolatedRotation: authoritative.rotation,
+    interpolationAlpha: 1,
+    authoritative,
+    aiAuthority: "host",
+    ...overrides,
+  };
+}
+
 class RecordingBufferSource extends MultiBufferSource.BufferSource {
   public readonly requested: RenderType[] = [];
 
@@ -208,8 +255,8 @@ describe("Entity renderer", () => {
 
     expect(createRenderableEntity({
       ...state,
-      typeId: "minecraft:chicken",
-      authoritative: { ...state.authoritative, typeId: "minecraft:chicken" },
+      typeId: "minecraft:goat",
+      authoritative: { ...state.authoritative, typeId: "minecraft:goat" },
     })).toBeUndefined();
 
     const cow = createRenderableEntity(cowState());
@@ -221,6 +268,10 @@ describe("Entity renderer", () => {
     const sheep = createRenderableEntity(sheepState());
     expect(sheep).toBeInstanceOf(SnapshotRenderableSheep);
     expect((sheep as SnapshotRenderableSheep).getColor()).toBe(12);
+
+    const chicken = createRenderableEntity(chickenState());
+    expect(chicken).toBeInstanceOf(SnapshotRenderableChicken);
+    expect((chicken as SnapshotRenderableChicken).getEggLayTime()).toBe(9000);
   });
 
   test("dispatcher renders a neutral remote player through entityTranslucent NEW_ENTITY batches", () => {
@@ -336,6 +387,31 @@ describe("Entity renderer", () => {
     expect(buffer.length).toBe(drawState.vertexBufferSize());
   });
 
+  test("dispatcher renders a neutral chicken through entityCutoutNoCull NEW_ENTITY batches", () => {
+    const dispatcher = new EntityRenderDispatcher();
+    const entity = new SnapshotRenderableChicken(chickenState());
+    const builder = new BufferBuilder(256);
+    const bufferSource = new RecordingBufferSource(builder);
+
+    dispatcher.renderEntity(
+      entity,
+      new Vec3(8, 65, 8),
+      new PoseStack(),
+      bufferSource,
+      LightTexture.pack(15, 15),
+      0,
+    );
+    bufferSource.endBatch();
+
+    expect(new Set(bufferSource.requested)).toEqual(new Set([RenderType.entityCutoutNoCull(DEFAULT_CHICKEN_TEXTURE)]));
+    const { drawState, buffer } = bufferSource.pop();
+    expect(drawState.format()).toBe(DefaultVertexFormat.NEW_ENTITY);
+    expect(drawState.vertexCount()).toBe(192);
+    expect(drawState.indexCount()).toBe(288);
+    expect(drawState.sequentialIndex()).toBe(true);
+    expect(buffer.length).toBe(drawState.vertexBufferSize());
+  });
+
   test("dispatcher renders a neutral sheep with a colored fur layer", () => {
     const dispatcher = new EntityRenderDispatcher();
     const entity = new SnapshotRenderableSheep(sheepState());
@@ -371,6 +447,7 @@ describe("Entity renderer", () => {
 
   test("entity texture paths resolve vanilla full texture locations directly", () => {
     expect(resolveEntityTexturePath(DEFAULT_PLAYER_SKIN)).toBe("assets/minecraft/textures/entity/steve.png");
+    expect(resolveEntityTexturePath(DEFAULT_CHICKEN_TEXTURE)).toBe("assets/minecraft/textures/entity/chicken.png");
     expect(resolveEntityTexturePath(DEFAULT_COW_TEXTURE)).toBe("assets/minecraft/textures/entity/cow/cow.png");
     expect(resolveEntityTexturePath(DEFAULT_PIG_TEXTURE)).toBe("assets/minecraft/textures/entity/pig/pig.png");
     expect(resolveEntityTexturePath(DEFAULT_SHEEP_TEXTURE)).toBe("assets/minecraft/textures/entity/sheep/sheep.png");

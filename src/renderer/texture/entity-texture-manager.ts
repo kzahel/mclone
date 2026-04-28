@@ -1,6 +1,7 @@
 import { ResourceLocation } from "../../core/resource-location";
 import type { AssetPack } from "../assets/asset-pack";
 import {
+  DEFAULT_CHICKEN_TEXTURE,
   DEFAULT_COW_TEXTURE,
   DEFAULT_PIG_TEXTURE,
   DEFAULT_PLAYER_SKIN,
@@ -63,6 +64,7 @@ export class EntityTextureManager {
     assetPack: AssetPack,
     initialLocations: readonly TextureLocation[] = [
       DEFAULT_PLAYER_SKIN,
+      DEFAULT_CHICKEN_TEXTURE,
       DEFAULT_COW_TEXTURE,
       DEFAULT_PIG_TEXTURE,
       DEFAULT_SHEEP_TEXTURE,

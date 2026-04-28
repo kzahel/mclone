@@ -1,4 +1,10 @@
-import { COW_ENTITY_TYPE_ID, PIG_ENTITY_TYPE_ID, PLAYER_ENTITY_TYPE_ID, SHEEP_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
+import {
+  CHICKEN_ENTITY_TYPE_ID,
+  COW_ENTITY_TYPE_ID,
+  PIG_ENTITY_TYPE_ID,
+  PLAYER_ENTITY_TYPE_ID,
+  SHEEP_ENTITY_TYPE_ID,
+} from "../../runtime/protocol/world-messages";
 import { Vec3 } from "../../world/phys/vec3";
 import { LightTexture } from "../light-texture";
 import type { MultiBufferSource } from "../multi-buffer-source";
@@ -6,6 +12,7 @@ import { EntityModelSet } from "../model/geom/entity-model-set";
 import { PoseStack } from "../vertex/pose-stack";
 import { EntityRendererProvider } from "./entity-renderer-provider";
 import type { EntityRenderer } from "./entity-renderer";
+import { ChickenRenderer } from "./chicken-renderer";
 import { CowRenderer } from "./cow-renderer";
 import { PigRenderer } from "./pig-renderer";
 import { PlayerRenderer } from "./player-renderer";
@@ -19,6 +26,7 @@ export class EntityRenderDispatcher {
   public constructor(modelSet = EntityModelSet.createDefault()) {
     const context = new EntityRendererProvider.Context(this, modelSet);
     this.renderers = new Map([
+      [CHICKEN_ENTITY_TYPE_ID, new ChickenRenderer(context) as EntityRenderer<RenderableEntity>],
       [COW_ENTITY_TYPE_ID, new CowRenderer(context) as EntityRenderer<RenderableEntity>],
       [PIG_ENTITY_TYPE_ID, new PigRenderer(context) as EntityRenderer<RenderableEntity>],
       [SHEEP_ENTITY_TYPE_ID, new SheepRenderer(context) as EntityRenderer<RenderableEntity>],

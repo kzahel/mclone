@@ -14,6 +14,7 @@ import type { FluidState } from "../../../src/world/level/material/fluid-state";
 import { Material } from "../../../src/world/level/material/material";
 import { FullChunkStatus } from "../../../src/world/level/entity/full-chunk-status";
 import { blockGetterPathNavigationRegion } from "../../../src/world/level/pathfinder";
+import { BlockPathTypes } from "../../../src/world/level/pathfinder/block-path-types";
 import type { AABB } from "../../../src/world/phys/aabb";
 
 const AIR = new AirBlock(BlockBehaviour.Properties.of(Material.AIR).noCollission().noOcclusion().air()).defaultBlockState();
@@ -183,5 +184,31 @@ describe("passive mob AI foundation", () => {
 
     expect(sheep.position.x).not.toBe(0.5);
     expect(sheep.position.y).toBe(64);
+  });
+
+  test("generated chickens use vanilla passive attributes and placeholder chicken state", () => {
+    const chicken = new GeneratedMobEntity({
+      id: 5,
+      uuid: "mclone:test/chicken-ground-navigation",
+      entityType: EntityTypes.CHICKEN,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+    });
+    chicken.setAiLevel(new FlatMobAiLevel());
+
+    expect(chicken.getAttributeValue(MobAttribute.MAX_HEALTH)).toBe(4.0);
+    expect(chicken.getAttributeValue(MobAttribute.MOVEMENT_SPEED)).toBe(0.25);
+    expect(typeof chicken.data.EggLayTime).toBe("number");
+    expect(chicken.data.IsChickenJockey).toBe(false);
+    expect(chicken.getPathfindingMalus(BlockPathTypes.WATER)).toBe(0.0);
+    expect(chicken.getNavigation().moveTo(4.5, 64, 0.5, 1.0)).toBe(true);
+
+    chicken.tickServerAi({ resetNoActionTime: true });
+
+    expect(chicken.position.x).not.toBe(0.5);
+    expect(chicken.position.y).toBe(64);
   });
 });

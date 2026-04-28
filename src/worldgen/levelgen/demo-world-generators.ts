@@ -39,6 +39,10 @@ const SMALL_ISLAND_STARTER_MOBS = [
   { type: EntityTypes.SHEEP, slug: "sheep", x: 9.5, z: 3.5, yaw: 115.0 },
   { type: EntityTypes.SHEEP, slug: "sheep", x: 3.5, z: 5.5, yaw: 195.0 },
   { type: EntityTypes.SHEEP, slug: "sheep", x: 11.5, z: 14.5, yaw: 305.0 },
+  { type: EntityTypes.CHICKEN, slug: "chicken", x: 2.5, z: 8.5, yaw: 40.0 },
+  { type: EntityTypes.CHICKEN, slug: "chicken", x: 8.5, z: 2.5, yaw: 140.0 },
+  { type: EntityTypes.CHICKEN, slug: "chicken", x: 15.5, z: 6.5, yaw: 240.0 },
+  { type: EntityTypes.CHICKEN, slug: "chicken", x: 6.5, z: 15.5, yaw: 320.0 },
 ] as const;
 
 function normalizeLongSeed(seed: LongSeed): bigint {

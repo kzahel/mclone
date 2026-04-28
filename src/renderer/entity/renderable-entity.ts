@@ -1,8 +1,15 @@
 import { ResourceLocation } from "../../core/resource-location";
 import type { ClientEntityPresentationState } from "../../runtime/client/entity-interpolation-service";
-import { COW_ENTITY_TYPE_ID, PIG_ENTITY_TYPE_ID, PLAYER_ENTITY_TYPE_ID, SHEEP_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
+import {
+  CHICKEN_ENTITY_TYPE_ID,
+  COW_ENTITY_TYPE_ID,
+  PIG_ENTITY_TYPE_ID,
+  PLAYER_ENTITY_TYPE_ID,
+  SHEEP_ENTITY_TYPE_ID,
+} from "../../runtime/protocol/world-messages";
 
 export const DEFAULT_PLAYER_SKIN = new ResourceLocation("minecraft", "textures/entity/steve.png");
+export const DEFAULT_CHICKEN_TEXTURE = new ResourceLocation("minecraft", "textures/entity/chicken.png");
 export const DEFAULT_COW_TEXTURE = new ResourceLocation("minecraft", "textures/entity/cow/cow.png");
 export const DEFAULT_PIG_TEXTURE = new ResourceLocation("minecraft", "textures/entity/pig/pig.png");
 export const DEFAULT_SHEEP_TEXTURE = new ResourceLocation("minecraft", "textures/entity/sheep/sheep.png");
@@ -48,6 +55,16 @@ export interface RenderableTexturedMob extends RenderableEntity {
 export interface RenderableCow extends RenderableTexturedMob {}
 
 export interface RenderablePig extends RenderableTexturedMob {}
+
+export interface RenderableChicken extends RenderableTexturedMob {
+  getFlap(): number;
+  getFlapSpeed(): number;
+  getOFlap(): number;
+  getOFlapSpeed(): number;
+  getFlapping(): number;
+  getEggLayTime(): number;
+  isChickenJockey(): boolean;
+}
 
 export interface RenderableSheep extends RenderableTexturedMob {
   getColor(): number;
@@ -272,6 +289,55 @@ export class SnapshotRenderablePig extends SnapshotRenderableTexturedMob impleme
   }
 }
 
+export class SnapshotRenderableChicken extends SnapshotRenderableTexturedMob implements RenderableChicken {
+  private readonly flap: number;
+  private readonly flapSpeed: number;
+  private readonly oFlap: number;
+  private readonly oFlapSpeed: number;
+  private readonly flapping: number;
+  private readonly eggLayTime: number;
+  private readonly chickenJockey: boolean;
+
+  public constructor(state: ClientEntityPresentationState) {
+    super(state, DEFAULT_CHICKEN_TEXTURE);
+    this.flap = readNumberData(state.data?.Flap, 0.0);
+    this.flapSpeed = readNumberData(state.data?.FlapSpeed, 0.0);
+    this.oFlap = readNumberData(state.data?.OFlap, 0.0);
+    this.oFlapSpeed = readNumberData(state.data?.OFlapSpeed, 0.0);
+    this.flapping = readNumberData(state.data?.Flapping, 1.0);
+    this.eggLayTime = Math.trunc(readNumberData(state.data?.EggLayTime, 0.0));
+    this.chickenJockey = state.data?.IsChickenJockey === true;
+  }
+
+  public getFlap(): number {
+    return this.flap;
+  }
+
+  public getFlapSpeed(): number {
+    return this.flapSpeed;
+  }
+
+  public getOFlap(): number {
+    return this.oFlap;
+  }
+
+  public getOFlapSpeed(): number {
+    return this.oFlapSpeed;
+  }
+
+  public getFlapping(): number {
+    return this.flapping;
+  }
+
+  public getEggLayTime(): number {
+    return this.eggLayTime;
+  }
+
+  public isChickenJockey(): boolean {
+    return this.chickenJockey;
+  }
+}
+
 export class SnapshotRenderableSheep extends SnapshotRenderableTexturedMob implements RenderableSheep {
   private readonly color: number;
   private readonly sheared: boolean;
@@ -302,6 +368,10 @@ export class SnapshotRenderableSheep extends SnapshotRenderableTexturedMob imple
 export function createRenderableEntity(state: ClientEntityPresentationState): RenderableEntity | undefined {
   if (state.typeId === PLAYER_ENTITY_TYPE_ID) {
     return new SnapshotRenderablePlayer(state);
+  }
+
+  if (state.typeId === CHICKEN_ENTITY_TYPE_ID) {
+    return new SnapshotRenderableChicken(state);
   }
 
   if (state.typeId === COW_ENTITY_TYPE_ID) {
@@ -344,4 +414,8 @@ function readSkinTextureLocation(value: unknown): ResourceLocation {
 
 function readSheepColor(value: unknown): number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 15 ? value : 0;
+}
+
+function readNumberData(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }

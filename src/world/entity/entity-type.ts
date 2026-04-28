@@ -61,6 +61,9 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
       this.setPathfindingMalus(BlockPathTypes.DANGER_FIRE, 16.0);
       this.setPathfindingMalus(BlockPathTypes.DAMAGE_FIRE, -1.0);
     }
+    if (this.entityType.id === EntityTypes.CHICKEN.id) {
+      this.setPathfindingMalus(BlockPathTypes.WATER, 0.0);
+    }
     this.registerGoals();
   }
 
@@ -227,6 +230,10 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
       this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 1.0));
       return;
     }
+    if (this.entityType.id === EntityTypes.CHICKEN.id) {
+      this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 1.0));
+      return;
+    }
     if (this.entityType.id === EntityTypes.PIG.id) {
       this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 1.0));
       return;
@@ -389,13 +396,28 @@ function creature(id: string, width: number, height: number, options: Omit<Entit
   return new EntityType({ id, category: MobCategory.CREATURE, width, height, ...options });
 }
 
+function chickenData(random: { nextInt(bound: number): number }): Readonly<Record<string, number | boolean | string>> {
+  return {
+    Flap: 0.0,
+    FlapSpeed: 0.0,
+    OFlap: 0.0,
+    OFlapSpeed: 0.0,
+    Flapping: 1.0,
+    EggLayTime: 6000 + random.nextInt(6000),
+    IsChickenJockey: false,
+  };
+}
+
 export const EntityTypes = {
   SHEEP: creature("minecraft:sheep", 0.9, 1.3, {
     attributes: { [MobAttribute.MAX_HEALTH]: 8.0, [MobAttribute.MOVEMENT_SPEED]: 0.23 },
     defaultData: (random) => ({ Color: sheepColor(random) }),
   }),
   PIG: creature("minecraft:pig", 0.9, 0.9, { attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.25 } }),
-  CHICKEN: creature("minecraft:chicken", 0.4, 0.7),
+  CHICKEN: creature("minecraft:chicken", 0.4, 0.7, {
+    attributes: { [MobAttribute.MAX_HEALTH]: 4.0, [MobAttribute.MOVEMENT_SPEED]: 0.25 },
+    defaultData: chickenData,
+  }),
   COW: creature("minecraft:cow", 0.9, 1.4, { attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.2 } }),
   WOLF: creature("minecraft:wolf", 0.6, 0.85),
   RABBIT: creature("minecraft:rabbit", 0.4, 0.5),
