@@ -43,6 +43,7 @@ The first slice landed:
 - Dirty durable saves still run before dirty chunk data is discarded.
 - Queued generated-clean cache writes carry a per-chunk version and skip if a later dirty/save-worthy write supersedes them.
 - Tactical 58 now gives resident holders a proto/full `chunkToSave` access record and saves those generated records on host flush or holder pruning.
+- Tactical [`60`](60-generated-unload-and-storage-race-safety.md) owns the race-safety follow-up: pending unload holder resurrection, stale generated-record write protection, storage epochs, and ticket-shaped unload queues.
 
 ## Remaining work
 
@@ -54,6 +55,7 @@ The first slice landed:
    - Add a real unload queue with per-tick/pass budgets similar to vanilla's `processUnloads(...)`.
    - Keep dirty-save-before-forget semantics for dirty chunks.
    - Add pressure/backlog counters and tests that route changes do not create unbounded holder growth.
+   - First race-safety slice landed in Tactical 60: holders with queued generated-record saves stay in a pending-unload map and can be resurrected before the save reaches storage.
 
 3. **Storage queue policy**
    - Keep side effects serialized or otherwise bounded.

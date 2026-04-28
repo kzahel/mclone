@@ -290,6 +290,13 @@ interface GeneratedChunkHolder {
   chunkToSave: GeneratedChunkAccess | undefined;
 }
 
+interface GeneratedPendingUnloadHolder {
+  readonly holder: GeneratedChunkHolder;
+  readonly record: GeneratedChunkStorageRecord;
+  readonly savePromise: Promise<void>;
+  cancelled: boolean;
+}
+
 interface GeneratedChunkStatusTarget {
   readonly chunkX: number;
   readonly chunkZ: number;
@@ -314,6 +321,11 @@ type StoredChunkPreloadResult = "loaded" | "already_loaded" | "missing";
 type GeneratedLevelChunk = LevelChunk;
 
 type StorageSideEffectTask = () => Promise<void>;
+
+interface QueuedGeneratedChunkAccessSave {
+  readonly record: GeneratedChunkStorageRecord;
+  readonly promise: Promise<void>;
+}
 
 interface PendingLightBlockChange {
   readonly x: number;
@@ -464,6 +476,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly dirtyDurableChunks = new Set<string>();
   private readonly spawnedOriginalMobChunks = new Set<string>();
   private readonly chunkHolders = new Map<string, GeneratedChunkHolder>();
+  private readonly pendingUnloadChunkHolders = new Map<string, GeneratedPendingUnloadHolder>();
   private readonly generatedCacheWriteVersions = new Map<string, number>();
   private storageSideEffectQueue: Promise<void> = Promise.resolve();
   private pendingStorageSideEffects = 0;
@@ -753,6 +766,18 @@ export class GeneratedWorldHost implements WorldHost {
       return existing;
     }
 
+    const pendingUnload = this.pendingUnloadChunkHolders.get(key);
+    if (pendingUnload !== undefined) {
+      pendingUnload.cancelled = true;
+      this.pendingUnloadChunkHolders.delete(key);
+      this.chunkHolders.set(key, pendingUnload.holder);
+      this.restoreStoredGeneratedChunkIntoLevel(pendingUnload.record);
+      this.incrementWorldgenCount("chunk_holders_pending_unload_resurrected");
+      this.notePendingUnloadChunkHolderCount();
+      this.noteChunkHolderCount();
+      return pendingUnload.holder;
+    }
+
     const holder: GeneratedChunkHolder = {
       chunkX,
       chunkZ,
@@ -773,7 +798,7 @@ export class GeneratedWorldHost implements WorldHost {
         continue;
       }
 
-      this.queueSaveGeneratedChunkAccess(holder.chunkToSave, removedChunkByKey.get(key));
+      this.schedulePendingUnloadChunkHolder(key, holder, removedChunkByKey.get(key));
       this.chunkHolders.delete(key);
       removed++;
     }
@@ -782,6 +807,36 @@ export class GeneratedWorldHost implements WorldHost {
       this.incrementWorldgenCount("chunk_holders_pruned_outside_authority", removed);
     }
     this.noteChunkHolderCount();
+  }
+
+  private schedulePendingUnloadChunkHolder(
+    key: string,
+    holder: GeneratedChunkHolder,
+    sourceChunk?: GeneratedLevelChunk,
+  ): void {
+    const queuedSave = this.queueSaveGeneratedChunkAccess(holder.chunkToSave, sourceChunk, holder);
+    if (queuedSave === undefined) {
+      return;
+    }
+
+    const pendingUnload: GeneratedPendingUnloadHolder = {
+      holder,
+      record: queuedSave.record,
+      savePromise: queuedSave.promise,
+      cancelled: false,
+    };
+    this.pendingUnloadChunkHolders.set(key, pendingUnload);
+    this.incrementWorldgenCount("chunk_holders_pending_unload_scheduled");
+    this.notePendingUnloadChunkHolderCount();
+    void queuedSave.promise.finally(() => {
+      if (this.pendingUnloadChunkHolders.get(key) !== pendingUnload || pendingUnload.cancelled) {
+        return;
+      }
+
+      this.pendingUnloadChunkHolders.delete(key);
+      this.incrementWorldgenCount("chunk_holders_pending_unload_completed");
+      this.notePendingUnloadChunkHolderCount();
+    });
   }
 
   private recordGeneratedChunkAccessStatus(chunkX: number, chunkZ: number): void {
@@ -1202,6 +1257,15 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private restoreStoredGeneratedChunk(record: GeneratedChunkStorageRecord): boolean {
+    if (!this.restoreStoredGeneratedChunkIntoLevel(record)) {
+      return false;
+    }
+
+    this.rememberStoredGeneratedChunkAccess(record);
+    return true;
+  }
+
+  private restoreStoredGeneratedChunkIntoLevel(record: GeneratedChunkStorageRecord): boolean {
     if (record.snapshot !== undefined && (record.chunkX !== record.snapshot.chunkX || record.chunkZ !== record.snapshot.chunkZ)) {
       return false;
     }
@@ -1228,7 +1292,6 @@ export class GeneratedWorldHost implements WorldHost {
       return false;
     }
 
-    this.rememberStoredGeneratedChunkAccess(record);
     return true;
   }
 
@@ -1249,17 +1312,17 @@ export class GeneratedWorldHost implements WorldHost {
     access: GeneratedChunkAccess | undefined,
     sourceChunk?: GeneratedLevelChunk | null,
     holder?: GeneratedChunkHolder,
-  ): void {
+  ): QueuedGeneratedChunkAccessSave | undefined {
     if (access === undefined || !access.isUnsaved) {
-      return;
+      return undefined;
     }
 
     const record = this.createGeneratedChunkStorageRecordForAccess(access, sourceChunk ?? undefined);
     if (record === undefined) {
-      return;
+      return undefined;
     }
 
-    this.queueStorageSideEffect(async () => {
+    const promise = this.queueStorageSideEffect(async () => {
       await this.saveGeneratedChunkRecord(record);
       if (
         holder?.chunkToSave === access
@@ -1271,6 +1334,7 @@ export class GeneratedWorldHost implements WorldHost {
         access.isUnsaved = false;
       }
     });
+    return promise === undefined ? undefined : { record, promise };
   }
 
   private createGeneratedChunkStorageRecordForAccess(
@@ -1943,9 +2007,9 @@ export class GeneratedWorldHost implements WorldHost {
     }
   }
 
-  private queueStorageSideEffect(task: StorageSideEffectTask | undefined): void {
+  private queueStorageSideEffect(task: StorageSideEffectTask | undefined): Promise<void> | undefined {
     if (task === undefined) {
-      return;
+      return undefined;
     }
 
     this.pendingStorageSideEffects++;
@@ -1963,7 +2027,9 @@ export class GeneratedWorldHost implements WorldHost {
         this.noteStorageSideEffectQueueDepth();
       }
     };
-    this.storageSideEffectQueue = this.storageSideEffectQueue.then(run, run);
+    const queued = this.storageSideEffectQueue.then(run, run);
+    this.storageSideEffectQueue = queued;
+    return queued;
   }
 
   private async publishChunkSnapshotIfReady(
@@ -2910,6 +2976,15 @@ export class GeneratedWorldHost implements WorldHost {
     this.setWorldgenCount(
       "chunk_holders_resident_max",
       Math.max(this.worldgenPerformance.counts.get("chunk_holders_resident_max") ?? 0, count),
+    );
+  }
+
+  private notePendingUnloadChunkHolderCount(): void {
+    const count = this.pendingUnloadChunkHolders.size;
+    this.setWorldgenCount("chunk_holders_pending_unload_current", count);
+    this.setWorldgenCount(
+      "chunk_holders_pending_unload_max",
+      Math.max(this.worldgenPerformance.counts.get("chunk_holders_pending_unload_max") ?? 0, count),
     );
   }
 

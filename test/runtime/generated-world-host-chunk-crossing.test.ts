@@ -7,14 +7,27 @@ import type {
   WorldHostMessage,
   WorldPerformanceMessage,
 } from "../../src/runtime/protocol/world-messages";
+import {
+  createWorldSaveMetadata,
+  type ChunkStorage,
+  type OpenWorldStorageRequest,
+  type WorldSaveMetadata,
+  type WorldStorage,
+  type WorldStorageSession,
+} from "../../src/runtime/storage/world-storage";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
 import {
   GeneratedChunkStatus,
   type GeneratedChunkStatus as GeneratedChunkStatusName,
 } from "../../src/world/level/generated-chunk-status";
-import type { GeneratedChunkAccessDebugRecord } from "../../src/world/level/generated-proto-chunk";
+import {
+  cloneGeneratedChunkStorageRecord,
+  type GeneratedChunkAccessDebugRecord,
+  type GeneratedChunkStorageRecord,
+} from "../../src/world/level/generated-proto-chunk";
 import type { GeneratedChunkStatusDebugRecord } from "../../src/world/level/generated-render-level";
 import { MemoryWorldStorage } from "../../src/runtime/storage/memory-world-storage";
+import { clonePackedChunkSnapshot, type PackedChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
 import { FlatGrassWorldGenerator } from "../../src/worldgen/levelgen/demo-world-generators";
 import { GenerationStep } from "../../src/worldgen/levelgen/generation-step";
 import type { WorldGenerator } from "../../src/worldgen/levelgen/world-generator";
@@ -88,6 +101,14 @@ class CountingWorldGenerator implements WorldGenerator {
     return this.delegate.getBaseStoneSource();
   }
 
+  public getSeaLevel(): ReturnType<WorldGenerator["getSeaLevel"]> {
+    return this.delegate.getSeaLevel();
+  }
+
+  public getPrimaryBiome(...args: Parameters<WorldGenerator["getPrimaryBiome"]>): ReturnType<WorldGenerator["getPrimaryBiome"]> {
+    return this.delegate.getPrimaryBiome(...args);
+  }
+
   public fillFromNoise(...args: Parameters<WorldGenerator["fillFromNoise"]>): ReturnType<WorldGenerator["fillFromNoise"]> {
     const [chunkX, chunkZ] = args;
     this.fillFromNoiseCalls.push(chunkKey(chunkX, chunkZ));
@@ -135,6 +156,14 @@ class CountingWorldGenerator implements WorldGenerator {
     await this.delegate.applyCarversCooperative(...args);
   }
 
+  public createStructures(...args: Parameters<WorldGenerator["createStructures"]>): void {
+    this.delegate.createStructures(...args);
+  }
+
+  public createReferences(...args: Parameters<WorldGenerator["createReferences"]>): void {
+    this.delegate.createReferences(...args);
+  }
+
   public applyBiomeDecoration(...args: Parameters<WorldGenerator["applyBiomeDecoration"]>): void {
     const [, chunkX, chunkZ] = args;
     this.decorationCalls.push(chunkKey(chunkX, chunkZ));
@@ -171,8 +200,77 @@ class CountingWorldGenerator implements WorldGenerator {
     return this.fillFromNoiseCalls.includes(chunkKey(chunkX, chunkZ));
   }
 
+  public fillFromNoiseCallCount(chunkX: number, chunkZ: number): number {
+    return this.fillFromNoiseCalls.filter((key) => key === chunkKey(chunkX, chunkZ)).length;
+  }
+
   public hasDecorationCall(chunkX: number, chunkZ: number): boolean {
     return this.decorationCalls.includes(chunkKey(chunkX, chunkZ));
+  }
+}
+
+class BlockingGeneratedChunkStorage implements ChunkStorage {
+  public readonly snapshots = new Map<string, PackedChunkSnapshot>();
+  public readonly generatedRecords = new Map<string, GeneratedChunkStorageRecord>();
+  public generatedSaveStarted = 0;
+  private readonly pendingGeneratedSaveResolvers: Array<() => void> = [];
+  private generatedSavesReleased = false;
+
+  public async loadChunk(chunkX: number, chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
+    const snapshot = this.snapshots.get(chunkKey(chunkX, chunkZ));
+    return snapshot === undefined ? undefined : clonePackedChunkSnapshot(snapshot);
+  }
+
+  public async saveChunk(snapshot: PackedChunkSnapshot): Promise<void> {
+    this.snapshots.set(chunkKey(snapshot.chunkX, snapshot.chunkZ), clonePackedChunkSnapshot(snapshot));
+  }
+
+  public async loadGeneratedChunk(chunkX: number, chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
+    const record = this.generatedRecords.get(chunkKey(chunkX, chunkZ));
+    return record === undefined ? undefined : cloneGeneratedChunkStorageRecord(record);
+  }
+
+  public async saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void> {
+    this.generatedSaveStarted++;
+    if (this.generatedSavesReleased) {
+      this.generatedRecords.set(chunkKey(record.chunkX, record.chunkZ), cloneGeneratedChunkStorageRecord(record));
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      this.pendingGeneratedSaveResolvers.push(() => {
+        this.generatedRecords.set(chunkKey(record.chunkX, record.chunkZ), cloneGeneratedChunkStorageRecord(record));
+        resolve();
+      });
+    });
+  }
+
+  public async evictChunk(_chunkX: number, _chunkZ: number): Promise<void> {}
+
+  public releaseAllGeneratedSaves(): void {
+    this.generatedSavesReleased = true;
+    while (this.pendingGeneratedSaveResolvers.length > 0) {
+      this.pendingGeneratedSaveResolvers.shift()?.();
+    }
+  }
+}
+
+class BlockingGeneratedWorldStorageSession implements WorldStorageSession {
+  public constructor(
+    public readonly metadata: WorldSaveMetadata,
+    public readonly chunks: BlockingGeneratedChunkStorage,
+  ) {}
+
+  public async close(): Promise<void> {}
+}
+
+class BlockingGeneratedWorldStorage implements WorldStorage {
+  public readonly chunks = new BlockingGeneratedChunkStorage();
+  public metadata: WorldSaveMetadata | undefined;
+
+  public async openWorld(request: OpenWorldStorageRequest): Promise<WorldStorageSession> {
+    this.metadata = createWorldSaveMetadata(request);
+    return new BlockingGeneratedWorldStorageSession(this.metadata, this.chunks);
   }
 }
 
@@ -273,7 +371,7 @@ function countMaterializedChunkAccess(records: readonly GeneratedChunkAccessDebu
 function createHost(options: {
   readonly chunkViewScheduling?: "synchronous" | "cooperative";
   readonly generatorOptions?: CountingWorldGeneratorOptions;
-  readonly worldStorage?: MemoryWorldStorage;
+  readonly worldStorage?: WorldStorage;
 } = {}): { readonly host: GeneratedWorldHost; readonly generator: CountingWorldGenerator } {
   const blocks = registerGeneratedRenderBlocks();
   const generator = new CountingWorldGenerator(12345n, options.generatorOptions);
@@ -307,6 +405,22 @@ async function waitForFillFromNoiseCalls(
   }
 
   throw new Error(`Expected at least ${expectedCalls.toString()} fillFromNoise calls`);
+}
+
+async function waitForGeneratedSaveStart(
+  storage: BlockingGeneratedChunkStorage,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (storage.generatedSaveStarted > 0) {
+      return;
+    }
+
+    await sleep(1);
+  }
+
+  throw new Error("Expected a generated chunk save to start");
 }
 
 async function drainChunkSnapshots(
@@ -552,4 +666,40 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(second.host.getDebugGeneratedChunkAccessRecords().find((record) => record.chunkX === 4 && record.chunkZ === 0)?.status)
       .toBe(GeneratedChunkStatus.FULL);
   });
+
+  test("resurrects pending-unload holders instead of reloading stale storage", async () => {
+    const storage = new BlockingGeneratedWorldStorage();
+    const { host, generator } = createHost({ worldStorage: storage });
+    await host.openWorld(OPEN_WORLD_REQUEST);
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    expect(generator.fillFromNoiseCallCount(0, 0)).toBe(1);
+
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 32,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    await waitForGeneratedSaveStart(storage.chunks);
+    expect(storage.chunks.generatedRecords.size).toBe(0);
+
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    const performance = await readWorldgenPerformance(host);
+
+    expect(generator.fillFromNoiseCallCount(0, 0)).toBe(1);
+    expect(performance.counts.chunk_holders_pending_unload_resurrected ?? 0).toBeGreaterThan(0);
+
+    storage.chunks.releaseAllGeneratedSaves();
+    await host.flushStorageSideEffects();
+  }, 60_000);
 });
