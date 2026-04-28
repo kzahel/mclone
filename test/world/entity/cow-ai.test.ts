@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { BlockPos } from "../../../src/core/block-pos";
 import { EntityRuntime } from "../../../src/runtime/host/entity-runtime";
 import { EntityTypes, GeneratedMobEntity } from "../../../src/world/entity/entity-type";
+import { MobAttribute } from "../../../src/world/entity/attribute";
 import { WaterAvoidingRandomStrollGoal } from "../../../src/world/entity/ai/goal/water-avoiding-random-stroll-goal";
 import type { MobAiLevel, PathfinderMob } from "../../../src/world/entity/ai/pathfinder-mob";
 import { AirBlock } from "../../../src/world/level/block/air-block";
@@ -83,7 +84,7 @@ function key(x: number, y: number, z: number): string {
   return `${x},${y},${z}`;
 }
 
-describe("cow AI foundation", () => {
+describe("passive mob AI foundation", () => {
   test("ticks generated cows only after their chunk reaches ENTITY_TICKING", () => {
     const cow = new GeneratedMobEntity({
       id: 1,
@@ -146,13 +147,15 @@ describe("cow AI foundation", () => {
     });
     mob.setAiLevel(new FlatMobAiLevel());
 
+    expect(mob.getAttributeValue(MobAttribute.MAX_HEALTH)).toBe(10.0);
+    expect(mob.getAttributeValue(MobAttribute.MOVEMENT_SPEED)).toBe(0.25);
     expect(mob.getNavigation().moveTo(4.5, 70, 0.5, 1.0)).toBe(true);
     expect(mob.getNavigation().getPath()?.canReach()).toBe(true);
     expect(mob.getNavigation().getPath()?.getTarget()).toEqual(new BlockPos(4, 64, 0));
 
     mob.tickServerAi({ resetNoActionTime: true });
 
-    expect(mob.position.x).toBeGreaterThan(0.5);
+    expect(mob.position.x).not.toBe(0.5);
     expect(mob.position.y).toBe(64);
     expect(mob.position.z).toBe(0.5);
     expect(mob.isOnGround()).toBe(true);

@@ -225,6 +225,10 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   private registerGoals(): void {
     if (this.entityType.id === EntityTypes.COW.id) {
       this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 1.0));
+      return;
+    }
+    if (this.entityType.id === EntityTypes.PIG.id) {
+      this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 1.0));
     }
   }
 
@@ -379,7 +383,7 @@ function creature(id: string, width: number, height: number, options: Omit<Entit
 
 export const EntityTypes = {
   SHEEP: creature("minecraft:sheep", 0.9, 1.3, { defaultData: (random) => ({ Color: sheepColor(random) }) }),
-  PIG: creature("minecraft:pig", 0.9, 0.9),
+  PIG: creature("minecraft:pig", 0.9, 0.9, { attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.25 } }),
   CHICKEN: creature("minecraft:chicken", 0.4, 0.7),
   COW: creature("minecraft:cow", 0.9, 1.4, { attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.2 } }),
   WOLF: creature("minecraft:wolf", 0.6, 0.85),

@@ -1,9 +1,10 @@
 import { ResourceLocation } from "../../core/resource-location";
 import type { ClientEntityPresentationState } from "../../runtime/client/entity-interpolation-service";
-import { COW_ENTITY_TYPE_ID, PLAYER_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
+import { COW_ENTITY_TYPE_ID, PIG_ENTITY_TYPE_ID, PLAYER_ENTITY_TYPE_ID } from "../../runtime/protocol/world-messages";
 
 export const DEFAULT_PLAYER_SKIN = new ResourceLocation("minecraft", "textures/entity/steve.png");
 export const DEFAULT_COW_TEXTURE = new ResourceLocation("minecraft", "textures/entity/cow/cow.png");
+export const DEFAULT_PIG_TEXTURE = new ResourceLocation("minecraft", "textures/entity/pig/pig.png");
 
 export type PlayerSkinModel = "default" | "slim";
 
@@ -38,9 +39,13 @@ export interface RenderablePlayer extends RenderableEntity {
   hasChestEquipment(): boolean;
 }
 
-export interface RenderableCow extends RenderableEntity {
+export interface RenderableTexturedMob extends RenderableEntity {
   getTextureLocation(): ResourceLocation;
 }
+
+export interface RenderableCow extends RenderableTexturedMob {}
+
+export interface RenderablePig extends RenderableTexturedMob {}
 
 export class SnapshotRenderablePlayer implements RenderablePlayer {
   public readonly entityId: number;
@@ -150,10 +155,10 @@ export class SnapshotRenderablePlayer implements RenderablePlayer {
   }
 }
 
-export class SnapshotRenderableCow implements RenderableCow {
+abstract class SnapshotRenderableTexturedMob implements RenderableTexturedMob {
   public readonly entityId: number;
   public readonly uuid: string;
-  public readonly typeId = COW_ENTITY_TYPE_ID;
+  public readonly typeId: string;
   public readonly tickCount: number;
   public readonly yBodyRot: number;
   public readonly yBodyRotO: number;
@@ -170,9 +175,13 @@ export class SnapshotRenderableCow implements RenderableCow {
   private readonly height: number;
   private readonly baby: boolean;
 
-  public constructor(state: ClientEntityPresentationState) {
+  protected constructor(
+    state: ClientEntityPresentationState,
+    private readonly textureLocation: ResourceLocation,
+  ) {
     this.entityId = state.entityId;
     this.uuid = state.uuid;
+    this.typeId = state.typeId;
     this.x = state.interpolatedPosition.x;
     this.y = state.interpolatedPosition.y;
     this.z = state.interpolatedPosition.z;
@@ -238,7 +247,19 @@ export class SnapshotRenderableCow implements RenderableCow {
   }
 
   public getTextureLocation(): ResourceLocation {
-    return DEFAULT_COW_TEXTURE;
+    return this.textureLocation;
+  }
+}
+
+export class SnapshotRenderableCow extends SnapshotRenderableTexturedMob implements RenderableCow {
+  public constructor(state: ClientEntityPresentationState) {
+    super(state, DEFAULT_COW_TEXTURE);
+  }
+}
+
+export class SnapshotRenderablePig extends SnapshotRenderableTexturedMob implements RenderablePig {
+  public constructor(state: ClientEntityPresentationState) {
+    super(state, DEFAULT_PIG_TEXTURE);
   }
 }
 
@@ -249,6 +270,10 @@ export function createRenderableEntity(state: ClientEntityPresentationState): Re
 
   if (state.typeId === COW_ENTITY_TYPE_ID) {
     return new SnapshotRenderableCow(state);
+  }
+
+  if (state.typeId === PIG_ENTITY_TYPE_ID) {
+    return new SnapshotRenderablePig(state);
   }
 
   return undefined;

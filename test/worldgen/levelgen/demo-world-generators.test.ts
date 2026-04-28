@@ -49,7 +49,7 @@ describe("demo world generators", () => {
     expect(farBiomeIds.has(getLayeredBiomeByKey("minecraft:ocean").getId())).toBe(true);
   });
 
-  test("small island generator places visible starter cows near the origin", () => {
+  test("small island generator places visible starter farm animals near the origin", () => {
     const generator = new SmallIslandWorldGenerator(12345n);
     const spawned: GeneratedMobEntity[] = [];
     let nextId = 100;
@@ -60,17 +60,22 @@ describe("demo world generators", () => {
       },
     }, {
       nextEntityId: () => nextId++,
-      nextEntityUuid: (id) => `mclone:test/small-island-cow/${id.toString()}`,
+      nextEntityUuid: (id) => `mclone:test/small-island-mob/${id.toString()}`,
     });
 
-    expect(spawned).toHaveLength(4);
-    expect(spawned.every((entity) => entity.typeId === "minecraft:cow")).toBe(true);
+    expect(spawned).toHaveLength(8);
+    expect(spawned.filter((entity) => entity.typeId === "minecraft:cow")).toHaveLength(4);
+    expect(spawned.filter((entity) => entity.typeId === "minecraft:pig")).toHaveLength(4);
     expect(spawned.every((entity) => entity.onGround)).toBe(true);
     expect(spawned.map((entity) => [entity.position.x, entity.position.z])).toEqual([
       [6.5, 6.5],
       [10.5, 7.5],
       [7.5, 11.5],
       [12.5, 12.5],
+      [3.5, 10.5],
+      [4.5, 13.5],
+      [13.5, 4.5],
+      [14.5, 9.5],
     ]);
     expect(spawned.every((entity) => entity.position.y > 62)).toBe(true);
 

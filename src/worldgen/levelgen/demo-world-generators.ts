@@ -26,11 +26,15 @@ const MIN_BUILD_HEIGHT = 0;
 const WORLD_HEIGHT = 256;
 const DEFAULT_SEA_LEVEL = 62;
 const STONE_LOCATION = new ResourceLocation("minecraft:stone");
-const SMALL_ISLAND_STARTER_COWS = [
-  { x: 6.5, z: 6.5, yaw: 45.0 },
-  { x: 10.5, z: 7.5, yaw: 135.0 },
-  { x: 7.5, z: 11.5, yaw: 225.0 },
-  { x: 12.5, z: 12.5, yaw: 315.0 },
+const SMALL_ISLAND_STARTER_MOBS = [
+  { type: EntityTypes.COW, slug: "cow", x: 6.5, z: 6.5, yaw: 45.0 },
+  { type: EntityTypes.COW, slug: "cow", x: 10.5, z: 7.5, yaw: 135.0 },
+  { type: EntityTypes.COW, slug: "cow", x: 7.5, z: 11.5, yaw: 225.0 },
+  { type: EntityTypes.COW, slug: "cow", x: 12.5, z: 12.5, yaw: 315.0 },
+  { type: EntityTypes.PIG, slug: "pig", x: 3.5, z: 10.5, yaw: 25.0 },
+  { type: EntityTypes.PIG, slug: "pig", x: 4.5, z: 13.5, yaw: 95.0 },
+  { type: EntityTypes.PIG, slug: "pig", x: 13.5, z: 4.5, yaw: 205.0 },
+  { type: EntityTypes.PIG, slug: "pig", x: 14.5, z: 9.5, yaw: 285.0 },
 ] as const;
 
 function normalizeLongSeed(seed: LongSeed): bigint {
@@ -338,8 +342,8 @@ export class SmallIslandWorldGenerator extends DemoWorldGeneratorBase {
     sink: GenerationEntitySink,
     options: NaturalSpawnerOptions = {},
   ): void {
-    for (let index = 0; index < SMALL_ISLAND_STARTER_COWS.length; index++) {
-      const spawn = SMALL_ISLAND_STARTER_COWS[index]!;
+    for (let index = 0; index < SMALL_ISLAND_STARTER_MOBS.length; index++) {
+      const spawn = SMALL_ISLAND_STARTER_MOBS[index]!;
       const spawnChunkX = Math.floor(spawn.x / CHUNK_WIDTH);
       const spawnChunkZ = Math.floor(spawn.z / CHUNK_WIDTH);
       if (spawnChunkX !== chunkX || spawnChunkZ !== chunkZ) {
@@ -354,8 +358,8 @@ export class SmallIslandWorldGenerator extends DemoWorldGeneratorBase {
       const entityId = options.nextEntityId?.() ?? index + 1;
       const entity = new GeneratedMobEntity({
         id: entityId,
-        uuid: options.nextEntityUuid?.(entityId) ?? `mclone:small-island/cow/${entityId.toString()}`,
-        entityType: EntityTypes.COW,
+        uuid: options.nextEntityUuid?.(entityId) ?? `mclone:small-island/${spawn.slug}/${entityId.toString()}`,
+        entityType: spawn.type,
         x: spawn.x,
         y: column.surfaceY + 1,
         z: spawn.z,

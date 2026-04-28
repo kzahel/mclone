@@ -214,7 +214,7 @@ describe("GeneratedWorldHost entity publication", () => {
     expect(cowUpdate!.update.position).not.toEqual(initialCow!.entity.position);
   });
 
-  test("publishes small-island starter cows near the origin chunk", async () => {
+  test("publishes small-island starter farm animals near the origin chunk", async () => {
     const blocks = registerGeneratedRenderBlocks();
     const host = new GeneratedWorldHost({
       seed: 12345n,
@@ -238,17 +238,24 @@ describe("GeneratedWorldHost entity publication", () => {
       radius: 1,
     });
 
-    const cows = messages
-      .filter((message): message is EntitySnapshotMessage => message.type === "entity_snapshot" && message.entity.typeId === "minecraft:cow")
+    const farmAnimals = messages
+      .filter((message): message is EntitySnapshotMessage => message.type === "entity_snapshot"
+        && (message.entity.typeId === "minecraft:cow" || message.entity.typeId === "minecraft:pig"))
       .sort((left, right) => left.entity.id - right.entity.id);
 
-    expect(cows).toHaveLength(4);
-    expect(cows.map((message) => [message.entity.position.x, message.entity.position.z])).toEqual([
+    expect(farmAnimals).toHaveLength(8);
+    expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:cow")).toHaveLength(4);
+    expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:pig")).toHaveLength(4);
+    expect(farmAnimals.map((message) => [message.entity.position.x, message.entity.position.z])).toEqual([
       [6.5, 6.5],
       [10.5, 7.5],
       [7.5, 11.5],
       [12.5, 12.5],
+      [3.5, 10.5],
+      [4.5, 13.5],
+      [13.5, 4.5],
+      [14.5, 9.5],
     ]);
-    expect(cows.every((message) => message.entity.chunkX === 0 && message.entity.chunkZ === 0)).toBe(true);
+    expect(farmAnimals.every((message) => message.entity.chunkX === 0 && message.entity.chunkZ === 0)).toBe(true);
   });
 });

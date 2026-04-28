@@ -5,8 +5,10 @@ import { collectEntityRenderBatches } from "../../../src/renderer/entity/entity-
 import { EntityRenderDispatcher } from "../../../src/renderer/entity/entity-render-dispatcher";
 import {
   DEFAULT_COW_TEXTURE,
+  DEFAULT_PIG_TEXTURE,
   DEFAULT_PLAYER_SKIN,
   SnapshotRenderableCow,
+  SnapshotRenderablePig,
   SnapshotRenderablePlayer,
   createRenderableEntity,
 } from "../../../src/renderer/entity/renderable-entity";
@@ -91,6 +93,42 @@ function cowState(overrides: Partial<ClientEntityPresentationState> = {}): Clien
   };
 }
 
+function pigState(overrides: Partial<ClientEntityPresentationState> = {}): ClientEntityPresentationState {
+  const authoritative = {
+    id: 9,
+    uuid: "00000000-0000-0000-0000-000000000009",
+    typeId: "minecraft:pig",
+    category: "creature" as const,
+    chunkX: 0,
+    chunkZ: 0,
+    position: { x: 8, y: 65, z: 8 },
+    rotation: { yaw: 45, pitch: 0 },
+    width: 0.9,
+    height: 0.9,
+    onGround: true,
+    age: 0,
+  };
+  return {
+    entityId: authoritative.id,
+    uuid: authoritative.uuid,
+    typeId: authoritative.typeId,
+    category: authoritative.category,
+    chunkX: authoritative.chunkX,
+    chunkZ: authoritative.chunkZ,
+    width: authoritative.width,
+    height: authoritative.height,
+    onGround: authoritative.onGround,
+    age: authoritative.age,
+    data: {},
+    interpolatedPosition: authoritative.position,
+    interpolatedRotation: authoritative.rotation,
+    interpolationAlpha: 1,
+    authoritative,
+    aiAuthority: "host",
+    ...overrides,
+  };
+}
+
 class RecordingBufferSource extends MultiBufferSource.BufferSource {
   public readonly requested: RenderType[] = [];
 
@@ -112,7 +150,7 @@ const FULL_BRIGHT_LEVEL = {
   getBrightness: () => 15,
 } as unknown as BlockAndTintGetter;
 
-describe("Player entity renderer", () => {
+describe("Entity renderer", () => {
   test("snapshot adapter creates renderable player state and ignores unsupported entities", () => {
     const state = playerState({
       data: {
@@ -136,6 +174,9 @@ describe("Player entity renderer", () => {
 
     const cow = createRenderableEntity(cowState());
     expect(cow).toBeInstanceOf(SnapshotRenderableCow);
+
+    const pig = createRenderableEntity(pigState());
+    expect(pig).toBeInstanceOf(SnapshotRenderablePig);
   });
 
   test("dispatcher renders a neutral remote player through entityTranslucent NEW_ENTITY batches", () => {
@@ -226,9 +267,35 @@ describe("Player entity renderer", () => {
     expect(batches[0]!.buffer.length).toBe(batches[0]!.drawState.vertexBufferSize());
   });
 
+  test("dispatcher renders a neutral pig through entityCutoutNoCull NEW_ENTITY batches", () => {
+    const dispatcher = new EntityRenderDispatcher();
+    const entity = new SnapshotRenderablePig(pigState());
+    const builder = new BufferBuilder(256);
+    const bufferSource = new RecordingBufferSource(builder);
+
+    dispatcher.renderEntity(
+      entity,
+      new Vec3(8, 65, 8),
+      new PoseStack(),
+      bufferSource,
+      LightTexture.pack(15, 15),
+      0,
+    );
+    bufferSource.endBatch();
+
+    expect(new Set(bufferSource.requested)).toEqual(new Set([RenderType.entityCutoutNoCull(DEFAULT_PIG_TEXTURE)]));
+    const { drawState, buffer } = bufferSource.pop();
+    expect(drawState.format()).toBe(DefaultVertexFormat.NEW_ENTITY);
+    expect(drawState.vertexCount()).toBe(168);
+    expect(drawState.indexCount()).toBe(252);
+    expect(drawState.sequentialIndex()).toBe(true);
+    expect(buffer.length).toBe(drawState.vertexBufferSize());
+  });
+
   test("entity texture paths resolve vanilla full texture locations directly", () => {
     expect(resolveEntityTexturePath(DEFAULT_PLAYER_SKIN)).toBe("assets/minecraft/textures/entity/steve.png");
     expect(resolveEntityTexturePath(DEFAULT_COW_TEXTURE)).toBe("assets/minecraft/textures/entity/cow/cow.png");
+    expect(resolveEntityTexturePath(DEFAULT_PIG_TEXTURE)).toBe("assets/minecraft/textures/entity/pig/pig.png");
     expect(resolveEntityTexturePath("minecraft:entity/custom_remote")).toBe("assets/minecraft/textures/entity/custom_remote.png");
   });
 });

@@ -16,6 +16,7 @@ function register(path: string, model = "main"): ModelLayerLocation {
 
 export class ModelLayers {
   public static readonly COW = register("cow");
+  public static readonly PIG = register("pig");
   public static readonly PLAYER = register("player");
   public static readonly PLAYER_SLIM = register("player_slim");
 
