@@ -39,7 +39,14 @@ This document is a reference for future creature work. It is not a tactical slic
 - explicit remove/untrack messages for unloaded interest and dropped remote player slots
 - vanilla-shaped cow renderer/model registration and extracted cow texture loading
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, meaningful cow ticking behavior, AI/pathfinding/wandering, persistence adapters beyond the in-memory runtime path, and cow gameplay interactions.
+`Creatures5` starts the cow tick/wander path:
+
+- generated cows tick only after their chunk reaches `ENTITY_TICKING`
+- cow tick state now owns `GoalSelector`, `MoveControl`, a deterministic runtime random source, no-action state, and cow attributes
+- `WaterAvoidingRandomStrollGoal` and its random-position helpers are ported far enough for first cow wandering
+- moving generated cows publish `entity_update` messages with authoritative tick context
+
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla ground pathfinding, collision-resolved living-entity travel, persistence adapters beyond the in-memory runtime path, and cow gameplay interactions.
 
 ## Reference Source Map
 
@@ -317,8 +324,8 @@ Today the repo has authoritative host/session plumbing, chunk snapshots, an earl
 | Area | Current role |
 |---|---|
 | `src/runtime/session/player-loop.ts` | debug authoritative player-state loop, not vanilla `Player`/`Entity` |
-| `docs/protocol.md` | documents current `entity_snapshot` and future `entity_delta` semantics |
-| `src/runtime/protocol/world-messages.ts` | concrete protocol has session, player, chunk, unload, error, and generated entity snapshot messages |
+| `docs/protocol.md` | documents current `entity_snapshot`, `entity_update`, and `entity_remove` semantics |
+| `src/runtime/protocol/world-messages.ts` | concrete protocol has session, player, chunk, unload, error, generated entity snapshot, entity update, and entity remove messages |
 | `src/runtime/host/generated-world-host.ts` | owns chunk interest, player state, chunk snapshot delivery, and generated original mob publication |
 | `src/runtime/node/generated-world-http-server.ts` | dedicated host path with the same logical ownership and per-session entity snapshot replay |
 | `src/worldgen/biome/` | biome source exists, with the first passive spawn settings needed for generation-time creatures |
@@ -337,7 +344,7 @@ Keep the same division used by lighting and liquids:
 | Authoritative host | owns game time, player/session positions, chunk ticket/activity state, entity storage, natural-spawn scheduling, entity ticks, mutation batching, persistence dirtying |
 | Chunk workers | generate chunks and return blocks plus generation-time original entity records when `ChunkStatus.SPAWN` lands |
 | Storage adapters | persist chunk/section entity records and world-level entity indexes behind engine-native records |
-| Protocol | publish entity snapshots/deltas with authoritative ids, chunk residency, and tick/revision context |
+| Protocol | publish entity snapshots/updates/removals with authoritative ids, chunk residency, and tick context; add per-session revisions before high-frequency movement depends on them |
 | Renderer/client runtime | consume authoritative entity state for interpolation and drawing; never decide spawning or despawning |
 
 ### Architectural Divergence

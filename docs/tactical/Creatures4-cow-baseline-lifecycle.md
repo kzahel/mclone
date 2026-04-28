@@ -1,6 +1,6 @@
 # Creatures4 - Cow baseline lifecycle
 
-Status: baseline landed; cow wandering still planned.
+Status: baseline landed; first cow tick/wander foundation continues in [`Creatures5-cow-tick-wander-foundation.md`](Creatures5-cow-tick-wander-foundation.md).
 
 This tactical follows the landed entity/runtime foundation in [`Entities0-runtime-entity-foundation.md`](Entities0-runtime-entity-foundation.md), generated passive spawning in [`Creatures1-generation-passive-spawning.md`](Creatures1-generation-passive-spawning.md), host entity publication in [`Creatures2-host-entity-publication.md`](Creatures2-host-entity-publication.md), and the vanilla-shaped renderer foundation in [`EntityRender0-vanilla-entity-renderer-foundation.md`](EntityRender0-vanilla-entity-renderer-foundation.md).
 
@@ -91,13 +91,13 @@ Do not add renderer-local cow placement, hand-authored test cows in the browser,
 
 ### 2. Entity Lifecycle Protocol
 
-Status: baseline landed for add/update/remove message shape and client hydration. Ordered tick/revision context and moving-entity routing should be finished with cow wandering.
+Status: baseline landed for add/update/remove message shape and client hydration. `Creatures5` adds tick context and first moving-entity routing; per-session revision remains deferred.
 
 Before cow movement, fix the protocol gap exposed by remote players and generated mobs.
 
 Required work:
 
-- add tick/revision context to authoritative entity state before deltas depend on ordering
+- add tick context to authoritative entity state before movement deltas depend on ordering; per-session revision remains follow-up
 - add explicit entity removal/untrack messages instead of relying only on `chunk_unload`
 - add entity update messages for position, rotation, chunk/section ownership, and tracked data
 - make per-session entity tracking decide when a client receives baseline, update, and remove messages
@@ -211,7 +211,7 @@ Cow wandering follow-up is done when:
 
 - cow movement is produced by vanilla-shaped entity tick/goals in entity-ticking chunks
 - cow section/chunk ownership updates through the entity manager as it moves
-- clients receive ordered entity updates and interpolate cow movement
+- clients receive tick-context entity updates and interpolate cow movement
 - tests cover movement, update publication, and client removal when interest changes
 
 ## Next

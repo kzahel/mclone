@@ -2,17 +2,23 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import cowFixture from "../fixtures/creatures/overworld-seed-12345-chunk-2--18-entities.json";
 import sheepFixture from "../fixtures/creatures/overworld-seed-12345-chunk--7--15-entities.json";
+import { BlockPos } from "../../src/core/block-pos";
 import { Registry } from "../../src/core/registry";
 import { createGeneratedWorldSaveId, GENERATED_WORLD_STORAGE_VERSION, GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
 import { LocalWorldClient, LocalWorldTransport } from "../../src/runtime/transport/local-world-transport";
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
+import type { WorldGenLevel } from "../../src/world/level/world-gen-level";
+import { EntityTypes, GeneratedMobEntity } from "../../src/world/entity/entity-type";
+import { Goal, GoalFlag } from "../../src/world/entity/ai/goal/goal";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
+import { FlatGrassWorldGenerator } from "../../src/worldgen/levelgen/demo-world-generators";
+import type { GenerationEntitySink, NaturalSpawnerOptions } from "../../src/worldgen/levelgen/natural-spawner";
 import {
   type CreatureGenerationFixture,
 } from "../../src/oracle/integration/creature-fixture";
-import type { EntitySnapshot } from "../../src/runtime/protocol/world-messages";
+import type { EntitySnapshot, EntitySnapshotMessage, EntityUpdateMessage } from "../../src/runtime/protocol/world-messages";
 
 const creatureFixtures = [
   ["sheep", sheepFixture as unknown as CreatureGenerationFixture, "minecraft:sheep"],
@@ -24,6 +30,61 @@ const OPEN_WORLD_REQUEST = {
   preset: "default",
 } as const;
 const GENERATED_WORLD_ENTITIES_TIMEOUT_MS = 30_000;
+
+class MoveOnceGoal extends Goal {
+  private used = false;
+
+  public constructor(
+    private readonly cow: GeneratedMobEntity,
+    private readonly target: BlockPos,
+  ) {
+    super();
+    this.setFlags([GoalFlag.MOVE]);
+  }
+
+  public canUse(): boolean {
+    return !this.used;
+  }
+
+  public override canContinueToUse(): boolean {
+    return !this.cow.getNavigation().isDone();
+  }
+
+  public override start(): void {
+    this.used = true;
+    this.cow.getNavigation().moveTo(this.target.getX() + 0.5, this.target.getY(), this.target.getZ() + 0.5, 1.0);
+  }
+}
+
+class MovingCowFlatGenerator extends FlatGrassWorldGenerator {
+  public override spawnOriginalMobs(
+    _level: WorldGenLevel,
+    chunkX: number,
+    chunkZ: number,
+    sink: GenerationEntitySink,
+    options: NaturalSpawnerOptions = {},
+  ): void {
+    if (chunkX !== 0 || chunkZ !== 0) {
+      return;
+    }
+
+    const id = options.nextEntityId?.() ?? 1;
+    const cow = new GeneratedMobEntity({
+      id,
+      uuid: options.nextEntityUuid?.(id) ?? "mclone:test/moving-cow",
+      entityType: EntityTypes.COW,
+      x: 8.5,
+      y: 64,
+      z: 8.5,
+      yaw: 0,
+      pitch: 0,
+      onGround: true,
+      randomSeed: 0,
+    });
+    cow.goalSelector.addGoal(0, new MoveOnceGoal(cow, new BlockPos(10, 64, 8)));
+    sink.addFreshEntityWithPassengers(cow);
+  }
+}
 
 function createWorldClient(): LocalWorldClient {
   const blocks = registerGeneratedRenderBlocks();
@@ -100,4 +161,56 @@ describe("GeneratedWorldHost entity publication", () => {
 
     expect(targetChunkEntitySnapshots(creatureFixture, client.getEntitySnapshots())).toEqual([]);
   }, GENERATED_WORLD_ENTITIES_TIMEOUT_MS);
+
+  test("publishes entity updates when a ticking generated cow moves", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    let nowMs = 0;
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      generator: new MovingCowFlatGenerator(12345n),
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      liquidSimulationMode: "none",
+      worldTickIntervalMs: 1,
+      nowMs: () => nowMs,
+    });
+
+    await host.openWorld({ ...OPEN_WORLD_REQUEST, preset: "flat_grass" });
+    const initialMessages = await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+    const initialCow = initialMessages.find(
+      (message): message is EntitySnapshotMessage => message.type === "entity_snapshot" && message.entity.typeId === "minecraft:cow",
+    );
+    expect(initialCow).toBeDefined();
+    expect(initialCow).toMatchObject({
+      type: "entity_snapshot",
+      entity: {
+        position: { x: 8.5, y: 64, z: 8.5 },
+        tick: 0,
+      },
+    });
+
+    nowMs = 1;
+    const updates = await host.pollUpdates({ type: "poll_world_updates" });
+    const cowUpdate = updates.find(
+      (message): message is EntityUpdateMessage => message.type === "entity_update" && message.update.id === initialCow!.entity.id,
+    );
+
+    expect(cowUpdate).toBeDefined();
+    expect(cowUpdate).toMatchObject({
+      type: "entity_update",
+      update: {
+        id: initialCow!.entity.id,
+        tick: 1,
+      },
+    });
+    expect(cowUpdate!.update.position).toBeDefined();
+    expect(cowUpdate!.update.position).not.toEqual(initialCow!.entity.position);
+  });
 });

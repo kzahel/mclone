@@ -57,8 +57,12 @@ export class EntityRuntime<T extends RuntimeEntityAccess> {
     this.manager.updateChunkStatus(chunkX, chunkZ, status);
   }
 
-  public tick(): void {
+  public processLifecycle(): void {
     this.manager.tick();
+  }
+
+  public tick(): void {
+    this.processLifecycle();
     this.tickList.forEach(this.tickEntity);
   }
 }

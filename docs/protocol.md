@@ -125,7 +125,7 @@ Current and near-term host-to-client updates:
 | `chunk_light_delta` | stored light changes for an already loaded chunk |
 | `chunk_unload` | release a chunk from client view/cache |
 | `entity_snapshot` | authoritative generated entity baseline data for a visible chunk |
-| `entity_update` | partial authoritative entity position/rotation/chunk/tracked-data update after a baseline |
+| `entity_update` | partial authoritative entity position/rotation/chunk/tracked-data/tick update after a baseline |
 | `entity_remove` | explicit entity untrack/remove fact for the client replica |
 | `world_error` | stable failure surface |
 

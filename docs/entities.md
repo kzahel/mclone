@@ -17,9 +17,9 @@ This document is about entity lifecycle, storage, ticking, host ownership, persi
 - logical chunk entity storage with a memory adapter for tests
 - `EntityRuntime` host wrapper that owns the manager and tick list
 
-`Entities0` itself stayed pre-creature. `Creatures1` feeds the runtime with generation-time passive entities through the host-owned worldgen entity sink. `Creatures2` wires that runtime into `GeneratedWorldHost` and publishes generated entities as protocol `entity_snapshot` records consumed by local and remote clients as data.
+`Entities0` itself stayed pre-creature. `Creatures1` feeds the runtime with generation-time passive entities through the host-owned worldgen entity sink. `Creatures2` wires that runtime into `GeneratedWorldHost` and publishes generated entities as protocol `entity_snapshot` records consumed by local and remote clients as data. `Creatures5` starts ticking generated cows in `ENTITY_TICKING` chunks and publishes movement through `entity_update`.
 
-Still deferred: `entity_delta`/removal streams, AI, despawn, renderer paths, and durable entity persistence adapters beyond the current in-memory runtime path.
+Still deferred: full per-session tracking/revision policy, despawn, durable entity persistence adapters beyond the current in-memory runtime path, and most mob behavior beyond the first cow wander foundation.
 
 ## Scope
 
@@ -301,7 +301,7 @@ Suggested baseline facts for `entity_snapshot`:
 - pose or minimal flags needed by presentation
 - initial tracked data subset
 
-The current landed `entity_snapshot` is the first baseline form for generated original mobs: id/UUID, type/category, owning chunk, position/rotation, dimensions, on-ground, age, and small type-specific data.
+The current landed `entity_snapshot` is the first baseline form for generated original mobs: id/UUID, type/category, owning chunk, position/rotation, dimensions, on-ground, age, authoritative tick, and small type-specific data.
 
 Current baseline facts for `entity_update`:
 
@@ -309,6 +309,7 @@ Current baseline facts for `entity_update`:
 - optional position/rotation/velocity update
 - optional owning section/chunk change
 - optional tracked-data patch
+- optional authoritative tick when the update carries changed entity facts
 
 Current baseline facts for `entity_remove`:
 
@@ -316,13 +317,13 @@ Current baseline facts for `entity_remove`:
 - optional UUID-equivalent identity
 - optional removal/untrack reason
 
-Add tick/revision before cow wandering or any high-frequency entity movement depends on ordered deltas.
+Entity snapshots and updates now carry tick context for generated mob movement. Per-session entity revisions are still deferred.
 
 Ordering rules:
 
 - A client should receive an `entity_snapshot` before deltas for that entity.
 - Removal should be explicit, not an implicit disappearance caused by a chunk mesh update.
-- Entity updates should carry tick/revision context like `player_state`.
+- Entity updates should carry tick context now and should gain per-session/entity revision context before higher-frequency movement depends on reordering recovery.
 - Entity updates should be filterable per session by tracking range and interest.
 - `chunk_unload` should either be paired with entity removals for entities no longer tracked by that client, or client cache semantics must define that unloading a chunk invalidates its tracked entities.
 

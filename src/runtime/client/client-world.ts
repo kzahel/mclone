@@ -355,6 +355,7 @@ export class HostMessageClientWorld implements ClientWorldHydrationTarget {
       height: update.height ?? entity.height,
       onGround: update.onGround ?? entity.onGround,
       age: update.age ?? entity.age,
+      tick: update.tick ?? entity.tick,
       data: update.data ?? entity.data,
     };
     this.entitySnapshots.set(update.id, next);

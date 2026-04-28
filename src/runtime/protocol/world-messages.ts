@@ -184,6 +184,7 @@ export interface EntitySnapshot {
   readonly height: number;
   readonly onGround: boolean;
   readonly age?: number;
+  readonly tick?: number;
   readonly data?: Readonly<Record<string, number | boolean | string>>;
 }
 
@@ -204,6 +205,7 @@ export interface EntityUpdate {
   readonly height?: number;
   readonly onGround?: boolean;
   readonly age?: number;
+  readonly tick?: number;
   readonly data?: Readonly<Record<string, number | boolean | string>>;
 }
 

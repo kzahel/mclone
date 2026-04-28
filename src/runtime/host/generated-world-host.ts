@@ -61,6 +61,8 @@ import {
   type EntitySnapshot,
   type EntitySnapshotCategory,
   type EntitySnapshotMessage,
+  type EntityUpdate,
+  type EntityUpdateMessage,
   type OpenWorldPreset,
   type OpenWorldRequest,
   type PollWorldUpdatesRequest,
@@ -99,6 +101,80 @@ import { LiquidSimulationLevel } from "./liquid-simulation-level";
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
+}
+
+type MutableEntityUpdate = { -readonly [K in keyof EntityUpdate]: EntityUpdate[K] };
+
+function createEntityUpdate(previous: EntitySnapshot, next: EntitySnapshot): EntityUpdateMessage | undefined {
+  const update: MutableEntityUpdate = { id: next.id };
+  let changed = false;
+
+  if (previous.chunkX !== next.chunkX) {
+    update.chunkX = next.chunkX;
+    changed = true;
+  }
+  if (previous.chunkZ !== next.chunkZ) {
+    update.chunkZ = next.chunkZ;
+    changed = true;
+  }
+  if (!vec3RecordEquals(previous.position, next.position)) {
+    update.position = next.position;
+    changed = true;
+  }
+  if (previous.rotation.yaw !== next.rotation.yaw || previous.rotation.pitch !== next.rotation.pitch) {
+    update.rotation = next.rotation;
+    changed = true;
+  }
+  if (previous.width !== next.width) {
+    update.width = next.width;
+    changed = true;
+  }
+  if (previous.height !== next.height) {
+    update.height = next.height;
+    changed = true;
+  }
+  if (previous.onGround !== next.onGround) {
+    update.onGround = next.onGround;
+    changed = true;
+  }
+  if (previous.age !== next.age) {
+    update.age = next.age;
+    changed = true;
+  }
+  if (!entityDataEquals(previous.data, next.data)) {
+    update.data = next.data;
+    changed = true;
+  }
+  if (changed) {
+    update.tick = next.tick;
+  }
+
+  return changed ? { type: "entity_update", update } : undefined;
+}
+
+function vec3RecordEquals(
+  left: { readonly x: number; readonly y: number; readonly z: number },
+  right: { readonly x: number; readonly y: number; readonly z: number },
+): boolean {
+  return left.x === right.x && left.y === right.y && left.z === right.z;
+}
+
+function entityDataEquals(
+  left: Readonly<Record<string, number | boolean | string>> | undefined,
+  right: Readonly<Record<string, number | boolean | string>> | undefined,
+): boolean {
+  const leftKeys = Object.keys(left ?? {});
+  const rightKeys = Object.keys(right ?? {});
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+
+  for (const key of leftKeys) {
+    if (left?.[key] !== right?.[key]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Bump when persisted generated-world meaning changes: terrain/decor algorithms,
@@ -344,7 +420,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly lightingService: LightingService | undefined;
   private readonly liquidLevel: LiquidSimulationLevel;
   private readonly liquidTicks: ServerTickList<Fluid>;
-  private readonly entityRuntime = new EntityRuntime<GeneratedMobEntity>();
+  private readonly entityRuntime: EntityRuntime<GeneratedMobEntity>;
   private readonly engineConfig: NormalizedWorldEngineConfig;
   private readonly liquidSimulationEnabled: boolean;
   private readonly nowMs: () => number;
@@ -361,6 +437,7 @@ export class GeneratedWorldHost implements WorldHost {
   private lastPlayerTickAtMs: number;
   private playerAnchoredToChunkView = false;
   private readonly publishedChunkSnapshots = new Set<string>();
+  private readonly publishedEntitySnapshots = new Map<number, EntitySnapshot>();
   private readonly chunkRevisions = new Map<string, number>();
   private readonly sentLightInputRevisions = new Map<string, number>();
   private readonly acceptedChunkLight = new Map<string, PackedChunkLight>();
@@ -397,6 +474,9 @@ export class GeneratedWorldHost implements WorldHost {
       this.generator,
       options.blockStateById,
     );
+    this.entityRuntime = new EntityRuntime<GeneratedMobEntity>({
+      tickEntity: (entity) => this.tickGeneratedEntity(entity),
+    });
     this.level.setPhaseRecorder((phase, elapsedMs) => this.recordWorldgenDuration(phase, elapsedMs));
     this.lightingService = this.engineConfig.lightingMode === "none" ? undefined : options.lightingService;
     if (this.engineConfig.lightingMode !== "none" && this.lightingService === undefined) {
@@ -1470,25 +1550,34 @@ export class GeneratedWorldHost implements WorldHost {
       return;
     }
     if (
-      !this.liquidSimulationEnabled
-      || this.publishedChunkSnapshots.size === 0
+      this.publishedChunkSnapshots.size === 0
       || this.activeChunkViewJobRevision !== undefined
     ) {
       this.lastWorldTickAtMs += dueTicks * tickIntervalMs;
       return;
     }
 
-    this.hydratePublishedLiquidTicks();
+    if (this.liquidSimulationEnabled) {
+      this.hydratePublishedLiquidTicks();
+    }
     for (let tickIndex = 0; tickIndex < dueTicks; tickIndex++) {
       this.gameTime++;
-      this.liquidTicks.tick();
+      if (this.liquidSimulationEnabled) {
+        this.liquidTicks.tick();
+      }
+      this.entityRuntime.tick();
     }
-    this.hydratePublishedLiquidTicks();
+    if (this.liquidSimulationEnabled) {
+      this.hydratePublishedLiquidTicks();
+    }
     this.lastWorldTickAtMs += dueTicks * tickIntervalMs;
-    await this.flushDirtyPublishedChunks(
-      this.options.chunkViewScheduling === "cooperative" ? createCooperativeYield() : undefined,
-    );
-    this.enqueueDirtyLightDeltas();
+    if (this.liquidSimulationEnabled) {
+      await this.flushDirtyPublishedChunks(
+        this.options.chunkViewScheduling === "cooperative" ? createCooperativeYield() : undefined,
+      );
+      this.enqueueDirtyLightDeltas();
+    }
+    this.enqueueDirtyEntityUpdates();
   }
 
   private hydratePublishedLiquidTicks(): void {
@@ -1681,8 +1770,8 @@ export class GeneratedWorldHost implements WorldHost {
 
   private ensureOriginalMobsForChunk(chunk: GeneratedLevelChunk): void {
     const key = chunkKey(chunk.chunkX, chunk.chunkZ);
-    this.entityRuntime.updateChunkStatus(chunk.chunkX, chunk.chunkZ, FullChunkStatus.BORDER);
-    this.entityRuntime.tick();
+    this.entityRuntime.updateChunkStatus(chunk.chunkX, chunk.chunkZ, FullChunkStatus.ENTITY_TICKING);
+    this.entityRuntime.processLifecycle();
     if (this.spawnedOriginalMobChunks.has(key)) {
       return;
     }
@@ -1703,7 +1792,7 @@ export class GeneratedWorldHost implements WorldHost {
       },
     );
     this.spawnedOriginalMobChunks.add(key);
-    this.entityRuntime.tick();
+    this.entityRuntime.processLifecycle();
   }
 
   private publishEntitySnapshotsForChunk(chunkX: number, chunkZ: number, messages: WorldHostMessage[]): void {
@@ -1714,6 +1803,9 @@ export class GeneratedWorldHost implements WorldHost {
       .map((entity) => this.createEntitySnapshotMessage(entity));
 
     messages.push(...snapshots);
+    for (const snapshot of snapshots) {
+      this.publishedEntitySnapshots.set(snapshot.entity.id, snapshot.entity);
+    }
     if (snapshots.length > 0) {
       this.incrementWorldgenCount("entity_snapshots_published", snapshots.length);
       this.notePendingMessageBacklog();
@@ -1735,6 +1827,7 @@ export class GeneratedWorldHost implements WorldHost {
       height: entity.entityType.height,
       onGround: entity.onGround,
       age: entity.age,
+      tick: entity.tickCount,
       ...(data === undefined ? {} : { data }),
     };
 
@@ -1758,6 +1851,135 @@ export class GeneratedWorldHost implements WorldHost {
         uuid: entity.uuid,
         reason: "unloaded_to_chunk",
       }));
+  }
+
+  private enqueueDirtyEntityUpdates(): void {
+    const messages = this.collectEntityPublicationUpdates();
+    if (messages.length === 0) {
+      return;
+    }
+
+    this.pendingMessages.push(...messages);
+    this.incrementWorldgenCount("entity_updates_published", messages.length);
+    this.notePendingMessageBacklog();
+  }
+
+  private collectEntityPublicationUpdates(): WorldHostMessage[] {
+    const messages: WorldHostMessage[] = [];
+    const currentEntityIds = new Set<number>();
+    const entities = [...this.entityRuntime.manager.getEntityGetter().getAll()]
+      .sort((left, right) => left.id - right.id);
+
+    for (const entity of entities) {
+      currentEntityIds.add(entity.id);
+      const snapshot = this.createEntitySnapshotMessage(entity).entity;
+      const inPublishedView = this.isEntitySnapshotInPublishedView(snapshot);
+      const previous = this.publishedEntitySnapshots.get(entity.id);
+
+      if (!inPublishedView) {
+        if (previous !== undefined) {
+          messages.push({
+            type: "entity_remove",
+            entityId: entity.id,
+            uuid: entity.uuid,
+            reason: "untracked",
+          });
+          this.publishedEntitySnapshots.delete(entity.id);
+        }
+        continue;
+      }
+
+      if (previous === undefined) {
+        messages.push({ type: "entity_snapshot", entity: snapshot });
+        this.publishedEntitySnapshots.set(entity.id, snapshot);
+        continue;
+      }
+
+      const update = createEntityUpdate(previous, snapshot);
+      if (update !== undefined) {
+        messages.push(update);
+        this.publishedEntitySnapshots.set(entity.id, snapshot);
+      }
+    }
+
+    for (const [entityId, previous] of [...this.publishedEntitySnapshots]) {
+      if (currentEntityIds.has(entityId)) {
+        continue;
+      }
+
+      messages.push({
+        type: "entity_remove",
+        entityId,
+        uuid: previous.uuid,
+        reason: "discarded",
+      });
+      this.publishedEntitySnapshots.delete(entityId);
+    }
+
+    return messages;
+  }
+
+  private isEntitySnapshotInPublishedView(snapshot: EntitySnapshot): boolean {
+    const key = chunkKey(snapshot.chunkX, snapshot.chunkZ);
+    return this.publishedChunkSnapshots.has(key) && this.isChunkInCurrentPublishView(snapshot.chunkX, snapshot.chunkZ);
+  }
+
+  private tickGeneratedEntity(entity: GeneratedMobEntity): void {
+    entity.setAiLevel({
+      getMinBuildHeight: () => this.level.getMinBuildHeight(),
+      getMaxBuildHeight: () => this.level.getMaxBuildHeight(),
+      isStableDestination: (pos) => this.isStableMobDestination(pos),
+      isWater: (pos) => this.isWaterMobPosition(pos),
+      isSolid: (pos) => this.isSolidMobPosition(pos),
+    });
+    entity.tickServerAi({
+      resetNoActionTime: this.shouldResetMobNoActionTime(entity),
+    });
+  }
+
+  private shouldResetMobNoActionTime(entity: GeneratedMobEntity): boolean {
+    const player = this.playerState?.position;
+    if (player !== undefined) {
+      const dx = player.x - entity.position.x;
+      const dy = player.y - entity.position.y;
+      const dz = player.z - entity.position.z;
+      if ((dx * dx) + (dy * dy) + (dz * dz) < 32 * 32) {
+        return true;
+      }
+    }
+
+    const chunkX = SectionPos.blockToSectionCoord(entity.blockPosition().getX());
+    const chunkZ = SectionPos.blockToSectionCoord(entity.blockPosition().getZ());
+    // Runtime: current chunk-view interest is the entity-ticking proxy until player tickets own mob activity.
+    return this.currentChunkView !== undefined && this.isChunkInCurrentPublishView(chunkX, chunkZ);
+  }
+
+  private isStableMobDestination(pos: BlockPos): boolean {
+    const state = this.getLoadedBlockState(pos);
+    const above = this.getLoadedBlockState(pos.above());
+    const below = this.getLoadedBlockState(pos.below());
+    return state !== undefined
+      && above !== undefined
+      && below !== undefined
+      && !state.getMaterial().blocksMotion()
+      && !above.getMaterial().blocksMotion()
+      && below.getMaterial().isSolid();
+  }
+
+  private isWaterMobPosition(pos: BlockPos): boolean {
+    return this.getLoadedBlockState(pos)?.getFluidState().getType().isSame(Fluids.WATER) ?? false;
+  }
+
+  private isSolidMobPosition(pos: BlockPos): boolean {
+    return this.getLoadedBlockState(pos)?.getMaterial().isSolid() ?? false;
+  }
+
+  private getLoadedBlockState(pos: BlockPos): BlockState | undefined {
+    const chunk = this.level.getAuthorityChunk(
+      SectionPos.blockToSectionCoord(pos.getX()),
+      SectionPos.blockToSectionCoord(pos.getZ()),
+    );
+    return chunk?.getBlockState(pos);
   }
 
   private getAcceptedCurrentChunkLight(chunkX: number, chunkZ: number): PackedChunkLight | undefined {
@@ -2258,13 +2480,22 @@ export class GeneratedWorldHost implements WorldHost {
   private discardUnloadedChunkState(chunkX: number, chunkZ: number): void {
     const key = chunkKey(chunkX, chunkZ);
     this.publishedChunkSnapshots.delete(key);
+    this.forgetPublishedEntitiesForChunk(chunkX, chunkZ);
     this.dirtyChunksForPublication.delete(key);
     if (!this.isChunkInCurrentAuthorityView(chunkX, chunkZ)) {
       this.chunkHolders.delete(key);
     }
     this.entityRuntime.updateChunkStatus(chunkX, chunkZ, FullChunkStatus.INACCESSIBLE);
-    this.entityRuntime.tick();
+    this.entityRuntime.processLifecycle();
     this.discardChunkLighting(chunkX, chunkZ);
+  }
+
+  private forgetPublishedEntitiesForChunk(chunkX: number, chunkZ: number): void {
+    for (const [entityId, snapshot] of this.publishedEntitySnapshots) {
+      if (snapshot.chunkX === chunkX && snapshot.chunkZ === chunkZ) {
+        this.publishedEntitySnapshots.delete(entityId);
+      }
+    }
   }
 
   private ensureLocalSessionState(): void {
