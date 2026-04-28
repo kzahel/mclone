@@ -114,6 +114,8 @@ Several vanilla worldgen features look like structures but do not use the start/
 
 Implement these through the existing configured-feature/decorator path, not through `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES`.
 
+For sequencing: monster rooms and desert wells are already in that ordinary-feature lane. Overworld fossils are the remaining small structure-looking configured feature and should stay ahead of true `StructureFeature` work.
+
 ## Scheduling And Finality Implications
 
 Structures explain why the status pipeline cannot be collapsed to "terrain then decoration":
@@ -130,36 +132,41 @@ For a `vanilla17` profile, structure work must be status-aware even if the runti
 
 Do not start with villages. They combine jigsaw pools, templates, processors, terrain blending, and settlement-specific interactions.
 
-1. **Status and metadata foundation**
+1. **Finish the remaining ordinary configured-feature oddity first**
+   - Monster rooms and desert wells are already covered through the normal feature/decorator path.
+   - Overworld fossils are still ordinary configured `Feature.FOSSIL`, not true structure-start work.
+   - Land that slice before starting larger `StructureFeature` families.
+
+2. **Status and metadata foundation**
    - Add `STRUCTURE_STARTS` and `STRUCTURE_REFERENCES` concepts to the local generation model.
    - Represent `StructureStart`, `StructurePiece`, `BoundingBox`, starts-by-feature, and references-by-feature.
    - Persist or at least keep the data shape compatible with vanilla chunk status/resume semantics.
    - Add oracle fixtures that can inspect structure starts/references separately from block placement.
 
-2. **Per-chunk clipped placement skeleton**
+3. **Per-chunk clipped placement skeleton**
    - Port enough `StructureStart.placeInChunk(...)` / `StructurePiece.postProcess(...)` flow to place only the intersecting slice of a structure into the current chunk.
    - Prove the pipeline with one small custom structure before adding templates or jigsaw.
 
-3. **Simple custom overworld structures**
+4. **Simple custom overworld structures**
    - Start with desert pyramid, then jungle temple, swamp hut, and buried treasure.
    - These validate start selection, references, per-chunk clipping, chest/block-entity data, and post-processing without requiring the full template or jigsaw stacks.
 
-4. **Mineshafts**
+5. **Mineshafts**
    - Mineshafts are structure starts, not carvers. They randomly decide starts, create an initial room, recursively add corridor/crossing/stair pieces, then place those pieces in `UNDERGROUND_STRUCTURES` ([`MineshaftFeature.java:29`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/MineshaftFeature.java), [`MineshaftFeature.java:55`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/MineshaftFeature.java), [`MineShaftPieces.java:70`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/structure/MineShaftPieces.java)).
    - They are a good middle step because they are multi-piece and cross-chunk, but do not require the jigsaw pool system.
 
-5. **Template-backed medium structures**
+6. **Template-backed medium structures**
    - Port template loading from extracted structure NBTs, placement settings, rotation/mirror, processors, and block entities.
    - Then add shipwrecks, igloos, ocean ruins, and overworld ruined portals.
 
-6. **Strongholds and terrain-blending foundation**
+7. **Strongholds and terrain-blending foundation**
    - Strongholds have special global placement via `ChunkGenerator.generateStrongholds(...)` and are noise-affecting ([`ChunkGenerator.java:80`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java)).
    - Port the metadata and placement path, but treat exact terrain blending as blocked on `Beardifier`.
 
-7. **Large custom/template structures**
+8. **Large custom/template structures**
    - Ocean monuments and woodland mansions have large custom/template piece systems and many block/entity consequences. Do these after the smaller placement/template paths are stable.
 
-8. **Beardifier, jigsaw, villages, and pillager outposts**
+9. **Beardifier, jigsaw, villages, and pillager outposts**
    - Port `Beardifier` and jigsaw pools before claiming village/outpost parity.
    - Villages use `JigsawFeature`, configured village pools, `JigsawPlacement`, `PoolElementStructurePiece`, terrain matching, and jigsaw junctions ([`VillageFeature.java:6`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/VillageFeature.java), [`JigsawFeature.java:42`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/JigsawFeature.java), [`StructureFeatures.java:80`](../reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/StructureFeatures.java)).
    - Pillager outposts share the jigsaw shape and also avoid nearby village candidates.

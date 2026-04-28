@@ -53,6 +53,8 @@ const CAVE_AIR_LOCATION = new ResourceLocation("minecraft:cave_air");
 const BEDROCK_LOCATION = new ResourceLocation("minecraft:bedrock");
 const GRASS_BLOCK_LOCATION = new ResourceLocation("minecraft:grass_block");
 const DIRT_LOCATION = new ResourceLocation("minecraft:dirt");
+const COBBLESTONE_LOCATION = new ResourceLocation("minecraft:cobblestone");
+const MOSSY_COBBLESTONE_LOCATION = new ResourceLocation("minecraft:mossy_cobblestone");
 const SAND_LOCATION = new ResourceLocation("minecraft:sand");
 const GRAVEL_LOCATION = new ResourceLocation("minecraft:gravel");
 const CLAY_LOCATION = new ResourceLocation("minecraft:clay");
@@ -174,6 +176,8 @@ const PACKED_ICE_LOCATION = new ResourceLocation("minecraft:packed_ice");
 const RED_SAND_LOCATION = new ResourceLocation("minecraft:red_sand");
 const ICE_LOCATION = new ResourceLocation("minecraft:ice");
 const SNOW_BLOCK_LOCATION = new ResourceLocation("minecraft:snow_block");
+const SPAWNER_LOCATION = new ResourceLocation("minecraft:spawner");
+const CHEST_LOCATION = new ResourceLocation("minecraft:chest");
 const SEA_PICKLE_LOCATION = new ResourceLocation("minecraft:sea_pickle");
 
 const CORAL_TYPES = ["tube", "brain", "bubble", "fire", "horn"] as const;
@@ -220,6 +224,8 @@ const GENERATED_BLOCK_LOCATIONS = [
   BEDROCK_LOCATION,
   GRASS_BLOCK_LOCATION,
   DIRT_LOCATION,
+  COBBLESTONE_LOCATION,
+  MOSSY_COBBLESTONE_LOCATION,
   SAND_LOCATION,
   GRAVEL_LOCATION,
   CLAY_LOCATION,
@@ -341,6 +347,8 @@ const GENERATED_BLOCK_LOCATIONS = [
   RED_SAND_LOCATION,
   ICE_LOCATION,
   SNOW_BLOCK_LOCATION,
+  SPAWNER_LOCATION,
+  CHEST_LOCATION,
   SEA_PICKLE_LOCATION,
   ...DEAD_CORAL_BLOCK_LOCATIONS,
   ...LIVE_CORAL_BLOCK_LOCATIONS,
@@ -360,6 +368,8 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("grass_block_side_overlay"),
   blockTexture("grass_block_snow"),
   blockTexture("dirt"),
+  blockTexture("cobblestone"),
+  blockTexture("mossy_cobblestone"),
   blockTexture("sand"),
   blockTexture("gravel"),
   blockTexture("clay"),
@@ -526,6 +536,8 @@ const GENERATED_SPRITE_LOCATIONS: readonly ResourceLocation[] = [
   blockTexture("packed_ice"),
   blockTexture("red_sand"),
   blockTexture("ice"),
+  blockTexture("spawner"),
+  blockTexture("oak_planks"),
   blockTexture("sea_pickle"),
   ...CORAL_TYPES.flatMap((type) => [
     blockTexture(`${type}_coral_block`),
@@ -578,6 +590,14 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     DIRT_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.DIRT, MaterialColor.DIRT).strength(0.5).sound(SoundType.GRAVEL)),
   ).defaultBlockState();
+  registerBlock(
+    COBBLESTONE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE).requiresCorrectToolForDrops().strength(2.0, 6.0)),
+  );
+  registerBlock(
+    MOSSY_COBBLESTONE_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE).requiresCorrectToolForDrops().strength(2.0, 6.0)),
+  );
   const sandState = registerBlock(
     SAND_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.SAND, MaterialColor.SAND).strength(0.5).sound(SoundType.GRAVEL)),
@@ -622,6 +642,14 @@ export function registerGeneratedRenderBlocks(): GeneratedRenderBlockPalette {
     SNOW_BLOCK_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.SNOW, MaterialColor.SNOW).strength(0.2).sound(SoundType.SNOW)),
   ).defaultBlockState();
+  registerBlock(
+    SPAWNER_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.STONE).requiresCorrectToolForDrops().strength(5.0).sound(SoundType.STONE).noOcclusion()),
+  );
+  registerBlock(
+    CHEST_LOCATION,
+    new Block(BlockBehaviour.Properties.of(Material.WOOD, MaterialColor.WOOD).strength(2.5).sound(SoundType.WOOD).noOcclusion()),
+  );
   const iceState = registerBlock(
     ICE_LOCATION,
     new Block(BlockBehaviour.Properties.of(Material.ICE, MaterialColor.ICE).strength(0.5)),

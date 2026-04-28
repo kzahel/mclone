@@ -94,6 +94,10 @@ describe("Surface feature palette", () => {
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate_emerald_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:infested_stone"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:infested_deepslate"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:cobblestone"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:mossy_cobblestone"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:spawner"))).toBe(RenderType.solid());
+    expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:chest"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:deepslate_redstone_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:copper_ore"))).toBe(RenderType.solid());
     expect(ItemBlockRenderTypes.getChunkRenderType(getState("minecraft:oak_log"))).toBe(RenderType.solid());
@@ -132,6 +136,14 @@ describe("Surface feature palette", () => {
     const sandstoneSlab = getState("minecraft:sandstone_slab");
     expect(sandstoneSlab.getValue(BlockStateProperties.SLAB_TYPE)).toBe(SlabType.BOTTOM);
     expect(palette.blockLocations.some((location) => location.toString() === "minecraft:sandstone_slab")).toBe(true);
+    expect(palette.blockLocations.some((location) => location.toString() === "minecraft:cobblestone")).toBe(true);
+    expect(palette.blockLocations.some((location) => location.toString() === "minecraft:mossy_cobblestone")).toBe(true);
+    expect(palette.blockLocations.some((location) => location.toString() === "minecraft:spawner")).toBe(true);
+    expect(palette.blockLocations.some((location) => location.toString() === "minecraft:chest")).toBe(true);
+    expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/cobblestone")).toBe(true);
+    expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/mossy_cobblestone")).toBe(true);
+    expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/spawner")).toBe(true);
+    expect(palette.spriteLocations.some((location) => location.toString() === "minecraft:block/oak_planks")).toBe(true);
   });
 
   test("leaves stay non-occluding so adjacent terrain faces are not culled", () => {

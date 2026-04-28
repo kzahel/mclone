@@ -7,6 +7,7 @@ import {
 import { BiomeGenerationSettings } from "./biome-generation-settings";
 import { VegetationFeatures } from "../levelgen/feature/vegetation-features";
 import { OreFeatures } from "../levelgen/feature/ore-features";
+import { UndergroundFeatures } from "../levelgen/feature/underground-features";
 import { WaterFeatures } from "../levelgen/feature/water-features";
 
 const OCEAN_BIOME_KEYS = new Set([
@@ -41,6 +42,10 @@ function addOceanCarvers(builder: BiomeGenerationSettings.Builder): void {
 function addDefaultLakes(builder: BiomeGenerationSettings.Builder): void {
   builder.addFeature(GenerationStep.Decoration.LAKES, () => WaterFeatures.LAKE_WATER);
   builder.addFeature(GenerationStep.Decoration.LAKES, () => WaterFeatures.LAKE_LAVA);
+}
+
+function addDefaultMonsterRoom(builder: BiomeGenerationSettings.Builder): void {
+  builder.addFeature(GenerationStep.Decoration.UNDERGROUND_STRUCTURES, () => UndergroundFeatures.MONSTER_ROOM);
 }
 
 function addDefaultUndergroundVariety(builder: BiomeGenerationSettings.Builder, skipGlowLichen = false): void {
@@ -299,6 +304,7 @@ function buildMountainSettings(edge: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -321,6 +327,7 @@ function buildTaigaSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
@@ -340,6 +347,7 @@ function buildSnowyTundraSettings(iceSpikes = false): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -361,6 +369,7 @@ function buildSnowyTaigaSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
@@ -380,6 +389,7 @@ function buildGiantTaigaSettings(giantSpruce: boolean): BiomeGenerationSettings 
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   builder.addFeature(GenerationStep.Decoration.VEGETAL_DECORATION, () => VegetationFeatures.PATCH_LARGE_FERN);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
@@ -399,6 +409,7 @@ function buildMushroomFieldSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -414,6 +425,7 @@ function buildDesertSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -430,6 +442,7 @@ function buildBadlandsSettings(wooded = false): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addExtraGold(builder);
@@ -449,6 +462,7 @@ function buildForestSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -467,6 +481,7 @@ function buildFlowerForestSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -485,6 +500,7 @@ function buildDarkForestSettings(redMushroomBias: boolean): BiomeGenerationSetti
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -506,6 +522,7 @@ function buildBirchForestSettings(tall: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -527,6 +544,7 @@ function buildPlainsSettings(sunflower = false): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -553,6 +571,7 @@ function buildSwampSettings(swampHills: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addSwampClayDisk(builder);
@@ -571,6 +590,7 @@ function buildSavannaSettings(shattered: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -597,6 +617,7 @@ function buildJungleSettings(edge: boolean, bamboo = false, modified = false): B
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -623,6 +644,7 @@ function buildBeachSettings(): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -639,6 +661,7 @@ function buildRiverSettings(frozen: boolean): BiomeGenerationSettings {
   const builder = new BiomeGenerationSettings.Builder();
   addDefaultCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);
@@ -661,6 +684,7 @@ function buildOceanSettings(kind: OceanSettingsKind, deep: boolean): BiomeGenera
   const builder = new BiomeGenerationSettings.Builder();
   addOceanCarvers(builder);
   addDefaultLakes(builder);
+  addDefaultMonsterRoom(builder);
   addDefaultUndergroundVariety(builder, true);
   addDefaultOres(builder);
   addDefaultSoftDisks(builder);

@@ -28,6 +28,7 @@ import { IcePatchFeature } from "./ice-patch-feature";
 import { IceSpikeFeature } from "./ice-spike-feature";
 import { KelpFeature } from "./kelp-feature";
 import { OreFeature } from "./ore-feature";
+import { MonsterRoomFeature } from "./monster-room-feature";
 import { CoralClawFeature } from "./coral-claw-feature";
 import { CoralMushroomFeature } from "./coral-mushroom-feature";
 import { CoralTreeFeature } from "./coral-tree-feature";
@@ -70,6 +71,7 @@ export const Features = {
   KELP: register("kelp", new KelpFeature()),
   BAMBOO: register("bamboo", new BambooFeature()),
   ORE: register("ore", new OreFeature()),
+  MONSTER_ROOM: register("monster_room", new MonsterRoomFeature()),
   GLOW_LICHEN: register("glow_lichen", new GlowLichenFeature()),
   DRIPSTONE_CLUSTER: register("dripstone_cluster", new DripstoneClusterFeature()),
   SMALL_DRIPSTONE: register("small_dripstone", new SmallDripstoneFeature()),

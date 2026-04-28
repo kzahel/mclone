@@ -15,7 +15,9 @@ import { GeneratedWorldHost } from "./generated-world-host";
 
 function applySmokeWorldMutations(
   level: WorldGenLevel,
+  airState: BlockState,
   waterState: BlockState,
+  stoneState: BlockState,
   sandState: BlockState,
   sandstoneState: BlockState,
   generator: WorldGenerator,
@@ -37,6 +39,39 @@ function applySmokeWorldMutations(
   }
 
   Features.DESERT_WELL.configured(NoneFeatureConfiguration.INSTANCE).place(level, generator, new WorldgenRandom(seed), center);
+
+  const monsterRoomCenter = new BlockPos(216, 192, 168);
+  const monsterRoomPreview = new WorldgenRandom(seed);
+  const roomWidth = monsterRoomPreview.nextInt(2) + 2;
+  const roomDepth = monsterRoomPreview.nextInt(2) + 2;
+  const minX = -roomWidth - 1;
+  const maxX = roomWidth + 1;
+  const minZ = -roomDepth - 1;
+  const maxZ = roomDepth + 1;
+
+  for (let offsetX = minX; offsetX <= maxX; offsetX++) {
+    for (let offsetY = -1; offsetY <= 4; offsetY++) {
+      for (let offsetZ = minZ; offsetZ <= maxZ; offsetZ++) {
+        level.setBlock(monsterRoomCenter.offset(offsetX, offsetY, offsetZ), stoneState, 2);
+      }
+    }
+  }
+
+  level.setBlock(monsterRoomCenter.offset(minX, 0, 0), airState, 2);
+  level.setBlock(monsterRoomCenter.offset(minX, 1, 0), airState, 2);
+
+  Features.MONSTER_ROOM.configured(NoneFeatureConfiguration.INSTANCE).place(
+    level,
+    generator,
+    new WorldgenRandom(seed),
+    monsterRoomCenter,
+  );
+
+  for (let offsetX = minX; offsetX <= maxX; offsetX++) {
+    for (let offsetZ = minZ; offsetZ <= maxZ; offsetZ++) {
+      level.setBlock(monsterRoomCenter.offset(offsetX, 4, offsetZ), airState, 2);
+    }
+  }
 }
 
 export interface CreateGeneratedWorldHostOptions {
@@ -70,7 +105,9 @@ export function createGeneratedWorldHostForRequest(
         ? (level) =>
             applySmokeWorldMutations(
               level,
+              generatedBlocks.airState,
               generatedBlocks.blockStateById[ChunkBlockId.WATER]!,
+              generatedBlocks.blockStateById[ChunkBlockId.STONE]!,
               generatedBlocks.blockStateById[ChunkBlockId.SAND]!,
               generatedBlocks.blockStateById[ChunkBlockId.SANDSTONE]!,
               generator,

@@ -27,7 +27,7 @@ The project is past the “terrain demo” phase. The renderer is already consum
 - translated surface material placement
 - translated classic air carvers
 - translated first-pass biome decoration
-- translated common overworld ore generation, the active underground variety material blobs, the live badlands/mountain underground extras, glow lichen, rare dripstone, and soft disks
+- translated common overworld ore generation, the active underground variety material blobs, the live badlands/mountain underground extras, glow lichen, rare dripstone, soft disks, and monster rooms
 - translated rendering for water, tint, dark-oak trees, acacia trees, jungle trees, bamboo, mega spruce / mega pine conifers, huge mushrooms, bee nests, desert wells, grass, flowers, sunflowers, lily pads, seagrass, kelp, coral, sea pickles, mushrooms, cactus, sugar cane, vine, cocoa, melon, and related surface features
 
 Several later worldgen capabilities landed through renderer-driven tacticals rather than through the original worldgen arc, so this document should be treated as the authoritative status view when it disagrees with the older tactical sequence.
@@ -47,12 +47,12 @@ The main remaining gap is not foundational plumbing. It is parity breadth and co
 | Overworld biome source / layered biome pipeline | `90-95%` | Landed and driving terrain + decoration lookup | [`05`](./tactical/05-overworld-biome-source.md) |
 | Surface rules / bedrock / top materials | `88-92%` | Landed for the current overworld path, now including frozen-ocean, badlands, giant-tree-taiga, shattered-savanna, and mushroom follow-through | [`06a`](./tactical/06a-pre-07-surface-prep.md), [`07`](./tactical/07-surface-builders.md), [`31`](./tactical/31-frozen-and-badlands-material-matrix.md), [`32`](./tactical/32-podzol-coarse-dirt-and-mycelium-matrix.md) |
 | Classic carvers (`CaveWorldCarver`, `CanyonWorldCarver`) | `85-90%` | Implemented for the overworld AIR+LIQUID path, integrated, and now backed by widened desert/ocean/frozen/badlands/podzol/coarse-dirt/mycelium material coverage, scheduled-tick capture, and a broader carved-fixture matrix, but still below full vanilla parity | code: [`src/worldgen/carver/`](../src/worldgen/carver), tacticals: [`28`](./tactical/28-carver-material-parity-and-oracle-expansion.md), [`29`](./tactical/29-underwater-liquid-carver-parity.md), [`30`](./tactical/30-liquid-floor-oracle-and-tick-capture.md), [`31`](./tactical/31-frozen-and-badlands-material-matrix.md), [`32`](./tactical/32-podzol-coarse-dirt-and-mycelium-matrix.md), status: [`carver-status.md`](./carver-status.md), generator hook: [`noise-based-chunk-generator.ts`](../src/worldgen/levelgen/noise-based-chunk-generator.ts) |
-| Feature/decorator framework | `90-95%` | Enough for the current vegetation, water-feature, dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, cold-surface, warm-ocean, common-ore placement, the replace-single-block underground extra path, glow lichen, rare dripstone, and soft disks | [`22`](./tactical/22-simple-feature-placement-bridge.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md) |
+| Feature/decorator framework | `90-95%` | Enough for the current vegetation, water-feature, dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, cold-surface, warm-ocean, common-ore placement, the replace-single-block underground extra path, glow lichen, rare dripstone, soft disks, and monster rooms | [`22`](./tactical/22-simple-feature-placement-bridge.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md), [`60`](./tactical/60-monster-room-follow-through.md) |
 | Tree pipeline | `85-92%` | Oak / swamp oak / fancy oak / spruce / pine / mega pine / mega spruce / birch / dark oak / acacia / jungle / mega-jungle / bamboo-jungle / huge-mushroom paths exist, bee-decorated oak/birch/fancy-oak variants are now wired through the live flower-forest, birch, and plains selectors, swamp-oak leaf vines now match vanilla again, and the remaining gaps are narrower selector/decorator exactness | [`23`](./tactical/23-true-tree-feature-placement.md), [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`51`](./tactical/51-bee-tree-decorator-follow-through.md), [`53`](./tactical/53-swamp-oak-vine-follow-through.md), [`54`](./tactical/54-deep-warm-ocean-seagrass-simple-follow-through.md) |
 | Surface vegetation + water decoration | `84-91%` | First substantial overworld set landed, now including dark-forest, savanna, jungle, bamboo-jungle, snowy, giant-taiga, mushroom-field, shoreline, river, warm-ocean, cold-surface identity, and the translated desert-well `SURFACE_STRUCTURES` oddity | [`20`](./tactical/20-surface-special-blocks-and-biome-tint.md), [`21`](./tactical/21-surface-feature-palette-expansion.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`55`](./tactical/55-desert-well-follow-through.md) |
 | Biome decoration table coverage | `88-93%` | The full layered-overworld biome key set now has non-empty translated settings, including the last mountain / modified-jungle / badlands aliases and the non-natural `deep_warm_ocean` seagrass exactness follow-through; remaining gaps are narrower table exactness and confidence, not broad empty-table coverage | [`24`](./tactical/24-biome-vegetation-decoration-bridge.md), [`25`](./tactical/25-biome-decoration-palette-expansion.md), [`26`](./tactical/26-overworld-water-and-swamp-decoration.md), [`27`](./tactical/27-biome-decoration-parity-follow-through.md), [`33`](./tactical/33-dark-forest-parity.md), [`34`](./tactical/34-savanna-parity.md), [`35`](./tactical/35-jungle-parity.md), [`36`](./tactical/36-snowy-giant-taiga-and-mushroom-table-coverage.md), [`37`](./tactical/37-shoreline-and-transition-parity.md), [`38`](./tactical/38-cold-surface-parity.md), [`39`](./tactical/39-warm-ocean-parity.md), [`41`](./tactical/41-bamboo-jungle-parity.md), [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md), [`45`](./tactical/45-overworld-biome-table-aliases-and-exactness.md), [`54`](./tactical/54-deep-warm-ocean-seagrass-simple-follow-through.md) |
-| Ore generation / underground decoration | `55-60%` | The live overworld underground helper stack is now translated: common ores, underground variety, biome-specific badlands/mountain extras, glow lichen, rare dripstone, soft disks, target-rule plumbing, replace-single-block support, block/palette coverage, and biome-table wiring all landed; the main remaining gaps are stronger decorated-stage confidence/oracle coverage and later underground feature families outside this helper surface | [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md) |
-| Structures | `0-5%` | Not meaningfully started; structure architecture is documented, with orchestration covered by the deterministic-order contract | [`structures.md`](./structures.md), [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) |
+| Ore generation / underground decoration | `60-65%` | The live overworld underground helper stack is now translated: common ores, underground variety, biome-specific badlands/mountain extras, glow lichen, rare dripstone, soft disks, monster rooms, target-rule plumbing, replace-single-block support, block/palette coverage, and biome-table wiring all landed; the main remaining gaps are stronger decorated-stage confidence/oracle coverage, overworld fossils, and later underground feature families outside this helper surface | [`42`](./tactical/42-ore-and-underground-decoration-foundation.md), [`43`](./tactical/43-biome-specific-underground-extras.md), [`44`](./tactical/44-underground-tail-and-soft-disks.md), [`60`](./tactical/60-monster-room-follow-through.md) |
+| Structures | `0-5%` | Still intentionally absent; true structure-start work is documented, but the structure-like ordinary configured features stay outside this bucket and are being landed first | [`structures.md`](./structures.md), [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) |
 
 If you compress all of that to one number, the project is roughly `60-70%` of the way to “recognizable vanilla-overworld worldgen,” but much less complete than that for broad biome/decor/structure parity.
 
@@ -92,6 +92,7 @@ The project now has translated support for:
 - `GlowLichenFeature`
 - `DripstoneClusterFeature`
 - `SmallDripstoneFeature`
+- `MonsterRoomFeature`
 - `HugeBrownMushroomFeature`
 - `HugeRedMushroomFeature`
 - flower-provider-backed flower placement
@@ -104,6 +105,7 @@ The project now has translated support for:
 - the remaining live underground helper tail: glow lichen, rare dripstone clusters, and rare small dripstone
 - soft disks: sand, clay, gravel, plus the swamp clay-only follow-through
 - biome-specific underground extras: badlands extra gold, mountain emeralds, and mountain infested stone
+- monster rooms / dungeons through the ordinary configured-feature path
 
 ### Current tree / plant / water feature families
 
@@ -164,6 +166,7 @@ The current tree system is enough to render believable forests, but not enough f
 The project now covers the full live vanilla overworld underground-helper surface used by the translated biome tables, but underground parity is still far from complete:
 
 - stronger decorated-stage / oracle coverage beyond focused unit tests and browser validation
+- overworld fossils as the next small structure-looking ordinary configured feature
 - non-helper underground feature families
 - later replace-material underground families if we decide they still matter for 1.17.1 overworld recognizability
 
@@ -176,6 +179,8 @@ Structure generation is still effectively absent:
 - no generated structure injection into chunks
 
 Desert wells are no longer part of this missing bucket because they are ordinary configured features, not `StructureFeature`s.
+
+Monster rooms are no longer part of this missing bucket for the same reason. The remaining small structure-looking oddity that still belongs outside true structure work is overworld fossils.
 
 The target architecture is status-aware rather than a decoration shortcut: structure starts are recorded first, references are computed before noise, and each chunk places clipped structure slices during `FEATURES`. See [`structures.md`](./structures.md) for structure details and [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md) for the broader status-order contract.
 
@@ -236,10 +241,10 @@ After the sand/gravel boundary target, use the full-block diff reports to choose
 
 ### 4. Finish the remaining narrow visible-exactness decoration slices
 
-The current vegetation set is already enough to make scenes legible, and the bee, sunflower, swamp-oak vine, non-natural deep-warm-ocean table, and desert-well follow-through removed the clearest remaining explicit table omissions. The next leverage point is the remaining visible exactness work that is still narrow enough to validate directly:
+The current vegetation set is already enough to make scenes legible, and the bee, sunflower, swamp-oak vine, non-natural deep-warm-ocean table, desert-well, and monster-room follow-through removed the clearest remaining explicit table omissions. The next leverage point is the remaining visible exactness work that is still narrow enough to validate directly:
 
 - remaining biome-specific decorators and selector exactness
-- other small non-structure decorated oddities such as monster rooms and overworld fossils
+- overworld fossils as the next small non-structure configured-feature oddity
 
 ### 5. Revisit exhaustive carver parity only where the current matrix is still intentionally lossy
 
@@ -262,7 +267,7 @@ Tacticals 42 through 44 landed the live overworld underground-helper surface. Th
 
 Structures are important for parity, but they should not displace the terrain/carver/biome-decor core unless priorities change.
 
-When they do become the priority, follow [`structures.md`](./structures.md) and keep the orchestration aligned with [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md): start with structure status/metadata and simple custom structures, then mineshafts, template-backed structures, strongholds/terrain blending, large structures, and finally jigsaw villages/outposts.
+Before true structures, finish any remaining structure-looking ordinary configured features through the existing feature path. At the moment that means overworld fossils. After that, follow [`structures.md`](./structures.md) and keep the orchestration aligned with [`worldgen-deterministic-order.md`](./worldgen-deterministic-order.md): start with structure status/metadata and simple custom structures, then mineshafts, template-backed structures, strongholds/terrain blending, large structures, and finally jigsaw villages/outposts.
 
 ## Update rules
 

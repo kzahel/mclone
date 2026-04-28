@@ -87,6 +87,7 @@ Direct port of MC 1.17.1's client rendering stack to raw WebGPU. Target and skip
 | [`57-generated-chunk-holder-status-futures.md`](57-generated-chunk-holder-status-futures.md) | host-side `ChunkHolder`-style per-status futures and in-flight coalescing for generated chunks | runtime + perf | **done** - holder slots, recursive status requests, and current-view status target scheduling are landed |
 | [`58-generated-protochunk-partial-state-and-persistence.md`](58-generated-protochunk-partial-state-and-persistence.md) | `ProtoChunk`-like partial status records, save/resume, and generated-cache versioning | runtime + storage | **proposed** - data-shape and persistence slice under Tactical 49 |
 | [`59-generated-holder-residency-and-save-queue.md`](59-generated-holder-residency-and-save-queue.md) | generated holder residency, unload/save queueing, and lazy generated-cache writes | runtime + storage | **partial** - holder pruning, storage side-effect queueing, and lazy generated-clean publish cache writes landed |
+| [`60-monster-room-follow-through.md`](60-monster-room-follow-through.md) | translate monster rooms as ordinary configured `UNDERGROUND_STRUCTURES`, add the minimal block/palette support, and keep the slice separate from true structure starts | unit + browser visual | **done** - monster rooms now run through the configured-feature path, biome tables, palette wiring, and a deterministic worker-world probe |
 | [`53-remote-player-integration-sequence.md`](53-remote-player-integration-sequence.md) | WebSocket remote transport, named join/player-slot semantics, grounded movement integration ordering | runtime + browser integration | **done** - R9, player-slot protocol cleanup, and basic movement physics/prediction integration are landed |
 
 Ordering rationale: `BlockState` prereqs (13) deferred until just before model baking (14a/b) since nothing before that needs them. WGSL shader ports (16) deferred until after the mesher (15) so we can verify geometry correctness with stub shaders first, then swap in real shaders. `ModelBakery` split from `BlockModel` parse (14a/b) because `ModelBakery` is one of the largest classes in the client and the data-loading and baking passes are independently testable.
@@ -242,6 +243,7 @@ Do not add mining, building, inventory, chat, or combat until the host/client pr
 - [`53-swamp-oak-vine-follow-through.md`](53-swamp-oak-vine-follow-through.md)
 - [`54-deep-warm-ocean-seagrass-simple-follow-through.md`](54-deep-warm-ocean-seagrass-simple-follow-through.md)
 - [`55-desert-well-follow-through.md`](55-desert-well-follow-through.md)
+- [`60-monster-room-follow-through.md`](60-monster-room-follow-through.md)
 
 ## Renderer oracle approach
 
