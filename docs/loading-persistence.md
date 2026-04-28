@@ -297,6 +297,7 @@ That means persisted light is currently not authoritative for host reload. A lig
 - Holders pruned while a generated-record save is pending stay in a pending-unload map; if interest returns before the save completes, the holder is resurrected instead of reading stale storage or regenerating.
 - Partial generated records, generated-clean full cache records, and dirty full records use the same host-owned generated-record write-version stream; stale lower-version generated records are skipped by memory, file, and IndexedDB storage.
 - Async generated-record and legacy snapshot preloads re-check chunk-view revision and authority before hydrating; stale results are skipped when a walk moves the authority window while storage is still reading.
+- Storage sessions carry adapter-local epochs. Reopening a save, resetting incompatible metadata, or closing the current session supersedes older sessions; stale-session loads return missing and stale-session writes/evicts are no-ops.
 - Host block mutations mark the owning chunk dirty and mark published chunks for replacement snapshot publication.
 - Dirty published chunks are saved when flushed.
 - Dirty chunks are saved before eviction; clean eviction still only records adapter-local `lastEvictedAtMs`.

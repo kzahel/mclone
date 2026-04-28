@@ -122,5 +122,35 @@ describe("FileWorldStorage", () => {
       lastOpenedAtMs: 3_000,
     });
     expect(await secondSession.chunks.loadChunk(0, 0)).toBeUndefined();
+
+    await firstSession.chunks.saveChunk(CHUNK_SNAPSHOT);
+    expect(await secondSession.chunks.loadChunk(0, 0)).toBeUndefined();
+  });
+
+  test("ignores writes from superseded file storage sessions", async () => {
+    const saveRoot = await createTempDirectory();
+    let now = 1_000;
+    const storage = new FileWorldStorage(saveRoot, () => now);
+    const firstSession = await storage.openWorld(STORAGE_REQUEST);
+
+    now = 2_000;
+    const secondSession = await storage.openWorld({
+      ...STORAGE_REQUEST,
+      openedAtMs: now,
+    });
+
+    await firstSession.chunks.saveChunk(CHUNK_SNAPSHOT);
+    expect(await secondSession.chunks.loadChunk(0, 0)).toBeUndefined();
+
+    await secondSession.chunks.saveChunk(CHUNK_SNAPSHOT);
+    expect(await secondSession.chunks.loadChunk(0, 0)).toEqual(CHUNK_SNAPSHOT);
+
+    await secondSession.close();
+    await secondSession.chunks.saveChunk({
+      ...CHUNK_SNAPSHOT,
+      chunkX: 1,
+    });
+    await expect(readFile(getFileChunkRecordPath(saveRoot, STORAGE_REQUEST.saveId, 1, 0), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
   });
 });

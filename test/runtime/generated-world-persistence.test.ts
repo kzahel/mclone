@@ -25,6 +25,14 @@ const OPEN_WORLD_REQUEST = {
   seed: 12345n,
   preset: "default",
 } as const;
+const STORAGE_CHUNK_SNAPSHOT: PackedChunkSnapshot = {
+  chunkX: 7,
+  chunkZ: -2,
+  biomes: [0],
+  sections: [],
+  blockTicks: [],
+  liquidTicks: [],
+};
 
 function createWorldClient(storage: MemoryWorldStorage, mutateWorld?: (level: WorldGenLevel) => void): LocalWorldClient {
   const blocks = registerGeneratedRenderBlocks();
@@ -365,5 +373,36 @@ describe("GeneratedWorld persistence", () => {
     const loaded = await session.chunks.loadGeneratedChunk(4, -3);
     expect(loaded?.status).toBe(GeneratedChunkStatus.STRUCTURE_REFERENCES);
     expect(loaded?.writeVersion).toBe(2);
+  });
+
+  test("ignores writes from superseded memory storage sessions", async () => {
+    const storage = new MemoryWorldStorage(() => 6_000);
+    const request: OpenWorldStorageRequest = {
+      saveId: "memory-epoch-test",
+      storageVersion: 1,
+      seed: "12345",
+      preset: "flat_grass",
+      minBuildHeight: 0,
+      height: 256,
+      openedAtMs: 6_000,
+    };
+    const firstSession = await storage.openWorld(request);
+    const secondSession = await storage.openWorld({
+      ...request,
+      openedAtMs: 6_001,
+    });
+
+    await firstSession.chunks.saveChunk(STORAGE_CHUNK_SNAPSHOT);
+    expect(storage.getChunkRecord(request.saveId, STORAGE_CHUNK_SNAPSHOT.chunkX, STORAGE_CHUNK_SNAPSHOT.chunkZ)).toBeUndefined();
+
+    await secondSession.chunks.saveChunk(STORAGE_CHUNK_SNAPSHOT);
+    expect(storage.getChunkRecord(request.saveId, STORAGE_CHUNK_SNAPSHOT.chunkX, STORAGE_CHUNK_SNAPSHOT.chunkZ)?.snapshot).toEqual(STORAGE_CHUNK_SNAPSHOT);
+
+    await secondSession.close();
+    await secondSession.chunks.saveChunk({
+      ...STORAGE_CHUNK_SNAPSHOT,
+      chunkX: STORAGE_CHUNK_SNAPSHOT.chunkX + 1,
+    });
+    expect(storage.getChunkRecord(request.saveId, STORAGE_CHUNK_SNAPSHOT.chunkX + 1, STORAGE_CHUNK_SNAPSHOT.chunkZ)).toBeUndefined();
   });
 });

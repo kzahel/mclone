@@ -163,14 +163,19 @@ class IndexedDbChunkStorage implements ChunkStorage {
     private readonly database: IDBDatabase,
     private readonly saveId: string,
     private readonly now: () => number,
+    private readonly isSessionCurrent: () => boolean,
   ) {}
 
   public async loadChunk(chunkX: number, chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
+    if (!this.isSessionCurrent()) {
+      return undefined;
+    }
+
     const transaction = this.database.transaction(CHUNKS_STORE, "readwrite");
     const store = transaction.objectStore(CHUNKS_STORE);
     const key = [this.saveId, chunkX, chunkZ];
     const record = (await requestToPromise(store.get(key))) as IndexedDbChunkRecord | undefined;
-    if (record !== undefined) {
+    if (record !== undefined && this.isSessionCurrent()) {
       store.put({
         ...record,
         lastLoadedAtMs: this.now(),
@@ -178,15 +183,24 @@ class IndexedDbChunkStorage implements ChunkStorage {
     }
 
     await waitForTransaction(transaction);
-    return record === undefined ? undefined : clonePackedChunkSnapshot(record.snapshot);
+    return record === undefined || !this.isSessionCurrent() ? undefined : clonePackedChunkSnapshot(record.snapshot);
   }
 
   public async saveChunk(snapshot: PackedChunkSnapshot, options?: SaveChunkOptions): Promise<void> {
+    if (!this.isSessionCurrent()) {
+      return;
+    }
+
     const transaction = this.database.transaction([CHUNKS_STORE, GENERATED_CHUNKS_STORE], "readwrite");
     const savedAtMs = this.now();
     const key = [this.saveId, snapshot.chunkX, snapshot.chunkZ];
     const generatedStore = transaction.objectStore(GENERATED_CHUNKS_STORE);
     const existingGeneratedRecord = (await requestToPromise(generatedStore.get(key))) as IndexedDbGeneratedChunkRecord | undefined;
+    if (!this.isSessionCurrent()) {
+      await waitForTransaction(transaction);
+      return;
+    }
+
     const generatedRecordWriteVersion = options?.generatedRecordWriteVersion
       ?? ((existingGeneratedRecord === undefined ? 0 : generatedChunkRecordWriteVersion(existingGeneratedRecord.generatedChunk)) + 1);
     transaction.objectStore(CHUNKS_STORE).put({
@@ -209,11 +223,15 @@ class IndexedDbChunkStorage implements ChunkStorage {
   }
 
   public async loadGeneratedChunk(chunkX: number, chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
+    if (!this.isSessionCurrent()) {
+      return undefined;
+    }
+
     const transaction = this.database.transaction(GENERATED_CHUNKS_STORE, "readwrite");
     const store = transaction.objectStore(GENERATED_CHUNKS_STORE);
     const key = [this.saveId, chunkX, chunkZ];
     const record = (await requestToPromise(store.get(key))) as IndexedDbGeneratedChunkRecord | undefined;
-    if (record !== undefined) {
+    if (record !== undefined && this.isSessionCurrent()) {
       store.put({
         ...record,
         generatedChunk: cloneStoredGeneratedChunkRecord(record.generatedChunk),
@@ -222,14 +240,23 @@ class IndexedDbChunkStorage implements ChunkStorage {
     }
 
     await waitForTransaction(transaction);
-    return record === undefined ? undefined : cloneStoredGeneratedChunkRecord(record.generatedChunk);
+    return record === undefined || !this.isSessionCurrent() ? undefined : cloneStoredGeneratedChunkRecord(record.generatedChunk);
   }
 
   public async saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void> {
+    if (!this.isSessionCurrent()) {
+      return;
+    }
+
     const transaction = this.database.transaction(GENERATED_CHUNKS_STORE, "readwrite");
     const store = transaction.objectStore(GENERATED_CHUNKS_STORE);
     const key = [this.saveId, record.chunkX, record.chunkZ];
     const existingGeneratedRecord = (await requestToPromise(store.get(key))) as IndexedDbGeneratedChunkRecord | undefined;
+    if (!this.isSessionCurrent()) {
+      await waitForTransaction(transaction);
+      return;
+    }
+
     if (existingGeneratedRecord !== undefined && generatedChunkRecordWriteVersion(existingGeneratedRecord.generatedChunk) > record.writeVersion) {
       await waitForTransaction(transaction);
       return;
@@ -246,11 +273,15 @@ class IndexedDbChunkStorage implements ChunkStorage {
   }
 
   public async evictChunk(chunkX: number, chunkZ: number): Promise<void> {
+    if (!this.isSessionCurrent()) {
+      return;
+    }
+
     const transaction = this.database.transaction([CHUNKS_STORE, GENERATED_CHUNKS_STORE], "readwrite");
     const key = [this.saveId, chunkX, chunkZ];
     const store = transaction.objectStore(CHUNKS_STORE);
     const record = (await requestToPromise(store.get(key))) as IndexedDbChunkRecord | undefined;
-    if (record !== undefined) {
+    if (record !== undefined && this.isSessionCurrent()) {
       store.put({
         ...record,
         lastEvictedAtMs: this.now(),
@@ -258,7 +289,7 @@ class IndexedDbChunkStorage implements ChunkStorage {
     }
     const generatedStore = transaction.objectStore(GENERATED_CHUNKS_STORE);
     const generatedRecord = (await requestToPromise(generatedStore.get(key))) as IndexedDbGeneratedChunkRecord | undefined;
-    if (generatedRecord !== undefined) {
+    if (generatedRecord !== undefined && this.isSessionCurrent()) {
       generatedStore.put({
         ...generatedRecord,
         lastEvictedAtMs: this.now(),
@@ -276,15 +307,20 @@ class IndexedDbWorldStorageSession implements WorldStorageSession {
     public readonly metadata: WorldSaveMetadata,
     database: IDBDatabase,
     now: () => number,
+    private readonly closeSession: () => void,
+    isSessionCurrent: () => boolean,
   ) {
-    this.chunks = new IndexedDbChunkStorage(database, metadata.saveId, now);
+    this.chunks = new IndexedDbChunkStorage(database, metadata.saveId, now, isSessionCurrent);
   }
 
-  public async close(): Promise<void> {}
+  public async close(): Promise<void> {
+    this.closeSession();
+  }
 }
 
 export class IndexedDbWorldStorage implements WorldStorage {
   private databasePromise: Promise<IDBDatabase> | undefined;
+  private readonly sessionEpochs = new Map<string, number>();
 
   public constructor(
     private readonly factory: IDBFactory,
@@ -292,6 +328,7 @@ export class IndexedDbWorldStorage implements WorldStorage {
   ) {}
 
   public async openWorld(request: OpenWorldStorageRequest): Promise<WorldStorageSession> {
+    const sessionEpoch = this.nextSessionEpoch(request.saveId);
     const database = await this.getDatabase();
     const worldsTransaction = database.transaction(WORLDS_STORE, "readwrite");
     const worldsStore = worldsTransaction.objectStore(WORLDS_STORE);
@@ -311,11 +348,33 @@ export class IndexedDbWorldStorage implements WorldStorage {
       await waitForTransaction(createTransaction);
     }
 
-    return new IndexedDbWorldStorageSession(metadata, database, this.now);
+    return new IndexedDbWorldStorageSession(
+      metadata,
+      database,
+      this.now,
+      () => this.closeSession(request.saveId, sessionEpoch),
+      () => this.isSessionCurrent(request.saveId, sessionEpoch),
+    );
   }
 
   private getDatabase(): Promise<IDBDatabase> {
     this.databasePromise ??= openIndexedDb(this.factory);
     return this.databasePromise;
+  }
+
+  private nextSessionEpoch(saveId: string): number {
+    const sessionEpoch = (this.sessionEpochs.get(saveId) ?? 0) + 1;
+    this.sessionEpochs.set(saveId, sessionEpoch);
+    return sessionEpoch;
+  }
+
+  private closeSession(saveId: string, sessionEpoch: number): void {
+    if (this.isSessionCurrent(saveId, sessionEpoch)) {
+      this.sessionEpochs.set(saveId, sessionEpoch + 1);
+    }
+  }
+
+  private isSessionCurrent(saveId: string, sessionEpoch: number): boolean {
+    return this.sessionEpochs.get(saveId) === sessionEpoch;
   }
 }

@@ -39,6 +39,7 @@ type MemoryWorldRecord = {
   metadata: WorldSaveMetadata;
   chunks: Map<string, MemoryChunkRecord>;
   generatedChunks: Map<string, MemoryGeneratedChunkRecord>;
+  sessionEpoch: number;
 };
 
 function createFullGeneratedChunkRecord(snapshot: PackedChunkSnapshot, writeVersion: number): GeneratedChunkStorageRecord {
@@ -65,10 +66,19 @@ function isStaleGeneratedChunkWrite(
 class MemoryChunkStorage implements ChunkStorage {
   public constructor(
     private readonly world: MemoryWorldRecord,
+    private readonly sessionEpoch: number,
     private readonly now: () => number,
   ) {}
 
+  private isCurrentSession(): boolean {
+    return this.world.sessionEpoch === this.sessionEpoch;
+  }
+
   public async loadChunk(chunkX: number, chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
+    if (!this.isCurrentSession()) {
+      return undefined;
+    }
+
     const record = this.world.chunks.get(chunkKey(chunkX, chunkZ));
     if (record === undefined) {
       return undefined;
@@ -79,6 +89,10 @@ class MemoryChunkStorage implements ChunkStorage {
   }
 
   public async saveChunk(snapshot: PackedChunkSnapshot, options?: SaveChunkOptions): Promise<void> {
+    if (!this.isCurrentSession()) {
+      return;
+    }
+
     const savedAtMs = this.now();
     const key = chunkKey(snapshot.chunkX, snapshot.chunkZ);
     this.world.chunks.set(
@@ -105,6 +119,10 @@ class MemoryChunkStorage implements ChunkStorage {
   }
 
   public async loadGeneratedChunk(chunkX: number, chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
+    if (!this.isCurrentSession()) {
+      return undefined;
+    }
+
     const record = this.world.generatedChunks.get(chunkKey(chunkX, chunkZ));
     if (record === undefined) {
       return undefined;
@@ -115,6 +133,10 @@ class MemoryChunkStorage implements ChunkStorage {
   }
 
   public async saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void> {
+    if (!this.isCurrentSession()) {
+      return;
+    }
+
     const existingGeneratedRecord = this.world.generatedChunks.get(chunkKey(record.chunkX, record.chunkZ));
     if (isStaleGeneratedChunkWrite(existingGeneratedRecord, record.writeVersion)) {
       return;
@@ -130,6 +152,10 @@ class MemoryChunkStorage implements ChunkStorage {
   }
 
   public async evictChunk(chunkX: number, chunkZ: number): Promise<void> {
+    if (!this.isCurrentSession()) {
+      return;
+    }
+
     const record = this.world.chunks.get(chunkKey(chunkX, chunkZ));
     if (record === undefined) {
       return;
@@ -148,13 +174,18 @@ class MemoryWorldStorageSession implements WorldStorageSession {
 
   public constructor(
     public readonly metadata: WorldSaveMetadata,
-    world: MemoryWorldRecord,
+    private readonly world: MemoryWorldRecord,
+    private readonly sessionEpoch: number,
     now: () => number,
   ) {
-    this.chunks = new MemoryChunkStorage(world, now);
+    this.chunks = new MemoryChunkStorage(world, sessionEpoch, now);
   }
 
-  public async close(): Promise<void> {}
+  public async close(): Promise<void> {
+    if (this.world.sessionEpoch === this.sessionEpoch) {
+      this.world.sessionEpoch++;
+    }
+  }
 }
 
 export class MemoryWorldStorage implements WorldStorage {
@@ -165,17 +196,20 @@ export class MemoryWorldStorage implements WorldStorage {
   public async openWorld(request: OpenWorldStorageRequest): Promise<WorldStorageSession> {
     const existing = this.worlds.get(request.saveId);
     if (existing !== undefined && isWorldSaveMetadataCompatible(existing.metadata, request)) {
+      existing.sessionEpoch++;
       existing.metadata = touchWorldSaveMetadata(existing.metadata, request.openedAtMs);
-      return new MemoryWorldStorageSession(existing.metadata, existing, this.now);
+      return new MemoryWorldStorageSession(existing.metadata, existing, existing.sessionEpoch, this.now);
     }
 
+    const previousSessionEpoch = existing?.sessionEpoch ?? 0;
     const world: MemoryWorldRecord = {
       metadata: createWorldSaveMetadata(request),
       chunks: new Map<string, MemoryChunkRecord>(),
       generatedChunks: new Map<string, MemoryGeneratedChunkRecord>(),
+      sessionEpoch: previousSessionEpoch + 1,
     };
     this.worlds.set(request.saveId, world);
-    return new MemoryWorldStorageSession(world.metadata, world, this.now);
+    return new MemoryWorldStorageSession(world.metadata, world, world.sessionEpoch, this.now);
   }
 
   public getWorldMetadata(saveId: string): WorldSaveMetadata | undefined {

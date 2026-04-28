@@ -151,11 +151,19 @@ class FileChunkStorage implements ChunkStorage {
     private readonly rootDirectory: string,
     private readonly saveId: string,
     private readonly now: () => number,
+    private readonly isSessionCurrent: () => boolean,
   ) {}
 
   public async loadChunk(chunkX: number, chunkZ: number): Promise<PackedChunkSnapshot | undefined> {
+    if (!this.isSessionCurrent()) {
+      return undefined;
+    }
+
     const filePath = getFileChunkRecordPath(this.rootDirectory, this.saveId, chunkX, chunkZ);
     const record = await readJsonFile<FileChunkRecord>(filePath);
+    if (!this.isSessionCurrent()) {
+      return undefined;
+    }
     if (record === undefined) {
       return undefined;
     }
@@ -171,8 +179,16 @@ class FileChunkStorage implements ChunkStorage {
   }
 
   public async saveChunk(snapshot: PackedChunkSnapshot, options?: SaveChunkOptions): Promise<void> {
+    if (!this.isSessionCurrent()) {
+      return;
+    }
+
     const savedAtMs = this.now();
     const existingGeneratedRecord = await this.loadGeneratedChunkRecord(snapshot.chunkX, snapshot.chunkZ);
+    if (!this.isSessionCurrent()) {
+      return;
+    }
+
     const generatedRecordWriteVersion = options?.generatedRecordWriteVersion
       ?? ((existingGeneratedRecord?.generatedChunk.writeVersion ?? 0) + 1);
     await writeJsonFile(
@@ -186,12 +202,23 @@ class FileChunkStorage implements ChunkStorage {
         savedAtMs,
       } satisfies FileChunkRecord,
     );
+    if (!this.isSessionCurrent()) {
+      return;
+    }
+
     await this.saveGeneratedChunkRecord(createFullGeneratedChunkRecord(snapshot, generatedRecordWriteVersion), savedAtMs);
   }
 
   public async loadGeneratedChunk(chunkX: number, chunkZ: number): Promise<GeneratedChunkStorageRecord | undefined> {
+    if (!this.isSessionCurrent()) {
+      return undefined;
+    }
+
     const filePath = getFileGeneratedChunkRecordPath(this.rootDirectory, this.saveId, chunkX, chunkZ);
     const record = await this.loadGeneratedChunkRecord(chunkX, chunkZ);
+    if (!this.isSessionCurrent()) {
+      return undefined;
+    }
     if (record === undefined) {
       return undefined;
     }
@@ -204,11 +231,23 @@ class FileChunkStorage implements ChunkStorage {
   }
 
   public async saveGeneratedChunk(record: GeneratedChunkStorageRecord): Promise<void> {
+    if (!this.isSessionCurrent()) {
+      return;
+    }
+
     await this.saveGeneratedChunkRecord(record, this.now());
   }
 
   private async saveGeneratedChunkRecord(record: GeneratedChunkStorageRecord, savedAtMs: number): Promise<void> {
+    if (!this.isSessionCurrent()) {
+      return;
+    }
+
     const existing = await this.loadGeneratedChunkRecord(record.chunkX, record.chunkZ);
+    if (!this.isSessionCurrent()) {
+      return;
+    }
+
     if (existing !== undefined && (existing.generatedChunk.writeVersion ?? 0) > record.writeVersion) {
       return;
     }
@@ -243,8 +282,15 @@ class FileChunkStorage implements ChunkStorage {
   }
 
   public async evictChunk(chunkX: number, chunkZ: number): Promise<void> {
+    if (!this.isSessionCurrent()) {
+      return;
+    }
+
     const filePath = getFileChunkRecordPath(this.rootDirectory, this.saveId, chunkX, chunkZ);
     const record = await readJsonFile<FileChunkRecord>(filePath);
+    if (!this.isSessionCurrent()) {
+      return;
+    }
     if (record === undefined) {
       return;
     }
@@ -259,6 +305,9 @@ class FileChunkStorage implements ChunkStorage {
 
     const generatedFilePath = getFileGeneratedChunkRecordPath(this.rootDirectory, this.saveId, chunkX, chunkZ);
     const generatedRecord = await readJsonFile<FileGeneratedChunkRecord>(generatedFilePath);
+    if (!this.isSessionCurrent()) {
+      return;
+    }
     if (generatedRecord !== undefined) {
       if (generatedRecord.schemaVersion !== FILE_GENERATED_CHUNK_RECORD_SCHEMA_VERSION) {
         throw new Error(`Unsupported file generated chunk record schemaVersion ${String(generatedRecord.schemaVersion)} in ${generatedFilePath}`);
@@ -279,15 +328,20 @@ class FileWorldStorageSession implements WorldStorageSession {
     public readonly metadata: WorldSaveMetadata,
     rootDirectory: string,
     now: () => number,
+    private readonly closeSession: () => void,
+    isSessionCurrent: () => boolean,
   ) {
-    this.chunks = new FileChunkStorage(rootDirectory, metadata.saveId, now);
+    this.chunks = new FileChunkStorage(rootDirectory, metadata.saveId, now, isSessionCurrent);
   }
 
-  public async close(): Promise<void> {}
+  public async close(): Promise<void> {
+    this.closeSession();
+  }
 }
 
 export class FileWorldStorage implements WorldStorage {
   private readonly rootDirectory: string;
+  private readonly sessionEpochs = new Map<string, number>();
 
   public constructor(
     rootDirectory: string,
@@ -297,6 +351,7 @@ export class FileWorldStorage implements WorldStorage {
   }
 
   public async openWorld(request: OpenWorldStorageRequest): Promise<WorldStorageSession> {
+    const sessionEpoch = this.nextSessionEpoch(request.saveId);
     const worldDirectory = getFileWorldSaveDirectory(this.rootDirectory, request.saveId);
     const metadataPath = getFileWorldMetadataPath(this.rootDirectory, request.saveId);
     const existing = await readJsonFile<WorldSaveMetadata>(metadataPath);
@@ -312,10 +367,32 @@ export class FileWorldStorage implements WorldStorage {
     }
 
     await writeJsonFile(metadataPath, metadata);
-    return new FileWorldStorageSession(metadata, this.rootDirectory, this.now);
+    return new FileWorldStorageSession(
+      metadata,
+      this.rootDirectory,
+      this.now,
+      () => this.closeSession(request.saveId, sessionEpoch),
+      () => this.isSessionCurrent(request.saveId, sessionEpoch),
+    );
   }
 
   public getRootDirectory(): string {
     return this.rootDirectory;
+  }
+
+  private nextSessionEpoch(saveId: string): number {
+    const sessionEpoch = (this.sessionEpochs.get(saveId) ?? 0) + 1;
+    this.sessionEpochs.set(saveId, sessionEpoch);
+    return sessionEpoch;
+  }
+
+  private closeSession(saveId: string, sessionEpoch: number): void {
+    if (this.isSessionCurrent(saveId, sessionEpoch)) {
+      this.sessionEpochs.set(saveId, sessionEpoch + 1);
+    }
+  }
+
+  private isSessionCurrent(saveId: string, sessionEpoch: number): boolean {
+    return this.sessionEpochs.get(saveId) === sessionEpoch;
   }
 }

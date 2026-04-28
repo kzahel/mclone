@@ -2,7 +2,7 @@
 
 Make generated chunk unload/save/load ordering predictable like vanilla `ChunkMap`, so async persistence cannot cause duplicate generation, stale reloads, or older partial records overwriting newer chunk state.
 
-Status: pending-unload resurrection, generated-record write-version, and stale-preload rejection slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results.
+Status: pending-unload resurrection, generated-record write-version, stale-preload rejection, and storage-session epoch slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results. Storage adapters reject operations from superseded sessions after reopen/reset/close.
 
 ## Vanilla source anchors
 
@@ -33,7 +33,8 @@ Status: pending-unload resurrection, generated-record write-version, and stale-p
 
 4. **Clear/reset while writes are queued**
    - Risk: a save reset or world clear runs while old queued writes are still alive, then those writes recreate old data.
-   - Remaining gap: storage sessions need an epoch/generation token so old queued writes are rejected after clear/close/reopen.
+   - Current protection: memory, file, and IndexedDB storage adapters use per-save session epochs. Opening a save, resetting an incompatible save, or closing the current session supersedes older sessions; stale-session reads return missing and stale-session writes/evicts are skipped.
+   - Remaining gap: this is process/adapter-local. It matches the local host lifecycle, but it is not yet a cross-tab/cross-process lock like vanilla's save-directory lock.
 
 5. **Global queue instead of per-chunk ordering**
    - Risk: the serialized global queue is safe but blunt; it can block unrelated chunks behind one slow write and does not encode same-key dependencies explicitly.
@@ -67,11 +68,19 @@ Status: pending-unload resurrection, generated-record write-version, and stale-p
 - New counters: `storage_preload_skipped_stale`, `storage_preload_skipped_revision_changed`, `storage_preload_skipped_outside_authority`, `storage_preload_not_coalesced_revision_changed`, and `status_not_coalesced_revision_changed.<status>`.
 - Regression coverage starts a flat-grass view, blocks its generated preload, walks one chunk over, verifies the old preload produces no stale chunk snapshots, then flushes storage and checks the settled status/access counts.
 
+## Landed fourth slice
+
+- `MemoryWorldStorage`, `FileWorldStorage`, and `IndexedDbWorldStorage` now assign an adapter-local session epoch for each opened save.
+- Opening the same save again supersedes the previous session; resetting incompatible metadata also supersedes old sessions before clearing chunk records.
+- Closing the current session advances the epoch, so late queued operations from that session become no-ops.
+- Stale-session loads return missing; stale-session `saveChunk(...)`, `saveGeneratedChunk(...)`, and `evictChunk(...)` calls are skipped.
+- Regression coverage verifies memory and file storage ignore writes from superseded sessions, including stale writes attempted after incompatible reset.
+
 ## Next implementation slices
 
-1. Add a storage/session epoch to reject queued writes after clear/reset/close.
-2. Split the global storage queue into keyed same-chunk ordering plus bounded global concurrency.
-3. Replace authority-square pruning with a ticket-shaped pending unload queue and processing budget.
+1. Split the global storage queue into keyed same-chunk ordering plus bounded global concurrency.
+2. Replace authority-square pruning with a ticket-shaped pending unload queue and processing budget.
+3. Consider a cross-tab/cross-process save lock for IndexedDB/file storage if we start supporting multiple authorities against the same save.
 
 ## Validation
 
