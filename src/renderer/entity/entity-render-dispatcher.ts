@@ -1,9 +1,12 @@
 import {
   CHICKEN_ENTITY_TYPE_ID,
   COW_ENTITY_TYPE_ID,
+  MOOSHROOM_ENTITY_TYPE_ID,
   PIG_ENTITY_TYPE_ID,
   PLAYER_ENTITY_TYPE_ID,
+  RABBIT_ENTITY_TYPE_ID,
   SHEEP_ENTITY_TYPE_ID,
+  WOLF_ENTITY_TYPE_ID,
 } from "../../runtime/protocol/world-messages";
 import { Vec3 } from "../../world/phys/vec3";
 import { LightTexture } from "../light-texture";
@@ -14,9 +17,12 @@ import { EntityRendererProvider } from "./entity-renderer-provider";
 import type { EntityRenderer } from "./entity-renderer";
 import { ChickenRenderer } from "./chicken-renderer";
 import { CowRenderer } from "./cow-renderer";
+import { MooshroomRenderer } from "./mooshroom-renderer";
 import { PigRenderer } from "./pig-renderer";
 import { PlayerRenderer } from "./player-renderer";
+import { RabbitRenderer } from "./rabbit-renderer";
 import { SheepRenderer } from "./sheep-renderer";
+import { WolfRenderer } from "./wolf-renderer";
 import type { RenderableEntity, RenderablePlayer, RenderableTexturedMob } from "./renderable-entity";
 
 export class EntityRenderDispatcher {
@@ -28,8 +34,11 @@ export class EntityRenderDispatcher {
     this.renderers = new Map([
       [CHICKEN_ENTITY_TYPE_ID, new ChickenRenderer(context) as EntityRenderer<RenderableEntity>],
       [COW_ENTITY_TYPE_ID, new CowRenderer(context) as EntityRenderer<RenderableEntity>],
+      [MOOSHROOM_ENTITY_TYPE_ID, new MooshroomRenderer(context) as EntityRenderer<RenderableEntity>],
       [PIG_ENTITY_TYPE_ID, new PigRenderer(context) as EntityRenderer<RenderableEntity>],
+      [RABBIT_ENTITY_TYPE_ID, new RabbitRenderer(context) as EntityRenderer<RenderableEntity>],
       [SHEEP_ENTITY_TYPE_ID, new SheepRenderer(context) as EntityRenderer<RenderableEntity>],
+      [WOLF_ENTITY_TYPE_ID, new WolfRenderer(context) as EntityRenderer<RenderableEntity>],
     ]);
     this.playerRenderers = new Map([
       ["default", new PlayerRenderer(context, false)],

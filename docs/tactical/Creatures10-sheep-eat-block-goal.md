@@ -64,4 +64,4 @@ The Deno entity smoke writes `/tmp/mclone-deno-entity-render-smoke.png`.
 
 ## Next Step
 
-Start the entity interaction/item side-effect foundation before adding the next animal-specific gameplay hook. Sheep shearing, cow milking, pig saddles/riding, and chicken egg drops all need the same authoritative item/entity interaction and side-effect publication path.
+`Creatures11` pivots to breadth first: mooshroom, rabbit, and wolf baseline render/runtime support before adding the shared item/entity interaction path.

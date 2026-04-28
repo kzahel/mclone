@@ -164,8 +164,11 @@ export const PLAYER_ENTITY_TYPE_ID = "minecraft:player";
 export const PLAYER_ENTITY_DATA_KIND = "player";
 export const CHICKEN_ENTITY_TYPE_ID = "minecraft:chicken";
 export const COW_ENTITY_TYPE_ID = "minecraft:cow";
+export const MOOSHROOM_ENTITY_TYPE_ID = "minecraft:mooshroom";
 export const PIG_ENTITY_TYPE_ID = "minecraft:pig";
+export const RABBIT_ENTITY_TYPE_ID = "minecraft:rabbit";
 export const SHEEP_ENTITY_TYPE_ID = "minecraft:sheep";
+export const WOLF_ENTITY_TYPE_ID = "minecraft:wolf";
 
 export interface EntitySnapshot {
   readonly id: number;

@@ -250,6 +250,79 @@ describe("passive mob AI foundation", () => {
     expect(sheep.position.y).toBe(64);
   });
 
+  test("generated mooshrooms reuse cow baseline movement with mooshroom data", () => {
+    const mooshroom = new GeneratedMobEntity({
+      id: 16,
+      uuid: "mclone:test/mooshroom-ground-navigation",
+      entityType: EntityTypes.MOOSHROOM,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+    });
+    mooshroom.setAiLevel(new FlatMobAiLevel());
+
+    expect(mooshroom.getAttributeValue(MobAttribute.MAX_HEALTH)).toBe(10.0);
+    expect(mooshroom.getAttributeValue(MobAttribute.MOVEMENT_SPEED)).toBe(0.2);
+    expect(mooshroom.data.Type).toBe("red");
+    expect(mooshroom.getNavigation().moveTo(4.5, 64, 0.5, 1.0)).toBe(true);
+
+    mooshroom.tickServerAi({ resetNoActionTime: true });
+
+    expect(mooshroom.position.x).not.toBe(0.5);
+    expect(mooshroom.position.y).toBe(64);
+  });
+
+  test("generated rabbits use vanilla baseline attributes and slower stroll speed", () => {
+    const rabbit = new GeneratedMobEntity({
+      id: 17,
+      uuid: "mclone:test/rabbit-ground-navigation",
+      entityType: EntityTypes.RABBIT,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+    });
+    rabbit.setAiLevel(new FlatMobAiLevel());
+
+    expect(rabbit.getAttributeValue(MobAttribute.MAX_HEALTH)).toBe(3.0);
+    expect(rabbit.getAttributeValue(MobAttribute.MOVEMENT_SPEED)).toBe(0.3);
+    expect(rabbit.data.RabbitType).toBe(0);
+    expect(rabbit.getNavigation().moveTo(4.5, 64, 0.5, 0.6)).toBe(true);
+
+    rabbit.tickServerAi({ resetNoActionTime: true });
+
+    expect(rabbit.position.x).not.toBe(0.5);
+    expect(rabbit.position.y).toBe(64);
+  });
+
+  test("generated wolves use vanilla baseline attributes and passive look/stroll goals", () => {
+    const wolf = new GeneratedMobEntity({
+      id: 18,
+      uuid: "mclone:test/wolf-ground-navigation",
+      entityType: EntityTypes.WOLF,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+    });
+    wolf.setAiLevel(new FlatMobAiLevel());
+
+    expect(wolf.getAttributeValue(MobAttribute.MAX_HEALTH)).toBe(8.0);
+    expect(wolf.getAttributeValue(MobAttribute.MOVEMENT_SPEED)).toBe(0.3);
+    expect(wolf.data.Tame).toBe(false);
+    expect(wolf.data.CollarColor).toBe(14);
+    expect(wolf.getNavigation().moveTo(4.5, 64, 0.5, 1.0)).toBe(true);
+
+    wolf.tickServerAi({ resetNoActionTime: true });
+
+    expect(wolf.position.x).not.toBe(0.5);
+    expect(wolf.position.y).toBe(64);
+  });
+
   test("EatBlockGoal converts grass block below sheep to dirt and regrows wool data", () => {
     const level = new FlatMobAiLevel();
     const sheep = new GeneratedMobEntity({

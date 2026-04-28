@@ -727,35 +727,58 @@ describe("GeneratedWorldHost entity publication", () => {
         && (
           message.entity.typeId === "minecraft:chicken"
           || message.entity.typeId === "minecraft:cow"
+          || message.entity.typeId === "minecraft:mooshroom"
           || message.entity.typeId === "minecraft:pig"
+          || message.entity.typeId === "minecraft:rabbit"
           || message.entity.typeId === "minecraft:sheep"
+          || message.entity.typeId === "minecraft:wolf"
         ))
       .sort((left, right) => left.entity.id - right.entity.id);
 
-    expect(farmAnimals).toHaveLength(16);
+    expect(farmAnimals).toHaveLength(24);
     expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:chicken")).toHaveLength(4);
     expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:cow")).toHaveLength(4);
+    expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:mooshroom")).toHaveLength(2);
     expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:pig")).toHaveLength(4);
+    expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:rabbit")).toHaveLength(4);
     expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:sheep")).toHaveLength(4);
+    expect(farmAnimals.filter((message) => message.entity.typeId === "minecraft:wolf")).toHaveLength(2);
     expect(farmAnimals
       .filter((message) => message.entity.typeId === "minecraft:chicken")
       .every((message) => typeof message.entity.data?.EggLayTime === "number")).toBe(true);
     expect(farmAnimals
       .filter((message) => message.entity.typeId === "minecraft:sheep")
       .every((message) => typeof message.entity.data?.Color === "number")).toBe(true);
+    expect(farmAnimals
+      .filter((message) => message.entity.typeId === "minecraft:mooshroom")
+      .every((message) => message.entity.data?.Type === "red")).toBe(true);
+    expect(farmAnimals
+      .filter((message) => message.entity.typeId === "minecraft:rabbit")
+      .every((message) => message.entity.data?.RabbitType === 0)).toBe(true);
+    expect(farmAnimals
+      .filter((message) => message.entity.typeId === "minecraft:wolf")
+      .every((message) => message.entity.data?.Tame === false)).toBe(true);
     expect(farmAnimals.map((message) => [message.entity.position.x, message.entity.position.z])).toEqual([
       [6.5, 6.5],
       [10.5, 7.5],
       [7.5, 11.5],
       [12.5, 12.5],
+      [1.5, 1.5],
+      [14.5, 14.5],
       [3.5, 10.5],
       [4.5, 13.5],
       [13.5, 4.5],
       [14.5, 9.5],
+      [1.5, 4.5],
+      [4.5, 1.5],
+      [12.5, 1.5],
+      [1.5, 14.5],
       [5.5, 3.5],
       [9.5, 3.5],
       [3.5, 5.5],
       [11.5, 14.5],
+      [14.5, 1.5],
+      [1.5, 7.5],
       [2.5, 8.5],
       [8.5, 2.5],
       [15.5, 6.5],

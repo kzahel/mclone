@@ -9,9 +9,12 @@ import { collectEntityRenderBatches } from "../src/renderer/entity/entity-batch-
 import {
   SnapshotRenderableChicken,
   SnapshotRenderableCow,
+  SnapshotRenderableMooshroom,
   SnapshotRenderablePig,
   SnapshotRenderablePlayer,
+  SnapshotRenderableRabbit,
   SnapshotRenderableSheep,
+  SnapshotRenderableWolf,
 } from "../src/renderer/entity/renderable-entity.ts";
 import { GameRenderer } from "../src/renderer/game-renderer.ts";
 import { EntityTextureManager } from "../src/renderer/texture/entity-texture-manager.ts";
@@ -42,14 +45,17 @@ const depthTarget = createSceneDepthTarget(device, WIDTH, HEIGHT);
 
 const player = new SnapshotRenderablePlayer(playerState());
 const cow = new SnapshotRenderableCow(cowState());
+const mooshroom = new SnapshotRenderableMooshroom(mooshroomState());
 const pig = new SnapshotRenderablePig(pigState());
+const rabbit = new SnapshotRenderableRabbit(rabbitState());
 const sheep = new SnapshotRenderableSheep(sheepState());
+const wolf = new SnapshotRenderableWolf(wolfState());
 const chicken = new SnapshotRenderableChicken(chickenState());
 const entityBatches = collectEntityRenderBatches({
   level: {
     getBrightness: () => 15,
   } as never,
-  entities: [player, cow, pig, sheep, chicken],
+  entities: [player, cow, mooshroom, pig, rabbit, sheep, wolf, chicken],
   cameraPosition: Vec3.ZERO,
   partialTick: 0,
 });
@@ -238,6 +244,78 @@ function pigState(): ClientEntityPresentationState {
   };
 }
 
+function mooshroomState(): ClientEntityPresentationState {
+  const authoritative = {
+    id: 12,
+    uuid: "00000000-0000-0000-0000-000000000012",
+    typeId: "minecraft:mooshroom",
+    category: "creature" as const,
+    chunkX: 0,
+    chunkZ: 0,
+    position: { x: 2.35, y: -1.0, z: -3.35 },
+    rotation: { yaw: 205, pitch: 0 },
+    width: 0.9,
+    height: 1.4,
+    onGround: true,
+    age: 0,
+    data: { Type: "red" },
+  };
+  return {
+    entityId: authoritative.id,
+    uuid: authoritative.uuid,
+    typeId: authoritative.typeId,
+    category: authoritative.category,
+    chunkX: authoritative.chunkX,
+    chunkZ: authoritative.chunkZ,
+    width: authoritative.width,
+    height: authoritative.height,
+    onGround: authoritative.onGround,
+    age: authoritative.age,
+    data: authoritative.data,
+    interpolatedPosition: authoritative.position,
+    interpolatedRotation: authoritative.rotation,
+    interpolationAlpha: 1,
+    authoritative,
+    aiAuthority: "host",
+  };
+}
+
+function rabbitState(): ClientEntityPresentationState {
+  const authoritative = {
+    id: 13,
+    uuid: "00000000-0000-0000-0000-000000000013",
+    typeId: "minecraft:rabbit",
+    category: "creature" as const,
+    chunkX: 0,
+    chunkZ: 0,
+    position: { x: -1.15, y: -1.0, z: -2.45 },
+    rotation: { yaw: 165, pitch: 0 },
+    width: 0.4,
+    height: 0.5,
+    onGround: true,
+    age: 0,
+    data: { RabbitType: 4, JumpTicks: 0, JumpDuration: 0 },
+  };
+  return {
+    entityId: authoritative.id,
+    uuid: authoritative.uuid,
+    typeId: authoritative.typeId,
+    category: authoritative.category,
+    chunkX: authoritative.chunkX,
+    chunkZ: authoritative.chunkZ,
+    width: authoritative.width,
+    height: authoritative.height,
+    onGround: authoritative.onGround,
+    age: authoritative.age,
+    data: authoritative.data,
+    interpolatedPosition: authoritative.position,
+    interpolatedRotation: authoritative.rotation,
+    interpolationAlpha: 1,
+    authoritative,
+    aiAuthority: "host",
+  };
+}
+
 function sheepState(): ClientEntityPresentationState {
   const authoritative = {
     id: 10,
@@ -253,6 +331,50 @@ function sheepState(): ClientEntityPresentationState {
     onGround: true,
     age: 0,
     data: { Color: 12 },
+  };
+  return {
+    entityId: authoritative.id,
+    uuid: authoritative.uuid,
+    typeId: authoritative.typeId,
+    category: authoritative.category,
+    chunkX: authoritative.chunkX,
+    chunkZ: authoritative.chunkZ,
+    width: authoritative.width,
+    height: authoritative.height,
+    onGround: authoritative.onGround,
+    age: authoritative.age,
+    data: authoritative.data,
+    interpolatedPosition: authoritative.position,
+    interpolatedRotation: authoritative.rotation,
+    interpolationAlpha: 1,
+    authoritative,
+    aiAuthority: "host",
+  };
+}
+
+function wolfState(): ClientEntityPresentationState {
+  const authoritative = {
+    id: 14,
+    uuid: "00000000-0000-0000-0000-000000000014",
+    typeId: "minecraft:wolf",
+    category: "creature" as const,
+    chunkX: 0,
+    chunkZ: 0,
+    position: { x: -2.35, y: -1.0, z: -3.0 },
+    rotation: { yaw: 155, pitch: 0 },
+    width: 0.6,
+    height: 0.85,
+    onGround: true,
+    age: 0,
+    data: {
+      Angry: false,
+      Health: 8,
+      MaxHealth: 8,
+      RemainingAngerTime: 0,
+      Sitting: false,
+      Tame: false,
+      Wet: false,
+    },
   };
   return {
     entityId: authoritative.id,

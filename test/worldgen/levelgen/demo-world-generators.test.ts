@@ -63,12 +63,18 @@ describe("demo world generators", () => {
       nextEntityUuid: (id) => `mclone:test/small-island-mob/${id.toString()}`,
     });
 
-    expect(spawned).toHaveLength(16);
+    expect(spawned).toHaveLength(24);
     expect(spawned.filter((entity) => entity.typeId === "minecraft:cow")).toHaveLength(4);
+    expect(spawned.filter((entity) => entity.typeId === "minecraft:mooshroom")).toHaveLength(2);
     expect(spawned.filter((entity) => entity.typeId === "minecraft:pig")).toHaveLength(4);
+    expect(spawned.filter((entity) => entity.typeId === "minecraft:rabbit")).toHaveLength(4);
     expect(spawned.filter((entity) => entity.typeId === "minecraft:sheep")).toHaveLength(4);
+    expect(spawned.filter((entity) => entity.typeId === "minecraft:wolf")).toHaveLength(2);
     expect(spawned.filter((entity) => entity.typeId === "minecraft:chicken")).toHaveLength(4);
+    expect(spawned.filter((entity) => entity.typeId === "minecraft:mooshroom").every((entity) => entity.data.Type === "red")).toBe(true);
+    expect(spawned.filter((entity) => entity.typeId === "minecraft:rabbit").every((entity) => entity.data.RabbitType === 0)).toBe(true);
     expect(spawned.filter((entity) => entity.typeId === "minecraft:sheep").every((entity) => typeof entity.data.Color === "number")).toBe(true);
+    expect(spawned.filter((entity) => entity.typeId === "minecraft:wolf").every((entity) => entity.data.Tame === false)).toBe(true);
     expect(spawned.filter((entity) => entity.typeId === "minecraft:chicken").every((entity) => typeof entity.data.EggLayTime === "number")).toBe(true);
     expect(spawned.every((entity) => entity.onGround)).toBe(true);
     expect(spawned.map((entity) => [entity.position.x, entity.position.z])).toEqual([
@@ -76,14 +82,22 @@ describe("demo world generators", () => {
       [10.5, 7.5],
       [7.5, 11.5],
       [12.5, 12.5],
+      [1.5, 1.5],
+      [14.5, 14.5],
       [3.5, 10.5],
       [4.5, 13.5],
       [13.5, 4.5],
       [14.5, 9.5],
+      [1.5, 4.5],
+      [4.5, 1.5],
+      [12.5, 1.5],
+      [1.5, 14.5],
       [5.5, 3.5],
       [9.5, 3.5],
       [3.5, 5.5],
       [11.5, 14.5],
+      [14.5, 1.5],
+      [1.5, 7.5],
       [2.5, 8.5],
       [8.5, 2.5],
       [15.5, 6.5],

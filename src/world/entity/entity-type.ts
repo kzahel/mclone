@@ -350,7 +350,7 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   }
 
   private registerGoals(): void {
-    if (this.entityType.id === EntityTypes.COW.id) {
+    if (this.entityType.id === EntityTypes.COW.id || this.entityType.id === EntityTypes.MOOSHROOM.id) {
       this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 1.0));
       this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, 6.0));
       this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
@@ -368,12 +368,23 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
       this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
       return;
     }
+    if (this.entityType.id === EntityTypes.RABBIT.id) {
+      this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 0.6));
+      this.goalSelector.addGoal(11, new LookAtPlayerGoal(this, 10.0));
+      return;
+    }
     if (this.entityType.id === EntityTypes.SHEEP.id) {
       this.eatBlockGoal = new EatBlockGoal(this);
       this.goalSelector.addGoal(5, this.eatBlockGoal);
       this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 1.0));
       this.goalSelector.addGoal(7, new LookAtPlayerGoal(this, 6.0));
       this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
+      return;
+    }
+    if (this.entityType.id === EntityTypes.WOLF.id) {
+      this.goalSelector.addGoal(8, new WaterAvoidingRandomStrollGoal(this, 1.0));
+      this.goalSelector.addGoal(10, new LookAtPlayerGoal(this, 8.0));
+      this.goalSelector.addGoal(10, new RandomLookAroundGoal(this));
     }
   }
 
@@ -575,6 +586,28 @@ function sheepColor(random: { nextInt(bound: number): number }): number {
   return random.nextInt(500) === 0 ? 6 : 0;
 }
 
+function rabbitData(_random: { nextInt(bound: number): number }): Readonly<Record<string, number | boolean | string>> {
+  return { RabbitType: 0, MoreCarrotTicks: 0, JumpTicks: 0, JumpDuration: 0 };
+}
+
+function wolfData(_random: { nextInt(bound: number): number }): Readonly<Record<string, number | boolean | string>> {
+  return {
+    Angry: false,
+    CollarColor: 14,
+    Health: 8.0,
+    Interested: false,
+    InterestedAngle: 0.0,
+    InterestedAngleO: 0.0,
+    MaxHealth: 8.0,
+    RemainingAngerTime: 0,
+    ShakeAnim: 0.0,
+    ShakeAnimO: 0.0,
+    Sitting: false,
+    Tame: false,
+    Wet: false,
+  };
+}
+
 function createSheepRuntimeData(data: Readonly<Record<string, number | boolean | string>>): GeneratedSheepRuntimeData {
   return {
     eatAnimationTick: readIntegerData(data.EatAnimationTick, 0),
@@ -656,15 +689,26 @@ export const EntityTypes = {
     eyeHeight: 1.3,
     attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.2 },
   }),
-  WOLF: creature("minecraft:wolf", 0.6, 0.85),
-  RABBIT: creature("minecraft:rabbit", 0.4, 0.5),
+  WOLF: creature("minecraft:wolf", 0.6, 0.85, {
+    eyeHeight: 0.68,
+    attributes: { [MobAttribute.MAX_HEALTH]: 8.0, [MobAttribute.MOVEMENT_SPEED]: 0.3 },
+    defaultData: wolfData,
+  }),
+  RABBIT: creature("minecraft:rabbit", 0.4, 0.5, {
+    attributes: { [MobAttribute.MAX_HEALTH]: 3.0, [MobAttribute.MOVEMENT_SPEED]: 0.3 },
+    defaultData: rabbitData,
+  }),
   FOX: creature("minecraft:fox", 0.6, 0.7),
   HORSE: creature("minecraft:horse", 1.3964844, 1.6),
   DONKEY: creature("minecraft:donkey", 1.3964844, 1.5),
   LLAMA: creature("minecraft:llama", 0.9, 1.87),
   GOAT: creature("minecraft:goat", 0.9, 1.3),
   POLAR_BEAR: creature("minecraft:polar_bear", 1.4, 1.4),
-  MOOSHROOM: creature("minecraft:mooshroom", 0.9, 1.4),
+  MOOSHROOM: creature("minecraft:mooshroom", 0.9, 1.4, {
+    eyeHeight: 1.3,
+    attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.2 },
+    defaultData: () => ({ Type: "red" }),
+  }),
 } as const;
 
 const ENTITY_TYPES_BY_ID = new Map(Object.values(EntityTypes).map((type) => [type.id, type] as const));

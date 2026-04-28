@@ -66,7 +66,9 @@ This document is a reference for future creature work. It is not a tactical slic
 
 `Creatures10` lands generated-sheep `EatBlockGoal`: sheep now use the vanilla-priority eating goal, mutate short grass/grass blocks through the host world bridge, reset sheared state on eating, publish `EatAnimationTick`, and render the vanilla sheep eating head motion.
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics and `deltaMovement` push impulse consumption, persistence adapters beyond the in-memory runtime path, egg item/sound side effects, game-rule synchronization, item/entity interaction side effects, and cow/pig/sheep interactions beyond sheep grass eating.
+`Creatures11` lands passive-animal breadth for mooshrooms, rabbits, and wolves. These species now have baseline generated entity data, vanilla-shaped movement/look priorities where supported, model/renderer/texture hydration, starter-island visibility, and host publication coverage. Mooshroom mushroom block layers, rabbit jump/garden/avoid behavior, wolf tame/sitting/anger/collar behavior, and interaction systems remain deferred.
+
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics and `deltaMovement` push impulse consumption, persistence adapters beyond the in-memory runtime path, egg item/sound side effects, game-rule synchronization, item/entity interaction side effects, and animal-specific gameplay beyond sheep grass eating plus the current chicken flap/egg timer data.
 
 ## Reference Source Map
 
