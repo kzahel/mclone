@@ -26,6 +26,10 @@ import {
   getGeneratedChunkDependencyStatus,
 } from "../../world/level/generated-chunk-status";
 import {
+  GeneratedChunkTicketSet,
+  type GeneratedChunkTicketDebugRecord,
+} from "../../world/level/generated-chunk-tickets";
+import {
   GENERATED_PROTO_CHUNK_CONTENT_VERSION,
   advanceGeneratedChunkAccessStatus,
   createGeneratedProtoChunk,
@@ -272,6 +276,7 @@ const STORAGE_SIDE_EFFECT_MAX_CONCURRENCY = 4;
 const GLOBAL_STORAGE_SIDE_EFFECT_KEY = "global";
 const CHUNK_HOLDER_UNLOADS_PER_PASS = 200;
 const CHUNK_HOLDER_UNLOAD_BACKLOG_THRESHOLD = 2_000;
+const GENERATED_RESIDENCY_TICKET_SOURCE = "generation_dependency";
 
 type GeneratedChunkStatusJobState = "pending" | "fulfilled" | "rejected";
 
@@ -509,6 +514,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly dirtyDurableChunks = new Set<string>();
   private readonly spawnedOriginalMobChunks = new Set<string>();
   private readonly chunkHolders = new Map<string, GeneratedChunkHolder>();
+  private readonly chunkResidencyTickets = new GeneratedChunkTicketSet();
   private readonly chunkHolderUnloadQueue = new Map<string, QueuedChunkHolderUnload>();
   private readonly pendingUnloadChunkHolders = new Map<string, GeneratedPendingUnloadHolder>();
   private readonly generatedCacheWriteVersions = new Map<string, number>();
@@ -623,6 +629,7 @@ export class GeneratedWorldHost implements WorldHost {
       return this.setChunkViewCooperative(request);
     }
 
+    this.updateChunkResidencyTickets(request);
     const update = this.level.updateChunkView(request.centerChunkX, request.centerChunkZ, request.radius);
     const chunkViewChanged = this.currentChunkView === undefined
       || this.currentChunkView.centerChunkX !== request.centerChunkX
@@ -692,6 +699,7 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private async setChunkViewCooperative(request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]> {
+    this.updateChunkResidencyTickets(request);
     const update = this.level.updateChunkView(request.centerChunkX, request.centerChunkZ, request.radius);
     const chunkViewChanged = this.currentChunkView === undefined
       || this.currentChunkView.centerChunkX !== request.centerChunkX
@@ -808,6 +816,25 @@ export class GeneratedWorldHost implements WorldHost {
         contentVersion: access.contentVersion,
       }))
       .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX);
+  }
+
+  public getDebugChunkTicketRecords(): readonly GeneratedChunkTicketDebugRecord[] {
+    return this.chunkResidencyTickets.getDebugRecords();
+  }
+
+  private updateChunkResidencyTickets(request: SetChunkViewRequest): void {
+    const previousSignature = this.chunkResidencyTickets.getSignature();
+    this.chunkResidencyTickets.replaceSource(GENERATED_RESIDENCY_TICKET_SOURCE, [{
+      source: GENERATED_RESIDENCY_TICKET_SOURCE,
+      centerChunkX: request.centerChunkX,
+      centerChunkZ: request.centerChunkZ,
+      radius: getGeneratedWorldAuthorityChunkRadius(request.radius),
+    }]);
+    const nextSignature = this.chunkResidencyTickets.getSignature();
+    if (nextSignature !== previousSignature) {
+      this.incrementWorldgenCount("chunk_residency_tickets_updated");
+    }
+    this.noteChunkResidencyTicketCount();
   }
 
   private getChunkHolder(chunkX: number, chunkZ: number): GeneratedChunkHolder {
@@ -2033,13 +2060,7 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private isChunkInCurrentAuthorityView(chunkX: number, chunkZ: number): boolean {
-    if (this.currentChunkView === undefined) {
-      return false;
-    }
-
-    const viewRadius = getGeneratedWorldAuthorityChunkRadius(this.currentChunkView.radius);
-    return Math.abs(chunkX - this.currentChunkView.centerChunkX) <= viewRadius
-      && Math.abs(chunkZ - this.currentChunkView.centerChunkZ) <= viewRadius;
+    return this.chunkResidencyTickets.contains(chunkX, chunkZ);
   }
 
   private collectFullStatusChunksForCurrentView(): readonly GeneratedLevelChunk[] {
@@ -3497,6 +3518,17 @@ export class GeneratedWorldHost implements WorldHost {
     this.setWorldgenCount(
       "chunk_holders_unload_queue_max",
       Math.max(this.worldgenPerformance.counts.get("chunk_holders_unload_queue_max") ?? 0, count),
+    );
+  }
+
+  private noteChunkResidencyTicketCount(): void {
+    const tickets = this.chunkResidencyTickets.getDebugRecords();
+    const ticketedChunks = tickets.reduce((sum, ticket) => sum + ticket.chunkCount, 0);
+    this.setWorldgenCount("chunk_residency_tickets_current", tickets.length);
+    this.setWorldgenCount("chunk_residency_ticketed_chunks_current", ticketedChunks);
+    this.setWorldgenCount(
+      "chunk_residency_ticketed_chunks_max",
+      Math.max(this.worldgenPerformance.counts.get("chunk_residency_ticketed_chunks_max") ?? 0, ticketedChunks),
     );
   }
 

@@ -26,6 +26,10 @@ import {
   type GeneratedDecorationMetrics,
   type GeneratedDecorationOptions,
 } from "./generated-decoration-region";
+import {
+  GeneratedChunkTicketSet,
+  type GeneratedChunkTicketDebugRecord,
+} from "./generated-chunk-tickets";
 import { StaticRenderLevel } from "./static-render-level";
 import { StructureFeatureManager } from "./structure-feature-manager";
 import type { StructureFeature } from "../../worldgen/levelgen/structure/structure-feature";
@@ -69,9 +73,8 @@ export interface GeneratedChunkViewUpdate {
 export class GeneratedRenderLevel extends StaticRenderLevel {
   private viewCenterX = Number.MIN_SAFE_INTEGER;
   private viewCenterZ = Number.MIN_SAFE_INTEGER;
-  // Runtime: keep a hidden authority window for FEATURES dependency reads while only publishing the view radius.
   private publishChunkRadius = -1;
-  private authorityChunkRadius = -1;
+  private readonly authorityTickets = new GeneratedChunkTicketSet();
   private readonly chunkRecords = new Map<string, GeneratedChunkRecord>();
   private readonly advancingFeatureChunks = new Set<string>();
   private readonly structureFeatureManager = new StructureFeatureManager(this);
@@ -161,6 +164,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     const previousCenterX = this.viewCenterX;
     const previousCenterZ = this.viewCenterZ;
     const previousPublishRadius = this.publishChunkRadius;
+    const previousAuthoritySignature = this.authorityTickets.getSignature();
     const nextPublishRadius = Math.max(1, viewDistance) + 1;
     // Runtime: retain status records far enough for publishable 3x3 FULL, LIGHT's 3x3 FEATURES input,
     // FEATURES' dependency window, and the pre-noise ±8 structure-reference halo for authority-only terrain reads.
@@ -170,16 +174,22 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       + LIGHT_FEATURES_NEIGHBOR_RADIUS
       + FEATURES_CHUNK_DEPENDENCY_RADIUS
       + STRUCTURE_REFERENCE_NEIGHBOR_RADIUS;
-    let changed =
-      centerChunkX !== previousCenterX ||
-      centerChunkZ !== previousCenterZ ||
-      nextPublishRadius !== previousPublishRadius ||
-      nextAuthorityRadius !== this.authorityChunkRadius;
 
     this.viewCenterX = centerChunkX;
     this.viewCenterZ = centerChunkZ;
     this.publishChunkRadius = nextPublishRadius;
-    this.authorityChunkRadius = nextAuthorityRadius;
+    this.authorityTickets.replaceSource("generation_dependency", [{
+      source: "generation_dependency",
+      centerChunkX,
+      centerChunkZ,
+      radius: nextAuthorityRadius,
+    }]);
+    const nextAuthoritySignature = this.authorityTickets.getSignature();
+    let changed =
+      centerChunkX !== previousCenterX ||
+      centerChunkZ !== previousCenterZ ||
+      nextPublishRadius !== previousPublishRadius ||
+      nextAuthoritySignature !== previousAuthoritySignature;
 
     const unloadedChunks: LevelChunk[] = [];
     const removedChunks: LevelChunk[] = [];
@@ -214,18 +224,21 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     }
 
     const missingChunks: Array<readonly [number, number]> = [];
-    for (let chunkZ = this.viewCenterZ - this.authorityChunkRadius; chunkZ <= this.viewCenterZ + this.authorityChunkRadius; chunkZ++) {
-      for (let chunkX = this.viewCenterX - this.authorityChunkRadius; chunkX <= this.viewCenterX + this.authorityChunkRadius; chunkX++) {
-        const chunk = super.getChunk(chunkX, chunkZ, false);
-        if (
-          this.inPublishRange(chunkX, chunkZ)
-          && (
-            chunk === null
-            || !this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)
-          )
-        ) {
-          missingChunks.push([chunkX, chunkZ]);
-          changed = true;
+    const authorityBounds = this.authorityTickets.getBounds();
+    if (authorityBounds !== undefined) {
+      for (let chunkZ = authorityBounds.minChunkZ; chunkZ <= authorityBounds.maxChunkZ; chunkZ++) {
+        for (let chunkX = authorityBounds.minChunkX; chunkX <= authorityBounds.maxChunkX; chunkX++) {
+          const chunk = super.getChunk(chunkX, chunkZ, false);
+          if (
+            this.inPublishRange(chunkX, chunkZ)
+            && (
+              chunk === null
+              || !this.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)
+            )
+          ) {
+            missingChunks.push([chunkX, chunkZ]);
+            changed = true;
+          }
         }
       }
     }
@@ -347,7 +360,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
   }
 
   private inAuthorityRange(chunkX: number, chunkZ: number): boolean {
-    return this.isWithinRadius(chunkX, chunkZ, this.viewCenterX, this.viewCenterZ, this.authorityChunkRadius);
+    return this.authorityTickets.contains(chunkX, chunkZ);
   }
 
   private isWithinRadius(
@@ -385,6 +398,10 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
         hasBlockSections: record.hasBlockSections,
       }))
       .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX);
+  }
+
+  public getDebugAuthorityTicketRecords(): readonly GeneratedChunkTicketDebugRecord[] {
+    return this.authorityTickets.getDebugRecords();
   }
 
   public hasChunkStatus(chunkX: number, chunkZ: number, status: GeneratedChunkStatusName): boolean {

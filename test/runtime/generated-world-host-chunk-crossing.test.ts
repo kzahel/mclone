@@ -570,6 +570,15 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(countMaterializedChunkAccess(initialAccessRecords)).toBe(121);
     expect(initialAccessRecords.filter((record) => record.type === "level")).toHaveLength(49);
     expect(initialAccessRecords.every((record) => record.isUnsaved)).toBe(true);
+    expect(host.getDebugChunkTicketRecords()).toEqual([{
+      source: "generation_dependency",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 12,
+      chunkCount: 625,
+    }]);
+    expect(initialPerformance.counts.chunk_residency_tickets_current).toBe(1);
+    expect(initialPerformance.counts.chunk_residency_ticketed_chunks_current).toBe(625);
     expect(countChunkAccessByExactStatus(initialAccessRecords)).toEqual({
       [GeneratedChunkStatus.STRUCTURE_STARTS]: 504,
       [GeneratedChunkStatus.LIQUID_CARVERS]: 40,
@@ -658,6 +667,14 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
     expect(countMaterializedChunkAccess(movedAccessRecords)).toBe(132);
     expect(movedAccessRecords.filter((record) => record.type === "level")).toHaveLength(56);
     expect(movedAccessRecords.every((record) => record.isUnsaved)).toBe(true);
+    expect(host.getDebugChunkTicketRecords()).toEqual([{
+      source: "generation_dependency",
+      centerChunkX: 1,
+      centerChunkZ: 0,
+      radius: 12,
+      chunkCount: 625,
+    }]);
+    expect(movedPerformance.counts.chunk_residency_tickets_updated).toBe(2);
     expect(countChunkAccessByExactStatus(movedAccessRecords)).toEqual({
       [GeneratedChunkStatus.STRUCTURE_STARTS]: 493,
       [GeneratedChunkStatus.LIQUID_CARVERS]: 42,
