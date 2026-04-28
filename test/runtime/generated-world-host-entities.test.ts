@@ -88,6 +88,36 @@ class MovingCowFlatGenerator extends FlatGrassWorldGenerator {
   }
 }
 
+class EdgeMovingCowFlatGenerator extends FlatGrassWorldGenerator {
+  public override spawnOriginalMobs(
+    _level: WorldGenLevel,
+    chunkX: number,
+    chunkZ: number,
+    sink: GenerationEntitySink,
+    options: NaturalSpawnerOptions = {},
+  ): void {
+    if (chunkX !== 2 || chunkZ !== 0) {
+      return;
+    }
+
+    const id = options.nextEntityId?.() ?? 1;
+    const cow = new GeneratedMobEntity({
+      id,
+      uuid: options.nextEntityUuid?.(id) ?? "mclone:test/edge-moving-cow",
+      entityType: EntityTypes.COW,
+      x: 40.5,
+      y: 64,
+      z: 8.5,
+      yaw: 0,
+      pitch: 0,
+      onGround: true,
+      randomSeed: 0,
+    });
+    cow.goalSelector.addGoal(0, new MoveOnceGoal(cow, new BlockPos(42, 64, 8)));
+    sink.addFreshEntityWithPassengers(cow);
+  }
+}
+
 class OverlappingCowsFlatGenerator extends FlatGrassWorldGenerator {
   public override spawnOriginalMobs(
     _level: WorldGenLevel,
@@ -325,9 +355,11 @@ describe("GeneratedWorldHost entity publication", () => {
 
     const initialStatuses = host.getDebugEntityChunkStatusRecords();
     expect(initialStatuses).toHaveLength(25);
-    expect(initialStatuses.every((record) => record.status === FullChunkStatus.ENTITY_TICKING)).toBe(true);
-    expect(statusChunkPairs(host)).toContain(`-2,0:${FullChunkStatus.ENTITY_TICKING}`);
-    expect(statusChunkPairs(host)).toContain(`2,0:${FullChunkStatus.ENTITY_TICKING}`);
+    expect(initialStatuses.filter((record) => record.status === FullChunkStatus.ENTITY_TICKING)).toHaveLength(1);
+    expect(initialStatuses.filter((record) => record.status === FullChunkStatus.BORDER)).toHaveLength(24);
+    expect(statusChunkPairs(host)).toContain(`0,0:${FullChunkStatus.ENTITY_TICKING}`);
+    expect(statusChunkPairs(host)).toContain(`-2,0:${FullChunkStatus.BORDER}`);
+    expect(statusChunkPairs(host)).toContain(`2,0:${FullChunkStatus.BORDER}`);
 
     await host.setChunkView({
       type: "set_chunk_view",
@@ -339,9 +371,82 @@ describe("GeneratedWorldHost entity publication", () => {
 
     const settledStatuses = host.getDebugEntityChunkStatusRecords();
     expect(settledStatuses).toHaveLength(25);
-    expect(settledStatuses.every((record) => record.status === FullChunkStatus.ENTITY_TICKING)).toBe(true);
-    expect(statusChunkPairs(host)).not.toContain(`-2,0:${FullChunkStatus.ENTITY_TICKING}`);
-    expect(statusChunkPairs(host)).toContain(`3,0:${FullChunkStatus.ENTITY_TICKING}`);
+    expect(settledStatuses.filter((record) => record.status === FullChunkStatus.ENTITY_TICKING)).toHaveLength(1);
+    expect(settledStatuses.filter((record) => record.status === FullChunkStatus.BORDER)).toHaveLength(24);
+    expect(statusChunkPairs(host).some((entry) => entry.startsWith("-2,0:"))).toBe(false);
+    expect(statusChunkPairs(host)).toContain(`1,0:${FullChunkStatus.ENTITY_TICKING}`);
+    expect(statusChunkPairs(host)).toContain(`3,0:${FullChunkStatus.BORDER}`);
+  });
+
+  test("keeps border-ring entity snapshots visible without ticking until promoted", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    let nowMs = 0;
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      generator: new EdgeMovingCowFlatGenerator(12345n),
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      liquidSimulationMode: "none",
+      worldTickIntervalMs: 1,
+      nowMs: () => nowMs,
+    });
+
+    await host.openWorld({ ...OPEN_WORLD_REQUEST, preset: "flat_grass" });
+    const initialMessages = await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    const initialCow = initialMessages.find(
+      (message): message is EntitySnapshotMessage => message.type === "entity_snapshot" && message.entity.typeId === "minecraft:cow",
+    );
+
+    expect(initialCow).toBeDefined();
+    expect(initialCow).toMatchObject({
+      type: "entity_snapshot",
+      entity: {
+        chunkX: 2,
+        chunkZ: 0,
+        position: { x: 40.5, y: 64, z: 8.5 },
+        tick: 0,
+      },
+    });
+    expect(statusChunkPairs(host)).toContain(`2,0:${FullChunkStatus.BORDER}`);
+
+    nowMs = 1;
+    const trackedOnlyUpdates = await host.pollUpdates({ type: "poll_world_updates" });
+    expect(trackedOnlyUpdates.some(
+      (message): message is EntityUpdateMessage => message.type === "entity_update" && message.update.id === initialCow!.entity.id,
+    )).toBe(false);
+
+    nowMs = 2;
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 2,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    expect(statusChunkPairs(host)).toContain(`2,0:${FullChunkStatus.ENTITY_TICKING}`);
+
+    nowMs = 3;
+    const tickingUpdates = await host.pollUpdates({ type: "poll_world_updates" });
+    const cowUpdate = tickingUpdates.find(
+      (message): message is EntityUpdateMessage => message.type === "entity_update" && message.update.id === initialCow!.entity.id,
+    );
+
+    expect(cowUpdate).toBeDefined();
+    expect(cowUpdate).toMatchObject({
+      type: "entity_update",
+      update: {
+        id: initialCow!.entity.id,
+        tick: 1,
+      },
+    });
+    expect(cowUpdate!.update.position).toBeDefined();
+    expect(cowUpdate!.update.position).not.toEqual(initialCow!.entity.position);
   });
 
   test("pushes overlapping generated mobs apart without treating them as path obstacles", async () => {

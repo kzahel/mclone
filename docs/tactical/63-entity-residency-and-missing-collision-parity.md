@@ -2,7 +2,7 @@
 
 Bring runtime entity loading, ticking, unloading, and "player outruns terrain" behavior to a vanilla-shaped architecture. The goal is not to make missing chunks feel good by inventing terrain; it is to make the host keep the right chunks available through tickets/statuses, and to fail closed when authoritative collision is unavailable.
 
-Status: first implementation slice landed. Generated entity chunk status now comes from an explicit `entity` ticket/status source instead of being promoted by chunk publication. Later slices should refine the exact vanilla ticket radii, entity persistence, player-as-entity treatment, and dynamic collision.
+Status: first two implementation slices landed. Generated entity chunk status now comes from explicit `entity` / `player_view` ticket sources instead of being promoted by chunk publication, and the entity-ticking ticket now uses the vanilla-shaped two-ring interior of the published player view. Later slices should move status ownership behind holder/full-status transitions, add entity persistence, resolve player-as-entity treatment, and add dynamic collision.
 
 ## Vanilla source anchors
 
@@ -37,7 +37,8 @@ Status: first implementation slice landed. Generated entity chunk status now com
 - `EntityRuntime` and `PersistentEntitySectionManager` already port the vanilla-shaped add/move/remove/load/unload/status semantics.
 - `GeneratedWorldHost` now installs an explicit `entity` ticket and syncs entity chunk status through `PersistentEntitySectionManager.updateChunkStatus(...)`.
 - `ensureOriginalMobsForChunk(...)` no longer promotes chunks to `ENTITY_TICKING`; publication only creates and sends snapshots for entities that the entity manager already considers tracked.
-- `discardUnloadedChunkState(...)` re-applies the current ticket-derived entity status instead of blindly hiding the chunk. Today that still hides chunks outside the published/entity ticket, but it keeps the path open for tracked-only or entity-ticking-only windows.
+- `player_view` chunks are at least `BORDER`, while the `entity` source marks only the interior as `ENTITY_TICKING`. At radius 0 this means 25 published/tracked chunks, 1 ticking chunk, and 24 tracked-only chunks.
+- `discardUnloadedChunkState(...)` re-applies the current ticket-derived entity status instead of blindly hiding the chunk, so chunks outside the published/entity ticket become hidden while tracked-only chunks remain accessible.
 - Host player state is session-owned movement state, not a `Player` entity in `EntityRuntime`. That is acceptable short-term but not full parity.
 - Host player collision already fails closed: `createGeneratedLevelCollisionWorld(...)` returns `missing_authority_chunk` when the movement AABB touches a chunk missing from authority, and the movement loop leaves commands queued instead of moving through absent terrain.
 - Mob pathing also fails closed: missing path blocks behave as blocking material, missing collision returns false, and stable standing scans require loaded block states.
@@ -46,12 +47,13 @@ Status: first implementation slice landed. Generated entity chunk status now com
 ## Gaps to close
 
 1. **Entity status ownership**
-   - Landed: entity chunk status is no longer promoted by chunk publication; it is synced from explicit `entity` / `player_view` tickets.
+   - Landed: entity chunk status is no longer promoted by chunk publication; it is synced from explicit `entity` / `player_view` tickets, with a two-ring interior ticking window.
    - Remaining gap: those tickets are still host-radius decisions rather than holder-owned vanilla full-status transitions.
    - Parity target: entity status is derived from full-status state, then handed to `PersistentEntitySectionManager.updateChunkStatus(...)`.
 
 2. **Tracked ring vs entity-ticking ring**
-   - Gap: every published generated chunk is effectively entity-ticking.
+   - Status: landed for generated host ticket/status behavior.
+   - Remaining gap: the split is still computed by radius helpers, not by a `ChunkHolder` ticket-level full-status owner.
    - Parity target: distinguish tracked chunks from entity-ticking chunks. Published chunks can be tracked without ticking; only `ENTITY_TICKING` chunks tick ordinary entities.
 
 3. **Ticket levels instead of radius helper decisions**
@@ -85,13 +87,13 @@ Status: first implementation slice landed. Generated entity chunk status now com
    - Added an `entity` ticket for generated-host entity status.
    - Synced `PersistentEntitySectionManager` chunk status from `entity` and `player_view` tickets.
    - Stopped promoting entity chunks from `ensureOriginalMobsForChunk(...)`.
-   - Kept today's effective radius for behavior stability: entity ticking matches the published 5x5 radius-0 grid for now.
    - Added debug records and a walk sanity test that verifies entity statuses after the host settles.
 
 2. **Tracked vs ticking split**
-   - Keep `player_view` chunks at least `BORDER`.
-   - Shrink or separately compute the `entity` ticking ticket to match vanilla's "view distance minus two rings" behavior once the mclone radius model is mapped cleanly to vanilla `ChunkMap.viewDistance`.
-   - Add tests proving entities in tracked-only chunks remain visible but do not tick.
+   - Status: landed.
+   - `player_view` chunks remain at least `BORDER`.
+   - The `entity` ticking ticket is computed as `view radius - 2`, clamped at 0, matching vanilla's `PlayerTicketTracker.haveTicketFor(level <= viewDistance - 2)` shape.
+   - Added tests proving entities in tracked-only chunks remain visible but do not tick until their chunk is promoted to `ENTITY_TICKING`.
 
 3. **Full-status owner**
    - Move entity status sync behind a holder/full-status transition path instead of direct host radius checks.
@@ -131,5 +133,12 @@ Status: first implementation slice landed. Generated entity chunk status now com
 - `GeneratedWorldHost` installs an `entity` ticket alongside `player_view` and `generation_dependency`.
 - Entity chunk status is tracked in host debug records and synchronized into `EntityRuntime` from ticket state.
 - `entity_chunk_statuses_current`, `entity_chunk_statuses_ticking_current`, and `entity_chunk_statuses_tracked_current` counters expose the current entity-status window.
-- The radius-0 flat-grass sanity test verifies that a one-chunk walk settles to exactly 25 `ENTITY_TICKING` chunks, drops the old west edge, and adds the new east edge.
 - Existing chunk-crossing generation counts remain unchanged: the new entity ticket overlaps the hidden generation dependency ticket, so resident holder count stays at 625.
+
+## Landed second slice
+
+- `GeneratedWorldHost.getGeneratedWorldEntityChunkRadius(...)` now keeps the entity-ticking ticket two rings inside the published `player_view` radius, clamped at 0.
+- `GeneratedRenderLevel` records the same smaller `entity` source in its authority ticket set.
+- The radius-0 flat-grass sanity test now verifies 25 entity-status chunks after a one-chunk walk: 1 `ENTITY_TICKING` center chunk and 24 `BORDER` tracked-only chunks.
+- A moving-cow regression publishes a cow in the east border ring, verifies no entity update while the chunk is tracked-only, then moves the view so the cow's chunk becomes `ENTITY_TICKING` and verifies the first tick/update occurs.
+- Existing chunk-crossing generation counts remain unchanged: the tracked/ticking split changes entity status only, not the 5/7/9/11 terrain/features/full/publish work.

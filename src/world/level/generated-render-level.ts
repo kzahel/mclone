@@ -166,6 +166,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
     const previousPublishRadius = this.publishChunkRadius;
     const previousAuthoritySignature = this.authorityTickets.getSignature();
     const nextPublishRadius = Math.max(1, viewDistance) + 1;
+    const nextEntityRadius = Math.max(0, nextPublishRadius - 2);
     // Runtime: retain status records far enough for publishable 3x3 FULL, LIGHT's 3x3 FEATURES input,
     // FEATURES' dependency window, and the pre-noise ±8 structure-reference halo for authority-only terrain reads.
     const nextAuthorityRadius =
@@ -188,7 +189,7 @@ export class GeneratedRenderLevel extends StaticRenderLevel {
       source: "entity",
       centerChunkX,
       centerChunkZ,
-      radius: nextPublishRadius,
+      radius: nextEntityRadius,
     }]);
     this.authorityTickets.replaceSource("generation_dependency", [{
       source: "generation_dependency",

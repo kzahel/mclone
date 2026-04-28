@@ -243,7 +243,7 @@ export function getGeneratedWorldViewChunkRadius(radius: number): number {
 }
 
 export function getGeneratedWorldEntityChunkRadius(radius: number): number {
-  return getGeneratedWorldViewChunkRadius(radius);
+  return Math.max(0, getGeneratedWorldViewChunkRadius(radius) - 2);
 }
 
 export function getGeneratedWorldFullChunkRadius(radius: number): number {
