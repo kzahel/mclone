@@ -4,10 +4,12 @@ import {
   createPlayerCommandQueue,
   enqueuePlayerInputCommand,
   PLAYER_COMMAND_QUANTUM_US,
+  pushPlayerStateWithCollision,
   tickPlayerStateWithCommandQueue,
 } from "../../src/runtime/session/player-loop";
 import { createMissingCollisionWorld, createStaticCollisionWorld } from "../../src/runtime/movement";
 import { AABB } from "../../src/world/phys/aabb";
+import { Vec3 } from "../../src/world/phys/vec3";
 
 function floorAt(y: number): AABB {
   return new AABB(-64, y - 1, -64, 64, y, 64);
@@ -140,5 +142,36 @@ describe("authoritative player command queue", () => {
       yaw: 0,
       pitch: 0,
     })).toBe(false);
+  });
+
+  test("applies authoritative entity push displacement without consuming input commands", () => {
+    const initial = createInitialPlayerState("player");
+    const pushed = pushPlayerStateWithCollision(
+      initial,
+      new Vec3(0.05, 0.0, -0.025),
+      7,
+      () => true,
+    );
+
+    expect(pushed).not.toBe(initial);
+    expect(pushed.position.x).toBeCloseTo(initial.position.x + 0.05);
+    expect(pushed.position.z).toBeCloseTo(initial.position.z - 0.025);
+    expect(pushed.movementBody?.position).toEqual(pushed.position);
+    expect(pushed.movementBody?.lastProcessedCommandSequence).toBe(0);
+    expect(pushed.acknowledgedInputSequence).toBe(0);
+    expect(pushed.tick).toBe(7);
+    expect(pushed.revision).toBe(initial.revision + 1);
+  });
+
+  test("blocks authoritative entity push displacement against collision", () => {
+    const initial = createInitialPlayerState("player");
+    const pushed = pushPlayerStateWithCollision(
+      initial,
+      new Vec3(0.05, 0.0, 0.0),
+      7,
+      () => false,
+    );
+
+    expect(pushed).toBe(initial);
   });
 });

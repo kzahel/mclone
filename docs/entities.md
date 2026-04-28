@@ -17,9 +17,9 @@ This document is about entity lifecycle, storage, ticking, host ownership, persi
 - logical chunk entity storage with a memory adapter for tests
 - `EntityRuntime` host wrapper that owns the manager and tick list
 
-`Entities0` itself stayed pre-creature. `Creatures1` feeds the runtime with generation-time passive entities through the host-owned worldgen entity sink. `Creatures2` wires that runtime into `GeneratedWorldHost` and publishes generated entities as protocol `entity_snapshot` records consumed by local and remote clients as data. `Creatures5` starts ticking generated cows in `ENTITY_TICKING` chunks and publishes movement through `entity_update`.
+`Entities0` itself stayed pre-creature. `Creatures1` feeds the runtime with generation-time passive entities through the host-owned worldgen entity sink. `Creatures2` wires that runtime into `GeneratedWorldHost` and publishes generated entities as protocol `entity_snapshot` records consumed by local and remote clients as data. `Creatures5` starts ticking generated cows in `ENTITY_TICKING` chunks and publishes movement through `entity_update`. `Creatures7` adds the first authoritative living-entity push pass for generated mobs and the local player.
 
-Still deferred: full per-session tracking/revision policy, despawn, durable entity persistence adapters beyond the current in-memory runtime path, and most mob behavior beyond the first cow wander foundation.
+Still deferred: full per-session tracking/revision policy, despawn, durable entity persistence adapters beyond the current in-memory runtime path, hard entity collision shapes for vehicles/special entities, full `deltaMovement` / `Entity.move(...)` parity, and most mob behavior beyond the first passive wander foundation.
 
 ## Scope
 

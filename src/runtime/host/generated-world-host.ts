@@ -45,12 +45,14 @@ import type { LevelChunk } from "../../world/level/chunk/level-chunk";
 import { LEVEL_CHUNK_SECTION_SIZE } from "../../world/level/chunk/level-chunk-section";
 import { FullChunkStatus } from "../../world/level/entity/full-chunk-status";
 import { AABB } from "../../world/phys/aabb";
+import { Vec3 } from "../../world/phys/vec3";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import type { Fluid } from "../../world/level/material/fluid";
 import { Fluids } from "../../world/level/material/fluids";
 import type { GeneratedMobEntity } from "../../world/entity/entity-type";
+import { collectLivingEntityPushDeltas, type LivingEntityPushParticipant } from "../../world/entity/entity-push";
 import type {
   ChunkLightDeltaResult,
   ChunkLightReadyResult,
@@ -101,7 +103,9 @@ import {
   createPlayerCommandQueue,
   createInitialPlayerState,
   enqueuePlayerInputCommand,
+  movementBodyFromPlayerState,
   PLAYER_TICK_INTERVAL_MS,
+  pushPlayerStateWithCollision,
   tickPlayerStateWithCommandQueue,
   type PlayerCommandQueue,
 } from "../session/player-loop";
@@ -2319,6 +2323,7 @@ export class GeneratedWorldHost implements WorldHost {
         this.liquidTicks.tick();
       }
       this.entityRuntime.tick();
+      this.pushOverlappingLivingEntities();
     }
     if (this.liquidSimulationEnabled) {
       this.hydratePublishedLiquidTicks();
@@ -2762,6 +2767,90 @@ export class GeneratedWorldHost implements WorldHost {
     entity.tickServerAi({
       resetNoActionTime: this.shouldResetMobNoActionTime(entity),
     });
+  }
+
+  private pushOverlappingLivingEntities(): void {
+    const applications = new Map<string, (delta: Vec3) => void>();
+    const participants: LivingEntityPushParticipant[] = [];
+
+    for (const entity of this.entityRuntime.manager.getEntityGetter().getAll()) {
+      if (entity.removalReason !== undefined) {
+        continue;
+      }
+
+      const key = `entity:${entity.id}`;
+      applications.set(key, (delta) => this.pushGeneratedEntity(entity, delta));
+      participants.push({
+        key,
+        x: entity.position.x,
+        z: entity.position.z,
+        boundingBox: entity.getBoundingBox(),
+        sourcePushes: this.entityRuntime.tickList.contains(entity),
+        pushable: true,
+        vehicle: entity.isVehicle(),
+        noPhysics: false,
+      });
+    }
+
+    if (this.playerState !== undefined) {
+      const key = `player:${this.playerState.playerId}`;
+      const body = movementBodyFromPlayerState(this.playerState);
+      applications.set(key, (delta) => this.pushLocalPlayer(delta));
+      participants.push({
+        key,
+        x: body.position.x,
+        z: body.position.z,
+        boundingBox: body.bounds,
+        sourcePushes: true,
+        pushable: true,
+        vehicle: false,
+        noPhysics: false,
+      });
+    }
+
+    const deltas = collectLivingEntityPushDeltas(participants);
+    for (const [key, delta] of deltas) {
+      applications.get(key)?.(delta);
+    }
+  }
+
+  private pushGeneratedEntity(entity: GeneratedMobEntity, delta: Vec3): void {
+    if (delta.horizontalDistanceSqr() <= 1.0e-14) {
+      return;
+    }
+
+    const nextX = entity.position.x + delta.x;
+    const nextZ = entity.position.z + delta.z;
+    const stableY = this.findStableMobStandingY(nextX, nextZ, entity.position.y);
+    if (stableY === undefined) {
+      return;
+    }
+
+    const nextBox = entity.getBoundingBox().move(delta.x, stableY - entity.position.y, delta.z);
+    if (!this.noMobPathCollision(nextBox)) {
+      return;
+    }
+
+    entity.setPosition(nextX, stableY, nextZ);
+    entity.onGround = true;
+  }
+
+  private pushLocalPlayer(delta: Vec3): void {
+    if (this.playerState === undefined || delta.horizontalDistanceSqr() <= 1.0e-14) {
+      return;
+    }
+
+    const previous = this.playerState;
+    const next = pushPlayerStateWithCollision(
+      previous,
+      new Vec3(delta.x, 0.0, delta.z),
+      previous.tick + 1,
+      (bounds) => this.noMobPathCollision(bounds),
+    );
+    if (next !== previous) {
+      this.playerState = next;
+      this.enqueuePlayerStateMessage();
+    }
   }
 
   private shouldResetMobNoActionTime(entity: GeneratedMobEntity): boolean {

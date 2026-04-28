@@ -62,7 +62,7 @@ function boundedSafeInteger(value: number | undefined, fallback: number, min: nu
   return Math.max(min, Math.min(max, integer));
 }
 
-function movementBodyFromPlayerState(playerState: ClientPlayerState): MovementBody {
+export function movementBodyFromPlayerState(playerState: ClientPlayerState): MovementBody {
   const snapshot = playerState.movementBody;
   if (snapshot === undefined) {
     return createStandingMovementBody({
@@ -120,6 +120,44 @@ function createMovementBodySnapshot(
     collisionRevision: PLAYER_COLLISION_REVISION,
     commandQuantumUs,
     lastProcessedCommandSequence,
+  };
+}
+
+export function pushPlayerStateWithCollision(
+  playerState: ClientPlayerState,
+  displacement: Vec3,
+  tick: number,
+  noCollision: (bounds: AABB) => boolean,
+): ClientPlayerState {
+  if (displacement.lengthSqr() <= 1.0e-14) {
+    return playerState;
+  }
+
+  const body = movementBodyFromPlayerState(playerState);
+  const nextBounds = body.bounds.move(displacement);
+  if (!noCollision(nextBounds)) {
+    return playerState;
+  }
+
+  const nextBody = {
+    ...body,
+    position: body.position.add(displacement),
+    bounds: nextBounds,
+  };
+  return {
+    ...playerState,
+    position: {
+      x: nextBody.position.x,
+      y: nextBody.position.y,
+      z: nextBody.position.z,
+    },
+    movementBody: createMovementBodySnapshot(
+      nextBody,
+      playerState.acknowledgedInputSequence,
+      playerState.movementBody?.commandQuantumUs,
+    ),
+    tick,
+    revision: playerState.revision + 1,
   };
 }
 

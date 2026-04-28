@@ -6,9 +6,11 @@ import { BlockPos } from "../../src/core/block-pos";
 import { Registry } from "../../src/core/registry";
 import { createGeneratedWorldSaveId, GENERATED_WORLD_STORAGE_VERSION, GeneratedWorldHost } from "../../src/runtime/host/generated-world-host";
 import { LocalWorldClient, LocalWorldTransport } from "../../src/runtime/transport/local-world-transport";
+import { createInitialPlayerState } from "../../src/runtime/session/player-loop";
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
+import { FullChunkStatus } from "../../src/world/level/entity/full-chunk-status";
 import type { WorldGenLevel } from "../../src/world/level/world-gen-level";
 import { EntityTypes, GeneratedMobEntity } from "../../src/world/entity/entity-type";
 import { Goal, GoalFlag } from "../../src/world/entity/ai/goal/goal";
@@ -18,7 +20,7 @@ import type { GenerationEntitySink, NaturalSpawnerOptions } from "../../src/worl
 import {
   type CreatureGenerationFixture,
 } from "../../src/oracle/integration/creature-fixture";
-import type { EntitySnapshot, EntitySnapshotMessage, EntityUpdateMessage } from "../../src/runtime/protocol/world-messages";
+import type { ClientPlayerState, EntitySnapshot, EntitySnapshotMessage, EntityUpdateMessage } from "../../src/runtime/protocol/world-messages";
 
 const creatureFixtures = [
   ["sheep", sheepFixture as unknown as CreatureGenerationFixture, "minecraft:sheep"],
@@ -86,6 +88,88 @@ class MovingCowFlatGenerator extends FlatGrassWorldGenerator {
   }
 }
 
+class OverlappingCowsFlatGenerator extends FlatGrassWorldGenerator {
+  public override spawnOriginalMobs(
+    _level: WorldGenLevel,
+    chunkX: number,
+    chunkZ: number,
+    sink: GenerationEntitySink,
+    options: NaturalSpawnerOptions = {},
+  ): void {
+    if (chunkX !== 0 || chunkZ !== 0) {
+      return;
+    }
+
+    for (const [offset, slug] of [[0.0, "left"], [0.5, "right"]] as const) {
+      const id = options.nextEntityId?.() ?? 1;
+      sink.addFreshEntityWithPassengers(new GeneratedMobEntity({
+        id,
+        uuid: options.nextEntityUuid?.(id) ?? `mclone:test/overlapping-cow/${slug}`,
+        entityType: EntityTypes.COW,
+        x: 8.5 + offset,
+        y: 64,
+        z: 8.5,
+        yaw: 0,
+        pitch: 0,
+        onGround: true,
+        randomSeed: id,
+      }));
+    }
+  }
+}
+
+class PlayerOverlappingCowFlatGenerator extends FlatGrassWorldGenerator {
+  public override spawnOriginalMobs(
+    _level: WorldGenLevel,
+    chunkX: number,
+    chunkZ: number,
+    sink: GenerationEntitySink,
+    options: NaturalSpawnerOptions = {},
+  ): void {
+    if (chunkX !== 0 || chunkZ !== 0) {
+      return;
+    }
+
+    const id = options.nextEntityId?.() ?? 1;
+    sink.addFreshEntityWithPassengers(new GeneratedMobEntity({
+      id,
+      uuid: options.nextEntityUuid?.(id) ?? "mclone:test/player-overlapping-cow",
+      entityType: EntityTypes.COW,
+      x: 8.9,
+      y: 64,
+      z: 8.5,
+      yaw: 0,
+      pitch: 0,
+      onGround: true,
+      randomSeed: id,
+    }));
+  }
+}
+
+function createPlayerStateAt(playerId: string, x: number, y: number, z: number): ClientPlayerState {
+  const state = createInitialPlayerState(playerId);
+  const body = state.movementBody!;
+  const dx = x - body.position.x;
+  const dy = y - body.position.y;
+  const dz = z - body.position.z;
+  return {
+    ...state,
+    position: { x, y, z },
+    movementBody: {
+      ...body,
+      position: { x, y, z },
+      bounds: {
+        minX: body.bounds.minX + dx,
+        minY: body.bounds.minY + dy,
+        minZ: body.bounds.minZ + dz,
+        maxX: body.bounds.maxX + dx,
+        maxY: body.bounds.maxY + dy,
+        maxZ: body.bounds.maxZ + dz,
+      },
+    },
+  };
+}
+
 function createWorldClient(): LocalWorldClient {
   const blocks = registerGeneratedRenderBlocks();
   const biomeSource = new OverworldBiomeSource(12345n);
@@ -119,6 +203,11 @@ function targetChunkEntitySnapshots(
   return entities
     .filter((entity) => entity.chunkX === chunk.chunkX && entity.chunkZ === chunk.chunkZ)
     .sort((left, right) => left.id - right.id);
+}
+
+function statusChunkPairs(host: GeneratedWorldHost): readonly string[] {
+  return host.getDebugEntityChunkStatusRecords()
+    .map((record) => `${record.chunkX.toString()},${record.chunkZ.toString()}:${record.status}`);
 }
 
 describe("GeneratedWorldHost entity publication", () => {
@@ -212,6 +301,138 @@ describe("GeneratedWorldHost entity publication", () => {
     });
     expect(cowUpdate!.update.position).toBeDefined();
     expect(cowUpdate!.update.position).not.toEqual(initialCow!.entity.position);
+  });
+
+  test("keeps entity chunk status on the explicit entity ticket after a chunk walk settles", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      generator: new FlatGrassWorldGenerator(12345n),
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      liquidSimulationMode: "none",
+    });
+
+    await host.openWorld({ ...OPEN_WORLD_REQUEST, preset: "flat_grass" });
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+
+    const initialStatuses = host.getDebugEntityChunkStatusRecords();
+    expect(initialStatuses).toHaveLength(25);
+    expect(initialStatuses.every((record) => record.status === FullChunkStatus.ENTITY_TICKING)).toBe(true);
+    expect(statusChunkPairs(host)).toContain(`-2,0:${FullChunkStatus.ENTITY_TICKING}`);
+    expect(statusChunkPairs(host)).toContain(`2,0:${FullChunkStatus.ENTITY_TICKING}`);
+
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 1,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    await host.flushStorageSideEffects();
+
+    const settledStatuses = host.getDebugEntityChunkStatusRecords();
+    expect(settledStatuses).toHaveLength(25);
+    expect(settledStatuses.every((record) => record.status === FullChunkStatus.ENTITY_TICKING)).toBe(true);
+    expect(statusChunkPairs(host)).not.toContain(`-2,0:${FullChunkStatus.ENTITY_TICKING}`);
+    expect(statusChunkPairs(host)).toContain(`3,0:${FullChunkStatus.ENTITY_TICKING}`);
+  });
+
+  test("pushes overlapping generated mobs apart without treating them as path obstacles", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    let nowMs = 0;
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      generator: new OverlappingCowsFlatGenerator(12345n),
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      liquidSimulationMode: "none",
+      worldTickIntervalMs: 1,
+      nowMs: () => nowMs,
+    });
+
+    await host.openWorld({ ...OPEN_WORLD_REQUEST, preset: "flat_grass" });
+    const initialMessages = await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+    const initialCows = initialMessages
+      .filter((message): message is EntitySnapshotMessage => message.type === "entity_snapshot" && message.entity.typeId === "minecraft:cow")
+      .sort((left, right) => left.entity.position.x - right.entity.position.x);
+
+    expect(initialCows.map((message) => message.entity.position.x)).toEqual([8.5, 9.0]);
+
+    nowMs = 1;
+    const updates = await host.pollUpdates({ type: "poll_world_updates" });
+    const cowUpdates = updates
+      .filter((message): message is EntityUpdateMessage => message.type === "entity_update")
+      .filter((message) => initialCows.some((snapshot) => snapshot.entity.id === message.update.id))
+      .sort((left, right) => left.update.id - right.update.id);
+
+    expect(cowUpdates).toHaveLength(2);
+    expect(cowUpdates[0]!.update.position?.x).toBeLessThan(8.5);
+    expect(cowUpdates[1]!.update.position?.x).toBeGreaterThan(9.0);
+    expect(cowUpdates.every((message) => message.update.position?.y === 64)).toBe(true);
+  });
+
+  test("pushes an overlapping generated mob and local player apart", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    let nowMs = 0;
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      generator: new PlayerOverlappingCowFlatGenerator(12345n),
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      liquidSimulationMode: "none",
+      worldTickIntervalMs: 1,
+      nowMs: () => nowMs,
+    });
+
+    await host.openWorld({ ...OPEN_WORLD_REQUEST, preset: "flat_grass" });
+    const initialMessages = await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+    const initialCow = initialMessages.find(
+      (message): message is EntitySnapshotMessage => message.type === "entity_snapshot" && message.entity.typeId === "minecraft:cow",
+    );
+    expect(initialCow).toBeDefined();
+
+    (host as unknown as { playerState: ClientPlayerState }).playerState = createPlayerStateAt("local-player", 8.5, 64, 8.5);
+
+    nowMs = 1;
+    const updates = await host.pollUpdates({ type: "poll_world_updates" });
+    const playerUpdate = updates.find((message) => message.type === "player_state");
+    const cowUpdate = updates.find(
+      (message): message is EntityUpdateMessage => message.type === "entity_update" && message.update.id === initialCow!.entity.id,
+    );
+
+    expect(playerUpdate).toBeDefined();
+    expect(playerUpdate).toMatchObject({
+      type: "player_state",
+      state: {
+        position: {
+          y: 64,
+        },
+      },
+    });
+    expect(playerUpdate!.state.position.x).toBeLessThan(8.5);
+    expect(cowUpdate).toBeDefined();
+    expect(cowUpdate!.update.position?.x).toBeGreaterThan(8.9);
   });
 
   test("publishes small-island starter farm animals near the origin chunk", async () => {
