@@ -47,6 +47,7 @@ describe("cow AI foundation", () => {
     cow.setAiLevel({
       getMinBuildHeight: () => 0,
       getMaxBuildHeight: () => 256,
+      findStableStandingY: () => 64,
       isStableDestination: () => true,
       isWater: () => false,
       isSolid: () => false,
@@ -59,5 +60,35 @@ describe("cow AI foundation", () => {
 
     expect(cow.tickCount).toBe(1);
     expect(cow.position).not.toEqual({ x: 0.5, y: 64, z: 0.5 });
+  });
+
+  test("direct ground steering keeps generated mob Y on the stable standing surface", () => {
+    const mob = new GeneratedMobEntity({
+      id: 3,
+      uuid: "mclone:test/mob-grounded-steering",
+      entityType: EntityTypes.PIG,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+    });
+    mob.setAiLevel({
+      getMinBuildHeight: () => 0,
+      getMaxBuildHeight: () => 256,
+      findStableStandingY: () => 64,
+      isStableDestination: () => true,
+      isWater: () => false,
+      isSolid: () => false,
+    });
+
+    expect(mob.getNavigation().moveTo(4.5, 70, 0.5, 1.0)).toBe(true);
+
+    mob.tickServerAi({ resetNoActionTime: true });
+
+    expect(mob.position.x).toBeGreaterThan(0.5);
+    expect(mob.position.y).toBe(64);
+    expect(mob.position.z).toBe(0.5);
+    expect(mob.isOnGround()).toBe(true);
   });
 });

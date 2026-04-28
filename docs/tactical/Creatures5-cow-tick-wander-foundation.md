@@ -27,13 +27,14 @@ This tactical follows [`Creatures4-cow-baseline-lifecycle.md`](Creatures4-cow-ba
 - `EntityRuntime` exposes lifecycle processing separately from entity ticking so chunk status changes can start/stop ticking without advancing AI during publication.
 - `GeneratedWorldHost` promotes published generated chunks to `ENTITY_TICKING` for entity activity, ticks generated entities on the world tick, and publishes `entity_update` messages when position/rotation/chunk-owned facts change.
 - Entity snapshots and movement updates now carry authoritative `tick` context.
+- Follow-up grounded travel in [`CreatureMovement0-grounded-mob-travel.md`](CreatureMovement0-grounded-mob-travel.md) keeps temporary direct steering on a host-supplied standing surface instead of interpolating mob Y toward arbitrary waypoints.
 - Focused tests cover entity-ticking chunk gating, forced cow `WaterAvoidingRandomStrollGoal` movement, and host-side `entity_update` publication for a moving generated cow.
 
 ## Deliberate Runtime Divergences
 
 Two pieces are intentionally incomplete and should not be mistaken for full vanilla cow parity:
 
-- `SimpleGroundPathNavigation` steers directly toward the chosen waypoint. Vanilla uses `PathNavigation`, `GroundPathNavigation`, `PathFinder`, `WalkNodeEvaluator`, `Path`, `Node`, and `BlockPathTypes`.
+- `SimpleGroundPathNavigation` steers directly toward the chosen waypoint. Vanilla uses `PathNavigation`, `GroundPathNavigation`, `PathFinder`, `WalkNodeEvaluator`, `Path`, `Node`, and `BlockPathTypes`. `CreatureMovement0` narrows the temporary behavior by preserving a stable standing Y, but it is still not a real pathfinder or collision-resolved travel port.
 - `GeneratedWorldHost` uses current chunk-view interest as the no-action reset proxy until player tickets, surface-aware spawn placement, and natural-spawn distance ownership are wired to entity ticking.
 
 Both divergences are narrow. The random-stroll goal, goal selector, target generation, entity section movement callback, and host protocol update path are in place so the next slice can replace navigation internals without changing entity ownership.
@@ -55,4 +56,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-Port the real vanilla ground pathfinding stack needed by cow wandering: `Path`, `Node`, `BlockPathTypes`, `NodeEvaluator`, `WalkNodeEvaluator`, `PathFinder`, then replace `SimpleGroundPathNavigation` with a direct `GroundPathNavigation` port.
+Continue the reusable movement stack in [`CreatureMovement1-path-node-foundation.md`](CreatureMovement1-path-node-foundation.md): port the vanilla path data model before `WalkNodeEvaluator`, `PathFinder`, and `GroundPathNavigation` integration.

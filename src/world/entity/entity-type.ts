@@ -201,14 +201,19 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     }
 
     const step = Math.min(Math.abs(this.speed * this.zza), horizontalDistance);
-    const yStep = Math.abs(target.y - this.position.y) <= step
-      ? target.y - this.position.y
-      : Math.sign(target.y - this.position.y) * step;
-    this.setPosition(
-      this.position.x + ((dx / horizontalDistance) * step),
-      this.position.y + yStep,
-      this.position.z + ((dz / horizontalDistance) * step),
-    );
+    const nextX = this.position.x + ((dx / horizontalDistance) * step);
+    const nextZ = this.position.z + ((dz / horizontalDistance) * step);
+    const stableY = this.aiLevel?.findStableStandingY(nextX, nextZ, this.position.y);
+    if (stableY === undefined && this.aiLevel !== undefined) {
+      this.navigation.stop();
+      this.setZza(0.0);
+      return;
+    }
+
+    this.setPosition(nextX, stableY ?? this.position.y, nextZ);
+    if (stableY !== undefined) {
+      this.onGround = true;
+    }
 
     if (step >= horizontalDistance) {
       this.navigation.stop();

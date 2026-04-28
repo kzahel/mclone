@@ -104,6 +104,10 @@ import {
 } from "../storage/world-storage";
 import { EntityRuntime } from "./entity-runtime";
 import { LiquidSimulationLevel } from "./liquid-simulation-level";
+import { floor } from "../../util/mth";
+
+const MOB_STABLE_STANDING_SCAN_UP = 1;
+const MOB_STABLE_STANDING_SCAN_DOWN = 4;
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -2065,6 +2069,7 @@ export class GeneratedWorldHost implements WorldHost {
     entity.setAiLevel({
       getMinBuildHeight: () => this.level.getMinBuildHeight(),
       getMaxBuildHeight: () => this.level.getMaxBuildHeight(),
+      findStableStandingY: (x, z, nearY) => this.findStableMobStandingY(x, z, nearY),
       isStableDestination: (pos) => this.isStableMobDestination(pos),
       isWater: (pos) => this.isWaterMobPosition(pos),
       isSolid: (pos) => this.isSolidMobPosition(pos),
@@ -2101,6 +2106,24 @@ export class GeneratedWorldHost implements WorldHost {
       && !state.getMaterial().blocksMotion()
       && !above.getMaterial().blocksMotion()
       && below.getMaterial().isSolid();
+  }
+
+  private findStableMobStandingY(x: number, z: number, nearY: number): number | undefined {
+    const blockX = floor(x);
+    const blockZ = floor(z);
+    const centerY = floor(nearY);
+    const minY = this.level.getMinBuildHeight() + 1;
+    const maxY = this.level.getMaxBuildHeight() - 2;
+    const topY = Math.min(maxY, centerY + MOB_STABLE_STANDING_SCAN_UP);
+    const bottomY = Math.max(minY, centerY - MOB_STABLE_STANDING_SCAN_DOWN);
+
+    for (let y = topY; y >= bottomY; y--) {
+      if (this.isStableMobDestination(new BlockPos(blockX, y, blockZ))) {
+        return y;
+      }
+    }
+
+    return undefined;
   }
 
   private isWaterMobPosition(pos: BlockPos): boolean {

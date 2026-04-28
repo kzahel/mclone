@@ -10,6 +10,7 @@ export interface MobRandom {
 export interface MobAiLevel {
   getMinBuildHeight(): number;
   getMaxBuildHeight(): number;
+  findStableStandingY(x: number, z: number, nearY: number): number | undefined;
   isStableDestination(pos: BlockPos): boolean;
   isWater(pos: BlockPos): boolean;
   isSolid(pos: BlockPos): boolean;

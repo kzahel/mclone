@@ -46,7 +46,9 @@ This document is a reference for future creature work. It is not a tactical slic
 - `WaterAvoidingRandomStrollGoal` and its random-position helpers are ported far enough for first cow wandering
 - moving generated cows publish `entity_update` messages with authoritative tick context
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla ground pathfinding, collision-resolved living-entity travel, persistence adapters beyond the in-memory runtime path, and cow gameplay interactions.
+`CreatureMovement0` keeps the first generated-mob movement stack reusable by resolving directly steered mobs back to a host-supplied stable standing Y instead of letting random stroll waypoints pull mobs above or below terrain.
+
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla ground pathfinding, collision-resolved living-entity travel, persistence adapters beyond the in-memory runtime path, additional farm animal renderers, and cow gameplay interactions.
 
 ## Reference Source Map
 
