@@ -426,6 +426,7 @@ function createHost(options: {
   readonly chunkViewScheduling?: "synchronous" | "cooperative";
   readonly generatorOptions?: CountingWorldGeneratorOptions;
   readonly worldStorage?: WorldStorage;
+  readonly nowMs?: () => number;
 } = {}): { readonly host: GeneratedWorldHost; readonly generator: CountingWorldGenerator } {
   const blocks = registerGeneratedRenderBlocks();
   const generator = new CountingWorldGenerator(12345n, options.generatorOptions);
@@ -437,6 +438,7 @@ function createHost(options: {
     blockStateIds: blocks.blockStateIds,
     chunkViewScheduling: options.chunkViewScheduling,
     worldStorage: options.worldStorage,
+    nowMs: options.nowMs,
     lightingMode: "none",
     liquidSimulationMode: "none",
   });
@@ -675,6 +677,47 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
       [GeneratedChunkStatus.FULL]: 56,
     });
   });
+
+  test("budgets holder unloads and settles chunk access state after flush", async () => {
+    const { host } = createHost({ nowMs: () => 0 });
+    await host.openWorld(OPEN_WORLD_REQUEST);
+
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 64,
+      centerChunkZ: 0,
+      radius: 0,
+    });
+    const movedPerformance = await readWorldgenPerformance(host);
+
+    expect(movedPerformance.counts.chunk_holders_unload_queued).toBe(625);
+    expect(movedPerformance.counts.chunk_holders_unload_processed).toBe(200);
+    expect(movedPerformance.counts.chunk_holders_unload_queue_current).toBe(425);
+    expect(movedPerformance.counts.chunk_holders_resident_current).toBe(1050);
+    expect(host.getDebugGeneratedChunkAccessRecords()).toHaveLength(1050);
+
+    await host.flushStorageSideEffects();
+    const settledPerformance = await readWorldgenPerformance(host);
+    const settledAccessRecords = host.getDebugGeneratedChunkAccessRecords();
+
+    expect(settledPerformance.counts.chunk_holders_unload_queue_current).toBe(0);
+    expect(settledPerformance.counts.chunk_holders_resident_current).toBe(625);
+    expect(settledAccessRecords).toHaveLength(625);
+    expect(countMaterializedChunkAccess(settledAccessRecords)).toBe(121);
+    expect(settledAccessRecords.every((record) => !record.isUnsaved)).toBe(true);
+    expect(countChunkAccessByExactStatus(settledAccessRecords)).toEqual({
+      [GeneratedChunkStatus.STRUCTURE_STARTS]: 504,
+      [GeneratedChunkStatus.LIQUID_CARVERS]: 40,
+      [GeneratedChunkStatus.FEATURES]: 32,
+      [GeneratedChunkStatus.FULL]: 49,
+    });
+  }, 60_000);
 
   test("drops stale preload results and settles expected chunk state after a walk", async () => {
     const storage = new BlockingPreloadWorldStorage();

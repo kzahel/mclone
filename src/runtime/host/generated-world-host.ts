@@ -268,6 +268,8 @@ const LIGHTING_RESULT_BATCH_SIZE = 64;
 const LIQUID_TICK_READ_RADIUS_BLOCKS = 4;
 const STORAGE_SIDE_EFFECT_MAX_CONCURRENCY = 4;
 const GLOBAL_STORAGE_SIDE_EFFECT_KEY = "global";
+const CHUNK_HOLDER_UNLOADS_PER_PASS = 200;
+const CHUNK_HOLDER_UNLOAD_BACKLOG_THRESHOLD = 2_000;
 
 type GeneratedChunkStatusJobState = "pending" | "fulfilled" | "rejected";
 
@@ -299,6 +301,12 @@ interface GeneratedPendingUnloadHolder {
   readonly record: GeneratedChunkStorageRecord;
   readonly savePromise: Promise<void>;
   cancelled: boolean;
+}
+
+interface QueuedChunkHolderUnload {
+  readonly key: string;
+  readonly holder: GeneratedChunkHolder;
+  sourceChunk: GeneratedLevelChunk | undefined;
 }
 
 interface GeneratedChunkStatusTarget {
@@ -486,6 +494,7 @@ export class GeneratedWorldHost implements WorldHost {
   private readonly dirtyDurableChunks = new Set<string>();
   private readonly spawnedOriginalMobChunks = new Set<string>();
   private readonly chunkHolders = new Map<string, GeneratedChunkHolder>();
+  private readonly chunkHolderUnloadQueue = new Map<string, QueuedChunkHolderUnload>();
   private readonly pendingUnloadChunkHolders = new Map<string, GeneratedPendingUnloadHolder>();
   private readonly generatedCacheWriteVersions = new Map<string, number>();
   private readonly generatedChunkRecordWriteVersions = new Map<string, number>();
@@ -614,7 +623,7 @@ export class GeneratedWorldHost implements WorldHost {
       this.incrementWorldgenCount("chunk_view_jobs_cancelled");
       return [this.createSessionStateMessage()];
     }
-    this.pruneChunkHoldersOutsideCurrentAuthority(update.removedChunks);
+    this.queueChunkHolderUnloadsOutsideCurrentAuthority(update.removedChunks);
 
     const messages: WorldHostMessage[] = [this.createSessionStateMessage()];
     if (!this.playerAnchoredToChunkView) {
@@ -684,7 +693,7 @@ export class GeneratedWorldHost implements WorldHost {
       messages.push(this.createPlayerStateMessage());
     }
 
-    this.pruneChunkHoldersOutsideCurrentAuthority(update.removedChunks);
+    this.queueChunkHolderUnloadsOutsideCurrentAuthority(update.removedChunks);
 
     for (const chunk of update.removedChunks) {
       this.queueStorageSideEffect(() => this.queueEvictAfterDirtySave(chunk), chunkKey(chunk.chunkX, chunk.chunkZ));
@@ -756,6 +765,7 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   public async flushStorageSideEffects(): Promise<void> {
+    this.processChunkHolderUnloadQueue({ drain: true });
     this.queueSaveResidentGeneratedChunkAccesses();
     while (this.pendingStorageSideEffects > 0) {
       await new Promise<void>((resolve) => {
@@ -788,6 +798,9 @@ export class GeneratedWorldHost implements WorldHost {
     const key = chunkKey(chunkX, chunkZ);
     const existing = this.chunkHolders.get(key);
     if (existing !== undefined) {
+      if (this.isChunkInCurrentAuthorityView(chunkX, chunkZ)) {
+        this.cancelQueuedChunkHolderUnload(key, true);
+      }
       return existing;
     }
 
@@ -815,23 +828,121 @@ export class GeneratedWorldHost implements WorldHost {
     return holder;
   }
 
-  private pruneChunkHoldersOutsideCurrentAuthority(removedChunks: readonly GeneratedLevelChunk[] = []): void {
+  private queueChunkHolderUnloadsOutsideCurrentAuthority(removedChunks: readonly GeneratedLevelChunk[] = []): void {
     const removedChunkByKey = new Map(removedChunks.map((chunk) => [chunkKey(chunk.chunkX, chunk.chunkZ), chunk] as const));
-    let removed = 0;
+    let queued = 0;
     for (const [key, holder] of this.chunkHolders) {
       if (this.isChunkInCurrentAuthorityView(holder.chunkX, holder.chunkZ)) {
+        this.cancelQueuedChunkHolderUnload(key, true);
         continue;
       }
 
-      this.schedulePendingUnloadChunkHolder(key, holder, removedChunkByKey.get(key));
-      this.chunkHolders.delete(key);
-      removed++;
+      const sourceChunk = removedChunkByKey.get(key);
+      const queuedUnload = this.chunkHolderUnloadQueue.get(key);
+      if (queuedUnload !== undefined) {
+        if (sourceChunk !== undefined && queuedUnload.sourceChunk === undefined) {
+          queuedUnload.sourceChunk = sourceChunk;
+        }
+        continue;
+      }
+
+      this.chunkHolderUnloadQueue.set(key, {
+        key,
+        holder,
+        sourceChunk,
+      });
+      queued++;
     }
 
-    if (removed > 0) {
-      this.incrementWorldgenCount("chunk_holders_pruned_outside_authority", removed);
+    if (queued > 0) {
+      this.incrementWorldgenCount("chunk_holders_unload_queued", queued);
     }
+    this.noteChunkHolderUnloadQueueCount();
+    this.processChunkHolderUnloadQueue();
+  }
+
+  private processChunkHolderUnloadQueue(options: { readonly drain?: boolean } = {}): void {
+    let processed = 0;
+    let skippedStale = 0;
+    while (
+      this.chunkHolderUnloadQueue.size > 0
+      && (
+        options.drain === true
+        || processed < CHUNK_HOLDER_UNLOADS_PER_PASS
+        || this.chunkHolderUnloadQueue.size > CHUNK_HOLDER_UNLOAD_BACKLOG_THRESHOLD
+      )
+    ) {
+      const next = this.chunkHolderUnloadQueue.entries().next().value as [string, QueuedChunkHolderUnload] | undefined;
+      if (next === undefined) {
+        break;
+      }
+
+      const [key, queuedUnload] = next;
+      this.chunkHolderUnloadQueue.delete(key);
+      if (this.isChunkInCurrentAuthorityView(queuedUnload.holder.chunkX, queuedUnload.holder.chunkZ)) {
+        this.incrementWorldgenCount("chunk_holders_unload_cancelled");
+        this.restoreQueuedChunkHolderUnload(queuedUnload);
+        continue;
+      }
+
+      if (this.chunkHolders.get(key) !== queuedUnload.holder) {
+        skippedStale++;
+        continue;
+      }
+
+      this.schedulePendingUnloadChunkHolder(key, queuedUnload.holder, queuedUnload.sourceChunk);
+      this.chunkHolders.delete(key);
+      this.generatedCacheWriteVersions.delete(key);
+      processed++;
+    }
+
+    if (processed > 0) {
+      this.incrementWorldgenCount("chunk_holders_unload_processed", processed);
+      this.incrementWorldgenCount("chunk_holders_pruned_outside_authority", processed);
+    }
+    if (skippedStale > 0) {
+      this.incrementWorldgenCount("chunk_holders_unload_skipped_stale", skippedStale);
+    }
+    this.noteChunkHolderUnloadQueueCount();
     this.noteChunkHolderCount();
+  }
+
+  private cancelQueuedChunkHolderUnload(key: string, restore: boolean): boolean {
+    const queuedUnload = this.chunkHolderUnloadQueue.get(key);
+    if (queuedUnload === undefined) {
+      return false;
+    }
+
+    this.chunkHolderUnloadQueue.delete(key);
+    this.incrementWorldgenCount("chunk_holders_unload_cancelled");
+    this.noteChunkHolderUnloadQueueCount();
+    if (restore) {
+      this.restoreQueuedChunkHolderUnload(queuedUnload);
+    }
+    return true;
+  }
+
+  private restoreQueuedChunkHolderUnload(queuedUnload: QueuedChunkHolderUnload): void {
+    const access = queuedUnload.holder.chunkToSave;
+    if (access === undefined) {
+      return;
+    }
+
+    const record = this.createGeneratedChunkStorageRecordForAccess(
+      access,
+      queuedUnload.sourceChunk,
+      this.generatedChunkRecordWriteVersions.get(queuedUnload.key) ?? 0,
+    );
+    if (record === undefined) {
+      this.incrementWorldgenCount("chunk_holders_unload_restore_skipped");
+      return;
+    }
+
+    if (this.restoreStoredGeneratedChunkIntoLevel(record)) {
+      this.incrementWorldgenCount("chunk_holders_unload_restored");
+    } else {
+      this.incrementWorldgenCount("chunk_holders_unload_restore_rejected");
+    }
   }
 
   private schedulePendingUnloadChunkHolder(
@@ -2006,6 +2117,7 @@ export class GeneratedWorldHost implements WorldHost {
     if (dueTicks <= 0) {
       return;
     }
+    this.processChunkHolderUnloadQueue();
     if (
       this.publishedChunkSnapshots.size === 0
       || this.activeChunkViewJobRevision !== undefined
@@ -3090,11 +3202,6 @@ export class GeneratedWorldHost implements WorldHost {
     this.publishedChunkSnapshots.delete(key);
     this.forgetPublishedEntitiesForChunk(chunkX, chunkZ);
     this.dirtyChunksForPublication.delete(key);
-    if (!this.isChunkInCurrentAuthorityView(chunkX, chunkZ)) {
-      this.chunkHolders.delete(key);
-      this.generatedCacheWriteVersions.delete(key);
-      this.noteChunkHolderCount();
-    }
     this.entityRuntime.updateChunkStatus(chunkX, chunkZ, FullChunkStatus.INACCESSIBLE);
     this.entityRuntime.processLifecycle();
     this.discardChunkLighting(chunkX, chunkZ);
@@ -3225,6 +3332,15 @@ export class GeneratedWorldHost implements WorldHost {
     this.setWorldgenCount(
       "chunk_holders_pending_unload_max",
       Math.max(this.worldgenPerformance.counts.get("chunk_holders_pending_unload_max") ?? 0, count),
+    );
+  }
+
+  private noteChunkHolderUnloadQueueCount(): void {
+    const count = this.chunkHolderUnloadQueue.size;
+    this.setWorldgenCount("chunk_holders_unload_queue_current", count);
+    this.setWorldgenCount(
+      "chunk_holders_unload_queue_max",
+      Math.max(this.worldgenPerformance.counts.get("chunk_holders_unload_queue_max") ?? 0, count),
     );
   }
 

@@ -2,7 +2,7 @@
 
 Make generated chunk unload/save/load ordering predictable like vanilla `ChunkMap`, so async persistence cannot cause duplicate generation, stale reloads, or older partial records overwriting newer chunk state.
 
-Status: pending-unload resurrection, generated-record write-version, stale-preload rejection, storage-session epoch, and keyed storage side-effect slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results. Storage adapters reject operations from superseded sessions after reopen/reset/close. Queued same-chunk side effects stay ordered without blocking unrelated chunk writes.
+Status: pending-unload resurrection, generated-record write-version, stale-preload rejection, storage-session epoch, keyed storage side-effect, and budgeted holder-unload slices landed. The generated host keeps pruned holders pending while their generated-record save is queued; if the same chunk is requested before that save completes, the holder is resurrected and its in-memory `chunkToSave` record is restored instead of reading stale storage or regenerating. Generated partial/full records also carry per-chunk `writeVersion` values so an older queued generated-record write cannot overwrite a newer full/dirty generated record. Async preloads now re-check chunk-view revision and authority before hydrating storage results. Storage adapters reject operations from superseded sessions after reopen/reset/close. Queued same-chunk side effects stay ordered without blocking unrelated chunk writes. Holder drops now enter a `toDrop`-style queue and process with a vanilla-sized 200-holder normal budget before moving into pending unload/save.
 
 ## Vanilla source anchors
 
@@ -43,7 +43,8 @@ Status: pending-unload resurrection, generated-record write-version, stale-prelo
 
 6. **Authority-square unload instead of ticket unload**
    - Risk: pruning is immediate and deterministic rather than ticket-level driven with budgets.
-   - Remaining gap: move pending unloads onto a ticket-shaped unload queue with pass budgets and backlog counters.
+   - Current protection: holders outside the derived authority window enter a `chunkHolderUnloadQueue`; normal passes process 200 holders, backlog above 2000 bypasses the normal budget, and flush drains the queue.
+   - Remaining gap: the input policy is still a derived authority square rather than a real ticket graph with player, generation, lighting, entity, and forced tickets.
 
 ## Landed first slice
 
@@ -86,10 +87,20 @@ Status: pending-unload resurrection, generated-record write-version, stale-prelo
 - New counters: `storage_side_effects_active_current`, `storage_side_effects_active_max`, `storage_side_effect_keys_current`, and `storage_side_effect_keys_max`.
 - Regression coverage blocks the first generated-cache save, verifies another chunk cache save completes before the first one is released, then flushes and confirms all 25 published cache writes landed.
 
+## Landed sixth slice
+
+- `GeneratedWorldHost` replaced immediate holder deletion outside the current authority window with a `chunkHolderUnloadQueue`.
+- Normal unload passes process up to `CHUNK_HOLDER_UNLOADS_PER_PASS = 200`, matching vanilla's normal `processUnloads(...)` drop budget; backlog above `2000` can keep draining.
+- Holders that are queued but not yet processed remain resident and can be cancelled if interest returns. Cancellation restores the holder's `chunkToSave` record back into the generated level when a removed source chunk is available.
+- Processed holders still move through the existing `pendingUnloadChunkHolders` save/resurrection path, so same-chunk return before save completion continues to reuse the holder.
+- `flushStorageSideEffects()` drains the holder-unload queue before queuing resident generated-record saves and waiting for storage side effects.
+- New counters: `chunk_holders_unload_queued`, `chunk_holders_unload_processed`, `chunk_holders_unload_cancelled`, `chunk_holders_unload_queue_current`, `chunk_holders_unload_queue_max`, `chunk_holders_unload_restored`, `chunk_holders_unload_restore_skipped`, `chunk_holders_unload_restore_rejected`, and `chunk_holders_unload_skipped_stale`.
+- Regression coverage walks far enough to queue 625 holder drops, verifies only 200 process before settling, then flushes and verifies the expected 625 current holder records remain.
+
 ## Next implementation slices
 
-1. Replace authority-square pruning with a ticket-shaped pending unload queue and processing budget.
-2. Add host-side pending-write read-through for same-key loads if future load paths can overlap queued saves.
+1. Add host-side pending-write read-through for same-key loads if future load paths can overlap queued saves.
+2. Replace the derived authority-square residency input with explicit ticket sources once generation, lighting, entities, forced chunks, and player interest can express independent tickets.
 3. Consider a cross-tab/cross-process save lock for IndexedDB/file storage if we start supporting multiple authorities against the same save.
 
 ## Validation

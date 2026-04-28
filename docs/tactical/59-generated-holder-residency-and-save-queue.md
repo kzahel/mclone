@@ -2,7 +2,7 @@
 
 Make generated chunk residency and storage IO closer to vanilla `ChunkMap`: memory-first holder reuse, bounded holder eviction, dirty-gated durable saves, and lazy discardable generated-cache writes.
 
-Status: first slice landed. The host now has holder residency gauges, prunes holders outside the authority window, and serializes storage side effects through a queue. Generated-clean publish cache writes are queued instead of blocking publication; dirty durable saves still run before the host forgets dirty chunk data.
+Status: holder residency gauges, budgeted holder unloads, pending-unload resurrection, and keyed storage side effects have landed. Generated-clean publish cache writes are queued instead of blocking publication; dirty durable saves still run before the host forgets dirty chunk data.
 
 ## Source files
 
@@ -34,11 +34,11 @@ The useful parity target is therefore:
 
 The generated host still uses a deterministic authority square instead of vanilla tickets. For the current publication policy, that authority square is intentionally large enough for `FULL`, `LIGHT`, and `FEATURES` dependencies. That is acceptable until a real ticket manager exists, but holder lifetime must be bounded by the same authority window.
 
-The first slice landed:
+Landed so far:
 
-- `GeneratedWorldHost` prunes `GeneratedChunkHolder` records outside the current authority window.
-- Worldgen perf counters report `chunk_holders_resident_current`, `chunk_holders_resident_max`, and `chunk_holders_pruned_outside_authority`.
-- Storage side effects are serialized through a host queue with `storage_side_effects_*` and `storage_side_effect_queue_depth_*` counters.
+- `GeneratedWorldHost` queues `GeneratedChunkHolder` records outside the current authority window, processes normal unload passes with a 200-holder budget, and drains that queue during explicit flush.
+- Worldgen perf counters report resident holder counts, unload-queue backlog, processed/cancelled holder drops, pending unloads, and storage side-effect depth/activity.
+- Storage side effects are keyed by chunk coordinate and run with bounded global concurrency.
 - Generated-clean cache writes from publish are queued lazily.
 - Dirty durable saves still run before dirty chunk data is discarded.
 - Queued generated-clean cache writes carry a per-chunk version and skip if a later dirty/save-worthy write supersedes them.
@@ -52,10 +52,10 @@ The first slice landed:
    - Keep the existing radius helpers as derived policy until tickets own all residency.
 
 2. **Unload queue parity**
-   - Add a real unload queue with per-tick/pass budgets similar to vanilla's `processUnloads(...)`.
+   - Landed: holder drops use a budgeted unload queue similar to vanilla's `processUnloads(...)`.
    - Keep dirty-save-before-forget semantics for dirty chunks.
-   - Add pressure/backlog counters and tests that route changes do not create unbounded holder growth.
-   - First race-safety slice landed in Tactical 60: holders with queued generated-record saves stay in a pending-unload map and can be resurrected before the save reaches storage.
+   - Remaining: drive the queue from explicit ticket levels instead of the derived authority square.
+   - Holders with queued generated-record saves stay in a pending-unload map and can be resurrected before the save reaches storage.
 
 3. **Storage queue policy**
    - Keep side effects serialized or otherwise bounded.
@@ -65,7 +65,7 @@ The first slice landed:
 4. **Integrate Tactical 58 - partial save/load landed**
    - Save `chunkToSave` proto/full generated chunk records on unload or explicit flush.
    - Save unsaved partial records on unload/flush; treat generated-clean partial records as versioned cache.
-   - Remaining: move this from authority-square pruning onto the future ticket/unload queue and add adapter-level priority if generated-cache pressure becomes visible.
+   - Remaining: move the unload trigger from authority-square pruning to future ticket levels and add adapter-level priority if generated-cache pressure becomes visible.
 
 ## Tests
 
