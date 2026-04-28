@@ -242,6 +242,7 @@ function readGuiOptionsState(url: URL): GuiOptionsState {
     renderDistance: config.renderDistance,
     lightingMode: config.lightingMode,
     liquidSimulationMode: config.liquidSimulationMode,
+    autoJump: config.autoJump,
   };
 }
 
@@ -274,6 +275,7 @@ function copyGuiOptionsState(options: GuiOptionsState): GuiOptionsState {
     renderDistance: options.renderDistance,
     lightingMode: options.lightingMode,
     liquidSimulationMode: options.liquidSimulationMode,
+    autoJump: options.autoJump,
   };
 }
 

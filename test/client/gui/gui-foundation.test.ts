@@ -147,6 +147,7 @@ describe("Gui0 model foundation", () => {
       renderDistance: 192,
       lightingMode: "vanilla17",
       liquidSimulationMode: "vanilla17",
+      autoJump: true,
     };
     let changedState: GuiOptionsState | undefined;
     let done = false;
@@ -166,6 +167,8 @@ describe("Gui0 model foundation", () => {
     expect(options.lightingMode).toBe("none");
     expect(manager.mouseClicked(175, 62, 0)).toBe(true);
     expect(options.liquidSimulationMode).toBe("none");
+    expect(manager.mouseClicked(80, 86, 0)).toBe(true);
+    expect(options.autoJump).toBe(false);
     expect(manager.mouseClicked(160, 146, 0)).toBe(true);
     expect(done).toBe(true);
     expect(changedState).toEqual(options);
@@ -179,6 +182,7 @@ describe("Gui0 model foundation", () => {
       renderDistance: 192,
       lightingMode: "vanilla17",
       liquidSimulationMode: "vanilla17",
+      autoJump: true,
     };
     let pauseScreen!: PauseScreen;
     pauseScreen = new PauseScreen(true, {

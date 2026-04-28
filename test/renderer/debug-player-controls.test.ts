@@ -38,7 +38,7 @@ describe("debug player controls", () => {
     expect(command.moveZ).toBe(1);
   });
 
-  test("maps player jump and crouch inputs to button bits without flight moveY", () => {
+  test("maps player jump and shift-sprint inputs to button bits without flight moveY", () => {
     const command = buildPlayerInputCommand(
       0,
       0,
@@ -59,7 +59,30 @@ describe("debug player controls", () => {
     );
 
     expect(command.moveY).toBe(0);
-    expect(command.buttons).toBe(3);
+    expect(command.buttons).toBe(5);
+  });
+
+  test("keeps crouch on the alternate player input path", () => {
+    const command = buildPlayerInputCommand(
+      0,
+      0,
+      {
+        heldKeys: new Set(["KeyC"]),
+        mouseDeltaX: 0,
+        mouseDeltaY: 0,
+        locked: true,
+        joystickX: 0,
+        joystickY: 0,
+        moveForward: false,
+        moveBack: false,
+        flyUp: false,
+        flyDown: false,
+      },
+      1 / 60,
+      8,
+    );
+
+    expect(command.buttons).toBe(2);
   });
 
   test("maps player strafe keys to movement-core local axes", () => {

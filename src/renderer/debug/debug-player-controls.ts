@@ -150,10 +150,15 @@ export function getDebugPlayerButtonMask(frame: DebugInputFrame): number {
   if (frame.heldKeys.has("Space") || frame.flyUp) {
     buttons |= MOVEMENT_COMMAND_BUTTONS.JUMP;
   }
-  if (frame.heldKeys.has("ShiftLeft") || frame.heldKeys.has("ShiftRight") || frame.flyDown) {
+  if (frame.flyDown || frame.heldKeys.has("AltLeft") || frame.heldKeys.has("AltRight") || frame.heldKeys.has("KeyC")) {
     buttons |= MOVEMENT_COMMAND_BUTTONS.CROUCH;
   }
-  if (frame.heldKeys.has("ControlLeft") || frame.heldKeys.has("ControlRight")) {
+  if (
+    frame.heldKeys.has("ShiftLeft")
+    || frame.heldKeys.has("ShiftRight")
+    || frame.heldKeys.has("ControlLeft")
+    || frame.heldKeys.has("ControlRight")
+  ) {
     buttons |= MOVEMENT_COMMAND_BUTTONS.SPRINT;
   }
   return buttons;

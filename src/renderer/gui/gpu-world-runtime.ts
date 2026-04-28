@@ -1,4 +1,10 @@
-import { DEFAULT_MOVEMENT_PHYSICS, MovementCommandClock } from "../../runtime/movement";
+import {
+  DEFAULT_MOVEMENT_PHYSICS,
+  MOVEMENT_COMMAND_BUTTONS,
+  MovementCommandClock,
+  shouldAutoJump,
+  type MovementIntent,
+} from "../../runtime/movement";
 import type {
   PlayerInputCommand,
   SetChunkViewRequest,
@@ -124,6 +130,20 @@ export function shouldQueuePlayerInput(
   return Math.hypot(inputCommand.moveX, inputCommand.moveY, inputCommand.moveZ) > 0.0
     || (inputCommand.buttons ?? 0) !== 0
     || (inputCommand.edgeButtons ?? 0) !== 0;
+}
+
+function movementIntentFromPlayerInput(input: PlayerInputCommand): MovementIntent {
+  const buttons = input.buttons ?? 0;
+  const edgeButtons = input.edgeButtons ?? 0;
+  return {
+    wishX: input.moveX,
+    wishZ: input.moveZ,
+    jump: (buttons & MOVEMENT_COMMAND_BUTTONS.JUMP) !== 0 || (edgeButtons & MOVEMENT_COMMAND_BUTTONS.JUMP) !== 0,
+    crouch: (buttons & MOVEMENT_COMMAND_BUTTONS.CROUCH) !== 0,
+    sprint: (buttons & MOVEMENT_COMMAND_BUTTONS.SPRINT) !== 0,
+    yaw: input.yaw,
+    pitch: input.pitch,
+  };
 }
 
 export function buildDebugOverlayLines(
@@ -483,6 +503,14 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
     if (this.options.preserveInitialCamera !== true) {
       this.camera = createCameraStateFromMovementBody(reconciledBody, authoritativeYaw, authoritativePitch);
     }
+    if (this.options.requirePointerLock !== false && !inputFrame.locked) {
+      this.lastPlayerButtonMask = 0;
+      const chunkViewRequest = this.options.preserveInitialCamera === true
+        ? createChunkViewRequestForPlayerState(playerState, scene.viewDistance)
+        : createChunkViewRequestForCameraState(this.camera, scene.viewDistance);
+      await this.setChunkInterestIfChanged(chunkViewRequest);
+      return;
+    }
     const baseYaw = this.options.preserveInitialCamera === true
       ? (this.lastInputCommand?.yaw ?? playerState.rotation.yaw)
       : this.camera.yRot;
@@ -493,8 +521,9 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
     const currentButtonMask = getDebugPlayerButtonMask(inputFrame);
     let edgeButtonMask = currentButtonMask & ~this.lastPlayerButtonMask;
     this.lastPlayerButtonMask = currentButtonMask;
+    let autoJumpEdgeAvailable = this.options.optionsState.autoJump;
     for (const stepCount of commandStepCounts) {
-      const playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, this.nextInputSequence, {
+      let playerInput = buildPlayerInputCommand(baseYaw, basePitch, inputFrame, dtSeconds, this.nextInputSequence, {
         clientTimeUs: Math.max(0, Math.round(nowMs * 1_000.0)),
         commandQuantumUs: PLAYER_COMMAND_QUANTUM_US,
         stepCount,
@@ -503,6 +532,23 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
         physicsRevision: PLAYER_MOVEMENT_PHYSICS_REVISION,
         collisionRevision: PLAYER_COLLISION_REVISION,
       });
+      if (
+        autoJumpEdgeAvailable
+        && ((playerInput.buttons ?? 0) & MOVEMENT_COMMAND_BUTTONS.JUMP) === 0
+        && ((playerInput.edgeButtons ?? 0) & MOVEMENT_COMMAND_BUTTONS.JUMP) === 0
+        && shouldAutoJump(
+          reconciledBody,
+          movementIntentFromPlayerInput(playerInput),
+          predictionView.createCollisionWorld(),
+          DEFAULT_MOVEMENT_PHYSICS,
+        )
+      ) {
+        playerInput = {
+          ...playerInput,
+          edgeButtons: (playerInput.edgeButtons ?? 0) | MOVEMENT_COMMAND_BUTTONS.JUMP,
+        };
+        autoJumpEdgeAvailable = false;
+      }
       edgeButtonMask = 0;
       if (this.queuePlayerInput(playerInput) && this.options.preserveInitialCamera !== true) {
         const predictedBody = predictionService.advanceCommandReplay({

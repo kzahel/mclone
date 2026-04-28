@@ -34,6 +34,7 @@ describe("browser render config", () => {
     expect(config.lightingMode).toBe("none");
     expect(config.liquidSimulationMode).toBe("vanilla17");
     expect(config.worldStorageMode).toBe("default");
+    expect(config.autoJump).toBe(true);
     expect(config.skyColor.x).toBeCloseTo(0x8f / 255);
     expect(config.skyColor.y).toBeCloseTo(0xb8 / 255);
     expect(config.skyColor.z).toBeCloseTo(0xff / 255);
@@ -63,6 +64,7 @@ describe("browser render config", () => {
       lightingMode: "none",
       liquidSimulationMode: "none",
       worldStorageMode: "none",
+      autoJump: false,
     });
 
     const config = readBrowserRenderConfig(new URL("http://127.0.0.1/"), storage);
@@ -72,12 +74,14 @@ describe("browser render config", () => {
     expect(config.lightingMode).toBe("none");
     expect(config.liquidSimulationMode).toBe("none");
     expect(config.worldStorageMode).toBe("none");
+    expect(config.autoJump).toBe(false);
     expect(readStoredBrowserRenderConfig(storage)).toEqual({
       viewDistance: 3,
       renderDistance: 96,
       lightingMode: "none",
       liquidSimulationMode: "none",
       worldStorageMode: "none",
+      autoJump: false,
     });
   });
 
@@ -89,10 +93,11 @@ describe("browser render config", () => {
       lightingMode: "none",
       liquidSimulationMode: "none",
       worldStorageMode: "none",
+      autoJump: true,
     }));
 
     const config = readBrowserRenderConfig(
-      new URL("http://127.0.0.1/?viewDistance=5&renderDistance=128&lightingMode=vanilla17&disableWaterSim=0&disableIndexedDb=0"),
+      new URL("http://127.0.0.1/?viewDistance=5&renderDistance=128&lightingMode=vanilla17&disableWaterSim=0&disableIndexedDb=0&autoJump=0"),
       storage,
     );
 
@@ -101,6 +106,7 @@ describe("browser render config", () => {
     expect(config.lightingMode).toBe("vanilla17");
     expect(config.liquidSimulationMode).toBe("vanilla17");
     expect(config.worldStorageMode).toBe("default");
+    expect(config.autoJump).toBe(false);
 
     clearStoredBrowserRenderConfig(storage);
     expect(readStoredBrowserRenderConfig(storage)).toEqual({});

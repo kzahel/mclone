@@ -9,6 +9,7 @@ export interface BrowserRenderConfig {
   readonly lightingMode: WorldEngineLightingMode;
   readonly liquidSimulationMode: WorldEngineLiquidSimulationMode;
   readonly worldStorageMode: WorldStorageMode;
+  readonly autoJump: boolean;
 }
 
 const DEFAULT_VIEW_DISTANCE = 6;
@@ -17,6 +18,7 @@ const DEFAULT_CLEAR_COLOR_SCALE = 1.0;
 const DEFAULT_LIGHTING_MODE: WorldEngineLightingMode = "none";
 const DEFAULT_LIQUID_SIMULATION_MODE: WorldEngineLiquidSimulationMode = "vanilla17";
 const DEFAULT_WORLD_STORAGE_MODE: WorldStorageMode = "default";
+const DEFAULT_AUTO_JUMP = true;
 
 export const BROWSER_RENDER_CONFIG_STORAGE_KEY = "mclone.debug.renderConfig.v1";
 export const BROWSER_RENDER_CONFIG_QUERY_KEYS = [
@@ -25,6 +27,7 @@ export const BROWSER_RENDER_CONFIG_QUERY_KEYS = [
   "lightingMode",
   "liquidSimulationMode",
   "worldStorageMode",
+  "autoJump",
   "disableLighting",
   "disableWaterSim",
   "disableIndexedDb",
@@ -34,6 +37,7 @@ export interface StoredBrowserRenderConfig extends WorldEngineConfig {
   readonly viewDistance?: number;
   readonly renderDistance?: number;
   readonly worldStorageMode?: WorldStorageMode;
+  readonly autoJump?: boolean;
 }
 
 export interface BrowserRenderConfigStorage {
@@ -146,6 +150,11 @@ function readStoredWorldStorageMode(record: Record<string, unknown>): WorldStora
   return record.worldStorageMode === "none" || record.worldStorageMode === "default" ? record.worldStorageMode : undefined;
 }
 
+function readStoredBoolean(record: Record<string, unknown>, key: string): boolean | undefined {
+  const value = record[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
 export function readStoredBrowserRenderConfig(storage: Pick<BrowserRenderConfigStorage, "getItem"> | undefined): StoredBrowserRenderConfig {
   if (storage === undefined) {
     return {};
@@ -168,6 +177,7 @@ export function readStoredBrowserRenderConfig(storage: Pick<BrowserRenderConfigS
       lightingMode: readStoredLightingMode(parsed),
       liquidSimulationMode: readStoredLiquidSimulationMode(parsed),
       worldStorageMode: readStoredWorldStorageMode(parsed),
+      autoJump: readStoredBoolean(parsed, "autoJump"),
     };
   } catch {
     return {};
@@ -184,6 +194,7 @@ export function writeStoredBrowserRenderConfig(
     lightingMode: config.lightingMode,
     liquidSimulationMode: config.liquidSimulationMode,
     worldStorageMode: config.worldStorageMode,
+    autoJump: config.autoJump,
   }));
 }
 
@@ -242,6 +253,18 @@ function parseWorldStorageModeParam(url: URL, fallback: WorldStorageMode): World
   return fallback;
 }
 
+function parseBooleanParam(url: URL, key: string, fallback: boolean): boolean {
+  const raw = url.searchParams.get(key);
+  if (raw === "1" || raw === "true") {
+    return true;
+  }
+  if (raw === "0" || raw === "false") {
+    return false;
+  }
+
+  return fallback;
+}
+
 export function readBrowserRenderConfig(
   url: URL,
   storage?: Pick<BrowserRenderConfigStorage, "getItem">,
@@ -258,5 +281,6 @@ export function readBrowserRenderConfig(
     lightingMode: parseLightingModeParam(url, stored.lightingMode ?? DEFAULT_LIGHTING_MODE),
     liquidSimulationMode: parseLiquidSimulationModeParam(url, stored.liquidSimulationMode ?? DEFAULT_LIQUID_SIMULATION_MODE),
     worldStorageMode: parseWorldStorageModeParam(url, stored.worldStorageMode ?? DEFAULT_WORLD_STORAGE_MODE),
+    autoJump: parseBooleanParam(url, "autoJump", stored.autoJump ?? DEFAULT_AUTO_JUMP),
   };
 }

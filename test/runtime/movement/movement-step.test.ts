@@ -6,6 +6,7 @@ import {
   DEFAULT_MOVEMENT_PHYSICS,
   NO_MOVEMENT_INTENT,
   simulateMovementStep,
+  shouldAutoJump,
   type MovementIntent,
   type MovementPhysicsParams,
 } from "../../../src/runtime/movement";
@@ -145,6 +146,59 @@ describe("simulateMovementStep", () => {
     expect(result.body.position.x).toBeGreaterThan(0.7);
     expect(result.body.position.y).toBeCloseTo(0.5, 8);
     expect(result.body.onGround).toBe(true);
+  });
+
+  test("uses the sprint intent to raise the grounded speed cap", () => {
+    const world = createStaticCollisionWorld([floor()]);
+    const params = {
+      ...TEST_PARAMS,
+      groundAccelerationBlocksPerSecondSq: 100.0,
+    };
+    const body = createStandingMovementBody({
+      position: new Vec3(0, 0, 0),
+      onGround: true,
+    });
+
+    const walking = simulateMovementStep(body, intent({ wishZ: 1.0 }), world, 0.1, params);
+    const sprinting = simulateMovementStep(body, intent({ wishZ: 1.0, sprint: true }), world, 0.1, params);
+
+    expect(walking.body.velocity.z).toBeCloseTo(TEST_PARAMS.maxGroundSpeedBlocksPerSecond, 8);
+    expect(sprinting.body.velocity.z).toBeCloseTo(
+      TEST_PARAMS.maxGroundSpeedBlocksPerSecond * TEST_PARAMS.sprintSpeedMultiplier,
+      8,
+    );
+  });
+
+  test("detects full-block obstacles that should become an auto-jump edge", () => {
+    const world = createStaticCollisionWorld([
+      floor(),
+      new AABB(-0.5, 0, 0.8, 0.5, 1.0, 1.8),
+    ]);
+    const body = createStandingMovementBody({
+      position: new Vec3(0, 0, 0),
+      onGround: true,
+    });
+
+    expect(shouldAutoJump(body, intent({ wishZ: 1.0 }), world, TEST_PARAMS)).toBe(true);
+  });
+
+  test("does not auto-jump low step-up obstacles or blocked headroom", () => {
+    const body = createStandingMovementBody({
+      position: new Vec3(0, 0, 0),
+      onGround: true,
+    });
+    const lowStepWorld = createStaticCollisionWorld([
+      floor(),
+      new AABB(-0.5, 0, 0.8, 0.5, 0.5, 1.8),
+    ]);
+    const blockedHeadroomWorld = createStaticCollisionWorld([
+      floor(),
+      new AABB(-0.5, 0, 0.8, 0.5, 1.0, 1.8),
+      new AABB(-0.5, 2.0, 0.8, 0.5, 3.0, 1.8),
+    ]);
+
+    expect(shouldAutoJump(body, intent({ wishZ: 1.0 }), lowStepWorld, TEST_PARAMS)).toBe(false);
+    expect(shouldAutoJump(body, intent({ wishZ: 1.0 }), blockedHeadroomWorld, TEST_PARAMS)).toBe(false);
   });
 
   test("reports missing collision data instead of moving through it", () => {

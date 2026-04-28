@@ -13,6 +13,7 @@ export interface GuiOptionsState {
   renderDistance: number;
   lightingMode: WorldEngineLightingMode;
   liquidSimulationMode: WorldEngineLiquidSimulationMode;
+  autoJump: boolean;
 }
 
 export interface OptionsScreenActions {
@@ -80,6 +81,20 @@ export class OptionsScreen extends Screen {
       formatLightingMode,
       (_button, value) => {
         this.options.lightingMode = value;
+        this.onChanged();
+      },
+    ));
+    this.addRenderableWidget(new Checkbox(
+      leftX,
+      topY + (rowSpacing * 2),
+      150,
+      20,
+      "Auto-Jump",
+      this.getFont(),
+      this.options.autoJump,
+      true,
+      (_checkbox, selected) => {
+        this.options.autoJump = selected;
         this.onChanged();
       },
     ));

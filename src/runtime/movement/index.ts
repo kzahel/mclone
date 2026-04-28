@@ -1,4 +1,5 @@
 export * from "./collision-world";
+export * from "./movement-auto-jump";
 export * from "./movement-command";
 export * from "./movement-command-buffer";
 export * from "./movement-command-clock";
