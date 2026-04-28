@@ -14,10 +14,19 @@ export interface MobRandom {
 export interface MobAiLevel extends PathNavigationRegion {
   getMinBuildHeight(): number;
   getMaxBuildHeight(): number;
+  getNearestPlayer?(x: number, y: number, z: number, range: number): MobLookTarget | undefined;
   findStableStandingY(x: number, z: number, nearY: number): number | undefined;
   isStableDestination(pos: BlockPos): boolean;
   isWater(pos: BlockPos): boolean;
   isSolid(pos: BlockPos): boolean;
+}
+
+export interface MobLookTarget {
+  getX(): number;
+  getY(): number;
+  getZ(): number;
+  getEyeY(): number;
+  isAlive(): boolean;
 }
 
 export interface MobNavigation {
@@ -32,6 +41,11 @@ export interface MobMoveControl {
   setWantedPosition(x: number, y: number, z: number, speed: number): void;
 }
 
+export interface MobLookControl {
+  setLookAt(x: number, y: number, z: number, deltaYaw?: number, deltaPitch?: number): void;
+  tick(): void;
+}
+
 export interface PathfinderMob {
   readonly position: {
     readonly x: number;
@@ -44,9 +58,19 @@ export interface PathfinderMob {
   getX(): number;
   getY(): number;
   getZ(): number;
+  getEyeY(): number;
   getBlockY(): number;
   getYRot(): number;
   setYRot(yaw: number): void;
+  getXRot(): number;
+  setXRot(pitch: number): void;
+  getYHeadRot(): number;
+  setYHeadRot(yaw: number): void;
+  getYBodyRot(): number;
+  setYBodyRot(yaw: number): void;
+  getMaxHeadXRot(): number;
+  getMaxHeadYRot(): number;
+  getHeadRotSpeed(): number;
   getBbWidth(): number;
   getBbHeight(): number;
   getMaxUpStep(): number;
@@ -55,6 +79,7 @@ export interface PathfinderMob {
   getNoActionTime(): number;
   getNavigation(): MobNavigation;
   getMoveControl(): MobMoveControl;
+  getLookControl(): MobLookControl;
   getAiLevel(): MobAiLevel | undefined;
   getPathfindingMalus(type: BlockPathTypes): number;
   setPathfindingMalus(type: BlockPathTypes, priority: number): void;
@@ -73,4 +98,5 @@ export interface PathfinderMob {
   isWithinRestriction(pos: BlockPos): boolean;
   getWalkTargetValue(pos: BlockPos): number;
   hasPathfindingMalus(pos: BlockPos): boolean;
+  isAlive(): boolean;
 }

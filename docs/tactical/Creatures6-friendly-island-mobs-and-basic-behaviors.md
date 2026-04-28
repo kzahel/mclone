@@ -42,7 +42,6 @@ This tactical follows the `CreatureMovement` stack. It expands the small island 
 
 ## Deferred Scope
 
-- Port shared passive look/idle goals instead of keeping wandering as the only visible AI behavior.
 - Port live chicken flap and egg-timer ticking, including egg item spawning once item entities exist.
 - Port sheep `EatBlockGoal`, grass mutation, sheared-state persistence, and eating animation.
 - Port pig saddle/boost/riding hooks once items, interactions, and passenger entities exist.
@@ -53,7 +52,7 @@ This tactical follows the `CreatureMovement` stack. It expands the small island 
 
 1. Spawn/render only, with static authoritative lifecycle.
 2. Shared random stroll through `GroundPathNavigation`.
-3. Passive look goals and idle animation state.
+3. Done in `Creatures8`: passive look goals and idle head/body rotation state.
 4. Animal-specific details: sheep eat grass/shear hooks, chicken live flap and egg timer, pig saddle/boost hooks when items/interactions exist.
 5. Natural-spawn integration after mob caps, player-distance eligibility, despawn, and persistence are in place.
 
@@ -77,4 +76,4 @@ The Deno entity smoke writes `/tmp/mclone-deno-entity-render-smoke.png`. Use a b
 
 ## Next Step
 
-Start the next creature tactical with shared passive look/idle goals (`LookAtPlayerGoal`, `RandomLookAroundGoal`) for generated passive mobs, then layer animal-specific behaviors such as chicken flap/egg ticking and sheep grass eating on top of that shared goal stack.
+Continue with animal-specific behaviors such as chicken flap/egg ticking and sheep grass eating on top of the shared movement, push, and passive look goal stack.

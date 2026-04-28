@@ -4,8 +4,9 @@ import { BlockPos } from "../../../src/core/block-pos";
 import { EntityRuntime } from "../../../src/runtime/host/entity-runtime";
 import { EntityTypes, GeneratedMobEntity } from "../../../src/world/entity/entity-type";
 import { MobAttribute } from "../../../src/world/entity/attribute";
+import { LookAtPlayerGoal } from "../../../src/world/entity/ai/goal/look-at-player-goal";
 import { WaterAvoidingRandomStrollGoal } from "../../../src/world/entity/ai/goal/water-avoiding-random-stroll-goal";
-import type { MobAiLevel, PathfinderMob } from "../../../src/world/entity/ai/pathfinder-mob";
+import type { MobAiLevel, MobLookTarget, PathfinderMob } from "../../../src/world/entity/ai/pathfinder-mob";
 import { AirBlock } from "../../../src/world/level/block/air-block";
 import { Block } from "../../../src/world/level/block/block";
 import { BlockBehaviour } from "../../../src/world/level/block/state/block-behaviour";
@@ -22,6 +23,7 @@ const STONE = new Block(BlockBehaviour.Properties.of(Material.STONE)).defaultBlo
 
 class FlatMobAiLevel implements MobAiLevel {
   private readonly blocks = new Map<string, BlockState>();
+  private nearestPlayer: MobLookTarget | undefined;
 
   public constructor(
     private readonly minBuildHeight = 0,
@@ -58,6 +60,21 @@ class FlatMobAiLevel implements MobAiLevel {
     return this.minBuildHeight + this.height;
   }
 
+  public setNearestPlayer(player: MobLookTarget | undefined): void {
+    this.nearestPlayer = player;
+  }
+
+  public getNearestPlayer(x: number, y: number, z: number, range: number): MobLookTarget | undefined {
+    if (this.nearestPlayer === undefined) {
+      return undefined;
+    }
+
+    const dx = this.nearestPlayer.getX() - x;
+    const dy = this.nearestPlayer.getEyeY() - y;
+    const dz = this.nearestPlayer.getZ() - z;
+    return (dx * dx) + (dy * dy) + (dz * dz) <= range * range ? this.nearestPlayer : undefined;
+  }
+
   public noCollision(_entity: PathfinderMob | undefined, box: AABB): boolean {
     return blockGetterPathNavigationRegion(this, this.minBuildHeight, this.height).noCollision(_entity, box);
   }
@@ -83,6 +100,16 @@ class FlatMobAiLevel implements MobAiLevel {
 
 function key(x: number, y: number, z: number): string {
   return `${x},${y},${z}`;
+}
+
+function livingTarget(x: number, y: number, z: number, eyeY: number): MobLookTarget {
+  return {
+    getX: () => x,
+    getY: () => y,
+    getZ: () => z,
+    getEyeY: () => eyeY,
+    isAlive: () => true,
+  };
 }
 
 describe("passive mob AI foundation", () => {
@@ -210,5 +237,82 @@ describe("passive mob AI foundation", () => {
 
     expect(chicken.position.x).not.toBe(0.5);
     expect(chicken.position.y).toBe(64);
+  });
+
+  test("generated passive mobs expose vanilla standing eye heights for shared look control", () => {
+    expect(new GeneratedMobEntity({
+      id: 6,
+      uuid: "mclone:test/cow-eye-height",
+      entityType: EntityTypes.COW,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+    }).getEyeY()).toBeCloseTo(65.3);
+
+    expect(new GeneratedMobEntity({
+      id: 7,
+      uuid: "mclone:test/sheep-eye-height",
+      entityType: EntityTypes.SHEEP,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+    }).getEyeY()).toBeCloseTo(65.235);
+
+    expect(new GeneratedMobEntity({
+      id: 8,
+      uuid: "mclone:test/chicken-eye-height",
+      entityType: EntityTypes.CHICKEN,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+    }).getEyeY()).toBeCloseTo(64.644);
+  });
+
+  test("LookControl rotates generated mob head and publishes render rotation data", () => {
+    const cow = new GeneratedMobEntity({
+      id: 9,
+      uuid: "mclone:test/cow-look-control",
+      entityType: EntityTypes.COW,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      yaw: 0,
+      pitch: 0,
+      randomSeed: 0,
+    });
+
+    cow.getLookControl().setLookAt(10.5, cow.getEyeY(), 0.5);
+    cow.getLookControl().tick();
+
+    expect(cow.getYBodyRot()).toBe(0);
+    expect(cow.getYHeadRot()).toBeCloseTo(-10);
+    expect(cow.getXRot()).toBe(0);
+    expect(cow.getSnapshotData().YHeadRot).toBeCloseTo(-10);
+  });
+
+  test("LookAtPlayerGoal acquires the nearest player through the mob level", () => {
+    const level = new FlatMobAiLevel();
+    const cow = new GeneratedMobEntity({
+      id: 10,
+      uuid: "mclone:test/cow-look-at-player",
+      entityType: EntityTypes.COW,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      yaw: 0,
+      pitch: 0,
+      randomSeed: 0,
+    });
+    level.setNearestPlayer(livingTarget(4.5, 64, 0.5, 65.62));
+    cow.setAiLevel(level);
+    const goal = new LookAtPlayerGoal(cow, 6.0, 1.0);
+
+    expect(goal.canUse()).toBe(true);
+    goal.start();
+    goal.tick();
+    cow.getLookControl().tick();
+
+    expect(cow.getYHeadRot()).toBeCloseTo(-10);
+    expect(cow.getXRot()).toBeLessThan(0);
   });
 });

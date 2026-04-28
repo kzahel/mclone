@@ -259,8 +259,21 @@ describe("Entity renderer", () => {
       authoritative: { ...state.authoritative, typeId: "minecraft:goat" },
     })).toBeUndefined();
 
-    const cow = createRenderableEntity(cowState());
+    const cow = createRenderableEntity(cowState({
+      data: {
+        YBodyRot: 12,
+        YBodyRotO: 8,
+        YHeadRot: 20,
+        YHeadRotO: 16,
+        XRotO: -3,
+      },
+    }));
     expect(cow).toBeInstanceOf(SnapshotRenderableCow);
+    expect(cow?.yBodyRot).toBe(12);
+    expect(cow?.yBodyRotO).toBe(8);
+    expect(cow?.yHeadRot).toBe(20);
+    expect(cow?.yHeadRotO).toBe(16);
+    expect(cow?.xRotO).toBe(-3);
 
     const pig = createRenderableEntity(pigState());
     expect(pig).toBeInstanceOf(SnapshotRenderablePig);

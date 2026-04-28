@@ -3,7 +3,10 @@ import { AABB } from "../phys/aabb";
 import { BlockPos } from "../../core/block-pos";
 import { DEFAULT_MOB_ATTRIBUTES, MobAttribute, type MobAttribute as MobAttributeValue } from "./attribute";
 import { GoalSelector } from "./ai/goal/goal-selector";
+import { LookAtPlayerGoal } from "./ai/goal/look-at-player-goal";
+import { RandomLookAroundGoal } from "./ai/goal/random-look-around-goal";
 import { WaterAvoidingRandomStrollGoal } from "./ai/goal/water-avoiding-random-stroll-goal";
+import { LookControl } from "./ai/control/look-control";
 import { MoveControl } from "./ai/control/move-control";
 import { GroundPathNavigation } from "./ai/navigation/ground-path-navigation";
 import type { MobAiLevel, MobRandom, PathfinderMob } from "./ai/pathfinder-mob";
@@ -30,6 +33,7 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   public readonly goalSelector = new GoalSelector();
   public readonly navigation: GroundPathNavigation;
   public readonly moveControl: MoveControl;
+  public readonly lookControl: LookControl;
   public readonly age: number;
   public onGround: boolean;
   public readonly data: Readonly<Record<string, number | boolean | string>>;
@@ -42,6 +46,11 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   private restrictCenter = BlockPos.ZERO;
   private restrictRadius = -1.0;
   private readonly pathfindingMalus = new Map<BlockPathType, number>();
+  private yBodyRot = 0.0;
+  private yBodyRotO = 0.0;
+  private yHeadRot = 0.0;
+  private yHeadRotO = 0.0;
+  private xRotO = 0.0;
 
   public constructor(options: GeneratedMobEntityOptions) {
     super({
@@ -53,8 +62,14 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     this.entityType = options.entityType;
     this.navigation = new GroundPathNavigation(this);
     this.moveControl = new MoveControl(this);
+    this.lookControl = new LookControl(this);
     this.age = options.age ?? 0;
     this.onGround = options.onGround ?? false;
+    this.yBodyRot = this.rotation.yaw;
+    this.yBodyRotO = this.rotation.yaw;
+    this.yHeadRot = this.rotation.yaw;
+    this.yHeadRotO = this.rotation.yaw;
+    this.xRotO = this.rotation.pitch;
     this.random = new WorldgenRandom(options.randomSeed ?? generatedEntityRandomSeed(options.id, options.uuid));
     this.data = options.data ?? this.entityType.createDefaultData(this.random);
     if (this.entityType.category === MobCategory.CREATURE) {
@@ -77,6 +92,7 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
 
   public tickServerAi(options: GeneratedMobTickOptions = {}): void {
     this.tickCount++;
+    this.capturePreviousRotations();
     if (options.resetNoActionTime) {
       this.noActionTime = 0;
     }
@@ -85,6 +101,7 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     this.goalSelector.tick();
     this.navigation.tick();
     this.moveControl.tick();
+    this.lookControl.tick();
     this.applyControlledTravel();
   }
 
@@ -100,6 +117,10 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     return this.position.z;
   }
 
+  public getEyeY(): number {
+    return this.position.y + this.entityType.eyeHeight;
+  }
+
   public getBlockY(): number {
     return floor(this.position.y);
   }
@@ -110,6 +131,43 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
 
   public setYRot(yaw: number): void {
     this.setRotation(yaw, this.rotation.pitch);
+    this.setYBodyRot(yaw);
+  }
+
+  public getXRot(): number {
+    return this.rotation.pitch;
+  }
+
+  public setXRot(pitch: number): void {
+    this.setRotation(this.rotation.yaw, pitch);
+  }
+
+  public getYHeadRot(): number {
+    return this.yHeadRot;
+  }
+
+  public setYHeadRot(yaw: number): void {
+    this.yHeadRot = yaw;
+  }
+
+  public getYBodyRot(): number {
+    return this.yBodyRot;
+  }
+
+  public setYBodyRot(yaw: number): void {
+    this.yBodyRot = yaw;
+  }
+
+  public getMaxHeadXRot(): number {
+    return 40;
+  }
+
+  public getMaxHeadYRot(): number {
+    return 75;
+  }
+
+  public getHeadRotSpeed(): number {
+    return 10;
   }
 
   public getBbWidth(): number {
@@ -144,6 +202,21 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     return this.moveControl;
   }
 
+  public getLookControl(): LookControl {
+    return this.lookControl;
+  }
+
+  public getSnapshotData(): Readonly<Record<string, number | boolean | string>> {
+    return {
+      ...this.data,
+      YBodyRot: this.yBodyRot,
+      YBodyRotO: this.yBodyRotO,
+      YHeadRot: this.yHeadRot,
+      YHeadRotO: this.yHeadRotO,
+      XRotO: this.xRotO,
+    };
+  }
+
   public getAttributeValue(attribute: MobAttributeValue): number {
     return this.entityType.getAttributeValue(attribute);
   }
@@ -176,6 +249,10 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
 
   public isVehicle(): boolean {
     return false;
+  }
+
+  public isAlive(): boolean {
+    return this.removalReason === undefined;
   }
 
   public canStandOnFluid(_fluid: Fluid): boolean {
@@ -228,19 +305,33 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   private registerGoals(): void {
     if (this.entityType.id === EntityTypes.COW.id) {
       this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 1.0));
+      this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, 6.0));
+      this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
       return;
     }
     if (this.entityType.id === EntityTypes.CHICKEN.id) {
       this.goalSelector.addGoal(5, new WaterAvoidingRandomStrollGoal(this, 1.0));
+      this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, 6.0));
+      this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
       return;
     }
     if (this.entityType.id === EntityTypes.PIG.id) {
       this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 1.0));
+      this.goalSelector.addGoal(7, new LookAtPlayerGoal(this, 6.0));
+      this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
       return;
     }
     if (this.entityType.id === EntityTypes.SHEEP.id) {
       this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 1.0));
+      this.goalSelector.addGoal(7, new LookAtPlayerGoal(this, 6.0));
+      this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
     }
+  }
+
+  private capturePreviousRotations(): void {
+    this.yBodyRotO = this.yBodyRot;
+    this.yHeadRotO = this.yHeadRot;
+    this.xRotO = this.rotation.pitch;
   }
 
   private applyControlledTravel(): void {
@@ -300,6 +391,7 @@ export interface EntityTypeOptions {
   readonly category: MobCategory;
   readonly width: number;
   readonly height: number;
+  readonly eyeHeight?: number;
   readonly attributes?: Partial<Record<MobAttributeValue, number>>;
   readonly canSummon?: boolean;
   readonly canSpawnFarFromPlayer?: boolean;
@@ -311,6 +403,7 @@ export class EntityType {
   public readonly category: MobCategory;
   public readonly width: number;
   public readonly height: number;
+  public readonly eyeHeight: number;
   private readonly attributes: Readonly<Record<MobAttributeValue, number>>;
   private readonly summon: boolean;
   private readonly spawnFarFromPlayer: boolean;
@@ -321,6 +414,7 @@ export class EntityType {
     this.category = options.category;
     this.width = options.width;
     this.height = options.height;
+    this.eyeHeight = options.eyeHeight ?? options.height * 0.85;
     this.attributes = {
       ...DEFAULT_MOB_ATTRIBUTES,
       ...options.attributes,
@@ -410,15 +504,20 @@ function chickenData(random: { nextInt(bound: number): number }): Readonly<Recor
 
 export const EntityTypes = {
   SHEEP: creature("minecraft:sheep", 0.9, 1.3, {
+    eyeHeight: 1.235,
     attributes: { [MobAttribute.MAX_HEALTH]: 8.0, [MobAttribute.MOVEMENT_SPEED]: 0.23 },
     defaultData: (random) => ({ Color: sheepColor(random) }),
   }),
   PIG: creature("minecraft:pig", 0.9, 0.9, { attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.25 } }),
   CHICKEN: creature("minecraft:chicken", 0.4, 0.7, {
+    eyeHeight: 0.644,
     attributes: { [MobAttribute.MAX_HEALTH]: 4.0, [MobAttribute.MOVEMENT_SPEED]: 0.25 },
     defaultData: chickenData,
   }),
-  COW: creature("minecraft:cow", 0.9, 1.4, { attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.2 } }),
+  COW: creature("minecraft:cow", 0.9, 1.4, {
+    eyeHeight: 1.3,
+    attributes: { [MobAttribute.MAX_HEALTH]: 10.0, [MobAttribute.MOVEMENT_SPEED]: 0.2 },
+  }),
   WOLF: creature("minecraft:wolf", 0.6, 0.85),
   RABBIT: creature("minecraft:rabbit", 0.4, 0.5),
   FOX: creature("minecraft:fox", 0.6, 0.7),

@@ -52,6 +52,7 @@ import type { WorldGenLevel } from "../../world/level/world-gen-level";
 import type { Fluid } from "../../world/level/material/fluid";
 import { Fluids } from "../../world/level/material/fluids";
 import type { GeneratedMobEntity } from "../../world/entity/entity-type";
+import type { MobLookTarget } from "../../world/entity/ai/pathfinder-mob";
 import { collectLivingEntityPushDeltas, type LivingEntityPushParticipant } from "../../world/entity/entity-push";
 import type {
   ChunkLightDeltaResult,
@@ -122,6 +123,7 @@ import { floor } from "../../util/mth";
 
 const MOB_STABLE_STANDING_SCAN_UP = 1;
 const MOB_STABLE_STANDING_SCAN_DOWN = 4;
+const PLAYER_STANDING_EYE_HEIGHT = 1.62;
 
 function chunkKey(chunkX: number, chunkZ: number): string {
   return `${chunkX},${chunkZ}`;
@@ -2736,7 +2738,8 @@ export class GeneratedWorldHost implements WorldHost {
   }
 
   private createEntitySnapshotMessage(entity: GeneratedMobEntity): EntitySnapshotMessage {
-    const data = Object.keys(entity.data).length === 0 ? undefined : entity.data;
+    const snapshotData = entity.getSnapshotData();
+    const data = Object.keys(snapshotData).length === 0 ? undefined : snapshotData;
     const snapshot: EntitySnapshot = {
       id: entity.id,
       uuid: entity.uuid,
@@ -2856,6 +2859,7 @@ export class GeneratedWorldHost implements WorldHost {
       getFluidState: (pos) => this.getMobPathfindingBlockState(pos).getFluidState(),
       getMaxLightLevel: () => 15,
       noCollision: (_entity, collisionBox) => this.noMobPathCollision(collisionBox),
+      getNearestPlayer: (x, y, z, range) => this.getNearestLocalPlayerLookTarget(x, y, z, range),
       findStableStandingY: (x, z, nearY) => this.findStableMobStandingY(x, z, nearY),
       isStableDestination: (pos) => this.isStableMobDestination(pos),
       isWater: (pos) => this.isWaterMobPosition(pos),
@@ -2864,6 +2868,29 @@ export class GeneratedWorldHost implements WorldHost {
     entity.tickServerAi({
       resetNoActionTime: this.shouldResetMobNoActionTime(entity),
     });
+  }
+
+  private getNearestLocalPlayerLookTarget(x: number, y: number, z: number, range: number): MobLookTarget | undefined {
+    if (this.playerState === undefined) {
+      return undefined;
+    }
+
+    const body = movementBodyFromPlayerState(this.playerState);
+    const eyeY = body.position.y + PLAYER_STANDING_EYE_HEIGHT;
+    const dx = body.position.x - x;
+    const dy = eyeY - y;
+    const dz = body.position.z - z;
+    if ((dx * dx) + (dy * dy) + (dz * dz) > range * range) {
+      return undefined;
+    }
+
+    return {
+      getX: () => body.position.x,
+      getY: () => body.position.y,
+      getZ: () => body.position.z,
+      getEyeY: () => eyeY,
+      isAlive: () => true,
+    };
   }
 
   private pushOverlappingLivingEntities(): void {

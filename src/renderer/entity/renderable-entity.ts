@@ -216,11 +216,18 @@ abstract class SnapshotRenderableTexturedMob implements RenderableTexturedMob {
     this.width = state.width;
     this.height = state.height;
     this.tickCount = state.age ?? 0;
-    this.yBodyRot = this.yaw;
-    this.yBodyRotO = state.previousAuthoritative?.rotation.yaw ?? this.yaw;
-    this.yHeadRot = this.yaw;
-    this.yHeadRotO = this.yBodyRotO;
-    this.xRotO = state.previousAuthoritative?.rotation.pitch ?? this.pitch;
+    const previousData = state.previousAuthoritative?.data;
+    this.yBodyRot = readNumberData(state.data?.YBodyRot, this.yaw);
+    this.yBodyRotO = readNumberData(
+      state.data?.YBodyRotO,
+      readNumberData(previousData?.YBodyRot, state.previousAuthoritative?.rotation.yaw ?? this.yBodyRot),
+    );
+    this.yHeadRot = readNumberData(state.data?.YHeadRot, this.yBodyRot);
+    this.yHeadRotO = readNumberData(
+      state.data?.YHeadRotO,
+      readNumberData(previousData?.YHeadRot, this.yHeadRot),
+    );
+    this.xRotO = readNumberData(state.data?.XRotO, state.previousAuthoritative?.rotation.pitch ?? this.pitch);
     this.baby = typeof state.age === "number" && state.age < 0;
   }
 

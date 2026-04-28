@@ -5,6 +5,7 @@ import { floor } from "../../../../src/util/mth";
 import { MobAttribute } from "../../../../src/world/entity/attribute";
 import type {
   MobAiLevel,
+  MobLookControl,
   MobMoveControl,
   MobNavigation,
   MobRandom,
@@ -53,6 +54,11 @@ const NULL_NAVIGATION: MobNavigation = {
 
 const NULL_MOVE_CONTROL: MobMoveControl = {
   setWantedPosition: () => {},
+};
+
+const NULL_LOOK_CONTROL: MobLookControl = {
+  setLookAt: () => {},
+  tick: () => {},
 };
 
 const NULL_RANDOM: MobRandom = {
@@ -124,6 +130,10 @@ class TestMob implements PathfinderMob {
     return this.position.z;
   }
 
+  public getEyeY(): number {
+    return this.position.y + (this.height * 0.85);
+  }
+
   public getBlockY(): number {
     return floor(this.position.y);
   }
@@ -133,6 +143,36 @@ class TestMob implements PathfinderMob {
   }
 
   public setYRot(_yaw: number): void {}
+
+  public getXRot(): number {
+    return 0;
+  }
+
+  public setXRot(_pitch: number): void {}
+
+  public getYHeadRot(): number {
+    return 0;
+  }
+
+  public setYHeadRot(_yaw: number): void {}
+
+  public getYBodyRot(): number {
+    return 0;
+  }
+
+  public setYBodyRot(_yaw: number): void {}
+
+  public getMaxHeadXRot(): number {
+    return 40;
+  }
+
+  public getMaxHeadYRot(): number {
+    return 75;
+  }
+
+  public getHeadRotSpeed(): number {
+    return 10;
+  }
 
   public getBbWidth(): number {
     return this.width;
@@ -164,6 +204,10 @@ class TestMob implements PathfinderMob {
 
   public getMoveControl(): MobMoveControl {
     return NULL_MOVE_CONTROL;
+  }
+
+  public getLookControl(): MobLookControl {
+    return NULL_LOOK_CONTROL;
   }
 
   public getAiLevel(): MobAiLevel | undefined {
@@ -201,6 +245,10 @@ class TestMob implements PathfinderMob {
 
   public isVehicle(): boolean {
     return false;
+  }
+
+  public isAlive(): boolean {
+    return true;
   }
 
   public isOnGround(): boolean {

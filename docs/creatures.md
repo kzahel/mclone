@@ -60,7 +60,9 @@ This document is a reference for future creature work. It is not a tactical slic
 
 `Creatures7` lands the first living-entity push baseline: generated passive mobs and the local player separate through the authoritative host when their bounding boxes overlap, while pathfinding remains block-focused like vanilla `PathNavigationRegion`.
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics and `deltaMovement` push impulse consumption, persistence adapters beyond the in-memory runtime path, shared passive look/idle goals, chicken live flapping/egg-laying behavior, and cow/pig/sheep gameplay interactions.
+`Creatures8` lands shared passive look/idle AI: generated cows, pigs, sheep, and chickens now have vanilla-shaped `LookControl`, `LookAtPlayerGoal`, `RandomLookAroundGoal`, standing eye heights, passive goal priorities, and authoritative head/body rotation snapshot data for renderer hydration.
+
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics and `deltaMovement` push impulse consumption, persistence adapters beyond the in-memory runtime path, chicken live flapping/egg-laying behavior, and cow/pig/sheep gameplay interactions.
 
 ## Reference Source Map
 

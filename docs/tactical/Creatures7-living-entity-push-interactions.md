@@ -61,4 +61,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-Start the shared passive look/idle goal slice (`LookAtPlayerGoal`, `RandomLookAroundGoal`) now that passive mobs separate instead of visually stacking. The next movement-parity follow-up should be full `deltaMovement`/`LivingEntity.travel(...)` integration so push impulses, gravity, friction, and block movement all share the same application path.
+Shared passive look/idle goals are now tracked in `Creatures8`. The next movement-parity follow-up should be full `deltaMovement`/`LivingEntity.travel(...)` integration so push impulses, gravity, friction, and block movement all share the same application path.
