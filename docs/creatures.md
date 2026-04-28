@@ -64,7 +64,9 @@ This document is a reference for future creature work. It is not a tactical slic
 
 `Creatures9` lands live generated-chicken flap and egg-timer data ticking. Egg item spawning, egg sounds, and fall-slowing `deltaMovement` behavior remain deferred until item entities, sounds, and full `LivingEntity.travel(...)` exist.
 
-Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics and `deltaMovement` push impulse consumption, persistence adapters beyond the in-memory runtime path, egg item/sound side effects, and cow/pig/sheep gameplay interactions.
+`Creatures10` lands generated-sheep `EatBlockGoal`: sheep now use the vanilla-priority eating goal, mutate short grass/grass blocks through the host world bridge, reset sheared state on eating, publish `EatAnimationTick`, and render the vanilla sheep eating head motion.
+
+Still not landed: live natural spawning, player-distance spawn eligibility, mob caps/counting, despawn, full vanilla `LivingEntity.travel(...)`/`Entity.move(...)` physics and `deltaMovement` push impulse consumption, persistence adapters beyond the in-memory runtime path, egg item/sound side effects, game-rule synchronization, item/entity interaction side effects, and cow/pig/sheep interactions beyond sheep grass eating.
 
 ## Reference Source Map
 

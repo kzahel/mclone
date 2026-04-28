@@ -348,11 +348,13 @@ export class SnapshotRenderableChicken extends SnapshotRenderableTexturedMob imp
 export class SnapshotRenderableSheep extends SnapshotRenderableTexturedMob implements RenderableSheep {
   private readonly color: number;
   private readonly sheared: boolean;
+  private readonly eatAnimationTick: number;
 
   public constructor(state: ClientEntityPresentationState) {
     super(state, DEFAULT_SHEEP_TEXTURE);
     this.color = readSheepColor(state.data?.Color);
     this.sheared = state.data?.Sheared === true;
+    this.eatAnimationTick = Math.trunc(readNumberData(state.data?.EatAnimationTick, 0.0));
   }
 
   public getColor(): number {
@@ -363,12 +365,24 @@ export class SnapshotRenderableSheep extends SnapshotRenderableTexturedMob imple
     return this.sheared;
   }
 
-  public getHeadEatPositionScale(_partialTick: number): number {
-    return 0.0;
+  public getHeadEatPositionScale(partialTick: number): number {
+    if (this.eatAnimationTick <= 0) {
+      return 0.0;
+    }
+    if (this.eatAnimationTick >= 4 && this.eatAnimationTick <= 36) {
+      return 1.0;
+    }
+    return this.eatAnimationTick < 4
+      ? (this.eatAnimationTick - partialTick) / 4.0
+      : -(this.eatAnimationTick - 40 - partialTick) / 4.0;
   }
 
-  public getHeadEatAngleScale(_partialTick: number): number {
-    return this.getXRot() * (Math.PI / 180.0);
+  public getHeadEatAngleScale(partialTick: number): number {
+    if (this.eatAnimationTick > 4 && this.eatAnimationTick <= 36) {
+      const phase = (this.eatAnimationTick - 4 - partialTick) / 32.0;
+      return (Math.PI / 5.0) + (0.21991149 * Math.sin(phase * 28.7));
+    }
+    return this.eatAnimationTick > 0 ? Math.PI / 5.0 : this.getXRot() * (Math.PI / 180.0);
   }
 }
 

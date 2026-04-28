@@ -3,6 +3,7 @@ import { AABB } from "../phys/aabb";
 import { BlockPos } from "../../core/block-pos";
 import { DEFAULT_MOB_ATTRIBUTES, MobAttribute, type MobAttribute as MobAttributeValue } from "./attribute";
 import { GoalSelector } from "./ai/goal/goal-selector";
+import { EatBlockGoal } from "./ai/goal/eat-block-goal";
 import { LookAtPlayerGoal } from "./ai/goal/look-at-player-goal";
 import { RandomLookAroundGoal } from "./ai/goal/random-look-around-goal";
 import { WaterAvoidingRandomStrollGoal } from "./ai/goal/water-avoiding-random-stroll-goal";
@@ -24,6 +25,11 @@ interface GeneratedChickenRuntimeData {
   flapping: number;
   eggLayTime: number;
   isChickenJockey: boolean;
+}
+
+interface GeneratedSheepRuntimeData {
+  eatAnimationTick: number;
+  sheared: boolean;
 }
 
 export interface GeneratedMobEntityOptions extends SyntheticRuntimeEntityOptions {
@@ -62,6 +68,8 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   private yHeadRotO = 0.0;
   private xRotO = 0.0;
   private chickenRuntimeData: GeneratedChickenRuntimeData | undefined;
+  private sheepRuntimeData: GeneratedSheepRuntimeData | undefined;
+  private eatBlockGoal: EatBlockGoal | undefined;
 
   public constructor(options: GeneratedMobEntityOptions) {
     super({
@@ -90,6 +98,9 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
     if (this.entityType.id === EntityTypes.CHICKEN.id) {
       this.setPathfindingMalus(BlockPathTypes.WATER, 0.0);
       this.chickenRuntimeData = createChickenRuntimeData(this.data, this.random);
+    }
+    if (this.entityType.id === EntityTypes.SHEEP.id) {
+      this.sheepRuntimeData = createSheepRuntimeData(this.data);
     }
     this.registerGoals();
   }
@@ -220,12 +231,19 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   }
 
   public getSnapshotData(): Readonly<Record<string, number | boolean | string>> {
-    const data = this.chickenRuntimeData === undefined
-      ? this.data
-      : {
-        ...this.data,
+    let data = this.data;
+    if (this.sheepRuntimeData !== undefined) {
+      data = {
+        ...data,
+        ...createSheepRuntimeDataSnapshot(this.sheepRuntimeData),
+      };
+    }
+    if (this.chickenRuntimeData !== undefined) {
+      data = {
+        ...data,
         ...createChickenRuntimeDataSnapshot(this.chickenRuntimeData),
       };
+    }
     return {
       ...data,
       YBodyRot: this.yBodyRot,
@@ -272,6 +290,16 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
 
   public isAlive(): boolean {
     return this.removalReason === undefined;
+  }
+
+  public isBaby(): boolean {
+    return this.age < 0;
+  }
+
+  public ate(): void {
+    if (this.sheepRuntimeData !== undefined) {
+      this.sheepRuntimeData.sheared = false;
+    }
   }
 
   public canStandOnFluid(_fluid: Fluid): boolean {
@@ -341,6 +369,8 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
       return;
     }
     if (this.entityType.id === EntityTypes.SHEEP.id) {
+      this.eatBlockGoal = new EatBlockGoal(this);
+      this.goalSelector.addGoal(5, this.eatBlockGoal);
       this.goalSelector.addGoal(6, new WaterAvoidingRandomStrollGoal(this, 1.0));
       this.goalSelector.addGoal(7, new LookAtPlayerGoal(this, 6.0));
       this.goalSelector.addGoal(8, new RandomLookAroundGoal(this));
@@ -356,6 +386,15 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
   private customAiStep(): void {
     if (this.entityType.id === EntityTypes.CHICKEN.id) {
       this.tickChickenAiStep();
+    }
+    if (this.entityType.id === EntityTypes.SHEEP.id) {
+      this.tickSheepCustomAiStep();
+    }
+  }
+
+  private tickSheepCustomAiStep(): void {
+    if (this.sheepRuntimeData !== undefined) {
+      this.sheepRuntimeData.eatAnimationTick = this.eatBlockGoal?.getEatAnimationTick() ?? 0;
     }
   }
 
@@ -382,10 +421,6 @@ export class GeneratedMobEntity extends SyntheticRuntimeEntity implements Pathfi
         data.eggLayTime = 6000 + this.random.nextInt(6000);
       }
     }
-  }
-
-  private isBaby(): boolean {
-    return this.age < 0;
   }
 
   private applyControlledTravel(): void {
@@ -538,6 +573,20 @@ function sheepColor(random: { nextInt(bound: number): number }): number {
     return 12;
   }
   return random.nextInt(500) === 0 ? 6 : 0;
+}
+
+function createSheepRuntimeData(data: Readonly<Record<string, number | boolean | string>>): GeneratedSheepRuntimeData {
+  return {
+    eatAnimationTick: readIntegerData(data.EatAnimationTick, 0),
+    sheared: data.Sheared === true,
+  };
+}
+
+function createSheepRuntimeDataSnapshot(data: GeneratedSheepRuntimeData): Readonly<Record<string, number | boolean | string>> {
+  return {
+    EatAnimationTick: data.eatAnimationTick,
+    Sheared: data.sheared,
+  };
 }
 
 function creature(id: string, width: number, height: number, options: Omit<EntityTypeOptions, "id" | "category" | "width" | "height"> = {}): EntityType {

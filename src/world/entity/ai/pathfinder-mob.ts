@@ -1,6 +1,8 @@
 import type { BlockPos } from "../../../core/block-pos";
+import type { ResourceLocation } from "../../../core/resource-location";
 import type { MobAttribute } from "../attribute";
 import type { AABB } from "../../phys/aabb";
+import type { BlockState } from "../../level/block/state/block-state";
 import type { Fluid } from "../../level/material/fluid";
 import type { BlockPathTypes } from "../../level/pathfinder/block-path-types";
 import type { PathNavigationRegion } from "../../level/pathfinder/path-navigation-region";
@@ -15,6 +17,10 @@ export interface MobAiLevel extends PathNavigationRegion {
   getMinBuildHeight(): number;
   getMaxBuildHeight(): number;
   getNearestPlayer?(x: number, y: number, z: number, range: number): MobLookTarget | undefined;
+  getDefaultBlockState?(location: ResourceLocation): BlockState | undefined;
+  getGameRuleMobGriefing?(): boolean;
+  destroyBlock?(pos: BlockPos, dropBlock: boolean): boolean;
+  setBlock?(pos: BlockPos, state: BlockState, flags?: number): boolean;
   findStableStandingY(x: number, z: number, nearY: number): number | undefined;
   isStableDestination(pos: BlockPos): boolean;
   isWater(pos: BlockPos): boolean;
@@ -99,4 +105,6 @@ export interface PathfinderMob {
   getWalkTargetValue(pos: BlockPos): number;
   hasPathfindingMalus(pos: BlockPos): boolean;
   isAlive(): boolean;
+  isBaby(): boolean;
+  ate(): void;
 }

@@ -29,7 +29,7 @@ This tactical follows the `CreatureMovement` stack. It expands the small island 
 - Registered pig `WaterAvoidingRandomStrollGoal` through the shared generated-mob stack at vanilla priority `6`.
 - Added vanilla-shaped sheep body and fur render/model/texture coverage through `SheepModel`, `SheepFurModel`, `SheepRenderer`, `ModelLayers.SHEEP`, `ModelLayers.SHEEP_FUR`, and renderable snapshot hydration.
 - Registered sheep passive movement attributes from vanilla: max health `8.0`, movement speed `0.23`.
-- Registered sheep `WaterAvoidingRandomStrollGoal` through the shared generated-mob stack at vanilla priority `6`; `EatBlockGoal`/eating animation remain deferred.
+- Registered sheep `WaterAvoidingRandomStrollGoal` through the shared generated-mob stack at vanilla priority `6`; `EatBlockGoal`/eating animation later land in `Creatures10`.
 - Hydrated sheep `Color` data for all generated sheep construction paths and rendered the wool fur layer with vanilla sheep tint math.
 - Added vanilla-shaped chicken render/model/texture coverage through `ChickenModel`, `ChickenRenderer`, `ModelLayers.CHICKEN`, and renderable snapshot hydration.
 - Registered chicken passive movement attributes from vanilla: max health `4.0`, movement speed `0.25`.
@@ -43,7 +43,7 @@ This tactical follows the `CreatureMovement` stack. It expands the small island 
 ## Deferred Scope
 
 - Add egg item spawning once item entities exist.
-- Port sheep `EatBlockGoal`, grass mutation, sheared-state persistence, and eating animation.
+- Port sheep shearing interactions, wool drops, and persistence-backed sheared state.
 - Port pig saddle/boost/riding hooks once items, interactions, and passenger entities exist.
 - Add breeding, food interactions, drops, sounds, damage/death, and loot tables through later entity/gameplay tacticals.
 - Replace debug starter entities with vanilla generation-time and live natural-spawn coverage when mob caps, despawn, player-distance eligibility, and persistence are in place.
@@ -53,7 +53,7 @@ This tactical follows the `CreatureMovement` stack. It expands the small island 
 1. Spawn/render only, with static authoritative lifecycle.
 2. Shared random stroll through `GroundPathNavigation`.
 3. Done in `Creatures8`: passive look goals and idle head/body rotation state.
-4. Animal-specific details: sheep eat grass/shear hooks, chicken live flap and egg timer, pig saddle/boost hooks when items/interactions exist.
+4. Animal-specific details: done for sheep grass eating in `Creatures10` and chicken live flap/egg timer in `Creatures9`; sheep shearing, egg item drops, and pig saddle/boost hooks wait for items/interactions.
 5. Natural-spawn integration after mob caps, player-distance eligibility, despawn, and persistence are in place.
 
 ## Out Of Scope
@@ -62,7 +62,7 @@ This tactical follows the `CreatureMovement` stack. It expands the small island 
 - Exact natural spawn scheduling or mob caps.
 - Hostile mobs and water creatures.
 - Pig saddle render layer and boost/riding logic until saddle data and interactions exist.
-- Sheep `EatBlockGoal`, grass mutation, shearing interactions, sheared-state persistence, and the `jeb_` color cycle until names/interactions are modeled.
+- Sheep shearing interactions, sheared-state persistence beyond in-memory snapshots, and the `jeb_` color cycle until names/interactions are modeled.
 
 ## Validation
 
@@ -76,4 +76,4 @@ The Deno entity smoke writes `/tmp/mclone-deno-entity-render-smoke.png`. Use a b
 
 ## Next Step
 
-Continue with sheep grass eating and egg item spawning on top of the shared movement, push, passive look, and chicken data-tick stack.
+Continue with the shared item/entity interaction foundation needed by sheep shearing, chicken egg items, cow milking, and pig saddle/riding hooks.

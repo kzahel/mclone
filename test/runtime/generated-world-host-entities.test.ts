@@ -10,9 +10,11 @@ import { createInitialPlayerState } from "../../src/runtime/session/player-loop"
 import { ClientChunkCache } from "../../src/world/level/client-chunk-cache";
 import { createBlockStateResolver } from "../../src/world/level/chunk-snapshot";
 import { registerGeneratedRenderBlocks } from "../../src/world/level/generated-render-blocks";
+import { unpackChunkSnapshot } from "../../src/world/level/packed-chunk-snapshot";
 import { FullChunkStatus } from "../../src/world/level/entity/full-chunk-status";
 import type { WorldGenLevel } from "../../src/world/level/world-gen-level";
 import { EntityTypes, GeneratedMobEntity } from "../../src/world/entity/entity-type";
+import { EatBlockGoal } from "../../src/world/entity/ai/goal/eat-block-goal";
 import { Goal, GoalFlag } from "../../src/world/entity/ai/goal/goal";
 import { OverworldBiomeSource } from "../../src/worldgen/biome/overworld-biome-source";
 import { FlatGrassWorldGenerator, SmallIslandWorldGenerator } from "../../src/worldgen/levelgen/demo-world-generators";
@@ -20,7 +22,7 @@ import type { GenerationEntitySink, NaturalSpawnerOptions } from "../../src/worl
 import {
   type CreatureGenerationFixture,
 } from "../../src/oracle/integration/creature-fixture";
-import type { ClientPlayerState, EntitySnapshot, EntitySnapshotMessage, EntityUpdateMessage } from "../../src/runtime/protocol/world-messages";
+import type { ChunkSnapshotMessage, ClientPlayerState, EntitySnapshot, EntitySnapshotMessage, EntityUpdateMessage } from "../../src/runtime/protocol/world-messages";
 
 const creatureFixtures = [
   ["sheep", sheepFixture as unknown as CreatureGenerationFixture, "minecraft:sheep"],
@@ -58,6 +60,19 @@ class MoveOnceGoal extends Goal {
   }
 }
 
+class ImmediateEatBlockGoal extends EatBlockGoal {
+  private used = false;
+
+  public override canUse(): boolean {
+    return !this.used;
+  }
+
+  public override start(): void {
+    this.used = true;
+    super.start();
+  }
+}
+
 class MovingCowFlatGenerator extends FlatGrassWorldGenerator {
   public override spawnOriginalMobs(
     _level: WorldGenLevel,
@@ -85,6 +100,36 @@ class MovingCowFlatGenerator extends FlatGrassWorldGenerator {
     });
     cow.goalSelector.addGoal(0, new MoveOnceGoal(cow, new BlockPos(10, 64, 8)));
     sink.addFreshEntityWithPassengers(cow);
+  }
+}
+
+class GrassEatingSheepFlatGenerator extends FlatGrassWorldGenerator {
+  public override spawnOriginalMobs(
+    _level: WorldGenLevel,
+    chunkX: number,
+    chunkZ: number,
+    sink: GenerationEntitySink,
+    options: NaturalSpawnerOptions = {},
+  ): void {
+    if (chunkX !== 0 || chunkZ !== 0) {
+      return;
+    }
+
+    const id = options.nextEntityId?.() ?? 1;
+    const sheep = new GeneratedMobEntity({
+      id,
+      uuid: options.nextEntityUuid?.(id) ?? "mclone:test/grass-eating-sheep",
+      entityType: EntityTypes.SHEEP,
+      x: 8.5,
+      y: 64,
+      z: 8.5,
+      yaw: 0,
+      pitch: 0,
+      onGround: true,
+      randomSeed: 0,
+    });
+    sheep.goalSelector.addGoal(0, new ImmediateEatBlockGoal(sheep));
+    sink.addFreshEntityWithPassengers(sheep);
   }
 }
 
@@ -235,6 +280,21 @@ function targetChunkEntitySnapshots(
     .sort((left, right) => left.id - right.id);
 }
 
+function packedSnapshotBlockNameAt(
+  snapshot: ReturnType<typeof unpackChunkSnapshot>,
+  x: number,
+  y: number,
+  z: number,
+): string | undefined {
+  const section = snapshot.sections.find((candidate) => candidate.y === Math.floor(y / 16));
+  if (section === undefined) {
+    return undefined;
+  }
+
+  const blockIndex = ((((y & 15) * 16) + (z & 15)) * 16) + (x & 15);
+  return section.palette[section.blocks[blockIndex] ?? -1]?.name;
+}
+
 function statusChunkPairs(host: GeneratedWorldHost): readonly string[] {
   return host.getDebugEntityChunkStatusRecords()
     .map((record) => `${record.chunkX.toString()},${record.chunkZ.toString()}:${record.status}`);
@@ -337,6 +397,40 @@ describe("GeneratedWorldHost entity publication", () => {
     });
     expect(cowUpdate!.update.position).toBeDefined();
     expect(cowUpdate!.update.position).not.toEqual(initialCow!.entity.position);
+  });
+
+  test("publishes dirty chunk snapshots when a generated sheep eats grass", async () => {
+    const blocks = registerGeneratedRenderBlocks();
+    let nowMs = 0;
+    const host = new GeneratedWorldHost({
+      seed: 12345n,
+      generator: new GrassEatingSheepFlatGenerator(12345n),
+      airState: blocks.airState,
+      blockStateById: blocks.blockStateById,
+      blockStateIds: blocks.blockStateIds,
+      lightingMode: "none",
+      liquidSimulationMode: "none",
+      worldTickIntervalMs: 1,
+      nowMs: () => nowMs,
+    });
+
+    await host.openWorld({ ...OPEN_WORLD_REQUEST, preset: "flat_grass" });
+    await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+
+    nowMs = 36;
+    const updates = await host.pollUpdates({ type: "poll_world_updates" });
+    const dirtySnapshot = updates.find((message): message is ChunkSnapshotMessage => (
+      message.type === "chunk_snapshot" && message.snapshot.chunkX === 0 && message.snapshot.chunkZ === 0
+    ));
+
+    expect(dirtySnapshot).toBeDefined();
+    const unpacked = unpackChunkSnapshot(dirtySnapshot!.snapshot, blocks.blockStateIds);
+    expect(packedSnapshotBlockNameAt(unpacked, 8, 63, 8)).toBe("minecraft:dirt");
   });
 
   test("keeps entity chunk status on the explicit entity ticket after a chunk walk settles", async () => {

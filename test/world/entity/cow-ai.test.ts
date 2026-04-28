@@ -1,14 +1,17 @@
 import { describe, expect, test } from "vitest";
 
 import { BlockPos } from "../../../src/core/block-pos";
+import { ResourceLocation } from "../../../src/core/resource-location";
 import { EntityRuntime } from "../../../src/runtime/host/entity-runtime";
 import { EntityTypes, GeneratedMobEntity } from "../../../src/world/entity/entity-type";
 import { MobAttribute } from "../../../src/world/entity/attribute";
+import { EatBlockGoal } from "../../../src/world/entity/ai/goal/eat-block-goal";
 import { LookAtPlayerGoal } from "../../../src/world/entity/ai/goal/look-at-player-goal";
 import { WaterAvoidingRandomStrollGoal } from "../../../src/world/entity/ai/goal/water-avoiding-random-stroll-goal";
 import type { MobAiLevel, MobLookTarget, PathfinderMob } from "../../../src/world/entity/ai/pathfinder-mob";
 import { AirBlock } from "../../../src/world/level/block/air-block";
 import { Block } from "../../../src/world/level/block/block";
+import { BushBlock } from "../../../src/world/level/block/bush-block";
 import { BlockBehaviour } from "../../../src/world/level/block/state/block-behaviour";
 import type { BlockState } from "../../../src/world/level/block/state/block-state";
 import type { FluidState } from "../../../src/world/level/material/fluid-state";
@@ -20,9 +23,21 @@ import type { AABB } from "../../../src/world/phys/aabb";
 
 const AIR = new AirBlock(BlockBehaviour.Properties.of(Material.AIR).noCollission().noOcclusion().air()).defaultBlockState();
 const STONE = new Block(BlockBehaviour.Properties.of(Material.STONE)).defaultBlockState();
+const DIRT = namedState(new Block(BlockBehaviour.Properties.of(Material.DIRT)), "minecraft:dirt");
+const GRASS_BLOCK = namedState(new Block(BlockBehaviour.Properties.of(Material.GRASS)), "minecraft:grass_block");
+const SHORT_GRASS = namedState(
+  new BushBlock(BlockBehaviour.Properties.of(Material.REPLACEABLE_PLANT).noCollission().noOcclusion()),
+  "minecraft:grass",
+);
 
 class FlatMobAiLevel implements MobAiLevel {
   private readonly blocks = new Map<string, BlockState>();
+  private readonly defaultStates = new Map<string, BlockState>([
+    ["minecraft:air", AIR],
+    ["minecraft:dirt", DIRT],
+    ["minecraft:grass", SHORT_GRASS],
+    ["minecraft:grass_block", GRASS_BLOCK],
+  ]);
   private nearestPlayer: MobLookTarget | undefined;
 
   public constructor(
@@ -58,6 +73,23 @@ class FlatMobAiLevel implements MobAiLevel {
 
   public getMaxBuildHeight(): number {
     return this.minBuildHeight + this.height;
+  }
+
+  public getDefaultBlockState(location: ResourceLocation): BlockState | undefined {
+    return this.defaultStates.get(location.toString());
+  }
+
+  public getGameRuleMobGriefing(): boolean {
+    return true;
+  }
+
+  public setBlock(pos: BlockPos, state: BlockState, _flags = 3): boolean {
+    this.blocks.set(key(pos.getX(), pos.getY(), pos.getZ()), state);
+    return true;
+  }
+
+  public destroyBlock(pos: BlockPos, _dropBlock: boolean): boolean {
+    return this.setBlock(pos, AIR);
   }
 
   public setNearestPlayer(player: MobLookTarget | undefined): void {
@@ -100,6 +132,11 @@ class FlatMobAiLevel implements MobAiLevel {
 
 function key(x: number, y: number, z: number): string {
   return `${x},${y},${z}`;
+}
+
+function namedState(block: Block, location: string): BlockState {
+  block.setLocation(new ResourceLocation(location));
+  return block.defaultBlockState();
 }
 
 function livingTarget(x: number, y: number, z: number, eyeY: number): MobLookTarget {
@@ -211,6 +248,60 @@ describe("passive mob AI foundation", () => {
 
     expect(sheep.position.x).not.toBe(0.5);
     expect(sheep.position.y).toBe(64);
+  });
+
+  test("EatBlockGoal converts grass block below sheep to dirt and regrows wool data", () => {
+    const level = new FlatMobAiLevel();
+    const sheep = new GeneratedMobEntity({
+      id: 14,
+      uuid: "mclone:test/sheep-eat-grass-block",
+      entityType: EntityTypes.SHEEP,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+      data: {
+        Color: 0,
+        Sheared: true,
+      },
+    });
+    sheep.setAiLevel(level);
+    level.setBlock(new BlockPos(0, 63, 0), GRASS_BLOCK);
+    const goal = new EatBlockGoal(sheep);
+
+    goal.start();
+    for (let tick = 0; tick < 36; tick++) {
+      goal.tick();
+    }
+
+    expect(goal.getEatAnimationTick()).toBe(4);
+    expect(level.getBlockState(new BlockPos(0, 63, 0)).getBlock().getLocation()?.toString()).toBe("minecraft:dirt");
+    expect(sheep.getSnapshotData().Sheared).toBe(false);
+  });
+
+  test("EatBlockGoal destroys short grass at the sheep position", () => {
+    const level = new FlatMobAiLevel();
+    const sheep = new GeneratedMobEntity({
+      id: 15,
+      uuid: "mclone:test/sheep-eat-short-grass",
+      entityType: EntityTypes.SHEEP,
+      x: 0.5,
+      y: 64,
+      z: 0.5,
+      onGround: true,
+      randomSeed: 0,
+    });
+    sheep.setAiLevel(level);
+    level.setBlock(new BlockPos(0, 64, 0), SHORT_GRASS);
+    const goal = new EatBlockGoal(sheep);
+
+    goal.start();
+    for (let tick = 0; tick < 36; tick++) {
+      goal.tick();
+    }
+
+    expect(level.getBlockState(new BlockPos(0, 64, 0)).isAir()).toBe(true);
   });
 
   test("generated chickens use vanilla passive attributes and placeholder chicken state", () => {

@@ -148,7 +148,7 @@ function sheepState(overrides: Partial<ClientEntityPresentationState> = {}): Cli
     height: 1.3,
     onGround: true,
     age: 0,
-    data: { Color: 12 },
+    data: { Color: 12, EatAnimationTick: 20 },
   };
   return {
     entityId: authoritative.id,
@@ -281,6 +281,8 @@ describe("Entity renderer", () => {
     const sheep = createRenderableEntity(sheepState());
     expect(sheep).toBeInstanceOf(SnapshotRenderableSheep);
     expect((sheep as SnapshotRenderableSheep).getColor()).toBe(12);
+    expect((sheep as SnapshotRenderableSheep).getHeadEatPositionScale(0)).toBe(1);
+    expect((sheep as SnapshotRenderableSheep).getHeadEatAngleScale(0)).toBeCloseTo(Math.PI / 5 + (0.21991149 * Math.sin(16 / 32 * 28.7)));
 
     const chicken = createRenderableEntity(chickenState());
     expect(chicken).toBeInstanceOf(SnapshotRenderableChicken);

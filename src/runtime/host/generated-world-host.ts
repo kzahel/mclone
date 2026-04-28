@@ -1,4 +1,6 @@
 import { BlockPos } from "../../core/block-pos";
+import { ResourceLocation } from "../../core/resource-location";
+import { Registry } from "../../core/registry";
 import { SectionPos } from "../../core/section-pos";
 import { ChunkBiomeContainer } from "../../worldgen/biome/chunk-biome-container";
 import { OverworldBiomeSource } from "../../worldgen/biome/overworld-biome-source";
@@ -48,6 +50,7 @@ import { LEVEL_CHUNK_SECTION_SIZE } from "../../world/level/chunk/level-chunk-se
 import { FullChunkStatus } from "../../world/level/entity/full-chunk-status";
 import { AABB } from "../../world/phys/aabb";
 import { Vec3 } from "../../world/phys/vec3";
+import type { Block } from "../../world/level/block/block";
 import type { BlockState } from "../../world/level/block/state/block-state";
 import type { BlockStateIdMap } from "../../world/level/block/state/block-state-id";
 import type { WorldGenLevel } from "../../world/level/world-gen-level";
@@ -2481,10 +2484,12 @@ export class GeneratedWorldHost implements WorldHost {
       this.hydratePublishedLiquidTicks();
     }
     this.lastWorldTickAtMs += dueTicks * tickIntervalMs;
-    if (this.liquidSimulationEnabled) {
+    if (this.liquidSimulationEnabled || this.dirtyChunksForPublication.size > 0) {
       await this.flushDirtyPublishedChunks(
         this.options.chunkViewScheduling === "cooperative" ? createCooperativeYield() : undefined,
       );
+    }
+    if (this.pendingLightBlockChanges.size > 0) {
       this.enqueueDirtyLightDeltas();
     }
     this.enqueueDirtyEntityUpdates();
@@ -2911,6 +2916,10 @@ export class GeneratedWorldHost implements WorldHost {
       getMaxLightLevel: () => 15,
       noCollision: (_entity, collisionBox) => this.noMobPathCollision(collisionBox),
       getNearestPlayer: (x, y, z, range) => this.getNearestLocalPlayerLookTarget(x, y, z, range),
+      getDefaultBlockState: (location) => this.getDefaultBlockState(location),
+      getGameRuleMobGriefing: () => true,
+      destroyBlock: (pos, _dropBlock) => this.destroyMobBlock(pos),
+      setBlock: (pos, state) => this.setMobBlockState(pos, state),
       findStableStandingY: (x, z, nearY) => this.findStableMobStandingY(x, z, nearY),
       isStableDestination: (pos) => this.isStableMobDestination(pos),
       isWater: (pos) => this.isWaterMobPosition(pos),
@@ -2919,6 +2928,32 @@ export class GeneratedWorldHost implements WorldHost {
     entity.tickServerAi({
       resetNoActionTime: this.shouldResetMobNoActionTime(entity),
     });
+  }
+
+  private getDefaultBlockState(location: ResourceLocation): BlockState | undefined {
+    return (Registry.BLOCK.get(location) as Block | undefined)?.defaultBlockState();
+  }
+
+  private destroyMobBlock(pos: BlockPos): boolean {
+    return this.setMobBlockState(pos, this.options.airState);
+  }
+
+  private setMobBlockState(pos: BlockPos, state: BlockState): boolean {
+    const chunkX = SectionPos.blockToSectionCoord(pos.getX());
+    const chunkZ = SectionPos.blockToSectionCoord(pos.getZ());
+    const chunk = this.level.getAuthorityChunk(chunkX, chunkZ);
+    if (chunk === null) {
+      return false;
+    }
+
+    const oldState = chunk.getBlockState(pos);
+    if (this.options.blockStateIds.idFor(oldState) === this.options.blockStateIds.idFor(state)) {
+      return false;
+    }
+
+    chunk.setBlockState(pos, state);
+    this.markHostBlockChanged(pos, oldState, state);
+    return true;
   }
 
   private getNearestLocalPlayerLookTarget(x: number, y: number, z: number, range: number): MobLookTarget | undefined {

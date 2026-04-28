@@ -53,4 +53,4 @@ pnpm --silent typecheck
 
 ## Next Step
 
-Start `Creatures10` with sheep `EatBlockGoal`, grass mutation, and eating head animation. That is the next visible animal-specific behavior that exercises both server-side world mutation and renderer state.
+`Creatures10` now covers sheep `EatBlockGoal`, grass mutation, and eating head animation. The next cross-cutting gameplay step is the shared item/entity interaction and side-effect path needed by sheep shearing, cow milking, pig saddles/riding, and chicken egg item drops.

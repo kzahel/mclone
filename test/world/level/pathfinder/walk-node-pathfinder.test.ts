@@ -251,6 +251,12 @@ class TestMob implements PathfinderMob {
     return true;
   }
 
+  public isBaby(): boolean {
+    return false;
+  }
+
+  public ate(): void {}
+
   public isOnGround(): boolean {
     return true;
   }
