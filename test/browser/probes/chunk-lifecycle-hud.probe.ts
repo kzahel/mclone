@@ -3,6 +3,7 @@ import { getDefaultRenderDistance } from "../../../src/renderer/browser-render-c
 import { FAST_VISUAL_PROBE_TIMEOUTS } from "./fast-visual-probe-config";
 
 const CHUNK_LIFECYCLE_HUD_SCREENSHOT_PATH = "/tmp/mclone-chunk-lifecycle-hud.png";
+const CHUNK_LIFECYCLE_LOADING_HUD_SCREENSHOT_PATH = "/tmp/mclone-chunk-lifecycle-loading-hud.png";
 
 interface ChunkLifecycleHudDebugState {
   readonly ready: boolean;
@@ -29,7 +30,7 @@ interface ChunkLifecycleHudDebugState {
 test.setTimeout(60_000);
 
 test("renders the chunk lifecycle debug HUD", async ({ page }) => {
-  const viewDistance = 1;
+  const viewDistance = 4;
   const params = new URLSearchParams({
     worldTransport: "worker",
     worldStorageMode: "none",
@@ -46,6 +47,23 @@ test("renders the chunk lifecycle debug HUD", async ({ page }) => {
   await page.waitForFunction(() => typeof window.__mcloneDebug !== "undefined", undefined, {
     timeout: FAST_VISUAL_PROBE_TIMEOUTS.ready,
   });
+  await page.waitForFunction(
+    () => {
+      const state = window.__mcloneDebug?.state as ChunkLifecycleHudDebugState | undefined;
+      return state?.mode === "loading"
+        && state.chunkLifecycle !== undefined
+        && state.chunkLifecycle.records.length > 0
+        && state.chunkLifecycle.counts.total > 0;
+    },
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.ready },
+  );
+  const loadingState = await page.evaluate(() => window.__mcloneDebug!.state as ChunkLifecycleHudDebugState);
+  expect(loadingState.error).toBeUndefined();
+  expect(loadingState.mode).toBe("loading");
+  expect(loadingState.chunkLifecycle!.counts.total).toBeGreaterThan(0);
+  await page.locator("#renderer").screenshot({ path: CHUNK_LIFECYCLE_LOADING_HUD_SCREENSHOT_PATH });
+
   await page.waitForFunction(
     () => window.__mcloneDebug?.state.ready === true || window.__mcloneDebug?.state.error !== undefined,
     undefined,

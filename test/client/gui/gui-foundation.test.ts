@@ -10,6 +10,49 @@ import { DebugSettingsScreen, type GuiDebugSettingsState } from "../../../src/cl
 import { Screen } from "../../../src/client/gui/screens/screen";
 import { TitleScreen } from "../../../src/client/gui/screens/title-screen";
 import { GuiDrawList } from "../../../src/renderer/gui/gui-draw-list";
+import type { GeneratedChunkLifecycleSnapshot } from "../../../src/runtime/protocol/chunk-lifecycle";
+
+const EMPTY_CHUNK_LIFECYCLE_SNAPSHOT: GeneratedChunkLifecycleSnapshot = {
+  currentChunkView: { centerChunkX: 0, centerChunkZ: 0, radius: 1 },
+  chunkViewJobRevision: 1,
+  records: [{
+    chunkX: 0,
+    chunkZ: 0,
+    inAuthorityView: true,
+    inFullView: true,
+    inPublishView: true,
+    ticketLevel: 31,
+    ticketFullStatus: "entity_ticking",
+    ticketSources: [],
+    generatedStatus: "full",
+    hasBlockSections: true,
+    chunkLoaded: true,
+    statusJobs: [],
+    published: true,
+    dirtyForPublication: false,
+    dirtyDurable: false,
+    queuedForUnload: false,
+    pendingUnload: false,
+    pendingStorageWrite: false,
+    lightInputSent: false,
+    lightAccepted: false,
+    publicationBlocker: { kind: "already_published" },
+  }],
+  counts: {
+    total: 1,
+    inAuthorityView: 1,
+    inPublishView: 1,
+    loaded: 1,
+    materialized: 1,
+    published: 1,
+    dirtyForPublication: 0,
+    queuedForUnload: 0,
+    pendingUnload: 0,
+    byGeneratedStatus: { full: 1 },
+    byHolderFullStatus: {},
+    byPublicationBlocker: { already_published: 1 },
+  },
+};
 
 describe("Gui0 model foundation", () => {
   it("measures and emits ASCII bitmap font glyph commands", () => {
@@ -95,6 +138,24 @@ describe("Gui0 model foundation", () => {
     expect(drawList.getCommands().length).toBeGreaterThan(4);
     expect(drawList.getCommands().some((command) => command.type === "solid_rect")).toBe(true);
     expect(drawList.getCommands().some((command) => command.type === "textured_quad")).toBe(true);
+  });
+
+  it("can render chunk lifecycle diagnostics on the progress screen", () => {
+    const manager = new ScreenManager(640, 360);
+    const progressScreen = new ProgressScreen(true);
+    manager.setScreen(progressScreen);
+    progressScreen.progressStart("Loading world");
+    progressScreen.updateProgress({ stage: "Loading terrain chunks", current: 3, total: 10 });
+    progressScreen.updateChunkLifecycle(EMPTY_CHUNK_LIFECYCLE_SNAPSHOT);
+
+    const drawList = new GuiDrawList();
+    manager.render(drawList, 0, 0, 0);
+
+    const solidRects = drawList.getCommands().filter((command) => command.type === "solid_rect");
+    expect(solidRects.length).toBeGreaterThan(6);
+    expect(drawList.getCommands().some((command) =>
+      command.type === "textured_quad" && command.x > 300 && command.y < 80
+    )).toBe(true);
   });
 
   it("lays out the pause menu and returns to gameplay", () => {

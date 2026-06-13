@@ -1,13 +1,15 @@
 import { describe, expect, test } from "vitest";
 import type { DebugInputFrame } from "../../src/renderer/debug/debug-input";
 import {
-  buildChunkLifecycleHudLines,
   buildDebugOverlayLines,
   consumePlayerPhysicsCommandsForFrame,
-  getChunkLifecycleHudBounds,
-  getChunkLifecycleHudCellState,
   shouldQueuePlayerInput,
 } from "../../src/renderer/gui/gpu-world-runtime";
+import {
+  buildChunkLifecycleHudLines,
+  getChunkLifecycleHudBounds,
+  getChunkLifecycleHudCellState,
+} from "../../src/client/gui/chunk-lifecycle-hud";
 import { MovementCommandClock } from "../../src/runtime/movement";
 import type { PlayerInputCommand } from "../../src/runtime/protocol/world-messages";
 import type { GeneratedChunkLifecycleRecord, GeneratedChunkLifecycleSnapshot } from "../../src/runtime/protocol/chunk-lifecycle";

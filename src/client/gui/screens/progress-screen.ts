@@ -1,4 +1,6 @@
 import type { GuiDrawList } from "../../../renderer/gui/gui-draw-list";
+import type { GeneratedChunkLifecycleSnapshot } from "../../../runtime/protocol/chunk-lifecycle";
+import { measureChunkLifecycleHudPanel, renderChunkLifecycleHud } from "../chunk-lifecycle-hud";
 import { GuiComponent } from "../gui-component";
 import { Screen } from "./screen";
 
@@ -15,6 +17,7 @@ export class ProgressScreen extends Screen {
   private stage: string | null = null;
   private progress = 0;
   private stop = false;
+  private chunkLifecycle: GeneratedChunkLifecycleSnapshot | undefined;
 
   public constructor(private readonly clearScreenAfterStop: boolean) {
     super("narrator.screen.progress");
@@ -54,6 +57,10 @@ export class ProgressScreen extends Screen {
     }
   }
 
+  public updateChunkLifecycle(snapshot: GeneratedChunkLifecycleSnapshot | undefined): void {
+    this.chunkLifecycle = snapshot;
+  }
+
   public stopProgress(): void {
     this.stop = true;
   }
@@ -67,8 +74,13 @@ export class ProgressScreen extends Screen {
     }
 
     this.renderBackground(drawList);
+    const lifecyclePanel = measureChunkLifecycleHudPanel(this.getFont(), this.width, this.height, this.chunkLifecycle);
+    const contentWidth = lifecyclePanel !== undefined && lifecyclePanel.x >= 120
+      ? lifecyclePanel.x - 12
+      : this.width;
+    const contentCenterX = Math.floor(contentWidth / 2);
     if (this.header !== null) {
-      GuiComponent.drawCenteredString(drawList, this.getFont(), this.header, Math.floor(this.width / 2), 70, 0xffffffff);
+      GuiComponent.drawCenteredString(drawList, this.getFont(), this.header, contentCenterX, 70, 0xffffffff);
     }
 
     if (this.stage !== null && this.progress !== 0) {
@@ -76,21 +88,22 @@ export class ProgressScreen extends Screen {
         drawList,
         this.getFont(),
         `${this.stage} ${this.progress.toString()}%`,
-        Math.floor(this.width / 2),
+        contentCenterX,
         90,
         0xffffffff,
       );
     }
 
     // WebGPU: visible progress bar instead of vanilla's text-only ProgressScreen.
-    this.renderProgressBar(drawList);
+    this.renderProgressBar(drawList, contentWidth);
+    renderChunkLifecycleHud(drawList, this.getFont(), this.width, this.height, this.chunkLifecycle);
     super.render(drawList, mouseX, mouseY, partialTick);
   }
 
-  private renderProgressBar(drawList: GuiDrawList): void {
-    const progressWidth = Math.min(240, Math.max(120, this.width - 80));
+  private renderProgressBar(drawList: GuiDrawList, contentWidth: number): void {
+    const progressWidth = Math.min(240, Math.max(120, contentWidth - 80));
     const progressHeight = 10;
-    const x = Math.floor((this.width - progressWidth) / 2);
+    const x = Math.floor((contentWidth - progressWidth) / 2);
     const y = 108;
     const filled = Math.floor((progressWidth - 2) * (this.progress / 100));
     GuiComponent.fill(drawList, x - 1, y - 1, x + progressWidth + 1, y + progressHeight + 1, 0xff000000);

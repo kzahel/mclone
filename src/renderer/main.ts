@@ -655,6 +655,11 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<G
   options.state.screenTitle = "Progress Screen";
   options.screenManager.setScreen(progressScreen);
 
+  const reportChunkLifecycle = (snapshot: GeneratedChunkLifecycleSnapshot | undefined): void => {
+    progressScreen.updateChunkLifecycle(snapshot);
+    options.state.chunkLifecycle = snapshot;
+  };
+
   const reportProgress = (progress: LoadingProgress): void => {
     progressScreen.updateProgress(progress);
     options.state.loadingStage = progress.stage;
@@ -668,7 +673,7 @@ async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<G
   try {
     const bootResult = shouldUseSmokeTitleWorldStart(options.url)
       ? await runGpuTitleSmokeWorldBoot(options, reportProgress)
-      : await runGpuTitleLiveWorldBoot(options, reportProgress);
+      : await runGpuTitleLiveWorldBoot(options, reportProgress, reportChunkLifecycle);
     if (!bootResult.ok) {
       options.state.mode = "error";
       options.state.error = bootResult.reason;
@@ -765,6 +770,7 @@ async function runGpuTitleSmokeWorldBoot(
 async function runGpuTitleLiveWorldBoot(
   options: StartGpuTitleWorldOptions,
   onProgress: LoadingProgressSink,
+  onChunkLifecycle?: (snapshot: GeneratedChunkLifecycleSnapshot | undefined) => void,
 ): Promise<GpuTitleWorldBootRun> {
   const runtimeConfig = resolveGuiWorldTransportConfig(options.debugSettingsState);
   const renderConfig = readBrowserRenderConfig(options.url, browserRenderConfigStorage());
@@ -799,6 +805,11 @@ async function runGpuTitleLiveWorldBoot(
   }
 
   const scene = sceneResult.scene;
+  const publishLoadingChunkLifecycle = (): void => {
+    const snapshot = scene.clientRuntime.publishPresentationState().chunkLifecycle;
+    options.state.chunkLifecycle = snapshot;
+    onChunkLifecycle?.(snapshot);
+  };
   try {
     const camera = readSmokeCamera(options.url) ?? DEFAULT_TITLE_WORLD_CAMERA;
     const chunkViewRequest = createChunkViewRequestForCameraState(camera, scene.viewDistance);
@@ -806,6 +817,7 @@ async function runGpuTitleLiveWorldBoot(
       applyRenderWorldDirtySections(scene);
       scene.levelRenderer.allChanged();
     }
+    publishLoadingChunkLifecycle();
 
     const expectedLoadedChunkCount = getExpectedLoadedChunkCount(scene.viewDistance);
     options.state.expectedLoadedChunkCount = expectedLoadedChunkCount;
@@ -817,10 +829,13 @@ async function runGpuTitleLiveWorldBoot(
     options.state.worldStorageMode = options.debugSettingsState.worldStorageMode;
     if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, {
       maxAttempts: Math.max(2400, expectedLoadedChunkCount * 32),
-      onProgress: (progress) => onProgress({
-        ...progress,
-        fraction: 0.92 + ((progressFraction(progress) ?? 0) * 0.06),
-      }),
+      onProgress: (progress) => {
+        publishLoadingChunkLifecycle();
+        onProgress({
+          ...progress,
+          fraction: 0.92 + ((progressFraction(progress) ?? 0) * 0.06),
+        });
+      },
     })) {
       closeRendererScene(scene);
       return {
@@ -829,6 +844,7 @@ async function runGpuTitleLiveWorldBoot(
       };
     }
 
+    publishLoadingChunkLifecycle();
     onProgress({ stage: "Building first frame", fraction: 0.98 });
     scene.levelRenderer.allChanged();
     const frame = await renderSceneUntilSettled(scene, camera);

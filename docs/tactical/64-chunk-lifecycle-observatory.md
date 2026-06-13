@@ -52,10 +52,11 @@ Implementation shape:
 - The generated host appends a `chunk_lifecycle` message only when that flag is present.
 - The client replica stores the latest lifecycle snapshot alongside the existing performance snapshot.
 - The browser runtime requests the snapshot only while `showDebugInfo` is enabled.
-- The debug overlay draws a compact top-right minimap from the protocol snapshot:
+- The loading screen and debug overlay draw a compact minimap from the protocol snapshot:
   - cell color is the actionable lifecycle state: published, blocked, ready, materialized, generated, dirty, or unloading
   - the panel shows chunk coordinate bounds, view center/radius, publication counts, loaded count, and blocked count
   - the current view square and center chunk are marked directly on the grid
+  - during loading, the normal progress text/bar shifts left when the lifecycle panel is visible
 
 This HUD is deliberately a host lifecycle view. It does not yet answer whether a published chunk has been hydrated into the render worker, meshed, uploaded, or submitted by the renderer.
 
