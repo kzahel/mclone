@@ -11,6 +11,7 @@ import {
 } from "../../src/renderer/generated-world-smoke-scenario.ts";
 
 const REMOTE_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-remote-smoke.png";
+const REMOTE_VANILLA_LIGHTING_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-remote-vanilla-lighting-smoke.png";
 const DEDICATED_QUERY_AUTO_START_SCREENSHOT_PATH = "/tmp/mclone-browser-dedicated-query-auto-start-smoke.png";
 const WORKER_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-smoke.png";
 const WORKER_TRANSITION_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-transition-smoke.png";
@@ -48,6 +49,13 @@ function createRemoteSmokeUrl(remoteWorldHostUrl: string): string {
     worldTransport: "remote",
     worldHostUrl: remoteWorldHostUrl,
   }).toString()}`;
+}
+
+function createRemoteVanillaLightingSmokeUrl(remoteWorldHostUrl: string): string {
+  return `/smoke.html?${createSmokeParams({
+    worldTransport: "remote",
+    worldHostUrl: remoteWorldHostUrl,
+  }, GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO).toString()}`;
 }
 
 function createDedicatedQueryAutoStartUrl(remoteWorldHostUrl: string): string {
@@ -143,6 +151,19 @@ test("WebGPU boot succeeds against the remote Node host with two browser clients
   expect(firstResult.saveId).toBe(secondResult.saveId);
   expect(firstResult.sessionId).not.toBe(secondResult.sessionId);
   expect(firstResult.playerId).not.toBe(secondResult.playerId);
+});
+
+test("WebGPU boot succeeds against the remote Node host with vanilla lighting", async ({ page, remoteWorldHostUrl }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(String(err)));
+
+  const result = await bootPage(page, createRemoteVanillaLightingSmokeUrl(remoteWorldHostUrl));
+  await page.locator("#renderer").screenshot({ path: REMOTE_VANILLA_LIGHTING_SMOKE_SCREENSHOT_PATH });
+
+  expectRenderedSmokeResult(result, "remote", GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO);
+  expect(result.lightingMode).toBe("vanilla17");
+  expect(result.topology.lighting).toBe("remote");
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });
 
 test("GPU title auto-starts a dedicated WebSocket session from query params", async ({ page, remoteWorldHostUrl }) => {

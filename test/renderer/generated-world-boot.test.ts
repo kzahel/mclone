@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   GENERATED_WORLD_SMOKE_SCENARIO,
   GENERATED_WORLD_TRANSITION_SCENARIO,
+  GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO,
 } from "../../src/renderer/generated-world-smoke-scenario";
 import {
   type GeneratedWorldBootAdapter,
@@ -53,6 +54,33 @@ describe("generated-world boot adapter", () => {
       lighting: "none",
       liquidSimulation: "none",
       storage: "none",
+      assetSource: "browser-asset-pack",
+      renderTarget: "canvas",
+    });
+  });
+
+  test("browser boot adapter declares remote vanilla lighting topology", () => {
+    const adapter = createGeneratedWorldBrowserBootAdapter({
+      canvas: {} as HTMLCanvasElement,
+      renderConfig: makeBrowserRenderConfig({
+        lightingMode: "vanilla17",
+        liquidSimulationMode: "none",
+      }),
+      runtimeConfig: {
+        worldTransport: "remote",
+        remoteWorldHostUrl: "http://127.0.0.1:4173",
+      },
+      readbackFormat: "rgba8unorm",
+    });
+
+    expect(adapter.describeTopology({ scenario: GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO })).toEqual({
+      host: "browser",
+      worldHost: "remote",
+      renderWorld: "worker",
+      meshTransport: "worker",
+      lighting: "remote",
+      liquidSimulation: "none",
+      storage: "remote",
       assetSource: "browser-asset-pack",
       renderTarget: "canvas",
     });
@@ -141,7 +169,7 @@ describe("generated-world boot adapter", () => {
   });
 });
 
-function makeBrowserRenderConfig(): BrowserRenderConfig {
+function makeBrowserRenderConfig(overrides: Partial<BrowserRenderConfig> = {}): BrowserRenderConfig {
   return {
     viewDistance: GENERATED_WORLD_SMOKE_SCENARIO.viewDistance,
     renderDistance: GENERATED_WORLD_SMOKE_SCENARIO.renderDistance,
@@ -152,5 +180,6 @@ function makeBrowserRenderConfig(): BrowserRenderConfig {
     liquidSimulationMode: GENERATED_WORLD_SMOKE_SCENARIO.engineConfig.liquidSimulationMode,
     worldStorageMode: "none",
     autoJump: true,
+    ...overrides,
   };
 }
