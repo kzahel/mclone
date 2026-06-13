@@ -1,5 +1,6 @@
 import { GuiDrawList } from "../../renderer/gui/gui-draw-list";
 import { Font } from "./font";
+import type { GuiRenderMetrics } from "./gui-render-metrics";
 import type { Screen } from "./screens/screen";
 
 export class ScreenManager {
@@ -36,13 +37,24 @@ export class ScreenManager {
     this.currentScreen?.tick();
   }
 
-  public render(drawList: GuiDrawList, mouseX: number, mouseY: number, partialTick: number): void {
-    this.currentScreen?.render(drawList, mouseX, mouseY, partialTick);
+  public render(
+    drawList: GuiDrawList,
+    mouseX: number,
+    mouseY: number,
+    partialTick: number,
+    metrics?: GuiRenderMetrics,
+  ): void {
+    this.currentScreen?.render(drawList, mouseX, mouseY, partialTick, metrics);
   }
 
-  public renderToDrawList(mouseX: number, mouseY: number, partialTick: number): GuiDrawList {
+  public renderToDrawList(
+    mouseX: number,
+    mouseY: number,
+    partialTick: number,
+    metrics?: GuiRenderMetrics,
+  ): GuiDrawList {
     const drawList = new GuiDrawList();
-    this.render(drawList, mouseX, mouseY, partialTick);
+    this.render(drawList, mouseX, mouseY, partialTick, metrics);
     return drawList;
   }
 

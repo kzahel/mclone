@@ -1,5 +1,6 @@
 import type { GuiDrawList } from "../../../renderer/gui/gui-draw-list";
 import type { GeneratedChunkLifecycleSnapshot } from "../../../runtime/protocol/chunk-lifecycle";
+import type { GuiRenderMetrics } from "../gui-render-metrics";
 import {
   measureChunkLifecycleHudPanel,
   measureChunkLifecycleHudPlaceholderPanel,
@@ -83,7 +84,13 @@ export class ProgressScreen extends Screen {
     this.stop = true;
   }
 
-  public override render(drawList: GuiDrawList, mouseX: number, mouseY: number, partialTick: number): void {
+  public override render(
+    drawList: GuiDrawList,
+    mouseX: number,
+    mouseY: number,
+    partialTick: number,
+    metrics?: GuiRenderMetrics,
+  ): void {
     if (this.stop) {
       if (this.clearScreenAfterStop) {
         this.manager?.setScreen(null);
@@ -114,8 +121,8 @@ export class ProgressScreen extends Screen {
 
     // WebGPU: visible progress bar instead of vanilla's text-only ProgressScreen.
     this.renderProgressBar(drawList, contentWidth);
-    this.renderChunkLifecyclePanel(drawList);
-    super.render(drawList, mouseX, mouseY, partialTick);
+    this.renderChunkLifecyclePanel(drawList, metrics);
+    super.render(drawList, mouseX, mouseY, partialTick, metrics);
   }
 
   private measureChunkLifecyclePanel() {
@@ -135,9 +142,9 @@ export class ProgressScreen extends Screen {
     );
   }
 
-  private renderChunkLifecyclePanel(drawList: GuiDrawList): void {
+  private renderChunkLifecyclePanel(drawList: GuiDrawList, metrics: GuiRenderMetrics | undefined): void {
     if (this.chunkLifecycle !== undefined) {
-      renderChunkLifecycleHud(drawList, this.getFont(), this.width, this.height, this.chunkLifecycle);
+      renderChunkLifecycleHud(drawList, this.getFont(), this.width, this.height, this.chunkLifecycle, { metrics });
       return;
     }
 

@@ -1,4 +1,5 @@
 import type { ScreenManager } from "../../client/gui/screen-manager";
+import type { GuiRenderMetrics } from "../../client/gui/gui-render-metrics";
 import { GuiDrawList } from "./gui-draw-list";
 import { GuiRenderer } from "./gui-renderer";
 
@@ -6,7 +7,13 @@ export interface GuiInputAttachment {
   dispose(): void;
 }
 
-export type GuiOverlayRenderer = (drawList: GuiDrawList, mouseX: number, mouseY: number, partialTick: number) => void;
+export type GuiOverlayRenderer = (
+  drawList: GuiDrawList,
+  mouseX: number,
+  mouseY: number,
+  partialTick: number,
+  metrics: GuiRenderMetrics,
+) => void;
 const NOOP_GUI_OVERLAY_RENDERER: GuiOverlayRenderer = () => {};
 
 export class GuiOverlayHost {
@@ -118,11 +125,19 @@ export class GuiOverlayHost {
     pixelHeight: number,
   ): void {
     const size = GuiRenderer.calculateGuiSize(pixelWidth, pixelHeight);
+    const metrics: GuiRenderMetrics = {
+      pixelWidth,
+      pixelHeight,
+      guiWidth: size.guiWidth,
+      guiHeight: size.guiHeight,
+      pixelScaleX: pixelWidth / size.guiWidth,
+      pixelScaleY: pixelHeight / size.guiHeight,
+    };
     this.screenManager.resize(size.guiWidth, size.guiHeight);
     this.screenManager.tick();
     this.drawList.clear();
-    this.screenManager.render(this.drawList, this.mouseX, this.mouseY, 0);
-    this.renderOverlay(this.drawList, this.mouseX, this.mouseY, 0);
+    this.screenManager.render(this.drawList, this.mouseX, this.mouseY, 0, metrics);
+    this.renderOverlay(this.drawList, this.mouseX, this.mouseY, 0, metrics);
     this.renderer.render(
       this.drawList,
       {

@@ -21,6 +21,7 @@ import {
   playerInputToQueuedMoveCommand,
 } from "../../runtime/session/player-loop";
 import type { ScreenManager } from "../../client/gui/screen-manager";
+import type { GuiRenderMetrics } from "../../client/gui/gui-render-metrics";
 import { DebugSettingsScreen, type GuiDebugSettingsState } from "../../client/gui/screens/debug-settings-screen";
 import { OptionsScreen, type GuiOptionsState } from "../../client/gui/screens/options-screen";
 import { PauseScreen } from "../../client/gui/screens/pause-screen";
@@ -280,8 +281,8 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
         }
       },
     });
-    options.guiOverlayHost.setOverlayRenderer((drawList) => {
-      this.renderDebugOverlay(drawList);
+    options.guiOverlayHost.setOverlayRenderer((drawList, _mouseX, _mouseY, _partialTick, metrics) => {
+      this.renderDebugOverlay(drawList, metrics);
       this.renderTouchHud(drawList);
     });
     this.add(window, "keydown", (event) => {
@@ -349,7 +350,7 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
     });
   }
 
-  private renderDebugOverlay(drawList: GuiDrawList): void {
+  private renderDebugOverlay(drawList: GuiDrawList, metrics: GuiRenderMetrics): void {
     if (!this.options.debugSettingsState.showDebugInfo || this.options.screenManager.currentScreen !== null) {
       return;
     }
@@ -376,6 +377,7 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
       this.options.screenManager.getWidth(),
       this.options.screenManager.getHeight(),
       this.options.state.chunkLifecycle,
+      { metrics },
     );
   }
 

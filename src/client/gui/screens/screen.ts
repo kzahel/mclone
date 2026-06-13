@@ -4,6 +4,7 @@ import type { GuiEventListener } from "../components/gui-event-listener";
 import type { Widget } from "../components/widget";
 import type { Font } from "../font";
 import { GuiComponent } from "../gui-component";
+import type { GuiRenderMetrics } from "../gui-render-metrics";
 import type { ScreenManager } from "../screen-manager";
 
 export abstract class Screen extends ContainerEventHandler implements Widget {
@@ -27,7 +28,13 @@ export abstract class Screen extends ContainerEventHandler implements Widget {
     return this.getTitle();
   }
 
-  public render(drawList: GuiDrawList, mouseX: number, mouseY: number, partialTick: number): void {
+  public render(
+    drawList: GuiDrawList,
+    mouseX: number,
+    mouseY: number,
+    partialTick: number,
+    _metrics?: GuiRenderMetrics,
+  ): void {
     for (const renderable of this.renderables) {
       renderable.render(drawList, mouseX, mouseY, partialTick);
     }

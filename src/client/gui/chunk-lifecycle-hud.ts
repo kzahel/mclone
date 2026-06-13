@@ -5,6 +5,7 @@ import type {
 import type { GuiDrawList } from "../../renderer/gui/gui-draw-list";
 import { GuiComponent } from "./gui-component";
 import type { Font } from "./font";
+import type { GuiRenderMetrics } from "./gui-render-metrics";
 
 export type ChunkLifecycleHudCellState =
   | "unload"
@@ -47,6 +48,10 @@ interface ChunkLifecycleHudLegendItem {
   readonly label: string;
 }
 
+interface ChunkLifecycleHudRenderOptions {
+  readonly metrics?: GuiRenderMetrics;
+}
+
 export const CHUNK_LIFECYCLE_HUD_CELL_COLORS: Readonly<Record<ChunkLifecycleHudCellState, number>> = {
   unload: 0xffab47bc,
   dirty: 0xffffb74d,
@@ -72,8 +77,8 @@ const LEGEND_SWATCH_SIZE = 5;
 const LEGEND_SWATCH_TEXT_GAP = 3;
 const LEGEND_ITEM_GAP = 10;
 const MAX_HUD_PANEL_WIDTH = 280;
-// The GUI is usually scaled up; 1/3 GUI unit keeps the visible grid seam near one screen pixel.
-const GRID_CELL_GAP = 1 / 3;
+const GRID_CELL_GAP_GUI_UNITS = 1;
+const GRID_CELL_GAP_SCREEN_PIXELS = 1;
 
 export function getChunkLifecycleHudCellState(record: GeneratedChunkLifecycleRecord): ChunkLifecycleHudCellState {
   if (record.queuedForUnload || record.pendingUnload) {
@@ -159,6 +164,7 @@ export function renderChunkLifecycleHud(
   guiWidth: number,
   guiHeight: number,
   snapshot: GeneratedChunkLifecycleSnapshot | undefined,
+  options: ChunkLifecycleHudRenderOptions = {},
 ): ChunkLifecycleHudPanel | undefined {
   const layout = createChunkLifecycleHudLayout(font, guiWidth, guiHeight, snapshot);
   if (layout === undefined || snapshot === undefined) {
@@ -176,7 +182,7 @@ export function renderChunkLifecycleHud(
 
   y += 3;
   const gridX = layout.x + 4;
-  drawChunkLifecycleGrid(drawList, snapshot, bounds, gridX, y, cellSize);
+  drawChunkLifecycleGrid(drawList, snapshot, bounds, gridX, y, cellSize, options.metrics);
   y += gridHeight + 4;
 
   for (const row of legendRows) {
@@ -352,6 +358,7 @@ function drawChunkLifecycleGrid(
   gridX: number,
   gridY: number,
   cellSize: number,
+  metrics: GuiRenderMetrics | undefined,
 ): void {
   const records = new Map<string, GeneratedChunkLifecycleRecord>();
   for (const record of snapshot.records) {
@@ -366,12 +373,50 @@ function drawChunkLifecycleGrid(
         : CHUNK_LIFECYCLE_HUD_CELL_COLORS[getChunkLifecycleHudCellState(record)];
       const x = gridX + ((chunkX - bounds.minChunkX) * cellSize);
       const y = gridY + ((chunkZ - bounds.minChunkZ) * cellSize);
-      GuiComponent.fill(drawList, x, y, x + cellSize - GRID_CELL_GAP, y + cellSize - GRID_CELL_GAP, color);
+      drawChunkLifecycleCell(drawList, x, y, cellSize, color, metrics);
     }
   }
 
   drawChunkLifecycleViewOutline(drawList, snapshot, bounds, gridX, gridY, cellSize);
   drawChunkLifecycleCenterMarker(drawList, snapshot, bounds, gridX, gridY, cellSize);
+}
+
+function drawChunkLifecycleCell(
+  drawList: GuiDrawList,
+  x: number,
+  y: number,
+  cellSize: number,
+  color: number,
+  metrics: GuiRenderMetrics | undefined,
+): void {
+  if (metrics === undefined || metrics.pixelScaleX <= 0 || metrics.pixelScaleY <= 0) {
+    GuiComponent.fill(
+      drawList,
+      x,
+      y,
+      x + cellSize - GRID_CELL_GAP_GUI_UNITS,
+      y + cellSize - GRID_CELL_GAP_GUI_UNITS,
+      color,
+    );
+    return;
+  }
+
+  const x0Px = Math.round(x * metrics.pixelScaleX);
+  const y0Px = Math.round(y * metrics.pixelScaleY);
+  const x1Px = Math.round((x + cellSize) * metrics.pixelScaleX) - GRID_CELL_GAP_SCREEN_PIXELS;
+  const y1Px = Math.round((y + cellSize) * metrics.pixelScaleY) - GRID_CELL_GAP_SCREEN_PIXELS;
+  if (x1Px <= x0Px || y1Px <= y0Px) {
+    return;
+  }
+
+  GuiComponent.fill(
+    drawList,
+    x0Px / metrics.pixelScaleX,
+    y0Px / metrics.pixelScaleY,
+    x1Px / metrics.pixelScaleX,
+    y1Px / metrics.pixelScaleY,
+    color,
+  );
 }
 
 function createChunkLifecycleLegendRows(
