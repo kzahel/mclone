@@ -72,6 +72,8 @@ const LEGEND_SWATCH_SIZE = 5;
 const LEGEND_SWATCH_TEXT_GAP = 3;
 const LEGEND_ITEM_GAP = 10;
 const MAX_HUD_PANEL_WIDTH = 280;
+// The GUI is usually scaled up; 1/3 GUI unit keeps the visible grid seam near one screen pixel.
+const GRID_CELL_GAP = 1 / 3;
 
 export function getChunkLifecycleHudCellState(record: GeneratedChunkLifecycleRecord): ChunkLifecycleHudCellState {
   if (record.queuedForUnload || record.pendingUnload) {
@@ -364,7 +366,7 @@ function drawChunkLifecycleGrid(
         : CHUNK_LIFECYCLE_HUD_CELL_COLORS[getChunkLifecycleHudCellState(record)];
       const x = gridX + ((chunkX - bounds.minChunkX) * cellSize);
       const y = gridY + ((chunkZ - bounds.minChunkZ) * cellSize);
-      GuiComponent.fill(drawList, x, y, x + cellSize - 1, y + cellSize - 1, color);
+      GuiComponent.fill(drawList, x, y, x + cellSize - GRID_CELL_GAP, y + cellSize - GRID_CELL_GAP, color);
     }
   }
 
