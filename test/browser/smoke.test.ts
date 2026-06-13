@@ -5,6 +5,7 @@ import {
   GENERATED_WORLD_SMOKE_SCENARIO,
   GENERATED_WORLD_TICK_CADENCE_SCENARIO,
   GENERATED_WORLD_TRANSITION_SCENARIO,
+  GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO,
   type GeneratedWorldSmokeScenario,
   validateGeneratedWorldSmokeResult,
 } from "../../src/renderer/generated-world-smoke-scenario.ts";
@@ -14,6 +15,7 @@ const DEDICATED_QUERY_AUTO_START_SCREENSHOT_PATH = "/tmp/mclone-browser-dedicate
 const WORKER_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-smoke.png";
 const WORKER_TRANSITION_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-transition-smoke.png";
 const WORKER_TICK_CADENCE_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-tick-cadence-smoke.png";
+const WORKER_VANILLA_LIGHTING_SMOKE_SCREENSHOT_PATH = "/tmp/mclone-browser-worker-vanilla-lighting-smoke.png";
 
 interface GpuGuiState {
   readonly ready: boolean;
@@ -78,6 +80,13 @@ function createWorkerTickCadenceSmokeUrl(): string {
     worldTransport: "worker",
     worldStorageMode: "none",
   }, GENERATED_WORLD_TICK_CADENCE_SCENARIO).toString()}`;
+}
+
+function createWorkerVanillaLightingSmokeUrl(): string {
+  return `/smoke.html?${createSmokeParams({
+    worldTransport: "worker",
+    worldStorageMode: "none",
+  }, GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO).toString()}`;
 }
 
 async function bootPage(page: Page, url: string): Promise<BootResult> {
@@ -167,6 +176,19 @@ test("WebGPU boot succeeds against the worker integrated server", async ({ page 
   await page.locator("#renderer").screenshot({ path: WORKER_SMOKE_SCREENSHOT_PATH });
 
   expectRenderedSmokeResult(result, "worker");
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+});
+
+test("WebGPU boot succeeds against the worker integrated server with vanilla lighting", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(String(err)));
+
+  const result = await bootPage(page, createWorkerVanillaLightingSmokeUrl());
+  await page.locator("#renderer").screenshot({ path: WORKER_VANILLA_LIGHTING_SMOKE_SCREENSHOT_PATH });
+
+  expectRenderedSmokeResult(result, "worker", GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO);
+  expect(result.lightingMode).toBe("vanilla17");
+  expect(result.topology.lighting).toBe("worker");
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
 });
 
