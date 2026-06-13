@@ -3,10 +3,14 @@ import { chromium, devices } from "@playwright/test";
 const url = process.argv[2] ?? "https://mclone.kzahel.com/?mode=debug";
 const outBefore = "/tmp/mclone-smoke-mobile-before.png";
 const outDuring = "/tmp/mclone-smoke-mobile-during.png";
+const webGpuLaunchArgs = [
+  "--enable-unsafe-webgpu",
+  ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
+];
 
 const browser = await chromium.launch({
   channel: "chrome",
-  args: ["--enable-unsafe-webgpu"],
+  args: webGpuLaunchArgs,
 });
 const ctx = await browser.newContext({ ...devices["iPhone 14 Pro"] });
 const page = await ctx.newPage();

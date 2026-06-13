@@ -8,6 +8,10 @@ function readDevServerPort(): number {
 }
 
 const devServerPort = readDevServerPort();
+const webGpuLaunchArgs = [
+  "--enable-unsafe-webgpu",
+  ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
+];
 
 export default defineConfig({
   testDir: "test/browser",
@@ -19,7 +23,7 @@ export default defineConfig({
     baseURL: `http://localhost:${devServerPort.toString()}`,
     channel: "chrome",
     launchOptions: {
-      args: ["--enable-unsafe-webgpu"],
+      args: webGpuLaunchArgs,
     },
     trace: "retain-on-failure",
   },

@@ -2,10 +2,14 @@ import { chromium } from "@playwright/test";
 
 const url = process.argv[2] ?? "https://mclone.kzahel.com/?mode=debug";
 const out = process.argv[3] ?? "/tmp/mclone-smoke.png";
+const webGpuLaunchArgs = [
+  "--enable-unsafe-webgpu",
+  ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
+];
 
 const browser = await chromium.launch({
   channel: "chrome",
-  args: ["--enable-unsafe-webgpu"],
+  args: webGpuLaunchArgs,
 });
 const ctx = await browser.newContext({ viewport: { width: 800, height: 600 } });
 const page = await ctx.newPage();
