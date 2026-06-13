@@ -63,7 +63,7 @@ export const CHUNK_LIFECYCLE_HUD_CELL_COLORS: Readonly<Record<ChunkLifecycleHudC
   ready: 0xff26c6da,
   materialized: 0xff42a5f5,
   generated: 0xff8d8f96,
-  empty: 0xff25272b,
+  empty: 0xff303030,
 };
 
 const CHUNK_LIFECYCLE_HUD_LEGEND_ITEMS: readonly ChunkLifecycleHudLegendItem[] = [
@@ -72,6 +72,7 @@ const CHUNK_LIFECYCLE_HUD_LEGEND_ITEMS: readonly ChunkLifecycleHudLegendItem[] =
   { state: "ready", label: "ready" },
   { state: "materialized", label: "materialized" },
   { state: "generated", label: "generated" },
+  { state: "empty", label: "empty" },
   { state: "dirty", label: "dirty" },
   { state: "unload", label: "unload" },
 ];

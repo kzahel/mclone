@@ -53,7 +53,7 @@ Implementation shape:
 - The client replica stores the latest lifecycle snapshot alongside the existing performance snapshot.
 - The browser runtime requests the snapshot while loading and while `showDebugInfo` is enabled.
 - The loading screen and debug overlay draw a compact minimap from the protocol snapshot:
-  - cell color is the actionable lifecycle state: published, blocked, ready, materialized, generated, dirty, or unloading
+  - cell color is the actionable lifecycle state: published, blocked, ready, materialized, generated, empty, dirty, or unloading
   - the panel shows chunk coordinate bounds, view center/radius, publication counts, loaded count, and blocked count
   - the current view square and center chunk are marked directly on the grid
   - the legend uses color swatches with state labels, not unrelated letter codes
