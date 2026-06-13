@@ -9,11 +9,14 @@ import {
   buildChunkLifecycleHudLines,
   getChunkLifecycleHudBounds,
   getChunkLifecycleHudCellState,
+  renderChunkLifecycleHud,
 } from "../../src/client/gui/chunk-lifecycle-hud";
 import { MovementCommandClock } from "../../src/runtime/movement";
 import type { PlayerInputCommand } from "../../src/runtime/protocol/world-messages";
 import type { GeneratedChunkLifecycleRecord, GeneratedChunkLifecycleSnapshot } from "../../src/runtime/protocol/chunk-lifecycle";
 import { PLAYER_COMMAND_QUANTUM_US } from "../../src/runtime/session/player-loop";
+import { Font } from "../../src/client/gui/font";
+import { GuiDrawList } from "../../src/renderer/gui/gui-draw-list";
 
 function input(overrides: Partial<PlayerInputCommand> = {}): PlayerInputCommand {
   return {
@@ -126,7 +129,13 @@ describe("gpu world runtime player input queueing", () => {
     expect(getChunkLifecycleHudCellState(lifecycleRecord({ queuedForUnload: true, published: true }))).toBe("unload");
     expect(getChunkLifecycleHudCellState(lifecycleRecord({ dirtyForPublication: true, published: true }))).toBe("dirty");
     expect(getChunkLifecycleHudCellState(lifecycleRecord({ published: true }))).toBe("published");
-    expect(getChunkLifecycleHudCellState(lifecycleRecord())).toBe("blocked");
+    expect(getChunkLifecycleHudCellState(lifecycleRecord())).toBe("blocked_missing");
+    expect(getChunkLifecycleHudCellState(lifecycleRecord({
+      publicationBlocker: { kind: "waiting_for_full_neighbor", chunkX: 1, chunkZ: 0 },
+    }))).toBe("blocked_neighbor");
+    expect(getChunkLifecycleHudCellState(lifecycleRecord({
+      publicationBlocker: { kind: "waiting_for_light" },
+    }))).toBe("blocked_light");
     expect(getChunkLifecycleHudCellState(lifecycleRecord({ publicationBlocker: { kind: "ready_to_publish" } }))).toBe("ready");
     expect(getChunkLifecycleHudCellState(lifecycleRecord({
       inPublishView: false,
@@ -153,6 +162,35 @@ describe("gpu world runtime player input queueing", () => {
       "x=-2..4 z=-1..3",
       "view=0,0 r=1 pub=1/2 loaded=0 blocked=1",
     ]);
+  });
+
+  test("crops retained lifecycle records in the rendered HUD and draws a heading marker", () => {
+    const records: GeneratedChunkLifecycleRecord[] = [];
+    for (let chunkZ = -50; chunkZ <= 50; chunkZ++) {
+      for (let chunkX = -50; chunkX <= 50; chunkX++) {
+        records.push(lifecycleRecord({
+          chunkX,
+          chunkZ,
+          inPublishView: false,
+          publicationBlocker: { kind: "outside_publish_view" },
+        }));
+      }
+    }
+    const snapshot = lifecycleSnapshot(records);
+    const drawList = new GuiDrawList();
+
+    renderChunkLifecycleHud(
+      drawList,
+      new Font(),
+      640,
+      360,
+      snapshot,
+      { marker: { chunkX: 0, chunkZ: 0, yawDeg: 90 } },
+    );
+
+    const solidRects = drawList.getCommands().filter((command) => command.type === "solid_rect");
+    expect(solidRects.length).toBeLessThan(2_000);
+    expect(solidRects.some((command) => command.color === 0xfffff176)).toBe(true);
   });
 
   test("queues unchanged idle commands when they advance movement time", () => {

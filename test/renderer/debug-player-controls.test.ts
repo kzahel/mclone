@@ -1,13 +1,30 @@
 import { describe, expect, test } from "vitest";
 import {
   applyPredictedCameraInput,
+  buildFreeCameraInputCommand,
   buildPlayerInputCommand,
   createChunkViewRequestForCameraState,
   createChunkViewRequestForPlayerState,
   mergeDebugInputFrame,
   reconcilePredictedCameraState,
 } from "../../src/renderer/debug/debug-player-controls";
+import type { DebugInputFrame } from "../../src/renderer/debug/debug-input";
 import { Vec3 } from "../../src/world/phys/vec3";
+
+function inputFrame(heldKeys: readonly string[]): DebugInputFrame {
+  return {
+    heldKeys: new Set(heldKeys),
+    mouseDeltaX: 0,
+    mouseDeltaY: 0,
+    locked: true,
+    joystickX: 0,
+    joystickY: 0,
+    moveForward: false,
+    moveBack: false,
+    flyUp: false,
+    flyDown: false,
+  };
+}
 
 describe("debug player controls", () => {
   test("builds player input commands from baseline rotation and forward input", () => {
@@ -205,6 +222,54 @@ describe("debug player controls", () => {
     expect(camera.yRot).toBeCloseTo(181.5);
     expect(camera.xRot).toBeCloseTo(29.4);
     expect(camera.position.z).toBeLessThan(40.5);
+  });
+
+  test("free camera applies yaw to forward movement exactly once", () => {
+    const command = buildFreeCameraInputCommand(
+      90,
+      0,
+      inputFrame(["KeyW"]),
+      1,
+      1,
+    );
+
+    expect(command.moveX).toBe(0);
+    expect(command.moveY).toBe(0);
+    expect(command.moveZ).toBe(1);
+
+    const camera = applyPredictedCameraInput(
+      { position: Vec3.ZERO, xRot: 0, yRot: 90 },
+      command,
+      1,
+    );
+
+    expect(camera.position.x).toBeCloseTo(-8);
+    expect(camera.position.y).toBeCloseTo(0);
+    expect(camera.position.z).toBeCloseTo(0);
+  });
+
+  test("free camera strafe does not pick up pitch as vertical movement", () => {
+    const command = buildFreeCameraInputCommand(
+      90,
+      30,
+      inputFrame(["KeyD"]),
+      1,
+      1,
+    );
+
+    expect(command.moveX).toBe(1);
+    expect(command.moveY).toBe(0);
+    expect(command.moveZ).toBe(0);
+
+    const camera = applyPredictedCameraInput(
+      { position: Vec3.ZERO, xRot: 30, yRot: 90 },
+      command,
+      1,
+    );
+
+    expect(camera.position.x).toBeCloseTo(0);
+    expect(camera.position.y).toBeCloseTo(0);
+    expect(camera.position.z).toBeCloseTo(-8);
   });
 
   test("keeps predicted camera state until authoritative input catches up", () => {

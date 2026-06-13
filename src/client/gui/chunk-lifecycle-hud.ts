@@ -12,6 +12,9 @@ export type ChunkLifecycleHudCellState =
   | "dirty"
   | "published"
   | "blocked"
+  | "blocked_missing"
+  | "blocked_neighbor"
+  | "blocked_light"
   | "ready"
   | "materialized"
   | "generated"
@@ -29,6 +32,12 @@ export interface ChunkLifecycleHudPanel {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+}
+
+export interface ChunkLifecycleHudMarker {
+  readonly chunkX: number;
+  readonly chunkZ: number;
+  readonly yawDeg?: number;
 }
 
 interface ChunkLifecycleHudLayout extends ChunkLifecycleHudPanel {
@@ -53,6 +62,7 @@ interface ChunkLifecycleHudLegendItem {
 
 interface ChunkLifecycleHudRenderOptions {
   readonly metrics?: GuiRenderMetrics;
+  readonly marker?: ChunkLifecycleHudMarker;
 }
 
 export const CHUNK_LIFECYCLE_HUD_CELL_COLORS: Readonly<Record<ChunkLifecycleHudCellState, number>> = {
@@ -60,6 +70,9 @@ export const CHUNK_LIFECYCLE_HUD_CELL_COLORS: Readonly<Record<ChunkLifecycleHudC
   dirty: 0xffffb74d,
   published: 0xff4caf50,
   blocked: 0xffef5350,
+  blocked_missing: 0xffef5350,
+  blocked_neighbor: 0xffff7043,
+  blocked_light: 0xffffd54f,
   ready: 0xff26c6da,
   materialized: 0xff42a5f5,
   generated: 0xff8d8f96,
@@ -68,7 +81,9 @@ export const CHUNK_LIFECYCLE_HUD_CELL_COLORS: Readonly<Record<ChunkLifecycleHudC
 
 const CHUNK_LIFECYCLE_HUD_LEGEND_ITEMS: readonly ChunkLifecycleHudLegendItem[] = [
   { state: "published", label: "published" },
-  { state: "blocked", label: "blocked" },
+  { state: "blocked_missing", label: "missing" },
+  { state: "blocked_neighbor", label: "neighbor" },
+  { state: "blocked_light", label: "light" },
   { state: "ready", label: "ready" },
   { state: "materialized", label: "materialized" },
   { state: "generated", label: "generated" },
@@ -82,8 +97,11 @@ const LEGEND_SWATCH_TEXT_GAP = 3;
 const LEGEND_ITEM_GAP = 10;
 const MAX_HUD_PANEL_WIDTH = 260;
 const MAX_HUD_PANEL_HEIGHT = 210;
+const MAX_HUD_GRID_CHUNKS_PER_AXIS = 41;
 const GRID_CELL_GAP_GUI_UNITS = 1;
 const GRID_CELL_GAP_SCREEN_PIXELS = 1;
+const PLAYER_MARKER_COLOR = 0xfffff176;
+const PLAYER_MARKER_SHADOW_COLOR = 0xff111111;
 
 export function getChunkLifecycleHudCellState(record: GeneratedChunkLifecycleRecord): ChunkLifecycleHudCellState {
   if (record.queuedForUnload || record.pendingUnload) {
@@ -96,15 +114,21 @@ export function getChunkLifecycleHudCellState(record: GeneratedChunkLifecycleRec
     return "published";
   }
   if (record.inPublishView) {
-    if (record.publicationBlocker.kind === "ready_to_publish") {
-      return "ready";
-    }
-    if (
-      record.publicationBlocker.kind !== "outside_publish_view"
-      && record.publicationBlocker.kind !== "already_published"
-      && record.publicationBlocker.kind !== "dirty_published"
-    ) {
-      return "blocked";
+    switch (record.publicationBlocker.kind) {
+      case "ready_to_publish":
+        return "ready";
+      case "missing_materialized_chunk":
+        return "blocked_missing";
+      case "waiting_for_full_neighbor":
+        return "blocked_neighbor";
+      case "waiting_for_light":
+        return "blocked_light";
+      case "outside_publish_view":
+      case "already_published":
+      case "dirty_published":
+        break;
+      default:
+        return "blocked";
     }
   }
   if (record.hasBlockSections || record.chunkLoaded) {
@@ -190,7 +214,7 @@ export function renderChunkLifecycleHud(
   const gridBoxY = y;
   const gridX = gridBoxX + Math.floor((gridBoxWidth - gridWidth) / 2);
   y = gridBoxY + Math.floor((gridBoxHeight - gridHeight) / 2);
-  drawChunkLifecycleGrid(drawList, snapshot, bounds, gridX, y, cellSize, options.metrics);
+  drawChunkLifecycleGrid(drawList, snapshot, bounds, gridX, y, cellSize, options);
   y = gridBoxY + gridBoxHeight + 4;
 
   for (const row of legendRows) {
@@ -280,11 +304,12 @@ function createChunkLifecycleHudLayout(
   guiHeight: number,
   snapshot: GeneratedChunkLifecycleSnapshot | undefined,
 ): ChunkLifecycleHudLayout | undefined {
-  const bounds = getChunkLifecycleHudBounds(snapshot);
-  if (snapshot === undefined || bounds === undefined) {
+  const rawBounds = getChunkLifecycleHudBounds(snapshot);
+  if (snapshot === undefined || rawBounds === undefined) {
     return undefined;
   }
 
+  const bounds = clampChunkLifecycleHudBounds(rawBounds, snapshot.currentChunkView);
   const columns = bounds.maxChunkX - bounds.minChunkX + 1;
   const rows = bounds.maxChunkZ - bounds.minChunkZ + 1;
   const headerLines = buildChunkLifecycleHudLines(snapshot, bounds);
@@ -378,7 +403,7 @@ function drawChunkLifecycleGrid(
   gridX: number,
   gridY: number,
   cellSize: number,
-  metrics: GuiRenderMetrics | undefined,
+  options: ChunkLifecycleHudRenderOptions,
 ): void {
   const records = new Map<string, GeneratedChunkLifecycleRecord>();
   for (const record of snapshot.records) {
@@ -393,12 +418,52 @@ function drawChunkLifecycleGrid(
         : CHUNK_LIFECYCLE_HUD_CELL_COLORS[getChunkLifecycleHudCellState(record)];
       const x = gridX + ((chunkX - bounds.minChunkX) * cellSize);
       const y = gridY + ((chunkZ - bounds.minChunkZ) * cellSize);
-      drawChunkLifecycleCell(drawList, x, y, cellSize, color, metrics);
+      drawChunkLifecycleCell(drawList, x, y, cellSize, color, options.metrics);
     }
   }
 
   drawChunkLifecycleViewOutline(drawList, snapshot, bounds, gridX, gridY, cellSize);
   drawChunkLifecycleCenterMarker(drawList, snapshot, bounds, gridX, gridY, cellSize);
+  drawChunkLifecycleMarker(drawList, options.marker, bounds, gridX, gridY, cellSize);
+}
+
+function clampChunkLifecycleHudBounds(
+  bounds: ChunkLifecycleHudBounds,
+  view: GeneratedChunkLifecycleSnapshot["currentChunkView"],
+): ChunkLifecycleHudBounds {
+  if (view === undefined) {
+    return bounds;
+  }
+
+  const [minChunkX, maxChunkX] = clampChunkLifecycleHudAxis(
+    bounds.minChunkX,
+    bounds.maxChunkX,
+    view.centerChunkX,
+  );
+  const [minChunkZ, maxChunkZ] = clampChunkLifecycleHudAxis(
+    bounds.minChunkZ,
+    bounds.maxChunkZ,
+    view.centerChunkZ,
+  );
+  return { minChunkX, maxChunkX, minChunkZ, maxChunkZ };
+}
+
+function clampChunkLifecycleHudAxis(min: number, max: number, center: number): readonly [number, number] {
+  if (max - min + 1 <= MAX_HUD_GRID_CHUNKS_PER_AXIS) {
+    return [min, max];
+  }
+
+  let nextMin = center - Math.floor(MAX_HUD_GRID_CHUNKS_PER_AXIS / 2);
+  let nextMax = nextMin + MAX_HUD_GRID_CHUNKS_PER_AXIS - 1;
+  if (nextMin < min) {
+    nextMin = min;
+    nextMax = nextMin + MAX_HUD_GRID_CHUNKS_PER_AXIS - 1;
+  }
+  if (nextMax > max) {
+    nextMax = max;
+    nextMin = nextMax - MAX_HUD_GRID_CHUNKS_PER_AXIS + 1;
+  }
+  return [nextMin, nextMax];
 }
 
 function drawChunkLifecycleCell(
@@ -550,6 +615,126 @@ function drawChunkLifecycleCenterMarker(
 
   const inset = Math.max(1, Math.floor(cellSize / 3));
   GuiComponent.fill(drawList, x + inset, y + inset, x + cellSize - inset, y + cellSize - inset, 0xffffffff);
+}
+
+function drawChunkLifecycleMarker(
+  drawList: GuiDrawList,
+  marker: ChunkLifecycleHudMarker | undefined,
+  bounds: ChunkLifecycleHudBounds,
+  gridX: number,
+  gridY: number,
+  cellSize: number,
+): void {
+  if (
+    marker === undefined
+    || marker.chunkX < bounds.minChunkX
+    || marker.chunkX > bounds.maxChunkX
+    || marker.chunkZ < bounds.minChunkZ
+    || marker.chunkZ > bounds.maxChunkZ
+  ) {
+    return;
+  }
+
+  const centerX = gridX + ((marker.chunkX - bounds.minChunkX) * cellSize) + (cellSize / 2);
+  const centerY = gridY + ((marker.chunkZ - bounds.minChunkZ) * cellSize) + (cellSize / 2);
+  const radius = Math.max(2, Math.min(4, Math.floor(cellSize / 2)));
+  drawPixelLine(
+    drawList,
+    Math.round(centerX - radius),
+    Math.round(centerY),
+    Math.round(centerX + radius),
+    Math.round(centerY),
+    PLAYER_MARKER_SHADOW_COLOR,
+  );
+  drawPixelLine(
+    drawList,
+    Math.round(centerX),
+    Math.round(centerY - radius),
+    Math.round(centerX),
+    Math.round(centerY + radius),
+    PLAYER_MARKER_SHADOW_COLOR,
+  );
+
+  const yawDeg = marker.yawDeg;
+  if (yawDeg === undefined || !Number.isFinite(yawDeg)) {
+    GuiComponent.fill(drawList, centerX - 1, centerY - 1, centerX + 2, centerY + 2, PLAYER_MARKER_COLOR);
+    return;
+  }
+
+  const yawRad = yawDeg * Math.PI / 180.0;
+  const dx = -Math.sin(yawRad);
+  const dy = Math.cos(yawRad);
+  const length = Math.max(5, cellSize * 1.75);
+  const tipX = centerX + (dx * length);
+  const tipY = centerY + (dy * length);
+  drawPixelLine(drawList, Math.round(centerX), Math.round(centerY), Math.round(tipX), Math.round(tipY), PLAYER_MARKER_SHADOW_COLOR, 3);
+  drawPixelLine(drawList, Math.round(centerX), Math.round(centerY), Math.round(tipX), Math.round(tipY), PLAYER_MARKER_COLOR);
+  drawPlayerMarkerHead(drawList, tipX, tipY, dx, dy);
+}
+
+function drawPlayerMarkerHead(
+  drawList: GuiDrawList,
+  tipX: number,
+  tipY: number,
+  dx: number,
+  dy: number,
+): void {
+  const headLength = 3.5;
+  const sideX = -dy;
+  const sideY = dx;
+  const baseX = tipX - (dx * headLength);
+  const baseY = tipY - (dy * headLength);
+  drawPixelLine(
+    drawList,
+    Math.round(tipX),
+    Math.round(tipY),
+    Math.round(baseX + (sideX * headLength * 0.7)),
+    Math.round(baseY + (sideY * headLength * 0.7)),
+    PLAYER_MARKER_COLOR,
+  );
+  drawPixelLine(
+    drawList,
+    Math.round(tipX),
+    Math.round(tipY),
+    Math.round(baseX - (sideX * headLength * 0.7)),
+    Math.round(baseY - (sideY * headLength * 0.7)),
+    PLAYER_MARKER_COLOR,
+  );
+}
+
+function drawPixelLine(
+  drawList: GuiDrawList,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  color: number,
+  thickness = 1,
+): void {
+  const dx = Math.abs(x1 - x0);
+  const sx = x0 < x1 ? 1 : -1;
+  const dy = -Math.abs(y1 - y0);
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  let x = x0;
+  let y = y0;
+  const half = Math.floor(thickness / 2);
+
+  while (true) {
+    GuiComponent.fill(drawList, x - half, y - half, x + half + 1, y + half + 1, color);
+    if (x === x1 && y === y1) {
+      break;
+    }
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      x += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y += sy;
+    }
+  }
 }
 
 function chunkLifecycleHudKey(chunkX: number, chunkZ: number): string {

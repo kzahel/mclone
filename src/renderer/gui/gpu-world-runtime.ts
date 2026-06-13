@@ -13,7 +13,8 @@ import type {
 import type {
   GeneratedChunkLifecycleSnapshot,
 } from "../../runtime/protocol/chunk-lifecycle";
-import { renderChunkLifecycleHud } from "../../client/gui/chunk-lifecycle-hud";
+import { renderChunkLifecycleHud, type ChunkLifecycleHudMarker } from "../../client/gui/chunk-lifecycle-hud";
+import { SectionPos } from "../../core/section-pos";
 import {
   PLAYER_COLLISION_REVISION,
   PLAYER_COMMAND_QUANTUM_US,
@@ -377,7 +378,7 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
       this.options.screenManager.getWidth(),
       this.options.screenManager.getHeight(),
       this.options.state.chunkLifecycle,
-      { metrics },
+      { metrics, marker: createChunkLifecycleHudMarker(this.options.state, this.options.movementMode ?? "freecam") },
     );
   }
 
@@ -783,6 +784,24 @@ function emptyInputFrame(): DebugInputFrame {
     moveBack: false,
     flyUp: false,
     flyDown: false,
+  };
+}
+
+function createChunkLifecycleHudMarker(
+  state: Pick<GpuWorldRuntimeState, "cameraPosition" | "cameraYaw" | "playerPosition">,
+  movementMode: GpuWorldMovementMode,
+): ChunkLifecycleHudMarker | undefined {
+  const position = movementMode === "player"
+    ? state.playerPosition
+    : state.cameraPosition;
+  if (position === undefined) {
+    return undefined;
+  }
+
+  return {
+    chunkX: SectionPos.posToSectionCoord(position[0]),
+    chunkZ: SectionPos.posToSectionCoord(position[2]),
+    ...(state.cameraYaw === undefined ? {} : { yawDeg: state.cameraYaw }),
   };
 }
 

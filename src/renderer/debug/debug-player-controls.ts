@@ -252,12 +252,11 @@ export function buildFreeCameraInputCommand(
   const upAxis =
     (frame.heldKeys.has("Space") || frame.flyUp ? 1 : 0)
     - (frame.heldKeys.has("ShiftLeft") || frame.heldKeys.has("ShiftRight") || frame.flyDown ? 1 : 0);
-  const move = buildCameraDeltaWorld(yaw, pitch, forwardAxis, rightAxis, upAxis);
   return {
     sequence,
-    moveX: move.x,
-    moveY: move.y,
-    moveZ: move.z,
+    moveX: rightAxis,
+    moveY: upAxis,
+    moveZ: forwardAxis,
     yaw,
     pitch,
   };

@@ -233,6 +233,40 @@ describe("GeneratedWorldHost chunk lifecycle observatory", () => {
     expect(delta.asciiMap).toContain("U");
   });
 
+  test("publishes chunks again after returning to an already generated view", async () => {
+    const host = createHost();
+    await host.openWorld(OPEN_WORLD_REQUEST);
+    throwOnWorldError(await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 3,
+    }));
+    await drainPublishedView(host, 81);
+
+    throwOnWorldError(await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 8,
+      centerChunkZ: 0,
+      radius: 3,
+    }));
+    await drainPublishedView(host, 81);
+
+    throwOnWorldError(await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 3,
+    }));
+    await drainPublishedView(host, 81);
+
+    const snapshot = host.getDebugChunkLifecycleSnapshot();
+    const publishRecords = snapshot.records.filter((record) => record.inPublishView);
+    expect(publishRecords).toHaveLength(81);
+    expect(publishRecords.every((record) => record.published)).toBe(true);
+    expect(snapshot.counts.byPublicationBlocker.ready_to_publish ?? 0).toBe(0);
+  });
+
   test("explains unpublished visible chunks while preload is blocked", async () => {
     const storage = new BlockingPreloadWorldStorage();
     const host = createHost({ worldStorage: storage });

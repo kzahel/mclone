@@ -2419,25 +2419,24 @@ export class GeneratedWorldHost implements WorldHost {
   ): Promise<void> {
     const yieldStep = createCooperativeYield();
     const statusTargets = this.collectCurrentStatusTargets();
-    if (statusTargets.length === 0) {
-      return;
-    }
 
     let statusDone = 0;
-    this.enqueueWorldProgress("Advancing statuses", statusDone, statusTargets.length, chunkViewJobRevision);
-    for (const target of statusTargets) {
-      await yieldStep();
-      if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
-        return;
-      }
-
-      await this.ensureChunkStatusRecursive(target.chunkX, target.chunkZ, target.status, yieldStep, chunkViewJobRevision);
-      if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
-        return;
-      }
-
-      statusDone++;
+    if (statusTargets.length > 0) {
       this.enqueueWorldProgress("Advancing statuses", statusDone, statusTargets.length, chunkViewJobRevision);
+      for (const target of statusTargets) {
+        await yieldStep();
+        if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+          return;
+        }
+
+        await this.ensureChunkStatusRecursive(target.chunkX, target.chunkZ, target.status, yieldStep, chunkViewJobRevision);
+        if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+          return;
+        }
+
+        statusDone++;
+        this.enqueueWorldProgress("Advancing statuses", statusDone, statusTargets.length, chunkViewJobRevision);
+      }
     }
 
     const lightingChunks = this.collectFullStatusChunksForCurrentView();
