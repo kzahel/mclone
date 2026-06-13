@@ -1,6 +1,6 @@
 # RendererHost11: Runtime Topology Descriptor
 
-Status: implemented for generated-world browser and Deno boot.
+Status: implemented for generated-world browser and Deno boot, including Deno worker-backed lighting declaration.
 
 ## Goal
 
@@ -18,7 +18,8 @@ This slice is about assurance, not adding another rendering path. Browser and De
 | smoke result | generated-world top-level and per-step results carry the declared topology |
 | scenario validation | `validateGeneratedWorldSmokeResult(...)` requires topology and checks it against scenario engine requirements |
 | browser adapter | declares browser canvas, browser asset pack, local worker or remote authority, storage, and lighting placement |
-| Deno adapter | declares Deno, worker world host, offscreen target, file asset pack, no storage, and current lighting placement `none` |
+| Deno adapter | declares Deno, worker world host, offscreen target, file asset pack, no storage, and `none` or worker-backed lighting placement by scenario |
+| Deno lighting | Deno generated-world host worker creates a worker-backed `LightingService` when `lightingMode: "vanilla17"` is requested |
 
 ## Design Notes
 
@@ -46,20 +47,20 @@ Scenario requirements are derived from the scenario engine config and requested 
 - the requested liquid simulation mode
 - local worker or remote world host matching the requested transport
 
-For a future `lightingMode: "vanilla17"` worker scenario, the same validation will require `lighting: "worker"`. The current Deno adapter declares `lighting: "none"`, so a Deno vanilla-lighting scenario fails before scene creation until a Deno lighting-worker service is added.
+For a `lightingMode: "vanilla17"` worker scenario, the same validation requires `lighting: "worker"`. The Deno generated-world smoke now includes a small vanilla-lighting scenario that exercises this topology through a Deno module lighting worker.
 
 ## Non-Goals
 
-- Implement Deno lighting worker support in this slice.
 - Change browser or Deno frame orchestration.
 - Add a native window/wgpu host.
 - Treat topology declarations as proof of remote server internals. A remote browser client can only declare that authority is remote; dedicated host internals need their own server-side topology checks later.
 
 ## Validation
 
-- Focused unit tests cover browser topology declaration, missing-topology result rejection, and pre-scene boot rejection for a Deno-style adapter that cannot satisfy `vanilla17` lighting.
+- Focused unit tests cover browser topology declaration, headless worker-lighting declaration, missing-topology result rejection, and pre-scene boot rejection for a Deno-style adapter that cannot satisfy `vanilla17` lighting.
 - Existing browser and Deno smokes now surface topology in their normalized result payloads.
+- Deno generated-world smoke includes the default, transition, tick-cadence, and vanilla-lighting scenarios.
 
 ## Follow-Up
 
-Add a Deno lighting-worker adapter and a generated-world `vanilla17` headless scenario. That should change the Deno topology from `lighting: "none"` to `lighting: "worker"` for the scenario and turn the current fail-fast assurance into full worker-stack parity.
+Run the same `vanilla-lighting` scenario through the browser worker smoke path on a Chrome/WebGPU host and compare its topology/result shape with Deno. After that, add server-side topology reporting for the dedicated remote host so `lighting: "remote"` carries inspectable authority details instead of only saying the browser client joined a remote authority.

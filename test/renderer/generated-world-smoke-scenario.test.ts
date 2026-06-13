@@ -4,6 +4,7 @@ import {
   GENERATED_WORLD_SMOKE_SCENARIO,
   GENERATED_WORLD_TICK_CADENCE_SCENARIO,
   GENERATED_WORLD_TRANSITION_SCENARIO,
+  GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO,
   getGeneratedWorldSmokeScenarioById,
   getGeneratedWorldSmokeStepExpectedChunkCenter,
   getGeneratedWorldSmokeStepExpectedLoadedChunkCount,
@@ -52,6 +53,28 @@ describe("generated-world smoke scenarios", () => {
       const center = getGeneratedWorldSmokeStepExpectedChunkCenter(step);
       return `${center.x.toString()},${center.z.toString()}`;
     }))).toHaveLength(1);
+  });
+
+  test("vanilla lighting scenario requires worker-backed lighting topology", () => {
+    expect(getGeneratedWorldSmokeScenarioById("vanilla-lighting")).toBe(GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO);
+    expect(GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO.preset).toBe("default");
+    expect(GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO.engineConfig).toEqual({
+      lightingMode: "vanilla17",
+      liquidSimulationMode: "none",
+    });
+
+    const step = GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO.steps[0]!;
+    const result = makeStepResult(GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO, step, 0);
+    expect(result.topology?.lighting).toBe("worker");
+    expect(validateGeneratedWorldSmokeResult({
+      ...result,
+      steps: [result],
+    }, {
+      expectedWorldTransport: "worker",
+      requireReadback: true,
+      requirePlayerInput: true,
+      requireSteps: true,
+    }, GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO)).toEqual([]);
   });
 
   test("search params carry scenario id and first-step camera", () => {

@@ -7,6 +7,7 @@ import {
   GENERATED_WORLD_SMOKE_SCENARIO,
   GENERATED_WORLD_TICK_CADENCE_SCENARIO,
   GENERATED_WORLD_TRANSITION_SCENARIO,
+  GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO,
   type GeneratedWorldSmokeScenario,
   validateGeneratedWorldSmokeResult,
 } from "../src/renderer/generated-world-smoke-scenario.ts";
@@ -56,7 +57,7 @@ async function runDenoGeneratedWorldScenario(
       worldTransport,
       host: "deno",
       worldHost: "worker",
-      lighting: "none",
+      lighting: scenario.engineConfig.lightingMode === "none" ? "none" : "worker",
       storage: "none",
       assetPack: createDenoExtractedAssetPack(),
       writePngArtifact: async ({ outputPath, width, height, pixels }) => {
@@ -92,9 +93,11 @@ async function runDenoGeneratedWorldScenario(
 const smokeResult = await runDenoGeneratedWorldScenario(GENERATED_WORLD_SMOKE_SCENARIO);
 const transitionResult = await runDenoGeneratedWorldScenario(GENERATED_WORLD_TRANSITION_SCENARIO);
 const tickCadenceResult = await runDenoGeneratedWorldScenario(GENERATED_WORLD_TICK_CADENCE_SCENARIO);
+const vanillaLightingResult = await runDenoGeneratedWorldScenario(GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO);
 
 console.log(JSON.stringify({
   ...smokeResult,
   transition: transitionResult,
   tickCadence: tickCadenceResult,
+  vanillaLighting: vanillaLightingResult,
 }));

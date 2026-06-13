@@ -1,6 +1,6 @@
 import { SectionPos } from "../core/section-pos";
 import { Vec3 } from "../world/phys/vec3";
-import type { NormalizedWorldEngineConfig, SetPlayerInputRequest } from "../runtime/protocol/world-messages";
+import type { NormalizedWorldEngineConfig, OpenWorldPreset, SetPlayerInputRequest } from "../runtime/protocol/world-messages";
 import { getDefaultRenderDistance, getExpectedLoadedChunkCount } from "./browser-render-config";
 import type { CameraState } from "./game-renderer";
 import {
@@ -40,7 +40,7 @@ export interface GeneratedWorldSmokeScenarioCadence {
 export interface GeneratedWorldSmokeScenario {
   readonly id: string;
   readonly seed: bigint;
-  readonly preset: "browser_smoke";
+  readonly preset: OpenWorldPreset;
   readonly width: number;
   readonly height: number;
   readonly outputPath: string;
@@ -289,10 +289,35 @@ export const GENERATED_WORLD_TICK_CADENCE_SCENARIO: GeneratedWorldSmokeScenario 
   ],
 };
 
+export const GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO: GeneratedWorldSmokeScenario = {
+  ...GENERATED_WORLD_SMOKE_SCENARIO,
+  id: "vanilla-lighting",
+  preset: "default",
+  outputPath: "/tmp/mclone-deno-generated-world-vanilla-lighting.png",
+  viewDistance: 1,
+  renderDistance: getDefaultRenderDistance(1),
+  engineConfig: {
+    lightingMode: "vanilla17",
+    liquidSimulationMode: "none",
+  },
+  steps: [
+    {
+      name: "vanilla-lighting",
+      frameIndex: 0,
+      camera: STATIC_CAMERA,
+      playerInput: STATIC_PLAYER_INPUT,
+      readback: {
+        outputPath: "/tmp/mclone-deno-generated-world-vanilla-lighting.png",
+      },
+    },
+  ],
+};
+
 export const GENERATED_WORLD_SMOKE_SCENARIOS = {
   static: GENERATED_WORLD_SMOKE_SCENARIO,
   transition: GENERATED_WORLD_TRANSITION_SCENARIO,
   tickCadence: GENERATED_WORLD_TICK_CADENCE_SCENARIO,
+  vanillaLighting: GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO,
 } as const;
 
 export function getGeneratedWorldSmokeScenarioById(id: string | null | undefined): GeneratedWorldSmokeScenario {
@@ -301,6 +326,8 @@ export function getGeneratedWorldSmokeScenarioById(id: string | null | undefined
       return GENERATED_WORLD_TRANSITION_SCENARIO;
     case GENERATED_WORLD_TICK_CADENCE_SCENARIO.id:
       return GENERATED_WORLD_TICK_CADENCE_SCENARIO;
+    case GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO.id:
+      return GENERATED_WORLD_VANILLA_LIGHTING_SCENARIO;
     default:
       return GENERATED_WORLD_SMOKE_SCENARIO;
   }

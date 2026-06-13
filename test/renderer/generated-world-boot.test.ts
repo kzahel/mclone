@@ -12,9 +12,13 @@ import {
   createGeneratedWorldBrowserBootAdapter,
   resolveGeneratedWorldBrowserCamera,
 } from "../../src/renderer/generated-world-browser-boot";
+import { createGeneratedWorldHeadlessBootAdapter } from "../../src/renderer/generated-world-headless-boot";
 import { createGeneratedWorldRuntimeTopology } from "../../src/renderer/generated-world-runtime-topology";
 import type { GeneratedWorldSmokePresentationHost } from "../../src/renderer/generated-world-smoke-runner";
 import type { BrowserRenderConfig } from "../../src/renderer/browser-render-config";
+import type { AssetPack } from "../../src/renderer/assets/asset-pack";
+import type { HeadlessRendererHost } from "../../src/renderer/renderer-host";
+import type { WorldTransport } from "../../src/runtime/transport/local-world-transport";
 
 describe("generated-world boot adapter", () => {
   test("uses the final scenario camera unless a one-step override is provided", () => {
@@ -51,6 +55,40 @@ describe("generated-world boot adapter", () => {
       storage: "none",
       assetSource: "browser-asset-pack",
       renderTarget: "canvas",
+    });
+  });
+
+  test("headless boot adapter can declare worker-backed vanilla lighting", () => {
+    const vanillaLightingScenario = {
+      ...GENERATED_WORLD_SMOKE_SCENARIO,
+      engineConfig: {
+        lightingMode: "vanilla17",
+        liquidSimulationMode: "none",
+      },
+    } as const;
+    const adapter = createGeneratedWorldHeadlessBootAdapter({
+      gpuAdapter: {} as GPUAdapter,
+      device: {} as GPUDevice,
+      format: "rgba8unorm",
+      rendererHost: {} as HeadlessRendererHost,
+      worldTransport: {} as WorldTransport,
+      host: "deno",
+      worldHost: "worker",
+      lighting: "worker",
+      storage: "none",
+      assetPack: {} as AssetPack,
+    });
+
+    expect(adapter.describeTopology({ scenario: vanillaLightingScenario })).toMatchObject({
+      host: "deno",
+      worldHost: "worker",
+      renderWorld: "worker",
+      meshTransport: "worker",
+      lighting: "worker",
+      liquidSimulation: "none",
+      storage: "none",
+      assetSource: "file-asset-pack",
+      renderTarget: "offscreen-texture",
     });
   });
 
