@@ -16,6 +16,7 @@ import {
   type WorldHostMessage,
   type WorldOpenedMessage,
 } from "../protocol/world-messages";
+import type { WorldDebugRequestOptions } from "../protocol/chunk-lifecycle";
 
 export type { RenderWorldChunkUpdateResult, RenderWorldUpdateMessage, RenderWorldUpdateSink } from "../client/client-world";
 
@@ -35,6 +36,7 @@ export interface WorldTransport {
 
 export interface TransportWorldClientOptions extends ClientWorldHydrationOptions {
   readonly pollUpdateMaxMessages?: number;
+  readonly pollDebugOptions?: () => WorldDebugRequestOptions | undefined;
 }
 
 export class LocalWorldTransport implements WorldTransport {
@@ -71,6 +73,7 @@ export class TransportWorldClient implements WorldClient {
   private readonly clientWorld: ClientWorldHydrationTarget;
   private lastChunkView: SetChunkViewRequest | undefined;
   private readonly pollUpdateMaxMessages: number | undefined;
+  private readonly pollDebugOptions: (() => WorldDebugRequestOptions | undefined) | undefined;
 
   public constructor(
     private readonly transport: WorldTransport,
@@ -79,6 +82,7 @@ export class TransportWorldClient implements WorldClient {
   ) {
     this.clientWorld = new HostMessageClientWorld(levelFactory, options);
     this.pollUpdateMaxMessages = options.pollUpdateMaxMessages;
+    this.pollDebugOptions = options.pollDebugOptions;
   }
 
   public setRenderWorldUpdateSink(
@@ -109,6 +113,10 @@ export class TransportWorldClient implements WorldClient {
 
   public getPerformanceSnapshot(): ReturnType<WorldClient["getPerformanceSnapshot"]> {
     return this.clientWorld.getPerformanceSnapshot();
+  }
+
+  public getChunkLifecycleSnapshot(): ReturnType<WorldClient["getChunkLifecycleSnapshot"]> {
+    return this.clientWorld.getChunkLifecycleSnapshot();
   }
 
   public async openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage> {
@@ -145,10 +153,13 @@ export class TransportWorldClient implements WorldClient {
   }
 
   public async pollUpdates(): Promise<boolean> {
-    const result = await this.clientWorld.hydrateHostMessages(await this.transport.pollUpdates({
+    const debug = this.pollDebugOptions?.();
+    const request: PollWorldUpdatesRequest = {
       type: "poll_world_updates",
-      maxMessages: this.pollUpdateMaxMessages,
-    }));
+      ...(this.pollUpdateMaxMessages === undefined ? {} : { maxMessages: this.pollUpdateMaxMessages }),
+      ...(debug === undefined ? {} : { debug }),
+    };
+    const result = await this.clientWorld.hydrateHostMessages(await this.transport.pollUpdates(request));
     return result.messageChanged;
   }
 

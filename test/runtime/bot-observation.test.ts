@@ -61,6 +61,7 @@ function createClientWorldWithFloor(options: {
     getLocalPlayerState: () => undefined,
     getEntitySnapshots: () => [],
     getPerformanceSnapshot: () => undefined,
+    getChunkLifecycleSnapshot: () => undefined,
     getChunkSnapshot: (chunkX, chunkZ) => level.getChunkSnapshot(chunkX, chunkZ),
     getRevisionFacts: () => ({}),
     getRenderView: () => ({

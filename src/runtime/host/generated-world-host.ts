@@ -106,6 +106,13 @@ import {
   type WorldgenPhasePerformanceCounters,
   type WorldProgressMessage,
 } from "../protocol/world-messages";
+import type {
+  GeneratedChunkLifecycleCounts,
+  GeneratedChunkLifecycleRecord,
+  GeneratedChunkLifecycleSnapshot,
+  GeneratedChunkLifecycleStatusJobDebugRecord,
+  GeneratedChunkPublicationBlocker,
+} from "../protocol/chunk-lifecycle";
 import {
   anchorPlayerStateToChunkView,
   createPlayerCommandQueue,
@@ -213,6 +220,18 @@ function entityDataEquals(
 // Bump when persisted generated-world meaning changes: terrain/decor algorithms,
 // biome/block-state/tick encodings, metadata compatibility, or future trusted light.
 export const GENERATED_WORLD_STORAGE_VERSION = 5;
+
+export type {
+  GeneratedChunkLifecycleAccessDebugRecord,
+  GeneratedChunkLifecycleCounts,
+  GeneratedChunkLifecyclePreloadDebugRecord,
+  GeneratedChunkLifecyclePreloadResult,
+  GeneratedChunkLifecycleRecord,
+  GeneratedChunkLifecycleSnapshot,
+  GeneratedChunkLifecycleStatusJobDebugRecord,
+  GeneratedChunkPublicationBlocker,
+  GeneratedChunkPublicationBlockerKind,
+} from "../protocol/chunk-lifecycle";
 
 function createGeneratedWorldConfigSaveSuffix(config: WorldEngineConfig | undefined): string {
   const normalized = normalizeWorldEngineConfig(config);
@@ -809,11 +828,11 @@ export class GeneratedWorldHost implements WorldHost {
     this.ensureLocalSessionState();
     this.tickPlayerLoop();
     if (this.pendingMessages.length > 0) {
-      return this.drainPendingMessages(request.maxMessages);
+      return this.appendPollDebugMessages(this.drainPendingMessages(request.maxMessages), request);
     }
 
     await this.tickWorldLoop();
-    return this.drainPendingMessages(request.maxMessages);
+    return this.appendPollDebugMessages(this.drainPendingMessages(request.maxMessages), request);
   }
 
   public close(): void {
@@ -880,6 +899,279 @@ export class GeneratedWorldHost implements WorldHost {
 
   public getDebugChunkTicketRecords(): readonly GeneratedChunkTicketDebugRecord[] {
     return this.chunkResidencyTickets.getDebugRecords();
+  }
+
+  public getDebugChunkLifecycleSnapshot(): GeneratedChunkLifecycleSnapshot {
+    const keys = this.collectDebugChunkLifecycleKeys();
+    const records = [...keys]
+      .map((key) => {
+        const [chunkXRaw, chunkZRaw] = key.split(",");
+        return this.createDebugChunkLifecycleRecord(Number(chunkXRaw), Number(chunkZRaw));
+      })
+      .sort((left, right) => left.chunkZ - right.chunkZ || left.chunkX - right.chunkX);
+
+    return {
+      ...(this.currentChunkView === undefined ? {} : { currentChunkView: createSessionChunkViewState(this.currentChunkView) }),
+      chunkViewJobRevision: this.chunkViewJobRevision,
+      ...(this.activeChunkViewJobRevision === undefined ? {} : { activeChunkViewJobRevision: this.activeChunkViewJobRevision }),
+      records,
+      counts: this.countDebugChunkLifecycleRecords(records),
+    };
+  }
+
+  private collectDebugChunkLifecycleKeys(): Set<string> {
+    const keys = new Set<string>();
+    const add = (chunkX: number, chunkZ: number): void => {
+      keys.add(chunkKey(chunkX, chunkZ));
+    };
+
+    this.chunkResidencyTickets.forEachCoveredChunk(add);
+    for (const key of this.chunkHolders.keys()) {
+      keys.add(key);
+    }
+    for (const key of this.entityChunkStatuses.keys()) {
+      keys.add(key);
+    }
+    for (const key of this.publishedChunkSnapshots) {
+      keys.add(key);
+    }
+    for (const key of this.dirtyChunksForPublication) {
+      keys.add(key);
+    }
+    for (const key of this.dirtyDurableChunks) {
+      keys.add(key);
+    }
+    for (const key of this.chunkHolderUnloadQueue.keys()) {
+      keys.add(key);
+    }
+    for (const key of this.pendingUnloadChunkHolders.keys()) {
+      keys.add(key);
+    }
+    for (const key of this.pendingStorageWrites.keys()) {
+      keys.add(key);
+    }
+    for (const record of this.level.getDebugChunkStatusRecords()) {
+      add(record.chunkX, record.chunkZ);
+    }
+    for (const target of this.collectCurrentStatusTargets()) {
+      add(target.chunkX, target.chunkZ);
+    }
+
+    if (this.currentChunkView !== undefined) {
+      this.addDebugChunkLifecycleSquare(
+        keys,
+        this.currentChunkView.centerChunkX,
+        this.currentChunkView.centerChunkZ,
+        getGeneratedWorldViewChunkRadius(this.currentChunkView.radius),
+      );
+      this.addDebugChunkLifecycleSquare(
+        keys,
+        this.currentChunkView.centerChunkX,
+        this.currentChunkView.centerChunkZ,
+        getGeneratedWorldFullChunkRadius(this.currentChunkView.radius),
+      );
+    }
+
+    return keys;
+  }
+
+  private addDebugChunkLifecycleSquare(
+    keys: Set<string>,
+    centerChunkX: number,
+    centerChunkZ: number,
+    radius: number,
+  ): void {
+    for (let chunkZ = centerChunkZ - radius; chunkZ <= centerChunkZ + radius; chunkZ++) {
+      for (let chunkX = centerChunkX - radius; chunkX <= centerChunkX + radius; chunkX++) {
+        keys.add(chunkKey(chunkX, chunkZ));
+      }
+    }
+  }
+
+  private createDebugChunkLifecycleRecord(chunkX: number, chunkZ: number): GeneratedChunkLifecycleRecord {
+    const key = chunkKey(chunkX, chunkZ);
+    const holder = this.chunkHolders.get(key);
+    const access = holder?.chunkToSave;
+    const preload = holder?.preloadJob;
+    const statusJobs: GeneratedChunkLifecycleStatusJobDebugRecord[] = holder === undefined
+      ? []
+      : [...holder.statusJobs.values()]
+        .map((job) => ({
+          status: job.status,
+          state: job.state,
+          chunkViewJobRevision: job.chunkViewJobRevision,
+          ...(job.result === undefined ? {} : { result: job.result }),
+        }))
+        .sort((left, right) => left.status.localeCompare(right.status));
+
+    return {
+      chunkX,
+      chunkZ,
+      inAuthorityView: this.isChunkInCurrentAuthorityView(chunkX, chunkZ),
+      inFullView: this.isChunkInCurrentFullView(chunkX, chunkZ),
+      inPublishView: this.isChunkInCurrentPublishView(chunkX, chunkZ),
+      ticketLevel: this.chunkResidencyTickets.getLevel(chunkX, chunkZ),
+      ticketFullStatus: this.chunkResidencyTickets.getFullStatus(chunkX, chunkZ),
+      ticketSources: this.chunkResidencyTickets.getDebugSourcesForChunk(chunkX, chunkZ),
+      generatedStatus: this.level.getChunkStatus(chunkX, chunkZ),
+      hasBlockSections: this.level.hasMaterializedChunk(chunkX, chunkZ),
+      chunkLoaded: this.level.getChunk(chunkX, chunkZ, false) !== null,
+      ...(holder === undefined ? {} : { holderFullStatus: holder.fullStatus }),
+      ...(this.entityChunkStatuses.get(key) === undefined ? {} : { entityStatus: this.entityChunkStatuses.get(key)! }),
+      ...(access === undefined
+        ? {}
+        : {
+          access: {
+            type: access.type,
+            status: access.status,
+            hasBlockSections: access.hasBlockSections,
+            isUnsaved: access.isUnsaved,
+            contentVersion: access.contentVersion,
+          },
+        }),
+      ...(preload === undefined
+        ? {}
+        : {
+          preload: {
+            state: preload.state,
+            chunkViewJobRevision: preload.chunkViewJobRevision,
+            ...(preload.result === undefined ? {} : { result: preload.result }),
+          },
+        }),
+      statusJobs,
+      published: this.publishedChunkSnapshots.has(key),
+      dirtyForPublication: this.dirtyChunksForPublication.has(key),
+      dirtyDurable: this.dirtyDurableChunks.has(key),
+      queuedForUnload: this.chunkHolderUnloadQueue.has(key),
+      pendingUnload: this.pendingUnloadChunkHolders.has(key),
+      pendingStorageWrite: this.pendingStorageWrites.has(key),
+      lightInputSent: this.sentLightInputRevisions.has(key),
+      lightAccepted: this.getAcceptedCurrentChunkLight(chunkX, chunkZ) !== undefined,
+      publicationBlocker: this.getDebugChunkPublicationBlocker(chunkX, chunkZ),
+    };
+  }
+
+  private getDebugChunkPublicationBlocker(chunkX: number, chunkZ: number): GeneratedChunkPublicationBlocker {
+    const key = chunkKey(chunkX, chunkZ);
+    if (!this.isChunkInCurrentPublishView(chunkX, chunkZ)) {
+      return { kind: "outside_publish_view" };
+    }
+
+    if (this.publishedChunkSnapshots.has(key)) {
+      return {
+        kind: this.dirtyChunksForPublication.has(key) ? "dirty_published" : "already_published",
+      };
+    }
+
+    if (this.level.getChunk(chunkX, chunkZ, false) === null) {
+      return {
+        kind: "missing_materialized_chunk",
+        chunkX,
+        chunkZ,
+        requiredStatus: GeneratedChunkStatus.FULL,
+        actualStatus: this.level.getChunkStatus(chunkX, chunkZ),
+      };
+    }
+
+    const missingFullNeighbor = this.getFirstMissingFullNeighbor(chunkX, chunkZ);
+    if (missingFullNeighbor !== undefined) {
+      return missingFullNeighbor;
+    }
+
+    if (this.lightingService !== undefined && this.getAcceptedCurrentChunkLight(chunkX, chunkZ) === undefined) {
+      return { kind: "waiting_for_light", chunkX, chunkZ };
+    }
+
+    return { kind: "ready_to_publish" };
+  }
+
+  private getFirstMissingFullNeighbor(
+    chunkX: number,
+    chunkZ: number,
+  ): GeneratedChunkPublicationBlocker | undefined {
+    for (let neighborChunkZ = chunkZ - 1; neighborChunkZ <= chunkZ + 1; neighborChunkZ++) {
+      for (let neighborChunkX = chunkX - 1; neighborChunkX <= chunkX + 1; neighborChunkX++) {
+        if (this.level.hasChunkStatus(neighborChunkX, neighborChunkZ, GeneratedChunkStatus.FULL)) {
+          continue;
+        }
+
+        return {
+          kind: "waiting_for_full_neighbor",
+          chunkX: neighborChunkX,
+          chunkZ: neighborChunkZ,
+          requiredStatus: GeneratedChunkStatus.FULL,
+          actualStatus: this.level.getChunkStatus(neighborChunkX, neighborChunkZ),
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  private countDebugChunkLifecycleRecords(
+    records: readonly GeneratedChunkLifecycleRecord[],
+  ): GeneratedChunkLifecycleCounts {
+    const byGeneratedStatus: Record<string, number> = {};
+    const byHolderFullStatus: Record<string, number> = {};
+    const byPublicationBlocker: Record<string, number> = {};
+    const increment = (counts: Record<string, number>, key: string): void => {
+      counts[key] = (counts[key] ?? 0) + 1;
+    };
+
+    let inAuthorityView = 0;
+    let inPublishView = 0;
+    let loaded = 0;
+    let materialized = 0;
+    let published = 0;
+    let dirtyForPublication = 0;
+    let queuedForUnload = 0;
+    let pendingUnload = 0;
+    for (const record of records) {
+      if (record.inAuthorityView) {
+        inAuthorityView++;
+      }
+      if (record.inPublishView) {
+        inPublishView++;
+      }
+      if (record.chunkLoaded) {
+        loaded++;
+      }
+      if (record.hasBlockSections) {
+        materialized++;
+      }
+      if (record.published) {
+        published++;
+      }
+      if (record.dirtyForPublication) {
+        dirtyForPublication++;
+      }
+      if (record.queuedForUnload) {
+        queuedForUnload++;
+      }
+      if (record.pendingUnload) {
+        pendingUnload++;
+      }
+      increment(byGeneratedStatus, record.generatedStatus);
+      if (record.holderFullStatus !== undefined) {
+        increment(byHolderFullStatus, record.holderFullStatus);
+      }
+      increment(byPublicationBlocker, record.publicationBlocker.kind);
+    }
+
+    return {
+      total: records.length,
+      inAuthorityView,
+      inPublishView,
+      loaded,
+      materialized,
+      published,
+      dirtyForPublication,
+      queuedForUnload,
+      pendingUnload,
+      byGeneratedStatus,
+      byHolderFullStatus,
+      byPublicationBlocker,
+    };
   }
 
   public setForcedChunk(chunkX: number, chunkZ: number, forced: boolean): void {
@@ -3856,6 +4148,23 @@ export class GeneratedWorldHost implements WorldHost {
     const drained = drainWorldHostMessages(this.pendingMessages, maxMessages);
     this.pendingMessages = drained.remaining;
     return [...drained.messages, this.createWorldPerformanceMessage()];
+  }
+
+  private appendPollDebugMessages(
+    messages: readonly WorldHostMessage[],
+    request: PollWorldUpdatesRequest,
+  ): readonly WorldHostMessage[] {
+    if (request.debug?.chunkLifecycle !== true) {
+      return messages;
+    }
+
+    return [
+      ...messages,
+      {
+        type: "chunk_lifecycle",
+        snapshot: this.getDebugChunkLifecycleSnapshot(),
+      },
+    ];
   }
 
   private createWorldPerformanceMessage(): WorldPerformanceMessage {

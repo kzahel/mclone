@@ -22,6 +22,7 @@ import type {
   WorldProgressMessage,
 } from "../protocol/world-messages";
 import type { WorldClient } from "../protocol/world-client";
+import type { GeneratedChunkLifecycleSnapshot } from "../protocol/chunk-lifecycle";
 
 export type RenderWorldUpdateMessage = ChunkSnapshotMessage | ChunkLightDeltaMessage | ChunkUnloadMessage;
 
@@ -74,6 +75,7 @@ export interface ClientWorld {
   getLocalPlayerState(): ClientPlayerState | undefined;
   getEntitySnapshots(): readonly EntitySnapshot[];
   getPerformanceSnapshot(): WorldPerformanceSnapshot | undefined;
+  getChunkLifecycleSnapshot(): GeneratedChunkLifecycleSnapshot | undefined;
   getChunkSnapshot(chunkX: number, chunkZ: number): ChunkSnapshot | undefined;
   getRevisionFacts(): ClientWorldRevisionFacts;
   getRenderView(): ClientWorldRenderView;
@@ -165,6 +167,7 @@ export class HostMessageClientWorld implements ClientWorldHydrationTarget {
   private playerState: ClientPlayerState | undefined;
   private readonly entitySnapshots = new Map<number, EntitySnapshot>();
   private performanceSnapshot: WorldPerformanceSnapshot | undefined;
+  private chunkLifecycleSnapshot: GeneratedChunkLifecycleSnapshot | undefined;
   private chunkUpdateSink: RenderWorldUpdateSink | undefined;
   private readonly worldProgressSink: ((message: WorldProgressMessage) => void) | undefined;
 
@@ -202,6 +205,10 @@ export class HostMessageClientWorld implements ClientWorldHydrationTarget {
 
   public getPerformanceSnapshot(): WorldPerformanceSnapshot | undefined {
     return this.performanceSnapshot;
+  }
+
+  public getChunkLifecycleSnapshot(): GeneratedChunkLifecycleSnapshot | undefined {
+    return this.chunkLifecycleSnapshot;
   }
 
   public getChunkSnapshot(chunkX: number, chunkZ: number): ChunkSnapshot | undefined {
@@ -310,6 +317,9 @@ export class HostMessageClientWorld implements ClientWorldHydrationTarget {
         case "world_perf":
           this.performanceSnapshot = message.performance;
           break;
+        case "chunk_lifecycle":
+          this.chunkLifecycleSnapshot = message.snapshot;
+          break;
         case "world_error":
           await flushChunkUpdates();
           throw new Error(message.message);
@@ -335,6 +345,7 @@ export class HostMessageClientWorld implements ClientWorldHydrationTarget {
     this.playerState = undefined;
     this.entitySnapshots.clear();
     this.performanceSnapshot = undefined;
+    this.chunkLifecycleSnapshot = undefined;
     return loadedChunks.length > 0;
   }
 
@@ -380,6 +391,10 @@ export class WorldClientBackedClientWorld implements ClientWorld {
 
   public getPerformanceSnapshot(): WorldPerformanceSnapshot | undefined {
     return this.client.getPerformanceSnapshot();
+  }
+
+  public getChunkLifecycleSnapshot(): GeneratedChunkLifecycleSnapshot | undefined {
+    return this.client.getChunkLifecycleSnapshot();
   }
 
   public getChunkSnapshot(chunkX: number, chunkZ: number): ChunkSnapshot | undefined {

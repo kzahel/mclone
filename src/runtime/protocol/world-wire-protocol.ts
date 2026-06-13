@@ -5,6 +5,7 @@ import type {
   EntityRemoveMessage,
   EntitySnapshotMessage,
   EntityUpdateMessage,
+  ChunkLifecycleMessage,
   PlayerStateMessage,
   SessionStateMessage,
   WorldErrorMessage,
@@ -31,7 +32,7 @@ import {
   type SerializedPackedChunkSnapshot,
 } from "./packed-chunk-wire";
 
-export const WORLD_REMOTE_PROTOCOL_VERSION = 8;
+export const WORLD_REMOTE_PROTOCOL_VERSION = 9;
 
 export type WorldRemoteErrorCode =
   | "protocol_version_mismatch"
@@ -82,6 +83,7 @@ export type SerializedWorldHostMessage =
   | ChunkUnloadMessage
   | WorldProgressMessage
   | WorldPerformanceMessage
+  | ChunkLifecycleMessage
   | WorldErrorMessage;
 
 export type WorldSocketClientFrame =
@@ -172,6 +174,7 @@ export function serializeWorldHostMessages(messages: readonly WorldHostMessage[]
       case "chunk_unload":
       case "world_progress":
       case "world_perf":
+      case "chunk_lifecycle":
       case "world_error":
         return message;
       case "chunk_snapshot":
@@ -202,6 +205,7 @@ export function deserializeWorldHostMessages(messages: readonly SerializedWorldH
       case "chunk_unload":
       case "world_progress":
       case "world_perf":
+      case "chunk_lifecycle":
       case "world_error":
         return message;
       case "chunk_snapshot":

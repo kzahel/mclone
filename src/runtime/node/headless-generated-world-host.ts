@@ -269,6 +269,7 @@ function expectWorldOpened(messages: readonly WorldHostMessage[]): WorldOpenedMe
       case "player_state":
       case "world_progress":
       case "world_perf":
+      case "chunk_lifecycle":
         break;
     }
   }
@@ -307,6 +308,7 @@ function summarizeChunkViewMessages(
       case "player_state":
       case "world_progress":
       case "world_perf":
+      case "chunk_lifecycle":
         break;
     }
   }

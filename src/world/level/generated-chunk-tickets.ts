@@ -37,6 +37,10 @@ export interface GeneratedChunkTicketDebugRecord extends GeneratedChunkTicket {
   readonly chunkCount: number;
 }
 
+export interface GeneratedChunkTicketChunkSourceDebugRecord extends GeneratedChunkTicket {
+  readonly sourceChunk: boolean;
+}
+
 export interface GeneratedChunkTicketLevelDebugRecord {
   readonly chunkX: number;
   readonly chunkZ: number;
@@ -125,6 +129,41 @@ export class GeneratedChunkTicketSet {
     }
 
     return false;
+  }
+
+  public getDebugSourcesForChunk(chunkX: number, chunkZ: number): readonly GeneratedChunkTicketChunkSourceDebugRecord[] {
+    return [...this.tickets.values()]
+      .filter((ticket) => (
+        Math.abs(chunkX - ticket.centerChunkX) <= ticket.radius
+        && Math.abs(chunkZ - ticket.centerChunkZ) <= ticket.radius
+      ))
+      .map((ticket) => ({
+        ...ticket,
+        sourceChunk: Math.abs(chunkX - ticket.centerChunkX) <= (ticket.sourceRadius ?? 0)
+          && Math.abs(chunkZ - ticket.centerChunkZ) <= (ticket.sourceRadius ?? 0),
+      }))
+      .sort((left, right) =>
+        left.source.localeCompare(right.source)
+        || (left.id ?? "").localeCompare(right.id ?? "")
+        || left.centerChunkZ - right.centerChunkZ
+        || left.centerChunkX - right.centerChunkX
+        || left.radius - right.radius
+      );
+  }
+
+  public forEachCoveredChunk(callback: (chunkX: number, chunkZ: number) => void): void {
+    const bounds = this.getBounds();
+    if (bounds === undefined) {
+      return;
+    }
+
+    for (let chunkZ = bounds.minChunkZ; chunkZ <= bounds.maxChunkZ; chunkZ++) {
+      for (let chunkX = bounds.minChunkX; chunkX <= bounds.maxChunkX; chunkX++) {
+        if (this.contains(chunkX, chunkZ)) {
+          callback(chunkX, chunkZ);
+        }
+      }
+    }
   }
 
   public forEachLeveledChunk(callback: (chunkX: number, chunkZ: number) => void): void {

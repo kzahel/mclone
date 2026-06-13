@@ -9,6 +9,7 @@ import type {
   WorldPerformanceSnapshot,
 } from "../protocol/world-messages";
 import type { WorldClient } from "../protocol/world-client";
+import type { GeneratedChunkLifecycleSnapshot } from "../protocol/chunk-lifecycle";
 import { PlayerMovementPredictor } from "../movement";
 import { type ClientWorld, type RenderWorldUpdateSink, WorldClientBackedClientWorld } from "./client-world";
 import {
@@ -30,6 +31,7 @@ export interface ClientPresentationState {
   readonly entities: readonly EntitySnapshot[];
   readonly entityPresentation: readonly ClientEntityPresentationState[];
   readonly performance?: WorldPerformanceSnapshot;
+  readonly chunkLifecycle?: GeneratedChunkLifecycleSnapshot;
 }
 
 export interface ClientRuntime {
@@ -140,6 +142,7 @@ export class WorldClientRuntimeFacade implements ClientRuntime {
       entities: entityView.getEntitySnapshots(),
       entityPresentation: this.entityInterpolationService.publishPresentationEntities(entityInterpolationTimeMs),
       performance: this.clientWorld.getPerformanceSnapshot(),
+      chunkLifecycle: this.clientWorld.getChunkLifecycleSnapshot(),
     };
   }
 }

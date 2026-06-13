@@ -689,6 +689,7 @@ export class RemoteWorldWebSocketTransport implements WorldTransport {
       switch (message.type) {
         case "world_progress":
         case "world_perf":
+        case "chunk_lifecycle":
         case "player_state":
           this.pendingPushMessages = this.pendingPushMessages.filter((pending) => pending.type !== message.type);
           break;

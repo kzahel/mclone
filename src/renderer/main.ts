@@ -63,6 +63,7 @@ import {
 } from "./webgpu-target";
 import { startGpuWorldRuntime, type GpuWorldRuntime } from "./gui/gpu-world-runtime";
 import { createChunkViewRequestForCameraState, type DebugInjectedInput } from "./debug/debug-player-controls";
+import type { GeneratedChunkLifecycleSnapshot } from "../runtime/protocol/chunk-lifecycle";
 
 export type BootResult =
   | GeneratedWorldSmokeScenarioResult
@@ -115,6 +116,7 @@ interface GpuGuiRuntimeState {
   renderWorldCounters?: RenderWorldPerformanceCounters;
   renderQueueStats?: RenderSceneQueueStats;
   worldPerformance?: WorldPerformanceSnapshot;
+  chunkLifecycle?: GeneratedChunkLifecycleSnapshot;
   viewDistance?: number;
   renderDistance?: number;
   lightingMode?: string;
@@ -789,6 +791,7 @@ async function runGpuTitleLiveWorldBoot(
     clearColorScale: renderConfig.clearColorScale,
     worldStorageMode: options.debugSettingsState.worldStorageMode,
     rendererHost: createPinnedBrowserRendererHost(options.deviceContext, options.target),
+    pollDebugOptions: () => options.debugSettingsState.showDebugInfo ? { chunkLifecycle: true } : undefined,
     onProgress,
   });
   if (!sceneResult.ok) {

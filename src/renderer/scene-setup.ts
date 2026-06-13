@@ -39,6 +39,7 @@ import { ViewArea } from "./view-area";
 import { Vec3 } from "../world/phys/vec3";
 import { VertexBuffer } from "./vertex/vertex-buffer";
 import { BROWSER_RENDERER_HOST, type BrowserRendererHost } from "./renderer-host";
+import type { WorldDebugRequestOptions } from "../runtime/protocol/chunk-lifecycle";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
 const GRASS_COLORMAP_LOCATION = new ResourceLocation("minecraft:colormap/grass");
@@ -69,6 +70,7 @@ export interface SceneInitOptions {
   readonly clearColorScale?: number;
   readonly onProgress?: LoadingProgressSink;
   readonly rendererHost?: BrowserRendererHost;
+  readonly pollDebugOptions?: () => WorldDebugRequestOptions | undefined;
 }
 
 export interface RendererScene {
@@ -262,6 +264,7 @@ function createWorldClient(
       new RemoteWorldWebSocketTransport(options.remoteWorldHostUrl ?? "http://127.0.0.1:4173"),
       levelFactory,
       {
+        pollDebugOptions: options.pollDebugOptions,
         worldProgressSink: (progress) => reportWorldProgress(options.onProgress, progress),
       },
     );
@@ -272,6 +275,7 @@ function createWorldClient(
     levelFactory,
     {
       pollUpdateMaxMessages: 4,
+      pollDebugOptions: options.pollDebugOptions,
       worldProgressSink: (progress) => reportWorldProgress(options.onProgress, progress),
     },
   );

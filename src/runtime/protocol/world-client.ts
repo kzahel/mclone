@@ -9,6 +9,7 @@ import type {
   WorldOpenedMessage,
   WorldPerformanceSnapshot,
 } from "./world-messages";
+import type { GeneratedChunkLifecycleSnapshot } from "./chunk-lifecycle";
 
 export interface WorldClient {
   openWorld(request: OpenWorldRequest): Promise<WorldOpenedMessage>;
@@ -28,4 +29,6 @@ export interface WorldClient {
   getEntitySnapshots(): readonly EntitySnapshot[];
 
   getPerformanceSnapshot(): WorldPerformanceSnapshot | undefined;
+
+  getChunkLifecycleSnapshot(): GeneratedChunkLifecycleSnapshot | undefined;
 }

@@ -1,6 +1,7 @@
 import type { WorldSaveMetadata } from "../storage/world-storage";
 import type { LightingServicePerformanceCounters } from "../lighting/lighting-protocol";
 import type { PackedChunkLightDelta, PackedChunkSnapshot } from "../../world/level/packed-chunk-snapshot";
+import type { GeneratedChunkLifecycleSnapshot, WorldDebugRequestOptions } from "./chunk-lifecycle";
 
 export type OpenWorldPreset = "default" | "browser_smoke" | "flat_grass" | "small_island";
 export type WorldEngineLightingMode = "vanilla17" | "none";
@@ -86,6 +87,7 @@ export interface SetPlayerInputRequest {
 export interface PollWorldUpdatesRequest {
   readonly type: "poll_world_updates";
   readonly maxMessages?: number;
+  readonly debug?: WorldDebugRequestOptions;
 }
 
 export interface SessionChunkViewState {
@@ -299,6 +301,11 @@ export interface WorldPerformanceMessage {
   readonly performance: WorldPerformanceSnapshot;
 }
 
+export interface ChunkLifecycleMessage {
+  readonly type: "chunk_lifecycle";
+  readonly snapshot: GeneratedChunkLifecycleSnapshot;
+}
+
 export interface WorldErrorMessage {
   readonly type: "world_error";
   readonly message: string;
@@ -317,4 +324,5 @@ export type WorldHostMessage =
   | ChunkUnloadMessage
   | WorldProgressMessage
   | WorldPerformanceMessage
+  | ChunkLifecycleMessage
   | WorldErrorMessage;

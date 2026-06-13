@@ -424,6 +424,23 @@ function drainPendingMessages(session: SessionRecord, maxMessages: number | unde
   return drained.messages;
 }
 
+function appendPollDebugMessages(
+  world: SharedWorldRecord,
+  request: PollWorldUpdatesRequest,
+  messages: readonly WorldHostMessage[],
+): readonly WorldHostMessage[] {
+  if (request.debug?.chunkLifecycle !== true) {
+    return messages;
+  }
+
+  const snapshot = world.host.getDebugChunkLifecycleSnapshot?.();
+  if (snapshot === undefined) {
+    return messages;
+  }
+
+  return [...messages, { type: "chunk_lifecycle", snapshot }];
+}
+
 function extractWorldOpened(messages: readonly WorldHostMessage[]): WorldOpenedMessage {
   const opened = messages.find((message) => message.type === "world_opened");
   if (opened === undefined) {
@@ -441,6 +458,7 @@ function applyAuthoritativeMessages(world: SharedWorldRecord, messages: readonly
       case "player_state":
       case "world_progress":
       case "world_perf":
+      case "chunk_lifecycle":
         break;
       case "entity_snapshot":
         world.loadedEntitySnapshots.set(message.entity.id, message.entity);
@@ -896,7 +914,7 @@ export class GeneratedWorldRemoteService {
     }
 
     await this.drainAuthoritativeHostMessages(world);
-    return drainPendingMessages(session, request.maxMessages);
+    return appendPollDebugMessages(world, request, drainPendingMessages(session, request.maxMessages));
   }
 
   public getSessionCount(): number {
@@ -1196,6 +1214,7 @@ export class GeneratedWorldRemoteService {
         case "world_opened":
         case "session_state":
         case "player_state":
+        case "chunk_lifecycle":
           break;
         case "world_progress":
           for (const session of this.getWorldSessions(world)) {

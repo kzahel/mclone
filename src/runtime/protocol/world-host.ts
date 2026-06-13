@@ -1,4 +1,5 @@
 import type { OpenWorldRequest, PollWorldUpdatesRequest, SetChunkViewRequest, SetPlayerInputRequest, WorldHostMessage } from "./world-messages";
+import type { GeneratedChunkLifecycleSnapshot } from "./chunk-lifecycle";
 
 export interface WorldHost {
   openWorld(request: OpenWorldRequest): Promise<readonly WorldHostMessage[]>;
@@ -8,6 +9,8 @@ export interface WorldHost {
   setPlayerInput(request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]>;
 
   pollUpdates(request: PollWorldUpdatesRequest): Promise<readonly WorldHostMessage[]>;
+
+  getDebugChunkLifecycleSnapshot?(): GeneratedChunkLifecycleSnapshot;
 
   close?(): void;
 }
