@@ -19,6 +19,12 @@ import {
   initializeRendererScene,
   type RendererScene,
 } from "./scene-setup";
+import {
+  createGeneratedWorldRuntimeTopology,
+  resolveBrowserGeneratedWorldStorageTopology,
+  resolveGeneratedWorldLightingTopology,
+  worldTransportToRuntimeWorldHost,
+} from "./generated-world-runtime-topology";
 
 export type GeneratedWorldBrowserWorldTransportConfig = BrowserWorldTransportConfig;
 
@@ -35,6 +41,18 @@ export function createGeneratedWorldBrowserBootAdapter(
   options: GeneratedWorldBrowserBootAdapterOptions,
 ): GeneratedWorldBootAdapter {
   return {
+    describeTopology: () => {
+      const worldHost = worldTransportToRuntimeWorldHost(options.runtimeConfig.worldTransport);
+      return createGeneratedWorldRuntimeTopology({
+        host: "browser",
+        worldHost,
+        lighting: resolveGeneratedWorldLightingTopology(options.renderConfig.lightingMode, worldHost),
+        liquidSimulation: options.renderConfig.liquidSimulationMode,
+        storage: resolveBrowserGeneratedWorldStorageTopology(worldHost, options.renderConfig.worldStorageMode),
+        assetSource: "browser-asset-pack",
+        renderTarget: "canvas",
+      });
+    },
     createScene: (context) => createGeneratedWorldBrowserScene(options, context),
     createPresentationHost: async ({ scene }) => createGeneratedWorldBrowserPresentationHost({
       canvas: options.canvas,

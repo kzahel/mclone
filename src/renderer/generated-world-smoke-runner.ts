@@ -28,6 +28,12 @@ import {
   type GeneratedWorldSmokeScenarioStep,
   type GeneratedWorldSmokeResultLike,
 } from "./generated-world-smoke-scenario";
+import {
+  createGeneratedWorldRuntimeTopology,
+  resolveGeneratedWorldLightingTopology,
+  worldTransportToRuntimeWorldHost,
+  type GeneratedWorldRuntimeTopology,
+} from "./generated-world-runtime-topology";
 import { countPixelsDifferentFrom, readPixel, rgbaColorToPixel } from "./static-frame-harness";
 
 export type GeneratedWorldSmokeWorldTransport = "worker" | "remote";
@@ -117,6 +123,7 @@ export interface CreateGeneratedWorldSmokePresentationHostOptions {
 export interface GeneratedWorldSmokeScenarioResult extends GeneratedWorldSmokeResultLike {
   readonly ok: true;
   readonly worldTransport: GeneratedWorldSmokeWorldTransport;
+  readonly topology: GeneratedWorldRuntimeTopology;
   readonly meshTransport: "worker";
   readonly saveId: string;
   readonly stepName: string;
@@ -146,6 +153,7 @@ export interface GeneratedWorldSmokeScenarioResult extends GeneratedWorldSmokeRe
 
 export interface GeneratedWorldSmokeStepResult extends GeneratedWorldSmokeResultLike {
   readonly worldTransport: GeneratedWorldSmokeWorldTransport;
+  readonly topology: GeneratedWorldRuntimeTopology;
   readonly meshTransport: "worker";
   readonly stepName: string;
   readonly stepIndex: number;
@@ -182,6 +190,7 @@ export interface GeneratedWorldSmokeRunOptions {
   readonly outputPath?: string;
   readonly lightingMode?: string;
   readonly liquidSimulationMode?: string;
+  readonly topology?: GeneratedWorldRuntimeTopology;
   readonly validatePipelines?: boolean;
   readonly validatePipelineFormats?: readonly GPUTextureFormat[];
   readonly onProgress?: LoadingProgressSink;
@@ -572,6 +581,7 @@ function createGeneratedWorldSmokeStepResult(
 
   return {
     worldTransport: options.worldTransport,
+    topology: resolveGeneratedWorldSmokeTopology(options, scenario),
     meshTransport: options.meshTransport ?? "worker",
     stepName: step.name,
     stepIndex,
@@ -614,6 +624,26 @@ function createGeneratedWorldSmokeStepResult(
     playerTick: playerState?.tick,
     playerPosition: playerState ? [playerState.position.x, playerState.position.y, playerState.position.z] as const : undefined,
   };
+}
+
+function resolveGeneratedWorldSmokeTopology(
+  options: GeneratedWorldSmokeRunOptions,
+  scenario: GeneratedWorldSmokeScenario,
+): GeneratedWorldRuntimeTopology {
+  if (options.topology !== undefined) {
+    return options.topology;
+  }
+
+  const worldHost = worldTransportToRuntimeWorldHost(options.worldTransport);
+  return createGeneratedWorldRuntimeTopology({
+    host: "test",
+    worldHost,
+    lighting: resolveGeneratedWorldLightingTopology(scenario.engineConfig.lightingMode, worldHost),
+    liquidSimulation: scenario.engineConfig.liquidSimulationMode,
+    storage: "none",
+    assetSource: "test",
+    renderTarget: "offscreen-texture",
+  });
 }
 
 function collectGeneratedWorldSmokeFrameResult(

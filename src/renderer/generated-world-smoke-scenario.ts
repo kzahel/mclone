@@ -3,6 +3,12 @@ import { Vec3 } from "../world/phys/vec3";
 import type { NormalizedWorldEngineConfig, SetPlayerInputRequest } from "../runtime/protocol/world-messages";
 import { getDefaultRenderDistance, getExpectedLoadedChunkCount } from "./browser-render-config";
 import type { CameraState } from "./game-renderer";
+import {
+  getGeneratedWorldRuntimeTopologyRequirement,
+  validateGeneratedWorldRuntimeTopology,
+  worldTransportToRuntimeWorldHost,
+  type GeneratedWorldRuntimeTopology,
+} from "./generated-world-runtime-topology";
 import type { RenderSceneQueueStats, RenderWorldPerformanceCounters } from "./scene-setup";
 
 export interface GeneratedWorldSmokeChunkCenter {
@@ -54,6 +60,7 @@ export interface GeneratedWorldSmokeScenario {
 
 export interface GeneratedWorldSmokeResultLike {
   readonly worldTransport?: "worker" | "remote";
+  readonly topology?: GeneratedWorldRuntimeTopology;
   readonly stepName?: string;
   readonly stepIndex?: number;
   readonly frameIndex?: number;
@@ -437,6 +444,23 @@ function validateGeneratedWorldSmokeStepResult(
   validateGeneratedWorldSmokeResultAgainstStep(result, options, scenario, step, errors, `steps[${stepIndex.toString()}].`);
 }
 
+function validateGeneratedWorldSmokeTopology(
+  result: GeneratedWorldSmokeResultLike,
+  options: GeneratedWorldSmokeValidationOptions,
+  scenario: GeneratedWorldSmokeScenario,
+  errors: string[],
+  prefix = "",
+): void {
+  const worldHost = options.expectedWorldTransport === undefined
+    ? undefined
+    : worldTransportToRuntimeWorldHost(options.expectedWorldTransport);
+  errors.push(...validateGeneratedWorldRuntimeTopology(
+    result.topology,
+    getGeneratedWorldRuntimeTopologyRequirement(scenario.engineConfig, worldHost),
+    `${prefix}topology`,
+  ));
+}
+
 function validateGeneratedWorldSmokeStepProgression(
   stepResults: readonly GeneratedWorldSmokeResultLike[],
   errors: string[],
@@ -516,6 +540,7 @@ function validateGeneratedWorldSmokeResultAgainstStep(
   if (result.liquidSimulationMode !== scenario.engineConfig.liquidSimulationMode) {
     errors.push(`${prefix}expected liquidSimulationMode=${scenario.engineConfig.liquidSimulationMode}, got ${result.liquidSimulationMode}`);
   }
+  validateGeneratedWorldSmokeTopology(result, options, scenario, errors, prefix);
   validateChunkCenter(`${prefix}expectedChunkCenter`, result.expectedChunkCenter, expectedChunkCenter, errors);
   validateChunkCenter(`${prefix}chunkCenter`, result.chunkCenter, expectedChunkCenter, errors);
   if (result.sessionChunkCenter !== undefined) {

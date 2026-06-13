@@ -12,6 +12,13 @@ import {
 import type { GeneratedWorldSmokePngArtifact } from "./generated-world-headless-presentation-host";
 import type { HeadlessRendererHost } from "./renderer-host";
 import type { WorldTransport } from "../runtime/transport/local-world-transport";
+import {
+  createGeneratedWorldRuntimeTopology,
+  type GeneratedWorldRuntimeHost,
+  type GeneratedWorldRuntimeLighting,
+  type GeneratedWorldRuntimeStorage,
+  type GeneratedWorldRuntimeWorldHost,
+} from "./generated-world-runtime-topology";
 
 export interface GeneratedWorldHeadlessBootAdapterOptions {
   readonly gpuAdapter: GPUAdapter;
@@ -19,6 +26,10 @@ export interface GeneratedWorldHeadlessBootAdapterOptions {
   readonly format: GPUTextureFormat;
   readonly rendererHost: HeadlessRendererHost;
   readonly worldTransport: WorldTransport;
+  readonly host: GeneratedWorldRuntimeHost;
+  readonly worldHost: GeneratedWorldRuntimeWorldHost;
+  readonly lighting?: GeneratedWorldRuntimeLighting;
+  readonly storage?: GeneratedWorldRuntimeStorage;
   readonly assetPack: AssetPack;
   readonly writePngArtifact?: (artifact: GeneratedWorldSmokePngArtifact) => Promise<void>;
 }
@@ -27,6 +38,15 @@ export function createGeneratedWorldHeadlessBootAdapter(
   options: GeneratedWorldHeadlessBootAdapterOptions,
 ): GeneratedWorldBootAdapter {
   return {
+    describeTopology: ({ scenario }) => createGeneratedWorldRuntimeTopology({
+      host: options.host,
+      worldHost: options.worldHost,
+      lighting: options.lighting ?? "none",
+      liquidSimulation: scenario.engineConfig.liquidSimulationMode,
+      storage: options.storage ?? "none",
+      assetSource: "file-asset-pack",
+      renderTarget: "offscreen-texture",
+    }),
     createScene: (context) => createGeneratedWorldHeadlessScene(options, context),
     createPresentationHost: ({ scenario }) => createGeneratedWorldHeadlessPresentationHost({
       rendererHost: options.rendererHost,

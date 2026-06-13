@@ -12,6 +12,12 @@ import {
   type GeneratedWorldSmokeRunOptions,
   type GeneratedWorldSmokeWorldTransport,
 } from "./generated-world-smoke-runner";
+import {
+  getGeneratedWorldRuntimeTopologyRequirement,
+  validateGeneratedWorldRuntimeTopology,
+  worldTransportToRuntimeWorldHost,
+  type GeneratedWorldRuntimeTopology,
+} from "./generated-world-runtime-topology";
 
 export interface GeneratedWorldBootSceneContext {
   readonly scenario: GeneratedWorldSmokeScenario;
@@ -32,6 +38,7 @@ export interface GeneratedWorldBootPresentationContext {
 }
 
 export interface GeneratedWorldBootAdapter {
+  describeTopology(context: GeneratedWorldBootSceneContext): GeneratedWorldRuntimeTopology;
   createScene(context: GeneratedWorldBootSceneContext): Promise<GeneratedWorldBootSceneResult>;
   createPresentationHost(context: GeneratedWorldBootPresentationContext): Promise<GeneratedWorldSmokePresentationHost> | GeneratedWorldSmokePresentationHost;
 }
@@ -66,6 +73,24 @@ export async function runGeneratedWorldBoot(
   options: GeneratedWorldBootOptions,
 ): Promise<GeneratedWorldBootResult> {
   const scenario = options.scenario ?? GENERATED_WORLD_SMOKE_SCENARIO;
+  const topology = options.adapter.describeTopology({
+    scenario,
+    onProgress: options.onProgress,
+  });
+  const topologyErrors = validateGeneratedWorldRuntimeTopology(
+    topology,
+    getGeneratedWorldRuntimeTopologyRequirement(
+      scenario.engineConfig,
+      worldTransportToRuntimeWorldHost(options.worldTransport),
+    ),
+  );
+  if (topologyErrors.length > 0) {
+    return {
+      ok: false,
+      reason: `generated-world boot topology mismatch:\n${topologyErrors.join("\n")}`,
+    };
+  }
+
   const sceneResult = await options.adapter.createScene({
     scenario,
     onProgress: options.onProgress,
@@ -88,6 +113,7 @@ export async function runGeneratedWorldBoot(
       scenario,
       scene: sceneResult.scene,
       presentationHost,
+      topology,
       format: options.format,
     });
 

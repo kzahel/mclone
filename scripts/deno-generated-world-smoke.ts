@@ -54,6 +54,10 @@ async function runDenoGeneratedWorldScenario(
       format,
       rendererHost,
       worldTransport,
+      host: "deno",
+      worldHost: "worker",
+      lighting: "none",
+      storage: "none",
       assetPack: createDenoExtractedAssetPack(),
       writePngArtifact: async ({ outputPath, width, height, pixels }) => {
         await Deno.writeFile(outputPath, encodePngRgba(width, height, pixels));

@@ -12,6 +12,11 @@ import {
   type GeneratedWorldSmokeScenarioStep,
   validateGeneratedWorldSmokeResult,
 } from "../../src/renderer/generated-world-smoke-scenario";
+import {
+  createGeneratedWorldRuntimeTopology,
+  resolveGeneratedWorldLightingTopology,
+  worldTransportToRuntimeWorldHost,
+} from "../../src/renderer/generated-world-runtime-topology";
 
 const renderWorldCounters = {
   ingestBatchCount: 1,
@@ -129,6 +134,21 @@ describe("generated-world smoke scenarios", () => {
       requireSteps: true,
     }, GENERATED_WORLD_SMOKE_SCENARIO)).toEqual([]);
   });
+
+  test("validation rejects results without declared runtime topology", () => {
+    const step = GENERATED_WORLD_SMOKE_SCENARIO.steps[0]!;
+    const { topology: _topology, ...result } = makeStepResult(GENERATED_WORLD_SMOKE_SCENARIO, step, 0);
+
+    expect(validateGeneratedWorldSmokeResult({
+      ...result,
+      steps: [result],
+    }, {
+      expectedWorldTransport: "worker",
+      requireReadback: true,
+      requirePlayerInput: true,
+      requireSteps: true,
+    }, GENERATED_WORLD_SMOKE_SCENARIO)).toContain("expected topology");
+  });
 });
 
 function makeStepResult(
@@ -138,8 +158,18 @@ function makeStepResult(
 ): GeneratedWorldSmokeResultLike {
   const chunkCenter = getGeneratedWorldSmokeStepExpectedChunkCenter(step);
   const inputSequence = step.playerInput?.sequence ?? scenario.playerInput.sequence;
+  const worldHost = worldTransportToRuntimeWorldHost("worker");
   return {
     worldTransport: "worker",
+    topology: createGeneratedWorldRuntimeTopology({
+      host: "test",
+      worldHost,
+      lighting: resolveGeneratedWorldLightingTopology(scenario.engineConfig.lightingMode, worldHost),
+      liquidSimulation: scenario.engineConfig.liquidSimulationMode,
+      storage: "none",
+      assetSource: "test",
+      renderTarget: "offscreen-texture",
+    }),
     stepName: step.name,
     stepIndex,
     frameIndex: step.frameIndex,
