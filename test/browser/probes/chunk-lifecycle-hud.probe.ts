@@ -4,6 +4,7 @@ import { FAST_VISUAL_PROBE_TIMEOUTS } from "./fast-visual-probe-config";
 
 const CHUNK_LIFECYCLE_HUD_SCREENSHOT_PATH = "/tmp/mclone-chunk-lifecycle-hud.png";
 const CHUNK_LIFECYCLE_LOADING_HUD_SCREENSHOT_PATH = "/tmp/mclone-chunk-lifecycle-loading-hud.png";
+const CHUNK_LIFECYCLE_TITLE_LOADING_HUD_SCREENSHOT_PATH = "/tmp/mclone-chunk-lifecycle-title-loading-hud.png";
 
 interface ChunkLifecycleHudDebugState {
   readonly ready: boolean;
@@ -28,6 +29,52 @@ interface ChunkLifecycleHudDebugState {
 }
 
 test.setTimeout(60_000);
+
+test("renders chunk lifecycle diagnostics while loading from the title button", async ({ page }) => {
+  const viewDistance = 4;
+  const params = new URLSearchParams({
+    gpuTitle: "1",
+    worldTransport: "worker",
+    worldStorageMode: "none",
+    clearWorldStorage: "1",
+    preserveInitialCamera: "1",
+    viewDistance: viewDistance.toString(),
+    renderDistance: getDefaultRenderDistance(viewDistance).toString(),
+    lightingMode: "none",
+    liquidSimulationMode: "none",
+  });
+
+  await page.goto(`/?${params.toString()}`, { waitUntil: "load" });
+  await page.waitForFunction(() => window.__mcloneGui?.state.ready === true, undefined, {
+    timeout: FAST_VISUAL_PROBE_TIMEOUTS.ready,
+  });
+
+  const box = await page.locator("#renderer").boundingBox();
+  expect(box).not.toBeNull();
+  const titleState = await page.evaluate(() => window.__mcloneGui!.state as ChunkLifecycleHudDebugState & {
+    readonly height: number;
+  });
+  const startWorldCenterY = (Math.floor(titleState.height / 4) + 48 + 10) / titleState.height;
+  await page.mouse.click(box!.x + (box!.width / 2), box!.y + (box!.height * startWorldCenterY));
+
+  await page.waitForFunction(
+    () => {
+      const state = window.__mcloneGui?.state as ChunkLifecycleHudDebugState | undefined;
+      return state?.mode === "loading"
+        && state.chunkLifecycle !== undefined
+        && state.chunkLifecycle.records.length > 0
+        && state.chunkLifecycle.counts.total > 0;
+    },
+    undefined,
+    { timeout: FAST_VISUAL_PROBE_TIMEOUTS.ready },
+  );
+  const loadingState = await page.evaluate(() => window.__mcloneGui!.state as ChunkLifecycleHudDebugState);
+  expect(loadingState.error).toBeUndefined();
+  expect(loadingState.mode).toBe("loading");
+  expect(loadingState.chunkLifecycle!.counts.total).toBeGreaterThan(0);
+
+  await page.locator("#renderer").screenshot({ path: CHUNK_LIFECYCLE_TITLE_LOADING_HUD_SCREENSHOT_PATH });
+});
 
 test("renders the chunk lifecycle debug HUD", async ({ page }) => {
   const viewDistance = 4;

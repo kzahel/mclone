@@ -797,7 +797,9 @@ async function runGpuTitleLiveWorldBoot(
     clearColorScale: renderConfig.clearColorScale,
     worldStorageMode: options.debugSettingsState.worldStorageMode,
     rendererHost: createPinnedBrowserRendererHost(options.deviceContext, options.target),
-    pollDebugOptions: () => options.debugSettingsState.showDebugInfo ? { chunkLifecycle: true } : undefined,
+    pollDebugOptions: () => options.state.mode === "loading" || options.debugSettingsState.showDebugInfo
+      ? { chunkLifecycle: true }
+      : undefined,
     onProgress,
   });
   if (!sceneResult.ok) {
