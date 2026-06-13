@@ -60,6 +60,7 @@ async function createGeneratedWorldBrowserScene(
     seed: context.scenario.seed,
     viewDistance: options.renderConfig.viewDistance,
     renderDistance: options.renderConfig.renderDistance,
+    fogEnabled: options.renderConfig.fogEnabled,
     worldTransport: options.runtimeConfig.worldTransport,
     remoteWorldHostUrl: options.runtimeConfig.remoteWorldHostUrl,
     preset: context.scenario.preset,

@@ -29,6 +29,7 @@ export class GameRenderer {
     private height: number,
     private readonly renderDistance: number,
     private readonly fov = 70.0,
+    private fogEnabled = true,
   ) {}
 
   public resize(width: number, height: number): void {
@@ -54,6 +55,14 @@ export class GameRenderer {
 
   public getRenderDistance(): number {
     return this.renderDistance;
+  }
+
+  public isFogEnabled(): boolean {
+    return this.fogEnabled;
+  }
+
+  public setFogEnabled(fogEnabled: boolean): void {
+    this.fogEnabled = fogEnabled;
   }
 
   public getMainCamera(): Camera {

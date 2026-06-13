@@ -11,6 +11,7 @@ import { Screen } from "./screen";
 export interface GuiOptionsState {
   viewDistance: number;
   renderDistance: number;
+  fogEnabled: boolean;
   lightingMode: WorldEngineLightingMode;
   liquidSimulationMode: WorldEngineLiquidSimulationMode;
   autoJump: boolean;
@@ -109,6 +110,20 @@ export class OptionsScreen extends Screen {
       true,
       (_checkbox, selected) => {
         this.options.liquidSimulationMode = selected ? "vanilla17" : "none";
+        this.onChanged();
+      },
+    ));
+    this.addRenderableWidget(new Checkbox(
+      rightX,
+      topY + (rowSpacing * 2),
+      150,
+      20,
+      "Fog",
+      this.getFont(),
+      this.options.fogEnabled,
+      true,
+      (_checkbox, selected) => {
+        this.options.fogEnabled = selected;
         this.onChanged();
       },
     ));

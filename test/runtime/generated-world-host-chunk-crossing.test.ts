@@ -898,7 +898,10 @@ describe("GeneratedWorldHost chunk-boundary generation counts", () => {
 
     expect(snapshots).toHaveLength(25);
     expect(performance.counts.storage_preload_missing).toBeLessThan(242);
-    expect(performance.counts["status_coalesced_pending.features"] ?? 0).toBeGreaterThan(0);
+    expect(
+      (performance.counts["status_coalesced_pending.full"] ?? 0)
+      + (performance.counts["status_coalesced_pending.features"] ?? 0),
+    ).toBeGreaterThan(0);
     expect(performance.counts["status_jobs_started.liquid_carvers"]).toBe(performance.counts.terrain_chunks_generated);
     expect(generatorSnapshot.fillFromNoise).toBe(generatorSnapshot.uniqueFillFromNoise);
     expect(generatorSnapshot.decorations).toBe(generatorSnapshot.uniqueDecorations);

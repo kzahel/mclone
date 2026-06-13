@@ -760,7 +760,10 @@ async function runHostBenchmark(options: CliOptions, mode: HostMode, expectedPub
         publishedChunks += countSnapshots(messages);
       }, () => `${publishedChunks.toString()} chunk snapshots returned in ack`));
 
-      phases.push(await timePhase("poll_until_publish", expectedPublishChunks, async () => {
+      let firstSnapshotMs: number | undefined;
+      let firstSnapshotBatchSize = 0;
+      const publishStartedAtMs = performance.now();
+      const publishPhase = await timePhase("poll_until_publish", expectedPublishChunks, async () => {
         const deadlineMs = performance.now() + options.timeoutMs;
         while (publishedChunks < expectedPublishChunks) {
           if (performance.now() > deadlineMs) {
@@ -777,9 +780,24 @@ async function runHostBenchmark(options: CliOptions, mode: HostMode, expectedPub
           throwOnWorldError(messages);
           collectProgress(messages, progress);
           latestPerformance = collectPerformance(messages) ?? latestPerformance;
-          publishedChunks += countSnapshots(messages);
+          const snapshotsInBatch = countSnapshots(messages);
+          if (snapshotsInBatch > 0 && firstSnapshotMs === undefined) {
+            firstSnapshotMs = performance.now() - publishStartedAtMs;
+            firstSnapshotBatchSize = snapshotsInBatch;
+          }
+          publishedChunks += snapshotsInBatch;
         }
-      }, () => `${publishedChunks.toString()} chunk snapshots returned`));
+      }, () => `${publishedChunks.toString()} chunk snapshots returned`);
+      if (firstSnapshotMs !== undefined) {
+        phases.push({
+          name: "poll_until_first_snapshot",
+          chunks: firstSnapshotBatchSize,
+          ms: firstSnapshotMs,
+          chunksPerSecond: (firstSnapshotBatchSize / firstSnapshotMs) * 1000.0,
+          detail: `${firstSnapshotBatchSize.toString()} chunk snapshots returned in first nonempty poll`,
+        });
+      }
+      phases.push(publishPhase);
     }
   } finally {
     if (host instanceof GeneratedWorldHost) {

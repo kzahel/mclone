@@ -32,6 +32,7 @@ export type LevelRenderFrame = {
   readonly frameId: number;
   readonly modelViewMatrix: Float32Array;
   readonly projectionMatrix: Float32Array;
+  readonly cameraPosition: readonly [number, number, number];
   readonly fogStart: number;
   readonly fogEnd: number;
   readonly fogColor: readonly [number, number, number, number];
@@ -139,7 +140,12 @@ export class LevelRenderer {
     const frustum = this.cullingFrustum!;
     const frameId = this.frameId++;
     FogRenderer.setupColor(camera, partialTick, level, this.lastViewDistance * 16, gameRenderer.getDarkenWorldAmount(partialTick));
-    FogRenderer.setupFog(camera, FogMode.FOG_TERRAIN, Math.max(gameRenderer.getRenderDistance() - 16.0, 32.0), false);
+    // WebGPU: browser option can disable terrain fog independently of render distance.
+    if (gameRenderer.isFogEnabled()) {
+      FogRenderer.setupFog(camera, FogMode.FOG_TERRAIN, Math.max(gameRenderer.getRenderDistance() - 16.0, 32.0), false);
+    } else {
+      FogRenderer.setupNoFog();
+    }
     this.setupRender(camera, frustum, false, frameId, false);
     await this.compileChunksUntil(finishTimeNano);
     if (options.waitForChunkTasks && this.chunkRenderDispatcher !== undefined && !this.chunkRenderDispatcher.isQueueEmpty()) {
@@ -166,6 +172,7 @@ export class LevelRenderer {
       frameId,
       modelViewMatrix: poseStack.last().pose().toFloat32Array(),
       projectionMatrix: projectionMatrix.toFloat32Array(),
+      cameraPosition: [cameraPosition.x, cameraPosition.y, cameraPosition.z],
       fogStart: FogRenderer.getShaderFogStart(),
       fogEnd: FogRenderer.getShaderFogEnd(),
       fogColor: FogRenderer.getShaderFogColor(),

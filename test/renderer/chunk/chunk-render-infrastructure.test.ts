@@ -167,6 +167,7 @@ function createDispatcher(): BlockRenderDispatcher {
 function createFakeDevice(): GPUDevice {
   return {
     queue: {
+      writeBuffer() {},
       writeTexture() {},
     },
     createBuffer(descriptor: GPUBufferDescriptor) {
@@ -524,6 +525,14 @@ describe("Chunk render infrastructure", () => {
     expect(solidDraws.some((draw) => draw.chunkOffset[2] < 0)).toBe(true);
     expect(solidDraws.some((draw) => draw.chunkOffset[2] > 0)).toBe(false);
     expect(frame.fogEnd).toBeGreaterThan(frame.fogStart);
+    gameRenderer.setFogEnabled(false);
+    const noFogFrame = await gameRenderer.renderLevel(0, Number.MAX_SAFE_INTEGER, levelRenderer, lightTexture, {
+      position: new Vec3(8.5, 8.5, 20),
+      xRot: 0,
+      yRot: 180,
+    }, { waitForChunkTasks: true });
+    expect(noFogFrame.fogStart).toBe(Number.MAX_VALUE);
+    expect(noFogFrame.fogEnd).toBe(Number.MAX_VALUE);
     expect(LightTexture.FULL_BLOCK).toBe(240);
     expect(LightTexture.block(LightTexture.FULL_BRIGHT)).toBe(15);
     expect(LightTexture.sky(LightTexture.FULL_BRIGHT)).toBe(15);

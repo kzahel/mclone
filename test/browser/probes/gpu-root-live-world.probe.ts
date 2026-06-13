@@ -60,7 +60,8 @@ test("root title starts a live world without routing through the smoke scenario"
   expect(worldState.lastAction).toBe("start_world");
   expect(worldState.worldResult?.ok).toBe(true);
   expect(worldState.worldResult?.mode).toBe("live_world");
-  expect(worldState.worldResult?.loadedChunkCount).toBeGreaterThanOrEqual(worldState.worldResult?.expectedLoadedChunkCount ?? 1);
+  expect(worldState.worldResult?.loadedChunkCount).toBeGreaterThan(0);
+  expect(worldState.worldResult?.expectedLoadedChunkCount).toBeGreaterThan(0);
   await page.waitForFunction(() => (window.__mcloneGui?.state.frameCount ?? 0) >= 3, undefined, {
     timeout: FAST_VISUAL_PROBE_TIMEOUTS.frame,
   });

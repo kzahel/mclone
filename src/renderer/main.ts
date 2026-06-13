@@ -119,6 +119,7 @@ interface GpuGuiRuntimeState {
   chunkLifecycle?: GeneratedChunkLifecycleSnapshot;
   viewDistance?: number;
   renderDistance?: number;
+  fogEnabled?: boolean;
   lightingMode?: string;
   liquidSimulationMode?: string;
   worldStorageMode?: string;
@@ -158,6 +159,7 @@ interface LiveWorldBootResult {
   readonly saveId: string;
   readonly viewDistance: number;
   readonly renderDistance: number;
+  readonly fogEnabled: boolean;
   readonly lightingMode: string;
   readonly liquidSimulationMode: string;
   readonly loadedChunkCount: number;
@@ -242,6 +244,7 @@ function readGuiOptionsState(url: URL): GuiOptionsState {
   return {
     viewDistance: config.viewDistance,
     renderDistance: config.renderDistance,
+    fogEnabled: config.fogEnabled,
     lightingMode: config.lightingMode,
     liquidSimulationMode: config.liquidSimulationMode,
     autoJump: config.autoJump,
@@ -265,6 +268,7 @@ function readGuiDebugSettingsState(url: URL): GuiDebugSettingsBundle {
       preset: debugSession.preset,
       worldStorageMode: renderConfig.worldStorageMode,
       showDebugInfo: debugSession.showDebugInfo,
+      showChunkBorders: debugSession.showChunkBorders,
       worldAuthority: worldTransportSettings.worldAuthority,
       dedicatedSocketUrl: worldTransportSettings.dedicatedSocketUrl,
     },
@@ -275,6 +279,7 @@ function copyGuiOptionsState(options: GuiOptionsState): GuiOptionsState {
   return {
     viewDistance: options.viewDistance,
     renderDistance: options.renderDistance,
+    fogEnabled: options.fogEnabled,
     lightingMode: options.lightingMode,
     liquidSimulationMode: options.liquidSimulationMode,
     autoJump: options.autoJump,
@@ -287,6 +292,7 @@ function copyGuiDebugSettingsState(debugSettings: GuiDebugSettingsState): GuiDeb
     preset: debugSettings.preset,
     worldStorageMode: debugSettings.worldStorageMode,
     showDebugInfo: debugSettings.showDebugInfo,
+    showChunkBorders: debugSettings.showChunkBorders,
     worldAuthority: debugSettings.worldAuthority,
     dedicatedSocketUrl: debugSettings.dedicatedSocketUrl,
   };
@@ -354,6 +360,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
     preset: debugSettingsState.debugSession.preset,
     viewDistance: optionsState.viewDistance,
     renderDistance: optionsState.renderDistance,
+    fogEnabled: optionsState.fogEnabled,
     lightingMode: optionsState.lightingMode,
     liquidSimulationMode: optionsState.liquidSimulationMode,
     worldStorageMode: debugSettingsState.debugSettings.worldStorageMode,
@@ -449,6 +456,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
       movementMode: debugSettingsState.debugSettings.movementMode,
       preset: debugSettingsState.debugSettings.preset,
       showDebugInfo: debugSettingsState.debugSettings.showDebugInfo,
+      showChunkBorders: debugSettingsState.debugSettings.showChunkBorders,
     };
     persistGuiSettingsState(optionsState, debugSettingsState.debugSession, debugSettingsState.debugSettings);
     state.options = copyGuiOptionsState(optionsState);
@@ -458,6 +466,7 @@ async function bootGpuTitle(canvas: HTMLCanvasElement, url: URL): Promise<MainBo
     state.preset = debugSettingsState.debugSession.preset;
     state.viewDistance = optionsState.viewDistance;
     state.renderDistance = optionsState.renderDistance;
+    state.fogEnabled = optionsState.fogEnabled;
     state.lightingMode = optionsState.lightingMode;
     state.liquidSimulationMode = optionsState.liquidSimulationMode;
     state.worldStorageMode = debugSettingsState.debugSettings.worldStorageMode;
@@ -788,6 +797,7 @@ async function runGpuTitleLiveWorldBoot(
     preset: options.debugSettingsState.preset,
     viewDistance: options.optionsState.viewDistance,
     renderDistance: options.optionsState.renderDistance,
+    fogEnabled: options.optionsState.fogEnabled,
     engineConfig: {
       lightingMode: options.optionsState.lightingMode,
       liquidSimulationMode: options.optionsState.liquidSimulationMode,
@@ -798,7 +808,7 @@ async function runGpuTitleLiveWorldBoot(
     clearColorScale: renderConfig.clearColorScale,
     worldStorageMode: options.debugSettingsState.worldStorageMode,
     rendererHost: createPinnedBrowserRendererHost(options.deviceContext, options.target),
-    pollDebugOptions: () => options.state.mode === "loading" || options.debugSettingsState.showDebugInfo
+    pollDebugOptions: () => options.state.mode === "loading" || options.debugSettingsState.showDebugInfo || options.debugSettingsState.showChunkBorders
       ? { chunkLifecycle: true }
       : undefined,
     onProgress,
@@ -827,30 +837,37 @@ async function runGpuTitleLiveWorldBoot(
     options.state.saveId = scene.saveMetadata.saveId;
     options.state.viewDistance = scene.viewDistance;
     options.state.renderDistance = scene.gameRenderer.getRenderDistance();
+    options.state.fogEnabled = options.optionsState.fogEnabled;
     options.state.lightingMode = options.optionsState.lightingMode;
     options.state.liquidSimulationMode = options.optionsState.liquidSimulationMode;
     options.state.worldStorageMode = options.debugSettingsState.worldStorageMode;
-    if (!await waitForLoadedChunkRing(scene, expectedLoadedChunkCount, {
-      maxAttempts: Math.max(2400, expectedLoadedChunkCount * 32),
+    if (!await waitForLoadedChunkRing(scene, 1, {
+      maxAttempts: Math.max(240, expectedLoadedChunkCount * 4),
       onProgress: (progress) => {
         publishLoadingChunkLifecycle();
+        const loadedChunkCount = getSceneLoadedChunkCount(scene);
         onProgress({
           ...progress,
-          fraction: 0.92 + ((progressFraction(progress) ?? 0) * 0.06),
+          stage: "Loading initial terrain",
+          fraction: 0.92 + (Math.min(loadedChunkCount, expectedLoadedChunkCount) / expectedLoadedChunkCount * 0.06),
         });
       },
     })) {
       closeRendererScene(scene);
       return {
         ok: false,
-        reason: `expected ${expectedLoadedChunkCount.toString()} loaded chunks for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`,
+        reason: `expected at least one loaded chunk for viewDistance=${scene.viewDistance.toString()}, got ${getSceneLoadedChunkCount(scene).toString()}`,
       };
     }
 
     publishLoadingChunkLifecycle();
-    onProgress({ stage: "Building first frame", fraction: 0.98 });
+    onProgress({ stage: "Building first terrain frame", fraction: 0.98 });
     scene.levelRenderer.allChanged();
-    const frame = await renderSceneUntilSettled(scene, camera);
+    const frame = await renderSceneUntilSettled(scene, camera, {
+      maxAttempts: 20,
+      stablePasses: 1,
+      pollIntervalMs: 25,
+    });
     const loadedChunkCount = getSceneLoadedChunkCount(scene);
     options.state.loadedChunkCount = loadedChunkCount;
     return {
@@ -868,6 +885,7 @@ async function runGpuTitleLiveWorldBoot(
         saveId: scene.saveMetadata.saveId,
         viewDistance: scene.viewDistance,
         renderDistance: scene.gameRenderer.getRenderDistance(),
+        fogEnabled: options.optionsState.fogEnabled,
         lightingMode: options.optionsState.lightingMode,
         liquidSimulationMode: options.optionsState.liquidSimulationMode,
         loadedChunkCount,

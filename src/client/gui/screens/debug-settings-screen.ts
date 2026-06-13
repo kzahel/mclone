@@ -15,6 +15,7 @@ export interface GuiDebugSettingsState {
   preset: OpenWorldPreset;
   worldStorageMode: WorldStorageMode;
   showDebugInfo: boolean;
+  showChunkBorders: boolean;
   worldAuthority: GuiWorldAuthority;
   dedicatedSocketUrl: string;
 }
@@ -42,7 +43,7 @@ export class DebugSettingsScreen extends Screen {
     const rightX = centerX + 5;
     const topY = Math.floor(this.height / 6) - 12;
     const rowSpacing = 24;
-    const doneY = Math.min(this.height - 28, topY + (rowSpacing * 4) + 12);
+    const doneY = Math.min(this.height - 28, topY + (rowSpacing * 5) + 12);
 
     this.addRenderableWidget(new CycleButton<GuiDebugMovementMode>(
       leftX,
@@ -103,9 +104,23 @@ export class DebugSettingsScreen extends Screen {
         this.onChanged();
       },
     ));
-    this.addRenderableWidget(new CycleButton<GuiWorldAuthority>(
+    this.addRenderableWidget(new Checkbox(
       leftX,
       topY + (rowSpacing * 2),
+      310,
+      20,
+      "Chunk Borders",
+      this.getFont(),
+      this.settings.showChunkBorders,
+      true,
+      (_checkbox, selected) => {
+        this.settings.showChunkBorders = selected;
+        this.onChanged();
+      },
+    ));
+    this.addRenderableWidget(new CycleButton<GuiWorldAuthority>(
+      leftX,
+      topY + (rowSpacing * 3),
       310,
       20,
       "World",
@@ -121,7 +136,7 @@ export class DebugSettingsScreen extends Screen {
     ));
     this.dedicatedSocketUrlBox = this.addRenderableWidget(new EditBox(
       leftX,
-      topY + (rowSpacing * 3),
+      topY + (rowSpacing * 4),
       310,
       20,
       "Server",

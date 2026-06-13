@@ -4,9 +4,10 @@ export const DEFAULT_DEBUG_SEED = 12_345n;
 export const DEFAULT_DEBUG_PRESET: OpenWorldPreset = "browser_smoke";
 export const DEFAULT_DEBUG_MOVEMENT_MODE: DebugMovementMode = "player";
 export const DEFAULT_DEBUG_SHOW_INFO = false;
+export const DEFAULT_DEBUG_SHOW_CHUNK_BORDERS = false;
 export const DEBUG_SESSION_CONFIG_STORAGE_KEY = "mclone.debug.sessionConfig.v1";
 export const START_LAST_WORLD_STORAGE_KEY = "mclone.start.lastWorld.v1";
-export const DEBUG_SESSION_CONFIG_QUERY_KEYS = ["seed", "movementMode", "preset", "showDebugInfo"] as const;
+export const DEBUG_SESSION_CONFIG_QUERY_KEYS = ["seed", "movementMode", "preset", "showDebugInfo", "showChunkBorders"] as const;
 
 export type DebugMovementMode = "player" | "freecam";
 
@@ -15,6 +16,7 @@ export interface DebugSessionConfig {
   readonly movementMode: DebugMovementMode;
   readonly preset: OpenWorldPreset;
   readonly showDebugInfo: boolean;
+  readonly showChunkBorders: boolean;
 }
 
 export function parseSeedValue(value: string | null | undefined, fallback: bigint): bigint {
@@ -75,11 +77,15 @@ export function readStoredDebugSessionConfig(
     const showDebugInfo = typeof parsed.showDebugInfo === "boolean"
       ? parsed.showDebugInfo
       : undefined;
+    const showChunkBorders = typeof parsed.showChunkBorders === "boolean"
+      ? parsed.showChunkBorders
+      : undefined;
     return {
       seed: typeof parsed.seed === "string" ? parseSeedValue(parsed.seed, DEFAULT_DEBUG_SEED) : undefined,
       movementMode,
       preset,
       showDebugInfo,
+      showChunkBorders,
     };
   } catch {
     return {};
@@ -92,11 +98,13 @@ export function readDebugSessionConfig(url: URL, storage?: Pick<Storage, "getIte
   const storedMovementMode = stored.movementMode ?? DEFAULT_DEBUG_MOVEMENT_MODE;
   const storedPreset = stored.preset ?? DEFAULT_DEBUG_PRESET;
   const storedShowDebugInfo = stored.showDebugInfo ?? DEFAULT_DEBUG_SHOW_INFO;
+  const storedShowChunkBorders = stored.showChunkBorders ?? DEFAULT_DEBUG_SHOW_CHUNK_BORDERS;
   return {
     seed: parseSeedValue(url.searchParams.get("seed"), storedSeed),
     movementMode: parseMovementMode(url.searchParams.get("movementMode"), storedMovementMode),
     preset: parsePreset(url.searchParams.get("preset"), storedPreset),
     showDebugInfo: parseBooleanValue(url.searchParams.get("showDebugInfo"), storedShowDebugInfo),
+    showChunkBorders: parseBooleanValue(url.searchParams.get("showChunkBorders"), storedShowChunkBorders),
   };
 }
 
@@ -109,6 +117,7 @@ export function writeStoredDebugSessionConfig(
     movementMode: config.movementMode,
     preset: config.preset,
     showDebugInfo: config.showDebugInfo,
+    showChunkBorders: config.showChunkBorders,
   }));
 }
 
@@ -121,6 +130,7 @@ export function writeStartLastWorld(
     movementMode: config.movementMode,
     preset: config.preset,
     showDebugInfo: config.showDebugInfo,
+    showChunkBorders: config.showChunkBorders,
     lastOpenedAtMs: Date.now(),
   }));
 }

@@ -313,6 +313,7 @@ const STORAGE_SIDE_EFFECT_MAX_CONCURRENCY = 4;
 const GLOBAL_STORAGE_SIDE_EFFECT_KEY = "global";
 const CHUNK_HOLDER_UNLOADS_PER_PASS = 200;
 const CHUNK_HOLDER_UNLOAD_BACKLOG_THRESHOLD = 2_000;
+const NO_LIGHT_STATUS_PUBLISH_INTERVAL = 32;
 const GENERATED_PLAYER_VIEW_TICKET_SOURCE = "player_view";
 const GENERATED_DEPENDENCY_TICKET_SOURCE = "generation_dependency";
 const GENERATED_ENTITY_TICKET_SOURCE = "entity";
@@ -1741,24 +1742,24 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     const targets: GeneratedChunkStatusTarget[] = [];
+    if (this.lightingService === undefined) {
+      const fullRadius = getGeneratedWorldFullChunkRadius(this.currentChunkView.radius);
+      for (let chunkZ = this.currentChunkView.centerChunkZ - fullRadius; chunkZ <= this.currentChunkView.centerChunkZ + fullRadius; chunkZ++) {
+        for (let chunkX = this.currentChunkView.centerChunkX - fullRadius; chunkX <= this.currentChunkView.centerChunkX + fullRadius; chunkX++) {
+          if (!this.level.isChunkFull(chunkX, chunkZ)) {
+            targets.push({ chunkX, chunkZ, status: GeneratedChunkStatus.FULL });
+          }
+        }
+      }
+
+      return targets;
+    }
+
     const featuresRadius = getGeneratedWorldFeaturesChunkRadius(this.currentChunkView.radius);
     for (let chunkZ = this.currentChunkView.centerChunkZ - featuresRadius; chunkZ <= this.currentChunkView.centerChunkZ + featuresRadius; chunkZ++) {
       for (let chunkX = this.currentChunkView.centerChunkX - featuresRadius; chunkX <= this.currentChunkView.centerChunkX + featuresRadius; chunkX++) {
         if (!this.level.hasChunkStatus(chunkX, chunkZ, GeneratedChunkStatus.FEATURES)) {
           targets.push({ chunkX, chunkZ, status: GeneratedChunkStatus.FEATURES });
-        }
-      }
-    }
-
-    if (this.lightingService !== undefined) {
-      return targets;
-    }
-
-    const fullRadius = getGeneratedWorldFullChunkRadius(this.currentChunkView.radius);
-    for (let chunkZ = this.currentChunkView.centerChunkZ - fullRadius; chunkZ <= this.currentChunkView.centerChunkZ + fullRadius; chunkZ++) {
-      for (let chunkX = this.currentChunkView.centerChunkX - fullRadius; chunkX <= this.currentChunkView.centerChunkX + fullRadius; chunkX++) {
-        if (!this.level.isChunkFull(chunkX, chunkZ)) {
-          targets.push({ chunkX, chunkZ, status: GeneratedChunkStatus.FULL });
         }
       }
     }
@@ -2424,6 +2425,25 @@ export class GeneratedWorldHost implements WorldHost {
   ): Promise<void> {
     const yieldStep = createCooperativeYield();
     const statusTargets = this.collectCurrentStatusTargets();
+    const publishTotal = this.countUnpublishedChunksInCurrentPublishView();
+    let publishDone = 0;
+    let publishProgressStarted = false;
+    const enqueuePublishingProgress = (current: number, force = false): void => {
+      if (!force && current <= 0 && publishTotal > 0) {
+        return;
+      }
+
+      publishProgressStarted = true;
+      this.enqueueWorldProgress("Publishing chunks", current, publishTotal, chunkViewJobRevision);
+    };
+    const publishReadyChunks = async (): Promise<void> => {
+      publishDone += await this.convergeCurrentPublishView(chunkViewJobRevision, yieldStep, {
+        onChunkPublished: (publishedInPass) => {
+          enqueuePublishingProgress(publishDone + publishedInPass);
+        },
+      });
+      enqueuePublishingProgress(publishDone);
+    };
 
     let statusDone = 0;
     if (statusTargets.length > 0) {
@@ -2440,28 +2460,27 @@ export class GeneratedWorldHost implements WorldHost {
         }
 
         statusDone++;
+        if (
+          this.lightingService === undefined
+          && target.status === GeneratedChunkStatus.FULL
+          && (statusDone % NO_LIGHT_STATUS_PUBLISH_INTERVAL === 0 || statusDone === statusTargets.length)
+        ) {
+          await publishReadyChunks();
+          if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
+            return;
+          }
+        }
         this.enqueueWorldProgress("Advancing statuses", statusDone, statusTargets.length, chunkViewJobRevision);
       }
     }
 
     const lightingChunks = this.collectFullStatusChunksForCurrentView();
     let lightingDone = 0;
-    let publishDone = 0;
-    let publishProgressStarted = false;
     this.enqueueWorldProgress("Computing light", lightingDone, lightingChunks.length, chunkViewJobRevision);
-    const publishTotal = this.countUnpublishedChunksInCurrentPublishView();
     const enqueueLightingProgress = (): void => {
       if (!publishProgressStarted) {
         this.enqueueWorldProgress("Computing light", lightingDone, lightingChunks.length, chunkViewJobRevision);
       }
-    };
-    const enqueuePublishingProgress = (current: number, force = false): void => {
-      if (!force && current <= 0 && publishTotal > 0) {
-        return;
-      }
-
-      publishProgressStarted = true;
-      this.enqueueWorldProgress("Publishing chunks", current, publishTotal, chunkViewJobRevision);
     };
     let pendingLightReadyForPublish = false;
     const publishReadyLightingBatch = async (): Promise<void> => {
@@ -2470,12 +2489,7 @@ export class GeneratedWorldHost implements WorldHost {
       }
 
       pendingLightReadyForPublish = false;
-      publishDone += await this.convergeCurrentPublishView(chunkViewJobRevision, yieldStep, {
-        onChunkPublished: (publishedInPass) => {
-          enqueuePublishingProgress(publishDone + publishedInPass);
-        },
-      });
-      enqueuePublishingProgress(publishDone);
+      await publishReadyChunks();
     };
     if (this.lightingService !== undefined && lightingChunks.length > 0) {
       this.options.mutateWorld?.(this.liquidLevel);
@@ -2521,12 +2535,7 @@ export class GeneratedWorldHost implements WorldHost {
       }
     }
     await publishReadyLightingBatch();
-    publishDone += await this.convergeCurrentPublishView(chunkViewJobRevision, yieldStep, {
-      onChunkPublished: (publishedInPass) => {
-        enqueuePublishingProgress(publishDone + publishedInPass);
-      },
-    });
-    enqueuePublishingProgress(publishDone);
+    await publishReadyChunks();
     lightingDone = lightingChunks.length;
     enqueueLightingProgress();
     enqueuePublishingProgress(publishTotal, true);

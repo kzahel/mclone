@@ -4,6 +4,7 @@ import type { WorldEngineConfig, WorldEngineLightingMode, WorldEngineLiquidSimul
 export interface BrowserRenderConfig {
   readonly viewDistance: number;
   readonly renderDistance: number;
+  readonly fogEnabled: boolean;
   readonly skyColor: Vec3;
   readonly clearColorScale: number;
   readonly lightingMode: WorldEngineLightingMode;
@@ -13,6 +14,7 @@ export interface BrowserRenderConfig {
 }
 
 const DEFAULT_VIEW_DISTANCE = 6;
+const DEFAULT_FOG_ENABLED = true;
 const DEFAULT_SKY_COLOR = new Vec3(0x8f / 255, 0xb8 / 255, 0xff / 255);
 const DEFAULT_CLEAR_COLOR_SCALE = 1.0;
 const DEFAULT_LIGHTING_MODE: WorldEngineLightingMode = "none";
@@ -24,10 +26,12 @@ export const BROWSER_RENDER_CONFIG_STORAGE_KEY = "mclone.debug.renderConfig.v1";
 export const BROWSER_RENDER_CONFIG_QUERY_KEYS = [
   "viewDistance",
   "renderDistance",
+  "fogEnabled",
   "lightingMode",
   "liquidSimulationMode",
   "worldStorageMode",
   "autoJump",
+  "disableFog",
   "disableLighting",
   "disableWaterSim",
   "disableIndexedDb",
@@ -36,6 +40,7 @@ export const BROWSER_RENDER_CONFIG_QUERY_KEYS = [
 export interface StoredBrowserRenderConfig extends WorldEngineConfig {
   readonly viewDistance?: number;
   readonly renderDistance?: number;
+  readonly fogEnabled?: boolean;
   readonly worldStorageMode?: WorldStorageMode;
   readonly autoJump?: boolean;
 }
@@ -174,6 +179,7 @@ export function readStoredBrowserRenderConfig(storage: Pick<BrowserRenderConfigS
     return {
       viewDistance: readStoredInteger(parsed, "viewDistance", 1, 16),
       renderDistance: readStoredInteger(parsed, "renderDistance", 16, 512),
+      fogEnabled: readStoredBoolean(parsed, "fogEnabled"),
       lightingMode: readStoredLightingMode(parsed),
       liquidSimulationMode: readStoredLiquidSimulationMode(parsed),
       worldStorageMode: readStoredWorldStorageMode(parsed),
@@ -191,6 +197,7 @@ export function writeStoredBrowserRenderConfig(
   storage.setItem(BROWSER_RENDER_CONFIG_STORAGE_KEY, JSON.stringify({
     viewDistance: config.viewDistance,
     renderDistance: config.renderDistance,
+    fogEnabled: config.fogEnabled,
     lightingMode: config.lightingMode,
     liquidSimulationMode: config.liquidSimulationMode,
     worldStorageMode: config.worldStorageMode,
@@ -253,6 +260,26 @@ function parseWorldStorageModeParam(url: URL, fallback: WorldStorageMode): World
   return fallback;
 }
 
+function parseFogEnabledParam(url: URL, fallback: boolean): boolean {
+  const raw = url.searchParams.get("fogEnabled");
+  if (raw === "1" || raw === "true") {
+    return true;
+  }
+  if (raw === "0" || raw === "false") {
+    return false;
+  }
+
+  const disable = url.searchParams.get("disableFog");
+  if (disable === "1" || disable === "true") {
+    return false;
+  }
+  if (disable === "0" || disable === "false") {
+    return true;
+  }
+
+  return fallback;
+}
+
 function parseBooleanParam(url: URL, key: string, fallback: boolean): boolean {
   const raw = url.searchParams.get(key);
   if (raw === "1" || raw === "true") {
@@ -276,6 +303,7 @@ export function readBrowserRenderConfig(
   return {
     viewDistance,
     renderDistance: parseIntegerValue(url.searchParams.get("renderDistance"), storedRenderDistance, 16, 512),
+    fogEnabled: parseFogEnabledParam(url, stored.fogEnabled ?? DEFAULT_FOG_ENABLED),
     skyColor: parseColorParam(url, "fogColor", DEFAULT_SKY_COLOR),
     clearColorScale: parseFloatParam(url, "clearColorScale", DEFAULT_CLEAR_COLOR_SCALE, 0.0, 1.0),
     lightingMode: parseLightingModeParam(url, stored.lightingMode ?? DEFAULT_LIGHTING_MODE),

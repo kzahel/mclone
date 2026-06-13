@@ -39,7 +39,8 @@ import { ViewArea } from "./view-area";
 import { Vec3 } from "../world/phys/vec3";
 import { VertexBuffer } from "./vertex/vertex-buffer";
 import { BROWSER_RENDERER_HOST, type BrowserRendererHost } from "./renderer-host";
-import type { WorldDebugRequestOptions } from "../runtime/protocol/chunk-lifecycle";
+import type { GeneratedChunkLifecycleSnapshot, WorldDebugRequestOptions } from "../runtime/protocol/chunk-lifecycle";
+import { createChunkBorderDebugVertexBuffer } from "./debug/chunk-border-debug-renderer";
 
 const SMOKE_ATLAS_LOCATION = new ResourceLocation("minecraft:textures/atlas/blocks.png");
 const GRASS_COLORMAP_LOCATION = new ResourceLocation("minecraft:colormap/grass");
@@ -59,6 +60,7 @@ export interface SceneInitOptions {
   readonly seed: bigint;
   readonly viewDistance: number;
   readonly renderDistance?: number;
+  readonly fogEnabled?: boolean;
   readonly fov?: number;
   readonly worldTransport?: "worker" | "remote";
   readonly remoteWorldHostUrl?: string;
@@ -594,6 +596,7 @@ export async function initializeRendererScene(
     canvas.height,
     options.renderDistance ?? Math.max(32, (options.viewDistance + 2) * 16),
     options.fov,
+    options.fogEnabled ?? true,
   );
   const lightTexture = new LightTexture(gameRenderer, compatibilityLevel, device);
   lightTexture.tick();
@@ -660,6 +663,10 @@ interface CachedChunkDrawResources {
 interface PassLayer {
   readonly pipeline: GPURenderPipeline;
   readonly draws: readonly DrawEntry[];
+}
+
+export interface EncodeSceneFrameOptions {
+  readonly chunkBorderDebugSnapshot?: GeneratedChunkLifecycleSnapshot;
 }
 
 const COLOR_MODULATOR = [1, 1, 1, 1] as const;
@@ -856,6 +863,65 @@ function createEntityBindGroupEntry(
   };
 }
 
+function createChunkBorderDebugBindGroupEntry(
+  scene: RendererScene,
+  pipeline: import("./pipeline/render-pipeline-cache").CachedRenderPipeline,
+  frame: LevelRenderFrame,
+  vertexBuffer: VertexBuffer,
+): DrawEntry {
+  const uniformBuffer = scene.device.createBuffer({
+    size: Math.max(4, pipeline.shaderProgram.uniformBufferSize),
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  const uniformBytes = new Uint8Array(pipeline.shaderProgram.uniformBufferSize);
+  pipeline.shaderProgram.writeUniformBufferBytes(uniformBytes, {
+    ModelViewMat: frame.modelViewMatrix,
+    ProjMat: frame.projectionMatrix,
+    ColorModulator: COLOR_MODULATOR,
+    LineWidth: [0],
+    ScreenSize: [scene.canvas.width, scene.canvas.height],
+    FogStart: [frame.fogStart],
+    FogEnd: [frame.fogEnd],
+    FogColor: [frame.fogColor[0], frame.fogColor[1], frame.fogColor[2], 0],
+  });
+  scene.device.queue.writeBuffer(uniformBuffer, 0, uniformBytes as Uint8Array<ArrayBuffer>);
+
+  scene.entityFrameResources.push({
+    vertexBuffer,
+    uniformBuffer,
+  });
+  return {
+    vertexBuffer,
+    bindGroup: pipeline.shaderProgram.createBindGroup(scene.device, pipeline.bindGroupLayout, {
+      uniformBuffer,
+    }),
+  };
+}
+
+function appendChunkBorderDebugPassLayer(
+  scene: RendererScene,
+  frame: LevelRenderFrame,
+  target: DrawTarget,
+  snapshot: GeneratedChunkLifecycleSnapshot | undefined,
+  layers: PassLayer[],
+): void {
+  const debugBuffer = createChunkBorderDebugVertexBuffer(scene.device, frame, snapshot, scene.worldBounds);
+  if (debugBuffer === undefined) {
+    return;
+  }
+
+  const renderType = RenderType.lines();
+  if (debugBuffer.vertexBuffer.getFormat() !== renderType.format()) {
+    throw new Error("render type format does not match chunk border debug vertex format");
+  }
+
+  const pipeline = scene.pipelineCache.getOrCreate(renderType, target.format, SCENE_DEPTH_FORMAT);
+  layers.push({
+    pipeline: pipeline.pipeline,
+    draws: [createChunkBorderDebugBindGroupEntry(scene, pipeline, frame, debugBuffer.vertexBuffer)],
+  });
+}
+
 function appendEntityPassLayers(
   scene: RendererScene,
   frame: LevelRenderFrame,
@@ -890,6 +956,7 @@ export function encodeSceneFrame(
   frame: LevelRenderFrame,
   target: DrawTarget,
   encoder: GPUCommandEncoder,
+  options: EncodeSceneFrameOptions = {},
 ): void {
   const layers: PassLayer[] = [];
   const atlasTexture = scene.atlas.getTextureView();
@@ -912,6 +979,7 @@ export function encodeSceneFrame(
     });
   }
   appendEntityPassLayers(scene, frame, target, layers);
+  appendChunkBorderDebugPassLayer(scene, frame, target, options.chunkBorderDebugSnapshot, layers);
 
   const clearColor: GPUColor = {
     r: frame.fogColor[0],

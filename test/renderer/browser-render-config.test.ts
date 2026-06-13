@@ -31,6 +31,7 @@ describe("browser render config", () => {
 
     expect(config.viewDistance).toBe(7);
     expect(config.renderDistance).toBe(160);
+    expect(config.fogEnabled).toBe(true);
     expect(config.lightingMode).toBe("none");
     expect(config.liquidSimulationMode).toBe("vanilla17");
     expect(config.worldStorageMode).toBe("default");
@@ -61,6 +62,7 @@ describe("browser render config", () => {
     writeStoredBrowserRenderConfig(storage, {
       viewDistance: 3,
       renderDistance: 96,
+      fogEnabled: false,
       lightingMode: "none",
       liquidSimulationMode: "none",
       worldStorageMode: "none",
@@ -71,6 +73,7 @@ describe("browser render config", () => {
 
     expect(config.viewDistance).toBe(3);
     expect(config.renderDistance).toBe(96);
+    expect(config.fogEnabled).toBe(false);
     expect(config.lightingMode).toBe("none");
     expect(config.liquidSimulationMode).toBe("none");
     expect(config.worldStorageMode).toBe("none");
@@ -78,6 +81,7 @@ describe("browser render config", () => {
     expect(readStoredBrowserRenderConfig(storage)).toEqual({
       viewDistance: 3,
       renderDistance: 96,
+      fogEnabled: false,
       lightingMode: "none",
       liquidSimulationMode: "none",
       worldStorageMode: "none",
@@ -90,6 +94,7 @@ describe("browser render config", () => {
     storage.setItem(BROWSER_RENDER_CONFIG_STORAGE_KEY, JSON.stringify({
       viewDistance: 2,
       renderDistance: 64,
+      fogEnabled: false,
       lightingMode: "none",
       liquidSimulationMode: "none",
       worldStorageMode: "none",
@@ -97,12 +102,13 @@ describe("browser render config", () => {
     }));
 
     const config = readBrowserRenderConfig(
-      new URL("http://127.0.0.1/?viewDistance=5&renderDistance=128&lightingMode=vanilla17&disableWaterSim=0&disableIndexedDb=0&autoJump=0"),
+      new URL("http://127.0.0.1/?viewDistance=5&renderDistance=128&disableFog=0&lightingMode=vanilla17&disableWaterSim=0&disableIndexedDb=0&autoJump=0"),
       storage,
     );
 
     expect(config.viewDistance).toBe(5);
     expect(config.renderDistance).toBe(128);
+    expect(config.fogEnabled).toBe(true);
     expect(config.lightingMode).toBe("vanilla17");
     expect(config.liquidSimulationMode).toBe("vanilla17");
     expect(config.worldStorageMode).toBe("default");
@@ -124,5 +130,10 @@ describe("browser render config", () => {
 
     expect(config.lightingMode).toBe("none");
     expect(config.liquidSimulationMode).toBe("none");
+  });
+
+  test("lets URL params disable fog independently of render distance", () => {
+    expect(readBrowserRenderConfig(new URL("http://127.0.0.1/?fogEnabled=0")).fogEnabled).toBe(false);
+    expect(readBrowserRenderConfig(new URL("http://127.0.0.1/?disableFog=1")).fogEnabled).toBe(false);
   });
 });

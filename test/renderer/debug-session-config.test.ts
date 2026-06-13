@@ -17,10 +17,11 @@ describe("debug session config", () => {
       movementMode: "freecam",
       preset: "flat_grass",
       showDebugInfo: true,
+      showChunkBorders: true,
     });
 
     const config = readDebugSessionConfig(
-      new URL("http://127.0.0.1/?mode=debug&seed=123&movementMode=player&preset=small_island&showDebugInfo=0"),
+      new URL("http://127.0.0.1/?mode=debug&seed=123&movementMode=player&preset=small_island&showDebugInfo=0&showChunkBorders=0"),
       storage,
     );
 
@@ -29,6 +30,7 @@ describe("debug session config", () => {
       movementMode: "player",
       preset: "small_island",
       showDebugInfo: false,
+      showChunkBorders: false,
     });
   });
 
@@ -39,6 +41,7 @@ describe("debug session config", () => {
       movementMode: "player" as const,
       preset: "browser_smoke" as const,
       showDebugInfo: true,
+      showChunkBorders: true,
     };
 
     writeStoredDebugSessionConfig(storage, config);
@@ -46,6 +49,7 @@ describe("debug session config", () => {
     expect(storage.getItem(DEBUG_SESSION_CONFIG_STORAGE_KEY)).toContain("\"preset\":\"browser_smoke\"");
     expect(storage.getItem(START_LAST_WORLD_STORAGE_KEY)).toContain("\"movementMode\":\"player\"");
     expect(storage.getItem(START_LAST_WORLD_STORAGE_KEY)).toContain("\"showDebugInfo\":true");
+    expect(storage.getItem(START_LAST_WORLD_STORAGE_KEY)).toContain("\"showChunkBorders\":true");
 
     clearStoredDebugSessionConfig(storage);
     expect(storage.getItem(DEBUG_SESSION_CONFIG_STORAGE_KEY)).toBeNull();

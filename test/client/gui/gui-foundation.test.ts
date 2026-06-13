@@ -235,6 +235,7 @@ describe("Gui0 model foundation", () => {
     const options: GuiOptionsState = {
       viewDistance: 6,
       renderDistance: 192,
+      fogEnabled: true,
       lightingMode: "vanilla17",
       liquidSimulationMode: "vanilla17",
       autoJump: true,
@@ -259,6 +260,8 @@ describe("Gui0 model foundation", () => {
     expect(options.liquidSimulationMode).toBe("none");
     expect(manager.mouseClicked(80, 86, 0)).toBe(true);
     expect(options.autoJump).toBe(false);
+    expect(manager.mouseClicked(175, 86, 0)).toBe(true);
+    expect(options.fogEnabled).toBe(false);
     expect(manager.mouseClicked(160, 146, 0)).toBe(true);
     expect(done).toBe(true);
     expect(changedState).toEqual(options);
@@ -270,6 +273,7 @@ describe("Gui0 model foundation", () => {
     const options: GuiOptionsState = {
       viewDistance: 6,
       renderDistance: 192,
+      fogEnabled: true,
       lightingMode: "vanilla17",
       liquidSimulationMode: "vanilla17",
       autoJump: true,
@@ -301,6 +305,7 @@ describe("Gui0 model foundation", () => {
       preset: "browser_smoke",
       worldStorageMode: "default",
       showDebugInfo: false,
+      showChunkBorders: false,
       worldAuthority: "local",
       dedicatedSocketUrl: "localhost:4173",
     };
@@ -325,11 +330,13 @@ describe("Gui0 model foundation", () => {
     expect(manager.mouseClicked(170, 62, 0)).toBe(true);
     expect(settings.showDebugInfo).toBe(true);
     expect(manager.mouseClicked(160, 86, 0)).toBe(true);
+    expect(settings.showChunkBorders).toBe(true);
+    expect(manager.mouseClicked(160, 110, 0)).toBe(true);
     expect(settings.worldAuthority).toBe("dedicated");
-    expect(manager.mouseClicked(80, 110, 0)).toBe(true);
+    expect(manager.mouseClicked(80, 134, 0)).toBe(true);
     expect(manager.charTyped("x", 0)).toBe(true);
     expect(settings.dedicatedSocketUrl).toBe("localhost:4173x");
-    expect(manager.mouseClicked(160, 146, 0)).toBe(true);
+    expect(manager.mouseClicked(160, 170, 0)).toBe(true);
     expect(done).toBe(true);
     expect(changedState).toEqual(settings);
     expect(manager.currentScreen).toBe(titleScreen);

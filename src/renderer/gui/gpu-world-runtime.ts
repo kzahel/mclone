@@ -658,6 +658,11 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
         format: scene.format,
       },
       encoder,
+      {
+        chunkBorderDebugSnapshot: this.options.debugSettingsState.showChunkBorders
+          ? this.options.state.chunkLifecycle
+          : undefined,
+      },
     );
     this.updateState();
     this.options.guiOverlayHost.encode(encoder, view, scene.format, scene.canvas.width, scene.canvas.height);
@@ -712,6 +717,7 @@ class BrowserGpuWorldRuntime implements GpuWorldRuntime {
     this.options.state.lastAction = "options";
     this.options.screenManager.setScreen(new OptionsScreen(lastScreen, this.options.optionsState, {
       onChanged: () => {
+        this.options.scene.gameRenderer.setFogEnabled(this.options.optionsState.fogEnabled);
         this.options.onOptionsChanged();
         this.updateState();
       },
