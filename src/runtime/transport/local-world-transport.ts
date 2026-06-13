@@ -142,7 +142,9 @@ export class TransportWorldClient implements WorldClient {
       return false;
     }
 
-    const result = await this.clientWorld.hydrateHostMessages(await this.transport.setChunkView(request));
+    const debug = this.pollDebugOptions?.();
+    const transportRequest = debug === undefined ? request : { ...request, debug };
+    const result = await this.clientWorld.hydrateHostMessages(await this.transport.setChunkView(transportRequest));
     this.lastChunkView = request;
     return result.chunkChanged;
   }

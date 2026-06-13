@@ -651,6 +651,7 @@ interface StartGpuTitleWorldOptions {
 
 async function startGpuTitleWorld(options: StartGpuTitleWorldOptions): Promise<GpuTitleWorldResult> {
   const progressScreen = new ProgressScreen(true);
+  progressScreen.setChunkLifecycleDiagnosticsVisible(true);
   options.state.mode = "loading";
   options.state.screenTitle = "Progress Screen";
   options.screenManager.setScreen(progressScreen);

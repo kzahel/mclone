@@ -89,9 +89,10 @@ const LIFECYCLE_SNAPSHOT: GeneratedChunkLifecycleSnapshot = {
 
 class StaticWorldTransport implements WorldTransport {
   public readonly pollRequests: PollWorldUpdatesRequest[] = [];
+  public readonly chunkViewRequests: SetChunkViewRequest[] = [];
 
   public constructor(
-    private readonly chunkViewMessages: readonly WorldHostMessage[],
+    private readonly chunkViewMessages: readonly WorldHostMessage[] | ((request: SetChunkViewRequest) => readonly WorldHostMessage[]),
     private readonly pollMessages: readonly WorldHostMessage[] | ((request: PollWorldUpdatesRequest) => readonly WorldHostMessage[]) = [],
   ) {}
 
@@ -99,8 +100,9 @@ class StaticWorldTransport implements WorldTransport {
     return Promise.resolve([OPENED]);
   }
 
-  public setChunkView(_request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]> {
-    return Promise.resolve(this.chunkViewMessages);
+  public setChunkView(request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]> {
+    this.chunkViewRequests.push(request);
+    return Promise.resolve(typeof this.chunkViewMessages === "function" ? this.chunkViewMessages(request) : this.chunkViewMessages);
   }
 
   public setPlayerInput(_request: SetPlayerInputRequest): Promise<readonly WorldHostMessage[]> {
@@ -263,9 +265,14 @@ describe("RenderWorld update sink", () => {
   test("requests and stores lifecycle debug snapshots only when enabled", async () => {
     const recordingLevel = createRecordingLevel();
     let enabled = false;
-    const transport = new StaticWorldTransport([], (request) => request.debug?.chunkLifecycle === true
-      ? [{ type: "chunk_lifecycle", snapshot: LIFECYCLE_SNAPSHOT }]
-      : []);
+    const transport = new StaticWorldTransport(
+      (request) => request.debug?.chunkLifecycle === true
+        ? [{ type: "chunk_lifecycle", snapshot: LIFECYCLE_SNAPSHOT }]
+        : [],
+      (request) => request.debug?.chunkLifecycle === true
+        ? [{ type: "chunk_lifecycle", snapshot: LIFECYCLE_SNAPSHOT }]
+        : [],
+    );
     const client = new TransportWorldClient(
       transport,
       () => recordingLevel.level,
@@ -276,11 +283,40 @@ describe("RenderWorld update sink", () => {
 
     await client.openWorld({ type: "open_world", seed: 12345n, preset: "default" });
 
+    await expect(client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    })).resolves.toBe(false);
+    expect(transport.chunkViewRequests[0]).toEqual({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 1,
+    });
+    expect(client.getChunkLifecycleSnapshot()).toBeUndefined();
+
     await expect(client.pollUpdates()).resolves.toBe(false);
     expect(transport.pollRequests[0]).toEqual({ type: "poll_world_updates" });
     expect(client.getChunkLifecycleSnapshot()).toBeUndefined();
 
     enabled = true;
+    await expect(client.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 1,
+      centerChunkZ: 0,
+      radius: 1,
+    })).resolves.toBe(false);
+    expect(transport.chunkViewRequests[1]).toEqual({
+      type: "set_chunk_view",
+      centerChunkX: 1,
+      centerChunkZ: 0,
+      radius: 1,
+      debug: { chunkLifecycle: true },
+    });
+    expect(client.getChunkLifecycleSnapshot()).toBe(LIFECYCLE_SNAPSHOT);
+
     await expect(client.pollUpdates()).resolves.toBe(false);
     expect(transport.pollRequests[1]).toEqual({ type: "poll_world_updates", debug: { chunkLifecycle: true } });
     expect(client.getChunkLifecycleSnapshot()).toBe(LIFECYCLE_SNAPSHOT);

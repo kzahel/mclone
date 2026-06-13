@@ -38,6 +38,7 @@ import {
   type WorldSocketClientFrame,
   type WorldSocketServerFrame,
 } from "../protocol/world-wire-protocol";
+import type { WorldDebugRequestOptions } from "../protocol/chunk-lifecycle";
 import { drainWorldHostMessages } from "../protocol/world-message-queue";
 import {
   isDefaultWorldEngineConfig,
@@ -424,12 +425,12 @@ function drainPendingMessages(session: SessionRecord, maxMessages: number | unde
   return drained.messages;
 }
 
-function appendPollDebugMessages(
+function appendDebugMessages(
   world: SharedWorldRecord,
-  request: PollWorldUpdatesRequest,
+  debug: WorldDebugRequestOptions | undefined,
   messages: readonly WorldHostMessage[],
 ): readonly WorldHostMessage[] {
-  if (request.debug?.chunkLifecycle !== true) {
+  if (debug?.chunkLifecycle !== true) {
     return messages;
   }
 
@@ -861,7 +862,7 @@ export class GeneratedWorldRemoteService {
       }
 
       queuedSession.visibleChunks = visibleChunks;
-      return responseMessages;
+      return appendDebugMessages(queuedWorld, request.debug, responseMessages);
     });
   }
 
@@ -914,7 +915,7 @@ export class GeneratedWorldRemoteService {
     }
 
     await this.drainAuthoritativeHostMessages(world);
-    return appendPollDebugMessages(world, request, drainPendingMessages(session, request.maxMessages));
+    return appendDebugMessages(world, request.debug, drainPendingMessages(session, request.maxMessages));
   }
 
   public getSessionCount(): number {

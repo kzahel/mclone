@@ -2,7 +2,7 @@
 
 Build a testable chunk-lifecycle report before adding more runtime complexity or relying on manual playtesting.
 
-Status: host-side snapshot, coordinate-bearing route delta slices, protocol transport, and debug HUD v0 are the current slice. Renderer mesh/render-state correlation remains follow-up work.
+Status: host-side snapshot, coordinate-bearing route delta slices, protocol transport, loading-screen diagnostics, and debug HUD v0 are the current slice. Renderer mesh/render-state correlation remains follow-up work.
 
 ## Goal
 
@@ -48,14 +48,16 @@ The in-game HUD should make the same report visible while playing, without turni
 
 Implementation shape:
 
-- `poll_world_updates` accepts an optional debug request: `{ debug: { chunkLifecycle: true } }`.
+- `set_chunk_view` and `poll_world_updates` accept an optional debug request: `{ debug: { chunkLifecycle: true } }`.
 - The generated host appends a `chunk_lifecycle` message only when that flag is present.
 - The client replica stores the latest lifecycle snapshot alongside the existing performance snapshot.
-- The browser runtime requests the snapshot only while `showDebugInfo` is enabled.
+- The browser runtime requests the snapshot while loading and while `showDebugInfo` is enabled.
 - The loading screen and debug overlay draw a compact minimap from the protocol snapshot:
   - cell color is the actionable lifecycle state: published, blocked, ready, materialized, generated, dirty, or unloading
   - the panel shows chunk coordinate bounds, view center/radius, publication counts, loaded count, and blocked count
   - the current view square and center chunk are marked directly on the grid
+  - the legend uses color swatches with state labels, not unrelated letter codes
+  - the loading screen shows a placeholder lifecycle panel before the first chunk-view snapshot arrives
   - during loading, the normal progress text/bar shifts left when the lifecycle panel is visible
 
 This HUD is deliberately a host lifecycle view. It does not yet answer whether a published chunk has been hydrated into the render worker, meshed, uploaded, or submitted by the renderer.

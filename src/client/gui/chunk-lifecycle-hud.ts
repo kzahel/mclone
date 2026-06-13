@@ -34,8 +34,17 @@ interface ChunkLifecycleHudLayout extends ChunkLifecycleHudPanel {
   readonly bounds: ChunkLifecycleHudBounds;
   readonly cellSize: number;
   readonly headerLines: readonly string[];
-  readonly legendLines: readonly string[];
+  readonly legendRows: readonly (readonly ChunkLifecycleHudLegendItem[])[];
   readonly gridHeight: number;
+}
+
+interface ChunkLifecycleHudPlaceholderLayout extends ChunkLifecycleHudPanel {
+  readonly lines: readonly string[];
+}
+
+interface ChunkLifecycleHudLegendItem {
+  readonly state: ChunkLifecycleHudCellState;
+  readonly label: string;
 }
 
 export const CHUNK_LIFECYCLE_HUD_CELL_COLORS: Readonly<Record<ChunkLifecycleHudCellState, number>> = {
@@ -48,6 +57,21 @@ export const CHUNK_LIFECYCLE_HUD_CELL_COLORS: Readonly<Record<ChunkLifecycleHudC
   generated: 0xff8d8f96,
   empty: 0xff25272b,
 };
+
+const CHUNK_LIFECYCLE_HUD_LEGEND_ITEMS: readonly ChunkLifecycleHudLegendItem[] = [
+  { state: "published", label: "published" },
+  { state: "blocked", label: "blocked" },
+  { state: "ready", label: "ready" },
+  { state: "materialized", label: "materialized" },
+  { state: "generated", label: "generated" },
+  { state: "dirty", label: "dirty" },
+  { state: "unload", label: "unload" },
+];
+
+const LEGEND_SWATCH_SIZE = 5;
+const LEGEND_SWATCH_TEXT_GAP = 3;
+const LEGEND_ITEM_GAP = 10;
+const MAX_HUD_PANEL_WIDTH = 280;
 
 export function getChunkLifecycleHudCellState(record: GeneratedChunkLifecycleRecord): ChunkLifecycleHudCellState {
   if (record.queuedForUnload || record.pendingUnload) {
@@ -139,7 +163,7 @@ export function renderChunkLifecycleHud(
     return undefined;
   }
 
-  const { bounds, cellSize, gridHeight, headerLines, legendLines } = layout;
+  const { bounds, cellSize, gridHeight, headerLines, legendRows } = layout;
   GuiComponent.fill(drawList, layout.x, layout.y, layout.x + layout.width, layout.y + layout.height, 0x8f000000);
 
   let y = layout.y + 3;
@@ -153,8 +177,42 @@ export function renderChunkLifecycleHud(
   drawChunkLifecycleGrid(drawList, snapshot, bounds, gridX, y, cellSize);
   y += gridHeight + 4;
 
-  for (const line of legendLines) {
-    GuiComponent.drawString(drawList, font, line, layout.x + 4, y, 0xffd8dee9);
+  for (const row of legendRows) {
+    drawChunkLifecycleLegendRow(drawList, font, row, layout.x + 4, y);
+    y += font.lineHeight;
+  }
+
+  return {
+    x: layout.x,
+    y: layout.y,
+    width: layout.width,
+    height: layout.height,
+  };
+}
+
+export function renderChunkLifecycleHudPlaceholder(
+  drawList: GuiDrawList,
+  font: Font,
+  guiWidth: number,
+  guiHeight: number,
+  lines: readonly string[],
+): ChunkLifecycleHudPanel | undefined {
+  const layout = createChunkLifecycleHudPlaceholderLayout(font, guiWidth, guiHeight, lines);
+  if (layout === undefined) {
+    return undefined;
+  }
+
+  GuiComponent.fill(drawList, layout.x, layout.y, layout.x + layout.width, layout.y + layout.height, 0x8f000000);
+  let y = layout.y + 3;
+  for (let index = 0; index < layout.lines.length; index++) {
+    GuiComponent.drawString(
+      drawList,
+      font,
+      layout.lines[index]!,
+      layout.x + 4,
+      y,
+      index === 0 ? 0xffffffff : 0xffd8dee9,
+    );
     y += font.lineHeight;
   }
 
@@ -183,6 +241,23 @@ export function measureChunkLifecycleHudPanel(
     };
 }
 
+export function measureChunkLifecycleHudPlaceholderPanel(
+  font: Font,
+  guiWidth: number,
+  guiHeight: number,
+  lines: readonly string[],
+): ChunkLifecycleHudPanel | undefined {
+  const layout = createChunkLifecycleHudPlaceholderLayout(font, guiWidth, guiHeight, lines);
+  return layout === undefined
+    ? undefined
+    : {
+      x: layout.x,
+      y: layout.y,
+      width: layout.width,
+      height: layout.height,
+    };
+}
+
 function createChunkLifecycleHudLayout(
   font: Font,
   guiWidth: number,
@@ -197,14 +272,13 @@ function createChunkLifecycleHudLayout(
   const columns = bounds.maxChunkX - bounds.minChunkX + 1;
   const rows = bounds.maxChunkZ - bounds.minChunkZ + 1;
   const headerLines = buildChunkLifecycleHudLines(snapshot, bounds);
-  const legendLines = [
-    "P published  B blocked  R ready",
-    "M material  G generated  D dirty  U unload",
-  ];
-  const textWidth = [...headerLines, ...legendLines]
-    .reduce((width, line) => Math.max(width, font.width(line)), 0);
-  const maxGridWidth = Math.max(48, Math.min(180, guiWidth - 12));
-  const maxGridHeight = Math.max(48, Math.min(150, guiHeight - ((headerLines.length + legendLines.length) * font.lineHeight) - 20));
+  const maxPanelWidth = getMaxChunkLifecycleHudPanelWidth(guiWidth);
+  const legendRows = createChunkLifecycleLegendRows(font, Math.max(80, maxPanelWidth - 8));
+  const headerWidth = headerLines.reduce((width, line) => Math.max(width, font.width(line)), 0);
+  const legendWidth = legendRows.reduce((width, row) => Math.max(width, measureChunkLifecycleLegendRow(font, row)), 0);
+  const textWidth = Math.max(headerWidth, legendWidth);
+  const maxGridWidth = Math.max(48, Math.min(180, maxPanelWidth - 8));
+  const maxGridHeight = Math.max(48, Math.min(150, guiHeight - ((headerLines.length + legendRows.length) * font.lineHeight) - 20));
   const cellSize = Math.min(8, Math.max(2, Math.floor(Math.min(maxGridWidth / columns, maxGridHeight / rows))));
   if (cellSize < 2) {
     return undefined;
@@ -212,13 +286,13 @@ function createChunkLifecycleHudLayout(
 
   const gridWidth = columns * cellSize;
   const gridHeight = rows * cellSize;
-  const panelWidth = Math.min(guiWidth - 4, Math.max(gridWidth + 8, textWidth + 8));
+  const panelWidth = Math.min(maxPanelWidth, Math.max(gridWidth + 8, textWidth + 8));
   const panelHeight = 6
     + (headerLines.length * font.lineHeight)
     + 4
     + gridHeight
     + 4
-    + (legendLines.length * font.lineHeight)
+    + (legendRows.length * font.lineHeight)
     + 4;
   if (panelWidth <= 0 || panelHeight > guiHeight) {
     return undefined;
@@ -234,8 +308,38 @@ function createChunkLifecycleHudLayout(
     bounds,
     cellSize,
     headerLines,
-    legendLines,
+    legendRows,
     gridHeight,
+  };
+}
+
+function getMaxChunkLifecycleHudPanelWidth(guiWidth: number): number {
+  return Math.max(80, Math.min(MAX_HUD_PANEL_WIDTH, guiWidth - 4));
+}
+
+function createChunkLifecycleHudPlaceholderLayout(
+  font: Font,
+  guiWidth: number,
+  guiHeight: number,
+  lines: readonly string[],
+): ChunkLifecycleHudPlaceholderLayout | undefined {
+  if (lines.length === 0) {
+    return undefined;
+  }
+
+  const textWidth = lines.reduce((width, line) => Math.max(width, font.width(line)), 0);
+  const panelWidth = Math.min(guiWidth - 4, textWidth + 8);
+  const panelHeight = 6 + (lines.length * font.lineHeight) + 4;
+  if (panelWidth <= 0 || panelHeight > guiHeight) {
+    return undefined;
+  }
+
+  return {
+    x: Math.max(0, guiWidth - panelWidth - 2),
+    y: 0,
+    width: panelWidth,
+    height: panelHeight,
+    lines,
   };
 }
 
@@ -266,6 +370,67 @@ function drawChunkLifecycleGrid(
 
   drawChunkLifecycleViewOutline(drawList, snapshot, bounds, gridX, gridY, cellSize);
   drawChunkLifecycleCenterMarker(drawList, snapshot, bounds, gridX, gridY, cellSize);
+}
+
+function createChunkLifecycleLegendRows(
+  font: Font,
+  maxWidth: number,
+): readonly (readonly ChunkLifecycleHudLegendItem[])[] {
+  const rows: ChunkLifecycleHudLegendItem[][] = [];
+  let row: ChunkLifecycleHudLegendItem[] = [];
+  let rowWidth = 0;
+  for (const item of CHUNK_LIFECYCLE_HUD_LEGEND_ITEMS) {
+    const itemWidth = measureChunkLifecycleLegendItem(font, item);
+    const nextWidth = row.length === 0 ? itemWidth : rowWidth + LEGEND_ITEM_GAP + itemWidth;
+    if (row.length > 0 && nextWidth > maxWidth) {
+      rows.push(row);
+      row = [item];
+      rowWidth = itemWidth;
+    } else {
+      row.push(item);
+      rowWidth = nextWidth;
+    }
+  }
+
+  if (row.length > 0) {
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function measureChunkLifecycleLegendRow(font: Font, row: readonly ChunkLifecycleHudLegendItem[]): number {
+  return row.reduce((width, item, index) => (
+    width + (index === 0 ? 0 : LEGEND_ITEM_GAP) + measureChunkLifecycleLegendItem(font, item)
+  ), 0);
+}
+
+function measureChunkLifecycleLegendItem(font: Font, item: ChunkLifecycleHudLegendItem): number {
+  return LEGEND_SWATCH_SIZE + LEGEND_SWATCH_TEXT_GAP + font.width(item.label);
+}
+
+function drawChunkLifecycleLegendRow(
+  drawList: GuiDrawList,
+  font: Font,
+  row: readonly ChunkLifecycleHudLegendItem[],
+  x: number,
+  y: number,
+): void {
+  let cursorX = x;
+  const swatchY = y + Math.max(1, Math.floor((font.lineHeight - LEGEND_SWATCH_SIZE) / 2));
+  for (const item of row) {
+    GuiComponent.fill(
+      drawList,
+      cursorX,
+      swatchY,
+      cursorX + LEGEND_SWATCH_SIZE,
+      swatchY + LEGEND_SWATCH_SIZE,
+      CHUNK_LIFECYCLE_HUD_CELL_COLORS[item.state],
+    );
+    cursorX += LEGEND_SWATCH_SIZE + LEGEND_SWATCH_TEXT_GAP;
+    GuiComponent.drawString(drawList, font, item.label, cursorX, y, 0xffd8dee9);
+    cursorX += font.width(item.label) + LEGEND_ITEM_GAP;
+  }
 }
 
 function drawChunkLifecycleViewOutline(

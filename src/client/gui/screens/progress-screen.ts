@@ -1,6 +1,11 @@
 import type { GuiDrawList } from "../../../renderer/gui/gui-draw-list";
 import type { GeneratedChunkLifecycleSnapshot } from "../../../runtime/protocol/chunk-lifecycle";
-import { measureChunkLifecycleHudPanel, renderChunkLifecycleHud } from "../chunk-lifecycle-hud";
+import {
+  measureChunkLifecycleHudPanel,
+  measureChunkLifecycleHudPlaceholderPanel,
+  renderChunkLifecycleHud,
+  renderChunkLifecycleHudPlaceholder,
+} from "../chunk-lifecycle-hud";
 import { GuiComponent } from "../gui-component";
 import { Screen } from "./screen";
 
@@ -12,12 +17,18 @@ export interface ProgressScreenStatus {
   readonly fraction?: number;
 }
 
+const CHUNK_LIFECYCLE_PENDING_LINES = [
+  "Chunk Lifecycle",
+  "waiting for chunk view",
+];
+
 export class ProgressScreen extends Screen {
   private header: string | null = null;
   private stage: string | null = null;
   private progress = 0;
   private stop = false;
   private chunkLifecycle: GeneratedChunkLifecycleSnapshot | undefined;
+  private chunkLifecycleDiagnosticsVisible = false;
 
   public constructor(private readonly clearScreenAfterStop: boolean) {
     super("narrator.screen.progress");
@@ -61,6 +72,13 @@ export class ProgressScreen extends Screen {
     this.chunkLifecycle = snapshot;
   }
 
+  public setChunkLifecycleDiagnosticsVisible(visible: boolean): void {
+    this.chunkLifecycleDiagnosticsVisible = visible;
+    if (!visible) {
+      this.chunkLifecycle = undefined;
+    }
+  }
+
   public stopProgress(): void {
     this.stop = true;
   }
@@ -74,7 +92,7 @@ export class ProgressScreen extends Screen {
     }
 
     this.renderBackground(drawList);
-    const lifecyclePanel = measureChunkLifecycleHudPanel(this.getFont(), this.width, this.height, this.chunkLifecycle);
+    const lifecyclePanel = this.measureChunkLifecyclePanel();
     const contentWidth = lifecyclePanel !== undefined && lifecyclePanel.x >= 120
       ? lifecyclePanel.x - 12
       : this.width;
@@ -96,8 +114,44 @@ export class ProgressScreen extends Screen {
 
     // WebGPU: visible progress bar instead of vanilla's text-only ProgressScreen.
     this.renderProgressBar(drawList, contentWidth);
-    renderChunkLifecycleHud(drawList, this.getFont(), this.width, this.height, this.chunkLifecycle);
+    this.renderChunkLifecyclePanel(drawList);
     super.render(drawList, mouseX, mouseY, partialTick);
+  }
+
+  private measureChunkLifecyclePanel() {
+    if (this.chunkLifecycle !== undefined) {
+      return measureChunkLifecycleHudPanel(this.getFont(), this.width, this.height, this.chunkLifecycle);
+    }
+
+    if (!this.chunkLifecycleDiagnosticsVisible) {
+      return undefined;
+    }
+
+    return measureChunkLifecycleHudPlaceholderPanel(
+      this.getFont(),
+      this.width,
+      this.height,
+      CHUNK_LIFECYCLE_PENDING_LINES,
+    );
+  }
+
+  private renderChunkLifecyclePanel(drawList: GuiDrawList): void {
+    if (this.chunkLifecycle !== undefined) {
+      renderChunkLifecycleHud(drawList, this.getFont(), this.width, this.height, this.chunkLifecycle);
+      return;
+    }
+
+    if (!this.chunkLifecycleDiagnosticsVisible) {
+      return;
+    }
+
+    renderChunkLifecycleHudPlaceholder(
+      drawList,
+      this.getFont(),
+      this.width,
+      this.height,
+      CHUNK_LIFECYCLE_PENDING_LINES,
+    );
   }
 
   private renderProgressBar(drawList: GuiDrawList, contentWidth: number): void {

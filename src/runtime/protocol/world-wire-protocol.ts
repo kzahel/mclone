@@ -32,7 +32,7 @@ import {
   type SerializedPackedChunkSnapshot,
 } from "./packed-chunk-wire";
 
-export const WORLD_REMOTE_PROTOCOL_VERSION = 9;
+export const WORLD_REMOTE_PROTOCOL_VERSION = 10;
 
 export type WorldRemoteErrorCode =
   | "protocol_version_mismatch"

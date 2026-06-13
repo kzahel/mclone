@@ -140,6 +140,24 @@ describe("Gui0 model foundation", () => {
     expect(drawList.getCommands().some((command) => command.type === "textured_quad")).toBe(true);
   });
 
+  it("can render chunk lifecycle loading diagnostics before a snapshot arrives", () => {
+    const manager = new ScreenManager(640, 360);
+    const progressScreen = new ProgressScreen(true);
+    manager.setScreen(progressScreen);
+    progressScreen.progressStart("Loading world");
+    progressScreen.setChunkLifecycleDiagnosticsVisible(true);
+    progressScreen.updateProgress({ stage: "Opening world", fraction: 0.05 });
+
+    const drawList = new GuiDrawList();
+    manager.render(drawList, 0, 0, 0);
+
+    const solidRects = drawList.getCommands().filter((command) => command.type === "solid_rect");
+    expect(solidRects.length).toBeGreaterThan(4);
+    expect(drawList.getCommands().some((command) =>
+      command.type === "textured_quad" && command.x > 480 && command.y < 40
+    )).toBe(true);
+  });
+
   it("can render chunk lifecycle diagnostics on the progress screen", () => {
     const manager = new ScreenManager(640, 360);
     const progressScreen = new ProgressScreen(true);

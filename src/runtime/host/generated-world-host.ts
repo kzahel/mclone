@@ -112,6 +112,7 @@ import type {
   GeneratedChunkLifecycleSnapshot,
   GeneratedChunkLifecycleStatusJobDebugRecord,
   GeneratedChunkPublicationBlocker,
+  WorldDebugRequestOptions,
 } from "../protocol/chunk-lifecycle";
 import {
   anchorPlayerStateToChunkView,
@@ -682,7 +683,7 @@ export class GeneratedWorldHost implements WorldHost {
     this.tickPlayerLoop();
     await this.tickWorldLoop();
     if (this.options.chunkViewScheduling === "cooperative") {
-      return this.setChunkViewCooperative(request);
+      return this.appendDebugMessages(await this.setChunkViewCooperative(request), request.debug);
     }
 
     this.updateChunkResidencyTickets(request);
@@ -700,7 +701,7 @@ export class GeneratedWorldHost implements WorldHost {
     await this.setLightingView(request, chunkViewJobRevision);
     if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
       this.incrementWorldgenCount("chunk_view_jobs_cancelled");
-      return [this.createSessionStateMessage()];
+      return this.appendDebugMessages([this.createSessionStateMessage()], request.debug);
     }
     this.queueChunkHolderUnloadsOutsideCurrentAuthority(update.removedChunks);
 
@@ -712,20 +713,20 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     if (!update.changed) {
-      return messages;
+      return this.appendDebugMessages(messages, request.debug);
     }
 
     await this.ensureStatusTargetsForCurrentView(undefined, chunkViewJobRevision);
     if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
       this.incrementWorldgenCount("chunk_view_jobs_cancelled");
-      return messages;
+      return this.appendDebugMessages(messages, request.debug);
     }
 
     this.options.mutateWorld?.(this.liquidLevel);
     await this.ensureFullStatusesForCurrentView(chunkViewJobRevision);
     if (!this.isCurrentChunkViewJob(chunkViewJobRevision)) {
       this.incrementWorldgenCount("chunk_view_jobs_cancelled");
-      return messages;
+      return this.appendDebugMessages(messages, request.debug);
     }
 
     for (const chunk of update.removedChunks) {
@@ -751,7 +752,7 @@ export class GeneratedWorldHost implements WorldHost {
       awaitStorage: true,
     });
 
-    return messages;
+    return this.appendDebugMessages(messages, request.debug);
   }
 
   private async setChunkViewCooperative(request: SetChunkViewRequest): Promise<readonly WorldHostMessage[]> {
@@ -828,11 +829,11 @@ export class GeneratedWorldHost implements WorldHost {
     this.ensureLocalSessionState();
     this.tickPlayerLoop();
     if (this.pendingMessages.length > 0) {
-      return this.appendPollDebugMessages(this.drainPendingMessages(request.maxMessages), request);
+      return this.appendDebugMessages(this.drainPendingMessages(request.maxMessages), request.debug);
     }
 
     await this.tickWorldLoop();
-    return this.appendPollDebugMessages(this.drainPendingMessages(request.maxMessages), request);
+    return this.appendDebugMessages(this.drainPendingMessages(request.maxMessages), request.debug);
   }
 
   public close(): void {
@@ -4150,11 +4151,11 @@ export class GeneratedWorldHost implements WorldHost {
     return [...drained.messages, this.createWorldPerformanceMessage()];
   }
 
-  private appendPollDebugMessages(
+  private appendDebugMessages(
     messages: readonly WorldHostMessage[],
-    request: PollWorldUpdatesRequest,
+    debug: WorldDebugRequestOptions | undefined,
   ): readonly WorldHostMessage[] {
-    if (request.debug?.chunkLifecycle !== true) {
+    if (debug?.chunkLifecycle !== true) {
       return messages;
     }
 

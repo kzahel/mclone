@@ -61,6 +61,7 @@ export interface SetChunkViewRequest {
   readonly centerChunkX: number;
   readonly centerChunkZ: number;
   readonly radius: number;
+  readonly debug?: WorldDebugRequestOptions;
 }
 
 export interface PlayerInputCommand {
