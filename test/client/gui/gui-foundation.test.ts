@@ -9,8 +9,9 @@ import { OptionsScreen, type GuiOptionsState } from "../../../src/client/gui/scr
 import { DebugSettingsScreen, type GuiDebugSettingsState } from "../../../src/client/gui/screens/debug-settings-screen";
 import { Screen } from "../../../src/client/gui/screens/screen";
 import { TitleScreen } from "../../../src/client/gui/screens/title-screen";
+import { measureChunkLifecycleHudPanel } from "../../../src/client/gui/chunk-lifecycle-hud";
 import { GuiDrawList } from "../../../src/renderer/gui/gui-draw-list";
-import type { GeneratedChunkLifecycleSnapshot } from "../../../src/runtime/protocol/chunk-lifecycle";
+import type { GeneratedChunkLifecycleRecord, GeneratedChunkLifecycleSnapshot } from "../../../src/runtime/protocol/chunk-lifecycle";
 
 const EMPTY_CHUNK_LIFECYCLE_SNAPSHOT: GeneratedChunkLifecycleSnapshot = {
   currentChunkView: { centerChunkX: 0, centerChunkZ: 0, radius: 1 },
@@ -154,7 +155,7 @@ describe("Gui0 model foundation", () => {
     const solidRects = drawList.getCommands().filter((command) => command.type === "solid_rect");
     expect(solidRects.length).toBeGreaterThan(4);
     expect(drawList.getCommands().some((command) =>
-      command.type === "textured_quad" && command.x > 480 && command.y < 40
+      command.type === "textured_quad" && command.x > 350 && command.y < 40
     )).toBe(true);
   });
 
@@ -174,6 +175,16 @@ describe("Gui0 model foundation", () => {
     expect(drawList.getCommands().some((command) =>
       command.type === "textured_quad" && command.x > 300 && command.y < 80
     )).toBe(true);
+  });
+
+  it("keeps the chunk lifecycle HUD panel size stable as snapshot text changes", () => {
+    const font = new Font();
+    const loadingSnapshot = createChunkLifecycleSnapshot(-14, 14, -12, 16, false, true);
+    const loadedSnapshot = createChunkLifecycleSnapshot(-15, 15, -13, 17, true, false);
+
+    expect(measureChunkLifecycleHudPanel(font, 640, 360, loadingSnapshot)).toEqual(
+      measureChunkLifecycleHudPanel(font, 640, 360, loadedSnapshot),
+    );
   });
 
   it("lays out the pause menu and returns to gameplay", () => {
@@ -324,6 +335,56 @@ describe("Gui0 model foundation", () => {
     expect(manager.currentScreen).toBe(titleScreen);
   });
 });
+
+function createChunkLifecycleSnapshot(
+  minChunkX: number,
+  maxChunkX: number,
+  minChunkZ: number,
+  maxChunkZ: number,
+  published: boolean,
+  active: boolean,
+): GeneratedChunkLifecycleSnapshot {
+  const records: GeneratedChunkLifecycleRecord[] = [];
+  const baseRecord = EMPTY_CHUNK_LIFECYCLE_SNAPSHOT.records[0]!;
+  for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+    for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+      records.push({
+        ...baseRecord,
+        chunkX,
+        chunkZ,
+        generatedStatus: published ? "full" : "empty",
+        hasBlockSections: published,
+        chunkLoaded: published,
+        published,
+        lightInputSent: !published,
+        lightAccepted: published,
+        publicationBlocker: published ? { kind: "already_published" } : { kind: "waiting_for_light" },
+      });
+    }
+  }
+
+  const total = records.length;
+  return {
+    currentChunkView: { centerChunkX: 0, centerChunkZ: 2, radius: 3 },
+    chunkViewJobRevision: 1,
+    ...(active ? { activeChunkViewJobRevision: 1 } : {}),
+    records,
+    counts: {
+      total,
+      inAuthorityView: total,
+      inPublishView: 81,
+      loaded: published ? 225 : 0,
+      materialized: published ? total : 0,
+      published: published ? 81 : 0,
+      dirtyForPublication: 0,
+      queuedForUnload: 0,
+      pendingUnload: 0,
+      byGeneratedStatus: published ? { full: total } : { empty: total },
+      byHolderFullStatus: {},
+      byPublicationBlocker: published ? { already_published: 81 } : { waiting_for_light: 81 },
+    },
+  };
+}
 
 class TestScreen extends Screen {
   public initCount = 0;
