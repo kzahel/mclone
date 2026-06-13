@@ -53,11 +53,22 @@ function createHost(options: { readonly worldStorage?: WorldStorage } = {}): Gen
   });
 }
 
+function getPublishRecords(host: GeneratedWorldHost) {
+  return host.getDebugChunkLifecycleSnapshot().records.filter((record) => record.inPublishView);
+}
+
+function expectPublishViewConverged(host: GeneratedWorldHost, expectedCount: number): void {
+  const snapshot = host.getDebugChunkLifecycleSnapshot();
+  const publishRecords = snapshot.records.filter((record) => record.inPublishView);
+  expect(publishRecords).toHaveLength(expectedCount);
+  expect(publishRecords.every((record) => record.published)).toBe(true);
+  expect(snapshot.counts.byPublicationBlocker.ready_to_publish ?? 0).toBe(0);
+}
+
 async function drainPublishedView(host: GeneratedWorldHost, expectedCount: number, timeoutMs = 60_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const snapshot = host.getDebugChunkLifecycleSnapshot();
-    const publishRecords = snapshot.records.filter((record) => record.inPublishView);
+    const publishRecords = getPublishRecords(host);
     if (publishRecords.length === expectedCount && publishRecords.every((record) => record.published)) {
       return;
     }
@@ -67,8 +78,14 @@ async function drainPublishedView(host: GeneratedWorldHost, expectedCount: numbe
   }
 
   const snapshot = host.getDebugChunkLifecycleSnapshot();
-  const published = snapshot.records.filter((record) => record.inPublishView && record.published).length;
-  throw new Error(`Expected ${expectedCount.toString()} published chunks, got ${published.toString()}`);
+  const publishRecords = snapshot.records.filter((record) => record.inPublishView);
+  const published = publishRecords.filter((record) => record.published).length;
+  const blockers = JSON.stringify(snapshot.counts.byPublicationBlocker);
+  throw new Error(`Expected ${expectedCount.toString()} published chunks, got ${published.toString()}; blockers=${blockers}`);
+}
+
+function clearPublishedChunkSnapshotsForTest(host: GeneratedWorldHost): void {
+  (host as unknown as { readonly publishedChunkSnapshots: Set<string> }).publishedChunkSnapshots.clear();
 }
 
 class BlockingPreloadChunkStorage implements ChunkStorage {
@@ -260,11 +277,26 @@ describe("GeneratedWorldHost chunk lifecycle observatory", () => {
     }));
     await drainPublishedView(host, 81);
 
-    const snapshot = host.getDebugChunkLifecycleSnapshot();
-    const publishRecords = snapshot.records.filter((record) => record.inPublishView);
-    expect(publishRecords).toHaveLength(81);
-    expect(publishRecords.every((record) => record.published)).toBe(true);
-    expect(snapshot.counts.byPublicationBlocker.ready_to_publish ?? 0).toBe(0);
+    expectPublishViewConverged(host, 81);
+  });
+
+  test("polling recovers idle publication debt without a chunk-view change", async () => {
+    const host = createHost();
+    await host.openWorld(OPEN_WORLD_REQUEST);
+    throwOnWorldError(await host.setChunkView({
+      type: "set_chunk_view",
+      centerChunkX: 0,
+      centerChunkZ: 0,
+      radius: 3,
+    }));
+    await drainPublishedView(host, 81);
+
+    clearPublishedChunkSnapshotsForTest(host);
+    const ready = getPublishRecords(host).filter((record) => record.publicationBlocker.kind === "ready_to_publish");
+    expect(ready).toHaveLength(81);
+
+    throwOnWorldError(await host.pollUpdates({ type: "poll_world_updates", maxMessages: 512 }));
+    expectPublishViewConverged(host, 81);
   });
 
   test("explains unpublished visible chunks while preload is blocked", async () => {

@@ -389,6 +389,8 @@ interface PublishReadyChunksOptions {
   readonly onChunkPublished?: (publishedInPass: number) => void;
 }
 
+type PublishConvergenceOptions = PublishReadyChunksOptions;
+
 type StoredChunkPreloadResult = "loaded" | "already_loaded" | "missing" | "stale";
 
 type GeneratedLevelChunk = LevelChunk;
@@ -747,7 +749,7 @@ export class GeneratedWorldHost implements WorldHost {
       this.incrementWorldgenCount("chunk_unloads_sent");
     }
 
-    await this.publishReadyChunksForCurrentView(this.chunkViewJobRevision, undefined, {
+    await this.convergeCurrentPublishView(this.chunkViewJobRevision, undefined, {
       targetMessages: messages,
       awaitStorage: true,
     });
@@ -833,6 +835,9 @@ export class GeneratedWorldHost implements WorldHost {
     }
 
     await this.tickWorldLoop();
+    if (this.activeChunkViewJobRevision === undefined) {
+      await this.convergeCurrentPublishView(this.chunkViewJobRevision);
+    }
     return this.appendDebugMessages(this.drainPendingMessages(request.maxMessages), request.debug);
   }
 
@@ -2465,7 +2470,7 @@ export class GeneratedWorldHost implements WorldHost {
       }
 
       pendingLightReadyForPublish = false;
-      publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep, {
+      publishDone += await this.convergeCurrentPublishView(chunkViewJobRevision, yieldStep, {
         onChunkPublished: (publishedInPass) => {
           enqueuePublishingProgress(publishDone + publishedInPass);
         },
@@ -2516,7 +2521,7 @@ export class GeneratedWorldHost implements WorldHost {
       }
     }
     await publishReadyLightingBatch();
-    publishDone += await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep, {
+    publishDone += await this.convergeCurrentPublishView(chunkViewJobRevision, yieldStep, {
       onChunkPublished: (publishedInPass) => {
         enqueuePublishingProgress(publishDone + publishedInPass);
       },
@@ -2673,6 +2678,23 @@ export class GeneratedWorldHost implements WorldHost {
     this.level.markChunkFull(chunkX, chunkZ);
     this.recordGeneratedChunkAccessStatus(chunkX, chunkZ);
     this.incrementWorldgenCount("chunks_marked_full_after_light");
+  }
+
+  private async convergeCurrentPublishView(
+    chunkViewJobRevision: number,
+    yieldStep?: () => Promise<void>,
+    options: PublishConvergenceOptions = {},
+  ): Promise<number> {
+    if (this.countUnpublishedChunksInCurrentPublishView() <= 0) {
+      return 0;
+    }
+
+    this.incrementWorldgenCount("publish_convergence_passes");
+    const published = await this.publishReadyChunksForCurrentView(chunkViewJobRevision, yieldStep, options);
+    if (published > 0) {
+      this.incrementWorldgenCount("publish_convergence_chunks", published);
+    }
+    return published;
   }
 
   private async publishReadyChunksForCurrentView(
