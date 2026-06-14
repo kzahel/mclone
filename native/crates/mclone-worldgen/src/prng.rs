@@ -8,6 +8,23 @@ const DOUBLE_MULTIPLIER: f64 = 1.110223E-16_f32 as f64;
 const BASE_CHUNK_MULTIPLIER_X: i64 = 341_873_128_712;
 const BASE_CHUNK_MULTIPLIER_Z: i64 = 132_897_987_541;
 
+pub trait RandomSource {
+    fn set_seed(&mut self, seed: i64);
+    fn next_int(&mut self) -> i32;
+    fn next_int_bound(&mut self, bound: i32) -> i32;
+    fn next_long(&mut self) -> i64;
+    fn next_boolean(&mut self) -> bool;
+    fn next_float(&mut self) -> f32;
+    fn next_double(&mut self) -> f64;
+    fn next_gaussian(&mut self) -> f64;
+
+    fn consume_count(&mut self, count: usize) {
+        for _ in 0..count {
+            self.next_int();
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SimpleRandomSource {
     seed: u64,
@@ -108,6 +125,44 @@ impl SimpleRandomSource {
         assert!((1..=32).contains(&bits), "bits must be between 1 and 32");
         self.seed = self.seed.wrapping_mul(MULTIPLIER).wrapping_add(INCREMENT) & MODULUS_MASK;
         (self.seed >> (MODULUS_BITS - bits)) as u32
+    }
+}
+
+impl RandomSource for SimpleRandomSource {
+    fn set_seed(&mut self, seed: i64) {
+        Self::set_seed(self, seed);
+    }
+
+    fn next_int(&mut self) -> i32 {
+        Self::next_int(self)
+    }
+
+    fn next_int_bound(&mut self, bound: i32) -> i32 {
+        Self::next_int_bound(self, bound)
+    }
+
+    fn next_long(&mut self) -> i64 {
+        Self::next_long(self)
+    }
+
+    fn next_boolean(&mut self) -> bool {
+        Self::next_boolean(self)
+    }
+
+    fn next_float(&mut self) -> f32 {
+        Self::next_float(self)
+    }
+
+    fn next_double(&mut self) -> f64 {
+        Self::next_double(self)
+    }
+
+    fn next_gaussian(&mut self) -> f64 {
+        Self::next_gaussian(self)
+    }
+
+    fn consume_count(&mut self, count: usize) {
+        Self::consume_count(self, count);
     }
 }
 
@@ -313,6 +368,44 @@ impl WorldgenRandom {
     fn next_bits_raw(&mut self, bits: u32) -> u32 {
         self.count += 1;
         self.source.next_bits_raw(bits)
+    }
+}
+
+impl RandomSource for WorldgenRandom {
+    fn set_seed(&mut self, seed: i64) {
+        Self::set_seed(self, seed);
+    }
+
+    fn next_int(&mut self) -> i32 {
+        Self::next_int(self)
+    }
+
+    fn next_int_bound(&mut self, bound: i32) -> i32 {
+        Self::next_int_bound(self, bound)
+    }
+
+    fn next_long(&mut self) -> i64 {
+        Self::next_long(self)
+    }
+
+    fn next_boolean(&mut self) -> bool {
+        Self::next_boolean(self)
+    }
+
+    fn next_float(&mut self) -> f32 {
+        Self::next_float(self)
+    }
+
+    fn next_double(&mut self) -> f64 {
+        Self::next_double(self)
+    }
+
+    fn next_gaussian(&mut self) -> f64 {
+        Self::next_gaussian(self)
+    }
+
+    fn consume_count(&mut self, count: usize) {
+        Self::consume_count(self, count);
     }
 }
 
