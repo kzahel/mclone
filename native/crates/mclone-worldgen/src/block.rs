@@ -41,6 +41,12 @@ pub const OAK_LEAVES: RawBlockId = 42;
 pub const GRASS: RawBlockId = 43;
 pub const DANDELION: RawBlockId = 44;
 pub const POPPY: RawBlockId = 45;
+pub const BIRCH_LOG: RawBlockId = 46;
+pub const BIRCH_LEAVES: RawBlockId = 47;
+pub const SPRUCE_LOG: RawBlockId = 48;
+pub const SPRUCE_LEAVES: RawBlockId = 49;
+pub const FERN: RawBlockId = 50;
+pub const DEAD_BUSH: RawBlockId = 51;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -117,6 +123,12 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         GRASS => "minecraft:grass",
         DANDELION => "minecraft:dandelion",
         POPPY => "minecraft:poppy",
+        BIRCH_LOG => "minecraft:birch_log",
+        BIRCH_LEAVES => "minecraft:birch_leaves",
+        SPRUCE_LOG => "minecraft:spruce_log",
+        SPRUCE_LEAVES => "minecraft:spruce_leaves",
+        FERN => "minecraft:fern",
+        DEAD_BUSH => "minecraft:dead_bush",
         _ => "minecraft:unknown",
     }
 }

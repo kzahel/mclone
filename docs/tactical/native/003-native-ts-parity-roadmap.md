@@ -25,6 +25,7 @@ Landed:
 - textured native section mesh generation from client snapshots, stitched atlas upload, and textured headless/window rendering
 - section-keyed textured render meshes, keyed GPU upload ownership, and repeatable native headless camera scenarios
 - Java-shaped configured/decorated feature execution, starter oak trees, grass/flower patches, and default `Features` chunk snapshots
+- biome-keyed native feature profiles with visible oak/birch/spruce tree families, ferns, dead bushes, and `COUNT_EXTRA` placement
 
 Still missing compared with the TypeScript engine:
 
@@ -33,7 +34,7 @@ Still missing compared with the TypeScript engine:
 - persistence is a temporary snapshot format, not Anvil/NBT or browser storage
 - web/WASM has a runtime smoke gate, not browser storage, network transport, or render path
 - no true frustum rejection, dirty-only section upload diffs, true liquid renderer, or AO/lighted textured path
-- no native lighting, liquids, movement, entities, biome feature breadth, or broad decorated-world parity
+- no native lighting, liquids, movement, entities, exact tree placers, ores, liquid-visible features, or broad decorated-world parity
 
 ## Target Horizon
 
@@ -80,7 +81,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 | [`013-vanilla-section-meshing.md`](013-vanilla-section-meshing.md) | mesh/render | **done** - client snapshot to textured section meshes using baked models, stitched atlas upload, and neighbor culling | headless rendered chunk from client snapshot with real textures |
 | [`014-streaming-renderer-and-camera.md`](014-streaming-renderer-and-camera.md) | renderer runtime | **done** - section-keyed textured render meshes, keyed GPU upload ownership, full-set render invalidation, and debug camera/headless scenario runner; true frustum/dirty-only diffs deferred | multi-step native headless captures and browser/native window smoke |
 | [`015-decoration-framework-foundation.md`](015-decoration-framework-foundation.md) | worldgen parity | **done** - configured/decorated feature framework, starter trees/plants, feature snapshots, and visible decorated terrain capture; full water/lake parity deferred behind liquid rendering | oracle/unit coverage plus visible decorated terrain capture |
-| `016-biome-feature-breadth.md` | worldgen parity | biome table coverage, tree family breadth, ores, underground extras, surface vegetation/water families | selected fixture matrix and visual probes |
+| [`016-biome-feature-breadth.md`](016-biome-feature-breadth.md) | worldgen parity | **done** - chunk-center biome feature profiles, oak/birch/spruce visible families, fern/dead-bush patches, and `COUNT_EXTRA`; exact trees/ores/water fixtures deferred | selected fixture matrix and visual probes |
 | `017-structures-foundation.md` | worldgen parity | status-aware structure starts/references, first true structure, template/block-entity scaffolding | server-backed fixture diff for first structure slice |
 | `018-lighting-pipeline.md` | lighting | `DataLayer`, light sections, solver/service boundary, initial light facts, renderer consumption | light fixture tests and non-fullbright terrain capture |
 | `019-live-light-and-liquid-updates.md` | simulation/runtime | light deltas, block/liquid dirty updates, pending liquid ticks, water flow baseline | update/delta tests and runtime smoke |
@@ -90,9 +91,9 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `016-biome-feature-breadth.md`.
+The next implementation tactical should be `017-structures-foundation.md`.
 
-That slice should replace the starter feature list with biome-aware feature tables, add tree-family breadth and visible vegetation families, and start selected oracle coverage for decorated chunks.
+Before starting structures, consider whether a focused `016` follow-through is higher value: exact tree placers, ore/disk placement, water-visible feature families, or decorated-chunk oracle fixtures. If not, move on to structure status scaffolding.
 
 ## Deferral Notes
 

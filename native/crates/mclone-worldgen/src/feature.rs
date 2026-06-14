@@ -1,6 +1,8 @@
+use crate::biome::{BiomeDefinition, OverworldBiomeSource};
 use crate::block::{
-    AIR, DANDELION, DIRT, GRASS, GRASS_BLOCK, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY,
-    RawBlockId, WATER,
+    AIR, BIRCH_LEAVES, BIRCH_LOG, DANDELION, DEAD_BUSH, DIRT, FERN, GRASS, GRASS_BLOCK, MYCELIUM,
+    OAK_LEAVES, OAK_LOG, PODZOL, POPPY, RED_SAND, RawBlockId, SAND, SPRUCE_LEAVES, SPRUCE_LOG,
+    TERRACOTTA, WATER,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{BlockPos, ConfiguredDecorator, DecorationContext};
@@ -96,21 +98,38 @@ impl RandomPatchConfiguration {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StarterOakTreeConfiguration {
+pub struct BasicTreeConfiguration {
     pub log: RawBlockId,
     pub leaves: RawBlockId,
     pub min_height: i32,
     pub random_height: i32,
 }
 
-impl StarterOakTreeConfiguration {
-    pub const fn oak() -> Self {
+impl BasicTreeConfiguration {
+    pub const fn new(
+        log: RawBlockId,
+        leaves: RawBlockId,
+        min_height: i32,
+        random_height: i32,
+    ) -> Self {
         Self {
-            log: OAK_LOG,
-            leaves: OAK_LEAVES,
-            min_height: 4,
-            random_height: 3,
+            log,
+            leaves,
+            min_height,
+            random_height,
         }
+    }
+
+    pub const fn oak() -> Self {
+        Self::new(OAK_LOG, OAK_LEAVES, 4, 3)
+    }
+
+    pub const fn birch() -> Self {
+        Self::new(BIRCH_LOG, BIRCH_LEAVES, 5, 3)
+    }
+
+    pub const fn spruce() -> Self {
+        Self::new(SPRUCE_LOG, SPRUCE_LEAVES, 6, 4)
     }
 }
 
@@ -118,7 +137,7 @@ impl StarterOakTreeConfiguration {
 pub enum ConfiguredFeature {
     SimpleBlock(SimpleBlockConfiguration),
     RandomPatch(RandomPatchConfiguration),
-    StarterOakTree(StarterOakTreeConfiguration),
+    BasicTree(BasicTreeConfiguration),
 }
 
 impl ConfiguredFeature {
@@ -130,8 +149,8 @@ impl ConfiguredFeature {
         Self::RandomPatch(config)
     }
 
-    pub const fn starter_oak_tree(config: StarterOakTreeConfiguration) -> Self {
-        Self::StarterOakTree(config)
+    pub const fn basic_tree(config: BasicTreeConfiguration) -> Self {
+        Self::BasicTree(config)
     }
 
     pub fn place(
@@ -143,7 +162,7 @@ impl ConfiguredFeature {
         match *self {
             Self::SimpleBlock(config) => place_simple_block(chunk, random, origin, config),
             Self::RandomPatch(config) => place_random_patch(chunk, random, origin, config),
-            Self::StarterOakTree(config) => place_starter_oak_tree(chunk, random, origin, config),
+            Self::BasicTree(config) => place_basic_tree(chunk, random, origin, config),
         }
     }
 }
@@ -196,20 +215,31 @@ impl PlacedFeature {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DecorationReport {
+    pub biome_key: &'static str,
     pub attempted_features: usize,
     pub placed_features: usize,
     pub added_non_air_blocks: usize,
 }
 
-pub fn apply_starter_overworld_decoration(
+pub fn apply_overworld_biome_decoration(
     seed: i64,
+    biome_source: &OverworldBiomeSource,
+    chunk: &mut MutableChunkBlockBuffer,
+) -> DecorationReport {
+    let biome = chunk_center_biome(seed, biome_source, chunk);
+    apply_overworld_biome_features(seed, biome, chunk)
+}
+
+pub fn apply_overworld_biome_features(
+    seed: i64,
+    biome: BiomeDefinition,
     chunk: &mut MutableChunkBlockBuffer,
 ) -> DecorationReport {
     let before = chunk.non_air_block_count();
     let min_block_x = chunk.chunk_x * CHUNK_WIDTH;
     let min_block_z = chunk.chunk_z * CHUNK_WIDTH;
     let origin = BlockPos::new(min_block_x, chunk.min_y, min_block_z);
-    let features = starter_overworld_features();
+    let features = overworld_features_for_biome(biome);
     let mut random = WorldgenRandom::default();
     let decoration_seed = random.set_decoration_seed(seed, min_block_x, min_block_z);
     let mut placed_features = 0;
@@ -222,35 +252,212 @@ pub fn apply_starter_overworld_decoration(
     }
 
     DecorationReport {
+        biome_key: biome.key(),
         attempted_features: features.len(),
         placed_features,
         added_non_air_blocks: chunk.non_air_block_count().saturating_sub(before),
     }
 }
 
-pub fn starter_overworld_features() -> Vec<PlacedFeature> {
+pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature> {
+    match biome.key() {
+        "minecraft:plains" | "minecraft:sunflower_plains" => plains_features(),
+        "minecraft:forest" | "minecraft:wooded_hills" | "minecraft:flower_forest" => {
+            forest_features()
+        }
+        "minecraft:birch_forest"
+        | "minecraft:birch_forest_hills"
+        | "minecraft:tall_birch_forest"
+        | "minecraft:tall_birch_hills" => birch_forest_features(),
+        "minecraft:taiga"
+        | "minecraft:taiga_hills"
+        | "minecraft:taiga_mountains"
+        | "minecraft:giant_tree_taiga"
+        | "minecraft:giant_tree_taiga_hills"
+        | "minecraft:giant_spruce_taiga"
+        | "minecraft:giant_spruce_taiga_hills" => taiga_features(),
+        "minecraft:snowy_taiga"
+        | "minecraft:snowy_taiga_hills"
+        | "minecraft:snowy_taiga_mountains"
+        | "minecraft:snowy_tundra"
+        | "minecraft:snowy_mountains" => snowy_features(),
+        "minecraft:mountains"
+        | "minecraft:wooded_mountains"
+        | "minecraft:mountain_edge"
+        | "minecraft:gravelly_mountains"
+        | "minecraft:modified_gravelly_mountains" => mountain_features(),
+        "minecraft:desert" | "minecraft:desert_hills" | "minecraft:desert_lakes" => {
+            desert_features()
+        }
+        "minecraft:badlands"
+        | "minecraft:badlands_plateau"
+        | "minecraft:wooded_badlands_plateau"
+        | "minecraft:modified_badlands_plateau"
+        | "minecraft:modified_wooded_badlands_plateau"
+        | "minecraft:eroded_badlands" => badlands_features(),
+        "minecraft:swamp" | "minecraft:swamp_hills" => swamp_features(),
+        "minecraft:mushroom_fields" | "minecraft:mushroom_field_shore" => mushroom_field_features(),
+        _ => default_land_features(),
+    }
+}
+
+fn chunk_center_biome(
+    seed: i64,
+    biome_source: &OverworldBiomeSource,
+    chunk: &MutableChunkBlockBuffer,
+) -> BiomeDefinition {
+    biome_source.get_block_position_biome_definition(
+        seed,
+        chunk.chunk_x * CHUNK_WIDTH + CHUNK_WIDTH / 2,
+        chunk.chunk_z * CHUNK_WIDTH + CHUNK_WIDTH / 2,
+    )
+}
+
+fn plains_features() -> Vec<PlacedFeature> {
     vec![
-        PlacedFeature::new(
-            DecorationStep::VegetalDecoration,
-            ConfiguredFeature::starter_oak_tree(StarterOakTreeConfiguration::oak()),
-            vec![ConfiguredDecorator::count(2), ConfiguredDecorator::square()],
-        ),
-        PlacedFeature::new(
-            DecorationStep::VegetalDecoration,
-            ConfiguredFeature::random_patch(RandomPatchConfiguration::new(GRASS)),
-            vec![ConfiguredDecorator::count(2), ConfiguredDecorator::square()],
-        ),
-        PlacedFeature::new(
-            DecorationStep::VegetalDecoration,
-            ConfiguredFeature::random_patch(RandomPatchConfiguration::new(DANDELION)),
-            vec![ConfiguredDecorator::count(1), ConfiguredDecorator::square()],
-        ),
-        PlacedFeature::new(
-            DecorationStep::VegetalDecoration,
-            ConfiguredFeature::random_patch(RandomPatchConfiguration::new(POPPY)),
-            vec![ConfiguredDecorator::count(1), ConfiguredDecorator::square()],
-        ),
+        tree_feature(BasicTreeConfiguration::oak(), 0, 0.35, 1),
+        grass_patch(GRASS, 4),
+        flower_patch(DANDELION, 1),
+        flower_patch(POPPY, 1),
     ]
+}
+
+fn forest_features() -> Vec<PlacedFeature> {
+    vec![
+        tree_feature(BasicTreeConfiguration::oak(), 5, 0.35, 1),
+        tree_feature(BasicTreeConfiguration::birch(), 2, 0.25, 1),
+        grass_patch(GRASS, 3),
+        grass_patch(FERN, 1),
+        flower_patch(DANDELION, 1),
+        flower_patch(POPPY, 1),
+    ]
+}
+
+fn birch_forest_features() -> Vec<PlacedFeature> {
+    vec![
+        tree_feature(BasicTreeConfiguration::birch(), 7, 0.3, 2),
+        grass_patch(GRASS, 3),
+        flower_patch(DANDELION, 1),
+        flower_patch(POPPY, 1),
+    ]
+}
+
+fn taiga_features() -> Vec<PlacedFeature> {
+    vec![
+        tree_feature(BasicTreeConfiguration::spruce(), 8, 0.35, 2),
+        grass_patch(FERN, 4),
+        grass_patch(GRASS, 2),
+    ]
+}
+
+fn snowy_features() -> Vec<PlacedFeature> {
+    vec![
+        tree_feature(BasicTreeConfiguration::spruce(), 3, 0.2, 1),
+        grass_patch(FERN, 1),
+    ]
+}
+
+fn mountain_features() -> Vec<PlacedFeature> {
+    vec![
+        tree_feature(BasicTreeConfiguration::spruce(), 1, 0.25, 1),
+        tree_feature(BasicTreeConfiguration::oak(), 0, 0.2, 1),
+        grass_patch(GRASS, 1),
+    ]
+}
+
+fn desert_features() -> Vec<PlacedFeature> {
+    vec![dead_bush_patch(2)]
+}
+
+fn badlands_features() -> Vec<PlacedFeature> {
+    vec![
+        tree_feature(BasicTreeConfiguration::oak(), 1, 0.1, 1),
+        dead_bush_patch(2),
+    ]
+}
+
+fn swamp_features() -> Vec<PlacedFeature> {
+    vec![
+        tree_feature(BasicTreeConfiguration::oak(), 2, 0.25, 1),
+        grass_patch(GRASS, 2),
+        flower_patch(POPPY, 1),
+        dead_bush_patch(1),
+    ]
+}
+
+fn mushroom_field_features() -> Vec<PlacedFeature> {
+    vec![grass_patch(GRASS, 1)]
+}
+
+fn default_land_features() -> Vec<PlacedFeature> {
+    vec![
+        tree_feature(BasicTreeConfiguration::oak(), 1, 0.1, 1),
+        grass_patch(GRASS, 2),
+        flower_patch(DANDELION, 1),
+    ]
+}
+
+fn tree_feature(
+    config: BasicTreeConfiguration,
+    count: i32,
+    extra_chance: f32,
+    extra_count: i32,
+) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::basic_tree(config),
+        vec![
+            ConfiguredDecorator::count_extra(count, extra_chance, extra_count),
+            ConfiguredDecorator::square(),
+        ],
+    )
+}
+
+fn grass_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
+    random_patch_feature(
+        RandomPatchConfiguration {
+            state: block_id,
+            tries: 48,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: true,
+            can_replace: false,
+            place_on: &[GRASS_BLOCK, DIRT, PODZOL, MYCELIUM],
+        },
+        count,
+    )
+}
+
+fn flower_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
+    random_patch_feature(RandomPatchConfiguration::new(block_id), count)
+}
+
+fn dead_bush_patch(count: i32) -> PlacedFeature {
+    random_patch_feature(
+        RandomPatchConfiguration {
+            state: DEAD_BUSH,
+            tries: 16,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: true,
+            can_replace: false,
+            place_on: &[SAND, RED_SAND, TERRACOTTA, DIRT, GRASS_BLOCK, PODZOL],
+        },
+        count,
+    )
+}
+
+fn random_patch_feature(config: RandomPatchConfiguration, count: i32) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(config),
+        vec![
+            ConfiguredDecorator::count(count),
+            ConfiguredDecorator::square(),
+        ],
+    )
 }
 
 fn place_simple_block(
@@ -324,11 +531,11 @@ fn place_random_patch(
     placed > 0
 }
 
-fn place_starter_oak_tree(
+fn place_basic_tree(
     chunk: &mut MutableChunkBlockBuffer,
     random: &mut impl RandomSource,
     origin: BlockPos,
-    config: StarterOakTreeConfiguration,
+    config: BasicTreeConfiguration,
 ) -> bool {
     let Some(base) = project_to_surface(chunk, origin) else {
         return false;
@@ -433,13 +640,21 @@ fn can_survive_simple_plant(
     current: RawBlockId,
     block_below: RawBlockId,
 ) -> bool {
-    matches!(block_id, GRASS | DANDELION | POPPY)
-        && current == AIR
-        && matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
+    current == AIR
+        && match block_id {
+            GRASS | FERN | DANDELION | POPPY => {
+                matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
+            }
+            DEAD_BUSH => matches!(
+                block_below,
+                SAND | RED_SAND | TERRACOTTA | DIRT | GRASS_BLOCK | PODZOL
+            ),
+            _ => false,
+        }
 }
 
 fn is_replaceable_plant(block_id: RawBlockId) -> bool {
-    matches!(block_id, GRASS | DANDELION | POPPY)
+    matches!(block_id, GRASS | FERN | DANDELION | POPPY | DEAD_BUSH)
 }
 
 fn can_replace_tree_block(chunk: &MutableChunkBlockBuffer, pos: BlockPos) -> bool {
@@ -448,13 +663,25 @@ fn can_replace_tree_block(chunk: &MutableChunkBlockBuffer, pos: BlockPos) -> boo
     };
     matches!(
         block_id,
-        AIR | WATER | GRASS | DANDELION | POPPY | OAK_LEAVES | OAK_LOG
+        AIR | WATER
+            | GRASS
+            | FERN
+            | DANDELION
+            | POPPY
+            | DEAD_BUSH
+            | OAK_LEAVES
+            | OAK_LOG
+            | BIRCH_LEAVES
+            | BIRCH_LOG
+            | SPRUCE_LEAVES
+            | SPRUCE_LOG
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::biome::get_layered_biome_by_id;
     use crate::block::STONE;
     use crate::prng::WorldgenRandom;
 
@@ -529,22 +756,67 @@ mod tests {
     }
 
     #[test]
-    fn starter_oak_tree_places_log_and_leaf_blocks() {
+    fn basic_tree_places_configured_log_and_leaf_blocks() {
         let mut chunk = flat_grass_chunk();
         let mut random = WorldgenRandom::new(1);
-        let feature = ConfiguredFeature::starter_oak_tree(StarterOakTreeConfiguration::oak());
+        let feature = ConfiguredFeature::basic_tree(BasicTreeConfiguration::birch());
 
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 0, 8)));
-        assert!(chunk.blocks.iter().any(|block_id| *block_id == OAK_LOG));
-        assert!(chunk.blocks.iter().any(|block_id| *block_id == OAK_LEAVES));
+        assert!(chunk.blocks.iter().any(|block_id| *block_id == BIRCH_LOG));
+        assert!(
+            chunk
+                .blocks
+                .iter()
+                .any(|block_id| *block_id == BIRCH_LEAVES)
+        );
     }
 
     #[test]
-    fn starter_overworld_decoration_reports_added_blocks() {
-        let mut chunk = flat_grass_chunk();
-        let report = apply_starter_overworld_decoration(12_345, &mut chunk);
+    fn biome_feature_tables_select_distinct_visible_families() {
+        let plains = overworld_features_for_biome(get_layered_biome_by_id(1));
+        let birch = overworld_features_for_biome(get_layered_biome_by_id(27));
+        let taiga = overworld_features_for_biome(get_layered_biome_by_id(5));
+        let desert = overworld_features_for_biome(get_layered_biome_by_id(2));
 
-        assert_eq!(report.attempted_features, 4);
+        assert!(plains.iter().any(|feature| {
+            matches!(
+                feature.feature,
+                ConfiguredFeature::BasicTree(BasicTreeConfiguration { log: OAK_LOG, .. })
+            )
+        }));
+        assert!(birch.iter().any(|feature| {
+            matches!(
+                feature.feature,
+                ConfiguredFeature::BasicTree(BasicTreeConfiguration { log: BIRCH_LOG, .. })
+            )
+        }));
+        assert!(taiga.iter().any(|feature| {
+            matches!(
+                feature.feature,
+                ConfiguredFeature::BasicTree(BasicTreeConfiguration {
+                    log: SPRUCE_LOG,
+                    ..
+                })
+            )
+        }));
+        assert!(desert.iter().any(|feature| {
+            matches!(
+                feature.feature,
+                ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                    state: DEAD_BUSH,
+                    ..
+                })
+            )
+        }));
+    }
+
+    #[test]
+    fn biome_overworld_decoration_reports_added_blocks() {
+        let mut chunk = flat_grass_chunk();
+        let report = apply_overworld_biome_features(12_345, get_layered_biome_by_id(4), &mut chunk);
+
+        assert_eq!(report.biome_key, "minecraft:forest");
+        assert_eq!(report.attempted_features, 6);
         assert!(report.placed_features > 0);
         assert!(report.added_non_air_blocks > 0);
     }

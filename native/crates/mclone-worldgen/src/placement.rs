@@ -313,6 +313,25 @@ impl CountConfiguration {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrequencyWithExtraChanceDecoratorConfiguration {
+    pub count: i32,
+    pub extra_chance: f32,
+    pub extra_count: i32,
+}
+
+impl Eq for FrequencyWithExtraChanceDecoratorConfiguration {}
+
+impl FrequencyWithExtraChanceDecoratorConfiguration {
+    pub const fn new(count: i32, extra_chance: f32, extra_count: i32) -> Self {
+        Self {
+            count,
+            extra_chance,
+            extra_count,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChanceDecoratorConfiguration {
     pub chance: i32,
@@ -351,6 +370,7 @@ pub enum ConfiguredDecorator {
     Nope,
     Square,
     Count(CountConfiguration),
+    CountExtra(FrequencyWithExtraChanceDecoratorConfiguration),
     Chance(ChanceDecoratorConfiguration),
     Range(RangeDecoratorConfiguration),
     Spread32Above,
@@ -369,6 +389,14 @@ impl ConfiguredDecorator {
 
     pub const fn count(count: i32) -> Self {
         Self::Count(CountConfiguration::new(count))
+    }
+
+    pub const fn count_extra(count: i32, extra_chance: f32, extra_count: i32) -> Self {
+        Self::CountExtra(FrequencyWithExtraChanceDecoratorConfiguration::new(
+            count,
+            extra_chance,
+            extra_count,
+        ))
     }
 
     pub const fn chance(chance: i32) -> Self {
@@ -401,6 +429,7 @@ impl ConfiguredDecorator {
             Self::Nope => nope_positions(context, random, pos),
             Self::Square => square_positions(context, random, pos),
             Self::Count(config) => count_positions(context, random, config, pos),
+            Self::CountExtra(config) => count_extra_positions(context, random, config, pos),
             Self::Chance(config) => chance_positions(context, random, config, pos),
             Self::Range(config) => range_positions(context, random, config, pos),
             Self::Spread32Above => spread_32_above_positions(context, random, pos),
@@ -440,6 +469,20 @@ pub fn count_positions(
 ) -> Vec<BlockPos> {
     let count = config.count().sample(random).max(0) as usize;
     vec![pos; count]
+}
+
+pub fn count_extra_positions(
+    _context: &DecorationContext,
+    random: &mut impl RandomSource,
+    config: FrequencyWithExtraChanceDecoratorConfiguration,
+    pos: BlockPos,
+) -> Vec<BlockPos> {
+    let extra = if random.next_float() < config.extra_chance {
+        config.extra_count
+    } else {
+        0
+    };
+    vec![pos; (config.count + extra).max(0) as usize]
 }
 
 pub fn chance_positions(
@@ -589,6 +632,31 @@ mod tests {
                 .get_positions(&CONTEXT, &mut negative_random, POS)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn count_extra_adds_extra_positions_by_chance() {
+        let mut accepted_random = WorldgenRandom::new(5045);
+        let mut rejected_random = WorldgenRandom::new(12345);
+
+        assert_eq!(
+            ConfiguredDecorator::count_extra(2, 0.25, 3).get_positions(
+                &CONTEXT,
+                &mut accepted_random,
+                POS
+            ),
+            vec![POS, POS, POS, POS, POS]
+        );
+        assert_eq!(
+            ConfiguredDecorator::count_extra(2, 0.25, 3).get_positions(
+                &CONTEXT,
+                &mut rejected_random,
+                POS
+            ),
+            vec![POS, POS]
+        );
+        assert_eq!(accepted_random.get_count(), 1);
+        assert_eq!(rejected_random.get_count(), 1);
     }
 
     #[test]

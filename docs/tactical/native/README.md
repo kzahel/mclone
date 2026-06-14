@@ -22,3 +22,4 @@ Use zero-padded numeric prefixes for new native tactical docs: `000-topic.md`, `
 | [`013-vanilla-section-meshing.md`](013-vanilla-section-meshing.md) | completed | Textured section meshes from client snapshots, baked model faces, stitched atlas upload, and native textured capture. |
 | [`014-streaming-renderer-and-camera.md`](014-streaming-renderer-and-camera.md) | completed | Section-keyed textured render meshes, GPU section upload cache, and native headless camera scenarios. |
 | [`015-decoration-framework-foundation.md`](015-decoration-framework-foundation.md) | completed | Java-shaped configured/decorated feature execution, starter trees/plants, feature snapshots, and native decorated capture. |
+| [`016-biome-feature-breadth.md`](016-biome-feature-breadth.md) | completed | Biome-keyed native feature profiles, visible oak/birch/spruce families, fern/dead-bush patches, and `COUNT_EXTRA` placement. |

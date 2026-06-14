@@ -2,7 +2,7 @@ use crate::biome::OverworldBiomeSource;
 use crate::block::{
     AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER, generated_block_state_id,
 };
-use crate::feature::apply_starter_overworld_decoration;
+use crate::feature::apply_overworld_biome_decoration;
 use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
 use crate::prng::WorldgenRandom;
 use crate::surface::apply_overworld_surface;
@@ -1183,8 +1183,14 @@ pub fn generate_overworld_surface_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -
 }
 
 pub fn generate_overworld_features_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
-    let mut chunk = generate_overworld_surface_buffer(seed, chunk_x, chunk_z);
-    apply_starter_overworld_decoration(seed, &mut chunk);
+    let biome_source = OverworldBiomeSource::new(seed, false, false);
+    let mut chunk = generate_overworld_surface_buffer_with_biome_source(
+        seed,
+        chunk_x,
+        chunk_z,
+        biome_source.clone(),
+    );
+    apply_overworld_biome_decoration(seed, &biome_source, &mut chunk);
     GeneratedChunk::from_mutable_buffer(chunk)
 }
 
@@ -1193,11 +1199,22 @@ fn generate_overworld_surface_buffer(
     chunk_x: i32,
     chunk_z: i32,
 ) -> MutableChunkBlockBuffer {
-    let generator = NoiseBasedChunkGenerator::new(
-        OverworldBiomeSource::new(seed, false, false),
+    generate_overworld_surface_buffer_with_biome_source(
         seed,
-        NoiseGeneratorSettings::overworld(),
-    );
+        chunk_x,
+        chunk_z,
+        OverworldBiomeSource::new(seed, false, false),
+    )
+}
+
+fn generate_overworld_surface_buffer_with_biome_source(
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+    biome_source: OverworldBiomeSource,
+) -> MutableChunkBlockBuffer {
+    let generator =
+        NoiseBasedChunkGenerator::new(biome_source, seed, NoiseGeneratorSettings::overworld());
     let mut chunk = generator.fill_from_noise(chunk_x, chunk_z);
     generator.build_surface_and_bedrock(&mut chunk);
     chunk
@@ -1804,9 +1821,15 @@ mod tests {
         let features = generate_overworld_features_chunk(12345, 0, 0);
         let feature_block_count = features.block_count(crate::block::OAK_LOG)
             + features.block_count(crate::block::OAK_LEAVES)
+            + features.block_count(crate::block::BIRCH_LOG)
+            + features.block_count(crate::block::BIRCH_LEAVES)
+            + features.block_count(crate::block::SPRUCE_LOG)
+            + features.block_count(crate::block::SPRUCE_LEAVES)
             + features.block_count(crate::block::GRASS)
+            + features.block_count(crate::block::FERN)
             + features.block_count(crate::block::DANDELION)
-            + features.block_count(crate::block::POPPY);
+            + features.block_count(crate::block::POPPY)
+            + features.block_count(crate::block::DEAD_BUSH);
 
         assert!(feature_block_count > 0);
         assert!(features.non_air_block_count() > surface.non_air_block_count());
