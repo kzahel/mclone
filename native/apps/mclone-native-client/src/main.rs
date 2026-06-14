@@ -3,12 +3,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
-use mclone_client::ClientRuntime;
+use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT,
 };
 use mclone_mesh::{ChunkMeshInput, VisibleChunkMesh, build_visible_chunk_area_mesh};
-use mclone_net::LocalTransport;
+use mclone_net::{LocalTransport, request_server_updates};
 use mclone_protocol::ChunkInterest;
 use mclone_render::chunk::{ChunkCamera, ChunkDrawResources};
 use mclone_render::headless::{
@@ -57,7 +57,7 @@ fn main() -> Result<()> {
             height,
             scene,
         } => {
-            let mesh = build_scene_mesh(scene)?;
+            let mesh = build_scene_mesh(&scene)?;
             let report = write_headless_chunk_png(
                 HeadlessChunkOptions {
                     path,
@@ -87,12 +87,13 @@ fn main() -> Result<()> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct SceneOptions {
     seed: i64,
     chunk_x: i32,
     chunk_z: i32,
     chunk_radius: i32,
+    remote_addr: Option<String>,
 }
 
 impl Default for SceneOptions {
@@ -102,6 +103,7 @@ impl Default for SceneOptions {
             chunk_x: DEFAULT_CHUNK_X,
             chunk_z: DEFAULT_CHUNK_Z,
             chunk_radius: DEFAULT_CHUNK_RADIUS,
+            remote_addr: None,
         }
     }
 }
@@ -161,6 +163,10 @@ impl Cli {
                 "--chunk-z" => scene.chunk_z = parse_i32_arg("--chunk-z", args.next())?,
                 "--chunk-radius" => {
                     scene.chunk_radius = parse_chunk_radius_arg("--chunk-radius", args.next())?
+                }
+                "--remote-addr" => {
+                    scene.remote_addr =
+                        Some(args.next().context("--remote-addr requires HOST:PORT")?);
                 }
                 "--help" | "-h" => {
                     print_help();
@@ -232,23 +238,24 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\
+           mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
-           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\n\
+           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\n\
          Window mode renders generated chunks with WASD/QE, mouse drag, and wheel camera controls. Headless modes write PNGs for GPU validation."
     );
 }
 
 fn run_window(scene: SceneOptions) -> Result<()> {
-    let mesh = build_scene_mesh(scene)?;
+    let mesh = build_scene_mesh(&scene)?;
     let stats = mesh.stats();
     let chunk_count = scene.chunk_span() * scene.chunk_span();
     log::info!(
-        "client-runtime chunk area seed={} center=({}, {}) radius={} chunks={} mesh={} vertices {} indices",
+        "client-runtime chunk area seed={} center=({}, {}) radius={} remote={:?} chunks={} mesh={} vertices {} indices",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
         scene.chunk_radius,
+        scene.remote_addr,
         chunk_count,
         stats.vertex_count,
         stats.index_count
@@ -264,7 +271,7 @@ fn run_window(scene: SceneOptions) -> Result<()> {
     Ok(())
 }
 
-fn build_scene_mesh(scene: SceneOptions) -> Result<VisibleChunkMesh> {
+fn build_scene_mesh(scene: &SceneOptions) -> Result<VisibleChunkMesh> {
     let client = build_scene_client_runtime(scene)?;
     let chunks = client
         .chunk_snapshots()
@@ -295,10 +302,12 @@ fn build_scene_mesh(scene: SceneOptions) -> Result<VisibleChunkMesh> {
     Ok(mesh)
 }
 
-fn build_scene_client_runtime(scene: SceneOptions) -> Result<ClientRuntime> {
-    let mut server = IntegratedServer::new(scene.seed);
-    let mut client = ClientRuntime::local_integrated();
-    let mut transport = LocalTransport::new();
+fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
+    let mut client = if scene.remote_addr.is_some() {
+        ClientRuntime::new(ClientHost::RemoteDedicated)
+    } else {
+        ClientRuntime::local_integrated()
+    };
     let radius_chunks =
         u32::try_from(scene.chunk_radius).context("chunk radius must be positive")?;
 
@@ -306,14 +315,23 @@ fn build_scene_client_runtime(scene: SceneOptions) -> Result<ClientRuntime> {
         center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
         radius_chunks,
     });
-    transport.send_client_command(command);
 
-    for command in transport.drain_client_commands() {
-        for update in server.handle_command(command) {
-            transport.send_server_update(update);
+    if let Some(remote_addr) = &scene.remote_addr {
+        let updates = request_server_updates(remote_addr.as_str(), &command)
+            .with_context(|| format!("failed to request chunk updates from {remote_addr}"))?;
+        client.apply_updates(updates);
+    } else {
+        let mut server = IntegratedServer::new(scene.seed);
+        let mut transport = LocalTransport::new();
+        transport.send_client_command(command);
+
+        for command in transport.drain_client_commands() {
+            for update in server.handle_command(command) {
+                transport.send_server_update(update);
+            }
         }
+        client.apply_updates(transport.drain_server_updates());
     }
-    client.apply_updates(transport.drain_server_updates());
     Ok(client)
 }
 
@@ -380,12 +398,12 @@ fn snapshot_mesh_blocks(snapshot: &ChunkSnapshot) -> Result<MeshChunkBlocks> {
 }
 
 impl SceneOptions {
-    fn chunk_span(self) -> i32 {
+    fn chunk_span(&self) -> i32 {
         self.chunk_radius * 2 + 1
     }
 
     #[cfg(test)]
-    fn chunk_positions(self) -> impl Iterator<Item = (i32, i32)> {
+    fn chunk_positions(&self) -> impl Iterator<Item = (i32, i32)> {
         let min_x = self.chunk_x - self.chunk_radius;
         let max_x = self.chunk_x + self.chunk_radius;
         let min_z = self.chunk_z - self.chunk_radius;
@@ -675,6 +693,7 @@ mod tests {
                     chunk_x: 2,
                     chunk_z: -3,
                     chunk_radius: DEFAULT_CHUNK_RADIUS,
+                    remote_addr: None,
                 },
             }
         );
@@ -705,12 +724,37 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_remote_addr() {
+        let cli = Cli::parse([
+            "--headless-chunk".to_owned(),
+            "/tmp/mclone-chunk.png".to_owned(),
+            "--remote-addr".to_owned(),
+            "127.0.0.1:25565".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessChunk {
+                path: PathBuf::from("/tmp/mclone-chunk.png"),
+                width: 640,
+                height: 480,
+                scene: SceneOptions {
+                    remote_addr: Some("127.0.0.1:25565".to_owned()),
+                    ..SceneOptions::default()
+                },
+            }
+        );
+    }
+
+    #[test]
     fn scene_chunk_positions_cover_square_radius() {
         let positions = SceneOptions {
             seed: 0,
             chunk_x: -2,
             chunk_z: 3,
             chunk_radius: 1,
+            remote_addr: None,
         }
         .chunk_positions()
         .collect::<Vec<_>>();
@@ -727,7 +771,7 @@ mod tests {
             chunk_radius: 0,
             ..SceneOptions::default()
         };
-        let client = build_scene_client_runtime(scene).unwrap();
+        let client = build_scene_client_runtime(&scene).unwrap();
 
         assert_eq!(client.loaded_chunk_count(), 1);
         assert!(
@@ -738,8 +782,37 @@ mod tests {
     }
 
     #[test]
+    fn scene_client_runtime_loads_center_chunk_from_remote_server() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let command = mclone_net::read_client_command_frame(&mut stream).unwrap();
+            let mut server = IntegratedServer::new(DEFAULT_SEED);
+            let updates = server.try_handle_command(command).unwrap();
+            mclone_net::write_server_update_batch(&mut stream, &updates).unwrap();
+        });
+        let scene = SceneOptions {
+            chunk_radius: 0,
+            remote_addr: Some(addr.to_string()),
+            ..SceneOptions::default()
+        };
+
+        let client = build_scene_client_runtime(&scene).unwrap();
+        server.join().unwrap();
+
+        assert_eq!(client.host(), ClientHost::RemoteDedicated);
+        assert_eq!(client.loaded_chunk_count(), 1);
+        assert!(
+            client
+                .chunk_snapshot(ChunkPos::new(scene.chunk_x, scene.chunk_z))
+                .is_some()
+        );
+    }
+
+    #[test]
     fn build_scene_mesh_uses_client_runtime_snapshots() {
-        let mesh = build_scene_mesh(SceneOptions {
+        let mesh = build_scene_mesh(&SceneOptions {
             chunk_radius: 0,
             ..SceneOptions::default()
         })

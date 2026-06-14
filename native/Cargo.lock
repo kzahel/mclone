@@ -1023,6 +1023,11 @@ version = "0.0.0"
 name = "mclone-dedicated-server"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "env_logger",
+ "log",
+ "mclone-core",
+ "mclone-net",
  "mclone-protocol",
  "mclone-server",
 ]

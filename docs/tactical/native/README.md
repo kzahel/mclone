@@ -15,3 +15,4 @@ Use zero-padded numeric prefixes for new native tactical docs: `000-topic.md`, `
 | [`006-wasm-browser-build-smoke.md`](006-wasm-browser-build-smoke.md) | completed | Browser/WASM smoke for the Rust web shell, runtime protocol path, and WebGPU capability probe. |
 | [`007-chunk-interest-status-scheduler.md`](007-chunk-interest-status-scheduler.md) | completed | Server-side chunk holders, status slots, coalesced interest scheduling, and unload publication. |
 | [`008-native-persistence-and-residency.md`](008-native-persistence-and-residency.md) | completed | Chunk holder residency, dirty save queue, native filesystem snapshot store, and reload through the server path. |
+| [`009-dedicated-server-and-remote-transport.md`](009-dedicated-server-and-remote-transport.md) | completed | Native TCP request/response transport, dedicated server loop, and native client remote chunk loading. |

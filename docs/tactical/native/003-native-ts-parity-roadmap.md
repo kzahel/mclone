@@ -18,10 +18,11 @@ Landed:
 - thin browser/WASM smoke that instantiates the Rust web shell, probes WebGPU, and runs a one-chunk protocol path
 - server-side chunk holders, status slots, duplicate request coalescing, and unload publication
 - chunk holder residency, dirty save queue, native filesystem snapshot store, and reload through the server path
+- native TCP request/response transport, a sequential dedicated server loop, and native client remote chunk loading
 
 Still missing compared with the TypeScript engine:
 
-- no remote transport or dedicated-server loop
+- no long-lived remote sessions or browser remote transport
 - chunk scheduling is still synchronous and surface-stage only
 - persistence is a temporary snapshot format, not Anvil/NBT or browser storage
 - web/WASM has only a thin smoke gate, not a real browser runtime, browser transport, or render path
@@ -66,7 +67,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 | [`006-wasm-browser-build-smoke.md`](006-wasm-browser-build-smoke.md) | web compatibility | **done** - `mclone-web-client` compiles/builds to WASM, boots in a browser shell, probes WebGPU, and exercises a one-chunk protocol/client/server path | `cargo check --target wasm32-unknown-unknown` plus `pnpm native:web:smoke` where Chrome is available |
 | [`007-chunk-interest-status-scheduler.md`](007-chunk-interest-status-scheduler.md) | server runtime | **done** - interest-driven chunk requests, holder/status slots, coalesced synchronous generation, publishable chunk events | tests for duplicate request coalescing and status ordering |
 | [`008-native-persistence-and-residency.md`](008-native-persistence-and-residency.md) | storage/runtime | **done** - chunk residency, dirty/save queue shape, filesystem adapter scaffold, reload/resume hook | save/load roundtrip of generated chunk snapshots |
-| `009-dedicated-server-and-remote-transport.md` | networking | `mclone-dedicated-server` serves the same protocol over a simple native transport; native client can join remotely | local two-process smoke or loopback integration |
+| [`009-dedicated-server-and-remote-transport.md`](009-dedicated-server-and-remote-transport.md) | networking | **done** - `mclone-dedicated-server` serves the same protocol over a simple native transport; native client can join remotely | local two-process smoke or loopback integration |
 | `010-browser-runtime-parity.md` | web runtime | browser client uses the same `ClientRuntime` and protocol messages against local or remote host adapters, with browser storage/transport constraints visible | browser runtime smoke from client replica facts |
 | `011-block-registry-and-asset-source.md` | assets/data | vanilla block-state id registry, file/web asset sources, extracted asset loading boundaries | registry and native/web asset fixture tests |
 | `012-model-baking-and-atlas.md` | renderer assets | blockstate/model parse, model baking, texture atlas, material/render-layer facts | baked model/atlas tests plus native and browser textured-block smoke where available |
@@ -83,16 +84,9 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `009-dedicated-server-and-remote-transport.md`.
+The next implementation tactical should be `010-browser-runtime-parity.md`.
 
-That slice should turn the dedicated server app from a placeholder into a process that speaks the same protocol/runtime shape:
-
-- `mclone-dedicated-server` owns an `IntegratedServer`-equivalent server runtime without a renderer
-- `mclone-net` gets the first native remote transport shape
-- native client can use local or remote transport without changing `ClientRuntime`
-- the same `ClientCommand` / `ServerUpdate` protocol remains the boundary
-
-Keep the transport deliberately simple for the first slice. The goal is a real two-process or loopback integration path, not a production protocol stack.
+That slice should make the Rust browser target more than a one-function smoke by keeping it on the same `ClientRuntime` and protocol path as native, while still respecting the web target's storage, transport, and WebGPU constraints.
 
 ## Deferral Notes
 

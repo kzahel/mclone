@@ -4,6 +4,13 @@ use std::collections::VecDeque;
 
 use mclone_protocol::{ClientCommand, ServerUpdate};
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use native_tcp::{
+    NativeTransportError, NativeTransportResult, read_client_command_frame,
+    read_server_update_batch, request_server_updates, write_client_command_frame,
+    write_server_update_batch,
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TransportKind {
     Local,
@@ -47,6 +54,159 @@ impl LocalTransport {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+mod native_tcp {
+    use std::error::Error;
+    use std::fmt;
+    use std::io::{Read, Write};
+    use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+
+    use mclone_protocol::{
+        ClientCommand, ProtocolCodecError, ServerUpdate, decode_client_command,
+        decode_server_update, encode_client_command, encode_server_update,
+    };
+
+    pub type NativeTransportResult<T> = Result<T, NativeTransportError>;
+
+    const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+
+    #[derive(Debug)]
+    pub enum NativeTransportError {
+        Io(std::io::Error),
+        Protocol(ProtocolCodecError),
+        FrameTooLarge { field: &'static str, len: usize },
+    }
+
+    impl fmt::Display for NativeTransportError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::Io(err) => write!(f, "native transport I/O failed: {err}"),
+                Self::Protocol(err) => write!(f, "native transport protocol failed: {err}"),
+                Self::FrameTooLarge { field, len } => {
+                    write!(
+                        f,
+                        "{field} frame length {len} exceeds {MAX_FRAME_BYTES} bytes"
+                    )
+                }
+            }
+        }
+    }
+
+    impl Error for NativeTransportError {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            match self {
+                Self::Io(err) => Some(err),
+                Self::Protocol(err) => Some(err),
+                Self::FrameTooLarge { .. } => None,
+            }
+        }
+    }
+
+    impl From<std::io::Error> for NativeTransportError {
+        fn from(value: std::io::Error) -> Self {
+            Self::Io(value)
+        }
+    }
+
+    impl From<ProtocolCodecError> for NativeTransportError {
+        fn from(value: ProtocolCodecError) -> Self {
+            Self::Protocol(value)
+        }
+    }
+
+    pub fn write_client_command_frame(
+        writer: &mut impl Write,
+        command: &ClientCommand,
+    ) -> NativeTransportResult<()> {
+        let payload = encode_client_command(command)?;
+        write_frame(writer, "client command", &payload)
+    }
+
+    pub fn read_client_command_frame(
+        reader: &mut impl Read,
+    ) -> NativeTransportResult<ClientCommand> {
+        let payload = read_frame(reader, "client command")?;
+        Ok(decode_client_command(&payload)?)
+    }
+
+    pub fn write_server_update_batch(
+        writer: &mut impl Write,
+        updates: &[ServerUpdate],
+    ) -> NativeTransportResult<()> {
+        write_u32(
+            writer,
+            checked_u32_len("server update batch", updates.len())?,
+        )?;
+        for update in updates {
+            let payload = encode_server_update(update)?;
+            write_frame(writer, "server update", &payload)?;
+        }
+        writer.flush()?;
+        Ok(())
+    }
+
+    pub fn read_server_update_batch(
+        reader: &mut impl Read,
+    ) -> NativeTransportResult<Vec<ServerUpdate>> {
+        let update_count = read_u32(reader)? as usize;
+        let mut updates = Vec::with_capacity(update_count);
+        for _ in 0..update_count {
+            let payload = read_frame(reader, "server update")?;
+            updates.push(decode_server_update(&payload)?);
+        }
+        Ok(updates)
+    }
+
+    pub fn request_server_updates(
+        addr: impl ToSocketAddrs,
+        command: &ClientCommand,
+    ) -> NativeTransportResult<Vec<ServerUpdate>> {
+        let mut stream = TcpStream::connect(addr)?;
+        write_client_command_frame(&mut stream, command)?;
+        stream.shutdown(Shutdown::Write)?;
+        read_server_update_batch(&mut stream)
+    }
+
+    fn write_frame(
+        writer: &mut impl Write,
+        field: &'static str,
+        payload: &[u8],
+    ) -> NativeTransportResult<()> {
+        write_u32(writer, checked_u32_len(field, payload.len())?)?;
+        writer.write_all(payload)?;
+        Ok(())
+    }
+
+    fn read_frame(reader: &mut impl Read, field: &'static str) -> NativeTransportResult<Vec<u8>> {
+        let len = read_u32(reader)? as usize;
+        if len > MAX_FRAME_BYTES {
+            return Err(NativeTransportError::FrameTooLarge { field, len });
+        }
+        let mut payload = vec![0; len];
+        reader.read_exact(&mut payload)?;
+        Ok(payload)
+    }
+
+    fn checked_u32_len(field: &'static str, len: usize) -> NativeTransportResult<u32> {
+        let len_u32 =
+            u32::try_from(len).map_err(|_| NativeTransportError::FrameTooLarge { field, len })?;
+        if len > MAX_FRAME_BYTES {
+            return Err(NativeTransportError::FrameTooLarge { field, len });
+        }
+        Ok(len_u32)
+    }
+
+    fn write_u32(writer: &mut impl Write, value: u32) -> std::io::Result<()> {
+        writer.write_all(&value.to_le_bytes())
+    }
+
+    fn read_u32(reader: &mut impl Read) -> std::io::Result<u32> {
+        let mut bytes = [0; 4];
+        reader.read_exact(&mut bytes)?;
+        Ok(u32::from_le_bytes(bytes))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,5 +236,73 @@ mod tests {
         assert_eq!(transport.drain_server_updates().len(), 1);
         assert_eq!(transport.pending_client_command_count(), 0);
         assert_eq!(transport.pending_server_update_count(), 0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_command_frame_round_trips() {
+        let command = ClientCommand::SetChunkInterest(ChunkInterest {
+            center: ChunkPos::new(-2, 4),
+            radius_chunks: 2,
+        });
+        let mut bytes = Vec::new();
+
+        write_client_command_frame(&mut bytes, &command).unwrap();
+
+        assert_eq!(
+            read_client_command_frame(&mut std::io::Cursor::new(bytes)).unwrap(),
+            command
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_update_batch_round_trips() {
+        let updates = vec![
+            ServerUpdate::ChunkUnload {
+                pos: ChunkPos::new(1, 2),
+            },
+            ServerUpdate::ChunkUnload {
+                pos: ChunkPos::new(-3, 4),
+            },
+        ];
+        let mut bytes = Vec::new();
+
+        write_server_update_batch(&mut bytes, &updates).unwrap();
+
+        assert_eq!(
+            read_server_update_batch(&mut std::io::Cursor::new(bytes)).unwrap(),
+            updates
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_loopback_requests_updates() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let command = ClientCommand::SetChunkInterest(ChunkInterest {
+            center: ChunkPos::new(0, 0),
+            radius_chunks: 0,
+        });
+        let server_command = command.clone();
+        let expected_updates = vec![ServerUpdate::ChunkUnload {
+            pos: ChunkPos::new(9, -9),
+        }];
+        let server_updates = expected_updates.clone();
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(
+                read_client_command_frame(&mut stream).unwrap(),
+                server_command
+            );
+            write_server_update_batch(&mut stream, &server_updates).unwrap();
+        });
+
+        let updates = request_server_updates(addr, &command).unwrap();
+        server.join().unwrap();
+
+        assert_eq!(updates, expected_updates);
     }
 }
