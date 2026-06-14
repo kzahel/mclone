@@ -10,7 +10,7 @@ pub const AIR_BLOCK_STATE_ID: BlockStateId = BlockStateId(0);
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct BlockStateId(pub u32);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,

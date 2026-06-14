@@ -8,6 +8,9 @@ publish.workspace = true
 [dependencies]
 mclone-protocol.workspace = true
 
+[dev-dependencies]
+mclone-core.workspace = true
+
 [lib]
 name = "mclone_net"
 path = "src/lib.rs"

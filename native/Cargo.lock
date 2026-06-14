@@ -1049,10 +1049,12 @@ dependencies = [
  "env_logger",
  "log",
  "mclone-client",
+ "mclone-core",
  "mclone-mesh",
+ "mclone-net",
+ "mclone-protocol",
  "mclone-render",
  "mclone-server",
- "mclone-worldgen",
  "winit",
 ]
 
@@ -1060,6 +1062,7 @@ dependencies = [
 name = "mclone-net"
 version = "0.0.0"
 dependencies = [
+ "mclone-core",
  "mclone-protocol",
 ]
 
@@ -1089,6 +1092,7 @@ dependencies = [
 name = "mclone-server"
 version = "0.0.0"
 dependencies = [
+ "mclone-core",
  "mclone-light",
  "mclone-protocol",
  "mclone-worldgen",

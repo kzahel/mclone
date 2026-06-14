@@ -58,7 +58,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 | Doc | Theme | Lands | Gate |
 |---|---|---|---|
 | [`004-canonical-chunk-snapshot-protocol.md`](004-canonical-chunk-snapshot-protocol.md) | data/protocol | **done** - `BlockStateId`, packed section snapshot facts, first chunk-interest and chunk-snapshot messages | unit tests over snapshot roundtrip and protocol data shape |
-| `005-local-integrated-client-server.md` | runtime spine | `IntegratedServer`, `ClientRuntime`, in-process transport, client chunk replica, native app renders from client facts | native headless chunk PNG comes from `ClientRuntime`, not direct worldgen |
+| [`005-local-integrated-client-server.md`](005-local-integrated-client-server.md) | runtime spine | **done** - `IntegratedServer`, `ClientRuntime`, in-process transport, client chunk replica, native app renders from client facts | native headless chunk PNG comes from `ClientRuntime`, not direct worldgen |
 | `006-wasm-browser-build-smoke.md` | web compatibility | `mclone-web-client` compiles to WASM, boots in a browser shell, creates WebGPU or reports a stable fallback, and exercises a tiny protocol/client path | `cargo check --target wasm32-unknown-unknown` plus browser smoke where available |
 | `007-chunk-interest-status-scheduler.md` | server runtime | interest-driven chunk requests, holder/status slots, async/coalesced generation, publishable chunk events | tests for duplicate request coalescing and status ordering |
 | `008-native-persistence-and-residency.md` | storage/runtime | chunk residency, dirty/save queue shape, filesystem adapter scaffold, reload/resume hook | save/load roundtrip of generated chunk snapshots |
@@ -79,18 +79,16 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `005-local-integrated-client-server.md`.
+The next implementation tactical should be `006-wasm-browser-build-smoke.md`.
 
-That slice should not build a local app cache. It should wire the chunk facts and protocol messages from [`004-canonical-chunk-snapshot-protocol.md`](004-canonical-chunk-snapshot-protocol.md) through the first real local client/server runtime:
+That slice should keep the web/WASM target honest now that core chunk data, protocol messages, local transport, integrated server, and client runtime exist:
 
-- `IntegratedServer` owns seed/worldgen and publishes `ServerUpdate::ChunkSnapshot`
-- `ClientRuntime` owns a client chunk replica and applies snapshots
-- local in-process transport moves `ClientCommand` / `ServerUpdate`
-- native headless/window rendering consumes client-replica chunks instead of direct worldgen output
+- compile `mclone-web-client` to `wasm32-unknown-unknown`
+- add a minimal browser boot path that exercises client/protocol/runtime setup without native-only assumptions
+- create WebGPU/`wgpu` or report a stable unsupported fallback
+- keep browser storage/threading/async constraints visible before more runtime APIs freeze
 
-`005` removes the direct worldgen-to-render shortcut from the native client.
-
-`006` is the first web/WASM compatibility gate. It should stay thin, but it must be real enough to catch API shapes that assume native threads, blocking filesystem access, or native-only `wgpu` setup.
+`006` is the first explicit web/WASM compatibility gate. It should stay thin, but it must be real enough to catch API shapes that assume native threads, blocking filesystem access, or native-only `wgpu` setup.
 
 ## Deferral Notes
 

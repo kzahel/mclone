@@ -10,10 +10,12 @@ anyhow.workspace = true
 env_logger.workspace = true
 log.workspace = true
 mclone-client.workspace = true
+mclone-core.workspace = true
 mclone-mesh.workspace = true
+mclone-net.workspace = true
+mclone-protocol.workspace = true
 mclone-render.workspace = true
 mclone-server.workspace = true
-mclone-worldgen.workspace = true
 winit.workspace = true
 
 [[bin]]

@@ -3,13 +3,19 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
+use mclone_client::ClientRuntime;
+use mclone_core::{
+    AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT,
+};
 use mclone_mesh::{ChunkMeshInput, VisibleChunkMesh, build_visible_chunk_area_mesh};
+use mclone_net::LocalTransport;
+use mclone_protocol::ChunkInterest;
 use mclone_render::chunk::{ChunkCamera, ChunkDrawResources};
 use mclone_render::headless::{
     HeadlessChunkOptions, HeadlessClearOptions, write_headless_chunk_png, write_headless_clear_png,
 };
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
-use mclone_worldgen::levelgen::generate_overworld_surface_chunk;
+use mclone_server::IntegratedServer;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -238,7 +244,7 @@ fn run_window(scene: SceneOptions) -> Result<()> {
     let stats = mesh.stats();
     let chunk_count = scene.chunk_span() * scene.chunk_span();
     log::info!(
-        "generated chunk area seed={} center=({}, {}) radius={} chunks={} mesh={} vertices {} indices",
+        "client-runtime chunk area seed={} center=({}, {}) radius={} chunks={} mesh={} vertices {} indices",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
@@ -259,10 +265,11 @@ fn run_window(scene: SceneOptions) -> Result<()> {
 }
 
 fn build_scene_mesh(scene: SceneOptions) -> Result<VisibleChunkMesh> {
-    let chunks = scene
-        .chunk_positions()
-        .map(|(chunk_x, chunk_z)| generate_overworld_surface_chunk(scene.seed, chunk_x, chunk_z))
-        .collect::<Vec<_>>();
+    let client = build_scene_client_runtime(scene)?;
+    let chunks = client
+        .chunk_snapshots()
+        .map(snapshot_mesh_blocks)
+        .collect::<Result<Vec<_>>>()?;
     let inputs = chunks
         .iter()
         .map(|chunk| {
@@ -271,7 +278,7 @@ fn build_scene_mesh(scene: SceneOptions) -> Result<VisibleChunkMesh> {
                 chunk.chunk_z,
                 chunk.min_y,
                 chunk.height,
-                chunk.blocks(),
+                &chunk.blocks,
             )
         })
         .collect::<Vec<_>>();
@@ -288,11 +295,96 @@ fn build_scene_mesh(scene: SceneOptions) -> Result<VisibleChunkMesh> {
     Ok(mesh)
 }
 
+fn build_scene_client_runtime(scene: SceneOptions) -> Result<ClientRuntime> {
+    let mut server = IntegratedServer::new(scene.seed);
+    let mut client = ClientRuntime::local_integrated();
+    let mut transport = LocalTransport::new();
+    let radius_chunks =
+        u32::try_from(scene.chunk_radius).context("chunk radius must be positive")?;
+
+    let command = client.set_chunk_interest(ChunkInterest {
+        center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
+        radius_chunks,
+    });
+    transport.send_client_command(command);
+
+    for command in transport.drain_client_commands() {
+        for update in server.handle_command(command) {
+            transport.send_server_update(update);
+        }
+    }
+    client.apply_updates(transport.drain_server_updates());
+    Ok(client)
+}
+
+#[derive(Clone, Debug)]
+struct MeshChunkBlocks {
+    chunk_x: i32,
+    chunk_z: i32,
+    min_y: i32,
+    height: i32,
+    blocks: Vec<u8>,
+}
+
+fn snapshot_mesh_blocks(snapshot: &ChunkSnapshot) -> Result<MeshChunkBlocks> {
+    if snapshot.height <= 0 || snapshot.height % SECTION_HEIGHT != 0 {
+        bail!(
+            "chunk snapshot {:?} has invalid height {}",
+            snapshot.pos,
+            snapshot.height
+        );
+    }
+    let expected_len = snapshot.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
+    let mut blocks = vec![AIR_BLOCK_STATE_ID.0 as u8; expected_len];
+    let min_section_y = snapshot.min_y / SECTION_HEIGHT;
+    let section_count = snapshot.height / SECTION_HEIGHT;
+
+    for section in &snapshot.sections {
+        let section_offset = section.section_y - min_section_y;
+        if !(0..section_count).contains(&section_offset) {
+            bail!(
+                "chunk snapshot {:?} contains section {} outside {}..{}",
+                snapshot.pos,
+                section.section_y,
+                min_section_y,
+                min_section_y + section_count - 1
+            );
+        }
+        let unpacked = section.unpack_block_state_ids();
+        if unpacked.len() != CHUNK_SECTION_VOLUME {
+            bail!(
+                "chunk snapshot {:?} section {} unpacked to {} blocks",
+                snapshot.pos,
+                section.section_y,
+                unpacked.len()
+            );
+        }
+        let start = section_offset as usize * CHUNK_SECTION_VOLUME;
+        for (index, state_id) in unpacked.into_iter().enumerate() {
+            blocks[start + index] = u8::try_from(state_id.0).with_context(|| {
+                format!(
+                    "temporary mesh adapter cannot represent block state id {} as u8",
+                    state_id.0
+                )
+            })?;
+        }
+    }
+
+    Ok(MeshChunkBlocks {
+        chunk_x: snapshot.pos.x,
+        chunk_z: snapshot.pos.z,
+        min_y: snapshot.min_y,
+        height: snapshot.height,
+        blocks,
+    })
+}
+
 impl SceneOptions {
     fn chunk_span(self) -> i32 {
         self.chunk_radius * 2 + 1
     }
 
+    #[cfg(test)]
     fn chunk_positions(self) -> impl Iterator<Item = (i32, i32)> {
         let min_x = self.chunk_x - self.chunk_radius;
         let max_x = self.chunk_x + self.chunk_radius;
@@ -502,6 +594,7 @@ fn key_axis(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_core::{BlockStateId, ChunkRevision, ChunkStatus};
 
     #[test]
     fn cli_defaults_to_window() {
@@ -626,5 +719,52 @@ mod tests {
         assert!(positions.contains(&(-3, 2)));
         assert!(positions.contains(&(-2, 3)));
         assert!(positions.contains(&(-1, 4)));
+    }
+
+    #[test]
+    fn scene_client_runtime_loads_center_chunk_from_integrated_server() {
+        let scene = SceneOptions {
+            chunk_radius: 0,
+            ..SceneOptions::default()
+        };
+        let client = build_scene_client_runtime(scene).unwrap();
+
+        assert_eq!(client.loaded_chunk_count(), 1);
+        assert!(
+            client
+                .chunk_snapshot(ChunkPos::new(scene.chunk_x, scene.chunk_z))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn build_scene_mesh_uses_client_runtime_snapshots() {
+        let mesh = build_scene_mesh(SceneOptions {
+            chunk_radius: 0,
+            ..SceneOptions::default()
+        })
+        .unwrap();
+
+        assert!(!mesh.is_empty());
+    }
+
+    #[test]
+    fn snapshot_mesh_blocks_rehydrates_omitted_air_sections() {
+        let mut block_state_ids = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME * 2];
+        block_state_ids[CHUNK_SECTION_VOLUME] = BlockStateId(1);
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            32,
+            &block_state_ids,
+        );
+
+        let mesh_blocks = snapshot_mesh_blocks(&snapshot).unwrap();
+
+        assert_eq!(mesh_blocks.blocks.len(), CHUNK_SECTION_VOLUME * 2);
+        assert_eq!(mesh_blocks.blocks[0], 0);
+        assert_eq!(mesh_blocks.blocks[CHUNK_SECTION_VOLUME], 1);
     }
 }
