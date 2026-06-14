@@ -47,17 +47,13 @@ The full fixture for chunk `0,0` still includes blocks or exact placements outsi
 
 ## Current Diagnostic
 
-After wiring air/liquid carvers into the native `Features` path, moving feature decoration onto a 3x3 region pass, correcting decorated-feature random interleaving, porting the first seven vanilla underground variety ore blobs, adding the active default ore block families, replacing the taiga placeholder with Java-shaped `TAIGA_VEGETATION` spruce/pine tree configs, switching trees onto the Java `HEIGHTMAP_WITH_TREE_THRESHOLD` path, enabling the Java taiga vegetal prefix (`PATCH_LARGE_FERN`, `GLOW_LICHEN`, then `TAIGA_VEGETATION`), removing the erroneous nested `countExtra(6, 0.1, 1)` wrapper from the weighted `PINE` branch, adding default water/lava lakes, porting `FREEZE_TOP_LAYER`, switching `OreFeature`'s pre-placement height gate to Java's `OCEAN_FLOOR_WG`, and preserving `CAVE_AIR` from `LakeFeature`, the ignored exact test reports:
+After wiring air/liquid carvers into the native `Features` path, moving feature decoration onto a 3x3 region pass, correcting decorated-feature random interleaving, porting the first seven vanilla underground variety ore blobs, adding the active default ore block families, replacing the taiga placeholder with Java-shaped `TAIGA_VEGETATION` spruce/pine tree configs, switching trees onto the Java `HEIGHTMAP_WITH_TREE_THRESHOLD` path, enabling the Java taiga vegetal prefix (`PATCH_LARGE_FERN`, `GLOW_LICHEN`, then `TAIGA_VEGETATION`), adding Java-shaped `FLOWER_DEFAULT` and `PATCH_GRASS_TAIGA_2`, removing the erroneous nested `countExtra(6, 0.1, 1)` wrapper from the weighted `PINE` branch, adding default water/lava lakes, porting `FREEZE_TOP_LAYER`, switching `OreFeature`'s pre-placement height gate to Java's `OCEAN_FLOOR_WG`, and preserving `CAVE_AIR` from `LakeFeature`, the ignored exact test reports:
 
 ```text
-matched_blocks: 65,487 / 65,536
-mismatched_blocks: 49
+matched_blocks: 65,516 / 65,536
+mismatched_blocks: 20
 largest buckets:
-  fern -> air: 12
   deepslate -> gravel: 9
-  grass -> air: 7
-  air -> fern: 6
-  air -> dandelion: 4
   air -> snow: 3
   air -> water: 2
   air -> glow_lichen: 1
@@ -68,7 +64,7 @@ largest buckets:
   stone -> water: 1
 ```
 
-This replaces the previous `108` mismatch baseline, which was dominated by `air -> cave_air`, the `280` mismatch baseline dominated by coal ore placement drift, the `1270` mismatch baseline inflated by a native-only pine sub-count, the `315` mismatch baseline before default lakes, and the `294` mismatch baseline before top-layer snow/freezing. Java `TAIGA_VEGETATION` selects one weighted `PINE` or default `SPRUCE` per outer placement; it does not decorate `PINE` with an inner count. With coal and cave-air corrected, the top remaining blockers are vegetation offsets, the low-y gravel/deepslate patch, and small top-layer/liquid tails. The target biome for chunk `0,0` is `minecraft:taiga_mountains`. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
+This replaces the previous `49` mismatch baseline, which was dominated by grass/fern/default-flower offsets, the `108` mismatch baseline dominated by `air -> cave_air`, the `280` mismatch baseline dominated by coal ore placement drift, the `1270` mismatch baseline inflated by a native-only pine sub-count, the `315` mismatch baseline before default lakes, and the `294` mismatch baseline before top-layer snow/freezing. Java `TAIGA_VEGETATION` selects one weighted `PINE` or default `SPRUCE` per outer placement; it does not decorate `PINE` with an inner count. Java `PATCH_GRASS_TAIGA_2` selects one weighted grass/fern state per patch, and `FLOWER_DEFAULT` uses `Feature.FLOWER` offsets rather than `RandomPatchFeature` offsets. With vegetation corrected, the top remaining blockers are the low-y gravel/deepslate patch and small top-layer/liquid/glow-lichen tails. The target biome for chunk `0,0` is `minecraft:taiga_mountains`. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
 
 The scheduler-trace oracle can now emit final selected ore branches with `--probe-ore-placements true`. A focused trace for target `(0,0)`, center `(0,0)`, `stepIndex=6`, `featureIndex=7` shows Java's coal branch `6` at origin `(2,12,9)` writes target block `(localX=1, y=10, localZ=8)` from `minecraft:stone` to `minecraft:coal_ore`. Native previously missed that write because the ore feature precheck used a world-surface helper instead of Java's `Heightmap.Types.OCEAN_FLOOR_WG`.
 
@@ -169,12 +165,11 @@ Still required:
 
 ## Next Steps
 
-1. Investigate the vegetation offsets (`fern -> air`, `grass -> air`, `air -> fern`, `air -> dandelion`). These are now the largest visible gauntlet buckets.
-2. Investigate the low-y `deepslate -> gravel` bucket before assuming it is ore-related; the first mismatches are y=1..3 edge gravel cells.
-3. Port or refine the remaining top-layer/liquid tails visible in the fixture: three expected snow layers, one `glow_lichen`, and small water/lava remnants.
-4. Add post-feature heightmap updates and scheduled tick capture to the native region path.
-5. Promote worker-local dependency reuse into scheduler-owned holder/status protochunk slots if structures or broader status scheduling need that before `018`.
-6. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
+1. Investigate the low-y `deepslate -> gravel` bucket before assuming it is ore-related; the first mismatches are y=1..3 edge gravel cells.
+2. Port or refine the remaining top-layer/liquid tails visible in the fixture: three expected snow layers, one `glow_lichen`, and small water/lava remnants.
+3. Add post-feature heightmap updates and scheduled tick capture to the native region path.
+4. Promote worker-local dependency reuse into scheduler-owned holder/status protochunk slots if structures or broader status scheduling need that before `018`.
+5. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
 
 ## Validation
 

@@ -24,6 +24,14 @@ pub const FEATURES_WRITE_RADIUS_CUTOFF: i32 = 1;
 const SIN_TABLE_SIZE: usize = 65_536;
 const SIN_TABLE_MASK: i32 = 65_535;
 const SIN_SCALE: f32 = 10_430.378_f32;
+const TAIGA_GRASS_STATES: [WeightedBlockState; 2] = [
+    WeightedBlockState::new(GRASS, 1),
+    WeightedBlockState::new(FERN, 4),
+];
+const DEFAULT_FLOWER_STATES: [WeightedBlockState; 2] = [
+    WeightedBlockState::new(POPPY, 2),
+    WeightedBlockState::new(DANDELION, 1),
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DecorationStep {
@@ -448,8 +456,21 @@ impl LakeConfiguration {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WeightedBlockState {
+    pub state: RawBlockId,
+    pub weight: i32,
+}
+
+impl WeightedBlockState {
+    pub const fn new(state: RawBlockId, weight: i32) -> Self {
+        Self { state, weight }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RandomPatchConfiguration {
     pub state: RawBlockId,
+    pub weighted_states: &'static [WeightedBlockState],
     pub tries: i32,
     pub xspread: i32,
     pub yspread: i32,
@@ -464,6 +485,7 @@ impl RandomPatchConfiguration {
     pub const fn new(state: RawBlockId) -> Self {
         Self {
             state,
+            weighted_states: &[],
             tries: 64,
             xspread: 7,
             yspread: 3,
@@ -863,6 +885,7 @@ pub enum ConfiguredFeature {
     Lake(LakeConfiguration),
     SimpleBlock(SimpleBlockConfiguration),
     RandomPatch(RandomPatchConfiguration),
+    Flower(RandomPatchConfiguration),
     GlowLichen(GlowLichenConfiguration),
     BasicTree(BasicTreeConfiguration),
     Tree(TreeConfiguration),
@@ -883,6 +906,10 @@ impl ConfiguredFeature {
 
     pub const fn random_patch(config: RandomPatchConfiguration) -> Self {
         Self::RandomPatch(config)
+    }
+
+    pub const fn flower(config: RandomPatchConfiguration) -> Self {
+        Self::Flower(config)
     }
 
     pub const fn glow_lichen(config: GlowLichenConfiguration) -> Self {
@@ -934,6 +961,7 @@ impl ConfiguredFeature {
             Self::Lake(config) => place_lake(world, random, origin, *config),
             Self::SimpleBlock(config) => place_simple_block(world, random, origin, *config),
             Self::RandomPatch(config) => place_random_patch(world, random, origin, *config),
+            Self::Flower(config) => place_flower(world, random, origin, *config),
             Self::GlowLichen(config) => place_glow_lichen(world, random, origin, *config),
             Self::BasicTree(config) => place_basic_tree(world, random, origin, *config),
             Self::Tree(config) => place_tree(world, random, origin, *config),
@@ -1479,8 +1507,8 @@ fn taiga_features() -> Vec<PlacedFeature> {
         large_fern_patch_feature(),
         glow_lichen_feature(),
         taiga_vegetation_feature(),
-        grass_patch(FERN, 4),
-        grass_patch(GRASS, 2),
+        default_flower_feature(),
+        taiga_grass_patch_feature(),
     ]
 }
 
@@ -1566,11 +1594,58 @@ fn taiga_vegetation_feature() -> PlacedFeature {
     )
 }
 
+fn default_flower_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::flower(RandomPatchConfiguration {
+            state: POPPY,
+            weighted_states: &DEFAULT_FLOWER_STATES,
+            tries: 64,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: true,
+            can_replace: false,
+            double_plant: false,
+            place_on: &[],
+        }),
+        vec![
+            ConfiguredDecorator::count(2),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+            ConfiguredDecorator::spread_32_above(),
+        ],
+    )
+}
+
+fn taiga_grass_patch_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: GRASS,
+            weighted_states: &TAIGA_GRASS_STATES,
+            tries: 32,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: true,
+            can_replace: false,
+            double_plant: false,
+            place_on: &[],
+        }),
+        vec![
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+        ],
+    )
+}
+
 fn large_fern_patch_feature() -> PlacedFeature {
     PlacedFeature::new(
         DecorationStep::VegetalDecoration,
         ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: LARGE_FERN_LOWER,
+            weighted_states: &[],
             tries: 64,
             xspread: 7,
             yspread: 3,
@@ -1636,6 +1711,7 @@ fn grass_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
     random_patch_feature(
         RandomPatchConfiguration {
             state: block_id,
+            weighted_states: &[],
             tries: 48,
             xspread: 7,
             yspread: 3,
@@ -1657,6 +1733,7 @@ fn dead_bush_patch(count: i32) -> PlacedFeature {
     random_patch_feature(
         RandomPatchConfiguration {
             state: DEAD_BUSH,
+            weighted_states: &[],
             tries: 16,
             xspread: 7,
             yspread: 3,
@@ -1881,6 +1958,7 @@ fn place_random_patch<W: FeatureWorld>(
     origin: BlockPos,
     config: RandomPatchConfiguration,
 ) -> bool {
+    let state = select_patch_state(random, config);
     let projected = if config.project {
         project_to_surface(world, origin).unwrap_or(origin)
     } else {
@@ -1908,7 +1986,7 @@ fn place_random_patch<W: FeatureWorld>(
             is_air_like(current) || (config.can_replace && is_replaceable_plant(current));
         if can_replace
             && matches_allowed(config.place_on, block_below)
-            && can_survive_simple_plant(config.state, current, block_below)
+            && can_survive_simple_plant(state, current, block_below)
         {
             let did_place = if config.double_plant {
                 let lower = world.set_block_world(pos, LARGE_FERN_LOWER);
@@ -1916,7 +1994,7 @@ fn place_random_patch<W: FeatureWorld>(
                     world.set_block_world(BlockPos::new(pos.x, pos.y + 1, pos.z), LARGE_FERN_UPPER);
                 lower && upper
             } else {
-                world.set_block_world(pos, config.state)
+                world.set_block_world(pos, state)
             };
             if did_place {
                 placed += 1;
@@ -1925,6 +2003,66 @@ fn place_random_patch<W: FeatureWorld>(
     }
 
     placed > 0
+}
+
+fn place_flower<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    origin: BlockPos,
+    config: RandomPatchConfiguration,
+) -> bool {
+    let state = select_patch_state(random, config);
+    let mut placed = 0;
+
+    for _ in 0..config.tries {
+        let pos = BlockPos::new(
+            origin.x + random.next_int_bound(config.xspread)
+                - random.next_int_bound(config.xspread),
+            origin.y + random.next_int_bound(config.yspread)
+                - random.next_int_bound(config.yspread),
+            origin.z + random.next_int_bound(config.zspread)
+                - random.next_int_bound(config.zspread),
+        );
+        let below = BlockPos::new(pos.x, pos.y - 1, pos.z);
+        let Some(current) = world.block_at_world(pos) else {
+            continue;
+        };
+        let Some(block_below) = world.block_at_world(below) else {
+            continue;
+        };
+        if is_air_like(current)
+            && can_survive_simple_plant(state, current, block_below)
+            && world.set_block_world(pos, state)
+        {
+            placed += 1;
+        }
+    }
+
+    placed > 0
+}
+
+fn select_patch_state(
+    random: &mut impl RandomSource,
+    config: RandomPatchConfiguration,
+) -> RawBlockId {
+    if config.weighted_states.is_empty() {
+        return config.state;
+    }
+
+    let total_weight = config
+        .weighted_states
+        .iter()
+        .map(|entry| entry.weight)
+        .sum::<i32>();
+    let mut selected_weight = random.next_int_bound(total_weight);
+    for entry in config.weighted_states {
+        selected_weight -= entry.weight;
+        if selected_weight < 0 {
+            return entry.state;
+        }
+    }
+
+    config.state
 }
 
 fn place_freeze_top_layer<W: FeatureWorld, B: FeatureBiomeResolver>(
@@ -2920,6 +3058,7 @@ mod tests {
         let mut random = WorldgenRandom::new(12_345);
         let feature = ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: GRASS,
+            weighted_states: &[],
             tries: 16,
             xspread: 3,
             yspread: 1,
@@ -2941,6 +3080,7 @@ mod tests {
         let mut random = WorldgenRandom::new(3);
         let feature = ConfiguredFeature::random_patch(RandomPatchConfiguration {
             state: LARGE_FERN_LOWER,
+            weighted_states: &[],
             tries: 1,
             xspread: 0,
             yspread: 0,
@@ -2986,6 +3126,7 @@ mod tests {
             DecorationStep::VegetalDecoration,
             ConfiguredFeature::random_patch(RandomPatchConfiguration {
                 state: POPPY,
+                weighted_states: &[],
                 tries: 8,
                 xspread: 1,
                 yspread: 1,
@@ -3317,6 +3458,37 @@ mod tests {
                 );
             }
             other => panic!("expected random selector, got {other:?}"),
+        }
+
+        assert_eq!(
+            vegetal_features[3].decorators,
+            vec![
+                ConfiguredDecorator::count(2),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+                ConfiguredDecorator::spread_32_above(),
+            ]
+        );
+        match &vegetal_features[3].feature {
+            ConfiguredFeature::Flower(config) => {
+                assert_eq!(config.weighted_states, DEFAULT_FLOWER_STATES.as_slice());
+                assert_eq!(config.tries, 64);
+            }
+            other => panic!("expected default flower feature, got {other:?}"),
+        }
+        assert_eq!(
+            vegetal_features[4].decorators,
+            vec![
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::heightmap_spread_double(HeightmapType::MotionBlocking),
+            ]
+        );
+        match &vegetal_features[4].feature {
+            ConfiguredFeature::RandomPatch(config) => {
+                assert_eq!(config.weighted_states, TAIGA_GRASS_STATES.as_slice());
+                assert_eq!(config.tries, 32);
+            }
+            other => panic!("expected taiga grass random patch, got {other:?}"),
         }
     }
 
