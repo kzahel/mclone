@@ -7,6 +7,8 @@ use std::{
     fmt,
 };
 
+#[cfg(target_arch = "wasm32")]
+use std::collections::VecDeque;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{sync::mpsc, thread};
 
@@ -141,12 +143,6 @@ impl ChunkHolder {
         self.published_snapshot.as_ref()
     }
 
-    fn has_ready_status(&self, status: ChunkStatus) -> bool {
-        self.status_slots
-            .get(&status)
-            .is_some_and(|slot| slot.step == ChunkStatusStep::Ready)
-    }
-
     fn mark_scheduled(&mut self, status: ChunkStatus) {
         self.status_slots.insert(
             status,
@@ -261,9 +257,13 @@ impl ChunkScheduler {
             }
         }
 
-        events.extend(self.schedule_feature_chunks(desired_chunks)?);
+        events.extend(self.enqueue_feature_chunks(desired_chunks)?);
 
         Ok(events)
+    }
+
+    pub fn poll(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        self.publish_completed_worldgen_jobs()
     }
 
     pub fn holder(&self, pos: ChunkPos) -> Option<&ChunkHolder> {
@@ -297,6 +297,13 @@ impl ChunkScheduler {
         self.jobs.len()
     }
 
+    pub fn pending_job_count(&self) -> usize {
+        self.jobs
+            .values()
+            .filter(|job| matches!(job.state, ChunkJobState::Queued | ChunkJobState::Running))
+            .count()
+    }
+
     pub fn worldgen_mailbox_kind(&self) -> WorldgenMailboxKind {
         self.worldgen_mailbox.kind()
     }
@@ -321,7 +328,7 @@ impl ChunkScheduler {
         Ok(saved)
     }
 
-    fn schedule_feature_chunks(
+    fn enqueue_feature_chunks(
         &mut self,
         desired_chunks: Vec<ChunkPos>,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
@@ -339,7 +346,8 @@ impl ChunkScheduler {
                     .holders
                     .get(&pos)
                     .expect("holder must exist before scheduling")
-                    .has_ready_status(status)
+                    .status_slot(status)
+                    .is_some()
                 {
                     continue;
                 }
@@ -399,32 +407,67 @@ impl ChunkScheduler {
             }
 
             self.mark_job_state(job_id, ChunkJobState::Running);
-            let mut generated =
-                self.worldgen_mailbox
-                    .generate_features(job_id, self.seed, &to_generate);
-
-            for pos in to_generate {
-                let revision = ChunkRevision(self.next_revision);
-                self.next_revision += 1;
-
-                let chunk = generated.remove(&pos).unwrap_or_else(|| {
-                    panic!(
-                        "feature batch did not return scheduler target chunk ({}, {})",
-                        pos.x, pos.z
-                    )
-                });
-                let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
-                self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
-                events.push(ChunkSchedulerEvent::StatusChanged {
-                    pos,
-                    status: ChunkStatus::Features,
-                    step: ChunkStatusStep::Ready,
-                });
-                events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
-            }
-            self.mark_job_state(job_id, ChunkJobState::Complete);
+            self.worldgen_mailbox
+                .enqueue_features(job_id, self.seed, &to_generate);
         }
 
+        Ok(events)
+    }
+
+    fn publish_completed_worldgen_jobs(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let completed_jobs = self.worldgen_mailbox.drain_completed();
+        let mut events = Vec::new();
+
+        for completed in completed_jobs {
+            events.extend(self.publish_completed_feature_job(completed)?);
+        }
+
+        Ok(events)
+    }
+
+    fn publish_completed_feature_job(
+        &mut self,
+        completed: WorldgenCompletedJob,
+    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let Some(job) = self.jobs.get(&completed.job_id).cloned() else {
+            return Ok(Vec::new());
+        };
+
+        let mut events = Vec::new();
+        let mut generated = completed.generated_chunks;
+
+        for pos in job.target_chunks {
+            let should_publish = self
+                .holders
+                .get(&pos)
+                .and_then(|holder| holder.status_slot(ChunkStatus::Features))
+                .is_some_and(|slot| {
+                    slot.job_id == Some(completed.job_id) && slot.step == ChunkStatusStep::Scheduled
+                });
+            if !should_publish {
+                continue;
+            }
+
+            let revision = ChunkRevision(self.next_revision);
+            self.next_revision += 1;
+
+            let chunk = generated.remove(&pos).unwrap_or_else(|| {
+                panic!(
+                    "feature batch did not return scheduler target chunk ({}, {})",
+                    pos.x, pos.z
+                )
+            });
+            let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
+            self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
+            events.push(ChunkSchedulerEvent::StatusChanged {
+                pos,
+                status: ChunkStatus::Features,
+                step: ChunkStatusStep::Ready,
+            });
+            events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+        }
+
+        self.mark_job_state(completed.job_id, ChunkJobState::Complete);
         Ok(events)
     }
 
@@ -497,6 +540,12 @@ impl ChunkScheduler {
     }
 }
 
+#[derive(Debug)]
+struct WorldgenCompletedJob {
+    job_id: ChunkJobId,
+    generated_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+}
+
 struct WorldgenMailbox {
     backend: WorldgenMailboxBackend,
 }
@@ -508,13 +557,12 @@ impl WorldgenMailbox {
         }
     }
 
-    fn generate_features(
-        &self,
-        job_id: ChunkJobId,
-        seed: i64,
-        targets: &[ChunkPos],
-    ) -> BTreeMap<ChunkPos, GeneratedChunk> {
-        self.backend.generate_features(job_id, seed, targets)
+    fn enqueue_features(&mut self, job_id: ChunkJobId, seed: i64, targets: &[ChunkPos]) {
+        self.backend.enqueue_features(job_id, seed, targets);
+    }
+
+    fn drain_completed(&mut self) -> Vec<WorldgenCompletedJob> {
+        self.backend.drain_completed()
     }
 
     fn kind(&self) -> WorldgenMailboxKind {
@@ -532,31 +580,39 @@ impl fmt::Debug for WorldgenMailbox {
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
-struct WorldgenMailboxBackend;
+struct WorldgenMailboxBackend {
+    completed: VecDeque<WorldgenCompletedJob>,
+}
 
 #[cfg(target_arch = "wasm32")]
 impl WorldgenMailboxBackend {
     fn new() -> Self {
-        Self
+        Self {
+            completed: VecDeque::new(),
+        }
     }
 
     fn kind(&self) -> WorldgenMailboxKind {
         WorldgenMailboxKind::Inline
     }
 
-    fn generate_features(
-        &self,
-        _job_id: ChunkJobId,
-        seed: i64,
-        targets: &[ChunkPos],
-    ) -> BTreeMap<ChunkPos, GeneratedChunk> {
-        generate_overworld_features_chunks(seed, targets.iter().copied())
+    fn enqueue_features(&mut self, job_id: ChunkJobId, seed: i64, targets: &[ChunkPos]) {
+        let generated_chunks = generate_overworld_features_chunks(seed, targets.iter().copied());
+        self.completed.push_back(WorldgenCompletedJob {
+            job_id,
+            generated_chunks,
+        });
+    }
+
+    fn drain_completed(&mut self) -> Vec<WorldgenCompletedJob> {
+        self.completed.drain(..).collect()
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 struct WorldgenMailboxBackend {
     sender: mpsc::Sender<WorldgenRequest>,
+    completion_receiver: mpsc::Receiver<WorldgenCompletedJob>,
     worker: Option<thread::JoinHandle<()>>,
 }
 
@@ -574,6 +630,7 @@ impl fmt::Debug for WorldgenMailboxBackend {
 impl WorldgenMailboxBackend {
     fn new() -> Self {
         let (sender, receiver) = mpsc::channel::<WorldgenRequest>();
+        let (completion_sender, completion_receiver) = mpsc::channel::<WorldgenCompletedJob>();
         let worker = thread::Builder::new()
             .name("mclone-worldgen".to_owned())
             .spawn(move || {
@@ -583,12 +640,18 @@ impl WorldgenMailboxBackend {
                             job_id,
                             seed,
                             targets,
-                            respond_to,
                         } => {
-                            let _job_id = job_id;
-                            let result =
+                            let generated_chunks =
                                 generate_overworld_features_chunks(seed, targets.iter().copied());
-                            let _ = respond_to.send(result);
+                            if completion_sender
+                                .send(WorldgenCompletedJob {
+                                    job_id,
+                                    generated_chunks,
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
                         }
                         WorldgenRequest::Shutdown => break,
                     }
@@ -598,6 +661,7 @@ impl WorldgenMailboxBackend {
 
         Self {
             sender,
+            completion_receiver,
             worker: Some(worker),
         }
     }
@@ -606,24 +670,22 @@ impl WorldgenMailboxBackend {
         WorldgenMailboxKind::NativeThread
     }
 
-    fn generate_features(
-        &self,
-        job_id: ChunkJobId,
-        seed: i64,
-        targets: &[ChunkPos],
-    ) -> BTreeMap<ChunkPos, GeneratedChunk> {
-        let (respond_to, receiver) = mpsc::channel();
+    fn enqueue_features(&mut self, job_id: ChunkJobId, seed: i64, targets: &[ChunkPos]) {
         self.sender
             .send(WorldgenRequest::GenerateFeatures {
                 job_id,
                 seed,
                 targets: targets.to_vec(),
-                respond_to,
             })
             .expect("native worldgen worker stopped before receiving job");
-        receiver
-            .recv()
-            .expect("native worldgen worker stopped before returning job result")
+    }
+
+    fn drain_completed(&mut self) -> Vec<WorldgenCompletedJob> {
+        let mut completed = Vec::new();
+        while let Ok(job) = self.completion_receiver.try_recv() {
+            completed.push(job);
+        }
+        completed
     }
 }
 
@@ -643,7 +705,6 @@ enum WorldgenRequest {
         job_id: ChunkJobId,
         seed: i64,
         targets: Vec<ChunkPos>,
-        respond_to: mpsc::Sender<BTreeMap<ChunkPos, GeneratedChunk>>,
     },
     Shutdown,
 }
@@ -684,8 +745,25 @@ impl IntegratedServer {
         }
     }
 
+    pub fn poll(&mut self) -> Vec<ServerUpdate> {
+        self.try_poll().expect("integrated server poll failed")
+    }
+
+    pub fn try_poll(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        Ok(self
+            .scheduler
+            .poll()?
+            .into_iter()
+            .filter_map(server_update_from_scheduler_event)
+            .collect())
+    }
+
     pub fn loaded_chunk_count(&self) -> usize {
         self.scheduler.loaded_chunk_count()
+    }
+
+    pub fn pending_job_count(&self) -> usize {
+        self.scheduler.pending_job_count()
     }
 
     pub fn scheduler(&self) -> &ChunkScheduler {
@@ -704,9 +782,9 @@ impl IntegratedServer {
         &mut self,
         interest: ChunkInterest,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        Ok(self
-            .scheduler
-            .apply_interest(interest)?
+        let mut events = self.scheduler.apply_interest(interest)?;
+        events.extend(self.scheduler.poll()?);
+        Ok(events
             .into_iter()
             .filter_map(server_update_from_scheduler_event)
             .collect())
@@ -786,6 +864,70 @@ const ALL_STATUSES: [ChunkStatus; 5] = [
 mod tests {
     use super::*;
 
+    fn apply_interest_and_poll(
+        scheduler: &mut ChunkScheduler,
+        interest: ChunkInterest,
+    ) -> Vec<ChunkSchedulerEvent> {
+        let mut events = scheduler.apply_interest(interest).unwrap();
+        events.extend(poll_scheduler_until_idle(scheduler));
+        events
+    }
+
+    fn poll_scheduler_until_idle(scheduler: &mut ChunkScheduler) -> Vec<ChunkSchedulerEvent> {
+        let mut events = Vec::new();
+        for _ in 0..60_000 {
+            events.extend(scheduler.poll().unwrap());
+            if scheduler.pending_job_count() == 0 {
+                return events;
+            }
+            wait_for_worker_tick();
+        }
+        panic!("timed out waiting for scheduler worldgen jobs");
+    }
+
+    fn handle_command_and_poll(
+        server: &mut IntegratedServer,
+        command: ClientCommand,
+    ) -> Vec<ServerUpdate> {
+        let mut updates = server.handle_command(command);
+        updates.extend(poll_server_until_idle(server));
+        updates
+    }
+
+    fn try_handle_command_and_poll(
+        server: &mut IntegratedServer,
+        command: ClientCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        let mut updates = server.try_handle_command(command)?;
+        updates.extend(try_poll_server_until_idle(server)?);
+        Ok(updates)
+    }
+
+    fn poll_server_until_idle(server: &mut IntegratedServer) -> Vec<ServerUpdate> {
+        try_poll_server_until_idle(server).unwrap()
+    }
+
+    fn try_poll_server_until_idle(
+        server: &mut IntegratedServer,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        let mut updates = Vec::new();
+        for _ in 0..60_000 {
+            updates.extend(server.try_poll()?);
+            if server.pending_job_count() == 0 {
+                return Ok(updates);
+            }
+            wait_for_worker_tick();
+        }
+        panic!("timed out waiting for integrated server worldgen jobs");
+    }
+
+    fn wait_for_worker_tick() {
+        #[cfg(not(target_arch = "wasm32"))]
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        #[cfg(target_arch = "wasm32")]
+        std::hint::spin_loop();
+    }
+
     #[test]
     fn distinguishes_integrated_and_dedicated_modes() {
         assert_ne!(ServerMode::Integrated, ServerMode::Dedicated);
@@ -811,10 +953,13 @@ mod tests {
     fn integrated_server_publishes_interested_chunks() {
         let mut server = IntegratedServer::new(12_345);
 
-        let updates = server.handle_command(ClientCommand::SetChunkInterest(ChunkInterest {
-            center: ChunkPos::new(0, 0),
-            radius_chunks: 1,
-        }));
+        let updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkInterest(ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 1,
+            }),
+        );
 
         assert_eq!(updates.len(), 9);
         assert_eq!(server.loaded_chunk_count(), 9);
@@ -857,23 +1002,23 @@ mod tests {
         };
 
         assert_eq!(
-            server
-                .handle_command(ClientCommand::SetChunkInterest(interest.clone()))
-                .len(),
+            handle_command_and_poll(
+                &mut server,
+                ClientCommand::SetChunkInterest(interest.clone())
+            )
+            .len(),
             1
         );
         assert_eq!(server.scheduler().job_count(), 1);
         assert_eq!(
-            server
-                .handle_command(ClientCommand::SetChunkInterest(interest))
-                .len(),
+            handle_command_and_poll(&mut server, ClientCommand::SetChunkInterest(interest)).len(),
             0
         );
         assert_eq!(server.scheduler().job_count(), 1);
     }
 
     #[test]
-    fn chunk_scheduler_records_holder_status_slots_in_order() {
+    fn chunk_scheduler_apply_interest_enqueues_features_before_poll() {
         let mut scheduler = ChunkScheduler::new(12_345);
 
         let events = scheduler
@@ -882,6 +1027,88 @@ mod tests {
                 radius_chunks: 0,
             })
             .unwrap();
+
+        assert_eq!(scheduler.pending_job_count(), 1);
+        assert_eq!(scheduler.loaded_chunk_count(), 0);
+        assert_eq!(
+            scheduler.job(ChunkJobId(1)).map(|job| job.state),
+            Some(ChunkJobState::Running)
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| !matches!(event, ChunkSchedulerEvent::SnapshotReady(_)))
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter_map(|event| {
+                    if let ChunkSchedulerEvent::StatusChanged { status, step, .. } = event {
+                        Some((*status, *step))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (ChunkStatus::Terrain, ChunkStatusStep::Scheduled),
+                (ChunkStatus::Terrain, ChunkStatusStep::Ready),
+                (ChunkStatus::Surface, ChunkStatusStep::Scheduled),
+                (ChunkStatus::Surface, ChunkStatusStep::Ready),
+                (ChunkStatus::Features, ChunkStatusStep::Scheduled),
+            ]
+        );
+
+        let ready_events = poll_scheduler_until_idle(&mut scheduler);
+        assert_eq!(scheduler.pending_job_count(), 0);
+        assert_eq!(scheduler.loaded_chunk_count(), 1);
+        assert!(matches!(
+            ready_events.as_slice(),
+            [
+                ChunkSchedulerEvent::StatusChanged {
+                    status: ChunkStatus::Features,
+                    step: ChunkStatusStep::Ready,
+                    ..
+                },
+                ChunkSchedulerEvent::SnapshotReady(_)
+            ]
+        ));
+    }
+
+    #[test]
+    fn duplicate_interest_while_job_running_does_not_enqueue_second_job() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let interest = ChunkInterest {
+            center: ChunkPos::new(0, 0),
+            radius_chunks: 0,
+        };
+
+        let first_events = scheduler.apply_interest(interest.clone()).unwrap();
+        assert_eq!(first_events.len(), 5);
+        assert_eq!(scheduler.pending_job_count(), 1);
+        assert_eq!(scheduler.job_count(), 1);
+
+        let second_events = scheduler.apply_interest(interest).unwrap();
+        assert_eq!(second_events, Vec::new());
+        assert_eq!(scheduler.pending_job_count(), 1);
+        assert_eq!(scheduler.job_count(), 1);
+
+        assert_eq!(poll_scheduler_until_idle(&mut scheduler).len(), 2);
+        assert_eq!(scheduler.loaded_chunk_count(), 1);
+        assert_eq!(scheduler.job_count(), 1);
+    }
+
+    #[test]
+    fn chunk_scheduler_records_holder_status_slots_in_order() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+
+        let events = apply_interest_and_poll(
+            &mut scheduler,
+            ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            },
+        );
 
         assert_eq!(
             events
@@ -966,20 +1193,27 @@ mod tests {
             radius_chunks: 0,
         };
 
-        assert_eq!(scheduler.apply_interest(interest.clone()).unwrap().len(), 7);
-        assert_eq!(scheduler.apply_interest(interest).unwrap(), Vec::new());
+        assert_eq!(
+            apply_interest_and_poll(&mut scheduler, interest.clone()).len(),
+            7
+        );
+        assert_eq!(
+            apply_interest_and_poll(&mut scheduler, interest),
+            Vec::new()
+        );
         assert_eq!(scheduler.loaded_chunk_count(), 1);
     }
 
     #[test]
     fn generated_chunks_are_dirty_until_saved() {
         let mut scheduler = ChunkScheduler::new(12_345);
-        scheduler
-            .apply_interest(ChunkInterest {
+        apply_interest_and_poll(
+            &mut scheduler,
+            ChunkInterest {
                 center: ChunkPos::new(0, 0),
                 radius_chunks: 0,
-            })
-            .unwrap();
+            },
+        );
 
         let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
         assert_eq!(holder.residency(), ChunkResidency::Generated);
@@ -1007,9 +1241,11 @@ mod tests {
                 12_345,
                 Box::new(FilesystemChunkSnapshotStore::new(&root)),
             );
-            let updates = server
-                .try_handle_command(ClientCommand::SetChunkInterest(interest.clone()))
-                .unwrap();
+            let updates = try_handle_command_and_poll(
+                &mut server,
+                ClientCommand::SetChunkInterest(interest.clone()),
+            )
+            .unwrap();
             let ServerUpdate::ChunkSnapshot(snapshot) = updates.first().unwrap() else {
                 panic!("first update was not a chunk snapshot");
             };
@@ -1041,9 +1277,9 @@ mod tests {
             12_345,
             Box::new(FilesystemChunkSnapshotStore::new(&root)),
         );
-        let updates = reloaded
-            .try_handle_command(ClientCommand::SetChunkInterest(interest))
-            .unwrap();
+        let updates =
+            try_handle_command_and_poll(&mut reloaded, ClientCommand::SetChunkInterest(interest))
+                .unwrap();
 
         assert_eq!(updates, vec![ServerUpdate::ChunkSnapshot(first_snapshot)]);
         assert_eq!(reloaded.scheduler().job_count(), 0);
@@ -1058,15 +1294,21 @@ mod tests {
     #[test]
     fn changed_interest_unloads_chunks_outside_view() {
         let mut server = IntegratedServer::new(12_345);
-        server.handle_command(ClientCommand::SetChunkInterest(ChunkInterest {
-            center: ChunkPos::new(0, 0),
-            radius_chunks: 0,
-        }));
+        handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkInterest(ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            }),
+        );
 
-        let updates = server.handle_command(ClientCommand::SetChunkInterest(ChunkInterest {
-            center: ChunkPos::new(1, 0),
-            radius_chunks: 0,
-        }));
+        let updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkInterest(ChunkInterest {
+                center: ChunkPos::new(1, 0),
+                radius_chunks: 0,
+            }),
+        );
 
         assert_eq!(
             updates,

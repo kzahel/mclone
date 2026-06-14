@@ -82,6 +82,7 @@ This points to underground decoration/ore families as the largest exactness gap.
 - The native radius-1 headless runtime capture dropped from just over 50s to roughly 14s on this host while producing the same framed decorated terrain output.
 - Native `ChunkStatusJob` records now persist completed `FEATURES` work metadata. Each generated holder `FEATURES` slot records the owning job id, and each job records its publish targets, 3x3 feature centers, dependency chunks, and queued/running/complete state.
 - Native `ChunkScheduler` now routes batched feature generation through a `WorldgenMailbox`. Desktop/native uses a persistent worker thread; WASM uses the same mailbox API with inline execution until browser worker plumbing exists.
+- `ChunkScheduler::apply_interest(...)` now only updates interest/holder status and enqueues feature jobs. `ChunkScheduler::poll(...)` drains completed worldgen jobs and publishes snapshots, so native command handling no longer waits for the worker thread to finish.
 
 ## Reference Scheduler Notes
 
@@ -113,23 +114,22 @@ Native has the first version of this concept:
 - batched publish-target generation reuses the union dependency window for one interest update
 - durable scheduler job records link generated `FEATURES` holder slots to the batch job that produced them
 - worker/mailbox execution exists for native `FEATURES` jobs, with an inline WASM fallback behind the same scheduler API
+- status job publication is split into enqueue and poll phases; one-shot native callers explicitly pump the server outside command handling when they need a full response batch
 
 Still required:
 
 - lower-status dependency chunks available out to the feature read radius
 - post-feature heightmap updates and scheduled tick capture
 - retained dependency/protochunk materialization across ticks/interests; current job records are durable metadata, not retained generated dependency chunks
-- nonblocking scheduler polling/publication; current native worker is request/response and the server waits for completion inside `apply_interest`
 - browser worker execution for WASM once the web runtime has worker/message plumbing
 
 ## Next Steps
 
-1. Split `apply_interest` into enqueue and poll/publish phases so the native worker can run jobs without blocking the command handler.
-2. Add retained dependency/protochunk materialization across ticks/interests once job execution is no longer direct synchronous generation.
-3. Port underground decoration buckets visible in the full fixture: stone variants, deepslate/tuff, dirt/gravel disks, and ore placement.
-4. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
-5. Add post-feature heightmap updates and scheduled tick capture to the native region path.
-6. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
+1. Add retained dependency/protochunk materialization across ticks/interests so overlapping feature jobs can reuse lower-status work instead of rebuilding dependency windows.
+2. Port underground decoration buckets visible in the full fixture: stone variants, deepslate/tuff, dirt/gravel disks, and ore placement.
+3. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
+4. Add post-feature heightmap updates and scheduled tick capture to the native region path.
+5. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
 
 ## Validation
 

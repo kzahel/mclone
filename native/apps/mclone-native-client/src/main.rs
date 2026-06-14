@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use mclone_assets::{
@@ -17,7 +17,7 @@ use mclone_mesh::{
     build_textured_render_sections,
 };
 use mclone_net::{LocalTransport, request_server_updates};
-use mclone_protocol::ChunkInterest;
+use mclone_protocol::{ChunkInterest, ServerUpdate};
 use mclone_render::chunk::{ChunkCamera, ChunkTextureAtlas, TexturedSectionDrawResources};
 use mclone_render::headless::{
     HeadlessChunkOptions, HeadlessClearOptions, write_headless_clear_png,
@@ -472,9 +472,32 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
                 transport.send_server_update(update);
             }
         }
+        for update in poll_integrated_server_until_idle(&mut server)? {
+            transport.send_server_update(update);
+        }
         client.apply_updates(transport.drain_server_updates());
     }
     Ok(client)
+}
+
+fn poll_integrated_server_until_idle(server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let mut updates = Vec::new();
+
+    loop {
+        updates.extend(
+            server
+                .try_poll()
+                .context("failed to poll integrated server worldgen jobs")?,
+        );
+        if server.pending_job_count() == 0 {
+            return Ok(updates);
+        }
+        if Instant::now() >= deadline {
+            bail!("timed out waiting for integrated server worldgen jobs");
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1071,7 +1094,8 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             let command = mclone_net::read_client_command_frame(&mut stream).unwrap();
             let mut server = IntegratedServer::new(DEFAULT_SEED);
-            let updates = server.try_handle_command(command).unwrap();
+            let mut updates = server.try_handle_command(command).unwrap();
+            updates.extend(poll_integrated_server_until_idle(&mut server).unwrap());
             mclone_net::write_server_update_batch(&mut stream, &updates).unwrap();
         });
         let scene = SceneOptions {

@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use mclone_net::{read_client_command_frame, write_server_update_batch};
@@ -118,15 +119,38 @@ fn serve_connection(
     server: &mut IntegratedServer,
 ) -> Result<usize> {
     let command = read_client_command_frame(stream).context("failed to read client command")?;
-    let updates = server
+    let mut updates = server
         .try_handle_command(command)
         .context("failed to apply client command")?;
+    updates.extend(wait_for_server_jobs(server)?);
     server
         .save_dirty_chunks()
         .context("failed to save dirty chunks")?;
     let update_count = updates.len();
     write_server_update_batch(stream, &updates).context("failed to write server update batch")?;
     Ok(update_count)
+}
+
+fn wait_for_server_jobs(
+    server: &mut IntegratedServer,
+) -> Result<Vec<mclone_protocol::ServerUpdate>> {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let mut updates = Vec::new();
+
+    loop {
+        updates.extend(
+            server
+                .try_poll()
+                .context("failed to poll dedicated server worldgen jobs")?,
+        );
+        if server.pending_job_count() == 0 {
+            return Ok(updates);
+        }
+        if Instant::now() >= deadline {
+            bail!("timed out waiting for dedicated server worldgen jobs");
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 #[cfg(test)]

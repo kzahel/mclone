@@ -4,8 +4,8 @@ use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::ChunkPos;
 use mclone_net::LocalTransport;
 use mclone_protocol::{
-    ChunkInterest, ClientCommand, ProtocolCodecResult, ServerUpdate, decode_client_command,
-    decode_server_update, encode_client_command, encode_server_update,
+    ChunkInterest, ClientCommand, ProtocolCodecError, ProtocolCodecResult, ServerUpdate,
+    decode_client_command, decode_server_update, encode_client_command, encode_server_update,
 };
 use mclone_render::RenderBackend;
 use mclone_server::IntegratedServer;
@@ -176,12 +176,24 @@ impl WebLoopbackHost {
         let command_count = commands.len();
         for command in commands {
             for update in self.server.handle_command(command) {
-                let encoded_update = encode_server_update(&update)?;
-                let decoded_update = decode_server_update(&encoded_update)?;
-                protocol_codec_roundtrip &= decoded_update == update;
-                self.transport.send_server_update(decoded_update);
+                self.send_roundtripped_update(update, &mut protocol_codec_roundtrip)?;
             }
         }
+        for _ in 0..60_000 {
+            if self.server.pending_job_count() == 0 {
+                break;
+            }
+            self.poll_server_updates(&mut protocol_codec_roundtrip)?;
+            if self.server.pending_job_count() > 0 {
+                wait_for_worker_tick();
+            }
+        }
+        if self.server.pending_job_count() > 0 {
+            return Err(ProtocolCodecError::InvalidData(
+                "timed out waiting for web loopback worldgen jobs",
+            ));
+        }
+        self.poll_server_updates(&mut protocol_codec_roundtrip)?;
 
         let updates = self.transport.drain_server_updates();
         let update_count = updates.len();
@@ -196,6 +208,35 @@ impl WebLoopbackHost {
             transport_drained,
         })
     }
+
+    fn poll_server_updates(
+        &mut self,
+        protocol_codec_roundtrip: &mut bool,
+    ) -> ProtocolCodecResult<()> {
+        for update in self.server.poll() {
+            self.send_roundtripped_update(update, protocol_codec_roundtrip)?;
+        }
+        Ok(())
+    }
+
+    fn send_roundtripped_update(
+        &mut self,
+        update: ServerUpdate,
+        protocol_codec_roundtrip: &mut bool,
+    ) -> ProtocolCodecResult<()> {
+        let encoded_update = encode_server_update(&update)?;
+        let decoded_update = decode_server_update(&encoded_update)?;
+        *protocol_codec_roundtrip &= decoded_update == update;
+        self.transport.send_server_update(decoded_update);
+        Ok(())
+    }
+}
+
+fn wait_for_worker_tick() {
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::sleep(std::time::Duration::from_millis(1));
+    #[cfg(target_arch = "wasm32")]
+    std::hint::spin_loop();
 }
 
 #[derive(Debug)]
