@@ -23,8 +23,8 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkMap.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/server/level/ChunkHolder.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkStatus.java`
-- `reference/minecraft-1.17.1/src/net/minecraft/world/level/WorldGenRegion.java`
-- `reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/ChunkGenerator.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/server/level/WorldGenRegion.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/TreeFeature.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/BiomeDefaultFeatures.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/Features.java`
@@ -48,11 +48,11 @@ The full fixture for chunk `0,0` includes blocks outside the current native feat
 
 ## Current Diagnostic
 
-After wiring air/liquid carvers into the native `Features` path, the ignored exact test reports:
+After wiring air/liquid carvers into the native `Features` path and moving feature decoration onto a 3x3 region pass, the ignored exact test reports:
 
 ```text
-matched_blocks: 60,528 / 65,536
-mismatched_blocks: 5,008
+matched_blocks: 60,390 / 65,536
+mismatched_blocks: 5,146
 largest buckets:
   stone -> diorite: 858
   stone -> deepslate: 856
@@ -60,13 +60,13 @@ largest buckets:
   stone -> andesite: 784
   stone -> dirt: 331
   stone -> gravel: 307
+  spruce_leaves -> air: 294
   stone -> coal_ore: 219
-  air -> spruce_leaves: 215
-  spruce_leaves -> air: 149
+  air -> spruce_leaves: 191
   stone -> iron_ore: 110
 ```
 
-This points to underground decoration/ore families as the largest exactness gap, followed by tree placement shape/spillover. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
+This points to underground decoration/ore families as the largest exactness gap. The region pass also exposes the current placeholder tree profiles more honestly: neighboring chunks can now spill into the target, but the tree shape/placement is not yet vanilla. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
 
 ## Landed So Far
 
@@ -75,6 +75,8 @@ This points to underground decoration/ore families as the largest exactness gap,
 - A Rust full-chunk fixture parser expands the vanilla server fixture's section palettes into a 65,536-block expected array.
 - `full_decorated_chunk_gauntlet_reports_current_native_gap` reports the current native-vs-vanilla mismatch buckets without failing the normal suite.
 - `full_decorated_chunk_zero_zero_matches_java_oracle` is an ignored exact-parity test that should be unignored when the gauntlet is expected to pass.
+- Native `FeatureRegion` mirrors the Java/TypeScript dependency/write-window shape with read radius `8`, write cutoff `1`, metrics, blocked far writes, and mutable multi-chunk access.
+- Native `generate_overworld_features_chunk(...)` now builds the union dependency window, runs surface plus air/liquid carvers for dependency chunks, and applies feature passes for the 3x3 centers that can write into the target chunk.
 
 ## Required Architecture
 
@@ -85,23 +87,26 @@ FEATURES_CHUNK_DEPENDENCY_RADIUS = 8
 FEATURES_WRITE_RADIUS_CUTOFF = 1
 ```
 
-Native needs the same durable concept before exact decorated parity is realistic:
+Native has the first version of this concept:
 
 - a `WorldGenRegion`-style feature region over multiple mutable chunks
 - read access across the `FEATURES` dependency window
 - writes accepted only for the center chunk plus immediate neighbors
 - center exactness produced by running feature passes for the 3x3 chunks that can write into the target chunk
+
+Still required:
+
 - lower-status dependency chunks available out to the feature read radius
 - post-feature heightmap updates and scheduled tick capture
+- scheduler-level dependency reuse instead of rebuilding the same dependency window per published chunk
 
 ## Next Steps
 
-1. Add a native feature-region type with read radius `8` and write cutoff `1`.
-2. Change native `Features` generation from single-buffer mutation to a region pass that can write into neighboring chunks.
-3. Add scheduler support for the dependency window needed to publish one exact center chunk.
-4. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
-5. Port ore/disk/underground decoration buckets visible in the full fixture.
-6. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
+1. Add scheduler support for the dependency window needed to publish one exact center chunk without regenerating the same neighbors repeatedly.
+2. Port underground decoration buckets visible in the full fixture: stone variants, deepslate/tuff, dirt/gravel disks, and ore placement.
+3. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
+4. Add post-feature heightmap updates and scheduled tick capture to the native region path.
+5. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
 
 ## Validation
 

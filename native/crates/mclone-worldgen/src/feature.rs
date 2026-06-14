@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::biome::{BiomeDefinition, OverworldBiomeSource};
 use crate::block::{
     AIR, BIRCH_LEAVES, BIRCH_LOG, DANDELION, DEAD_BUSH, DIRT, FERN, GRASS, GRASS_BLOCK, MYCELIUM,
@@ -9,6 +11,8 @@ use crate::placement::{BlockPos, ConfiguredDecorator, DecorationContext};
 use crate::prng::{RandomSource, WorldgenRandom};
 
 const CHUNK_WIDTH: i32 = 16;
+pub const FEATURES_CHUNK_DEPENDENCY_RADIUS: i32 = 8;
+pub const FEATURES_WRITE_RADIUS_CUTOFF: i32 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DecorationStep {
@@ -38,6 +42,287 @@ impl DecorationStep {
             Self::VegetalDecoration => 8,
             Self::TopLayerModification => 9,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FeatureRegionMetrics {
+    pub block_reads: usize,
+    pub height_queries: usize,
+    pub block_write_attempts: usize,
+    pub block_writes: usize,
+    pub blocked_block_writes: usize,
+}
+
+pub trait FeatureWorld {
+    fn center_chunk_x(&self) -> i32;
+    fn center_chunk_z(&self) -> i32;
+    fn min_y(&self) -> i32;
+    fn height(&self) -> i32;
+    fn non_air_block_count(&self) -> usize;
+    fn block_at_world(&mut self, pos: BlockPos) -> Option<RawBlockId>;
+    fn world_surface_height_at(&mut self, world_x: i32, world_z: i32) -> Option<i32>;
+    fn set_block_world(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool;
+}
+
+impl FeatureWorld for MutableChunkBlockBuffer {
+    fn center_chunk_x(&self) -> i32 {
+        self.chunk_x
+    }
+
+    fn center_chunk_z(&self) -> i32 {
+        self.chunk_z
+    }
+
+    fn min_y(&self) -> i32 {
+        self.min_y
+    }
+
+    fn height(&self) -> i32 {
+        self.height
+    }
+
+    fn non_air_block_count(&self) -> usize {
+        self.non_air_block_count()
+    }
+
+    fn block_at_world(&mut self, pos: BlockPos) -> Option<RawBlockId> {
+        let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
+        let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
+        if !(0..CHUNK_WIDTH).contains(&local_x)
+            || !(self.min_y..self.min_y + self.height).contains(&pos.y)
+            || !(0..CHUNK_WIDTH).contains(&local_z)
+        {
+            return None;
+        }
+        Some(self.get_block_at_y(local_x, pos.y, local_z))
+    }
+
+    fn world_surface_height_at(&mut self, world_x: i32, world_z: i32) -> Option<i32> {
+        let local_x = world_x - self.chunk_x * CHUNK_WIDTH;
+        let local_z = world_z - self.chunk_z * CHUNK_WIDTH;
+        if !(0..CHUNK_WIDTH).contains(&local_x) || !(0..CHUNK_WIDTH).contains(&local_z) {
+            return None;
+        }
+        Some(self.world_surface_height(local_x, local_z))
+    }
+
+    fn set_block_world(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool {
+        let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
+        let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
+        if !(0..CHUNK_WIDTH).contains(&local_x)
+            || !(self.min_y..self.min_y + self.height).contains(&pos.y)
+            || !(0..CHUNK_WIDTH).contains(&local_z)
+        {
+            return false;
+        }
+        self.set_block_at_y(local_x, pos.y, local_z, block_id);
+        true
+    }
+}
+
+#[derive(Debug)]
+pub struct FeatureRegion {
+    center_chunk_x: i32,
+    center_chunk_z: i32,
+    dependency_radius: i32,
+    write_radius_cutoff: i32,
+    chunks: BTreeMap<(i32, i32), MutableChunkBlockBuffer>,
+    metrics: FeatureRegionMetrics,
+}
+
+impl FeatureRegion {
+    pub fn new(
+        center_chunk_x: i32,
+        center_chunk_z: i32,
+        chunks: impl IntoIterator<Item = MutableChunkBlockBuffer>,
+    ) -> Self {
+        Self::with_radii(
+            center_chunk_x,
+            center_chunk_z,
+            FEATURES_CHUNK_DEPENDENCY_RADIUS,
+            FEATURES_WRITE_RADIUS_CUTOFF,
+            chunks,
+        )
+    }
+
+    pub fn with_radii(
+        center_chunk_x: i32,
+        center_chunk_z: i32,
+        dependency_radius: i32,
+        write_radius_cutoff: i32,
+        chunks: impl IntoIterator<Item = MutableChunkBlockBuffer>,
+    ) -> Self {
+        if dependency_radius < 0 {
+            panic!("feature dependency radius must be non-negative");
+        }
+        if write_radius_cutoff < 0 {
+            panic!("feature write radius cutoff must be non-negative");
+        }
+        if write_radius_cutoff > dependency_radius {
+            panic!(
+                "feature write radius cutoff {write_radius_cutoff} exceeds dependency radius {dependency_radius}"
+            );
+        }
+
+        let chunks = chunks
+            .into_iter()
+            .map(|chunk| ((chunk.chunk_x, chunk.chunk_z), chunk))
+            .collect();
+        Self {
+            center_chunk_x,
+            center_chunk_z,
+            dependency_radius,
+            write_radius_cutoff,
+            chunks,
+            metrics: FeatureRegionMetrics::default(),
+        }
+    }
+
+    pub fn set_center(&mut self, center_chunk_x: i32, center_chunk_z: i32) {
+        self.center_chunk_x = center_chunk_x;
+        self.center_chunk_z = center_chunk_z;
+    }
+
+    pub fn dependency_radius(&self) -> i32 {
+        self.dependency_radius
+    }
+
+    pub fn write_radius_cutoff(&self) -> i32 {
+        self.write_radius_cutoff
+    }
+
+    pub fn metrics(&self) -> FeatureRegionMetrics {
+        self.metrics
+    }
+
+    pub fn chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&MutableChunkBlockBuffer> {
+        self.chunks.get(&(chunk_x, chunk_z))
+    }
+
+    pub fn chunk_mut(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+    ) -> Option<&mut MutableChunkBlockBuffer> {
+        self.chunks.get_mut(&(chunk_x, chunk_z))
+    }
+
+    pub fn into_chunk(mut self, chunk_x: i32, chunk_z: i32) -> Option<MutableChunkBlockBuffer> {
+        self.chunks.remove(&(chunk_x, chunk_z))
+    }
+
+    fn get_chunk(&self, chunk_x: i32, chunk_z: i32) -> &MutableChunkBlockBuffer {
+        self.ensure_within_dependency_window(chunk_x, chunk_z);
+        self.chunks.get(&(chunk_x, chunk_z)).unwrap_or_else(|| {
+            panic!(
+                "feature region missing dependency chunk ({chunk_x}, {chunk_z}) for center ({}, {})",
+                self.center_chunk_x, self.center_chunk_z
+            )
+        })
+    }
+
+    fn get_chunk_mut(&mut self, chunk_x: i32, chunk_z: i32) -> &mut MutableChunkBlockBuffer {
+        self.ensure_within_dependency_window(chunk_x, chunk_z);
+        self.chunks.get_mut(&(chunk_x, chunk_z)).unwrap_or_else(|| {
+            panic!(
+                "feature region missing dependency chunk ({chunk_x}, {chunk_z}) for center ({}, {})",
+                self.center_chunk_x, self.center_chunk_z
+            )
+        })
+    }
+
+    fn ensure_within_dependency_window(&self, chunk_x: i32, chunk_z: i32) {
+        if (chunk_x - self.center_chunk_x).abs() > self.dependency_radius
+            || (chunk_z - self.center_chunk_z).abs() > self.dependency_radius
+        {
+            panic!(
+                "feature region access outside dependency window: center ({}, {}), requested ({chunk_x}, {chunk_z}), radius {}",
+                self.center_chunk_x, self.center_chunk_z, self.dependency_radius
+            );
+        }
+    }
+
+    fn can_write_chunk(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        (chunk_x - self.center_chunk_x).abs() <= self.write_radius_cutoff
+            && (chunk_z - self.center_chunk_z).abs() <= self.write_radius_cutoff
+    }
+}
+
+impl FeatureWorld for FeatureRegion {
+    fn center_chunk_x(&self) -> i32 {
+        self.center_chunk_x
+    }
+
+    fn center_chunk_z(&self) -> i32 {
+        self.center_chunk_z
+    }
+
+    fn min_y(&self) -> i32 {
+        self.get_chunk(self.center_chunk_x, self.center_chunk_z)
+            .min_y
+    }
+
+    fn height(&self) -> i32 {
+        self.get_chunk(self.center_chunk_x, self.center_chunk_z)
+            .height
+    }
+
+    fn non_air_block_count(&self) -> usize {
+        self.chunks
+            .values()
+            .map(MutableChunkBlockBuffer::non_air_block_count)
+            .sum()
+    }
+
+    fn block_at_world(&mut self, pos: BlockPos) -> Option<RawBlockId> {
+        let chunk_x = block_to_chunk_coord(pos.x);
+        let chunk_z = block_to_chunk_coord(pos.z);
+        self.metrics.block_reads += 1;
+        let chunk = self.get_chunk(chunk_x, chunk_z);
+        if !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y) {
+            return None;
+        }
+        Some(chunk.get_block_at_y(
+            pos.x - chunk_x * CHUNK_WIDTH,
+            pos.y,
+            pos.z - chunk_z * CHUNK_WIDTH,
+        ))
+    }
+
+    fn world_surface_height_at(&mut self, world_x: i32, world_z: i32) -> Option<i32> {
+        let chunk_x = block_to_chunk_coord(world_x);
+        let chunk_z = block_to_chunk_coord(world_z);
+        self.metrics.height_queries += 1;
+        let chunk = self.get_chunk(chunk_x, chunk_z);
+        Some(chunk.world_surface_height(
+            world_x - chunk_x * CHUNK_WIDTH,
+            world_z - chunk_z * CHUNK_WIDTH,
+        ))
+    }
+
+    fn set_block_world(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool {
+        let chunk_x = block_to_chunk_coord(pos.x);
+        let chunk_z = block_to_chunk_coord(pos.z);
+        self.ensure_within_dependency_window(chunk_x, chunk_z);
+        self.metrics.block_write_attempts += 1;
+        if !self.can_write_chunk(chunk_x, chunk_z) {
+            self.metrics.blocked_block_writes += 1;
+            return false;
+        }
+
+        let chunk = self.get_chunk_mut(chunk_x, chunk_z);
+        if !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y) {
+            return false;
+        }
+        chunk.set_block_at_y(
+            pos.x - chunk_x * CHUNK_WIDTH,
+            pos.y,
+            pos.z - chunk_z * CHUNK_WIDTH,
+            block_id,
+        );
+        self.metrics.block_writes += 1;
+        true
     }
 }
 
@@ -153,16 +438,16 @@ impl ConfiguredFeature {
         Self::BasicTree(config)
     }
 
-    pub fn place(
+    pub fn place<W: FeatureWorld>(
         &self,
-        chunk: &mut MutableChunkBlockBuffer,
+        world: &mut W,
         random: &mut impl RandomSource,
         origin: BlockPos,
     ) -> bool {
         match *self {
-            Self::SimpleBlock(config) => place_simple_block(chunk, random, origin, config),
-            Self::RandomPatch(config) => place_random_patch(chunk, random, origin, config),
-            Self::BasicTree(config) => place_basic_tree(chunk, random, origin, config),
+            Self::SimpleBlock(config) => place_simple_block(world, random, origin, config),
+            Self::RandomPatch(config) => place_random_patch(world, random, origin, config),
+            Self::BasicTree(config) => place_basic_tree(world, random, origin, config),
         }
     }
 }
@@ -187,13 +472,13 @@ impl PlacedFeature {
         }
     }
 
-    pub fn place(
+    pub fn place<W: FeatureWorld>(
         &self,
-        chunk: &mut MutableChunkBlockBuffer,
+        world: &mut W,
         random: &mut impl RandomSource,
         origin: BlockPos,
     ) -> bool {
-        let decoration_context = DecorationContext::new(chunk.min_y, chunk.height);
+        let decoration_context = DecorationContext::new(world.min_y(), world.height());
         let mut positions = vec![origin];
         for decorator in &self.decorators {
             positions = positions
@@ -207,7 +492,7 @@ impl PlacedFeature {
 
         let mut placed_any = false;
         for pos in positions {
-            placed_any |= self.feature.place(chunk, random, pos);
+            placed_any |= self.feature.place(world, random, pos);
         }
         placed_any
     }
@@ -226,19 +511,33 @@ pub fn apply_overworld_biome_decoration(
     biome_source: &OverworldBiomeSource,
     chunk: &mut MutableChunkBlockBuffer,
 ) -> DecorationReport {
-    let biome = chunk_center_biome(seed, biome_source, chunk);
+    let biome = chunk_center_biome(seed, biome_source, chunk.chunk_x, chunk.chunk_z);
     apply_overworld_biome_features(seed, biome, chunk)
 }
 
-pub fn apply_overworld_biome_features(
+pub fn apply_overworld_biome_decoration_to_region(
+    seed: i64,
+    biome_source: &OverworldBiomeSource,
+    region: &mut FeatureRegion,
+) -> DecorationReport {
+    let biome = chunk_center_biome(
+        seed,
+        biome_source,
+        region.center_chunk_x(),
+        region.center_chunk_z(),
+    );
+    apply_overworld_biome_features(seed, biome, region)
+}
+
+pub fn apply_overworld_biome_features<W: FeatureWorld>(
     seed: i64,
     biome: BiomeDefinition,
-    chunk: &mut MutableChunkBlockBuffer,
+    world: &mut W,
 ) -> DecorationReport {
-    let before = chunk.non_air_block_count();
-    let min_block_x = chunk.chunk_x * CHUNK_WIDTH;
-    let min_block_z = chunk.chunk_z * CHUNK_WIDTH;
-    let origin = BlockPos::new(min_block_x, chunk.min_y, min_block_z);
+    let before = world.non_air_block_count();
+    let min_block_x = world.center_chunk_x() * CHUNK_WIDTH;
+    let min_block_z = world.center_chunk_z() * CHUNK_WIDTH;
+    let origin = BlockPos::new(min_block_x, world.min_y(), min_block_z);
     let features = overworld_features_for_biome(biome);
     let mut random = WorldgenRandom::default();
     let decoration_seed = random.set_decoration_seed(seed, min_block_x, min_block_z);
@@ -246,7 +545,7 @@ pub fn apply_overworld_biome_features(
 
     for (index, feature) in features.iter().enumerate() {
         random.set_feature_seed(decoration_seed, index as i32, feature.step.index());
-        if feature.place(chunk, &mut random, origin) {
+        if feature.place(world, &mut random, origin) {
             placed_features += 1;
         }
     }
@@ -255,7 +554,7 @@ pub fn apply_overworld_biome_features(
         biome_key: biome.key(),
         attempted_features: features.len(),
         placed_features,
-        added_non_air_blocks: chunk.non_air_block_count().saturating_sub(before),
+        added_non_air_blocks: world.non_air_block_count().saturating_sub(before),
     }
 }
 
@@ -304,12 +603,13 @@ pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature
 fn chunk_center_biome(
     seed: i64,
     biome_source: &OverworldBiomeSource,
-    chunk: &MutableChunkBlockBuffer,
+    chunk_x: i32,
+    chunk_z: i32,
 ) -> BiomeDefinition {
     biome_source.get_block_position_biome_definition(
         seed,
-        chunk.chunk_x * CHUNK_WIDTH + CHUNK_WIDTH / 2,
-        chunk.chunk_z * CHUNK_WIDTH + CHUNK_WIDTH / 2,
+        chunk_x * CHUNK_WIDTH + CHUNK_WIDTH / 2,
+        chunk_z * CHUNK_WIDTH + CHUNK_WIDTH / 2,
     )
 }
 
@@ -460,21 +760,21 @@ fn random_patch_feature(config: RandomPatchConfiguration, count: i32) -> PlacedF
     )
 }
 
-fn place_simple_block(
-    chunk: &mut MutableChunkBlockBuffer,
+fn place_simple_block<W: FeatureWorld>(
+    world: &mut W,
     _random: &mut impl RandomSource,
     origin: BlockPos,
     config: SimpleBlockConfiguration,
 ) -> bool {
     let below = BlockPos::new(origin.x, origin.y - 1, origin.z);
     let above = BlockPos::new(origin.x, origin.y + 1, origin.z);
-    let Some(block_below) = block_at_world(chunk, below) else {
+    let Some(block_below) = world.block_at_world(below) else {
         return false;
     };
-    let Some(current) = block_at_world(chunk, origin) else {
+    let Some(current) = world.block_at_world(origin) else {
         return false;
     };
-    let Some(block_above) = block_at_world(chunk, above) else {
+    let Some(block_above) = world.block_at_world(above) else {
         return false;
     };
 
@@ -486,17 +786,17 @@ fn place_simple_block(
         return false;
     }
 
-    set_block_world(chunk, origin, config.to_place)
+    world.set_block_world(origin, config.to_place)
 }
 
-fn place_random_patch(
-    chunk: &mut MutableChunkBlockBuffer,
+fn place_random_patch<W: FeatureWorld>(
+    world: &mut W,
     random: &mut impl RandomSource,
     origin: BlockPos,
     config: RandomPatchConfiguration,
 ) -> bool {
     let projected = if config.project {
-        project_to_surface(chunk, origin).unwrap_or(origin)
+        project_to_surface(world, origin).unwrap_or(origin)
     } else {
         origin
     };
@@ -512,17 +812,17 @@ fn place_random_patch(
                 - random.next_int_bound(config.zspread + 1),
         );
         let below = BlockPos::new(pos.x, pos.y - 1, pos.z);
-        let Some(current) = block_at_world(chunk, pos) else {
+        let Some(current) = world.block_at_world(pos) else {
             continue;
         };
-        let Some(block_below) = block_at_world(chunk, below) else {
+        let Some(block_below) = world.block_at_world(below) else {
             continue;
         };
         let can_replace = current == AIR || (config.can_replace && is_replaceable_plant(current));
         if can_replace
             && matches_allowed(config.place_on, block_below)
             && can_survive_simple_plant(config.state, current, block_below)
-            && set_block_world(chunk, pos, config.state)
+            && world.set_block_world(pos, config.state)
         {
             placed += 1;
         }
@@ -531,17 +831,17 @@ fn place_random_patch(
     placed > 0
 }
 
-fn place_basic_tree(
-    chunk: &mut MutableChunkBlockBuffer,
+fn place_basic_tree<W: FeatureWorld>(
+    world: &mut W,
     random: &mut impl RandomSource,
     origin: BlockPos,
     config: BasicTreeConfiguration,
 ) -> bool {
-    let Some(base) = project_to_surface(chunk, origin) else {
+    let Some(base) = project_to_surface(world, origin) else {
         return false;
     };
     let below = BlockPos::new(base.x, base.y - 1, base.z);
-    let Some(block_below) = block_at_world(chunk, below) else {
+    let Some(block_below) = world.block_at_world(below) else {
         return false;
     };
     if !matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM) {
@@ -550,7 +850,7 @@ fn place_basic_tree(
 
     let height = config.min_height + random.next_int_bound(config.random_height.max(1));
     let leaves_center_y = base.y + height;
-    if base.y < chunk.min_y + 1 || leaves_center_y + 1 >= chunk.min_y + chunk.height {
+    if base.y < world.min_y() + 1 || leaves_center_y + 1 >= world.min_y() + world.height() {
         return false;
     }
 
@@ -577,58 +877,24 @@ fn place_basic_tree(
 
     if targets
         .iter()
-        .any(|(pos, _)| !can_replace_tree_block(chunk, *pos))
+        .any(|(pos, _)| !can_replace_tree_block(world, *pos))
     {
         return false;
     }
 
-    set_block_world(chunk, below, DIRT);
+    world.set_block_world(below, DIRT);
     for (pos, block_id) in targets {
-        set_block_world(chunk, pos, block_id);
+        world.set_block_world(pos, block_id);
     }
     true
 }
 
-fn project_to_surface(chunk: &MutableChunkBlockBuffer, pos: BlockPos) -> Option<BlockPos> {
-    let local_x = pos.x - chunk.chunk_x * CHUNK_WIDTH;
-    let local_z = pos.z - chunk.chunk_z * CHUNK_WIDTH;
-    if !(0..CHUNK_WIDTH).contains(&local_x) || !(0..CHUNK_WIDTH).contains(&local_z) {
-        return None;
-    }
+fn project_to_surface<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> Option<BlockPos> {
     Some(BlockPos::new(
         pos.x,
-        chunk.world_surface_height(local_x, local_z),
+        world.world_surface_height_at(pos.x, pos.z)?,
         pos.z,
     ))
-}
-
-fn block_at_world(chunk: &MutableChunkBlockBuffer, pos: BlockPos) -> Option<RawBlockId> {
-    let local_x = pos.x - chunk.chunk_x * CHUNK_WIDTH;
-    let local_z = pos.z - chunk.chunk_z * CHUNK_WIDTH;
-    if !(0..CHUNK_WIDTH).contains(&local_x)
-        || !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y)
-        || !(0..CHUNK_WIDTH).contains(&local_z)
-    {
-        return None;
-    }
-    Some(chunk.get_block_at_y(local_x, pos.y, local_z))
-}
-
-fn set_block_world(
-    chunk: &mut MutableChunkBlockBuffer,
-    pos: BlockPos,
-    block_id: RawBlockId,
-) -> bool {
-    let local_x = pos.x - chunk.chunk_x * CHUNK_WIDTH;
-    let local_z = pos.z - chunk.chunk_z * CHUNK_WIDTH;
-    if !(0..CHUNK_WIDTH).contains(&local_x)
-        || !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y)
-        || !(0..CHUNK_WIDTH).contains(&local_z)
-    {
-        return false;
-    }
-    chunk.set_block_at_y(local_x, pos.y, local_z, block_id);
-    true
 }
 
 fn matches_allowed(allowed: &[RawBlockId], block_id: RawBlockId) -> bool {
@@ -657,8 +923,8 @@ fn is_replaceable_plant(block_id: RawBlockId) -> bool {
     matches!(block_id, GRASS | FERN | DANDELION | POPPY | DEAD_BUSH)
 }
 
-fn can_replace_tree_block(chunk: &MutableChunkBlockBuffer, pos: BlockPos) -> bool {
-    let Some(block_id) = block_at_world(chunk, pos) else {
+fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    let Some(block_id) = world.block_at_world(pos) else {
         return false;
     };
     matches!(
@@ -678,6 +944,10 @@ fn can_replace_tree_block(chunk: &MutableChunkBlockBuffer, pos: BlockPos) -> boo
     )
 }
 
+fn block_to_chunk_coord(block: i32) -> i32 {
+    block.div_euclid(CHUNK_WIDTH)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -686,7 +956,11 @@ mod tests {
     use crate::prng::WorldgenRandom;
 
     fn flat_grass_chunk() -> MutableChunkBlockBuffer {
-        let mut chunk = MutableChunkBlockBuffer::new(0, 0, 0, 32);
+        flat_grass_chunk_at(0, 0)
+    }
+
+    fn flat_grass_chunk_at(chunk_x: i32, chunk_z: i32) -> MutableChunkBlockBuffer {
+        let mut chunk = MutableChunkBlockBuffer::new(chunk_x, chunk_z, 0, 32);
         for x in 0..CHUNK_WIDTH {
             for z in 0..CHUNK_WIDTH {
                 chunk.set_block_at_y(x, 0, z, STONE);
@@ -769,6 +1043,55 @@ mod tests {
                 .iter()
                 .any(|block_id| *block_id == BIRCH_LEAVES)
         );
+    }
+
+    #[test]
+    fn feature_region_allows_neighbor_tree_to_spill_into_center_chunk() {
+        let mut region = FeatureRegion::with_radii(
+            -1,
+            0,
+            1,
+            1,
+            vec![flat_grass_chunk_at(-1, 0), flat_grass_chunk_at(0, 0)],
+        );
+        let mut random = WorldgenRandom::new(1);
+        let feature = ConfiguredFeature::basic_tree(BasicTreeConfiguration::oak());
+
+        assert!(feature.place(&mut region, &mut random, BlockPos::new(-1, 0, 8)));
+
+        let center = region.chunk(0, 0).expect("center chunk exists");
+        assert!(center.blocks.iter().any(|block_id| *block_id == OAK_LEAVES));
+        assert_eq!(region.metrics().blocked_block_writes, 0);
+    }
+
+    #[test]
+    fn feature_region_blocks_writes_beyond_cutoff() {
+        let mut region = FeatureRegion::with_radii(
+            0,
+            0,
+            2,
+            1,
+            vec![flat_grass_chunk_at(0, 0), flat_grass_chunk_at(2, 0)],
+        );
+
+        assert!(!region.set_block_world(BlockPos::new(32, 3, 0), POPPY));
+        assert_eq!(
+            region.metrics(),
+            FeatureRegionMetrics {
+                block_write_attempts: 1,
+                blocked_block_writes: 1,
+                ..FeatureRegionMetrics::default()
+            }
+        );
+        assert_eq!(region.chunk(2, 0).unwrap().get_block_at_y(0, 3, 0), AIR);
+    }
+
+    #[test]
+    #[should_panic(expected = "outside dependency window")]
+    fn feature_region_rejects_reads_outside_dependency_window() {
+        let mut region = FeatureRegion::with_radii(0, 0, 1, 1, vec![flat_grass_chunk()]);
+
+        let _ = region.block_at_world(BlockPos::new(32, 3, 0));
     }
 
     #[test]

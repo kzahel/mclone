@@ -26,7 +26,7 @@ Landed:
 - section-keyed textured render meshes, keyed GPU upload ownership, and repeatable native headless camera scenarios
 - Java-shaped configured/decorated feature execution, starter oak trees, grass/flower patches, and default `Features` chunk snapshots
 - biome-keyed native feature profiles with visible oak/birch/spruce tree families, ferns, dead bushes, and `COUNT_EXTRA` placement
-- full decorated chunk parity gauntlet for seed `12345`, chunk `0,0`, plus carvers wired into the native `Features` generation path
+- full decorated chunk parity gauntlet for seed `12345`, chunk `0,0`, carvers wired into the native `Features` generation path, and first region-backed 3x3 feature spillover pass
 
 Still missing compared with the TypeScript engine:
 
@@ -83,7 +83,7 @@ Expect about 20 implementation tacticals after this parent roadmap before native
 | [`014-streaming-renderer-and-camera.md`](014-streaming-renderer-and-camera.md) | renderer runtime | **done** - section-keyed textured render meshes, keyed GPU upload ownership, full-set render invalidation, and debug camera/headless scenario runner; true frustum/dirty-only diffs deferred | multi-step native headless captures and browser/native window smoke |
 | [`015-decoration-framework-foundation.md`](015-decoration-framework-foundation.md) | worldgen parity | **done** - configured/decorated feature framework, starter trees/plants, feature snapshots, and visible decorated terrain capture; full water/lake parity deferred behind liquid rendering | oracle/unit coverage plus visible decorated terrain capture |
 | [`016-biome-feature-breadth.md`](016-biome-feature-breadth.md) | worldgen parity | **done** - chunk-center biome feature profiles, oak/birch/spruce visible families, fern/dead-bush patches, and `COUNT_EXTRA`; exact trees/ores/water fixtures deferred | selected fixture matrix and visual probes |
-| [`017-full-decorated-chunk-parity-gauntlet.md`](017-full-decorated-chunk-parity-gauntlet.md) | worldgen parity | **active** - exact full chunk diff target, carvers in published features path, and feature-region/dependency scheduling plan | ignored exact test plus normal mismatch-bucket diagnostic |
+| [`017-full-decorated-chunk-parity-gauntlet.md`](017-full-decorated-chunk-parity-gauntlet.md) | worldgen parity | **active** - exact full chunk diff target, carvers in published features path, first feature-region spillover path, and scheduler dependency reuse plan | ignored exact test plus normal mismatch-bucket diagnostic |
 | `018-structures-foundation.md` | worldgen parity | status-aware structure starts/references, first true structure, template/block-entity scaffolding | server-backed fixture diff for first structure slice |
 | `019-lighting-pipeline.md` | lighting | `DataLayer`, light sections, solver/service boundary, initial light facts, renderer consumption | light fixture tests and non-fullbright terrain capture |
 | `020-live-light-and-liquid-updates.md` | simulation/runtime | light deltas, block/liquid dirty updates, pending liquid ticks, water flow baseline | update/delta tests and runtime smoke |
@@ -95,7 +95,7 @@ Expect about 20 implementation tacticals after this parent roadmap before native
 
 The next implementation tactical should stay on [`017-full-decorated-chunk-parity-gauntlet.md`](017-full-decorated-chunk-parity-gauntlet.md).
 
-Do not start structures until the native pipeline has a real feature-region/dependency window and the full chunk mismatch report is driving concrete parity work. The immediate focus is reducing the top mismatch buckets for seed `12345`, chunk `0,0`.
+Do not start structures until the native scheduler owns the feature dependency window and the full chunk mismatch report is driving concrete parity work. The immediate focus is reducing the top mismatch buckets for seed `12345`, chunk `0,0`.
 
 ## Deferral Notes
 

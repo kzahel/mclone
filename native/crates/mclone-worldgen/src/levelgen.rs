@@ -3,7 +3,10 @@ use crate::block::{
     AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER, generated_block_state_id,
 };
 use crate::carver::{apply_overworld_air_carvers, apply_overworld_liquid_carvers};
-use crate::feature::apply_overworld_biome_decoration;
+use crate::feature::{
+    FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF, FeatureRegion,
+    apply_overworld_biome_decoration_to_region,
+};
 use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
 use crate::prng::WorldgenRandom;
 use crate::surface::apply_overworld_surface;
@@ -1185,15 +1188,33 @@ pub fn generate_overworld_surface_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -
 
 pub fn generate_overworld_features_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
     let biome_source = OverworldBiomeSource::new(seed, false, false);
-    let mut chunk = generate_overworld_surface_buffer_with_biome_source(
-        seed,
-        chunk_x,
-        chunk_z,
-        biome_source.clone(),
-    );
-    apply_overworld_air_carvers(seed, &biome_source, &mut chunk);
-    apply_overworld_liquid_carvers(seed, &biome_source, &mut chunk);
-    apply_overworld_biome_decoration(seed, &biome_source, &mut chunk);
+    let dependency_radius = FEATURES_CHUNK_DEPENDENCY_RADIUS + FEATURES_WRITE_RADIUS_CUTOFF;
+    let mut chunks = Vec::new();
+    for z in chunk_z - dependency_radius..=chunk_z + dependency_radius {
+        for x in chunk_x - dependency_radius..=chunk_x + dependency_radius {
+            chunks.push(generate_overworld_liquid_carved_buffer_with_biome_source(
+                seed,
+                x,
+                z,
+                biome_source.clone(),
+            ));
+        }
+    }
+    let mut region = FeatureRegion::new(chunk_x, chunk_z, chunks);
+
+    for feature_z in chunk_z - FEATURES_WRITE_RADIUS_CUTOFF..=chunk_z + FEATURES_WRITE_RADIUS_CUTOFF
+    {
+        for feature_x in
+            chunk_x - FEATURES_WRITE_RADIUS_CUTOFF..=chunk_x + FEATURES_WRITE_RADIUS_CUTOFF
+        {
+            region.set_center(feature_x, feature_z);
+            apply_overworld_biome_decoration_to_region(seed, &biome_source, &mut region);
+        }
+    }
+
+    let chunk = region.into_chunk(chunk_x, chunk_z).unwrap_or_else(|| {
+        panic!("feature region did not retain target chunk ({chunk_x}, {chunk_z})")
+    });
     GeneratedChunk::from_mutable_buffer(chunk)
 }
 
@@ -1220,6 +1241,23 @@ fn generate_overworld_surface_buffer_with_biome_source(
         NoiseBasedChunkGenerator::new(biome_source, seed, NoiseGeneratorSettings::overworld());
     let mut chunk = generator.fill_from_noise(chunk_x, chunk_z);
     generator.build_surface_and_bedrock(&mut chunk);
+    chunk
+}
+
+fn generate_overworld_liquid_carved_buffer_with_biome_source(
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+    biome_source: OverworldBiomeSource,
+) -> MutableChunkBlockBuffer {
+    let mut chunk = generate_overworld_surface_buffer_with_biome_source(
+        seed,
+        chunk_x,
+        chunk_z,
+        biome_source.clone(),
+    );
+    apply_overworld_air_carvers(seed, &biome_source, &mut chunk);
+    apply_overworld_liquid_carvers(seed, &biome_source, &mut chunk);
     chunk
 }
 
