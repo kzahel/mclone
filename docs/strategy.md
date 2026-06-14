@@ -1,16 +1,20 @@
 # Translation strategy
 
-Two-phase approach. Optimize for "it works at home" now; worry about distribution later only if we want to.
+Current approach: native-first Rust direct translation for parity-critical engine logic, with web/WASM kept alive as an early compatibility gate. The older TypeScript implementation is now legacy/reference prior art, not the main engine direction.
+
+The durable native roadmap lives in [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). This document owns translation/oracle policy and the legal distinction between private direct translation and any future clean-room release.
 
 For runtime boundaries that are intentionally not a 1:1 translation of Minecraft's host architecture, see [`architecture.md`](./architecture.md).
 
-## Phase 1 — direct translation (now)
+## Phase 1 — native direct translation (now)
 
 - **Goal:** working terrain gen + voxel engine running on the LAN for personal use (my daughter's laptop).
-- **Approach:** line-by-line translate the relevant parts of the 1.17.1 decomp into **TypeScript**. AI translation from Java → TS is the smoothest path (closer syntax, GC memory model, no borrow-checker fights); same-language-as-host removes WASM boundary friction during the messy stitch-it-together period. Java MC itself is a GC'd JVM language running on consumer hardware — we're not at a structural perf disadvantage. If a specific module benchmarks badly later, we port *that one* to WASM-from-C (not Rust). See `docs/tactical/00-worldgen-ts-port.md`.
-- **Tooling:** AI agents (Claude / Codex / etc.) with the decomp in context can do the bulk of the translation. We review each layer, fix TS-specific issues (64-bit int handling via hi/lo `Uint32` pairs — Java's `long` doesn't have a native TS equivalent; `Math.imul` for 32-bit mul; `| 0` / `>>> 0` coercion to match Java `int` / unsigned semantics; exact `Math.floor` vs. truncation-toward-zero distinctions), stitch modules together.
+- **Approach:** line-by-line translate the relevant parts of the 1.17.1 decomp into **Rust** crates under [`../native/`](../native/). Native desktop is the main development loop; the web target stays compiling/smoke-tested early so WASM/browser constraints remain visible.
+- **Tooling:** AI agents (Claude / Codex / etc.) with the decomp in context can do the bulk of the translation. We review each layer, preserve Java primitive semantics explicitly (`int` wrapping, `long` arithmetic, float/double behavior, truncation vs floor, JavaRandom draw counts), and stitch modules together behind oracle tests.
 - **Legal status:** this code is a derivative work of Mojang's source. **Do not distribute.** `~/code/mclone` is a private GitHub repo; it stays private for this phase.
 - **Why direct-first:** a literal translation is the shortest path to something that actually produces correct Minecraft-shaped terrain. Clean-room-first means debugging two unknowns at once ("is my reimplementation wrong, or does it just legitimately differ from MC?"). Direct-first gives us a known-working baseline and lets us oracle-test cleanly.
+
+The existing TypeScript translation remains useful as a working reference and oracle scaffold. New parity-critical engine work should prefer the Rust/native track unless explicitly called out as legacy TypeScript maintenance.
 
 ## Phase 2 — clean-room (only if we decide to distribute)
 
@@ -36,10 +40,10 @@ Ground truth for tests is **real Minecraft**, not our Phase-1 translation.
 
 | Component | Approach |
 |---|---|
-| 1.17.1 worldgen (PRNG, noise, biome source, terrain, carvers, surface, features, structure positions) | Direct translation from Java → TypeScript in Phase 1 |
-| 1.18+ density functions (if we go that route later) | Direct translation from 1.18 decomp (Java → TS) in Phase 1 |
+| 1.17.1 worldgen (PRNG, noise, biome source, terrain, carvers, surface, features, structure positions) | Direct translation from Java → Rust in Phase 1 |
+| 1.18+ density functions (if we go that route later) | Direct translation from 1.18 decomp into Rust after the target is explicitly changed |
 | Textures, block models, structure NBT | Use Minecraft's for dev (`docs/assets-plan.md`); replace for Phase 2 release |
-| Renderer, physics, UI, networking, chunk storage | Original work — no source to translate |
+| Renderer, physics, UI, networking, chunk storage | Original Rust/native work, shaped by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md) |
 
 ## AI agents and copyright
 
@@ -47,13 +51,15 @@ Running decomp through an AI to produce translated code still yields a derivativ
 
 ## Action items
 
-Ordered dependency chain for Phase 1 terrain gen:
+Ordered dependency chain for the native worldgen track:
 
-- [x] Pick translation target (TypeScript — see `docs/tactical/00-worldgen-ts-port.md`) and stand up project (`pnpm` + Vitest + strict TS)
-- [ ] Oracle harness — unit tier (Java dumper importing MC classes) live for PRNG; integration tier (server jar with pinned seed → `region/*.mca` → JSON) still TODO
-- [ ] Translate PRNG (`SimpleRandomSource` in 1.17.1 / `LegacyRandomSource` in later mappings, plus `WorldgenRandom`) — smallest, cleanest unit, easy to oracle-test against Java's output for a sequence of `nextInt` calls
-- [ ] Translate noise (`PerlinNoise`, `ImprovedNoise`) — validate against MC's Perlin output at specific sample points
-- [ ] Translate `NoiseSampler` + `NoiseBasedChunkGenerator` — produces block-level terrain
-- [ ] Translate carvers (`CaveWorldCarver`, `CanyonWorldCarver`)
-- [ ] Translate biome source (`OverworldBiomeSource`, `BiomeManager`, climate layers) for biome IDs
-- [ ] Surface rules + feature placement
+- [x] Stand up Rust workspace and crate boundaries under [`../native/`](../native/)
+- [x] Reuse existing oracle fixtures and Java reference tree as correctness inputs
+- [x] Translate PRNG and JavaRandom-compatible worldgen seed helpers
+- [x] Translate noise primitives, `NoiseSampler`, and terrain density fill
+- [x] Translate `OverworldBiomeSource` enough for terrain/fixture parity
+- [x] Translate surface and bedrock stage
+- [x] Translate classic overworld AIR and LIQUID carvers
+- [ ] Translate decorator composition and feature placement core
+- [ ] Translate first block-mutating feature family, likely ores/underground features
+- [ ] Reach native full decorated chunk parity against committed oracle fixtures

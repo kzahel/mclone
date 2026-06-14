@@ -1,6 +1,8 @@
 # mclone native workspace
 
-This workspace is the clean Rust track for a native-first engine with a web target. It lives inside the existing repository so it can reuse the project oracle fixtures, reference notes, asset extraction scripts, and the TypeScript engine as prior art.
+This workspace is the clean Rust track for the native-first engine with a web target kept alive from the beginning. It lives inside the existing repository so it can reuse the project oracle fixtures, reference notes, asset extraction scripts, and the TypeScript engine as prior art.
+
+The durable direction is documented in [`../docs/native-rewrite-roadmap.md`](../docs/native-rewrite-roadmap.md). The short version: native desktop is the primary development target, web/WASM is an early compatibility gate, and the TypeScript implementation is now legacy/reference rather than the main engine direction.
 
 The Rust workspace is quarantined from the TypeScript implementation:
 

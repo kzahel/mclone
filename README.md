@@ -1,25 +1,26 @@
 # mclone
 
-Web-based Minecraft-inspired voxel sandbox. Private project — primary target is home/LAN use for my daughter to play with.
+Minecraft-inspired voxel sandbox. Private project — primary target is home/LAN use for my daughter to play with.
 
-See [`docs/strategy.md`](docs/strategy.md) for the two-phase plan (direct translation now, optional clean-room only if we ever want to distribute), [`docs/architecture.md`](docs/architecture.md) for the runtime/host split, [`docs/worker-ownership.md`](docs/worker-ownership.md) for the worker/cache ownership model that keeps UI/GPU and host ticks responsive, [`docs/runtime-data-model.md`](docs/runtime-data-model.md) for shared chunk/block-state data contracts, [`docs/protocol.md`](docs/protocol.md) for the host/client message model, [`docs/loading-persistence.md`](docs/loading-persistence.md) for world loading and save policy, [`docs/authoritative-host-scheduling.md`](docs/authoritative-host-scheduling.md) for keeping player/session authority responsive while chunk jobs run, [`docs/gui.md`](docs/gui.md) for the WebGPU-only vanilla-shaped GUI architecture, [`docs/player-movement-netcode.md`](docs/player-movement-netcode.md) for high-rate player movement, prediction, reconciliation, and interpolation, [`docs/worldgen-deterministic-order.md`](docs/worldgen-deterministic-order.md) for vanilla status order, decoration finality, lighting gates, and chunk publication gates, [`docs/worldgen-status.md`](docs/worldgen-status.md) for the living worldgen status/prioritization view, [`docs/carver-status.md`](docs/carver-status.md) for the narrower carver-parity/oracle tracker, [`docs/structures.md`](docs/structures.md) for vanilla overworld structure generation architecture, [`docs/liquids.md`](docs/liquids.md) for liquid simulation architecture, [`docs/creatures.md`](docs/creatures.md) for overworld creature spawning architecture, and [`docs/assets-plan.md`](docs/assets-plan.md) for asset extraction. Implementation work is tracked in numbered tactical docs under [`docs/tactical/`](docs/tactical/). Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
+The current direction is a native-first Rust engine with the web target kept alive from the beginning. See [`docs/native-rewrite-roadmap.md`](docs/native-rewrite-roadmap.md) for the durable native architecture and sequencing plan. The existing TypeScript implementation is now legacy/reference prior art: useful for oracle scaffolding, fixtures, behavior comparison, and browser experiments, but not the primary engine direction.
+
+See [`docs/strategy.md`](docs/strategy.md) for translation/oracle policy, [`docs/architecture.md`](docs/architecture.md) for the existing runtime/host split, [`docs/runtime-data-model.md`](docs/runtime-data-model.md) for shared chunk/block-state data contracts, [`docs/protocol.md`](docs/protocol.md) for the host/client message model, [`docs/loading-persistence.md`](docs/loading-persistence.md) for world loading and save policy, [`docs/worldgen-deterministic-order.md`](docs/worldgen-deterministic-order.md) for vanilla status order, decoration finality, lighting gates, and chunk publication gates, [`docs/worldgen-status.md`](docs/worldgen-status.md) for the TypeScript worldgen status/prioritization view, [`docs/carver-status.md`](docs/carver-status.md) for the narrower carver-parity/oracle tracker, [`docs/structures.md`](docs/structures.md) for vanilla overworld structure generation architecture, [`docs/liquids.md`](docs/liquids.md) for liquid simulation architecture, [`docs/creatures.md`](docs/creatures.md) for overworld creature spawning architecture, and [`docs/assets-plan.md`](docs/assets-plan.md) for asset extraction. Implementation work is tracked in numbered tactical docs under [`docs/tactical/`](docs/tactical/). Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
 
 Runtime/host arc status: `R0` through `R8` are landed: browser singleplayer, dedicated Node hosting, remote browser clients, protocol hardening, and the first authoritative player/control loop all use the shared host/client boundary.
 
 ## Stack
 
-- **Language:** TypeScript end-to-end — host, workers, worldgen, meshing.
-- **Renderer:** WebGPU. Greedy-meshed chunks packed into instanced buffers.
-- **Worldgen:** TS translation of MC 1.17.1's pipeline; bit-exact seed parity is the correctness bar. See `docs/tactical/`.
-- **Chunk storage:** engine-native chunk records behind adapters; IndexedDB is the browser baseline, with OPFS still open for large binary blobs.
-- **Host:** Vite + workers. Main thread handles input/UI/GPU submission; workers own the authoritative local host and client meshing.
-- **Perf escape hatch:** any measured-hot module can move to WASM-from-C. Default stack is pure TS; no WASM unless measurement says so.
-
-[`docs/native-target.md`](docs/native-target.md) is an exploratory architecture note only. It does not change the current TS-first roadmap or imply committed native-host work.
+- **Primary language:** Rust, under [`native/`](native/).
+- **Primary target:** native desktop first, with `mclone_native_client` as the main engine loop.
+- **Web target:** WASM/web kept compiling and smoke-tested early through `mclone_web_client`, but not developed in lockstep with native.
+- **Renderer:** `wgpu`, native first, web-compatible capability checks at renderer milestones.
+- **Worldgen:** direct Rust port of MC Java 1.17.1's pipeline; bit-exact seed parity is the correctness bar.
+- **Protocol/runtime:** `mclone_protocol`, `mclone_net`, `mclone_server`, and `mclone_client` are first-class from the start so singleplayer uses the same client/server boundary as multiplayer.
+- **Legacy implementation:** TypeScript remains available as a working/reference implementation and browser experiment, not the main path for new engine systems.
 
 ## Worldgen strategy
 
-**Directly translate** 1.17.1's full worldgen pipeline from the decomp: PRNG → noise → biome source → `NoiseSampler` → `NoiseBasedChunkGenerator` → carvers (`CaveWorldCarver`, `CanyonWorldCarver`) → surface rules → features → structures. Oracle-test each layer against real MC output (see strategy doc). Preserve the vanilla status scheduling and finality gates in [`docs/worldgen-deterministic-order.md`](docs/worldgen-deterministic-order.md). 1.17 specifically because it's pre-Caves-and-Cliffs — no density functions or splines to port.
+**Directly translate** 1.17.1's full worldgen pipeline from the decomp into Rust: PRNG → noise → biome source → `NoiseSampler` → `NoiseBasedChunkGenerator` → carvers (`CaveWorldCarver`, `CanyonWorldCarver`) → surface rules → features → structures. Oracle-test each layer against real MC output (see strategy doc). Preserve the vanilla status scheduling and finality gates in [`docs/worldgen-deterministic-order.md`](docs/worldgen-deterministic-order.md). 1.17 specifically because it's pre-Caves-and-Cliffs — no density functions or splines to port.
 
 Pipeline per chunk:
 
@@ -30,7 +31,7 @@ Pipeline per chunk:
 5. Ore veins + features (translated `OreFeature` / `TreeFeature`)
 6. Structures (status-aware starts, references, per-chunk placement, and block templates from extracted NBT; see [`docs/structures.md`](docs/structures.md))
 
-Runtime boundaries should stay chunk/section-sized: pass chunk or section facts across workers/transports, never per-voxel calls. The same rule applies to any future TS-module-migrated-to-WASM.
+Runtime boundaries should stay chunk/section-sized: pass chunk or section facts across crates, workers, transports, and WASM/web adapters, never per-voxel calls.
 
 ## References (repo-local, under `reference/` — gitignored)
 
@@ -131,7 +132,7 @@ Neither Mojang, Yarn, nor Parchment can recover true **local variable names insi
 
 Worldgen questions are settled by the direct-translation strategy — we mirror what MC does, then oracle-test against it. Open questions for parts we're writing from scratch:
 
-- **Meshing:** greedy in TS first, emit indexed buffer directly. Investigate binary greedy meshing (bitwise tricks over 64-wide `Uint32Array` columns). Move to C→WASM only if measured.
-- **Lighting:** flood-fill on chunk changes. Two passes (block + sky). Possibly deferred to GPU compute shader.
-- **Chunk compression:** raw palette-encoded blocks → LZ4 or zstd before IndexedDB write? Trade-off between storage size and seek latency.
-- **Worker topology:** one worldgen worker per core? One shared, queued? Ownership of chunk memory across transfers.
+- **Meshing:** native Rust first, emit renderer-ready indexed buffers through `mclone_mesh`; keep payloads plain enough for WASM/web transfer.
+- **Lighting:** vanilla-shaped sky/block solver in `mclone_light`; evaluate CPU threading first, GPU compute only for measured follow-up work.
+- **Chunk compression:** raw palette-encoded blocks to LZ4/zstd or region-style storage behind engine-native adapters; web storage remains an adapter constraint, not the core format.
+- **Threading topology:** native worker pools first, but design scheduler/memory ownership so web workers plus `SharedArrayBuffer` can support the same chunk/status model.

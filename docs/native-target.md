@@ -1,8 +1,8 @@
 # Native desktop target
 
-A future-looking note on preserving a possible native host/renderer path for `mclone`.
+Historical note on preserving a native host/renderer path for `mclone`.
 
-This does not change the current roadmap. The browser WebGPU build remains the default and primary target, and the committed implementation stack remains TypeScript-first. This document exists so today's architectural decisions keep a native option open if we later have a concrete reason to pursue it.
+This document has been superseded by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). The committed direction is now native-first Rust with the web target kept alive early. The TypeScript implementation remains legacy/reference prior art, not the primary engine direction.
 
 For a concrete Deno/WebGPU validation path, see [`deno-wgpu-native-spike.md`](./deno-wgpu-native-spike.md).
 
