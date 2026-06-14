@@ -2399,7 +2399,7 @@ fn place_ore<W: FeatureWorld>(
         for z in min_z..=min_z + width_xz {
             if min_y
                 <= world
-                    .world_surface_height_at(x, z)
+                    .height_at(HeightmapType::OceanFloorWg, x, z)
                     .unwrap_or(world.min_y() - 1)
             {
                 return do_place_ore(
@@ -2833,6 +2833,66 @@ mod tests {
             .count()
     }
 
+    #[derive(Default)]
+    struct OreHeightmapProbeWorld {
+        height_queries: Vec<HeightmapType>,
+        world_surface_queries: usize,
+        writes: usize,
+    }
+
+    impl FeatureWorld for OreHeightmapProbeWorld {
+        fn center_chunk_x(&self) -> i32 {
+            0
+        }
+
+        fn center_chunk_z(&self) -> i32 {
+            0
+        }
+
+        fn min_y(&self) -> i32 {
+            0
+        }
+
+        fn height(&self) -> i32 {
+            64
+        }
+
+        fn non_air_block_count(&self) -> usize {
+            0
+        }
+
+        fn block_at_world(&mut self, pos: BlockPos) -> Option<RawBlockId> {
+            (0..64).contains(&pos.y).then_some(STONE)
+        }
+
+        fn height_at(
+            &mut self,
+            heightmap: HeightmapType,
+            _world_x: i32,
+            _world_z: i32,
+        ) -> Option<i32> {
+            self.height_queries.push(heightmap);
+            match heightmap {
+                HeightmapType::OceanFloorWg => Some(64),
+                _ => Some(0),
+            }
+        }
+
+        fn world_surface_height_at(&mut self, _world_x: i32, _world_z: i32) -> Option<i32> {
+            self.world_surface_queries += 1;
+            Some(0)
+        }
+
+        fn set_block_world(&mut self, pos: BlockPos, _block_id: RawBlockId) -> bool {
+            if (0..64).contains(&pos.y) {
+                self.writes += 1;
+                true
+            } else {
+                false
+            }
+        }
+    }
+
     #[test]
     fn simple_block_feature_places_on_grass_surface() {
         let mut chunk = flat_grass_chunk();
@@ -3038,6 +3098,18 @@ mod tests {
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 32, 8)));
         assert!(count_blocks(&chunk, DIORITE) > 0);
         assert!(count_blocks(&chunk, STONE) < CHUNK_WIDTH as usize * CHUNK_WIDTH as usize * 64);
+    }
+
+    #[test]
+    fn ore_feature_uses_ocean_floor_wg_height_gate() {
+        let mut world = OreHeightmapProbeWorld::default();
+        let mut random = WorldgenRandom::new(12_345);
+        let feature = ConfiguredFeature::ore(OreConfiguration::natural_stone(DIORITE, 33));
+
+        assert!(feature.place(&mut world, &mut random, BlockPos::new(8, 32, 8)));
+        assert!(world.writes > 0);
+        assert_eq!(world.world_surface_queries, 0);
+        assert_eq!(world.height_queries, vec![HeightmapType::OceanFloorWg]);
     }
 
     #[test]

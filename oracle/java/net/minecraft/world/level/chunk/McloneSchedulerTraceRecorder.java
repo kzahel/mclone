@@ -41,14 +41,20 @@ public final class McloneSchedulerTraceRecorder {
    private static final List<ProbeBlock> PROBE_BLOCKS = parseProbeBlocks(System.getProperty("mclone.schedulerTrace.probeBlocks", ""));
    private static final boolean PROBE_TARGET_TREE_BLOCKS = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeTargetTreeBlocks", "false"));
    private static final boolean PROBE_TREE_CANDIDATES = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeTreeCandidates", "false"));
+   private static final boolean PROBE_ORE_PLACEMENTS = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeOrePlacements", "false"));
    private static final int TREE_PROBE_CENTER_X = parseIntProperty("mclone.schedulerTrace.treeProbeCenterX", Integer.MIN_VALUE);
    private static final int TREE_PROBE_CENTER_Z = parseIntProperty("mclone.schedulerTrace.treeProbeCenterZ", Integer.MIN_VALUE);
    private static final int TREE_PROBE_STEP_INDEX = parseIntProperty("mclone.schedulerTrace.treeProbeStepIndex", -1);
    private static final int TREE_PROBE_FEATURE_INDEX = parseIntProperty("mclone.schedulerTrace.treeProbeFeatureIndex", -1);
+   private static final int ORE_PROBE_CENTER_X = parseIntProperty("mclone.schedulerTrace.oreProbeCenterX", Integer.MIN_VALUE);
+   private static final int ORE_PROBE_CENTER_Z = parseIntProperty("mclone.schedulerTrace.oreProbeCenterZ", Integer.MIN_VALUE);
+   private static final int ORE_PROBE_STEP_INDEX = parseIntProperty("mclone.schedulerTrace.oreProbeStepIndex", -1);
+   private static final int ORE_PROBE_FEATURE_INDEX = parseIntProperty("mclone.schedulerTrace.oreProbeFeatureIndex", -1);
    private static final List<Map<String, Object>> EVENTS = new ArrayList<>();
    private static final Set<String> TARGET_STOP_COMPLETIONS = new LinkedHashSet<>();
    private static final ThreadLocal<FeatureProbeContext> CURRENT_FEATURE = new ThreadLocal<>();
    private static final ThreadLocal<TreeCandidateProbe> CURRENT_TREE_CANDIDATE = new ThreadLocal<>();
+   private static final ThreadLocal<OrePlacementProbe> CURRENT_ORE_PLACEMENT = new ThreadLocal<>();
    private static long sequence;
    private static boolean written;
 
@@ -85,7 +91,7 @@ public final class McloneSchedulerTraceRecorder {
    }
 
    static boolean hasFeatureProbes() {
-      return hasProbeBlocks() || PROBE_TARGET_TREE_BLOCKS || PROBE_TREE_CANDIDATES;
+      return hasProbeBlocks() || PROBE_TARGET_TREE_BLOCKS || PROBE_TREE_CANDIDATES || PROBE_ORE_PLACEMENTS;
    }
 
    static void enterFeatureContext(
@@ -95,7 +101,7 @@ public final class McloneSchedulerTraceRecorder {
       String configuredFeature,
       String featureType
    ) {
-      if (!ENABLED || written || !PROBE_TREE_CANDIDATES) {
+      if (!ENABLED || written || (!PROBE_TREE_CANDIDATES && !PROBE_ORE_PLACEMENTS)) {
          return;
       }
 
@@ -268,6 +274,143 @@ public final class McloneSchedulerTraceRecorder {
       probe.event.put("foliageBlocks", foliageBlocks);
       probe.event.put("decoratorBlocks", decoratorBlocks);
       probe.event.put("finalTreeResult", finalResult);
+   }
+
+   public static boolean beginOrePlacement(
+      String oreFeatureType,
+      Random random,
+      BlockPos origin,
+      int oreSize,
+      float discardChanceOnAirExposure,
+      List<String> targetStates
+   ) {
+      if (!ENABLED || written || !PROBE_ORE_PLACEMENTS) {
+         return false;
+      }
+
+      FeatureProbeContext context = CURRENT_FEATURE.get();
+      if (context == null || !matchesOreProbeFilter(context)) {
+         return false;
+      }
+
+      Map<String, Object> event = new LinkedHashMap<>();
+      event.put("phase", "ore_placement");
+      event.put("status", "FEATURES");
+      event.put("statusName", "features");
+      event.put("chunkX", context.center.x);
+      event.put("chunkZ", context.center.z);
+      event.put("scenario", SCENARIO);
+      event.put("seed", SEED);
+      event.put("targetChunkX", TARGET_CHUNK_X);
+      event.put("targetChunkZ", TARGET_CHUNK_Z);
+      event.put("targetRadius", TARGET_RADIUS);
+      event.put("stepIndex", context.stepIndex);
+      event.put("featureIndex", context.featureIndex);
+      event.put("configuredFeature", context.configuredFeature);
+      event.put("featureType", context.featureType);
+      event.put("oreFeatureType", oreFeatureType);
+      event.put("originX", origin.getX());
+      event.put("originY", origin.getY());
+      event.put("originZ", origin.getZ());
+      event.put("targetLocalX", origin.getX() - (TARGET_CHUNK_X << 4));
+      event.put("targetLocalZ", origin.getZ() - (TARGET_CHUNK_Z << 4));
+      event.put("oreSize", oreSize);
+      event.put("discardChanceOnAirExposure", discardChanceOnAirExposure);
+      event.put("oreTargetStates", targetStates);
+      event.put("randomCountBefore", randomCount(random));
+      event.put("thread", Thread.currentThread().getName());
+      CURRENT_ORE_PLACEMENT.set(new OrePlacementProbe(event));
+      return true;
+   }
+
+   public static void recordOrePlacementGeometry(
+      float angleRadians,
+      double startX,
+      double endX,
+      double startZ,
+      double endZ,
+      double startY,
+      double endY,
+      int minX,
+      int minY,
+      int minZ,
+      int widthXz,
+      int heightY
+   ) {
+      OrePlacementProbe probe = CURRENT_ORE_PLACEMENT.get();
+      if (probe == null) {
+         return;
+      }
+
+      probe.event.put("angleRadians", angleRadians);
+      probe.event.put("startX", startX);
+      probe.event.put("endX", endX);
+      probe.event.put("startZ", startZ);
+      probe.event.put("endZ", endZ);
+      probe.event.put("startY", startY);
+      probe.event.put("endY", endY);
+      probe.event.put("minX", minX);
+      probe.event.put("minY", minY);
+      probe.event.put("minZ", minZ);
+      probe.event.put("widthXz", widthXz);
+      probe.event.put("heightY", heightY);
+   }
+
+   public static void recordOrePlacementWrite(BlockPos pos, BlockState before, BlockState after) {
+      OrePlacementProbe probe = CURRENT_ORE_PLACEMENT.get();
+      if (probe == null) {
+         return;
+      }
+
+      probe.writeCount++;
+      boolean targetChunk = isTargetChunkBlock(pos);
+      boolean probeBlock = matchesProbeBlock(pos);
+      if (!targetChunk && !probeBlock) {
+         return;
+      }
+
+      Map<String, Object> row = new LinkedHashMap<>();
+      row.put("x", pos.getX());
+      row.put("y", pos.getY());
+      row.put("z", pos.getZ());
+      row.put("localX", pos.getX() - (TARGET_CHUNK_X << 4));
+      row.put("localZ", pos.getZ() - (TARGET_CHUNK_Z << 4));
+      row.put("before", blockName(before));
+      row.put("after", blockName(after));
+      if (targetChunk) {
+         probe.targetChunkWrites.add(row);
+      }
+      if (probeBlock) {
+         probe.probeBlockWrites.add(row);
+      }
+   }
+
+   public static void finishOrePlacement(boolean placed, Random random, Throwable error) {
+      OrePlacementProbe probe = CURRENT_ORE_PLACEMENT.get();
+      if (probe == null) {
+         return;
+      }
+
+      CURRENT_ORE_PLACEMENT.remove();
+      probe.event.put("placed", placed);
+      probe.event.put("writeCount", probe.writeCount);
+      probe.event.put("targetChunkWriteCount", probe.targetChunkWrites.size());
+      probe.event.put("probeBlockWriteCount", probe.probeBlockWrites.size());
+      probe.event.put("targetChunkWrites", probe.targetChunkWrites);
+      if (!probe.probeBlockWrites.isEmpty()) {
+         probe.event.put("probeBlockWrites", probe.probeBlockWrites);
+      }
+      probe.event.put("randomCountAfter", randomCount(random));
+      if (error != null) {
+         probe.event.put("error", error.getClass().getName() + ": " + error.getMessage());
+      }
+
+      synchronized (McloneSchedulerTraceRecorder.class) {
+         if (!written) {
+            probe.event.put("sequence", ++sequence);
+            EVENTS.add(probe.event);
+         }
+      }
    }
 
    static synchronized void recordFeatureProbe(
@@ -532,7 +675,8 @@ public final class McloneSchedulerTraceRecorder {
          "ChunkStatus.generate:task_complete",
          "ChunkStatus.applyBiomeDecorationWithFeatureProbes:feature_probe",
          "ConfiguredFeature.place:tree_candidate",
-         "TreeFeature.doPlace:tree_candidate_details"
+         "TreeFeature.doPlace:tree_candidate_details",
+         "OreFeature.place:ore_placement"
       });
       root.put("featureCompletionOrder3x3", collectCompletionOrder("features"));
       root.put("fullCompletionOrder3x3", collectCompletionOrder("full"));
@@ -598,6 +742,41 @@ public final class McloneSchedulerTraceRecorder {
       return true;
    }
 
+   private static boolean matchesOreProbeFilter(FeatureProbeContext context) {
+      if (ORE_PROBE_CENTER_X != Integer.MIN_VALUE && context.center.x != ORE_PROBE_CENTER_X) {
+         return false;
+      }
+      if (ORE_PROBE_CENTER_Z != Integer.MIN_VALUE && context.center.z != ORE_PROBE_CENTER_Z) {
+         return false;
+      }
+      if (ORE_PROBE_STEP_INDEX >= 0 && context.stepIndex != ORE_PROBE_STEP_INDEX) {
+         return false;
+      }
+      if (ORE_PROBE_FEATURE_INDEX >= 0 && context.featureIndex != ORE_PROBE_FEATURE_INDEX) {
+         return false;
+      }
+      return true;
+   }
+
+   private static boolean isTargetChunkBlock(BlockPos pos) {
+      return (pos.getX() >> 4) == TARGET_CHUNK_X && (pos.getZ() >> 4) == TARGET_CHUNK_Z;
+   }
+
+   private static boolean matchesProbeBlock(BlockPos pos) {
+      if (PROBE_BLOCKS.isEmpty()) {
+         return false;
+      }
+
+      int localX = pos.getX() - (TARGET_CHUNK_X << 4);
+      int localZ = pos.getZ() - (TARGET_CHUNK_Z << 4);
+      for (ProbeBlock block : PROBE_BLOCKS) {
+         if (block.localX == localX && block.y == pos.getY() && block.localZ == localZ) {
+            return true;
+         }
+      }
+      return false;
+   }
+
    private static Object randomCount(Random random) {
       if (random instanceof WorldgenRandom) {
          return ((WorldgenRandom)random).getCount();
@@ -632,6 +811,17 @@ public final class McloneSchedulerTraceRecorder {
       final Map<String, Object> event;
 
       TreeCandidateProbe(Map<String, Object> event) {
+         this.event = event;
+      }
+   }
+
+   private static final class OrePlacementProbe {
+      final Map<String, Object> event;
+      final List<Map<String, Object>> targetChunkWrites = new ArrayList<>();
+      final List<Map<String, Object>> probeBlockWrites = new ArrayList<>();
+      int writeCount;
+
+      OrePlacementProbe(Map<String, Object> event) {
          this.event = event;
       }
    }
