@@ -936,6 +936,7 @@ fn lerp3(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::biome::OverworldBiomeSource;
     use crate::prng::WorldgenRandom;
     use serde::Deserialize;
     use std::collections::BTreeMap;
@@ -945,14 +946,6 @@ mod tests {
         -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0,
     ];
     const BEDROCK: u8 = 3;
-    const MOUNTAINS: NoiseBiome = NoiseBiome {
-        depth: 1.0_f32,
-        scale: 0.5_f32,
-    };
-    const TAIGA_MOUNTAINS: NoiseBiome = NoiseBiome {
-        depth: 0.30000001192092896_f32,
-        scale: 0.4000000059604645_f32,
-    };
 
     #[derive(Debug, Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -1092,21 +1085,6 @@ mod tests {
             let wrapped_x = x.rem_euclid(self.width as i32) as usize;
             let wrapped_z = z.rem_euclid(self.height as i32) as usize;
             self.biomes[wrapped_x * self.height + wrapped_z]
-        }
-    }
-
-    #[derive(Clone, Debug)]
-    struct ChunkZeroZeroTerrainBiomeSource;
-
-    impl NoiseBiomeSource for ChunkZeroZeroTerrainBiomeSource {
-        fn get_noise_biome(&self, x: i32, _y: i32, z: i32) -> NoiseBiome {
-            if ((x == -2 || x == -1) && (3..=6).contains(&z))
-                || ((x == 0 || x == 1) && (4..=6).contains(&z))
-            {
-                MOUNTAINS
-            } else {
-                TAIGA_MOUNTAINS
-            }
         }
     }
 
@@ -1324,7 +1302,11 @@ mod tests {
     fn fills_chunk_zero_zero_with_terrain_only_java_oracle() {
         let oracle = terrain_fixture();
         let generator = NoiseBasedChunkGenerator::new(
-            ChunkZeroZeroTerrainBiomeSource,
+            OverworldBiomeSource::new(
+                oracle.seed.parse::<i64>().expect("i64 fixture seed"),
+                false,
+                false,
+            ),
             oracle.seed.parse::<i64>().expect("i64 fixture seed"),
             NoiseGeneratorSettings::overworld(),
         );
