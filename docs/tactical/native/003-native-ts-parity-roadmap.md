@@ -57,7 +57,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 | Doc | Theme | Lands | Gate |
 |---|---|---|---|
-| `004-canonical-chunk-snapshot-protocol.md` | data/protocol | `BlockStateId`, packed section or section-ready snapshot facts, first chunk-interest and chunk-snapshot messages | unit tests over snapshot roundtrip and protocol data shape |
+| [`004-canonical-chunk-snapshot-protocol.md`](004-canonical-chunk-snapshot-protocol.md) | data/protocol | `BlockStateId`, packed section or section-ready snapshot facts, first chunk-interest and chunk-snapshot messages | unit tests over snapshot roundtrip and protocol data shape |
 | `005-local-integrated-client-server.md` | runtime spine | `IntegratedServer`, `ClientRuntime`, in-process transport, client chunk replica, native app renders from client facts | native headless chunk PNG comes from `ClientRuntime`, not direct worldgen |
 | `006-wasm-browser-build-smoke.md` | web compatibility | `mclone-web-client` compiles to WASM, boots in a browser shell, creates WebGPU or reports a stable fallback, and exercises a tiny protocol/client path | `cargo check --target wasm32-unknown-unknown` plus browser smoke where available |
 | `007-chunk-interest-status-scheduler.md` | server runtime | interest-driven chunk requests, holder/status slots, async/coalesced generation, publishable chunk events | tests for duplicate request coalescing and status ordering |
@@ -79,7 +79,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `004-canonical-chunk-snapshot-protocol.md`.
+The next implementation tactical should be [`004-canonical-chunk-snapshot-protocol.md`](004-canonical-chunk-snapshot-protocol.md).
 
 That slice should not build a local app cache. It should define the chunk facts and protocol messages that `005-local-integrated-client-server.md` will use immediately:
 

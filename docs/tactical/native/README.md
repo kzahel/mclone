@@ -10,3 +10,4 @@ Use zero-padded numeric prefixes for new native tactical docs: `000-topic.md`, `
 | [`001-one-generated-chunk-render.md`](001-one-generated-chunk-render.md) | completed | One generated chunk artifact, visible-face meshing, flat-color render path, and headless chunk capture. |
 | [`002-multichunk-camera.md`](002-multichunk-camera.md) | completed | Small multi-chunk terrain area, neighbor-aware culling, fixed headless overview, and minimal camera controls. |
 | [`003-native-ts-parity-roadmap.md`](003-native-ts-parity-roadmap.md) | active parent | Ordered native roadmap from current scaffolding to roughly the TypeScript engine capability horizon. |
+| [`004-canonical-chunk-snapshot-protocol.md`](004-canonical-chunk-snapshot-protocol.md) | proposed next | Canonical native chunk snapshot data and first logical chunk-interest / chunk-publication protocol messages. |
