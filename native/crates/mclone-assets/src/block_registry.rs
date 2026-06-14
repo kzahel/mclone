@@ -344,6 +344,8 @@ const EMPTY_PROPS: &[(&str, &str)] = &[];
 const SNOWY_FALSE: &[(&str, &str)] = &[("snowy", "false")];
 const AXIS_Y: &[(&str, &str)] = &[("axis", "y")];
 const LAYERS_1: &[(&str, &str)] = &[("layers", "1")];
+const HALF_LOWER: &[(&str, &str)] = &[("half", "lower")];
+const HALF_UPPER: &[(&str, &str)] = &[("half", "upper")];
 
 const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (0, "minecraft:air", EMPTY_PROPS),
@@ -414,6 +416,8 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (65, "minecraft:deepslate_diamond_ore", EMPTY_PROPS),
     (66, "minecraft:lapis_ore", EMPTY_PROPS),
     (67, "minecraft:deepslate_lapis_ore", EMPTY_PROPS),
+    (68, "minecraft:large_fern", HALF_LOWER),
+    (69, "minecraft:large_fern", HALF_UPPER),
 ];
 
 #[cfg(test)]
@@ -425,7 +429,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 68);
+        assert_eq!(registry.len(), 70);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -473,6 +477,14 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:deepslate_lapis_ore"),
             Some(BlockStateId(67))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:large_fern[half=lower]"),
+            Some(BlockStateId(68))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(69)).unwrap().canonical_key(),
+            "minecraft:large_fern[half=upper]"
         );
         assert_eq!(
             registry.by_id(BlockStateId(8)).unwrap().canonical_key(),

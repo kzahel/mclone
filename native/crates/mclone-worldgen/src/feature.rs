@@ -5,9 +5,9 @@ use crate::block::{
     AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE,
     DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
     DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
-    FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LAVA, MYCELIUM,
-    OAK_LEAVES, OAK_LOG, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SNOW,
-    SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER,
+    FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER,
+    LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY, RED_SAND, REDSTONE_ORE,
+    RawBlockId, SAND, SNOW, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{
@@ -400,6 +400,7 @@ pub struct RandomPatchConfiguration {
     pub zspread: i32,
     pub project: bool,
     pub can_replace: bool,
+    pub double_plant: bool,
     pub place_on: &'static [RawBlockId],
 }
 
@@ -413,6 +414,7 @@ impl RandomPatchConfiguration {
             zspread: 7,
             project: true,
             can_replace: false,
+            double_plant: false,
             place_on: &[GRASS_BLOCK],
         }
     }
@@ -1343,6 +1345,7 @@ fn grass_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
             zspread: 7,
             project: true,
             can_replace: false,
+            double_plant: false,
             place_on: &[GRASS_BLOCK, DIRT, PODZOL, MYCELIUM],
         },
         count,
@@ -1363,6 +1366,7 @@ fn dead_bush_patch(count: i32) -> PlacedFeature {
             zspread: 7,
             project: true,
             can_replace: false,
+            double_plant: false,
             place_on: &[SAND, RED_SAND, TERRACOTTA, DIRT, GRASS_BLOCK, PODZOL],
         },
         count,
@@ -1442,9 +1446,18 @@ fn place_random_patch<W: FeatureWorld>(
         if can_replace
             && matches_allowed(config.place_on, block_below)
             && can_survive_simple_plant(config.state, current, block_below)
-            && world.set_block_world(pos, config.state)
         {
-            placed += 1;
+            let did_place = if config.double_plant {
+                let lower = world.set_block_world(pos, LARGE_FERN_LOWER);
+                let upper =
+                    world.set_block_world(BlockPos::new(pos.x, pos.y + 1, pos.z), LARGE_FERN_UPPER);
+                lower && upper
+            } else {
+                world.set_block_world(pos, config.state)
+            };
+            if did_place {
+                placed += 1;
+            }
         }
     }
 
@@ -1967,7 +1980,16 @@ fn heightmap_is_opaque(heightmap: HeightmapType, block_id: RawBlockId) -> bool {
 fn material_blocks_motion(block_id: RawBlockId) -> bool {
     !matches!(
         block_id,
-        AIR | WATER | LAVA | SNOW | GRASS | FERN | DANDELION | POPPY | DEAD_BUSH
+        AIR | WATER
+            | LAVA
+            | SNOW
+            | GRASS
+            | FERN
+            | DANDELION
+            | POPPY
+            | DEAD_BUSH
+            | LARGE_FERN_LOWER
+            | LARGE_FERN_UPPER
     )
 }
 
@@ -1993,6 +2015,9 @@ fn can_survive_simple_plant(
             GRASS | FERN | DANDELION | POPPY => {
                 matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
             }
+            LARGE_FERN_LOWER | LARGE_FERN_UPPER => {
+                matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
+            }
             DEAD_BUSH => matches!(
                 block_below,
                 SAND | RED_SAND | TERRACOTTA | DIRT | GRASS_BLOCK | PODZOL
@@ -2002,7 +2027,10 @@ fn can_survive_simple_plant(
 }
 
 fn is_replaceable_plant(block_id: RawBlockId) -> bool {
-    matches!(block_id, GRASS | FERN | DANDELION | POPPY | DEAD_BUSH)
+    matches!(
+        block_id,
+        GRASS | FERN | DANDELION | POPPY | DEAD_BUSH | LARGE_FERN_LOWER | LARGE_FERN_UPPER
+    )
 }
 
 fn can_survive_tree_sapling<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
@@ -2025,6 +2053,8 @@ fn valid_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
             | DANDELION
             | POPPY
             | DEAD_BUSH
+            | LARGE_FERN_LOWER
+            | LARGE_FERN_UPPER
             | OAK_LEAVES
             | BIRCH_LEAVES
             | SPRUCE_LEAVES
@@ -2053,6 +2083,8 @@ fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool
             | DANDELION
             | POPPY
             | DEAD_BUSH
+            | LARGE_FERN_LOWER
+            | LARGE_FERN_UPPER
             | OAK_LEAVES
             | OAK_LOG
             | BIRCH_LEAVES
@@ -2176,12 +2208,34 @@ mod tests {
             zspread: 3,
             project: true,
             can_replace: false,
+            double_plant: false,
             place_on: &[GRASS_BLOCK],
         });
 
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 0, 8)));
         assert!(chunk.non_air_block_count() > before);
         assert!(chunk.blocks.iter().any(|block_id| *block_id == GRASS));
+    }
+
+    #[test]
+    fn random_patch_double_plant_writes_large_fern_halves() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(3);
+        let feature = ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: LARGE_FERN_LOWER,
+            tries: 1,
+            xspread: 0,
+            yspread: 0,
+            zspread: 0,
+            project: false,
+            can_replace: false,
+            double_plant: true,
+            place_on: &[],
+        });
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
+        assert_eq!(chunk.get_block_at_y(8, 3, 8), LARGE_FERN_LOWER);
+        assert_eq!(chunk.get_block_at_y(8, 4, 8), LARGE_FERN_UPPER);
     }
 
     #[test]
@@ -2198,6 +2252,7 @@ mod tests {
                 zspread: 1,
                 project: true,
                 can_replace: false,
+                double_plant: false,
                 place_on: &[GRASS_BLOCK],
             }),
             vec![ConfiguredDecorator::count(2), ConfiguredDecorator::square()],
