@@ -1,21 +1,15 @@
 #![forbid(unsafe_code)]
 
+mod bit_storage;
+mod chunk;
+
+pub use bit_storage::{BitStorage, local_palette_bits_for, palette_bits_for};
+pub use chunk::{
+    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkRevision,
+    ChunkSnapshot, ChunkStatus, PackedChunkSection, SECTION_HEIGHT, chunk_section_index,
+};
+
 pub const TARGET_MINECRAFT_VERSION: &str = "1.17.1";
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct BlockStateId(pub u32);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub struct ChunkPos {
-    pub x: i32,
-    pub z: i32,
-}
-
-impl ChunkPos {
-    pub const fn new(x: i32, z: i32) -> Self {
-        Self { x, z }
-    }
-}
 
 #[cfg(test)]
 mod tests {

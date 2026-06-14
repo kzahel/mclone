@@ -1,8 +1,11 @@
 use crate::biome::OverworldBiomeSource;
-use crate::block::{AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER};
+use crate::block::{
+    AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER, generated_block_state_id,
+};
 use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
 use crate::prng::WorldgenRandom;
 use crate::surface::apply_overworld_surface;
+use mclone_core::{BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 
 const OLD_CELL_COUNT_Y: i32 = 32;
 const BIOME_WEIGHT_RADIUS: i32 = 2;
@@ -763,6 +766,22 @@ impl GeneratedChunk {
             .iter()
             .filter(|block_id| **block_id != AIR)
             .count()
+    }
+
+    pub fn to_chunk_snapshot(&self, revision: ChunkRevision, status: ChunkStatus) -> ChunkSnapshot {
+        let block_state_ids = self
+            .blocks
+            .iter()
+            .map(|block_id| generated_block_state_id(*block_id))
+            .collect::<Vec<BlockStateId>>();
+        ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(self.chunk_x, self.chunk_z),
+            status,
+            revision,
+            self.min_y,
+            self.height,
+            &block_state_ids,
+        )
     }
 
     fn assert_local_position(&self, local_x: i32, local_y: i32, local_z: i32) {
@@ -1893,6 +1912,28 @@ mod tests {
                 );
             },
             "NoiseSampler island noise override is out of scope for the 1.17.1 overworld target",
+        );
+    }
+
+    #[test]
+    fn generated_chunk_converts_to_packed_snapshot() {
+        let mut blocks = vec![AIR; 32 * 16 * 16];
+        blocks[16 * 16 * 16] = STONE;
+        let chunk = GeneratedChunk::from_raw_parts(2, -3, 0, 32, blocks);
+
+        let snapshot = chunk.to_chunk_snapshot(
+            mclone_core::ChunkRevision(9),
+            mclone_core::ChunkStatus::Surface,
+        );
+
+        assert_eq!(snapshot.pos, mclone_core::ChunkPos::new(2, -3));
+        assert_eq!(snapshot.revision, mclone_core::ChunkRevision(9));
+        assert_eq!(snapshot.status, mclone_core::ChunkStatus::Surface);
+        assert_eq!(snapshot.sections.len(), 1);
+        assert_eq!(snapshot.sections[0].section_y, 1);
+        assert_eq!(
+            snapshot.sections[0].unpack_block_state_ids()[0],
+            mclone_core::BlockStateId(STONE as u32)
         );
     }
 

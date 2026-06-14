@@ -1,3 +1,5 @@
+use mclone_core::BlockStateId;
+
 pub type RawBlockId = u8;
 
 pub const AIR: RawBlockId = 0;
@@ -48,6 +50,10 @@ impl GeneratedBlockId {
         self.0
     }
 
+    pub const fn block_state_id(self) -> BlockStateId {
+        generated_block_state_id(self.0)
+    }
+
     pub const fn is_air(self) -> bool {
         self.0 == AIR
     }
@@ -59,6 +65,10 @@ impl GeneratedBlockId {
     pub const fn name(self) -> &'static str {
         block_name(self.0)
     }
+}
+
+pub const fn generated_block_state_id(block_id: RawBlockId) -> BlockStateId {
+    BlockStateId(block_id as u32)
 }
 
 pub const fn block_name(block_id: RawBlockId) -> &'static str {

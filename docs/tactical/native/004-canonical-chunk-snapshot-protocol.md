@@ -1,6 +1,6 @@
 # 004: Canonical Chunk Snapshot Protocol
 
-Status: proposed next implementation.
+Status: completed.
 
 Define the first real native chunk snapshot and protocol contract before wiring the local integrated client/server loop. The goal is to make the next slice render from authoritative client-replica facts without baking a temporary `mclone-native-client` cache or direct worldgen shortcut deeper into the app.
 
