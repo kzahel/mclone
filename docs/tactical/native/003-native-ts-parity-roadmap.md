@@ -16,10 +16,12 @@ Landed:
 - canonical packed chunk snapshots and first chunk-interest / chunk-snapshot protocol messages
 - local integrated server, client runtime replica, in-process transport, and native rendering from client snapshots
 - thin browser/WASM smoke that instantiates the Rust web shell, probes WebGPU, and runs a one-chunk protocol path
+- server-side chunk holders, status slots, duplicate request coalescing, and unload publication
 
 Still missing compared with the TypeScript engine:
 
-- no native chunk-status scheduler, persistence, remote transport, or dedicated-server loop
+- no native persistence, remote transport, or dedicated-server loop
+- chunk scheduling is still synchronous and surface-stage only
 - web/WASM has only a thin smoke gate, not a real browser runtime, browser transport, or render path
 - no vanilla asset/model/texture pipeline in the Rust renderer
 - no native lighting, liquids, movement, entities, or broad decorated-world parity
@@ -60,7 +62,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 | [`004-canonical-chunk-snapshot-protocol.md`](004-canonical-chunk-snapshot-protocol.md) | data/protocol | **done** - `BlockStateId`, packed section snapshot facts, first chunk-interest and chunk-snapshot messages | unit tests over snapshot roundtrip and protocol data shape |
 | [`005-local-integrated-client-server.md`](005-local-integrated-client-server.md) | runtime spine | **done** - `IntegratedServer`, `ClientRuntime`, in-process transport, client chunk replica, native app renders from client facts | native headless chunk PNG comes from `ClientRuntime`, not direct worldgen |
 | [`006-wasm-browser-build-smoke.md`](006-wasm-browser-build-smoke.md) | web compatibility | **done** - `mclone-web-client` compiles/builds to WASM, boots in a browser shell, probes WebGPU, and exercises a one-chunk protocol/client/server path | `cargo check --target wasm32-unknown-unknown` plus `pnpm native:web:smoke` where Chrome is available |
-| `007-chunk-interest-status-scheduler.md` | server runtime | interest-driven chunk requests, holder/status slots, async/coalesced generation, publishable chunk events | tests for duplicate request coalescing and status ordering |
+| [`007-chunk-interest-status-scheduler.md`](007-chunk-interest-status-scheduler.md) | server runtime | **done** - interest-driven chunk requests, holder/status slots, coalesced synchronous generation, publishable chunk events | tests for duplicate request coalescing and status ordering |
 | `008-native-persistence-and-residency.md` | storage/runtime | chunk residency, dirty/save queue shape, filesystem adapter scaffold, reload/resume hook | save/load roundtrip of generated chunk snapshots |
 | `009-dedicated-server-and-remote-transport.md` | networking | `mclone-dedicated-server` serves the same protocol over a simple native transport; native client can join remotely | local two-process smoke or loopback integration |
 | `010-browser-runtime-parity.md` | web runtime | browser client uses the same `ClientRuntime` and protocol messages against local or remote host adapters, with browser storage/transport constraints visible | browser runtime smoke from client replica facts |
@@ -79,16 +81,16 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `007-chunk-interest-status-scheduler.md`.
+The next implementation tactical should be `008-native-persistence-and-residency.md`.
 
-That slice should replace the immediate generate-on-interest shortcut with the first durable chunk scheduling shape:
+That slice should put a storage-shaped boundary under the scheduler before remote transport and broader streaming work:
 
-- interest-driven chunk requests produce holder/status slots instead of direct synchronous generation at the app boundary
-- duplicate interest requests coalesce without regenerating loaded chunks
-- server update publication remains protocol-shaped and client-runtime-owned
-- the implementation leaves room for later async workers/native threads/WASM workers without freezing a browser-hostile API
+- chunk holders should distinguish resident, dirty, and publishable snapshots
+- add a filesystem adapter scaffold without making it a final save format
+- save/load one generated chunk snapshot through the server runtime path
+- preserve the same protocol publication path after reload
 
-`007` should stay synchronous internally if that keeps the slice small, but the public shape should look like a scheduler instead of direct worldgen calls.
+`008` should avoid full Anvil parity for now. The point is to prevent scheduler state from becoming memory-only architecture before dedicated server and browser storage adapters arrive.
 
 ## Deferral Notes
 
