@@ -1408,11 +1408,53 @@ mod tests {
         delay: i32,
     }
 
-    fn carved_fixture() -> ChunkFixture {
+    fn plains_carved_fixture() -> ChunkFixture {
         serde_json::from_str(include_str!(
             "../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0-carved-only.json"
         ))
         .expect("valid carved fixture")
+    }
+
+    fn ocean_carved_fixture() -> ChunkFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-117--128-carved-only.json"
+        ))
+        .expect("valid ocean carved fixture")
+    }
+
+    fn desert_carved_fixture() -> ChunkFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-96--64-carved-only.json"
+        ))
+        .expect("valid desert carved fixture")
+    }
+
+    fn badlands_carved_fixture() -> ChunkFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks--320-99-carved-only.json"
+        ))
+        .expect("valid badlands carved fixture")
+    }
+
+    fn giant_taiga_carved_fixture() -> ChunkFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks--9-68-carved-only.json"
+        ))
+        .expect("valid giant taiga carved fixture")
+    }
+
+    fn shattered_savanna_carved_fixture() -> ChunkFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-60-199-carved-only.json"
+        ))
+        .expect("valid shattered savanna carved fixture")
+    }
+
+    fn mushroom_carved_fixture() -> ChunkFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks--446-387-carved-only.json"
+        ))
+        .expect("valid mushroom carved fixture")
     }
 
     fn liquid_ocean_carved_fixture() -> ChunkFixture {
@@ -1430,29 +1472,59 @@ mod tests {
     }
 
     #[test]
-    fn overworld_air_carvers_match_java_fixture_from_native_surface_stage() {
-        let carved = carved_fixture();
-        assert_eq!(carved.module, "carved-chunk");
-        assert_eq!(carved.minecraft_version, "1.17.1");
-        assert_eq!(carved.block_order, "y-major,z-major,x-minor");
-        assert_eq!(carved.palette[0], "minecraft:air");
+    fn overworld_air_carvers_match_java_plains_fixture_from_native_surface_stage() {
+        let carved = plains_carved_fixture();
+        assert_eq!(carved.chunk_x, 0);
+        assert_eq!(carved.chunk_z, 0);
+        assert_air_carved_fixture_matches_native(carved);
+    }
 
-        let seed = carved.seed.parse::<i64>().expect("i64 seed");
-        let biome_source = OverworldBiomeSource::new(seed, false, false);
-        let generator = NoiseBasedChunkGenerator::new(
-            biome_source.clone(),
-            seed,
-            NoiseGeneratorSettings::overworld(),
-        );
-        let mut chunk = generator.fill_from_noise(carved.chunk_x, carved.chunk_z);
-        generator.build_surface_and_bedrock(&mut chunk);
+    #[test]
+    fn overworld_air_carvers_match_java_ocean_fixture_from_native_surface_stage() {
+        let carved = ocean_carved_fixture();
+        assert_eq!(carved.chunk_x, 117);
+        assert_eq!(carved.chunk_z, -128);
+        assert_air_carved_fixture_matches_native(carved);
+    }
 
-        let mask = apply_overworld_air_carvers(seed, &biome_source, &mut chunk);
-        assert_eq!(mask.bits().len(), (carved.height * 16 * 16) as usize);
-        assert!(mask.carved_count() > 0);
-        assert_blocks_match(&chunk.blocks, &carved.blocks, carved.min_y, carved.height);
-        assert_ticks_match(chunk.block_ticks(), &carved.block_ticks);
-        assert_ticks_match(chunk.liquid_ticks(), &carved.liquid_ticks);
+    #[test]
+    fn overworld_air_carvers_match_java_desert_fixture_from_native_surface_stage() {
+        let carved = desert_carved_fixture();
+        assert_eq!(carved.chunk_x, 96);
+        assert_eq!(carved.chunk_z, -64);
+        assert_air_carved_fixture_matches_native(carved);
+    }
+
+    #[test]
+    fn overworld_air_carvers_match_java_badlands_fixture_from_native_surface_stage() {
+        let carved = badlands_carved_fixture();
+        assert_eq!(carved.chunk_x, -320);
+        assert_eq!(carved.chunk_z, 99);
+        assert_air_carved_fixture_matches_native(carved);
+    }
+
+    #[test]
+    fn overworld_air_carvers_match_java_giant_taiga_fixture_from_native_surface_stage() {
+        let carved = giant_taiga_carved_fixture();
+        assert_eq!(carved.chunk_x, -9);
+        assert_eq!(carved.chunk_z, 68);
+        assert_air_carved_fixture_matches_native(carved);
+    }
+
+    #[test]
+    fn overworld_air_carvers_match_java_shattered_savanna_fixture_from_native_surface_stage() {
+        let carved = shattered_savanna_carved_fixture();
+        assert_eq!(carved.chunk_x, 60);
+        assert_eq!(carved.chunk_z, 199);
+        assert_air_carved_fixture_matches_native(carved);
+    }
+
+    #[test]
+    fn overworld_air_carvers_match_java_mushroom_fixture_from_native_surface_stage() {
+        let carved = mushroom_carved_fixture();
+        assert_eq!(carved.chunk_x, -446);
+        assert_eq!(carved.chunk_z, 387);
+        assert_air_carved_fixture_matches_native(carved);
     }
 
     #[test]
@@ -1532,6 +1604,30 @@ mod tests {
         assert_eq!(liquid_mask.bits().len(), (carved.height * 16 * 16) as usize);
         assert!(liquid_mask.carved_count() > 0);
 
+        assert_blocks_match(&chunk.blocks, &carved.blocks, carved.min_y, carved.height);
+        assert_ticks_match(chunk.block_ticks(), &carved.block_ticks);
+        assert_ticks_match(chunk.liquid_ticks(), &carved.liquid_ticks);
+    }
+
+    fn assert_air_carved_fixture_matches_native(carved: ChunkFixture) {
+        assert_eq!(carved.module, "carved-chunk");
+        assert_eq!(carved.minecraft_version, "1.17.1");
+        assert_eq!(carved.block_order, "y-major,z-major,x-minor");
+        assert_eq!(carved.palette[0], "minecraft:air");
+
+        let seed = carved.seed.parse::<i64>().expect("i64 seed");
+        let biome_source = OverworldBiomeSource::new(seed, false, false);
+        let generator = NoiseBasedChunkGenerator::new(
+            biome_source.clone(),
+            seed,
+            NoiseGeneratorSettings::overworld(),
+        );
+        let mut chunk = generator.fill_from_noise(carved.chunk_x, carved.chunk_z);
+        generator.build_surface_and_bedrock(&mut chunk);
+
+        let mask = apply_overworld_air_carvers(seed, &biome_source, &mut chunk);
+        assert_eq!(mask.bits().len(), (carved.height * 16 * 16) as usize);
+        assert!(mask.carved_count() > 0);
         assert_blocks_match(&chunk.blocks, &carved.blocks, carved.min_y, carved.height);
         assert_ticks_match(chunk.block_ticks(), &carved.block_ticks);
         assert_ticks_match(chunk.liquid_ticks(), &carved.liquid_ticks);
