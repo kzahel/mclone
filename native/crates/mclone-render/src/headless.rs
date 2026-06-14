@@ -2,10 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use anyhow::{Context, Result};
-use mclone_mesh::{TexturedVisibleChunkMesh, VisibleChunkMesh};
+use mclone_mesh::{TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh};
 
 use crate::chunk::{
     ChunkCamera, ChunkDrawResources, ChunkTextureAtlas, TexturedChunkDrawResources,
+    TexturedSectionDrawResources,
 };
 use crate::gpu_util::{native_backends, optional_gpu_features};
 
@@ -165,6 +166,59 @@ pub fn write_headless_textured_chunk_png(
         byte_len: pixels.len(),
         vertex_count: stats.vertex_count,
         index_count: stats.index_count,
+    })
+}
+
+pub fn write_headless_textured_sections_png(
+    options: HeadlessChunkOptions,
+    sections: &[TexturedRenderSectionMesh],
+    atlas: ChunkTextureAtlas<'_>,
+) -> Result<HeadlessChunkReport> {
+    let width = options.width.max(1);
+    let height = options.height.max(1);
+    let (device, queue) = create_headless_device()?;
+    let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
+    let draw = TexturedSectionDrawResources::new(
+        &device,
+        &queue,
+        HEADLESS_FORMAT,
+        width,
+        height,
+        sections,
+        atlas,
+    )?;
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_headless_textured_sections_encoder"),
+    });
+    draw.render(
+        &queue,
+        &mut encoder,
+        &target.view,
+        [width, height],
+        options.camera,
+        options.color,
+    )?;
+    queue.submit(std::iter::once(encoder.finish()));
+
+    let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
+    save_rgba_png(&options.path, width, height, &pixels)?;
+    let vertex_count = sections
+        .iter()
+        .map(|section| section.stats().vertex_count)
+        .sum();
+    let index_count = sections
+        .iter()
+        .map(|section| section.stats().index_count)
+        .sum();
+
+    Ok(HeadlessChunkReport {
+        path: options.path,
+        width,
+        height,
+        byte_len: pixels.len(),
+        vertex_count,
+        index_count,
     })
 }
 

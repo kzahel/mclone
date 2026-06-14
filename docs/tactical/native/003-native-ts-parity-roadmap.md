@@ -23,6 +23,7 @@ Landed:
 - resource locations, native/web asset sources, blockstate asset indexing, and the current terrain block-state registry
 - blockstate variant parsing, block model parent/texture resolution, baked model face facts, and deterministic texture atlas planning
 - textured native section mesh generation from client snapshots, stitched atlas upload, and textured headless/window rendering
+- section-keyed textured render meshes, keyed GPU upload ownership, and repeatable native headless camera scenarios
 
 Still missing compared with the TypeScript engine:
 
@@ -30,7 +31,7 @@ Still missing compared with the TypeScript engine:
 - chunk scheduling is still synchronous and surface-stage only
 - persistence is a temporary snapshot format, not Anvil/NBT or browser storage
 - web/WASM has a runtime smoke gate, not browser storage, network transport, or render path
-- no streaming section upload cache, render invalidation, true liquid renderer, or AO/lighted textured path
+- no true frustum rejection, dirty-only section upload diffs, true liquid renderer, or AO/lighted textured path
 - no native lighting, liquids, movement, entities, or broad decorated-world parity
 
 ## Target Horizon
@@ -76,7 +77,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 | [`011-block-registry-and-asset-source.md`](011-block-registry-and-asset-source.md) | assets/data | **done** - vanilla-shaped block-state registry scaffold, file/web asset sources, extracted asset loading boundaries | registry and native/web asset fixture tests |
 | [`012-model-baking-and-atlas.md`](012-model-baking-and-atlas.md) | renderer assets | **done** - blockstate/model parse, parent texture resolution, baked face facts, and deterministic atlas planning | baked model/atlas tests over extracted vanilla assets |
 | [`013-vanilla-section-meshing.md`](013-vanilla-section-meshing.md) | mesh/render | **done** - client snapshot to textured section meshes using baked models, stitched atlas upload, and neighbor culling | headless rendered chunk from client snapshot with real textures |
-| `014-streaming-renderer-and-camera.md` | renderer runtime | visible section upload cache, frustum, render invalidation, debug camera/headless scenario runner | multi-step native headless captures and browser/native window smoke |
+| [`014-streaming-renderer-and-camera.md`](014-streaming-renderer-and-camera.md) | renderer runtime | **done** - section-keyed textured render meshes, keyed GPU upload ownership, full-set render invalidation, and debug camera/headless scenario runner; true frustum/dirty-only diffs deferred | multi-step native headless captures and browser/native window smoke |
 | `015-decoration-framework-foundation.md` | worldgen parity | configured/decorated feature framework, first trees/plants/water features from Rust | oracle/unit coverage plus visible decorated terrain capture |
 | `016-biome-feature-breadth.md` | worldgen parity | biome table coverage, tree family breadth, ores, underground extras, surface vegetation/water families | selected fixture matrix and visual probes |
 | `017-structures-foundation.md` | worldgen parity | status-aware structure starts/references, first true structure, template/block-entity scaffolding | server-backed fixture diff for first structure slice |
@@ -88,9 +89,9 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `014-streaming-renderer-and-camera.md`.
+The next implementation tactical should be `015-decoration-framework-foundation.md`.
 
-That slice should move the textured renderer from one synchronous all-scene mesh into section-level mesh ownership, visible-section upload caching, invalidation, and scenario-based camera validation.
+That slice should start broad worldgen parity again now that the native renderer has a section-level runtime boundary. Focus on the configured/decorated feature framework and the first visible feature families rather than further local renderer polish.
 
 ## Deferral Notes
 

@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -13,15 +13,15 @@ use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT,
 };
 use mclone_mesh::{
-    TexturedChunkMeshInput, TexturedMeshCatalog, TexturedVisibleChunkMesh,
-    build_textured_visible_chunk_area_mesh,
+    TexturedChunkMeshInput, TexturedMeshCatalog, TexturedRenderSectionMesh,
+    build_textured_render_sections,
 };
 use mclone_net::{LocalTransport, request_server_updates};
 use mclone_protocol::ChunkInterest;
-use mclone_render::chunk::{ChunkCamera, ChunkTextureAtlas, TexturedChunkDrawResources};
+use mclone_render::chunk::{ChunkCamera, ChunkTextureAtlas, TexturedSectionDrawResources};
 use mclone_render::headless::{
     HeadlessChunkOptions, HeadlessClearOptions, write_headless_clear_png,
-    write_headless_textured_chunk_png,
+    write_headless_textured_sections_png,
 };
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_server::IntegratedServer;
@@ -66,8 +66,8 @@ fn main() -> Result<()> {
             height,
             scene,
         } => {
-            let scene_mesh = build_scene_textured_mesh(&scene)?;
-            let report = write_headless_textured_chunk_png(
+            let scene_mesh = build_scene_textured_sections(&scene)?;
+            let report = write_headless_textured_sections_png(
                 HeadlessChunkOptions {
                     path,
                     width,
@@ -79,11 +79,11 @@ fn main() -> Result<()> {
                         scene.chunk_radius,
                     ),
                 },
-                &scene_mesh.mesh,
+                &scene_mesh.sections,
                 scene_mesh.atlas.as_upload(),
             )?;
             println!(
-                "headless textured chunk saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
+                "headless textured sections saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
                 report.path.display(),
                 report.width,
                 report.height,
@@ -91,6 +91,28 @@ fn main() -> Result<()> {
                 report.vertex_count,
                 report.index_count
             );
+            Ok(())
+        }
+        Cli::HeadlessChunkScenarios {
+            directory,
+            width,
+            height,
+            scene,
+        } => {
+            let scene_mesh = build_scene_textured_sections(&scene)?;
+            let reports =
+                write_headless_chunk_scenarios(&directory, width, height, &scene, &scene_mesh)?;
+            for report in reports {
+                println!(
+                    "headless textured scenario saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
+                    report.path.display(),
+                    report.width,
+                    report.height,
+                    report.byte_len,
+                    report.vertex_count,
+                    report.index_count
+                );
+            }
             Ok(())
         }
         Cli::Window { scene } => run_window(scene),
@@ -134,12 +156,19 @@ enum Cli {
         height: u32,
         scene: SceneOptions,
     },
+    HeadlessChunkScenarios {
+        directory: PathBuf,
+        width: u32,
+        height: u32,
+        scene: SceneOptions,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum HeadlessMode {
     Clear(PathBuf),
     Chunk(PathBuf),
+    ChunkScenarios(PathBuf),
 }
 
 impl Cli {
@@ -165,6 +194,13 @@ impl Cli {
                         .map(PathBuf::from)
                         .context("--headless-chunk requires an output PNG path")?;
                     set_headless_mode(&mut mode, HeadlessMode::Chunk(path))?;
+                }
+                "--headless-chunk-scenarios" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--headless-chunk-scenarios requires an output directory")?;
+                    set_headless_mode(&mut mode, HeadlessMode::ChunkScenarios(path))?;
                 }
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
                 "--height" => height = Some(parse_u32_arg("--height", args.next())?),
@@ -196,6 +232,12 @@ impl Cli {
                 path,
                 width: width.unwrap_or(640),
                 height: height.unwrap_or(480),
+                scene,
+            }),
+            Some(HeadlessMode::ChunkScenarios(directory)) => Ok(Self::HeadlessChunkScenarios {
+                directory,
+                width: width.unwrap_or(960),
+                height: height.unwrap_or(640),
                 scene,
             }),
             None => Ok(Self::Window { scene }),
@@ -250,25 +292,26 @@ fn print_help() {
          Usage:\n\
            mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
-           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\n\
+           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\
+           mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\n\
          Window mode renders generated chunks with WASD/QE, mouse drag, and wheel camera controls. Headless modes write PNGs for GPU validation."
     );
 }
 
 fn run_window(scene: SceneOptions) -> Result<()> {
-    let scene_mesh = build_scene_textured_mesh(&scene)?;
-    let stats = scene_mesh.mesh.stats();
+    let scene_mesh = build_scene_textured_sections(&scene)?;
     let chunk_count = scene.chunk_span() * scene.chunk_span();
     log::info!(
-        "client-runtime textured chunk area seed={} center=({}, {}) radius={} remote={:?} chunks={} mesh={} vertices {} indices atlas={}x{}",
+        "client-runtime textured chunk area seed={} center=({}, {}) radius={} remote={:?} chunks={} sections={} vertices={} indices={} atlas={}x{}",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
         scene.chunk_radius,
         scene.remote_addr,
         chunk_count,
-        stats.vertex_count,
-        stats.index_count,
+        scene_mesh.section_count(),
+        scene_mesh.vertex_count(),
+        scene_mesh.index_count(),
         scene_mesh.atlas.width,
         scene_mesh.atlas.height
     );
@@ -284,9 +327,29 @@ fn run_window(scene: SceneOptions) -> Result<()> {
 }
 
 #[derive(Clone, Debug)]
-struct SceneTexturedMesh {
-    mesh: TexturedVisibleChunkMesh,
+struct SceneTexturedSections {
+    sections: Vec<TexturedRenderSectionMesh>,
     atlas: TextureAtlasImage,
+}
+
+impl SceneTexturedSections {
+    fn section_count(&self) -> usize {
+        self.sections.len()
+    }
+
+    fn vertex_count(&self) -> u32 {
+        self.sections
+            .iter()
+            .map(|section| section.stats().vertex_count)
+            .sum()
+    }
+
+    fn index_count(&self) -> u32 {
+        self.sections
+            .iter()
+            .map(|section| section.stats().index_count)
+            .sum()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -306,7 +369,7 @@ impl TextureAtlasImage {
     }
 }
 
-fn build_scene_textured_mesh(scene: &SceneOptions) -> Result<SceneTexturedMesh> {
+fn build_scene_textured_sections(scene: &SceneOptions) -> Result<SceneTexturedSections> {
     let client = build_scene_client_runtime(scene)?;
     let chunks = client
         .chunk_snapshots()
@@ -325,20 +388,60 @@ fn build_scene_textured_mesh(scene: &SceneOptions) -> Result<SceneTexturedMesh> 
             )
         })
         .collect::<Vec<_>>();
-    let mesh = build_textured_visible_chunk_area_mesh(&inputs, &mesh_assets.catalog)?;
-    if mesh.is_empty() {
+    let sections = build_textured_render_sections(&inputs, &mesh_assets.catalog)?;
+    if sections.is_empty() {
         bail!(
-            "generated chunk area seed={} center=({}, {}) radius={} produced an empty textured mesh",
+            "generated chunk area seed={} center=({}, {}) radius={} produced no textured render sections",
             scene.seed,
             scene.chunk_x,
             scene.chunk_z,
             scene.chunk_radius
         );
     }
-    Ok(SceneTexturedMesh {
-        mesh,
+    Ok(SceneTexturedSections {
+        sections,
         atlas: mesh_assets.atlas,
     })
+}
+
+fn write_headless_chunk_scenarios(
+    directory: &Path,
+    width: u32,
+    height: u32,
+    scene: &SceneOptions,
+    scene_mesh: &SceneTexturedSections,
+) -> Result<Vec<mclone_render::headless::HeadlessChunkReport>> {
+    let mut reports = Vec::new();
+    for (name, camera) in chunk_capture_scenarios(scene) {
+        let path = directory.join(format!("{name}.png"));
+        reports.push(write_headless_textured_sections_png(
+            HeadlessChunkOptions {
+                path,
+                width,
+                height,
+                color: mclone_render::default_clear_color(),
+                camera,
+            },
+            &scene_mesh.sections,
+            scene_mesh.atlas.as_upload(),
+        )?);
+    }
+    Ok(reports)
+}
+
+fn chunk_capture_scenarios(scene: &SceneOptions) -> [(&'static str, ChunkCamera); 3] {
+    let overview =
+        ChunkCamera::overview_for_chunk_area(scene.chunk_x, scene.chunk_z, scene.chunk_radius);
+    let mut orbit = overview;
+    orbit.orbit(0.7, -0.16);
+    let mut close = overview;
+    close.zoom(0.45);
+    close.orbit(-0.32, 0.08);
+    [
+        ("overview", overview),
+        ("orbit-east", orbit),
+        ("close", close),
+    ]
 }
 
 fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
@@ -559,11 +662,11 @@ impl SceneOptions {
 }
 
 struct ChunkApp {
-    scene_mesh: SceneTexturedMesh,
+    scene_mesh: SceneTexturedSections,
     camera: ChunkCamera,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
-    draw: Option<TexturedChunkDrawResources>,
+    draw: Option<TexturedSectionDrawResources>,
     pressed_keys: std::collections::HashSet<KeyCode>,
     orbit_dragging: bool,
     last_cursor: Option<(f64, f64)>,
@@ -571,7 +674,7 @@ struct ChunkApp {
 }
 
 impl ChunkApp {
-    fn new(scene_mesh: SceneTexturedMesh, camera: ChunkCamera) -> Self {
+    fn new(scene_mesh: SceneTexturedSections, camera: ChunkCamera) -> Self {
         Self {
             scene_mesh,
             camera,
@@ -630,13 +733,13 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
-        let draw = match TexturedChunkDrawResources::new(
+        let draw = match TexturedSectionDrawResources::new(
             &surface.device,
             &surface.queue,
             surface.config.format,
             surface.config.width,
             surface.config.height,
-            &self.scene_mesh.mesh,
+            &self.scene_mesh.sections,
             self.scene_mesh.atlas.as_upload(),
         ) {
             Ok(draw) => draw,
@@ -646,7 +749,11 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
-        log::info!("uploaded chunk mesh with {} indices", draw.index_count());
+        log::info!(
+            "uploaded {} render sections with {} indices",
+            draw.section_count(),
+            draw.index_count()
+        );
         self.draw = Some(draw);
         self.surface = Some(surface);
         self.window = Some(window);
@@ -871,6 +978,34 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_headless_chunk_scenarios() {
+        let cli = Cli::parse([
+            "--headless-chunk-scenarios".to_owned(),
+            "/tmp/mclone-camera".to_owned(),
+            "--width".to_owned(),
+            "320".to_owned(),
+            "--height".to_owned(),
+            "180".to_owned(),
+            "--chunk-radius".to_owned(),
+            "2".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessChunkScenarios {
+                directory: PathBuf::from("/tmp/mclone-camera"),
+                width: 320,
+                height: 180,
+                scene: SceneOptions {
+                    chunk_radius: 2,
+                    ..SceneOptions::default()
+                },
+            }
+        );
+    }
+
+    #[test]
     fn cli_parses_remote_addr() {
         let cli = Cli::parse([
             "--headless-chunk".to_owned(),
@@ -958,17 +1093,18 @@ mod tests {
     }
 
     #[test]
-    fn build_scene_textured_mesh_uses_client_runtime_snapshots() {
+    fn build_scene_textured_sections_uses_client_runtime_snapshots() {
         if !extracted_asset_root().exists() {
             return;
         }
-        let scene_mesh = build_scene_textured_mesh(&SceneOptions {
+        let scene_mesh = build_scene_textured_sections(&SceneOptions {
             chunk_radius: 0,
             ..SceneOptions::default()
         })
         .unwrap();
 
-        assert!(!scene_mesh.mesh.is_empty());
+        assert!(scene_mesh.section_count() > 0);
+        assert!(scene_mesh.index_count() > 0);
         assert!(scene_mesh.atlas.width > 0);
         assert!(scene_mesh.atlas.height > 0);
     }

@@ -11,6 +11,7 @@ use mclone_assets::{
 use mclone_core::{AIR_BLOCK_STATE_ID, BlockStateId};
 
 pub const CHUNK_WIDTH: i32 = 16;
+pub const RENDER_SECTION_HEIGHT: i32 = 16;
 pub const AIR_BLOCK_ID: u8 = 0;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -67,6 +68,43 @@ impl TexturedVisibleChunkMesh {
             vertex_count: self.vertices.len() as u32,
             index_count: self.indices.len() as u32,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RenderSectionKey {
+    pub chunk_x: i32,
+    pub section_y: i32,
+    pub chunk_z: i32,
+}
+
+impl RenderSectionKey {
+    pub fn new(chunk_x: i32, section_y: i32, chunk_z: i32) -> Self {
+        Self {
+            chunk_x,
+            section_y,
+            chunk_z,
+        }
+    }
+
+    pub fn min_y(self) -> i32 {
+        self.section_y * RENDER_SECTION_HEIGHT
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TexturedRenderSectionMesh {
+    pub key: RenderSectionKey,
+    pub mesh: TexturedVisibleChunkMesh,
+}
+
+impl TexturedRenderSectionMesh {
+    pub fn is_empty(&self) -> bool {
+        self.mesh.is_empty()
+    }
+
+    pub fn stats(&self) -> SectionMeshStats {
+        self.mesh.stats()
     }
 }
 
@@ -255,8 +293,8 @@ pub struct ChunkMeshInput<'a> {
 
 impl<'a> ChunkMeshInput<'a> {
     pub fn new(chunk_x: i32, chunk_z: i32, min_y: i32, height: i32, blocks: &'a [u8]) -> Self {
-        if height <= 0 || height % CHUNK_WIDTH != 0 {
-            panic!("chunk height {height} must be a positive multiple of {CHUNK_WIDTH}");
+        if height <= 0 || height % RENDER_SECTION_HEIGHT != 0 {
+            panic!("chunk height {height} must be a positive multiple of {RENDER_SECTION_HEIGHT}");
         }
         let expected_len = height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
         if blocks.len() != expected_len {
@@ -356,10 +394,42 @@ pub fn build_textured_visible_chunk_area_mesh(
     catalog: &TexturedMeshCatalog,
 ) -> Result<TexturedVisibleChunkMesh, TexturedMeshError> {
     let mut mesh = TexturedVisibleChunkMesh::default();
-    for input in inputs {
-        add_textured_chunk_to_mesh(&mut mesh, *input, inputs, catalog)?;
+    for section in build_textured_render_sections(inputs, catalog)? {
+        append_textured_mesh(&mut mesh, &section.mesh);
     }
     Ok(mesh)
+}
+
+pub fn build_textured_render_sections(
+    inputs: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+) -> Result<Vec<TexturedRenderSectionMesh>, TexturedMeshError> {
+    let mut sections = Vec::new();
+    for input in inputs {
+        for local_y_start in (0..input.height).step_by(RENDER_SECTION_HEIGHT as usize) {
+            let local_y_end = (local_y_start + RENDER_SECTION_HEIGHT).min(input.height);
+            let mut mesh = TexturedVisibleChunkMesh::default();
+            add_textured_chunk_range_to_mesh(
+                &mut mesh,
+                *input,
+                inputs,
+                catalog,
+                local_y_start,
+                local_y_end,
+            )?;
+            if !mesh.is_empty() {
+                sections.push(TexturedRenderSectionMesh {
+                    key: RenderSectionKey::new(
+                        input.chunk_x,
+                        (input.min_y + local_y_start).div_euclid(RENDER_SECTION_HEIGHT),
+                        input.chunk_z,
+                    ),
+                    mesh,
+                });
+            }
+        }
+    }
+    Ok(sections)
 }
 
 fn add_chunk_to_mesh(
@@ -397,16 +467,18 @@ fn add_chunk_to_mesh(
     }
 }
 
-fn add_textured_chunk_to_mesh(
+fn add_textured_chunk_range_to_mesh(
     mesh: &mut TexturedVisibleChunkMesh,
     input: TexturedChunkMeshInput<'_>,
     area: &[TexturedChunkMeshInput<'_>],
     catalog: &TexturedMeshCatalog,
+    local_y_start: i32,
+    local_y_end: i32,
 ) -> Result<(), TexturedMeshError> {
     let world_origin_x = chunk_world_origin(input.chunk_x);
     let world_origin_z = chunk_world_origin(input.chunk_z);
 
-    for local_y in 0..input.height {
+    for local_y in local_y_start..local_y_end {
         for local_z in 0..CHUNK_WIDTH {
             for local_x in 0..CHUNK_WIDTH {
                 let state_id = input.block_at_or_air(local_x, local_y, local_z);
@@ -445,6 +517,13 @@ fn add_textured_chunk_to_mesh(
     }
 
     Ok(())
+}
+
+fn append_textured_mesh(mesh: &mut TexturedVisibleChunkMesh, source: &TexturedVisibleChunkMesh) {
+    let base_index = mesh.vertices.len() as u32;
+    mesh.vertices.extend_from_slice(&source.vertices);
+    mesh.indices
+        .extend(source.indices.iter().map(|index| base_index + *index));
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -985,6 +1064,50 @@ mod tests {
 
         assert_eq!(mesh.stats().vertex_count, 40);
         assert_eq!(mesh.stats().index_count, 60);
+    }
+
+    #[test]
+    fn textured_render_sections_split_by_vertical_section() {
+        let catalog = stone_textured_catalog();
+        let blocks = textured_chunk_blocks(
+            32,
+            &[(0, 0, 0, BlockStateId(1)), (0, 16, 0, BlockStateId(1))],
+        );
+        let sections = build_textured_render_sections(
+            &[TexturedChunkMeshInput::new(2, -3, -16, 32, &blocks)],
+            &catalog,
+        )
+        .unwrap();
+
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].key, RenderSectionKey::new(2, -1, -3));
+        assert_eq!(sections[1].key, RenderSectionKey::new(2, 0, -3));
+        assert_eq!(sections[0].stats().index_count, 36);
+        assert_eq!(sections[1].stats().index_count, 36);
+    }
+
+    #[test]
+    fn textured_render_sections_cull_across_section_boundary() {
+        let catalog = stone_textured_catalog();
+        let blocks = textured_chunk_blocks(
+            32,
+            &[(0, 15, 0, BlockStateId(1)), (0, 16, 0, BlockStateId(1))],
+        );
+        let sections = build_textured_render_sections(
+            &[TexturedChunkMeshInput::new(0, 0, 0, 32, &blocks)],
+            &catalog,
+        )
+        .unwrap();
+        let combined = build_textured_visible_chunk_area_mesh(
+            &[TexturedChunkMeshInput::new(0, 0, 0, 32, &blocks)],
+            &catalog,
+        )
+        .unwrap();
+
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].stats().index_count, 30);
+        assert_eq!(sections[1].stats().index_count, 30);
+        assert_eq!(combined.stats().index_count, 60);
     }
 
     fn png_header(width: u32, height: u32) -> Vec<u8> {

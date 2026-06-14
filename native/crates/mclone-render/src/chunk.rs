@@ -1,6 +1,10 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Vec3};
-use mclone_mesh::{TexturedVisibleChunkMesh, VisibleChunkMesh};
+use mclone_mesh::{
+    RenderSectionKey, TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh,
+};
 use wgpu::util::DeviceExt;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
@@ -720,6 +724,123 @@ impl TexturedChunkDrawResources {
         pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
         pass.set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
+        Ok(())
+    }
+}
+
+pub struct TexturedSectionDrawResources {
+    renderer: TexturedChunkRenderer,
+    sections: BTreeMap<RenderSectionKey, GpuTexturedChunkMesh>,
+    atlas: GpuChunkTextureAtlas,
+    depth: DepthTarget,
+}
+
+impl TexturedSectionDrawResources {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        sections: &[TexturedRenderSectionMesh],
+        atlas: ChunkTextureAtlas<'_>,
+    ) -> Result<Self> {
+        let renderer = TexturedChunkRenderer::new(device, color_format);
+        let atlas =
+            GpuChunkTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)
+                .context("failed to upload chunk texture atlas")?;
+        let mut resources = Self {
+            renderer,
+            sections: BTreeMap::new(),
+            atlas,
+            depth: DepthTarget::new(device, width, height),
+        };
+        resources.update_sections(device, sections)?;
+        Ok(resources)
+    }
+
+    pub fn update_sections(
+        &mut self,
+        device: &wgpu::Device,
+        sections: &[TexturedRenderSectionMesh],
+    ) -> Result<()> {
+        let wanted = sections
+            .iter()
+            .filter(|section| !section.is_empty())
+            .map(|section| section.key)
+            .collect::<BTreeSet<_>>();
+        self.sections.retain(|key, _| wanted.contains(key));
+
+        for section in sections {
+            if section.is_empty() {
+                continue;
+            }
+            self.sections.insert(
+                section.key,
+                GpuTexturedChunkMesh::new(device, &section.mesh).with_context(|| {
+                    format!("failed to upload render section {:?}", section.key)
+                })?,
+            );
+        }
+        Ok(())
+    }
+
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+        self.depth.resize(device, width, height);
+    }
+
+    pub fn section_count(&self) -> usize {
+        self.sections.len()
+    }
+
+    pub fn index_count(&self) -> u32 {
+        self.sections.values().map(|mesh| mesh.index_count()).sum()
+    }
+
+    pub fn render(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        size: [u32; 2],
+        camera: ChunkCamera,
+        clear_color: wgpu::Color,
+    ) -> Result<()> {
+        let view_projection = camera.view_projection(size[0], size[1]);
+        queue.write_buffer(
+            &self.renderer.uniform_buffer,
+            0,
+            &matrix_bytes(view_projection),
+        );
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_textured_section_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.renderer.pipeline);
+        pass.set_bind_group(0, &self.renderer.bind_group, &[]);
+        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        for mesh in self.sections.values() {
+            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+        }
         Ok(())
     }
 }
