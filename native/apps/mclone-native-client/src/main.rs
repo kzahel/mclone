@@ -547,14 +547,17 @@ fn selected_model_refs(
             .get(&record.block)
             .with_context(|| format!("missing blockstate asset for {}", record.block))?;
         let variant_key = record.variant_key();
-        let variants = asset.variants_for_key(&variant_key).with_context(|| {
-            format!(
+        if let Some(variants) = asset.variants_for_key(&variant_key) {
+            if let Some(variant) = variants.first() {
+                refs.insert(variant.model.clone());
+            }
+        } else if variant_key.is_empty() && !asset.model_refs.is_empty() {
+            refs.extend(asset.model_refs.iter().cloned());
+        } else {
+            bail!(
                 "missing blockstate variant `{variant_key}` for {}",
                 record.block
-            )
-        })?;
-        if let Some(variant) = variants.first() {
-            refs.insert(variant.model.clone());
+            );
         }
     }
     Ok(refs)

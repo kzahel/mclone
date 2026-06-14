@@ -5,9 +5,10 @@ use crate::block::{
     AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE,
     DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
     DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
-    FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER,
-    LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY, RED_SAND, REDSTONE_ORE,
-    RawBlockId, SAND, SNOW, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER,
+    FERN, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE,
+    LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY,
+    RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SNOW, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA,
+    TUFF, WATER,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{
@@ -421,6 +422,71 @@ impl RandomPatchConfiguration {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Direction {
+    Down,
+    Up,
+    North,
+    South,
+    West,
+    East,
+}
+
+impl Direction {
+    const ALL: [Self; 6] = [
+        Self::Down,
+        Self::Up,
+        Self::North,
+        Self::South,
+        Self::West,
+        Self::East,
+    ];
+
+    const GLOW_LICHEN_VALID: [Self; 5] =
+        [Self::Up, Self::North, Self::East, Self::South, Self::West];
+
+    const fn offset(self) -> (i32, i32, i32) {
+        match self {
+            Self::Down => (0, -1, 0),
+            Self::Up => (0, 1, 0),
+            Self::North => (0, 0, -1),
+            Self::South => (0, 0, 1),
+            Self::West => (-1, 0, 0),
+            Self::East => (1, 0, 0),
+        }
+    }
+
+    const fn opposite(self) -> Self {
+        match self {
+            Self::Down => Self::Up,
+            Self::Up => Self::Down,
+            Self::North => Self::South,
+            Self::South => Self::North,
+            Self::West => Self::East,
+            Self::East => Self::West,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GlowLichenConfiguration {
+    pub search_range: i32,
+    pub chance_of_spreading: f32,
+    pub can_be_placed_on: &'static [RawBlockId],
+}
+
+impl Eq for GlowLichenConfiguration {}
+
+impl GlowLichenConfiguration {
+    pub const fn default_overworld() -> Self {
+        Self {
+            search_range: 20,
+            chance_of_spreading: 0.5,
+            can_be_placed_on: &[STONE, ANDESITE, DIORITE, GRANITE, TUFF, DEEPSLATE],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BasicTreeConfiguration {
     pub log: RawBlockId,
     pub leaves: RawBlockId,
@@ -741,6 +807,7 @@ impl OreConfiguration {
 pub enum ConfiguredFeature {
     SimpleBlock(SimpleBlockConfiguration),
     RandomPatch(RandomPatchConfiguration),
+    GlowLichen(GlowLichenConfiguration),
     BasicTree(BasicTreeConfiguration),
     Tree(TreeConfiguration),
     RandomSelector(RandomFeatureConfiguration),
@@ -755,6 +822,10 @@ impl ConfiguredFeature {
 
     pub const fn random_patch(config: RandomPatchConfiguration) -> Self {
         Self::RandomPatch(config)
+    }
+
+    pub const fn glow_lichen(config: GlowLichenConfiguration) -> Self {
+        Self::GlowLichen(config)
     }
 
     pub const fn basic_tree(config: BasicTreeConfiguration) -> Self {
@@ -786,6 +857,7 @@ impl ConfiguredFeature {
         match self {
             Self::SimpleBlock(config) => place_simple_block(world, random, origin, *config),
             Self::RandomPatch(config) => place_random_patch(world, random, origin, *config),
+            Self::GlowLichen(config) => place_glow_lichen(world, random, origin, *config),
             Self::BasicTree(config) => place_basic_tree(world, random, origin, *config),
             Self::Tree(config) => place_tree(world, random, origin, *config),
             Self::RandomSelector(config) => place_random_selector(world, random, origin, config),
@@ -1244,6 +1316,8 @@ fn birch_forest_features() -> Vec<PlacedFeature> {
 
 fn taiga_features() -> Vec<PlacedFeature> {
     vec![
+        large_fern_patch_feature(),
+        glow_lichen_feature(),
         taiga_vegetation_feature(),
         grass_patch(FERN, 4),
         grass_patch(GRASS, 2),
@@ -1335,11 +1409,51 @@ fn taiga_vegetation_feature() -> PlacedFeature {
     )
 }
 
+fn large_fern_patch_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_patch(RandomPatchConfiguration {
+            state: LARGE_FERN_LOWER,
+            tries: 64,
+            xspread: 7,
+            yspread: 3,
+            zspread: 7,
+            project: false,
+            can_replace: false,
+            double_plant: true,
+            place_on: &[GRASS_BLOCK, DIRT, PODZOL, MYCELIUM],
+        }),
+        vec![
+            ConfiguredDecorator::count(7),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
+            ConfiguredDecorator::spread_32_above(),
+        ],
+    )
+}
+
+fn glow_lichen_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::glow_lichen(GlowLichenConfiguration::default_overworld()),
+        vec![
+            ConfiguredDecorator::Count(crate::placement::CountConfiguration::from_provider(
+                IntProvider::uniform(20, 30),
+            )),
+            ConfiguredDecorator::range(HeightProvider::uniform(
+                VerticalAnchor::bottom(),
+                VerticalAnchor::absolute(54),
+            )),
+            ConfiguredDecorator::square(),
+        ],
+    )
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
 
-    pub(crate) const CURRENT_TAIGA_VEGETATION_FEATURE_INDEX: i32 = 0;
+    pub(crate) const CURRENT_TAIGA_VEGETATION_FEATURE_INDEX: i32 = 2;
     pub(crate) const JAVA_TAIGA_VEGETATION_FEATURE_INDEX: i32 = 2;
 
     pub(crate) fn place_taiga_vegetation_with_feature_index<W: FeatureWorld>(
@@ -1488,6 +1602,125 @@ fn place_random_patch<W: FeatureWorld>(
     }
 
     placed > 0
+}
+
+fn place_glow_lichen<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    origin: BlockPos,
+    config: GlowLichenConfiguration,
+) -> bool {
+    let Some(current) = world.block_at_world(origin) else {
+        return false;
+    };
+    if !is_air_or_water(current) {
+        return false;
+    }
+
+    let directions = shuffled_directions(&Direction::GLOW_LICHEN_VALID, random);
+    if place_glow_lichen_if_possible(world, random, origin, current, config, &directions) {
+        return true;
+    }
+
+    for direction in &directions {
+        let candidate = offset_pos(origin, *direction);
+        let side_directions =
+            shuffled_directions_except(&Direction::GLOW_LICHEN_VALID, random, direction.opposite());
+
+        for _ in 0..config.search_range {
+            let Some(candidate_state) = world.block_at_world(candidate) else {
+                break;
+            };
+            if !is_air_or_water(candidate_state) && candidate_state != GLOW_LICHEN {
+                break;
+            }
+            if place_glow_lichen_if_possible(
+                world,
+                random,
+                candidate,
+                candidate_state,
+                config,
+                &side_directions,
+            ) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn place_glow_lichen_if_possible<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    pos: BlockPos,
+    current: RawBlockId,
+    config: GlowLichenConfiguration,
+    directions: &[Direction],
+) -> bool {
+    if !is_air_or_water(current) && current != GLOW_LICHEN {
+        return false;
+    }
+
+    for direction in directions {
+        let neighbor = offset_pos(pos, *direction);
+        let Some(neighbor_state) = world.block_at_world(neighbor) else {
+            continue;
+        };
+        if !config.can_be_placed_on.contains(&neighbor_state) {
+            continue;
+        }
+
+        world.set_block_world(pos, GLOW_LICHEN);
+        if random.next_float() < config.chance_of_spreading {
+            consume_glow_lichen_spread_random(random);
+        }
+        return true;
+    }
+
+    false
+}
+
+fn shuffled_directions(directions: &[Direction], random: &mut impl RandomSource) -> Vec<Direction> {
+    let mut shuffled = directions.to_vec();
+    shuffle_java_style(&mut shuffled, random);
+    shuffled
+}
+
+fn shuffled_directions_except(
+    directions: &[Direction],
+    random: &mut impl RandomSource,
+    excluded: Direction,
+) -> Vec<Direction> {
+    let mut filtered = directions
+        .iter()
+        .copied()
+        .filter(|direction| *direction != excluded)
+        .collect::<Vec<_>>();
+    shuffle_java_style(&mut filtered, random);
+    filtered
+}
+
+fn shuffle_java_style<T>(items: &mut [T], random: &mut impl RandomSource) {
+    for i in (2..=items.len()).rev() {
+        let swap_with = random.next_int_bound(i as i32) as usize;
+        items.swap(i - 1, swap_with);
+    }
+}
+
+fn consume_glow_lichen_spread_random(random: &mut impl RandomSource) {
+    // Native: compact glow_lichen state consumes Java spread RNG without storing extra faces.
+    let mut directions = Direction::ALL;
+    shuffle_java_style(&mut directions, random);
+}
+
+fn offset_pos(pos: BlockPos, direction: Direction) -> BlockPos {
+    let (dx, dy, dz) = direction.offset();
+    BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz)
+}
+
+fn is_air_or_water(block_id: RawBlockId) -> bool {
+    matches!(block_id, AIR | WATER)
 }
 
 fn place_basic_tree<W: FeatureWorld>(
@@ -2016,6 +2249,7 @@ fn material_blocks_motion(block_id: RawBlockId) -> bool {
             | DEAD_BUSH
             | LARGE_FERN_LOWER
             | LARGE_FERN_UPPER
+            | GLOW_LICHEN
     )
 }
 
@@ -2055,7 +2289,14 @@ fn can_survive_simple_plant(
 fn is_replaceable_plant(block_id: RawBlockId) -> bool {
     matches!(
         block_id,
-        GRASS | FERN | DANDELION | POPPY | DEAD_BUSH | LARGE_FERN_LOWER | LARGE_FERN_UPPER
+        GRASS
+            | FERN
+            | DANDELION
+            | POPPY
+            | DEAD_BUSH
+            | LARGE_FERN_LOWER
+            | LARGE_FERN_UPPER
+            | GLOW_LICHEN
     )
 }
 
@@ -2081,6 +2322,7 @@ fn valid_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
             | DEAD_BUSH
             | LARGE_FERN_LOWER
             | LARGE_FERN_UPPER
+            | GLOW_LICHEN
             | OAK_LEAVES
             | BIRCH_LEAVES
             | SPRUCE_LEAVES
@@ -2111,6 +2353,7 @@ fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool
             | DEAD_BUSH
             | LARGE_FERN_LOWER
             | LARGE_FERN_UPPER
+            | GLOW_LICHEN
             | OAK_LEAVES
             | OAK_LOG
             | BIRCH_LEAVES
@@ -2262,6 +2505,17 @@ mod tests {
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 3, 8)));
         assert_eq!(chunk.get_block_at_y(8, 3, 8), LARGE_FERN_LOWER);
         assert_eq!(chunk.get_block_at_y(8, 4, 8), LARGE_FERN_UPPER);
+    }
+
+    #[test]
+    fn glow_lichen_feature_places_against_stone_face() {
+        let mut chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        chunk.set_block_at_y(8, 9, 8, STONE);
+        let mut random = WorldgenRandom::new(12_345);
+        let feature = ConfiguredFeature::glow_lichen(GlowLichenConfiguration::default_overworld());
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 8, 8)));
+        assert_eq!(chunk.get_block_at_y(8, 8, 8), GLOW_LICHEN);
     }
 
     #[test]
@@ -2512,7 +2766,24 @@ mod tests {
     #[test]
     fn taiga_feature_table_uses_vanilla_taiga_vegetation_selector() {
         let taiga = overworld_features_for_biome(get_layered_biome_by_id(133));
-        let feature = &taiga[14];
+        let vegetal_features = taiga
+            .iter()
+            .filter(|feature| feature.step == DecorationStep::VegetalDecoration)
+            .collect::<Vec<_>>();
+
+        assert!(matches!(
+            vegetal_features[0].feature,
+            ConfiguredFeature::RandomPatch(RandomPatchConfiguration {
+                state: LARGE_FERN_LOWER,
+                double_plant: true,
+                ..
+            })
+        ));
+        assert_eq!(
+            vegetal_features[1].feature,
+            ConfiguredFeature::glow_lichen(GlowLichenConfiguration::default_overworld())
+        );
+        let feature = vegetal_features[2];
 
         assert_eq!(feature.step, DecorationStep::VegetalDecoration);
         assert_eq!(

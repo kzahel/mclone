@@ -189,20 +189,28 @@ impl TexturedMeshCatalog {
                 .get(&record.block)
                 .ok_or_else(|| TexturedMeshError::MissingBlockStateAsset(record.block.clone()))?;
             let variant_key = record.variant_key();
-            let variants = asset.variants_for_key(&variant_key).ok_or_else(|| {
-                TexturedMeshError::MissingBlockStateVariant {
-                    block: record.block.clone(),
-                    variant_key: variant_key.clone(),
-                }
-            })?;
-            let variant =
+            let model = if let Some(variants) = asset.variants_for_key(&variant_key) {
                 variants
                     .first()
+                    .map(|variant| &variant.model)
                     .ok_or_else(|| TexturedMeshError::MissingBlockStateVariant {
                         block: record.block.clone(),
-                        variant_key,
-                    })?;
-            let baked = models.bake_model(&variant.model)?;
+                        variant_key: variant_key.clone(),
+                    })?
+            } else if variant_key.is_empty() {
+                asset.model_refs.iter().next().ok_or_else(|| {
+                    TexturedMeshError::MissingBlockStateVariant {
+                        block: record.block.clone(),
+                        variant_key: variant_key.clone(),
+                    }
+                })?
+            } else {
+                return Err(TexturedMeshError::MissingBlockStateVariant {
+                    block: record.block.clone(),
+                    variant_key,
+                });
+            };
+            let baked = models.bake_model(model)?;
             let faces = baked
                 .faces
                 .iter()
@@ -809,6 +817,7 @@ fn base_color(block_id: u8) -> [f32; 3] {
         65 => [0.25, 0.56, 0.60],
         66 => [0.18, 0.24, 0.70],
         67 => [0.16, 0.20, 0.48],
+        70 => [0.42, 0.72, 0.42],
         _ => [0.82, 0.22, 0.70],
     }
 }

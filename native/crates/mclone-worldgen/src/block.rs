@@ -72,6 +72,7 @@ pub const LAPIS_ORE: RawBlockId = 66;
 pub const DEEPSLATE_LAPIS_ORE: RawBlockId = 67;
 pub const LARGE_FERN_LOWER: RawBlockId = 68;
 pub const LARGE_FERN_UPPER: RawBlockId = 69;
+pub const GLOW_LICHEN: RawBlockId = 70;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -99,6 +100,7 @@ impl GeneratedBlockId {
     pub const DEEPSLATE_LAPIS_ORE: Self = Self(DEEPSLATE_LAPIS_ORE);
     pub const LARGE_FERN_LOWER: Self = Self(LARGE_FERN_LOWER);
     pub const LARGE_FERN_UPPER: Self = Self(LARGE_FERN_UPPER);
+    pub const GLOW_LICHEN: Self = Self(GLOW_LICHEN);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -196,6 +198,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         LAPIS_ORE => "minecraft:lapis_ore",
         DEEPSLATE_LAPIS_ORE => "minecraft:deepslate_lapis_ore",
         LARGE_FERN_LOWER | LARGE_FERN_UPPER => "minecraft:large_fern",
+        GLOW_LICHEN => "minecraft:glow_lichen",
         _ => "minecraft:unknown",
     }
 }
