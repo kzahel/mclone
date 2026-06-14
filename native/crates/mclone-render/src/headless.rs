@@ -2,9 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use anyhow::{Context, Result};
-use mclone_mesh::VisibleChunkMesh;
+use mclone_mesh::{TexturedVisibleChunkMesh, VisibleChunkMesh};
 
-use crate::chunk::{ChunkCamera, ChunkDrawResources};
+use crate::chunk::{
+    ChunkCamera, ChunkDrawResources, ChunkTextureAtlas, TexturedChunkDrawResources,
+};
 use crate::gpu_util::{native_backends, optional_gpu_features};
 
 const BYTES_PER_PIXEL: u32 = 4;
@@ -95,6 +97,52 @@ pub fn write_headless_chunk_png(
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_chunk_encoder"),
+    });
+    draw.render(
+        &queue,
+        &mut encoder,
+        &target.view,
+        [width, height],
+        options.camera,
+        options.color,
+    )?;
+    queue.submit(std::iter::once(encoder.finish()));
+
+    let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
+    save_rgba_png(&options.path, width, height, &pixels)?;
+    let stats = mesh.stats();
+
+    Ok(HeadlessChunkReport {
+        path: options.path,
+        width,
+        height,
+        byte_len: pixels.len(),
+        vertex_count: stats.vertex_count,
+        index_count: stats.index_count,
+    })
+}
+
+pub fn write_headless_textured_chunk_png(
+    options: HeadlessChunkOptions,
+    mesh: &TexturedVisibleChunkMesh,
+    atlas: ChunkTextureAtlas<'_>,
+) -> Result<HeadlessChunkReport> {
+    let width = options.width.max(1);
+    let height = options.height.max(1);
+    let (device, queue) = create_headless_device()?;
+    let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
+    let draw = TexturedChunkDrawResources::new(
+        &device,
+        &queue,
+        HEADLESS_FORMAT,
+        width,
+        height,
+        mesh,
+        atlas,
+    )?;
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_headless_textured_chunk_encoder"),
     });
     draw.render(
         &queue,

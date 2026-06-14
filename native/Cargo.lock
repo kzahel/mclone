@@ -1048,6 +1048,7 @@ dependencies = [
 name = "mclone-mesh"
 version = "0.0.0"
 dependencies = [
+ "mclone-assets",
  "mclone-core",
 ]
 
@@ -1057,7 +1058,9 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "env_logger",
+ "image",
  "log",
+ "mclone-assets",
  "mclone-client",
  "mclone-core",
  "mclone-mesh",

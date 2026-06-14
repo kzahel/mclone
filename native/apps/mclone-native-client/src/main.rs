@@ -1,18 +1,27 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
+use mclone_assets::{
+    AssetSource, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
+    FilesystemAssetSource, TextureAtlasPlan,
+};
 use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT,
 };
-use mclone_mesh::{ChunkMeshInput, VisibleChunkMesh, build_visible_chunk_area_mesh};
+use mclone_mesh::{
+    TexturedChunkMeshInput, TexturedMeshCatalog, TexturedVisibleChunkMesh,
+    build_textured_visible_chunk_area_mesh,
+};
 use mclone_net::{LocalTransport, request_server_updates};
 use mclone_protocol::ChunkInterest;
-use mclone_render::chunk::{ChunkCamera, ChunkDrawResources};
+use mclone_render::chunk::{ChunkCamera, ChunkTextureAtlas, TexturedChunkDrawResources};
 use mclone_render::headless::{
-    HeadlessChunkOptions, HeadlessClearOptions, write_headless_chunk_png, write_headless_clear_png,
+    HeadlessChunkOptions, HeadlessClearOptions, write_headless_clear_png,
+    write_headless_textured_chunk_png,
 };
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_server::IntegratedServer;
@@ -57,8 +66,8 @@ fn main() -> Result<()> {
             height,
             scene,
         } => {
-            let mesh = build_scene_mesh(&scene)?;
-            let report = write_headless_chunk_png(
+            let scene_mesh = build_scene_textured_mesh(&scene)?;
+            let report = write_headless_textured_chunk_png(
                 HeadlessChunkOptions {
                     path,
                     width,
@@ -70,10 +79,11 @@ fn main() -> Result<()> {
                         scene.chunk_radius,
                     ),
                 },
-                &mesh,
+                &scene_mesh.mesh,
+                scene_mesh.atlas.as_upload(),
             )?;
             println!(
-                "headless chunk saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
+                "headless textured chunk saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
                 report.path.display(),
                 report.width,
                 report.height,
@@ -246,11 +256,11 @@ fn print_help() {
 }
 
 fn run_window(scene: SceneOptions) -> Result<()> {
-    let mesh = build_scene_mesh(&scene)?;
-    let stats = mesh.stats();
+    let scene_mesh = build_scene_textured_mesh(&scene)?;
+    let stats = scene_mesh.mesh.stats();
     let chunk_count = scene.chunk_span() * scene.chunk_span();
     log::info!(
-        "client-runtime chunk area seed={} center=({}, {}) radius={} remote={:?} chunks={} mesh={} vertices {} indices",
+        "client-runtime textured chunk area seed={} center=({}, {}) radius={} remote={:?} chunks={} mesh={} vertices {} indices atlas={}x{}",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
@@ -258,29 +268,55 @@ fn run_window(scene: SceneOptions) -> Result<()> {
         scene.remote_addr,
         chunk_count,
         stats.vertex_count,
-        stats.index_count
+        stats.index_count,
+        scene_mesh.atlas.width,
+        scene_mesh.atlas.height
     );
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = ChunkApp::new(
-        mesh,
+        scene_mesh,
         ChunkCamera::overview_for_chunk_area(scene.chunk_x, scene.chunk_z, scene.chunk_radius),
     );
     event_loop.run_app(&mut app)?;
     Ok(())
 }
 
-fn build_scene_mesh(scene: &SceneOptions) -> Result<VisibleChunkMesh> {
+#[derive(Clone, Debug)]
+struct SceneTexturedMesh {
+    mesh: TexturedVisibleChunkMesh,
+    atlas: TextureAtlasImage,
+}
+
+#[derive(Clone, Debug)]
+struct TextureAtlasImage {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+impl TextureAtlasImage {
+    fn as_upload(&self) -> ChunkTextureAtlas<'_> {
+        ChunkTextureAtlas {
+            width: self.width,
+            height: self.height,
+            rgba: &self.rgba,
+        }
+    }
+}
+
+fn build_scene_textured_mesh(scene: &SceneOptions) -> Result<SceneTexturedMesh> {
     let client = build_scene_client_runtime(scene)?;
     let chunks = client
         .chunk_snapshots()
-        .map(snapshot_mesh_blocks)
+        .map(snapshot_mesh_block_state_ids)
         .collect::<Result<Vec<_>>>()?;
+    let mesh_assets = load_textured_mesh_assets()?;
     let inputs = chunks
         .iter()
         .map(|chunk| {
-            ChunkMeshInput::new(
+            TexturedChunkMeshInput::new(
                 chunk.chunk_x,
                 chunk.chunk_z,
                 chunk.min_y,
@@ -289,17 +325,20 @@ fn build_scene_mesh(scene: &SceneOptions) -> Result<VisibleChunkMesh> {
             )
         })
         .collect::<Vec<_>>();
-    let mesh = build_visible_chunk_area_mesh(&inputs);
+    let mesh = build_textured_visible_chunk_area_mesh(&inputs, &mesh_assets.catalog)?;
     if mesh.is_empty() {
         bail!(
-            "generated chunk area seed={} center=({}, {}) radius={} produced an empty mesh",
+            "generated chunk area seed={} center=({}, {}) radius={} produced an empty textured mesh",
             scene.seed,
             scene.chunk_x,
             scene.chunk_z,
             scene.chunk_radius
         );
     }
-    Ok(mesh)
+    Ok(SceneTexturedMesh {
+        mesh,
+        atlas: mesh_assets.atlas,
+    })
 }
 
 fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
@@ -336,15 +375,126 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
 }
 
 #[derive(Clone, Debug)]
+struct TexturedMeshAssets {
+    catalog: TexturedMeshCatalog,
+    atlas: TextureAtlasImage,
+}
+
+fn load_textured_mesh_assets() -> Result<TexturedMeshAssets> {
+    let root = extracted_asset_root();
+    if !root.exists() {
+        bail!(
+            "missing extracted Minecraft assets at {}; run ./scripts/decompile-mc.sh from the repository root",
+            root.display()
+        );
+    }
+
+    let source = FilesystemAssetSource::new(root);
+    let registry = BlockStateRegistry::terrain_mvp();
+    let blockstates = BlockStateAssetIndex::load_namespace(&source, "minecraft")
+        .context("failed to load vanilla blockstate assets")?;
+    registry
+        .validate_blockstate_assets(&blockstates)
+        .context("terrain MVP registry is not covered by vanilla blockstates")?;
+    let selected_model_refs = selected_model_refs(&registry, &blockstates)?;
+    let models = BlockModelLibrary::load_model_tree(&source, selected_model_refs.iter().cloned())
+        .context("failed to load vanilla block model tree")?;
+    let materials = models
+        .collect_materials_for_models(selected_model_refs.iter().cloned())
+        .context("failed to collect selected block model materials")?;
+    let atlas_plan = TextureAtlasPlan::build(&source, materials)
+        .context("failed to plan block texture atlas")?;
+    let atlas = stitch_texture_atlas(&source, &atlas_plan)?;
+    let catalog = TexturedMeshCatalog::from_assets(&registry, &blockstates, &models, &atlas_plan)
+        .context("failed to build textured mesh catalog")?;
+
+    Ok(TexturedMeshAssets { catalog, atlas })
+}
+
+fn selected_model_refs(
+    registry: &BlockStateRegistry,
+    blockstates: &BlockStateAssetIndex,
+) -> Result<BTreeSet<mclone_assets::ResourceLocation>> {
+    let mut refs = BTreeSet::new();
+    for record in registry.records() {
+        let asset = blockstates
+            .get(&record.block)
+            .with_context(|| format!("missing blockstate asset for {}", record.block))?;
+        let variant_key = record.variant_key();
+        let variants = asset.variants_for_key(&variant_key).with_context(|| {
+            format!(
+                "missing blockstate variant `{variant_key}` for {}",
+                record.block
+            )
+        })?;
+        if let Some(variant) = variants.first() {
+            refs.insert(variant.model.clone());
+        }
+    }
+    Ok(refs)
+}
+
+fn stitch_texture_atlas(
+    source: &impl AssetSource,
+    plan: &TextureAtlasPlan,
+) -> Result<TextureAtlasImage> {
+    let width = plan.width();
+    let height = plan.height();
+    if width == 0 || height == 0 {
+        bail!("cannot stitch an empty texture atlas");
+    }
+    let mut atlas = vec![0; width as usize * height as usize * 4];
+
+    for sprite in plan.sprites() {
+        let bytes = source
+            .read(&sprite.info.path)?
+            .with_context(|| format!("missing texture {}", sprite.info.path))?;
+        let image = image::load_from_memory(&bytes)
+            .with_context(|| format!("failed to decode texture {}", sprite.info.path))?
+            .to_rgba8();
+        let (sprite_width, sprite_height) = image.dimensions();
+        if sprite_width != sprite.info.width || sprite_height != sprite.info.height {
+            bail!(
+                "texture {} decoded as {}x{} but atlas plan expected {}x{}",
+                sprite.info.path,
+                sprite_width,
+                sprite_height,
+                sprite.info.width,
+                sprite.info.height
+            );
+        }
+
+        let image = image.as_raw();
+        for row in 0..sprite.info.height {
+            let source_start = (row * sprite.info.width * 4) as usize;
+            let source_end = source_start + (sprite.info.width * 4) as usize;
+            let dest_start = (((sprite.y + row) * width + sprite.x) * 4) as usize;
+            let dest_end = dest_start + (sprite.info.width * 4) as usize;
+            atlas[dest_start..dest_end].copy_from_slice(&image[source_start..source_end]);
+        }
+    }
+
+    Ok(TextureAtlasImage {
+        width,
+        height,
+        rgba: atlas,
+    })
+}
+
+fn extracted_asset_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../reference/minecraft-1.17.1/extracted")
+}
+
+#[derive(Clone, Debug)]
 struct MeshChunkBlocks {
     chunk_x: i32,
     chunk_z: i32,
     min_y: i32,
     height: i32,
-    blocks: Vec<u8>,
+    blocks: Vec<mclone_core::BlockStateId>,
 }
 
-fn snapshot_mesh_blocks(snapshot: &ChunkSnapshot) -> Result<MeshChunkBlocks> {
+fn snapshot_mesh_block_state_ids(snapshot: &ChunkSnapshot) -> Result<MeshChunkBlocks> {
     if snapshot.height <= 0 || snapshot.height % SECTION_HEIGHT != 0 {
         bail!(
             "chunk snapshot {:?} has invalid height {}",
@@ -353,7 +503,7 @@ fn snapshot_mesh_blocks(snapshot: &ChunkSnapshot) -> Result<MeshChunkBlocks> {
         );
     }
     let expected_len = snapshot.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
-    let mut blocks = vec![AIR_BLOCK_STATE_ID.0 as u8; expected_len];
+    let mut blocks = vec![AIR_BLOCK_STATE_ID; expected_len];
     let min_section_y = snapshot.min_y / SECTION_HEIGHT;
     let section_count = snapshot.height / SECTION_HEIGHT;
 
@@ -379,12 +529,7 @@ fn snapshot_mesh_blocks(snapshot: &ChunkSnapshot) -> Result<MeshChunkBlocks> {
         }
         let start = section_offset as usize * CHUNK_SECTION_VOLUME;
         for (index, state_id) in unpacked.into_iter().enumerate() {
-            blocks[start + index] = u8::try_from(state_id.0).with_context(|| {
-                format!(
-                    "temporary mesh adapter cannot represent block state id {} as u8",
-                    state_id.0
-                )
-            })?;
+            blocks[start + index] = state_id;
         }
     }
 
@@ -414,11 +559,11 @@ impl SceneOptions {
 }
 
 struct ChunkApp {
-    mesh: VisibleChunkMesh,
+    scene_mesh: SceneTexturedMesh,
     camera: ChunkCamera,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
-    draw: Option<ChunkDrawResources>,
+    draw: Option<TexturedChunkDrawResources>,
     pressed_keys: std::collections::HashSet<KeyCode>,
     orbit_dragging: bool,
     last_cursor: Option<(f64, f64)>,
@@ -426,9 +571,9 @@ struct ChunkApp {
 }
 
 impl ChunkApp {
-    fn new(mesh: VisibleChunkMesh, camera: ChunkCamera) -> Self {
+    fn new(scene_mesh: SceneTexturedMesh, camera: ChunkCamera) -> Self {
         Self {
-            mesh,
+            scene_mesh,
             camera,
             window: None,
             surface: None,
@@ -485,12 +630,14 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
-        let draw = match ChunkDrawResources::new(
+        let draw = match TexturedChunkDrawResources::new(
             &surface.device,
+            &surface.queue,
             surface.config.format,
             surface.config.width,
             surface.config.height,
-            &self.mesh,
+            &self.scene_mesh.mesh,
+            self.scene_mesh.atlas.as_upload(),
         ) {
             Ok(draw) => draw,
             Err(err) => {
@@ -811,18 +958,23 @@ mod tests {
     }
 
     #[test]
-    fn build_scene_mesh_uses_client_runtime_snapshots() {
-        let mesh = build_scene_mesh(&SceneOptions {
+    fn build_scene_textured_mesh_uses_client_runtime_snapshots() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+        let scene_mesh = build_scene_textured_mesh(&SceneOptions {
             chunk_radius: 0,
             ..SceneOptions::default()
         })
         .unwrap();
 
-        assert!(!mesh.is_empty());
+        assert!(!scene_mesh.mesh.is_empty());
+        assert!(scene_mesh.atlas.width > 0);
+        assert!(scene_mesh.atlas.height > 0);
     }
 
     #[test]
-    fn snapshot_mesh_blocks_rehydrates_omitted_air_sections() {
+    fn snapshot_mesh_block_state_ids_rehydrates_omitted_air_sections() {
         let mut block_state_ids = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME * 2];
         block_state_ids[CHUNK_SECTION_VOLUME] = BlockStateId(1);
         let snapshot = ChunkSnapshot::from_block_state_ids(
@@ -834,10 +986,10 @@ mod tests {
             &block_state_ids,
         );
 
-        let mesh_blocks = snapshot_mesh_blocks(&snapshot).unwrap();
+        let mesh_blocks = snapshot_mesh_block_state_ids(&snapshot).unwrap();
 
         assert_eq!(mesh_blocks.blocks.len(), CHUNK_SECTION_VOLUME * 2);
-        assert_eq!(mesh_blocks.blocks[0], 0);
-        assert_eq!(mesh_blocks.blocks[CHUNK_SECTION_VOLUME], 1);
+        assert_eq!(mesh_blocks.blocks[0], AIR_BLOCK_STATE_ID);
+        assert_eq!(mesh_blocks.blocks[CHUNK_SECTION_VOLUME], BlockStateId(1));
     }
 }

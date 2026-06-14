@@ -22,6 +22,7 @@ Landed:
 - browser runtime harness that exercises serialized client/server protocol updates, interest movement, unloads, and WebGPU smoke
 - resource locations, native/web asset sources, blockstate asset indexing, and the current terrain block-state registry
 - blockstate variant parsing, block model parent/texture resolution, baked model face facts, and deterministic texture atlas planning
+- textured native section mesh generation from client snapshots, stitched atlas upload, and textured headless/window rendering
 
 Still missing compared with the TypeScript engine:
 
@@ -29,7 +30,7 @@ Still missing compared with the TypeScript engine:
 - chunk scheduling is still synchronous and surface-stage only
 - persistence is a temporary snapshot format, not Anvil/NBT or browser storage
 - web/WASM has a runtime smoke gate, not browser storage, network transport, or render path
-- no textured Rust render path from baked vanilla model facts
+- no streaming section upload cache, render invalidation, true liquid renderer, or AO/lighted textured path
 - no native lighting, liquids, movement, entities, or broad decorated-world parity
 
 ## Target Horizon
@@ -74,7 +75,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 | [`010-browser-runtime-parity.md`](010-browser-runtime-parity.md) | web runtime | **done** - browser client uses the same `ClientRuntime` and serialized protocol messages against a browser loopback host adapter, with browser storage/transport constraints visible | browser runtime smoke from client replica facts |
 | [`011-block-registry-and-asset-source.md`](011-block-registry-and-asset-source.md) | assets/data | **done** - vanilla-shaped block-state registry scaffold, file/web asset sources, extracted asset loading boundaries | registry and native/web asset fixture tests |
 | [`012-model-baking-and-atlas.md`](012-model-baking-and-atlas.md) | renderer assets | **done** - blockstate/model parse, parent texture resolution, baked face facts, and deterministic atlas planning | baked model/atlas tests over extracted vanilla assets |
-| `013-vanilla-section-meshing.md` | mesh/render | client snapshot to section meshes using baked models, cutout/liquid layer separation, neighbor culling | headless rendered chunk from client snapshot with real textures |
+| [`013-vanilla-section-meshing.md`](013-vanilla-section-meshing.md) | mesh/render | **done** - client snapshot to textured section meshes using baked models, stitched atlas upload, and neighbor culling | headless rendered chunk from client snapshot with real textures |
 | `014-streaming-renderer-and-camera.md` | renderer runtime | visible section upload cache, frustum, render invalidation, debug camera/headless scenario runner | multi-step native headless captures and browser/native window smoke |
 | `015-decoration-framework-foundation.md` | worldgen parity | configured/decorated feature framework, first trees/plants/water features from Rust | oracle/unit coverage plus visible decorated terrain capture |
 | `016-biome-feature-breadth.md` | worldgen parity | biome table coverage, tree family breadth, ores, underground extras, surface vegetation/water families | selected fixture matrix and visual probes |
@@ -87,9 +88,9 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `013-vanilla-section-meshing.md`.
+The next implementation tactical should be `014-streaming-renderer-and-camera.md`.
 
-That slice should consume the baked model and atlas facts from client replica snapshots and produce the first textured native section mesh.
+That slice should move the textured renderer from one synchronous all-scene mesh into section-level mesh ownership, visible-section upload caching, invalidation, and scenario-based camera validation.
 
 ## Deferral Notes
 

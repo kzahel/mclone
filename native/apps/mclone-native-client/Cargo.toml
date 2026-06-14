@@ -8,7 +8,9 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 env_logger.workspace = true
+image.workspace = true
 log.workspace = true
+mclone-assets.workspace = true
 mclone-client.workspace = true
 mclone-core.workspace = true
 mclone-mesh.workspace = true

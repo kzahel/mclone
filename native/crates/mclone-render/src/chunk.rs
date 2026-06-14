@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Vec3};
-use mclone_mesh::VisibleChunkMesh;
+use mclone_mesh::{TexturedVisibleChunkMesh, VisibleChunkMesh};
 use wgpu::util::DeviceExt;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
@@ -8,6 +8,9 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 const VERTEX_FLOAT_COUNT: usize = 7;
 const VERTEX_BYTE_SIZE: wgpu::BufferAddress =
     (VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
+const TEXTURED_VERTEX_FLOAT_COUNT: usize = 9;
+const TEXTURED_VERTEX_BYTE_SIZE: wgpu::BufferAddress =
+    (TEXTURED_VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -155,6 +158,138 @@ impl GpuChunkMesh {
     }
 }
 
+pub struct GpuTexturedChunkMesh {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+}
+
+impl GpuTexturedChunkMesh {
+    pub fn new(device: &wgpu::Device, mesh: &TexturedVisibleChunkMesh) -> Result<Self> {
+        if mesh.is_empty() {
+            bail!("cannot upload an empty textured chunk mesh");
+        }
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mclone_textured_chunk_vertices"),
+            contents: &textured_vertex_bytes(mesh),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("mclone_textured_chunk_indices"),
+            contents: &index_bytes(&mesh.indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        Ok(Self {
+            vertex_buffer,
+            index_buffer,
+            index_count: mesh.indices.len() as u32,
+        })
+    }
+
+    pub fn index_count(&self) -> u32 {
+        self.index_count
+    }
+}
+
+pub struct ChunkTextureAtlas<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: &'a [u8],
+}
+
+struct GpuChunkTextureAtlas {
+    _texture: wgpu::Texture,
+    _view: wgpu::TextureView,
+    _sampler: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
+}
+
+impl GpuChunkTextureAtlas {
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        atlas: ChunkTextureAtlas<'_>,
+    ) -> Result<Self> {
+        let width = atlas.width.max(1);
+        let height = atlas.height.max(1);
+        let expected_len = width as usize * height as usize * 4;
+        if atlas.rgba.len() != expected_len {
+            bail!(
+                "texture atlas has {} bytes; expected {expected_len} for {}x{} RGBA",
+                atlas.rgba.len(),
+                width,
+                height
+            );
+        }
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_chunk_texture_atlas"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: Default::default(),
+                aspect: Default::default(),
+            },
+            atlas.rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&Default::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mclone_chunk_texture_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_chunk_texture_bind_group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+        Ok(Self {
+            _texture: texture,
+            _view: view,
+            _sampler: sampler,
+            bind_group,
+        })
+    }
+}
+
 pub struct DepthTarget {
     _texture: wgpu::Texture,
     pub view: wgpu::TextureView,
@@ -299,6 +434,138 @@ impl ChunkRenderer {
     }
 }
 
+pub struct TexturedChunkRenderer {
+    pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+}
+
+impl TexturedChunkRenderer {
+    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_chunk_textured_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/chunk_textured.wgsl").into()),
+        });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_textured_chunk_uniforms"),
+            size: UNIFORM_BYTE_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_textured_chunk_uniform_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_textured_chunk_uniform_bind_group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_textured_chunk_texture_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_textured_chunk_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout, &texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mclone_textured_chunk_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: TEXTURED_VERTEX_BYTE_SIZE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: 12,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: 20,
+                            shader_location: 2,
+                            format: wgpu::VertexFormat::Float32x4,
+                        },
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
+        Self {
+            pipeline,
+            uniform_buffer,
+            bind_group,
+            texture_bind_group_layout,
+        }
+    }
+}
+
 pub struct ChunkDrawResources {
     renderer: ChunkRenderer,
     mesh: GpuChunkMesh,
@@ -373,10 +640,109 @@ impl ChunkDrawResources {
     }
 }
 
+pub struct TexturedChunkDrawResources {
+    renderer: TexturedChunkRenderer,
+    mesh: GpuTexturedChunkMesh,
+    atlas: GpuChunkTextureAtlas,
+    depth: DepthTarget,
+}
+
+impl TexturedChunkDrawResources {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        mesh: &TexturedVisibleChunkMesh,
+        atlas: ChunkTextureAtlas<'_>,
+    ) -> Result<Self> {
+        let renderer = TexturedChunkRenderer::new(device, color_format);
+        let atlas =
+            GpuChunkTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)
+                .context("failed to upload chunk texture atlas")?;
+        Ok(Self {
+            renderer,
+            mesh: GpuTexturedChunkMesh::new(device, mesh)
+                .context("failed to upload textured chunk mesh")?,
+            atlas,
+            depth: DepthTarget::new(device, width, height),
+        })
+    }
+
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+        self.depth.resize(device, width, height);
+    }
+
+    pub fn index_count(&self) -> u32 {
+        self.mesh.index_count()
+    }
+
+    pub fn render(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        size: [u32; 2],
+        camera: ChunkCamera,
+        clear_color: wgpu::Color,
+    ) -> Result<()> {
+        let view_projection = camera.view_projection(size[0], size[1]);
+        queue.write_buffer(
+            &self.renderer.uniform_buffer,
+            0,
+            &matrix_bytes(view_projection),
+        );
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_textured_chunk_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth.view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.renderer.pipeline);
+        pass.set_bind_group(0, &self.renderer.bind_group, &[]);
+        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
+        pass.set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
+        Ok(())
+    }
+}
+
 fn vertex_bytes(mesh: &VisibleChunkMesh) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(mesh.vertices.len() * VERTEX_FLOAT_COUNT * 4);
     for vertex in &mesh.vertices {
         for value in vertex.position.into_iter().chain(vertex.color) {
+            bytes.extend_from_slice(&value.to_ne_bytes());
+        }
+    }
+    bytes
+}
+
+fn textured_vertex_bytes(mesh: &TexturedVisibleChunkMesh) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(mesh.vertices.len() * TEXTURED_VERTEX_FLOAT_COUNT * 4);
+    for vertex in &mesh.vertices {
+        for value in vertex
+            .position
+            .into_iter()
+            .chain(vertex.uv)
+            .chain(vertex.color)
+        {
             bytes.extend_from_slice(&value.to_ne_bytes());
         }
     }
@@ -403,7 +769,9 @@ fn matrix_bytes(matrix: [[f32; 4]; 4]) -> [u8; 64] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_mesh::{ChunkMeshInput, build_visible_chunk_mesh};
+    use mclone_mesh::{
+        ChunkMeshInput, TexturedChunkVertex, TexturedVisibleChunkMesh, build_visible_chunk_mesh,
+    };
 
     #[test]
     fn camera_matrix_serializes_to_uniform_size() {
@@ -462,5 +830,22 @@ mod tests {
             mesh.vertices.len() as wgpu::BufferAddress * VERTEX_BYTE_SIZE
         );
         assert_eq!(index_bytes(&mesh.indices).len(), mesh.indices.len() * 4);
+    }
+
+    #[test]
+    fn textured_vertex_bytes_match_gpu_layout() {
+        let mesh = TexturedVisibleChunkMesh {
+            vertices: vec![TexturedChunkVertex {
+                position: [1.0, 2.0, 3.0],
+                uv: [0.25, 0.75],
+                color: [1.0, 0.5, 0.25, 1.0],
+            }],
+            indices: vec![0],
+        };
+
+        assert_eq!(
+            textured_vertex_bytes(&mesh).len() as wgpu::BufferAddress,
+            TEXTURED_VERTEX_BYTE_SIZE
+        );
     }
 }
