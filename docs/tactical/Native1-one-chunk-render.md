@@ -75,7 +75,4 @@ cargo run -p mclone-native-client
 
 After one generated chunk renders:
 
-1. add a minimal camera/input controller
-2. add neighbor-aware chunk meshing inputs
-3. render a small chunk area around the origin
-4. start a lighting data path only after unlit geometry is visually stable
+- [`Native2-multichunk-camera.md`](Native2-multichunk-camera.md)

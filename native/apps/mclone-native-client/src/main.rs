@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
-use mclone_mesh::{ChunkMeshInput, VisibleChunkMesh, build_visible_chunk_mesh};
+use mclone_mesh::{ChunkMeshInput, VisibleChunkMesh, build_visible_chunk_area_mesh};
 use mclone_render::chunk::{ChunkCamera, ChunkDrawResources};
 use mclone_render::headless::{
     HeadlessChunkOptions, HeadlessClearOptions, write_headless_chunk_png, write_headless_clear_png,
@@ -10,7 +11,7 @@ use mclone_render::headless::{
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_worldgen::levelgen::generate_overworld_surface_chunk;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
@@ -18,6 +19,8 @@ use winit::window::{Window, WindowId};
 const DEFAULT_SEED: i64 = 12345;
 const DEFAULT_CHUNK_X: i32 = 0;
 const DEFAULT_CHUNK_Z: i32 = 0;
+const DEFAULT_CHUNK_RADIUS: i32 = 1;
+const MAX_CHUNK_RADIUS: i32 = 4;
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -55,7 +58,11 @@ fn main() -> Result<()> {
                     width,
                     height,
                     color: mclone_render::default_clear_color(),
-                    camera: ChunkCamera::overview_for_chunk(scene.chunk_x, scene.chunk_z),
+                    camera: ChunkCamera::overview_for_chunk_area(
+                        scene.chunk_x,
+                        scene.chunk_z,
+                        scene.chunk_radius,
+                    ),
                 },
                 &mesh,
             )?;
@@ -79,6 +86,7 @@ struct SceneOptions {
     seed: i64,
     chunk_x: i32,
     chunk_z: i32,
+    chunk_radius: i32,
 }
 
 impl Default for SceneOptions {
@@ -87,6 +95,7 @@ impl Default for SceneOptions {
             seed: DEFAULT_SEED,
             chunk_x: DEFAULT_CHUNK_X,
             chunk_z: DEFAULT_CHUNK_Z,
+            chunk_radius: DEFAULT_CHUNK_RADIUS,
         }
     }
 }
@@ -144,6 +153,9 @@ impl Cli {
                 "--seed" => scene.seed = parse_i64_arg("--seed", args.next())?,
                 "--chunk-x" => scene.chunk_x = parse_i32_arg("--chunk-x", args.next())?,
                 "--chunk-z" => scene.chunk_z = parse_i32_arg("--chunk-z", args.next())?,
+                "--chunk-radius" => {
+                    scene.chunk_radius = parse_chunk_radius_arg("--chunk-radius", args.next())?
+                }
                 "--help" | "-h" => {
                     print_help();
                     std::process::exit(0);
@@ -202,25 +214,36 @@ fn parse_i64_arg(flag: &str, value: Option<String>) -> Result<i64> {
         .with_context(|| format!("{flag} requires a signed 64-bit integer, got `{value}`"))
 }
 
+fn parse_chunk_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
+    let parsed = parse_i32_arg(flag, value)?;
+    if !(0..=MAX_CHUNK_RADIUS).contains(&parsed) {
+        bail!("{flag} must be between 0 and {MAX_CHUNK_RADIUS}");
+    }
+    Ok(parsed)
+}
+
 fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0]\n\
+           mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
-           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0]\n\n\
-         Window mode renders one generated chunk with a fixed overview camera. Headless modes write PNGs for GPU validation."
+           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\n\
+         Window mode renders generated chunks with WASD/QE, mouse drag, and wheel camera controls. Headless modes write PNGs for GPU validation."
     );
 }
 
 fn run_window(scene: SceneOptions) -> Result<()> {
     let mesh = build_scene_mesh(scene)?;
     let stats = mesh.stats();
+    let chunk_count = scene.chunk_span() * scene.chunk_span();
     log::info!(
-        "generated chunk seed={} chunk=({}, {}) mesh={} vertices {} indices",
+        "generated chunk area seed={} center=({}, {}) radius={} chunks={} mesh={} vertices {} indices",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
+        scene.chunk_radius,
+        chunk_count,
         stats.vertex_count,
         stats.index_count
     );
@@ -229,30 +252,55 @@ fn run_window(scene: SceneOptions) -> Result<()> {
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut app = ChunkApp::new(
         mesh,
-        ChunkCamera::overview_for_chunk(scene.chunk_x, scene.chunk_z),
+        ChunkCamera::overview_for_chunk_area(scene.chunk_x, scene.chunk_z, scene.chunk_radius),
     );
     event_loop.run_app(&mut app)?;
     Ok(())
 }
 
 fn build_scene_mesh(scene: SceneOptions) -> Result<VisibleChunkMesh> {
-    let chunk = generate_overworld_surface_chunk(scene.seed, scene.chunk_x, scene.chunk_z);
-    let mesh = build_visible_chunk_mesh(ChunkMeshInput::new(
-        chunk.chunk_x,
-        chunk.chunk_z,
-        chunk.min_y,
-        chunk.height,
-        chunk.blocks(),
-    ));
+    let chunks = scene
+        .chunk_positions()
+        .map(|(chunk_x, chunk_z)| generate_overworld_surface_chunk(scene.seed, chunk_x, chunk_z))
+        .collect::<Vec<_>>();
+    let inputs = chunks
+        .iter()
+        .map(|chunk| {
+            ChunkMeshInput::new(
+                chunk.chunk_x,
+                chunk.chunk_z,
+                chunk.min_y,
+                chunk.height,
+                chunk.blocks(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mesh = build_visible_chunk_area_mesh(&inputs);
     if mesh.is_empty() {
         bail!(
-            "generated chunk seed={} chunk=({}, {}) produced an empty mesh",
+            "generated chunk area seed={} center=({}, {}) radius={} produced an empty mesh",
             scene.seed,
             scene.chunk_x,
-            scene.chunk_z
+            scene.chunk_z,
+            scene.chunk_radius
         );
     }
     Ok(mesh)
+}
+
+impl SceneOptions {
+    fn chunk_span(self) -> i32 {
+        self.chunk_radius * 2 + 1
+    }
+
+    fn chunk_positions(self) -> impl Iterator<Item = (i32, i32)> {
+        let min_x = self.chunk_x - self.chunk_radius;
+        let max_x = self.chunk_x + self.chunk_radius;
+        let min_z = self.chunk_z - self.chunk_radius;
+        let max_z = self.chunk_z + self.chunk_radius;
+        (min_x..=max_x)
+            .flat_map(move |chunk_x| (min_z..=max_z).map(move |chunk_z| (chunk_x, chunk_z)))
+    }
 }
 
 struct ChunkApp {
@@ -261,6 +309,10 @@ struct ChunkApp {
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
     draw: Option<ChunkDrawResources>,
+    pressed_keys: std::collections::HashSet<KeyCode>,
+    orbit_dragging: bool,
+    last_cursor: Option<(f64, f64)>,
+    last_frame: Instant,
 }
 
 impl ChunkApp {
@@ -271,6 +323,10 @@ impl ChunkApp {
             window: None,
             surface: None,
             draw: None,
+            pressed_keys: std::collections::HashSet::new(),
+            orbit_dragging: false,
+            last_cursor: None,
+            last_frame: Instant::now(),
         }
     }
 
@@ -278,6 +334,20 @@ impl ChunkApp {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
+    }
+
+    fn update_camera_from_keys(&mut self) {
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.05);
+        self.last_frame = now;
+
+        let right = key_axis(&self.pressed_keys, KeyCode::KeyD, KeyCode::KeyA);
+        let up = key_axis(&self.pressed_keys, KeyCode::KeyE, KeyCode::KeyQ);
+        let forward = key_axis(&self.pressed_keys, KeyCode::KeyW, KeyCode::KeyS);
+        let boosted = self.pressed_keys.contains(&KeyCode::ShiftLeft)
+            || self.pressed_keys.contains(&KeyCode::ShiftRight);
+        let speed = if boosted { 95.0 } else { 32.0 };
+        self.camera.move_local(right, up, forward, speed * dt);
     }
 }
 
@@ -339,11 +409,55 @@ impl ApplicationHandler for ChunkApp {
                 self.request_redraw();
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) {
-                    event_loop.exit();
+                if let PhysicalKey::Code(key_code) = event.physical_key {
+                    if key_code == KeyCode::Escape {
+                        event_loop.exit();
+                        return;
+                    }
+                    match event.state {
+                        ElementState::Pressed => {
+                            self.pressed_keys.insert(key_code);
+                        }
+                        ElementState::Released => {
+                            self.pressed_keys.remove(&key_code);
+                        }
+                    }
+                    self.request_redraw();
                 }
             }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if button == MouseButton::Left || button == MouseButton::Right {
+                    self.orbit_dragging = state == ElementState::Pressed;
+                    self.last_cursor = None;
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let cursor = (position.x, position.y);
+                if self.orbit_dragging {
+                    if let Some(previous) = self.last_cursor {
+                        let dx = (cursor.0 - previous.0) as f32;
+                        let dy = (cursor.1 - previous.1) as f32;
+                        self.camera.orbit(-dx * 0.006, -dy * 0.004);
+                        self.request_redraw();
+                    }
+                    self.last_cursor = Some(cursor);
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let amount = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y * 0.12,
+                    MouseScrollDelta::PixelDelta(position) => position.y as f32 * 0.001,
+                };
+                self.camera.zoom(amount);
+                self.request_redraw();
+            }
+            WindowEvent::Focused(false) => {
+                self.pressed_keys.clear();
+                self.orbit_dragging = false;
+                self.last_cursor = None;
+            }
             WindowEvent::RedrawRequested => {
+                self.update_camera_from_keys();
                 let result = {
                     let (Some(surface), Some(draw)) = (&mut self.surface, &mut self.draw) else {
                         return;
@@ -373,6 +487,16 @@ impl ApplicationHandler for ChunkApp {
             _ => {}
         }
     }
+}
+
+fn key_axis(
+    keys: &std::collections::HashSet<KeyCode>,
+    positive: KeyCode,
+    negative: KeyCode,
+) -> f32 {
+    let positive = keys.contains(&positive) as i32;
+    let negative = keys.contains(&negative) as i32;
+    (positive - negative) as f32
 }
 
 #[cfg(test)]
@@ -457,8 +581,50 @@ mod tests {
                     seed: -9,
                     chunk_x: 2,
                     chunk_z: -3,
+                    chunk_radius: DEFAULT_CHUNK_RADIUS,
                 },
             }
         );
+    }
+
+    #[test]
+    fn cli_parses_chunk_radius() {
+        let cli = Cli::parse([
+            "--headless-chunk".to_owned(),
+            "/tmp/mclone-chunk.png".to_owned(),
+            "--chunk-radius".to_owned(),
+            "2".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessChunk {
+                path: PathBuf::from("/tmp/mclone-chunk.png"),
+                width: 640,
+                height: 480,
+                scene: SceneOptions {
+                    chunk_radius: 2,
+                    ..SceneOptions::default()
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn scene_chunk_positions_cover_square_radius() {
+        let positions = SceneOptions {
+            seed: 0,
+            chunk_x: -2,
+            chunk_z: 3,
+            chunk_radius: 1,
+        }
+        .chunk_positions()
+        .collect::<Vec<_>>();
+
+        assert_eq!(positions.len(), 9);
+        assert!(positions.contains(&(-3, 2)));
+        assert!(positions.contains(&(-2, 3)));
+        assert!(positions.contains(&(-1, 4)));
     }
 }

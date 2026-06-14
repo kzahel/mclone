@@ -22,15 +22,29 @@ pub struct ChunkCamera {
 
 impl ChunkCamera {
     pub fn overview_for_chunk(chunk_x: i32, chunk_z: i32) -> Self {
-        let center_x = chunk_x as f32 * 16.0 + 8.0;
-        let center_z = chunk_z as f32 * 16.0 + 8.0;
+        Self::overview_for_chunk_area(chunk_x, chunk_z, 0)
+    }
+
+    pub fn overview_for_chunk_area(
+        center_chunk_x: i32,
+        center_chunk_z: i32,
+        chunk_radius: i32,
+    ) -> Self {
+        let radius = chunk_radius.max(0);
+        let scale = 1.0 + radius as f32 * 1.1;
+        let center_x = center_chunk_x as f32 * 16.0 + 8.0;
+        let center_z = center_chunk_z as f32 * 16.0 + 8.0;
         Self {
-            eye: [center_x + 54.0, 116.0, center_z - 66.0],
+            eye: [
+                center_x + 54.0 * scale,
+                116.0 + 12.0 * (scale - 1.0),
+                center_z - 66.0 * scale,
+            ],
             target: [center_x, 48.0, center_z],
             up: [0.0, 1.0, 0.0],
-            fov_y_radians: 56.0_f32.to_radians(),
+            fov_y_radians: 58.0_f32.to_radians(),
             z_near: 0.1,
-            z_far: 420.0,
+            z_far: 600.0 * scale,
         }
     }
 
@@ -48,6 +62,63 @@ impl ChunkCamera {
             self.z_far,
         );
         (projection * view).to_cols_array_2d()
+    }
+
+    pub fn orbit(&mut self, yaw_delta: f32, pitch_delta: f32) {
+        let target = Vec3::from_array(self.target);
+        let mut offset = Vec3::from_array(self.eye) - target;
+        if offset.length_squared() <= f32::EPSILON {
+            return;
+        }
+
+        offset = Mat4::from_rotation_y(yaw_delta).transform_vector3(offset);
+        let forward = (-offset).normalize();
+        let right = forward.cross(Vec3::Y).normalize_or_zero();
+        if right.length_squared() > f32::EPSILON {
+            let pitched = Mat4::from_axis_angle(right, pitch_delta).transform_vector3(offset);
+            let pitched_forward = (-pitched).normalize();
+            if pitched_forward.dot(Vec3::Y).abs() < 0.96 {
+                offset = pitched;
+            }
+        }
+
+        self.eye = (target + offset).to_array();
+    }
+
+    pub fn move_local(&mut self, right_axis: f32, up_axis: f32, forward_axis: f32, distance: f32) {
+        if distance <= 0.0 {
+            return;
+        }
+        let (forward, right, up) = self.basis();
+        let direction = right * right_axis + up * up_axis + forward * forward_axis;
+        let Some(direction) = direction.try_normalize() else {
+            return;
+        };
+        let delta = direction * distance;
+        self.eye = (Vec3::from_array(self.eye) + delta).to_array();
+        self.target = (Vec3::from_array(self.target) + delta).to_array();
+    }
+
+    pub fn zoom(&mut self, amount: f32) {
+        if !amount.is_finite() {
+            return;
+        }
+        let target = Vec3::from_array(self.target);
+        let eye = Vec3::from_array(self.eye);
+        let offset = eye - target;
+        let distance = offset.length();
+        if distance <= f32::EPSILON {
+            return;
+        }
+        let new_distance = (distance * (1.0 - amount).clamp(0.2, 5.0)).clamp(8.0, 900.0);
+        self.eye = (target + offset / distance * new_distance).to_array();
+    }
+
+    fn basis(self) -> (Vec3, Vec3, Vec3) {
+        let forward = (Vec3::from_array(self.target) - Vec3::from_array(self.eye)).normalize();
+        let right = forward.cross(Vec3::Y).normalize_or_zero();
+        let up = right.cross(forward).normalize_or_zero();
+        (forward, right, up)
     }
 }
 
@@ -342,6 +413,42 @@ mod tests {
             UNIFORM_BYTE_SIZE
         );
         assert!(matrix.into_iter().flatten().all(f32::is_finite));
+    }
+
+    #[test]
+    fn area_overview_camera_targets_center_chunk() {
+        let camera = ChunkCamera::overview_for_chunk_area(2, -3, 1);
+
+        assert_eq!(camera.target, [40.0, 48.0, -40.0]);
+        assert!(camera.eye[0] > camera.target[0]);
+        assert!(camera.eye[2] < camera.target[2]);
+    }
+
+    #[test]
+    fn orbit_preserves_target_and_distance() {
+        let mut camera = ChunkCamera::overview_for_chunk(0, 0);
+        let target = camera.target;
+        let before = (Vec3::from_array(camera.eye) - Vec3::from_array(camera.target)).length();
+
+        camera.orbit(0.25, -0.1);
+
+        let after = (Vec3::from_array(camera.eye) - Vec3::from_array(camera.target)).length();
+        assert_eq!(camera.target, target);
+        assert!((before - after).abs() < 0.001);
+    }
+
+    #[test]
+    fn local_move_translates_eye_and_target_together() {
+        let mut camera = ChunkCamera::overview_for_chunk(0, 0);
+        let eye = Vec3::from_array(camera.eye);
+        let target = Vec3::from_array(camera.target);
+
+        camera.move_local(1.0, 0.0, 0.0, 3.0);
+
+        let eye_delta = Vec3::from_array(camera.eye) - eye;
+        let target_delta = Vec3::from_array(camera.target) - target;
+        assert!((eye_delta - target_delta).length() < 0.001);
+        assert!((eye_delta.length() - 3.0).abs() < 0.001);
     }
 
     #[test]

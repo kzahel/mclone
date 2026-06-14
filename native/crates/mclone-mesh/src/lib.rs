@@ -76,9 +76,24 @@ impl<'a> ChunkMeshInput<'a> {
 }
 
 pub fn build_visible_chunk_mesh(input: ChunkMeshInput<'_>) -> VisibleChunkMesh {
+    build_visible_chunk_area_mesh(&[input])
+}
+
+pub fn build_visible_chunk_area_mesh(inputs: &[ChunkMeshInput<'_>]) -> VisibleChunkMesh {
     let mut mesh = VisibleChunkMesh::default();
-    let world_origin_x = input.chunk_x * CHUNK_WIDTH;
-    let world_origin_z = input.chunk_z * CHUNK_WIDTH;
+    for input in inputs {
+        add_chunk_to_mesh(&mut mesh, *input, inputs);
+    }
+    mesh
+}
+
+fn add_chunk_to_mesh(
+    mesh: &mut VisibleChunkMesh,
+    input: ChunkMeshInput<'_>,
+    area: &[ChunkMeshInput<'_>],
+) {
+    let world_origin_x = chunk_world_origin(input.chunk_x);
+    let world_origin_z = chunk_world_origin(input.chunk_z);
 
     for local_y in 0..input.height {
         for local_z in 0..CHUNK_WIDTH {
@@ -92,20 +107,19 @@ pub fn build_visible_chunk_mesh(input: ChunkMeshInput<'_>) -> VisibleChunkMesh {
                 let world_y = input.min_y + local_y;
                 let world_z = world_origin_z + local_z;
                 for face in FACES {
-                    let neighbor = input.block_at_or_air(
-                        local_x + face.neighbor[0],
-                        local_y + face.neighbor[1],
-                        local_z + face.neighbor[2],
+                    let neighbor = block_at_world_or_air(
+                        area,
+                        world_x + face.neighbor[0],
+                        world_y + face.neighbor[1],
+                        world_z + face.neighbor[2],
                     );
                     if neighbor == AIR_BLOCK_ID {
-                        add_face(&mut mesh, world_x, world_y, world_z, block_id, face);
+                        add_face(mesh, world_x, world_y, world_z, block_id, face);
                     }
                 }
             }
         }
     }
-
-    mesh
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -256,6 +270,22 @@ fn block_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
     ((local_y << 8) | (local_z << 4) | local_x) as usize
 }
 
+fn block_at_world_or_air(inputs: &[ChunkMeshInput<'_>], world_x: i32, y: i32, world_z: i32) -> u8 {
+    let chunk_x = world_x.div_euclid(CHUNK_WIDTH);
+    let chunk_z = world_z.div_euclid(CHUNK_WIDTH);
+    let local_x = world_x.rem_euclid(CHUNK_WIDTH);
+    let local_z = world_z.rem_euclid(CHUNK_WIDTH);
+    inputs
+        .iter()
+        .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
+        .map(|input| input.block_at_or_air(local_x, y - input.min_y, local_z))
+        .unwrap_or(AIR_BLOCK_ID)
+}
+
+fn chunk_world_origin(chunk_coord: i32) -> i32 {
+    chunk_coord * CHUNK_WIDTH
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,6 +331,28 @@ mod tests {
             mesh.vertices
                 .iter()
                 .any(|vertex| vertex.position == [32.0, 4.0, -16.0])
+        );
+    }
+
+    #[test]
+    fn area_mesh_culls_faces_across_chunk_boundaries() {
+        let left = chunk_blocks(16, &[(15, 0, 0, 1)]);
+        let right = chunk_blocks(16, &[(0, 0, 0, 1)]);
+        let mesh = build_visible_chunk_area_mesh(&[
+            ChunkMeshInput::new(0, 0, 0, 16, &left),
+            ChunkMeshInput::new(1, 0, 0, 16, &right),
+        ]);
+
+        assert_eq!(mesh.stats().vertex_count, 40);
+        assert_eq!(mesh.stats().index_count, 60);
+    }
+
+    #[test]
+    fn area_mesh_uses_euclidean_chunk_coordinates_for_negative_world_positions() {
+        let chunk = chunk_blocks(16, &[(15, 0, 15, 1)]);
+        assert_eq!(
+            block_at_world_or_air(&[ChunkMeshInput::new(-1, -1, 0, 16, &chunk)], -1, 0, -1),
+            1
         );
     }
 }
