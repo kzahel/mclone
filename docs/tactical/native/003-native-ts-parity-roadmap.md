@@ -24,6 +24,7 @@ Landed:
 - blockstate variant parsing, block model parent/texture resolution, baked model face facts, and deterministic texture atlas planning
 - textured native section mesh generation from client snapshots, stitched atlas upload, and textured headless/window rendering
 - section-keyed textured render meshes, keyed GPU upload ownership, and repeatable native headless camera scenarios
+- Java-shaped configured/decorated feature execution, starter oak trees, grass/flower patches, and default `Features` chunk snapshots
 
 Still missing compared with the TypeScript engine:
 
@@ -32,7 +33,7 @@ Still missing compared with the TypeScript engine:
 - persistence is a temporary snapshot format, not Anvil/NBT or browser storage
 - web/WASM has a runtime smoke gate, not browser storage, network transport, or render path
 - no true frustum rejection, dirty-only section upload diffs, true liquid renderer, or AO/lighted textured path
-- no native lighting, liquids, movement, entities, or broad decorated-world parity
+- no native lighting, liquids, movement, entities, biome feature breadth, or broad decorated-world parity
 
 ## Target Horizon
 
@@ -78,7 +79,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 | [`012-model-baking-and-atlas.md`](012-model-baking-and-atlas.md) | renderer assets | **done** - blockstate/model parse, parent texture resolution, baked face facts, and deterministic atlas planning | baked model/atlas tests over extracted vanilla assets |
 | [`013-vanilla-section-meshing.md`](013-vanilla-section-meshing.md) | mesh/render | **done** - client snapshot to textured section meshes using baked models, stitched atlas upload, and neighbor culling | headless rendered chunk from client snapshot with real textures |
 | [`014-streaming-renderer-and-camera.md`](014-streaming-renderer-and-camera.md) | renderer runtime | **done** - section-keyed textured render meshes, keyed GPU upload ownership, full-set render invalidation, and debug camera/headless scenario runner; true frustum/dirty-only diffs deferred | multi-step native headless captures and browser/native window smoke |
-| `015-decoration-framework-foundation.md` | worldgen parity | configured/decorated feature framework, first trees/plants/water features from Rust | oracle/unit coverage plus visible decorated terrain capture |
+| [`015-decoration-framework-foundation.md`](015-decoration-framework-foundation.md) | worldgen parity | **done** - configured/decorated feature framework, starter trees/plants, feature snapshots, and visible decorated terrain capture; full water/lake parity deferred behind liquid rendering | oracle/unit coverage plus visible decorated terrain capture |
 | `016-biome-feature-breadth.md` | worldgen parity | biome table coverage, tree family breadth, ores, underground extras, surface vegetation/water families | selected fixture matrix and visual probes |
 | `017-structures-foundation.md` | worldgen parity | status-aware structure starts/references, first true structure, template/block-entity scaffolding | server-backed fixture diff for first structure slice |
 | `018-lighting-pipeline.md` | lighting | `DataLayer`, light sections, solver/service boundary, initial light facts, renderer consumption | light fixture tests and non-fullbright terrain capture |
@@ -89,9 +90,9 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `015-decoration-framework-foundation.md`.
+The next implementation tactical should be `016-biome-feature-breadth.md`.
 
-That slice should start broad worldgen parity again now that the native renderer has a section-level runtime boundary. Focus on the configured/decorated feature framework and the first visible feature families rather than further local renderer polish.
+That slice should replace the starter feature list with biome-aware feature tables, add tree-family breadth and visible vegetation families, and start selected oracle coverage for decorated chunks.
 
 ## Deferral Notes
 

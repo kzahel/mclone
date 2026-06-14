@@ -6,7 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
-use mclone_worldgen::levelgen::generate_overworld_surface_chunk;
+use mclone_worldgen::levelgen::{
+    generate_overworld_features_chunk, generate_overworld_surface_chunk,
+};
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
 };
@@ -207,7 +209,7 @@ impl ChunkScheduler {
         }
 
         for pos in desired_chunks {
-            events.extend(self.schedule_chunk(pos, ChunkStatus::Surface)?);
+            events.extend(self.schedule_chunk(pos, ChunkStatus::Features)?);
         }
 
         Ok(events)
@@ -286,7 +288,7 @@ impl ChunkScheduler {
                 step: ChunkStatusStep::Scheduled,
             });
 
-            if status == ChunkStatus::Surface {
+            if status == ChunkStatus::Surface && target_status == ChunkStatus::Surface {
                 if let Some(snapshot) = self.load_stored_snapshot(pos, target_status)? {
                     self.mark_snapshot_ready(
                         pos,
@@ -308,6 +310,35 @@ impl ChunkScheduler {
 
                 let chunk = generate_overworld_surface_chunk(self.seed, pos.x, pos.z);
                 let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Surface);
+                self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
+                events.push(ChunkSchedulerEvent::StatusChanged {
+                    pos,
+                    status,
+                    step: ChunkStatusStep::Ready,
+                });
+                events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+            } else if status == ChunkStatus::Features {
+                if let Some(snapshot) = self.load_stored_snapshot(pos, target_status)? {
+                    self.mark_snapshot_ready(
+                        pos,
+                        snapshot.clone(),
+                        ChunkResidency::LoadedFromStore,
+                        false,
+                    );
+                    events.push(ChunkSchedulerEvent::StatusChanged {
+                        pos,
+                        status,
+                        step: ChunkStatusStep::Ready,
+                    });
+                    events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+                    continue;
+                }
+
+                let revision = ChunkRevision(self.next_revision);
+                self.next_revision += 1;
+
+                let chunk = generate_overworld_features_chunk(self.seed, pos.x, pos.z);
+                let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
                 self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
                 events.push(ChunkSchedulerEvent::StatusChanged {
                     pos,
@@ -553,18 +584,20 @@ mod tests {
                 (ChunkStatus::Terrain, ChunkStatusStep::Ready),
                 (ChunkStatus::Surface, ChunkStatusStep::Scheduled),
                 (ChunkStatus::Surface, ChunkStatusStep::Ready),
+                (ChunkStatus::Features, ChunkStatusStep::Scheduled),
+                (ChunkStatus::Features, ChunkStatusStep::Ready),
             ]
         );
         assert!(matches!(
             events.last(),
             Some(ChunkSchedulerEvent::SnapshotReady(snapshot))
                 if snapshot.pos == ChunkPos::new(0, 0)
-                    && snapshot.status == ChunkStatus::Surface
+                    && snapshot.status == ChunkStatus::Features
         ));
 
         let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
-        assert_eq!(holder.target_status(), Some(ChunkStatus::Surface));
-        assert_eq!(holder.ready_status_count(), 2);
+        assert_eq!(holder.target_status(), Some(ChunkStatus::Features));
+        assert_eq!(holder.ready_status_count(), 3);
         assert_eq!(
             holder.status_slot(ChunkStatus::Terrain),
             Some(&ChunkStatusSlot {
@@ -577,6 +610,14 @@ mod tests {
             holder.status_slot(ChunkStatus::Surface),
             Some(&ChunkStatusSlot {
                 status: ChunkStatus::Surface,
+                step: ChunkStatusStep::Ready,
+                revision: None,
+            })
+        );
+        assert_eq!(
+            holder.status_slot(ChunkStatus::Features),
+            Some(&ChunkStatusSlot {
+                status: ChunkStatus::Features,
                 step: ChunkStatusStep::Ready,
                 revision: Some(ChunkRevision(1)),
             })
@@ -591,7 +632,7 @@ mod tests {
             radius_chunks: 0,
         };
 
-        assert_eq!(scheduler.apply_interest(interest.clone()).unwrap().len(), 5);
+        assert_eq!(scheduler.apply_interest(interest.clone()).unwrap().len(), 7);
         assert_eq!(scheduler.apply_interest(interest).unwrap(), Vec::new());
         assert_eq!(scheduler.loaded_chunk_count(), 1);
     }
@@ -698,8 +739,8 @@ mod tests {
                     pos: ChunkPos::new(0, 0)
                 },
                 ServerUpdate::ChunkSnapshot(
-                    generate_overworld_surface_chunk(12_345, 1, 0)
-                        .to_chunk_snapshot(ChunkRevision(2), ChunkStatus::Surface)
+                    generate_overworld_features_chunk(12_345, 1, 0)
+                        .to_chunk_snapshot(ChunkRevision(2), ChunkStatus::Features)
                 )
             ]
         );

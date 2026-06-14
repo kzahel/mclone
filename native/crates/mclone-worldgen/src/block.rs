@@ -36,6 +36,11 @@ pub const PACKED_ICE: RawBlockId = 35;
 pub const RED_SAND: RawBlockId = 38;
 pub const ICE: RawBlockId = 39;
 pub const SNOW_BLOCK: RawBlockId = 40;
+pub const OAK_LOG: RawBlockId = 41;
+pub const OAK_LEAVES: RawBlockId = 42;
+pub const GRASS: RawBlockId = 43;
+pub const DANDELION: RawBlockId = 44;
+pub const POPPY: RawBlockId = 45;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -107,6 +112,11 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         RED_SAND => "minecraft:red_sand",
         ICE => "minecraft:ice",
         SNOW_BLOCK => "minecraft:snow_block",
+        OAK_LOG => "minecraft:oak_log",
+        OAK_LEAVES => "minecraft:oak_leaves",
+        GRASS => "minecraft:grass",
+        DANDELION => "minecraft:dandelion",
+        POPPY => "minecraft:poppy",
         _ => "minecraft:unknown",
     }
 }

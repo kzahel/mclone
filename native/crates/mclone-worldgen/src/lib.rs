@@ -3,6 +3,7 @@
 pub mod biome;
 pub mod block;
 pub mod carver;
+pub mod feature;
 pub mod levelgen;
 pub mod noise;
 pub mod placement;

@@ -342,6 +342,7 @@ fn normalized_rotation(value: i32) -> AssetResult<i32> {
 
 const EMPTY_PROPS: &[(&str, &str)] = &[];
 const SNOWY_FALSE: &[(&str, &str)] = &[("snowy", "false")];
+const AXIS_Y: &[(&str, &str)] = &[("axis", "y")];
 
 const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (0, "minecraft:air", EMPTY_PROPS),
@@ -378,6 +379,11 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (38, "minecraft:red_sand", EMPTY_PROPS),
     (39, "minecraft:ice", EMPTY_PROPS),
     (40, "minecraft:snow_block", EMPTY_PROPS),
+    (41, "minecraft:oak_log", AXIS_Y),
+    (42, "minecraft:oak_leaves", EMPTY_PROPS),
+    (43, "minecraft:grass", EMPTY_PROPS),
+    (44, "minecraft:dandelion", EMPTY_PROPS),
+    (45, "minecraft:poppy", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -389,7 +395,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 34);
+        assert_eq!(registry.len(), 39);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -401,6 +407,14 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:stone"),
             Some(BlockStateId(1))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(41)).unwrap().canonical_key(),
+            "minecraft:oak_log[axis=y]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:poppy"),
+            Some(BlockStateId(45))
         );
     }
 
