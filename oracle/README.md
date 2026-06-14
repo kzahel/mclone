@@ -184,6 +184,7 @@ Options:
 - `--stop-status full` continues the run until the target 3x3 reaches `FULL`.
 - `--record-radius 12` records the wider dependency-window event stream instead of only the target 3x3.
 - `--timeout-seconds <n>` changes the server-process timeout.
+- `--probe-target-tree-blocks true` switches `FEATURES` decoration to feature-by-feature probe mode and records all target-chunk `spruce_log` / `spruce_leaves` blocks after each configured feature. This is intended for focused taiga tree diagnostics; it is too verbose for the committed scheduler-order fixture.
 
 The child JVM is pinned with `-XX:ActiveProcessorCount=2` so vanilla's background executor has one worker, and `-XX:hashCode=3` so identity-hashed scheduler collections iterate reproducibly. In sandboxed environments the temporary server may need elevated permission to bind its localhost listener.
 

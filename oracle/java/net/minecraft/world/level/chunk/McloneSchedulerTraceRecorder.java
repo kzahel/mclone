@@ -20,6 +20,7 @@ import net.minecraft.core.Registry;
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 final class McloneSchedulerTraceRecorder {
@@ -35,6 +36,7 @@ final class McloneSchedulerTraceRecorder {
    private static final int RECORD_RADIUS = parseIntProperty("mclone.schedulerTrace.recordRadius", TARGET_RADIUS);
    private static final String STOP_STATUS = System.getProperty("mclone.schedulerTrace.stopStatus", "features").toLowerCase(Locale.ROOT);
    private static final List<ProbeBlock> PROBE_BLOCKS = parseProbeBlocks(System.getProperty("mclone.schedulerTrace.probeBlocks", ""));
+   private static final boolean PROBE_TARGET_TREE_BLOCKS = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeTargetTreeBlocks", "false"));
    private static final List<Map<String, Object>> EVENTS = new ArrayList<>();
    private static final Set<String> TARGET_STOP_COMPLETIONS = new LinkedHashSet<>();
    private static long sequence;
@@ -72,6 +74,10 @@ final class McloneSchedulerTraceRecorder {
       return !PROBE_BLOCKS.isEmpty();
    }
 
+   static boolean hasFeatureProbes() {
+      return hasProbeBlocks() || PROBE_TARGET_TREE_BLOCKS;
+   }
+
    static synchronized void recordFeatureProbe(
       WorldGenRegion region,
       int stepIndex,
@@ -80,7 +86,7 @@ final class McloneSchedulerTraceRecorder {
       String featureType,
       int randomCount
    ) {
-      if (!ENABLED || written || PROBE_BLOCKS.isEmpty()) {
+      if (!ENABLED || written || !hasFeatureProbes()) {
          return;
       }
 
@@ -107,7 +113,9 @@ final class McloneSchedulerTraceRecorder {
       event.put("featureType", featureType);
       event.put("randomCount", randomCount);
       event.put("thread", Thread.currentThread().getName());
-      appendProbeBlocks(event, region.getChunk(TARGET_CHUNK_X, TARGET_CHUNK_Z, ChunkStatus.EMPTY, false));
+      ChunkAccess target = region.getChunk(TARGET_CHUNK_X, TARGET_CHUNK_Z, ChunkStatus.EMPTY, false);
+      appendProbeBlocks(event, target);
+      appendTargetTreeBlocks(event, target);
       EVENTS.add(event);
    }
 
@@ -204,7 +212,7 @@ final class McloneSchedulerTraceRecorder {
    }
 
    private static void appendProbeBlocks(Map<String, Object> event, ChunkAccess target) {
-      if (target == null) {
+      if (target == null || PROBE_BLOCKS.isEmpty()) {
          return;
       }
 
@@ -224,6 +232,33 @@ final class McloneSchedulerTraceRecorder {
          probes.add(row);
       }
       event.put("probeBlocks", probes);
+   }
+
+   private static void appendTargetTreeBlocks(Map<String, Object> event, ChunkAccess target) {
+      if (!PROBE_TARGET_TREE_BLOCKS || target == null) {
+         return;
+      }
+
+      List<Map<String, Object>> treeBlocks = new ArrayList<>();
+      for (int y = target.getMinBuildHeight(); y < target.getMaxBuildHeight(); y++) {
+         for (int localZ = 0; localZ < 16; localZ++) {
+            for (int localX = 0; localX < 16; localX++) {
+               BlockPos pos = new BlockPos((TARGET_CHUNK_X << 4) + localX, y, (TARGET_CHUNK_Z << 4) + localZ);
+               BlockState state = target.getBlockState(pos);
+               if (state.getBlock() != Blocks.SPRUCE_LOG && state.getBlock() != Blocks.SPRUCE_LEAVES) {
+                  continue;
+               }
+
+               Map<String, Object> row = new LinkedHashMap<>();
+               row.put("localX", localX);
+               row.put("y", y);
+               row.put("localZ", localZ);
+               row.put("block", Registry.BLOCK.getKey(state.getBlock()).toString());
+               treeBlocks.add(row);
+            }
+         }
+      }
+      event.put("targetTreeBlocks", treeBlocks);
    }
 
    private static List<ProbeBlock> parseProbeBlocks(String raw) {
@@ -302,7 +337,8 @@ final class McloneSchedulerTraceRecorder {
       root.put("sourceHooks", new String[]{
          "ChunkStatus.generate:dependency_ready",
          "ChunkStatus.generate:task_start",
-         "ChunkStatus.generate:task_complete"
+         "ChunkStatus.generate:task_complete",
+         "ChunkStatus.applyBiomeDecorationWithFeatureProbes:feature_probe"
       });
       root.put("featureCompletionOrder3x3", collectCompletionOrder("features"));
       root.put("fullCompletionOrder3x3", collectCompletionOrder("full"));

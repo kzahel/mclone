@@ -1340,7 +1340,7 @@ pub(crate) mod test_support {
     use super::*;
 
     pub(crate) const CURRENT_TAIGA_VEGETATION_FEATURE_INDEX: i32 = 0;
-    pub(crate) const JAVA_TAIGA_VEGETATION_FEATURE_INDEX: i32 = 1;
+    pub(crate) const JAVA_TAIGA_VEGETATION_FEATURE_INDEX: i32 = 2;
 
     pub(crate) fn place_taiga_vegetation_with_feature_index<W: FeatureWorld>(
         seed: i64,

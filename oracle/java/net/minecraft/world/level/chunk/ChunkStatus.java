@@ -132,7 +132,7 @@ public class ChunkStatus {
                )
             );
             WorldGenRegion var10 = new WorldGenRegion(var2, var7, var0, 1);
-            if (McloneSchedulerTraceRecorder.hasProbeBlocks() && !var2.structureFeatureManager().forWorldGenRegion(var10).shouldGenerateFeatures()) {
+            if (McloneSchedulerTraceRecorder.hasFeatureProbes() && !var2.structureFeatureManager().forWorldGenRegion(var10).shouldGenerateFeatures()) {
                applyBiomeDecorationWithFeatureProbes(var10, var3);
             } else {
                var3.applyBiomeDecoration(var10, var2.structureFeatureManager().forWorldGenRegion(var10));
