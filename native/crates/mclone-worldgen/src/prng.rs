@@ -581,6 +581,16 @@ mod tests {
     }
 
     #[test]
+    fn decoration_feature_seed_matches_java_oracle_for_negative_chunk_z() {
+        let mut random = WorldgenRandom::default();
+        let decoration_seed = random.set_decoration_seed(12_345, 0, -16);
+        assert_eq!(
+            random.set_feature_seed(decoration_seed, 2, 8),
+            1_330_090_079_493_877_963
+        );
+    }
+
+    #[test]
     fn slime_chunk_seeding_returns_a_random_source_initialized_to_the_java_formula() {
         let mut seeded = WorldgenRandom::seed_slime_chunk(4, -7, 12_345, 987_234_911);
         let formula_seed = (12_345_i64

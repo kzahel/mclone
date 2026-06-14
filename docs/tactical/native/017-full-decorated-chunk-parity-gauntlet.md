@@ -77,7 +77,9 @@ Java `taigaBiome(...)` has two `VEGETAL_DECORATION` features before `TAIGA_VEGET
 
 A focused native diagnostic can force only `TAIGA_VEGETATION` at feature index `2` over real liquid-carved terrain, one center at a time. For target chunk `(0,0)`, native isolated index-2 output now writes target trees from three nearby centers: `(0,-1)` writes `9`, `(0,0)` writes `236`, `(1,0)` writes `12`, and `(0,1)` writes `14`; `(-1,-1)`, `(1,-1)`, `(-1,0)`, and `(1,1)` write no target trees in this isolated diagnostic; `(-1,1)` is not a taiga-family center.
 
-The Java scheduler trace oracle can now record full target-chunk spruce logs/leaves after each configured feature with `--probe-target-tree-blocks true`. A local diagnostic trace for seed `12345`, target chunk `(0,0)`, and `generateStructures=false` showed the actual vanilla full-table tree delta at `stepIndex=8`, `featureIndex=2`: center `(0,0)` adds `236` target tree blocks and center `(1,0)` adds `10`; the other target 3x3 centers add none at that feature event. The trace is verbose, about 5.8 MB for this case, so keep it in `/tmp` unless a smaller committed fixture is added intentionally.
+The Java scheduler trace oracle can now record full target-chunk spruce logs/leaves after each configured feature with `--probe-target-tree-blocks true`. A local diagnostic trace for seed `12345`, target chunk `(0,0)`, and `generateStructures=false` showed the actual vanilla full-table tree delta at `stepIndex=8`, `featureIndex=2`: center `(0,0)` adds `236` target tree blocks and center `(1,0)` adds `10`; the other target 3x3 centers add none at that feature event. Native now has an ignored Rust diagnostic for the same full-table event. It still shows the `23` extra target leaves from centers `(0,-1)` and `(0,1)`, while matching Java's per-feature random-call counts for the main tree centers.
+
+Follow-up Java probes with target chunk `(0,-1)` showed why at least the north spillover survives natively: the disputed native trunk at local `(1, z=15)` would need a survivable block below `y=91`, but the server scheduler trace has `minecraft:cave_air` at `(localX=1, y=90, localZ=15)` after glow lichen and before `TAIGA_VEGETATION`. Native's dependency terrain lets that tree survive, so the remaining spruce-leaf bucket is currently a dependency terrain/carver parity symptom, not a conifer foliage-shape bug. The verbose Java traces live in `/tmp` during investigation and should not be committed unless reduced to a small fixture.
 
 ## Landed So Far
 
@@ -105,6 +107,9 @@ The Java scheduler trace oracle can now record full target-chunk spruce logs/lea
 - Native block/asset registries include compact `glow_lichen` state support, and the taiga table now enables a Java-shaped `GLOW_LICHEN` feature before trees. The native block buffer still stores this as one compact state rather than full multiface/waterlogged state.
 - Native feature-center commit order now has a Rust test against the committed vanilla scheduler trace for seed `12345`, chunk `(0,0)`. The current order is z-major over the target 3x3: `(-1,-1)`, `(0,-1)`, `(1,-1)`, then the next rows.
 - Native test support can place only `TAIGA_VEGETATION` with a forced vegetal feature index. `taiga_vegetation_feature_index_shift_is_isolated_by_center` now guards that native's active taiga tree selector uses Java full-biome index `2`.
+- Native feature table selection now uses Java's primary chunk biome path (`BiomeSource.getPrimaryBiome`) instead of fuzzy block-position biome lookup at the chunk center.
+- Native has an ignored full-table taiga tree diagnostic, `taiga_full_table_tree_deltas_match_vanilla_scheduler_probe`, pinned to Java's `(0,0): +236` and `(1,0): +10` scheduler-probe deltas. It intentionally remains ignored until dependency terrain/carver parity stops the north/south spillover trees.
+- `WorldgenRandom` now has a focused negative-`z` decoration feature-seed oracle test for the `TAIGA_VEGETATION` center `(0,-1)`.
 
 ## Reference Scheduler Notes
 
@@ -147,8 +152,8 @@ Still required:
 
 ## Next Steps
 
-1. Add a smaller committed tree-feature probe fixture or Rust-side diagnostic that records native full-table tree deltas at the `TAIGA_VEGETATION` event, not only isolated forced-index output. The residual tree work is now small enough to isolate against Java's `(0,0): +236`, `(1,0): +10` full-table deltas.
-2. Investigate the coal ore placement drift (`coal_ore -> stone` and `stone -> coal_ore`) now that tree overproduction no longer dominates the chunk diff.
+1. Investigate server-backed cave/carver dependency terrain around the north/south tree spillover roots. The immediate known probe is Java target `(0,-1)`, local `(1,90,15)`, which is `cave_air` in the scheduler trace but survivable terrain natively when center `(0,-1)` runs `TAIGA_VEGETATION`.
+2. Investigate the coal ore placement drift (`coal_ore -> stone` and `stone -> coal_ore`) once the cave/dependency terrain issue is understood, because ore is now the largest remaining bucket.
 3. Port the remaining taiga surface vegetation/top-layer features visible in the fixture: snow/top-layer placement, liquid-visible underground decoration, and remaining grass/flower/mushroom/sugar-cane/pumpkin/berry-bush patches as needed by the top mismatch buckets.
 4. Add post-feature heightmap updates and scheduled tick capture to the native region path.
 5. Promote worker-local dependency reuse into scheduler-owned holder/status protochunk slots if structures or broader status scheduling need that before `018`.

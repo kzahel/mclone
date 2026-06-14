@@ -1035,7 +1035,7 @@ pub fn apply_overworld_biome_decoration(
     biome_source: &OverworldBiomeSource,
     chunk: &mut MutableChunkBlockBuffer,
 ) -> DecorationReport {
-    let biome = chunk_center_biome(seed, biome_source, chunk.chunk_x, chunk.chunk_z);
+    let biome = chunk_primary_biome(biome_source, chunk.chunk_x, chunk.chunk_z);
     apply_overworld_biome_features(seed, biome, chunk)
 }
 
@@ -1044,8 +1044,7 @@ pub fn apply_overworld_biome_decoration_to_region(
     biome_source: &OverworldBiomeSource,
     region: &mut FeatureRegion,
 ) -> DecorationReport {
-    let biome = chunk_center_biome(
-        seed,
+    let biome = chunk_primary_biome(
         biome_source,
         region.center_chunk_x(),
         region.center_chunk_z(),
@@ -1135,17 +1134,12 @@ pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature
     features
 }
 
-fn chunk_center_biome(
-    seed: i64,
+fn chunk_primary_biome(
     biome_source: &OverworldBiomeSource,
     chunk_x: i32,
     chunk_z: i32,
 ) -> BiomeDefinition {
-    biome_source.get_block_position_biome_definition(
-        seed,
-        chunk_x * CHUNK_WIDTH + CHUNK_WIDTH / 2,
-        chunk_z * CHUNK_WIDTH + CHUNK_WIDTH / 2,
-    )
+    biome_source.get_primary_biome_definition(chunk_x, chunk_z)
 }
 
 fn plains_features() -> Vec<PlacedFeature> {

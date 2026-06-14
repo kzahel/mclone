@@ -423,6 +423,15 @@ impl OverworldBiomeSource {
         get_layered_biome_by_id(self.get_noise_biome_id(x, y, z))
     }
 
+    pub fn get_primary_biome_definition(&self, chunk_x: i32, chunk_z: i32) -> BiomeDefinition {
+        const CHUNK_CENTER_QUART: i32 = 8 >> 2;
+        self.get_noise_biome_definition(
+            (chunk_x << 2) + CHUNK_CENTER_QUART,
+            0,
+            (chunk_z << 2) + CHUNK_CENTER_QUART,
+        )
+    }
+
     pub fn get_block_position_biome_definition(
         &self,
         seed: i64,

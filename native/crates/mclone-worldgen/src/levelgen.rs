@@ -1510,6 +1510,7 @@ fn lerp3(
 mod tests {
     use super::*;
     use crate::biome::OverworldBiomeSource;
+    use crate::feature::FeatureWorld;
     use crate::prng::WorldgenRandom;
     use serde::Deserialize;
     use std::collections::BTreeMap;
@@ -1817,17 +1818,30 @@ mod tests {
         java_only_tree_blocks: usize,
     }
 
-    fn chunk_center_biome_key(
-        seed: i64,
-        biome_source: &OverworldBiomeSource,
-        pos: ChunkPos,
-    ) -> &'static str {
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct TaigaFullTableTreeDeltaDiagnostic {
+        center: ChunkPos,
+        biome_key: &'static str,
+        before_tree_blocks: usize,
+        after_tree_blocks: usize,
+        added_tree_blocks: usize,
+        removed_tree_blocks: usize,
+        feature_random_calls: usize,
+        random_count: usize,
+        added_tree_block_samples: Vec<TreeBlockSample>,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct TreeBlockSample {
+        local_x: i32,
+        y: i32,
+        local_z: i32,
+        block_id: RawBlockId,
+    }
+
+    fn chunk_primary_biome_key(biome_source: &OverworldBiomeSource, pos: ChunkPos) -> &'static str {
         biome_source
-            .get_block_position_biome_definition(
-                seed,
-                pos.x * CHUNK_WIDTH + CHUNK_WIDTH / 2,
-                pos.z * CHUNK_WIDTH + CHUNK_WIDTH / 2,
-            )
+            .get_primary_biome_definition(pos.x, pos.z)
             .key()
     }
 
@@ -1905,6 +1919,56 @@ mod tests {
         blocks
     }
 
+    fn tree_blocks_in_target_region(
+        region: &FeatureRegion,
+        target: ChunkPos,
+    ) -> BTreeMap<(i32, i32, i32), RawBlockId> {
+        tree_blocks_in_chunk(
+            region
+                .chunk(target.x, target.z)
+                .expect("target chunk should be inside feature region"),
+        )
+    }
+
+    fn tree_block_delta(
+        before: &BTreeMap<(i32, i32, i32), RawBlockId>,
+        after: &BTreeMap<(i32, i32, i32), RawBlockId>,
+    ) -> (usize, usize) {
+        let added = after
+            .iter()
+            .filter(|(pos, block_id)| before.get(pos) != Some(block_id))
+            .count();
+        let removed = before
+            .iter()
+            .filter(|(pos, block_id)| after.get(pos) != Some(block_id))
+            .count();
+        (added, removed)
+    }
+
+    fn added_tree_block_samples(
+        before: &BTreeMap<(i32, i32, i32), RawBlockId>,
+        after: &BTreeMap<(i32, i32, i32), RawBlockId>,
+        limit: usize,
+    ) -> Vec<TreeBlockSample> {
+        let added = after
+            .iter()
+            .filter(|(pos, block_id)| before.get(pos) != Some(block_id))
+            .collect::<Vec<_>>();
+        if added.len() > limit {
+            return Vec::new();
+        }
+
+        added
+            .into_iter()
+            .map(|(&(local_x, y, local_z), &block_id)| TreeBlockSample {
+                local_x,
+                y,
+                local_z,
+                block_id,
+            })
+            .collect()
+    }
+
     fn taiga_tree_index_shift_diagnostics(
         seed: i64,
         target: ChunkPos,
@@ -1914,7 +1978,7 @@ mod tests {
             .ordered_feature_centers()
             .into_iter()
             .filter_map(|center| {
-                let biome_key = chunk_center_biome_key(seed, &biome_source, center);
+                let biome_key = chunk_primary_biome_key(&biome_source, center);
                 if !is_taiga_vegetation_biome(biome_key) {
                     return None;
                 }
@@ -1946,6 +2010,77 @@ mod tests {
                 })
             })
             .collect()
+    }
+
+    fn taiga_full_table_tree_delta_diagnostics(
+        seed: i64,
+        target: ChunkPos,
+    ) -> Vec<TaigaFullTableTreeDeltaDiagnostic> {
+        let biome_source = OverworldBiomeSource::new(seed, false, false);
+        let plan = FeatureBatchPlan::new([target]);
+        let chunks = sorted_chunk_positions_z_major(plan.dependency_chunks.iter().copied())
+            .into_iter()
+            .map(|pos| {
+                generate_overworld_liquid_carved_buffer_with_biome_source(
+                    seed,
+                    pos.x,
+                    pos.z,
+                    biome_source.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let first_target = *plan.targets.iter().next().expect("non-empty target plan");
+        let mut region = FeatureRegion::new(first_target.x, first_target.z, chunks);
+        let mut diagnostics = Vec::new();
+
+        for center in plan.ordered_feature_centers() {
+            region.set_center(center.x, center.z);
+            let biome = biome_source.get_primary_biome_definition(center.x, center.z);
+            let biome_key = biome.key();
+            let min_block_x = center.x * CHUNK_WIDTH;
+            let min_block_z = center.z * CHUNK_WIDTH;
+            let origin = crate::placement::BlockPos::new(min_block_x, region.min_y(), min_block_z);
+            let features = crate::feature::overworld_features_for_biome(biome);
+            let mut random = WorldgenRandom::default();
+            let decoration_seed = random.set_decoration_seed(seed, min_block_x, min_block_z);
+
+            for step_index in 0..=crate::feature::DecorationStep::TopLayerModification.index() {
+                let mut feature_index = 0;
+                for feature in features
+                    .iter()
+                    .filter(|feature| feature.step.index() == step_index)
+                {
+                    random.set_feature_seed(decoration_seed, feature_index, step_index);
+                    let capture = is_taiga_vegetation_biome(biome_key)
+                        && step_index == crate::feature::DecorationStep::VegetalDecoration.index()
+                        && feature_index
+                            == crate::feature::test_support::JAVA_TAIGA_VEGETATION_FEATURE_INDEX;
+                    let random_count_before_feature = random.get_count();
+                    let before = capture.then(|| tree_blocks_in_target_region(&region, target));
+                    feature.place(&mut region, &mut random, origin);
+                    if let Some(before) = before {
+                        let after = tree_blocks_in_target_region(&region, target);
+                        let (added_tree_blocks, removed_tree_blocks) =
+                            tree_block_delta(&before, &after);
+                        let random_count = random.get_count();
+                        diagnostics.push(TaigaFullTableTreeDeltaDiagnostic {
+                            center,
+                            biome_key,
+                            before_tree_blocks: before.len(),
+                            after_tree_blocks: after.len(),
+                            added_tree_blocks,
+                            removed_tree_blocks,
+                            feature_random_calls: random_count - random_count_before_feature,
+                            random_count,
+                            added_tree_block_samples: added_tree_block_samples(&before, &after, 20),
+                        });
+                    }
+                    feature_index += 1;
+                }
+            }
+        }
+
+        diagnostics
     }
 
     fn create_noise_settings(fixture: &NoiseSamplerFixture) -> NoiseSettings {
@@ -2528,6 +2663,106 @@ mod tests {
                     shared_tree_blocks: 0,
                     current_only_tree_blocks: 0,
                     java_only_tree_blocks: 0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "active gauntlet: native dependency terrain still lets north/south taiga trees survive"]
+    fn taiga_full_table_tree_deltas_match_vanilla_scheduler_probe() {
+        let diagnostics = taiga_full_table_tree_delta_diagnostics(12_345, ChunkPos::new(0, 0));
+
+        assert_eq!(
+            diagnostics,
+            vec![
+                TaigaFullTableTreeDeltaDiagnostic {
+                    center: ChunkPos::new(-1, -1),
+                    biome_key: "minecraft:taiga_mountains",
+                    before_tree_blocks: 0,
+                    after_tree_blocks: 0,
+                    added_tree_blocks: 0,
+                    removed_tree_blocks: 0,
+                    feature_random_calls: 75,
+                    random_count: 7705,
+                    added_tree_block_samples: Vec::new(),
+                },
+                TaigaFullTableTreeDeltaDiagnostic {
+                    center: ChunkPos::new(0, -1),
+                    biome_key: "minecraft:taiga_mountains",
+                    before_tree_blocks: 0,
+                    after_tree_blocks: 0,
+                    added_tree_blocks: 0,
+                    removed_tree_blocks: 0,
+                    feature_random_calls: 68,
+                    random_count: 7499,
+                    added_tree_block_samples: Vec::new(),
+                },
+                TaigaFullTableTreeDeltaDiagnostic {
+                    center: ChunkPos::new(1, -1),
+                    biome_key: "minecraft:taiga_mountains",
+                    before_tree_blocks: 0,
+                    after_tree_blocks: 0,
+                    added_tree_blocks: 0,
+                    removed_tree_blocks: 0,
+                    feature_random_calls: 75,
+                    random_count: 7467,
+                    added_tree_block_samples: Vec::new(),
+                },
+                TaigaFullTableTreeDeltaDiagnostic {
+                    center: ChunkPos::new(-1, 0),
+                    biome_key: "minecraft:taiga_mountains",
+                    before_tree_blocks: 0,
+                    after_tree_blocks: 0,
+                    added_tree_blocks: 0,
+                    removed_tree_blocks: 0,
+                    feature_random_calls: 77,
+                    random_count: 8092,
+                    added_tree_block_samples: Vec::new(),
+                },
+                TaigaFullTableTreeDeltaDiagnostic {
+                    center: ChunkPos::new(0, 0),
+                    biome_key: "minecraft:taiga_mountains",
+                    before_tree_blocks: 0,
+                    after_tree_blocks: 236,
+                    added_tree_blocks: 236,
+                    removed_tree_blocks: 0,
+                    feature_random_calls: 77,
+                    random_count: 7759,
+                    added_tree_block_samples: Vec::new(),
+                },
+                TaigaFullTableTreeDeltaDiagnostic {
+                    center: ChunkPos::new(1, 0),
+                    biome_key: "minecraft:taiga_mountains",
+                    before_tree_blocks: 236,
+                    after_tree_blocks: 246,
+                    added_tree_blocks: 10,
+                    removed_tree_blocks: 0,
+                    feature_random_calls: 86,
+                    random_count: 7357,
+                    added_tree_block_samples: Vec::new(),
+                },
+                TaigaFullTableTreeDeltaDiagnostic {
+                    center: ChunkPos::new(0, 1),
+                    biome_key: "minecraft:taiga_mountains",
+                    before_tree_blocks: 246,
+                    after_tree_blocks: 246,
+                    added_tree_blocks: 0,
+                    removed_tree_blocks: 0,
+                    feature_random_calls: 73,
+                    random_count: 7721,
+                    added_tree_block_samples: Vec::new(),
+                },
+                TaigaFullTableTreeDeltaDiagnostic {
+                    center: ChunkPos::new(1, 1),
+                    biome_key: "minecraft:taiga_mountains",
+                    before_tree_blocks: 246,
+                    after_tree_blocks: 246,
+                    added_tree_blocks: 0,
+                    removed_tree_blocks: 0,
+                    feature_random_calls: 73,
+                    random_count: 7626,
+                    added_tree_block_samples: Vec::new(),
                 },
             ]
         );
