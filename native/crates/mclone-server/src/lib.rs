@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
+use mclone_worldgen::feature::{FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
 use mclone_worldgen::levelgen::generate_overworld_features_chunks;
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
@@ -34,6 +35,26 @@ pub enum ChunkResidency {
     Saved,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct ChunkJobId(pub u64);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChunkJobState {
+    Queued,
+    Running,
+    Complete,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChunkStatusJob {
+    pub id: ChunkJobId,
+    pub status: ChunkStatus,
+    pub state: ChunkJobState,
+    pub target_chunks: Vec<ChunkPos>,
+    pub feature_centers: Vec<ChunkPos>,
+    pub dependency_chunks: Vec<ChunkPos>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChunkSchedulerEvent {
     StatusChanged {
@@ -52,6 +73,7 @@ pub struct ChunkStatusSlot {
     pub status: ChunkStatus,
     pub step: ChunkStatusStep,
     pub revision: Option<ChunkRevision>,
+    pub job_id: Option<ChunkJobId>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -120,19 +142,34 @@ impl ChunkHolder {
                 status,
                 step: ChunkStatusStep::Scheduled,
                 revision: None,
+                job_id: None,
             },
         );
     }
 
     fn mark_ready(&mut self, status: ChunkStatus, revision: Option<ChunkRevision>) {
+        let job_id = self.status_slots.get(&status).and_then(|slot| slot.job_id);
         self.status_slots.insert(
             status,
             ChunkStatusSlot {
                 status,
                 step: ChunkStatusStep::Ready,
                 revision,
+                job_id,
             },
         );
+    }
+
+    fn assign_status_job(&mut self, status: ChunkStatus, job_id: ChunkJobId) {
+        self.status_slots
+            .entry(status)
+            .or_insert(ChunkStatusSlot {
+                status,
+                step: ChunkStatusStep::Scheduled,
+                revision: None,
+                job_id: None,
+            })
+            .job_id = Some(job_id);
     }
 
     fn publish_snapshot(
@@ -157,7 +194,9 @@ impl ChunkHolder {
 pub struct ChunkScheduler {
     seed: i64,
     holders: BTreeMap<ChunkPos, ChunkHolder>,
+    jobs: BTreeMap<ChunkJobId, ChunkStatusJob>,
     dirty_chunks: BTreeSet<ChunkPos>,
+    next_job_id: u64,
     next_revision: u64,
     store: Box<dyn ChunkSnapshotStore>,
 }
@@ -171,7 +210,9 @@ impl ChunkScheduler {
         Self {
             seed,
             holders: BTreeMap::new(),
+            jobs: BTreeMap::new(),
             dirty_chunks: BTreeSet::new(),
+            next_job_id: 1,
             next_revision: 1,
             store,
         }
@@ -228,6 +269,18 @@ impl ChunkScheduler {
 
     pub fn dirty_chunk_count(&self) -> usize {
         self.dirty_chunks.len()
+    }
+
+    pub fn job(&self, id: ChunkJobId) -> Option<&ChunkStatusJob> {
+        self.jobs.get(&id)
+    }
+
+    pub fn jobs(&self) -> impl Iterator<Item = &ChunkStatusJob> {
+        self.jobs.values()
+    }
+
+    pub fn job_count(&self) -> usize {
+        self.jobs.len()
     }
 
     pub fn save_dirty_chunks(&mut self) -> ChunkStoreResult<usize> {
@@ -319,6 +372,15 @@ impl ChunkScheduler {
         }
 
         if !to_generate.is_empty() {
+            let job_id = self.create_feature_job(&to_generate);
+            for pos in &to_generate {
+                self.holders
+                    .get_mut(pos)
+                    .expect("holder must exist before assigning job")
+                    .assign_status_job(ChunkStatus::Features, job_id);
+            }
+
+            self.mark_job_state(job_id, ChunkJobState::Running);
             let mut generated =
                 generate_overworld_features_chunks(self.seed, to_generate.iter().copied());
 
@@ -341,9 +403,35 @@ impl ChunkScheduler {
                 });
                 events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
             }
+            self.mark_job_state(job_id, ChunkJobState::Complete);
         }
 
         Ok(events)
+    }
+
+    fn create_feature_job(&mut self, targets: &[ChunkPos]) -> ChunkJobId {
+        let id = ChunkJobId(self.next_job_id);
+        self.next_job_id += 1;
+        let (target_chunks, feature_centers, dependency_chunks) = feature_job_positions(targets);
+        self.jobs.insert(
+            id,
+            ChunkStatusJob {
+                id,
+                status: ChunkStatus::Features,
+                state: ChunkJobState::Queued,
+                target_chunks,
+                feature_centers,
+                dependency_chunks,
+            },
+        );
+        id
+    }
+
+    fn mark_job_state(&mut self, id: ChunkJobId, state: ChunkJobState) {
+        self.jobs
+            .get_mut(&id)
+            .expect("job must exist before state transition")
+            .state = state;
     }
 
     fn load_stored_snapshot(
@@ -463,6 +551,40 @@ fn server_update_from_scheduler_event(event: ChunkSchedulerEvent) -> Option<Serv
     }
 }
 
+fn feature_job_positions(targets: &[ChunkPos]) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkPos>) {
+    let target_chunks = targets.iter().copied().collect::<BTreeSet<_>>();
+    let mut feature_centers = BTreeSet::new();
+    let mut dependency_chunks = BTreeSet::new();
+
+    for target in &target_chunks {
+        for dz in -FEATURES_WRITE_RADIUS_CUTOFF..=FEATURES_WRITE_RADIUS_CUTOFF {
+            for dx in -FEATURES_WRITE_RADIUS_CUTOFF..=FEATURES_WRITE_RADIUS_CUTOFF {
+                feature_centers.insert(ChunkPos::new(target.x + dx, target.z + dz));
+            }
+        }
+    }
+
+    for center in &feature_centers {
+        for dz in -FEATURES_CHUNK_DEPENDENCY_RADIUS..=FEATURES_CHUNK_DEPENDENCY_RADIUS {
+            for dx in -FEATURES_CHUNK_DEPENDENCY_RADIUS..=FEATURES_CHUNK_DEPENDENCY_RADIUS {
+                dependency_chunks.insert(ChunkPos::new(center.x + dx, center.z + dz));
+            }
+        }
+    }
+
+    (
+        sorted_chunk_positions_z_major(target_chunks),
+        sorted_chunk_positions_z_major(feature_centers),
+        sorted_chunk_positions_z_major(dependency_chunks),
+    )
+}
+
+fn sorted_chunk_positions_z_major(positions: BTreeSet<ChunkPos>) -> Vec<ChunkPos> {
+    let mut positions = positions.into_iter().collect::<Vec<_>>();
+    positions.sort_by_key(|pos| (pos.z, pos.x));
+    positions
+}
+
 fn interest_positions(interest: &ChunkInterest) -> Vec<ChunkPos> {
     let radius = i32::try_from(interest.radius_chunks).expect("chunk interest radius exceeds i32");
     let min_x = interest.center.x - radius;
@@ -511,6 +633,28 @@ mod tests {
         assert_eq!(updates.len(), 9);
         assert_eq!(server.loaded_chunk_count(), 9);
         assert_eq!(server.scheduler().holder_count(), 9);
+        assert_eq!(server.scheduler().job_count(), 1);
+        let job = server.scheduler().jobs().next().unwrap();
+        assert_eq!(job.id, ChunkJobId(1));
+        assert_eq!(job.status, ChunkStatus::Features);
+        assert_eq!(job.state, ChunkJobState::Complete);
+        assert_eq!(job.target_chunks.len(), 9);
+        assert_eq!(job.feature_centers.len(), 5 * 5);
+        assert_eq!(job.dependency_chunks.len(), 21 * 21);
+        assert!(job.dependency_chunks.contains(&ChunkPos::new(-10, -10)));
+        assert!(job.dependency_chunks.contains(&ChunkPos::new(10, 10)));
+        for target in &job.target_chunks {
+            assert_eq!(
+                server
+                    .scheduler()
+                    .holder(*target)
+                    .unwrap()
+                    .status_slot(ChunkStatus::Features)
+                    .unwrap()
+                    .job_id,
+                Some(job.id)
+            );
+        }
         assert!(
             updates
                 .iter()
@@ -532,12 +676,14 @@ mod tests {
                 .len(),
             1
         );
+        assert_eq!(server.scheduler().job_count(), 1);
         assert_eq!(
             server
                 .handle_command(ClientCommand::SetChunkInterest(interest))
                 .len(),
             0
         );
+        assert_eq!(server.scheduler().job_count(), 1);
     }
 
     #[test]
@@ -587,6 +733,7 @@ mod tests {
                 status: ChunkStatus::Terrain,
                 step: ChunkStatusStep::Ready,
                 revision: None,
+                job_id: None,
             })
         );
         assert_eq!(
@@ -595,6 +742,7 @@ mod tests {
                 status: ChunkStatus::Surface,
                 step: ChunkStatusStep::Ready,
                 revision: None,
+                job_id: None,
             })
         );
         assert_eq!(
@@ -603,6 +751,23 @@ mod tests {
                 status: ChunkStatus::Features,
                 step: ChunkStatusStep::Ready,
                 revision: Some(ChunkRevision(1)),
+                job_id: Some(ChunkJobId(1)),
+            })
+        );
+        assert_eq!(scheduler.job_count(), 1);
+        assert_eq!(
+            scheduler.job(ChunkJobId(1)),
+            Some(&ChunkStatusJob {
+                id: ChunkJobId(1),
+                status: ChunkStatus::Features,
+                state: ChunkJobState::Complete,
+                target_chunks: vec![ChunkPos::new(0, 0)],
+                feature_centers: (-1..=1)
+                    .flat_map(|z| (-1..=1).map(move |x| ChunkPos::new(x, z)))
+                    .collect(),
+                dependency_chunks: (-9..=9)
+                    .flat_map(|z| (-9..=9).map(move |x| ChunkPos::new(x, z)))
+                    .collect(),
             })
         );
     }
@@ -662,6 +827,7 @@ mod tests {
             let ServerUpdate::ChunkSnapshot(snapshot) = updates.first().unwrap() else {
                 panic!("first update was not a chunk snapshot");
             };
+            assert_eq!(server.scheduler().job_count(), 1);
             assert_eq!(server.scheduler().dirty_chunk_count(), 1);
             assert_eq!(
                 server
@@ -694,6 +860,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(updates, vec![ServerUpdate::ChunkSnapshot(first_snapshot)]);
+        assert_eq!(reloaded.scheduler().job_count(), 0);
         let holder = reloaded.scheduler().holder(ChunkPos::new(0, 0)).unwrap();
         assert_eq!(holder.residency(), ChunkResidency::LoadedFromStore);
         assert!(!holder.is_dirty());

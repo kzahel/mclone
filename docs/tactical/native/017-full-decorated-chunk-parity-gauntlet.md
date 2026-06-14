@@ -80,6 +80,7 @@ This points to underground decoration/ore families as the largest exactness gap.
 - Native `generate_overworld_features_chunks(...)` batches multiple publish targets through one union dependency window. A 3x3 publish view now plans 25 feature-center passes over 441 dependency chunks instead of rebuilding nine separate 361-chunk windows.
 - The integrated server scheduler now batches missing `FEATURES` chunks per interest update before publishing snapshots. The `mclone-server` test suite dropped from roughly 52s to roughly 18s on this host.
 - The native radius-1 headless runtime capture dropped from just over 50s to roughly 14s on this host while producing the same framed decorated terrain output.
+- Native `ChunkStatusJob` records now persist completed `FEATURES` work metadata. Each generated holder `FEATURES` slot records the owning job id, and each job records its publish targets, 3x3 feature centers, dependency chunks, and queued/running/complete state.
 
 ## Reference Scheduler Notes
 
@@ -109,18 +110,19 @@ Native has the first version of this concept:
 - writes accepted only for the center chunk plus immediate neighbors
 - center exactness produced by running feature passes for the 3x3 chunks that can write into the target chunk
 - batched publish-target generation reuses the union dependency window for one interest update
+- durable scheduler job records link generated `FEATURES` holder slots to the batch job that produced them
 
 Still required:
 
 - lower-status dependency chunks available out to the feature read radius
 - post-feature heightmap updates and scheduled tick capture
-- durable holder/status futures or job records so dependency chunks can survive across ticks/interests instead of only within one batch call
+- retained dependency/protochunk materialization across ticks/interests; current job records are durable metadata, not retained generated dependency chunks
 - worker-thread or mailbox execution for generation jobs after the ownership boundary is stable
 
 ## Next Steps
 
-1. Add durable scheduler job/future records for status generation, modeled after Java's holder future slots, so dependency chunks can be reused across ticks and adjacent interest updates.
-2. Add a native worker/mailbox boundary for batched worldgen jobs once holder/status ownership is explicit.
+1. Add a native worker/mailbox boundary for batched worldgen jobs, using `ChunkStatusJob` state transitions as the ownership API.
+2. Add retained dependency/protochunk materialization across ticks/interests once job execution is no longer direct synchronous generation.
 3. Port underground decoration buckets visible in the full fixture: stone variants, deepslate/tuff, dirt/gravel disks, and ore placement.
 4. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
 5. Add post-feature heightmap updates and scheduled tick capture to the native region path.
