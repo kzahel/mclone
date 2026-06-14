@@ -13,14 +13,14 @@ Landed:
 - one generated chunk and small multi-chunk flat-color render path
 - minimal camera controls
 - Rust crate skeletons for client, server, protocol, net, worldgen, mesh, render, assets, light
+- canonical packed chunk snapshots and first chunk-interest / chunk-snapshot protocol messages
+- local integrated server, client runtime replica, in-process transport, and native rendering from client snapshots
+- thin browser/WASM smoke that instantiates the Rust web shell, probes WebGPU, and runs a one-chunk protocol path
 
 Still missing compared with the TypeScript engine:
 
-- native client/server/protocol ownership is not real yet
-- `mclone-native-client` still generates chunks directly and meshes them immediately
-- chunk snapshots are not yet canonical packed runtime facts
-- no native chunk-status scheduler, persistence, local/remote transport, or web runtime smoke
-- no committed WASM/browser build gate beyond the current scaffold check
+- no native chunk-status scheduler, persistence, remote transport, or dedicated-server loop
+- web/WASM has only a thin smoke gate, not a real browser runtime, browser transport, or render path
 - no vanilla asset/model/texture pipeline in the Rust renderer
 - no native lighting, liquids, movement, entities, or broad decorated-world parity
 
@@ -59,7 +59,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 |---|---|---|---|
 | [`004-canonical-chunk-snapshot-protocol.md`](004-canonical-chunk-snapshot-protocol.md) | data/protocol | **done** - `BlockStateId`, packed section snapshot facts, first chunk-interest and chunk-snapshot messages | unit tests over snapshot roundtrip and protocol data shape |
 | [`005-local-integrated-client-server.md`](005-local-integrated-client-server.md) | runtime spine | **done** - `IntegratedServer`, `ClientRuntime`, in-process transport, client chunk replica, native app renders from client facts | native headless chunk PNG comes from `ClientRuntime`, not direct worldgen |
-| `006-wasm-browser-build-smoke.md` | web compatibility | `mclone-web-client` compiles to WASM, boots in a browser shell, creates WebGPU or reports a stable fallback, and exercises a tiny protocol/client path | `cargo check --target wasm32-unknown-unknown` plus browser smoke where available |
+| [`006-wasm-browser-build-smoke.md`](006-wasm-browser-build-smoke.md) | web compatibility | **done** - `mclone-web-client` compiles/builds to WASM, boots in a browser shell, probes WebGPU, and exercises a one-chunk protocol/client/server path | `cargo check --target wasm32-unknown-unknown` plus `pnpm native:web:smoke` where Chrome is available |
 | `007-chunk-interest-status-scheduler.md` | server runtime | interest-driven chunk requests, holder/status slots, async/coalesced generation, publishable chunk events | tests for duplicate request coalescing and status ordering |
 | `008-native-persistence-and-residency.md` | storage/runtime | chunk residency, dirty/save queue shape, filesystem adapter scaffold, reload/resume hook | save/load roundtrip of generated chunk snapshots |
 | `009-dedicated-server-and-remote-transport.md` | networking | `mclone-dedicated-server` serves the same protocol over a simple native transport; native client can join remotely | local two-process smoke or loopback integration |
@@ -79,16 +79,16 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `006-wasm-browser-build-smoke.md`.
+The next implementation tactical should be `007-chunk-interest-status-scheduler.md`.
 
-That slice should keep the web/WASM target honest now that core chunk data, protocol messages, local transport, integrated server, and client runtime exist:
+That slice should replace the immediate generate-on-interest shortcut with the first durable chunk scheduling shape:
 
-- compile `mclone-web-client` to `wasm32-unknown-unknown`
-- add a minimal browser boot path that exercises client/protocol/runtime setup without native-only assumptions
-- create WebGPU/`wgpu` or report a stable unsupported fallback
-- keep browser storage/threading/async constraints visible before more runtime APIs freeze
+- interest-driven chunk requests produce holder/status slots instead of direct synchronous generation at the app boundary
+- duplicate interest requests coalesce without regenerating loaded chunks
+- server update publication remains protocol-shaped and client-runtime-owned
+- the implementation leaves room for later async workers/native threads/WASM workers without freezing a browser-hostile API
 
-`006` is the first explicit web/WASM compatibility gate. It should stay thin, but it must be real enough to catch API shapes that assume native threads, blocking filesystem access, or native-only `wgpu` setup.
+`007` should stay synchronous internally if that keeps the slice small, but the public shape should look like a scheduler instead of direct worldgen calls.
 
 ## Deferral Notes
 

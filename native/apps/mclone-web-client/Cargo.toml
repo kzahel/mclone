@@ -7,7 +7,11 @@ publish.workspace = true
 
 [dependencies]
 mclone-client.workspace = true
+mclone-core.workspace = true
+mclone-net.workspace = true
+mclone-protocol.workspace = true
 mclone-render.workspace = true
+mclone-server.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]

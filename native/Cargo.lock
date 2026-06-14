@@ -1103,7 +1103,11 @@ name = "mclone-web-client"
 version = "0.0.0"
 dependencies = [
  "mclone-client",
+ "mclone-core",
+ "mclone-net",
+ "mclone-protocol",
  "mclone-render",
+ "mclone-server",
 ]
 
 [[package]]

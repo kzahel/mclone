@@ -34,4 +34,10 @@ Applications:
 - `mclone-dedicated-server`: headless native server.
 - `mclone-web-client`: browser/WASM client shell.
 
+Useful gates:
+
+- `cargo test --workspace`
+- `cargo check -p mclone-web-client --target wasm32-unknown-unknown`
+- `pnpm native:web:smoke`
+
 Start narrow: port one oracle-backed worldgen layer before adding heavyweight renderer, networking, async, or WASM dependencies.

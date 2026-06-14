@@ -12,3 +12,4 @@ Use zero-padded numeric prefixes for new native tactical docs: `000-topic.md`, `
 | [`003-native-ts-parity-roadmap.md`](003-native-ts-parity-roadmap.md) | active parent | Ordered native roadmap from current scaffolding to roughly the TypeScript engine capability horizon. |
 | [`004-canonical-chunk-snapshot-protocol.md`](004-canonical-chunk-snapshot-protocol.md) | completed | Canonical native chunk snapshot data and first logical chunk-interest / chunk-publication protocol messages. |
 | [`005-local-integrated-client-server.md`](005-local-integrated-client-server.md) | completed | Local integrated server, client runtime replica, in-process transport, and native rendering from client snapshots. |
+| [`006-wasm-browser-build-smoke.md`](006-wasm-browser-build-smoke.md) | completed | Browser/WASM smoke for the Rust web shell, runtime protocol path, and WebGPU capability probe. |
