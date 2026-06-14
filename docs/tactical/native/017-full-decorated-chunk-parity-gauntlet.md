@@ -73,7 +73,7 @@ largest buckets:
 
 This replaces the earlier lower `579` mismatch shortcut baseline with a more faithful Java-shaped baseline: tree positions now go through water-depth threshold plus ocean-floor heightmap placement, and the weighted `PINE` branch includes its nested vanilla `countExtra(6, 0.1, 1)` decorator. The remaining top buckets are now mostly exact spruce/pine log and leaf offsets rather than missing heightmap plumbing. Cave-air/liquid-visible feature deltas and remaining small vegetation/top-layer blocks are still visible. The target biome for chunk `0,0` is `minecraft:taiga_mountains`. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
 
-Java `taigaBiome(...)` places `PATCH_LARGE_FERN` before `TAIGA_VEGETATION`, but a native diagnostic insertion of that feature currently worsens the exact diff and introduces ore drift. A no-op vegetal feature before the trees reproduces the same broad profile, which means the immediate blocker is feature index / cross-center scheduling parity rather than only large-fern placement logic. Keep the active table at the current `644` mismatch baseline until that scheduling behavior is understood.
+Java `taigaBiome(...)` places `PATCH_LARGE_FERN` before `TAIGA_VEGETATION`, so the Java tree selector should run at vegetal feature index `1`, not `0`. A native diagnostic insertion of that preceding feature currently worsens the exact diff, so keep the active table at the current `644` mismatch baseline until the feature-index shift can be isolated from remaining tree and mixed-status region behavior. The native 3x3 feature-center order for this fixture is now trace-guarded against `test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json`; do not chase this by reordering centers unless a new scheduler trace says to.
 
 ## Landed So Far
 
@@ -97,7 +97,8 @@ Java `taigaBiome(...)` places `PATCH_LARGE_FERN` before `TAIGA_VEGETATION`, but 
 - Native taiga vegetation now uses Java-shaped `RandomSelectorFeature` behavior for `TAIGA_VEGETATION`, including the `PINE` weighted branch, default `SPRUCE`, `StraightTrunkPlacer`, `SpruceFoliagePlacer`, `PineFoliagePlacer`, `TwoLayersFeatureSize`, and vanilla `countExtra(10, 0.1, 1)` placement count for the target `taiga_mountains` biome.
 - Native feature placement now supports world-backed `HeightmapDecorator` and `WaterDepthThresholdDecorator` semantics over `FeatureRegion` columns, including reduced Java material predicates for `WORLD_SURFACE`, `OCEAN_FLOOR`, `MOTION_BLOCKING`, and `MOTION_BLOCKING_NO_LEAVES`.
 - Native configured features now support nested `DecoratedFeature` wrappers. The weighted vanilla `PINE` branch inside `TAIGA_VEGETATION` now carries its own `countExtra(6, 0.1, 1)` decorator before tree placement.
-- Native block/asset registries and `RandomPatchFeature` now support lower/upper `large_fern` blocks for future `DoublePlantPlacer` parity. The Java `PATCH_LARGE_FERN` biome insertion is intentionally deferred until feature scheduling order is corrected.
+- Native block/asset registries and `RandomPatchFeature` now support lower/upper `large_fern` blocks for future `DoublePlantPlacer` parity. The Java `PATCH_LARGE_FERN` biome insertion is intentionally deferred until the feature-index/tree-placement diagnostic is understood.
+- Native feature-center commit order now has a Rust test against the committed vanilla scheduler trace for seed `12345`, chunk `(0,0)`. The current order is z-major over the target 3x3: `(-1,-1)`, `(0,-1)`, `(1,-1)`, then the next rows.
 
 ## Reference Scheduler Notes
 
@@ -140,9 +141,9 @@ Still required:
 
 ## Next Steps
 
-1. Investigate feature index and cross-center scheduling parity before enabling Java-preceding vegetal features. A no-op feature before `TAIGA_VEGETATION` should not destabilize unrelated exact buckets; until it does not, large ferns and other preceding features will create misleading diffs.
-2. Continue exact taiga tree parity once scheduling is stable: compare native `TreeFeature`, `StraightTrunkPlacer`, `SpruceFoliagePlacer`, and `PineFoliagePlacer` behavior against the source/oracle and reduce the remaining spruce log/leaf offset buckets.
-3. Port the remaining taiga surface vegetation/top-layer features visible in the fixture: enable large ferns after the scheduling fix, then add snow/top-layer placement and glow lichen/liquid-visible underground decoration as needed by the top mismatch buckets.
+1. Isolate the Java-order `PATCH_LARGE_FERN` / `TAIGA_VEGETATION` feature-index shift with a focused per-center diagnostic before enabling it in the active table. Center commit order is already trace-guarded for this fixture.
+2. Continue exact taiga tree parity: compare native `TreeFeature`, `StraightTrunkPlacer`, `SpruceFoliagePlacer`, and `PineFoliagePlacer` behavior against the source/oracle and reduce the remaining spruce log/leaf offset buckets.
+3. Port the remaining taiga surface vegetation/top-layer features visible in the fixture: enable large ferns after the feature-index/tree diagnostic, then add snow/top-layer placement and glow lichen/liquid-visible underground decoration as needed by the top mismatch buckets.
 4. Add post-feature heightmap updates and scheduled tick capture to the native region path.
 5. Promote worker-local dependency reuse into scheduler-owned holder/status protochunk slots if structures or broader status scheduling need that before `018`.
 6. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.

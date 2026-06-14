@@ -1309,7 +1309,7 @@ fn generate_overworld_features_chunks_from_plan(
     let first_target = *plan.targets.iter().next().expect("non-empty targets");
     let mut region = FeatureRegion::new(first_target.x, first_target.z, chunks);
 
-    for center in sorted_chunk_positions_z_major(plan.feature_centers.iter().copied()) {
+    for center in plan.ordered_feature_centers() {
         region.set_center(center.x, center.z);
         apply_overworld_biome_decoration_to_region(seed, biome_source, &mut region);
     }
@@ -1361,6 +1361,10 @@ impl FeatureBatchPlan {
             feature_centers,
             dependency_chunks,
         }
+    }
+
+    fn ordered_feature_centers(&self) -> Vec<ChunkPos> {
+        sorted_chunk_positions_z_major(self.feature_centers.iter().copied())
     }
 }
 
@@ -1657,6 +1661,27 @@ mod tests {
 
     #[derive(Debug, Deserialize)]
     #[serde(rename_all = "camelCase")]
+    struct SchedulerTraceFixture {
+        module: String,
+        minecraft_version: String,
+        seed: String,
+        target_chunk_x: i32,
+        target_chunk_z: i32,
+        target_radius: i32,
+        stop_status: String,
+        #[serde(rename = "featureCompletionOrder3x3")]
+        feature_completion_order_3x3: Vec<SchedulerTraceChunkFixture>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SchedulerTraceChunkFixture {
+        chunk_x: i32,
+        chunk_z: i32,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct FullChunkSectionFixture {
         y: i32,
         palette: Vec<String>,
@@ -1772,6 +1797,13 @@ mod tests {
             "../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0.json"
         ))
         .expect("valid full chunk oracle fixture")
+    }
+
+    fn scheduler_trace_fixture() -> SchedulerTraceFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json"
+        ))
+        .expect("valid vanilla scheduler trace fixture")
     }
 
     fn create_noise_settings(fixture: &NoiseSamplerFixture) -> NoiseSettings {
@@ -2254,6 +2286,26 @@ mod tests {
                 .dependency_chunks
                 .contains(&ChunkPos::new(10, 10))
         );
+    }
+
+    #[test]
+    fn feature_center_order_matches_vanilla_scheduler_trace_for_spawn_bootstrap() {
+        let trace = scheduler_trace_fixture();
+        assert_eq!(trace.module, "scheduler-trace");
+        assert_eq!(trace.minecraft_version, "1.17.1");
+        assert_eq!(trace.seed, "12345");
+        assert_eq!(trace.target_radius, FEATURES_WRITE_RADIUS_CUTOFF);
+        assert_eq!(trace.stop_status, "FEATURES");
+
+        let plan =
+            FeatureBatchPlan::new([ChunkPos::new(trace.target_chunk_x, trace.target_chunk_z)]);
+        let expected = trace
+            .feature_completion_order_3x3
+            .into_iter()
+            .map(|entry| ChunkPos::new(entry.chunk_x, entry.chunk_z))
+            .collect::<Vec<_>>();
+
+        assert_eq!(plan.ordered_feature_centers(), expected);
     }
 
     #[test]
