@@ -1392,10 +1392,7 @@ fn taiga_vegetation_feature() -> PlacedFeature {
         DecorationStep::VegetalDecoration,
         ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
             [WeightedConfiguredFeature::new(
-                ConfiguredFeature::decorated(DecoratedFeatureConfiguration::new(
-                    ConfiguredFeature::tree(TreeConfiguration::pine()),
-                    [ConfiguredDecorator::count_extra(6, 0.1, 1)],
-                )),
+                ConfiguredFeature::tree(TreeConfiguration::pine()),
                 0.33333334,
             )],
             ConfiguredFeature::tree(TreeConfiguration::spruce()),
@@ -2800,10 +2797,7 @@ mod tests {
                 assert_eq!(
                     config.features,
                     vec![WeightedConfiguredFeature::new(
-                        ConfiguredFeature::decorated(DecoratedFeatureConfiguration::new(
-                            ConfiguredFeature::tree(TreeConfiguration::pine()),
-                            [ConfiguredDecorator::count_extra(6, 0.1, 1)],
-                        )),
+                        ConfiguredFeature::tree(TreeConfiguration::pine()),
                         0.33333334,
                     )]
                 );
