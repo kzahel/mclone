@@ -2,9 +2,12 @@ use std::{collections::BTreeMap, sync::OnceLock};
 
 use crate::biome::{BiomeDefinition, OverworldBiomeSource};
 use crate::block::{
-    AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, DANDELION, DEAD_BUSH, DEEPSLATE, DIORITE, DIRT, FERN,
-    GRANITE, GRASS, GRASS_BLOCK, GRAVEL, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY, RED_SAND,
-    RawBlockId, SAND, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER,
+    AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE,
+    DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
+    DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
+    FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, MYCELIUM, OAK_LEAVES,
+    OAK_LOG, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SPRUCE_LEAVES, SPRUCE_LOG,
+    STONE, TERRACOTTA, TUFF, WATER,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{
@@ -431,6 +434,7 @@ impl BasicTreeConfiguration {
 pub enum OreTarget {
     NaturalStone,
     StoneOreReplaceables,
+    DeepslateOreReplaceables,
 }
 
 impl OreTarget {
@@ -443,6 +447,7 @@ impl OreTarget {
                 )
             }
             Self::StoneOreReplaceables => matches!(block_id, STONE | GRANITE | DIORITE | ANDESITE),
+            Self::DeepslateOreReplaceables => matches!(block_id, TUFF | DEEPSLATE),
         }
     }
 }
@@ -484,6 +489,21 @@ impl OreConfiguration {
     pub fn natural_stone(state: RawBlockId, size: i32) -> Self {
         Self::new(
             [OreTargetBlockState::new(OreTarget::NaturalStone, state)],
+            size,
+            0.0,
+        )
+    }
+
+    pub fn stone_and_deepslate_ore(
+        stone_ore: RawBlockId,
+        deepslate_ore: RawBlockId,
+        size: i32,
+    ) -> Self {
+        Self::new(
+            [
+                OreTargetBlockState::new(OreTarget::StoneOreReplaceables, stone_ore),
+                OreTargetBlockState::new(OreTarget::DeepslateOreReplaceables, deepslate_ore),
+            ],
             size,
             0.0,
         )
@@ -694,6 +714,7 @@ pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature
         _ => default_land_features(),
     };
     let mut features = default_underground_variety_features();
+    features.extend(default_ore_features());
     features.append(&mut biome_features);
     features
 }
@@ -774,6 +795,44 @@ fn default_underground_variety_features() -> Vec<PlacedFeature> {
     ]
 }
 
+fn default_ore_features() -> Vec<PlacedFeature> {
+    vec![
+        counted_ore_feature(
+            OreConfiguration::stone_and_deepslate_ore(COAL_ORE, DEEPSLATE_COAL_ORE, 17),
+            HeightProvider::uniform(VerticalAnchor::bottom(), VerticalAnchor::absolute(127)),
+            20,
+        ),
+        counted_ore_feature(
+            OreConfiguration::stone_and_deepslate_ore(IRON_ORE, DEEPSLATE_IRON_ORE, 9),
+            HeightProvider::uniform(VerticalAnchor::bottom(), VerticalAnchor::absolute(63)),
+            20,
+        ),
+        counted_ore_feature(
+            OreConfiguration::stone_and_deepslate_ore(GOLD_ORE, DEEPSLATE_GOLD_ORE, 9),
+            HeightProvider::uniform(VerticalAnchor::bottom(), VerticalAnchor::absolute(31)),
+            2,
+        ),
+        counted_ore_feature(
+            OreConfiguration::stone_and_deepslate_ore(REDSTONE_ORE, DEEPSLATE_REDSTONE_ORE, 8),
+            HeightProvider::uniform(VerticalAnchor::bottom(), VerticalAnchor::absolute(15)),
+            8,
+        ),
+        single_ore_feature(
+            OreConfiguration::stone_and_deepslate_ore(DIAMOND_ORE, DEEPSLATE_DIAMOND_ORE, 8),
+            HeightProvider::uniform(VerticalAnchor::bottom(), VerticalAnchor::absolute(15)),
+        ),
+        single_ore_feature(
+            OreConfiguration::stone_and_deepslate_ore(LAPIS_ORE, DEEPSLATE_LAPIS_ORE, 7),
+            HeightProvider::trapezoid(VerticalAnchor::absolute(0), VerticalAnchor::absolute(30), 0),
+        ),
+        counted_ore_feature(
+            OreConfiguration::stone_and_deepslate_ore(COPPER_ORE, DEEPSLATE_COPPER_ORE, 10),
+            HeightProvider::trapezoid(VerticalAnchor::absolute(0), VerticalAnchor::absolute(96), 0),
+            6,
+        ),
+    ]
+}
+
 fn underground_ore_feature(
     block_id: RawBlockId,
     size: i32,
@@ -788,6 +847,33 @@ fn underground_ore_feature(
             ConfiguredDecorator::count(count),
             ConfiguredDecorator::square(),
             ConfiguredDecorator::range(HeightProvider::uniform(min_inclusive, max_inclusive)),
+        ],
+    )
+}
+
+fn counted_ore_feature(
+    config: OreConfiguration,
+    height: HeightProvider,
+    count: i32,
+) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::UndergroundOres,
+        ConfiguredFeature::ore(config),
+        vec![
+            ConfiguredDecorator::count(count),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::range(height),
+        ],
+    )
+}
+
+fn single_ore_feature(config: OreConfiguration, height: HeightProvider) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::UndergroundOres,
+        ConfiguredFeature::ore(config),
+        vec![
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::range(height),
         ],
     )
 }
@@ -1676,12 +1762,106 @@ mod tests {
     }
 
     #[test]
+    fn biome_feature_tables_include_default_ores_after_variety() {
+        let plains = overworld_features_for_biome(get_layered_biome_by_id(1));
+        let expected = [
+            (
+                COAL_ORE,
+                DEEPSLATE_COAL_ORE,
+                17,
+                Some(20),
+                HeightProvider::uniform(VerticalAnchor::bottom(), VerticalAnchor::absolute(127)),
+            ),
+            (
+                IRON_ORE,
+                DEEPSLATE_IRON_ORE,
+                9,
+                Some(20),
+                HeightProvider::uniform(VerticalAnchor::bottom(), VerticalAnchor::absolute(63)),
+            ),
+            (
+                GOLD_ORE,
+                DEEPSLATE_GOLD_ORE,
+                9,
+                Some(2),
+                HeightProvider::uniform(VerticalAnchor::bottom(), VerticalAnchor::absolute(31)),
+            ),
+            (
+                REDSTONE_ORE,
+                DEEPSLATE_REDSTONE_ORE,
+                8,
+                Some(8),
+                HeightProvider::uniform(VerticalAnchor::bottom(), VerticalAnchor::absolute(15)),
+            ),
+            (
+                DIAMOND_ORE,
+                DEEPSLATE_DIAMOND_ORE,
+                8,
+                None,
+                HeightProvider::uniform(VerticalAnchor::bottom(), VerticalAnchor::absolute(15)),
+            ),
+            (
+                LAPIS_ORE,
+                DEEPSLATE_LAPIS_ORE,
+                7,
+                None,
+                HeightProvider::trapezoid(
+                    VerticalAnchor::absolute(0),
+                    VerticalAnchor::absolute(30),
+                    0,
+                ),
+            ),
+            (
+                COPPER_ORE,
+                DEEPSLATE_COPPER_ORE,
+                10,
+                Some(6),
+                HeightProvider::trapezoid(
+                    VerticalAnchor::absolute(0),
+                    VerticalAnchor::absolute(96),
+                    0,
+                ),
+            ),
+        ];
+
+        for (feature, (stone_ore, deepslate_ore, size, count, height)) in
+            plains.iter().skip(7).zip(expected)
+        {
+            assert_eq!(feature.step, DecorationStep::UndergroundOres);
+            let mut expected_decorators = Vec::new();
+            if let Some(count) = count {
+                expected_decorators.push(ConfiguredDecorator::count(count));
+            }
+            expected_decorators.push(ConfiguredDecorator::square());
+            expected_decorators.push(ConfiguredDecorator::range(height));
+            assert_eq!(feature.decorators, expected_decorators);
+
+            match &feature.feature {
+                ConfiguredFeature::Ore(config) => {
+                    assert_eq!(config.size, size);
+                    assert_eq!(
+                        config.target_states,
+                        vec![
+                            OreTargetBlockState::new(OreTarget::StoneOreReplaceables, stone_ore),
+                            OreTargetBlockState::new(
+                                OreTarget::DeepslateOreReplaceables,
+                                deepslate_ore,
+                            ),
+                        ]
+                    );
+                }
+                other => panic!("expected ore feature, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn biome_overworld_decoration_reports_added_blocks() {
         let mut chunk = flat_grass_chunk();
         let report = apply_overworld_biome_features(12_345, get_layered_biome_by_id(4), &mut chunk);
 
         assert_eq!(report.biome_key, "minecraft:forest");
-        assert_eq!(report.attempted_features, 13);
+        assert_eq!(report.attempted_features, 20);
         assert!(report.placed_features > 0);
         assert!(report.added_non_air_blocks > 0);
     }

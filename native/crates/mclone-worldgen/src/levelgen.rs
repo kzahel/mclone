@@ -2219,6 +2219,15 @@ mod tests {
                 + features.block_count(crate::block::DEEPSLATE)
                 > 0
         );
+        assert!(
+            features.block_count(crate::block::COAL_ORE)
+                + features.block_count(crate::block::DEEPSLATE_COAL_ORE)
+                + features.block_count(crate::block::IRON_ORE)
+                + features.block_count(crate::block::DEEPSLATE_IRON_ORE)
+                + features.block_count(crate::block::COPPER_ORE)
+                + features.block_count(crate::block::DEEPSLATE_COPPER_ORE)
+                > 0
+        );
         assert!(features.block_count(crate::block::LAVA) > 0);
     }
 

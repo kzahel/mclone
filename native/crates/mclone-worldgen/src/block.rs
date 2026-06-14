@@ -56,6 +56,20 @@ pub const FERN: RawBlockId = 50;
 pub const DEAD_BUSH: RawBlockId = 51;
 pub const TUFF: RawBlockId = 52;
 pub const DEEPSLATE: RawBlockId = 53;
+pub const COAL_ORE: RawBlockId = 54;
+pub const DEEPSLATE_COAL_ORE: RawBlockId = 55;
+pub const COPPER_ORE: RawBlockId = 56;
+pub const DEEPSLATE_COPPER_ORE: RawBlockId = 57;
+pub const IRON_ORE: RawBlockId = 58;
+pub const DEEPSLATE_IRON_ORE: RawBlockId = 59;
+pub const GOLD_ORE: RawBlockId = 60;
+pub const DEEPSLATE_GOLD_ORE: RawBlockId = 61;
+pub const REDSTONE_ORE: RawBlockId = 62;
+pub const DEEPSLATE_REDSTONE_ORE: RawBlockId = 63;
+pub const DIAMOND_ORE: RawBlockId = 64;
+pub const DEEPSLATE_DIAMOND_ORE: RawBlockId = 65;
+pub const LAPIS_ORE: RawBlockId = 66;
+pub const DEEPSLATE_LAPIS_ORE: RawBlockId = 67;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -67,6 +81,20 @@ impl GeneratedBlockId {
     pub const BEDROCK: Self = Self(BEDROCK);
     pub const TUFF: Self = Self(TUFF);
     pub const DEEPSLATE: Self = Self(DEEPSLATE);
+    pub const COAL_ORE: Self = Self(COAL_ORE);
+    pub const DEEPSLATE_COAL_ORE: Self = Self(DEEPSLATE_COAL_ORE);
+    pub const COPPER_ORE: Self = Self(COPPER_ORE);
+    pub const DEEPSLATE_COPPER_ORE: Self = Self(DEEPSLATE_COPPER_ORE);
+    pub const IRON_ORE: Self = Self(IRON_ORE);
+    pub const DEEPSLATE_IRON_ORE: Self = Self(DEEPSLATE_IRON_ORE);
+    pub const GOLD_ORE: Self = Self(GOLD_ORE);
+    pub const DEEPSLATE_GOLD_ORE: Self = Self(DEEPSLATE_GOLD_ORE);
+    pub const REDSTONE_ORE: Self = Self(REDSTONE_ORE);
+    pub const DEEPSLATE_REDSTONE_ORE: Self = Self(DEEPSLATE_REDSTONE_ORE);
+    pub const DIAMOND_ORE: Self = Self(DIAMOND_ORE);
+    pub const DEEPSLATE_DIAMOND_ORE: Self = Self(DEEPSLATE_DIAMOND_ORE);
+    pub const LAPIS_ORE: Self = Self(LAPIS_ORE);
+    pub const DEEPSLATE_LAPIS_ORE: Self = Self(DEEPSLATE_LAPIS_ORE);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -149,6 +177,20 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         DEAD_BUSH => "minecraft:dead_bush",
         TUFF => "minecraft:tuff",
         DEEPSLATE => "minecraft:deepslate",
+        COAL_ORE => "minecraft:coal_ore",
+        DEEPSLATE_COAL_ORE => "minecraft:deepslate_coal_ore",
+        COPPER_ORE => "minecraft:copper_ore",
+        DEEPSLATE_COPPER_ORE => "minecraft:deepslate_copper_ore",
+        IRON_ORE => "minecraft:iron_ore",
+        DEEPSLATE_IRON_ORE => "minecraft:deepslate_iron_ore",
+        GOLD_ORE => "minecraft:gold_ore",
+        DEEPSLATE_GOLD_ORE => "minecraft:deepslate_gold_ore",
+        REDSTONE_ORE => "minecraft:redstone_ore",
+        DEEPSLATE_REDSTONE_ORE => "minecraft:deepslate_redstone_ore",
+        DIAMOND_ORE => "minecraft:diamond_ore",
+        DEEPSLATE_DIAMOND_ORE => "minecraft:deepslate_diamond_ore",
+        LAPIS_ORE => "minecraft:lapis_ore",
+        DEEPSLATE_LAPIS_ORE => "minecraft:deepslate_lapis_ore",
         _ => "minecraft:unknown",
     }
 }

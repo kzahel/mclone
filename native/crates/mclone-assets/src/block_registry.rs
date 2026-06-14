@@ -400,6 +400,20 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (51, "minecraft:dead_bush", EMPTY_PROPS),
     (52, "minecraft:tuff", EMPTY_PROPS),
     (53, "minecraft:deepslate", AXIS_Y),
+    (54, "minecraft:coal_ore", EMPTY_PROPS),
+    (55, "minecraft:deepslate_coal_ore", EMPTY_PROPS),
+    (56, "minecraft:copper_ore", EMPTY_PROPS),
+    (57, "minecraft:deepslate_copper_ore", EMPTY_PROPS),
+    (58, "minecraft:iron_ore", EMPTY_PROPS),
+    (59, "minecraft:deepslate_iron_ore", EMPTY_PROPS),
+    (60, "minecraft:gold_ore", EMPTY_PROPS),
+    (61, "minecraft:deepslate_gold_ore", EMPTY_PROPS),
+    (62, "minecraft:redstone_ore", EMPTY_PROPS),
+    (63, "minecraft:deepslate_redstone_ore", EMPTY_PROPS),
+    (64, "minecraft:diamond_ore", EMPTY_PROPS),
+    (65, "minecraft:deepslate_diamond_ore", EMPTY_PROPS),
+    (66, "minecraft:lapis_ore", EMPTY_PROPS),
+    (67, "minecraft:deepslate_lapis_ore", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -411,7 +425,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 54);
+        assert_eq!(registry.len(), 68);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -451,6 +465,14 @@ mod tests {
         assert_eq!(
             registry.by_id(BlockStateId(53)).unwrap().canonical_key(),
             "minecraft:deepslate[axis=y]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:coal_ore"),
+            Some(BlockStateId(54))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:deepslate_lapis_ore"),
+            Some(BlockStateId(67))
         );
         assert_eq!(
             registry.by_id(BlockStateId(8)).unwrap().canonical_key(),

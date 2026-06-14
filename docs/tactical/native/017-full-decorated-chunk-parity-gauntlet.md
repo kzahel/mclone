@@ -36,37 +36,42 @@ Read before implementation:
 
 Native already has exact oracle coverage for terrain-only, surface/bedrock, biome/noise/PRNG, and standalone air/liquid carver stages. Native does not yet have exact full decorated chunk parity.
 
-The full fixture for chunk `0,0` includes blocks outside the current native feature implementation, including:
+The full fixture for chunk `0,0` still includes blocks or exact placements outside the current native feature implementation, including:
 
 - `minecraft:cave_air`
-- ores such as `coal_ore`, `iron_ore`, `copper_ore`, `redstone_ore`, and deepslate ore variants
-- stone variants and underground materials such as `granite`, `diorite`, `andesite`, `tuff`, and `deepslate`
+- residual ore-placement offsets after true ore block families landed
 - `glow_lichen`
 - `snow`
-- spruce logs/leaves and fern/large fern decoration
+- exact spruce logs/leaves and fern/large fern decoration
 - water/lava persisted from generation
 
 ## Current Diagnostic
 
-After wiring air/liquid carvers into the native `Features` path, moving feature decoration onto a 3x3 region pass, correcting decorated-feature random interleaving, and porting the first seven vanilla underground variety ore blobs, the ignored exact test reports:
+After wiring air/liquid carvers into the native `Features` path, moving feature decoration onto a 3x3 region pass, correcting decorated-feature random interleaving, porting the first seven vanilla underground variety ore blobs, and adding the active default ore block families, the ignored exact test reports:
 
 ```text
-matched_blocks: 64,472 / 65,536
-mismatched_blocks: 1,064
+matched_blocks: 64,724 / 65,536
+mismatched_blocks: 812
 largest buckets:
   spruce_leaves -> air: 246
-  stone -> coal_ore: 204
   air -> spruce_leaves: 185
-  stone -> iron_ore: 103
-  stone -> copper_ore: 37
+  coal_ore -> stone: 96
+  stone -> coal_ore: 67
   air -> spruce_log: 24
   grass_block -> cave_air: 22
   dirt -> cave_air: 21
   dirt -> water: 21
   fern -> air: 20
+  spruce_log -> air: 19
+  air -> cave_air: 13
+  dirt -> grass_block: 11
+  grass -> air: 10
+  deepslate -> gravel: 9
+  air -> fern: 6
+  air -> dandelion: 4
 ```
 
-This leaves true ore block families and exact tree/vegetation profiles as the largest content gaps. The region pass also exposes the current placeholder tree profiles more honestly: neighboring chunks can now spill into the target, but the tree shape/placement is not yet vanilla. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
+This leaves exact tree/vegetation profiles as the largest content gap, with residual coal ore placement offsets still visible after the true ore block families landed. The region pass also exposes the current placeholder tree profiles more honestly: neighboring chunks can now spill into the target, but the tree shape/placement is not yet vanilla. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
 
 ## Landed So Far
 
@@ -86,6 +91,7 @@ This leaves true ore block families and exact tree/vegetation profiles as the la
 - `OverworldFeatureDependencyCache` retains clean liquid-carved lower-status dependency chunks inside the worldgen worker. Adjacent single-chunk feature jobs now reuse 342 of 361 dependency chunks and generate only the new 19-column strip, while repeated jobs keep deterministic output because feature writes are applied to cloned region chunks.
 - Native decorated feature execution now mirrors Java's nested `DecoratedFeature` order: decorator branches are evaluated depth-first, so feature placement consumes random before the next `count` branch. This fixed the initial underground ore drift.
 - Native `OreFeature` now covers the active default underground variety blobs for `dirt`, `gravel`, `granite`, `diorite`, `andesite`, `tuff`, and `deepslate`, including Java `Mth.sin` radius sampling, overlap culling, and natural-stone target matching.
+- Native default ore block families now cover the active overworld `ORE_COAL`, `ORE_IRON`, `ORE_GOLD`, `ORE_REDSTONE`, `ORE_DIAMOND`, `ORE_LAPIS`, and `ORE_COPPER` features with normal/deepslate replacement targets, terrain registry IDs, asset validation, and mesh fallback colors.
 
 ## Reference Scheduler Notes
 
@@ -128,8 +134,8 @@ Still required:
 
 ## Next Steps
 
-1. Port true ore block families visible in the full fixture: coal, iron, copper, redstone, gold, diamond, and lapis, including normal/deepslate replacement targets.
-2. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
+1. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
+2. Investigate the remaining coal ore placement offset and low-Y gravel/deepslate mismatch buckets.
 3. Add post-feature heightmap updates and scheduled tick capture to the native region path.
 4. Promote worker-local dependency reuse into scheduler-owned holder/status protochunk slots if structures or broader status scheduling need that before `018`.
 5. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
