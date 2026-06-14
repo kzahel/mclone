@@ -17,11 +17,13 @@ Landed:
 - local integrated server, client runtime replica, in-process transport, and native rendering from client snapshots
 - thin browser/WASM smoke that instantiates the Rust web shell, probes WebGPU, and runs a one-chunk protocol path
 - server-side chunk holders, status slots, duplicate request coalescing, and unload publication
+- chunk holder residency, dirty save queue, native filesystem snapshot store, and reload through the server path
 
 Still missing compared with the TypeScript engine:
 
-- no native persistence, remote transport, or dedicated-server loop
+- no remote transport or dedicated-server loop
 - chunk scheduling is still synchronous and surface-stage only
+- persistence is a temporary snapshot format, not Anvil/NBT or browser storage
 - web/WASM has only a thin smoke gate, not a real browser runtime, browser transport, or render path
 - no vanilla asset/model/texture pipeline in the Rust renderer
 - no native lighting, liquids, movement, entities, or broad decorated-world parity
@@ -63,7 +65,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 | [`005-local-integrated-client-server.md`](005-local-integrated-client-server.md) | runtime spine | **done** - `IntegratedServer`, `ClientRuntime`, in-process transport, client chunk replica, native app renders from client facts | native headless chunk PNG comes from `ClientRuntime`, not direct worldgen |
 | [`006-wasm-browser-build-smoke.md`](006-wasm-browser-build-smoke.md) | web compatibility | **done** - `mclone-web-client` compiles/builds to WASM, boots in a browser shell, probes WebGPU, and exercises a one-chunk protocol/client/server path | `cargo check --target wasm32-unknown-unknown` plus `pnpm native:web:smoke` where Chrome is available |
 | [`007-chunk-interest-status-scheduler.md`](007-chunk-interest-status-scheduler.md) | server runtime | **done** - interest-driven chunk requests, holder/status slots, coalesced synchronous generation, publishable chunk events | tests for duplicate request coalescing and status ordering |
-| `008-native-persistence-and-residency.md` | storage/runtime | chunk residency, dirty/save queue shape, filesystem adapter scaffold, reload/resume hook | save/load roundtrip of generated chunk snapshots |
+| [`008-native-persistence-and-residency.md`](008-native-persistence-and-residency.md) | storage/runtime | **done** - chunk residency, dirty/save queue shape, filesystem adapter scaffold, reload/resume hook | save/load roundtrip of generated chunk snapshots |
 | `009-dedicated-server-and-remote-transport.md` | networking | `mclone-dedicated-server` serves the same protocol over a simple native transport; native client can join remotely | local two-process smoke or loopback integration |
 | `010-browser-runtime-parity.md` | web runtime | browser client uses the same `ClientRuntime` and protocol messages against local or remote host adapters, with browser storage/transport constraints visible | browser runtime smoke from client replica facts |
 | `011-block-registry-and-asset-source.md` | assets/data | vanilla block-state id registry, file/web asset sources, extracted asset loading boundaries | registry and native/web asset fixture tests |
@@ -81,16 +83,16 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `008-native-persistence-and-residency.md`.
+The next implementation tactical should be `009-dedicated-server-and-remote-transport.md`.
 
-That slice should put a storage-shaped boundary under the scheduler before remote transport and broader streaming work:
+That slice should turn the dedicated server app from a placeholder into a process that speaks the same protocol/runtime shape:
 
-- chunk holders should distinguish resident, dirty, and publishable snapshots
-- add a filesystem adapter scaffold without making it a final save format
-- save/load one generated chunk snapshot through the server runtime path
-- preserve the same protocol publication path after reload
+- `mclone-dedicated-server` owns an `IntegratedServer`-equivalent server runtime without a renderer
+- `mclone-net` gets the first native remote transport shape
+- native client can use local or remote transport without changing `ClientRuntime`
+- the same `ClientCommand` / `ServerUpdate` protocol remains the boundary
 
-`008` should avoid full Anvil parity for now. The point is to prevent scheduler state from becoming memory-only architecture before dedicated server and browser storage adapters arrive.
+Keep the transport deliberately simple for the first slice. The goal is a real two-process or loopback integration path, not a production protocol stack.
 
 ## Deferral Notes
 

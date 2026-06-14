@@ -1,10 +1,18 @@
 #![forbid(unsafe_code)]
 
+mod persistence;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
 use mclone_worldgen::levelgen::generate_overworld_surface_chunk;
+pub use persistence::{
+    ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use persistence::FilesystemChunkSnapshotStore;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ServerMode {
@@ -16,6 +24,14 @@ pub enum ServerMode {
 pub enum ChunkStatusStep {
     Scheduled,
     Ready,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChunkResidency {
+    NotResident,
+    Generated,
+    LoadedFromStore,
+    Saved,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -44,6 +60,8 @@ pub struct ChunkHolder {
     target_status: Option<ChunkStatus>,
     status_slots: BTreeMap<ChunkStatus, ChunkStatusSlot>,
     published_snapshot: Option<ChunkSnapshot>,
+    residency: ChunkResidency,
+    dirty: bool,
 }
 
 impl ChunkHolder {
@@ -53,6 +71,8 @@ impl ChunkHolder {
             target_status: None,
             status_slots: BTreeMap::new(),
             published_snapshot: None,
+            residency: ChunkResidency::NotResident,
+            dirty: false,
         }
     }
 
@@ -73,6 +93,18 @@ impl ChunkHolder {
             .values()
             .filter(|slot| slot.step == ChunkStatusStep::Ready)
             .count()
+    }
+
+    pub fn residency(&self) -> ChunkResidency {
+        self.residency
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    pub fn snapshot(&self) -> Option<&ChunkSnapshot> {
+        self.published_snapshot.as_ref()
     }
 
     fn has_ready_status(&self, status: ChunkStatus) -> bool {
@@ -102,21 +134,46 @@ impl ChunkHolder {
             },
         );
     }
+
+    fn publish_snapshot(
+        &mut self,
+        snapshot: ChunkSnapshot,
+        residency: ChunkResidency,
+        dirty: bool,
+    ) {
+        self.mark_ready(snapshot.status, Some(snapshot.revision));
+        self.published_snapshot = Some(snapshot);
+        self.residency = residency;
+        self.dirty = dirty;
+    }
+
+    fn mark_saved(&mut self) {
+        self.dirty = false;
+        self.residency = ChunkResidency::Saved;
+    }
 }
 
 #[derive(Debug)]
 pub struct ChunkScheduler {
     seed: i64,
     holders: BTreeMap<ChunkPos, ChunkHolder>,
+    dirty_chunks: BTreeSet<ChunkPos>,
     next_revision: u64,
+    store: Box<dyn ChunkSnapshotStore>,
 }
 
 impl ChunkScheduler {
     pub fn new(seed: i64) -> Self {
+        Self::with_store(seed, Box::<NullChunkSnapshotStore>::default())
+    }
+
+    pub fn with_store(seed: i64, store: Box<dyn ChunkSnapshotStore>) -> Self {
         Self {
             seed,
             holders: BTreeMap::new(),
+            dirty_chunks: BTreeSet::new(),
             next_revision: 1,
+            store,
         }
     }
 
@@ -124,7 +181,10 @@ impl ChunkScheduler {
         self.seed
     }
 
-    pub fn apply_interest(&mut self, interest: ChunkInterest) -> Vec<ChunkSchedulerEvent> {
+    pub fn apply_interest(
+        &mut self,
+        interest: ChunkInterest,
+    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let desired_chunks = interest_positions(&interest);
         let desired_set = desired_chunks.iter().copied().collect::<BTreeSet<_>>();
         let mut events = Vec::new();
@@ -137,16 +197,20 @@ impl ChunkScheduler {
             .collect::<Vec<_>>()
         {
             let holder = self.holders.remove(&pos).expect("holder key disappeared");
+            if holder.dirty {
+                self.save_holder(&holder)?;
+                self.dirty_chunks.remove(&pos);
+            }
             if holder.published_snapshot.is_some() {
                 events.push(ChunkSchedulerEvent::Unloaded { pos });
             }
         }
 
         for pos in desired_chunks {
-            events.extend(self.schedule_chunk(pos, ChunkStatus::Surface));
+            events.extend(self.schedule_chunk(pos, ChunkStatus::Surface)?);
         }
 
-        events
+        Ok(events)
     }
 
     pub fn holder(&self, pos: ChunkPos) -> Option<&ChunkHolder> {
@@ -164,11 +228,35 @@ impl ChunkScheduler {
             .count()
     }
 
+    pub fn dirty_chunk_count(&self) -> usize {
+        self.dirty_chunks.len()
+    }
+
+    pub fn save_dirty_chunks(&mut self) -> ChunkStoreResult<usize> {
+        let dirty_chunks = self.dirty_chunks.iter().copied().collect::<Vec<_>>();
+        let mut saved = 0;
+        for pos in dirty_chunks {
+            let Some(holder) = self.holders.get(&pos).cloned() else {
+                self.dirty_chunks.remove(&pos);
+                continue;
+            };
+            if holder.dirty {
+                self.save_holder(&holder)?;
+                if let Some(current) = self.holders.get_mut(&pos) {
+                    current.mark_saved();
+                }
+                saved += 1;
+            }
+            self.dirty_chunks.remove(&pos);
+        }
+        Ok(saved)
+    }
+
     fn schedule_chunk(
         &mut self,
         pos: ChunkPos,
         target_status: ChunkStatus,
-    ) -> Vec<ChunkSchedulerEvent> {
+    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let mut events = Vec::new();
         self.holders
             .entry(pos)
@@ -199,17 +287,28 @@ impl ChunkScheduler {
             });
 
             if status == ChunkStatus::Surface {
+                if let Some(snapshot) = self.load_stored_snapshot(pos, target_status)? {
+                    self.mark_snapshot_ready(
+                        pos,
+                        snapshot.clone(),
+                        ChunkResidency::LoadedFromStore,
+                        false,
+                    );
+                    events.push(ChunkSchedulerEvent::StatusChanged {
+                        pos,
+                        status,
+                        step: ChunkStatusStep::Ready,
+                    });
+                    events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+                    continue;
+                }
+
                 let revision = ChunkRevision(self.next_revision);
                 self.next_revision += 1;
 
                 let chunk = generate_overworld_surface_chunk(self.seed, pos.x, pos.z);
                 let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Surface);
-                let holder = self
-                    .holders
-                    .get_mut(&pos)
-                    .expect("holder must exist before publishing");
-                holder.mark_ready(status, Some(revision));
-                holder.published_snapshot = Some(snapshot.clone());
+                self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
                 events.push(ChunkSchedulerEvent::StatusChanged {
                     pos,
                     status,
@@ -230,7 +329,50 @@ impl ChunkScheduler {
             }
         }
 
-        events
+        Ok(events)
+    }
+
+    fn load_stored_snapshot(
+        &mut self,
+        pos: ChunkPos,
+        target_status: ChunkStatus,
+    ) -> ChunkStoreResult<Option<ChunkSnapshot>> {
+        let Some(snapshot) = self.store.load_chunk(pos)? else {
+            return Ok(None);
+        };
+        if snapshot.status < target_status {
+            return Ok(None);
+        }
+        self.next_revision = self
+            .next_revision
+            .max(snapshot.revision.0.saturating_add(1));
+        Ok(Some(snapshot))
+    }
+
+    fn mark_snapshot_ready(
+        &mut self,
+        pos: ChunkPos,
+        snapshot: ChunkSnapshot,
+        residency: ChunkResidency,
+        dirty: bool,
+    ) {
+        let holder = self
+            .holders
+            .get_mut(&pos)
+            .expect("holder must exist before publishing");
+        holder.publish_snapshot(snapshot, residency, dirty);
+        if dirty {
+            self.dirty_chunks.insert(pos);
+        } else {
+            self.dirty_chunks.remove(&pos);
+        }
+    }
+
+    fn save_holder(&mut self, holder: &ChunkHolder) -> ChunkStoreResult<()> {
+        if let Some(snapshot) = holder.snapshot() {
+            self.store.save_chunk(snapshot)?;
+        }
+        Ok(())
     }
 }
 
@@ -242,9 +384,13 @@ pub struct IntegratedServer {
 
 impl IntegratedServer {
     pub fn new(seed: i64) -> Self {
+        Self::with_chunk_store(seed, Box::<NullChunkSnapshotStore>::default())
+    }
+
+    pub fn with_chunk_store(seed: i64, store: Box<dyn ChunkSnapshotStore>) -> Self {
         Self {
             seed,
-            scheduler: ChunkScheduler::new(seed),
+            scheduler: ChunkScheduler::with_store(seed, store),
         }
     }
 
@@ -253,6 +399,14 @@ impl IntegratedServer {
     }
 
     pub fn handle_command(&mut self, command: ClientCommand) -> Vec<ServerUpdate> {
+        self.try_handle_command(command)
+            .expect("integrated server command failed")
+    }
+
+    pub fn try_handle_command(
+        &mut self,
+        command: ClientCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         match command {
             ClientCommand::SetChunkInterest(interest) => self.set_chunk_interest(interest),
         }
@@ -266,12 +420,24 @@ impl IntegratedServer {
         &self.scheduler
     }
 
-    fn set_chunk_interest(&mut self, interest: ChunkInterest) -> Vec<ServerUpdate> {
-        self.scheduler
-            .apply_interest(interest)
+    pub fn scheduler_mut(&mut self) -> &mut ChunkScheduler {
+        &mut self.scheduler
+    }
+
+    pub fn save_dirty_chunks(&mut self) -> ChunkStoreResult<usize> {
+        self.scheduler.save_dirty_chunks()
+    }
+
+    fn set_chunk_interest(
+        &mut self,
+        interest: ChunkInterest,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        Ok(self
+            .scheduler
+            .apply_interest(interest)?
             .into_iter()
             .filter_map(server_update_from_scheduler_event)
-            .collect()
+            .collect())
     }
 }
 
@@ -364,10 +530,12 @@ mod tests {
     fn chunk_scheduler_records_holder_status_slots_in_order() {
         let mut scheduler = ChunkScheduler::new(12_345);
 
-        let events = scheduler.apply_interest(ChunkInterest {
-            center: ChunkPos::new(0, 0),
-            radius_chunks: 0,
-        });
+        let events = scheduler
+            .apply_interest(ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            })
+            .unwrap();
 
         assert_eq!(
             events
@@ -423,9 +591,91 @@ mod tests {
             radius_chunks: 0,
         };
 
-        assert_eq!(scheduler.apply_interest(interest.clone()).len(), 5);
-        assert_eq!(scheduler.apply_interest(interest), Vec::new());
+        assert_eq!(scheduler.apply_interest(interest.clone()).unwrap().len(), 5);
+        assert_eq!(scheduler.apply_interest(interest).unwrap(), Vec::new());
         assert_eq!(scheduler.loaded_chunk_count(), 1);
+    }
+
+    #[test]
+    fn generated_chunks_are_dirty_until_saved() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler
+            .apply_interest(ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            })
+            .unwrap();
+
+        let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(holder.residency(), ChunkResidency::Generated);
+        assert!(holder.is_dirty());
+        assert_eq!(scheduler.dirty_chunk_count(), 1);
+
+        assert_eq!(scheduler.save_dirty_chunks().unwrap(), 1);
+
+        let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(holder.residency(), ChunkResidency::Saved);
+        assert!(!holder.is_dirty());
+        assert_eq!(scheduler.dirty_chunk_count(), 0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn integrated_server_saves_and_reloads_resident_chunk() {
+        let root = unique_temp_dir("integrated_server_saves_and_reloads_resident_chunk");
+        let interest = ChunkInterest {
+            center: ChunkPos::new(0, 0),
+            radius_chunks: 0,
+        };
+        let first_snapshot = {
+            let mut server = IntegratedServer::with_chunk_store(
+                12_345,
+                Box::new(FilesystemChunkSnapshotStore::new(&root)),
+            );
+            let updates = server
+                .try_handle_command(ClientCommand::SetChunkInterest(interest.clone()))
+                .unwrap();
+            let ServerUpdate::ChunkSnapshot(snapshot) = updates.first().unwrap() else {
+                panic!("first update was not a chunk snapshot");
+            };
+            assert_eq!(server.scheduler().dirty_chunk_count(), 1);
+            assert_eq!(
+                server
+                    .scheduler()
+                    .holder(ChunkPos::new(0, 0))
+                    .unwrap()
+                    .residency(),
+                ChunkResidency::Generated
+            );
+
+            assert_eq!(server.save_dirty_chunks().unwrap(), 1);
+            assert_eq!(server.scheduler().dirty_chunk_count(), 0);
+            assert_eq!(
+                server
+                    .scheduler()
+                    .holder(ChunkPos::new(0, 0))
+                    .unwrap()
+                    .residency(),
+                ChunkResidency::Saved
+            );
+            snapshot.clone()
+        };
+
+        let mut reloaded = IntegratedServer::with_chunk_store(
+            12_345,
+            Box::new(FilesystemChunkSnapshotStore::new(&root)),
+        );
+        let updates = reloaded
+            .try_handle_command(ClientCommand::SetChunkInterest(interest))
+            .unwrap();
+
+        assert_eq!(updates, vec![ServerUpdate::ChunkSnapshot(first_snapshot)]);
+        let holder = reloaded.scheduler().holder(ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(holder.residency(), ChunkResidency::LoadedFromStore);
+        assert!(!holder.is_dirty());
+        assert_eq!(reloaded.scheduler().dirty_chunk_count(), 0);
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -453,5 +703,16 @@ mod tests {
                 )
             ]
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn unique_temp_dir(name: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("mclone-{name}-{}-{nanos}", std::process::id()));
+        path
     }
 }
