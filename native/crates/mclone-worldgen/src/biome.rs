@@ -438,10 +438,20 @@ impl OverworldBiomeSource {
         block_x: i32,
         block_z: i32,
     ) -> BiomeDefinition {
+        self.get_block_position_biome_definition_at_y(seed, block_x, 0, block_z)
+    }
+
+    pub fn get_block_position_biome_definition_at_y(
+        &self,
+        seed: i64,
+        block_x: i32,
+        block_y: i32,
+        block_z: i32,
+    ) -> BiomeDefinition {
         get_layered_biome_by_id(get_fuzzy_zoomed_biome_id(
             obfuscate_biome_zoom_seed(seed),
             block_x,
-            0,
+            block_y,
             block_z,
             |quart_x, quart_y, quart_z| self.get_noise_biome_id(quart_x, quart_y, quart_z),
         ))

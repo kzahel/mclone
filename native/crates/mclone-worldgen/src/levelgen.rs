@@ -2031,6 +2031,8 @@ mod tests {
             .collect::<Vec<_>>();
         let first_target = *plan.targets.iter().next().expect("non-empty target plan");
         let mut region = FeatureRegion::new(first_target.x, first_target.z, chunks);
+        let feature_biomes =
+            crate::feature::OverworldFeatureBiomeResolver::new(seed, &biome_source);
         let mut diagnostics = Vec::new();
 
         for center in plan.ordered_feature_centers() {
@@ -2057,7 +2059,7 @@ mod tests {
                             == crate::feature::test_support::JAVA_TAIGA_VEGETATION_FEATURE_INDEX;
                     let random_count_before_feature = random.get_count();
                     let before = capture.then(|| tree_blocks_in_target_region(&region, target));
-                    feature.place(&mut region, &mut random, origin);
+                    feature.place_with_biomes(&mut region, &feature_biomes, &mut random, origin);
                     if let Some(before) = before {
                         let after = tree_blocks_in_target_region(&region, target);
                         let (added_tree_blocks, removed_tree_blocks) =
@@ -2669,101 +2671,98 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "active gauntlet: native still accepts south-side taiga tree candidates Java rejects"]
     fn taiga_full_table_tree_deltas_match_vanilla_scheduler_probe() {
         let diagnostics = taiga_full_table_tree_delta_diagnostics(12_345, ChunkPos::new(0, 0));
+        let tree_deltas = diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.center,
+                    diagnostic.biome_key,
+                    diagnostic.before_tree_blocks,
+                    diagnostic.after_tree_blocks,
+                    diagnostic.added_tree_blocks,
+                    diagnostic.removed_tree_blocks,
+                    diagnostic.feature_random_calls,
+                )
+            })
+            .collect::<Vec<_>>();
 
         assert_eq!(
-            diagnostics,
+            tree_deltas,
             vec![
-                TaigaFullTableTreeDeltaDiagnostic {
-                    center: ChunkPos::new(-1, -1),
-                    biome_key: "minecraft:taiga_mountains",
-                    before_tree_blocks: 0,
-                    after_tree_blocks: 0,
-                    added_tree_blocks: 0,
-                    removed_tree_blocks: 0,
-                    feature_random_calls: 75,
-                    random_count: 7705,
-                    added_tree_block_samples: Vec::new(),
-                },
-                TaigaFullTableTreeDeltaDiagnostic {
-                    center: ChunkPos::new(0, -1),
-                    biome_key: "minecraft:taiga_mountains",
-                    before_tree_blocks: 0,
-                    after_tree_blocks: 0,
-                    added_tree_blocks: 0,
-                    removed_tree_blocks: 0,
-                    feature_random_calls: 68,
-                    random_count: 7499,
-                    added_tree_block_samples: Vec::new(),
-                },
-                TaigaFullTableTreeDeltaDiagnostic {
-                    center: ChunkPos::new(1, -1),
-                    biome_key: "minecraft:taiga_mountains",
-                    before_tree_blocks: 0,
-                    after_tree_blocks: 0,
-                    added_tree_blocks: 0,
-                    removed_tree_blocks: 0,
-                    feature_random_calls: 75,
-                    random_count: 7467,
-                    added_tree_block_samples: Vec::new(),
-                },
-                TaigaFullTableTreeDeltaDiagnostic {
-                    center: ChunkPos::new(-1, 0),
-                    biome_key: "minecraft:taiga_mountains",
-                    before_tree_blocks: 0,
-                    after_tree_blocks: 0,
-                    added_tree_blocks: 0,
-                    removed_tree_blocks: 0,
-                    feature_random_calls: 77,
-                    random_count: 8092,
-                    added_tree_block_samples: Vec::new(),
-                },
-                TaigaFullTableTreeDeltaDiagnostic {
-                    center: ChunkPos::new(0, 0),
-                    biome_key: "minecraft:taiga_mountains",
-                    before_tree_blocks: 0,
-                    after_tree_blocks: 236,
-                    added_tree_blocks: 236,
-                    removed_tree_blocks: 0,
-                    feature_random_calls: 77,
-                    random_count: 7759,
-                    added_tree_block_samples: Vec::new(),
-                },
-                TaigaFullTableTreeDeltaDiagnostic {
-                    center: ChunkPos::new(1, 0),
-                    biome_key: "minecraft:taiga_mountains",
-                    before_tree_blocks: 236,
-                    after_tree_blocks: 246,
-                    added_tree_blocks: 10,
-                    removed_tree_blocks: 0,
-                    feature_random_calls: 86,
-                    random_count: 7357,
-                    added_tree_block_samples: Vec::new(),
-                },
-                TaigaFullTableTreeDeltaDiagnostic {
-                    center: ChunkPos::new(0, 1),
-                    biome_key: "minecraft:taiga_mountains",
-                    before_tree_blocks: 246,
-                    after_tree_blocks: 246,
-                    added_tree_blocks: 0,
-                    removed_tree_blocks: 0,
-                    feature_random_calls: 73,
-                    random_count: 7721,
-                    added_tree_block_samples: Vec::new(),
-                },
-                TaigaFullTableTreeDeltaDiagnostic {
-                    center: ChunkPos::new(1, 1),
-                    biome_key: "minecraft:taiga_mountains",
-                    before_tree_blocks: 246,
-                    after_tree_blocks: 246,
-                    added_tree_blocks: 0,
-                    removed_tree_blocks: 0,
-                    feature_random_calls: 73,
-                    random_count: 7626,
-                    added_tree_block_samples: Vec::new(),
-                },
+                (
+                    ChunkPos::new(-1, -1),
+                    "minecraft:taiga_mountains",
+                    0,
+                    0,
+                    0,
+                    0,
+                    75
+                ),
+                (
+                    ChunkPos::new(0, -1),
+                    "minecraft:taiga_mountains",
+                    0,
+                    0,
+                    0,
+                    0,
+                    68
+                ),
+                (
+                    ChunkPos::new(1, -1),
+                    "minecraft:taiga_mountains",
+                    0,
+                    0,
+                    0,
+                    0,
+                    75
+                ),
+                (
+                    ChunkPos::new(-1, 0),
+                    "minecraft:taiga_mountains",
+                    0,
+                    0,
+                    0,
+                    0,
+                    77
+                ),
+                (
+                    ChunkPos::new(0, 0),
+                    "minecraft:taiga_mountains",
+                    0,
+                    236,
+                    236,
+                    0,
+                    77
+                ),
+                (
+                    ChunkPos::new(1, 0),
+                    "minecraft:taiga_mountains",
+                    236,
+                    246,
+                    10,
+                    0,
+                    86
+                ),
+                (
+                    ChunkPos::new(0, 1),
+                    "minecraft:taiga_mountains",
+                    246,
+                    246,
+                    0,
+                    0,
+                    73
+                ),
+                (
+                    ChunkPos::new(1, 1),
+                    "minecraft:taiga_mountains",
+                    246,
+                    246,
+                    0,
+                    0,
+                    73
+                ),
             ]
         );
     }

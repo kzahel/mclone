@@ -378,13 +378,20 @@ public class ChunkStatus {
             ConfiguredFeature<?, ?> feature = featureSupplier.get();
             random.setFeatureSeed(decorationSeed, featureIndex, stepIndex);
             region.setCurrentlyGenerating(feature::toString);
-            feature.place(region, generator, random, origin);
+            String configuredFeature = feature.toString();
+            String featureType = Registry.FEATURE.getKey(feature.feature()).toString();
+            McloneSchedulerTraceRecorder.enterFeatureContext(region, stepIndex, featureIndex, configuredFeature, featureType);
+            try {
+               feature.place(region, generator, random, origin);
+            } finally {
+               McloneSchedulerTraceRecorder.exitFeatureContext();
+            }
             McloneSchedulerTraceRecorder.recordFeatureProbe(
                region,
                stepIndex,
                featureIndex,
-               feature.toString(),
-               Registry.FEATURE.getKey(feature.feature()).toString(),
+               configuredFeature,
+               featureType,
                random.getCount()
             );
             featureIndex++;

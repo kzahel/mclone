@@ -808,6 +808,7 @@ public final class OracleDumper {
       String stopStatus = options.getOrDefault("stop-status", "features");
       String probeBlocks = options.getOrDefault("probe-blocks", "");
       boolean probeTargetTreeBlocks = parseBooleanOption(options, "probe-target-tree-blocks", false);
+      boolean probeTreeCandidates = parseBooleanOption(options, "probe-tree-candidates", false);
       boolean generateStructures = parseBooleanOption(options, "generate-structures", true);
       Path tempDir = Files.createTempDirectory("mclone-scheduler-trace-");
       Path output = tempDir.resolve("scheduler-trace.json");
@@ -833,6 +834,11 @@ public final class OracleDumper {
       command.add("-Dmclone.schedulerTrace.stopStatus=" + stopStatus);
       command.add("-Dmclone.schedulerTrace.probeBlocks=" + probeBlocks);
       command.add("-Dmclone.schedulerTrace.probeTargetTreeBlocks=" + probeTargetTreeBlocks);
+      command.add("-Dmclone.schedulerTrace.probeTreeCandidates=" + probeTreeCandidates);
+      addOptionalSystemProperty(command, options, "tree-probe-center-x", "mclone.schedulerTrace.treeProbeCenterX");
+      addOptionalSystemProperty(command, options, "tree-probe-center-z", "mclone.schedulerTrace.treeProbeCenterZ");
+      addOptionalSystemProperty(command, options, "tree-probe-step-index", "mclone.schedulerTrace.treeProbeStepIndex");
+      addOptionalSystemProperty(command, options, "tree-probe-feature-index", "mclone.schedulerTrace.treeProbeFeatureIndex");
       command.add("-Dmclone.schedulerTrace.identityHashCodeMode=3");
       command.add("-Dmclone.schedulerTrace.output=" + output);
       command.add("-cp");
@@ -900,6 +906,13 @@ public final class OracleDumper {
          + "sync-chunk-writes=false\n"
          + "view-distance=3\n"
          + "white-list=false\n";
+   }
+
+   private static void addOptionalSystemProperty(List<String> command, Map<String, String> options, String optionName, String propertyName) {
+      String value = options.get(optionName);
+      if (value != null) {
+         command.add("-D" + propertyName + "=" + value);
+      }
    }
 
    private static void appendBoundedLog(StringBuilder log, String line) {
@@ -2324,7 +2337,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper liquid-carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper feature-order-trace --seed <long> --chunk-x <int> --chunk-z <int> [--generate-structures <true|false>]");
-      System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full] [--generate-structures <true|false>] [--probe-blocks <x,y,z;...>] [--probe-target-tree-blocks <true|false>]");
+      System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full] [--generate-structures <true|false>] [--probe-blocks <x,y,z;...>] [--probe-target-tree-blocks <true|false>] [--probe-tree-candidates <true|false>] [--tree-probe-center-x <int>] [--tree-probe-center-z <int>] [--tree-probe-step-index <int>] [--tree-probe-feature-index <int>]");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");

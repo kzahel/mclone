@@ -6,9 +6,9 @@ use crate::block::{
     DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
     DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
     DIAMOND_ORE, DIORITE, DIRT, FERN, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
-    IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES, OAK_LOG,
-    PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SNOW, SPRUCE_LEAVES, SPRUCE_LOG,
-    STONE, TERRACOTTA, TUFF, WATER,
+    ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES,
+    OAK_LOG, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SNOW, SPRUCE_LEAVES,
+    SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{
@@ -16,6 +16,7 @@ use crate::placement::{
     VerticalAnchor,
 };
 use crate::prng::{RandomSource, WorldgenRandom};
+use crate::surface::biome_temperature;
 
 const CHUNK_WIDTH: i32 = 16;
 pub const FEATURES_CHUNK_DEPENDENCY_RADIUS: i32 = 8;
@@ -75,6 +76,49 @@ pub trait FeatureWorld {
     fn world_surface_height_at(&mut self, world_x: i32, world_z: i32) -> Option<i32>;
     fn set_block_world(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool;
 }
+
+pub(crate) trait FeatureBiomeResolver {
+    fn biome_at(&self, block_x: i32, block_y: i32, block_z: i32) -> BiomeDefinition;
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ConstantFeatureBiomeResolver {
+    biome: BiomeDefinition,
+}
+
+impl ConstantFeatureBiomeResolver {
+    pub(crate) const fn new(biome: BiomeDefinition) -> Self {
+        Self { biome }
+    }
+}
+
+impl FeatureBiomeResolver for ConstantFeatureBiomeResolver {
+    fn biome_at(&self, _block_x: i32, _block_y: i32, _block_z: i32) -> BiomeDefinition {
+        self.biome
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct OverworldFeatureBiomeResolver<'a> {
+    seed: i64,
+    biome_source: &'a OverworldBiomeSource,
+}
+
+impl<'a> OverworldFeatureBiomeResolver<'a> {
+    pub(crate) const fn new(seed: i64, biome_source: &'a OverworldBiomeSource) -> Self {
+        Self { seed, biome_source }
+    }
+}
+
+impl FeatureBiomeResolver for OverworldFeatureBiomeResolver<'_> {
+    fn biome_at(&self, block_x: i32, block_y: i32, block_z: i32) -> BiomeDefinition {
+        self.biome_source
+            .get_block_position_biome_definition_at_y(self.seed, block_x, block_y, block_z)
+    }
+}
+
+const DEFAULT_FEATURE_BIOME: BiomeDefinition =
+    BiomeDefinition::new(1, "minecraft:plains", 0.125, 0.05000000074505806);
 
 impl FeatureWorld for MutableChunkBlockBuffer {
     fn center_chunk_x(&self) -> i32 {
@@ -825,6 +869,7 @@ pub enum ConfiguredFeature {
     RandomSelector(RandomFeatureConfiguration),
     Decorated(DecoratedFeatureConfiguration),
     Ore(OreConfiguration),
+    FreezeTopLayer,
 }
 
 impl ConfiguredFeature {
@@ -864,9 +909,24 @@ impl ConfiguredFeature {
         Self::Ore(config)
     }
 
+    pub const fn freeze_top_layer() -> Self {
+        Self::FreezeTopLayer
+    }
+
     pub fn place<W: FeatureWorld>(
         &self,
         world: &mut W,
+        random: &mut impl RandomSource,
+        origin: BlockPos,
+    ) -> bool {
+        let biomes = ConstantFeatureBiomeResolver::new(DEFAULT_FEATURE_BIOME);
+        self.place_with_biomes(world, &biomes, random, origin)
+    }
+
+    pub(crate) fn place_with_biomes<W: FeatureWorld, B: FeatureBiomeResolver>(
+        &self,
+        world: &mut W,
+        biomes: &B,
         random: &mut impl RandomSource,
         origin: BlockPos,
     ) -> bool {
@@ -877,11 +937,14 @@ impl ConfiguredFeature {
             Self::GlowLichen(config) => place_glow_lichen(world, random, origin, *config),
             Self::BasicTree(config) => place_basic_tree(world, random, origin, *config),
             Self::Tree(config) => place_tree(world, random, origin, *config),
-            Self::RandomSelector(config) => place_random_selector(world, random, origin, config),
+            Self::RandomSelector(config) => {
+                place_random_selector(world, biomes, random, origin, config)
+            }
             Self::Decorated(config) => {
-                place_configured_decorated_feature(world, random, origin, config)
+                place_configured_decorated_feature(world, biomes, random, origin, config)
             }
             Self::Ore(config) => place_ore(world, random, origin, config),
+            Self::FreezeTopLayer => place_freeze_top_layer(world, biomes, origin),
         }
     }
 }
@@ -912,26 +975,39 @@ impl PlacedFeature {
         random: &mut impl RandomSource,
         origin: BlockPos,
     ) -> bool {
-        let decoration_context = DecorationContext::new(world.min_y(), world.height());
-        self.place_decorated(world, random, &decoration_context, 0, origin)
+        let biomes = ConstantFeatureBiomeResolver::new(DEFAULT_FEATURE_BIOME);
+        self.place_with_biomes(world, &biomes, random, origin)
     }
 
-    fn place_decorated<W: FeatureWorld>(
+    pub(crate) fn place_with_biomes<W: FeatureWorld, B: FeatureBiomeResolver>(
         &self,
         world: &mut W,
+        biomes: &B,
+        random: &mut impl RandomSource,
+        origin: BlockPos,
+    ) -> bool {
+        let decoration_context = DecorationContext::new(world.min_y(), world.height());
+        self.place_decorated(world, biomes, random, &decoration_context, 0, origin)
+    }
+
+    fn place_decorated<W: FeatureWorld, B: FeatureBiomeResolver>(
+        &self,
+        world: &mut W,
+        biomes: &B,
         random: &mut impl RandomSource,
         decoration_context: &DecorationContext,
         decorator_index: usize,
         pos: BlockPos,
     ) -> bool {
         let Some(decorator) = self.decorators.get(decorator_index) else {
-            return self.feature.place(world, random, pos);
+            return self.feature.place_with_biomes(world, biomes, random, pos);
         };
 
         let mut placed_any = false;
         for next_pos in decorator_positions(world, decoration_context, random, *decorator, pos) {
             placed_any |= self.place_decorated(
                 world,
+                biomes,
                 random,
                 decoration_context,
                 decorator_index + 1,
@@ -993,8 +1069,9 @@ fn decorator_positions<W: FeatureWorld>(
     }
 }
 
-fn place_configured_decorated_feature<W: FeatureWorld>(
+fn place_configured_decorated_feature<W: FeatureWorld, B: FeatureBiomeResolver>(
     world: &mut W,
+    biomes: &B,
     random: &mut impl RandomSource,
     origin: BlockPos,
     config: &DecoratedFeatureConfiguration,
@@ -1002,6 +1079,7 @@ fn place_configured_decorated_feature<W: FeatureWorld>(
     let decoration_context = DecorationContext::new(world.min_y(), world.height());
     place_configured_decorated_feature_at(
         world,
+        biomes,
         random,
         &decoration_context,
         config.feature.as_ref(),
@@ -1011,8 +1089,9 @@ fn place_configured_decorated_feature<W: FeatureWorld>(
     )
 }
 
-fn place_configured_decorated_feature_at<W: FeatureWorld>(
+fn place_configured_decorated_feature_at<W: FeatureWorld, B: FeatureBiomeResolver>(
     world: &mut W,
+    biomes: &B,
     random: &mut impl RandomSource,
     decoration_context: &DecorationContext,
     feature: &ConfiguredFeature,
@@ -1021,13 +1100,14 @@ fn place_configured_decorated_feature_at<W: FeatureWorld>(
     pos: BlockPos,
 ) -> bool {
     let Some(decorator) = decorators.get(decorator_index) else {
-        return feature.place(world, random, pos);
+        return feature.place_with_biomes(world, biomes, random, pos);
     };
 
     let mut placed_any = false;
     for next_pos in decorator_positions(world, decoration_context, random, *decorator, pos) {
         placed_any |= place_configured_decorated_feature_at(
             world,
+            biomes,
             random,
             decoration_context,
             feature,
@@ -1053,7 +1133,8 @@ pub fn apply_overworld_biome_decoration(
     chunk: &mut MutableChunkBlockBuffer,
 ) -> DecorationReport {
     let biome = chunk_primary_biome(biome_source, chunk.chunk_x, chunk.chunk_z);
-    apply_overworld_biome_features(seed, biome, chunk)
+    let biomes = OverworldFeatureBiomeResolver::new(seed, biome_source);
+    apply_overworld_biome_features_with_biomes(seed, biome, &biomes, chunk)
 }
 
 pub fn apply_overworld_biome_decoration_to_region(
@@ -1066,12 +1147,23 @@ pub fn apply_overworld_biome_decoration_to_region(
         region.center_chunk_x(),
         region.center_chunk_z(),
     );
-    apply_overworld_biome_features(seed, biome, region)
+    let biomes = OverworldFeatureBiomeResolver::new(seed, biome_source);
+    apply_overworld_biome_features_with_biomes(seed, biome, &biomes, region)
 }
 
 pub fn apply_overworld_biome_features<W: FeatureWorld>(
     seed: i64,
     biome: BiomeDefinition,
+    world: &mut W,
+) -> DecorationReport {
+    let biomes = ConstantFeatureBiomeResolver::new(biome);
+    apply_overworld_biome_features_with_biomes(seed, biome, &biomes, world)
+}
+
+fn apply_overworld_biome_features_with_biomes<W: FeatureWorld, B: FeatureBiomeResolver>(
+    seed: i64,
+    biome: BiomeDefinition,
+    biomes: &B,
     world: &mut W,
 ) -> DecorationReport {
     let before = world.non_air_block_count();
@@ -1090,7 +1182,7 @@ pub fn apply_overworld_biome_features<W: FeatureWorld>(
             .filter(|feature| feature.step.index() == step_index)
         {
             random.set_feature_seed(decoration_seed, feature_index, step_index);
-            if feature.place(world, &mut random, origin) {
+            if feature.place_with_biomes(world, biomes, &mut random, origin) {
                 placed_features += 1;
             }
             feature_index += 1;
@@ -1149,6 +1241,7 @@ pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature
     features.extend(default_underground_variety_features());
     features.extend(default_ore_features());
     features.append(&mut biome_features);
+    features.extend(default_top_layer_features());
     features
 }
 
@@ -1302,6 +1395,18 @@ fn default_ore_features() -> Vec<PlacedFeature> {
             6,
         ),
     ]
+}
+
+fn default_top_layer_features() -> Vec<PlacedFeature> {
+    vec![freeze_top_layer_feature()]
+}
+
+fn freeze_top_layer_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::TopLayerModification,
+        ConfiguredFeature::freeze_top_layer(),
+        Vec::new(),
+    )
 }
 
 fn underground_ore_feature(
@@ -1821,6 +1926,62 @@ fn place_random_patch<W: FeatureWorld>(
     placed > 0
 }
 
+fn place_freeze_top_layer<W: FeatureWorld, B: FeatureBiomeResolver>(
+    world: &mut W,
+    biomes: &B,
+    origin: BlockPos,
+) -> bool {
+    for dx in 0..CHUNK_WIDTH {
+        for dz in 0..CHUNK_WIDTH {
+            let x = origin.x + dx;
+            let z = origin.z + dz;
+            let Some(y) = world.height_at(HeightmapType::MotionBlocking, x, z) else {
+                continue;
+            };
+            let surface_pos = BlockPos::new(x, y, z);
+            let below = BlockPos::new(x, y - 1, z);
+            let biome = biomes.biome_at(x, y, z);
+
+            if should_freeze(world, biome, below) {
+                world.set_block_world(below, ICE);
+            }
+            if should_snow(world, biome, surface_pos) {
+                world.set_block_world(surface_pos, SNOW);
+            }
+        }
+    }
+
+    true
+}
+
+fn should_freeze<W: FeatureWorld>(world: &mut W, biome: BiomeDefinition, pos: BlockPos) -> bool {
+    is_within_build_height(world, pos)
+        && biome_temperature(biome, pos.x, pos.y, pos.z) < 0.15
+        && world.block_at_world(pos) == Some(WATER)
+}
+
+fn should_snow<W: FeatureWorld>(world: &mut W, biome: BiomeDefinition, pos: BlockPos) -> bool {
+    if !is_within_build_height(world, pos)
+        || biome_temperature(biome, pos.x, pos.y, pos.z) >= 0.15
+        || world.block_at_world(pos) != Some(AIR)
+    {
+        return false;
+    }
+
+    let below = BlockPos::new(pos.x, pos.y - 1, pos.z);
+    world
+        .block_at_world(below)
+        .is_some_and(snow_layer_can_survive_on)
+}
+
+fn is_within_build_height<W: FeatureWorld>(world: &W, pos: BlockPos) -> bool {
+    (world.min_y()..world.min_y() + world.height()).contains(&pos.y)
+}
+
+fn snow_layer_can_survive_on(block_id: RawBlockId) -> bool {
+    material_blocks_motion(block_id)
+}
+
 fn place_glow_lichen<W: FeatureWorld>(
     world: &mut W,
     random: &mut impl RandomSource,
@@ -1998,19 +2159,24 @@ fn place_basic_tree<W: FeatureWorld>(
     true
 }
 
-fn place_random_selector<W: FeatureWorld>(
+fn place_random_selector<W: FeatureWorld, B: FeatureBiomeResolver>(
     world: &mut W,
+    biomes: &B,
     random: &mut impl RandomSource,
     origin: BlockPos,
     config: &RandomFeatureConfiguration,
 ) -> bool {
     for weighted in &config.features {
         if random.next_float() < weighted.chance {
-            return weighted.feature.place(world, random, origin);
+            return weighted
+                .feature
+                .place_with_biomes(world, biomes, random, origin);
         }
     }
 
-    config.default_feature.place(world, random, origin)
+    config
+        .default_feature
+        .place_with_biomes(world, biomes, random, origin)
 }
 
 fn place_tree<W: FeatureWorld>(
@@ -2829,6 +2995,41 @@ mod tests {
     }
 
     #[test]
+    fn freeze_top_layer_places_snow_on_cold_motion_blocking_surface() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(12_345);
+        let biomes = ConstantFeatureBiomeResolver::new(get_layered_biome_by_id(12));
+        let feature = ConfiguredFeature::freeze_top_layer();
+
+        assert!(feature.place_with_biomes(
+            &mut chunk,
+            &biomes,
+            &mut random,
+            BlockPos::new(0, 0, 0),
+        ));
+        assert_eq!(chunk.get_block_at_y(8, 3, 8), SNOW);
+        assert_eq!(random.get_count(), 0);
+    }
+
+    #[test]
+    fn freeze_top_layer_freezes_surface_water_before_snow_check() {
+        let mut chunk = flat_grass_chunk();
+        chunk.set_block_at_y(8, 2, 8, WATER);
+        let mut random = WorldgenRandom::new(12_345);
+        let biomes = ConstantFeatureBiomeResolver::new(get_layered_biome_by_id(12));
+        let feature = ConfiguredFeature::freeze_top_layer();
+
+        assert!(feature.place_with_biomes(
+            &mut chunk,
+            &biomes,
+            &mut random,
+            BlockPos::new(0, 0, 0),
+        ));
+        assert_eq!(chunk.get_block_at_y(8, 2, 8), ICE);
+        assert_eq!(chunk.get_block_at_y(8, 3, 8), SNOW);
+    }
+
+    #[test]
     fn ore_feature_replaces_natural_stone_blob() {
         let mut chunk = solid_stone_chunk();
         let mut random = WorldgenRandom::new(12_345);
@@ -3216,12 +3417,22 @@ mod tests {
     }
 
     #[test]
+    fn biome_feature_tables_end_with_default_freeze_top_layer() {
+        let plains = overworld_features_for_biome(get_layered_biome_by_id(1));
+        let feature = plains.last().expect("plains has features");
+
+        assert_eq!(feature.step, DecorationStep::TopLayerModification);
+        assert_eq!(feature.feature, ConfiguredFeature::freeze_top_layer());
+        assert!(feature.decorators.is_empty());
+    }
+
+    #[test]
     fn biome_overworld_decoration_reports_added_blocks() {
         let mut chunk = flat_grass_chunk();
         let report = apply_overworld_biome_features(12_345, get_layered_biome_by_id(4), &mut chunk);
 
         assert_eq!(report.biome_key, "minecraft:forest");
-        assert_eq!(report.attempted_features, 22);
+        assert_eq!(report.attempted_features, 23);
         assert!(report.placed_features > 0);
         assert!(report.added_non_air_blocks > 0);
     }

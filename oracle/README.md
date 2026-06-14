@@ -185,6 +185,22 @@ Options:
 - `--record-radius 12` records the wider dependency-window event stream instead of only the target 3x3.
 - `--timeout-seconds <n>` changes the server-process timeout.
 - `--probe-target-tree-blocks true` switches `FEATURES` decoration to feature-by-feature probe mode and records all target-chunk `spruce_log` / `spruce_leaves` blocks after each configured feature. This is intended for focused taiga tree diagnostics; it is too verbose for the committed scheduler-order fixture.
+- `--probe-tree-candidates true` records final selected `minecraft:tree` attempts from the decorated feature stack. Combine it with `--tree-probe-center-x`, `--tree-probe-center-z`, `--tree-probe-step-index`, and `--tree-probe-feature-index` to keep output focused. Each `tree_candidate` event includes origin, pine/spruce discriminator via foliage placer class, tree dimensions, placement result, random-count range, and rejection details such as `sapling_cannot_survive` or the first block that limited `max_free_tree_height`.
+
+Example focused taiga candidate trace:
+
+```bash
+pnpm --silent oracle:gen scheduler-trace \
+  --seed 12345 --chunk-x 0 --chunk-z 1 \
+  --target-radius 1 --record-radius 1 --stop-status features \
+  --generate-structures false \
+  --probe-target-tree-blocks true \
+  --probe-tree-candidates true \
+  --tree-probe-center-x 0 \
+  --tree-probe-center-z 1 \
+  --tree-probe-step-index 8 \
+  --tree-probe-feature-index 2
+```
 
 The child JVM is pinned with `-XX:ActiveProcessorCount=2` so vanilla's background executor has one worker, and `-XX:hashCode=3` so identity-hashed scheduler collections iterate reproducibly. In sandboxed environments the temporary server may need elevated permission to bind its localhost listener.
 

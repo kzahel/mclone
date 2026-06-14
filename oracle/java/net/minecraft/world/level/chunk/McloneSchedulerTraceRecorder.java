@@ -13,6 +13,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.OptionalInt;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.core.BlockPos;
@@ -22,8 +24,9 @@ import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.WorldgenRandom;
 
-final class McloneSchedulerTraceRecorder {
+public final class McloneSchedulerTraceRecorder {
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
    private static final boolean ENABLED = Boolean.getBoolean("mclone.schedulerTrace.enabled");
    private static final boolean HALT_ON_COMPLETE = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.haltOnComplete", "false"));
@@ -37,8 +40,15 @@ final class McloneSchedulerTraceRecorder {
    private static final String STOP_STATUS = System.getProperty("mclone.schedulerTrace.stopStatus", "features").toLowerCase(Locale.ROOT);
    private static final List<ProbeBlock> PROBE_BLOCKS = parseProbeBlocks(System.getProperty("mclone.schedulerTrace.probeBlocks", ""));
    private static final boolean PROBE_TARGET_TREE_BLOCKS = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeTargetTreeBlocks", "false"));
+   private static final boolean PROBE_TREE_CANDIDATES = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeTreeCandidates", "false"));
+   private static final int TREE_PROBE_CENTER_X = parseIntProperty("mclone.schedulerTrace.treeProbeCenterX", Integer.MIN_VALUE);
+   private static final int TREE_PROBE_CENTER_Z = parseIntProperty("mclone.schedulerTrace.treeProbeCenterZ", Integer.MIN_VALUE);
+   private static final int TREE_PROBE_STEP_INDEX = parseIntProperty("mclone.schedulerTrace.treeProbeStepIndex", -1);
+   private static final int TREE_PROBE_FEATURE_INDEX = parseIntProperty("mclone.schedulerTrace.treeProbeFeatureIndex", -1);
    private static final List<Map<String, Object>> EVENTS = new ArrayList<>();
    private static final Set<String> TARGET_STOP_COMPLETIONS = new LinkedHashSet<>();
+   private static final ThreadLocal<FeatureProbeContext> CURRENT_FEATURE = new ThreadLocal<>();
+   private static final ThreadLocal<TreeCandidateProbe> CURRENT_TREE_CANDIDATE = new ThreadLocal<>();
    private static long sequence;
    private static boolean written;
 
@@ -75,7 +85,189 @@ final class McloneSchedulerTraceRecorder {
    }
 
    static boolean hasFeatureProbes() {
-      return hasProbeBlocks() || PROBE_TARGET_TREE_BLOCKS;
+      return hasProbeBlocks() || PROBE_TARGET_TREE_BLOCKS || PROBE_TREE_CANDIDATES;
+   }
+
+   static void enterFeatureContext(
+      WorldGenRegion region,
+      int stepIndex,
+      int featureIndex,
+      String configuredFeature,
+      String featureType
+   ) {
+      if (!ENABLED || written || !PROBE_TREE_CANDIDATES) {
+         return;
+      }
+
+      CURRENT_FEATURE.set(new FeatureProbeContext(region.getCenter(), stepIndex, featureIndex, configuredFeature, featureType));
+   }
+
+   static void exitFeatureContext() {
+      CURRENT_FEATURE.remove();
+   }
+
+   public static boolean beginTreeCandidate(
+      String treeConfiguredFeature,
+      String treeFeatureType,
+      Random random,
+      BlockPos origin
+   ) {
+      if (!ENABLED || written || !PROBE_TREE_CANDIDATES) {
+         return false;
+      }
+
+      FeatureProbeContext context = CURRENT_FEATURE.get();
+      if (context == null || !matchesTreeProbeFilter(context)) {
+         return false;
+      }
+
+      Map<String, Object> event = new LinkedHashMap<>();
+      event.put("phase", "tree_candidate");
+      event.put("status", "FEATURES");
+      event.put("statusName", "features");
+      event.put("chunkX", context.center.x);
+      event.put("chunkZ", context.center.z);
+      event.put("scenario", SCENARIO);
+      event.put("seed", SEED);
+      event.put("targetChunkX", TARGET_CHUNK_X);
+      event.put("targetChunkZ", TARGET_CHUNK_Z);
+      event.put("targetRadius", TARGET_RADIUS);
+      event.put("stepIndex", context.stepIndex);
+      event.put("featureIndex", context.featureIndex);
+      event.put("configuredFeature", context.configuredFeature);
+      event.put("featureType", context.featureType);
+      event.put("treeConfiguredFeature", treeConfiguredFeature);
+      event.put("treeFeatureType", treeFeatureType);
+      event.put("originX", origin.getX());
+      event.put("originY", origin.getY());
+      event.put("originZ", origin.getZ());
+      event.put("targetLocalX", origin.getX() - (TARGET_CHUNK_X << 4));
+      event.put("targetLocalZ", origin.getZ() - (TARGET_CHUNK_Z << 4));
+      event.put("randomCountBefore", randomCount(random));
+      event.put("thread", Thread.currentThread().getName());
+      CURRENT_TREE_CANDIDATE.set(new TreeCandidateProbe(event));
+      return true;
+   }
+
+   public static void finishTreeCandidate(boolean placed, Random random, Throwable error) {
+      TreeCandidateProbe probe = CURRENT_TREE_CANDIDATE.get();
+      if (probe == null) {
+         return;
+      }
+
+      CURRENT_TREE_CANDIDATE.remove();
+      probe.event.put("placed", placed);
+      probe.event.put("randomCountAfter", randomCount(random));
+      if (error != null) {
+         probe.event.put("error", error.getClass().getName() + ": " + error.getMessage());
+      }
+
+      synchronized (McloneSchedulerTraceRecorder.class) {
+         if (!written) {
+            probe.event.put("sequence", ++sequence);
+            EVENTS.add(probe.event);
+         }
+      }
+   }
+
+   public static boolean hasActiveTreeCandidate() {
+      return CURRENT_TREE_CANDIDATE.get() != null;
+   }
+
+   public static void recordTreeCandidateParameters(int treeHeight, int foliageHeight, int trunkHeight, int foliageRadius) {
+      TreeCandidateProbe probe = CURRENT_TREE_CANDIDATE.get();
+      if (probe == null) {
+         return;
+      }
+
+      probe.event.put("treeHeight", treeHeight);
+      probe.event.put("foliageHeight", foliageHeight);
+      probe.event.put("trunkHeight", trunkHeight);
+      probe.event.put("foliageRadius", foliageRadius);
+   }
+
+   public static void recordTreeCandidateConfiguration(String trunkPlacer, String foliagePlacer, String minimumSize) {
+      TreeCandidateProbe probe = CURRENT_TREE_CANDIDATE.get();
+      if (probe == null) {
+         return;
+      }
+
+      probe.event.put("trunkPlacer", trunkPlacer);
+      probe.event.put("foliagePlacer", foliagePlacer);
+      probe.event.put("minimumSize", minimumSize);
+   }
+
+   public static void recordTreeCandidateSaplingState(BlockState state, boolean canSurvive) {
+      TreeCandidateProbe probe = CURRENT_TREE_CANDIDATE.get();
+      if (probe == null) {
+         return;
+      }
+
+      probe.event.put("saplingState", blockName(state));
+      probe.event.put("saplingCanSurvive", canSurvive);
+   }
+
+   public static void recordTreeCandidateHeightCheck(int maxFreeTreeHeight, OptionalInt minClippedHeight) {
+      TreeCandidateProbe probe = CURRENT_TREE_CANDIDATE.get();
+      if (probe == null) {
+         return;
+      }
+
+      probe.event.put("maxFreeTreeHeight", maxFreeTreeHeight);
+      if (minClippedHeight.isPresent()) {
+         probe.event.put("minClippedHeight", minClippedHeight.getAsInt());
+      }
+   }
+
+   public static void recordTreeCandidateBlockedPosition(
+      BlockPos pos,
+      BlockState state,
+      boolean vine,
+      int heightOffset,
+      int radius
+   ) {
+      TreeCandidateProbe probe = CURRENT_TREE_CANDIDATE.get();
+      if (probe == null) {
+         return;
+      }
+
+      probe.event.put("blockedX", pos.getX());
+      probe.event.put("blockedY", pos.getY());
+      probe.event.put("blockedZ", pos.getZ());
+      probe.event.put("blockedBlock", blockName(state));
+      probe.event.put("blockedByVine", vine);
+      probe.event.put("blockedHeightOffset", heightOffset);
+      probe.event.put("blockedRadius", radius);
+   }
+
+   public static void recordTreeCandidateAccepted(int maxFreeTreeHeight) {
+      TreeCandidateProbe probe = CURRENT_TREE_CANDIDATE.get();
+      if (probe == null) {
+         return;
+      }
+
+      probe.event.put("acceptedMaxFreeTreeHeight", maxFreeTreeHeight);
+   }
+
+   public static void recordTreeCandidateRejected(String reason) {
+      TreeCandidateProbe probe = CURRENT_TREE_CANDIDATE.get();
+      if (probe == null) {
+         return;
+      }
+
+      probe.event.put("rejectReason", reason);
+   }
+
+   public static void recordTreeCandidateBlockCounts(int trunkBlocks, int foliageBlocks, int decoratorBlocks, boolean finalResult) {
+      TreeCandidateProbe probe = CURRENT_TREE_CANDIDATE.get();
+      if (probe == null) {
+         return;
+      }
+
+      probe.event.put("trunkBlocks", trunkBlocks);
+      probe.event.put("foliageBlocks", foliageBlocks);
+      probe.event.put("decoratorBlocks", decoratorBlocks);
+      probe.event.put("finalTreeResult", finalResult);
    }
 
    static synchronized void recordFeatureProbe(
@@ -338,7 +530,9 @@ final class McloneSchedulerTraceRecorder {
          "ChunkStatus.generate:dependency_ready",
          "ChunkStatus.generate:task_start",
          "ChunkStatus.generate:task_complete",
-         "ChunkStatus.applyBiomeDecorationWithFeatureProbes:feature_probe"
+         "ChunkStatus.applyBiomeDecorationWithFeatureProbes:feature_probe",
+         "ConfiguredFeature.place:tree_candidate",
+         "TreeFeature.doPlace:tree_candidate_details"
       });
       root.put("featureCompletionOrder3x3", collectCompletionOrder("features"));
       root.put("fullCompletionOrder3x3", collectCompletionOrder("full"));
@@ -386,5 +580,59 @@ final class McloneSchedulerTraceRecorder {
       }
 
       return order;
+   }
+
+   private static boolean matchesTreeProbeFilter(FeatureProbeContext context) {
+      if (TREE_PROBE_CENTER_X != Integer.MIN_VALUE && context.center.x != TREE_PROBE_CENTER_X) {
+         return false;
+      }
+      if (TREE_PROBE_CENTER_Z != Integer.MIN_VALUE && context.center.z != TREE_PROBE_CENTER_Z) {
+         return false;
+      }
+      if (TREE_PROBE_STEP_INDEX >= 0 && context.stepIndex != TREE_PROBE_STEP_INDEX) {
+         return false;
+      }
+      if (TREE_PROBE_FEATURE_INDEX >= 0 && context.featureIndex != TREE_PROBE_FEATURE_INDEX) {
+         return false;
+      }
+      return true;
+   }
+
+   private static Object randomCount(Random random) {
+      if (random instanceof WorldgenRandom) {
+         return ((WorldgenRandom)random).getCount();
+      }
+      return null;
+   }
+
+   private static String blockName(BlockState state) {
+      if (state == null) {
+         return "unknown";
+      }
+      return Registry.BLOCK.getKey(state.getBlock()).toString();
+   }
+
+   private static final class FeatureProbeContext {
+      final ChunkPos center;
+      final int stepIndex;
+      final int featureIndex;
+      final String configuredFeature;
+      final String featureType;
+
+      FeatureProbeContext(ChunkPos center, int stepIndex, int featureIndex, String configuredFeature, String featureType) {
+         this.center = center;
+         this.stepIndex = stepIndex;
+         this.featureIndex = featureIndex;
+         this.configuredFeature = configuredFeature;
+         this.featureType = featureType;
+      }
+   }
+
+   private static final class TreeCandidateProbe {
+      final Map<String, Object> event;
+
+      TreeCandidateProbe(Map<String, Object> event) {
+         this.event = event;
+      }
    }
 }

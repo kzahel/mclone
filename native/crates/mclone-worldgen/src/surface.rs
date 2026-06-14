@@ -987,7 +987,7 @@ fn java_round(value: f64) -> i32 {
     (value + 0.5).floor() as i32
 }
 
-fn biome_temperature(biome: BiomeDefinition, x: i32, y: i32, z: i32) -> f32 {
+pub(crate) fn biome_temperature(biome: BiomeDefinition, x: i32, y: i32, z: i32) -> f32 {
     let mut temperature = biome_base_temperature(biome);
     if matches!(
         biome.key(),
