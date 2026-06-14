@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod noise;
 pub mod prng;
 
 pub fn target_minecraft_version() -> &'static str {
