@@ -75,6 +75,8 @@ This replaces the earlier lower `579` mismatch shortcut baseline with a more fai
 
 Java `taigaBiome(...)` places `PATCH_LARGE_FERN` before `TAIGA_VEGETATION`, so the Java tree selector should run at vegetal feature index `1`, not `0`. A native diagnostic insertion of that preceding feature currently worsens the exact diff, so keep the active table at the current `644` mismatch baseline until the feature-index shift can be isolated from remaining tree and mixed-status region behavior. The native 3x3 feature-center order for this fixture is now trace-guarded against `test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json`; do not chase this by reordering centers unless a new scheduler trace says to.
 
+A focused native diagnostic now forces only `TAIGA_VEGETATION` at the current feature index `0` and the Java feature index `1` over real liquid-carved terrain, one center at a time. For target chunk `(0,0)`, the Java index changes target-tree writes from three centers: `(0,-1)` moves from `43` current-only tree blocks to `26` Java-only tree blocks, `(-1,0)` adds `39` Java-only tree blocks, and `(0,0)` moves from `486` current tree blocks to `370` Java tree blocks with only `93` shared. Other taiga centers in the target 3x3 write no target tree blocks in this isolated diagnostic; `(-1,1)` is not a taiga-family center.
+
 ## Landed So Far
 
 - Native `generate_overworld_features_chunk(...)` now applies air and liquid carvers before feature decoration.
@@ -99,6 +101,7 @@ Java `taigaBiome(...)` places `PATCH_LARGE_FERN` before `TAIGA_VEGETATION`, so t
 - Native configured features now support nested `DecoratedFeature` wrappers. The weighted vanilla `PINE` branch inside `TAIGA_VEGETATION` now carries its own `countExtra(6, 0.1, 1)` decorator before tree placement.
 - Native block/asset registries and `RandomPatchFeature` now support lower/upper `large_fern` blocks for future `DoublePlantPlacer` parity. The Java `PATCH_LARGE_FERN` biome insertion is intentionally deferred until the feature-index/tree-placement diagnostic is understood.
 - Native feature-center commit order now has a Rust test against the committed vanilla scheduler trace for seed `12345`, chunk `(0,0)`. The current order is z-major over the target 3x3: `(-1,-1)`, `(0,-1)`, `(1,-1)`, then the next rows.
+- Native test support can place only `TAIGA_VEGETATION` with a forced vegetal feature index. `taiga_vegetation_feature_index_shift_is_isolated_by_center` records the current index-0 versus Java index-1 target-tree deltas per feature center without enabling `PATCH_LARGE_FERN` globally.
 
 ## Reference Scheduler Notes
 
@@ -141,8 +144,8 @@ Still required:
 
 ## Next Steps
 
-1. Isolate the Java-order `PATCH_LARGE_FERN` / `TAIGA_VEGETATION` feature-index shift with a focused per-center diagnostic before enabling it in the active table. Center commit order is already trace-guarded for this fixture.
-2. Continue exact taiga tree parity: compare native `TreeFeature`, `StraightTrunkPlacer`, `SpruceFoliagePlacer`, and `PineFoliagePlacer` behavior against the source/oracle and reduce the remaining spruce log/leaf offset buckets.
+1. Use the forced-index diagnostic to compare native index-1 `TAIGA_VEGETATION` tree writes against a Java oracle/probe for the same three contributing centers: `(0,-1)`, `(-1,0)`, and `(0,0)`.
+2. Continue exact taiga tree parity from that probe: compare native `TreeFeature`, `StraightTrunkPlacer`, `SpruceFoliagePlacer`, and `PineFoliagePlacer` behavior against the source/oracle and reduce the remaining spruce log/leaf offset buckets.
 3. Port the remaining taiga surface vegetation/top-layer features visible in the fixture: enable large ferns after the feature-index/tree diagnostic, then add snow/top-layer placement and glow lichen/liquid-visible underground decoration as needed by the top mismatch buckets.
 4. Add post-feature heightmap updates and scheduled tick capture to the native region path.
 5. Promote worker-local dependency reuse into scheduler-owned holder/status protochunk slots if structures or broader status scheduling need that before `018`.

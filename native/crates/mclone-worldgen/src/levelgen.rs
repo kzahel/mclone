@@ -1806,6 +1806,148 @@ mod tests {
         .expect("valid vanilla scheduler trace fixture")
     }
 
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct TaigaTreeIndexShiftCenterDiagnostic {
+        center: ChunkPos,
+        biome_key: &'static str,
+        current_tree_blocks: usize,
+        java_tree_blocks: usize,
+        shared_tree_blocks: usize,
+        current_only_tree_blocks: usize,
+        java_only_tree_blocks: usize,
+    }
+
+    fn chunk_center_biome_key(
+        seed: i64,
+        biome_source: &OverworldBiomeSource,
+        pos: ChunkPos,
+    ) -> &'static str {
+        biome_source
+            .get_block_position_biome_definition(
+                seed,
+                pos.x * CHUNK_WIDTH + CHUNK_WIDTH / 2,
+                pos.z * CHUNK_WIDTH + CHUNK_WIDTH / 2,
+            )
+            .key()
+    }
+
+    fn is_taiga_vegetation_biome(key: &str) -> bool {
+        matches!(
+            key,
+            "minecraft:taiga"
+                | "minecraft:taiga_hills"
+                | "minecraft:taiga_mountains"
+                | "minecraft:giant_tree_taiga"
+                | "minecraft:giant_tree_taiga_hills"
+                | "minecraft:giant_spruce_taiga"
+                | "minecraft:giant_spruce_taiga_hills"
+        )
+    }
+
+    fn target_tree_blocks_after_taiga_vegetation_center(
+        seed: i64,
+        target: ChunkPos,
+        center: ChunkPos,
+        feature_index: i32,
+    ) -> BTreeMap<(i32, i32, i32), RawBlockId> {
+        let biome_source = OverworldBiomeSource::new(seed, false, false);
+        let chunks = (center.z - FEATURES_WRITE_RADIUS_CUTOFF
+            ..=center.z + FEATURES_WRITE_RADIUS_CUTOFF)
+            .flat_map(|chunk_z| {
+                let biome_source = biome_source.clone();
+                (center.x - FEATURES_WRITE_RADIUS_CUTOFF..=center.x + FEATURES_WRITE_RADIUS_CUTOFF)
+                    .map(move |chunk_x| {
+                        generate_overworld_liquid_carved_buffer_with_biome_source(
+                            seed,
+                            chunk_x,
+                            chunk_z,
+                            biome_source.clone(),
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
+        let mut region = FeatureRegion::with_radii(
+            center.x,
+            center.z,
+            FEATURES_WRITE_RADIUS_CUTOFF,
+            FEATURES_WRITE_RADIUS_CUTOFF,
+            chunks,
+        );
+
+        crate::feature::test_support::place_taiga_vegetation_with_feature_index(
+            seed,
+            &mut region,
+            feature_index,
+        );
+        let chunk = region
+            .remove_chunk(target.x, target.z)
+            .expect("target chunk should be inside center write window");
+        tree_blocks_in_chunk(&chunk)
+    }
+
+    fn tree_blocks_in_chunk(
+        chunk: &MutableChunkBlockBuffer,
+    ) -> BTreeMap<(i32, i32, i32), RawBlockId> {
+        let mut blocks = BTreeMap::new();
+        for y in chunk.min_y..chunk.min_y + chunk.height {
+            for z in 0..CHUNK_WIDTH {
+                for x in 0..CHUNK_WIDTH {
+                    let block_id = chunk.get_block_at_y(x, y, z);
+                    if matches!(
+                        block_id,
+                        crate::block::SPRUCE_LOG | crate::block::SPRUCE_LEAVES
+                    ) {
+                        blocks.insert((x, y, z), block_id);
+                    }
+                }
+            }
+        }
+        blocks
+    }
+
+    fn taiga_tree_index_shift_diagnostics(
+        seed: i64,
+        target: ChunkPos,
+    ) -> Vec<TaigaTreeIndexShiftCenterDiagnostic> {
+        let biome_source = OverworldBiomeSource::new(seed, false, false);
+        FeatureBatchPlan::new([target])
+            .ordered_feature_centers()
+            .into_iter()
+            .filter_map(|center| {
+                let biome_key = chunk_center_biome_key(seed, &biome_source, center);
+                if !is_taiga_vegetation_biome(biome_key) {
+                    return None;
+                }
+
+                let current = target_tree_blocks_after_taiga_vegetation_center(
+                    seed,
+                    target,
+                    center,
+                    crate::feature::test_support::CURRENT_TAIGA_VEGETATION_FEATURE_INDEX,
+                );
+                let java = target_tree_blocks_after_taiga_vegetation_center(
+                    seed,
+                    target,
+                    center,
+                    crate::feature::test_support::JAVA_TAIGA_VEGETATION_FEATURE_INDEX,
+                );
+                let shared_tree_blocks = current
+                    .iter()
+                    .filter(|(pos, block_id)| java.get(pos) == Some(block_id))
+                    .count();
+                Some(TaigaTreeIndexShiftCenterDiagnostic {
+                    center,
+                    biome_key,
+                    current_tree_blocks: current.len(),
+                    java_tree_blocks: java.len(),
+                    shared_tree_blocks,
+                    current_only_tree_blocks: current.len() - shared_tree_blocks,
+                    java_only_tree_blocks: java.len() - shared_tree_blocks,
+                })
+            })
+            .collect()
+    }
+
     fn create_noise_settings(fixture: &NoiseSamplerFixture) -> NoiseSettings {
         let settings = &fixture.noise_settings;
         NoiseSettings::create(
@@ -2306,6 +2448,89 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(plan.ordered_feature_centers(), expected);
+    }
+
+    #[test]
+    fn taiga_vegetation_feature_index_shift_is_isolated_by_center() {
+        let diagnostics = taiga_tree_index_shift_diagnostics(12_345, ChunkPos::new(0, 0));
+
+        assert_eq!(
+            diagnostics,
+            vec![
+                TaigaTreeIndexShiftCenterDiagnostic {
+                    center: ChunkPos::new(-1, -1),
+                    biome_key: "minecraft:taiga_mountains",
+                    current_tree_blocks: 0,
+                    java_tree_blocks: 0,
+                    shared_tree_blocks: 0,
+                    current_only_tree_blocks: 0,
+                    java_only_tree_blocks: 0,
+                },
+                TaigaTreeIndexShiftCenterDiagnostic {
+                    center: ChunkPos::new(0, -1),
+                    biome_key: "minecraft:taiga_mountains",
+                    current_tree_blocks: 43,
+                    java_tree_blocks: 26,
+                    shared_tree_blocks: 0,
+                    current_only_tree_blocks: 43,
+                    java_only_tree_blocks: 26,
+                },
+                TaigaTreeIndexShiftCenterDiagnostic {
+                    center: ChunkPos::new(1, -1),
+                    biome_key: "minecraft:taiga_mountains",
+                    current_tree_blocks: 0,
+                    java_tree_blocks: 0,
+                    shared_tree_blocks: 0,
+                    current_only_tree_blocks: 0,
+                    java_only_tree_blocks: 0,
+                },
+                TaigaTreeIndexShiftCenterDiagnostic {
+                    center: ChunkPos::new(-1, 0),
+                    biome_key: "minecraft:taiga_mountains",
+                    current_tree_blocks: 0,
+                    java_tree_blocks: 39,
+                    shared_tree_blocks: 0,
+                    current_only_tree_blocks: 0,
+                    java_only_tree_blocks: 39,
+                },
+                TaigaTreeIndexShiftCenterDiagnostic {
+                    center: ChunkPos::new(0, 0),
+                    biome_key: "minecraft:taiga_mountains",
+                    current_tree_blocks: 486,
+                    java_tree_blocks: 370,
+                    shared_tree_blocks: 93,
+                    current_only_tree_blocks: 393,
+                    java_only_tree_blocks: 277,
+                },
+                TaigaTreeIndexShiftCenterDiagnostic {
+                    center: ChunkPos::new(1, 0),
+                    biome_key: "minecraft:taiga_mountains",
+                    current_tree_blocks: 0,
+                    java_tree_blocks: 0,
+                    shared_tree_blocks: 0,
+                    current_only_tree_blocks: 0,
+                    java_only_tree_blocks: 0,
+                },
+                TaigaTreeIndexShiftCenterDiagnostic {
+                    center: ChunkPos::new(0, 1),
+                    biome_key: "minecraft:taiga_mountains",
+                    current_tree_blocks: 0,
+                    java_tree_blocks: 0,
+                    shared_tree_blocks: 0,
+                    current_only_tree_blocks: 0,
+                    java_only_tree_blocks: 0,
+                },
+                TaigaTreeIndexShiftCenterDiagnostic {
+                    center: ChunkPos::new(1, 1),
+                    biome_key: "minecraft:taiga_mountains",
+                    current_tree_blocks: 0,
+                    java_tree_blocks: 0,
+                    shared_tree_blocks: 0,
+                    current_only_tree_blocks: 0,
+                    java_only_tree_blocks: 0,
+                },
+            ]
+        );
     }
 
     #[test]

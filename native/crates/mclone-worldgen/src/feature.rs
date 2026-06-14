@@ -1335,6 +1335,32 @@ fn taiga_vegetation_feature() -> PlacedFeature {
     )
 }
 
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    pub(crate) const CURRENT_TAIGA_VEGETATION_FEATURE_INDEX: i32 = 0;
+    pub(crate) const JAVA_TAIGA_VEGETATION_FEATURE_INDEX: i32 = 1;
+
+    pub(crate) fn place_taiga_vegetation_with_feature_index<W: FeatureWorld>(
+        seed: i64,
+        world: &mut W,
+        feature_index: i32,
+    ) -> bool {
+        let min_block_x = world.center_chunk_x() * CHUNK_WIDTH;
+        let min_block_z = world.center_chunk_z() * CHUNK_WIDTH;
+        let origin = BlockPos::new(min_block_x, world.min_y(), min_block_z);
+        let mut random = WorldgenRandom::default();
+        let decoration_seed = random.set_decoration_seed(seed, min_block_x, min_block_z);
+        random.set_feature_seed(
+            decoration_seed,
+            feature_index,
+            DecorationStep::VegetalDecoration.index(),
+        );
+        taiga_vegetation_feature().place(world, &mut random, origin)
+    }
+}
+
 fn grass_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
     random_patch_feature(
         RandomPatchConfiguration {
