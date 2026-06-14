@@ -1201,27 +1201,117 @@ pub fn generate_overworld_features_chunks(
     seed: i64,
     targets: impl IntoIterator<Item = ChunkPos>,
 ) -> BTreeMap<ChunkPos, GeneratedChunk> {
-    let plan = FeatureBatchPlan::new(targets);
+    let mut cache = OverworldFeatureDependencyCache::new();
+    cache.generate_features_chunks(seed, targets).chunks
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct OverworldFeatureDependencyCacheReport {
+    pub requested_dependency_chunks: usize,
+    pub cache_hits: usize,
+    pub generated_dependency_chunks: usize,
+    pub retained_dependency_chunks: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OverworldFeatureBatchResult {
+    pub chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+    pub cache_report: OverworldFeatureDependencyCacheReport,
+}
+
+#[derive(Debug, Default)]
+pub struct OverworldFeatureDependencyCache {
+    seed: Option<i64>,
+    chunks: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+}
+
+impl OverworldFeatureDependencyCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn retained_chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+
+    pub fn clear(&mut self) {
+        self.seed = None;
+        self.chunks.clear();
+    }
+
+    pub fn generate_features_chunks(
+        &mut self,
+        seed: i64,
+        targets: impl IntoIterator<Item = ChunkPos>,
+    ) -> OverworldFeatureBatchResult {
+        if self.seed != Some(seed) {
+            self.seed = Some(seed);
+            self.chunks.clear();
+        }
+
+        let plan = FeatureBatchPlan::new(targets);
+        let mut cache_report = OverworldFeatureDependencyCacheReport {
+            requested_dependency_chunks: plan.dependency_chunks.len(),
+            ..OverworldFeatureDependencyCacheReport::default()
+        };
+
+        if plan.targets.is_empty() {
+            cache_report.retained_dependency_chunks = self.chunks.len();
+            return OverworldFeatureBatchResult {
+                chunks: BTreeMap::new(),
+                cache_report,
+            };
+        }
+
+        let biome_source = OverworldBiomeSource::new(seed, false, false);
+        let mut region_chunks = Vec::with_capacity(plan.dependency_chunks.len());
+        for pos in sorted_chunk_positions_z_major(plan.dependency_chunks.iter().copied()) {
+            if let Some(chunk) = self.chunks.get(&pos) {
+                cache_report.cache_hits += 1;
+                region_chunks.push(chunk.clone());
+                continue;
+            }
+
+            let chunk = generate_overworld_liquid_carved_buffer_with_biome_source(
+                seed,
+                pos.x,
+                pos.z,
+                biome_source.clone(),
+            );
+            cache_report.generated_dependency_chunks += 1;
+            self.chunks.insert(pos, chunk.clone());
+            region_chunks.push(chunk);
+        }
+
+        self.chunks
+            .retain(|pos, _| plan.dependency_chunks.contains(pos));
+        cache_report.retained_dependency_chunks = self.chunks.len();
+
+        let chunks =
+            generate_overworld_features_chunks_from_plan(seed, &biome_source, plan, region_chunks);
+        OverworldFeatureBatchResult {
+            chunks,
+            cache_report,
+        }
+    }
+}
+
+fn generate_overworld_features_chunks_from_plan(
+    seed: i64,
+    biome_source: &OverworldBiomeSource,
+    plan: FeatureBatchPlan,
+    chunks: Vec<MutableChunkBlockBuffer>,
+) -> BTreeMap<ChunkPos, GeneratedChunk> {
     if plan.targets.is_empty() {
         return BTreeMap::new();
     }
 
-    let biome_source = OverworldBiomeSource::new(seed, false, false);
-    let mut chunks = Vec::new();
-    for pos in sorted_chunk_positions_z_major(plan.dependency_chunks.iter().copied()) {
-        chunks.push(generate_overworld_liquid_carved_buffer_with_biome_source(
-            seed,
-            pos.x,
-            pos.z,
-            biome_source.clone(),
-        ));
-    }
     let first_target = *plan.targets.iter().next().expect("non-empty targets");
     let mut region = FeatureRegion::new(first_target.x, first_target.z, chunks);
 
     for center in sorted_chunk_positions_z_major(plan.feature_centers.iter().copied()) {
         region.set_center(center.x, center.z);
-        apply_overworld_biome_decoration_to_region(seed, &biome_source, &mut region);
+        apply_overworld_biome_decoration_to_region(seed, biome_source, &mut region);
     }
 
     let mut generated = BTreeMap::new();
@@ -2146,6 +2236,78 @@ mod tests {
             radius_one
                 .dependency_chunks
                 .contains(&ChunkPos::new(10, 10))
+        );
+    }
+
+    #[test]
+    fn overworld_feature_dependency_cache_reuses_overlapping_windows() {
+        let mut cache = OverworldFeatureDependencyCache::new();
+
+        let first = cache.generate_features_chunks(12_345, [ChunkPos::new(0, 0)]);
+        assert_eq!(
+            first.cache_report,
+            OverworldFeatureDependencyCacheReport {
+                requested_dependency_chunks: 19 * 19,
+                cache_hits: 0,
+                generated_dependency_chunks: 19 * 19,
+                retained_dependency_chunks: 19 * 19,
+            }
+        );
+
+        let second = cache.generate_features_chunks(12_345, [ChunkPos::new(1, 0)]);
+        assert_eq!(
+            second.cache_report,
+            OverworldFeatureDependencyCacheReport {
+                requested_dependency_chunks: 19 * 19,
+                cache_hits: 18 * 19,
+                generated_dependency_chunks: 19,
+                retained_dependency_chunks: 19 * 19,
+            }
+        );
+        assert_eq!(cache.retained_chunk_count(), 19 * 19);
+        assert_eq!(
+            second.chunks.get(&ChunkPos::new(1, 0)),
+            Some(&generate_overworld_features_chunk(12_345, 1, 0))
+        );
+    }
+
+    #[test]
+    fn overworld_feature_dependency_cache_keeps_clean_lower_status_chunks() {
+        let mut cache = OverworldFeatureDependencyCache::new();
+
+        let first = cache.generate_features_chunks(12_345, [ChunkPos::new(0, 0)]);
+        let second = cache.generate_features_chunks(12_345, [ChunkPos::new(0, 0)]);
+
+        assert_eq!(
+            second.cache_report,
+            OverworldFeatureDependencyCacheReport {
+                requested_dependency_chunks: 19 * 19,
+                cache_hits: 19 * 19,
+                generated_dependency_chunks: 0,
+                retained_dependency_chunks: 19 * 19,
+            }
+        );
+        assert_eq!(
+            second.chunks.get(&ChunkPos::new(0, 0)),
+            first.chunks.get(&ChunkPos::new(0, 0))
+        );
+    }
+
+    #[test]
+    fn overworld_feature_dependency_cache_resets_when_seed_changes() {
+        let mut cache = OverworldFeatureDependencyCache::new();
+
+        cache.generate_features_chunks(12_345, [ChunkPos::new(0, 0)]);
+        let changed_seed = cache.generate_features_chunks(54_321, [ChunkPos::new(0, 0)]);
+
+        assert_eq!(
+            changed_seed.cache_report,
+            OverworldFeatureDependencyCacheReport {
+                requested_dependency_chunks: 19 * 19,
+                cache_hits: 0,
+                generated_dependency_chunks: 19 * 19,
+                retained_dependency_chunks: 19 * 19,
+            }
         );
     }
 

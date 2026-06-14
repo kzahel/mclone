@@ -83,6 +83,7 @@ This points to underground decoration/ore families as the largest exactness gap.
 - Native `ChunkStatusJob` records now persist completed `FEATURES` work metadata. Each generated holder `FEATURES` slot records the owning job id, and each job records its publish targets, 3x3 feature centers, dependency chunks, and queued/running/complete state.
 - Native `ChunkScheduler` now routes batched feature generation through a `WorldgenMailbox`. Desktop/native uses a persistent worker thread; WASM uses the same mailbox API with inline execution until browser worker plumbing exists.
 - `ChunkScheduler::apply_interest(...)` now only updates interest/holder status and enqueues feature jobs. `ChunkScheduler::poll(...)` drains completed worldgen jobs and publishes snapshots, so native command handling no longer waits for the worker thread to finish.
+- `OverworldFeatureDependencyCache` retains clean liquid-carved lower-status dependency chunks inside the worldgen worker. Adjacent single-chunk feature jobs now reuse 342 of 361 dependency chunks and generate only the new 19-column strip, while repeated jobs keep deterministic output because feature writes are applied to cloned region chunks.
 
 ## Reference Scheduler Notes
 
@@ -115,20 +116,20 @@ Native has the first version of this concept:
 - durable scheduler job records link generated `FEATURES` holder slots to the batch job that produced them
 - worker/mailbox execution exists for native `FEATURES` jobs, with an inline WASM fallback behind the same scheduler API
 - status job publication is split into enqueue and poll phases; one-shot native callers explicitly pump the server outside command handling when they need a full response batch
+- worker-local lower-status dependency materialization survives across jobs/interests and records hit/miss counters on completed `ChunkStatusJob`s
 
 Still required:
 
-- lower-status dependency chunks available out to the feature read radius
 - post-feature heightmap updates and scheduled tick capture
-- retained dependency/protochunk materialization across ticks/interests; current job records are durable metadata, not retained generated dependency chunks
+- full Java-style holder/status materialization for dependency protochunks; the current retained cache is worker-local clean lower-status buffers, not durable scheduler-owned dependency holders
 - browser worker execution for WASM once the web runtime has worker/message plumbing
 
 ## Next Steps
 
-1. Add retained dependency/protochunk materialization across ticks/interests so overlapping feature jobs can reuse lower-status work instead of rebuilding dependency windows.
-2. Port underground decoration buckets visible in the full fixture: stone variants, deepslate/tuff, dirt/gravel disks, and ore placement.
-3. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
-4. Add post-feature heightmap updates and scheduled tick capture to the native region path.
+1. Port underground decoration buckets visible in the full fixture: stone variants, deepslate/tuff, dirt/gravel disks, and ore placement.
+2. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
+3. Add post-feature heightmap updates and scheduled tick capture to the native region path.
+4. Promote worker-local dependency reuse into scheduler-owned holder/status protochunk slots if structures or broader status scheduling need that before `018`.
 5. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
 
 ## Validation

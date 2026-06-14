@@ -15,7 +15,9 @@ use std::{sync::mpsc, thread};
 use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
 use mclone_worldgen::feature::{FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
-use mclone_worldgen::levelgen::{GeneratedChunk, generate_overworld_features_chunks};
+use mclone_worldgen::levelgen::{
+    GeneratedChunk, OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport,
+};
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
 };
@@ -67,6 +69,9 @@ pub struct ChunkStatusJob {
     pub target_chunks: Vec<ChunkPos>,
     pub feature_centers: Vec<ChunkPos>,
     pub dependency_chunks: Vec<ChunkPos>,
+    pub dependency_cache_hits: usize,
+    pub dependency_cache_misses: usize,
+    pub retained_dependency_chunks: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -467,7 +472,7 @@ impl ChunkScheduler {
             events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
         }
 
-        self.mark_job_state(completed.job_id, ChunkJobState::Complete);
+        self.mark_job_complete(completed.job_id, completed.cache_report);
         Ok(events)
     }
 
@@ -484,6 +489,9 @@ impl ChunkScheduler {
                 target_chunks,
                 feature_centers,
                 dependency_chunks,
+                dependency_cache_hits: 0,
+                dependency_cache_misses: 0,
+                retained_dependency_chunks: 0,
             },
         );
         id
@@ -494,6 +502,21 @@ impl ChunkScheduler {
             .get_mut(&id)
             .expect("job must exist before state transition")
             .state = state;
+    }
+
+    fn mark_job_complete(
+        &mut self,
+        id: ChunkJobId,
+        cache_report: OverworldFeatureDependencyCacheReport,
+    ) {
+        let job = self
+            .jobs
+            .get_mut(&id)
+            .expect("job must exist before state transition");
+        job.dependency_cache_hits = cache_report.cache_hits;
+        job.dependency_cache_misses = cache_report.generated_dependency_chunks;
+        job.retained_dependency_chunks = cache_report.retained_dependency_chunks;
+        job.state = ChunkJobState::Complete;
     }
 
     fn load_stored_snapshot(
@@ -544,6 +567,7 @@ impl ChunkScheduler {
 struct WorldgenCompletedJob {
     job_id: ChunkJobId,
     generated_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+    cache_report: OverworldFeatureDependencyCacheReport,
 }
 
 struct WorldgenMailbox {
@@ -582,6 +606,7 @@ impl fmt::Debug for WorldgenMailbox {
 #[derive(Debug)]
 struct WorldgenMailboxBackend {
     completed: VecDeque<WorldgenCompletedJob>,
+    dependency_cache: OverworldFeatureDependencyCache,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -589,6 +614,7 @@ impl WorldgenMailboxBackend {
     fn new() -> Self {
         Self {
             completed: VecDeque::new(),
+            dependency_cache: OverworldFeatureDependencyCache::new(),
         }
     }
 
@@ -597,10 +623,13 @@ impl WorldgenMailboxBackend {
     }
 
     fn enqueue_features(&mut self, job_id: ChunkJobId, seed: i64, targets: &[ChunkPos]) {
-        let generated_chunks = generate_overworld_features_chunks(seed, targets.iter().copied());
+        let result = self
+            .dependency_cache
+            .generate_features_chunks(seed, targets.iter().copied());
         self.completed.push_back(WorldgenCompletedJob {
             job_id,
-            generated_chunks,
+            generated_chunks: result.chunks,
+            cache_report: result.cache_report,
         });
     }
 
@@ -634,6 +663,7 @@ impl WorldgenMailboxBackend {
         let worker = thread::Builder::new()
             .name("mclone-worldgen".to_owned())
             .spawn(move || {
+                let mut dependency_cache = OverworldFeatureDependencyCache::new();
                 while let Ok(request) = receiver.recv() {
                     match request {
                         WorldgenRequest::GenerateFeatures {
@@ -641,12 +671,13 @@ impl WorldgenMailboxBackend {
                             seed,
                             targets,
                         } => {
-                            let generated_chunks =
-                                generate_overworld_features_chunks(seed, targets.iter().copied());
+                            let result = dependency_cache
+                                .generate_features_chunks(seed, targets.iter().copied());
                             if completion_sender
                                 .send(WorldgenCompletedJob {
                                     job_id,
-                                    generated_chunks,
+                                    generated_chunks: result.chunks,
+                                    cache_report: result.cache_report,
                                 })
                                 .is_err()
                             {
@@ -972,6 +1003,9 @@ mod tests {
         assert_eq!(job.target_chunks.len(), 9);
         assert_eq!(job.feature_centers.len(), 5 * 5);
         assert_eq!(job.dependency_chunks.len(), 21 * 21);
+        assert_eq!(job.dependency_cache_hits, 0);
+        assert_eq!(job.dependency_cache_misses, 21 * 21);
+        assert_eq!(job.retained_dependency_chunks, 21 * 21);
         assert!(job.dependency_chunks.contains(&ChunkPos::new(-10, -10)));
         assert!(job.dependency_chunks.contains(&ChunkPos::new(10, 10)));
         for target in &job.target_chunks {
@@ -1015,6 +1049,51 @@ mod tests {
             0
         );
         assert_eq!(server.scheduler().job_count(), 1);
+    }
+
+    #[test]
+    fn adjacent_interest_reuses_retained_dependency_chunks() {
+        let mut server = IntegratedServer::new(12_345);
+
+        assert_eq!(
+            handle_command_and_poll(
+                &mut server,
+                ClientCommand::SetChunkInterest(ChunkInterest {
+                    center: ChunkPos::new(0, 0),
+                    radius_chunks: 0,
+                }),
+            )
+            .len(),
+            1
+        );
+        assert_eq!(
+            server.scheduler().job(ChunkJobId(1)).map(|job| (
+                job.dependency_cache_hits,
+                job.dependency_cache_misses,
+                job.retained_dependency_chunks
+            )),
+            Some((0, 19 * 19, 19 * 19))
+        );
+
+        assert_eq!(
+            handle_command_and_poll(
+                &mut server,
+                ClientCommand::SetChunkInterest(ChunkInterest {
+                    center: ChunkPos::new(1, 0),
+                    radius_chunks: 0,
+                }),
+            )
+            .len(),
+            2
+        );
+        assert_eq!(
+            server.scheduler().job(ChunkJobId(2)).map(|job| (
+                job.dependency_cache_hits,
+                job.dependency_cache_misses,
+                job.retained_dependency_chunks
+            )),
+            Some((18 * 19, 19, 19 * 19))
+        );
     }
 
     #[test]
@@ -1181,6 +1260,9 @@ mod tests {
                 dependency_chunks: (-9..=9)
                     .flat_map(|z| (-9..=9).map(move |x| ChunkPos::new(x, z)))
                     .collect(),
+                dependency_cache_hits: 0,
+                dependency_cache_misses: 19 * 19,
+                retained_dependency_chunks: 19 * 19,
             })
         );
     }

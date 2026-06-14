@@ -26,12 +26,12 @@ Landed:
 - section-keyed textured render meshes, keyed GPU upload ownership, and repeatable native headless camera scenarios
 - Java-shaped configured/decorated feature execution, starter oak trees, grass/flower patches, and default `Features` chunk snapshots
 - biome-keyed native feature profiles with visible oak/birch/spruce tree families, ferns, dead bushes, and `COUNT_EXTRA` placement
-- full decorated chunk parity gauntlet for seed `12345`, chunk `0,0`, carvers wired into the native `Features` generation path, first region-backed 3x3 feature spillover pass, batched feature dependency reuse for interest updates, durable scheduler job records, native worker-mailbox execution, and split enqueue/poll job publication
+- full decorated chunk parity gauntlet for seed `12345`, chunk `0,0`, carvers wired into the native `Features` generation path, first region-backed 3x3 feature spillover pass, batched feature dependency reuse for interest updates, durable scheduler job records, native worker-mailbox execution, split enqueue/poll job publication, and worker-local lower-status dependency reuse across adjacent feature jobs
 
 Still missing compared with the TypeScript engine:
 
 - no long-lived remote sessions or browser remote network transport
-- chunk scheduling does not retain dependency/protochunk materialization across interest updates
+- no full Java-style scheduler-owned dependency protochunk holder graph; dependency reuse is currently worker-local clean lower-status buffers
 - persistence is a temporary snapshot format, not Anvil/NBT or browser storage
 - web/WASM has a runtime smoke gate, not browser storage, network transport, or render path
 - no true frustum rejection, dirty-only section upload diffs, true liquid renderer, or AO/lighted textured path
@@ -83,7 +83,7 @@ Expect about 20 implementation tacticals after this parent roadmap before native
 | [`014-streaming-renderer-and-camera.md`](014-streaming-renderer-and-camera.md) | renderer runtime | **done** - section-keyed textured render meshes, keyed GPU upload ownership, full-set render invalidation, and debug camera/headless scenario runner; true frustum/dirty-only diffs deferred | multi-step native headless captures and browser/native window smoke |
 | [`015-decoration-framework-foundation.md`](015-decoration-framework-foundation.md) | worldgen parity | **done** - configured/decorated feature framework, starter trees/plants, feature snapshots, and visible decorated terrain capture; full water/lake parity deferred behind liquid rendering | oracle/unit coverage plus visible decorated terrain capture |
 | [`016-biome-feature-breadth.md`](016-biome-feature-breadth.md) | worldgen parity | **done** - chunk-center biome feature profiles, oak/birch/spruce visible families, fern/dead-bush patches, and `COUNT_EXTRA`; exact trees/ores/water fixtures deferred | selected fixture matrix and visual probes |
-| [`017-full-decorated-chunk-parity-gauntlet.md`](017-full-decorated-chunk-parity-gauntlet.md) | worldgen parity | **active** - exact full chunk diff target, carvers in published features path, first feature-region spillover path, batched dependency reuse, durable job records, native worker mailbox, and split job publication | ignored exact test plus normal mismatch-bucket diagnostic |
+| [`017-full-decorated-chunk-parity-gauntlet.md`](017-full-decorated-chunk-parity-gauntlet.md) | worldgen parity | **active** - exact full chunk diff target, carvers in published features path, first feature-region spillover path, batched dependency reuse, durable job records, native worker mailbox, split job publication, and worker-local dependency cache | ignored exact test plus normal mismatch-bucket diagnostic |
 | `018-structures-foundation.md` | worldgen parity | status-aware structure starts/references, first true structure, template/block-entity scaffolding | server-backed fixture diff for first structure slice |
 | `019-lighting-pipeline.md` | lighting | `DataLayer`, light sections, solver/service boundary, initial light facts, renderer consumption | light fixture tests and non-fullbright terrain capture |
 | `020-live-light-and-liquid-updates.md` | simulation/runtime | light deltas, block/liquid dirty updates, pending liquid ticks, water flow baseline | update/delta tests and runtime smoke |
@@ -95,7 +95,7 @@ Expect about 20 implementation tacticals after this parent roadmap before native
 
 The next implementation tactical should stay on [`017-full-decorated-chunk-parity-gauntlet.md`](017-full-decorated-chunk-parity-gauntlet.md).
 
-Do not start structures until retained dependency/protochunk materialization is either in place or explicitly deferred, and the full chunk mismatch report is driving concrete parity work. The immediate focus is reducing the top mismatch buckets for seed `12345`, chunk `0,0` while keeping feature generation efficient enough to iterate.
+Do not start structures until worker-local dependency reuse is either promoted to scheduler-owned protochunk holders or explicitly accepted as sufficient for `018`, and the full chunk mismatch report is driving concrete parity work. The immediate focus is reducing the top mismatch buckets for seed `12345`, chunk `0,0` while keeping feature generation efficient enough to iterate.
 
 ## Deferral Notes
 
