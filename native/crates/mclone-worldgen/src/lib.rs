@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod biome;
+pub mod block;
 pub mod carver;
 pub mod levelgen;
 pub mod noise;

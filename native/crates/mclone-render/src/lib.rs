@@ -3,6 +3,8 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod gpu_util;
 
+pub mod chunk;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod headless;
 #[cfg(not(target_arch = "wasm32"))]

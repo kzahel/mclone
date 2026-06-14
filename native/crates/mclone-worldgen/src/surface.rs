@@ -1,4 +1,12 @@
 use crate::biome::BiomeDefinition;
+use crate::block::{
+    AIR, BLACK_TERRACOTTA, BLUE_TERRACOTTA, BROWN_TERRACOTTA, COARSE_DIRT, CYAN_TERRACOTTA, DIRT,
+    GRASS_BLOCK, GRAVEL, GRAY_TERRACOTTA, GREEN_TERRACOTTA, ICE, LIGHT_BLUE_TERRACOTTA,
+    LIGHT_GRAY_TERRACOTTA, LIME_TERRACOTTA, MAGENTA_TERRACOTTA, MYCELIUM, ORANGE_TERRACOTTA,
+    PACKED_ICE, PINK_TERRACOTTA, PODZOL, PURPLE_TERRACOTTA, RED_SAND, RED_SANDSTONE,
+    RED_TERRACOTTA, SAND, SANDSTONE, SNOW_BLOCK, STONE, TERRACOTTA, WATER, WHITE_TERRACOTTA,
+    YELLOW_TERRACOTTA,
+};
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::noise::PerlinSimplexNoise;
 use crate::prng::WorldgenRandom;
@@ -8,40 +16,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 const CHUNK_WIDTH: i32 = 16;
 const BADLANDS_BAND_LENGTH: usize = 64;
 const MAX_CLAY_DEPTH: i32 = 15;
-
-const AIR: u8 = 0;
-const STONE: u8 = 1;
-const WATER: u8 = 2;
-const GRASS_BLOCK: u8 = 4;
-const DIRT: u8 = 5;
-const SAND: u8 = 6;
-const GRAVEL: u8 = 7;
-const COARSE_DIRT: u8 = 13;
-const PODZOL: u8 = 14;
-const MYCELIUM: u8 = 15;
-const TERRACOTTA: u8 = 16;
-const WHITE_TERRACOTTA: u8 = 17;
-const ORANGE_TERRACOTTA: u8 = 18;
-const MAGENTA_TERRACOTTA: u8 = 19;
-const LIGHT_BLUE_TERRACOTTA: u8 = 20;
-const YELLOW_TERRACOTTA: u8 = 21;
-const LIME_TERRACOTTA: u8 = 22;
-const PINK_TERRACOTTA: u8 = 23;
-const GRAY_TERRACOTTA: u8 = 24;
-const LIGHT_GRAY_TERRACOTTA: u8 = 25;
-const CYAN_TERRACOTTA: u8 = 26;
-const PURPLE_TERRACOTTA: u8 = 27;
-const BLUE_TERRACOTTA: u8 = 28;
-const BROWN_TERRACOTTA: u8 = 29;
-const GREEN_TERRACOTTA: u8 = 30;
-const RED_TERRACOTTA: u8 = 31;
-const BLACK_TERRACOTTA: u8 = 32;
-const SANDSTONE: u8 = 33;
-const RED_SANDSTONE: u8 = 34;
-const PACKED_ICE: u8 = 35;
-const RED_SAND: u8 = 38;
-const ICE: u8 = 39;
-const SNOW_BLOCK: u8 = 40;
 
 const BIOME_INFO_NOISE_OCTAVES: [i32; 1] = [0];
 const TEMPERATURE_NOISE_OCTAVES: [i32; 1] = [0];

@@ -1,4 +1,5 @@
 use crate::biome::OverworldBiomeSource;
+use crate::block::{AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER};
 use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
 use crate::prng::WorldgenRandom;
 use crate::surface::apply_overworld_surface;
@@ -15,10 +16,6 @@ const DEPTH_NOISE_OCTAVES: [i32; 16] = [
     -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0,
 ];
 const INT_MIN: i32 = i32::MIN;
-const AIR: u8 = 0;
-const STONE: u8 = 1;
-const WATER: u8 = 2;
-const BEDROCK: u8 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NoiseBiome {
@@ -700,6 +697,88 @@ impl MutableChunkBlockBuffer {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeneratedChunk {
+    pub chunk_x: i32,
+    pub chunk_z: i32,
+    pub min_y: i32,
+    pub height: i32,
+    blocks: Vec<RawBlockId>,
+}
+
+impl GeneratedChunk {
+    pub const WIDTH: i32 = CHUNK_WIDTH;
+
+    pub fn from_raw_parts(
+        chunk_x: i32,
+        chunk_z: i32,
+        min_y: i32,
+        height: i32,
+        blocks: Vec<RawBlockId>,
+    ) -> Self {
+        if height <= 0 || height % SECTION_HEIGHT != 0 {
+            panic!("chunk height {height} must be a positive multiple of {SECTION_HEIGHT}");
+        }
+        let expected_len = height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
+        if blocks.len() != expected_len {
+            panic!(
+                "generated chunk block buffer has {} entries; expected {expected_len}",
+                blocks.len()
+            );
+        }
+        Self {
+            chunk_x,
+            chunk_z,
+            min_y,
+            height,
+            blocks,
+        }
+    }
+
+    pub fn from_mutable_buffer(buffer: MutableChunkBlockBuffer) -> Self {
+        Self::from_raw_parts(
+            buffer.chunk_x,
+            buffer.chunk_z,
+            buffer.min_y,
+            buffer.height,
+            buffer.blocks,
+        )
+    }
+
+    pub fn blocks(&self) -> &[RawBlockId] {
+        &self.blocks
+    }
+
+    pub fn block_at_local(&self, local_x: i32, local_y: i32, local_z: i32) -> GeneratedBlockId {
+        self.assert_local_position(local_x, local_y, local_z);
+        GeneratedBlockId(self.blocks[block_buffer_index(local_x, local_y, local_z)])
+    }
+
+    pub fn block_at_y(&self, local_x: i32, y: i32, local_z: i32) -> GeneratedBlockId {
+        self.block_at_local(local_x, y - self.min_y, local_z)
+    }
+
+    pub fn non_air_block_count(&self) -> usize {
+        self.blocks
+            .iter()
+            .filter(|block_id| **block_id != AIR)
+            .count()
+    }
+
+    fn assert_local_position(&self, local_x: i32, local_y: i32, local_z: i32) {
+        if !(0..CHUNK_WIDTH).contains(&local_x)
+            || !(0..self.height).contains(&local_y)
+            || !(0..CHUNK_WIDTH).contains(&local_z)
+        {
+            panic!(
+                "local block position ({local_x}, {local_y}, {local_z}) is outside generated chunk {}..{}",
+                self.min_y,
+                self.min_y + self.height
+            );
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 enum SurfaceNoiseSource {
     Perlin(PerlinNoise),
@@ -1058,6 +1137,17 @@ impl NoiseBasedChunkGenerator<OverworldBiomeSource> {
             }
         }
     }
+}
+
+pub fn generate_overworld_surface_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
+    let generator = NoiseBasedChunkGenerator::new(
+        OverworldBiomeSource::new(seed, false, false),
+        seed,
+        NoiseGeneratorSettings::overworld(),
+    );
+    let mut chunk = generator.fill_from_noise(chunk_x, chunk_z);
+    generator.build_surface_and_bedrock(&mut chunk);
+    GeneratedChunk::from_mutable_buffer(chunk)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1637,6 +1727,22 @@ mod tests {
         assert_eq!(oracle.chunk_x, -320);
         assert_eq!(oracle.chunk_z, 99);
         assert_surface_chunk_matches_java_oracle(oracle);
+    }
+
+    #[test]
+    fn generated_chunk_wraps_surface_buffer_for_render_consumers() {
+        let chunk = generate_overworld_surface_chunk(12345, 0, 0);
+
+        assert_eq!(chunk.chunk_x, 0);
+        assert_eq!(chunk.chunk_z, 0);
+        assert_eq!(chunk.min_y, 0);
+        assert_eq!(chunk.height, 256);
+        assert_eq!(
+            chunk.blocks().len(),
+            CHUNK_WIDTH as usize * CHUNK_WIDTH as usize * 256
+        );
+        assert!(chunk.non_air_block_count() > 0);
+        assert_eq!(chunk.block_at_local(0, 0, 0).name(), "minecraft:bedrock");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Native0: Native Render Bring-Up And Validation
 
-Status: active.
+Status: completed in `0f29a3b`.
 
 Build the first native desktop render path and headless GPU validation path for the Rust engine. This slice starts from a clear-color frame, then becomes the foundation for rendering one generated chunk.
 
@@ -104,9 +104,6 @@ Do not require manual user verification for the first GPU path. Headless capture
 
 ## Next Slice
 
-After clear-color validation:
+Active follow-up:
 
-1. expose a renderer-agnostic native generated chunk artifact from `mclone_worldgen`
-2. add simple visible-face meshing in `mclone_mesh`
-3. draw one generated chunk with flat material colors in `mclone_native_client`
-4. keep the headless path able to render the same mesh for screenshot validation
+- [`Native1-one-chunk-render.md`](Native1-one-chunk-render.md)

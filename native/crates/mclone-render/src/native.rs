@@ -92,31 +92,12 @@ impl NativeSurfaceContext {
         self.surface.configure(&self.device, &self.config);
     }
 
-    pub fn render_clear(&mut self, color: wgpu::Color) -> Result<SurfaceClearStatus> {
-        let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                self.surface.configure(&self.device, &self.config);
-                return Ok(SurfaceClearStatus::Reconfigured);
-            }
-            Err(wgpu::SurfaceError::OutOfMemory) => bail!("wgpu surface out of memory"),
-            Err(err) => {
-                log::warn!("surface acquire failed: {err:?}");
-                return Ok(SurfaceClearStatus::Skipped);
-            }
-        };
-
-        let view = frame.texture.create_view(&Default::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("mclone_native_clear_encoder"),
-            });
-        {
+    pub fn render_clear(&mut self, color: wgpu::Color) -> Result<SurfaceFrameStatus> {
+        self.render_with(|_device, _queue, encoder, view, _size| {
             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_native_clear_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(color),
@@ -126,15 +107,54 @@ impl NativeSurfaceContext {
                 depth_stencil_attachment: None,
                 ..Default::default()
             });
-        }
+            Ok(())
+        })
+    }
+
+    pub fn render_with<F>(&mut self, encode: F) -> Result<SurfaceFrameStatus>
+    where
+        F: FnOnce(
+            &wgpu::Device,
+            &wgpu::Queue,
+            &mut wgpu::CommandEncoder,
+            &wgpu::TextureView,
+            [u32; 2],
+        ) -> Result<()>,
+    {
+        let frame = match self.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                self.surface.configure(&self.device, &self.config);
+                return Ok(SurfaceFrameStatus::Reconfigured);
+            }
+            Err(wgpu::SurfaceError::OutOfMemory) => bail!("wgpu surface out of memory"),
+            Err(err) => {
+                log::warn!("surface acquire failed: {err:?}");
+                return Ok(SurfaceFrameStatus::Skipped);
+            }
+        };
+
+        let view = frame.texture.create_view(&Default::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("mclone_native_frame_encoder"),
+            });
+        encode(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &view,
+            [self.config.width, self.config.height],
+        )?;
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
-        Ok(SurfaceClearStatus::Presented)
+        Ok(SurfaceFrameStatus::Presented)
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SurfaceClearStatus {
+pub enum SurfaceFrameStatus {
     Presented,
     Reconfigured,
     Skipped,

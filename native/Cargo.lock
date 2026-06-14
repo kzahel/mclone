@@ -650,6 +650,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.30.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
+
+[[package]]
 name = "glow"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1043,8 +1049,10 @@ dependencies = [
  "env_logger",
  "log",
  "mclone-client",
+ "mclone-mesh",
  "mclone-render",
  "mclone-server",
+ "mclone-worldgen",
  "winit",
 ]
 
@@ -1067,6 +1075,7 @@ name = "mclone-render"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "glam",
  "image",
  "log",
  "mclone-assets",

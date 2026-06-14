@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use anyhow::{Context, Result};
+use mclone_mesh::VisibleChunkMesh;
 
+use crate::chunk::{ChunkCamera, ChunkDrawResources};
 use crate::gpu_util::{native_backends, optional_gpu_features};
 
 const BYTES_PER_PIXEL: u32 = 4;
@@ -23,6 +25,25 @@ pub struct HeadlessClearReport {
     pub width: u32,
     pub height: u32,
     pub byte_len: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct HeadlessChunkOptions {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub color: wgpu::Color,
+    pub camera: ChunkCamera,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HeadlessChunkReport {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub byte_len: usize,
+    pub vertex_count: u32,
+    pub index_count: u32,
 }
 
 pub fn write_headless_clear_png(options: HeadlessClearOptions) -> Result<HeadlessClearReport> {
@@ -59,6 +80,43 @@ pub fn write_headless_clear_png(options: HeadlessClearOptions) -> Result<Headles
         width,
         height,
         byte_len: pixels.len(),
+    })
+}
+
+pub fn write_headless_chunk_png(
+    options: HeadlessChunkOptions,
+    mesh: &VisibleChunkMesh,
+) -> Result<HeadlessChunkReport> {
+    let width = options.width.max(1);
+    let height = options.height.max(1);
+    let (device, queue) = create_headless_device()?;
+    let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
+    let draw = ChunkDrawResources::new(&device, HEADLESS_FORMAT, width, height, mesh)?;
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_headless_chunk_encoder"),
+    });
+    draw.render(
+        &queue,
+        &mut encoder,
+        &target.view,
+        [width, height],
+        options.camera,
+        options.color,
+    )?;
+    queue.submit(std::iter::once(encoder.finish()));
+
+    let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
+    save_rgba_png(&options.path, width, height, &pixels)?;
+    let stats = mesh.stats();
+
+    Ok(HeadlessChunkReport {
+        path: options.path,
+        width,
+        height,
+        byte_len: pixels.len(),
+        vertex_count: stats.vertex_count,
+        index_count: stats.index_count,
     })
 }
 
