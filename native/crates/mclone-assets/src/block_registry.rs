@@ -137,6 +137,7 @@ impl BlockStateRegistry {
 pub struct BlockStateAsset {
     pub block: ResourceLocation,
     pub path: AssetPath,
+    pub variants: BTreeMap<String, Vec<BlockStateVariant>>,
     pub variant_keys: BTreeSet<String>,
     pub model_refs: BTreeSet<ResourceLocation>,
 }
@@ -151,18 +152,61 @@ impl BlockStateAsset {
             path: path.clone(),
             source,
         })?;
-        let variant_keys = json
-            .get("variants")
-            .and_then(Value::as_object)
-            .map(|variants| variants.keys().cloned().collect())
-            .unwrap_or_default();
+        let variants = parse_variants(&json)?;
+        let variant_keys = variants.keys().cloned().collect();
         let mut model_refs = BTreeSet::new();
         collect_model_refs(&json, &mut model_refs)?;
         Ok(Self {
             block,
             path,
+            variants,
             variant_keys,
             model_refs,
+        })
+    }
+
+    pub fn variants_for_key(&self, key: &str) -> Option<&[BlockStateVariant]> {
+        self.variants.get(key).map(Vec::as_slice)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlockStateVariant {
+    pub model: ResourceLocation,
+    pub x: i32,
+    pub y: i32,
+    pub uvlock: bool,
+    pub weight: u32,
+}
+
+impl BlockStateVariant {
+    fn from_json(value: &Value) -> AssetResult<Self> {
+        let object = value.as_object().ok_or_else(|| {
+            AssetError::InvalidBlockState("blockstate variant must be an object".to_owned())
+        })?;
+        let model = object
+            .get("model")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                AssetError::InvalidBlockState("blockstate variant missing model".to_owned())
+            })
+            .and_then(ResourceLocation::parse)?;
+        let x = normalized_rotation(get_i32(object, "x", 0)?)?;
+        let y = normalized_rotation(get_i32(object, "y", 0)?)?;
+        let uvlock = get_bool(object, "uvlock", false)?;
+        let weight = get_i32(object, "weight", 1)?;
+        if weight < 1 {
+            return Err(AssetError::InvalidBlockState(format!(
+                "invalid variant weight {weight}; expected integer >= 1"
+            )));
+        }
+
+        Ok(Self {
+            model,
+            x,
+            y,
+            uvlock,
+            weight: weight as u32,
         })
     }
 }
@@ -206,6 +250,39 @@ impl BlockStateAssetIndex {
     }
 }
 
+fn parse_variants(value: &Value) -> AssetResult<BTreeMap<String, Vec<BlockStateVariant>>> {
+    let Some(variants) = value.get("variants") else {
+        return Ok(BTreeMap::new());
+    };
+    let variants = variants.as_object().ok_or_else(|| {
+        AssetError::InvalidBlockState("blockstate variants must be an object".to_owned())
+    })?;
+    let mut parsed = BTreeMap::new();
+    for (key, value) in variants {
+        let variants = match value {
+            Value::Array(values) => {
+                if values.is_empty() {
+                    return Err(AssetError::InvalidBlockState(format!(
+                        "blockstate variant `{key}` is an empty array"
+                    )));
+                }
+                values
+                    .iter()
+                    .map(BlockStateVariant::from_json)
+                    .collect::<AssetResult<Vec<_>>>()?
+            }
+            Value::Object(_) => vec![BlockStateVariant::from_json(value)?],
+            _ => {
+                return Err(AssetError::InvalidBlockState(format!(
+                    "blockstate variant `{key}` must be an object or array"
+                )));
+            }
+        };
+        parsed.insert(key.clone(), variants);
+    }
+    Ok(parsed)
+}
+
 fn collect_model_refs(value: &Value, out: &mut BTreeSet<ResourceLocation>) -> AssetResult<()> {
     match value {
         Value::Object(object) => {
@@ -224,6 +301,43 @@ fn collect_model_refs(value: &Value, out: &mut BTreeSet<ResourceLocation>) -> As
         _ => {}
     }
     Ok(())
+}
+
+fn get_i32(object: &serde_json::Map<String, Value>, name: &str, default: i32) -> AssetResult<i32> {
+    let Some(value) = object.get(name) else {
+        return Ok(default);
+    };
+    let Some(value) = value.as_i64() else {
+        return Err(AssetError::InvalidBlockState(format!(
+            "`{name}` must be an integer"
+        )));
+    };
+    i32::try_from(value).map_err(|_| {
+        AssetError::InvalidBlockState(format!("`{name}` value {value} does not fit in i32"))
+    })
+}
+
+fn get_bool(
+    object: &serde_json::Map<String, Value>,
+    name: &str,
+    default: bool,
+) -> AssetResult<bool> {
+    let Some(value) = object.get(name) else {
+        return Ok(default);
+    };
+    value
+        .as_bool()
+        .ok_or_else(|| AssetError::InvalidBlockState(format!("`{name}` must be a boolean")))
+}
+
+fn normalized_rotation(value: i32) -> AssetResult<i32> {
+    let normalized = value.rem_euclid(360);
+    if normalized % 90 != 0 {
+        return Err(AssetError::InvalidBlockState(format!(
+            "invalid block model rotation {value}; expected a multiple of 90 degrees"
+        )));
+    }
+    Ok(normalized)
 }
 
 const EMPTY_PROPS: &[(&str, &str)] = &[];
@@ -313,8 +427,27 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            asset.variant_keys.into_iter().collect::<Vec<_>>(),
+            asset.variant_keys.iter().cloned().collect::<Vec<_>>(),
             vec!["snowy=false", "snowy=true"]
+        );
+        assert_eq!(
+            asset.variants_for_key("snowy=false").unwrap(),
+            [
+                BlockStateVariant {
+                    model: ResourceLocation::parse("minecraft:block/grass_block").unwrap(),
+                    x: 0,
+                    y: 0,
+                    uvlock: false,
+                    weight: 1,
+                },
+                BlockStateVariant {
+                    model: ResourceLocation::parse("minecraft:block/grass_block").unwrap(),
+                    x: 0,
+                    y: 90,
+                    uvlock: false,
+                    weight: 1,
+                }
+            ]
         );
         assert!(
             asset
