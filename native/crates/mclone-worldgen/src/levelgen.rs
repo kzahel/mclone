@@ -630,6 +630,14 @@ impl MutableChunkBlockBuffer {
         let index = block_buffer_index(local_x, local_y, local_z);
         self.blocks[index] = block_id;
     }
+
+    pub fn get_block_at_y(&self, local_x: i32, y: i32, local_z: i32) -> u8 {
+        self.get_block(local_x, y - self.min_y, local_z)
+    }
+
+    pub fn set_block_at_y(&mut self, local_x: i32, y: i32, local_z: i32, block_id: u8) {
+        self.set_block(local_x, y - self.min_y, local_z, block_id);
+    }
 }
 
 #[derive(Clone, Debug)]
