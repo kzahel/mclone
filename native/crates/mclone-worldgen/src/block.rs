@@ -73,6 +73,7 @@ pub const DEEPSLATE_LAPIS_ORE: RawBlockId = 67;
 pub const LARGE_FERN_LOWER: RawBlockId = 68;
 pub const LARGE_FERN_UPPER: RawBlockId = 69;
 pub const GLOW_LICHEN: RawBlockId = 70;
+pub const CAVE_AIR: RawBlockId = 71;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -101,6 +102,7 @@ impl GeneratedBlockId {
     pub const LARGE_FERN_LOWER: Self = Self(LARGE_FERN_LOWER);
     pub const LARGE_FERN_UPPER: Self = Self(LARGE_FERN_UPPER);
     pub const GLOW_LICHEN: Self = Self(GLOW_LICHEN);
+    pub const CAVE_AIR: Self = Self(CAVE_AIR);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -111,7 +113,7 @@ impl GeneratedBlockId {
     }
 
     pub const fn is_air(self) -> bool {
-        self.0 == AIR
+        is_air_like(self.0)
     }
 
     pub const fn is_water(self) -> bool {
@@ -121,6 +123,10 @@ impl GeneratedBlockId {
     pub const fn name(self) -> &'static str {
         block_name(self.0)
     }
+}
+
+pub const fn is_air_like(block_id: RawBlockId) -> bool {
+    block_id == AIR || block_id == CAVE_AIR
 }
 
 pub const fn generated_block_state_id(block_id: RawBlockId) -> BlockStateId {
@@ -199,6 +205,7 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         DEEPSLATE_LAPIS_ORE => "minecraft:deepslate_lapis_ore",
         LARGE_FERN_LOWER | LARGE_FERN_UPPER => "minecraft:large_fern",
         GLOW_LICHEN => "minecraft:glow_lichen",
+        CAVE_AIR => "minecraft:cave_air",
         _ => "minecraft:unknown",
     }
 }

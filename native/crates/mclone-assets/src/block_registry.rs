@@ -419,6 +419,7 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (68, "minecraft:large_fern", HALF_LOWER),
     (69, "minecraft:large_fern", HALF_UPPER),
     (70, "minecraft:glow_lichen", EMPTY_PROPS),
+    (71, "minecraft:cave_air", EMPTY_PROPS),
 ];
 
 #[cfg(test)]
@@ -430,7 +431,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 71);
+        assert_eq!(registry.len(), 72);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -490,6 +491,10 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:glow_lichen"),
             Some(BlockStateId(70))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:cave_air"),
+            Some(BlockStateId(71))
         );
         assert_eq!(
             registry.by_id(BlockStateId(8)).unwrap().canonical_key(),

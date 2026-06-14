@@ -2,13 +2,13 @@ use std::{collections::BTreeMap, sync::OnceLock};
 
 use crate::biome::{BiomeDefinition, OverworldBiomeSource};
 use crate::block::{
-    AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, COAL_ORE, COARSE_DIRT, COPPER_ORE, DANDELION,
+    AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, COAL_ORE, COARSE_DIRT, COPPER_ORE, DANDELION,
     DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
     DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
     DIAMOND_ORE, DIORITE, DIRT, FERN, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
     ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES,
     OAK_LOG, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SNOW, SPRUCE_LEAVES,
-    SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER,
+    SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER, is_air_like,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{
@@ -1688,7 +1688,7 @@ fn place_lake<W: FeatureWorld>(
     config: LakeConfiguration,
 ) -> bool {
     let mut base = origin;
-    while base.y > world.min_y() + 5 && world.block_at_world(base) == Some(AIR) {
+    while base.y > world.min_y() + 5 && world.block_at_world(base).is_some_and(is_air_like) {
         base.y -= 1;
     }
 
@@ -1752,7 +1752,7 @@ fn place_lake<W: FeatureWorld>(
                 if carved[lake_index(x, z, y)] {
                     let pos =
                         BlockPos::new(base.x + x as i32, base.y + y as i32, base.z + z as i32);
-                    let replacement = if y >= 4 { AIR } else { config.state };
+                    let replacement = if y >= 4 { CAVE_AIR } else { config.state };
                     world.set_block_world(pos, replacement);
                 }
             }
@@ -1904,7 +1904,8 @@ fn place_random_patch<W: FeatureWorld>(
         let Some(block_below) = world.block_at_world(below) else {
             continue;
         };
-        let can_replace = current == AIR || (config.can_replace && is_replaceable_plant(current));
+        let can_replace =
+            is_air_like(current) || (config.can_replace && is_replaceable_plant(current));
         if can_replace
             && matches_allowed(config.place_on, block_below)
             && can_survive_simple_plant(config.state, current, block_below)
@@ -1963,7 +1964,7 @@ fn should_freeze<W: FeatureWorld>(world: &mut W, biome: BiomeDefinition, pos: Bl
 fn should_snow<W: FeatureWorld>(world: &mut W, biome: BiomeDefinition, pos: BlockPos) -> bool {
     if !is_within_build_height(world, pos)
         || biome_temperature(biome, pos.x, pos.y, pos.z) >= 0.15
-        || world.block_at_world(pos) != Some(AIR)
+        || !world.block_at_world(pos).is_some_and(is_air_like)
     {
         return false;
     }
@@ -2098,7 +2099,7 @@ fn offset_pos(pos: BlockPos, direction: Direction) -> BlockPos {
 }
 
 fn is_air_or_water(block_id: RawBlockId) -> bool {
-    matches!(block_id, AIR | WATER)
+    is_air_like(block_id) || block_id == WATER
 }
 
 fn place_basic_tree<W: FeatureWorld>(
@@ -2582,7 +2583,9 @@ fn is_adjacent_to_air<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
     ];
 
     NEIGHBORS.iter().any(|(dx, dy, dz)| {
-        world.block_at_world(BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz)) == Some(AIR)
+        world
+            .block_at_world(BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz))
+            .is_some_and(is_air_like)
     })
 }
 
@@ -2610,7 +2613,7 @@ fn heightmap_height(
 
 fn heightmap_is_opaque(heightmap: HeightmapType, block_id: RawBlockId) -> bool {
     match heightmap {
-        HeightmapType::WorldSurfaceWg | HeightmapType::WorldSurface => block_id != AIR,
+        HeightmapType::WorldSurfaceWg | HeightmapType::WorldSurface => !is_air_like(block_id),
         HeightmapType::OceanFloorWg | HeightmapType::OceanFloor => material_blocks_motion(block_id),
         HeightmapType::MotionBlocking => material_blocks_motion(block_id) || has_fluid(block_id),
         HeightmapType::MotionBlockingNoLeaves => {
@@ -2622,7 +2625,8 @@ fn heightmap_is_opaque(heightmap: HeightmapType, block_id: RawBlockId) -> bool {
 fn material_blocks_motion(block_id: RawBlockId) -> bool {
     !matches!(
         block_id,
-        AIR | WATER
+        AIR | CAVE_AIR
+            | WATER
             | LAVA
             | SNOW
             | GRASS
@@ -2653,7 +2657,7 @@ fn can_survive_simple_plant(
     current: RawBlockId,
     block_below: RawBlockId,
 ) -> bool {
-    current == AIR
+    is_air_like(current)
         && match block_id {
             GRASS | FERN | DANDELION | POPPY => {
                 matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
@@ -2697,7 +2701,8 @@ fn valid_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
     };
     matches!(
         block_id,
-        AIR | WATER
+        AIR | CAVE_AIR
+            | WATER
             | GRASS
             | FERN
             | DANDELION
@@ -2728,7 +2733,8 @@ fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool
     };
     matches!(
         block_id,
-        AIR | WATER
+        AIR | CAVE_AIR
+            | WATER
             | GRASS
             | FERN
             | DANDELION
@@ -2959,6 +2965,17 @@ mod tests {
 
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 8, 8)));
         assert_eq!(chunk.get_block_at_y(8, 8, 8), GLOW_LICHEN);
+    }
+
+    #[test]
+    fn lake_feature_uses_cave_air_for_upper_cavity() {
+        let mut chunk = solid_stone_chunk();
+        let mut random = WorldgenRandom::new(12_345);
+        let feature = ConfiguredFeature::lake(LakeConfiguration::new(WATER));
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(0, 20, 0)));
+        assert!(count_blocks(&chunk, CAVE_AIR) > 0);
+        assert!(count_blocks(&chunk, WATER) > 0);
     }
 
     #[test]

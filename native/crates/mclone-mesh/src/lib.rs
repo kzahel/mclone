@@ -13,6 +13,8 @@ use mclone_core::{AIR_BLOCK_STATE_ID, BlockStateId};
 pub const CHUNK_WIDTH: i32 = 16;
 pub const RENDER_SECTION_HEIGHT: i32 = 16;
 pub const AIR_BLOCK_ID: u8 = 0;
+pub const CAVE_AIR_BLOCK_ID: u8 = 71;
+pub const CAVE_AIR_BLOCK_STATE_ID: BlockStateId = BlockStateId(71);
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SectionMeshStats {
@@ -452,7 +454,7 @@ fn add_chunk_to_mesh(
         for local_z in 0..CHUNK_WIDTH {
             for local_x in 0..CHUNK_WIDTH {
                 let block_id = input.block_at_or_air(local_x, local_y, local_z);
-                if block_id == AIR_BLOCK_ID {
+                if is_air_like_block_id(block_id) {
                     continue;
                 }
 
@@ -466,7 +468,7 @@ fn add_chunk_to_mesh(
                         world_y + face.neighbor[1],
                         world_z + face.neighbor[2],
                     );
-                    if neighbor == AIR_BLOCK_ID {
+                    if is_air_like_block_id(neighbor) {
                         add_face(mesh, world_x, world_y, world_z, block_id, face);
                     }
                 }
@@ -490,7 +492,7 @@ fn add_textured_chunk_range_to_mesh(
         for local_z in 0..CHUNK_WIDTH {
             for local_x in 0..CHUNK_WIDTH {
                 let state_id = input.block_at_or_air(local_x, local_y, local_z);
-                if state_id == AIR_BLOCK_STATE_ID {
+                if is_air_like_block_state(state_id) {
                     continue;
                 }
 
@@ -838,6 +840,14 @@ fn block_at_world_or_air(inputs: &[ChunkMeshInput<'_>], world_x: i32, y: i32, wo
         .unwrap_or(AIR_BLOCK_ID)
 }
 
+fn is_air_like_block_id(block_id: u8) -> bool {
+    matches!(block_id, AIR_BLOCK_ID | CAVE_AIR_BLOCK_ID)
+}
+
+fn is_air_like_block_state(state_id: BlockStateId) -> bool {
+    matches!(state_id, AIR_BLOCK_STATE_ID | CAVE_AIR_BLOCK_STATE_ID)
+}
+
 fn block_state_at_world_or_air(
     inputs: &[TexturedChunkMeshInput<'_>],
     world_x: i32,
@@ -935,6 +945,15 @@ mod tests {
 
         assert_eq!(mesh.stats().vertex_count, 40);
         assert_eq!(mesh.stats().index_count, 60);
+    }
+
+    #[test]
+    fn cave_air_is_invisible_and_non_occluding_in_debug_mesh() {
+        let blocks = chunk_blocks(16, &[(0, 0, 0, 1), (1, 0, 0, CAVE_AIR_BLOCK_ID)]);
+        let mesh = build_visible_chunk_mesh(ChunkMeshInput::new(0, 0, 0, 16, &blocks));
+
+        assert_eq!(mesh.stats().vertex_count, 24);
+        assert_eq!(mesh.stats().index_count, 36);
     }
 
     #[test]
@@ -1072,6 +1091,27 @@ mod tests {
         assert!(mesh.vertices.iter().all(
             |vertex| (0.0..=1.0).contains(&vertex.uv[0]) && (0.0..=1.0).contains(&vertex.uv[1])
         ));
+    }
+
+    #[test]
+    fn cave_air_is_invisible_and_non_occluding_in_textured_mesh() {
+        let catalog = stone_textured_catalog();
+        let blocks = textured_chunk_blocks(
+            16,
+            &[
+                (0, 0, 0, BlockStateId(1)),
+                (1, 0, 0, CAVE_AIR_BLOCK_STATE_ID),
+            ],
+        );
+        let mesh = build_textured_visible_chunk_mesh(
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+            &catalog,
+        )
+        .unwrap();
+
+        assert_eq!(mesh.stats().vertex_count, 24);
+        assert_eq!(mesh.stats().index_count, 36);
+        assert!(!catalog.occludes(CAVE_AIR_BLOCK_STATE_ID));
     }
 
     #[test]

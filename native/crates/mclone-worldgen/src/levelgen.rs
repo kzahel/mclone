@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::biome::OverworldBiomeSource;
 use crate::block::{
-    AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER, generated_block_state_id,
+    AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER, generated_block_state_id, is_air_like,
 };
 use crate::carver::{apply_overworld_air_carvers, apply_overworld_liquid_carvers};
 use crate::feature::{
@@ -681,7 +681,7 @@ impl MutableChunkBlockBuffer {
     pub fn non_air_block_count(&self) -> usize {
         self.blocks
             .iter()
-            .filter(|block_id| **block_id != AIR)
+            .filter(|block_id| !is_air_like(**block_id))
             .count()
     }
 
@@ -782,7 +782,7 @@ impl GeneratedChunk {
     pub fn non_air_block_count(&self) -> usize {
         self.blocks
             .iter()
-            .filter(|block_id| **block_id != AIR)
+            .filter(|block_id| !is_air_like(**block_id))
             .count()
     }
 
@@ -1444,7 +1444,7 @@ fn block_buffer_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
 
 fn world_surface_height(chunk: &MutableChunkBlockBuffer, local_x: i32, local_z: i32) -> i32 {
     for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
-        if chunk.get_block_at_y(local_x, y, local_z) != AIR {
+        if !is_air_like(chunk.get_block_at_y(local_x, y, local_z)) {
             return y + 1;
         }
     }
@@ -2866,9 +2866,9 @@ mod tests {
             report
                 .top_mismatch_pairs
                 .iter()
-                .any(|bucket| bucket.expected == "minecraft:coal_ore"
-                    || bucket.expected == "minecraft:cave_air"
-                    || bucket.expected == "minecraft:spruce_log"),
+                .any(|bucket| bucket.expected == "minecraft:gravel"
+                    || bucket.expected == "minecraft:fern"
+                    || bucket.expected == "minecraft:snow"),
             "expected current report to expose a known full-decoration gap: {report:#?}"
         );
     }
