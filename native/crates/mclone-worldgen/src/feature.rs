@@ -1,18 +1,23 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 use crate::biome::{BiomeDefinition, OverworldBiomeSource};
 use crate::block::{
-    AIR, BIRCH_LEAVES, BIRCH_LOG, DANDELION, DEAD_BUSH, DIRT, FERN, GRASS, GRASS_BLOCK, MYCELIUM,
-    OAK_LEAVES, OAK_LOG, PODZOL, POPPY, RED_SAND, RawBlockId, SAND, SPRUCE_LEAVES, SPRUCE_LOG,
-    TERRACOTTA, WATER,
+    AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, DANDELION, DEAD_BUSH, DEEPSLATE, DIORITE, DIRT, FERN,
+    GRANITE, GRASS, GRASS_BLOCK, GRAVEL, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY, RED_SAND,
+    RawBlockId, SAND, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
-use crate::placement::{BlockPos, ConfiguredDecorator, DecorationContext};
+use crate::placement::{
+    BlockPos, ConfiguredDecorator, DecorationContext, HeightProvider, VerticalAnchor,
+};
 use crate::prng::{RandomSource, WorldgenRandom};
 
 const CHUNK_WIDTH: i32 = 16;
 pub const FEATURES_CHUNK_DEPENDENCY_RADIUS: i32 = 8;
 pub const FEATURES_WRITE_RADIUS_CUTOFF: i32 = 1;
+const SIN_TABLE_SIZE: usize = 65_536;
+const SIN_TABLE_MASK: i32 = 65_535;
+const SIN_SCALE: f32 = 10_430.378_f32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DecorationStep {
@@ -422,11 +427,75 @@ impl BasicTreeConfiguration {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OreTarget {
+    NaturalStone,
+    StoneOreReplaceables,
+}
+
+impl OreTarget {
+    fn matches(self, block_id: RawBlockId) -> bool {
+        match self {
+            Self::NaturalStone => {
+                matches!(
+                    block_id,
+                    STONE | GRANITE | DIORITE | ANDESITE | TUFF | DEEPSLATE
+                )
+            }
+            Self::StoneOreReplaceables => matches!(block_id, STONE | GRANITE | DIORITE | ANDESITE),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OreTargetBlockState {
+    pub target: OreTarget,
+    pub state: RawBlockId,
+}
+
+impl OreTargetBlockState {
+    pub const fn new(target: OreTarget, state: RawBlockId) -> Self {
+        Self { target, state }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct OreConfiguration {
+    pub target_states: Vec<OreTargetBlockState>,
+    pub size: i32,
+    pub discard_chance_on_air_exposure: f32,
+}
+
+impl Eq for OreConfiguration {}
+
+impl OreConfiguration {
+    pub fn new(
+        target_states: impl Into<Vec<OreTargetBlockState>>,
+        size: i32,
+        discard_chance_on_air_exposure: f32,
+    ) -> Self {
+        Self {
+            target_states: target_states.into(),
+            size,
+            discard_chance_on_air_exposure,
+        }
+    }
+
+    pub fn natural_stone(state: RawBlockId, size: i32) -> Self {
+        Self::new(
+            [OreTargetBlockState::new(OreTarget::NaturalStone, state)],
+            size,
+            0.0,
+        )
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConfiguredFeature {
     SimpleBlock(SimpleBlockConfiguration),
     RandomPatch(RandomPatchConfiguration),
     BasicTree(BasicTreeConfiguration),
+    Ore(OreConfiguration),
 }
 
 impl ConfiguredFeature {
@@ -442,16 +511,21 @@ impl ConfiguredFeature {
         Self::BasicTree(config)
     }
 
+    pub const fn ore(config: OreConfiguration) -> Self {
+        Self::Ore(config)
+    }
+
     pub fn place<W: FeatureWorld>(
         &self,
         world: &mut W,
         random: &mut impl RandomSource,
         origin: BlockPos,
     ) -> bool {
-        match *self {
-            Self::SimpleBlock(config) => place_simple_block(world, random, origin, config),
-            Self::RandomPatch(config) => place_random_patch(world, random, origin, config),
-            Self::BasicTree(config) => place_basic_tree(world, random, origin, config),
+        match self {
+            Self::SimpleBlock(config) => place_simple_block(world, random, origin, *config),
+            Self::RandomPatch(config) => place_random_patch(world, random, origin, *config),
+            Self::BasicTree(config) => place_basic_tree(world, random, origin, *config),
+            Self::Ore(config) => place_ore(world, random, origin, config),
         }
     }
 }
@@ -483,20 +557,30 @@ impl PlacedFeature {
         origin: BlockPos,
     ) -> bool {
         let decoration_context = DecorationContext::new(world.min_y(), world.height());
-        let mut positions = vec![origin];
-        for decorator in &self.decorators {
-            positions = positions
-                .into_iter()
-                .flat_map(|pos| decorator.get_positions(&decoration_context, random, pos))
-                .collect();
-            if positions.is_empty() {
-                return false;
-            }
-        }
+        self.place_decorated(world, random, &decoration_context, 0, origin)
+    }
+
+    fn place_decorated<W: FeatureWorld>(
+        &self,
+        world: &mut W,
+        random: &mut impl RandomSource,
+        decoration_context: &DecorationContext,
+        decorator_index: usize,
+        pos: BlockPos,
+    ) -> bool {
+        let Some(decorator) = self.decorators.get(decorator_index) else {
+            return self.feature.place(world, random, pos);
+        };
 
         let mut placed_any = false;
-        for pos in positions {
-            placed_any |= self.feature.place(world, random, pos);
+        for next_pos in decorator.get_positions(decoration_context, random, pos) {
+            placed_any |= self.place_decorated(
+                world,
+                random,
+                decoration_context,
+                decorator_index + 1,
+                next_pos,
+            );
         }
         placed_any
     }
@@ -547,10 +631,17 @@ pub fn apply_overworld_biome_features<W: FeatureWorld>(
     let decoration_seed = random.set_decoration_seed(seed, min_block_x, min_block_z);
     let mut placed_features = 0;
 
-    for (index, feature) in features.iter().enumerate() {
-        random.set_feature_seed(decoration_seed, index as i32, feature.step.index());
-        if feature.place(world, &mut random, origin) {
-            placed_features += 1;
+    for step_index in 0..=DecorationStep::TopLayerModification.index() {
+        let mut feature_index = 0;
+        for feature in features
+            .iter()
+            .filter(|feature| feature.step.index() == step_index)
+        {
+            random.set_feature_seed(decoration_seed, feature_index, step_index);
+            if feature.place(world, &mut random, origin) {
+                placed_features += 1;
+            }
+            feature_index += 1;
         }
     }
 
@@ -563,7 +654,7 @@ pub fn apply_overworld_biome_features<W: FeatureWorld>(
 }
 
 pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature> {
-    match biome.key() {
+    let mut biome_features = match biome.key() {
         "minecraft:plains" | "minecraft:sunflower_plains" => plains_features(),
         "minecraft:forest" | "minecraft:wooded_hills" | "minecraft:flower_forest" => {
             forest_features()
@@ -601,7 +692,10 @@ pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature
         "minecraft:swamp" | "minecraft:swamp_hills" => swamp_features(),
         "minecraft:mushroom_fields" | "minecraft:mushroom_field_shore" => mushroom_field_features(),
         _ => default_land_features(),
-    }
+    };
+    let mut features = default_underground_variety_features();
+    features.append(&mut biome_features);
+    features
 }
 
 fn chunk_center_biome(
@@ -624,6 +718,78 @@ fn plains_features() -> Vec<PlacedFeature> {
         flower_patch(DANDELION, 1),
         flower_patch(POPPY, 1),
     ]
+}
+
+fn default_underground_variety_features() -> Vec<PlacedFeature> {
+    vec![
+        underground_ore_feature(
+            DIRT,
+            33,
+            VerticalAnchor::absolute(0),
+            VerticalAnchor::top(),
+            10,
+        ),
+        underground_ore_feature(
+            GRAVEL,
+            33,
+            VerticalAnchor::absolute(0),
+            VerticalAnchor::top(),
+            8,
+        ),
+        underground_ore_feature(
+            GRANITE,
+            33,
+            VerticalAnchor::absolute(0),
+            VerticalAnchor::absolute(79),
+            10,
+        ),
+        underground_ore_feature(
+            DIORITE,
+            33,
+            VerticalAnchor::absolute(0),
+            VerticalAnchor::absolute(79),
+            10,
+        ),
+        underground_ore_feature(
+            ANDESITE,
+            33,
+            VerticalAnchor::absolute(0),
+            VerticalAnchor::absolute(79),
+            10,
+        ),
+        underground_ore_feature(
+            TUFF,
+            33,
+            VerticalAnchor::absolute(0),
+            VerticalAnchor::absolute(16),
+            1,
+        ),
+        underground_ore_feature(
+            DEEPSLATE,
+            64,
+            VerticalAnchor::absolute(0),
+            VerticalAnchor::absolute(16),
+            2,
+        ),
+    ]
+}
+
+fn underground_ore_feature(
+    block_id: RawBlockId,
+    size: i32,
+    min_inclusive: VerticalAnchor,
+    max_inclusive: VerticalAnchor,
+    count: i32,
+) -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::UndergroundOres,
+        ConfiguredFeature::ore(OreConfiguration::natural_stone(block_id, size)),
+        vec![
+            ConfiguredDecorator::count(count),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::range(HeightProvider::uniform(min_inclusive, max_inclusive)),
+        ],
+    )
 }
 
 fn forest_features() -> Vec<PlacedFeature> {
@@ -893,6 +1059,222 @@ fn place_basic_tree<W: FeatureWorld>(
     true
 }
 
+fn place_ore<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    origin: BlockPos,
+    config: &OreConfiguration,
+) -> bool {
+    if config.size <= 0 {
+        return false;
+    }
+
+    let angle = random.next_float() * std::f32::consts::PI;
+    let radius = config.size as f32 / 8.0;
+    let padding = ceil_f32((config.size as f32 / 16.0 * 2.0 + 1.0) / 2.0);
+    let start_x = origin.x as f64 + (angle as f64).sin() * radius as f64;
+    let end_x = origin.x as f64 - (angle as f64).sin() * radius as f64;
+    let start_z = origin.z as f64 + (angle as f64).cos() * radius as f64;
+    let end_z = origin.z as f64 - (angle as f64).cos() * radius as f64;
+    let start_y = origin.y as f64 + random.next_int_bound(3) as f64 - 2.0;
+    let end_y = origin.y as f64 + random.next_int_bound(3) as f64 - 2.0;
+    let min_x = origin.x - ceil_f32(radius) - padding;
+    let min_y = origin.y - 2 - padding;
+    let min_z = origin.z - ceil_f32(radius) - padding;
+    let width_xz = 2 * (ceil_f32(radius) + padding);
+    let height_y = 2 * (2 + padding);
+
+    for x in min_x..=min_x + width_xz {
+        for z in min_z..=min_z + width_xz {
+            if min_y
+                <= world
+                    .world_surface_height_at(x, z)
+                    .unwrap_or(world.min_y() - 1)
+            {
+                return do_place_ore(
+                    world, random, config, start_x, end_x, start_z, end_z, start_y, end_y, min_x,
+                    min_y, min_z, width_xz, height_y,
+                );
+            }
+        }
+    }
+
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
+fn do_place_ore<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    config: &OreConfiguration,
+    start_x: f64,
+    end_x: f64,
+    start_z: f64,
+    end_z: f64,
+    start_y: f64,
+    end_y: f64,
+    min_x: i32,
+    min_y: i32,
+    min_z: i32,
+    width_xz: i32,
+    height_y: i32,
+) -> bool {
+    if width_xz <= 0 || height_y <= 0 {
+        return false;
+    }
+
+    let mut placed = 0;
+    let mut visited = vec![false; (width_xz * height_y * width_xz) as usize];
+    let size = config.size as usize;
+    let mut spheres = vec![0.0; size * 4];
+
+    for index in 0..size {
+        let progress = index as f32 / config.size as f32;
+        let center_x = lerp(progress as f64, start_x, end_x);
+        let center_y = lerp(progress as f64, start_y, end_y);
+        let center_z = lerp(progress as f64, start_z, end_z);
+        let scale = random.next_double() * config.size as f64 / 16.0;
+        let radius = ((mth_sin(std::f32::consts::PI * progress) as f64 + 1.0) * scale + 1.0) / 2.0;
+        spheres[index * 4] = center_x;
+        spheres[index * 4 + 1] = center_y;
+        spheres[index * 4 + 2] = center_z;
+        spheres[index * 4 + 3] = radius;
+    }
+
+    for left in 0..size.saturating_sub(1) {
+        if spheres[left * 4 + 3] <= 0.0 {
+            continue;
+        }
+        for right in left + 1..size {
+            if spheres[right * 4 + 3] <= 0.0 {
+                continue;
+            }
+
+            let dx = spheres[left * 4] - spheres[right * 4];
+            let dy = spheres[left * 4 + 1] - spheres[right * 4 + 1];
+            let dz = spheres[left * 4 + 2] - spheres[right * 4 + 2];
+            let dr = spheres[left * 4 + 3] - spheres[right * 4 + 3];
+            if dr * dr > dx * dx + dy * dy + dz * dz {
+                if dr > 0.0 {
+                    spheres[right * 4 + 3] = -1.0;
+                } else {
+                    spheres[left * 4 + 3] = -1.0;
+                }
+            }
+        }
+    }
+
+    for index in 0..size {
+        let radius = spheres[index * 4 + 3];
+        if radius < 0.0 {
+            continue;
+        }
+
+        let center_x = spheres[index * 4];
+        let center_y = spheres[index * 4 + 1];
+        let center_z = spheres[index * 4 + 2];
+        let block_min_x = floor_f64(center_x - radius).max(min_x);
+        let block_min_y = floor_f64(center_y - radius).max(min_y);
+        let block_min_z = floor_f64(center_z - radius).max(min_z);
+        let block_max_x = floor_f64(center_x + radius).max(block_min_x);
+        let block_max_y = floor_f64(center_y + radius).max(block_min_y);
+        let block_max_z = floor_f64(center_z + radius).max(block_min_z);
+
+        for x in block_min_x..=block_max_x {
+            let normalized_x = (x as f64 + 0.5 - center_x) / radius;
+            if normalized_x * normalized_x >= 1.0 {
+                continue;
+            }
+            for y in block_min_y..=block_max_y {
+                let normalized_y = (y as f64 + 0.5 - center_y) / radius;
+                if normalized_x * normalized_x + normalized_y * normalized_y >= 1.0 {
+                    continue;
+                }
+                for z in block_min_z..=block_max_z {
+                    let normalized_z = (z as f64 + 0.5 - center_z) / radius;
+                    if normalized_x * normalized_x
+                        + normalized_y * normalized_y
+                        + normalized_z * normalized_z
+                        >= 1.0
+                        || !(world.min_y()..world.min_y() + world.height()).contains(&y)
+                    {
+                        continue;
+                    }
+
+                    let visited_index =
+                        x - min_x + (y - min_y) * width_xz + (z - min_z) * width_xz * height_y;
+                    if visited_index < 0 || visited_index as usize >= visited.len() {
+                        continue;
+                    }
+                    let visited_index = visited_index as usize;
+                    if visited[visited_index] {
+                        continue;
+                    }
+                    visited[visited_index] = true;
+
+                    let pos = BlockPos::new(x, y, z);
+                    let Some(current) = world.block_at_world(pos) else {
+                        continue;
+                    };
+                    for target in &config.target_states {
+                        if can_place_ore(current, world, random, config, *target, pos)
+                            && world.set_block_world(pos, target.state)
+                        {
+                            placed += 1;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    placed > 0
+}
+
+fn can_place_ore<W: FeatureWorld>(
+    current: RawBlockId,
+    world: &mut W,
+    random: &mut impl RandomSource,
+    config: &OreConfiguration,
+    target: OreTargetBlockState,
+    pos: BlockPos,
+) -> bool {
+    if !target.target.matches(current) {
+        return false;
+    }
+    if should_skip_air_check(random, config.discard_chance_on_air_exposure) {
+        true
+    } else {
+        !is_adjacent_to_air(world, pos)
+    }
+}
+
+fn should_skip_air_check(random: &mut impl RandomSource, chance: f32) -> bool {
+    if chance <= 0.0 {
+        true
+    } else if chance >= 1.0 {
+        false
+    } else {
+        random.next_float() >= chance
+    }
+}
+
+fn is_adjacent_to_air<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    const NEIGHBORS: [(i32, i32, i32); 6] = [
+        (0, -1, 0),
+        (0, 1, 0),
+        (0, 0, -1),
+        (0, 0, 1),
+        (-1, 0, 0),
+        (1, 0, 0),
+    ];
+
+    NEIGHBORS.iter().any(|(dx, dy, dz)| {
+        world.block_at_world(BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz)) == Some(AIR)
+    })
+}
+
 fn project_to_surface<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> Option<BlockPos> {
     Some(BlockPos::new(
         pos.x,
@@ -952,6 +1334,46 @@ fn block_to_chunk_coord(block: i32) -> i32 {
     block.div_euclid(CHUNK_WIDTH)
 }
 
+fn ceil_f32(value: f32) -> i32 {
+    let truncated = value as i32;
+    if value > truncated as f32 {
+        truncated + 1
+    } else {
+        truncated
+    }
+}
+
+fn floor_f64(value: f64) -> i32 {
+    let truncated = value as i32;
+    if value < truncated as f64 {
+        truncated - 1
+    } else {
+        truncated
+    }
+}
+
+fn lerp(delta: f64, start: f64, end: f64) -> f64 {
+    start + delta * (end - start)
+}
+
+fn mth_sin(value: f32) -> f32 {
+    let index = ((value * SIN_SCALE).trunc() as i32 & SIN_TABLE_MASK) as usize;
+    sin_table()[index]
+}
+
+fn sin_table() -> &'static [f32] {
+    static SIN_TABLE: OnceLock<Vec<f32>> = OnceLock::new();
+    SIN_TABLE
+        .get_or_init(|| {
+            (0..SIN_TABLE_SIZE)
+                .map(|index| {
+                    ((index as f64) * std::f64::consts::TAU / SIN_TABLE_SIZE as f64).sin() as f32
+                })
+                .collect()
+        })
+        .as_slice()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -973,6 +1395,26 @@ mod tests {
             }
         }
         chunk
+    }
+
+    fn solid_stone_chunk() -> MutableChunkBlockBuffer {
+        let mut chunk = MutableChunkBlockBuffer::new(0, 0, 0, 64);
+        for x in 0..CHUNK_WIDTH {
+            for y in 0..64 {
+                for z in 0..CHUNK_WIDTH {
+                    chunk.set_block_at_y(x, y, z, STONE);
+                }
+            }
+        }
+        chunk
+    }
+
+    fn count_blocks(chunk: &MutableChunkBlockBuffer, block_id: RawBlockId) -> usize {
+        chunk
+            .blocks
+            .iter()
+            .filter(|current| **current == block_id)
+            .count()
     }
 
     #[test]
@@ -1031,6 +1473,58 @@ mod tests {
 
         assert!(placed.place(&mut chunk, &mut random, BlockPos::new(0, 0, 0)));
         assert!(chunk.blocks.iter().any(|block_id| *block_id == POPPY));
+    }
+
+    #[test]
+    fn ore_feature_replaces_natural_stone_blob() {
+        let mut chunk = solid_stone_chunk();
+        let mut random = WorldgenRandom::new(12_345);
+        let feature = ConfiguredFeature::ore(OreConfiguration::natural_stone(DIORITE, 33));
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 32, 8)));
+        assert!(count_blocks(&chunk, DIORITE) > 0);
+        assert!(count_blocks(&chunk, STONE) < CHUNK_WIDTH as usize * CHUNK_WIDTH as usize * 64);
+    }
+
+    #[test]
+    fn placed_feature_interleaves_decorator_branches_with_feature_random() {
+        let origin = BlockPos::new(0, 0, 0);
+        let range =
+            HeightProvider::uniform(VerticalAnchor::absolute(8), VerticalAnchor::absolute(48));
+        let ore = ConfiguredFeature::ore(OreConfiguration::natural_stone(DIORITE, 33));
+        let placed = PlacedFeature::new(
+            DecorationStep::UndergroundOres,
+            ore.clone(),
+            vec![
+                ConfiguredDecorator::count(2),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::range(range),
+            ],
+        );
+        let mut placed_chunk = solid_stone_chunk();
+        let mut placed_random = WorldgenRandom::new(12_345);
+
+        placed.place(&mut placed_chunk, &mut placed_random, origin);
+
+        let mut manual_chunk = solid_stone_chunk();
+        let mut manual_random = WorldgenRandom::new(12_345);
+        let context = DecorationContext::new(manual_chunk.min_y, manual_chunk.height);
+        for _ in 0..2 {
+            for square_pos in
+                ConfiguredDecorator::square().get_positions(&context, &mut manual_random, origin)
+            {
+                for range_pos in ConfiguredDecorator::range(range).get_positions(
+                    &context,
+                    &mut manual_random,
+                    square_pos,
+                ) {
+                    ore.place(&mut manual_chunk, &mut manual_random, range_pos);
+                }
+            }
+        }
+
+        assert_eq!(placed_chunk.blocks, manual_chunk.blocks);
+        assert_eq!(placed_random.get_count(), manual_random.get_count());
     }
 
     #[test]
@@ -1138,12 +1632,56 @@ mod tests {
     }
 
     #[test]
+    fn biome_feature_tables_start_with_default_underground_variety() {
+        let plains = overworld_features_for_biome(get_layered_biome_by_id(1));
+        let expected = [
+            (DIRT, 33, 10, VerticalAnchor::top()),
+            (GRAVEL, 33, 8, VerticalAnchor::top()),
+            (GRANITE, 33, 10, VerticalAnchor::absolute(79)),
+            (DIORITE, 33, 10, VerticalAnchor::absolute(79)),
+            (ANDESITE, 33, 10, VerticalAnchor::absolute(79)),
+            (TUFF, 33, 1, VerticalAnchor::absolute(16)),
+            (DEEPSLATE, 64, 2, VerticalAnchor::absolute(16)),
+        ];
+
+        for (feature, (expected_block, expected_size, expected_count, max_y)) in
+            plains.iter().zip(expected)
+        {
+            assert_eq!(feature.step, DecorationStep::UndergroundOres);
+            assert_eq!(
+                feature.decorators,
+                vec![
+                    ConfiguredDecorator::count(expected_count),
+                    ConfiguredDecorator::square(),
+                    ConfiguredDecorator::range(HeightProvider::uniform(
+                        VerticalAnchor::absolute(0),
+                        max_y,
+                    )),
+                ]
+            );
+            match &feature.feature {
+                ConfiguredFeature::Ore(config) => {
+                    assert_eq!(config.size, expected_size);
+                    assert_eq!(
+                        config.target_states,
+                        vec![OreTargetBlockState::new(
+                            OreTarget::NaturalStone,
+                            expected_block,
+                        )]
+                    );
+                }
+                other => panic!("expected ore feature, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn biome_overworld_decoration_reports_added_blocks() {
         let mut chunk = flat_grass_chunk();
         let report = apply_overworld_biome_features(12_345, get_layered_biome_by_id(4), &mut chunk);
 
         assert_eq!(report.biome_key, "minecraft:forest");
-        assert_eq!(report.attempted_features, 6);
+        assert_eq!(report.attempted_features, 13);
         assert!(report.placed_features > 0);
         assert!(report.added_non_air_blocks > 0);
     }

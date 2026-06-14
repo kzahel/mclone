@@ -398,6 +398,8 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (49, "minecraft:spruce_leaves", EMPTY_PROPS),
     (50, "minecraft:fern", EMPTY_PROPS),
     (51, "minecraft:dead_bush", EMPTY_PROPS),
+    (52, "minecraft:tuff", EMPTY_PROPS),
+    (53, "minecraft:deepslate", AXIS_Y),
 ];
 
 #[cfg(test)]
@@ -409,7 +411,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 52);
+        assert_eq!(registry.len(), 54);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -437,6 +439,18 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:dead_bush"),
             Some(BlockStateId(51))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:tuff"),
+            Some(BlockStateId(52))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:deepslate[axis=y]"),
+            Some(BlockStateId(53))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(53)).unwrap().canonical_key(),
+            "minecraft:deepslate[axis=y]"
         );
         assert_eq!(
             registry.by_id(BlockStateId(8)).unwrap().canonical_key(),

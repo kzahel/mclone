@@ -2211,6 +2211,14 @@ mod tests {
             + features.block_count(crate::block::DEAD_BUSH);
 
         assert!(feature_block_count > 0);
+        assert!(
+            features.block_count(crate::block::GRANITE)
+                + features.block_count(crate::block::DIORITE)
+                + features.block_count(crate::block::ANDESITE)
+                + features.block_count(crate::block::TUFF)
+                + features.block_count(crate::block::DEEPSLATE)
+                > 0
+        );
         assert!(features.block_count(crate::block::LAVA) > 0);
     }
 

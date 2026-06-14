@@ -54,6 +54,8 @@ pub const SPRUCE_LOG: RawBlockId = 48;
 pub const SPRUCE_LEAVES: RawBlockId = 49;
 pub const FERN: RawBlockId = 50;
 pub const DEAD_BUSH: RawBlockId = 51;
+pub const TUFF: RawBlockId = 52;
+pub const DEEPSLATE: RawBlockId = 53;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -63,6 +65,8 @@ impl GeneratedBlockId {
     pub const STONE: Self = Self(STONE);
     pub const WATER: Self = Self(WATER);
     pub const BEDROCK: Self = Self(BEDROCK);
+    pub const TUFF: Self = Self(TUFF);
+    pub const DEEPSLATE: Self = Self(DEEPSLATE);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -143,6 +147,8 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         SPRUCE_LEAVES => "minecraft:spruce_leaves",
         FERN => "minecraft:fern",
         DEAD_BUSH => "minecraft:dead_bush",
+        TUFF => "minecraft:tuff",
+        DEEPSLATE => "minecraft:deepslate",
         _ => "minecraft:unknown",
     }
 }
