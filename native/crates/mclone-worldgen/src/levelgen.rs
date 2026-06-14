@@ -602,12 +602,35 @@ impl<B: NoiseBiomeSource> NoiseSampler<B> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScheduledTick {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub target: String,
+    pub delay: i32,
+}
+
+impl ScheduledTick {
+    pub fn new(x: i32, y: i32, z: i32, target: impl Into<String>, delay: i32) -> Self {
+        Self {
+            x,
+            y,
+            z,
+            target: target.into(),
+            delay,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MutableChunkBlockBuffer {
     pub chunk_x: i32,
     pub chunk_z: i32,
     pub min_y: i32,
     pub height: i32,
     pub blocks: Vec<u8>,
+    block_ticks: Vec<ScheduledTick>,
+    liquid_ticks: Vec<ScheduledTick>,
 }
 
 impl MutableChunkBlockBuffer {
@@ -622,6 +645,8 @@ impl MutableChunkBlockBuffer {
             min_y,
             height,
             blocks: vec![AIR; height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize],
+            block_ticks: Vec::new(),
+            liquid_ticks: Vec::new(),
         }
     }
 
@@ -640,6 +665,38 @@ impl MutableChunkBlockBuffer {
 
     pub fn set_block_at_y(&mut self, local_x: i32, y: i32, local_z: i32, block_id: u8) {
         self.set_block(local_x, y - self.min_y, local_z, block_id);
+    }
+
+    pub fn schedule_block_tick(
+        &mut self,
+        world_x: i32,
+        y: i32,
+        world_z: i32,
+        target: impl Into<String>,
+        delay: i32,
+    ) {
+        self.block_ticks
+            .push(ScheduledTick::new(world_x, y, world_z, target, delay));
+    }
+
+    pub fn schedule_liquid_tick(
+        &mut self,
+        world_x: i32,
+        y: i32,
+        world_z: i32,
+        target: impl Into<String>,
+        delay: i32,
+    ) {
+        self.liquid_ticks
+            .push(ScheduledTick::new(world_x, y, world_z, target, delay));
+    }
+
+    pub fn block_ticks(&self) -> &[ScheduledTick] {
+        &self.block_ticks
+    }
+
+    pub fn liquid_ticks(&self) -> &[ScheduledTick] {
+        &self.liquid_ticks
     }
 }
 

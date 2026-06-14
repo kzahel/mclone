@@ -47,10 +47,16 @@ const BLACK_TERRACOTTA: u8 = 32;
 const SANDSTONE: u8 = 33;
 const RED_SANDSTONE: u8 = 34;
 const PACKED_ICE: u8 = 35;
+const OBSIDIAN: u8 = 36;
+const MAGMA_BLOCK: u8 = 37;
+
+const MAGMA_BLOCK_TARGET: &str = "minecraft:magma_block";
+const WATER_TARGET: &str = "minecraft:water";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GenerationStepCarving {
     Air,
+    Liquid,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,6 +111,7 @@ impl CarvingMask {
 struct CarvingContext {
     min_gen_y: i32,
     gen_depth: i32,
+    sea_level: i32,
 }
 
 impl CarvingContext {
@@ -112,6 +119,7 @@ impl CarvingContext {
         Self {
             min_gen_y: chunk.min_y,
             gen_depth: chunk.height,
+            sea_level: 63,
         }
     }
 
@@ -121,6 +129,10 @@ impl CarvingContext {
 
     fn gen_depth(&self) -> i32 {
         self.gen_depth
+    }
+
+    fn sea_level(&self) -> i32 {
+        self.sea_level
     }
 }
 
@@ -267,12 +279,27 @@ struct CanyonCarverConfiguration {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum ConfiguredAirCarver {
+enum ConfiguredOverworldCarver {
     Cave(CaveCarverConfiguration),
     Canyon(CanyonCarverConfiguration),
+    UnderwaterCave(CaveCarverConfiguration),
+    UnderwaterCanyon(CanyonCarverConfiguration),
 }
 
-impl ConfiguredAirCarver {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CarverReplacement {
+    Air,
+    UnderwaterCave,
+    UnderwaterCanyon,
+}
+
+impl CarverReplacement {
+    fn checks_disallowed_liquid(&self) -> bool {
+        matches!(self, Self::Air)
+    }
+}
+
+impl ConfiguredOverworldCarver {
     fn is_start_chunk(&self, random: &mut WorldgenRandom) -> bool {
         random.next_float() <= self.base().probability
     }
@@ -288,9 +315,10 @@ impl ConfiguredAirCarver {
         mask: &mut CarvingMask,
     ) -> bool {
         match *self {
-            Self::Cave(config) => cave_carve(
+            Self::Cave(config) | Self::UnderwaterCave(config) => cave_carve(
                 context,
                 config,
+                self.replacement(),
                 chunk,
                 seed,
                 random,
@@ -298,9 +326,10 @@ impl ConfiguredAirCarver {
                 source_chunk_z,
                 mask,
             ),
-            Self::Canyon(config) => canyon_carve(
+            Self::Canyon(config) | Self::UnderwaterCanyon(config) => canyon_carve(
                 context,
                 config,
+                self.replacement(),
                 chunk,
                 seed,
                 random,
@@ -315,6 +344,16 @@ impl ConfiguredAirCarver {
         match self {
             Self::Cave(config) => &config.base,
             Self::Canyon(config) => &config.base,
+            Self::UnderwaterCave(config) => &config.base,
+            Self::UnderwaterCanyon(config) => &config.base,
+        }
+    }
+
+    fn replacement(&self) -> CarverReplacement {
+        match self {
+            Self::Cave(_) | Self::Canyon(_) => CarverReplacement::Air,
+            Self::UnderwaterCave(_) => CarverReplacement::UnderwaterCave,
+            Self::UnderwaterCanyon(_) => CarverReplacement::UnderwaterCanyon,
         }
     }
 }
@@ -327,6 +366,14 @@ pub fn apply_overworld_air_carvers(
     apply_overworld_carvers(seed, biome_source, chunk, GenerationStepCarving::Air)
 }
 
+pub fn apply_overworld_liquid_carvers(
+    seed: i64,
+    biome_source: &OverworldBiomeSource,
+    chunk: &mut MutableChunkBlockBuffer,
+) -> CarvingMask {
+    apply_overworld_carvers(seed, biome_source, chunk, GenerationStepCarving::Liquid)
+}
+
 pub fn apply_overworld_carvers(
     seed: i64,
     biome_source: &OverworldBiomeSource,
@@ -334,14 +381,16 @@ pub fn apply_overworld_carvers(
     step: GenerationStepCarving,
 ) -> CarvingMask {
     match step {
-        GenerationStepCarving::Air => apply_air_carvers(seed, biome_source, chunk),
+        GenerationStepCarving::Air => apply_carvers(seed, biome_source, chunk, step),
+        GenerationStepCarving::Liquid => apply_carvers(seed, biome_source, chunk, step),
     }
 }
 
-fn apply_air_carvers(
+fn apply_carvers(
     seed: i64,
     biome_source: &OverworldBiomeSource,
     chunk: &mut MutableChunkBlockBuffer,
+    step: GenerationStepCarving,
 ) -> CarvingMask {
     let context = CarvingContext::new(chunk);
     let mut random = WorldgenRandom::default();
@@ -354,7 +403,7 @@ fn apply_air_carvers(
                 0,
                 source_chunk_z << 2,
             );
-            let carvers = overworld_air_carvers_for_biome(biome.key());
+            let carvers = overworld_carvers_for_biome(biome.key(), step);
             for (carver_index, carver) in carvers.iter().enumerate() {
                 random.set_large_feature_seed(
                     seed.wrapping_add(carver_index as i64),
@@ -379,11 +428,25 @@ fn apply_air_carvers(
     mask
 }
 
-fn overworld_air_carvers_for_biome(biome_key: &str) -> [ConfiguredAirCarver; 2] {
-    if is_ocean_biome(biome_key) {
-        [ocean_cave_carver(), canyon_carver()]
-    } else {
-        [cave_carver(), canyon_carver()]
+fn overworld_carvers_for_biome(
+    biome_key: &str,
+    step: GenerationStepCarving,
+) -> Vec<ConfiguredOverworldCarver> {
+    match step {
+        GenerationStepCarving::Air => {
+            if is_ocean_biome(biome_key) {
+                vec![ocean_cave_carver(), canyon_carver()]
+            } else {
+                vec![cave_carver(), canyon_carver()]
+            }
+        }
+        GenerationStepCarving::Liquid => {
+            if is_ocean_biome(biome_key) {
+                vec![underwater_canyon_carver(), underwater_cave_carver()]
+            } else {
+                Vec::new()
+            }
+        }
     }
 }
 
@@ -403,8 +466,8 @@ fn is_ocean_biome(biome_key: &str) -> bool {
     )
 }
 
-fn cave_carver() -> ConfiguredAirCarver {
-    ConfiguredAirCarver::Cave(CaveCarverConfiguration {
+fn cave_carver() -> ConfiguredOverworldCarver {
+    ConfiguredOverworldCarver::Cave(CaveCarverConfiguration {
         base: overworld_cave_base_config(0.142_857_15),
         horizontal_radius_multiplier: FloatProvider::Constant(1.0),
         vertical_radius_multiplier: FloatProvider::Constant(1.0),
@@ -412,8 +475,8 @@ fn cave_carver() -> ConfiguredAirCarver {
     })
 }
 
-fn ocean_cave_carver() -> ConfiguredAirCarver {
-    ConfiguredAirCarver::Cave(CaveCarverConfiguration {
+fn ocean_cave_carver() -> ConfiguredOverworldCarver {
+    ConfiguredOverworldCarver::Cave(CaveCarverConfiguration {
         base: overworld_cave_base_config(0.066_666_67),
         horizontal_radius_multiplier: FloatProvider::Constant(1.0),
         vertical_radius_multiplier: FloatProvider::Constant(1.0),
@@ -421,8 +484,25 @@ fn ocean_cave_carver() -> ConfiguredAirCarver {
     })
 }
 
-fn canyon_carver() -> ConfiguredAirCarver {
-    ConfiguredAirCarver::Canyon(CanyonCarverConfiguration {
+fn underwater_cave_carver() -> ConfiguredOverworldCarver {
+    ConfiguredOverworldCarver::UnderwaterCave(CaveCarverConfiguration {
+        base: overworld_cave_base_config(0.066_666_67),
+        horizontal_radius_multiplier: FloatProvider::Constant(1.0),
+        vertical_radius_multiplier: FloatProvider::Constant(1.0),
+        floor_level: FloatProvider::Constant(-0.7),
+    })
+}
+
+fn canyon_carver() -> ConfiguredOverworldCarver {
+    ConfiguredOverworldCarver::Canyon(overworld_canyon_config())
+}
+
+fn underwater_canyon_carver() -> ConfiguredOverworldCarver {
+    ConfiguredOverworldCarver::UnderwaterCanyon(overworld_canyon_config())
+}
+
+fn overworld_canyon_config() -> CanyonCarverConfiguration {
+    CanyonCarverConfiguration {
         base: CarverConfiguration {
             probability: 0.02,
             y: HeightProvider::biased_to_bottom(
@@ -457,7 +537,7 @@ fn canyon_carver() -> ConfiguredAirCarver {
             vertical_radius_default_factor: 1.0,
             vertical_radius_center_factor: 0.0,
         },
-    })
+    }
 }
 
 fn overworld_cave_base_config(probability: f32) -> CarverConfiguration {
@@ -479,6 +559,7 @@ fn overworld_cave_base_config(probability: f32) -> CarverConfiguration {
 fn cave_carve(
     context: &CarvingContext,
     config: CaveCarverConfiguration,
+    replacement: CarverReplacement,
     chunk: &mut MutableChunkBlockBuffer,
     _seed: i64,
     random: &mut WorldgenRandom,
@@ -507,6 +588,7 @@ fn cave_carve(
             carved |= create_room(
                 context,
                 &config.base,
+                replacement,
                 chunk,
                 random.next_long(),
                 x,
@@ -528,6 +610,7 @@ fn cave_carve(
             carved |= create_tunnel(
                 context,
                 &config.base,
+                replacement,
                 chunk,
                 random.next_long(),
                 x,
@@ -565,6 +648,7 @@ fn get_thickness(random: &mut WorldgenRandom) -> f32 {
 fn create_room(
     context: &CarvingContext,
     config: &CarverConfiguration,
+    replacement: CarverReplacement,
     chunk: &mut MutableChunkBlockBuffer,
     seed: i64,
     x: f64,
@@ -579,6 +663,7 @@ fn create_room(
     carve_ellipsoid(
         context,
         config,
+        replacement,
         chunk,
         seed,
         x + 1.0,
@@ -597,6 +682,7 @@ fn create_room(
 fn create_tunnel(
     context: &CarvingContext,
     config: &CarverConfiguration,
+    replacement: CarverReplacement,
     chunk: &mut MutableChunkBlockBuffer,
     seed: i64,
     mut x: f64,
@@ -639,6 +725,7 @@ fn create_tunnel(
             carved |= create_tunnel(
                 context,
                 config,
+                replacement,
                 chunk,
                 random.next_long(),
                 x,
@@ -657,6 +744,7 @@ fn create_tunnel(
             carved |= create_tunnel(
                 context,
                 config,
+                replacement,
                 chunk,
                 random.next_long(),
                 x,
@@ -683,6 +771,7 @@ fn create_tunnel(
             carved |= carve_ellipsoid(
                 context,
                 config,
+                replacement,
                 chunk,
                 seed,
                 x,
@@ -710,6 +799,7 @@ fn cave_should_skip(relative_x: f64, relative_y: f64, relative_z: f64, floor_lev
 fn canyon_carve(
     context: &CarvingContext,
     config: CanyonCarverConfiguration,
+    replacement: CarverReplacement,
     chunk: &mut MutableChunkBlockBuffer,
     _seed: i64,
     random: &mut WorldgenRandom,
@@ -730,6 +820,7 @@ fn canyon_carve(
     canyon_do_carve(
         context,
         config,
+        replacement,
         chunk,
         random.next_long(),
         x,
@@ -749,6 +840,7 @@ fn canyon_carve(
 fn canyon_do_carve(
     context: &CarvingContext,
     config: CanyonCarverConfiguration,
+    replacement: CarverReplacement,
     chunk: &mut MutableChunkBlockBuffer,
     seed: i64,
     mut x: f64,
@@ -800,6 +892,7 @@ fn canyon_do_carve(
             carved |= carve_ellipsoid(
                 context,
                 &config.base,
+                replacement,
                 chunk,
                 seed,
                 x,
@@ -880,6 +973,7 @@ fn canyon_should_skip(
 fn carve_ellipsoid(
     context: &CarvingContext,
     config: &CarverConfiguration,
+    replacement: CarverReplacement,
     chunk: &mut MutableChunkBlockBuffer,
     seed: i64,
     x: f64,
@@ -908,7 +1002,8 @@ fn carve_ellipsoid(
     let min_z = ((floor(z - horizontal_radius) - min_block_z - 1).max(0)).min(15);
     let max_z = ((floor(z + horizontal_radius) - min_block_z).max(0)).min(15);
 
-    if !config.aquifers_enabled
+    if replacement.checks_disallowed_liquid()
+        && !config.aquifers_enabled
         && has_disallowed_liquid(chunk, min_x, max_x, min_y, max_y, min_z, max_z)
     {
         return false;
@@ -934,11 +1029,14 @@ fn carve_ellipsoid(
                     carved |= carve_block(
                         context,
                         config,
+                        replacement,
                         chunk,
                         &mut carve_random,
                         local_x,
                         world_y,
                         local_z,
+                        min_block_x + local_x,
+                        min_block_z + local_z,
                         &mut reached_surface,
                     );
                 }
@@ -998,13 +1096,30 @@ fn has_disallowed_liquid(
 fn carve_block(
     context: &CarvingContext,
     config: &CarverConfiguration,
+    replacement: CarverReplacement,
     chunk: &mut MutableChunkBlockBuffer,
     random: &mut SimpleRandomSource,
     local_x: i32,
     y: i32,
     local_z: i32,
+    world_x: i32,
+    world_z: i32,
     reached_surface: &mut bool,
 ) -> bool {
+    if !matches!(replacement, CarverReplacement::Air) {
+        return carve_underwater_block(
+            replacement,
+            context,
+            chunk,
+            random,
+            local_x,
+            y,
+            local_z,
+            world_x,
+            world_z,
+        );
+    }
+
     let current = chunk.get_block_at_y(local_x, y, local_z);
     let above = if y + 1 >= chunk.min_y + chunk.height {
         AIR
@@ -1028,6 +1143,50 @@ fn carve_block(
         && chunk.get_block_at_y(local_x, y - 1, local_z) == DIRT
     {
         chunk.set_block_at_y(local_x, y - 1, local_z, GRASS_BLOCK);
+    }
+
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
+fn carve_underwater_block(
+    replacement: CarverReplacement,
+    context: &CarvingContext,
+    chunk: &mut MutableChunkBlockBuffer,
+    random: &mut SimpleRandomSource,
+    local_x: i32,
+    y: i32,
+    local_z: i32,
+    world_x: i32,
+    world_z: i32,
+) -> bool {
+    if y >= context.sea_level() {
+        return false;
+    }
+
+    let current = chunk.get_block_at_y(local_x, y, local_z);
+    if !can_replace_underwater_block(replacement, current) {
+        return false;
+    }
+
+    if y == 10 {
+        if random.next_float() < 0.25 {
+            chunk.set_block_at_y(local_x, y, local_z, MAGMA_BLOCK);
+            chunk.schedule_block_tick(world_x, y, world_z, MAGMA_BLOCK_TARGET, 0);
+        } else {
+            chunk.set_block_at_y(local_x, y, local_z, OBSIDIAN);
+        }
+        return true;
+    }
+
+    if y < 10 {
+        chunk.set_block_at_y(local_x, y, local_z, LAVA);
+        return false;
+    }
+
+    chunk.set_block_at_y(local_x, y, local_z, WATER);
+    if should_schedule_water_tick(chunk, world_x, y, world_z) {
+        chunk.schedule_liquid_tick(world_x, y, world_z, WATER_TARGET, 0);
     }
 
     true
@@ -1095,12 +1254,48 @@ fn can_replace_block_without_above(block: u8) -> bool {
     )
 }
 
+fn can_replace_underwater_block(replacement: CarverReplacement, block: u8) -> bool {
+    can_replace_block_without_above(block)
+        || matches!(block, SAND | GRAVEL | WATER | LAVA | OBSIDIAN | PACKED_ICE)
+        || (matches!(replacement, CarverReplacement::UnderwaterCanyon) && block == AIR)
+}
+
 fn is_grass_or_mycelium(block: u8) -> bool {
     block == GRASS_BLOCK || block == MYCELIUM
 }
 
 fn is_water(block: u8) -> bool {
     block == WATER
+}
+
+fn should_schedule_water_tick(
+    chunk: &MutableChunkBlockBuffer,
+    world_x: i32,
+    y: i32,
+    world_z: i32,
+) -> bool {
+    const FLOW_DIRECTIONS: [(i32, i32, i32); 5] =
+        [(0, -1, 0), (0, 0, 1), (0, 0, -1), (1, 0, 0), (-1, 0, 0)];
+
+    for (step_x, step_y, step_z) in FLOW_DIRECTIONS {
+        let neighbor_x = world_x + step_x;
+        let neighbor_y = y + step_y;
+        let neighbor_z = world_z + step_z;
+        if (neighbor_x >> 4) != chunk.chunk_x || (neighbor_z >> 4) != chunk.chunk_z {
+            return true;
+        }
+
+        if neighbor_y < chunk.min_y || neighbor_y >= chunk.min_y + chunk.height {
+            return true;
+        }
+
+        if chunk.get_block_at_y(local_coord(neighbor_x), neighbor_y, local_coord(neighbor_z)) == AIR
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn can_reach(
@@ -1148,6 +1343,10 @@ fn chunk_middle_block_z(chunk_z: i32) -> i32 {
     chunk_min_block_z(chunk_z) + 8
 }
 
+fn local_coord(world_coord: i32) -> i32 {
+    world_coord & (CHUNK_WIDTH - 1)
+}
+
 fn floor(value: f64) -> i32 {
     value.floor() as i32
 }
@@ -1178,7 +1377,7 @@ fn sin_table() -> &'static [f32] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::levelgen::{NoiseBasedChunkGenerator, NoiseGeneratorSettings};
+    use crate::levelgen::{NoiseBasedChunkGenerator, NoiseGeneratorSettings, ScheduledTick};
     use serde::Deserialize;
 
     #[derive(Debug, Deserialize)]
@@ -1194,6 +1393,19 @@ mod tests {
         block_order: String,
         palette: Vec<String>,
         blocks: Vec<u8>,
+        #[serde(default, rename = "blockTicks")]
+        block_ticks: Vec<FixtureScheduledTick>,
+        #[serde(default, rename = "liquidTicks")]
+        liquid_ticks: Vec<FixtureScheduledTick>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct FixtureScheduledTick {
+        x: i32,
+        y: i32,
+        z: i32,
+        target: String,
+        delay: i32,
     }
 
     fn carved_fixture() -> ChunkFixture {
@@ -1201,6 +1413,20 @@ mod tests {
             "../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0-carved-only.json"
         ))
         .expect("valid carved fixture")
+    }
+
+    fn liquid_ocean_carved_fixture() -> ChunkFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-117--128-liquid-carved.json"
+        ))
+        .expect("valid liquid ocean carved fixture")
+    }
+
+    fn liquid_floor_carved_fixture() -> ChunkFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks--129--256-liquid-carved.json"
+        ))
+        .expect("valid liquid floor carved fixture")
     }
 
     #[test]
@@ -1225,17 +1451,90 @@ mod tests {
         assert_eq!(mask.bits().len(), (carved.height * 16 * 16) as usize);
         assert!(mask.carved_count() > 0);
         assert_blocks_match(&chunk.blocks, &carved.blocks, carved.min_y, carved.height);
+        assert_ticks_match(chunk.block_ticks(), &carved.block_ticks);
+        assert_ticks_match(chunk.liquid_ticks(), &carved.liquid_ticks);
+    }
+
+    #[test]
+    fn overworld_liquid_carvers_match_java_ocean_fixture_from_native_surface_stage() {
+        let carved = liquid_ocean_carved_fixture();
+        assert_eq!(carved.module, "liquid-carved-chunk");
+        assert_eq!(carved.minecraft_version, "1.17.1");
+        assert_eq!(carved.chunk_x, 117);
+        assert_eq!(carved.chunk_z, -128);
+
+        assert_liquid_carved_fixture_matches_native(carved);
+    }
+
+    #[test]
+    fn overworld_liquid_carvers_match_java_floor_fixture_from_native_surface_stage() {
+        let carved = liquid_floor_carved_fixture();
+        assert_eq!(carved.module, "liquid-carved-chunk");
+        assert_eq!(carved.minecraft_version, "1.17.1");
+        assert_eq!(carved.chunk_x, -129);
+        assert_eq!(carved.chunk_z, -256);
+
+        assert_liquid_carved_fixture_matches_native(carved);
     }
 
     #[test]
     fn ocean_biomes_use_ocean_cave_probability() {
-        let [first, second] = overworld_air_carvers_for_biome("minecraft:deep_ocean");
+        let carvers =
+            overworld_carvers_for_biome("minecraft:deep_ocean", GenerationStepCarving::Air);
+        let [first, second]: &[ConfiguredOverworldCarver; 2] =
+            carvers.as_slice().try_into().expect("two air carvers");
         assert_eq!(
             first.base().probability.to_bits(),
             0.066_666_67_f32.to_bits()
         );
-        assert!(matches!(first, ConfiguredAirCarver::Cave(_)));
-        assert!(matches!(second, ConfiguredAirCarver::Canyon(_)));
+        assert!(matches!(first, ConfiguredOverworldCarver::Cave(_)));
+        assert!(matches!(second, ConfiguredOverworldCarver::Canyon(_)));
+    }
+
+    #[test]
+    fn liquid_carvers_only_run_for_ocean_biomes() {
+        let ocean =
+            overworld_carvers_for_biome("minecraft:frozen_ocean", GenerationStepCarving::Liquid);
+        let plains = overworld_carvers_for_biome("minecraft:plains", GenerationStepCarving::Liquid);
+        let [first, second]: &[ConfiguredOverworldCarver; 2] =
+            ocean.as_slice().try_into().expect("two liquid carvers");
+
+        assert!(matches!(
+            first,
+            ConfiguredOverworldCarver::UnderwaterCanyon(_)
+        ));
+        assert!(matches!(
+            second,
+            ConfiguredOverworldCarver::UnderwaterCave(_)
+        ));
+        assert!(plains.is_empty());
+    }
+
+    fn assert_liquid_carved_fixture_matches_native(carved: ChunkFixture) {
+        assert_eq!(carved.block_order, "y-major,z-major,x-minor");
+        assert_eq!(carved.palette[0], "minecraft:air");
+        assert_eq!(carved.palette[36], "minecraft:obsidian");
+        assert_eq!(carved.palette[37], "minecraft:magma_block");
+
+        let seed = carved.seed.parse::<i64>().expect("i64 seed");
+        let biome_source = OverworldBiomeSource::new(seed, false, false);
+        let generator = NoiseBasedChunkGenerator::new(
+            biome_source.clone(),
+            seed,
+            NoiseGeneratorSettings::overworld(),
+        );
+        let mut chunk = generator.fill_from_noise(carved.chunk_x, carved.chunk_z);
+        generator.build_surface_and_bedrock(&mut chunk);
+
+        let air_mask = apply_overworld_air_carvers(seed, &biome_source, &mut chunk);
+        let liquid_mask = apply_overworld_liquid_carvers(seed, &biome_source, &mut chunk);
+        assert_eq!(air_mask.bits().len(), (carved.height * 16 * 16) as usize);
+        assert_eq!(liquid_mask.bits().len(), (carved.height * 16 * 16) as usize);
+        assert!(liquid_mask.carved_count() > 0);
+
+        assert_blocks_match(&chunk.blocks, &carved.blocks, carved.min_y, carved.height);
+        assert_ticks_match(chunk.block_ticks(), &carved.block_ticks);
+        assert_ticks_match(chunk.liquid_ticks(), &carved.liquid_ticks);
     }
 
     fn assert_blocks_match(actual: &[u8], expected: &[u8], min_y: i32, height: i32) {
@@ -1257,17 +1556,19 @@ mod tests {
 
         if !mismatches.is_empty() {
             let sample: Vec<_> = mismatches.iter().take(16).copied().collect();
-            let mut actual_counts = [0_usize; 10];
-            let mut expected_counts = [0_usize; 10];
+            let max_block = actual
+                .iter()
+                .chain(expected.iter())
+                .copied()
+                .max()
+                .unwrap_or(0) as usize;
+            let mut actual_counts = vec![0_usize; max_block + 1];
+            let mut expected_counts = vec![0_usize; max_block + 1];
             for &block in actual {
-                if (block as usize) < actual_counts.len() {
-                    actual_counts[block as usize] += 1;
-                }
+                actual_counts[block as usize] += 1;
             }
             for &block in expected {
-                if (block as usize) < expected_counts.len() {
-                    expected_counts[block as usize] += 1;
-                }
+                expected_counts[block as usize] += 1;
             }
             panic!(
                 "block mismatch count={} height={} sample={sample:?} actual_counts={actual_counts:?} expected_counts={expected_counts:?}",
@@ -1275,5 +1576,19 @@ mod tests {
                 height
             );
         }
+    }
+
+    fn assert_ticks_match(actual: &[ScheduledTick], expected: &[FixtureScheduledTick]) {
+        let mut actual: Vec<_> = actual
+            .iter()
+            .map(|tick| (tick.x, tick.y, tick.z, tick.target.as_str(), tick.delay))
+            .collect();
+        let mut expected: Vec<_> = expected
+            .iter()
+            .map(|tick| (tick.x, tick.y, tick.z, tick.target.as_str(), tick.delay))
+            .collect();
+        actual.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(actual, expected, "scheduled tick mismatch");
     }
 }
