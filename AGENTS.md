@@ -4,6 +4,8 @@ See [`README.md`](README.md) for project context.
 
 **Do not use the auto-memory system** for this project (the `~/.claude/projects/-home-kgraehl-code-mclone/memory/` directory). Persist project-relevant guidance in this file (`AGENTS.md`) instead.
 
+For the native Rust rewrite, use the sibling engine at `~/code/playbox` as a reference for mature `winit`/`wgpu`, headless capture, diagnostics, and future desktop OpenXR patterns. Treat it as a pattern library only; do not depend on it directly, and do not copy its PhysX/VaM-specific runtime shape.
+
 ## Porting methodology — applies to every slice, worldgen and renderer
 
 Every class we port has a 1:1 counterpart in `reference/minecraft-1.17.1/src/`. **Always read the source file before writing the port.** The default is direct translation: same field names, same method names, same logic flow. Diverge only when the platform forces it.

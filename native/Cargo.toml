@@ -22,6 +22,10 @@ rust-version = "1.92"
 publish = false
 
 [workspace.dependencies]
+anyhow = "1"
+env_logger = "0.11"
+image = { version = "0.25", default-features = false, features = ["png"] }
+log = "0.4"
 mclone-assets = { path = "crates/mclone-assets" }
 mclone-client = { path = "crates/mclone-client" }
 mclone-core = { path = "crates/mclone-core" }
@@ -32,3 +36,6 @@ mclone-protocol = { path = "crates/mclone-protocol" }
 mclone-render = { path = "crates/mclone-render" }
 mclone-server = { path = "crates/mclone-server" }
 mclone-worldgen = { path = "crates/mclone-worldgen" }
+pollster = "0.4"
+wgpu = { version = "25", features = ["metal", "vulkan", "vulkan-portability"] }
+winit = "0.30"

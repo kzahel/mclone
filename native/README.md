@@ -4,6 +4,8 @@ This workspace is the clean Rust track for the native-first engine with a web ta
 
 The durable direction is documented in [`../docs/native-rewrite-roadmap.md`](../docs/native-rewrite-roadmap.md). The short version: native desktop is the primary development target, web/WASM is an early compatibility gate, and the TypeScript implementation is now legacy/reference rather than the main engine direction.
 
+Use `~/code/playbox` as the reference Rust engine for native app/render/XR patterns. In particular, its `winit`/`wgpu` setup, frame pacing, headless capture, render-target, camera, diagnostics, and OpenXR code are useful references. Do not depend on Playbox directly, and do not copy its PhysX/VaM-specific runtime shape.
+
 The Rust workspace is quarantined from the TypeScript implementation:
 
 - Rust crates may read shared docs, fixtures, and extracted assets.

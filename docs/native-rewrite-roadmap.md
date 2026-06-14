@@ -15,6 +15,12 @@ The primary implementation direction is now:
 native-first Rust engine, web target kept alive from the beginning
 ```
 
+Reference Rust engine for native app/render/XR patterns:
+
+- local path: `~/code/playbox`
+- use it for `winit`/`wgpu` bring-up, frame pacing, headless capture, render target, camera, diagnostics, Android/OpenXR reference, and validation patterns
+- do not import it as a dependency or copy its PhysX/VaM-specific architecture
+
 ## Direction
 
 Build the engine as normal Rust crates first, with desktop/native as the main development loop. Keep a thin WASM/web target compiling and booting early so browser constraints stay visible while APIs are still easy to adjust.
@@ -130,6 +136,7 @@ render via wgpu/web
 2. **Native minimal app**
 
    Add `winit` + `wgpu`, clear screen, camera/input, and one chunk. This becomes the main development loop.
+   The active tactical for the first step is [`tactical/Native0-native-render-bringup.md`](tactical/Native0-native-render-bringup.md).
 
 3. **Web smoke very early**
 
