@@ -8,6 +8,10 @@ const SIMPLEX_F3: f64 = 0.333_333_333_333_333_3;
 const SIMPLEX_G3: f64 = 0.166_666_666_666_666_66;
 const ROUND_OFF: f64 = 33_554_432.0;
 const PERLIN_SIMPLEX_RESEED_FACTOR: f64 = 9.223372E18_f32 as f64;
+const LIMIT_OCTAVES: [i32; 16] = [
+    -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0,
+];
+const MAIN_OCTAVES: [i32; 8] = [-7, -6, -5, -4, -3, -2, -1, 0];
 const GRADIENTS: [[i32; 3]; 16] = [
     [1, 1, 0],
     [-1, 1, 0],
@@ -550,6 +554,105 @@ impl PerlinSimplexNoise {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct BlendedNoise {
+    min_limit_noise: PerlinNoise,
+    max_limit_noise: PerlinNoise,
+    main_noise: PerlinNoise,
+}
+
+impl BlendedNoise {
+    pub fn new(random: &mut impl RandomSource) -> Self {
+        let min_limit_noise = PerlinNoise::from_octaves(random, &LIMIT_OCTAVES);
+        let max_limit_noise = PerlinNoise::from_octaves(random, &LIMIT_OCTAVES);
+        let main_noise = PerlinNoise::from_octaves(random, &MAIN_OCTAVES);
+        Self::from_noises(min_limit_noise, max_limit_noise, main_noise)
+    }
+
+    pub fn from_noises(
+        min_limit_noise: PerlinNoise,
+        max_limit_noise: PerlinNoise,
+        main_noise: PerlinNoise,
+    ) -> Self {
+        Self {
+            min_limit_noise,
+            max_limit_noise,
+            main_noise,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn sample_and_clamp_noise(
+        &self,
+        x: i32,
+        y: i32,
+        z: i32,
+        limit_horizontal_scale: f64,
+        limit_vertical_scale: f64,
+        main_horizontal_scale: f64,
+        main_vertical_scale: f64,
+    ) -> f64 {
+        let mut min = 0.0;
+        let mut max = 0.0;
+        let mut main = 0.0;
+        let mut input_factor = 1.0;
+
+        for octave in 0..8 {
+            if let Some(noise) = self.main_noise.get_octave_noise(octave) {
+                main += noise.noise_scaled(
+                    PerlinNoise::wrap(x as f64 * main_horizontal_scale * input_factor),
+                    PerlinNoise::wrap(y as f64 * main_vertical_scale * input_factor),
+                    PerlinNoise::wrap(z as f64 * main_horizontal_scale * input_factor),
+                    main_vertical_scale * input_factor,
+                    y as f64 * main_vertical_scale * input_factor,
+                ) / input_factor;
+            }
+
+            input_factor /= 2.0;
+        }
+
+        let blend = (main / 10.0 + 1.0) / 2.0;
+        let skip_min = blend >= 1.0;
+        let skip_max = blend <= 0.0;
+        input_factor = 1.0;
+
+        for octave in 0..16 {
+            let wrapped_x = PerlinNoise::wrap(x as f64 * limit_horizontal_scale * input_factor);
+            let wrapped_y = PerlinNoise::wrap(y as f64 * limit_vertical_scale * input_factor);
+            let wrapped_z = PerlinNoise::wrap(z as f64 * limit_horizontal_scale * input_factor);
+            let y_scale = limit_vertical_scale * input_factor;
+
+            if !skip_min {
+                if let Some(noise) = self.min_limit_noise.get_octave_noise(octave) {
+                    min += noise.noise_scaled(
+                        wrapped_x,
+                        wrapped_y,
+                        wrapped_z,
+                        y_scale,
+                        y as f64 * y_scale,
+                    ) / input_factor;
+                }
+            }
+
+            if !skip_max {
+                if let Some(noise) = self.max_limit_noise.get_octave_noise(octave) {
+                    max += noise.noise_scaled(
+                        wrapped_x,
+                        wrapped_y,
+                        wrapped_z,
+                        y_scale,
+                        y as f64 * y_scale,
+                    ) / input_factor;
+                }
+            }
+
+            input_factor /= 2.0;
+        }
+
+        clamped_lerp(min / 512.0, max / 512.0, blend)
+    }
+}
+
 fn floor(value: f64) -> i32 {
     value.floor() as i32
 }
@@ -608,6 +711,16 @@ fn smoothstep(value: f64) -> f64 {
 
 fn lerp(delta: f64, start: f64, end: f64) -> f64 {
     start + delta * (end - start)
+}
+
+fn clamped_lerp(start: f64, end: f64, delta: f64) -> f64 {
+    if delta < 0.0 {
+        start
+    } else if delta > 1.0 {
+        end
+    } else {
+        lerp(delta, start, end)
+    }
 }
 
 fn lerp2(delta_x: f64, delta_y: f64, x0_y0: f64, x1_y0: f64, x0_y1: f64, x1_y1: f64) -> f64 {
@@ -762,6 +875,79 @@ mod tests {
         values: Vec<f64>,
     }
 
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BlendedFixture {
+        module: String,
+        minecraft_version: String,
+        noise_class: String,
+        random_source_class: String,
+        random_source_alias: String,
+        noise_method: String,
+        seed: String,
+        octaves: BlendedOctaves,
+        wire_format: BlendedWireFormat,
+        sample_sets: BlendedSampleSets,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct BlendedOctaves {
+        limit: Vec<i32>,
+        main: Vec<i32>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct BlendedWireFormat {
+        coordinates: String,
+        parameters: String,
+        values: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct BlendedSampleSets {
+        overworld: BlendedSampleSet,
+        nether: BlendedSampleSet,
+        end: BlendedSampleSet,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BlendedSampleSet {
+        grid_order: String,
+        sample_count: usize,
+        settings_keys: Vec<String>,
+        parameters: BlendedSampleParameters,
+        x: Vec<i32>,
+        y: Vec<i32>,
+        z: Vec<i32>,
+        values: Vec<f64>,
+        blend_factor_range: BlendFactorRange,
+        blend_region_counts: BlendRegionCounts,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BlendedSampleParameters {
+        limit_horizontal_scale: f64,
+        limit_vertical_scale: f64,
+        main_horizontal_scale: f64,
+        main_vertical_scale: f64,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct BlendFactorRange {
+        min: f64,
+        max: f64,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BlendRegionCounts {
+        below_or_equal_zero: usize,
+        interior: usize,
+        above_or_equal_one: usize,
+    }
+
     fn fixtures() -> Vec<NoiseFixture> {
         [
             include_str!("../../../../test/fixtures/noise/seed-0.json"),
@@ -848,6 +1034,18 @@ mod tests {
                 .collect(),
             ),
         ]
+    }
+
+    fn blended_fixtures() -> Vec<BlendedFixture> {
+        [
+            include_str!("../../../../test/fixtures/noise/blended-seed-0.json"),
+            include_str!("../../../../test/fixtures/noise/blended-seed-1.json"),
+            include_str!("../../../../test/fixtures/noise/blended-seed-12345.json"),
+            include_str!("../../../../test/fixtures/noise/blended-seed-2151901553968352745.json"),
+        ]
+        .into_iter()
+        .map(|json| serde_json::from_str(json).expect("valid BlendedNoise fixture"))
+        .collect()
     }
 
     #[test]
@@ -1219,6 +1417,134 @@ mod tests {
                 .get_surface_noise_value(0.5, -0.75, 123.0, 456.0)
                 .to_bits(),
             (noise.get_value(0.5, -0.75, true) * 0.55).to_bits()
+        );
+    }
+
+    #[test]
+    fn blended_fixture_metadata_stays_consistent() {
+        for fixture in blended_fixtures() {
+            assert_eq!(fixture.module, "noise");
+            assert_eq!(fixture.minecraft_version, "1.17.1");
+            assert_eq!(
+                fixture.noise_class,
+                "net.minecraft.world.level.levelgen.synth.BlendedNoise"
+            );
+            assert_eq!(
+                fixture.random_source_class,
+                "net.minecraft.world.level.levelgen.SimpleRandomSource"
+            );
+            assert_eq!(fixture.random_source_alias, "LegacyRandomSource");
+            assert_eq!(
+                fixture.noise_method,
+                "sampleAndClampNoise(x,y,z,limitHorizontalScale,limitVerticalScale,mainHorizontalScale,mainVerticalScale)"
+            );
+            assert_eq!(fixture.octaves.limit, LIMIT_OCTAVES);
+            assert_eq!(fixture.octaves.main, MAIN_OCTAVES);
+            assert_eq!(fixture.wire_format.coordinates, "integer");
+            assert_eq!(fixture.wire_format.parameters, "number");
+            assert_eq!(fixture.wire_format.values, "number");
+
+            for (preset, expected_settings_keys, sample_set) in [
+                (
+                    "overworld",
+                    &["overworld", "amplified"][..],
+                    &fixture.sample_sets.overworld,
+                ),
+                (
+                    "nether",
+                    &["nether", "caves"][..],
+                    &fixture.sample_sets.nether,
+                ),
+                (
+                    "end",
+                    &["end", "floating_islands"][..],
+                    &fixture.sample_sets.end,
+                ),
+            ] {
+                assert_eq!(sample_set.grid_order, "x-major,y-major,z-minor");
+                assert_eq!(
+                    sample_set.settings_keys, expected_settings_keys,
+                    "{preset} settings keys drifted"
+                );
+                assert_eq!(sample_set.values.len(), sample_set.sample_count);
+                assert_eq!(
+                    sample_set.sample_count,
+                    sample_set.x.len() * sample_set.y.len() * sample_set.z.len()
+                );
+
+                let region_count = sample_set.blend_region_counts.below_or_equal_zero
+                    + sample_set.blend_region_counts.interior
+                    + sample_set.blend_region_counts.above_or_equal_one;
+                assert_eq!(region_count, sample_set.sample_count);
+                assert!(sample_set.blend_factor_range.min <= 0.0);
+                assert!(sample_set.blend_factor_range.max >= 1.0);
+                assert!(sample_set.blend_region_counts.below_or_equal_zero > 0);
+                assert!(sample_set.blend_region_counts.interior > 0);
+                assert!(sample_set.blend_region_counts.above_or_equal_one > 0);
+            }
+        }
+    }
+
+    #[test]
+    fn blended_matches_java_oracle_across_shared_cell_grid() {
+        for fixture in blended_fixtures() {
+            let seed = fixture.seed.parse::<i64>().expect("i64 fixture seed");
+            let mut random = SimpleRandomSource::new(seed);
+            let noise = BlendedNoise::new(&mut random);
+
+            for (preset, sample_set) in [
+                ("overworld", &fixture.sample_sets.overworld),
+                ("nether", &fixture.sample_sets.nether),
+                ("end", &fixture.sample_sets.end),
+            ] {
+                let mut index = 0;
+                for x in &sample_set.x {
+                    for y in &sample_set.y {
+                        for z in &sample_set.z {
+                            let actual = noise.sample_and_clamp_noise(
+                                *x,
+                                *y,
+                                *z,
+                                sample_set.parameters.limit_horizontal_scale,
+                                sample_set.parameters.limit_vertical_scale,
+                                sample_set.parameters.main_horizontal_scale,
+                                sample_set.parameters.main_vertical_scale,
+                            );
+                            let expected = sample_set.values[index];
+                            assert_eq!(
+                                actual.to_bits(),
+                                expected.to_bits(),
+                                "blended(seed={}, preset={preset}) mismatch at index {index} for ({x}, {y}, {z}): expected {expected}, got {actual}",
+                                fixture.seed
+                            );
+                            index += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn blended_random_source_construction_matches_explicitly_chained_perlin_noises() {
+        let seed = 12_345;
+        let mut direct_random = SimpleRandomSource::new(seed);
+        let direct = BlendedNoise::new(&mut direct_random);
+
+        let mut explicit_random = SimpleRandomSource::new(seed);
+        let explicit = BlendedNoise::from_noises(
+            PerlinNoise::from_octaves(&mut explicit_random, &LIMIT_OCTAVES),
+            PerlinNoise::from_octaves(&mut explicit_random, &LIMIT_OCTAVES),
+            PerlinNoise::from_octaves(&mut explicit_random, &MAIN_OCTAVES),
+        );
+
+        assert_eq!(
+            direct
+                .sample_and_clamp_noise(4, -2, 8, 684.412, 684.412, 684.412 / 80.0, 684.412 / 160.0)
+                .to_bits(),
+            explicit
+                .sample_and_clamp_noise(4, -2, 8, 684.412, 684.412, 684.412 / 80.0, 684.412 / 160.0)
+                .to_bits()
         );
     }
 }
