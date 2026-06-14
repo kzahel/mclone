@@ -5,6 +5,7 @@ pub mod carver;
 pub mod levelgen;
 pub mod noise;
 pub mod prng;
+pub mod surface;
 
 pub fn target_minecraft_version() -> &'static str {
     mclone_core::TARGET_MINECRAFT_VERSION

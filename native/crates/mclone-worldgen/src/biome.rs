@@ -1,6 +1,7 @@
 use crate::levelgen::{NoiseBiome, NoiseBiomeSource};
 use crate::noise::ImprovedNoise;
 use crate::prng::SimpleRandomSource;
+use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -420,6 +421,21 @@ impl OverworldBiomeSource {
 
     pub fn get_noise_biome_definition(&self, x: i32, y: i32, z: i32) -> BiomeDefinition {
         get_layered_biome_by_id(self.get_noise_biome_id(x, y, z))
+    }
+
+    pub fn get_block_position_biome_definition(
+        &self,
+        seed: i64,
+        block_x: i32,
+        block_z: i32,
+    ) -> BiomeDefinition {
+        get_layered_biome_by_id(get_fuzzy_zoomed_biome_id(
+            obfuscate_biome_zoom_seed(seed),
+            block_x,
+            0,
+            block_z,
+            |quart_x, quart_y, quart_z| self.get_noise_biome_id(quart_x, quart_y, quart_z),
+        ))
     }
 }
 
@@ -1762,6 +1778,115 @@ fn is_jungle_compatible(value: i32) -> bool {
 
 fn is_mesa(value: i32) -> bool {
     matches!(value, 37 | 38 | 39 | 165 | 166 | 167)
+}
+
+fn obfuscate_biome_zoom_seed(seed: i64) -> i64 {
+    let digest = Sha256::digest(seed.to_le_bytes());
+    i64::from_le_bytes(
+        digest[..8]
+            .try_into()
+            .expect("sha256 digest has at least eight bytes"),
+    )
+}
+
+fn get_fuzzy_zoomed_biome_id(
+    zoom_seed: i64,
+    block_x: i32,
+    block_y: i32,
+    block_z: i32,
+    noise_biome_source: impl Fn(i32, i32, i32) -> i32,
+) -> i32 {
+    let shifted_x = block_x - 2;
+    let shifted_y = block_y - 2;
+    let shifted_z = block_z - 2;
+    let base_quart_x = shifted_x >> 2;
+    let base_quart_y = shifted_y >> 2;
+    let base_quart_z = shifted_z >> 2;
+    let offset_x = (shifted_x & 3) as f64 / 4.0;
+    let offset_y = (shifted_y & 3) as f64 / 4.0;
+    let offset_z = (shifted_z & 3) as f64 / 4.0;
+
+    let mut best_corner = 0;
+    let mut best_distance = f64::INFINITY;
+    for corner in 0..8 {
+        let use_base_x = (corner & 4) == 0;
+        let use_base_y = (corner & 2) == 0;
+        let use_base_z = (corner & 1) == 0;
+        let quart_x = if use_base_x {
+            base_quart_x
+        } else {
+            base_quart_x + 1
+        };
+        let quart_y = if use_base_y {
+            base_quart_y
+        } else {
+            base_quart_y + 1
+        };
+        let quart_z = if use_base_z {
+            base_quart_z
+        } else {
+            base_quart_z + 1
+        };
+        let scale_x = if use_base_x { offset_x } else { offset_x - 1.0 };
+        let scale_y = if use_base_y { offset_y } else { offset_y - 1.0 };
+        let scale_z = if use_base_z { offset_z } else { offset_z - 1.0 };
+        let distance = get_fiddled_distance(
+            zoom_seed, quart_x, quart_y, quart_z, scale_x, scale_y, scale_z,
+        );
+        if distance < best_distance {
+            best_corner = corner;
+            best_distance = distance;
+        }
+    }
+
+    let quart_x = if (best_corner & 4) == 0 {
+        base_quart_x
+    } else {
+        base_quart_x + 1
+    };
+    let quart_y = if (best_corner & 2) == 0 {
+        base_quart_y
+    } else {
+        base_quart_y + 1
+    };
+    let quart_z = if (best_corner & 1) == 0 {
+        base_quart_z
+    } else {
+        base_quart_z + 1
+    };
+    noise_biome_source(quart_x, quart_y, quart_z)
+}
+
+fn get_fiddled_distance(
+    zoom_seed: i64,
+    quart_x: i32,
+    quart_y: i32,
+    quart_z: i32,
+    scale_x: f64,
+    scale_y: f64,
+    scale_z: f64,
+) -> f64 {
+    let mut seed = linear_congruential_generator_next(zoom_seed, quart_x as i64);
+    seed = linear_congruential_generator_next(seed, quart_y as i64);
+    seed = linear_congruential_generator_next(seed, quart_z as i64);
+    seed = linear_congruential_generator_next(seed, quart_x as i64);
+    seed = linear_congruential_generator_next(seed, quart_y as i64);
+    seed = linear_congruential_generator_next(seed, quart_z as i64);
+    let fiddle_x = get_fiddle(seed);
+    seed = linear_congruential_generator_next(seed, zoom_seed);
+    let fiddle_y = get_fiddle(seed);
+    seed = linear_congruential_generator_next(seed, zoom_seed);
+    let fiddle_z = get_fiddle(seed);
+    square(scale_z + fiddle_z) + square(scale_y + fiddle_y) + square(scale_x + fiddle_x)
+}
+
+fn get_fiddle(seed: i64) -> f64 {
+    let scaled = (seed >> 24).rem_euclid(1024) as f64;
+    (scaled / 1024.0 - 0.5) * 0.9
+}
+
+fn square(value: f64) -> f64 {
+    value * value
 }
 
 fn mix_seed(left: i64, right: i64) -> i64 {

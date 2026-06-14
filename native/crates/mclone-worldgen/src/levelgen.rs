@@ -1,5 +1,7 @@
+use crate::biome::OverworldBiomeSource;
 use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
 use crate::prng::WorldgenRandom;
+use crate::surface::apply_overworld_surface;
 
 const OLD_CELL_COUNT_Y: i32 = 32;
 const BIOME_WEIGHT_RADIUS: i32 = 2;
@@ -16,6 +18,7 @@ const INT_MIN: i32 = i32::MIN;
 const AIR: u8 = 0;
 const STONE: u8 = 1;
 const WATER: u8 = 2;
+const BEDROCK: u8 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NoiseBiome {
@@ -641,7 +644,23 @@ impl MutableChunkBlockBuffer {
 }
 
 #[derive(Clone, Debug)]
+enum SurfaceNoiseSource {
+    Perlin(PerlinNoise),
+    PerlinSimplex(PerlinSimplexNoise),
+}
+
+impl SurfaceNoiseSource {
+    fn get_surface_noise_value(&self, x: f64, y: f64, z: f64, y_max: f64) -> f64 {
+        match self {
+            Self::Perlin(noise) => noise.get_surface_noise_value(x, y, z, y_max),
+            Self::PerlinSimplex(noise) => noise.get_surface_noise_value(x, y, z, y_max),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct NoiseBasedChunkGenerator<B: NoiseBiomeSource> {
+    seed: i64,
     cell_height: i32,
     cell_width: i32,
     cell_count_x: i32,
@@ -652,6 +671,7 @@ pub struct NoiseBasedChunkGenerator<B: NoiseBiomeSource> {
     min_cell_y: i32,
     sea_level: i32,
     settings: NoiseGeneratorSettings,
+    surface_noise: SurfaceNoiseSource,
     sampler: NoiseSampler<B>,
 }
 
@@ -679,13 +699,17 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
 
         let mut random = WorldgenRandom::new(seed);
         let blended_noise = BlendedNoise::new(&mut random);
-        // Rust MVP: construct surface noise only to preserve Java RNG order before depth noise.
-        if noise_settings.use_simplex_surface_noise() {
-            let _surface_noise =
-                PerlinSimplexNoise::from_octaves(&mut random, &SURFACE_NOISE_OCTAVES);
+        let surface_noise = if noise_settings.use_simplex_surface_noise() {
+            SurfaceNoiseSource::PerlinSimplex(PerlinSimplexNoise::from_octaves(
+                &mut random,
+                &SURFACE_NOISE_OCTAVES,
+            ))
         } else {
-            let _surface_noise = PerlinNoise::from_octaves(&mut random, &SURFACE_NOISE_OCTAVES);
-        }
+            SurfaceNoiseSource::Perlin(PerlinNoise::from_octaves(
+                &mut random,
+                &SURFACE_NOISE_OCTAVES,
+            ))
+        };
         random.consume_count(2620);
         let depth_noise = PerlinNoise::from_octaves(&mut random, &DEPTH_NOISE_OCTAVES);
 
@@ -710,6 +734,7 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
         );
 
         Self {
+            seed,
             cell_height,
             cell_width,
             cell_count_x,
@@ -720,6 +745,7 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
             min_cell_y,
             sea_level,
             settings,
+            surface_noise,
             sampler,
         }
     }
@@ -871,6 +897,109 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
             self.settings.default_fluid()
         }
     }
+
+    fn assert_compatible_chunk(&self, chunk: &MutableChunkBlockBuffer) {
+        if chunk.min_y != self.min_y || chunk.height != self.height {
+            panic!(
+                "chunk height range {}..{} is incompatible with generator range {}..{}",
+                chunk.min_y,
+                chunk.min_y + chunk.height,
+                self.min_y,
+                self.min_y + self.height
+            );
+        }
+    }
+}
+
+impl NoiseBasedChunkGenerator<OverworldBiomeSource> {
+    pub fn build_surface_and_bedrock(&self, chunk: &mut MutableChunkBlockBuffer) {
+        self.assert_compatible_chunk(chunk);
+        let mut random = WorldgenRandom::default();
+        random.set_base_chunk_seed(chunk.chunk_x, chunk.chunk_z);
+        self.build_surface(chunk, &mut random);
+        self.set_bedrock(chunk, &mut random);
+    }
+
+    fn build_surface(&self, chunk: &mut MutableChunkBlockBuffer, random: &mut WorldgenRandom) {
+        let min_block_x = chunk.chunk_x * CHUNK_WIDTH;
+        let min_block_z = chunk.chunk_z * CHUNK_WIDTH;
+        let min_surface_level = self.settings.min_surface_level();
+
+        for local_x in 0..CHUNK_WIDTH {
+            for local_z in 0..CHUNK_WIDTH {
+                let x = min_block_x + local_x;
+                let z = min_block_z + local_z;
+                let height_y = world_surface_height(chunk, local_x, local_z);
+                let surface_value = self.surface_noise.get_surface_noise_value(
+                    x as f64 * 0.0625,
+                    z as f64 * 0.0625,
+                    0.0625,
+                    local_x as f64 * 0.0625,
+                ) * 15.0;
+                let biome = self
+                    .sampler
+                    .biome_source
+                    .get_block_position_biome_definition(self.seed, x, z);
+                apply_overworld_surface(
+                    random,
+                    chunk,
+                    biome,
+                    x,
+                    z,
+                    height_y,
+                    surface_value,
+                    self.sea_level,
+                    min_surface_level,
+                );
+            }
+        }
+    }
+
+    fn set_bedrock(&self, chunk: &mut MutableChunkBlockBuffer, random: &mut WorldgenRandom) {
+        let floor_y = self.min_y as i64 + self.settings.bedrock_floor_position() as i64;
+        let roof_y = self.height as i64 - 1 + self.min_y as i64
+            - self.settings.bedrock_roof_position() as i64;
+        let min_build_height = self.min_y as i64;
+        let max_build_height = (self.min_y + self.height) as i64;
+        let has_roof = roof_y + 4 >= min_build_height && roof_y < max_build_height;
+        let has_floor = floor_y + 4 >= min_build_height && floor_y < max_build_height;
+
+        if !has_roof && !has_floor {
+            return;
+        }
+
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                if has_roof {
+                    for offset in 0..5 {
+                        if offset <= random.next_int_bound(5) {
+                            set_block_at_i64_y_if_inside(
+                                chunk,
+                                local_x,
+                                roof_y - offset as i64,
+                                local_z,
+                                BEDROCK,
+                            );
+                        }
+                    }
+                }
+
+                if has_floor {
+                    for offset in (0..5).rev() {
+                        if offset <= random.next_int_bound(5) {
+                            set_block_at_i64_y_if_inside(
+                                chunk,
+                                local_x,
+                                floor_y + offset as i64,
+                                local_z,
+                                BEDROCK,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -896,6 +1025,27 @@ fn clamped_lerp(start: f64, end: f64, delta: f64) -> f64 {
 
 fn block_buffer_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
     ((local_y << 8) | (local_z << 4) | local_x) as usize
+}
+
+fn world_surface_height(chunk: &MutableChunkBlockBuffer, local_x: i32, local_z: i32) -> i32 {
+    for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
+        if chunk.get_block_at_y(local_x, y, local_z) != AIR {
+            return y + 1;
+        }
+    }
+    chunk.min_y
+}
+
+fn set_block_at_i64_y_if_inside(
+    chunk: &mut MutableChunkBlockBuffer,
+    local_x: i32,
+    y: i64,
+    local_z: i32,
+    block_id: u8,
+) {
+    if y >= chunk.min_y as i64 && y < (chunk.min_y + chunk.height) as i64 {
+        chunk.set_block_at_y(local_x, y as i32, local_z, block_id);
+    }
 }
 
 fn column_index(
@@ -1117,6 +1267,13 @@ mod tests {
         .expect("valid terrain chunk oracle fixture")
     }
 
+    fn surface_fixture() -> TerrainChunkOracleFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0-surface-only.json"
+        ))
+        .expect("valid surface chunk oracle fixture")
+    }
+
     fn create_noise_settings(fixture: &NoiseSamplerFixture) -> NoiseSettings {
         let settings = &fixture.noise_settings;
         NoiseSettings::create(
@@ -1185,6 +1342,22 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    fn assert_chunk_blocks_match(actual: &[u8], expected: &[u8], min_y: i32) {
+        assert_eq!(actual.len(), expected.len());
+        for (index, (actual, expected)) in actual.iter().zip(expected.iter()).enumerate() {
+            assert_eq!(
+                actual,
+                expected,
+                "chunk block mismatch at local ({}, {}, {}): expected block id {}, got {}",
+                index & 15,
+                (index >> 8) as i32 + min_y,
+                (index >> 4) & 15,
+                expected,
+                actual
+            );
+        }
     }
 
     #[test]
@@ -1340,6 +1513,41 @@ mod tests {
                 actual
             );
         }
+    }
+
+    #[test]
+    fn build_surface_and_bedrock_matches_java_oracle() {
+        let oracle = surface_fixture();
+        assert_eq!(oracle.module, "surface-chunk");
+        assert_eq!(oracle.minecraft_version, "1.17.1");
+        assert_eq!(
+            oracle.generator_class,
+            "net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator"
+        );
+        assert_eq!(oracle.seed, "12345");
+        assert_eq!(oracle.chunk_x, 0);
+        assert_eq!(oracle.chunk_z, 0);
+        assert_eq!(oracle.min_y, 0);
+        assert_eq!(oracle.height, 256);
+        assert_eq!(oracle.block_order, "y-major,z-major,x-minor");
+
+        let generator = NoiseBasedChunkGenerator::new(
+            OverworldBiomeSource::new(
+                oracle.seed.parse::<i64>().expect("i64 fixture seed"),
+                false,
+                false,
+            ),
+            oracle.seed.parse::<i64>().expect("i64 fixture seed"),
+            NoiseGeneratorSettings::overworld(),
+        );
+        let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+        generator.build_surface_and_bedrock(&mut chunk);
+
+        assert_eq!(chunk.chunk_x, oracle.chunk_x);
+        assert_eq!(chunk.chunk_z, oracle.chunk_z);
+        assert_eq!(chunk.min_y, oracle.min_y);
+        assert_eq!(chunk.height, oracle.height);
+        assert_chunk_blocks_match(&chunk.blocks, &oracle.blocks, oracle.min_y);
     }
 
     #[test]

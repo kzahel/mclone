@@ -1178,6 +1178,7 @@ fn sin_table() -> &'static [f32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::levelgen::{NoiseBasedChunkGenerator, NoiseGeneratorSettings};
     use serde::Deserialize;
 
     #[derive(Debug, Deserialize)]
@@ -1195,13 +1196,6 @@ mod tests {
         blocks: Vec<u8>,
     }
 
-    fn surface_fixture() -> ChunkFixture {
-        serde_json::from_str(include_str!(
-            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0-surface-only.json"
-        ))
-        .expect("valid surface fixture")
-    }
-
     fn carved_fixture() -> ChunkFixture {
         serde_json::from_str(include_str!(
             "../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0-carved-only.json"
@@ -1210,36 +1204,27 @@ mod tests {
     }
 
     #[test]
-    fn overworld_air_carvers_match_java_fixture_from_surface_stage() {
-        let surface = surface_fixture();
+    fn overworld_air_carvers_match_java_fixture_from_native_surface_stage() {
         let carved = carved_fixture();
-        assert_eq!(surface.module, "surface-chunk");
         assert_eq!(carved.module, "carved-chunk");
-        assert_eq!(surface.minecraft_version, "1.17.1");
         assert_eq!(carved.minecraft_version, "1.17.1");
-        assert_eq!(surface.seed, carved.seed);
-        assert_eq!(surface.chunk_x, carved.chunk_x);
-        assert_eq!(surface.chunk_z, carved.chunk_z);
-        assert_eq!(surface.min_y, carved.min_y);
-        assert_eq!(surface.height, carved.height);
-        assert_eq!(surface.block_order, "y-major,z-major,x-minor");
         assert_eq!(carved.block_order, "y-major,z-major,x-minor");
-        assert_eq!(surface.palette, carved.palette);
+        assert_eq!(carved.palette[0], "minecraft:air");
 
-        let seed = surface.seed.parse::<i64>().expect("i64 seed");
+        let seed = carved.seed.parse::<i64>().expect("i64 seed");
         let biome_source = OverworldBiomeSource::new(seed, false, false);
-        let mut chunk = MutableChunkBlockBuffer {
-            chunk_x: surface.chunk_x,
-            chunk_z: surface.chunk_z,
-            min_y: surface.min_y,
-            height: surface.height,
-            blocks: surface.blocks,
-        };
+        let generator = NoiseBasedChunkGenerator::new(
+            biome_source.clone(),
+            seed,
+            NoiseGeneratorSettings::overworld(),
+        );
+        let mut chunk = generator.fill_from_noise(carved.chunk_x, carved.chunk_z);
+        generator.build_surface_and_bedrock(&mut chunk);
 
         let mask = apply_overworld_air_carvers(seed, &biome_source, &mut chunk);
-        assert_eq!(mask.bits().len(), (surface.height * 16 * 16) as usize);
+        assert_eq!(mask.bits().len(), (carved.height * 16 * 16) as usize);
         assert!(mask.carved_count() > 0);
-        assert_blocks_match(&chunk.blocks, &carved.blocks, surface.min_y, surface.height);
+        assert_blocks_match(&chunk.blocks, &carved.blocks, carved.min_y, carved.height);
     }
 
     #[test]
