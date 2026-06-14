@@ -11,7 +11,7 @@ use crate::block::{
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{
-    BlockPos, ConfiguredDecorator, DecorationContext, HeightProvider, VerticalAnchor,
+    BlockPos, ConfiguredDecorator, DecorationContext, HeightProvider, IntProvider, VerticalAnchor,
 };
 use crate::prng::{RandomSource, WorldgenRandom};
 
@@ -431,6 +431,189 @@ impl BasicTreeConfiguration {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StraightTrunkPlacerConfiguration {
+    pub base_height: i32,
+    pub height_rand_a: i32,
+    pub height_rand_b: i32,
+}
+
+impl StraightTrunkPlacerConfiguration {
+    pub const fn new(base_height: i32, height_rand_a: i32, height_rand_b: i32) -> Self {
+        Self {
+            base_height,
+            height_rand_a,
+            height_rand_b,
+        }
+    }
+
+    fn tree_height(self, random: &mut impl RandomSource) -> i32 {
+        self.base_height
+            + random.next_int_bound(self.height_rand_a + 1)
+            + random.next_int_bound(self.height_rand_b + 1)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FoliagePlacerConfiguration {
+    Spruce {
+        radius: IntProvider,
+        offset: IntProvider,
+        trunk_height: IntProvider,
+    },
+    Pine {
+        radius: IntProvider,
+        offset: IntProvider,
+        height: IntProvider,
+    },
+}
+
+impl FoliagePlacerConfiguration {
+    fn foliage_height(
+        self,
+        random: &mut impl RandomSource,
+        tree_height: i32,
+        _config: TreeConfiguration,
+    ) -> i32 {
+        match self {
+            Self::Spruce { trunk_height, .. } => (tree_height - trunk_height.sample(random)).max(4),
+            Self::Pine { height, .. } => height.sample(random),
+        }
+    }
+
+    fn foliage_radius(self, random: &mut impl RandomSource, trunk_height: i32) -> i32 {
+        match self {
+            Self::Spruce { radius, .. } => radius.sample(random),
+            Self::Pine { radius, .. } => {
+                radius.sample(random) + random.next_int_bound((trunk_height + 1).max(1))
+            }
+        }
+    }
+
+    fn offset(self, random: &mut impl RandomSource) -> i32 {
+        match self {
+            Self::Spruce { offset, .. } | Self::Pine { offset, .. } => offset.sample(random),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TwoLayersFeatureSize {
+    pub limit: i32,
+    pub lower_size: i32,
+    pub upper_size: i32,
+}
+
+impl TwoLayersFeatureSize {
+    pub const fn new(limit: i32, lower_size: i32, upper_size: i32) -> Self {
+        Self {
+            limit,
+            lower_size,
+            upper_size,
+        }
+    }
+
+    pub const fn size_at_height(self, height: i32) -> i32 {
+        if height < self.limit {
+            self.lower_size
+        } else {
+            self.upper_size
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TreeConfiguration {
+    pub log: RawBlockId,
+    pub leaves: RawBlockId,
+    pub trunk_placer: StraightTrunkPlacerConfiguration,
+    pub foliage_placer: FoliagePlacerConfiguration,
+    pub minimum_size: TwoLayersFeatureSize,
+}
+
+impl TreeConfiguration {
+    pub const fn new(
+        log: RawBlockId,
+        leaves: RawBlockId,
+        trunk_placer: StraightTrunkPlacerConfiguration,
+        foliage_placer: FoliagePlacerConfiguration,
+        minimum_size: TwoLayersFeatureSize,
+    ) -> Self {
+        Self {
+            log,
+            leaves,
+            trunk_placer,
+            foliage_placer,
+            minimum_size,
+        }
+    }
+
+    pub const fn spruce() -> Self {
+        Self::new(
+            SPRUCE_LOG,
+            SPRUCE_LEAVES,
+            StraightTrunkPlacerConfiguration::new(5, 2, 1),
+            FoliagePlacerConfiguration::Spruce {
+                radius: IntProvider::uniform(2, 3),
+                offset: IntProvider::uniform(0, 2),
+                trunk_height: IntProvider::uniform(1, 2),
+            },
+            TwoLayersFeatureSize::new(2, 0, 2),
+        )
+    }
+
+    pub const fn pine() -> Self {
+        Self::new(
+            SPRUCE_LOG,
+            SPRUCE_LEAVES,
+            StraightTrunkPlacerConfiguration::new(6, 4, 0),
+            FoliagePlacerConfiguration::Pine {
+                radius: IntProvider::constant(1),
+                offset: IntProvider::constant(1),
+                height: IntProvider::uniform(3, 4),
+            },
+            TwoLayersFeatureSize::new(2, 0, 2),
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct WeightedConfiguredFeature {
+    pub feature: Box<ConfiguredFeature>,
+    pub chance: f32,
+}
+
+impl Eq for WeightedConfiguredFeature {}
+
+impl WeightedConfiguredFeature {
+    pub fn new(feature: ConfiguredFeature, chance: f32) -> Self {
+        Self {
+            feature: Box::new(feature),
+            chance,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RandomFeatureConfiguration {
+    pub features: Vec<WeightedConfiguredFeature>,
+    pub default_feature: Box<ConfiguredFeature>,
+}
+
+impl Eq for RandomFeatureConfiguration {}
+
+impl RandomFeatureConfiguration {
+    pub fn new(
+        features: impl Into<Vec<WeightedConfiguredFeature>>,
+        default_feature: ConfiguredFeature,
+    ) -> Self {
+        Self {
+            features: features.into(),
+            default_feature: Box::new(default_feature),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OreTarget {
     NaturalStone,
     StoneOreReplaceables,
@@ -515,6 +698,8 @@ pub enum ConfiguredFeature {
     SimpleBlock(SimpleBlockConfiguration),
     RandomPatch(RandomPatchConfiguration),
     BasicTree(BasicTreeConfiguration),
+    Tree(TreeConfiguration),
+    RandomSelector(RandomFeatureConfiguration),
     Ore(OreConfiguration),
 }
 
@@ -531,6 +716,14 @@ impl ConfiguredFeature {
         Self::BasicTree(config)
     }
 
+    pub const fn tree(config: TreeConfiguration) -> Self {
+        Self::Tree(config)
+    }
+
+    pub fn random_selector(config: RandomFeatureConfiguration) -> Self {
+        Self::RandomSelector(config)
+    }
+
     pub const fn ore(config: OreConfiguration) -> Self {
         Self::Ore(config)
     }
@@ -545,6 +738,8 @@ impl ConfiguredFeature {
             Self::SimpleBlock(config) => place_simple_block(world, random, origin, *config),
             Self::RandomPatch(config) => place_random_patch(world, random, origin, *config),
             Self::BasicTree(config) => place_basic_tree(world, random, origin, *config),
+            Self::Tree(config) => place_tree(world, random, origin, *config),
+            Self::RandomSelector(config) => place_random_selector(world, random, origin, config),
             Self::Ore(config) => place_ore(world, random, origin, config),
         }
     }
@@ -900,7 +1095,7 @@ fn birch_forest_features() -> Vec<PlacedFeature> {
 
 fn taiga_features() -> Vec<PlacedFeature> {
     vec![
-        tree_feature(BasicTreeConfiguration::spruce(), 8, 0.35, 2),
+        taiga_vegetation_feature(),
         grass_patch(FERN, 4),
         grass_patch(GRASS, 2),
     ]
@@ -964,6 +1159,23 @@ fn tree_feature(
         ConfiguredFeature::basic_tree(config),
         vec![
             ConfiguredDecorator::count_extra(count, extra_chance, extra_count),
+            ConfiguredDecorator::square(),
+        ],
+    )
+}
+
+fn taiga_vegetation_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
+            [WeightedConfiguredFeature::new(
+                ConfiguredFeature::tree(TreeConfiguration::pine()),
+                0.33333334,
+            )],
+            ConfiguredFeature::tree(TreeConfiguration::spruce()),
+        )),
+        vec![
+            ConfiguredDecorator::count_extra(10, 0.1, 1),
             ConfiguredDecorator::square(),
         ],
     )
@@ -1143,6 +1355,214 @@ fn place_basic_tree<W: FeatureWorld>(
         world.set_block_world(pos, block_id);
     }
     true
+}
+
+fn place_random_selector<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    origin: BlockPos,
+    config: &RandomFeatureConfiguration,
+) -> bool {
+    for weighted in &config.features {
+        if random.next_float() < weighted.chance {
+            return weighted.feature.place(world, random, origin);
+        }
+    }
+
+    config.default_feature.place(world, random, origin)
+}
+
+fn place_tree<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    origin: BlockPos,
+    config: TreeConfiguration,
+) -> bool {
+    let Some(base) = project_to_surface(world, origin) else {
+        return false;
+    };
+
+    let tree_height = config.trunk_placer.tree_height(random);
+    let foliage_height = config
+        .foliage_placer
+        .foliage_height(random, tree_height, config);
+    let trunk_height = tree_height - foliage_height;
+    let foliage_radius = config.foliage_placer.foliage_radius(random, trunk_height);
+
+    if base.y < world.min_y() + 1 || base.y + tree_height + 1 > world.min_y() + world.height() {
+        return false;
+    }
+    if !can_survive_tree_sapling(world, base) {
+        return false;
+    }
+    if get_max_free_tree_height(world, tree_height, base, config) < tree_height {
+        return false;
+    }
+
+    place_straight_trunk(world, random, base, tree_height, config);
+    let foliage_attachment = BlockPos::new(base.x, base.y + tree_height, base.z);
+    create_foliage(
+        world,
+        random,
+        config,
+        foliage_attachment,
+        foliage_height,
+        foliage_radius,
+    );
+    true
+}
+
+fn get_max_free_tree_height<W: FeatureWorld>(
+    world: &mut W,
+    tree_height: i32,
+    base: BlockPos,
+    config: TreeConfiguration,
+) -> i32 {
+    for y_offset in 0..=tree_height + 1 {
+        let radius = config.minimum_size.size_at_height(y_offset);
+        for x_offset in -radius..=radius {
+            for z_offset in -radius..=radius {
+                let pos = BlockPos::new(base.x + x_offset, base.y + y_offset, base.z + z_offset);
+                if !is_free_tree_pos(world, pos) {
+                    return y_offset - 2;
+                }
+            }
+        }
+    }
+
+    tree_height
+}
+
+fn place_straight_trunk<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    base: BlockPos,
+    height: i32,
+    config: TreeConfiguration,
+) {
+    set_dirt_at(world, random, BlockPos::new(base.x, base.y - 1, base.z));
+
+    for y_offset in 0..height {
+        place_log(
+            world,
+            random,
+            BlockPos::new(base.x, base.y + y_offset, base.z),
+            config,
+        );
+    }
+}
+
+fn create_foliage<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    config: TreeConfiguration,
+    attachment: BlockPos,
+    foliage_height: i32,
+    foliage_radius: i32,
+) {
+    let offset = config.foliage_placer.offset(random);
+    match config.foliage_placer {
+        FoliagePlacerConfiguration::Spruce { .. } => {
+            let mut radius = random.next_int_bound(2);
+            let mut radius_limit = 1;
+            let mut reset_radius = 0;
+
+            for y_offset in (-(foliage_height)..=offset).rev() {
+                place_leaves_row(world, random, config, attachment, radius, y_offset);
+                if radius >= radius_limit {
+                    radius = reset_radius;
+                    reset_radius = 1;
+                    radius_limit = (radius_limit + 1).min(foliage_radius);
+                } else {
+                    radius += 1;
+                }
+            }
+        }
+        FoliagePlacerConfiguration::Pine { .. } => {
+            let mut radius = 0;
+
+            for y_offset in ((offset - foliage_height)..=offset).rev() {
+                place_leaves_row(world, random, config, attachment, radius, y_offset);
+                if radius >= 1 && y_offset == offset - foliage_height + 1 {
+                    radius -= 1;
+                } else if radius < foliage_radius {
+                    radius += 1;
+                }
+            }
+        }
+    }
+}
+
+fn place_leaves_row<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    config: TreeConfiguration,
+    center: BlockPos,
+    radius: i32,
+    y_offset: i32,
+) {
+    for x_offset in -radius..=radius {
+        for z_offset in -radius..=radius {
+            if should_skip_conifer_leaf(x_offset.abs(), z_offset.abs(), radius) {
+                continue;
+            }
+            try_place_leaf(
+                world,
+                random,
+                BlockPos::new(
+                    center.x + x_offset,
+                    center.y + y_offset,
+                    center.z + z_offset,
+                ),
+                config,
+            );
+        }
+    }
+}
+
+fn should_skip_conifer_leaf(abs_x: i32, abs_z: i32, radius: i32) -> bool {
+    abs_x == radius && abs_z == radius && radius > 0
+}
+
+fn place_log<W: FeatureWorld>(
+    world: &mut W,
+    _random: &mut impl RandomSource,
+    pos: BlockPos,
+    config: TreeConfiguration,
+) -> bool {
+    if valid_tree_pos(world, pos) {
+        world.set_block_world(pos, config.log)
+    } else {
+        false
+    }
+}
+
+fn try_place_leaf<W: FeatureWorld>(
+    world: &mut W,
+    _random: &mut impl RandomSource,
+    pos: BlockPos,
+    config: TreeConfiguration,
+) -> bool {
+    if valid_tree_pos(world, pos) {
+        world.set_block_world(pos, config.leaves)
+    } else {
+        false
+    }
+}
+
+fn set_dirt_at<W: FeatureWorld>(
+    world: &mut W,
+    _random: &mut impl RandomSource,
+    pos: BlockPos,
+) -> bool {
+    let Some(current) = world.block_at_world(pos) else {
+        return false;
+    };
+    if matches!(current, DIRT | PODZOL) {
+        true
+    } else {
+        world.set_block_world(pos, DIRT)
+    }
 }
 
 fn place_ore<W: FeatureWorld>(
@@ -1393,6 +1813,42 @@ fn can_survive_simple_plant(
 
 fn is_replaceable_plant(block_id: RawBlockId) -> bool {
     matches!(block_id, GRASS | FERN | DANDELION | POPPY | DEAD_BUSH)
+}
+
+fn can_survive_tree_sapling<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    let below = BlockPos::new(pos.x, pos.y - 1, pos.z);
+    let Some(block_below) = world.block_at_world(below) else {
+        return false;
+    };
+    matches!(block_below, GRASS_BLOCK | DIRT | PODZOL | MYCELIUM)
+}
+
+fn valid_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    let Some(block_id) = world.block_at_world(pos) else {
+        return false;
+    };
+    matches!(
+        block_id,
+        AIR | WATER
+            | GRASS
+            | FERN
+            | DANDELION
+            | POPPY
+            | DEAD_BUSH
+            | OAK_LEAVES
+            | BIRCH_LEAVES
+            | SPRUCE_LEAVES
+    )
+}
+
+fn is_free_tree_pos<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    if valid_tree_pos(world, pos) {
+        return true;
+    }
+    let Some(block_id) = world.block_at_world(pos) else {
+        return false;
+    };
+    matches!(block_id, OAK_LOG | BIRCH_LOG | SPRUCE_LOG)
 }
 
 fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
@@ -1697,15 +2153,11 @@ mod tests {
                 ConfiguredFeature::BasicTree(BasicTreeConfiguration { log: BIRCH_LOG, .. })
             )
         }));
-        assert!(taiga.iter().any(|feature| {
-            matches!(
-                feature.feature,
-                ConfiguredFeature::BasicTree(BasicTreeConfiguration {
-                    log: SPRUCE_LOG,
-                    ..
-                })
-            )
-        }));
+        assert!(
+            taiga
+                .iter()
+                .any(|feature| matches!(feature.feature, ConfiguredFeature::RandomSelector(_)))
+        );
         assert!(desert.iter().any(|feature| {
             matches!(
                 feature.feature,
@@ -1715,6 +2167,37 @@ mod tests {
                 })
             )
         }));
+    }
+
+    #[test]
+    fn taiga_feature_table_uses_vanilla_taiga_vegetation_selector() {
+        let taiga = overworld_features_for_biome(get_layered_biome_by_id(133));
+        let feature = &taiga[14];
+
+        assert_eq!(feature.step, DecorationStep::VegetalDecoration);
+        assert_eq!(
+            feature.decorators,
+            vec![
+                ConfiguredDecorator::count_extra(10, 0.1, 1),
+                ConfiguredDecorator::square(),
+            ]
+        );
+        match &feature.feature {
+            ConfiguredFeature::RandomSelector(config) => {
+                assert_eq!(
+                    config.features,
+                    vec![WeightedConfiguredFeature::new(
+                        ConfiguredFeature::tree(TreeConfiguration::pine()),
+                        0.33333334,
+                    )]
+                );
+                assert_eq!(
+                    *config.default_feature,
+                    ConfiguredFeature::tree(TreeConfiguration::spruce())
+                );
+            }
+            other => panic!("expected random selector, got {other:?}"),
+        }
     }
 
     #[test]

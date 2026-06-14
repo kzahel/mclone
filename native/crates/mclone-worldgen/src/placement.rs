@@ -278,6 +278,10 @@ impl HeightProvider {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IntProvider {
     Constant(i32),
+    Uniform {
+        min_inclusive: i32,
+        max_inclusive: i32,
+    },
 }
 
 impl IntProvider {
@@ -285,9 +289,26 @@ impl IntProvider {
         Self::Constant(value)
     }
 
-    pub fn sample(&self, _random: &mut impl RandomSource) -> i32 {
+    pub const fn uniform(min_inclusive: i32, max_inclusive: i32) -> Self {
+        Self::Uniform {
+            min_inclusive,
+            max_inclusive,
+        }
+    }
+
+    pub fn sample(&self, random: &mut impl RandomSource) -> i32 {
         match *self {
             Self::Constant(value) => value,
+            Self::Uniform {
+                min_inclusive,
+                max_inclusive,
+            } => {
+                if min_inclusive > max_inclusive {
+                    min_inclusive
+                } else {
+                    random_between_inclusive(random, min_inclusive, max_inclusive)
+                }
+            }
         }
     }
 }

@@ -42,36 +42,36 @@ The full fixture for chunk `0,0` still includes blocks or exact placements outsi
 - residual ore-placement offsets after true ore block families landed
 - `glow_lichen`
 - `snow`
-- exact spruce logs/leaves and fern/large fern decoration
+- remaining spruce log/leaf placement offsets and fern/large fern decoration
 - water/lava persisted from generation
 
 ## Current Diagnostic
 
-After wiring air/liquid carvers into the native `Features` path, moving feature decoration onto a 3x3 region pass, correcting decorated-feature random interleaving, porting the first seven vanilla underground variety ore blobs, and adding the active default ore block families, the ignored exact test reports:
+After wiring air/liquid carvers into the native `Features` path, moving feature decoration onto a 3x3 region pass, correcting decorated-feature random interleaving, porting the first seven vanilla underground variety ore blobs, adding the active default ore block families, and replacing the taiga placeholder with Java-shaped `TAIGA_VEGETATION` spruce/pine tree configs, the ignored exact test reports:
 
 ```text
-matched_blocks: 64,724 / 65,536
-mismatched_blocks: 812
+matched_blocks: 64,957 / 65,536
+mismatched_blocks: 579
 largest buckets:
-  spruce_leaves -> air: 246
-  air -> spruce_leaves: 185
-  coal_ore -> stone: 96
-  stone -> coal_ore: 67
-  air -> spruce_log: 24
+  air -> spruce_leaves: 187
+  spruce_leaves -> air: 183
+  spruce_log -> air: 28
   grass_block -> cave_air: 22
   dirt -> cave_air: 21
   dirt -> water: 21
-  fern -> air: 20
-  spruce_log -> air: 19
-  air -> cave_air: 13
+  fern -> air: 18
+  air -> spruce_log: 15
+  air -> cave_air: 14
   dirt -> grass_block: 11
-  grass -> air: 10
-  deepslate -> gravel: 9
+  grass -> air: 11
+  spruce_leaves -> spruce_log: 11
   air -> fern: 6
   air -> dandelion: 4
+  air -> large_fern: 4
+  air -> snow: 4
 ```
 
-This leaves exact tree/vegetation profiles as the largest content gap, with residual coal ore placement offsets still visible after the true ore block families landed. The region pass also exposes the current placeholder tree profiles more honestly: neighboring chunks can now spill into the target, but the tree shape/placement is not yet vanilla. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
+This leaves exact tree placement/decorator semantics, cave-air/liquid-visible feature deltas, and remaining small vegetation/top-layer blocks as the largest gaps. The target biome for chunk `0,0` is `minecraft:taiga_mountains`; its tree shape is now much closer to vanilla, but the Java `HEIGHTMAP_WITH_TREE_THRESHOLD` path still needs a proper native heightmap implementation before the remaining tree offsets can be trusted as pure placer differences. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
 
 ## Landed So Far
 
@@ -92,6 +92,7 @@ This leaves exact tree/vegetation profiles as the largest content gap, with resi
 - Native decorated feature execution now mirrors Java's nested `DecoratedFeature` order: decorator branches are evaluated depth-first, so feature placement consumes random before the next `count` branch. This fixed the initial underground ore drift.
 - Native `OreFeature` now covers the active default underground variety blobs for `dirt`, `gravel`, `granite`, `diorite`, `andesite`, `tuff`, and `deepslate`, including Java `Mth.sin` radius sampling, overlap culling, and natural-stone target matching.
 - Native default ore block families now cover the active overworld `ORE_COAL`, `ORE_IRON`, `ORE_GOLD`, `ORE_REDSTONE`, `ORE_DIAMOND`, `ORE_LAPIS`, and `ORE_COPPER` features with normal/deepslate replacement targets, terrain registry IDs, asset validation, and mesh fallback colors.
+- Native taiga vegetation now uses Java-shaped `RandomSelectorFeature` behavior for `TAIGA_VEGETATION`, including the `PINE` weighted branch, default `SPRUCE`, `StraightTrunkPlacer`, `SpruceFoliagePlacer`, `PineFoliagePlacer`, `TwoLayersFeatureSize`, and vanilla `countExtra(10, 0.1, 1)` placement count for the target `taiga_mountains` biome.
 
 ## Reference Scheduler Notes
 
@@ -134,8 +135,8 @@ Still required:
 
 ## Next Steps
 
-1. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
-2. Investigate the remaining coal ore placement offset and low-Y gravel/deepslate mismatch buckets.
+1. Implement native heightmap semantics for `HEIGHTMAP_WITH_TREE_THRESHOLD` and retry the taiga tree path with the full Java `square -> water-depth-threshold -> ocean-floor-heightmap` decorator chain.
+2. Port the remaining taiga surface vegetation/top-layer features visible in the fixture: large ferns, snow/top-layer placement, and glow lichen/liquid-visible underground decoration as needed by the top mismatch buckets.
 3. Add post-feature heightmap updates and scheduled tick capture to the native region path.
 4. Promote worker-local dependency reuse into scheduler-owned holder/status protochunk slots if structures or broader status scheduling need that before `018`.
 5. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
