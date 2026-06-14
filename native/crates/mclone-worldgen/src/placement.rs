@@ -387,6 +387,17 @@ impl HeightmapConfiguration {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WaterDepthThresholdConfiguration {
+    pub max_water_depth: i32,
+}
+
+impl WaterDepthThresholdConfiguration {
+    pub const fn new(max_water_depth: i32) -> Self {
+        Self { max_water_depth }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfiguredDecorator {
     Nope,
     Square,
@@ -397,6 +408,7 @@ pub enum ConfiguredDecorator {
     Spread32Above,
     Heightmap(HeightmapConfiguration),
     HeightmapSpreadDouble(HeightmapConfiguration),
+    WaterDepthThreshold(WaterDepthThresholdConfiguration),
 }
 
 impl ConfiguredDecorator {
@@ -440,6 +452,10 @@ impl ConfiguredDecorator {
         Self::HeightmapSpreadDouble(HeightmapConfiguration::new(heightmap))
     }
 
+    pub const fn water_depth_threshold(max_water_depth: i32) -> Self {
+        Self::WaterDepthThreshold(WaterDepthThresholdConfiguration::new(max_water_depth))
+    }
+
     pub fn get_positions(
         &self,
         context: &DecorationContext,
@@ -457,6 +473,9 @@ impl ConfiguredDecorator {
             Self::Heightmap(config) => heightmap_positions(context, random, config, pos),
             Self::HeightmapSpreadDouble(config) => {
                 heightmap_spread_double_positions(context, random, config, pos)
+            }
+            Self::WaterDepthThreshold(config) => {
+                water_depth_threshold_positions(context, random, config, pos)
             }
         }
     }
@@ -569,6 +588,21 @@ pub fn heightmap_spread_double_positions(
     }
 }
 
+pub fn water_depth_threshold_positions(
+    context: &DecorationContext,
+    _random: &mut impl RandomSource,
+    config: WaterDepthThresholdConfiguration,
+    pos: BlockPos,
+) -> Vec<BlockPos> {
+    let ocean_floor = context.get_height(HeightmapType::OceanFloor, pos.x, pos.z);
+    let world_surface = context.get_height(HeightmapType::WorldSurface, pos.x, pos.z);
+    if world_surface - ocean_floor > config.max_water_depth {
+        Vec::new()
+    } else {
+        vec![pos]
+    }
+}
+
 fn vertical_positions(y: i32, pos: BlockPos) -> Vec<BlockPos> {
     vec![BlockPos::new(pos.x, y, pos.z)]
 }
@@ -603,6 +637,16 @@ mod tests {
     fn min_build_height(heightmap: HeightmapType, _x: i32, _z: i32) -> i32 {
         assert_eq!(heightmap, HeightmapType::MotionBlocking);
         0
+    }
+
+    fn water_depth_height(heightmap: HeightmapType, x: i32, z: i32) -> i32 {
+        assert_eq!(x, POS.x);
+        assert_eq!(z, POS.z);
+        match heightmap {
+            HeightmapType::OceanFloor => 64,
+            HeightmapType::WorldSurface => 65,
+            other => panic!("unexpected heightmap {other:?}"),
+        }
     }
 
     #[test]
@@ -829,5 +873,28 @@ mod tests {
             vec![BlockPos::new(32, 46, -48)]
         );
         assert_eq!(random.get_count(), 1);
+    }
+
+    #[test]
+    fn water_depth_threshold_decorator_filters_columns_deeper_than_threshold() {
+        let context = CONTEXT.with_height_sampler(water_depth_height);
+        let mut accepted_random = WorldgenRandom::new(12345);
+        let mut rejected_random = WorldgenRandom::new(12345);
+
+        assert_eq!(
+            ConfiguredDecorator::water_depth_threshold(1).get_positions(
+                &context,
+                &mut accepted_random,
+                POS
+            ),
+            vec![POS]
+        );
+        assert!(
+            ConfiguredDecorator::water_depth_threshold(0)
+                .get_positions(&context, &mut rejected_random, POS)
+                .is_empty()
+        );
+        assert_eq!(accepted_random.get_count(), 0);
+        assert_eq!(rejected_random.get_count(), 0);
     }
 }

@@ -5,13 +5,14 @@ use crate::block::{
     AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE,
     DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
     DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
-    FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, MYCELIUM, OAK_LEAVES,
-    OAK_LOG, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SPRUCE_LEAVES, SPRUCE_LOG,
-    STONE, TERRACOTTA, TUFF, WATER,
+    FERN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE, LAVA, MYCELIUM,
+    OAK_LEAVES, OAK_LOG, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SNOW,
+    SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{
-    BlockPos, ConfiguredDecorator, DecorationContext, HeightProvider, IntProvider, VerticalAnchor,
+    BlockPos, ConfiguredDecorator, DecorationContext, HeightProvider, HeightmapType, IntProvider,
+    VerticalAnchor,
 };
 use crate::prng::{RandomSource, WorldgenRandom};
 
@@ -69,6 +70,7 @@ pub trait FeatureWorld {
     fn height(&self) -> i32;
     fn non_air_block_count(&self) -> usize;
     fn block_at_world(&mut self, pos: BlockPos) -> Option<RawBlockId>;
+    fn height_at(&mut self, heightmap: HeightmapType, world_x: i32, world_z: i32) -> Option<i32>;
     fn world_surface_height_at(&mut self, world_x: i32, world_z: i32) -> Option<i32>;
     fn set_block_world(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool;
 }
@@ -104,6 +106,15 @@ impl FeatureWorld for MutableChunkBlockBuffer {
             return None;
         }
         Some(self.get_block_at_y(local_x, pos.y, local_z))
+    }
+
+    fn height_at(&mut self, heightmap: HeightmapType, world_x: i32, world_z: i32) -> Option<i32> {
+        let local_x = world_x - self.chunk_x * CHUNK_WIDTH;
+        let local_z = world_z - self.chunk_z * CHUNK_WIDTH;
+        if !(0..CHUNK_WIDTH).contains(&local_x) || !(0..CHUNK_WIDTH).contains(&local_z) {
+            return None;
+        }
+        Some(heightmap_height(self, heightmap, local_x, local_z))
     }
 
     fn world_surface_height_at(&mut self, world_x: i32, world_z: i32) -> Option<i32> {
@@ -299,6 +310,19 @@ impl FeatureWorld for FeatureRegion {
             pos.x - chunk_x * CHUNK_WIDTH,
             pos.y,
             pos.z - chunk_z * CHUNK_WIDTH,
+        ))
+    }
+
+    fn height_at(&mut self, heightmap: HeightmapType, world_x: i32, world_z: i32) -> Option<i32> {
+        let chunk_x = block_to_chunk_coord(world_x);
+        let chunk_z = block_to_chunk_coord(world_z);
+        self.metrics.height_queries += 1;
+        let chunk = self.get_chunk(chunk_x, chunk_z);
+        Some(heightmap_height(
+            chunk,
+            heightmap,
+            world_x - chunk_x * CHUNK_WIDTH,
+            world_z - chunk_z * CHUNK_WIDTH,
         ))
     }
 
@@ -613,6 +637,24 @@ impl RandomFeatureConfiguration {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecoratedFeatureConfiguration {
+    pub feature: Box<ConfiguredFeature>,
+    pub decorators: Vec<ConfiguredDecorator>,
+}
+
+impl DecoratedFeatureConfiguration {
+    pub fn new(
+        feature: ConfiguredFeature,
+        decorators: impl Into<Vec<ConfiguredDecorator>>,
+    ) -> Self {
+        Self {
+            feature: Box::new(feature),
+            decorators: decorators.into(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OreTarget {
     NaturalStone,
@@ -700,6 +742,7 @@ pub enum ConfiguredFeature {
     BasicTree(BasicTreeConfiguration),
     Tree(TreeConfiguration),
     RandomSelector(RandomFeatureConfiguration),
+    Decorated(DecoratedFeatureConfiguration),
     Ore(OreConfiguration),
 }
 
@@ -724,6 +767,10 @@ impl ConfiguredFeature {
         Self::RandomSelector(config)
     }
 
+    pub fn decorated(config: DecoratedFeatureConfiguration) -> Self {
+        Self::Decorated(config)
+    }
+
     pub const fn ore(config: OreConfiguration) -> Self {
         Self::Ore(config)
     }
@@ -740,6 +787,9 @@ impl ConfiguredFeature {
             Self::BasicTree(config) => place_basic_tree(world, random, origin, *config),
             Self::Tree(config) => place_tree(world, random, origin, *config),
             Self::RandomSelector(config) => place_random_selector(world, random, origin, config),
+            Self::Decorated(config) => {
+                place_configured_decorated_feature(world, random, origin, config)
+            }
             Self::Ore(config) => place_ore(world, random, origin, config),
         }
     }
@@ -788,7 +838,7 @@ impl PlacedFeature {
         };
 
         let mut placed_any = false;
-        for next_pos in decorator.get_positions(decoration_context, random, pos) {
+        for next_pos in decorator_positions(world, decoration_context, random, *decorator, pos) {
             placed_any |= self.place_decorated(
                 world,
                 random,
@@ -799,6 +849,103 @@ impl PlacedFeature {
         }
         placed_any
     }
+}
+
+fn decorator_positions<W: FeatureWorld>(
+    world: &mut W,
+    context: &DecorationContext,
+    random: &mut impl RandomSource,
+    decorator: ConfiguredDecorator,
+    pos: BlockPos,
+) -> Vec<BlockPos> {
+    match decorator {
+        ConfiguredDecorator::Heightmap(config) => {
+            let Some(y) = world.height_at(config.heightmap, pos.x, pos.z) else {
+                return Vec::new();
+            };
+            if y > context.get_min_build_height() {
+                vec![BlockPos::new(pos.x, y, pos.z)]
+            } else {
+                Vec::new()
+            }
+        }
+        ConfiguredDecorator::HeightmapSpreadDouble(config) => {
+            let Some(y) = world.height_at(config.heightmap, pos.x, pos.z) else {
+                return Vec::new();
+            };
+            if y == context.get_min_build_height() {
+                Vec::new()
+            } else {
+                vec![BlockPos::new(
+                    pos.x,
+                    context.get_min_build_height()
+                        + random.next_int_bound((y - context.get_min_build_height()) * 2),
+                    pos.z,
+                )]
+            }
+        }
+        ConfiguredDecorator::WaterDepthThreshold(config) => {
+            let Some(ocean_floor) = world.height_at(HeightmapType::OceanFloor, pos.x, pos.z) else {
+                return Vec::new();
+            };
+            let Some(world_surface) = world.height_at(HeightmapType::WorldSurface, pos.x, pos.z)
+            else {
+                return Vec::new();
+            };
+            if world_surface - ocean_floor > config.max_water_depth {
+                Vec::new()
+            } else {
+                vec![pos]
+            }
+        }
+        _ => decorator.get_positions(context, random, pos),
+    }
+}
+
+fn place_configured_decorated_feature<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    origin: BlockPos,
+    config: &DecoratedFeatureConfiguration,
+) -> bool {
+    let decoration_context = DecorationContext::new(world.min_y(), world.height());
+    place_configured_decorated_feature_at(
+        world,
+        random,
+        &decoration_context,
+        config.feature.as_ref(),
+        &config.decorators,
+        0,
+        origin,
+    )
+}
+
+fn place_configured_decorated_feature_at<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    decoration_context: &DecorationContext,
+    feature: &ConfiguredFeature,
+    decorators: &[ConfiguredDecorator],
+    decorator_index: usize,
+    pos: BlockPos,
+) -> bool {
+    let Some(decorator) = decorators.get(decorator_index) else {
+        return feature.place(world, random, pos);
+    };
+
+    let mut placed_any = false;
+    for next_pos in decorator_positions(world, decoration_context, random, *decorator, pos) {
+        placed_any |= place_configured_decorated_feature_at(
+            world,
+            random,
+            decoration_context,
+            feature,
+            decorators,
+            decorator_index + 1,
+            next_pos,
+        );
+    }
+    placed_any
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1169,7 +1316,10 @@ fn taiga_vegetation_feature() -> PlacedFeature {
         DecorationStep::VegetalDecoration,
         ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
             [WeightedConfiguredFeature::new(
-                ConfiguredFeature::tree(TreeConfiguration::pine()),
+                ConfiguredFeature::decorated(DecoratedFeatureConfiguration::new(
+                    ConfiguredFeature::tree(TreeConfiguration::pine()),
+                    [ConfiguredDecorator::count_extra(6, 0.1, 1)],
+                )),
                 0.33333334,
             )],
             ConfiguredFeature::tree(TreeConfiguration::spruce()),
@@ -1177,6 +1327,8 @@ fn taiga_vegetation_feature() -> PlacedFeature {
         vec![
             ConfiguredDecorator::count_extra(10, 0.1, 1),
             ConfiguredDecorator::square(),
+            ConfiguredDecorator::water_depth_threshold(0),
+            ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
         ],
     )
 }
@@ -1378,9 +1530,7 @@ fn place_tree<W: FeatureWorld>(
     origin: BlockPos,
     config: TreeConfiguration,
 ) -> bool {
-    let Some(base) = project_to_surface(world, origin) else {
-        return false;
-    };
+    let base = origin;
 
     let tree_height = config.trunk_placer.tree_height(random);
     let foliage_height = config
@@ -1789,6 +1939,46 @@ fn project_to_surface<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> Option<B
     ))
 }
 
+fn heightmap_height(
+    chunk: &MutableChunkBlockBuffer,
+    heightmap: HeightmapType,
+    local_x: i32,
+    local_z: i32,
+) -> i32 {
+    for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
+        if heightmap_is_opaque(heightmap, chunk.get_block_at_y(local_x, y, local_z)) {
+            return y + 1;
+        }
+    }
+    chunk.min_y
+}
+
+fn heightmap_is_opaque(heightmap: HeightmapType, block_id: RawBlockId) -> bool {
+    match heightmap {
+        HeightmapType::WorldSurfaceWg | HeightmapType::WorldSurface => block_id != AIR,
+        HeightmapType::OceanFloorWg | HeightmapType::OceanFloor => material_blocks_motion(block_id),
+        HeightmapType::MotionBlocking => material_blocks_motion(block_id) || has_fluid(block_id),
+        HeightmapType::MotionBlockingNoLeaves => {
+            (material_blocks_motion(block_id) || has_fluid(block_id)) && !is_leaves(block_id)
+        }
+    }
+}
+
+fn material_blocks_motion(block_id: RawBlockId) -> bool {
+    !matches!(
+        block_id,
+        AIR | WATER | LAVA | SNOW | GRASS | FERN | DANDELION | POPPY | DEAD_BUSH
+    )
+}
+
+fn has_fluid(block_id: RawBlockId) -> bool {
+    matches!(block_id, WATER | LAVA)
+}
+
+fn is_leaves(block_id: RawBlockId) -> bool {
+    matches!(block_id, OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES)
+}
+
 fn matches_allowed(allowed: &[RawBlockId], block_id: RawBlockId) -> bool {
     allowed.is_empty() || allowed.contains(&block_id)
 }
@@ -2018,6 +2208,75 @@ mod tests {
     }
 
     #[test]
+    fn feature_world_heightmaps_follow_reduced_java_predicates() {
+        let mut chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        chunk.set_block_at_y(8, 2, 8, DIRT);
+        chunk.set_block_at_y(8, 3, 8, WATER);
+        chunk.set_block_at_y(8, 4, 8, GRASS);
+        chunk.set_block_at_y(8, 5, 8, SPRUCE_LEAVES);
+        chunk.set_block_at_y(8, 6, 8, SNOW);
+
+        assert_eq!(chunk.height_at(HeightmapType::WorldSurface, 8, 8), Some(7));
+        assert_eq!(chunk.height_at(HeightmapType::OceanFloor, 8, 8), Some(6));
+        assert_eq!(
+            chunk.height_at(HeightmapType::MotionBlocking, 8, 8),
+            Some(6)
+        );
+        assert_eq!(
+            chunk.height_at(HeightmapType::MotionBlockingNoLeaves, 8, 8),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn placed_feature_uses_world_heightmap_and_water_depth_decorators() {
+        let feature = ConfiguredFeature::simple_block(
+            SimpleBlockConfiguration::new(POPPY)
+                .place_on(&[GRASS_BLOCK])
+                .place_in(&[AIR]),
+        );
+        let placed = PlacedFeature::new(
+            DecorationStep::VegetalDecoration,
+            feature,
+            vec![
+                ConfiguredDecorator::water_depth_threshold(0),
+                ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
+            ],
+        );
+        let origin = BlockPos::new(8, 0, 8);
+
+        let mut dry_chunk = flat_grass_chunk();
+        let mut dry_random = WorldgenRandom::new(12_345);
+        assert!(placed.place(&mut dry_chunk, &mut dry_random, origin));
+        assert_eq!(dry_chunk.get_block_at_y(8, 3, 8), POPPY);
+
+        let mut wet_chunk = flat_grass_chunk();
+        wet_chunk.set_block_at_y(8, 3, 8, WATER);
+        let mut wet_random = WorldgenRandom::new(12_345);
+        assert!(!placed.place(&mut wet_chunk, &mut wet_random, origin));
+        assert_eq!(wet_chunk.get_block_at_y(8, 3, 8), WATER);
+        assert_eq!(dry_random.get_count(), wet_random.get_count());
+    }
+
+    #[test]
+    fn decorated_configured_feature_applies_nested_decorators() {
+        let mut chunk = flat_grass_chunk();
+        let mut random = WorldgenRandom::new(12_345);
+        let feature = ConfiguredFeature::decorated(DecoratedFeatureConfiguration::new(
+            ConfiguredFeature::simple_block(
+                SimpleBlockConfiguration::new(DANDELION)
+                    .place_on(&[GRASS_BLOCK])
+                    .place_in(&[AIR]),
+            ),
+            [ConfiguredDecorator::heightmap(HeightmapType::OceanFloor)],
+        ));
+
+        assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 0, 8)));
+        assert_eq!(chunk.get_block_at_y(8, 3, 8), DANDELION);
+        assert_eq!(random.get_count(), 0);
+    }
+
+    #[test]
     fn ore_feature_replaces_natural_stone_blob() {
         let mut chunk = solid_stone_chunk();
         let mut random = WorldgenRandom::new(12_345);
@@ -2180,6 +2439,8 @@ mod tests {
             vec![
                 ConfiguredDecorator::count_extra(10, 0.1, 1),
                 ConfiguredDecorator::square(),
+                ConfiguredDecorator::water_depth_threshold(0),
+                ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
             ]
         );
         match &feature.feature {
@@ -2187,7 +2448,10 @@ mod tests {
                 assert_eq!(
                     config.features,
                     vec![WeightedConfiguredFeature::new(
-                        ConfiguredFeature::tree(TreeConfiguration::pine()),
+                        ConfiguredFeature::decorated(DecoratedFeatureConfiguration::new(
+                            ConfiguredFeature::tree(TreeConfiguration::pine()),
+                            [ConfiguredDecorator::count_extra(6, 0.1, 1)],
+                        )),
                         0.33333334,
                     )]
                 );
