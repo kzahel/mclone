@@ -1,10 +1,21 @@
-use crate::noise::{BlendedNoise, PerlinNoise, SimplexNoise};
+use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
+use crate::prng::WorldgenRandom;
 
 const OLD_CELL_COUNT_Y: i32 = 32;
 const BIOME_WEIGHT_RADIUS: i32 = 2;
 const BITS_FOR_Y: i32 = 12;
 const Y_SIZE: i32 = (1 << BITS_FOR_Y) - 32;
 const MAX_Y: i32 = (Y_SIZE >> 1) - 1;
+const CHUNK_WIDTH: i32 = 16;
+const SECTION_HEIGHT: i32 = 16;
+const SURFACE_NOISE_OCTAVES: [i32; 4] = [-3, -2, -1, 0];
+const DEPTH_NOISE_OCTAVES: [i32; 16] = [
+    -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0,
+];
+const INT_MIN: i32 = i32::MIN;
+const AIR: u8 = 0;
+const STONE: u8 = 1;
+const WATER: u8 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NoiseBiome {
@@ -28,6 +39,23 @@ impl NoiseBiome {
 
 pub trait NoiseBiomeSource {
     fn get_noise_biome(&self, x: i32, y: i32, z: i32) -> NoiseBiome;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConstantBiomeSource {
+    biome: NoiseBiome,
+}
+
+impl ConstantBiomeSource {
+    pub fn new(biome: NoiseBiome) -> Self {
+        Self { biome }
+    }
+}
+
+impl NoiseBiomeSource for ConstantBiomeSource {
+    fn get_noise_biome(&self, _x: i32, _y: i32, _z: i32) -> NoiseBiome {
+        self.biome
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -224,6 +252,113 @@ impl NoiseModifier {
         match self {
             Self::Passthrough => noise,
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NoiseGeneratorSettings {
+    noise_settings: NoiseSettings,
+    default_block: u8,
+    default_fluid: u8,
+    bedrock_roof_position: i32,
+    bedrock_floor_position: i32,
+    sea_level: i32,
+    min_surface_level: i32,
+    disable_mob_generation: bool,
+    aquifers_enabled: bool,
+    noise_caves_enabled: bool,
+    deepslate_enabled: bool,
+    ore_veins_enabled: bool,
+    noodle_caves_enabled: bool,
+}
+
+impl NoiseGeneratorSettings {
+    pub fn overworld() -> Self {
+        Self::overworld_with_amplified(false)
+    }
+
+    pub fn overworld_with_amplified(is_amplified: bool) -> Self {
+        Self {
+            noise_settings: NoiseSettings::create(
+                0,
+                256,
+                NoiseSamplingSettings::new(0.9999999814507745, 0.9999999814507745, 80.0, 160.0),
+                NoiseSlideSettings::new(-10, 3, 0),
+                NoiseSlideSettings::new(15, 3, 0),
+                1,
+                2,
+                1.0,
+                -0.46875,
+                true,
+                true,
+                false,
+                is_amplified,
+            ),
+            default_block: STONE,
+            default_fluid: WATER,
+            bedrock_roof_position: INT_MIN,
+            bedrock_floor_position: 0,
+            sea_level: 63,
+            min_surface_level: 0,
+            disable_mob_generation: false,
+            aquifers_enabled: false,
+            noise_caves_enabled: false,
+            deepslate_enabled: false,
+            ore_veins_enabled: false,
+            noodle_caves_enabled: false,
+        }
+    }
+
+    pub fn noise_settings(&self) -> &NoiseSettings {
+        &self.noise_settings
+    }
+
+    pub fn default_block(&self) -> u8 {
+        self.default_block
+    }
+
+    pub fn default_fluid(&self) -> u8 {
+        self.default_fluid
+    }
+
+    pub fn bedrock_roof_position(&self) -> i32 {
+        self.bedrock_roof_position
+    }
+
+    pub fn bedrock_floor_position(&self) -> i32 {
+        self.bedrock_floor_position
+    }
+
+    pub fn sea_level(&self) -> i32 {
+        self.sea_level
+    }
+
+    pub fn min_surface_level(&self) -> i32 {
+        self.min_surface_level
+    }
+
+    pub fn disable_mob_generation(&self) -> bool {
+        self.disable_mob_generation
+    }
+
+    pub fn is_aquifers_enabled(&self) -> bool {
+        self.aquifers_enabled
+    }
+
+    pub fn is_noise_caves_enabled(&self) -> bool {
+        self.noise_caves_enabled
+    }
+
+    pub fn is_deepslate_enabled(&self) -> bool {
+        self.deepslate_enabled
+    }
+
+    pub fn is_ore_veins_enabled(&self) -> bool {
+        self.ore_veins_enabled
+    }
+
+    pub fn is_noodle_caves_enabled(&self) -> bool {
+        self.noodle_caves_enabled
     }
 }
 
@@ -463,6 +598,273 @@ impl<B: NoiseBiomeSource> NoiseSampler<B> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MutableChunkBlockBuffer {
+    pub chunk_x: i32,
+    pub chunk_z: i32,
+    pub min_y: i32,
+    pub height: i32,
+    pub blocks: Vec<u8>,
+}
+
+impl MutableChunkBlockBuffer {
+    pub fn new(chunk_x: i32, chunk_z: i32, min_y: i32, height: i32) -> Self {
+        if height <= 0 || height % SECTION_HEIGHT != 0 {
+            panic!("chunk height {height} must be a positive multiple of {SECTION_HEIGHT}");
+        }
+
+        Self {
+            chunk_x,
+            chunk_z,
+            min_y,
+            height,
+            blocks: vec![AIR; height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize],
+        }
+    }
+
+    pub fn get_block(&self, local_x: i32, local_y: i32, local_z: i32) -> u8 {
+        self.blocks[block_buffer_index(local_x, local_y, local_z)]
+    }
+
+    pub fn set_block(&mut self, local_x: i32, local_y: i32, local_z: i32, block_id: u8) {
+        let index = block_buffer_index(local_x, local_y, local_z);
+        self.blocks[index] = block_id;
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct NoiseBasedChunkGenerator<B: NoiseBiomeSource> {
+    cell_height: i32,
+    cell_width: i32,
+    cell_count_x: i32,
+    cell_count_y: i32,
+    cell_count_z: i32,
+    min_y: i32,
+    height: i32,
+    min_cell_y: i32,
+    sea_level: i32,
+    settings: NoiseGeneratorSettings,
+    sampler: NoiseSampler<B>,
+}
+
+impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
+    pub fn new(biome_source: B, seed: i64, settings: NoiseGeneratorSettings) -> Self {
+        if settings.is_aquifers_enabled()
+            || settings.is_noise_caves_enabled()
+            || settings.is_deepslate_enabled()
+            || settings.is_ore_veins_enabled()
+            || settings.is_noodle_caves_enabled()
+        {
+            panic!("This terrain-only generator only supports the default 1.17.1 overworld flags");
+        }
+
+        let noise_settings = settings.noise_settings().clone();
+        let min_y = noise_settings.min_y();
+        let height = noise_settings.height();
+        let cell_height = noise_settings.noise_size_vertical() * 4;
+        let cell_width = noise_settings.noise_size_horizontal() * 4;
+        let cell_count_x = CHUNK_WIDTH / cell_width;
+        let cell_count_y = height / cell_height;
+        let cell_count_z = CHUNK_WIDTH / cell_width;
+        let min_cell_y = min_y.div_euclid(cell_height);
+        let sea_level = settings.sea_level();
+
+        let mut random = WorldgenRandom::new(seed);
+        let blended_noise = BlendedNoise::new(&mut random);
+        // Rust MVP: construct surface noise only to preserve Java RNG order before depth noise.
+        if noise_settings.use_simplex_surface_noise() {
+            let _surface_noise =
+                PerlinSimplexNoise::from_octaves(&mut random, &SURFACE_NOISE_OCTAVES);
+        } else {
+            let _surface_noise = PerlinNoise::from_octaves(&mut random, &SURFACE_NOISE_OCTAVES);
+        }
+        random.consume_count(2620);
+        let depth_noise = PerlinNoise::from_octaves(&mut random, &DEPTH_NOISE_OCTAVES);
+
+        let island_noise = if noise_settings.island_noise_override() {
+            let mut island_random = WorldgenRandom::new(seed);
+            island_random.consume_count(17292);
+            Some(SimplexNoise::new(&mut island_random))
+        } else {
+            None
+        };
+
+        let sampler = NoiseSampler::new(
+            biome_source,
+            cell_width,
+            cell_height,
+            cell_count_y,
+            noise_settings,
+            blended_noise,
+            island_noise,
+            depth_noise,
+            NoiseModifier::Passthrough,
+        );
+
+        Self {
+            cell_height,
+            cell_width,
+            cell_count_x,
+            cell_count_y,
+            cell_count_z,
+            min_y,
+            height,
+            min_cell_y,
+            sea_level,
+            settings,
+            sampler,
+        }
+    }
+
+    pub fn fill_from_noise(&self, chunk_x: i32, chunk_z: i32) -> MutableChunkBlockBuffer {
+        let mut chunk = MutableChunkBlockBuffer::new(chunk_x, chunk_z, self.min_y, self.height);
+        self.fill_terrain_block_buffer(&mut chunk);
+        chunk
+    }
+
+    fn fill_terrain_block_buffer(&self, chunk: &mut MutableChunkBlockBuffer) {
+        let noise_columns = self.create_noise_columns(chunk.chunk_x, chunk.chunk_z);
+
+        for cell_x in 0..self.cell_count_x {
+            for cell_z in 0..self.cell_count_z {
+                for cell_y in (0..self.cell_count_y).rev() {
+                    let x0z0y0 = noise_columns[column_index(
+                        cell_x,
+                        cell_z,
+                        cell_y,
+                        self.cell_count_z,
+                        self.cell_count_y,
+                    )];
+                    let x0z0y1 = noise_columns[column_index(
+                        cell_x,
+                        cell_z,
+                        cell_y + 1,
+                        self.cell_count_z,
+                        self.cell_count_y,
+                    )];
+                    let x1z0y0 = noise_columns[column_index(
+                        cell_x + 1,
+                        cell_z,
+                        cell_y,
+                        self.cell_count_z,
+                        self.cell_count_y,
+                    )];
+                    let x1z0y1 = noise_columns[column_index(
+                        cell_x + 1,
+                        cell_z,
+                        cell_y + 1,
+                        self.cell_count_z,
+                        self.cell_count_y,
+                    )];
+                    let x0z1y0 = noise_columns[column_index(
+                        cell_x,
+                        cell_z + 1,
+                        cell_y,
+                        self.cell_count_z,
+                        self.cell_count_y,
+                    )];
+                    let x0z1y1 = noise_columns[column_index(
+                        cell_x,
+                        cell_z + 1,
+                        cell_y + 1,
+                        self.cell_count_z,
+                        self.cell_count_y,
+                    )];
+                    let x1z1y0 = noise_columns[column_index(
+                        cell_x + 1,
+                        cell_z + 1,
+                        cell_y,
+                        self.cell_count_z,
+                        self.cell_count_y,
+                    )];
+                    let x1z1y1 = noise_columns[column_index(
+                        cell_x + 1,
+                        cell_z + 1,
+                        cell_y + 1,
+                        self.cell_count_z,
+                        self.cell_count_y,
+                    )];
+
+                    for y_offset in (0..self.cell_height).rev() {
+                        let y_fraction = y_offset as f64 / self.cell_height as f64;
+                        let block_y = (self.min_cell_y + cell_y) * self.cell_height + y_offset;
+                        let local_y = block_y - self.min_y;
+
+                        for x_offset in 0..self.cell_width {
+                            let x_fraction = x_offset as f64 / self.cell_width as f64;
+                            let local_x = cell_x * self.cell_width + x_offset;
+
+                            for z_offset in 0..self.cell_width {
+                                let z_fraction = z_offset as f64 / self.cell_width as f64;
+                                let density = lerp3(
+                                    y_fraction, x_fraction, z_fraction, x0z0y0, x0z0y1, x1z0y0,
+                                    x1z0y1, x0z1y0, x0z1y1, x1z1y0, x1z1y1,
+                                );
+                                let block_id = self.resolve_terrain_block(block_y, density);
+                                if block_id != AIR {
+                                    let local_z = cell_z * self.cell_width + z_offset;
+                                    chunk.set_block(local_x, local_y, local_z, block_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn create_noise_columns(&self, chunk_x: i32, chunk_z: i32) -> Vec<f64> {
+        let mut columns = vec![
+            0.0;
+            (self.cell_count_x + 1) as usize
+                * (self.cell_count_z + 1) as usize
+                * (self.cell_count_y + 1) as usize
+        ];
+        let cell_min_x = chunk_x * self.cell_count_x;
+        let cell_min_z = chunk_z * self.cell_count_z;
+        let noise_settings = self.settings.noise_settings();
+
+        for cell_x in 0..=self.cell_count_x {
+            for cell_z in 0..=self.cell_count_z {
+                let mut noise_values = vec![0.0; self.cell_count_y as usize + 1];
+                self.sampler.fill_noise_column(
+                    &mut noise_values,
+                    cell_min_x + cell_x,
+                    cell_min_z + cell_z,
+                    noise_settings,
+                    self.sea_level,
+                    self.min_cell_y,
+                    self.cell_count_y,
+                );
+
+                for (cell_y, value) in noise_values.into_iter().enumerate() {
+                    columns[column_index(
+                        cell_x,
+                        cell_z,
+                        cell_y as i32,
+                        self.cell_count_z,
+                        self.cell_count_y,
+                    )] = value;
+                }
+            }
+        }
+
+        columns
+    }
+
+    fn resolve_terrain_block(&self, y: i32, noise: f64) -> u8 {
+        let mut density = (noise / 200.0).clamp(-1.0, 1.0);
+        density = density / 2.0 - density * density * density / 24.0;
+        if density > 0.0 {
+            self.settings.default_block()
+        } else if y >= self.sea_level {
+            AIR
+        } else {
+            self.settings.default_fluid()
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct BiomeDensity {
     depth: f64,
@@ -484,6 +886,53 @@ fn clamped_lerp(start: f64, end: f64, delta: f64) -> f64 {
     }
 }
 
+fn block_buffer_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
+    ((local_y << 8) | (local_z << 4) | local_x) as usize
+}
+
+fn column_index(
+    cell_x: i32,
+    cell_z: i32,
+    cell_y: i32,
+    cell_count_z: i32,
+    cell_count_y: i32,
+) -> usize {
+    ((cell_x * (cell_count_z + 1) + cell_z) * (cell_count_y + 1) + cell_y) as usize
+}
+
+fn lerp(delta: f64, start: f64, end: f64) -> f64 {
+    start + delta * (end - start)
+}
+
+fn lerp2(delta_x: f64, delta_y: f64, x0_y0: f64, x1_y0: f64, x0_y1: f64, x1_y1: f64) -> f64 {
+    lerp(
+        delta_y,
+        lerp(delta_x, x0_y0, x1_y0),
+        lerp(delta_x, x0_y1, x1_y1),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lerp3(
+    delta_x: f64,
+    delta_y: f64,
+    delta_z: f64,
+    x0_y0_z0: f64,
+    x1_y0_z0: f64,
+    x0_y1_z0: f64,
+    x1_y1_z0: f64,
+    x0_y0_z1: f64,
+    x1_y0_z1: f64,
+    x0_y1_z1: f64,
+    x1_y1_z1: f64,
+) -> f64 {
+    lerp(
+        delta_z,
+        lerp2(delta_x, delta_y, x0_y0_z0, x1_y0_z0, x0_y1_z0, x1_y1_z0),
+        lerp2(delta_x, delta_y, x0_y0_z1, x1_y0_z1, x0_y1_z1, x1_y1_z1),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,6 +944,15 @@ mod tests {
     const DEPTH_NOISE_OCTAVES: [i32; 16] = [
         -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0,
     ];
+    const BEDROCK: u8 = 3;
+    const MOUNTAINS: NoiseBiome = NoiseBiome {
+        depth: 1.0_f32,
+        scale: 0.5_f32,
+    };
+    const TAIGA_MOUNTAINS: NoiseBiome = NoiseBiome {
+        depth: 0.30000001192092896_f32,
+        scale: 0.4000000059604645_f32,
+    };
 
     #[derive(Debug, Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -591,6 +1049,22 @@ mod tests {
         values: Vec<f64>,
     }
 
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct TerrainChunkOracleFixture {
+        module: String,
+        minecraft_version: String,
+        generator_class: String,
+        seed: String,
+        chunk_x: i32,
+        chunk_z: i32,
+        min_y: i32,
+        height: i32,
+        block_order: String,
+        palette: Vec<String>,
+        blocks: Vec<u8>,
+    }
+
     #[derive(Clone, Debug)]
     struct RepeatingPatternBiomeSource {
         width: usize,
@@ -621,6 +1095,21 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug)]
+    struct ChunkZeroZeroTerrainBiomeSource;
+
+    impl NoiseBiomeSource for ChunkZeroZeroTerrainBiomeSource {
+        fn get_noise_biome(&self, x: i32, _y: i32, z: i32) -> NoiseBiome {
+            if ((x == -2 || x == -1) && (3..=6).contains(&z))
+                || ((x == 0 || x == 1) && (4..=6).contains(&z))
+            {
+                MOUNTAINS
+            } else {
+                TAIGA_MOUNTAINS
+            }
+        }
+    }
+
     fn fixtures() -> Vec<NoiseSamplerFixture> {
         [
             include_str!("../../../../test/fixtures/noise/noise-sampler-overworld-seed-0.json"),
@@ -633,6 +1122,13 @@ mod tests {
         .into_iter()
         .map(|json| serde_json::from_str(json).expect("valid NoiseSampler fixture"))
         .collect()
+    }
+
+    fn terrain_fixture() -> TerrainChunkOracleFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0-terrain-only.json"
+        ))
+        .expect("valid terrain chunk oracle fixture")
     }
 
     fn create_noise_settings(fixture: &NoiseSamplerFixture) -> NoiseSettings {
@@ -689,6 +1185,20 @@ mod tests {
             depth_noise,
             NoiseModifier::Passthrough,
         )
+    }
+
+    fn terrain_stage_blocks_from_oracle(oracle: &TerrainChunkOracleFixture) -> Vec<u8> {
+        oracle
+            .blocks
+            .iter()
+            .map(|block_id| {
+                if *block_id == BEDROCK {
+                    STONE
+                } else {
+                    *block_id
+                }
+            })
+            .collect()
     }
 
     #[test]
@@ -763,6 +1273,82 @@ mod tests {
                     sample_set.columns.sample_count
                 );
             }
+        }
+    }
+
+    #[test]
+    fn default_overworld_settings_keep_dormant_caves_and_cliffs_flags_disabled() {
+        let settings = NoiseGeneratorSettings::overworld();
+        assert_eq!(settings.default_block(), STONE);
+        assert_eq!(settings.default_fluid(), WATER);
+        assert_eq!(settings.bedrock_floor_position(), 0);
+        assert_eq!(settings.sea_level(), 63);
+        assert!(!settings.is_aquifers_enabled());
+        assert!(!settings.is_noise_caves_enabled());
+        assert!(!settings.is_deepslate_enabled());
+        assert!(!settings.is_ore_veins_enabled());
+        assert!(!settings.is_noodle_caves_enabled());
+    }
+
+    #[test]
+    fn terrain_only_oracle_fixture_stays_pinned_to_generator_target() {
+        let oracle = terrain_fixture();
+        assert_eq!(oracle.module, "terrain-chunk");
+        assert_eq!(oracle.minecraft_version, "1.17.1");
+        assert_eq!(
+            oracle.generator_class,
+            "net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator"
+        );
+        assert_eq!(oracle.seed, "12345");
+        assert_eq!(oracle.chunk_x, 0);
+        assert_eq!(oracle.chunk_z, 0);
+        assert_eq!(oracle.min_y, 0);
+        assert_eq!(oracle.height, 256);
+        assert_eq!(oracle.block_order, "y-major,z-major,x-minor");
+        assert_eq!(
+            oracle.palette,
+            [
+                "minecraft:air",
+                "minecraft:stone",
+                "minecraft:water",
+                "minecraft:bedrock",
+            ]
+        );
+        assert_eq!(
+            oracle.blocks.len(),
+            CHUNK_WIDTH as usize * CHUNK_WIDTH as usize * 256
+        );
+    }
+
+    #[test]
+    fn fills_chunk_zero_zero_with_terrain_only_java_oracle() {
+        let oracle = terrain_fixture();
+        let generator = NoiseBasedChunkGenerator::new(
+            ChunkZeroZeroTerrainBiomeSource,
+            oracle.seed.parse::<i64>().expect("i64 fixture seed"),
+            NoiseGeneratorSettings::overworld(),
+        );
+        let chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+        let expected = terrain_stage_blocks_from_oracle(&oracle);
+
+        assert_eq!(chunk.chunk_x, oracle.chunk_x);
+        assert_eq!(chunk.chunk_z, oracle.chunk_z);
+        assert_eq!(chunk.min_y, oracle.min_y);
+        assert_eq!(chunk.height, oracle.height);
+        assert!(!chunk.blocks.contains(&BEDROCK));
+        assert_eq!(chunk.blocks.len(), expected.len());
+
+        for (index, (actual, expected)) in chunk.blocks.iter().zip(expected.iter()).enumerate() {
+            assert_eq!(
+                actual,
+                expected,
+                "terrain mismatch at local ({}, {}, {}): expected block id {}, got {}",
+                index & 15,
+                index >> 8,
+                (index >> 4) & 15,
+                expected,
+                actual
+            );
         }
     }
 
