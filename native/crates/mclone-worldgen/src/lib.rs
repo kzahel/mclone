@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod levelgen;
 pub mod noise;
 pub mod prng;
 
