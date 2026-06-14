@@ -1,0 +1,34 @@
+[workspace]
+members = [
+  "crates/mclone-assets",
+  "crates/mclone-client",
+  "crates/mclone-core",
+  "crates/mclone-light",
+  "crates/mclone-mesh",
+  "crates/mclone-net",
+  "crates/mclone-protocol",
+  "crates/mclone-render",
+  "crates/mclone-server",
+  "crates/mclone-worldgen",
+  "apps/mclone-dedicated-server",
+  "apps/mclone-native-client",
+  "apps/mclone-web-client",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.92"
+publish = false
+
+[workspace.dependencies]
+mclone-assets = { path = "crates/mclone-assets" }
+mclone-client = { path = "crates/mclone-client" }
+mclone-core = { path = "crates/mclone-core" }
+mclone-light = { path = "crates/mclone-light" }
+mclone-mesh = { path = "crates/mclone-mesh" }
+mclone-net = { path = "crates/mclone-net" }
+mclone-protocol = { path = "crates/mclone-protocol" }
+mclone-render = { path = "crates/mclone-render" }
+mclone-server = { path = "crates/mclone-server" }
+mclone-worldgen = { path = "crates/mclone-worldgen" }

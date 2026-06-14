@@ -1,0 +1,15 @@
+[package]
+name = "mclone-web-client"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+mclone-client.workspace = true
+mclone-render.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "mclone_web_client"
+path = "src/lib.rs"

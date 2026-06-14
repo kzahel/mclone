@@ -1,0 +1,13 @@
+[package]
+name = "mclone-protocol"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+mclone-core.workspace = true
+
+[lib]
+name = "mclone_protocol"
+path = "src/lib.rs"

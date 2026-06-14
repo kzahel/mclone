@@ -1,0 +1,15 @@
+[package]
+name = "mclone-server"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+mclone-light.workspace = true
+mclone-protocol.workspace = true
+mclone-worldgen.workspace = true
+
+[lib]
+name = "mclone_server"
+path = "src/lib.rs"

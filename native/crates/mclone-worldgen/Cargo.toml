@@ -1,0 +1,17 @@
+[package]
+name = "mclone-worldgen"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+mclone-core.workspace = true
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[lib]
+name = "mclone_worldgen"
+path = "src/lib.rs"
