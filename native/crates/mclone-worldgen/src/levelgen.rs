@@ -950,6 +950,7 @@ impl NoiseBasedChunkGenerator<OverworldBiomeSource> {
                     surface_value,
                     self.sea_level,
                     min_surface_level,
+                    self.seed,
                 );
             }
         }
@@ -1274,6 +1275,20 @@ mod tests {
         .expect("valid surface chunk oracle fixture")
     }
 
+    fn frozen_ocean_surface_fixture() -> TerrainChunkOracleFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks--247--247-surface-only.json"
+        ))
+        .expect("valid frozen ocean surface chunk oracle fixture")
+    }
+
+    fn badlands_surface_fixture() -> TerrainChunkOracleFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks--320-99-surface-only.json"
+        ))
+        .expect("valid badlands surface chunk oracle fixture")
+    }
+
     fn create_noise_settings(fixture: &NoiseSamplerFixture) -> NoiseSettings {
         let settings = &fixture.noise_settings;
         NoiseSettings::create(
@@ -1358,6 +1373,34 @@ mod tests {
                 actual
             );
         }
+    }
+
+    fn assert_surface_chunk_matches_java_oracle(oracle: TerrainChunkOracleFixture) {
+        assert_eq!(oracle.module, "surface-chunk");
+        assert_eq!(oracle.minecraft_version, "1.17.1");
+        assert_eq!(
+            oracle.generator_class,
+            "net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator"
+        );
+        assert_eq!(oracle.seed, "12345");
+        assert_eq!(oracle.min_y, 0);
+        assert_eq!(oracle.height, 256);
+        assert_eq!(oracle.block_order, "y-major,z-major,x-minor");
+
+        let seed = oracle.seed.parse::<i64>().expect("i64 fixture seed");
+        let generator = NoiseBasedChunkGenerator::new(
+            OverworldBiomeSource::new(seed, false, false),
+            seed,
+            NoiseGeneratorSettings::overworld(),
+        );
+        let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
+        generator.build_surface_and_bedrock(&mut chunk);
+
+        assert_eq!(chunk.chunk_x, oracle.chunk_x);
+        assert_eq!(chunk.chunk_z, oracle.chunk_z);
+        assert_eq!(chunk.min_y, oracle.min_y);
+        assert_eq!(chunk.height, oracle.height);
+        assert_chunk_blocks_match(&chunk.blocks, &oracle.blocks, oracle.min_y);
     }
 
     #[test]
@@ -1518,36 +1561,25 @@ mod tests {
     #[test]
     fn build_surface_and_bedrock_matches_java_oracle() {
         let oracle = surface_fixture();
-        assert_eq!(oracle.module, "surface-chunk");
-        assert_eq!(oracle.minecraft_version, "1.17.1");
-        assert_eq!(
-            oracle.generator_class,
-            "net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator"
-        );
-        assert_eq!(oracle.seed, "12345");
         assert_eq!(oracle.chunk_x, 0);
         assert_eq!(oracle.chunk_z, 0);
-        assert_eq!(oracle.min_y, 0);
-        assert_eq!(oracle.height, 256);
-        assert_eq!(oracle.block_order, "y-major,z-major,x-minor");
+        assert_surface_chunk_matches_java_oracle(oracle);
+    }
 
-        let generator = NoiseBasedChunkGenerator::new(
-            OverworldBiomeSource::new(
-                oracle.seed.parse::<i64>().expect("i64 fixture seed"),
-                false,
-                false,
-            ),
-            oracle.seed.parse::<i64>().expect("i64 fixture seed"),
-            NoiseGeneratorSettings::overworld(),
-        );
-        let mut chunk = generator.fill_from_noise(oracle.chunk_x, oracle.chunk_z);
-        generator.build_surface_and_bedrock(&mut chunk);
+    #[test]
+    fn build_frozen_ocean_surface_and_bedrock_matches_java_oracle() {
+        let oracle = frozen_ocean_surface_fixture();
+        assert_eq!(oracle.chunk_x, -247);
+        assert_eq!(oracle.chunk_z, -247);
+        assert_surface_chunk_matches_java_oracle(oracle);
+    }
 
-        assert_eq!(chunk.chunk_x, oracle.chunk_x);
-        assert_eq!(chunk.chunk_z, oracle.chunk_z);
-        assert_eq!(chunk.min_y, oracle.min_y);
-        assert_eq!(chunk.height, oracle.height);
-        assert_chunk_blocks_match(&chunk.blocks, &oracle.blocks, oracle.min_y);
+    #[test]
+    fn build_badlands_surface_and_bedrock_matches_java_oracle() {
+        let oracle = badlands_surface_fixture();
+        assert_eq!(oracle.chunk_x, -320);
+        assert_eq!(oracle.chunk_z, 99);
+        assert_surface_chunk_matches_java_oracle(oracle);
     }
 
     #[test]
