@@ -19,13 +19,14 @@ Landed:
 - server-side chunk holders, status slots, duplicate request coalescing, and unload publication
 - chunk holder residency, dirty save queue, native filesystem snapshot store, and reload through the server path
 - native TCP request/response transport, a sequential dedicated server loop, and native client remote chunk loading
+- browser runtime harness that exercises serialized client/server protocol updates, interest movement, unloads, and WebGPU smoke
 
 Still missing compared with the TypeScript engine:
 
-- no long-lived remote sessions or browser remote transport
+- no long-lived remote sessions or browser remote network transport
 - chunk scheduling is still synchronous and surface-stage only
 - persistence is a temporary snapshot format, not Anvil/NBT or browser storage
-- web/WASM has only a thin smoke gate, not a real browser runtime, browser transport, or render path
+- web/WASM has a runtime smoke gate, not browser storage, network transport, or render path
 - no vanilla asset/model/texture pipeline in the Rust renderer
 - no native lighting, liquids, movement, entities, or broad decorated-world parity
 
@@ -68,7 +69,7 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 | [`007-chunk-interest-status-scheduler.md`](007-chunk-interest-status-scheduler.md) | server runtime | **done** - interest-driven chunk requests, holder/status slots, coalesced synchronous generation, publishable chunk events | tests for duplicate request coalescing and status ordering |
 | [`008-native-persistence-and-residency.md`](008-native-persistence-and-residency.md) | storage/runtime | **done** - chunk residency, dirty/save queue shape, filesystem adapter scaffold, reload/resume hook | save/load roundtrip of generated chunk snapshots |
 | [`009-dedicated-server-and-remote-transport.md`](009-dedicated-server-and-remote-transport.md) | networking | **done** - `mclone-dedicated-server` serves the same protocol over a simple native transport; native client can join remotely | local two-process smoke or loopback integration |
-| `010-browser-runtime-parity.md` | web runtime | browser client uses the same `ClientRuntime` and protocol messages against local or remote host adapters, with browser storage/transport constraints visible | browser runtime smoke from client replica facts |
+| [`010-browser-runtime-parity.md`](010-browser-runtime-parity.md) | web runtime | **done** - browser client uses the same `ClientRuntime` and serialized protocol messages against a browser loopback host adapter, with browser storage/transport constraints visible | browser runtime smoke from client replica facts |
 | `011-block-registry-and-asset-source.md` | assets/data | vanilla block-state id registry, file/web asset sources, extracted asset loading boundaries | registry and native/web asset fixture tests |
 | `012-model-baking-and-atlas.md` | renderer assets | blockstate/model parse, model baking, texture atlas, material/render-layer facts | baked model/atlas tests plus native and browser textured-block smoke where available |
 | `013-vanilla-section-meshing.md` | mesh/render | client snapshot to section meshes using baked models, cutout/liquid layer separation, neighbor culling | headless rendered chunk from client snapshot with real textures |
@@ -84,9 +85,9 @@ Expect about 19 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should be `010-browser-runtime-parity.md`.
+The next implementation tactical should be `011-block-registry-and-asset-source.md`.
 
-That slice should make the Rust browser target more than a one-function smoke by keeping it on the same `ClientRuntime` and protocol path as native, while still respecting the web target's storage, transport, and WebGPU constraints.
+That slice should establish the vanilla block-state registry and native/web asset source boundary before textured section meshing, atlas construction, and render-layer work.
 
 ## Deferral Notes
 

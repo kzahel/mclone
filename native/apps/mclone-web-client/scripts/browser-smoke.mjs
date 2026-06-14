@@ -143,10 +143,19 @@ function assertSmokeResult(result, pageErrors) {
   if (!result.wasm?.report?.ok) {
     throw new Error(`wasm runtime report failed:\n${JSON.stringify(result.wasm, null, 2)}`);
   }
-  if (result.wasm.report.commandCount !== 1 || result.wasm.report.updateCount !== 1) {
+  if (
+    result.wasm.report.commandCount !== 2
+    || result.wasm.report.updateCount !== 3
+    || !result.wasm.report.protocolCodecRoundtrip
+  ) {
     throw new Error(`unexpected runtime message counts:\n${JSON.stringify(result.wasm.report, null, 2)}`);
   }
-  if (result.wasm.report.loadedChunkCount !== 1 || !result.wasm.report.centerChunkLoaded) {
+  if (
+    result.wasm.report.loadedChunkCount !== 1
+    || !result.wasm.report.centerChunkLoaded
+    || !result.wasm.report.movedChunkLoaded
+    || !result.wasm.report.previousChunkUnloaded
+  ) {
     throw new Error(`client replica did not load center chunk:\n${JSON.stringify(result.wasm.report, null, 2)}`);
   }
   if (!result.webGpu?.ok) {
