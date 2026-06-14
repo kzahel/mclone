@@ -1,4 +1,4 @@
-# Native0: Native Render Bring-Up And Validation
+# 000: Native Render Bring-Up And Validation
 
 Status: completed in `0f29a3b`.
 
@@ -8,7 +8,7 @@ Build the first native desktop render path and headless GPU validation path for 
 
 Primary native roadmap:
 
-- [`../native-rewrite-roadmap.md`](../native-rewrite-roadmap.md)
+- [`../../native-rewrite-roadmap.md`](../../native-rewrite-roadmap.md)
 
 Reference Rust engine:
 
@@ -106,4 +106,4 @@ Do not require manual user verification for the first GPU path. Headless capture
 
 Active follow-up:
 
-- [`Native1-one-chunk-render.md`](Native1-one-chunk-render.md)
+- [`001-one-generated-chunk-render.md`](001-one-generated-chunk-render.md)

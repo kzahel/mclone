@@ -6,6 +6,8 @@ See [`README.md`](README.md) for project context.
 
 For the native Rust rewrite, use the sibling engine at `~/code/playbox` as a reference for mature `winit`/`wgpu`, headless capture, diagnostics, and future desktop OpenXR patterns. Treat it as a pattern library only; do not depend on it directly, and do not copy its PhysX/VaM-specific runtime shape.
 
+Native Rust rewrite tactical docs live under `docs/tactical/native/` and use zero-padded numeric filenames such as `000-topic.md`, `001-next-topic.md`. Do not add new native workstream tacticals beside the legacy TypeScript/browser tacticals in `docs/tactical/`.
+
 ## Porting methodology — applies to every slice, worldgen and renderer
 
 Every class we port has a 1:1 counterpart in `reference/minecraft-1.17.1/src/`. **Always read the source file before writing the port.** The default is direct translation: same field names, same method names, same logic flow. Diverge only when the platform forces it.

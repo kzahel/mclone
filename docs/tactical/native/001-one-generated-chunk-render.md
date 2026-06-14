@@ -1,4 +1,4 @@
-# Native1: One Generated Chunk Render
+# 001: One Generated Chunk Render
 
 Status: completed.
 
@@ -6,14 +6,14 @@ Render one generated overworld chunk from the native Rust pipeline. This is the 
 
 ## Dependencies
 
-- [`Native0-native-render-bringup.md`](Native0-native-render-bringup.md)
-- [`../native-rewrite-roadmap.md`](../native-rewrite-roadmap.md)
+- [`000-native-render-bringup.md`](000-native-render-bringup.md)
+- [`../../native-rewrite-roadmap.md`](../../native-rewrite-roadmap.md)
 
 Use `~/code/playbox` only as a reference for `wgpu` buffer/pipeline/depth/headless patterns. Keep this slice specific to voxel rendering and do not import Playbox code or architecture.
 
 ## Coordinate Contract
 
-This slice must preserve the Native0 Minecraft world-space contract:
+This slice must preserve the `000` Minecraft world-space contract:
 
 - `+X` east
 - `+Y` up
@@ -75,4 +75,4 @@ cargo run -p mclone-native-client
 
 After one generated chunk renders:
 
-- [`Native2-multichunk-camera.md`](Native2-multichunk-camera.md)
+- [`002-multichunk-camera.md`](002-multichunk-camera.md)

@@ -2,6 +2,10 @@
 
 Numbered, short-lived implementation plans. Each covers a cohesive group of modules scoped to ~1–2 focused sessions of work. Strategy lives in [`../strategy.md`](../strategy.md); these are the sequenced "do this next" plans. For the non-tactical view of what is actually landed, what is still missing, and how worldgen should be prioritized, see [`../worldgen-status.md`](../worldgen-status.md). For vanilla chunk-status order, deterministic decoration finality, lighting gates, and publication gates, see [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md). For the narrower live status of classic overworld carvers, see [`../carver-status.md`](../carver-status.md). For vanilla overworld structure generation architecture and suggested implementation order, see [`../structures.md`](../structures.md). For runtime/host boundaries and durable data/protocol/loading contracts, see [`../architecture.md`](../architecture.md), [`../runtime-data-model.md`](../runtime-data-model.md), [`../protocol.md`](../protocol.md), and [`../loading-persistence.md`](../loading-persistence.md). For the WebGPU-only vanilla-shaped GUI architecture, see [`../gui.md`](../gui.md). For the vanilla client-replica source review that drives the active client runtime arc, see [`../minecraft-client-replica-research.md`](../minecraft-client-replica-research.md). For liquid simulation architecture, see [`../liquids.md`](../liquids.md). For paused high-rate movement constraints, see [`../player-movement-netcode.md`](../player-movement-netcode.md).
 
+## Native Rust Workstream
+
+Native-first Rust tacticals live under [`native/`](native/README.md) with zero-padded numeric filenames such as `000-native-render-bringup.md`. Keep new native rewrite tacticals there instead of adding them beside these legacy TypeScript/browser tacticals.
+
 ## Rule of thumb
 
 - **Plan only the next one in detail.** What we learn porting module N changes what N+1 should look like.

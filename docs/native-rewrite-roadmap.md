@@ -136,7 +136,7 @@ render via wgpu/web
 2. **Native minimal app**
 
    Add `winit` + `wgpu`, clear screen, camera/input, and one chunk. This becomes the main development loop.
-   The active tactical for the first step is [`tactical/Native0-native-render-bringup.md`](tactical/Native0-native-render-bringup.md).
+   The native tactical sequence starts at [`tactical/native/000-native-render-bringup.md`](tactical/native/000-native-render-bringup.md); the index is [`tactical/native/README.md`](tactical/native/README.md).
 
 3. **Web smoke very early**
 
