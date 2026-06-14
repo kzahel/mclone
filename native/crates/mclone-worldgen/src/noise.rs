@@ -6,6 +6,7 @@ const SIMPLEX_F2: f64 = 0.5 * (SQRT_3 - 1.0);
 const SIMPLEX_G2: f64 = (3.0 - SQRT_3) / 6.0;
 const SIMPLEX_F3: f64 = 0.333_333_333_333_333_3;
 const SIMPLEX_G3: f64 = 0.166_666_666_666_666_66;
+const ROUND_OFF: f64 = 33_554_432.0;
 const GRADIENTS: [[i32; 3]; 16] = [
     [1, 1, 0],
     [-1, 1, 0],
@@ -330,8 +331,162 @@ impl SimplexNoise {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct PerlinNoise {
+    noise_levels: Vec<Option<ImprovedNoise>>,
+    amplitudes: Vec<f64>,
+    lowest_freq_value_factor: f64,
+    lowest_freq_input_factor: f64,
+}
+
+impl PerlinNoise {
+    pub fn from_octaves(random: &mut SimpleRandomSource, octaves: &[i32]) -> Self {
+        let (first_octave, amplitudes) = make_amplitudes(octaves);
+        Self::new_with_amplitudes(random, first_octave, amplitudes)
+    }
+
+    pub fn create(random: &mut SimpleRandomSource, first_octave: i32, amplitudes: &[f64]) -> Self {
+        if amplitudes.is_empty() {
+            panic!("Need some amplitudes!");
+        }
+        Self::new_with_amplitudes(random, first_octave, amplitudes.to_vec())
+    }
+
+    fn new_with_amplitudes(
+        random: &mut SimpleRandomSource,
+        first_octave: i32,
+        amplitudes: Vec<f64>,
+    ) -> Self {
+        let base_noise = ImprovedNoise::new(random);
+        let size = amplitudes.len();
+        let zero_octave_index = -first_octave;
+        let mut noise_levels = vec![None; size];
+
+        if zero_octave_index >= 0 && (zero_octave_index as usize) < size {
+            let index = zero_octave_index as usize;
+            if amplitudes[index] != 0.0 {
+                noise_levels[index] = Some(base_noise);
+            }
+        }
+
+        for index in (0..zero_octave_index).rev() {
+            if (index as usize) < size {
+                if amplitudes[index as usize] != 0.0 {
+                    noise_levels[index as usize] = Some(ImprovedNoise::new(random));
+                } else {
+                    skip_octave(random);
+                }
+            } else {
+                skip_octave(random);
+            }
+        }
+
+        if zero_octave_index < size as i32 - 1 {
+            panic!("Positive octaves are temporarily disabled");
+        }
+
+        Self {
+            noise_levels,
+            amplitudes,
+            lowest_freq_input_factor: 2.0_f64.powi(-zero_octave_index),
+            lowest_freq_value_factor: 2.0_f64.powi(size as i32 - 1)
+                / (2.0_f64.powi(size as i32) - 1.0),
+        }
+    }
+
+    pub fn get_value(&self, x: f64, y: f64, z: f64) -> f64 {
+        self.get_value_scaled(x, y, z, 0.0, 0.0, false)
+    }
+
+    pub fn get_value_scaled(
+        &self,
+        x: f64,
+        y: f64,
+        z: f64,
+        y_scale: f64,
+        y_max: f64,
+        use_fixed_y: bool,
+    ) -> f64 {
+        let mut value = 0.0;
+        let mut input_factor = self.lowest_freq_input_factor;
+        let mut value_factor = self.lowest_freq_value_factor;
+
+        for (index, noise) in self.noise_levels.iter().enumerate() {
+            if let Some(noise) = noise {
+                let sample = noise.noise_scaled(
+                    Self::wrap(x * input_factor),
+                    if use_fixed_y {
+                        -noise.yo
+                    } else {
+                        Self::wrap(y * input_factor)
+                    },
+                    Self::wrap(z * input_factor),
+                    y_scale * input_factor,
+                    y_max * input_factor,
+                );
+                value += self.amplitudes[index] * sample * value_factor;
+            }
+
+            input_factor *= 2.0;
+            value_factor /= 2.0;
+        }
+
+        value
+    }
+
+    pub fn get_surface_noise_value(&self, x: f64, y: f64, z: f64, y_max: f64) -> f64 {
+        self.get_value_scaled(x, y, 0.0, z, y_max, false)
+    }
+
+    pub fn get_octave_noise(&self, octave: i32) -> Option<&ImprovedNoise> {
+        let index = self.noise_levels.len() as i32 - 1 - octave;
+        if index < 0 {
+            return None;
+        }
+        self.noise_levels
+            .get(index as usize)
+            .and_then(Option::as_ref)
+    }
+
+    pub fn wrap(value: f64) -> f64 {
+        value - floor_i64(value / ROUND_OFF + 0.5) as f64 * ROUND_OFF
+    }
+}
+
 fn floor(value: f64) -> i32 {
     value.floor() as i32
+}
+
+fn floor_i64(value: f64) -> i64 {
+    value.floor() as i64
+}
+
+fn skip_octave(random: &mut SimpleRandomSource) {
+    random.consume_count(262);
+}
+
+fn make_amplitudes(octaves: &[i32]) -> (i32, Vec<f64>) {
+    let mut unique_sorted_octaves = octaves.to_vec();
+    unique_sorted_octaves.sort_unstable();
+    unique_sorted_octaves.dedup();
+
+    if unique_sorted_octaves.is_empty() {
+        panic!("Need some octaves!");
+    }
+
+    let first = -unique_sorted_octaves[0];
+    let last = *unique_sorted_octaves.last().expect("non-empty octave set");
+    let total = first + last + 1;
+    if total < 1 {
+        panic!("Total number of octaves needs to be >= 1");
+    }
+
+    let mut amplitudes = vec![0.0; total as usize];
+    for octave in unique_sorted_octaves {
+        amplitudes[(octave + first) as usize] = 1.0;
+    }
+
+    (-first, amplitudes)
 }
 
 fn grad_dot(gradient_index: i32, x_factor: f64, y_factor: f64, z_factor: f64) -> f64 {
@@ -459,6 +614,26 @@ mod tests {
         values: Vec<f64>,
     }
 
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PerlinFixture {
+        module: String,
+        minecraft_version: String,
+        noise_class: String,
+        random_source_class: String,
+        random_source_alias: String,
+        noise_method: String,
+        grid_order: String,
+        seed: String,
+        sample_count: usize,
+        octaves: Vec<i32>,
+        wire_format: WireFormat,
+        x: Vec<f64>,
+        y: Vec<f64>,
+        z: Vec<f64>,
+        values: Vec<f64>,
+    }
+
     fn fixtures() -> Vec<NoiseFixture> {
         [
             include_str!("../../../../test/fixtures/noise/seed-0.json"),
@@ -481,6 +656,39 @@ mod tests {
         .into_iter()
         .map(|json| serde_json::from_str(json).expect("valid SimplexNoise fixture"))
         .collect()
+    }
+
+    fn perlin_fixture_sets() -> Vec<(&'static str, Vec<i32>, Vec<PerlinFixture>)> {
+        vec![
+            (
+                "[-7..0]",
+                vec![-7, -6, -5, -4, -3, -2, -1, 0],
+                [
+                    include_str!("../../../../test/fixtures/noise/perlin-seed-0-oct-m7-0.json"),
+                    include_str!("../../../../test/fixtures/noise/perlin-seed-1-oct-m7-0.json"),
+                    include_str!("../../../../test/fixtures/noise/perlin-seed-12345-oct-m7-0.json"),
+                    include_str!("../../../../test/fixtures/noise/perlin-seed-2151901553968352745-oct-m7-0.json"),
+                ]
+                .into_iter()
+                .map(|json| serde_json::from_str(json).expect("valid PerlinNoise [-7..0] fixture"))
+                .collect(),
+            ),
+            (
+                "[-15..0]",
+                vec![
+                    -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0,
+                ],
+                [
+                    include_str!("../../../../test/fixtures/noise/perlin-seed-0-oct-m15-0.json"),
+                    include_str!("../../../../test/fixtures/noise/perlin-seed-1-oct-m15-0.json"),
+                    include_str!("../../../../test/fixtures/noise/perlin-seed-12345-oct-m15-0.json"),
+                    include_str!("../../../../test/fixtures/noise/perlin-seed-2151901553968352745-oct-m15-0.json"),
+                ]
+                .into_iter()
+                .map(|json| serde_json::from_str(json).expect("valid PerlinNoise [-15..0] fixture"))
+                .collect(),
+            ),
+        ]
     }
 
     #[test]
@@ -650,5 +858,101 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn perlin_fixture_metadata_stays_consistent() {
+        for (_range_label, expected_octaves, fixtures) in perlin_fixture_sets() {
+            for fixture in fixtures {
+                assert_eq!(fixture.module, "noise");
+                assert_eq!(fixture.minecraft_version, "1.17.1");
+                assert_eq!(
+                    fixture.noise_class,
+                    "net.minecraft.world.level.levelgen.synth.PerlinNoise"
+                );
+                assert_eq!(
+                    fixture.random_source_class,
+                    "net.minecraft.world.level.levelgen.SimpleRandomSource"
+                );
+                assert_eq!(fixture.random_source_alias, "LegacyRandomSource");
+                assert_eq!(fixture.noise_method, "getValue(x,y,z)");
+                assert_eq!(fixture.grid_order, "x-major,y-major,z-minor");
+                assert_eq!(fixture.octaves, expected_octaves);
+                assert_eq!(fixture.wire_format.coordinates, "number");
+                assert_eq!(fixture.wire_format.values, "number");
+                assert_eq!(fixture.values.len(), fixture.sample_count);
+                assert_eq!(
+                    fixture.sample_count,
+                    fixture.x.len() * fixture.y.len() * fixture.z.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn perlin_matches_java_oracle_across_shared_sample_grid() {
+        for (range_label, _expected_octaves, fixtures) in perlin_fixture_sets() {
+            for fixture in fixtures {
+                let seed = fixture.seed.parse::<i64>().expect("i64 fixture seed");
+                let mut random = SimpleRandomSource::new(seed);
+                let noise = PerlinNoise::from_octaves(&mut random, &fixture.octaves);
+
+                let mut index = 0;
+                for x in &fixture.x {
+                    for y in &fixture.y {
+                        for z in &fixture.z {
+                            let actual = noise.get_value(*x, *y, *z);
+                            let expected = fixture.values[index];
+                            assert_eq!(
+                                actual.to_bits(),
+                                expected.to_bits(),
+                                "perlin(seed={}, octaves={range_label}) mismatch at index {index} for ({x}, {y}, {z}): expected {expected}, got {actual}",
+                                fixture.seed
+                            );
+                            index += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn perlin_default_get_value_delegates_to_explicit_default_arguments() {
+        let mut random = SimpleRandomSource::new(12_345);
+        let noise = PerlinNoise::from_octaves(&mut random, &[-7, -6, -5, -4, -3, -2, -1, 0]);
+        assert_eq!(
+            noise.get_value(0.5, -0.75, 1.25).to_bits(),
+            noise
+                .get_value_scaled(0.5, -0.75, 1.25, 0.0, 0.0, false)
+                .to_bits()
+        );
+    }
+
+    #[test]
+    fn perlin_surface_noise_value_preserves_java_argument_remapping() {
+        let mut random = SimpleRandomSource::new(12_345);
+        let noise = PerlinNoise::from_octaves(&mut random, &[-7, -6, -5, -4, -3, -2, -1, 0]);
+        assert_eq!(
+            noise
+                .get_surface_noise_value(0.5, -0.75, 1.25, 2.5)
+                .to_bits(),
+            noise
+                .get_value_scaled(0.5, -0.75, 0.0, 1.25, 2.5, false)
+                .to_bits()
+        );
+    }
+
+    #[test]
+    fn perlin_create_uses_explicit_amplitudes_instead_of_octave_presence() {
+        let mut explicit_random = SimpleRandomSource::new(12_345);
+        let explicit = PerlinNoise::create(&mut explicit_random, -3, &[1.0, 0.0, 2.0]);
+        let mut manual_random = SimpleRandomSource::new(12_345);
+        let manual = PerlinNoise::create(&mut manual_random, -3, &[1.0, 0.0, 2.0]);
+
+        assert_eq!(
+            explicit.get_value(0.25, -0.5, 0.75).to_bits(),
+            manual.get_value(0.25, -0.5, 0.75).to_bits()
+        );
     }
 }
