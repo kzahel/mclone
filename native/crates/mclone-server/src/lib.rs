@@ -2,12 +2,18 @@
 
 mod persistence;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::{sync::mpsc, thread};
 
 use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
 use mclone_worldgen::feature::{FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
-use mclone_worldgen::levelgen::generate_overworld_features_chunks;
+use mclone_worldgen::levelgen::{GeneratedChunk, generate_overworld_features_chunks};
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
 };
@@ -33,6 +39,12 @@ pub enum ChunkResidency {
     Generated,
     LoadedFromStore,
     Saved,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorldgenMailboxKind {
+    Inline,
+    NativeThread,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -195,6 +207,7 @@ pub struct ChunkScheduler {
     seed: i64,
     holders: BTreeMap<ChunkPos, ChunkHolder>,
     jobs: BTreeMap<ChunkJobId, ChunkStatusJob>,
+    worldgen_mailbox: WorldgenMailbox,
     dirty_chunks: BTreeSet<ChunkPos>,
     next_job_id: u64,
     next_revision: u64,
@@ -211,6 +224,7 @@ impl ChunkScheduler {
             seed,
             holders: BTreeMap::new(),
             jobs: BTreeMap::new(),
+            worldgen_mailbox: WorldgenMailbox::new(),
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
             next_revision: 1,
@@ -281,6 +295,10 @@ impl ChunkScheduler {
 
     pub fn job_count(&self) -> usize {
         self.jobs.len()
+    }
+
+    pub fn worldgen_mailbox_kind(&self) -> WorldgenMailboxKind {
+        self.worldgen_mailbox.kind()
     }
 
     pub fn save_dirty_chunks(&mut self) -> ChunkStoreResult<usize> {
@@ -382,7 +400,8 @@ impl ChunkScheduler {
 
             self.mark_job_state(job_id, ChunkJobState::Running);
             let mut generated =
-                generate_overworld_features_chunks(self.seed, to_generate.iter().copied());
+                self.worldgen_mailbox
+                    .generate_features(job_id, self.seed, &to_generate);
 
             for pos in to_generate {
                 let revision = ChunkRevision(self.next_revision);
@@ -476,6 +495,157 @@ impl ChunkScheduler {
         }
         Ok(())
     }
+}
+
+struct WorldgenMailbox {
+    backend: WorldgenMailboxBackend,
+}
+
+impl WorldgenMailbox {
+    fn new() -> Self {
+        Self {
+            backend: WorldgenMailboxBackend::new(),
+        }
+    }
+
+    fn generate_features(
+        &self,
+        job_id: ChunkJobId,
+        seed: i64,
+        targets: &[ChunkPos],
+    ) -> BTreeMap<ChunkPos, GeneratedChunk> {
+        self.backend.generate_features(job_id, seed, targets)
+    }
+
+    fn kind(&self) -> WorldgenMailboxKind {
+        self.backend.kind()
+    }
+}
+
+impl fmt::Debug for WorldgenMailbox {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WorldgenMailbox")
+            .field("backend", &self.backend)
+            .finish()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+struct WorldgenMailboxBackend;
+
+#[cfg(target_arch = "wasm32")]
+impl WorldgenMailboxBackend {
+    fn new() -> Self {
+        Self
+    }
+
+    fn kind(&self) -> WorldgenMailboxKind {
+        WorldgenMailboxKind::Inline
+    }
+
+    fn generate_features(
+        &self,
+        _job_id: ChunkJobId,
+        seed: i64,
+        targets: &[ChunkPos],
+    ) -> BTreeMap<ChunkPos, GeneratedChunk> {
+        generate_overworld_features_chunks(seed, targets.iter().copied())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct WorldgenMailboxBackend {
+    sender: mpsc::Sender<WorldgenRequest>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl fmt::Debug for WorldgenMailboxBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WorldgenMailboxBackend")
+            .field("kind", &"native-thread")
+            .field("worker_running", &self.worker.is_some())
+            .finish()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WorldgenMailboxBackend {
+    fn new() -> Self {
+        let (sender, receiver) = mpsc::channel::<WorldgenRequest>();
+        let worker = thread::Builder::new()
+            .name("mclone-worldgen".to_owned())
+            .spawn(move || {
+                while let Ok(request) = receiver.recv() {
+                    match request {
+                        WorldgenRequest::GenerateFeatures {
+                            job_id,
+                            seed,
+                            targets,
+                            respond_to,
+                        } => {
+                            let _job_id = job_id;
+                            let result =
+                                generate_overworld_features_chunks(seed, targets.iter().copied());
+                            let _ = respond_to.send(result);
+                        }
+                        WorldgenRequest::Shutdown => break,
+                    }
+                }
+            })
+            .expect("failed to spawn native worldgen worker");
+
+        Self {
+            sender,
+            worker: Some(worker),
+        }
+    }
+
+    fn kind(&self) -> WorldgenMailboxKind {
+        WorldgenMailboxKind::NativeThread
+    }
+
+    fn generate_features(
+        &self,
+        job_id: ChunkJobId,
+        seed: i64,
+        targets: &[ChunkPos],
+    ) -> BTreeMap<ChunkPos, GeneratedChunk> {
+        let (respond_to, receiver) = mpsc::channel();
+        self.sender
+            .send(WorldgenRequest::GenerateFeatures {
+                job_id,
+                seed,
+                targets: targets.to_vec(),
+                respond_to,
+            })
+            .expect("native worldgen worker stopped before receiving job");
+        receiver
+            .recv()
+            .expect("native worldgen worker stopped before returning job result")
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for WorldgenMailboxBackend {
+    fn drop(&mut self) {
+        let _ = self.sender.send(WorldgenRequest::Shutdown);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+enum WorldgenRequest {
+    GenerateFeatures {
+        job_id: ChunkJobId,
+        seed: i64,
+        targets: Vec<ChunkPos>,
+        respond_to: mpsc::Sender<BTreeMap<ChunkPos, GeneratedChunk>>,
+    },
+    Shutdown,
 }
 
 #[derive(Debug)]
@@ -619,6 +789,22 @@ mod tests {
     #[test]
     fn distinguishes_integrated_and_dedicated_modes() {
         assert_ne!(ServerMode::Integrated, ServerMode::Dedicated);
+    }
+
+    #[test]
+    fn chunk_scheduler_uses_platform_worldgen_mailbox() {
+        let scheduler = ChunkScheduler::new(12_345);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(
+            scheduler.worldgen_mailbox_kind(),
+            WorldgenMailboxKind::NativeThread
+        );
+        #[cfg(target_arch = "wasm32")]
+        assert_eq!(
+            scheduler.worldgen_mailbox_kind(),
+            WorldgenMailboxKind::Inline
+        );
     }
 
     #[test]
