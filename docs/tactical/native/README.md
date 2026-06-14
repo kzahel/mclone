@@ -17,3 +17,4 @@ Use zero-padded numeric prefixes for new native tactical docs: `000-topic.md`, `
 | [`008-native-persistence-and-residency.md`](008-native-persistence-and-residency.md) | completed | Chunk holder residency, dirty save queue, native filesystem snapshot store, and reload through the server path. |
 | [`009-dedicated-server-and-remote-transport.md`](009-dedicated-server-and-remote-transport.md) | completed | Native TCP request/response transport, dedicated server loop, and native client remote chunk loading. |
 | [`010-browser-runtime-parity.md`](010-browser-runtime-parity.md) | completed | Browser runtime harness, serialized loopback host adapter, movement/unload smoke, and WebGPU gate. |
+| [`011-block-registry-and-asset-source.md`](011-block-registry-and-asset-source.md) | completed | Resource locations, native/web asset sources, blockstate asset index, and current terrain block-state registry. |

@@ -38,5 +38,7 @@ mclone-render = { path = "crates/mclone-render" }
 mclone-server = { path = "crates/mclone-server" }
 mclone-worldgen = { path = "crates/mclone-worldgen" }
 pollster = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
 wgpu = { version = "25", features = ["metal", "vulkan", "vulkan-portability"] }
 winit = "0.30"

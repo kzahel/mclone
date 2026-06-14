@@ -7,7 +7,7 @@ pub const SECTION_HEIGHT: i32 = 16;
 pub const CHUNK_SECTION_VOLUME: usize = 4096;
 pub const AIR_BLOCK_STATE_ID: BlockStateId = BlockStateId(0);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct BlockStateId(pub u32);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]

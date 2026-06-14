@@ -1006,6 +1006,11 @@ dependencies = [
 [[package]]
 name = "mclone-assets"
 version = "0.0.0"
+dependencies = [
+ "mclone-core",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "mclone-client"

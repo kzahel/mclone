@@ -10,8 +10,8 @@ mclone-core.workspace = true
 sha2 = "0.10"
 
 [dev-dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["float_roundtrip"] }
+serde.workspace = true
+serde_json.workspace = true
 
 [lib]
 name = "mclone_worldgen"
