@@ -6,9 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
-use mclone_worldgen::levelgen::{
-    generate_overworld_features_chunk, generate_overworld_surface_chunk,
-};
+use mclone_worldgen::levelgen::generate_overworld_features_chunks;
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
 };
@@ -208,9 +206,7 @@ impl ChunkScheduler {
             }
         }
 
-        for pos in desired_chunks {
-            events.extend(self.schedule_chunk(pos, ChunkStatus::Features)?);
-        }
+        events.extend(self.schedule_feature_chunks(desired_chunks)?);
 
         Ok(events)
     }
@@ -254,109 +250,96 @@ impl ChunkScheduler {
         Ok(saved)
     }
 
-    fn schedule_chunk(
+    fn schedule_feature_chunks(
         &mut self,
-        pos: ChunkPos,
-        target_status: ChunkStatus,
+        desired_chunks: Vec<ChunkPos>,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let mut events = Vec::new();
-        self.holders
-            .entry(pos)
-            .or_insert_with(|| ChunkHolder::new(pos))
-            .target_status = Some(target_status);
+        let mut to_generate = Vec::new();
 
-        for status in status_path_to(target_status) {
-            if self
-                .holders
-                .get(&pos)
-                .expect("holder must exist before scheduling")
-                .has_ready_status(status)
-            {
-                continue;
-            }
+        for pos in desired_chunks {
+            self.holders
+                .entry(pos)
+                .or_insert_with(|| ChunkHolder::new(pos))
+                .target_status = Some(ChunkStatus::Features);
 
-            {
-                let holder = self
+            for status in status_path_to(ChunkStatus::Features) {
+                if self
                     .holders
-                    .get_mut(&pos)
-                    .expect("holder must exist before scheduling");
-                holder.mark_scheduled(status);
-            }
-            events.push(ChunkSchedulerEvent::StatusChanged {
-                pos,
-                status,
-                step: ChunkStatusStep::Scheduled,
-            });
-
-            if status == ChunkStatus::Surface && target_status == ChunkStatus::Surface {
-                if let Some(snapshot) = self.load_stored_snapshot(pos, target_status)? {
-                    self.mark_snapshot_ready(
-                        pos,
-                        snapshot.clone(),
-                        ChunkResidency::LoadedFromStore,
-                        false,
-                    );
-                    events.push(ChunkSchedulerEvent::StatusChanged {
-                        pos,
-                        status,
-                        step: ChunkStatusStep::Ready,
-                    });
-                    events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+                    .get(&pos)
+                    .expect("holder must exist before scheduling")
+                    .has_ready_status(status)
+                {
                     continue;
                 }
 
-                let revision = ChunkRevision(self.next_revision);
-                self.next_revision += 1;
-
-                let chunk = generate_overworld_surface_chunk(self.seed, pos.x, pos.z);
-                let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Surface);
-                self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
+                {
+                    let holder = self
+                        .holders
+                        .get_mut(&pos)
+                        .expect("holder must exist before scheduling");
+                    holder.mark_scheduled(status);
+                }
                 events.push(ChunkSchedulerEvent::StatusChanged {
                     pos,
                     status,
-                    step: ChunkStatusStep::Ready,
+                    step: ChunkStatusStep::Scheduled,
                 });
-                events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
-            } else if status == ChunkStatus::Features {
-                if let Some(snapshot) = self.load_stored_snapshot(pos, target_status)? {
-                    self.mark_snapshot_ready(
-                        pos,
-                        snapshot.clone(),
-                        ChunkResidency::LoadedFromStore,
-                        false,
-                    );
+
+                if status == ChunkStatus::Features {
+                    if let Some(snapshot) = self.load_stored_snapshot(pos, ChunkStatus::Features)? {
+                        self.mark_snapshot_ready(
+                            pos,
+                            snapshot.clone(),
+                            ChunkResidency::LoadedFromStore,
+                            false,
+                        );
+                        events.push(ChunkSchedulerEvent::StatusChanged {
+                            pos,
+                            status,
+                            step: ChunkStatusStep::Ready,
+                        });
+                        events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+                    } else {
+                        to_generate.push(pos);
+                    }
+                } else {
+                    let holder = self
+                        .holders
+                        .get_mut(&pos)
+                        .expect("holder must exist before marking ready");
+                    holder.mark_ready(status, None);
                     events.push(ChunkSchedulerEvent::StatusChanged {
                         pos,
                         status,
                         step: ChunkStatusStep::Ready,
                     });
-                    events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
-                    continue;
                 }
+            }
+        }
 
+        if !to_generate.is_empty() {
+            let mut generated =
+                generate_overworld_features_chunks(self.seed, to_generate.iter().copied());
+
+            for pos in to_generate {
                 let revision = ChunkRevision(self.next_revision);
                 self.next_revision += 1;
 
-                let chunk = generate_overworld_features_chunk(self.seed, pos.x, pos.z);
+                let chunk = generated.remove(&pos).unwrap_or_else(|| {
+                    panic!(
+                        "feature batch did not return scheduler target chunk ({}, {})",
+                        pos.x, pos.z
+                    )
+                });
                 let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
                 self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
                 events.push(ChunkSchedulerEvent::StatusChanged {
                     pos,
-                    status,
+                    status: ChunkStatus::Features,
                     step: ChunkStatusStep::Ready,
                 });
                 events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
-            } else {
-                let holder = self
-                    .holders
-                    .get_mut(&pos)
-                    .expect("holder must exist before marking ready");
-                holder.mark_ready(status, None);
-                events.push(ChunkSchedulerEvent::StatusChanged {
-                    pos,
-                    status,
-                    step: ChunkStatusStep::Ready,
-                });
             }
         }
 
@@ -739,7 +722,7 @@ mod tests {
                     pos: ChunkPos::new(0, 0)
                 },
                 ServerUpdate::ChunkSnapshot(
-                    generate_overworld_features_chunk(12_345, 1, 0)
+                    mclone_worldgen::levelgen::generate_overworld_features_chunk(12_345, 1, 0)
                         .to_chunk_snapshot(ChunkRevision(2), ChunkStatus::Features)
                 )
             ]

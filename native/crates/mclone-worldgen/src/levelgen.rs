@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::biome::OverworldBiomeSource;
 use crate::block::{
     AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER, generated_block_state_id,
@@ -1187,35 +1189,95 @@ pub fn generate_overworld_surface_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -
 }
 
 pub fn generate_overworld_features_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
+    let pos = ChunkPos::new(chunk_x, chunk_z);
+    generate_overworld_features_chunks(seed, [pos])
+        .remove(&pos)
+        .unwrap_or_else(|| {
+            panic!("feature batch did not return target chunk ({chunk_x}, {chunk_z})")
+        })
+}
+
+pub fn generate_overworld_features_chunks(
+    seed: i64,
+    targets: impl IntoIterator<Item = ChunkPos>,
+) -> BTreeMap<ChunkPos, GeneratedChunk> {
+    let plan = FeatureBatchPlan::new(targets);
+    if plan.targets.is_empty() {
+        return BTreeMap::new();
+    }
+
     let biome_source = OverworldBiomeSource::new(seed, false, false);
-    let dependency_radius = FEATURES_CHUNK_DEPENDENCY_RADIUS + FEATURES_WRITE_RADIUS_CUTOFF;
     let mut chunks = Vec::new();
-    for z in chunk_z - dependency_radius..=chunk_z + dependency_radius {
-        for x in chunk_x - dependency_radius..=chunk_x + dependency_radius {
-            chunks.push(generate_overworld_liquid_carved_buffer_with_biome_source(
-                seed,
-                x,
-                z,
-                biome_source.clone(),
-            ));
-        }
+    for pos in sorted_chunk_positions_z_major(plan.dependency_chunks.iter().copied()) {
+        chunks.push(generate_overworld_liquid_carved_buffer_with_biome_source(
+            seed,
+            pos.x,
+            pos.z,
+            biome_source.clone(),
+        ));
     }
-    let mut region = FeatureRegion::new(chunk_x, chunk_z, chunks);
+    let first_target = *plan.targets.iter().next().expect("non-empty targets");
+    let mut region = FeatureRegion::new(first_target.x, first_target.z, chunks);
 
-    for feature_z in chunk_z - FEATURES_WRITE_RADIUS_CUTOFF..=chunk_z + FEATURES_WRITE_RADIUS_CUTOFF
-    {
-        for feature_x in
-            chunk_x - FEATURES_WRITE_RADIUS_CUTOFF..=chunk_x + FEATURES_WRITE_RADIUS_CUTOFF
-        {
-            region.set_center(feature_x, feature_z);
-            apply_overworld_biome_decoration_to_region(seed, &biome_source, &mut region);
-        }
+    for center in sorted_chunk_positions_z_major(plan.feature_centers.iter().copied()) {
+        region.set_center(center.x, center.z);
+        apply_overworld_biome_decoration_to_region(seed, &biome_source, &mut region);
     }
 
-    let chunk = region.into_chunk(chunk_x, chunk_z).unwrap_or_else(|| {
-        panic!("feature region did not retain target chunk ({chunk_x}, {chunk_z})")
-    });
-    GeneratedChunk::from_mutable_buffer(chunk)
+    let mut generated = BTreeMap::new();
+    for target in plan.targets {
+        let chunk = region.remove_chunk(target.x, target.z).unwrap_or_else(|| {
+            panic!(
+                "feature region did not retain target chunk ({}, {})",
+                target.x, target.z
+            )
+        });
+        generated.insert(target, GeneratedChunk::from_mutable_buffer(chunk));
+    }
+    generated
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FeatureBatchPlan {
+    targets: BTreeSet<ChunkPos>,
+    feature_centers: BTreeSet<ChunkPos>,
+    dependency_chunks: BTreeSet<ChunkPos>,
+}
+
+impl FeatureBatchPlan {
+    fn new(targets: impl IntoIterator<Item = ChunkPos>) -> Self {
+        let targets = targets.into_iter().collect::<BTreeSet<_>>();
+        let mut feature_centers = BTreeSet::new();
+        let mut dependency_chunks = BTreeSet::new();
+
+        for target in &targets {
+            for dz in -FEATURES_WRITE_RADIUS_CUTOFF..=FEATURES_WRITE_RADIUS_CUTOFF {
+                for dx in -FEATURES_WRITE_RADIUS_CUTOFF..=FEATURES_WRITE_RADIUS_CUTOFF {
+                    feature_centers.insert(ChunkPos::new(target.x + dx, target.z + dz));
+                }
+            }
+        }
+
+        for center in &feature_centers {
+            for dz in -FEATURES_CHUNK_DEPENDENCY_RADIUS..=FEATURES_CHUNK_DEPENDENCY_RADIUS {
+                for dx in -FEATURES_CHUNK_DEPENDENCY_RADIUS..=FEATURES_CHUNK_DEPENDENCY_RADIUS {
+                    dependency_chunks.insert(ChunkPos::new(center.x + dx, center.z + dz));
+                }
+            }
+        }
+
+        Self {
+            targets,
+            feature_centers,
+            dependency_chunks,
+        }
+    }
+}
+
+fn sorted_chunk_positions_z_major(positions: impl IntoIterator<Item = ChunkPos>) -> Vec<ChunkPos> {
+    let mut positions = positions.into_iter().collect::<Vec<_>>();
+    positions.sort_by_key(|pos| (pos.z, pos.x));
+    positions
 }
 
 fn generate_overworld_surface_buffer(
@@ -2060,6 +2122,31 @@ mod tests {
 
         assert!(feature_block_count > 0);
         assert!(features.block_count(crate::block::LAVA) > 0);
+    }
+
+    #[test]
+    fn feature_batch_plan_reuses_overlapping_dependency_windows() {
+        let single = FeatureBatchPlan::new([ChunkPos::new(0, 0)]);
+        assert_eq!(single.targets.len(), 1);
+        assert_eq!(single.feature_centers.len(), 3 * 3);
+        assert_eq!(single.dependency_chunks.len(), 19 * 19);
+
+        let radius_one_targets = (-1..=1).flat_map(|z| (-1..=1).map(move |x| ChunkPos::new(x, z)));
+        let radius_one = FeatureBatchPlan::new(radius_one_targets);
+
+        assert_eq!(radius_one.targets.len(), 3 * 3);
+        assert_eq!(radius_one.feature_centers.len(), 5 * 5);
+        assert_eq!(radius_one.dependency_chunks.len(), 21 * 21);
+        assert!(
+            radius_one
+                .dependency_chunks
+                .contains(&ChunkPos::new(-10, -10))
+        );
+        assert!(
+            radius_one
+                .dependency_chunks
+                .contains(&ChunkPos::new(10, 10))
+        );
     }
 
     #[test]

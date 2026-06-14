@@ -77,6 +77,21 @@ This points to underground decoration/ore families as the largest exactness gap.
 - `full_decorated_chunk_zero_zero_matches_java_oracle` is an ignored exact-parity test that should be unignored when the gauntlet is expected to pass.
 - Native `FeatureRegion` mirrors the Java/TypeScript dependency/write-window shape with read radius `8`, write cutoff `1`, metrics, blocked far writes, and mutable multi-chunk access.
 - Native `generate_overworld_features_chunk(...)` now builds the union dependency window, runs surface plus air/liquid carvers for dependency chunks, and applies feature passes for the 3x3 centers that can write into the target chunk.
+- Native `generate_overworld_features_chunks(...)` batches multiple publish targets through one union dependency window. A 3x3 publish view now plans 25 feature-center passes over 441 dependency chunks instead of rebuilding nine separate 361-chunk windows.
+- The integrated server scheduler now batches missing `FEATURES` chunks per interest update before publishing snapshots. The `mclone-server` test suite dropped from roughly 52s to roughly 18s on this host.
+- The native radius-1 headless runtime capture dropped from just over 50s to roughly 14s on this host while producing the same framed decorated terrain output.
+
+## Reference Scheduler Notes
+
+Java 1.17.1 does not regenerate a dependency world per published chunk. The relevant shape is:
+
+- `ChunkHolder` owns one future slot per `ChunkStatus`.
+- `ChunkMap.schedule(...)` asks the parent status first, then calls `scheduleChunkGeneration(...)` only when generation is needed.
+- `ChunkMap.scheduleChunkGeneration(...)` calls `getChunkRangeFuture(center, status.getRange(), dependencyStatusFn)` to collect the required neighboring holder futures.
+- For `FEATURES`, `ChunkStatus.FEATURES` has range `8`, then constructs `WorldGenRegion(..., FEATURES, 1)` and calls `ChunkGenerator.applyBiomeDecoration(...)`.
+- Work is submitted through `worldgenMailbox` / `ChunkTaskPriorityQueueSorter`, so threading is layered on top of the holder/status dependency graph instead of replacing it.
+
+Native should follow that order: first make holder/status dependency ownership explicit and reusable, then move worldgen jobs to a worker pool/mailbox. Do not add ad hoc threads around direct chunk generation calls; that would parallelize duplicate work and make parity scheduling harder to reason about.
 
 ## Required Architecture
 
@@ -93,20 +108,23 @@ Native has the first version of this concept:
 - read access across the `FEATURES` dependency window
 - writes accepted only for the center chunk plus immediate neighbors
 - center exactness produced by running feature passes for the 3x3 chunks that can write into the target chunk
+- batched publish-target generation reuses the union dependency window for one interest update
 
 Still required:
 
 - lower-status dependency chunks available out to the feature read radius
 - post-feature heightmap updates and scheduled tick capture
-- scheduler-level dependency reuse instead of rebuilding the same dependency window per published chunk
+- durable holder/status futures or job records so dependency chunks can survive across ticks/interests instead of only within one batch call
+- worker-thread or mailbox execution for generation jobs after the ownership boundary is stable
 
 ## Next Steps
 
-1. Add scheduler support for the dependency window needed to publish one exact center chunk without regenerating the same neighbors repeatedly.
-2. Port underground decoration buckets visible in the full fixture: stone variants, deepslate/tuff, dirt/gravel disks, and ore placement.
-3. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
-4. Add post-feature heightmap updates and scheduled tick capture to the native region path.
-5. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
+1. Add durable scheduler job/future records for status generation, modeled after Java's holder future slots, so dependency chunks can be reused across ticks and adjacent interest updates.
+2. Add a native worker/mailbox boundary for batched worldgen jobs once holder/status ownership is explicit.
+3. Port underground decoration buckets visible in the full fixture: stone variants, deepslate/tuff, dirt/gravel disks, and ore placement.
+4. Replace placeholder tree/vegetation profiles with vanilla feature registries for the target chunk's biome path.
+5. Add post-feature heightmap updates and scheduled tick capture to the native region path.
+6. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
 
 ## Validation
 

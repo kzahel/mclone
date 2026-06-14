@@ -212,6 +212,10 @@ impl FeatureRegion {
         self.chunks.remove(&(chunk_x, chunk_z))
     }
 
+    pub fn remove_chunk(&mut self, chunk_x: i32, chunk_z: i32) -> Option<MutableChunkBlockBuffer> {
+        self.chunks.remove(&(chunk_x, chunk_z))
+    }
+
     fn get_chunk(&self, chunk_x: i32, chunk_z: i32) -> &MutableChunkBlockBuffer {
         self.ensure_within_dependency_window(chunk_x, chunk_z);
         self.chunks.get(&(chunk_x, chunk_z)).unwrap_or_else(|| {
