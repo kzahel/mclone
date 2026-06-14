@@ -51,7 +51,7 @@ Kept out:
 
 - full vanilla `TreeFeature`, `TrunkPlacer`, `FoliagePlacer`, `FeatureSize`, and tree decorators
 - biome-specific feature tables
-- full `LakeFeature`; water block facts already exist, but the current renderer still lacks a true liquid draw path
+- full `LakeFeature`; water block facts already existed, but the current renderer still lacked a true liquid draw path at this slice boundary. Default lakes landed later in `017-full-decorated-chunk-parity-gauntlet.md`.
 - feature spillover into neighboring chunks
 - ore, mushroom, seagrass, spring, disk, and structure feature families
 - oracle fixtures for decorated chunks
@@ -73,7 +73,7 @@ The starter tree is not a full Java tree port. It exists so the server/client/re
 
 Java decoration runs with a `WorldGenLevel`, chunk generator, heightmaps, biome generation settings, and cross-chunk write behavior. This slice runs against a single `MutableChunkBlockBuffer`. That is a runtime-scope divergence: it proves the feature boundary and visible snapshot path, but it does not claim decorated-chunk parity yet.
 
-Java `LakeFeature` was reviewed but not ported into the default feature list because water currently has no true liquid renderer in the native textured path. Adding invisible water lakes now would make validation less clear. Lake/water feature parity should follow after liquid rendering or in a dedicated water-feature slice with explicit visual expectations.
+Java `LakeFeature` was reviewed but not ported into the default feature list during this foundation slice because water had no true liquid renderer in the native textured path yet. Default lake parity later became necessary for tree spillover correctness and landed under `017-full-decorated-chunk-parity-gauntlet.md`.
 
 ## Validation
 

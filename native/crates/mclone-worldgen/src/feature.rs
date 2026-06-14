@@ -2,13 +2,13 @@ use std::{collections::BTreeMap, sync::OnceLock};
 
 use crate::biome::{BiomeDefinition, OverworldBiomeSource};
 use crate::block::{
-    AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, COAL_ORE, COPPER_ORE, DANDELION, DEAD_BUSH, DEEPSLATE,
-    DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE,
-    DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, DIRT,
-    FERN, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, IRON_ORE, LAPIS_ORE,
-    LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY,
-    RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SNOW, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA,
-    TUFF, WATER,
+    AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, COAL_ORE, COARSE_DIRT, COPPER_ORE, DANDELION,
+    DEAD_BUSH, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
+    DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
+    DIAMOND_ORE, DIORITE, DIRT, FERN, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
+    IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES, OAK_LOG,
+    PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SNOW, SPRUCE_LEAVES, SPRUCE_LOG,
+    STONE, TERRACOTTA, TUFF, WATER,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{
@@ -389,6 +389,17 @@ impl SimpleBlockConfiguration {
     pub const fn place_in(mut self, place_in: &'static [RawBlockId]) -> Self {
         self.place_in = place_in;
         self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LakeConfiguration {
+    pub state: RawBlockId,
+}
+
+impl LakeConfiguration {
+    pub const fn new(state: RawBlockId) -> Self {
+        Self { state }
     }
 }
 
@@ -805,6 +816,7 @@ impl OreConfiguration {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConfiguredFeature {
+    Lake(LakeConfiguration),
     SimpleBlock(SimpleBlockConfiguration),
     RandomPatch(RandomPatchConfiguration),
     GlowLichen(GlowLichenConfiguration),
@@ -816,6 +828,10 @@ pub enum ConfiguredFeature {
 }
 
 impl ConfiguredFeature {
+    pub const fn lake(config: LakeConfiguration) -> Self {
+        Self::Lake(config)
+    }
+
     pub const fn simple_block(config: SimpleBlockConfiguration) -> Self {
         Self::SimpleBlock(config)
     }
@@ -855,6 +871,7 @@ impl ConfiguredFeature {
         origin: BlockPos,
     ) -> bool {
         match self {
+            Self::Lake(config) => place_lake(world, random, origin, *config),
             Self::SimpleBlock(config) => place_simple_block(world, random, origin, *config),
             Self::RandomPatch(config) => place_random_patch(world, random, origin, *config),
             Self::GlowLichen(config) => place_glow_lichen(world, random, origin, *config),
@@ -1128,7 +1145,8 @@ pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature
         "minecraft:mushroom_fields" | "minecraft:mushroom_field_shore" => mushroom_field_features(),
         _ => default_land_features(),
     };
-    let mut features = default_underground_variety_features();
+    let mut features = default_lake_features(biome.key());
+    features.extend(default_underground_variety_features());
     features.extend(default_ore_features());
     features.append(&mut biome_features);
     features
@@ -1149,6 +1167,49 @@ fn plains_features() -> Vec<PlacedFeature> {
         flower_patch(DANDELION, 1),
         flower_patch(POPPY, 1),
     ]
+}
+
+fn default_lake_features(biome_key: &str) -> Vec<PlacedFeature> {
+    if matches!(
+        biome_key,
+        "minecraft:desert" | "minecraft:desert_hills" | "minecraft:desert_lakes"
+    ) {
+        vec![lava_lake_feature()]
+    } else {
+        vec![water_lake_feature(), lava_lake_feature()]
+    }
+}
+
+fn water_lake_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::Lakes,
+        ConfiguredFeature::lake(LakeConfiguration::new(WATER)),
+        vec![
+            ConfiguredDecorator::chance(4),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::range(HeightProvider::uniform(
+                VerticalAnchor::bottom(),
+                VerticalAnchor::top(),
+            )),
+        ],
+    )
+}
+
+fn lava_lake_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::Lakes,
+        ConfiguredFeature::lake(LakeConfiguration::new(LAVA)),
+        vec![
+            ConfiguredDecorator::chance(8),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::range(HeightProvider::biased_to_bottom(
+                VerticalAnchor::bottom(),
+                VerticalAnchor::top(),
+                8,
+            )),
+            ConfiguredDecorator::lava_lake(80),
+        ],
+    )
 }
 
 fn default_underground_variety_features() -> Vec<PlacedFeature> {
@@ -1513,6 +1574,171 @@ fn random_patch_feature(config: RandomPatchConfiguration, count: i32) -> PlacedF
             ConfiguredDecorator::square(),
         ],
     )
+}
+
+fn place_lake<W: FeatureWorld>(
+    world: &mut W,
+    random: &mut impl RandomSource,
+    origin: BlockPos,
+    config: LakeConfiguration,
+) -> bool {
+    let mut base = origin;
+    while base.y > world.min_y() + 5 && world.block_at_world(base) == Some(AIR) {
+        base.y -= 1;
+    }
+
+    if base.y <= world.min_y() + 4 {
+        return false;
+    }
+    base.y -= 4;
+
+    let mut carved = [false; 16 * 16 * 8];
+    let ellipsoid_count = random.next_int_bound(4) + 4;
+    for _ in 0..ellipsoid_count {
+        let radius_x = random.next_double() * 6.0 + 3.0;
+        let radius_y = random.next_double() * 4.0 + 2.0;
+        let radius_z = random.next_double() * 6.0 + 3.0;
+        let center_x = random.next_double() * (16.0 - radius_x - 2.0) + 1.0 + radius_x / 2.0;
+        let center_y = random.next_double() * (8.0 - radius_y - 4.0) + 2.0 + radius_y / 2.0;
+        let center_z = random.next_double() * (16.0 - radius_z - 2.0) + 1.0 + radius_z / 2.0;
+
+        for x in 1..15 {
+            for z in 1..15 {
+                for y in 1..7 {
+                    let normalized_x = (x as f64 - center_x) / (radius_x / 2.0);
+                    let normalized_y = (y as f64 - center_y) / (radius_y / 2.0);
+                    let normalized_z = (z as f64 - center_z) / (radius_z / 2.0);
+                    if normalized_x * normalized_x
+                        + normalized_y * normalized_y
+                        + normalized_z * normalized_z
+                        < 1.0
+                    {
+                        carved[lake_index(x, z, y)] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    for x in 0..16 {
+        for z in 0..16 {
+            for y in 0..8 {
+                if !lake_shell_cell(&carved, x, z, y) {
+                    continue;
+                }
+
+                let pos = BlockPos::new(base.x + x as i32, base.y + y as i32, base.z + z as i32);
+                let Some(block_id) = world.block_at_world(pos) else {
+                    return false;
+                };
+                if y >= 4 && is_lake_liquid(block_id) {
+                    return false;
+                }
+                if y < 4 && !lake_material_is_solid(block_id) && block_id != config.state {
+                    return false;
+                }
+            }
+        }
+    }
+
+    for x in 0..16 {
+        for z in 0..16 {
+            for y in 0..8 {
+                if carved[lake_index(x, z, y)] {
+                    let pos =
+                        BlockPos::new(base.x + x as i32, base.y + y as i32, base.z + z as i32);
+                    let replacement = if y >= 4 { AIR } else { config.state };
+                    world.set_block_world(pos, replacement);
+                }
+            }
+        }
+    }
+
+    for x in 0..16 {
+        for z in 0..16 {
+            for y in 4..8 {
+                if carved[lake_index(x, z, y)] {
+                    let below =
+                        BlockPos::new(base.x + x as i32, base.y + y as i32 - 1, base.z + z as i32);
+                    let sky_pos =
+                        BlockPos::new(base.x + x as i32, base.y + y as i32, base.z + z as i32);
+                    if world.block_at_world(below).is_some_and(is_lake_dirt)
+                        && has_lake_sky_light(world, sky_pos)
+                    {
+                        let replacement = if world.block_at_world(below) == Some(MYCELIUM) {
+                            MYCELIUM
+                        } else {
+                            GRASS_BLOCK
+                        };
+                        world.set_block_world(below, replacement);
+                    }
+                }
+            }
+        }
+    }
+
+    if config.state == LAVA {
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in 0..8 {
+                    if lake_shell_cell(&carved, x, z, y) && (y < 4 || random.next_int_bound(2) != 0)
+                    {
+                        let pos =
+                            BlockPos::new(base.x + x as i32, base.y + y as i32, base.z + z as i32);
+                        if world
+                            .block_at_world(pos)
+                            .is_some_and(lake_material_is_solid)
+                        {
+                            world.set_block_world(pos, STONE);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    true
+}
+
+fn lake_index(x: usize, z: usize, y: usize) -> usize {
+    (x * 16 + z) * 8 + y
+}
+
+fn lake_shell_cell(carved: &[bool; 16 * 16 * 8], x: usize, z: usize, y: usize) -> bool {
+    !carved[lake_index(x, z, y)]
+        && ((x < 15 && carved[lake_index(x + 1, z, y)])
+            || (x > 0 && carved[lake_index(x - 1, z, y)])
+            || (z < 15 && carved[lake_index(x, z + 1, y)])
+            || (z > 0 && carved[lake_index(x, z - 1, y)])
+            || (y < 7 && carved[lake_index(x, z, y + 1)])
+            || (y > 0 && carved[lake_index(x, z, y - 1)]))
+}
+
+fn is_lake_liquid(block_id: RawBlockId) -> bool {
+    matches!(block_id, WATER | LAVA)
+}
+
+fn lake_material_is_solid(block_id: RawBlockId) -> bool {
+    material_blocks_motion(block_id)
+}
+
+fn is_lake_dirt(block_id: RawBlockId) -> bool {
+    matches!(
+        block_id,
+        DIRT | GRASS_BLOCK | PODZOL | COARSE_DIRT | MYCELIUM
+    )
+}
+
+fn has_lake_sky_light<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
+    for y in pos.y + 1..world.min_y() + world.height() {
+        let Some(block_id) = world.block_at_world(BlockPos::new(pos.x, y, pos.z)) else {
+            return false;
+        };
+        if material_blocks_motion(block_id) {
+            return false;
+        }
+    }
+    true
 }
 
 fn place_simple_block<W: FeatureWorld>(
@@ -2805,6 +3031,53 @@ mod tests {
     }
 
     #[test]
+    fn biome_feature_tables_start_with_default_lakes() {
+        let plains = overworld_features_for_biome(get_layered_biome_by_id(1));
+        let desert = overworld_features_for_biome(get_layered_biome_by_id(2));
+
+        assert_eq!(plains[0].step, DecorationStep::Lakes);
+        assert_eq!(
+            plains[0].feature,
+            ConfiguredFeature::lake(LakeConfiguration::new(WATER))
+        );
+        assert_eq!(
+            plains[0].decorators,
+            vec![
+                ConfiguredDecorator::chance(4),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::range(HeightProvider::uniform(
+                    VerticalAnchor::bottom(),
+                    VerticalAnchor::top(),
+                )),
+            ]
+        );
+        assert_eq!(plains[1].step, DecorationStep::Lakes);
+        assert_eq!(
+            plains[1].feature,
+            ConfiguredFeature::lake(LakeConfiguration::new(LAVA))
+        );
+        assert_eq!(
+            plains[1].decorators,
+            vec![
+                ConfiguredDecorator::chance(8),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::range(HeightProvider::biased_to_bottom(
+                    VerticalAnchor::bottom(),
+                    VerticalAnchor::top(),
+                    8,
+                )),
+                ConfiguredDecorator::lava_lake(80),
+            ]
+        );
+
+        assert_eq!(desert[0].step, DecorationStep::Lakes);
+        assert_eq!(
+            desert[0].feature,
+            ConfiguredFeature::lake(LakeConfiguration::new(LAVA))
+        );
+    }
+
+    #[test]
     fn biome_feature_tables_start_with_default_underground_variety() {
         let plains = overworld_features_for_biome(get_layered_biome_by_id(1));
         let expected = [
@@ -2818,7 +3091,7 @@ mod tests {
         ];
 
         for (feature, (expected_block, expected_size, expected_count, max_y)) in
-            plains.iter().zip(expected)
+            plains.iter().skip(2).zip(expected)
         {
             assert_eq!(feature.step, DecorationStep::UndergroundOres);
             assert_eq!(
@@ -2912,7 +3185,7 @@ mod tests {
         ];
 
         for (feature, (stone_ore, deepslate_ore, size, count, height)) in
-            plains.iter().skip(7).zip(expected)
+            plains.iter().skip(9).zip(expected)
         {
             assert_eq!(feature.step, DecorationStep::UndergroundOres);
             let mut expected_decorators = Vec::new();
@@ -2948,7 +3221,7 @@ mod tests {
         let report = apply_overworld_biome_features(12_345, get_layered_biome_by_id(4), &mut chunk);
 
         assert_eq!(report.biome_key, "minecraft:forest");
-        assert_eq!(report.attempted_features, 20);
+        assert_eq!(report.attempted_features, 22);
         assert!(report.placed_features > 0);
         assert!(report.added_non_air_blocks > 0);
     }

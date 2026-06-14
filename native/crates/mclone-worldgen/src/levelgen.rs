@@ -2669,7 +2669,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "active gauntlet: native dependency terrain still lets north/south taiga trees survive"]
+    #[ignore = "active gauntlet: native still accepts south-side taiga tree candidates Java rejects"]
     fn taiga_full_table_tree_deltas_match_vanilla_scheduler_probe() {
         let diagnostics = taiga_full_table_tree_delta_diagnostics(12_345, ChunkPos::new(0, 0));
 

@@ -404,6 +404,7 @@ pub enum ConfiguredDecorator {
     Count(CountConfiguration),
     CountExtra(FrequencyWithExtraChanceDecoratorConfiguration),
     Chance(ChanceDecoratorConfiguration),
+    LavaLake(ChanceDecoratorConfiguration),
     Range(RangeDecoratorConfiguration),
     Spread32Above,
     Heightmap(HeightmapConfiguration),
@@ -434,6 +435,10 @@ impl ConfiguredDecorator {
 
     pub const fn chance(chance: i32) -> Self {
         Self::Chance(ChanceDecoratorConfiguration::new(chance))
+    }
+
+    pub const fn lava_lake(chance: i32) -> Self {
+        Self::LavaLake(ChanceDecoratorConfiguration::new(chance))
     }
 
     pub const fn range(height: HeightProvider) -> Self {
@@ -468,6 +473,7 @@ impl ConfiguredDecorator {
             Self::Count(config) => count_positions(context, random, config, pos),
             Self::CountExtra(config) => count_extra_positions(context, random, config, pos),
             Self::Chance(config) => chance_positions(context, random, config, pos),
+            Self::LavaLake(config) => lava_lake_positions(context, random, config, pos),
             Self::Range(config) => range_positions(context, random, config, pos),
             Self::Spread32Above => spread_32_above_positions(context, random, pos),
             Self::Heightmap(config) => heightmap_positions(context, random, config, pos),
@@ -535,6 +541,19 @@ pub fn chance_positions(
         vec![pos]
     } else {
         Vec::new()
+    }
+}
+
+pub fn lava_lake_positions(
+    _context: &DecorationContext,
+    random: &mut impl RandomSource,
+    _config: ChanceDecoratorConfiguration,
+    pos: BlockPos,
+) -> Vec<BlockPos> {
+    if pos.y >= 63 && random.next_int_bound(10) != 0 {
+        Vec::new()
+    } else {
+        vec![pos]
     }
 }
 
@@ -740,6 +759,36 @@ mod tests {
         );
         assert_eq!(accepted_random.get_count(), 1);
         assert_eq!(rejected_random.get_count(), 1);
+    }
+
+    #[test]
+    fn lava_lake_accepts_low_positions_and_filters_high_positions() {
+        let low_pos = BlockPos::new(POS.x, 62, POS.z);
+        let high_pos = BlockPos::new(POS.x, 72, POS.z);
+        let mut low_random = WorldgenRandom::new(12345);
+        let mut high_accepted_random = WorldgenRandom::new(0);
+        let mut high_rejected_random = WorldgenRandom::new(12345);
+
+        assert_eq!(
+            ConfiguredDecorator::lava_lake(80).get_positions(&CONTEXT, &mut low_random, low_pos),
+            vec![low_pos]
+        );
+        assert_eq!(
+            ConfiguredDecorator::lava_lake(80).get_positions(
+                &CONTEXT,
+                &mut high_accepted_random,
+                high_pos
+            ),
+            vec![high_pos]
+        );
+        assert!(
+            ConfiguredDecorator::lava_lake(80)
+                .get_positions(&CONTEXT, &mut high_rejected_random, high_pos)
+                .is_empty()
+        );
+        assert_eq!(low_random.get_count(), 0);
+        assert_eq!(high_accepted_random.get_count(), 1);
+        assert_eq!(high_rejected_random.get_count(), 1);
     }
 
     #[test]
