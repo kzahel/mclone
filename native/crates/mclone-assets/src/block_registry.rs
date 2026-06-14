@@ -343,6 +343,7 @@ fn normalized_rotation(value: i32) -> AssetResult<i32> {
 const EMPTY_PROPS: &[(&str, &str)] = &[];
 const SNOWY_FALSE: &[(&str, &str)] = &[("snowy", "false")];
 const AXIS_Y: &[(&str, &str)] = &[("axis", "y")];
+const LAYERS_1: &[(&str, &str)] = &[("layers", "1")];
 
 const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (0, "minecraft:air", EMPTY_PROPS),
@@ -353,6 +354,11 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (5, "minecraft:dirt", EMPTY_PROPS),
     (6, "minecraft:sand", EMPTY_PROPS),
     (7, "minecraft:gravel", EMPTY_PROPS),
+    (8, "minecraft:snow", LAYERS_1),
+    (9, "minecraft:lava", EMPTY_PROPS),
+    (10, "minecraft:granite", EMPTY_PROPS),
+    (11, "minecraft:diorite", EMPTY_PROPS),
+    (12, "minecraft:andesite", EMPTY_PROPS),
     (13, "minecraft:coarse_dirt", EMPTY_PROPS),
     (14, "minecraft:podzol", SNOWY_FALSE),
     (15, "minecraft:mycelium", SNOWY_FALSE),
@@ -376,6 +382,8 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (33, "minecraft:sandstone", EMPTY_PROPS),
     (34, "minecraft:red_sandstone", EMPTY_PROPS),
     (35, "minecraft:packed_ice", EMPTY_PROPS),
+    (36, "minecraft:obsidian", EMPTY_PROPS),
+    (37, "minecraft:magma_block", EMPTY_PROPS),
     (38, "minecraft:red_sand", EMPTY_PROPS),
     (39, "minecraft:ice", EMPTY_PROPS),
     (40, "minecraft:snow_block", EMPTY_PROPS),
@@ -401,7 +409,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 45);
+        assert_eq!(registry.len(), 52);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -429,6 +437,14 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:dead_bush"),
             Some(BlockStateId(51))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(8)).unwrap().canonical_key(),
+            "minecraft:snow[layers=1]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:magma_block"),
+            Some(BlockStateId(37))
         );
     }
 

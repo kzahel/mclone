@@ -2,6 +2,7 @@ use crate::biome::OverworldBiomeSource;
 use crate::block::{
     AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER, generated_block_state_id,
 };
+use crate::carver::{apply_overworld_air_carvers, apply_overworld_liquid_carvers};
 use crate::feature::apply_overworld_biome_decoration;
 use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
 use crate::prng::WorldgenRandom;
@@ -1190,6 +1191,8 @@ pub fn generate_overworld_features_chunk(seed: i64, chunk_x: i32, chunk_z: i32) 
         chunk_z,
         biome_source.clone(),
     );
+    apply_overworld_air_carvers(seed, &biome_source, &mut chunk);
+    apply_overworld_liquid_carvers(seed, &biome_source, &mut chunk);
     apply_overworld_biome_decoration(seed, &biome_source, &mut chunk);
     GeneratedChunk::from_mutable_buffer(chunk)
 }
@@ -1434,6 +1437,74 @@ mod tests {
         blocks: Vec<u8>,
     }
 
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FullChunkOracleFixture {
+        module: String,
+        minecraft_version: String,
+        seed: String,
+        generator: String,
+        generate_structures: bool,
+        wire_format: FullChunkWireFormatFixture,
+        chunks: Vec<FullChunkEntryFixture>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FullChunkWireFormatFixture {
+        block_order: String,
+        palette_entries: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FullChunkEntryFixture {
+        chunk_x: i32,
+        chunk_z: i32,
+        status: String,
+        sections: Vec<FullChunkSectionFixture>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FullChunkSectionFixture {
+        y: i32,
+        palette: Vec<String>,
+        block_order: String,
+        blocks: Vec<usize>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct FullChunkDiffReport {
+        total_blocks: usize,
+        matched_blocks: usize,
+        mismatched_blocks: usize,
+        top_mismatch_pairs: Vec<MismatchBucket>,
+        first_mismatches: Vec<BlockMismatch>,
+    }
+
+    impl FullChunkDiffReport {
+        fn is_exact(&self) -> bool {
+            self.mismatched_blocks == 0
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct MismatchBucket {
+        actual: String,
+        expected: String,
+        count: usize,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct BlockMismatch {
+        local_x: i32,
+        y: i32,
+        local_z: i32,
+        actual: String,
+        expected: String,
+    }
+
     #[derive(Clone, Debug)]
     struct RepeatingPatternBiomeSource {
         width: usize,
@@ -1504,6 +1575,13 @@ mod tests {
             "../../../../test/fixtures/integration/overworld-seed-12345-chunks--320-99-surface-only.json"
         ))
         .expect("valid badlands surface chunk oracle fixture")
+    }
+
+    fn full_chunk_fixture() -> FullChunkOracleFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/integration/overworld-seed-12345-chunks-0-0.json"
+        ))
+        .expect("valid full chunk oracle fixture")
     }
 
     fn create_noise_settings(fixture: &NoiseSamplerFixture) -> NoiseSettings {
@@ -1589,6 +1667,118 @@ mod tests {
                 expected,
                 actual
             );
+        }
+    }
+
+    fn compare_generated_chunk_to_full_fixture(
+        actual: &GeneratedChunk,
+        expected: &FullChunkEntryFixture,
+    ) -> FullChunkDiffReport {
+        let expected_blocks = expand_full_fixture_blocks(expected, actual.min_y, actual.height);
+        let actual_blocks = actual
+            .blocks()
+            .iter()
+            .map(|block_id| crate::block::block_name(*block_id).to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(actual_blocks.len(), expected_blocks.len());
+
+        let mut mismatch_counts = BTreeMap::<(String, String), usize>::new();
+        let mut first_mismatches = Vec::new();
+        let mut matched_blocks = 0;
+
+        for (index, (actual_name, expected_name)) in
+            actual_blocks.iter().zip(expected_blocks.iter()).enumerate()
+        {
+            if actual_name == expected_name {
+                matched_blocks += 1;
+                continue;
+            }
+
+            *mismatch_counts
+                .entry((actual_name.clone(), expected_name.clone()))
+                .or_default() += 1;
+            if first_mismatches.len() < 12 {
+                first_mismatches.push(block_mismatch_at_index(
+                    index,
+                    actual.min_y,
+                    actual_name.clone(),
+                    expected_name.clone(),
+                ));
+            }
+        }
+
+        let mut top_mismatch_pairs = mismatch_counts
+            .into_iter()
+            .map(|((actual, expected), count)| MismatchBucket {
+                actual,
+                expected,
+                count,
+            })
+            .collect::<Vec<_>>();
+        top_mismatch_pairs.sort_by(|left, right| {
+            right
+                .count
+                .cmp(&left.count)
+                .then_with(|| left.actual.cmp(&right.actual))
+                .then_with(|| left.expected.cmp(&right.expected))
+        });
+        top_mismatch_pairs.truncate(16);
+
+        FullChunkDiffReport {
+            total_blocks: actual_blocks.len(),
+            matched_blocks,
+            mismatched_blocks: actual_blocks.len() - matched_blocks,
+            top_mismatch_pairs,
+            first_mismatches,
+        }
+    }
+
+    fn expand_full_fixture_blocks(
+        fixture: &FullChunkEntryFixture,
+        min_y: i32,
+        height: i32,
+    ) -> Vec<String> {
+        let mut blocks = vec!["minecraft:air".to_owned(); height as usize * 16 * 16];
+
+        for section in &fixture.sections {
+            assert_eq!(section.block_order, "y-major,z-major,x-minor");
+            assert_eq!(section.blocks.len(), 16 * 16 * 16);
+            for (section_index, palette_index) in section.blocks.iter().copied().enumerate() {
+                let local_y_in_section = section_index as i32 / 256;
+                let within_layer = section_index as i32 % 256;
+                let local_x = within_layer & 15;
+                let local_z = (within_layer >> 4) & 15;
+                let y = section.y * 16 + local_y_in_section;
+                if !(min_y..min_y + height).contains(&y) {
+                    continue;
+                }
+                let block_name = section
+                    .palette
+                    .get(palette_index)
+                    .unwrap_or_else(|| {
+                        panic!("palette index {palette_index} outside section palette")
+                    })
+                    .clone();
+                let index = block_buffer_index(local_x, y - min_y, local_z);
+                blocks[index] = block_name;
+            }
+        }
+
+        blocks
+    }
+
+    fn block_mismatch_at_index(
+        index: usize,
+        min_y: i32,
+        actual: String,
+        expected: String,
+    ) -> BlockMismatch {
+        BlockMismatch {
+            local_x: (index & 15) as i32,
+            y: ((index >> 8) as i32) + min_y,
+            local_z: ((index >> 4) & 15) as i32,
+            actual,
+            expected,
         }
     }
 
@@ -1817,7 +2007,6 @@ mod tests {
 
     #[test]
     fn generated_features_chunk_adds_visible_decoration_blocks() {
-        let surface = generate_overworld_surface_chunk(12345, 0, 0);
         let features = generate_overworld_features_chunk(12345, 0, 0);
         let feature_block_count = features.block_count(crate::block::OAK_LOG)
             + features.block_count(crate::block::OAK_LEAVES)
@@ -1832,7 +2021,56 @@ mod tests {
             + features.block_count(crate::block::DEAD_BUSH);
 
         assert!(feature_block_count > 0);
-        assert!(features.non_air_block_count() > surface.non_air_block_count());
+        assert!(features.block_count(crate::block::LAVA) > 0);
+    }
+
+    #[test]
+    fn full_decorated_chunk_gauntlet_reports_current_native_gap() {
+        let fixture = full_chunk_fixture();
+        assert_eq!(fixture.module, "integration");
+        assert_eq!(fixture.minecraft_version, "1.17.1");
+        assert_eq!(fixture.seed, "12345");
+        assert_eq!(fixture.generator, "default");
+        assert!(!fixture.generate_structures);
+        assert_eq!(fixture.wire_format.block_order, "y-major,z-major,x-minor");
+        assert_eq!(fixture.wire_format.palette_entries, "resource-key");
+        assert_eq!(fixture.chunks.len(), 1);
+
+        let expected = &fixture.chunks[0];
+        assert_eq!(expected.chunk_x, 0);
+        assert_eq!(expected.chunk_z, 0);
+        assert_eq!(expected.status, "full");
+        let actual = generate_overworld_features_chunk(12_345, expected.chunk_x, expected.chunk_z);
+        let report = compare_generated_chunk_to_full_fixture(&actual, expected);
+
+        assert_eq!(report.total_blocks, 16 * 16 * 256);
+        assert!(report.matched_blocks < report.total_blocks);
+        assert!(report.mismatched_blocks > 0);
+        assert!(!report.top_mismatch_pairs.is_empty());
+        assert!(
+            report
+                .top_mismatch_pairs
+                .iter()
+                .any(|bucket| bucket.expected == "minecraft:coal_ore"
+                    || bucket.expected == "minecraft:cave_air"
+                    || bucket.expected == "minecraft:spruce_log"),
+            "expected current report to expose a known full-decoration gap: {report:#?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "active gauntlet: native full decorated chunk parity is not expected to pass yet"]
+    fn full_decorated_chunk_zero_zero_matches_java_oracle() {
+        let fixture = full_chunk_fixture();
+        let expected = &fixture.chunks[0];
+        let actual = generate_overworld_features_chunk(
+            fixture.seed.parse::<i64>().expect("fixture seed is i64"),
+            expected.chunk_x,
+            expected.chunk_z,
+        );
+        let report = compare_generated_chunk_to_full_fixture(&actual, expected);
+
+        assert!(report.is_exact(), "{report:#?}");
     }
 
     #[test]
