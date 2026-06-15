@@ -149,7 +149,9 @@ fn wait_for_server_jobs(
         if Instant::now() >= deadline {
             bail!("timed out waiting for dedicated server worldgen jobs");
         }
-        std::thread::sleep(Duration::from_millis(1));
+        if server.pending_publication_count() == 0 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 }
 

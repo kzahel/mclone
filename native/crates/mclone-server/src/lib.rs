@@ -910,6 +910,7 @@ pub struct ChunkScheduler {
     jobs: BTreeMap<ChunkJobId, ChunkStatusJob>,
     job_timings: BTreeMap<ChunkJobId, OverworldFeatureBatchTiming>,
     worldgen_mailbox: WorldgenMailbox,
+    pending_worldgen_publications: VecDeque<PendingWorldgenPublication>,
     dirty_chunks: BTreeSet<ChunkPos>,
     next_job_id: u64,
     next_revision: u64,
@@ -930,6 +931,7 @@ impl ChunkScheduler {
             jobs: BTreeMap::new(),
             job_timings: BTreeMap::new(),
             worldgen_mailbox: WorldgenMailbox::new(),
+            pending_worldgen_publications: VecDeque::new(),
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
             next_revision: 1,
@@ -1151,6 +1153,21 @@ impl ChunkScheduler {
             .values()
             .filter(|job| matches!(job.state, ChunkJobState::Queued | ChunkJobState::Running))
             .count()
+    }
+
+    pub fn pending_publication_count(&self) -> usize {
+        self.pending_worldgen_publications
+            .iter()
+            .map(|publication| {
+                self.jobs
+                    .get(&publication.completed.job_id)
+                    .map_or(0, |job| {
+                        job.target_chunks
+                            .len()
+                            .saturating_sub(publication.next_target_index)
+                    })
+            })
+            .sum()
     }
 
     pub fn worldgen_mailbox_kind(&self) -> WorldgenMailboxKind {
@@ -1971,11 +1988,26 @@ impl ChunkScheduler {
     }
 
     fn publish_completed_worldgen_jobs(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        let completed_jobs = self.worldgen_mailbox.drain_completed();
+        self.pending_worldgen_publications.extend(
+            self.worldgen_mailbox
+                .drain_completed()
+                .into_iter()
+                .map(PendingWorldgenPublication::new),
+        );
         let mut events = Vec::new();
+        let mut remaining_budget = DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET;
 
-        for completed in completed_jobs {
-            events.extend(self.publish_completed_feature_job(completed)?);
+        while remaining_budget > 0 {
+            let Some(publication) = self.pending_worldgen_publications.pop_front() else {
+                break;
+            };
+            let (mut published, pending) =
+                self.publish_completed_feature_job(publication, &mut remaining_budget)?;
+            events.append(&mut published);
+            if let Some(pending) = pending {
+                self.pending_worldgen_publications.push_front(pending);
+                break;
+            }
         }
 
         Ok(events)
@@ -1983,23 +2015,28 @@ impl ChunkScheduler {
 
     fn publish_completed_feature_job(
         &mut self,
-        completed: WorldgenCompletedJob,
-    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        let Some(job) = self.jobs.get(&completed.job_id).cloned() else {
-            return Ok(Vec::new());
+        mut publication: PendingWorldgenPublication,
+        remaining_budget: &mut usize,
+    ) -> ChunkStoreResult<(Vec<ChunkSchedulerEvent>, Option<PendingWorldgenPublication>)> {
+        let Some(job) = self.jobs.get(&publication.completed.job_id).cloned() else {
+            return Ok((Vec::new(), None));
         };
 
         let mut events = Vec::new();
-        let generated = completed.generated_chunks;
-        let retained_dependencies = completed.retained_dependencies;
+        let generated = &publication.completed.generated_chunks;
+        let retained_dependencies = &publication.completed.retained_dependencies;
 
-        for pos in job.target_chunks {
+        while publication.next_target_index < job.target_chunks.len() && *remaining_budget > 0 {
+            let pos = job.target_chunks[publication.next_target_index];
+            publication.next_target_index += 1;
+            *remaining_budget -= 1;
             let should_publish = self
                 .holders
                 .get(&pos)
                 .and_then(|holder| holder.status_slot(ChunkStatus::Features))
                 .is_some_and(|slot| {
-                    slot.job_id == Some(completed.job_id) && slot.step == ChunkStatusStep::Scheduled
+                    slot.job_id == Some(publication.completed.job_id)
+                        && slot.step == ChunkStatusStep::Scheduled
                 });
             if !should_publish {
                 continue;
@@ -2015,21 +2052,33 @@ impl ChunkScheduler {
                 )
             });
             events.extend(fluid_tick_events_from_generated_chunk(&chunk));
-            let light_neighbors = retained_dependencies
-                .iter()
-                .filter_map(|(neighbor_pos, buffer)| {
-                    provisional_sky_light_includes_chunk(pos, *neighbor_pos)
-                        .then_some((*neighbor_pos, buffer.blocks.as_slice()))
-                })
-                .chain(generated.iter().filter_map(|(neighbor_pos, chunk)| {
-                    provisional_sky_light_includes_chunk(pos, *neighbor_pos)
-                        .then_some((*neighbor_pos, chunk.blocks()))
-                }));
-            let snapshot = snapshot_with_provisional_lighting_from_neighbors(
-                chunk.to_chunk_snapshot(revision, ChunkStatus::Features),
-                chunk.blocks(),
-                light_neighbors,
-            );
+            let light_sections = publication
+                .completed
+                .light_sections
+                .get(&pos)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let light_neighbors = retained_dependencies
+                        .iter()
+                        .filter_map(|(neighbor_pos, buffer)| {
+                            provisional_sky_light_includes_chunk(pos, *neighbor_pos)
+                                .then_some((*neighbor_pos, buffer.blocks.as_slice()))
+                        })
+                        .chain(generated.iter().filter_map(|(neighbor_pos, chunk)| {
+                            provisional_sky_light_includes_chunk(pos, *neighbor_pos)
+                                .then_some((*neighbor_pos, chunk.blocks()))
+                        }));
+                    provisional_light_sections_from_neighbors(
+                        pos,
+                        chunk.min_y,
+                        chunk.height,
+                        chunk.blocks(),
+                        light_neighbors,
+                    )
+                });
+            let snapshot = chunk
+                .to_chunk_snapshot(revision, ChunkStatus::Features)
+                .with_light_sections(false, light_sections);
             self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
             events.push(ChunkSchedulerEvent::StatusChanged {
                 pos,
@@ -2049,11 +2098,16 @@ impl ChunkScheduler {
             }
         }
 
-        for dependency in retained_dependencies.into_values() {
+        if publication.next_target_index < job.target_chunks.len() {
+            return Ok((events, Some(publication)));
+        }
+
+        let completed = publication.completed;
+        for dependency in completed.retained_dependencies.into_values() {
             self.mark_dependency_ready(dependency);
         }
         self.mark_job_complete(completed.job_id, completed.cache_report, completed.timing);
-        Ok(events)
+        Ok((events, None))
     }
 
     fn create_feature_job(
@@ -2211,8 +2265,57 @@ struct WorldgenCompletedJob {
     job_id: ChunkJobId,
     generated_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
     retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+    light_sections: BTreeMap<ChunkPos, Vec<PackedLightSection>>,
     cache_report: OverworldFeatureDependencyCacheReport,
     timing: OverworldFeatureBatchTiming,
+}
+
+#[derive(Debug)]
+struct PendingWorldgenPublication {
+    completed: WorldgenCompletedJob,
+    next_target_index: usize,
+}
+
+impl PendingWorldgenPublication {
+    fn new(completed: WorldgenCompletedJob) -> Self {
+        Self {
+            completed,
+            next_target_index: 0,
+        }
+    }
+}
+
+fn precompute_completed_light_sections(
+    generated_chunks: &BTreeMap<ChunkPos, GeneratedChunk>,
+    retained_dependencies: &BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+    targets: &[ChunkPos],
+) -> BTreeMap<ChunkPos, Vec<PackedLightSection>> {
+    targets
+        .iter()
+        .filter_map(|pos| {
+            let chunk = generated_chunks.get(pos)?;
+            let light_neighbors = retained_dependencies
+                .iter()
+                .filter_map(|(neighbor_pos, buffer)| {
+                    provisional_sky_light_includes_chunk(*pos, *neighbor_pos)
+                        .then_some((*neighbor_pos, buffer.blocks.as_slice()))
+                })
+                .chain(generated_chunks.iter().filter_map(|(neighbor_pos, chunk)| {
+                    provisional_sky_light_includes_chunk(*pos, *neighbor_pos)
+                        .then_some((*neighbor_pos, chunk.blocks()))
+                }));
+            Some((
+                *pos,
+                provisional_light_sections_from_neighbors(
+                    *pos,
+                    chunk.min_y,
+                    chunk.height,
+                    chunk.blocks(),
+                    light_neighbors,
+                ),
+            ))
+        })
+        .collect()
 }
 
 struct WorldgenMailbox {
@@ -2289,10 +2392,16 @@ impl WorldgenMailboxBackend {
             targets.iter().copied(),
             dependencies,
         );
+        let light_sections = precompute_completed_light_sections(
+            &result.chunks,
+            &result.retained_dependencies,
+            targets,
+        );
         self.completed.push_back(WorldgenCompletedJob {
             job_id,
             generated_chunks: result.chunks,
             retained_dependencies: result.retained_dependencies,
+            light_sections,
             cache_report: result.cache_report,
             timing: result.timing,
         });
@@ -2348,11 +2457,17 @@ impl WorldgenMailboxBackend {
                                     targets.iter().copied(),
                                     dependencies,
                                 );
+                            let light_sections = precompute_completed_light_sections(
+                                &result.chunks,
+                                &result.retained_dependencies,
+                                &targets,
+                            );
                             if completion_sender
                                 .send(WorldgenCompletedJob {
                                     job_id,
                                     generated_chunks: result.chunks,
                                     retained_dependencies: result.retained_dependencies,
+                                    light_sections,
                                     cache_report: result.cache_report,
                                     timing: result.timing,
                                 })
@@ -2617,6 +2732,10 @@ impl IntegratedServer {
         self.scheduler.pending_job_count()
     }
 
+    pub fn pending_publication_count(&self) -> usize {
+        self.scheduler.pending_publication_count()
+    }
+
     pub fn wait_for_worldgen_completion(&mut self, timeout: Duration) -> bool {
         self.scheduler.wait_for_worldgen_completion(timeout)
     }
@@ -2637,8 +2756,7 @@ impl IntegratedServer {
         &mut self,
         interest: ChunkInterest,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        let mut events = self.scheduler.apply_interest(interest)?;
-        events.extend(self.scheduler.poll()?);
+        let events = self.scheduler.apply_interest(interest)?;
         Ok(self.apply_scheduler_events(events))
     }
 
@@ -2772,6 +2890,7 @@ pub const UNLOADED_CHUNK_LEVEL: i32 = MAX_CHUNK_DISTANCE + 1;
 const ENTITY_TICKING_RANGE: i32 = 2;
 const VANILLA_STATUS_AROUND_FULL_DISTANCE: i32 = 11;
 const DEFAULT_PENDING_UNLOAD_BUDGET: usize = 200;
+const DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET: usize = 1;
 const MAX_SCHEDULED_FLUID_TICKS_PER_TICK: usize = 65_536;
 const ALL_FLUID_DIRECTIONS: [FluidDirection; 6] = [
     FluidDirection::Down,
@@ -2862,30 +2981,42 @@ fn snapshot_with_provisional_lighting_from_neighbors<'a>(
     raw_blocks: &'a [RawBlockId],
     neighbor_blocks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
 ) -> ChunkSnapshot {
-    let expected_len = snapshot.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
+    let light_sections = provisional_light_sections_from_neighbors(
+        snapshot.pos,
+        snapshot.min_y,
+        snapshot.height,
+        raw_blocks,
+        neighbor_blocks,
+    );
+    snapshot.with_light_sections(false, light_sections)
+}
+
+fn provisional_light_sections_from_neighbors<'a>(
+    target_pos: ChunkPos,
+    min_y: i32,
+    height: i32,
+    raw_blocks: &'a [RawBlockId],
+    neighbor_blocks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
+) -> Vec<PackedLightSection> {
+    let expected_len = height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
     assert_eq!(
         raw_blocks.len(),
         expected_len,
         "chunk {:?} lighting input had {} blocks instead of {expected_len}",
-        snapshot.pos,
+        target_pos,
         raw_blocks.len()
     );
     let mut chunks = neighbor_blocks.into_iter().collect::<Vec<_>>();
-    chunks.push((snapshot.pos, raw_blocks));
-    let sky_sections = provisional_sky_light_sections_for_chunk(
-        snapshot.pos,
-        snapshot.min_y,
-        snapshot.height,
-        chunks.iter().copied(),
-    );
+    chunks.push((target_pos, raw_blocks));
+    let sky_sections =
+        provisional_sky_light_sections_for_chunk(target_pos, min_y, height, chunks.iter().copied());
     let block_sections = provisional_block_light_sections_for_chunk(
-        snapshot.pos,
-        snapshot.min_y,
-        snapshot.height,
+        target_pos,
+        min_y,
+        height,
         chunks.iter().copied(),
     );
-    let light_sections = merge_light_sections(sky_sections, block_sections);
-    snapshot.with_light_sections(false, light_sections)
+    merge_light_sections(sky_sections, block_sections)
 }
 
 #[cfg(test)]
@@ -3394,7 +3525,9 @@ mod tests {
             if scheduler.pending_job_count() == 0 {
                 return events;
             }
-            wait_for_scheduler_completion(scheduler);
+            if scheduler.pending_publication_count() == 0 {
+                wait_for_scheduler_completion(scheduler);
+            }
         }
         panic!("timed out waiting for scheduler worldgen jobs");
     }
@@ -3953,7 +4086,9 @@ mod tests {
             if server.pending_job_count() == 0 {
                 return Ok(updates);
             }
-            wait_for_server_completion(server);
+            if server.pending_publication_count() == 0 {
+                wait_for_server_completion(server);
+            }
         }
         panic!("timed out waiting for integrated server worldgen jobs");
     }
@@ -5446,6 +5581,39 @@ mod tests {
             9
         );
         assert_eq!(snapshot_ready_count(&ready_events_without_fluid), 1);
+    }
+
+    #[test]
+    fn chunk_scheduler_poll_slices_completed_publication() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler
+            .apply_interest(ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            })
+            .unwrap();
+        wait_for_scheduler_completion(&mut scheduler);
+
+        let first_events = scheduler.poll().unwrap();
+
+        assert_eq!(
+            scheduler.loaded_chunk_count(),
+            DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET
+        );
+        assert!(scheduler.pending_publication_count() > 0);
+        assert_eq!(scheduler.pending_job_count(), 1);
+        assert!(
+            without_fluid_tick_events(&first_events)
+                .iter()
+                .filter(|event| matches!(event, ChunkSchedulerEvent::StatusChanged { .. }))
+                .count()
+                <= DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET
+        );
+
+        poll_scheduler_until_idle(&mut scheduler);
+        assert_eq!(scheduler.pending_publication_count(), 0);
+        assert_eq!(scheduler.pending_job_count(), 0);
+        assert_eq!(scheduler.loaded_chunk_count(), 9);
     }
 
     #[test]

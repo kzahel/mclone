@@ -1104,6 +1104,7 @@ struct FrameBudgetProbeFrameReport {
     uploaded_indices: u32,
     loaded_chunks: usize,
     pending_jobs: usize,
+    pending_publications: usize,
     drawn_sections: usize,
     drawn_indices: u32,
 }
@@ -1129,6 +1130,7 @@ impl Default for FrameBudgetProbeFrameReport {
             uploaded_indices: 0,
             loaded_chunks: 0,
             pending_jobs: 0,
+            pending_publications: 0,
             drawn_sections: 0,
             drawn_indices: 0,
         }
@@ -1446,6 +1448,10 @@ impl FrameBudgetProbeReport {
             println!("      \"uploaded_indices\": {},", frame.uploaded_indices);
             println!("      \"loaded_chunks\": {},", frame.loaded_chunks);
             println!("      \"pending_jobs\": {},", frame.pending_jobs);
+            println!(
+                "      \"pending_publications\": {},",
+                frame.pending_publications
+            );
             println!("      \"drawn_sections\": {},", frame.drawn_sections);
             println!("      \"drawn_indices\": {}", frame.drawn_indices);
             println!("    }}{suffix}");
@@ -1795,6 +1801,7 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
             let stats = state.runtime.stats();
             report.loaded_chunks = stats.loaded_chunks;
             report.pending_jobs = stats.pending_jobs;
+            report.pending_publications = stats.pending_publications;
             report.drawn_sections = state.render_stats.drawn_section_count;
             report.drawn_indices = state.render_stats.drawn_index_count;
             frame_reports.push(report);
@@ -2302,6 +2309,7 @@ struct WindowRuntimeStats {
     interest_center: ChunkPos,
     loaded_chunks: usize,
     pending_jobs: usize,
+    pending_publications: usize,
     client_visible_chunks: usize,
     active_ticket_chunks: usize,
     pending_unload_chunks: usize,
@@ -2482,6 +2490,12 @@ impl WindowSceneRuntime {
             .map_or(0, IntegratedServer::pending_job_count)
     }
 
+    fn pending_publication_count(&self) -> usize {
+        self.server
+            .as_ref()
+            .map_or(0, IntegratedServer::pending_publication_count)
+    }
+
     fn stats(&self) -> WindowRuntimeStats {
         let scheduler_metrics = self
             .server
@@ -2491,6 +2505,7 @@ impl WindowSceneRuntime {
             interest_center: self.interest_center,
             loaded_chunks: self.client.loaded_chunk_count(),
             pending_jobs: self.pending_job_count(),
+            pending_publications: self.pending_publication_count(),
             client_visible_chunks: scheduler_metrics
                 .map_or(self.client.loaded_chunk_count(), |metrics| {
                     metrics.client_visible_chunks
@@ -2536,7 +2551,9 @@ fn poll_integrated_server_until_idle(server: &mut IntegratedServer) -> Result<Ve
         if Instant::now() >= deadline {
             bail!("timed out waiting for integrated server worldgen jobs");
         }
-        std::thread::sleep(Duration::from_millis(1));
+        if server.pending_publication_count() == 0 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 }
 
@@ -2555,7 +2572,9 @@ fn poll_window_runtime_until_idle(runtime: &mut WindowSceneRuntime) -> Result<(u
         if Instant::now() >= deadline {
             bail!("timed out waiting for window runtime worldgen jobs");
         }
-        std::thread::sleep(Duration::from_millis(1));
+        if runtime.pending_publication_count() == 0 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 }
 
@@ -3183,6 +3202,7 @@ impl DebugPaneStats {
                 self.runtime.client_visible_chunks,
                 self.runtime.pending_jobs
             ),
+            format!("STREAM PUB{}", self.runtime.pending_publications),
             format!(
                 "TICKING B{}:{} E{}:{}",
                 self.runtime.block_ticking_chunks,
@@ -4739,6 +4759,7 @@ mod tests {
                 interest_center: ChunkPos::new(3, -4),
                 loaded_chunks: 9,
                 pending_jobs: 1,
+                pending_publications: 2,
                 client_visible_chunks: 8,
                 active_ticket_chunks: 9,
                 pending_unload_chunks: 0,

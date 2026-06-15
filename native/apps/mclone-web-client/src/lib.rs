@@ -184,7 +184,7 @@ impl WebLoopbackHost {
                 break;
             }
             self.poll_server_updates(&mut protocol_codec_roundtrip)?;
-            if self.server.pending_job_count() > 0 {
+            if self.server.pending_job_count() > 0 && self.server.pending_publication_count() == 0 {
                 wait_for_worker_tick();
             }
         }
