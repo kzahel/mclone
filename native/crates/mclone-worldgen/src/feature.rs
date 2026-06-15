@@ -8,7 +8,7 @@ use crate::block::{
     DIAMOND_ORE, DIORITE, DIRT, FERN, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
     ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES,
     OAK_LOG, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SNOW, SPRUCE_LEAVES,
-    SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER, has_fluid, is_air_like, is_leaves,
+    SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER, block_name, has_fluid, is_air_like, is_leaves,
     material_blocks_motion,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
@@ -32,6 +32,16 @@ const TAIGA_GRASS_STATES: [WeightedBlockState; 2] = [
 const DEFAULT_FLOWER_STATES: [WeightedBlockState; 2] = [
     WeightedBlockState::new(POPPY, 2),
     WeightedBlockState::new(DANDELION, 1),
+];
+const WATER_SPRING_VALID_BLOCKS: [RawBlockId; 4] = [STONE, GRANITE, DIORITE, ANDESITE];
+const LAVA_SPRING_VALID_BLOCKS: [RawBlockId; 6] =
+    [STONE, GRANITE, DIORITE, ANDESITE, DEEPSLATE, TUFF];
+const SPRING_NEIGHBOR_DIRECTIONS: [Direction; 5] = [
+    Direction::West,
+    Direction::East,
+    Direction::North,
+    Direction::South,
+    Direction::Down,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -84,6 +94,7 @@ pub trait FeatureWorld {
     fn height_at(&mut self, heightmap: HeightmapType, world_x: i32, world_z: i32) -> Option<i32>;
     fn world_surface_height_at(&mut self, world_x: i32, world_z: i32) -> Option<i32>;
     fn set_block_world(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool;
+    fn schedule_liquid_tick_world(&mut self, _pos: BlockPos, _target: RawBlockId, _delay: i32) {}
 }
 
 pub(crate) trait FeatureBiomeResolver {
@@ -191,6 +202,18 @@ impl FeatureWorld for MutableChunkBlockBuffer {
         }
         self.set_block_at_y(local_x, pos.y, local_z, block_id);
         true
+    }
+
+    fn schedule_liquid_tick_world(&mut self, pos: BlockPos, target: RawBlockId, delay: i32) {
+        let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
+        let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
+        if !(0..CHUNK_WIDTH).contains(&local_x)
+            || !(self.min_y..self.min_y + self.height).contains(&pos.y)
+            || !(0..CHUNK_WIDTH).contains(&local_z)
+        {
+            return;
+        }
+        self.schedule_liquid_tick(pos.x, pos.y, pos.z, block_name(target), delay);
     }
 }
 
@@ -414,6 +437,21 @@ impl FeatureWorld for FeatureRegion {
         self.metrics.block_writes += 1;
         true
     }
+
+    fn schedule_liquid_tick_world(&mut self, pos: BlockPos, target: RawBlockId, delay: i32) {
+        let chunk_x = block_to_chunk_coord(pos.x);
+        let chunk_z = block_to_chunk_coord(pos.z);
+        self.ensure_within_dependency_window(chunk_x, chunk_z);
+        if !self.can_write_chunk(chunk_x, chunk_z) {
+            return;
+        }
+
+        let chunk = self.get_chunk_mut(chunk_x, chunk_z);
+        if !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y) {
+            return;
+        }
+        chunk.schedule_liquid_tick(pos.x, pos.y, pos.z, block_name(target), delay);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -453,6 +491,41 @@ pub struct LakeConfiguration {
 impl LakeConfiguration {
     pub const fn new(state: RawBlockId) -> Self {
         Self { state }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SpringConfiguration {
+    pub state: RawBlockId,
+    pub requires_block_below: bool,
+    pub rock_count: i32,
+    pub hole_count: i32,
+    pub valid_blocks: &'static [RawBlockId],
+}
+
+impl SpringConfiguration {
+    pub const fn new(
+        state: RawBlockId,
+        requires_block_below: bool,
+        rock_count: i32,
+        hole_count: i32,
+        valid_blocks: &'static [RawBlockId],
+    ) -> Self {
+        Self {
+            state,
+            requires_block_below,
+            rock_count,
+            hole_count,
+            valid_blocks,
+        }
+    }
+
+    pub const fn water() -> Self {
+        Self::new(WATER, true, 4, 1, &WATER_SPRING_VALID_BLOCKS)
+    }
+
+    pub const fn lava() -> Self {
+        Self::new(LAVA, true, 4, 1, &LAVA_SPRING_VALID_BLOCKS)
     }
 }
 
@@ -883,7 +956,9 @@ impl OreConfiguration {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConfiguredFeature {
+    Noop,
     Lake(LakeConfiguration),
+    Spring(SpringConfiguration),
     SimpleBlock(SimpleBlockConfiguration),
     RandomPatch(RandomPatchConfiguration),
     Flower(RandomPatchConfiguration),
@@ -897,8 +972,16 @@ pub enum ConfiguredFeature {
 }
 
 impl ConfiguredFeature {
+    pub const fn noop() -> Self {
+        Self::Noop
+    }
+
     pub const fn lake(config: LakeConfiguration) -> Self {
         Self::Lake(config)
+    }
+
+    pub const fn spring(config: SpringConfiguration) -> Self {
+        Self::Spring(config)
     }
 
     pub const fn simple_block(config: SimpleBlockConfiguration) -> Self {
@@ -959,7 +1042,9 @@ impl ConfiguredFeature {
         origin: BlockPos,
     ) -> bool {
         match self {
+            Self::Noop => false,
             Self::Lake(config) => place_lake(world, random, origin, *config),
+            Self::Spring(config) => place_spring(world, origin, *config),
             Self::SimpleBlock(config) => place_simple_block(world, random, origin, *config),
             Self::RandomPatch(config) => place_random_patch(world, random, origin, *config),
             Self::Flower(config) => place_flower(world, random, origin, *config),
@@ -1510,6 +1595,15 @@ fn taiga_features() -> Vec<PlacedFeature> {
         taiga_vegetation_feature(),
         default_flower_feature(),
         taiga_grass_patch_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        omitted_vegetal_feature(),
+        spring_water_feature(),
+        spring_lava_feature(),
+        omitted_vegetal_feature(),
     ]
 }
 
@@ -1573,6 +1667,14 @@ fn tree_feature(
             ConfiguredDecorator::count_extra(count, extra_chance, extra_count),
             ConfiguredDecorator::square(),
         ],
+    )
+}
+
+fn omitted_vegetal_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::noop(),
+        Vec::new(),
     )
 }
 
@@ -1682,12 +1784,46 @@ fn glow_lichen_feature() -> PlacedFeature {
     )
 }
 
+fn spring_water_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::spring(SpringConfiguration::water()),
+        vec![
+            ConfiguredDecorator::count(50),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::range(HeightProvider::biased_to_bottom(
+                VerticalAnchor::bottom(),
+                VerticalAnchor::below_top(8),
+                8,
+            )),
+        ],
+    )
+}
+
+fn spring_lava_feature() -> PlacedFeature {
+    PlacedFeature::new(
+        DecorationStep::VegetalDecoration,
+        ConfiguredFeature::spring(SpringConfiguration::lava()),
+        vec![
+            ConfiguredDecorator::count(20),
+            ConfiguredDecorator::square(),
+            ConfiguredDecorator::range(HeightProvider::very_biased_to_bottom(
+                VerticalAnchor::bottom(),
+                VerticalAnchor::below_top(8),
+                8,
+            )),
+        ],
+    )
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
 
     pub(crate) const CURRENT_TAIGA_VEGETATION_FEATURE_INDEX: i32 = 2;
     pub(crate) const JAVA_TAIGA_VEGETATION_FEATURE_INDEX: i32 = 2;
+    pub(crate) const JAVA_TAIGA_WATER_SPRING_FEATURE_INDEX: i32 = 11;
+    pub(crate) const JAVA_TAIGA_LAVA_SPRING_FEATURE_INDEX: i32 = 12;
 
     pub(crate) fn place_taiga_vegetation_with_feature_index<W: FeatureWorld>(
         seed: i64,
@@ -1922,6 +2058,61 @@ fn has_lake_sky_light<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
         }
     }
     true
+}
+
+fn place_spring<W: FeatureWorld>(
+    world: &mut W,
+    origin: BlockPos,
+    config: SpringConfiguration,
+) -> bool {
+    let above = offset_pos(origin, Direction::Up);
+    let below = offset_pos(origin, Direction::Down);
+    if !world
+        .block_at_world(above)
+        .is_some_and(|block_id| config.valid_blocks.contains(&block_id))
+    {
+        return false;
+    }
+    if config.requires_block_below
+        && !world
+            .block_at_world(below)
+            .is_some_and(|block_id| config.valid_blocks.contains(&block_id))
+    {
+        return false;
+    }
+
+    let Some(current) = world.block_at_world(origin) else {
+        return false;
+    };
+    if !is_air_like(current) && !config.valid_blocks.contains(&current) {
+        return false;
+    }
+
+    let mut rock_count = 0;
+    let mut hole_count = 0;
+    for direction in SPRING_NEIGHBOR_DIRECTIONS {
+        let neighbor = offset_pos(origin, direction);
+        let Some(block_id) = world.block_at_world(neighbor) else {
+            continue;
+        };
+        if config.valid_blocks.contains(&block_id) {
+            rock_count += 1;
+        }
+        if is_air_like(block_id) {
+            hole_count += 1;
+        }
+    }
+
+    if rock_count != config.rock_count || hole_count != config.hole_count {
+        return false;
+    }
+
+    if world.set_block_world(origin, config.state) {
+        world.schedule_liquid_tick_world(origin, config.state, 0);
+        true
+    } else {
+        false
+    }
 }
 
 fn place_simple_block<W: FeatureWorld>(
@@ -3031,6 +3222,36 @@ mod tests {
     }
 
     #[test]
+    fn spring_feature_places_fluid_and_schedules_liquid_tick() {
+        let mut chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        let origin = BlockPos::new(8, 8, 8);
+        for pos in [
+            BlockPos::new(8, 9, 8),
+            BlockPos::new(8, 7, 8),
+            BlockPos::new(7, 8, 8),
+            BlockPos::new(9, 8, 8),
+            BlockPos::new(8, 8, 7),
+        ] {
+            chunk.set_block_at_y(pos.x, pos.y, pos.z, STONE);
+        }
+        let mut random = WorldgenRandom::new(0);
+        let feature = ConfiguredFeature::spring(SpringConfiguration::water());
+
+        assert!(feature.place(&mut chunk, &mut random, origin));
+        assert_eq!(chunk.get_block_at_y(8, 8, 8), WATER);
+        assert_eq!(
+            chunk.liquid_ticks(),
+            &[crate::levelgen::ScheduledTick::new(
+                8,
+                8,
+                8,
+                "minecraft:water",
+                0
+            )]
+        );
+    }
+
+    #[test]
     fn random_patch_projects_to_surface_and_places_multiple_blocks() {
         let mut chunk = flat_grass_chunk();
         let before = chunk.non_air_block_count();
@@ -3485,6 +3706,58 @@ mod tests {
             }
             other => panic!("expected taiga grass random patch, got {other:?}"),
         }
+        assert_eq!(
+            vegetal_features[5..11]
+                .iter()
+                .filter(|feature| feature.feature == ConfiguredFeature::noop())
+                .count(),
+            6
+        );
+        assert!(
+            vegetal_features[5..11]
+                .iter()
+                .all(|feature| feature.decorators.is_empty())
+        );
+
+        let water_spring =
+            vegetal_features[test_support::JAVA_TAIGA_WATER_SPRING_FEATURE_INDEX as usize];
+        assert_eq!(
+            water_spring.feature,
+            ConfiguredFeature::spring(SpringConfiguration::water())
+        );
+        assert_eq!(
+            water_spring.decorators,
+            vec![
+                ConfiguredDecorator::count(50),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::range(HeightProvider::biased_to_bottom(
+                    VerticalAnchor::bottom(),
+                    VerticalAnchor::below_top(8),
+                    8,
+                )),
+            ]
+        );
+
+        let lava_spring =
+            vegetal_features[test_support::JAVA_TAIGA_LAVA_SPRING_FEATURE_INDEX as usize];
+        assert_eq!(
+            lava_spring.feature,
+            ConfiguredFeature::spring(SpringConfiguration::lava())
+        );
+        assert_eq!(
+            lava_spring.decorators,
+            vec![
+                ConfiguredDecorator::count(20),
+                ConfiguredDecorator::square(),
+                ConfiguredDecorator::range(HeightProvider::very_biased_to_bottom(
+                    VerticalAnchor::bottom(),
+                    VerticalAnchor::below_top(8),
+                    8,
+                )),
+            ]
+        );
+        assert_eq!(vegetal_features[13].feature, ConfiguredFeature::noop());
+        assert!(vegetal_features[13].decorators.is_empty());
     }
 
     #[test]
