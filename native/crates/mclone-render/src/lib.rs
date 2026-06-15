@@ -4,6 +4,7 @@
 mod gpu_util;
 
 pub mod chunk;
+pub mod target;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod headless;

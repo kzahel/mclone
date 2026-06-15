@@ -1707,16 +1707,15 @@ impl ApplicationHandler for ChunkApp {
                     else {
                         return;
                     };
-                    surface.render_with(|_device, queue, encoder, color_view, size| {
-                        let render_view = camera.render_view(size[0], size[1]);
-                        let render_target = ChunkRenderTarget::new(
-                            color_view,
-                            &depth.view,
-                            size,
+                    surface.render_with(|frame| {
+                        let render_view =
+                            camera.render_view(frame.target.size[0], frame.target.size[1]);
+                        let render_target = ChunkRenderTarget::from_frame_target(
+                            frame.target.with_depth(&depth.view),
                             mclone_render::default_clear_color(),
-                        );
+                        )?;
                         let frame_stats =
-                            draw.render(queue, encoder, render_target, render_view)?;
+                            draw.render(frame.queue, frame.encoder, render_target, render_view)?;
                         frame_render_stats = Some(frame_stats);
                         Ok(())
                     })

@@ -5,6 +5,7 @@ use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
 use crate::gpu_util::{native_backends, optional_gpu_features};
+use crate::target::{RenderFrameContext, RenderFrameTarget};
 
 const INITIAL_PRESENT_MODE: wgpu::PresentMode = wgpu::PresentMode::Fifo;
 const SURFACE_FORMAT_OVERRIDE_ENV: &str = "MCLONE_FORCE_SURFACE_FORMAT";
@@ -93,33 +94,29 @@ impl NativeSurfaceContext {
     }
 
     pub fn render_clear(&mut self, color: wgpu::Color) -> Result<SurfaceFrameStatus> {
-        self.render_with(|_device, _queue, encoder, view, _size| {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("mclone_native_clear_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
+        self.render_with(|frame| {
+            let _pass = frame
+                .encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("mclone_native_clear_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: frame.target.color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(color),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
             Ok(())
         })
     }
 
     pub fn render_with<F>(&mut self, encode: F) -> Result<SurfaceFrameStatus>
     where
-        F: FnOnce(
-            &wgpu::Device,
-            &wgpu::Queue,
-            &mut wgpu::CommandEncoder,
-            &wgpu::TextureView,
-            [u32; 2],
-        ) -> Result<()>,
+        F: FnOnce(RenderFrameContext<'_>) -> Result<()>,
     {
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
@@ -140,13 +137,14 @@ impl NativeSurfaceContext {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("mclone_native_frame_encoder"),
             });
-        encode(
+        let target =
+            RenderFrameTarget::color(&view, [self.config.width.max(1), self.config.height.max(1)]);
+        encode(RenderFrameContext::new(
             &self.device,
             &self.queue,
             &mut encoder,
-            &view,
-            [self.config.width, self.config.height],
-        )?;
+            target,
+        ))?;
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         Ok(SurfaceFrameStatus::Presented)

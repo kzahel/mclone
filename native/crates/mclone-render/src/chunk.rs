@@ -8,6 +8,8 @@ use mclone_mesh::{
 };
 use wgpu::util::DeviceExt;
 
+use crate::target::RenderFrameTarget;
+
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
 const VERTEX_FLOAT_COUNT: usize = 7;
@@ -189,6 +191,21 @@ impl<'a> ChunkRenderTarget<'a> {
             clear_color,
             clear_depth: 1.0,
         }
+    }
+
+    pub fn from_frame_target(
+        target: RenderFrameTarget<'a>,
+        clear_color: wgpu::Color,
+    ) -> Result<Self> {
+        let depth_view = target
+            .depth_view
+            .context("chunk render target requires a depth attachment")?;
+        Ok(Self::new(
+            target.color_view,
+            depth_view,
+            target.size,
+            clear_color,
+        ))
     }
 }
 

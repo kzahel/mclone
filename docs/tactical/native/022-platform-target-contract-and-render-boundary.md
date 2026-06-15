@@ -1,6 +1,6 @@
 # 022: Platform Target Contract And Render Boundary
 
-Status: active near-term defensive slice. The first renderer boundary pass is landed; keep follow-up work small and validation-backed.
+Status: active near-term defensive slice. The renderer target and host frame boundary passes are landed; keep follow-up work small and validation-backed.
 
 ## Purpose
 
@@ -44,11 +44,21 @@ Add small renderer data types and thread them through the existing chunk render 
 - Chunk draw resources own reusable GPU draw state only: pipelines, uploaded meshes/sections, and texture atlas bindings. They do not allocate or resize window-shaped attachments.
 - This is still a single-view renderer. XR should later feed one `ChunkRenderView`/`ChunkRenderTarget` pair per eye instead of asking the renderer to understand OpenXR sessions.
 
+## Host Frame Contract
+
+- `RenderFrameTarget` is the generic host-acquired target description. It carries a color view, optional depth view, and size. It does not know about `winit`, Android surfaces, OpenXR swapchains, browser canvases, or headless readback.
+- `RenderFrameContext` carries the `wgpu` device, queue, command encoder, and `RenderFrameTarget` for a single frame encode.
+- `NativeSurfaceContext::render_with` now passes a `RenderFrameContext` instead of a desktop-shaped tuple. Headless offscreen rendering builds the same context from `OffscreenTarget`.
+- `ChunkRenderTarget::from_frame_target` is the chunk renderer's stricter adapter: it requires a depth attachment and adds chunk-specific clear state.
+- A future flat Android host should acquire one color view, own/resize one depth target, build one `RenderFrameContext`, and drive the same chunk render call.
+- A future XR host should acquire one color view per eye from its XR swapchain, pair each with the matching depth target, and feed one `ChunkRenderView` plus one `RenderFrameTarget` per eye. OpenXR session/swapchain ownership stays outside shared renderer code.
+
 ## Current Boundary Checks
 
 Feature work should preserve these checks:
 
 - A render call must be driveable from both a swapchain color view and an offscreen color view.
+- Surface/offscreen acquisition should expose `RenderFrameContext`; feature code should not grow new callback tuples of raw target parameters.
 - Depth attachment size/lifetime belongs to the host target path. Adding another host target must not require changing draw-resource constructors.
 - Culling consumes `ChunkRenderView`, not a desktop window size or desktop camera.
 - New camera-dependent render features should add facts to `ChunkRenderView` instead of reaching back into `ChunkCamera`.
@@ -81,11 +91,11 @@ Required for the first implementation slice:
 ```bash
 cargo test --workspace
 cargo check -p mclone-web-client --target wasm32-unknown-unknown
-cargo run -p mclone-native-client -- --headless-chunk /tmp/mclone-platform-depth-boundary-chunk.png --width 960 --height 640 --chunk-radius 1
+cargo run -p mclone-native-client -- --headless-chunk /tmp/mclone-platform-host-contract-chunk.png --width 960 --height 640 --chunk-radius 1
 git diff --check
 ```
 
-Inspect `/tmp/mclone-platform-depth-boundary-chunk.png`. It should match the pre-refactor framing closely enough that any difference is explainable by intentional camera math cleanup, not by blank output, clipped terrain, or changed draw order.
+Inspect `/tmp/mclone-platform-host-contract-chunk.png`. It should match the pre-refactor framing closely enough that any difference is explainable by intentional camera math cleanup, not by blank output, clipped terrain, or changed draw order.
 
 ## Follow-Up Trigger
 

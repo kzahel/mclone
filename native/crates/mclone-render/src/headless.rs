@@ -9,6 +9,7 @@ use crate::chunk::{
     TexturedChunkDrawResources, TexturedSectionDrawResources,
 };
 use crate::gpu_util::{native_backends, optional_gpu_features};
+use crate::target::{RenderFrameContext, RenderFrameTarget};
 
 const BYTES_PER_PIXEL: u32 = 4;
 const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
@@ -59,19 +60,22 @@ pub fn write_headless_clear_png(options: HeadlessClearOptions) -> Result<Headles
         label: Some("mclone_headless_clear_encoder"),
     });
     {
-        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("mclone_headless_clear_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &target.view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(options.color),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            ..Default::default()
-        });
+        let frame = RenderFrameContext::new(&device, &queue, &mut encoder, target.render_target());
+        let _pass = frame
+            .encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_headless_clear_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: frame.target.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(options.color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
     }
     queue.submit(std::iter::once(encoder.finish()));
 
@@ -100,10 +104,17 @@ pub fn write_headless_chunk_png(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_chunk_encoder"),
     });
-    let render_view = options.camera.render_view(width, height);
-    let render_target =
-        ChunkRenderTarget::new(&target.view, &depth.view, [width, height], options.color);
-    draw.render(&queue, &mut encoder, render_target, render_view)?;
+    {
+        let frame = RenderFrameContext::new(&device, &queue, &mut encoder, target.render_target());
+        let render_view = options
+            .camera
+            .render_view(frame.target.size[0], frame.target.size[1]);
+        let render_target = ChunkRenderTarget::from_frame_target(
+            frame.target.with_depth(&depth.view),
+            options.color,
+        )?;
+        draw.render(frame.queue, frame.encoder, render_target, render_view)?;
+    }
     queue.submit(std::iter::once(encoder.finish()));
 
     let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
@@ -135,10 +146,17 @@ pub fn write_headless_textured_chunk_png(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_textured_chunk_encoder"),
     });
-    let render_view = options.camera.render_view(width, height);
-    let render_target =
-        ChunkRenderTarget::new(&target.view, &depth.view, [width, height], options.color);
-    draw.render(&queue, &mut encoder, render_target, render_view)?;
+    {
+        let frame = RenderFrameContext::new(&device, &queue, &mut encoder, target.render_target());
+        let render_view = options
+            .camera
+            .render_view(frame.target.size[0], frame.target.size[1]);
+        let render_target = ChunkRenderTarget::from_frame_target(
+            frame.target.with_depth(&depth.view),
+            options.color,
+        )?;
+        draw.render(frame.queue, frame.encoder, render_target, render_view)?;
+    }
     queue.submit(std::iter::once(encoder.finish()));
 
     let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
@@ -171,10 +189,17 @@ pub fn write_headless_textured_sections_png(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_textured_sections_encoder"),
     });
-    let render_view = options.camera.render_view(width, height);
-    let render_target =
-        ChunkRenderTarget::new(&target.view, &depth.view, [width, height], options.color);
-    draw.render(&queue, &mut encoder, render_target, render_view)?;
+    {
+        let frame = RenderFrameContext::new(&device, &queue, &mut encoder, target.render_target());
+        let render_view = options
+            .camera
+            .render_view(frame.target.size[0], frame.target.size[1]);
+        let render_target = ChunkRenderTarget::from_frame_target(
+            frame.target.with_depth(&depth.view),
+            options.color,
+        )?;
+        draw.render(frame.queue, frame.encoder, render_target, render_view)?;
+    }
     queue.submit(std::iter::once(encoder.finish()));
 
     let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
@@ -236,6 +261,7 @@ fn create_headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
 struct OffscreenTarget {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
+    size: [u32; 2],
 }
 
 impl OffscreenTarget {
@@ -255,7 +281,15 @@ impl OffscreenTarget {
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
-        Self { texture, view }
+        Self {
+            texture,
+            view,
+            size: [width, height],
+        }
+    }
+
+    fn render_target(&self) -> RenderFrameTarget<'_> {
+        RenderFrameTarget::color(&self.view, self.size)
     }
 }
 
