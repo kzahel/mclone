@@ -45,7 +45,7 @@ Key Java facts for this slice:
 - Java-shaped propagated ticket levels are now covered by `019-scheduler-owned-dependency-holders.md`.
 - Holder futures are still simplified `ChunkStatusSlot`s, not Java's full `CompletableFuture` graph.
 - Lower-status dependency chunks are now scheduler-owned clean buffers in `019`, but not yet explicit protochunk holder objects.
-- Pending unloads are immediate after ticket removal, except dirty chunks are saved before removal. Java's delayed `pendingUnloads` queue is still a future refinement.
+- Pending unloads are now covered by `019-scheduler-owned-dependency-holders.md`: holders leave the active ticket graph first, then bounded unload processing saves/removes them later.
 - Only `FEATURES` publication is wired to the scheduler. `LIGHT`, `FULL`, ticking chunks, and entity ticking are represented by ticket/full-status facts but not by real runtime systems yet.
 
 ## Successor Work
@@ -54,6 +54,5 @@ The first four follow-ups moved into `019-scheduler-owned-dependency-holders.md`
 
 Remaining successor work:
 
-1. Add a small native benchmark/smoke for interest movement over a radius view so chunk residency and worldgen reuse regressions are visible.
-2. Replace cloned dependency-buffer transfer with a cheaper ownership or shared-buffer strategy if the benchmark shows material overhead.
-3. Keep the browser/WASM build compiling after the API changes; browser worker plumbing can remain deferred until the scheduler boundary is stable.
+1. Replace cloned dependency-buffer transfer with a cheaper ownership or shared-buffer strategy if the benchmark shows material overhead.
+2. Keep the browser/WASM build compiling after the API changes; browser worker plumbing can remain deferred until the scheduler boundary is stable.

@@ -171,6 +171,7 @@ pub struct ChunkSchedulerMetrics {
     pub direct_ticket_chunks: usize,
     pub active_ticket_chunks: usize,
     pub holder_chunks: usize,
+    pub pending_unload_chunks: usize,
     pub client_visible_chunks: usize,
     pub loaded_snapshot_chunks: usize,
     pub dependency_holder_chunks: usize,
@@ -543,6 +544,7 @@ impl ChunkDistanceManager {
 pub struct ChunkScheduler {
     seed: i64,
     holders: BTreeMap<ChunkPos, ChunkHolder>,
+    pending_unloads: BTreeSet<ChunkPos>,
     distance_manager: ChunkDistanceManager,
     jobs: BTreeMap<ChunkJobId, ChunkStatusJob>,
     job_timings: BTreeMap<ChunkJobId, OverworldFeatureBatchTiming>,
@@ -562,6 +564,7 @@ impl ChunkScheduler {
         Self {
             seed,
             holders: BTreeMap::new(),
+            pending_unloads: BTreeSet::new(),
             distance_manager: ChunkDistanceManager::new(),
             jobs: BTreeMap::new(),
             job_timings: BTreeMap::new(),
@@ -597,6 +600,7 @@ impl ChunkScheduler {
         self.distance_manager.purge_stale_tickets();
         let mut events = self.reconcile_ticketed_holders()?;
         events.extend(self.poll()?);
+        self.process_pending_unloads(DEFAULT_PENDING_UNLOAD_BUDGET)?;
         Ok(events)
     }
 
@@ -659,6 +663,14 @@ impl ChunkScheduler {
 
     pub fn holder_count(&self) -> usize {
         self.holders.len()
+    }
+
+    pub fn pending_unload_count(&self) -> usize {
+        self.pending_unloads.len()
+    }
+
+    pub fn is_pending_unload(&self, pos: ChunkPos) -> bool {
+        self.pending_unloads.contains(&pos)
     }
 
     pub fn loaded_chunk_count(&self) -> usize {
@@ -754,6 +766,7 @@ impl ChunkScheduler {
             direct_ticket_chunks: self.ticketed_chunk_count(),
             active_ticket_chunks: self.active_ticketed_chunk_count(),
             holder_chunks: self.holder_count(),
+            pending_unload_chunks: self.pending_unload_count(),
             client_visible_chunks: self.client_visible_chunk_count(),
             loaded_snapshot_chunks: self.loaded_chunk_count(),
             dependency_holder_chunks: self.dependency_holder_count(),
@@ -808,6 +821,45 @@ impl ChunkScheduler {
         Ok(saved)
     }
 
+    pub fn process_pending_unloads(&mut self, max_chunks: usize) -> ChunkStoreResult<usize> {
+        if max_chunks == 0 || self.pending_unloads.is_empty() {
+            return Ok(0);
+        }
+
+        let active_levels = self.distance_manager.active_levels();
+        let candidates = self
+            .pending_unloads
+            .iter()
+            .copied()
+            .take(max_chunks)
+            .collect::<Vec<_>>();
+        let mut processed = 0;
+
+        for pos in candidates {
+            if active_levels.contains_key(&pos) {
+                self.pending_unloads.remove(&pos);
+                continue;
+            }
+
+            let Some(holder) = self.holders.get(&pos).cloned() else {
+                self.pending_unloads.remove(&pos);
+                self.dirty_chunks.remove(&pos);
+                continue;
+            };
+
+            if holder.dirty {
+                self.save_holder(&holder)?;
+                self.dirty_chunks.remove(&pos);
+            }
+
+            self.holders.remove(&pos);
+            self.pending_unloads.remove(&pos);
+            processed += 1;
+        }
+
+        Ok(processed)
+    }
+
     fn reconcile_ticketed_holders(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let active_levels = self.distance_manager.active_levels();
         let desired_set = active_levels.keys().copied().collect::<BTreeSet<_>>();
@@ -821,20 +873,18 @@ impl ChunkScheduler {
             .filter(|pos| !desired_set.contains(pos))
             .collect::<Vec<_>>()
         {
-            let mut holder = self.holders.remove(&pos).expect("holder key disappeared");
+            let holder = self.holders.get_mut(&pos).expect("holder key disappeared");
             holder.set_ticket_level(UNLOADED_CHUNK_LEVEL);
             if holder.client_visible {
                 events.push(ChunkSchedulerEvent::Unloaded { pos });
                 holder.set_client_visible(false);
             }
-            if holder.dirty {
-                self.save_holder(&holder)?;
-                self.dirty_chunks.remove(&pos);
-            }
+            self.pending_unloads.insert(pos);
         }
 
         let mut feature_targets = BTreeSet::new();
         for (pos, ticket_level) in active_levels {
+            self.pending_unloads.remove(&pos);
             let should_be_client_visible = client_visible_set.contains(&pos);
             let has_direct_feature_ticket =
                 self.distance_manager.ticket_level_at(pos) <= CHUNK_LEVEL_FULL + 1;
@@ -1590,6 +1640,7 @@ pub const UNLOADED_CHUNK_LEVEL: i32 = MAX_CHUNK_DISTANCE + 1;
 
 const ENTITY_TICKING_RANGE: i32 = 2;
 const VANILLA_STATUS_AROUND_FULL_DISTANCE: i32 = 11;
+const DEFAULT_PENDING_UNLOAD_BUDGET: usize = 200;
 
 fn full_chunk_status_for_ticket_level(ticket_level: i32) -> FullChunkStatus {
     match (CHUNK_LEVEL_FULL - ticket_level + 1).clamp(0, 3) {
@@ -1682,6 +1733,13 @@ mod tests {
         server.wait_for_worldgen_completion(std::time::Duration::from_secs(30));
     }
 
+    fn active_ticket_square_count(ticket_level: i32) -> usize {
+        let radius = usize::try_from(MAX_CHUNK_DISTANCE - ticket_level)
+            .expect("ticket level must be within active distance");
+        let side = radius * 2 + 1;
+        side * side
+    }
+
     #[test]
     fn distinguishes_integrated_and_dedicated_modes() {
         assert_ne!(ServerMode::Integrated, ServerMode::Dedicated);
@@ -1727,6 +1785,7 @@ mod tests {
                 direct_ticket_chunks: 9,
                 active_ticket_chunks: 29 * 29,
                 holder_chunks: 29 * 29,
+                pending_unload_chunks: 0,
                 client_visible_chunks: 9,
                 loaded_snapshot_chunks: 9,
                 dependency_holder_chunks: 29 * 29 - 9,
@@ -2054,7 +2113,88 @@ mod tests {
         assert_eq!(scheduler.ticket_tick(), 2);
         assert_eq!(scheduler.ticketed_chunk_count(), 0);
         assert!(events.is_empty());
+        assert_eq!(
+            scheduler.pending_unload_count(),
+            active_ticket_square_count(CHUNK_LEVEL_FULL) - DEFAULT_PENDING_UNLOAD_BUDGET
+        );
+
+        scheduler.process_pending_unloads(usize::MAX).unwrap();
+        assert_eq!(scheduler.pending_unload_count(), 0);
         assert!(scheduler.holder(ChunkPos::new(0, 0)).is_none());
+    }
+
+    #[test]
+    fn expired_ticket_queues_pending_unload_until_processed() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let pos = ChunkPos::new(0, 0);
+
+        scheduler
+            .add_region_ticket(ChunkTicketType::Unknown, pos, 0)
+            .unwrap();
+        poll_scheduler_until_idle(&mut scheduler);
+        let active_count = active_ticket_square_count(CHUNK_LEVEL_FULL);
+        assert_eq!(scheduler.holder_count(), active_count);
+        assert_eq!(scheduler.pending_unload_count(), 0);
+        assert_eq!(scheduler.loaded_chunk_count(), 1);
+
+        scheduler.distance_manager.purge_stale_tickets();
+        scheduler.distance_manager.purge_stale_tickets();
+        assert!(scheduler.reconcile_ticketed_holders().unwrap().is_empty());
+
+        assert_eq!(scheduler.ticketed_chunk_count(), 0);
+        assert_eq!(scheduler.pending_unload_count(), active_count);
+        assert_eq!(scheduler.holder_count(), active_count);
+        assert!(scheduler.is_pending_unload(pos));
+        assert_eq!(
+            scheduler.holder(pos).map(ChunkHolder::ticket_level),
+            Some(UNLOADED_CHUNK_LEVEL)
+        );
+        assert_eq!(scheduler.loaded_chunk_count(), 1);
+
+        assert_eq!(scheduler.process_pending_unloads(10).unwrap(), 10);
+        assert_eq!(scheduler.pending_unload_count(), active_count - 10);
+
+        assert_eq!(
+            scheduler.process_pending_unloads(usize::MAX).unwrap(),
+            active_count - 10
+        );
+        assert_eq!(scheduler.pending_unload_count(), 0);
+        assert_eq!(scheduler.holder_count(), 0);
+        assert_eq!(scheduler.loaded_chunk_count(), 0);
+        assert_eq!(scheduler.dirty_chunk_count(), 0);
+        assert!(scheduler.holder(pos).is_none());
+    }
+
+    #[test]
+    fn pending_unload_holder_is_rescued_when_ticket_returns() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let pos = ChunkPos::new(0, 0);
+
+        scheduler
+            .add_region_ticket(ChunkTicketType::Unknown, pos, 0)
+            .unwrap();
+        poll_scheduler_until_idle(&mut scheduler);
+
+        scheduler.distance_manager.purge_stale_tickets();
+        scheduler.distance_manager.purge_stale_tickets();
+        scheduler.reconcile_ticketed_holders().unwrap();
+        assert!(scheduler.is_pending_unload(pos));
+        assert_eq!(
+            scheduler.holder(pos).map(ChunkHolder::ticket_level),
+            Some(UNLOADED_CHUNK_LEVEL)
+        );
+
+        assert!(scheduler.set_chunk_forced(pos, true).unwrap().is_empty());
+
+        assert!(!scheduler.is_pending_unload(pos));
+        assert_eq!(scheduler.pending_unload_count(), 0);
+        assert_eq!(
+            scheduler.holder(pos).map(ChunkHolder::ticket_level),
+            Some(FORCED_TICKET_LEVEL)
+        );
+        assert_eq!(scheduler.loaded_chunk_count(), 1);
+        assert_eq!(scheduler.process_pending_unloads(usize::MAX).unwrap(), 0);
+        assert!(scheduler.holder(pos).is_some());
     }
 
     #[test]

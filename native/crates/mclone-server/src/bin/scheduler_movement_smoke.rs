@@ -97,6 +97,9 @@ fn run() -> Result<(), String> {
         }
         let worker_wait_ms = elapsed_ms(worker_wait_start.elapsed());
         let non_poll_wait_ms = (worker_wait_ms - poll_call_ms).max(0.0);
+        scheduler
+            .process_pending_unloads(usize::MAX)
+            .map_err(|error| error.to_string())?;
 
         let snapshots = events
             .iter()
@@ -287,6 +290,12 @@ impl SmokeReport {
                     step.index, step.metrics.pending_jobs
                 ));
             }
+            if step.metrics.pending_unload_chunks != 0 {
+                return Err(format!(
+                    "step {} still has {} pending unloads",
+                    step.index, step.metrics.pending_unload_chunks
+                ));
+            }
 
             let expected_snapshots = if step.index == 0 {
                 interest_chunks
@@ -439,6 +448,10 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         metrics.active_ticket_chunks
     );
     println!("{indent}  \"holder_chunks\": {},", metrics.holder_chunks);
+    println!(
+        "{indent}  \"pending_unload_chunks\": {},",
+        metrics.pending_unload_chunks
+    );
     println!(
         "{indent}  \"client_visible_chunks\": {},",
         metrics.client_visible_chunks

@@ -498,6 +498,7 @@ struct WindowRuntimeStats {
     pending_jobs: usize,
     client_visible_chunks: usize,
     active_ticket_chunks: usize,
+    pending_unload_chunks: usize,
 }
 
 impl WindowSceneRuntime {
@@ -554,8 +555,8 @@ impl WindowSceneRuntime {
         let mut changed = self.flush_local_commands()?;
         if let Some(server) = &mut self.server {
             let updates = server
-                .try_poll()
-                .context("failed to poll integrated server worldgen jobs")?;
+                .try_tick()
+                .context("failed to tick integrated server")?;
             changed |= self.apply_server_updates(updates);
         }
         Ok(changed)
@@ -607,6 +608,8 @@ impl WindowSceneRuntime {
                 }),
             active_ticket_chunks: scheduler_metrics
                 .map_or(0, |metrics| metrics.active_ticket_chunks),
+            pending_unload_chunks: scheduler_metrics
+                .map_or(0, |metrics| metrics.pending_unload_chunks),
         }
     }
 }
@@ -1031,7 +1034,7 @@ impl ChunkApp {
         let runtime = self.runtime.stats();
         let pos = self.spectator.position;
         window.set_title(&format!(
-            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | loaded {} visible {} pending {} active {} | sections {} idx {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
+            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | loaded {} visible {} pending {} active {} unload {} | sections {} idx {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
             pos.x,
             pos.y,
             pos.z,
@@ -1041,6 +1044,7 @@ impl ChunkApp {
             runtime.client_visible_chunks,
             runtime.pending_jobs,
             runtime.active_ticket_chunks,
+            runtime.pending_unload_chunks,
             self.render_stats.section_count,
             self.render_stats.index_count,
             self.render_stats.last_frame_ms,

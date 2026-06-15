@@ -44,13 +44,13 @@ Key Java facts for this slice:
 - `FeatureRegion` stores dependency chunks in an indexed rectangle instead of a `BTreeMap`, and hot decoration uses cached immutable biome feature tables instead of rebuilding feature vectors for each center.
 - Scheduler batch feature generation bypasses `DecorationReport.added_non_air_blocks` accounting, which otherwise scans the whole feature-region dependency window before and after every decoration center. Public decoration report APIs still compute that field for tests/debug callers.
 - Lower-status dependency generation now reuses one `NoiseBasedChunkGenerator` per feature job instead of recreating it for every dependency chunk, and reports generator setup, surface fill, surface/bedrock, air carver, liquid carver, and heightmap timing.
+- Ticket removal now queues holders in a native pending-unload set instead of dropping/saving them synchronously. Returned tickets rescue pending holders, `ChunkScheduler::process_pending_unloads(...)` drains a bounded amount of save/drop work, `tick()` processes the Java-shaped default budget, and native window mode ticks the integrated server each frame.
 
 ## Current Limits
 
 - Propagated non-direct holders are treated as clean lower-status dependency holders. Native does not yet generate Java's full feature-status halo for `level 34` chunks.
 - The clean dependency buffer is still stored as a worldgen `MutableChunkBlockBuffer`, not a long-lived protochunk type with explicit status transitions.
 - Moving scheduler-owned buffers through the worker currently clones chunk buffers. Current profiling shows this is not the first bottleneck for radius-1 movement, but performance work should still replace it with shared/owned transfer accounting once the shape stabilizes.
-- Pending unloads are still immediate for non-visible chunks when no propagated ticket keeps them active. Java's delayed `pendingUnloads` queue remains unported.
 - The smoke records split timing, but no fixed perf budget is enforced yet. Use release mode for performance comparisons.
 
 ## Movement Smoke
@@ -71,6 +71,7 @@ The smoke defaults to seed `12345`, radius `1`, `3` adjacent movement steps, and
 
 - direct ticket count differs from the client-visible interest square
 - propagated active holder count differs from the expected Chebyshev ticket halo
+- pending unloads remain after the smoke's explicit unload-drain step
 - client-visible chunk count differs from direct interest
 - movement steps stop publishing one new strip and one unload strip
 - scheduler-owned dependency seeding no longer matches worker cache hits
@@ -153,5 +154,4 @@ On this host it keeps similar end-to-end latency, but burns caller-thread time o
 2. Consider a feature-family split inside `underground_ores` if decoration remains material after the noise-column work.
 3. Introduce an explicit protochunk/dependency-holder type so lower-status holder data is not stored as ad hoc worldgen buffers.
 4. Replace per-job dependency buffer cloning with a cheaper ownership/transfer strategy if profiling changes or larger view-distance movement makes it material.
-5. Add delayed pending-unload processing so save/unload work can be bounded per tick.
-6. Decide whether to model Java's full `level 34 -> FEATURES` propagated halo before structures, or keep the MVP scoped to direct feature targets plus lower-status dependency holders.
+5. Decide whether to model Java's full `level 34 -> FEATURES` propagated halo before structures, or keep the MVP scoped to direct feature targets plus lower-status dependency holders.
