@@ -464,6 +464,7 @@ public final class OracleDumper {
       Map<String, Object> blockPalette = new LinkedHashMap<>();
       blockPalette.put("air", "minecraft:air");
       blockPalette.put("stone", "minecraft:stone");
+      blockPalette.put("lava", "minecraft:lava");
       root.put("blockPalette", blockPalette);
 
       List<Map<String, Object>> cases = new ArrayList<>();
@@ -504,6 +505,30 @@ public final class OracleDumper {
          sampleList(new int[]{15, 15, 0}, new int[]{15, 14, 0}, new int[]{15, 13, 0}, new int[]{16, 13, 0}, new int[]{16, 0, 0})
       ));
       root.put("cases", cases);
+
+      List<Map<String, Object>> blockCases = new ArrayList<>();
+      blockCases.add(dumpSyntheticBlockCase(
+         "lavaOpen",
+         chunkList(new int[]{0, 0}),
+         new ArrayList<>(),
+         sampleList(new int[]{1, 1, 1}),
+         sampleList(new int[]{1, 1, 1}, new int[]{2, 1, 1}, new int[]{3, 1, 1}, new int[]{1, 2, 1}, new int[]{1, 0, 1})
+      ));
+      blockCases.add(dumpSyntheticBlockCase(
+         "lavaBlockedByStone",
+         chunkList(new int[]{0, 0}),
+         sampleList(new int[]{2, 1, 1}),
+         sampleList(new int[]{1, 1, 1}),
+         sampleList(new int[]{1, 1, 1}, new int[]{2, 1, 1}, new int[]{3, 1, 1}, new int[]{1, 2, 1})
+      ));
+      blockCases.add(dumpSyntheticBlockCase(
+         "lavaCrossChunk",
+         chunkList(new int[]{0, 0}, new int[]{1, 0}),
+         new ArrayList<>(),
+         sampleList(new int[]{15, 1, 1}),
+         sampleList(new int[]{15, 1, 1}, new int[]{16, 1, 1}, new int[]{17, 1, 1}, new int[]{14, 1, 1})
+      ));
+      root.put("blockCases", blockCases);
 
       return GSON.toJson(root) + "\n";
    }
@@ -548,10 +573,62 @@ public final class OracleDumper {
       List<Map<String, Object>> skySections = new ArrayList<>();
       for (int[] chunk : chunks) {
          for (int sectionY = SYNTHETIC_LIGHT_MIN_SECTION_Y; sectionY < SYNTHETIC_LIGHT_MAX_SECTION_Y_EXCLUSIVE; sectionY++) {
-            skySections.add(lightSection(engine, chunk[0], sectionY, chunk[1]));
+            skySections.add(lightSection(engine, LightLayer.SKY, chunk[0], sectionY, chunk[1]));
          }
       }
       result.put("skySections", skySections);
+      return result;
+   }
+
+   private static Map<String, Object> dumpSyntheticBlockCase(
+      String name,
+      List<int[]> chunks,
+      List<int[]> opaqueCells,
+      List<int[]> lavaCells,
+      List<int[]> samplePositions
+   ) {
+      SyntheticLightLevel level = new SyntheticLightLevel(SYNTHETIC_LIGHT_MIN_Y, SYNTHETIC_LIGHT_HEIGHT);
+      LevelLightEngine engine = new LevelLightEngine(level, true, false);
+
+      for (int[] chunk : chunks) {
+         level.addChunk(chunk[0], chunk[1]);
+         for (int sectionY = SYNTHETIC_LIGHT_MIN_SECTION_Y; sectionY < SYNTHETIC_LIGHT_MAX_SECTION_Y_EXCLUSIVE; sectionY++) {
+            engine.updateSectionStatus(SectionPos.of(chunk[0], sectionY, chunk[1]), false);
+         }
+      }
+
+      for (int[] cell : opaqueCells) {
+         level.setBlock(cell[0], cell[1], cell[2], Blocks.STONE.defaultBlockState());
+      }
+
+      BlockState lava = Blocks.LAVA.defaultBlockState();
+      for (int[] cell : lavaCells) {
+         BlockPos pos = new BlockPos(cell[0], cell[1], cell[2]);
+         level.setBlock(cell[0], cell[1], cell[2], lava);
+         engine.onBlockEmissionIncrease(pos, lava.getLightEmission());
+      }
+      runLightUntilIdle(engine);
+
+      Map<String, Object> result = new LinkedHashMap<>();
+      result.put("name", name);
+      result.put("chunks", chunks);
+      result.put("opaqueCount", opaqueCells.size());
+      result.put("opaque", opaqueCells);
+      result.put("lava", lavaCells);
+
+      List<Map<String, Object>> samples = new ArrayList<>();
+      for (int[] position : samplePositions) {
+         samples.add(lightSample(engine, position[0], position[1], position[2]));
+      }
+      result.put("samples", samples);
+
+      List<Map<String, Object>> blockSections = new ArrayList<>();
+      for (int[] chunk : chunks) {
+         for (int sectionY = SYNTHETIC_LIGHT_MIN_SECTION_Y; sectionY < SYNTHETIC_LIGHT_MAX_SECTION_Y_EXCLUSIVE; sectionY++) {
+            blockSections.add(lightSection(engine, LightLayer.BLOCK, chunk[0], sectionY, chunk[1]));
+         }
+      }
+      result.put("blockSections", blockSections);
       return result;
    }
 
@@ -577,9 +654,9 @@ public final class OracleDumper {
       return sample;
    }
 
-   private static Map<String, Object> lightSection(LevelLightEngine engine, int sectionX, int sectionY, int sectionZ) {
-      LayerLightEventListener sky = engine.getLayerListener(LightLayer.SKY);
-      DataLayer data = sky.getDataLayerData(SectionPos.of(sectionX, sectionY, sectionZ));
+   private static Map<String, Object> lightSection(LevelLightEngine engine, LightLayer layer, int sectionX, int sectionY, int sectionZ) {
+      LayerLightEventListener listener = engine.getLayerListener(layer);
+      DataLayer data = listener.getDataLayerData(SectionPos.of(sectionX, sectionY, sectionZ));
       byte[] bytes = data == null ? new byte[2048] : data.getData();
 
       Map<String, Object> section = new LinkedHashMap<>();

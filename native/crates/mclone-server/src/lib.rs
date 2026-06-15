@@ -17,7 +17,7 @@ use mclone_core::{
     BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot,
     ChunkStatus, PackedLightSection, SECTION_HEIGHT, chunk_section_index,
 };
-use mclone_light::DataLayer;
+use mclone_light::{DataLayer, LightLayer};
 use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
 use mclone_worldgen::block::{
     LAVA, OBSIDIAN, RawBlockId, STONE, WATER, fluid_level, generated_block_state_id, is_lava,
@@ -2872,12 +2872,19 @@ fn snapshot_with_provisional_lighting_from_neighbors<'a>(
     );
     let mut chunks = neighbor_blocks.into_iter().collect::<Vec<_>>();
     chunks.push((snapshot.pos, raw_blocks));
-    let light_sections = provisional_sky_light_sections_for_chunk(
+    let sky_sections = provisional_sky_light_sections_for_chunk(
         snapshot.pos,
         snapshot.min_y,
         snapshot.height,
-        chunks,
+        chunks.iter().copied(),
     );
+    let block_sections = provisional_block_light_sections_for_chunk(
+        snapshot.pos,
+        snapshot.min_y,
+        snapshot.height,
+        chunks.iter().copied(),
+    );
+    let light_sections = merge_light_sections(sky_sections, block_sections);
     snapshot.with_light_sections(false, light_sections)
 }
 
@@ -2903,6 +2910,37 @@ fn provisional_sky_light_sections_for_chunk<'a>(
 ) -> Vec<PackedLightSection> {
     let world = ProvisionalSkyLightWorld::new(target_pos, min_y, height, chunks);
     world.light_sections()
+}
+
+fn provisional_block_light_sections_for_chunk<'a>(
+    target_pos: ChunkPos,
+    min_y: i32,
+    height: i32,
+    chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
+) -> Vec<PackedLightSection> {
+    let world = ProvisionalSkyLightWorld::new(target_pos, min_y, height, chunks);
+    world.block_light_sections()
+}
+
+fn merge_light_sections(
+    sky_sections: Vec<PackedLightSection>,
+    block_sections: Vec<PackedLightSection>,
+) -> Vec<PackedLightSection> {
+    let mut sections = BTreeMap::<i32, (Option<Vec<u8>>, Option<Vec<u8>>)>::new();
+    for section in sky_sections.into_iter().chain(block_sections) {
+        let entry = sections.entry(section.section_y).or_default();
+        if section.sky.is_some() {
+            entry.0 = section.sky;
+        }
+        if section.block.is_some() {
+            entry.1 = section.block;
+        }
+    }
+
+    sections
+        .into_iter()
+        .map(|(section_y, (sky, block))| PackedLightSection::new(section_y, sky, block))
+        .collect()
 }
 
 fn provisional_sky_light_includes_chunk(target_pos: ChunkPos, chunk_pos: ChunkPos) -> bool {
@@ -3013,7 +3051,66 @@ impl<'a> ProvisionalSkyLightWorld<'a> {
             }
         }
 
-        self.target_light_sections(&sky_values[&self.target_pos])
+        self.target_light_sections(&sky_values[&self.target_pos], LightLayer::Sky)
+    }
+
+    fn block_light_sections(&self) -> Vec<PackedLightSection> {
+        let mut block_values = self
+            .chunks
+            .keys()
+            .map(|pos| {
+                (
+                    *pos,
+                    vec![0_u8; self.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize],
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut queue = VecDeque::new();
+
+        for (&chunk_pos, blocks) in &self.chunks {
+            for local_y in 0..self.height {
+                for local_z in 0..CHUNK_WIDTH {
+                    for local_x in 0..CHUNK_WIDTH {
+                        let index = chunk_block_index(local_x, local_y, local_z);
+                        let emission = block_light_emission(blocks[index]);
+                        if emission > 0 {
+                            block_values.get_mut(&chunk_pos).unwrap()[index] = emission;
+                            queue.push_back((chunk_pos, local_x, local_y, local_z));
+                        }
+                    }
+                }
+            }
+        }
+
+        while let Some((chunk_pos, local_x, local_y, local_z)) = queue.pop_front() {
+            let source_level =
+                block_values[&chunk_pos][chunk_block_index(local_x, local_y, local_z)];
+            if source_level <= 1 {
+                continue;
+            }
+
+            for [dx, dy, dz] in SKY_LIGHT_DIRECTIONS {
+                let Some((next_pos, next_x, next_y, next_z)) =
+                    self.offset_cell(chunk_pos, local_x, local_y, local_z, dx, dy, dz)
+                else {
+                    continue;
+                };
+
+                let next_index = chunk_block_index(next_x, next_y, next_z);
+                let target_block = self.chunks[&next_pos][next_index];
+                let Some(next_level) = propagated_block_light_level(source_level, target_block)
+                else {
+                    continue;
+                };
+                let next_values = block_values.get_mut(&next_pos).unwrap();
+                if next_level > next_values[next_index] {
+                    next_values[next_index] = next_level;
+                    queue.push_back((next_pos, next_x, next_y, next_z));
+                }
+            }
+        }
+
+        self.target_light_sections(&block_values[&self.target_pos], LightLayer::Block)
     }
 
     fn offset_cell(
@@ -3055,46 +3152,49 @@ impl<'a> ProvisionalSkyLightWorld<'a> {
             .then_some((next_pos, next_x, next_y, next_z))
     }
 
-    fn target_light_sections(&self, sky_values: &[u8]) -> Vec<PackedLightSection> {
+    fn target_light_sections(
+        &self,
+        light_values: &[u8],
+        layer: LightLayer,
+    ) -> Vec<PackedLightSection> {
         debug_assert_eq!(
-            sky_values.len(),
+            light_values.len(),
             self.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize
         );
         let section_count = self.height / SECTION_HEIGHT;
         let min_section_y = self.min_y.div_euclid(SECTION_HEIGHT);
 
-        let mut sky_layers = (0..section_count)
+        let mut layers = (0..section_count)
             .map(|_| DataLayer::new())
             .collect::<Vec<_>>();
         for local_y in 0..self.height {
             for local_z in 0..CHUNK_WIDTH {
                 for local_x in 0..CHUNK_WIDTH {
-                    let level = sky_values[chunk_block_index(local_x, local_y, local_z)];
+                    let level = light_values[chunk_block_index(local_x, local_y, local_z)];
                     if level == 0 {
                         continue;
                     }
                     let section_offset = local_y.div_euclid(SECTION_HEIGHT);
                     let section_local_y = local_y.rem_euclid(SECTION_HEIGHT);
-                    sky_layers[section_offset as usize].set(
-                        local_x,
-                        section_local_y,
-                        local_z,
-                        level,
-                    );
+                    layers[section_offset as usize].set(local_x, section_local_y, local_z, level);
                 }
             }
         }
 
-        let mut sections = sky_layers
+        let mut sections = layers
             .into_iter()
             .enumerate()
-            .filter_map(|(offset, layer)| {
-                layer.into_bytes().map(|sky| {
-                    PackedLightSection::new(min_section_y + offset as i32, Some(sky), None)
+            .filter_map(|(offset, data_layer)| {
+                data_layer.into_bytes().map(|bytes| {
+                    let (sky, block) = match layer {
+                        LightLayer::Sky => (Some(bytes), None),
+                        LightLayer::Block => (None, Some(bytes)),
+                    };
+                    PackedLightSection::new(min_section_y + offset as i32, sky, block)
                 })
             })
             .collect::<Vec<_>>();
-        if sections.is_empty() && section_count > 0 {
+        if layer == LightLayer::Sky && sections.is_empty() && section_count > 0 {
             sections.push(PackedLightSection::new(
                 min_section_y,
                 Some(vec![0; mclone_light::DATA_LAYER_SIZE]),
@@ -3131,6 +3231,20 @@ fn propagated_sky_light_level(
     };
     let level = source_level.saturating_sub(attenuation);
     (level > 0).then_some(level)
+}
+
+fn propagated_block_light_level(source_level: u8, target_block: RawBlockId) -> Option<u8> {
+    let opacity = sky_light_opacity(target_block);
+    if source_level == 0 || opacity >= 15 {
+        return None;
+    }
+
+    let level = source_level.saturating_sub(opacity.max(1));
+    (level > 0).then_some(level)
+}
+
+fn block_light_emission(block_id: RawBlockId) -> u8 {
+    if is_lava(block_id) { 15 } else { 0 }
 }
 
 fn sky_light_opacity(block_id: RawBlockId) -> u8 {
@@ -3405,6 +3519,93 @@ mod tests {
     }
 
     #[test]
+    fn provisional_block_light_matches_java_synthetic_fixture() {
+        let fixture = serde_json::from_str::<Value>(include_str!(
+            "../../../../test/fixtures/lighting/sky-synthetic.json"
+        ))
+        .unwrap();
+        let min_y = fixture_i32(&fixture["level"], "minY");
+        let height = fixture_i32(&fixture["level"], "height");
+
+        for case_name in ["lavaOpen", "lavaBlockedByStone"] {
+            let case = synthetic_block_light_case(&fixture, case_name);
+            let chunks = native_chunk_blocks_from_synthetic_light_case(case, min_y, height);
+            let target_pos = ChunkPos::new(0, 0);
+            let sections = provisional_block_light_sections_for_chunk(
+                target_pos,
+                min_y,
+                height,
+                chunks.iter().map(|(pos, blocks)| (*pos, blocks.as_slice())),
+            );
+
+            assert_synthetic_block_light_samples(case, target_pos, &sections);
+            let java_section = synthetic_block_light_section(case, 0, 0, 0);
+            assert_eq!(
+                block_section_hex(&sections, 0),
+                java_section["dataHex"]
+                    .as_str()
+                    .expect("synthetic block light dataHex must be a string"),
+                "block DataLayer mismatch for synthetic light case `{case_name}`"
+            );
+        }
+    }
+
+    #[test]
+    fn provisional_block_light_matches_java_cross_chunk_synthetic_fixture() {
+        let fixture = serde_json::from_str::<Value>(include_str!(
+            "../../../../test/fixtures/lighting/sky-synthetic.json"
+        ))
+        .unwrap();
+        let min_y = fixture_i32(&fixture["level"], "minY");
+        let height = fixture_i32(&fixture["level"], "height");
+        let case = synthetic_block_light_case(&fixture, "lavaCrossChunk");
+        let chunks = native_chunk_blocks_from_synthetic_light_case(case, min_y, height);
+
+        for target_pos in [ChunkPos::new(0, 0), ChunkPos::new(1, 0)] {
+            let sections = provisional_block_light_sections_for_chunk(
+                target_pos,
+                min_y,
+                height,
+                chunks.iter().map(|(pos, blocks)| (*pos, blocks.as_slice())),
+            );
+
+            assert_synthetic_block_light_samples(case, target_pos, &sections);
+            let java_section = synthetic_block_light_section(case, target_pos.x, 0, target_pos.z);
+            assert_eq!(
+                block_section_hex(&sections, 0),
+                java_section["dataHex"]
+                    .as_str()
+                    .expect("synthetic block light dataHex must be a string")
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_with_provisional_lighting_packs_block_light_layer() {
+        let min_y = -SECTION_HEIGHT;
+        let height = SECTION_HEIGHT * 3;
+        let mut blocks = vec![AIR; (CHUNK_WIDTH * height * CHUNK_WIDTH) as usize];
+        blocks[chunk_block_index(1, 1 - min_y, 1)] = LAVA;
+        let block_state_ids = blocks
+            .iter()
+            .map(|block_id| generated_block_state_id(*block_id))
+            .collect::<Vec<_>>();
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Features,
+            ChunkRevision(1),
+            min_y,
+            height,
+            &block_state_ids,
+        );
+
+        let snapshot = snapshot_with_provisional_lighting(snapshot, &blocks);
+
+        assert_eq!(sample_block_light(&snapshot.light_sections, 1, 1, 1), 15);
+        assert_eq!(sample_block_light(&snapshot.light_sections, 2, 1, 1), 14);
+    }
+
+    #[test]
     fn synthetic_light_fixture_records_cross_chunk_boundary_case() {
         let fixture = serde_json::from_str::<Value>(include_str!(
             "../../../../test/fixtures/lighting/sky-synthetic.json"
@@ -3453,15 +3654,43 @@ mod tests {
             .unwrap_or_else(|| panic!("synthetic light fixture missing case `{name}`"))
     }
 
+    fn synthetic_block_light_case<'a>(fixture: &'a Value, name: &str) -> &'a Value {
+        fixture["blockCases"]
+            .as_array()
+            .expect("synthetic light fixture blockCases must be an array")
+            .iter()
+            .find(|case| case["name"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("synthetic light fixture missing block case `{name}`"))
+    }
+
     fn synthetic_light_section(
         case: &Value,
         section_x: i32,
         section_y: i32,
         section_z: i32,
     ) -> &Value {
-        case["skySections"]
+        synthetic_light_section_from(case, "skySections", section_x, section_y, section_z)
+    }
+
+    fn synthetic_block_light_section(
+        case: &Value,
+        section_x: i32,
+        section_y: i32,
+        section_z: i32,
+    ) -> &Value {
+        synthetic_light_section_from(case, "blockSections", section_x, section_y, section_z)
+    }
+
+    fn synthetic_light_section_from<'a>(
+        case: &'a Value,
+        key: &str,
+        section_x: i32,
+        section_y: i32,
+        section_z: i32,
+    ) -> &'a Value {
+        case[key]
             .as_array()
-            .expect("synthetic light case skySections must be an array")
+            .unwrap_or_else(|| panic!("synthetic light case {key} must be an array"))
             .iter()
             .find(|section| {
                 fixture_i32(section, "sectionX") == section_x
@@ -3530,6 +3759,25 @@ mod tests {
             blocks[chunk_block_index(local_block_coord(x), y - min_y, local_block_coord(z))] =
                 STONE;
         }
+        if let Some(lava_cells) = case.get("lava").and_then(Value::as_array) {
+            for cell in lava_cells {
+                let coords = cell
+                    .as_array()
+                    .expect("synthetic light lava cell must be an array");
+                assert_eq!(coords.len(), 3);
+                let x = coords[0].as_i64().unwrap() as i32;
+                let y = coords[1].as_i64().unwrap() as i32;
+                let z = coords[2].as_i64().unwrap() as i32;
+                let pos = WorldBlockPos::new(x, y, z);
+                let chunk_pos = pos.chunk_pos();
+                let blocks = chunks
+                    .get_mut(&chunk_pos)
+                    .unwrap_or_else(|| panic!("lava cell ({x}, {y}, {z}) had no loaded chunk"));
+                assert!((min_y..min_y + height).contains(&y));
+                blocks[chunk_block_index(local_block_coord(x), y - min_y, local_block_coord(z))] =
+                    LAVA;
+            }
+        }
         chunks
     }
 
@@ -3569,7 +3817,57 @@ mod tests {
         );
     }
 
+    fn assert_synthetic_block_light_samples(
+        case: &Value,
+        target_pos: ChunkPos,
+        sections: &[PackedLightSection],
+    ) {
+        let case_name = case["name"].as_str().unwrap();
+        let mut checked = 0;
+        for sample in case["samples"]
+            .as_array()
+            .expect("synthetic light case samples must be an array")
+        {
+            let x = fixture_i32(sample, "x");
+            let y = fixture_i32(sample, "y");
+            let z = fixture_i32(sample, "z");
+            if WorldBlockPos::new(x, y, z).chunk_pos() != target_pos {
+                continue;
+            }
+            let expected_block = fixture_i32(sample, "block") as u8;
+            assert_eq!(
+                sample_block_light(sections, x, y, z),
+                expected_block,
+                "block sample mismatch for synthetic light case `{case_name}` at ({x}, {y}, {z})"
+            );
+            assert_eq!(
+                fixture_i32(sample, "sky"),
+                0,
+                "synthetic block fixture should not contain sky light"
+            );
+            checked += 1;
+        }
+        assert!(
+            checked > 0,
+            "synthetic light case `{case_name}` had no block samples in target chunk {target_pos:?}"
+        );
+    }
+
     fn sample_sky_light(sections: &[PackedLightSection], x: i32, y: i32, z: i32) -> u8 {
+        sample_light(sections, LightLayer::Sky, x, y, z)
+    }
+
+    fn sample_block_light(sections: &[PackedLightSection], x: i32, y: i32, z: i32) -> u8 {
+        sample_light(sections, LightLayer::Block, x, y, z)
+    }
+
+    fn sample_light(
+        sections: &[PackedLightSection],
+        layer: LightLayer,
+        x: i32,
+        y: i32,
+        z: i32,
+    ) -> u8 {
         let section_y = y.div_euclid(SECTION_HEIGHT);
         let Some(section) = sections
             .iter()
@@ -3577,13 +3875,11 @@ mod tests {
         else {
             return 0;
         };
-        let Some(layer) =
-            mclone_light::packed_light_section_layer(section, mclone_light::LightLayer::Sky)
-                .unwrap()
+        let Some(data_layer) = mclone_light::packed_light_section_layer(section, layer).unwrap()
         else {
             return 0;
         };
-        layer.get(
+        data_layer.get(
             x.rem_euclid(CHUNK_WIDTH),
             y.rem_euclid(SECTION_HEIGHT),
             z.rem_euclid(CHUNK_WIDTH),
@@ -3591,15 +3887,26 @@ mod tests {
     }
 
     fn sky_section_hex(sections: &[PackedLightSection], section_y: i32) -> String {
+        light_section_hex(sections, section_y, LightLayer::Sky)
+    }
+
+    fn block_section_hex(sections: &[PackedLightSection], section_y: i32) -> String {
+        light_section_hex(sections, section_y, LightLayer::Block)
+    }
+
+    fn light_section_hex(
+        sections: &[PackedLightSection],
+        section_y: i32,
+        layer: LightLayer,
+    ) -> String {
         let section = sections
             .iter()
             .find(|section| section.section_y == section_y)
-            .unwrap_or_else(|| panic!("missing sky light section {section_y}"));
-        let layer =
-            mclone_light::packed_light_section_layer(section, mclone_light::LightLayer::Sky)
-                .unwrap()
-                .unwrap_or_else(mclone_light::DataLayer::new);
-        data_layer_hex(&layer)
+            .unwrap_or_else(|| panic!("missing light section {section_y}"));
+        let data_layer = mclone_light::packed_light_section_layer(section, layer)
+            .unwrap()
+            .unwrap_or_else(mclone_light::DataLayer::new);
+        data_layer_hex(&data_layer)
     }
 
     fn data_layer_hex(layer: &mclone_light::DataLayer) -> String {
