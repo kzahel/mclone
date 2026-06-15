@@ -17,14 +17,21 @@ import java.util.OptionalInt;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.core.Registry;
 import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.WorldGenRegion;
+import net.minecraft.world.level.ChunkTickList;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.TickList;
+import net.minecraft.world.level.TickPriority;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
+import net.minecraft.world.level.material.Fluid;
 
 public final class McloneSchedulerTraceRecorder {
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
@@ -42,6 +49,8 @@ public final class McloneSchedulerTraceRecorder {
    private static final boolean PROBE_TARGET_TREE_BLOCKS = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeTargetTreeBlocks", "false"));
    private static final boolean PROBE_TREE_CANDIDATES = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeTreeCandidates", "false"));
    private static final boolean PROBE_ORE_PLACEMENTS = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeOrePlacements", "false"));
+   private static final boolean DUMP_CHUNKS = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.dumpChunks", "false"));
+   private static final boolean DUMP_ONLY_TARGET_CHUNK = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.dumpOnlyTargetChunk", "false"));
    private static final int TREE_PROBE_CENTER_X = parseIntProperty("mclone.schedulerTrace.treeProbeCenterX", Integer.MIN_VALUE);
    private static final int TREE_PROBE_CENTER_Z = parseIntProperty("mclone.schedulerTrace.treeProbeCenterZ", Integer.MIN_VALUE);
    private static final int TREE_PROBE_STEP_INDEX = parseIntProperty("mclone.schedulerTrace.treeProbeStepIndex", -1);
@@ -52,6 +61,7 @@ public final class McloneSchedulerTraceRecorder {
    private static final int ORE_PROBE_FEATURE_INDEX = parseIntProperty("mclone.schedulerTrace.oreProbeFeatureIndex", -1);
    private static final List<Map<String, Object>> EVENTS = new ArrayList<>();
    private static final Set<String> TARGET_STOP_COMPLETIONS = new LinkedHashSet<>();
+   private static final Map<String, Map<String, Object>> CHUNK_SNAPSHOTS = new LinkedHashMap<>();
    private static final ThreadLocal<FeatureProbeContext> CURRENT_FEATURE = new ThreadLocal<>();
    private static final ThreadLocal<TreeCandidateProbe> CURRENT_TREE_CANDIDATE = new ThreadLocal<>();
    private static final ThreadLocal<OrePlacementProbe> CURRENT_ORE_PLACEMENT = new ThreadLocal<>();
@@ -498,6 +508,9 @@ public final class McloneSchedulerTraceRecorder {
       if ("task_complete".equals(phase) && status.getName().equals(STOP_STATUS) && isInTargetNeighborhood(pos)) {
          TARGET_STOP_COMPLETIONS.add(chunkKey(pos));
          if (TARGET_STOP_COMPLETIONS.size() == expectedTargetChunkCount()) {
+            if (DUMP_CHUNKS) {
+               captureTargetChunkSnapshots(chunks);
+            }
             writeTrace();
          }
       }
@@ -638,6 +651,163 @@ public final class McloneSchedulerTraceRecorder {
       return pos.x + "," + pos.z;
    }
 
+   private static void captureTargetChunkSnapshots(List<ChunkAccess> chunks) {
+      CHUNK_SNAPSHOTS.clear();
+      for (ChunkAccess chunk : chunks) {
+         ChunkPos pos = chunk.getPos();
+         if (DUMP_ONLY_TARGET_CHUNK && (pos.x != TARGET_CHUNK_X || pos.z != TARGET_CHUNK_Z)) {
+            continue;
+         }
+         if (isInTargetNeighborhood(pos)) {
+            CHUNK_SNAPSHOTS.put(chunkKey(pos), chunkSnapshot(chunk));
+         }
+      }
+   }
+
+   private static Map<String, Object> chunkSnapshot(ChunkAccess chunk) {
+      ChunkPos pos = chunk.getPos();
+      Map<String, Object> snapshot = new LinkedHashMap<>();
+      snapshot.put("chunkX", pos.x);
+      snapshot.put("chunkZ", pos.z);
+      snapshot.put("status", chunk.getStatus().getName());
+      snapshot.put("minY", chunk.getMinBuildHeight());
+      snapshot.put("height", chunk.getHeight());
+      snapshot.put("sections", collectChunkSections(chunk));
+      snapshot.put("blockTicks", collectScheduledBlockTicks(chunk));
+      snapshot.put("liquidTicks", collectScheduledLiquidTicks(chunk));
+      return snapshot;
+   }
+
+   private static List<Map<String, Object>> collectChunkSections(ChunkAccess chunk) {
+      List<Map<String, Object>> sections = new ArrayList<>();
+      int minY = chunk.getMinBuildHeight();
+      int maxY = chunk.getMaxBuildHeight();
+      ChunkPos chunkPos = chunk.getPos();
+      int minBlockX = chunkPos.getMinBlockX();
+      int minBlockZ = chunkPos.getMinBlockZ();
+      BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+
+      for (int sectionBaseY = minY; sectionBaseY < maxY; sectionBaseY += 16) {
+         Map<String, Integer> paletteIndex = new LinkedHashMap<>();
+         List<String> palette = new ArrayList<>();
+         int[] blocks = new int[16 * 16 * 16];
+
+         for (int localY = 0; localY < 16; localY++) {
+            int y = sectionBaseY + localY;
+            for (int localZ = 0; localZ < 16; localZ++) {
+               for (int localX = 0; localX < 16; localX++) {
+                  String block = blockName(chunk.getBlockState(cursor.set(minBlockX + localX, y, minBlockZ + localZ)));
+                  Integer index = paletteIndex.get(block);
+                  if (index == null) {
+                     index = palette.size();
+                     paletteIndex.put(block, index);
+                     palette.add(block);
+                  }
+                  blocks[(localY << 8) | (localZ << 4) | localX] = index;
+               }
+            }
+         }
+
+         if (palette.size() == 1 && "minecraft:air".equals(palette.get(0))) {
+            continue;
+         }
+
+         Map<String, Object> section = new LinkedHashMap<>();
+         section.put("y", Math.floorDiv(sectionBaseY, 16));
+         section.put("palette", palette);
+         section.put("blockOrder", "y-major,z-major,x-minor");
+         section.put("blocks", blocks);
+         sections.add(section);
+      }
+
+      return sections;
+   }
+
+   private static List<Map<String, Object>> collectScheduledBlockTicks(ChunkAccess chunk) {
+      ScheduledTickCollector<Block> collector = new ScheduledTickCollector<>(block -> Registry.BLOCK.getKey(block).toString());
+      collectScheduledTicks(chunk.getBlockTicks(), chunk, pos -> chunk.getBlockState(pos).getBlock(), collector);
+      return collector.toJson();
+   }
+
+   private static List<Map<String, Object>> collectScheduledLiquidTicks(ChunkAccess chunk) {
+      ScheduledTickCollector<Fluid> collector = new ScheduledTickCollector<>(fluid -> Registry.FLUID.getKey(fluid).toString());
+      collectScheduledTicks(chunk.getLiquidTicks(), chunk, pos -> chunk.getFluidState(pos).getType(), collector);
+      return collector.toJson();
+   }
+
+   @SuppressWarnings("unchecked")
+   private static <T> void collectScheduledTicks(
+      TickList<T> ticks,
+      ChunkAccess chunk,
+      Function<BlockPos, T> targetAt,
+      ScheduledTickCollector<T> collector
+   ) {
+      if (ticks instanceof ProtoTickList) {
+         collectProtoTicks((ProtoTickList<T>)ticks, chunk, targetAt, collector);
+      } else if (ticks instanceof ChunkTickList) {
+         ((ChunkTickList<T>)ticks).copyOut(collector);
+      }
+   }
+
+   private static <T> void collectProtoTicks(
+      ProtoTickList<T> ticks,
+      ChunkAccess chunk,
+      Function<BlockPos, T> targetAt,
+      ScheduledTickCollector<T> collector
+   ) {
+      ListTag packed = ticks.save();
+      for (int sectionIndex = 0; sectionIndex < packed.size(); sectionIndex++) {
+         ListTag sectionTicks = packed.getList(sectionIndex);
+         for (int tickIndex = 0; tickIndex < sectionTicks.size(); tickIndex++) {
+            BlockPos pos = ProtoChunk.unpackOffsetCoordinates(
+               sectionTicks.getShort(tickIndex),
+               chunk.getSectionYFromSectionIndex(sectionIndex),
+               chunk.getPos()
+            );
+            collector.scheduleTick(pos, targetAt.apply(pos), 0);
+         }
+      }
+   }
+
+   private static final class ScheduledTickCollector<T> implements TickList<T> {
+      private final Function<T, String> toId;
+      private final List<Map<String, Object>> ticks = new ArrayList<>();
+
+      ScheduledTickCollector(Function<T, String> toId) {
+         this.toId = toId;
+      }
+
+      @Override
+      public boolean hasScheduledTick(BlockPos pos, T target) {
+         return false;
+      }
+
+      @Override
+      public void scheduleTick(BlockPos pos, T target, int delay, TickPriority priority) {
+         Map<String, Object> tick = new LinkedHashMap<>();
+         tick.put("x", pos.getX());
+         tick.put("y", pos.getY());
+         tick.put("z", pos.getZ());
+         tick.put("target", this.toId.apply(target));
+         tick.put("delay", delay);
+         this.ticks.add(tick);
+      }
+
+      @Override
+      public boolean willTickThisTick(BlockPos pos, T target) {
+         return false;
+      }
+
+      @Override
+      public int size() {
+         return this.ticks.size();
+      }
+
+      List<Map<String, Object>> toJson() {
+         return this.ticks;
+      }
+   }
+
    private static final class ProbeBlock {
       final int localX;
       final int y;
@@ -680,6 +850,9 @@ public final class McloneSchedulerTraceRecorder {
       });
       root.put("featureCompletionOrder3x3", collectCompletionOrder("features"));
       root.put("fullCompletionOrder3x3", collectCompletionOrder("full"));
+      if (DUMP_CHUNKS) {
+         root.put("chunks", new ArrayList<>(CHUNK_SNAPSHOTS.values()));
+      }
       root.put("events", new ArrayList<>(EVENTS));
 
       try {

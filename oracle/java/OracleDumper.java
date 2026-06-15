@@ -810,6 +810,8 @@ public final class OracleDumper {
       boolean probeTargetTreeBlocks = parseBooleanOption(options, "probe-target-tree-blocks", false);
       boolean probeTreeCandidates = parseBooleanOption(options, "probe-tree-candidates", false);
       boolean probeOrePlacements = parseBooleanOption(options, "probe-ore-placements", false);
+      boolean dumpChunks = parseBooleanOption(options, "dump-chunks", false);
+      boolean dumpOnlyTargetChunk = parseBooleanOption(options, "dump-only-target-chunk", false);
       boolean generateStructures = parseBooleanOption(options, "generate-structures", true);
       Path tempDir = Files.createTempDirectory("mclone-scheduler-trace-");
       Path output = tempDir.resolve("scheduler-trace.json");
@@ -837,6 +839,8 @@ public final class OracleDumper {
       command.add("-Dmclone.schedulerTrace.probeTargetTreeBlocks=" + probeTargetTreeBlocks);
       command.add("-Dmclone.schedulerTrace.probeTreeCandidates=" + probeTreeCandidates);
       command.add("-Dmclone.schedulerTrace.probeOrePlacements=" + probeOrePlacements);
+      command.add("-Dmclone.schedulerTrace.dumpChunks=" + dumpChunks);
+      command.add("-Dmclone.schedulerTrace.dumpOnlyTargetChunk=" + dumpOnlyTargetChunk);
       addOptionalSystemProperty(command, options, "tree-probe-center-x", "mclone.schedulerTrace.treeProbeCenterX");
       addOptionalSystemProperty(command, options, "tree-probe-center-z", "mclone.schedulerTrace.treeProbeCenterZ");
       addOptionalSystemProperty(command, options, "tree-probe-step-index", "mclone.schedulerTrace.treeProbeStepIndex");
@@ -2343,7 +2347,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper liquid-carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper feature-order-trace --seed <long> --chunk-x <int> --chunk-z <int> [--generate-structures <true|false>]");
-      System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full] [--generate-structures <true|false>] [--probe-blocks <x,y,z;...>] [--probe-target-tree-blocks <true|false>] [--probe-tree-candidates <true|false>] [--tree-probe-center-x <int>] [--tree-probe-center-z <int>] [--tree-probe-step-index <int>] [--tree-probe-feature-index <int>] [--probe-ore-placements <true|false>] [--ore-probe-center-x <int>] [--ore-probe-center-z <int>] [--ore-probe-step-index <int>] [--ore-probe-feature-index <int>]");
+      System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full] [--generate-structures <true|false>] [--dump-chunks <true|false>] [--dump-only-target-chunk <true|false>] [--probe-blocks <x,y,z;...>] [--probe-target-tree-blocks <true|false>] [--probe-tree-candidates <true|false>] [--tree-probe-center-x <int>] [--tree-probe-center-z <int>] [--tree-probe-step-index <int>] [--tree-probe-feature-index <int>] [--probe-ore-placements <true|false>] [--ore-probe-center-x <int>] [--ore-probe-center-z <int>] [--ore-probe-step-index <int>] [--ore-probe-feature-index <int>]");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");

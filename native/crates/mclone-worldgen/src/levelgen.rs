@@ -1749,6 +1749,8 @@ mod tests {
         stop_status: String,
         #[serde(rename = "featureCompletionOrder3x3")]
         feature_completion_order_3x3: Vec<SchedulerTraceChunkFixture>,
+        #[serde(default)]
+        chunks: Vec<FullChunkEntryFixture>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -1882,6 +1884,13 @@ mod tests {
             "../../../../test/fixtures/scheduler/vanilla-scheduler-trace-seed-12345-chunk-0-0-spawn-bootstrap.json"
         ))
         .expect("valid vanilla scheduler trace fixture")
+    }
+
+    fn scheduler_features_snapshot_fixture() -> SchedulerTraceFixture {
+        serde_json::from_str(include_str!(
+            "../../../../test/fixtures/scheduler/vanilla-scheduler-features-snapshot-seed-12345-chunk-0-0.json"
+        ))
+        .expect("valid vanilla scheduler features snapshot fixture")
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2947,6 +2956,56 @@ mod tests {
                     || bucket.expected == "minecraft:fern"
                     || bucket.expected == "minecraft:snow"),
             "expected current report to expose a known full-decoration gap: {report:#?}"
+        );
+    }
+
+    #[test]
+    fn features_status_chunk_snapshot_excludes_runtime_liquid_tick_results() {
+        let fixture = scheduler_features_snapshot_fixture();
+        assert_eq!(fixture.module, "scheduler-trace");
+        assert_eq!(fixture.minecraft_version, "1.17.1");
+        assert_eq!(fixture.seed, "12345");
+        assert_eq!(fixture.target_chunk_x, 0);
+        assert_eq!(fixture.target_chunk_z, 0);
+        assert_eq!(fixture.target_radius, 1);
+        assert_eq!(fixture.stop_status, "FEATURES");
+        assert_eq!(fixture.chunks.len(), 1);
+
+        let expected = &fixture.chunks[0];
+        assert_eq!(expected.chunk_x, 0);
+        assert_eq!(expected.chunk_z, 0);
+        assert_eq!(expected.status, "features");
+
+        let actual = generate_overworld_features_chunk(
+            fixture.seed.parse::<i64>().expect("fixture seed is i64"),
+            expected.chunk_x,
+            expected.chunk_z,
+        );
+        let expected_blocks = expand_full_fixture_blocks(expected, actual.min_y, actual.height);
+        for (local_x, y, local_z, expected_name) in [
+            (9, 12, 15, "minecraft:air"),
+            (10, 17, 2, "minecraft:air"),
+            (7, 17, 8, "minecraft:air"),
+            (9, 18, 2, "minecraft:water"),
+            (10, 18, 2, "minecraft:air"),
+        ] {
+            let index = ((y - actual.min_y) << 8) | (local_z << 4) | local_x;
+            assert_eq!(expected_blocks[index as usize], expected_name);
+            assert_eq!(actual.block_at_y(local_x, y, local_z).name(), expected_name);
+        }
+
+        let report = compare_generated_chunk_to_full_fixture(&actual, expected);
+        assert!(
+            report.top_mismatch_pairs.iter().all(|bucket| {
+                !matches!(
+                    (bucket.actual.as_str(), bucket.expected.as_str()),
+                    ("minecraft:water", _)
+                        | (_, "minecraft:water")
+                        | ("minecraft:lava", _)
+                        | (_, "minecraft:lava")
+                )
+            }),
+            "clean FEATURES snapshot should not include runtime fluid mismatch buckets: {report:#?}"
         );
     }
 
