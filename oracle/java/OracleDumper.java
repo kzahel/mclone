@@ -480,6 +480,12 @@ public final class OracleDumper {
          sampleList(new int[]{8, 15, 8}, new int[]{8, 14, 8}, new int[]{8, 13, 8}, new int[]{0, 13, 0})
       ));
       cases.add(dumpSyntheticSkyCase(
+         "fullRoofEastOpenNeighbor",
+         chunkList(new int[]{0, 0}, new int[]{1, 0}),
+         fullRoofCells(14),
+         sampleList(new int[]{16, 13, 8}, new int[]{15, 13, 8}, new int[]{14, 13, 8}, new int[]{8, 13, 8})
+      ));
+      cases.add(dumpSyntheticSkyCase(
          "singleOverhang",
          chunkList(new int[]{0, 0}),
          sampleList(new int[]{0, 14, 0}),

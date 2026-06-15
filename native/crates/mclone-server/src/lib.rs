@@ -1990,10 +1990,8 @@ impl ChunkScheduler {
         };
 
         let mut events = Vec::new();
-        let mut generated = completed.generated_chunks;
-        for dependency in completed.retained_dependencies.into_values() {
-            self.mark_dependency_ready(dependency);
-        }
+        let generated = completed.generated_chunks;
+        let retained_dependencies = completed.retained_dependencies;
 
         for pos in job.target_chunks {
             let should_publish = self
@@ -2010,16 +2008,27 @@ impl ChunkScheduler {
             let revision = ChunkRevision(self.next_revision);
             self.next_revision += 1;
 
-            let chunk = generated.remove(&pos).unwrap_or_else(|| {
+            let chunk = generated.get(&pos).unwrap_or_else(|| {
                 panic!(
                     "feature batch did not return scheduler target chunk ({}, {})",
                     pos.x, pos.z
                 )
             });
             events.extend(fluid_tick_events_from_generated_chunk(&chunk));
-            let snapshot = snapshot_with_provisional_lighting(
+            let light_neighbors = retained_dependencies
+                .iter()
+                .filter_map(|(neighbor_pos, buffer)| {
+                    provisional_sky_light_includes_chunk(pos, *neighbor_pos)
+                        .then_some((*neighbor_pos, buffer.blocks.as_slice()))
+                })
+                .chain(generated.iter().filter_map(|(neighbor_pos, chunk)| {
+                    provisional_sky_light_includes_chunk(pos, *neighbor_pos)
+                        .then_some((*neighbor_pos, chunk.blocks()))
+                }));
+            let snapshot = snapshot_with_provisional_lighting_from_neighbors(
                 chunk.to_chunk_snapshot(revision, ChunkStatus::Features),
                 chunk.blocks(),
+                light_neighbors,
             );
             self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
             events.push(ChunkSchedulerEvent::StatusChanged {
@@ -2040,6 +2049,9 @@ impl ChunkScheduler {
             }
         }
 
+        for dependency in retained_dependencies.into_values() {
+            self.mark_dependency_ready(dependency);
+        }
         self.mark_job_complete(completed.job_id, completed.cache_report, completed.timing);
         Ok(events)
     }
@@ -2842,6 +2854,14 @@ fn snapshot_with_provisional_lighting(
     snapshot: ChunkSnapshot,
     raw_blocks: &[RawBlockId],
 ) -> ChunkSnapshot {
+    snapshot_with_provisional_lighting_from_neighbors(snapshot, raw_blocks, std::iter::empty())
+}
+
+fn snapshot_with_provisional_lighting_from_neighbors<'a>(
+    snapshot: ChunkSnapshot,
+    raw_blocks: &'a [RawBlockId],
+    neighbor_blocks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
+) -> ChunkSnapshot {
     let expected_len = snapshot.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
     assert_eq!(
         raw_blocks.len(),
@@ -2850,107 +2870,239 @@ fn snapshot_with_provisional_lighting(
         snapshot.pos,
         raw_blocks.len()
     );
-    let light_sections =
-        provisional_sky_light_sections(snapshot.min_y, snapshot.height, raw_blocks);
+    let mut chunks = neighbor_blocks.into_iter().collect::<Vec<_>>();
+    chunks.push((snapshot.pos, raw_blocks));
+    let light_sections = provisional_sky_light_sections_for_chunk(
+        snapshot.pos,
+        snapshot.min_y,
+        snapshot.height,
+        chunks,
+    );
     snapshot.with_light_sections(false, light_sections)
 }
 
+#[cfg(test)]
 fn provisional_sky_light_sections(
     min_y: i32,
     height: i32,
     raw_blocks: &[RawBlockId],
 ) -> Vec<PackedLightSection> {
-    debug_assert_eq!(
-        raw_blocks.len(),
-        height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize
-    );
-    let section_count = height / SECTION_HEIGHT;
-    let min_section_y = min_y.div_euclid(SECTION_HEIGHT);
-    let mut sky_values = vec![0_u8; height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize];
-    let mut queue = VecDeque::new();
+    provisional_sky_light_sections_for_chunk(
+        ChunkPos::new(0, 0),
+        min_y,
+        height,
+        std::iter::once((ChunkPos::new(0, 0), raw_blocks)),
+    )
+}
 
-    for local_z in 0..CHUNK_WIDTH {
-        for local_x in 0..CHUNK_WIDTH {
-            let mut sky_open = true;
-            for local_y in (0..height).rev() {
-                let index = chunk_block_index(local_x, local_y, local_z);
-                let block_id = raw_blocks[index];
-                if sky_open && sky_light_opacity(block_id) >= 15 {
-                    sky_open = false;
-                    continue;
-                }
-                if sky_open {
-                    sky_values[index] = 15;
-                    queue.push_back((local_x, local_y, local_z));
-                }
-            }
+fn provisional_sky_light_sections_for_chunk<'a>(
+    target_pos: ChunkPos,
+    min_y: i32,
+    height: i32,
+    chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
+) -> Vec<PackedLightSection> {
+    let world = ProvisionalSkyLightWorld::new(target_pos, min_y, height, chunks);
+    world.light_sections()
+}
+
+fn provisional_sky_light_includes_chunk(target_pos: ChunkPos, chunk_pos: ChunkPos) -> bool {
+    (chunk_pos.x - target_pos.x).abs() <= 1 && (chunk_pos.z - target_pos.z).abs() <= 1
+}
+
+struct ProvisionalSkyLightWorld<'a> {
+    target_pos: ChunkPos,
+    min_y: i32,
+    height: i32,
+    chunks: BTreeMap<ChunkPos, &'a [RawBlockId]>,
+}
+
+impl<'a> ProvisionalSkyLightWorld<'a> {
+    fn new(
+        target_pos: ChunkPos,
+        min_y: i32,
+        height: i32,
+        chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
+    ) -> Self {
+        assert!(
+            height > 0 && height % SECTION_HEIGHT == 0,
+            "provisional light height {height} must be a positive multiple of {SECTION_HEIGHT}"
+        );
+        let expected_len = height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
+        let chunks = chunks
+            .into_iter()
+            .map(|(pos, blocks)| {
+                assert_eq!(
+                    blocks.len(),
+                    expected_len,
+                    "chunk {pos:?} lighting input had {} blocks instead of {expected_len}",
+                    blocks.len()
+                );
+                (pos, blocks)
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert!(
+            chunks.contains_key(&target_pos),
+            "provisional light target chunk {target_pos:?} was missing from input chunks"
+        );
+
+        Self {
+            target_pos,
+            min_y,
+            height,
+            chunks,
         }
     }
 
-    while let Some((local_x, local_y, local_z)) = queue.pop_front() {
-        let source_level = sky_values[chunk_block_index(local_x, local_y, local_z)];
-        if source_level <= 1 {
-            continue;
+    fn light_sections(&self) -> Vec<PackedLightSection> {
+        let mut sky_values = self
+            .chunks
+            .keys()
+            .map(|pos| {
+                (
+                    *pos,
+                    vec![0_u8; self.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize],
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut queue = VecDeque::new();
+
+        for (&chunk_pos, blocks) in &self.chunks {
+            for local_z in 0..CHUNK_WIDTH {
+                for local_x in 0..CHUNK_WIDTH {
+                    let mut sky_open = true;
+                    for local_y in (0..self.height).rev() {
+                        let index = chunk_block_index(local_x, local_y, local_z);
+                        let block_id = blocks[index];
+                        if sky_open && sky_light_opacity(block_id) >= 15 {
+                            sky_open = false;
+                            continue;
+                        }
+                        if sky_open {
+                            sky_values.get_mut(&chunk_pos).unwrap()[index] = 15;
+                            queue.push_back((chunk_pos, local_x, local_y, local_z));
+                        }
+                    }
+                }
+            }
         }
 
-        for [dx, dy, dz] in SKY_LIGHT_DIRECTIONS {
-            let next_x = local_x + dx;
-            let next_y = local_y + dy;
-            let next_z = local_z + dz;
-            if !(0..CHUNK_WIDTH).contains(&next_x)
-                || !(0..height).contains(&next_y)
-                || !(0..CHUNK_WIDTH).contains(&next_z)
-            {
+        while let Some((chunk_pos, local_x, local_y, local_z)) = queue.pop_front() {
+            let source_level = sky_values[&chunk_pos][chunk_block_index(local_x, local_y, local_z)];
+            if source_level <= 1 {
                 continue;
             }
 
-            let next_index = chunk_block_index(next_x, next_y, next_z);
-            let target_block = raw_blocks[next_index];
-            let Some(next_level) = propagated_sky_light_level(source_level, dy, target_block)
-            else {
-                continue;
-            };
-            if next_level > sky_values[next_index] {
-                sky_values[next_index] = next_level;
-                queue.push_back((next_x, next_y, next_z));
-            }
-        }
-    }
-
-    let mut sky_layers = (0..section_count)
-        .map(|_| DataLayer::new())
-        .collect::<Vec<_>>();
-    for local_y in 0..height {
-        for local_z in 0..CHUNK_WIDTH {
-            for local_x in 0..CHUNK_WIDTH {
-                let level = sky_values[chunk_block_index(local_x, local_y, local_z)];
-                if level == 0 {
+            for [dx, dy, dz] in SKY_LIGHT_DIRECTIONS {
+                let Some((next_pos, next_x, next_y, next_z)) =
+                    self.offset_cell(chunk_pos, local_x, local_y, local_z, dx, dy, dz)
+                else {
                     continue;
+                };
+
+                let next_index = chunk_block_index(next_x, next_y, next_z);
+                let target_block = self.chunks[&next_pos][next_index];
+                let Some(next_level) = propagated_sky_light_level(source_level, dy, target_block)
+                else {
+                    continue;
+                };
+                let next_values = sky_values.get_mut(&next_pos).unwrap();
+                if next_level > next_values[next_index] {
+                    next_values[next_index] = next_level;
+                    queue.push_back((next_pos, next_x, next_y, next_z));
                 }
-                let section_offset = local_y.div_euclid(SECTION_HEIGHT);
-                let section_local_y = local_y.rem_euclid(SECTION_HEIGHT);
-                sky_layers[section_offset as usize].set(local_x, section_local_y, local_z, level);
             }
         }
+
+        self.target_light_sections(&sky_values[&self.target_pos])
     }
 
-    let mut sections = sky_layers
-        .into_iter()
-        .enumerate()
-        .filter_map(|(offset, layer)| {
-            layer
-                .into_bytes()
-                .map(|sky| PackedLightSection::new(min_section_y + offset as i32, Some(sky), None))
-        })
-        .collect::<Vec<_>>();
-    if sections.is_empty() && section_count > 0 {
-        sections.push(PackedLightSection::new(
-            min_section_y,
-            Some(vec![0; mclone_light::DATA_LAYER_SIZE]),
-            None,
-        ));
+    fn offset_cell(
+        &self,
+        chunk_pos: ChunkPos,
+        local_x: i32,
+        local_y: i32,
+        local_z: i32,
+        dx: i32,
+        dy: i32,
+        dz: i32,
+    ) -> Option<(ChunkPos, i32, i32, i32)> {
+        let next_y = local_y + dy;
+        if !(0..self.height).contains(&next_y) {
+            return None;
+        }
+
+        let mut next_pos = chunk_pos;
+        let mut next_x = local_x + dx;
+        if next_x < 0 {
+            next_pos.x -= 1;
+            next_x += CHUNK_WIDTH;
+        } else if next_x >= CHUNK_WIDTH {
+            next_pos.x += 1;
+            next_x -= CHUNK_WIDTH;
+        }
+
+        let mut next_z = local_z + dz;
+        if next_z < 0 {
+            next_pos.z -= 1;
+            next_z += CHUNK_WIDTH;
+        } else if next_z >= CHUNK_WIDTH {
+            next_pos.z += 1;
+            next_z -= CHUNK_WIDTH;
+        }
+
+        self.chunks
+            .contains_key(&next_pos)
+            .then_some((next_pos, next_x, next_y, next_z))
     }
-    sections
+
+    fn target_light_sections(&self, sky_values: &[u8]) -> Vec<PackedLightSection> {
+        debug_assert_eq!(
+            sky_values.len(),
+            self.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize
+        );
+        let section_count = self.height / SECTION_HEIGHT;
+        let min_section_y = self.min_y.div_euclid(SECTION_HEIGHT);
+
+        let mut sky_layers = (0..section_count)
+            .map(|_| DataLayer::new())
+            .collect::<Vec<_>>();
+        for local_y in 0..self.height {
+            for local_z in 0..CHUNK_WIDTH {
+                for local_x in 0..CHUNK_WIDTH {
+                    let level = sky_values[chunk_block_index(local_x, local_y, local_z)];
+                    if level == 0 {
+                        continue;
+                    }
+                    let section_offset = local_y.div_euclid(SECTION_HEIGHT);
+                    let section_local_y = local_y.rem_euclid(SECTION_HEIGHT);
+                    sky_layers[section_offset as usize].set(
+                        local_x,
+                        section_local_y,
+                        local_z,
+                        level,
+                    );
+                }
+            }
+        }
+
+        let mut sections = sky_layers
+            .into_iter()
+            .enumerate()
+            .filter_map(|(offset, layer)| {
+                layer.into_bytes().map(|sky| {
+                    PackedLightSection::new(min_section_y + offset as i32, Some(sky), None)
+                })
+            })
+            .collect::<Vec<_>>();
+        if sections.is_empty() && section_count > 0 {
+            sections.push(PackedLightSection::new(
+                min_section_y,
+                Some(vec![0; mclone_light::DATA_LAYER_SIZE]),
+                None,
+            ));
+        }
+        sections
+    }
 }
 
 const SKY_LIGHT_DIRECTIONS: [[i32; 3]; 6] = [
@@ -3205,7 +3357,7 @@ mod tests {
             let blocks = native_blocks_from_synthetic_light_case(case, min_y, height);
             let sections = provisional_sky_light_sections(min_y, height, &blocks);
 
-            assert_synthetic_light_samples(case, &sections);
+            assert_synthetic_light_samples(case, ChunkPos::new(0, 0), &sections);
             let java_section = synthetic_light_section(case, 0, 0, 0);
             assert_eq!(
                 sky_section_hex(&sections, 0),
@@ -3218,11 +3370,62 @@ mod tests {
     }
 
     #[test]
+    fn provisional_sky_light_matches_java_cross_chunk_synthetic_fixture() {
+        let fixture = serde_json::from_str::<Value>(include_str!(
+            "../../../../test/fixtures/lighting/sky-synthetic.json"
+        ))
+        .unwrap();
+        let min_y = fixture_i32(&fixture["level"], "minY");
+        let height = fixture_i32(&fixture["level"], "height");
+        let case = synthetic_light_case(&fixture, "fullRoofEastOpenNeighbor");
+        let chunks = native_chunk_blocks_from_synthetic_light_case(case, min_y, height);
+        let target_pos = ChunkPos::new(0, 0);
+        let sections = provisional_sky_light_sections_for_chunk(
+            target_pos,
+            min_y,
+            height,
+            chunks.iter().map(|(pos, blocks)| (*pos, blocks.as_slice())),
+        );
+
+        assert_synthetic_light_samples(case, target_pos, &sections);
+        assert_eq!(sample_sky_light(&sections, 15, 13, 8), 14);
+        assert_eq!(sample_sky_light(&sections, 14, 13, 8), 13);
+
+        let java_section = synthetic_light_section(case, 0, 0, 0);
+        assert_eq!(
+            sky_section_hex(&sections, 0),
+            java_section["dataHex"]
+                .as_str()
+                .expect("synthetic light dataHex must be a string")
+        );
+
+        let local_only_sections =
+            provisional_sky_light_sections(min_y, height, chunks.get(&target_pos).unwrap());
+        assert_eq!(sample_sky_light(&local_only_sections, 15, 13, 8), 0);
+    }
+
+    #[test]
     fn synthetic_light_fixture_records_cross_chunk_boundary_case() {
         let fixture = serde_json::from_str::<Value>(include_str!(
             "../../../../test/fixtures/lighting/sky-synthetic.json"
         ))
         .unwrap();
+        let cross_light_case = synthetic_light_case(&fixture, "fullRoofEastOpenNeighbor");
+        assert_eq!(cross_light_case["skySections"].as_array().unwrap().len(), 6);
+        assert_eq!(
+            cross_light_case["samples"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|sample| {
+                    fixture_i32(sample, "x") == 15
+                        && fixture_i32(sample, "y") == 13
+                        && fixture_i32(sample, "z") == 8
+                })
+                .map(|sample| fixture_i32(sample, "sky")),
+            Some(14)
+        );
+
         let case = synthetic_light_case(&fixture, "chunkBoundaryOverhang");
 
         assert_eq!(case["skySections"].as_array().unwrap().len(), 6);
@@ -3277,7 +3480,36 @@ mod tests {
         min_y: i32,
         height: i32,
     ) -> Vec<RawBlockId> {
-        let mut blocks = vec![AIR; (CHUNK_WIDTH * height * CHUNK_WIDTH) as usize];
+        let mut chunks = native_chunk_blocks_from_synthetic_light_case(case, min_y, height);
+        chunks
+            .remove(&ChunkPos::new(0, 0))
+            .expect("synthetic light case must include chunk (0, 0)")
+    }
+
+    fn native_chunk_blocks_from_synthetic_light_case(
+        case: &Value,
+        min_y: i32,
+        height: i32,
+    ) -> BTreeMap<ChunkPos, Vec<RawBlockId>> {
+        let mut chunks = BTreeMap::new();
+        for chunk in case["chunks"]
+            .as_array()
+            .expect("synthetic light case chunks must be an array")
+        {
+            let coords = chunk
+                .as_array()
+                .expect("synthetic light chunk entry must be an array");
+            assert_eq!(coords.len(), 2);
+            let chunk_pos = ChunkPos::new(
+                coords[0].as_i64().unwrap() as i32,
+                coords[1].as_i64().unwrap() as i32,
+            );
+            chunks.insert(
+                chunk_pos,
+                vec![AIR; (CHUNK_WIDTH * height * CHUNK_WIDTH) as usize],
+            );
+        }
+
         for cell in case["opaque"]
             .as_array()
             .expect("synthetic light case opaque must be an array")
@@ -3289,16 +3521,25 @@ mod tests {
             let x = coords[0].as_i64().unwrap() as i32;
             let y = coords[1].as_i64().unwrap() as i32;
             let z = coords[2].as_i64().unwrap() as i32;
-            assert!((0..CHUNK_WIDTH).contains(&x));
+            let pos = WorldBlockPos::new(x, y, z);
+            let chunk_pos = pos.chunk_pos();
+            let blocks = chunks
+                .get_mut(&chunk_pos)
+                .unwrap_or_else(|| panic!("opaque cell ({x}, {y}, {z}) had no loaded chunk"));
             assert!((min_y..min_y + height).contains(&y));
-            assert!((0..CHUNK_WIDTH).contains(&z));
-            blocks[chunk_block_index(x, y - min_y, z)] = STONE;
+            blocks[chunk_block_index(local_block_coord(x), y - min_y, local_block_coord(z))] =
+                STONE;
         }
-        blocks
+        chunks
     }
 
-    fn assert_synthetic_light_samples(case: &Value, sections: &[PackedLightSection]) {
+    fn assert_synthetic_light_samples(
+        case: &Value,
+        target_pos: ChunkPos,
+        sections: &[PackedLightSection],
+    ) {
         let case_name = case["name"].as_str().unwrap();
+        let mut checked = 0;
         for sample in case["samples"]
             .as_array()
             .expect("synthetic light case samples must be an array")
@@ -3306,6 +3547,9 @@ mod tests {
             let x = fixture_i32(sample, "x");
             let y = fixture_i32(sample, "y");
             let z = fixture_i32(sample, "z");
+            if WorldBlockPos::new(x, y, z).chunk_pos() != target_pos {
+                continue;
+            }
             let expected_sky = fixture_i32(sample, "sky") as u8;
             assert_eq!(
                 sample_sky_light(sections, x, y, z),
@@ -3317,7 +3561,12 @@ mod tests {
                 0,
                 "synthetic sky fixture should not emit block light"
             );
+            checked += 1;
         }
+        assert!(
+            checked > 0,
+            "synthetic light case `{case_name}` had no samples in target chunk {target_pos:?}"
+        );
     }
 
     fn sample_sky_light(sections: &[PackedLightSection], x: i32, y: i32, z: i32) -> u8 {
