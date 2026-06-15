@@ -1110,6 +1110,7 @@ dependencies = [
  "mclone-light",
  "mclone-protocol",
  "mclone-worldgen",
+ "serde_json",
 ]
 
 [[package]]

@@ -190,7 +190,9 @@ impl TexturedMeshCatalog {
             let asset = blockstates
                 .get(&record.block)
                 .ok_or_else(|| TexturedMeshError::MissingBlockStateAsset(record.block.clone()))?;
-            let variant_key = record.variant_key();
+            let variant_key = record
+                .asset_variant_key(asset)
+                .unwrap_or_else(|| record.variant_key());
             let model = if let Some(variants) = asset.variants_for_key(&variant_key) {
                 variants
                     .first()

@@ -51,6 +51,24 @@ impl BlockStateRecord {
             format!("{}[{variant_key}]", self.block)
         }
     }
+
+    pub fn asset_variant_key(&self, asset: &BlockStateAsset) -> Option<String> {
+        let variant_key = self.variant_key();
+        if asset.variants_for_key(&variant_key).is_some() {
+            return Some(variant_key);
+        }
+        if self.can_use_empty_fluid_model_variant() && asset.variants_for_key("").is_some() {
+            return Some(String::new());
+        }
+        None
+    }
+
+    fn can_use_empty_fluid_model_variant(&self) -> bool {
+        self.block.namespace() == "minecraft"
+            && matches!(self.block.path(), "water" | "lava")
+            && self.properties.len() == 1
+            && self.properties.contains_key("level")
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -121,11 +139,14 @@ impl BlockStateRegistry {
             let asset = index.get(&record.block).ok_or_else(|| {
                 AssetError::MissingAsset(AssetPath::blockstate_json(&record.block))
             })?;
-            let variant_key = record.variant_key();
-            if !asset.variant_keys.is_empty() && !asset.variant_keys.contains(&variant_key) {
+            if asset.variant_keys.is_empty() {
+                continue;
+            }
+            if record.asset_variant_key(asset).is_none() {
                 return Err(AssetError::InvalidBlockState(format!(
-                    "{} references missing blockstate variant `{variant_key}`",
-                    record.canonical_key()
+                    "{} references missing blockstate variant `{}`",
+                    record.canonical_key(),
+                    record.variant_key()
                 )));
             }
         }
@@ -346,18 +367,27 @@ const AXIS_Y: &[(&str, &str)] = &[("axis", "y")];
 const LAYERS_1: &[(&str, &str)] = &[("layers", "1")];
 const HALF_LOWER: &[(&str, &str)] = &[("half", "lower")];
 const HALF_UPPER: &[(&str, &str)] = &[("half", "upper")];
+const LEVEL_0: &[(&str, &str)] = &[("level", "0")];
+const LEVEL_1: &[(&str, &str)] = &[("level", "1")];
+const LEVEL_2: &[(&str, &str)] = &[("level", "2")];
+const LEVEL_3: &[(&str, &str)] = &[("level", "3")];
+const LEVEL_4: &[(&str, &str)] = &[("level", "4")];
+const LEVEL_5: &[(&str, &str)] = &[("level", "5")];
+const LEVEL_6: &[(&str, &str)] = &[("level", "6")];
+const LEVEL_7: &[(&str, &str)] = &[("level", "7")];
+const LEVEL_8: &[(&str, &str)] = &[("level", "8")];
 
 const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (0, "minecraft:air", EMPTY_PROPS),
     (1, "minecraft:stone", EMPTY_PROPS),
-    (2, "minecraft:water", EMPTY_PROPS),
+    (2, "minecraft:water", LEVEL_0),
     (3, "minecraft:bedrock", EMPTY_PROPS),
     (4, "minecraft:grass_block", SNOWY_FALSE),
     (5, "minecraft:dirt", EMPTY_PROPS),
     (6, "minecraft:sand", EMPTY_PROPS),
     (7, "minecraft:gravel", EMPTY_PROPS),
     (8, "minecraft:snow", LAYERS_1),
-    (9, "minecraft:lava", EMPTY_PROPS),
+    (9, "minecraft:lava", LEVEL_0),
     (10, "minecraft:granite", EMPTY_PROPS),
     (11, "minecraft:diorite", EMPTY_PROPS),
     (12, "minecraft:andesite", EMPTY_PROPS),
@@ -420,6 +450,24 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (69, "minecraft:large_fern", HALF_UPPER),
     (70, "minecraft:glow_lichen", EMPTY_PROPS),
     (71, "minecraft:cave_air", EMPTY_PROPS),
+    // These ids mirror mclone_worldgen::block fluid level ids. The asset JSON only has
+    // a base water/lava model variant; simulation still needs distinct level states.
+    (72, "minecraft:water", LEVEL_1),
+    (73, "minecraft:water", LEVEL_2),
+    (74, "minecraft:water", LEVEL_3),
+    (75, "minecraft:water", LEVEL_4),
+    (76, "minecraft:water", LEVEL_5),
+    (77, "minecraft:water", LEVEL_6),
+    (78, "minecraft:water", LEVEL_7),
+    (79, "minecraft:water", LEVEL_8),
+    (80, "minecraft:lava", LEVEL_1),
+    (81, "minecraft:lava", LEVEL_2),
+    (82, "minecraft:lava", LEVEL_3),
+    (83, "minecraft:lava", LEVEL_4),
+    (84, "minecraft:lava", LEVEL_5),
+    (85, "minecraft:lava", LEVEL_6),
+    (86, "minecraft:lava", LEVEL_7),
+    (87, "minecraft:lava", LEVEL_8),
 ];
 
 #[cfg(test)]
@@ -431,7 +479,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 72);
+        assert_eq!(registry.len(), 88);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -443,6 +491,26 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:stone"),
             Some(BlockStateId(1))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(2)).unwrap().canonical_key(),
+            "minecraft:water[level=0]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:water[level=1]"),
+            Some(BlockStateId(72))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:water[level=8]"),
+            Some(BlockStateId(79))
+        );
+        assert_eq!(
+            registry.by_id(BlockStateId(9)).unwrap().canonical_key(),
+            "minecraft:lava[level=0]"
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:lava[level=8]"),
+            Some(BlockStateId(87))
         );
         assert_eq!(
             registry.by_id(BlockStateId(41)).unwrap().canonical_key(),
@@ -581,6 +649,31 @@ mod tests {
             .unwrap();
 
         registry.validate_blockstate_assets(&index).unwrap();
+    }
+
+    #[test]
+    fn fluid_level_states_use_base_asset_variant() {
+        let mut source = MemoryAssetSource::new();
+        source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/water.json"),
+            r#"{"variants":{"":{"model":"minecraft:block/water"}}}"#,
+        );
+        let index = BlockStateAssetIndex::load_namespace(&source, "minecraft").unwrap();
+        let mut registry = BlockStateRegistry::new();
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(72),
+                ResourceLocation::parse("minecraft:water").unwrap(),
+                [("level", "1")],
+            ))
+            .unwrap();
+
+        registry.validate_blockstate_assets(&index).unwrap();
+        let record = registry.by_id(BlockStateId(72)).unwrap();
+        let asset = index
+            .get(&ResourceLocation::parse("minecraft:water").unwrap())
+            .unwrap();
+        assert_eq!(record.asset_variant_key(asset), Some(String::new()));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec3, Vec4};
 use mclone_mesh::{
-    RenderSectionKey, TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh,
+    CHUNK_WIDTH as MESH_CHUNK_WIDTH, RENDER_SECTION_HEIGHT, RenderSectionKey,
+    TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh,
 };
 use wgpu::util::DeviceExt;
 
@@ -56,6 +57,11 @@ impl ChunkCamera {
     }
 
     pub fn view_projection(self, width: u32, height: u32) -> [[f32; 4]; 4] {
+        self.view_projection_matrix(width, height)
+            .to_cols_array_2d()
+    }
+
+    fn view_projection_matrix(self, width: u32, height: u32) -> Mat4 {
         let aspect = width.max(1) as f32 / height.max(1) as f32;
         let view = Mat4::look_at_rh(
             Vec3::from_array(self.eye),
@@ -68,7 +74,7 @@ impl ChunkCamera {
             self.z_near,
             self.z_far,
         );
-        (projection * view).to_cols_array_2d()
+        projection * view
     }
 
     pub fn orbit(&mut self, yaw_delta: f32, pitch_delta: f32) {
@@ -126,6 +132,98 @@ impl ChunkCamera {
         let right = forward.cross(Vec3::Y).normalize_or_zero();
         let up = right.cross(forward).normalize_or_zero();
         (forward, right, up)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TexturedSectionRenderStats {
+    pub loaded_section_count: usize,
+    pub drawn_section_count: usize,
+    pub loaded_index_count: u32,
+    pub drawn_index_count: u32,
+}
+
+pub fn textured_section_visibility_stats(
+    sections: &[TexturedRenderSectionMesh],
+    camera: ChunkCamera,
+    width: u32,
+    height: u32,
+) -> TexturedSectionRenderStats {
+    let frustum = ClipFrustum::from_camera(camera, width, height);
+    let mut stats = TexturedSectionRenderStats::default();
+    for section in sections.iter().filter(|section| !section.is_empty()) {
+        let index_count = section.stats().index_count;
+        stats.loaded_section_count += 1;
+        stats.loaded_index_count += index_count;
+        if frustum.is_render_section_visible(section.key) {
+            stats.drawn_section_count += 1;
+            stats.drawn_index_count += index_count;
+        }
+    }
+    stats
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ClipFrustum {
+    view_projection: Mat4,
+}
+
+impl ClipFrustum {
+    fn from_camera(camera: ChunkCamera, width: u32, height: u32) -> Self {
+        Self {
+            view_projection: camera.view_projection_matrix(width, height),
+        }
+    }
+
+    fn is_render_section_visible(&self, key: RenderSectionKey) -> bool {
+        let min = Vec3::new(
+            (key.chunk_x * MESH_CHUNK_WIDTH) as f32,
+            key.min_y() as f32,
+            (key.chunk_z * MESH_CHUNK_WIDTH) as f32,
+        );
+        let max = min
+            + Vec3::new(
+                MESH_CHUNK_WIDTH as f32,
+                RENDER_SECTION_HEIGHT as f32,
+                MESH_CHUNK_WIDTH as f32,
+            );
+        self.is_aabb_visible(min, max)
+    }
+
+    fn is_aabb_visible(&self, min: Vec3, max: Vec3) -> bool {
+        let corners = [
+            Vec3::new(min.x, min.y, min.z),
+            Vec3::new(max.x, min.y, min.z),
+            Vec3::new(min.x, max.y, min.z),
+            Vec3::new(max.x, max.y, min.z),
+            Vec3::new(min.x, min.y, max.z),
+            Vec3::new(max.x, min.y, max.z),
+            Vec3::new(min.x, max.y, max.z),
+            Vec3::new(max.x, max.y, max.z),
+        ];
+        let mut outside_left = true;
+        let mut outside_right = true;
+        let mut outside_bottom = true;
+        let mut outside_top = true;
+        let mut outside_near = true;
+        let mut outside_far = true;
+
+        for corner in corners {
+            let clip = self.view_projection * Vec4::new(corner.x, corner.y, corner.z, 1.0);
+            outside_left &= clip.x < -clip.w;
+            outside_right &= clip.x > clip.w;
+            outside_bottom &= clip.y < -clip.w;
+            outside_top &= clip.y > clip.w;
+            outside_near &= clip.z < -clip.w;
+            outside_far &= clip.z > clip.w;
+        }
+
+        !(outside_left
+            || outside_right
+            || outside_bottom
+            || outside_top
+            || outside_near
+            || outside_far)
     }
 }
 
@@ -805,7 +903,8 @@ impl TexturedSectionDrawResources {
         size: [u32; 2],
         camera: ChunkCamera,
         clear_color: wgpu::Color,
-    ) -> Result<()> {
+    ) -> Result<TexturedSectionRenderStats> {
+        let frustum = ClipFrustum::from_camera(camera, size[0], size[1]);
         let view_projection = camera.view_projection(size[0], size[1]);
         queue.write_buffer(
             &self.renderer.uniform_buffer,
@@ -836,12 +935,22 @@ impl TexturedSectionDrawResources {
         pass.set_pipeline(&self.renderer.pipeline);
         pass.set_bind_group(0, &self.renderer.bind_group, &[]);
         pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-        for mesh in self.sections.values() {
+        let mut stats = TexturedSectionRenderStats {
+            loaded_section_count: self.sections.len(),
+            loaded_index_count: self.index_count(),
+            ..TexturedSectionRenderStats::default()
+        };
+        for (key, mesh) in &self.sections {
+            if !frustum.is_render_section_visible(*key) {
+                continue;
+            }
+            stats.drawn_section_count += 1;
+            stats.drawn_index_count += mesh.index_count();
             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.index_count, 0, 0..1);
         }
-        Ok(())
+        Ok(stats)
     }
 }
 
@@ -938,6 +1047,36 @@ mod tests {
         let target_delta = Vec3::from_array(camera.target) - target;
         assert!((eye_delta - target_delta).length() < 0.001);
         assert!((eye_delta.length() - 3.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn frustum_marks_target_section_visible() {
+        let camera = ChunkCamera {
+            eye: [8.0, 80.0, -40.0],
+            target: [8.0, 48.0, 8.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 64.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 700.0,
+        };
+        let frustum = ClipFrustum::from_camera(camera, 1280, 720);
+
+        assert!(frustum.is_render_section_visible(RenderSectionKey::new(0, 3, 0)));
+    }
+
+    #[test]
+    fn frustum_rejects_section_behind_camera() {
+        let camera = ChunkCamera {
+            eye: [8.0, 80.0, -40.0],
+            target: [8.0, 48.0, 8.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 64.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 700.0,
+        };
+        let frustum = ClipFrustum::from_camera(camera, 1280, 720);
+
+        assert!(!frustum.is_render_section_visible(RenderSectionKey::new(0, 3, -8)));
     }
 
     #[test]

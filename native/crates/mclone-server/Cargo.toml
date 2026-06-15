@@ -11,6 +11,9 @@ mclone-light.workspace = true
 mclone-protocol.workspace = true
 mclone-worldgen.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lib]
 name = "mclone_server"
 path = "src/lib.rs"

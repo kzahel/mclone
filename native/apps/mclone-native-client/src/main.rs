@@ -19,7 +19,9 @@ use mclone_mesh::{
 };
 use mclone_net::{LocalTransport, request_server_updates};
 use mclone_protocol::{ChunkInterest, ServerUpdate};
-use mclone_render::chunk::{ChunkCamera, ChunkTextureAtlas, TexturedSectionDrawResources};
+use mclone_render::chunk::{
+    ChunkCamera, ChunkTextureAtlas, TexturedSectionDrawResources, textured_section_visibility_stats,
+};
 use mclone_render::headless::{
     HeadlessChunkOptions, HeadlessClearOptions, write_headless_clear_png,
     write_headless_textured_sections_png,
@@ -37,6 +39,10 @@ const DEFAULT_CHUNK_X: i32 = 0;
 const DEFAULT_CHUNK_Z: i32 = 0;
 const DEFAULT_CHUNK_RADIUS: i32 = 1;
 const MAX_CHUNK_RADIUS: i32 = 4;
+const DEFAULT_MOVEMENT_PERF_STEPS: usize = 12;
+const DEFAULT_MOVEMENT_PERF_PATH_RADIUS: i32 = 4;
+const MAX_MOVEMENT_PERF_STEPS: usize = 512;
+const MAX_MOVEMENT_PERF_PATH_RADIUS: i32 = 128;
 const SPECTATOR_BASE_SPEED: f32 = 32.0;
 const SPECTATOR_MIN_SPEED: f32 = 2.0;
 const SPECTATOR_MAX_SPEED: f32 = 256.0;
@@ -121,6 +127,12 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Cli::MovementPerf { options } => {
+            let report = run_movement_perf_smoke(&options)?;
+            report.validate()?;
+            report.print_json();
+            Ok(())
+        }
         Cli::Window { scene } => run_window(scene),
     }
 }
@@ -132,6 +144,27 @@ struct SceneOptions {
     chunk_z: i32,
     chunk_radius: i32,
     remote_addr: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MovementPerfOptions {
+    scene: SceneOptions,
+    width: u32,
+    height: u32,
+    steps: usize,
+    path_radius_chunks: i32,
+}
+
+impl Default for MovementPerfOptions {
+    fn default() -> Self {
+        Self {
+            scene: SceneOptions::default(),
+            width: 1280,
+            height: 720,
+            steps: DEFAULT_MOVEMENT_PERF_STEPS,
+            path_radius_chunks: DEFAULT_MOVEMENT_PERF_PATH_RADIUS,
+        }
+    }
 }
 
 impl Default for SceneOptions {
@@ -168,6 +201,9 @@ enum Cli {
         height: u32,
         scene: SceneOptions,
     },
+    MovementPerf {
+        options: MovementPerfOptions,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -183,15 +219,27 @@ impl Cli {
         let mut width = None;
         let mut height = None;
         let mut scene = SceneOptions::default();
+        let mut movement_perf = false;
+        let mut movement_steps = DEFAULT_MOVEMENT_PERF_STEPS;
+        let mut movement_path_radius = DEFAULT_MOVEMENT_PERF_PATH_RADIUS;
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
+                "--movement-perf" => {
+                    if mode.is_some() {
+                        bail!("--movement-perf cannot be combined with a headless output mode");
+                    }
+                    movement_perf = true;
+                }
                 "--headless-clear" => {
                     let path = args
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-clear requires an output PNG path")?;
+                    if movement_perf {
+                        bail!("headless output modes cannot be combined with --movement-perf");
+                    }
                     set_headless_mode(&mut mode, HeadlessMode::Clear(path))?;
                 }
                 "--headless-chunk" => {
@@ -199,6 +247,9 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-chunk requires an output PNG path")?;
+                    if movement_perf {
+                        bail!("headless output modes cannot be combined with --movement-perf");
+                    }
                     set_headless_mode(&mut mode, HeadlessMode::Chunk(path))?;
                 }
                 "--headless-chunk-scenarios" => {
@@ -206,6 +257,9 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-chunk-scenarios requires an output directory")?;
+                    if movement_perf {
+                        bail!("headless output modes cannot be combined with --movement-perf");
+                    }
                     set_headless_mode(&mut mode, HeadlessMode::ChunkScenarios(path))?;
                 }
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
@@ -219,6 +273,14 @@ impl Cli {
                 "--remote-addr" => {
                     scene.remote_addr =
                         Some(args.next().context("--remote-addr requires HOST:PORT")?);
+                }
+                "--movement-steps" => {
+                    movement_perf = true;
+                    movement_steps = parse_movement_steps_arg("--movement-steps", args.next())?;
+                }
+                "--path-radius" | "--movement-path-radius" => {
+                    movement_perf = true;
+                    movement_path_radius = parse_movement_path_radius_arg(&arg, args.next())?;
                 }
                 "--help" | "-h" => {
                     print_help();
@@ -245,6 +307,15 @@ impl Cli {
                 width: width.unwrap_or(960),
                 height: height.unwrap_or(640),
                 scene,
+            }),
+            None if movement_perf => Ok(Self::MovementPerf {
+                options: MovementPerfOptions {
+                    scene,
+                    width: width.unwrap_or(1280),
+                    height: height.unwrap_or(720),
+                    steps: movement_steps,
+                    path_radius_chunks: movement_path_radius,
+                },
             }),
             None => Ok(Self::Window { scene }),
         }
@@ -292,6 +363,25 @@ fn parse_chunk_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
     Ok(parsed)
 }
 
+fn parse_movement_steps_arg(flag: &str, value: Option<String>) -> Result<usize> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<usize>()
+        .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
+    if !(1..=MAX_MOVEMENT_PERF_STEPS).contains(&parsed) {
+        bail!("{flag} must be between 1 and {MAX_MOVEMENT_PERF_STEPS}");
+    }
+    Ok(parsed)
+}
+
+fn parse_movement_path_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
+    let parsed = parse_i32_arg(flag, value)?;
+    if !(1..=MAX_MOVEMENT_PERF_PATH_RADIUS).contains(&parsed) {
+        bail!("{flag} must be between 1 and {MAX_MOVEMENT_PERF_PATH_RADIUS}");
+    }
+    Ok(parsed)
+}
+
 fn print_help() {
     println!(
         "mclone-native-client\n\n\
@@ -299,7 +389,8 @@ fn print_help() {
            mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\
-           mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\n\
+           mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\
+           mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4]\n\n\
          Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, and wheel speed controls. Headless modes write PNGs for GPU validation."
     );
 }
@@ -322,6 +413,286 @@ fn run_window(scene: SceneOptions) -> Result<()> {
     let mut app = ChunkApp::new(runtime, SpectatorCamera::spawn_for_scene(&scene));
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct MovementPerfReport {
+    options: MovementPerfOptions,
+    total_elapsed_ms: f64,
+    steps: Vec<MovementPerfStepReport>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MovementPerfStepReport {
+    index: usize,
+    center: ChunkPos,
+    elapsed_ms: f64,
+    set_interest_ms: f64,
+    poll_ms: f64,
+    remesh_ms: f64,
+    poll_count: usize,
+    loaded_chunks: usize,
+    client_visible_chunks: usize,
+    active_ticket_chunks: usize,
+    pending_unload_chunks: usize,
+    block_ticking_chunks: usize,
+    entity_ticking_chunks: usize,
+    simulation_tick: u64,
+    simulation_scheduler_tick_ms: f64,
+    simulation_block_tick_ms: f64,
+    simulation_fluid_tick_ms: f64,
+    simulation_entity_tick_ms: f64,
+    fluid_ticks_executed: usize,
+    fluid_mutated_blocks: usize,
+    scheduled_fluid_ticks: usize,
+    loaded_sections: usize,
+    visible_sections: usize,
+    loaded_indices: u32,
+    visible_indices: u32,
+}
+
+impl MovementPerfReport {
+    fn validate(&self) -> Result<()> {
+        let expected_visible_chunks = square_count(self.options.scene.chunk_radius)?;
+        for step in &self.steps {
+            if step.loaded_chunks != expected_visible_chunks {
+                bail!(
+                    "movement step {} loaded_chunks={} expected {expected_visible_chunks}",
+                    step.index,
+                    step.loaded_chunks
+                );
+            }
+            if step.client_visible_chunks != expected_visible_chunks {
+                bail!(
+                    "movement step {} client_visible_chunks={} expected {expected_visible_chunks}",
+                    step.index,
+                    step.client_visible_chunks
+                );
+            }
+            if step.loaded_sections == 0 {
+                bail!("movement step {} produced no render sections", step.index);
+            }
+            if step.visible_sections == 0 {
+                bail!(
+                    "movement step {} frustum culled every render section",
+                    step.index
+                );
+            }
+            if step.visible_sections > step.loaded_sections {
+                bail!(
+                    "movement step {} visible_sections={} exceeds loaded_sections={}",
+                    step.index,
+                    step.visible_sections,
+                    step.loaded_sections
+                );
+            }
+        }
+        if self
+            .steps
+            .iter()
+            .all(|step| step.visible_sections == step.loaded_sections)
+        {
+            bail!("movement perf smoke did not cull any loaded render section");
+        }
+        Ok(())
+    }
+
+    fn print_json(&self) {
+        println!("{{");
+        println!("  \"seed\": {},", self.options.scene.seed);
+        println!(
+            "  \"origin\": {{ \"x\": {}, \"z\": {} }},",
+            self.options.scene.chunk_x, self.options.scene.chunk_z
+        );
+        println!("  \"chunk_radius\": {},", self.options.scene.chunk_radius);
+        println!(
+            "  \"path_radius_chunks\": {},",
+            self.options.path_radius_chunks
+        );
+        println!("  \"steps\": {},", self.options.steps);
+        println!("  \"width\": {},", self.options.width);
+        println!("  \"height\": {},", self.options.height);
+        println!("  \"total_elapsed_ms\": {:.3},", self.total_elapsed_ms);
+        println!("  \"step_reports\": [");
+        for (index, step) in self.steps.iter().enumerate() {
+            let suffix = if index + 1 == self.steps.len() {
+                ""
+            } else {
+                ","
+            };
+            println!("    {{");
+            println!("      \"index\": {},", step.index);
+            println!(
+                "      \"center\": {{ \"x\": {}, \"z\": {} }},",
+                step.center.x, step.center.z
+            );
+            println!("      \"elapsed_ms\": {:.3},", step.elapsed_ms);
+            println!("      \"set_interest_ms\": {:.3},", step.set_interest_ms);
+            println!("      \"poll_ms\": {:.3},", step.poll_ms);
+            println!("      \"remesh_ms\": {:.3},", step.remesh_ms);
+            println!("      \"poll_count\": {},", step.poll_count);
+            println!("      \"loaded_chunks\": {},", step.loaded_chunks);
+            println!(
+                "      \"client_visible_chunks\": {},",
+                step.client_visible_chunks
+            );
+            println!(
+                "      \"active_ticket_chunks\": {},",
+                step.active_ticket_chunks
+            );
+            println!(
+                "      \"pending_unload_chunks\": {},",
+                step.pending_unload_chunks
+            );
+            println!(
+                "      \"block_ticking_chunks\": {},",
+                step.block_ticking_chunks
+            );
+            println!(
+                "      \"entity_ticking_chunks\": {},",
+                step.entity_ticking_chunks
+            );
+            println!("      \"simulation_tick\": {},", step.simulation_tick);
+            println!(
+                "      \"simulation_scheduler_tick_ms\": {:.3},",
+                step.simulation_scheduler_tick_ms
+            );
+            println!(
+                "      \"simulation_block_tick_ms\": {:.3},",
+                step.simulation_block_tick_ms
+            );
+            println!(
+                "      \"simulation_fluid_tick_ms\": {:.3},",
+                step.simulation_fluid_tick_ms
+            );
+            println!(
+                "      \"simulation_entity_tick_ms\": {:.3},",
+                step.simulation_entity_tick_ms
+            );
+            println!(
+                "      \"fluid_ticks_executed\": {},",
+                step.fluid_ticks_executed
+            );
+            println!(
+                "      \"fluid_mutated_blocks\": {},",
+                step.fluid_mutated_blocks
+            );
+            println!(
+                "      \"scheduled_fluid_ticks\": {},",
+                step.scheduled_fluid_ticks
+            );
+            println!("      \"loaded_sections\": {},", step.loaded_sections);
+            println!("      \"visible_sections\": {},", step.visible_sections);
+            println!("      \"loaded_indices\": {},", step.loaded_indices);
+            println!("      \"visible_indices\": {}", step.visible_indices);
+            println!("    }}{suffix}");
+        }
+        println!("  ]");
+        println!("}}");
+    }
+}
+
+fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerfReport> {
+    if options.scene.remote_addr.is_some() {
+        bail!("--movement-perf currently requires the local integrated server path");
+    }
+    let total_start = Instant::now();
+    let mut runtime = WindowSceneRuntime::new(&options.scene)?;
+    let mut steps = Vec::with_capacity(options.steps);
+
+    for index in 0..options.steps {
+        let step_start = Instant::now();
+        let spectator = circular_movement_spectator(
+            &options.scene,
+            options.path_radius_chunks,
+            index,
+            options.steps,
+        );
+        let center = spectator.chunk_pos();
+        let set_interest_start = Instant::now();
+        runtime.set_interest_center(center)?;
+        let set_interest_ms = elapsed_ms(set_interest_start.elapsed());
+        let (poll_count, poll_ms) = poll_window_runtime_until_idle(&mut runtime)?;
+
+        let remesh_start = Instant::now();
+        let sections = runtime.build_sections()?;
+        let remesh_ms = elapsed_ms(remesh_start.elapsed());
+        let camera = spectator.camera(runtime.radius_chunks);
+        let visibility =
+            textured_section_visibility_stats(&sections, camera, options.width, options.height);
+        let stats = runtime.stats();
+
+        steps.push(MovementPerfStepReport {
+            index,
+            center,
+            elapsed_ms: elapsed_ms(step_start.elapsed()),
+            set_interest_ms,
+            poll_ms,
+            remesh_ms,
+            poll_count,
+            loaded_chunks: stats.loaded_chunks,
+            client_visible_chunks: stats.client_visible_chunks,
+            active_ticket_chunks: stats.active_ticket_chunks,
+            pending_unload_chunks: stats.pending_unload_chunks,
+            block_ticking_chunks: stats.block_ticking_chunks,
+            entity_ticking_chunks: stats.entity_ticking_chunks,
+            simulation_tick: stats.last_simulation_tick,
+            simulation_scheduler_tick_ms: stats.last_simulation_scheduler_tick_ms,
+            simulation_block_tick_ms: stats.last_simulation_block_tick_ms,
+            simulation_fluid_tick_ms: stats.last_simulation_fluid_tick_ms,
+            simulation_entity_tick_ms: stats.last_simulation_entity_tick_ms,
+            fluid_ticks_executed: stats.last_simulation_fluid_ticks_executed,
+            fluid_mutated_blocks: stats.last_simulation_fluid_mutated_blocks,
+            scheduled_fluid_ticks: stats.scheduled_fluid_ticks,
+            loaded_sections: visibility.loaded_section_count,
+            visible_sections: visibility.drawn_section_count,
+            loaded_indices: visibility.loaded_index_count,
+            visible_indices: visibility.drawn_index_count,
+        });
+    }
+
+    Ok(MovementPerfReport {
+        options: options.clone(),
+        total_elapsed_ms: elapsed_ms(total_start.elapsed()),
+        steps,
+    })
+}
+
+fn circular_movement_spectator(
+    scene: &SceneOptions,
+    path_radius_chunks: i32,
+    index: usize,
+    steps: usize,
+) -> SpectatorCamera {
+    let origin_x = scene.chunk_x as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+    let origin_z = scene.chunk_z as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+    let radius_blocks = path_radius_chunks.max(1) as f32 * CHUNK_WIDTH as f32;
+    let angle = std::f32::consts::TAU * index as f32 / steps.max(1) as f32;
+    let position = Vec3::new(
+        origin_x + radius_blocks * angle.cos(),
+        88.0,
+        origin_z + radius_blocks * angle.sin(),
+    );
+    let target = Vec3::new(origin_x, 56.0, origin_z);
+    let direction = (target - position).normalize_or_zero();
+    let horizontal = Vec3::new(direction.x, 0.0, direction.z).length();
+    SpectatorCamera {
+        position,
+        yaw: direction.x.atan2(direction.z),
+        pitch: direction.y.atan2(horizontal),
+        speed: SPECTATOR_BASE_SPEED,
+    }
+}
+
+fn square_count(radius: i32) -> Result<usize> {
+    if radius < 0 {
+        bail!("radius must be non-negative");
+    }
+    let side = usize::try_from(radius)
+        .context("radius exceeds usize")?
+        .saturating_mul(2)
+        .saturating_add(1);
+    Ok(side * side)
 }
 
 #[derive(Clone, Debug)]
@@ -496,7 +867,11 @@ struct WindowSceneRuntime {
     last_simulation_entity_tick_chunks: usize,
     last_simulation_scheduler_tick_ms: f64,
     last_simulation_block_tick_ms: f64,
+    last_simulation_fluid_tick_ms: f64,
     last_simulation_entity_tick_ms: f64,
+    last_simulation_fluid_ticks_executed: usize,
+    last_simulation_fluid_mutated_blocks: usize,
+    scheduled_fluid_ticks: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -516,7 +891,11 @@ struct WindowRuntimeStats {
     last_simulation_entity_tick_chunks: usize,
     last_simulation_scheduler_tick_ms: f64,
     last_simulation_block_tick_ms: f64,
+    last_simulation_fluid_tick_ms: f64,
     last_simulation_entity_tick_ms: f64,
+    last_simulation_fluid_ticks_executed: usize,
+    last_simulation_fluid_mutated_blocks: usize,
+    scheduled_fluid_ticks: usize,
 }
 
 impl WindowSceneRuntime {
@@ -546,7 +925,11 @@ impl WindowSceneRuntime {
             last_simulation_entity_tick_chunks: 0,
             last_simulation_scheduler_tick_ms: 0.0,
             last_simulation_block_tick_ms: 0.0,
+            last_simulation_fluid_tick_ms: 0.0,
             last_simulation_entity_tick_ms: 0.0,
+            last_simulation_fluid_ticks_executed: 0,
+            last_simulation_fluid_mutated_blocks: 0,
+            scheduled_fluid_ticks: 0,
         };
         runtime.set_interest_center(runtime.interest_center)?;
         Ok(runtime)
@@ -590,7 +973,11 @@ impl WindowSceneRuntime {
             self.last_simulation_entity_tick_chunks = report.entity_tick_chunks;
             self.last_simulation_scheduler_tick_ms = micros_to_ms(report.timing.scheduler_tick_us);
             self.last_simulation_block_tick_ms = micros_to_ms(report.timing.block_tick_us);
+            self.last_simulation_fluid_tick_ms = micros_to_ms(report.timing.fluid_tick_us);
             self.last_simulation_entity_tick_ms = micros_to_ms(report.timing.entity_tick_us);
+            self.last_simulation_fluid_ticks_executed = report.fluid_ticks_executed;
+            self.last_simulation_fluid_mutated_blocks = report.fluid_mutated_blocks;
+            self.scheduled_fluid_ticks = report.scheduled_fluid_ticks;
             changed |= self.apply_server_updates(report.updates);
         }
         Ok(changed)
@@ -655,7 +1042,11 @@ impl WindowSceneRuntime {
             last_simulation_entity_tick_chunks: self.last_simulation_entity_tick_chunks,
             last_simulation_scheduler_tick_ms: self.last_simulation_scheduler_tick_ms,
             last_simulation_block_tick_ms: self.last_simulation_block_tick_ms,
+            last_simulation_fluid_tick_ms: self.last_simulation_fluid_tick_ms,
             last_simulation_entity_tick_ms: self.last_simulation_entity_tick_ms,
+            last_simulation_fluid_ticks_executed: self.last_simulation_fluid_ticks_executed,
+            last_simulation_fluid_mutated_blocks: self.last_simulation_fluid_mutated_blocks,
+            scheduled_fluid_ticks: self.scheduled_fluid_ticks,
         }
     }
 }
@@ -675,6 +1066,25 @@ fn poll_integrated_server_until_idle(server: &mut IntegratedServer) -> Result<Ve
         }
         if Instant::now() >= deadline {
             bail!("timed out waiting for integrated server worldgen jobs");
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn poll_window_runtime_until_idle(runtime: &mut WindowSceneRuntime) -> Result<(usize, f64)> {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let mut polls = 0_usize;
+    let mut poll_ms = 0.0_f64;
+    loop {
+        let poll_start = Instant::now();
+        runtime.poll()?;
+        poll_ms += elapsed_ms(poll_start.elapsed());
+        polls += 1;
+        if runtime.pending_job_count() == 0 {
+            return Ok((polls, poll_ms));
+        }
+        if Instant::now() >= deadline {
+            bail!("timed out waiting for window runtime worldgen jobs");
         }
         std::thread::sleep(Duration::from_millis(1));
     }
@@ -726,16 +1136,22 @@ fn selected_model_refs(
         let asset = blockstates
             .get(&record.block)
             .with_context(|| format!("missing blockstate asset for {}", record.block))?;
-        let variant_key = record.variant_key();
-        if let Some(variants) = asset.variants_for_key(&variant_key) {
+        if let Some(variant_key) = record.asset_variant_key(asset) {
+            let Some(variants) = asset.variants_for_key(&variant_key) else {
+                bail!(
+                    "missing blockstate variant `{variant_key}` for {}",
+                    record.block
+                );
+            };
             if let Some(variant) = variants.first() {
                 refs.insert(variant.model.clone());
             }
-        } else if variant_key.is_empty() && !asset.model_refs.is_empty() {
+        } else if record.variant_key().is_empty() && !asset.model_refs.is_empty() {
             refs.extend(asset.model_refs.iter().cloned());
         } else {
             bail!(
-                "missing blockstate variant `{variant_key}` for {}",
+                "missing blockstate variant `{}` for {}",
+                record.variant_key(),
                 record.block
             );
         }
@@ -957,7 +1373,9 @@ fn world_block_to_chunk_coord(value: f32) -> i32 {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct RenderStreamStats {
     section_count: usize,
+    drawn_section_count: usize,
     index_count: u32,
+    drawn_index_count: u32,
     last_remesh_ms: f64,
     last_upload_ms: f64,
     last_frame_ms: f32,
@@ -1054,6 +1472,8 @@ impl ChunkApp {
         let upload_ms = elapsed_ms(upload_start.elapsed());
         self.render_stats.section_count = draw.section_count();
         self.render_stats.index_count = draw.index_count();
+        self.render_stats.drawn_section_count = 0;
+        self.render_stats.drawn_index_count = 0;
         self.render_stats.last_remesh_ms = remesh_ms;
         self.render_stats.last_upload_ms = upload_ms;
         log::info!(
@@ -1080,7 +1500,7 @@ impl ChunkApp {
         let runtime = self.runtime.stats();
         let pos = self.spectator.position;
         window.set_title(&format!(
-            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} | sim {:.3}/{:.3}/{:.3}ms | sections {} idx {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
+            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} fluid {}/{}/{} | sim {:.3}/{:.3}/{:.3}/{:.3}ms | sections {}/{} idx {}/{} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
             pos.x,
             pos.y,
             pos.z,
@@ -1098,10 +1518,16 @@ impl ChunkApp {
             runtime.last_simulation_block_tick_chunks,
             runtime.entity_ticking_chunks,
             runtime.last_simulation_entity_tick_chunks,
+            runtime.last_simulation_fluid_ticks_executed,
+            runtime.last_simulation_fluid_mutated_blocks,
+            runtime.scheduled_fluid_ticks,
             runtime.last_simulation_scheduler_tick_ms,
             runtime.last_simulation_block_tick_ms,
+            runtime.last_simulation_fluid_tick_ms,
             runtime.last_simulation_entity_tick_ms,
+            self.render_stats.drawn_section_count,
             self.render_stats.section_count,
+            self.render_stats.drawn_index_count,
             self.render_stats.index_count,
             self.render_stats.last_frame_ms,
             self.render_stats.last_remesh_ms,
@@ -1164,6 +1590,8 @@ impl ApplicationHandler for ChunkApp {
         let upload_ms = elapsed_ms(upload_start.elapsed());
         self.render_stats.section_count = draw.section_count();
         self.render_stats.index_count = draw.index_count();
+        self.render_stats.drawn_section_count = 0;
+        self.render_stats.drawn_index_count = 0;
         self.render_stats.last_remesh_ms = remesh_ms;
         self.render_stats.last_upload_ms = upload_ms;
         log::info!(
@@ -1256,21 +1684,28 @@ impl ApplicationHandler for ChunkApp {
                     return;
                 }
                 let camera = self.spectator.camera(self.runtime.radius_chunks);
+                let mut frame_render_stats = None;
                 let result = {
                     let (Some(surface), Some(draw)) = (&mut self.surface, &mut self.draw) else {
                         return;
                     };
                     surface.render_with(|_device, queue, encoder, view, size| {
-                        draw.render(
+                        let frame_stats = draw.render(
                             queue,
                             encoder,
                             view,
                             size,
                             camera,
                             mclone_render::default_clear_color(),
-                        )
+                        )?;
+                        frame_render_stats = Some(frame_stats);
+                        Ok(())
                     })
                 };
+                if let Some(frame_stats) = frame_render_stats {
+                    self.render_stats.drawn_section_count = frame_stats.drawn_section_count;
+                    self.render_stats.drawn_index_count = frame_stats.drawn_index_count;
+                }
                 match result {
                     Ok(SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped) => {}
                     Ok(SurfaceFrameStatus::Reconfigured) => self.request_redraw(),
@@ -1518,6 +1953,40 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_movement_perf_options() {
+        let cli = Cli::parse([
+            "--movement-perf".to_owned(),
+            "--movement-steps".to_owned(),
+            "6".to_owned(),
+            "--path-radius".to_owned(),
+            "3".to_owned(),
+            "--chunk-radius".to_owned(),
+            "2".to_owned(),
+            "--width".to_owned(),
+            "800".to_owned(),
+            "--height".to_owned(),
+            "600".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::MovementPerf {
+                options: MovementPerfOptions {
+                    scene: SceneOptions {
+                        chunk_radius: 2,
+                        ..SceneOptions::default()
+                    },
+                    width: 800,
+                    height: 600,
+                    steps: 6,
+                    path_radius_chunks: 3,
+                },
+            }
+        );
+    }
+
+    #[test]
     fn cli_parses_headless_chunk_scenarios() {
         let cli = Cli::parse([
             "--headless-chunk-scenarios".to_owned(),
@@ -1585,6 +2054,16 @@ mod tests {
         assert!(positions.contains(&(-3, 2)));
         assert!(positions.contains(&(-2, 3)));
         assert!(positions.contains(&(-1, 4)));
+    }
+
+    #[test]
+    fn circular_movement_spectator_faces_origin_from_ring() {
+        let scene = SceneOptions::default();
+        let spectator = circular_movement_spectator(&scene, 4, 0, 8);
+
+        assert_eq!(spectator.chunk_pos(), ChunkPos::new(4, 0));
+        assert!(spectator.forward().x < -0.5);
+        assert!(spectator.forward().z.abs() < 0.2);
     }
 
     #[test]

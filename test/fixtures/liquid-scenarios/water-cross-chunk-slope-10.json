@@ -1,0 +1,23 @@
+{
+  "scenario": "water_cross_chunk_slope_10_ticks",
+  "seed": "12345",
+  "ticks": 10,
+  "bounds": {
+    "minX": 14,
+    "minY": 79,
+    "minZ": 0,
+    "sizeX": 5,
+    "sizeY": 4,
+    "sizeZ": 5
+  },
+  "tickMargin": 1,
+  "commands": [
+    "forceload add 0 0 31 15",
+    "fill 14 78 0 18 84 4 minecraft:air",
+    "fill 14 79 0 18 79 4 minecraft:stone",
+    "fill 14 80 1 18 81 1 minecraft:stone",
+    "fill 14 80 3 18 81 3 minecraft:stone",
+    "fill 14 80 2 14 81 2 minecraft:stone",
+    "setblock 15 80 2 minecraft:water[level=0]"
+  ]
+}

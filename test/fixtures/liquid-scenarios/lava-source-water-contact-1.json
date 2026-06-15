@@ -1,0 +1,25 @@
+{
+  "scenario": "lava_source_water_contact_1_tick",
+  "seed": "12345",
+  "ticks": 1,
+  "bounds": {
+    "minX": 0,
+    "minY": 79,
+    "minZ": 0,
+    "sizeX": 5,
+    "sizeY": 4,
+    "sizeZ": 5
+  },
+  "tickMargin": 1,
+  "commands": [
+    "forceload add 0 0 15 15",
+    "fill 0 78 0 4 84 4 minecraft:air",
+    "fill 0 79 0 4 79 4 minecraft:stone",
+    "fill 0 80 1 4 81 1 minecraft:stone",
+    "fill 0 80 3 4 81 3 minecraft:stone",
+    "fill 0 80 2 0 81 2 minecraft:stone",
+    "fill 4 80 2 4 81 2 minecraft:stone",
+    "setblock 1 80 2 minecraft:lava[level=0]",
+    "setblock 2 80 2 minecraft:water[level=0]"
+  ]
+}

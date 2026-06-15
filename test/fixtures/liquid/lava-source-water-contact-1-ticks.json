@@ -1,0 +1,58 @@
+{
+  "module": "liquid-sim",
+  "minecraftVersion": "1.17.1",
+  "dataVersion": 2730,
+  "seed": "12345",
+  "generator": "default",
+  "generateStructures": false,
+  "scenario": "lava_source_water_contact_1_tick",
+  "ticks": 1,
+  "bounds": {
+    "minX": 0,
+    "minY": 79,
+    "minZ": 0,
+    "sizeX": 5,
+    "sizeY": 4,
+    "sizeZ": 5
+  },
+  "wireFormat": {
+    "blockOrder": "y-major,z-major,x-minor",
+    "paletteEntries": "block-state"
+  },
+  "palette": [
+    {
+      "name": "minecraft:stone"
+    },
+    {
+      "name": "minecraft:air"
+    },
+    {
+      "name": "minecraft:obsidian"
+    },
+    {
+      "name": "minecraft:water",
+      "properties": {
+        "level": "0"
+      }
+    }
+  ],
+  "blocks": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 2, 3, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+  "liquidTicks": [
+    {
+      "x": 2,
+      "y": 80,
+      "z": 2,
+      "target": "minecraft:water",
+      "delay": 3,
+      "priority": "normal"
+    },
+    {
+      "x": 1,
+      "y": 80,
+      "z": 2,
+      "target": "minecraft:lava",
+      "delay": 28,
+      "priority": "normal"
+    }
+  ]
+}

@@ -591,9 +591,18 @@ mod tests {
         let mut model_refs = BTreeSet::new();
         for record in registry.records() {
             let asset = index.get(&record.block).unwrap();
-            let variants = asset.variants_for_key(&record.variant_key()).unwrap();
-            for variant in variants {
-                model_refs.insert(variant.model.clone());
+            if let Some(variant_key) = record.asset_variant_key(asset) {
+                let variants = asset.variants_for_key(&variant_key).unwrap();
+                for variant in variants {
+                    model_refs.insert(variant.model.clone());
+                }
+            } else if record.variant_key().is_empty() {
+                model_refs.extend(asset.model_refs.iter().cloned());
+            } else {
+                panic!(
+                    "{} is not covered by blockstate asset variants",
+                    record.canonical_key()
+                );
             }
         }
 

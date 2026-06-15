@@ -1,0 +1,61 @@
+{
+  "module": "liquid-sim",
+  "minecraftVersion": "1.17.1",
+  "dataVersion": 2730,
+  "seed": "12345",
+  "generator": "default",
+  "generateStructures": false,
+  "scenario": "lava_fall_60_ticks",
+  "ticks": 60,
+  "bounds": {
+    "minX": 0,
+    "minY": 79,
+    "minZ": 0,
+    "sizeX": 5,
+    "sizeY": 9,
+    "sizeZ": 5
+  },
+  "wireFormat": {
+    "blockOrder": "y-major,z-major,x-minor",
+    "paletteEntries": "block-state"
+  },
+  "palette": [
+    {
+      "name": "minecraft:stone"
+    },
+    {
+      "name": "minecraft:air"
+    },
+    {
+      "name": "minecraft:lava",
+      "properties": {
+        "level": "8"
+      }
+    },
+    {
+      "name": "minecraft:lava",
+      "properties": {
+        "level": "0"
+      }
+    }
+  ],
+  "blocks": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "liquidTicks": [
+    {
+      "x": 2,
+      "y": 84,
+      "z": 2,
+      "target": "minecraft:flowing_lava",
+      "delay": 30,
+      "priority": "normal"
+    },
+    {
+      "x": 2,
+      "y": 85,
+      "z": 2,
+      "target": "minecraft:flowing_lava",
+      "delay": 30,
+      "priority": "normal"
+    }
+  ]
+}

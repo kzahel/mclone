@@ -796,6 +796,8 @@ pub struct GeneratedChunk {
     pub min_y: i32,
     pub height: i32,
     blocks: Vec<RawBlockId>,
+    block_ticks: Vec<ScheduledTick>,
+    liquid_ticks: Vec<ScheduledTick>,
 }
 
 impl GeneratedChunk {
@@ -808,37 +810,60 @@ impl GeneratedChunk {
         height: i32,
         blocks: Vec<RawBlockId>,
     ) -> Self {
-        if height <= 0 || height % SECTION_HEIGHT != 0 {
-            panic!("chunk height {height} must be a positive multiple of {SECTION_HEIGHT}");
-        }
-        let expected_len = height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
-        if blocks.len() != expected_len {
-            panic!(
-                "generated chunk block buffer has {} entries; expected {expected_len}",
-                blocks.len()
-            );
-        }
+        Self::from_raw_parts_with_ticks(
+            chunk_x,
+            chunk_z,
+            min_y,
+            height,
+            blocks,
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    fn from_raw_parts_with_ticks(
+        chunk_x: i32,
+        chunk_z: i32,
+        min_y: i32,
+        height: i32,
+        blocks: Vec<RawBlockId>,
+        block_ticks: Vec<ScheduledTick>,
+        liquid_ticks: Vec<ScheduledTick>,
+    ) -> Self {
+        validate_generated_chunk_shape(height, blocks.len());
         Self {
             chunk_x,
             chunk_z,
             min_y,
             height,
             blocks,
+            block_ticks,
+            liquid_ticks,
         }
     }
 
     pub fn from_mutable_buffer(buffer: MutableChunkBlockBuffer) -> Self {
-        Self::from_raw_parts(
+        Self::from_raw_parts_with_ticks(
             buffer.chunk_x,
             buffer.chunk_z,
             buffer.min_y,
             buffer.height,
             buffer.blocks,
+            buffer.block_ticks,
+            buffer.liquid_ticks,
         )
     }
 
     pub fn blocks(&self) -> &[RawBlockId] {
         &self.blocks
+    }
+
+    pub fn block_ticks(&self) -> &[ScheduledTick] {
+        &self.block_ticks
+    }
+
+    pub fn liquid_ticks(&self) -> &[ScheduledTick] {
+        &self.liquid_ticks
     }
 
     pub fn block_at_local(&self, local_x: i32, local_y: i32, local_z: i32) -> GeneratedBlockId {
@@ -891,6 +916,16 @@ impl GeneratedChunk {
                 self.min_y + self.height
             );
         }
+    }
+}
+
+fn validate_generated_chunk_shape(height: i32, block_count: usize) {
+    if height <= 0 || height % SECTION_HEIGHT != 0 {
+        panic!("chunk height {height} must be a positive multiple of {SECTION_HEIGHT}");
+    }
+    let expected_len = height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
+    if block_count != expected_len {
+        panic!("generated chunk block buffer has {block_count} entries; expected {expected_len}");
     }
 }
 
@@ -3545,6 +3580,24 @@ mod tests {
                 );
             },
             "NoiseSampler island noise override is out of scope for the 1.17.1 overworld target",
+        );
+    }
+
+    #[test]
+    fn generated_chunk_preserves_scheduled_ticks_from_mutable_buffer() {
+        let mut buffer = MutableChunkBlockBuffer::new(2, -3, 0, 32);
+        buffer.schedule_block_tick(33, 8, -47, "minecraft:stone", 2);
+        buffer.schedule_liquid_tick(34, 9, -46, "minecraft:water", 0);
+
+        let chunk = GeneratedChunk::from_mutable_buffer(buffer);
+
+        assert_eq!(
+            chunk.block_ticks(),
+            &[ScheduledTick::new(33, 8, -47, "minecraft:stone", 2)]
+        );
+        assert_eq!(
+            chunk.liquid_ticks(),
+            &[ScheduledTick::new(34, 9, -46, "minecraft:water", 0)]
         );
     }
 

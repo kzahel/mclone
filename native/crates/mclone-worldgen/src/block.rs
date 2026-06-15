@@ -74,6 +74,22 @@ pub const LARGE_FERN_LOWER: RawBlockId = 68;
 pub const LARGE_FERN_UPPER: RawBlockId = 69;
 pub const GLOW_LICHEN: RawBlockId = 70;
 pub const CAVE_AIR: RawBlockId = 71;
+pub const WATER_LEVEL_1: RawBlockId = 72;
+pub const WATER_LEVEL_2: RawBlockId = 73;
+pub const WATER_LEVEL_3: RawBlockId = 74;
+pub const WATER_LEVEL_4: RawBlockId = 75;
+pub const WATER_LEVEL_5: RawBlockId = 76;
+pub const WATER_LEVEL_6: RawBlockId = 77;
+pub const WATER_LEVEL_7: RawBlockId = 78;
+pub const WATER_LEVEL_8: RawBlockId = 79;
+pub const LAVA_LEVEL_1: RawBlockId = 80;
+pub const LAVA_LEVEL_2: RawBlockId = 81;
+pub const LAVA_LEVEL_3: RawBlockId = 82;
+pub const LAVA_LEVEL_4: RawBlockId = 83;
+pub const LAVA_LEVEL_5: RawBlockId = 84;
+pub const LAVA_LEVEL_6: RawBlockId = 85;
+pub const LAVA_LEVEL_7: RawBlockId = 86;
+pub const LAVA_LEVEL_8: RawBlockId = 87;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -117,7 +133,7 @@ impl GeneratedBlockId {
     }
 
     pub const fn is_water(self) -> bool {
-        self.0 == WATER
+        is_water(self.0)
     }
 
     pub const fn name(self) -> &'static str {
@@ -130,11 +146,13 @@ pub const fn is_air_like(block_id: RawBlockId) -> bool {
 }
 
 pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
+    if has_fluid(block_id) {
+        return false;
+    }
+
     !matches!(
         block_id,
         AIR | CAVE_AIR
-            | WATER
-            | LAVA
             | SNOW
             | GRASS
             | FERN
@@ -147,8 +165,61 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
     )
 }
 
+pub const fn is_water(block_id: RawBlockId) -> bool {
+    block_id == WATER || (block_id >= WATER_LEVEL_1 && block_id <= WATER_LEVEL_8)
+}
+
+pub const fn is_lava(block_id: RawBlockId) -> bool {
+    block_id == LAVA || (block_id >= LAVA_LEVEL_1 && block_id <= LAVA_LEVEL_8)
+}
+
 pub const fn has_fluid(block_id: RawBlockId) -> bool {
-    matches!(block_id, WATER | LAVA)
+    is_water(block_id) || is_lava(block_id)
+}
+
+pub const fn fluid_level(block_id: RawBlockId) -> Option<u8> {
+    match block_id {
+        WATER | LAVA => Some(0),
+        WATER_LEVEL_1 | LAVA_LEVEL_1 => Some(1),
+        WATER_LEVEL_2 | LAVA_LEVEL_2 => Some(2),
+        WATER_LEVEL_3 | LAVA_LEVEL_3 => Some(3),
+        WATER_LEVEL_4 | LAVA_LEVEL_4 => Some(4),
+        WATER_LEVEL_5 | LAVA_LEVEL_5 => Some(5),
+        WATER_LEVEL_6 | LAVA_LEVEL_6 => Some(6),
+        WATER_LEVEL_7 | LAVA_LEVEL_7 => Some(7),
+        WATER_LEVEL_8 | LAVA_LEVEL_8 => Some(8),
+        _ => None,
+    }
+}
+
+pub const fn water_block_for_level(level: u8) -> Option<RawBlockId> {
+    match level {
+        0 => Some(WATER),
+        1 => Some(WATER_LEVEL_1),
+        2 => Some(WATER_LEVEL_2),
+        3 => Some(WATER_LEVEL_3),
+        4 => Some(WATER_LEVEL_4),
+        5 => Some(WATER_LEVEL_5),
+        6 => Some(WATER_LEVEL_6),
+        7 => Some(WATER_LEVEL_7),
+        8 => Some(WATER_LEVEL_8),
+        _ => None,
+    }
+}
+
+pub const fn lava_block_for_level(level: u8) -> Option<RawBlockId> {
+    match level {
+        0 => Some(LAVA),
+        1 => Some(LAVA_LEVEL_1),
+        2 => Some(LAVA_LEVEL_2),
+        3 => Some(LAVA_LEVEL_3),
+        4 => Some(LAVA_LEVEL_4),
+        5 => Some(LAVA_LEVEL_5),
+        6 => Some(LAVA_LEVEL_6),
+        7 => Some(LAVA_LEVEL_7),
+        8 => Some(LAVA_LEVEL_8),
+        _ => None,
+    }
 }
 
 pub const fn is_leaves(block_id: RawBlockId) -> bool {
@@ -160,17 +231,22 @@ pub const fn generated_block_state_id(block_id: RawBlockId) -> BlockStateId {
 }
 
 pub const fn block_name(block_id: RawBlockId) -> &'static str {
+    if is_water(block_id) {
+        return "minecraft:water";
+    }
+    if is_lava(block_id) {
+        return "minecraft:lava";
+    }
+
     match block_id {
         AIR => "minecraft:air",
         STONE => "minecraft:stone",
-        WATER => "minecraft:water",
         BEDROCK => "minecraft:bedrock",
         GRASS_BLOCK => "minecraft:grass_block",
         DIRT => "minecraft:dirt",
         SAND => "minecraft:sand",
         GRAVEL => "minecraft:gravel",
         SNOW => "minecraft:snow",
-        LAVA => "minecraft:lava",
         GRANITE => "minecraft:granite",
         DIORITE => "minecraft:diorite",
         ANDESITE => "minecraft:andesite",

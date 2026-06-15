@@ -1,6 +1,6 @@
 # 019: Scheduler-Owned Dependency Holders
 
-Status: active.
+Status: completed.
 
 ## Purpose
 
@@ -48,13 +48,14 @@ Key Java facts for this slice:
 - `ChunkSchedulerMetrics` now exposes exact active full-status rings (`Inaccessible`, `Border`, `Ticking`, `EntityTicking`) plus the block-ticking lane. Tests assert the vanilla player-ticket radius math and that client visibility is independent from ticking status.
 - `ChunkScheduler::tick_report()` and `IntegratedServer::tick_report()` now expose deterministic z-major block-ticking and entity-ticking chunk lists, bounded pending-unload drain counts, and protocol updates/events. Native window mode uses the report and shows the tick id plus last unload-drain count in the title.
 - `IntegratedServer::simulation_tick_report()` now consumes the chunk tick report through no-op block/entity phases, records phase counts and native timing, and preserves existing `tick()` protocol-update behavior. Native window diagnostics show simulation tick id, phase counts, and phase timing.
+- After scheduled fluid ticks landed, chunks in the block-ticking or entity-ticking lanes are promoted to full generated live chunks even when they are not client-visible. This keeps client publication narrow while giving runtime systems mutable block access across chunk boundaries.
 
 ## Current Limits
 
 - Propagated non-direct holders are treated as clean lower-status dependency holders. Native does not yet generate Java's full feature-status halo for `level 34` chunks.
 - The clean dependency buffer is still stored as a worldgen `MutableChunkBlockBuffer`, not a long-lived protochunk type with explicit status transitions.
 - Moving scheduler-owned buffers through the worker currently clones chunk buffers. Current profiling shows this is not the first bottleneck for radius-1 movement, but performance work should still replace it with shared/owned transfer accounting once the shape stabilizes.
-- Ticking/entity-ticking currently pass through no-op simulation phases only. No block ticks, random ticks, fluid ticks, entity ticking, or spawn systems mutate world state through these lanes yet.
+- Block-ticking chunks now have live generated block buffers for scheduled fluid mutation. General block ticks, random ticks, entity ticking, and spawn systems are still not implemented.
 - The smoke records split timing, but no fixed perf budget is enforced yet. Use release mode for performance comparisons.
 
 ## Movement Smoke
@@ -101,10 +102,10 @@ Observed debug-mode baseline on this host with default `poll_mode=completion`:
 steps: 3
 radius: 1
 completion_wait_ms: 30,000 timeout cap, zero observed timeouts
-total_elapsed_ms: ~6,070
-step 0 elapsed_ms: ~5,258, feature_total_ms: ~5,203, dependency_generate_ms: ~4,949, surface_fill_ms: ~2,790, surface_bedrock_ms: ~984, air_carvers_ms: ~532, feature_decoration_ms: ~245, polls: 1, snapshots 9, unloads 0
-step 1 elapsed_ms: ~406, feature_total_ms: ~384, dependency_generate_ms: ~235, surface_fill_ms: ~130, surface_bedrock_ms: ~45, air_carvers_ms: ~30, feature_decoration_ms: ~144, polls: 1, snapshots 3, unloads 3
-step 2 elapsed_ms: ~400, feature_total_ms: ~379, dependency_generate_ms: ~232, surface_fill_ms: ~128, surface_bedrock_ms: ~44, air_carvers_ms: ~30, feature_decoration_ms: ~144, polls: 1, snapshots 3, unloads 3
+total_elapsed_ms: ~7,041
+step 0 elapsed_ms: ~6,042, feature_total_ms: ~5,854, dependency_generate_ms: ~5,351, surface_fill_ms: ~2,661, surface_bedrock_ms: ~1,193, air_carvers_ms: ~663, feature_decoration_ms: ~493, polls: 1, snapshots 9, unloads 0
+step 1 elapsed_ms: ~499, feature_total_ms: ~456, dependency_generate_ms: ~240, surface_fill_ms: ~118, surface_bedrock_ms: ~51, air_carvers_ms: ~34, feature_decoration_ms: ~210, polls: 1, snapshots 3, unloads 3
+step 2 elapsed_ms: ~493, feature_total_ms: ~450, dependency_generate_ms: ~238, surface_fill_ms: ~119, surface_bedrock_ms: ~51, air_carvers_ms: ~32, feature_decoration_ms: ~209, polls: 1, snapshots 3, unloads 3
 final metrics:
   active_ticket_chunks: 841
   inaccessible_status_chunks: 792
@@ -113,13 +114,15 @@ final metrics:
   entity_ticking_status_chunks: 9
   block_ticking_chunks: 25
   client_visible_chunks: 9
-  ready_dependency_chunks: 483
-  total_seeded_dependency_chunks: 756
-  total_dependency_cache_hits: 756
-  total_dependency_cache_misses: 483
+  loaded_snapshot_chunks: 35
+  dirty_chunks: 35
+  ready_dependency_chunks: 575
+  total_seeded_dependency_chunks: 828
+  total_dependency_cache_hits: 828
+  total_dependency_cache_misses: 575
 ```
 
-Observed release-mode baseline on this host with default `poll_mode=completion`:
+Release-mode baseline on this host should be refreshed after the block-ticking live-chunk promotion. The older pre-promotion release baseline was:
 
 ```text
 steps: 3
@@ -137,15 +140,17 @@ final metrics:
   entity_ticking_status_chunks: 9
   block_ticking_chunks: 25
   client_visible_chunks: 9
+  loaded_snapshot_chunks: 9
+  dirty_chunks: 9
   ready_dependency_chunks: 483
   total_seeded_dependency_chunks: 756
   total_dependency_cache_hits: 756
   total_dependency_cache_misses: 483
 ```
 
-The release baseline suggests adjacent movement is primarily worker throughput / scheduler-idle latency, not active scheduler CPU work: default adjacent steps take about `23-25ms` end-to-end, while synchronous scheduler work is about `1.7-2.0ms`. In completion mode the smoke blocks while waiting for that worker result; a renderer/tick loop should keep using nonblocking `poll()` or event-loop wakeups instead of waiting on the render thread.
+The old release baseline suggested adjacent movement was primarily worker throughput / scheduler-idle latency, not active scheduler CPU work. Re-run `pnpm native:scheduler:perf` before treating the current live block-ticking shape as performance-budgeted.
 
-The worker profile says the main adjacent-step bottleneck is now dependency generation for the new strip (`~12.4-12.5ms`). Within that, surface noise fill dominates (`~7.3-7.4ms`), followed by surface/bedrock (`~2.2ms`) and air carvers (`~2.0-2.1ms`). The surface-fill split shows that noise-column sampling is still the hot part (`~5.1-5.2ms` adjacent) while interpolation/block writes are about `~2.1ms` adjacent. Actual feature placement is second (`~7.2-7.5ms`), mostly `underground_ores` (`~5.3-5.5ms`) and `top_layer_modification` (`~1.4ms`). Retained dependency cloning and seeded cache-hit cloning are below `2ms` combined for the adjacent movement path on this host.
+The debug worker profile now says adjacent movement pays for both a new generated strip and the wider retained live block-ticking set. In debug mode, adjacent steps spend about `~238-240ms` in dependency generation and `~209-210ms` in feature decoration. Recheck release mode before deciding whether the next optimization target is noise-column sampling, feature decoration, or live-chunk retention.
 
 The old sleep-poll lane is still available for comparison:
 

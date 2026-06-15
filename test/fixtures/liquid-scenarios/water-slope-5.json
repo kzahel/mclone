@@ -1,0 +1,23 @@
+{
+  "scenario": "water_slope_5_ticks",
+  "seed": "12345",
+  "ticks": 5,
+  "bounds": {
+    "minX": 0,
+    "minY": 79,
+    "minZ": 0,
+    "sizeX": 13,
+    "sizeY": 4,
+    "sizeZ": 5
+  },
+  "tickMargin": 1,
+  "commands": [
+    "forceload add 0 0 15 15",
+    "fill 0 78 0 12 84 4 minecraft:air",
+    "fill 0 79 0 12 79 4 minecraft:stone",
+    "fill 0 80 1 12 81 1 minecraft:stone",
+    "fill 0 80 3 12 81 3 minecraft:stone",
+    "fill 0 80 2 0 81 2 minecraft:stone",
+    "setblock 1 80 2 minecraft:water[level=0]"
+  ]
+}
