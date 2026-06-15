@@ -1,6 +1,6 @@
 # 017: Full Decorated Chunk Parity Gauntlet
 
-Status: active.
+Status: completed milestone; runtime liquid/glow-lichen tails deferred.
 
 ## Purpose
 

@@ -45,6 +45,97 @@ pub enum ChunkResidency {
     Saved,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub enum FullChunkStatus {
+    Inaccessible,
+    Border,
+    Ticking,
+    EntityTicking,
+}
+
+impl FullChunkStatus {
+    pub fn is_or_after(self, status: Self) -> bool {
+        self >= status
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub enum ChunkTicketType {
+    Start,
+    Dragon,
+    Player,
+    Forced,
+    Light,
+    Portal,
+    PostTeleport,
+    Unknown,
+}
+
+impl ChunkTicketType {
+    const fn timeout_ticks(self) -> Option<u64> {
+        match self {
+            Self::Portal => Some(300),
+            Self::PostTeleport => Some(5),
+            Self::Unknown => Some(1),
+            Self::Start | Self::Dragon | Self::Player | Self::Forced | Self::Light => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub enum ChunkTicketKey {
+    Chunk(ChunkPos),
+    Named(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct ChunkTicket {
+    pub ticket_type: ChunkTicketType,
+    pub level: i32,
+    pub key: ChunkTicketKey,
+    pub created_tick: u64,
+}
+
+impl ChunkTicket {
+    pub fn new(ticket_type: ChunkTicketType, level: i32, key: ChunkTicketKey) -> Self {
+        Self {
+            ticket_type,
+            level,
+            key,
+            created_tick: 0,
+        }
+    }
+
+    fn timed_out(&self, current_tick: u64) -> bool {
+        self.ticket_type
+            .timeout_ticks()
+            .is_some_and(|timeout| current_tick.saturating_sub(self.created_tick) > timeout)
+    }
+}
+
+impl PartialEq for ChunkTicket {
+    fn eq(&self, other: &Self) -> bool {
+        self.ticket_type == other.ticket_type && self.level == other.level && self.key == other.key
+    }
+}
+
+impl Eq for ChunkTicket {}
+
+impl PartialOrd for ChunkTicket {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ChunkTicket {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.level
+            .cmp(&other.level)
+            .then_with(|| self.ticket_type.cmp(&other.ticket_type))
+            .then_with(|| self.key.cmp(&other.key))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorldgenMailboxKind {
     Inline,
@@ -98,6 +189,7 @@ pub struct ChunkStatusSlot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkHolder {
     pos: ChunkPos,
+    ticket_level: i32,
     target_status: Option<ChunkStatus>,
     status_slots: BTreeMap<ChunkStatus, ChunkStatusSlot>,
     published_snapshot: Option<ChunkSnapshot>,
@@ -109,6 +201,7 @@ impl ChunkHolder {
     fn new(pos: ChunkPos) -> Self {
         Self {
             pos,
+            ticket_level: UNLOADED_CHUNK_LEVEL,
             target_status: None,
             status_slots: BTreeMap::new(),
             published_snapshot: None,
@@ -123,6 +216,14 @@ impl ChunkHolder {
 
     pub fn target_status(&self) -> Option<ChunkStatus> {
         self.target_status
+    }
+
+    pub fn ticket_level(&self) -> i32 {
+        self.ticket_level
+    }
+
+    pub fn full_status(&self) -> FullChunkStatus {
+        full_chunk_status_for_ticket_level(self.ticket_level)
     }
 
     pub fn status_slot(&self, status: ChunkStatus) -> Option<&ChunkStatusSlot> {
@@ -201,12 +302,165 @@ impl ChunkHolder {
         self.dirty = false;
         self.residency = ChunkResidency::Saved;
     }
+
+    fn set_ticket_level(&mut self, ticket_level: i32) {
+        self.ticket_level = ticket_level;
+    }
+}
+
+#[derive(Debug)]
+struct ChunkDistanceManager {
+    tickets: BTreeMap<ChunkPos, BTreeSet<ChunkTicket>>,
+    player_ticket_positions: BTreeSet<ChunkPos>,
+    ticket_tick: u64,
+}
+
+impl ChunkDistanceManager {
+    fn new() -> Self {
+        Self {
+            tickets: BTreeMap::new(),
+            player_ticket_positions: BTreeSet::new(),
+            ticket_tick: 0,
+        }
+    }
+
+    fn ticket_tick(&self) -> u64 {
+        self.ticket_tick
+    }
+
+    fn set_player_interest(&mut self, interest: ChunkInterest) {
+        let new_positions = interest_positions(&interest)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let old_positions = std::mem::take(&mut self.player_ticket_positions);
+
+        for pos in old_positions.difference(&new_positions).copied() {
+            self.remove_ticket(
+                ChunkTicketType::Player,
+                pos,
+                PLAYER_TICKET_LEVEL,
+                ChunkTicketKey::Chunk(pos),
+            );
+        }
+
+        for pos in new_positions.difference(&old_positions).copied() {
+            self.add_ticket(
+                ChunkTicketType::Player,
+                pos,
+                PLAYER_TICKET_LEVEL,
+                ChunkTicketKey::Chunk(pos),
+            );
+        }
+
+        self.player_ticket_positions = new_positions;
+    }
+
+    fn add_region_ticket(
+        &mut self,
+        ticket_type: ChunkTicketType,
+        pos: ChunkPos,
+        distance: i32,
+        key: ChunkTicketKey,
+    ) {
+        self.add_ticket(ticket_type, pos, CHUNK_LEVEL_FULL - distance, key);
+    }
+
+    fn remove_region_ticket(
+        &mut self,
+        ticket_type: ChunkTicketType,
+        pos: ChunkPos,
+        distance: i32,
+        key: ChunkTicketKey,
+    ) {
+        self.remove_ticket(ticket_type, pos, CHUNK_LEVEL_FULL - distance, key);
+    }
+
+    fn add_ticket(
+        &mut self,
+        ticket_type: ChunkTicketType,
+        pos: ChunkPos,
+        level: i32,
+        key: ChunkTicketKey,
+    ) {
+        let mut ticket = ChunkTicket::new(ticket_type, level, key);
+        ticket.created_tick = self.ticket_tick;
+        let tickets = self.tickets.entry(pos).or_default();
+        tickets.replace(ticket);
+    }
+
+    fn remove_ticket(
+        &mut self,
+        ticket_type: ChunkTicketType,
+        pos: ChunkPos,
+        level: i32,
+        key: ChunkTicketKey,
+    ) {
+        let ticket = ChunkTicket::new(ticket_type, level, key);
+        if let Some(tickets) = self.tickets.get_mut(&pos) {
+            tickets.remove(&ticket);
+            if tickets.is_empty() {
+                self.tickets.remove(&pos);
+            }
+        }
+    }
+
+    fn purge_stale_tickets(&mut self) {
+        self.ticket_tick += 1;
+        let ticket_tick = self.ticket_tick;
+        let mut empty_chunks = Vec::new();
+
+        for (pos, tickets) in &mut self.tickets {
+            tickets.retain(|ticket| !ticket.timed_out(ticket_tick));
+            if tickets.is_empty() {
+                empty_chunks.push(*pos);
+            }
+        }
+
+        for pos in empty_chunks {
+            self.tickets.remove(&pos);
+        }
+    }
+
+    fn ticketed_chunks(&self) -> Vec<ChunkPos> {
+        self.tickets
+            .iter()
+            .filter_map(|(pos, tickets)| {
+                tickets
+                    .first()
+                    .is_some_and(|ticket| ticket.level <= MAX_CHUNK_DISTANCE)
+                    .then_some(*pos)
+            })
+            .collect()
+    }
+
+    fn ticketed_chunk_count(&self) -> usize {
+        self.tickets
+            .values()
+            .filter(|tickets| {
+                tickets
+                    .first()
+                    .is_some_and(|ticket| ticket.level <= MAX_CHUNK_DISTANCE)
+            })
+            .count()
+    }
+
+    fn ticket_count_at(&self, pos: ChunkPos) -> usize {
+        self.tickets.get(&pos).map_or(0, BTreeSet::len)
+    }
+
+    fn ticket_level_at(&self, pos: ChunkPos) -> i32 {
+        self.tickets
+            .get(&pos)
+            .and_then(|tickets| tickets.first())
+            .map_or(UNLOADED_CHUNK_LEVEL, |ticket| ticket.level)
+    }
 }
 
 #[derive(Debug)]
 pub struct ChunkScheduler {
     seed: i64,
     holders: BTreeMap<ChunkPos, ChunkHolder>,
+    distance_manager: ChunkDistanceManager,
     jobs: BTreeMap<ChunkJobId, ChunkStatusJob>,
     worldgen_mailbox: WorldgenMailbox,
     dirty_chunks: BTreeSet<ChunkPos>,
@@ -224,6 +478,7 @@ impl ChunkScheduler {
         Self {
             seed,
             holders: BTreeMap::new(),
+            distance_manager: ChunkDistanceManager::new(),
             jobs: BTreeMap::new(),
             worldgen_mailbox: WorldgenMailbox::new(),
             dirty_chunks: BTreeSet::new(),
@@ -241,34 +496,72 @@ impl ChunkScheduler {
         &mut self,
         interest: ChunkInterest,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        let desired_chunks = interest_positions(&interest);
-        let desired_set = desired_chunks.iter().copied().collect::<BTreeSet<_>>();
-        let mut events = Vec::new();
-
-        for pos in self
-            .holders
-            .keys()
-            .copied()
-            .filter(|pos| !desired_set.contains(pos))
-            .collect::<Vec<_>>()
-        {
-            let holder = self.holders.remove(&pos).expect("holder key disappeared");
-            if holder.dirty {
-                self.save_holder(&holder)?;
-                self.dirty_chunks.remove(&pos);
-            }
-            if holder.published_snapshot.is_some() {
-                events.push(ChunkSchedulerEvent::Unloaded { pos });
-            }
-        }
-
-        events.extend(self.enqueue_feature_chunks(desired_chunks)?);
-
-        Ok(events)
+        self.distance_manager.set_player_interest(interest);
+        self.reconcile_ticketed_holders()
     }
 
     pub fn poll(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         self.publish_completed_worldgen_jobs()
+    }
+
+    pub fn tick(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        self.distance_manager.purge_stale_tickets();
+        let mut events = self.reconcile_ticketed_holders()?;
+        events.extend(self.poll()?);
+        Ok(events)
+    }
+
+    pub fn add_region_ticket(
+        &mut self,
+        ticket_type: ChunkTicketType,
+        pos: ChunkPos,
+        distance: i32,
+    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        self.distance_manager.add_region_ticket(
+            ticket_type,
+            pos,
+            distance,
+            ChunkTicketKey::Chunk(pos),
+        );
+        self.reconcile_ticketed_holders()
+    }
+
+    pub fn remove_region_ticket(
+        &mut self,
+        ticket_type: ChunkTicketType,
+        pos: ChunkPos,
+        distance: i32,
+    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        self.distance_manager.remove_region_ticket(
+            ticket_type,
+            pos,
+            distance,
+            ChunkTicketKey::Chunk(pos),
+        );
+        self.reconcile_ticketed_holders()
+    }
+
+    pub fn set_chunk_forced(
+        &mut self,
+        pos: ChunkPos,
+        forced: bool,
+    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        if forced {
+            self.distance_manager.add_ticket(
+                ChunkTicketType::Forced,
+                pos,
+                FORCED_TICKET_LEVEL,
+                ChunkTicketKey::Chunk(pos),
+            );
+        } else {
+            self.distance_manager.remove_ticket(
+                ChunkTicketType::Forced,
+                pos,
+                FORCED_TICKET_LEVEL,
+                ChunkTicketKey::Chunk(pos),
+            );
+        }
+        self.reconcile_ticketed_holders()
     }
 
     pub fn holder(&self, pos: ChunkPos) -> Option<&ChunkHolder> {
@@ -288,6 +581,22 @@ impl ChunkScheduler {
 
     pub fn dirty_chunk_count(&self) -> usize {
         self.dirty_chunks.len()
+    }
+
+    pub fn ticket_tick(&self) -> u64 {
+        self.distance_manager.ticket_tick()
+    }
+
+    pub fn ticketed_chunk_count(&self) -> usize {
+        self.distance_manager.ticketed_chunk_count()
+    }
+
+    pub fn ticket_count_at(&self, pos: ChunkPos) -> usize {
+        self.distance_manager.ticket_count_at(pos)
+    }
+
+    pub fn ticket_level_at(&self, pos: ChunkPos) -> i32 {
+        self.distance_manager.ticket_level_at(pos)
     }
 
     pub fn job(&self, id: ChunkJobId) -> Option<&ChunkStatusJob> {
@@ -331,6 +640,49 @@ impl ChunkScheduler {
             self.dirty_chunks.remove(&pos);
         }
         Ok(saved)
+    }
+
+    fn reconcile_ticketed_holders(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let ticketed_chunks = self.distance_manager.ticketed_chunks();
+        let desired_set = ticketed_chunks.iter().copied().collect::<BTreeSet<_>>();
+        let mut events = Vec::new();
+
+        for pos in self
+            .holders
+            .keys()
+            .copied()
+            .filter(|pos| !desired_set.contains(pos))
+            .collect::<Vec<_>>()
+        {
+            let mut holder = self.holders.remove(&pos).expect("holder key disappeared");
+            holder.set_ticket_level(UNLOADED_CHUNK_LEVEL);
+            if holder.dirty {
+                self.save_holder(&holder)?;
+                self.dirty_chunks.remove(&pos);
+            }
+            if holder.published_snapshot.is_some() {
+                events.push(ChunkSchedulerEvent::Unloaded { pos });
+            }
+        }
+
+        let mut feature_targets = BTreeSet::new();
+        for pos in ticketed_chunks {
+            let ticket_level = self.distance_manager.ticket_level_at(pos);
+            let holder = self
+                .holders
+                .entry(pos)
+                .or_insert_with(|| ChunkHolder::new(pos));
+            holder.set_ticket_level(ticket_level);
+            if ticket_level_status_target(ticket_level)
+                .is_some_and(|status| status >= ChunkStatus::Features)
+            {
+                feature_targets.insert(pos);
+            }
+        }
+
+        events
+            .extend(self.enqueue_feature_chunks(sorted_chunk_positions_z_major(feature_targets))?);
+        Ok(events)
     }
 
     fn enqueue_feature_chunks(
@@ -789,6 +1141,19 @@ impl IntegratedServer {
             .collect())
     }
 
+    pub fn tick(&mut self) -> Vec<ServerUpdate> {
+        self.try_tick().expect("integrated server tick failed")
+    }
+
+    pub fn try_tick(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        Ok(self
+            .scheduler
+            .tick()?
+            .into_iter()
+            .filter_map(server_update_from_scheduler_event)
+            .collect())
+    }
+
     pub fn loaded_chunk_count(&self) -> usize {
         self.scheduler.loaded_chunk_count()
     }
@@ -881,6 +1246,35 @@ fn status_path_to(target_status: ChunkStatus) -> Vec<ChunkStatus> {
         .copied()
         .take_while(|status| *status <= target_status)
         .collect()
+}
+
+pub const CHUNK_LEVEL_FULL: i32 = 33;
+pub const PLAYER_TICKET_LEVEL: i32 = CHUNK_LEVEL_FULL - ENTITY_TICKING_RANGE;
+pub const FORCED_TICKET_LEVEL: i32 = 31;
+pub const MAX_CHUNK_DISTANCE: i32 = CHUNK_LEVEL_FULL + VANILLA_STATUS_AROUND_FULL_DISTANCE;
+pub const UNLOADED_CHUNK_LEVEL: i32 = MAX_CHUNK_DISTANCE + 1;
+
+const ENTITY_TICKING_RANGE: i32 = 2;
+const VANILLA_STATUS_AROUND_FULL_DISTANCE: i32 = 11;
+
+fn full_chunk_status_for_ticket_level(ticket_level: i32) -> FullChunkStatus {
+    match (CHUNK_LEVEL_FULL - ticket_level + 1).clamp(0, 3) {
+        0 => FullChunkStatus::Inaccessible,
+        1 => FullChunkStatus::Border,
+        2 => FullChunkStatus::Ticking,
+        3 => FullChunkStatus::EntityTicking,
+        _ => unreachable!("clamped full chunk status index must be in 0..=3"),
+    }
+}
+
+fn ticket_level_status_target(ticket_level: i32) -> Option<ChunkStatus> {
+    if ticket_level > MAX_CHUNK_DISTANCE {
+        None
+    } else if ticket_level <= CHUNK_LEVEL_FULL + 1 {
+        Some(ChunkStatus::Features)
+    } else {
+        Some(ChunkStatus::Terrain)
+    }
 }
 
 const ALL_STATUSES: [ChunkStatus; 5] = [
@@ -1155,6 +1549,57 @@ mod tests {
     }
 
     #[test]
+    fn chunk_interest_updates_player_tickets_and_holder_levels() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+
+        let events = scheduler
+            .apply_interest(ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            })
+            .unwrap();
+
+        assert_eq!(scheduler.ticketed_chunk_count(), 1);
+        assert_eq!(scheduler.ticket_count_at(ChunkPos::new(0, 0)), 1);
+        assert_eq!(
+            scheduler.ticket_level_at(ChunkPos::new(0, 0)),
+            PLAYER_TICKET_LEVEL
+        );
+        let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(holder.ticket_level(), PLAYER_TICKET_LEVEL);
+        assert_eq!(holder.full_status(), FullChunkStatus::EntityTicking);
+        assert!(holder.full_status().is_or_after(FullChunkStatus::Ticking));
+        assert_eq!(events.len(), 5);
+
+        let moved_events = scheduler
+            .apply_interest(ChunkInterest {
+                center: ChunkPos::new(1, 0),
+                radius_chunks: 0,
+            })
+            .unwrap();
+
+        assert_eq!(scheduler.ticketed_chunk_count(), 1);
+        assert_eq!(scheduler.ticket_count_at(ChunkPos::new(0, 0)), 0);
+        assert_eq!(scheduler.ticket_count_at(ChunkPos::new(1, 0)), 1);
+        assert_eq!(
+            scheduler.ticket_level_at(ChunkPos::new(0, 0)),
+            UNLOADED_CHUNK_LEVEL
+        );
+        assert!(scheduler.holder(ChunkPos::new(0, 0)).is_none());
+        assert_eq!(
+            scheduler
+                .holder(ChunkPos::new(1, 0))
+                .map(ChunkHolder::ticket_level),
+            Some(PLAYER_TICKET_LEVEL)
+        );
+        assert!(
+            moved_events
+                .iter()
+                .all(|event| !matches!(event, ChunkSchedulerEvent::Unloaded { .. }))
+        );
+    }
+
+    #[test]
     fn duplicate_interest_while_job_running_does_not_enqueue_second_job() {
         let mut scheduler = ChunkScheduler::new(12_345);
         let interest = ChunkInterest {
@@ -1175,6 +1620,88 @@ mod tests {
         assert_eq!(poll_scheduler_until_idle(&mut scheduler).len(), 2);
         assert_eq!(scheduler.loaded_chunk_count(), 1);
         assert_eq!(scheduler.job_count(), 1);
+    }
+
+    #[test]
+    fn forced_ticket_keeps_chunk_resident_after_interest_moves() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+
+        apply_interest_and_poll(
+            &mut scheduler,
+            ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            },
+        );
+        assert!(
+            scheduler
+                .set_chunk_forced(ChunkPos::new(0, 0), true)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(scheduler.ticket_count_at(ChunkPos::new(0, 0)), 2);
+        assert_eq!(
+            scheduler.ticket_level_at(ChunkPos::new(0, 0)),
+            FORCED_TICKET_LEVEL
+        );
+
+        let events = apply_interest_and_poll(
+            &mut scheduler,
+            ChunkInterest {
+                center: ChunkPos::new(1, 0),
+                radius_chunks: 0,
+            },
+        );
+
+        assert!(events
+            .iter()
+            .all(|event| !matches!(event, ChunkSchedulerEvent::Unloaded { pos } if *pos == ChunkPos::new(0, 0))));
+        assert!(scheduler.holder(ChunkPos::new(0, 0)).is_some());
+        assert!(scheduler.holder(ChunkPos::new(1, 0)).is_some());
+        assert_eq!(scheduler.loaded_chunk_count(), 2);
+
+        let events = scheduler
+            .set_chunk_forced(ChunkPos::new(0, 0), false)
+            .unwrap();
+
+        assert_eq!(
+            events,
+            vec![ChunkSchedulerEvent::Unloaded {
+                pos: ChunkPos::new(0, 0)
+            }]
+        );
+        assert_eq!(scheduler.ticket_count_at(ChunkPos::new(0, 0)), 0);
+        assert!(scheduler.holder(ChunkPos::new(0, 0)).is_none());
+    }
+
+    #[test]
+    fn stale_unknown_ticket_expires_on_scheduler_tick() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+
+        let events = scheduler
+            .add_region_ticket(ChunkTicketType::Unknown, ChunkPos::new(0, 0), 0)
+            .unwrap();
+        assert_eq!(events.len(), 5);
+        assert_eq!(scheduler.ticketed_chunk_count(), 1);
+        assert_eq!(scheduler.ticket_level_at(ChunkPos::new(0, 0)), 33);
+        assert_eq!(poll_scheduler_until_idle(&mut scheduler).len(), 2);
+        assert_eq!(scheduler.loaded_chunk_count(), 1);
+
+        assert!(scheduler.tick().unwrap().is_empty());
+        assert_eq!(scheduler.ticket_tick(), 1);
+        assert_eq!(scheduler.ticketed_chunk_count(), 1);
+
+        let events = scheduler.tick().unwrap();
+
+        assert_eq!(scheduler.ticket_tick(), 2);
+        assert_eq!(scheduler.ticketed_chunk_count(), 0);
+        assert_eq!(
+            events,
+            vec![ChunkSchedulerEvent::Unloaded {
+                pos: ChunkPos::new(0, 0)
+            }]
+        );
+        assert!(scheduler.holder(ChunkPos::new(0, 0)).is_none());
     }
 
     #[test]
