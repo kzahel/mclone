@@ -43,6 +43,7 @@ Key Java facts for this slice:
 - Feature-generation jobs now report phase timings for dependency seeding, dependency generation, retained dependency cloning, feature-region setup, decoration, and target extraction.
 - `FeatureRegion` stores dependency chunks in an indexed rectangle instead of a `BTreeMap`, and hot decoration uses cached immutable biome feature tables instead of rebuilding feature vectors for each center.
 - Scheduler batch feature generation bypasses `DecorationReport.added_non_air_blocks` accounting, which otherwise scans the whole feature-region dependency window before and after every decoration center. Public decoration report APIs still compute that field for tests/debug callers.
+- Lower-status dependency generation now reuses one `NoiseBasedChunkGenerator` per feature job instead of recreating it for every dependency chunk, and reports generator setup, surface fill, surface/bedrock, air carver, liquid carver, and heightmap timing.
 
 ## Current Limits
 
@@ -86,7 +87,7 @@ Timing fields:
 - `worker_wait_ms`: wall-clock wait after `apply_interest`, including poll sleeps and poll calls.
 - `non_poll_wait_ms`: wall-clock wait minus time spent inside `poll()`.
 - `max_main_thread_call_ms`: largest single synchronous scheduler call in the step.
-- `feature_timing`: worker-side feature-generation phase timings. `feature_decoration_ms` is the active biome feature placement loop; `feature_decoration_steps` breaks that loop down by vanilla `DecorationStep`; `dependency_generate_ms` is lower-status carved dependency generation; clone/retain fields measure current buffer-copy overhead.
+- `feature_timing`: worker-side feature-generation phase timings. `feature_decoration_ms` is the active biome feature placement loop; `feature_decoration_steps` breaks that loop down by vanilla `DecorationStep`; `dependency_generate_ms` is lower-status carved dependency generation; `dependency_generation` breaks that down into generator setup, surface fill, surface/bedrock, air carvers, liquid carvers, and heightmap priming; clone/retain fields measure current buffer-copy overhead.
 
 Observed debug-mode baseline on this host with default `poll_mode=completion`:
 
@@ -94,10 +95,10 @@ Observed debug-mode baseline on this host with default `poll_mode=completion`:
 steps: 3
 radius: 1
 completion_wait_ms: 30,000 timeout cap, zero observed timeouts
-total_elapsed_ms: ~6,111
-step 0 elapsed_ms: ~5,290, feature_total_ms: ~5,236, dependency_generate_ms: ~4,992, feature_decoration_ms: ~237, polls: 1, snapshots 9, unloads 0
-step 1 elapsed_ms: ~408, feature_total_ms: ~385, dependency_generate_ms: ~241, feature_decoration_ms: ~140, polls: 1, snapshots 3, unloads 3
-step 2 elapsed_ms: ~407, feature_total_ms: ~386, dependency_generate_ms: ~245, feature_decoration_ms: ~138, polls: 1, snapshots 3, unloads 3
+total_elapsed_ms: ~6,070
+step 0 elapsed_ms: ~5,258, feature_total_ms: ~5,203, dependency_generate_ms: ~4,949, surface_fill_ms: ~2,790, surface_bedrock_ms: ~984, air_carvers_ms: ~532, feature_decoration_ms: ~245, polls: 1, snapshots 9, unloads 0
+step 1 elapsed_ms: ~406, feature_total_ms: ~384, dependency_generate_ms: ~235, surface_fill_ms: ~130, surface_bedrock_ms: ~45, air_carvers_ms: ~30, feature_decoration_ms: ~144, polls: 1, snapshots 3, unloads 3
+step 2 elapsed_ms: ~400, feature_total_ms: ~379, dependency_generate_ms: ~232, surface_fill_ms: ~128, surface_bedrock_ms: ~44, air_carvers_ms: ~30, feature_decoration_ms: ~144, polls: 1, snapshots 3, unloads 3
 final metrics:
   active_ticket_chunks: 841
   client_visible_chunks: 9
@@ -113,10 +114,10 @@ Observed release-mode baseline on this host with default `poll_mode=completion`:
 steps: 3
 radius: 1
 completion_wait_ms: 30,000 timeout cap, zero observed timeouts
-total_elapsed_ms: ~396
-step 0 elapsed_ms: ~347, feature_total_ms: ~339, dependency_generate_ms: ~324, feature_decoration_ms: ~11.5, polls: 1, snapshots 9, unloads 0
-step 1 elapsed_ms: ~24.6, feature_total_ms: ~22.9, dependency_generate_ms: ~14.3, feature_decoration_ms: ~6.8, polls: 1, snapshots 3, unloads 3
-step 2 elapsed_ms: ~23.8, feature_total_ms: ~22.2, dependency_generate_ms: ~14.3, feature_decoration_ms: ~6.7, polls: 1, snapshots 3, unloads 3
+total_elapsed_ms: ~387
+step 0 elapsed_ms: ~338, feature_total_ms: ~333, dependency_generate_ms: ~317, surface_fill_ms: ~212, surface_bedrock_ms: ~50, air_carvers_ms: ~36, feature_decoration_ms: ~11.9, polls: 1, snapshots 9, unloads 0
+step 1 elapsed_ms: ~24.6, feature_total_ms: ~22.5, dependency_generate_ms: ~13.6, surface_fill_ms: ~8.8, surface_bedrock_ms: ~2.0, air_carvers_ms: ~1.9, feature_decoration_ms: ~7.1, polls: 1, snapshots 3, unloads 3
+step 2 elapsed_ms: ~24.6, feature_total_ms: ~22.5, dependency_generate_ms: ~14.3, surface_fill_ms: ~9.2, surface_bedrock_ms: ~2.1, air_carvers_ms: ~2.1, feature_decoration_ms: ~6.8, polls: 1, snapshots 3, unloads 3
 final metrics:
   active_ticket_chunks: 841
   client_visible_chunks: 9
@@ -128,7 +129,7 @@ final metrics:
 
 The release baseline suggests adjacent movement is primarily worker throughput / scheduler-idle latency, not active scheduler CPU work: default adjacent steps take about `24ms` end-to-end, while synchronous scheduler work is about `1.4-1.5ms`. In completion mode the smoke blocks while waiting for that worker result; a renderer/tick loop should keep using nonblocking `poll()` or event-loop wakeups instead of waiting on the render thread.
 
-The worker profile says the main adjacent-step bottleneck is now dependency generation for the new strip (`~14ms`). Actual feature placement is second (`~6.8ms`), mostly `underground_ores` (`~4.9ms`) and `top_layer_modification` (`~1.3ms`). Retained dependency cloning and seeded cache-hit cloning are below `2ms` combined for the adjacent movement path on this host.
+The worker profile says the main adjacent-step bottleneck is now dependency generation for the new strip (`~14ms`). Within that, surface noise fill dominates (`~9ms`), followed by surface/bedrock (`~2ms`) and air carvers (`~2ms`). Actual feature placement is second (`~7ms`), mostly `underground_ores` (`~5ms`) and `top_layer_modification` (`~1.3ms`). Retained dependency cloning and seeded cache-hit cloning are below `2ms` combined for the adjacent movement path on this host.
 
 The old sleep-poll lane is still available for comparison:
 
@@ -136,7 +137,7 @@ The old sleep-poll lane is still available for comparison:
 cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --poll-mode sleep
 ```
 
-On this host it kept similar end-to-end latency (`~930ms` total) but needed hundreds of empty polls on initial load and about a hundred empty polls per adjacent movement step.
+On this host it keeps similar end-to-end latency to completion mode, but needs repeated empty polls while the worker is still generating.
 
 Spin polling is a contention/stress mode:
 
@@ -144,11 +145,11 @@ Spin polling is a contention/stress mode:
 cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --poll-mode spin --max-polls 50000000
 ```
 
-On this host it kept similar end-to-end latency (`~910ms` total), but burned caller-thread time on millions of empty polls (`~76ms` per adjacent step inside `poll()` calls). The normal scheduler should therefore wake from tick/frame cadence or completion notification, not tight spin-poll.
+On this host it keeps similar end-to-end latency, but burns caller-thread time on many empty polls. The normal scheduler should therefore wake from tick/frame cadence or completion notification, not tight spin-poll.
 
 ## Next Implementation Steps
 
-1. Split `dependency_generate_ms` into surface fill, surface/bedrock, air carvers, liquid carvers, and heightmap priming so the remaining `~14ms` adjacent-step bottleneck points at a concrete lower-status stage.
+1. Profile and optimize surface fill (`NoiseBasedChunkGenerator::fill_from_noise`) because it is now the largest adjacent-step cost.
 2. Consider a feature-family split inside `underground_ores` if decoration remains material after dependency generation work.
 3. Introduce an explicit protochunk/dependency-holder type so lower-status holder data is not stored as ad hoc worldgen buffers.
 4. Replace per-job dependency buffer cloning with a cheaper ownership/transfer strategy if profiling changes or larger view-distance movement makes it material.

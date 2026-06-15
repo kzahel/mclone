@@ -1303,6 +1303,7 @@ pub struct OverworldFeatureBatchTiming {
     pub plan_us: u128,
     pub dependency_cache_hit_clone_us: u128,
     pub dependency_generate_us: u128,
+    pub dependency_generation: OverworldDependencyGenerationTiming,
     pub dependency_insert_clone_us: u128,
     pub dependency_retain_us: u128,
     pub retained_dependency_clone_us: u128,
@@ -1310,6 +1311,36 @@ pub struct OverworldFeatureBatchTiming {
     pub feature_decoration_us: u128,
     pub feature_decoration_steps: FeatureDecorationTiming,
     pub target_extract_us: u128,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct OverworldDependencyGenerationTiming {
+    pub generator_setup_us: u128,
+    pub surface_fill_us: u128,
+    pub surface_bedrock_us: u128,
+    pub air_carvers_us: u128,
+    pub liquid_carvers_us: u128,
+    pub heightmap_prime_us: u128,
+}
+
+impl OverworldDependencyGenerationTiming {
+    pub fn total_us(self) -> u128 {
+        self.generator_setup_us
+            + self.surface_fill_us
+            + self.surface_bedrock_us
+            + self.air_carvers_us
+            + self.liquid_carvers_us
+            + self.heightmap_prime_us
+    }
+
+    pub fn add_assign(&mut self, other: Self) {
+        self.generator_setup_us += other.generator_setup_us;
+        self.surface_fill_us += other.surface_fill_us;
+        self.surface_bedrock_us += other.surface_bedrock_us;
+        self.air_carvers_us += other.air_carvers_us;
+        self.liquid_carvers_us += other.liquid_carvers_us;
+        self.heightmap_prime_us += other.heightmap_prime_us;
+    }
 }
 
 impl OverworldFeatureBatchTiming {
@@ -1331,6 +1362,8 @@ impl OverworldFeatureBatchTiming {
         self.plan_us += other.plan_us;
         self.dependency_cache_hit_clone_us += other.dependency_cache_hit_clone_us;
         self.dependency_generate_us += other.dependency_generate_us;
+        self.dependency_generation
+            .add_assign(other.dependency_generation);
         self.dependency_insert_clone_us += other.dependency_insert_clone_us;
         self.dependency_retain_us += other.dependency_retain_us;
         self.retained_dependency_clone_us += other.retained_dependency_clone_us;
@@ -1418,6 +1451,7 @@ impl OverworldFeatureDependencyCache {
         }
 
         let biome_source = OverworldBiomeSource::new(seed, false, false);
+        let mut dependency_generator = None;
         let mut region_chunks = Vec::with_capacity(plan.dependency_chunks.len());
         for pos in sorted_chunk_positions_z_major(plan.dependency_chunks.iter().copied()) {
             if let Some(chunk) = self.chunks.get(&pos) {
@@ -1428,14 +1462,30 @@ impl OverworldFeatureDependencyCache {
                 continue;
             }
 
+            if dependency_generator.is_none() {
+                let generator_setup_start = timing_start();
+                dependency_generator = Some(NoiseBasedChunkGenerator::new(
+                    biome_source.clone(),
+                    seed,
+                    NoiseGeneratorSettings::overworld(),
+                ));
+                timing.dependency_generation.generator_setup_us +=
+                    timing_elapsed_us(generator_setup_start);
+            }
+            let generator = dependency_generator
+                .as_ref()
+                .expect("dependency generator was just initialized");
             let generate_start = timing_start();
-            let chunk = generate_overworld_liquid_carved_buffer_with_biome_source(
+            let generated = generate_overworld_liquid_carved_buffer_with_generator_timed(
                 seed,
                 pos.x,
                 pos.z,
-                biome_source.clone(),
+                &biome_source,
+                generator,
             );
             timing.dependency_generate_us += timing_elapsed_us(generate_start);
+            timing.dependency_generation.add_assign(generated.timing);
+            let chunk = generated.chunk;
             cache_report.generated_dependency_chunks += 1;
             let insert_start = timing_start();
             self.chunks.insert(pos, chunk.clone());
@@ -1613,22 +1663,90 @@ fn generate_overworld_surface_buffer_with_biome_source(
     chunk
 }
 
+#[cfg(test)]
 fn generate_overworld_liquid_carved_buffer_with_biome_source(
     seed: i64,
     chunk_x: i32,
     chunk_z: i32,
     biome_source: OverworldBiomeSource,
 ) -> MutableChunkBlockBuffer {
-    let mut chunk = generate_overworld_surface_buffer_with_biome_source(
+    generate_overworld_liquid_carved_buffer_with_biome_source_timed(
         seed,
         chunk_x,
         chunk_z,
+        biome_source,
+    )
+    .chunk
+}
+
+#[derive(Debug)]
+struct TimedDependencyBuffer {
+    chunk: MutableChunkBlockBuffer,
+    timing: OverworldDependencyGenerationTiming,
+}
+
+#[cfg(test)]
+fn generate_overworld_liquid_carved_buffer_with_biome_source_timed(
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+    biome_source: OverworldBiomeSource,
+) -> TimedDependencyBuffer {
+    let generator_setup_start = timing_start();
+    let generator = NoiseBasedChunkGenerator::new(
         biome_source.clone(),
+        seed,
+        NoiseGeneratorSettings::overworld(),
     );
-    apply_overworld_air_carvers(seed, &biome_source, &mut chunk);
-    apply_overworld_liquid_carvers(seed, &biome_source, &mut chunk);
+    let mut timing = OverworldDependencyGenerationTiming::default();
+    timing.generator_setup_us = timing_elapsed_us(generator_setup_start);
+    generate_overworld_liquid_carved_buffer_with_generator_timed(
+        seed,
+        chunk_x,
+        chunk_z,
+        &biome_source,
+        &generator,
+    )
+    .with_generator_setup_us(timing.generator_setup_us)
+}
+
+fn generate_overworld_liquid_carved_buffer_with_generator_timed(
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+    biome_source: &OverworldBiomeSource,
+    generator: &NoiseBasedChunkGenerator<OverworldBiomeSource>,
+) -> TimedDependencyBuffer {
+    let mut timing = OverworldDependencyGenerationTiming::default();
+    let surface_fill_start = timing_start();
+    let mut chunk = generator.fill_from_noise(chunk_x, chunk_z);
+    timing.surface_fill_us = timing_elapsed_us(surface_fill_start);
+
+    let surface_bedrock_start = timing_start();
+    generator.build_surface_and_bedrock(&mut chunk);
+    timing.surface_bedrock_us = timing_elapsed_us(surface_bedrock_start);
+
+    let air_carvers_start = timing_start();
+    apply_overworld_air_carvers(seed, biome_source, &mut chunk);
+    timing.air_carvers_us = timing_elapsed_us(air_carvers_start);
+
+    let liquid_carvers_start = timing_start();
+    apply_overworld_liquid_carvers(seed, biome_source, &mut chunk);
+    timing.liquid_carvers_us = timing_elapsed_us(liquid_carvers_start);
+
+    let heightmap_prime_start = timing_start();
     chunk.prime_worldgen_heightmaps();
-    chunk
+    timing.heightmap_prime_us = timing_elapsed_us(heightmap_prime_start);
+
+    TimedDependencyBuffer { chunk, timing }
+}
+
+#[cfg(test)]
+impl TimedDependencyBuffer {
+    fn with_generator_setup_us(mut self, generator_setup_us: u128) -> Self {
+        self.timing.generator_setup_us += generator_setup_us;
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

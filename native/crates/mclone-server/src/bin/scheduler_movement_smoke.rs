@@ -7,7 +7,7 @@ use mclone_server::{
     PLAYER_TICKET_LEVEL,
 };
 use mclone_worldgen::feature::DecorationStep;
-use mclone_worldgen::levelgen::OverworldFeatureBatchTiming;
+use mclone_worldgen::levelgen::{OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming};
 
 const DEFAULT_SEED: i64 = 12_345;
 const DEFAULT_RADIUS_CHUNKS: u32 = 1;
@@ -500,6 +500,7 @@ fn print_timing_json(indent: &str, timing: OverworldFeatureBatchTiming, trailing
         "{indent}  \"dependency_generate_ms\": {:.3},",
         micros_to_ms(timing.dependency_generate_us)
     );
+    print_dependency_generation_json(&format!("{indent}  "), timing.dependency_generation, true);
     println!(
         "{indent}  \"dependency_insert_clone_ms\": {:.3},",
         micros_to_ms(timing.dependency_insert_clone_us)
@@ -528,6 +529,44 @@ fn print_timing_json(indent: &str, timing: OverworldFeatureBatchTiming, trailing
     println!(
         "{indent}  \"target_extract_ms\": {:.3}",
         micros_to_ms(timing.target_extract_us)
+    );
+    let suffix = if trailing_comma { "," } else { "" };
+    println!("{indent}}}{suffix}");
+}
+
+fn print_dependency_generation_json(
+    indent: &str,
+    timing: OverworldDependencyGenerationTiming,
+    trailing_comma: bool,
+) {
+    println!("{indent}\"dependency_generation\": {{");
+    println!(
+        "{indent}  \"total_ms\": {:.3},",
+        micros_to_ms(timing.total_us())
+    );
+    println!(
+        "{indent}  \"generator_setup_ms\": {:.3},",
+        micros_to_ms(timing.generator_setup_us)
+    );
+    println!(
+        "{indent}  \"surface_fill_ms\": {:.3},",
+        micros_to_ms(timing.surface_fill_us)
+    );
+    println!(
+        "{indent}  \"surface_bedrock_ms\": {:.3},",
+        micros_to_ms(timing.surface_bedrock_us)
+    );
+    println!(
+        "{indent}  \"air_carvers_ms\": {:.3},",
+        micros_to_ms(timing.air_carvers_us)
+    );
+    println!(
+        "{indent}  \"liquid_carvers_ms\": {:.3},",
+        micros_to_ms(timing.liquid_carvers_us)
+    );
+    println!(
+        "{indent}  \"heightmap_prime_ms\": {:.3}",
+        micros_to_ms(timing.heightmap_prime_us)
     );
     let suffix = if trailing_comma { "," } else { "" };
     println!("{indent}}}{suffix}");
