@@ -385,16 +385,8 @@ fn cull_textured_sections(
         };
     }
 
-    let Some(start_key) = render_section_key_containing(render_view.camera_position) else {
-        stats.drawn_section_count = stats.frustum_section_count;
-        stats.drawn_index_count = stats.frustum_index_count;
-        return TexturedSectionCullingResult {
-            stats,
-            drawn_keys: frustum_keys,
-        };
-    };
-
-    if !records.contains_key(&start_key) {
+    let start_keys = traversal_start_keys(records, &frustum_keys, render_view.camera_position);
+    if start_keys.is_empty() {
         stats.drawn_section_count = stats.frustum_section_count;
         stats.drawn_index_count = stats.frustum_index_count;
         return TexturedSectionCullingResult {
@@ -406,8 +398,10 @@ fn cull_textured_sections(
     let mut queue = VecDeque::new();
     let mut infos = BTreeMap::new();
     let mut drawn_keys = BTreeSet::new();
-    infos.insert(start_key, RenderSectionTraversalInfo::start());
-    queue.push_back(start_key);
+    for start_key in start_keys {
+        infos.insert(start_key, RenderSectionTraversalInfo::start());
+        queue.push_back(start_key);
+    }
 
     while let Some(key) = queue.pop_front() {
         let Some(record) = records.get(&key) else {
@@ -469,6 +463,57 @@ fn cull_textured_sections(
     TexturedSectionCullingResult { stats, drawn_keys }
 }
 
+fn traversal_start_keys(
+    records: &BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
+    frustum_keys: &BTreeSet<RenderSectionKey>,
+    camera_position: Vec3,
+) -> Vec<RenderSectionKey> {
+    let Some(camera_key) = render_section_key_containing(camera_position) else {
+        return Vec::new();
+    };
+    if records.contains_key(&camera_key) {
+        return vec![camera_key];
+    }
+
+    outside_retained_section_start_keys(records, frustum_keys, camera_position)
+}
+
+fn outside_retained_section_start_keys(
+    records: &BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
+    frustum_keys: &BTreeSet<RenderSectionKey>,
+    camera_position: Vec3,
+) -> Vec<RenderSectionKey> {
+    if !camera_position.is_finite() {
+        return Vec::new();
+    }
+    let Some(min_section_y) = records.keys().map(|key| key.section_y).min() else {
+        return Vec::new();
+    };
+    let Some(max_section_y) = records.keys().map(|key| key.section_y).max() else {
+        return Vec::new();
+    };
+
+    let min_build_y = min_section_y * RENDER_SECTION_HEIGHT;
+    let target_section_y = if camera_position.y.floor() as i32 > min_build_y {
+        max_section_y
+    } else {
+        min_section_y
+    };
+
+    // Mirrors LevelRenderer.updateRenderChunks when the camera has no containing RenderChunk.
+    let mut starts = records
+        .keys()
+        .copied()
+        .filter(|key| key.section_y == target_section_y && frustum_keys.contains(key))
+        .collect::<Vec<_>>();
+    starts.sort_by(|a, b| {
+        let a_distance = render_section_center(*a).distance_squared(camera_position);
+        let b_distance = render_section_center(*b).distance_squared(camera_position);
+        a_distance.total_cmp(&b_distance)
+    });
+    starts
+}
+
 fn can_see_through_source(
     visibility: VisibilitySet,
     source_directions: u8,
@@ -497,6 +542,14 @@ fn render_section_key_containing(position: Vec3) -> Option<RenderSectionKey> {
 fn section_neighbor_key(key: RenderSectionKey, face: SectionFace) -> RenderSectionKey {
     let [dx, dy, dz] = face.section_delta();
     RenderSectionKey::new(key.chunk_x + dx, key.section_y + dy, key.chunk_z + dz)
+}
+
+fn render_section_center(key: RenderSectionKey) -> Vec3 {
+    Vec3::new(
+        (key.chunk_x * MESH_CHUNK_WIDTH) as f32 + MESH_CHUNK_WIDTH as f32 * 0.5,
+        key.min_y() as f32 + RENDER_SECTION_HEIGHT as f32 * 0.5,
+        (key.chunk_z * MESH_CHUNK_WIDTH) as f32 + MESH_CHUNK_WIDTH as f32 * 0.5,
+    )
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1469,7 +1522,7 @@ mod tests {
     }
 
     #[test]
-    fn textured_section_visibility_stats_falls_back_without_camera_section() {
+    fn textured_section_visibility_stats_seeds_visible_edge_when_camera_section_is_missing() {
         let sections = vec![
             fake_section(
                 RenderSectionKey::new(0, 0, 0),
@@ -1493,9 +1546,44 @@ mod tests {
 
         let stats = textured_section_visibility_stats(&sections, camera.render_view(800, 600));
 
-        assert!(!stats.graph_cull_enabled);
+        assert!(stats.graph_cull_enabled);
         assert_eq!(stats.frustum_section_count, stats.drawn_section_count);
         assert_eq!(stats.frustum_index_count, stats.drawn_index_count);
+    }
+
+    #[test]
+    fn textured_section_visibility_stats_outside_seed_still_uses_section_graph() {
+        let mut blocked_middle_visibility = VisibilitySet::all_visible();
+        blocked_middle_visibility.set(SectionFace::Up, SectionFace::Down, false);
+        let sections = vec![
+            fake_section(
+                RenderSectionKey::new(0, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(RenderSectionKey::new(0, 1, 0), 6, blocked_middle_visibility),
+            fake_section(
+                RenderSectionKey::new(0, 2, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+        ];
+        let camera = ChunkCamera {
+            eye: [8.0, 64.0, 8.0],
+            target: [8.0, 0.0, 8.0],
+            up: [0.0, 0.0, 1.0],
+            fov_y_radians: 80.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 120.0,
+        };
+
+        let stats = textured_section_visibility_stats(&sections, camera.render_view(800, 600));
+
+        assert!(stats.graph_cull_enabled);
+        assert_eq!(stats.frustum_section_count, 3);
+        assert_eq!(stats.drawn_section_count, 2);
+        assert_eq!(stats.graph_culled_section_count, 1);
+        assert_eq!(stats.graph_culled_index_count, 6);
     }
 
     #[test]

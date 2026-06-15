@@ -216,6 +216,6 @@ Observation: the graph build itself is currently about `0.016 ms` per render sec
 
 ## Near-Term Perf Questions
 
-- Keep tracking whether graph culling is enabled for each camera lane. Movement and timedemo now both exercise the graph; outside-retained-section traversal seeding is still a separate Java-parity follow-up for ad-hoc camera paths.
+- Keep tracking whether graph culling is enabled for each camera lane. Movement and timedemo now both exercise the graph; outside-retained-section traversal seeding is covered by render tests and headless overview captures.
 - Add release records before enforcing budgets.
 - Add larger radius/view-distance variants once radius `1` is stable enough to avoid hiding regressions in bootstrap noise.

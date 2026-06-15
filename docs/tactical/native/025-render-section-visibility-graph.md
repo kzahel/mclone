@@ -1,6 +1,6 @@
 # 025: Render Section Visibility Graph
 
-Status: first implementation landed; follow-up needed for outside-retained-section traversal seeding and release-sized perf baselines.
+Status: first implementation landed; follow-up needed for release-sized perf baselines.
 
 ## Purpose
 
@@ -153,8 +153,8 @@ Implemented first pass:
 - Native client window mode can toggle section occlusion at runtime with `O`; CLI/headless/perf modes can use `--section-occlusion true|false`, `--disable-section-occlusion`, or `--enable-section-occlusion`.
 - Empty mesh sections inside retained chunk snapshot height are kept as traversal nodes but are not uploaded to the GPU.
 - Timedemo loads an effective static scene radius of `max(chunk_radius, path_radius_chunks)` so the default orbit stays inside retained sections.
-- Traversal falls back to frustum-only if the camera starts outside the retained section set.
-- Current limitation: Java seeds traversal from visible in-range chunks when the camera has no render chunk; native still uses frustum-only fallback for that ad-hoc outside-retained case.
+- When the camera starts outside the retained section set, native now mirrors Java's null-camera-render-chunk branch: seed traversal from frustum-visible top or bottom retained sections and sort those seeds nearest-first from the camera.
+- If no such outside seeds exist in the retained section set, native still falls back to frustum-only rather than hiding terrain.
 
 ## Instrumentation
 
@@ -191,6 +191,7 @@ Implemented first-pass counters:
 Still pending:
 
 - release-sized clean perf records with occlusion enabled vs disabled
+- exact Java parity for `RenderChunk.hasAllNeighbors()` once native retained-section neighborhood policy is tightened
 
 Expected perf signal:
 
