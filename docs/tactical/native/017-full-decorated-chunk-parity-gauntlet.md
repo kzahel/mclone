@@ -34,37 +34,30 @@ Read before implementation:
 
 ## Current Native Gap
 
-Native already has exact oracle coverage for terrain-only, surface/bedrock, biome/noise/PRNG, and standalone air/liquid carver stages. Native does not yet have exact full decorated chunk parity.
+Native already has exact oracle coverage for terrain-only, surface/bedrock, biome/noise/PRNG, standalone air/liquid carver stages, and the clean scheduler `FEATURES` snapshot for seed `12345`, chunk `(0,0)`.
 
-The full fixture for chunk `0,0` still includes blocks or exact placements outside the current native feature implementation, including:
+Native does not yet have exact parity against the older full-server fixture for chunk `(0,0)`. That fixture includes runtime/post-generation tails outside the current clean `FEATURES` comparison:
 
-- `minecraft:cave_air`
-- residual ore-placement offsets after true ore block families landed
-- `glow_lichen`
-- small top-layer snow offsets
-- remaining fern/grass/flower decoration offsets
-- water/lava persisted from generation
+- water/lava persisted from later runtime generation or scheduled fluid behavior
+- a small glow-lichen full-vs-clean tail
 
 ## Current Diagnostic
 
-After wiring air/liquid carvers into the native `Features` path, moving feature decoration onto a 3x3 region pass, correcting decorated-feature random interleaving, porting the first seven vanilla underground variety ore blobs, adding the active default ore block families, replacing the taiga placeholder with Java-shaped `TAIGA_VEGETATION` spruce/pine tree configs, switching trees onto the Java `HEIGHTMAP_WITH_TREE_THRESHOLD` path, enabling the Java taiga vegetal prefix (`PATCH_LARGE_FERN`, `GLOW_LICHEN`, then `TAIGA_VEGETATION`), adding Java-shaped `FLOWER_DEFAULT` and `PATCH_GRASS_TAIGA_2`, removing the erroneous nested `countExtra(6, 0.1, 1)` wrapper from the weighted `PINE` branch, adding default water/lava lakes, porting `FREEZE_TOP_LAYER`, switching `OreFeature`'s pre-placement height gate to Java's `OCEAN_FLOOR_WG`, and preserving `CAVE_AIR` from `LakeFeature`, the ignored exact test reports:
+After wiring air/liquid carvers into the native `Features` path, moving feature decoration onto a 3x3 region pass, correcting decorated-feature random interleaving, porting the first seven vanilla underground variety ore blobs, adding the active default ore block families, replacing the taiga placeholder with Java-shaped `TAIGA_VEGETATION` spruce/pine tree configs, switching trees onto the Java `HEIGHTMAP_WITH_TREE_THRESHOLD` path, enabling the Java taiga vegetal prefix (`PATCH_LARGE_FERN`, `GLOW_LICHEN`, then `TAIGA_VEGETATION`), adding Java-shaped `FLOWER_DEFAULT` and `PATCH_GRASS_TAIGA_2`, removing the erroneous nested `countExtra(6, 0.1, 1)` wrapper from the weighted `PINE` branch, adding default water/lava lakes, porting `FREEZE_TOP_LAYER`, switching `OreFeature`'s pre-placement height gate to Java's `OCEAN_FLOOR_WG`, preserving `CAVE_AIR` from `LakeFeature`, storing glow-lichen face state, using the overworld constant-column biome zoomer for feature biome checks, and matching Java's positive worldgen skylight behavior for lake grass restoration, the clean scheduler `FEATURES` fixture is exact.
+
+The remaining ignored full-server fixture mismatch is now the expected gap between the clean `FEATURES` snapshot and the older full fixture, which includes post-generation runtime fluid results and the full-vs-clean glow-lichen tail:
 
 ```text
-matched_blocks: 65,516 / 65,536
-mismatched_blocks: 20
+matched_blocks: 65,531 / 65,536
+mismatched_blocks: 5
 largest buckets:
-  deepslate -> gravel: 9
-  air -> snow: 3
   air -> water: 2
   air -> glow_lichen: 1
   air -> lava: 1
-  dirt -> grass_block: 1
-  snow -> air: 1
-  stone -> gravel: 1
-  stone -> water: 1
+  glow_lichen -> air: 1
 ```
 
-This replaces the previous `49` mismatch baseline, which was dominated by grass/fern/default-flower offsets, the `108` mismatch baseline dominated by `air -> cave_air`, the `280` mismatch baseline dominated by coal ore placement drift, the `1270` mismatch baseline inflated by a native-only pine sub-count, the `315` mismatch baseline before default lakes, and the `294` mismatch baseline before top-layer snow/freezing. Java `TAIGA_VEGETATION` selects one weighted `PINE` or default `SPRUCE` per outer placement; it does not decorate `PINE` with an inner count. Java `PATCH_GRASS_TAIGA_2` selects one weighted grass/fern state per patch, and `FLOWER_DEFAULT` uses `Feature.FLOWER` offsets rather than `RandomPatchFeature` offsets. With vegetation corrected, the top remaining blockers are the low-y gravel/deepslate patch and small top-layer/liquid/glow-lichen tails. The target biome for chunk `0,0` is `minecraft:taiga_mountains`. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
+This replaces the previous `20` mismatch baseline, which still had low-y gravel/deepslate, small top-layer snow, lake grass restoration, liquid, and glow-lichen tails. Earlier baselines were `49` mismatches dominated by grass/fern/default-flower offsets, `108` dominated by `air -> cave_air`, `280` dominated by coal ore placement drift, `1270` inflated by a native-only pine sub-count, `315` before default lakes, and `294` before top-layer snow/freezing. Java `TAIGA_VEGETATION` selects one weighted `PINE` or default `SPRUCE` per outer placement; it does not decorate `PINE` with an inner count. Java `PATCH_GRASS_TAIGA_2` selects one weighted grass/fern state per patch, and `FLOWER_DEFAULT` uses `Feature.FLOWER` offsets rather than `RandomPatchFeature` offsets. The target biome for chunk `0,0` is `minecraft:taiga_mountains`. The fixture was generated with `generateStructures: false`, so structures are not part of this gauntlet.
 
 The scheduler-trace oracle can now emit final selected ore branches with `--probe-ore-placements true`. A focused trace for target `(0,0)`, center `(0,0)`, `stepIndex=6`, `featureIndex=7` shows Java's coal branch `6` at origin `(2,12,9)` writes target block `(localX=1, y=10, localZ=8)` from `minecraft:stone` to `minecraft:coal_ore`. Native previously missed that write because the ore feature precheck used a world-surface helper instead of Java's `Heightmap.Types.OCEAN_FLOOR_WG`.
 
@@ -115,8 +108,11 @@ Native now places the blocking snow with `FREEZE_TOP_LAYER`; a one-block Java pr
 - Native configured features now support nested `DecoratedFeature` wrappers for configured features that use them. The weighted `PINE` branch inside `TAIGA_VEGETATION` is direct, matching Java 1.17.1's `RandomFeatureConfiguration`.
 - Native default feature tables now include Java-shaped default water and lava lake features in `DecorationStep::Lakes`, including water-lake chance/square/full-range placement and lava-lake biased range plus high-altitude rejection.
 - Native default feature tables now include Java-shaped `FREEZE_TOP_LAYER` in `DecorationStep::TopLayerModification`. Feature placement has a per-column biome resolver so snow/freezing uses `BiomeSource.getNoiseBiome(...)`/fuzzy block-position lookup rather than a center-biome shortcut.
+- Native feature biome checks now use the overworld constant-column biome zoomer shape: fuzzy block-position lookup with `y = 0`, matching Java's `FuzzyOffsetConstantColumnBiomeZoomer`.
+- Native `LakeFeature` grass/mycelium restoration now treats in-bounds protochunk lake lip cells as having positive sky light during `FEATURES`, matching Java's worldgen light-engine behavior before final light status.
 - Native block/asset registries and `RandomPatchFeature` support lower/upper `large_fern` blocks, and the taiga table now enables Java's `PATCH_LARGE_FERN` prefix before trees.
 - Native block/asset registries include compact `glow_lichen` state support, and the taiga table now enables a Java-shaped `GLOW_LICHEN` feature before trees. The native block buffer still stores this as one compact state rather than full multiface/waterlogged state.
+- Native chunk buffers now store glow-lichen face bits during feature placement so the clean scheduler `FEATURES` fixture preserves the correct visible block while still using compact generated block IDs.
 - Native feature-center commit order now has a Rust test against the committed vanilla scheduler trace for seed `12345`, chunk `(0,0)`. The current order is z-major over the target 3x3: `(-1,-1)`, `(0,-1)`, `(1,-1)`, then the next rows.
 - Native test support can place only `TAIGA_VEGETATION` with a forced vegetal feature index. `taiga_vegetation_feature_index_shift_is_isolated_by_center` now guards that native's active taiga tree selector uses Java full-biome index `2`.
 - Native feature table selection now uses Java's primary chunk biome path (`BiomeSource.getPrimaryBiome`) instead of fuzzy block-position biome lookup at the chunk center.
@@ -165,11 +161,10 @@ Still required:
 
 ## Next Steps
 
-1. Investigate the low-y `deepslate -> gravel` bucket before assuming it is ore-related; the first mismatches are y=1..3 edge gravel cells.
-2. Port or refine the remaining top-layer/liquid tails visible in the fixture: three expected snow layers, one `glow_lichen`, and small water/lava remnants.
-3. Add post-feature heightmap updates and scheduled tick capture to the native region path.
-4. Promote worker-local dependency reuse into scheduler-owned holder/status protochunk slots if structures or broader status scheduling need that before `018`.
-5. Keep running the ignored exact test locally and reduce top mismatch buckets until it can become a normal test.
+1. Decide whether the full-server fixture should be regenerated/replaced by the clean scheduler `FEATURES` fixture for this gauntlet, or whether the next slice should intentionally model post-generation fluid ticks and the full-vs-clean glow-lichen tail.
+2. Add post-feature heightmap updates and scheduled tick capture to the native region path.
+3. Promote worker-local dependency reuse into scheduler-owned holder/status protochunk slots if structures or broader status scheduling need that before `018`.
+4. Keep running the ignored exact test locally when comparing against the older full fixture, but treat the clean scheduler `FEATURES` exact test as the current apples-to-apples parity gate.
 
 ## Validation
 

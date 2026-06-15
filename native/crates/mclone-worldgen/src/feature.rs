@@ -144,9 +144,9 @@ impl<'a> OverworldFeatureBiomeResolver<'a> {
 }
 
 impl FeatureBiomeResolver for OverworldFeatureBiomeResolver<'_> {
-    fn biome_at(&self, block_x: i32, block_y: i32, block_z: i32) -> BiomeDefinition {
+    fn biome_at(&self, block_x: i32, _block_y: i32, block_z: i32) -> BiomeDefinition {
         self.biome_source
-            .get_block_position_biome_definition_at_y(self.seed, block_x, block_y, block_z)
+            .get_block_position_biome_definition(self.seed, block_x, block_z)
     }
 }
 
@@ -2165,15 +2165,9 @@ fn is_lake_dirt(block_id: RawBlockId) -> bool {
 }
 
 fn has_lake_sky_light<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool {
-    for y in pos.y + 1..world.min_y() + world.height() {
-        let Some(block_id) = world.block_at_world(BlockPos::new(pos.x, y, pos.z)) else {
-            return false;
-        };
-        if material_blocks_motion(block_id) {
-            return false;
-        }
-    }
-    true
+    // Java asks the worldgen light engine for LightLayer.SKY during FEATURES, before the
+    // post-feature light status has populated final skylight data.
+    world.block_at_world(pos).is_some()
 }
 
 fn place_spring<W: FeatureWorld>(

@@ -2969,16 +2969,31 @@ mod tests {
 
         assert_eq!(report.total_blocks, 16 * 16 * 256);
         assert!(report.matched_blocks < report.total_blocks);
-        assert!(report.mismatched_blocks > 0);
-        assert!(!report.top_mismatch_pairs.is_empty());
-        assert!(
-            report
-                .top_mismatch_pairs
-                .iter()
-                .any(|bucket| bucket.expected == "minecraft:gravel"
-                    || bucket.expected == "minecraft:fern"
-                    || bucket.expected == "minecraft:snow"),
-            "expected current report to expose a known full-decoration gap: {report:#?}"
+        assert_eq!(report.mismatched_blocks, 5, "{report:#?}");
+        assert_eq!(
+            report.top_mismatch_pairs,
+            vec![
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:water".to_owned(),
+                    count: 2,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:glow_lichen".to_owned(),
+                    count: 1,
+                },
+                MismatchBucket {
+                    actual: "minecraft:air".to_owned(),
+                    expected: "minecraft:lava".to_owned(),
+                    count: 1,
+                },
+                MismatchBucket {
+                    actual: "minecraft:glow_lichen".to_owned(),
+                    expected: "minecraft:air".to_owned(),
+                    count: 1,
+                },
+            ]
         );
     }
 
@@ -3018,25 +3033,7 @@ mod tests {
         }
 
         let report = compare_generated_chunk_to_full_fixture(&actual, expected);
-        assert_eq!(report.mismatched_blocks, 5);
-        assert!(report.top_mismatch_pairs.iter().all(|bucket| {
-            !matches!(
-                (bucket.actual.as_str(), bucket.expected.as_str()),
-                ("minecraft:glow_lichen", _) | (_, "minecraft:glow_lichen")
-            )
-        }));
-        assert!(
-            report.top_mismatch_pairs.iter().all(|bucket| {
-                !matches!(
-                    (bucket.actual.as_str(), bucket.expected.as_str()),
-                    ("minecraft:water", _)
-                        | (_, "minecraft:water")
-                        | ("minecraft:lava", _)
-                        | (_, "minecraft:lava")
-                )
-            }),
-            "clean FEATURES snapshot should not include runtime fluid mismatch buckets: {report:#?}"
-        );
+        assert!(report.is_exact(), "{report:#?}");
     }
 
     #[test]
