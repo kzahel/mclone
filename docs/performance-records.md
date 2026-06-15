@@ -214,6 +214,50 @@ Timedemo, seed `12345`, chunk radius `1`, loaded chunk radius `4`, 60 frames:
 
 Observation: the graph build itself is currently about `0.016 ms` per render section in optimized dev. The timedemo toggle control confirms section occlusion is reducing submitted draw pressure by roughly `3.35x` on this camera path, while leaving frustum pressure unchanged.
 
+### 2026-06-15 - Provisional Sky Propagation Smoke
+
+Commit reported by benchmark JSON: `2e97fc1`.
+
+Note: `git_dirty=true` because this was captured while replacing direct-only provisional sky light with chunk-local propagated sky light. Treat it as an implementation-check record, not a clean budget.
+
+Commands:
+
+```bash
+pnpm --silent native:movement:smoke
+pnpm --silent native:timedemo:smoke
+```
+
+Movement/loading, seed `12345`, chunk radius `1`, 12-step circular path:
+
+| Metric | Value |
+|---|---:|
+| total elapsed | 1804.757 ms |
+| first step elapsed | 897.615 ms |
+| later step elapsed range | 52.123-94.525 ms |
+| later poll range | 19.362-44.411 ms |
+| later remesh range | 12.420-16.336 ms |
+| visibility graph total build range | 2.315-2.816 ms |
+| graph-cull-enabled steps | 12 / 12 |
+| graph-drawn sections range | 3-13 |
+| graph-culled sections range | 3-18 |
+| graph-drawn faces range | 783-13,114 |
+
+Timedemo, seed `12345`, chunk radius `1`, loaded chunk radius `4`, 60 frames:
+
+| Metric | Value |
+|---|---:|
+| scene build | 1172.352 ms |
+| render setup | 83.020 ms |
+| average frame | 2.097 ms |
+| min frame | 1.619 ms |
+| max frame | 15.524 ms |
+| section count | 1,296 |
+| face count | 328,036 |
+| average drawn sections | 89.783 |
+| average drawn indices | 440,756.4 |
+
+Observation: draw pressure is effectively unchanged from the VisGraph lanes, but scene build/loading work is higher because the server now computes propagated sky `DataLayer`s instead of direct-only columns.
+
 ## Near-Term Perf Questions
 
 - Keep tracking whether graph culling is enabled for each camera lane. Movement and timedemo now both exercise the graph; outside-retained-section traversal seeding is covered by render tests and headless overview captures.

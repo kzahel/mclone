@@ -2851,11 +2851,11 @@ fn snapshot_with_provisional_lighting(
         raw_blocks.len()
     );
     let light_sections =
-        provisional_direct_sky_light_sections(snapshot.min_y, snapshot.height, raw_blocks);
+        provisional_sky_light_sections(snapshot.min_y, snapshot.height, raw_blocks);
     snapshot.with_light_sections(false, light_sections)
 }
 
-fn provisional_direct_sky_light_sections(
+fn provisional_sky_light_sections(
     min_y: i32,
     height: i32,
     raw_blocks: &[RawBlockId],
@@ -2866,29 +2866,75 @@ fn provisional_direct_sky_light_sections(
     );
     let section_count = height / SECTION_HEIGHT;
     let min_section_y = min_y.div_euclid(SECTION_HEIGHT);
-    let mut sky_layers = (0..section_count)
-        .map(|_| DataLayer::new())
-        .collect::<Vec<_>>();
+    let mut sky_values = vec![0_u8; height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize];
+    let mut queue = VecDeque::new();
 
     for local_z in 0..CHUNK_WIDTH {
         for local_x in 0..CHUNK_WIDTH {
             let mut sky_open = true;
             for local_y in (0..height).rev() {
-                let block_id = raw_blocks[chunk_block_index(local_x, local_y, local_z)];
-                if sky_open && material_blocks_motion(block_id) {
+                let index = chunk_block_index(local_x, local_y, local_z);
+                let block_id = raw_blocks[index];
+                if sky_open && sky_light_opacity(block_id) >= 15 {
                     sky_open = false;
                     continue;
                 }
                 if sky_open {
-                    let section_offset = local_y.div_euclid(SECTION_HEIGHT);
-                    let section_local_y = local_y.rem_euclid(SECTION_HEIGHT);
-                    sky_layers[section_offset as usize].set(local_x, section_local_y, local_z, 15);
+                    sky_values[index] = 15;
+                    queue.push_back((local_x, local_y, local_z));
                 }
             }
         }
     }
 
-    sky_layers
+    while let Some((local_x, local_y, local_z)) = queue.pop_front() {
+        let source_level = sky_values[chunk_block_index(local_x, local_y, local_z)];
+        if source_level <= 1 {
+            continue;
+        }
+
+        for [dx, dy, dz] in SKY_LIGHT_DIRECTIONS {
+            let next_x = local_x + dx;
+            let next_y = local_y + dy;
+            let next_z = local_z + dz;
+            if !(0..CHUNK_WIDTH).contains(&next_x)
+                || !(0..height).contains(&next_y)
+                || !(0..CHUNK_WIDTH).contains(&next_z)
+            {
+                continue;
+            }
+
+            let next_index = chunk_block_index(next_x, next_y, next_z);
+            let target_block = raw_blocks[next_index];
+            let Some(next_level) = propagated_sky_light_level(source_level, dy, target_block)
+            else {
+                continue;
+            };
+            if next_level > sky_values[next_index] {
+                sky_values[next_index] = next_level;
+                queue.push_back((next_x, next_y, next_z));
+            }
+        }
+    }
+
+    let mut sky_layers = (0..section_count)
+        .map(|_| DataLayer::new())
+        .collect::<Vec<_>>();
+    for local_y in 0..height {
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                let level = sky_values[chunk_block_index(local_x, local_y, local_z)];
+                if level == 0 {
+                    continue;
+                }
+                let section_offset = local_y.div_euclid(SECTION_HEIGHT);
+                let section_local_y = local_y.rem_euclid(SECTION_HEIGHT);
+                sky_layers[section_offset as usize].set(local_x, section_local_y, local_z, level);
+            }
+        }
+    }
+
+    let mut sections = sky_layers
         .into_iter()
         .enumerate()
         .filter_map(|(offset, layer)| {
@@ -2896,7 +2942,51 @@ fn provisional_direct_sky_light_sections(
                 .into_bytes()
                 .map(|sky| PackedLightSection::new(min_section_y + offset as i32, Some(sky), None))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    if sections.is_empty() && section_count > 0 {
+        sections.push(PackedLightSection::new(
+            min_section_y,
+            Some(vec![0; mclone_light::DATA_LAYER_SIZE]),
+            None,
+        ));
+    }
+    sections
+}
+
+const SKY_LIGHT_DIRECTIONS: [[i32; 3]; 6] = [
+    [0, -1, 0],
+    [0, 1, 0],
+    [0, 0, -1],
+    [0, 0, 1],
+    [-1, 0, 0],
+    [1, 0, 0],
+];
+
+fn propagated_sky_light_level(
+    source_level: u8,
+    direction_y: i32,
+    target_block: RawBlockId,
+) -> Option<u8> {
+    let opacity = sky_light_opacity(target_block);
+    if source_level == 0 || opacity >= 15 {
+        return None;
+    }
+
+    let attenuation = if direction_y == -1 && source_level == 15 && opacity == 0 {
+        0
+    } else {
+        opacity.max(1)
+    };
+    let level = source_level.saturating_sub(attenuation);
+    (level > 0).then_some(level)
+}
+
+fn sky_light_opacity(block_id: RawBlockId) -> u8 {
+    if material_blocks_motion(block_id) {
+        15
+    } else {
+        0
+    }
 }
 
 fn raw_block_id_from_state_id(state_id: BlockStateId) -> RawBlockId {
@@ -3044,11 +3134,11 @@ mod tests {
     }
 
     #[test]
-    fn provisional_direct_sky_light_stops_at_motion_blocking_blocks() {
+    fn provisional_sky_light_spreads_sideways_below_overhangs() {
         let mut blocks = vec![AIR; (CHUNK_WIDTH * SECTION_HEIGHT * CHUNK_WIDTH) as usize];
         blocks[chunk_block_index(0, 14, 0)] = STONE;
 
-        let sections = provisional_direct_sky_light_sections(0, SECTION_HEIGHT, &blocks);
+        let sections = provisional_sky_light_sections(0, SECTION_HEIGHT, &blocks);
 
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].section_y, 0);
@@ -3059,8 +3149,43 @@ mod tests {
                 .unwrap();
         assert_eq!(sky.get(0, 15, 0), 15);
         assert_eq!(sky.get(0, 14, 0), 0);
-        assert_eq!(sky.get(0, 13, 0), 0);
+        assert_eq!(sky.get(0, 13, 0), 14);
         assert_eq!(sky.get(1, 0, 0), 15);
+    }
+
+    #[test]
+    fn provisional_sky_light_keeps_full_roof_dark_below() {
+        let mut blocks = vec![AIR; (CHUNK_WIDTH * SECTION_HEIGHT * CHUNK_WIDTH) as usize];
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                blocks[chunk_block_index(local_x, 14, local_z)] = STONE;
+            }
+        }
+
+        let sections = provisional_sky_light_sections(0, SECTION_HEIGHT, &blocks);
+
+        assert_eq!(sections.len(), 1);
+        let sky =
+            mclone_light::packed_light_section_layer(&sections[0], mclone_light::LightLayer::Sky)
+                .unwrap()
+                .unwrap();
+        assert_eq!(sky.get(8, 15, 8), 15);
+        assert_eq!(sky.get(8, 14, 8), 0);
+        assert_eq!(sky.get(8, 13, 8), 0);
+    }
+
+    #[test]
+    fn provisional_sky_light_marks_all_dark_chunks_as_lit_data() {
+        let blocks = vec![STONE; (CHUNK_WIDTH * SECTION_HEIGHT * CHUNK_WIDTH) as usize];
+
+        let sections = provisional_sky_light_sections(0, SECTION_HEIGHT, &blocks);
+
+        assert_eq!(sections.len(), 1);
+        let sky =
+            mclone_light::packed_light_section_layer(&sections[0], mclone_light::LightLayer::Sky)
+                .unwrap()
+                .unwrap();
+        assert_eq!(sky.get(8, 8, 8), 0);
     }
 
     fn handle_command_and_poll(

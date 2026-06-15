@@ -1,6 +1,6 @@
 # 026: Lighting Pipeline
 
-Status: proposed.
+Status: active. The first storage/render handoff has landed, followed by a provisional chunk-local sky propagation pass. The full Java solver, light status scheduling, live deltas, and lightmap parity are still pending.
 
 ## Purpose
 
@@ -48,11 +48,15 @@ Reference facts from the initial pass:
 
 ## Current Native State
 
-- `native/crates/mclone-light` exists but only contains `LightChunkKey`.
-- `ChunkSnapshot` currently carries block sections only. Lighting is listed as a future snapshot/delta extension in [`../../runtime-data-model.md`](../../runtime-data-model.md).
+- `native/crates/mclone-light` has Java-shaped `DataLayer`, `LightLayer`, and packed-light helpers.
+- `ChunkSnapshot` carries provisional light payloads with optional sky/block `DataLayer` bytes per section.
+- Protocol and filesystem persistence roundtrip the light payload.
 - `ChunkStatus::Light` exists in `mclone_core`, but the server path does not yet run a native light status.
-- `TexturedChunkVertex` contains `position`, `uv`, and baked tint/shade `color`. There is no packed light field.
-- `chunk_textured.wgsl` multiplies atlas texels by vertex color only. The current output is effectively fullbright plus directional face shade.
+- The server currently publishes provisional sky facts from generated/live chunk blocks and leaves `light_correct=false`.
+- The provisional sky pass seeds open-sky cells at 15 and does chunk-local propagation through transparent cells, including the Java-style direct-down exception where vertical transparent sky can remain level 15.
+- There is still no cross-chunk light storage, async fixed-point solver, block emission propagation, or live light-delta publication.
+- `TexturedChunkVertex` carries Java-packed light, and `chunk_textured.wgsl` decodes it into a simple brightness factor.
+- The native client/headless path has a fullbright render toggle for before/after captures.
 
 ## First Slice
 
@@ -117,6 +121,8 @@ Add a clearly named provisional builder owned by the server/runtime path, not th
 This is intentionally not vanilla-correct lighting. It exists to validate the data path, vertex layout, shader path, dirty-section interactions, and visual inspection loop before the solver port.
 
 If this provisional path starts hiding real solver needs, stop and narrow it. The final target is still the Java solver.
+
+Implementation note: the provisional producer has since been extended from direct-only columns to chunk-local sky propagation. It is still provisional because it does not use `SkyLightSectionStorage`, cross-chunk top-section/source-column data, `DynamicGraphMinFixedPoint`, or Java block shape opacity.
 
 ### 4. Mesh Consumption
 
@@ -246,4 +252,3 @@ The image should not be blank, over-dark, or still indistinguishable from forced
 - persisted trusted light data from disk
 - night/gamma/effect-correct `LightTexture`
 - GPU compute lighting
-
