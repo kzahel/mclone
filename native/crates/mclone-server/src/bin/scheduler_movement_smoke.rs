@@ -1,15 +1,17 @@
 use std::{env, thread, time::Duration, time::Instant};
 
 use mclone_core::ChunkPos;
-use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
+use mclone_protocol::ChunkInterest;
 use mclone_server::{
-    ChunkSchedulerMetrics, IntegratedServer, MAX_CHUNK_DISTANCE, PLAYER_TICKET_LEVEL,
+    ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics, MAX_CHUNK_DISTANCE,
+    PLAYER_TICKET_LEVEL,
 };
 
 const DEFAULT_SEED: i64 = 12_345;
 const DEFAULT_RADIUS_CHUNKS: u32 = 1;
 const DEFAULT_STEPS: usize = 3;
 const DEFAULT_MAX_POLLS: usize = 120_000;
+const DEFAULT_POLL_SLEEP_MS: u64 = 1;
 
 fn main() {
     if let Err(error) = run() {
@@ -21,48 +23,90 @@ fn main() {
 fn run() -> Result<(), String> {
     let config = Config::parse(env::args().skip(1))?;
     let total_start = Instant::now();
-    let mut server = IntegratedServer::new(config.seed);
+    let mut scheduler = ChunkScheduler::new(config.seed);
     let mut steps = Vec::with_capacity(config.steps);
 
     for index in 0..config.steps {
         let center = ChunkPos::new(i32::try_from(index).expect("step index exceeded i32"), 0);
         let step_start = Instant::now();
-        let mut updates = server.handle_command(ClientCommand::SetChunkInterest(ChunkInterest {
-            center,
-            radius_chunks: config.radius_chunks,
-        }));
+        let apply_start = Instant::now();
+        let mut events = scheduler
+            .apply_interest(ChunkInterest {
+                center,
+                radius_chunks: config.radius_chunks,
+            })
+            .map_err(|error| error.to_string())?;
+        let apply_interest_ms = elapsed_ms(apply_start.elapsed());
 
         let mut polls = 0_usize;
-        while server.pending_job_count() > 0 {
+        let mut empty_polls = 0_usize;
+        let mut publish_polls = 0_usize;
+        let mut poll_call_ms = 0.0_f64;
+        let mut empty_poll_call_ms = 0.0_f64;
+        let mut publish_poll_call_ms = 0.0_f64;
+        let mut max_poll_call_ms = 0.0_f64;
+        let worker_wait_start = Instant::now();
+        while scheduler.pending_job_count() > 0 {
             if polls >= config.max_polls {
                 return Err(format!(
                     "timed out waiting for step {index} center=({}, {}) after {polls} polls",
                     center.x, center.z
                 ));
             }
-            thread::sleep(Duration::from_millis(1));
-            updates.extend(server.poll());
+            if config.poll_sleep_ms > 0 {
+                thread::sleep(Duration::from_millis(config.poll_sleep_ms));
+            }
+            let poll_start = Instant::now();
+            let poll_events = scheduler.poll().map_err(|error| error.to_string())?;
+            let poll_elapsed_ms = elapsed_ms(poll_start.elapsed());
+            poll_call_ms += poll_elapsed_ms;
+            max_poll_call_ms = max_poll_call_ms.max(poll_elapsed_ms);
+            if poll_events.is_empty() {
+                empty_polls += 1;
+                empty_poll_call_ms += poll_elapsed_ms;
+            } else {
+                publish_polls += 1;
+                publish_poll_call_ms += poll_elapsed_ms;
+            }
+            events.extend(poll_events);
             polls += 1;
         }
+        let worker_wait_ms = elapsed_ms(worker_wait_start.elapsed());
+        let non_poll_wait_ms = (worker_wait_ms - poll_call_ms).max(0.0);
 
-        let snapshots = updates
+        let snapshots = events
             .iter()
-            .filter(|update| matches!(update, ServerUpdate::ChunkSnapshot(_)))
+            .filter(|event| matches!(event, ChunkSchedulerEvent::SnapshotReady(_)))
             .count();
-        let unloads = updates
+        let unloads = events
             .iter()
-            .filter(|update| matches!(update, ServerUpdate::ChunkUnload { .. }))
+            .filter(|event| matches!(event, ChunkSchedulerEvent::Unloaded { .. }))
+            .count();
+        let status_events = events
+            .iter()
+            .filter(|event| matches!(event, ChunkSchedulerEvent::StatusChanged { .. }))
             .count();
 
         steps.push(StepReport {
             index,
             center,
             elapsed_ms: elapsed_ms(step_start.elapsed()),
+            apply_interest_ms,
+            worker_wait_ms,
+            poll_call_ms,
+            empty_poll_call_ms,
+            publish_poll_call_ms,
+            non_poll_wait_ms,
+            max_poll_call_ms,
             polls,
-            updates: updates.len(),
+            empty_polls,
+            publish_polls,
+            scheduler_events: events.len(),
+            client_updates: snapshots + unloads,
+            status_events,
             snapshots,
             unloads,
-            metrics: server.scheduler().metrics(),
+            metrics: scheduler.metrics(),
         });
     }
 
@@ -83,6 +127,7 @@ struct Config {
     radius_chunks: u32,
     steps: usize,
     max_polls: usize,
+    poll_sleep_ms: u64,
 }
 
 impl Config {
@@ -92,6 +137,7 @@ impl Config {
             radius_chunks: DEFAULT_RADIUS_CHUNKS,
             steps: DEFAULT_STEPS,
             max_polls: DEFAULT_MAX_POLLS,
+            poll_sleep_ms: DEFAULT_POLL_SLEEP_MS,
         };
 
         let mut args = args.into_iter();
@@ -108,6 +154,9 @@ impl Config {
                 }
                 "--max-polls" => {
                     config.max_polls = parse_next(&mut args, "--max-polls")?;
+                }
+                "--poll-sleep-ms" => {
+                    config.poll_sleep_ms = parse_next(&mut args, "--poll-sleep-ms")?;
                 }
                 "--help" | "-h" => {
                     return Err(usage());
@@ -129,8 +178,19 @@ struct StepReport {
     index: usize,
     center: ChunkPos,
     elapsed_ms: f64,
+    apply_interest_ms: f64,
+    worker_wait_ms: f64,
+    poll_call_ms: f64,
+    empty_poll_call_ms: f64,
+    publish_poll_call_ms: f64,
+    non_poll_wait_ms: f64,
+    max_poll_call_ms: f64,
     polls: usize,
-    updates: usize,
+    empty_polls: usize,
+    publish_polls: usize,
+    scheduler_events: usize,
+    client_updates: usize,
+    status_events: usize,
     snapshots: usize,
     unloads: usize,
     metrics: ChunkSchedulerMetrics,
@@ -234,6 +294,7 @@ impl SmokeReport {
         println!("  \"seed\": {},", self.config.seed);
         println!("  \"radius_chunks\": {},", self.config.radius_chunks);
         println!("  \"steps\": {},", self.config.steps);
+        println!("  \"poll_sleep_ms\": {},", self.config.poll_sleep_ms);
         println!("  \"total_elapsed_ms\": {:.3},", self.total_elapsed_ms);
         println!("  \"expected_interest_chunks\": {interest_chunks},");
         println!("  \"expected_active_chunks\": {active_chunks},");
@@ -251,8 +312,40 @@ impl SmokeReport {
                 step.center.x, step.center.z
             );
             println!("      \"elapsed_ms\": {:.3},", step.elapsed_ms);
+            println!(
+                "      \"apply_interest_ms\": {:.3},",
+                step.apply_interest_ms
+            );
+            println!(
+                "      \"main_thread_scheduler_ms\": {:.3},",
+                step.apply_interest_ms + step.poll_call_ms
+            );
+            println!(
+                "      \"main_thread_publish_path_ms\": {:.3},",
+                step.apply_interest_ms + step.publish_poll_call_ms
+            );
+            println!(
+                "      \"max_main_thread_call_ms\": {:.3},",
+                step.apply_interest_ms.max(step.max_poll_call_ms)
+            );
+            println!("      \"worker_wait_ms\": {:.3},", step.worker_wait_ms);
+            println!("      \"poll_call_ms\": {:.3},", step.poll_call_ms);
+            println!(
+                "      \"empty_poll_call_ms\": {:.3},",
+                step.empty_poll_call_ms
+            );
+            println!(
+                "      \"publish_poll_call_ms\": {:.3},",
+                step.publish_poll_call_ms
+            );
+            println!("      \"non_poll_wait_ms\": {:.3},", step.non_poll_wait_ms);
+            println!("      \"max_poll_call_ms\": {:.3},", step.max_poll_call_ms);
             println!("      \"polls\": {},", step.polls);
-            println!("      \"updates\": {},", step.updates);
+            println!("      \"empty_polls\": {},", step.empty_polls);
+            println!("      \"publish_polls\": {},", step.publish_polls);
+            println!("      \"scheduler_events\": {},", step.scheduler_events);
+            println!("      \"client_updates\": {},", step.client_updates);
+            println!("      \"status_events\": {},", step.status_events);
             println!("      \"snapshots\": {},", step.snapshots);
             println!("      \"unloads\": {},", step.unloads);
             print_metrics_json("      ", step.metrics, false);
@@ -357,5 +450,5 @@ fn parse_next<T: std::str::FromStr>(
 }
 
 fn usage() -> String {
-    "usage: scheduler_movement_smoke [--seed N] [--radius N] [--steps N] [--max-polls N]".to_owned()
+    "usage: scheduler_movement_smoke [--seed N] [--radius N] [--steps N] [--max-polls N] [--poll-sleep-ms N]".to_owned()
 }
