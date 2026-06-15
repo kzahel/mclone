@@ -52,7 +52,7 @@ Still missing compared with the TypeScript engine:
 - initial lighting, live light deltas, liquid ticks, basic movement/prediction, and entity/passive-mob baseline
 - early web/WASM compatibility gate kept alive from the same crates
 - browser client target that boots through the same runtime/protocol shape instead of a separate demo path
-- native presentation shape that does not block a desktop OpenXR path
+- native presentation shape that does not block future desktop OpenXR, flat Android, or Android XR / Quest hosts
 
 This is a parity horizon, not a pledge to port every TypeScript tactical one-for-one. The TypeScript implementation is the oracle/scaffold/reference target; Rust should group work by durable engine boundaries.
 
@@ -61,6 +61,7 @@ This is a parity horizon, not a pledge to port every TypeScript tactical one-for
 - Runtime ownership before renderer polish: the renderer should consume client-replica facts, not generate world data.
 - Data/protocol contracts before transports: local, dedicated, and web transports should move the same logical messages.
 - Native-first, web-kept-alive: keep web compiling/smoking early at subsystem boundaries, but do not develop a second full product in lockstep.
+- Desktop-first, not desktop-only: native desktop is the current bring-up path, but shared renderer/client/server contracts should not depend on desktop windowing or one desktop swapchain.
 - Web/WASM has two gates: an early build/boot smoke so constraints shape APIs, then a later real browser runtime once transport/render facts stabilize.
 - Validation is part of the slice: every render/runtime slice needs a headless or app smoke that exercises the new path.
 - Avoid throwaway cache/refactor work unless it removes a bypass or lands inside a real ownership boundary.
@@ -106,6 +107,6 @@ Do not start structures until the propagated residency/dependency-holder path ha
 - Do not start broad renderer asset polish before the native app is rendering from a client replica.
 - Do not start native lighting before snapshots can carry chunk facts through the client/server boundary.
 - Do not start movement/prediction before `ClientRuntime` owns a client world and collision-relevant chunk facts.
-- Do not build OpenXR on the current direct worldgen render path; wait until renderer presentation is separated from world ownership.
+- Do not build Android or OpenXR app scaffolding on the current desktop-coupled render path; wait until renderer presentation is separated from world ownership and accepts explicit view/target data.
 - Do not postpone all web work until the end; keep the WASM/browser target compiling and booting at the early runtime and renderer boundaries.
 - Do not port every TypeScript worldgen follow-through in order. Port grouped families against oracle fixtures and split only when a concrete parity failure needs a focused tactical.

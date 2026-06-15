@@ -1,19 +1,25 @@
-# Native desktop target
+# Native target notes
 
-Historical note on preserving a native host/renderer path for `mclone`.
+Historical note on preserving native host/renderer paths for `mclone`.
 
-This document has been superseded by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). The committed direction is now native-first Rust with the web target kept alive early. The TypeScript implementation remains legacy/reference prior art, not the primary engine direction.
+This document has been superseded by [`native-rewrite-roadmap.md`](native-rewrite-roadmap.md). The committed direction is now native-first Rust: native desktop is the first-priority bring-up path, web/WASM is kept alive as an early compatibility gate, and Android XR / Quest standalone is a future native target once the engine is mature enough. The TypeScript implementation remains legacy/reference prior art, not the primary engine direction.
 
 For a concrete Deno/WebGPU validation path, see [`deno-wgpu-native-spike.md`](./deno-wgpu-native-spike.md).
 
-## Motivation
+## Current posture
 
-The browser build remains the main product. A native target only matters for narrower cases where the browser is a poor fit:
+Native desktop is the current product and validation loop because it is the fastest way to bring up worldgen, scheduling, meshing, rendering, persistence, and diagnostics. The browser build remains a compatibility promise, but not the place where every low-level engine decision is first discovered.
+
+Future native targets matter for cases where desktop and browser are a poor fit:
 
 - **Direct OpenXR integration**: browser XR exists via WebXR, but if we decide we need direct OpenXR runtime/headset integration, native is the clearer path.
+- **Android XR / Quest standalone**: once the engine is mature, a standalone headset target should be able to reuse shared client/server/render data while owning its own Android lifecycle, OpenXR session, stereo swapchains, and controller/hand input.
+- **Flat Android**: useful as a single-view native host and packaging baseline, but less compelling than Quest/XR for product direction.
 - **High-tier rendering experiments**: compute-heavy simulation, indirect multi-draw, bindless-style resource models, and other advanced GPU techniques may fit better outside the browser sandbox.
 
 Native would be a host tier, not a separate game or separate simulation codebase. The goal would be to reuse the same simulation/content logic where practical while swapping host/runtime adapters and the renderer backend.
+
+The important near-term discipline is to avoid desktop lock-in while still moving quickly on desktop. Do not add Android or OpenXR scaffolding just to reserve the target; instead, keep the renderer and runtime boundaries explicit enough that those app crates can be added later without undoing the desktop path.
 
 ## Architectural shape
 
@@ -21,8 +27,8 @@ At this level, the shape we need to preserve is simple:
 
 ```
 ┌──────────────────────────────────────────────┐
-│ Native host (implementation TBD)             │
-│  ├─ window / input / XR integration          │
+│ Native host / platform adapter               │
+│  ├─ window / input / Android / XR integration│
 │  ├─ renderer backend                         │
 │  └─ engine runtime                           │
 │     ├─ simulation core                       │
@@ -50,9 +56,11 @@ The runtime split in [`architecture.md`](./architecture.md) already separates si
 
 In short, the same engine logic should ideally remain usable in:
 
-- browser main thread + WebGPU renderer
-- Node dedicated server (no renderer)
-- possible future native host + native renderer backend
+- native desktop app + `wgpu` renderer
+- browser/WASM app + WebGPU renderer
+- dedicated native server (no renderer)
+- future flat Android app + Vulkan-backed `wgpu`
+- future Android XR / Quest app + OpenXR swapchains wrapped for renderer submission
 
 The exact embedding and threading model can differ by host without changing parity-critical simulation logic.
 
@@ -97,13 +105,15 @@ Concretely:
 
 If a `GPUBuffer` shows up in `worldgen/` or `runtime/`, or a `Worker` shows up in simulation-core contracts, that is a regression worth fixing immediately.
 
-## Start gate
+## Start gate for Android/OpenXR scaffolding
 
-Before native work starts in earnest, all of the following should be true:
+Native work has started in earnest; this start gate now applies to Android and OpenXR app scaffolding. Before those targets are added, all of the following should be true:
 
-- there is a concrete requirement, such as XR support or a renderer experiment the browser path cannot satisfy cleanly
-- the browser and Node host paths are stable enough that native is not being used as a substitute for unfinished core architecture
-- the host language/runtime/embedding choices are made from a small requirement-driven spike, not from speculation
+- desktop/headless rendering already uses explicit view/projection and render-target data rather than a desktop-only camera/swapchain shape
+- shared client/server/mesh/asset crates do not depend on `winit`, Android activity glue, OpenXR sessions, or other host-specific objects
+- there is a concrete validation lane: attached Quest, Android emulator, desktop OpenXR runtime, or a focused compile/build smoke
+- the first slice is intentionally small: flat Android clear/chunk smoke, desktop OpenXR stereo smoke, or Android XR loader/session smoke
+- packaging and asset decisions are made from that validation lane, not from speculative scaffolding
 
 ## Open questions
 
@@ -117,6 +127,7 @@ These are only worth answering once the start gate above is met:
 
 ## Non-goals
 
-- Replacing the browser build. WebGPU stays the default and primary target.
-- Starting native implementation work before there is a concrete requirement and a stable browser/Node host core.
+- Replacing the browser build. Web/WASM stays a compatibility target.
+- Letting desktop bring-up leak `winit` or desktop filesystem assumptions into shared engine contracts.
+- Starting Android or OpenXR implementation work before renderer view/target contracts and a validation lane exist.
 - A separate game-logic codebase. There is one engine; native would be one of its hosts.

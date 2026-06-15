@@ -12,7 +12,7 @@ The TypeScript implementation remains valuable, but its role changes:
 The primary implementation direction is now:
 
 ```text
-native-first Rust engine, web target kept alive from the beginning
+native-first Rust engine, desktop bring-up first, web target kept alive early, Android XR later
 ```
 
 Reference Rust engine for native app/render/XR patterns:
@@ -23,12 +23,14 @@ Reference Rust engine for native app/render/XR patterns:
 
 ## Direction
 
-Build the engine as normal Rust crates first, with desktop/native as the main development loop. Keep a thin WASM/web target compiling and booting early so browser constraints stay visible while APIs are still easy to adjust.
+Build the engine as normal Rust crates first, with desktop/native as the main development loop. Keep a thin WASM/web target compiling and booting early so browser constraints stay visible while APIs are still easy to adjust. Treat Android XR / Quest standalone as a real later native target, but do not pull Android or OpenXR app scaffolding forward before the desktop path and renderer boundaries are mature enough to validate them.
 
 This is not equal effort across targets:
 
-- native desktop is the primary engine target
+- native desktop is the first-priority bring-up and validation target
 - web is an early compatibility gate
+- flat Android is a later single-view native host, not an immediate workstream
+- Android XR / Quest standalone is a later native XR host, not a current implementation lane
 - XR remains native-only until there is a concrete WebXR path worth supporting
 
 ## Why Native-First
@@ -40,7 +42,7 @@ Native is the better proving ground for engine internals:
 - real filesystem and persistence options
 - native threads and lower-friction worker scheduling
 - native `wgpu` without browser lifecycle/header/storage constraints
-- direct path to OpenXR later
+- direct path to Android and OpenXR later
 
 The browser build is still a product promise, but it should not be the place where every low-level engine decision is first discovered.
 
@@ -81,6 +83,14 @@ apps/
   mclone_web_client
 ```
 
+Future app crates should stay out of the workspace until they have a validation lane:
+
+```text
+apps/
+  mclone_android_client      # future flat Android single-view host
+  mclone_android_xr_client   # future Quest/OpenXR host
+```
+
 Responsibilities:
 
 | Crate | Owns | Does not own |
@@ -103,6 +113,21 @@ Native client:
 ```text
 input -> mclone_client -> mclone_protocol -> mclone_net
 mclone_client -> mclone_render
+```
+
+Future flat Android client:
+
+```text
+Android lifecycle/input adapters -> mclone_client
+mclone_client -> explicit single-view render target -> mclone_render
+```
+
+Future Android XR / Quest client:
+
+```text
+OpenXR session/actions/swapchains -> XR host app
+XR host app -> mclone_client
+XR host app -> per-eye render views/targets -> mclone_render
 ```
 
 Dedicated server:
@@ -150,6 +175,10 @@ render via wgpu/web
 
    When threading, storage, networking, asset streaming, or renderer capabilities are introduced, make the web adapter real before the API freezes.
 
+6. **Preserve future Android XR boundaries**
+
+   Before adding Android or OpenXR app crates, make renderer view/projection inputs and render targets explicit enough that desktop, headless, web, flat Android, and stereo XR hosts can drive the same renderer without desktop `winit` assumptions leaking into shared crates. The near-term tactical for this is [`tactical/native/022-platform-target-contract-and-render-boundary.md`](tactical/native/022-platform-target-contract-and-render-boundary.md).
+
 ## Rule Of Thumb
 
 ```text
@@ -157,6 +186,7 @@ core logic: native tests first, web compile gate
 renderer: native first, web smoke per milestone
 threading/scheduler: design for web constraints immediately
 storage/network: adapter-shaped from day one
+Android/XR: document and protect boundaries now; defer app scaffolding until renderer view/target contracts are explicit
 XR: native-only until there is a concrete WebXR path worth supporting
 ```
 
@@ -182,7 +212,7 @@ Next worldgen milestones:
 4. biome decoration tables for a narrow fixture
 5. full decorated native chunk parity against committed oracle fixtures
 
-Only after that should renderer/lighting/meshing work compete for primary focus, unless a small native renderer smoke is needed to keep the app path honest.
+Only after that should renderer/lighting/meshing work compete for primary focus, unless a small native renderer smoke or platform-boundary cleanup is needed to keep the app path honest. The renderer should keep explicit view/projection and target ownership so future Android and XR hosts do not have to unwind desktop-only assumptions.
 
 ## Documentation Ownership
 

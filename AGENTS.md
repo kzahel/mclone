@@ -4,7 +4,11 @@ See [`README.md`](README.md) for project context.
 
 **Do not use the auto-memory system** for this project (the `~/.claude/projects/-home-kgraehl-code-mclone/memory/` directory). Persist project-relevant guidance in this file (`AGENTS.md`) instead.
 
-For the native Rust rewrite, use the sibling engine at `~/code/playbox` as a reference for mature `winit`/`wgpu`, headless capture, diagnostics, and future desktop OpenXR patterns. Treat it as a pattern library only; do not depend on it directly, and do not copy its PhysX/VaM-specific runtime shape.
+For the native Rust rewrite, use the sibling engine at `~/code/playbox` as a reference for mature `winit`/`wgpu`, headless capture, diagnostics, Android, and OpenXR patterns. Treat it as a pattern library only; do not depend on it directly, and do not copy its PhysX/VaM-specific runtime shape.
+
+Current target posture: native desktop is the first-priority bring-up path, but do not let shared engine, client, server, mesh, asset, or renderer contracts become desktop-only. Keep `winit` and desktop surface ownership in app/platform adapters, keep renderer-facing view/projection and render-target data explicit, and keep headless/offscreen validation available. Web/WASM remains an early compatibility gate. Android XR / Quest standalone is a real future native target once the desktop path is mature enough; do not add Gradle, Android, or OpenXR scaffolding unless a tactical explicitly asks for it.
+
+The TypeScript/browser implementation is legacy/reference prior art. Use it for fixtures, behavior comparison, and old orchestration context only; new engine work should go through the Rust native workspace unless the user explicitly asks for legacy TypeScript maintenance.
 
 Native Rust rewrite tactical docs live under `docs/tactical/native/` and use zero-padded numeric filenames such as `000-topic.md`, `001-next-topic.md`. Do not add new native workstream tacticals beside the legacy TypeScript/browser tacticals in `docs/tactical/`.
 
