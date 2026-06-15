@@ -552,6 +552,28 @@ fn print_dependency_generation_json(
         "{indent}  \"surface_fill_ms\": {:.3},",
         micros_to_ms(timing.surface_fill_us)
     );
+    println!("{indent}  \"surface_fill_breakdown\": {{");
+    println!(
+        "{indent}    \"total_ms\": {:.3},",
+        micros_to_ms(timing.surface_fill.total_us())
+    );
+    println!(
+        "{indent}    \"chunk_alloc_ms\": {:.3},",
+        micros_to_ms(timing.surface_fill.chunk_alloc_us)
+    );
+    println!(
+        "{indent}    \"noise_columns_ms\": {:.3},",
+        micros_to_ms(timing.surface_fill.noise_columns_us)
+    );
+    println!(
+        "{indent}    \"terrain_fill_ms\": {:.3},",
+        micros_to_ms(timing.surface_fill.terrain_fill_us)
+    );
+    println!(
+        "{indent}    \"non_air_blocks_written\": {}",
+        timing.surface_fill.non_air_blocks_written
+    );
+    println!("{indent}  }},");
     println!(
         "{indent}  \"surface_bedrock_ms\": {:.3},",
         micros_to_ms(timing.surface_bedrock_us)

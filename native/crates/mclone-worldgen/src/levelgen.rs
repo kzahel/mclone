@@ -452,13 +452,35 @@ impl<B: NoiseBiomeSource> NoiseSampler<B> {
         min_cell_y: i32,
         cell_count_y: i32,
     ) {
+        let density = self.compute_biome_density(cell_x, cell_z, biome_y, noise_settings);
+        self.fill_noise_column_with_density(
+            noise_values,
+            cell_x,
+            cell_z,
+            noise_settings,
+            min_cell_y,
+            cell_count_y,
+            density,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn fill_noise_column_with_density(
+        &self,
+        noise_values: &mut [f64],
+        cell_x: i32,
+        cell_z: i32,
+        noise_settings: &NoiseSettings,
+        min_cell_y: i32,
+        cell_count_y: i32,
+        density: BiomeDensity,
+    ) {
         if self.island_noise.is_some() {
             panic!(
                 "NoiseSampler island noise override is out of scope for the 1.17.1 overworld target"
             );
         }
 
-        let density = self.compute_biome_density(cell_x, cell_z, biome_y, noise_settings);
         let sampling = noise_settings.noise_sampling_settings();
         let limit_horizontal_scale = 684.412 * sampling.xz_scale();
         let limit_vertical_scale = 684.412 * sampling.y_scale();
@@ -504,55 +526,18 @@ impl<B: NoiseBiomeSource> NoiseSampler<B> {
         biome_y: i32,
         noise_settings: &NoiseSettings,
     ) -> BiomeDensity {
-        let mut weighted_scale = 0.0_f32;
-        let mut weighted_depth = 0.0_f32;
-        let mut total_weight = 0.0_f32;
         let center_depth = self
             .biome_source
             .get_noise_biome(cell_x, biome_y, cell_z)
             .get_depth();
-
-        for offset_x in -BIOME_WEIGHT_RADIUS..=BIOME_WEIGHT_RADIUS {
-            for offset_z in -BIOME_WEIGHT_RADIUS..=BIOME_WEIGHT_RADIUS {
-                let biome = self.biome_source.get_noise_biome(
-                    cell_x + offset_x,
-                    biome_y,
-                    cell_z + offset_z,
-                );
-                let biome_depth = biome.get_depth();
-                let biome_scale = biome.get_scale();
-                let (adjusted_depth, adjusted_scale) =
-                    if noise_settings.is_amplified() && biome_depth > 0.0 {
-                        (
-                            1.0_f32 + biome_depth * 2.0_f32,
-                            1.0_f32 + biome_scale * 4.0_f32,
-                        )
-                    } else {
-                        (biome_depth, biome_scale)
-                    };
-
-                let weight_multiplier = if biome_depth > center_depth {
-                    0.5_f32
-                } else {
-                    1.0_f32
-                };
-                let weight = (weight_multiplier * biome_weight(offset_x, offset_z))
-                    / (adjusted_depth + 2.0_f32);
-                weighted_scale += adjusted_scale * weight;
-                weighted_depth += adjusted_depth * weight;
-                total_weight += weight;
-            }
-        }
-
-        let average_depth = weighted_depth / total_weight;
-        let average_scale = weighted_scale / total_weight;
-        let depth_offset = average_depth * 0.5_f32 - 0.125_f32;
-        let scale_factor = average_scale * 0.9_f32 + 0.1_f32;
-
-        BiomeDensity {
-            depth: f64::from(depth_offset) * 0.265625,
-            scale: 96.0 / f64::from(scale_factor),
-        }
+        compute_biome_density_from_neighborhood(
+            center_depth,
+            noise_settings,
+            |offset_x, offset_z| {
+                self.biome_source
+                    .get_noise_biome(cell_x + offset_x, biome_y, cell_z + offset_z)
+            },
+        )
     }
 
     fn compute_initial_density(
@@ -939,6 +924,27 @@ pub struct NoiseBasedChunkGenerator<B: NoiseBiomeSource> {
     sampler: NoiseSampler<B>,
 }
 
+#[derive(Debug)]
+struct TimedSurfaceFill {
+    chunk: MutableChunkBlockBuffer,
+    timing: SurfaceFillTiming,
+}
+
+#[derive(Clone, Debug)]
+struct NoiseBiomeCache {
+    min_x: i32,
+    min_z: i32,
+    z_count: i32,
+    biomes: Vec<NoiseBiome>,
+}
+
+impl NoiseBiomeCache {
+    fn get(&self, x: i32, z: i32) -> NoiseBiome {
+        let index = ((x - self.min_x) * self.z_count + (z - self.min_z)) as usize;
+        self.biomes[index]
+    }
+}
+
 impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
     pub fn new(biome_source: B, seed: i64, settings: NoiseGeneratorSettings) -> Self {
         if settings.is_aquifers_enabled()
@@ -1020,88 +1026,94 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
         chunk
     }
 
+    fn fill_from_noise_timed(&self, chunk_x: i32, chunk_z: i32) -> TimedSurfaceFill {
+        let mut timing = SurfaceFillTiming::default();
+
+        let chunk_alloc_start = timing_start();
+        let mut chunk = MutableChunkBlockBuffer::new(chunk_x, chunk_z, self.min_y, self.height);
+        timing.chunk_alloc_us = timing_elapsed_us(chunk_alloc_start);
+
+        let fill_timing = self.fill_terrain_block_buffer_timed(&mut chunk);
+        timing.add_assign(fill_timing);
+
+        TimedSurfaceFill { chunk, timing }
+    }
+
     fn fill_terrain_block_buffer(&self, chunk: &mut MutableChunkBlockBuffer) {
         let noise_columns = self.create_noise_columns(chunk.chunk_x, chunk.chunk_z);
+        self.fill_terrain_block_buffer_from_columns(chunk, &noise_columns);
+    }
+
+    fn fill_terrain_block_buffer_timed(
+        &self,
+        chunk: &mut MutableChunkBlockBuffer,
+    ) -> SurfaceFillTiming {
+        let mut timing = SurfaceFillTiming::default();
+
+        let noise_columns_start = timing_start();
+        let noise_columns = self.create_noise_columns(chunk.chunk_x, chunk.chunk_z);
+        timing.noise_columns_us = timing_elapsed_us(noise_columns_start);
+
+        let terrain_fill_start = timing_start();
+        timing.non_air_blocks_written =
+            self.fill_terrain_block_buffer_from_columns(chunk, &noise_columns);
+        timing.terrain_fill_us = timing_elapsed_us(terrain_fill_start);
+        timing
+    }
+
+    fn fill_terrain_block_buffer_from_columns(
+        &self,
+        chunk: &mut MutableChunkBlockBuffer,
+        noise_columns: &[f64],
+    ) -> usize {
+        let mut non_air_blocks_written = 0;
+        let column_y_count = (self.cell_count_y + 1) as usize;
+        let column_z_stride = column_y_count;
+        let column_x_stride = (self.cell_count_z + 1) as usize * column_y_count;
+        let inv_cell_height = 1.0 / self.cell_height as f64;
+        let inv_cell_width = 1.0 / self.cell_width as f64;
 
         for cell_x in 0..self.cell_count_x {
             for cell_z in 0..self.cell_count_z {
                 for cell_y in (0..self.cell_count_y).rev() {
-                    let x0z0y0 = noise_columns[column_index(
-                        cell_x,
-                        cell_z,
-                        cell_y,
-                        self.cell_count_z,
-                        self.cell_count_y,
-                    )];
-                    let x0z0y1 = noise_columns[column_index(
-                        cell_x,
-                        cell_z,
-                        cell_y + 1,
-                        self.cell_count_z,
-                        self.cell_count_y,
-                    )];
-                    let x1z0y0 = noise_columns[column_index(
-                        cell_x + 1,
-                        cell_z,
-                        cell_y,
-                        self.cell_count_z,
-                        self.cell_count_y,
-                    )];
-                    let x1z0y1 = noise_columns[column_index(
-                        cell_x + 1,
-                        cell_z,
-                        cell_y + 1,
-                        self.cell_count_z,
-                        self.cell_count_y,
-                    )];
-                    let x0z1y0 = noise_columns[column_index(
-                        cell_x,
-                        cell_z + 1,
-                        cell_y,
-                        self.cell_count_z,
-                        self.cell_count_y,
-                    )];
-                    let x0z1y1 = noise_columns[column_index(
-                        cell_x,
-                        cell_z + 1,
-                        cell_y + 1,
-                        self.cell_count_z,
-                        self.cell_count_y,
-                    )];
-                    let x1z1y0 = noise_columns[column_index(
-                        cell_x + 1,
-                        cell_z + 1,
-                        cell_y,
-                        self.cell_count_z,
-                        self.cell_count_y,
-                    )];
-                    let x1z1y1 = noise_columns[column_index(
-                        cell_x + 1,
-                        cell_z + 1,
-                        cell_y + 1,
-                        self.cell_count_z,
-                        self.cell_count_y,
-                    )];
+                    let column_base = cell_x as usize * column_x_stride
+                        + cell_z as usize * column_z_stride
+                        + cell_y as usize;
+                    let x0z0y0 = noise_columns[column_base];
+                    let x0z0y1 = noise_columns[column_base + 1];
+                    let x1z0y0 = noise_columns[column_base + column_x_stride];
+                    let x1z0y1 = noise_columns[column_base + column_x_stride + 1];
+                    let x0z1y0 = noise_columns[column_base + column_z_stride];
+                    let x0z1y1 = noise_columns[column_base + column_z_stride + 1];
+                    let x1z1y0 = noise_columns[column_base + column_x_stride + column_z_stride];
+                    let x1z1y1 = noise_columns[column_base + column_x_stride + column_z_stride + 1];
 
                     for y_offset in (0..self.cell_height).rev() {
-                        let y_fraction = y_offset as f64 / self.cell_height as f64;
+                        let y_fraction = y_offset as f64 * inv_cell_height;
                         let block_y = (self.min_cell_y + cell_y) * self.cell_height + y_offset;
                         let local_y = block_y - self.min_y;
+                        let local_y_base = (local_y as usize) << 8;
+                        let x0z0 = lerp(y_fraction, x0z0y0, x0z0y1);
+                        let x1z0 = lerp(y_fraction, x1z0y0, x1z0y1);
+                        let x0z1 = lerp(y_fraction, x0z1y0, x0z1y1);
+                        let x1z1 = lerp(y_fraction, x1z1y0, x1z1y1);
 
                         for x_offset in 0..self.cell_width {
-                            let x_fraction = x_offset as f64 / self.cell_width as f64;
+                            let x_fraction = x_offset as f64 * inv_cell_width;
                             let local_x = cell_x * self.cell_width + x_offset;
+                            let z0 = lerp(x_fraction, x0z0, x1z0);
+                            let z1 = lerp(x_fraction, x0z1, x1z1);
 
                             for z_offset in 0..self.cell_width {
-                                let z_fraction = z_offset as f64 / self.cell_width as f64;
-                                let density = lerp3(
-                                    y_fraction, x_fraction, z_fraction, x0z0y0, x0z0y1, x1z0y0,
-                                    x1z0y1, x0z1y0, x0z1y1, x1z1y0, x1z1y1,
-                                );
+                                let z_fraction = z_offset as f64 * inv_cell_width;
+                                let density = lerp(z_fraction, z0, z1);
                                 let block_id = self.resolve_terrain_block(block_y, density);
                                 if block_id != AIR {
                                     let local_z = cell_z * self.cell_width + z_offset;
-                                    chunk.set_block(local_x, local_y, local_z, block_id);
+                                    let index =
+                                        local_y_base | ((local_z as usize) << 4) | local_x as usize;
+                                    chunk.blocks[index] = block_id;
+                                    non_air_blocks_written += 1;
                                 }
                             }
                         }
@@ -1109,6 +1121,8 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
                 }
             }
         }
+
+        non_air_blocks_written
     }
 
     fn create_noise_columns(&self, chunk_x: i32, chunk_z: i32) -> Vec<f64> {
@@ -1121,33 +1135,79 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
         let cell_min_x = chunk_x * self.cell_count_x;
         let cell_min_z = chunk_z * self.cell_count_z;
         let noise_settings = self.settings.noise_settings();
+        let biome_cache = self.create_noise_biome_cache(cell_min_x, cell_min_z);
+        let column_y_count = self.cell_count_y as usize + 1;
+        let column_z_stride = column_y_count;
+        let column_x_stride = (self.cell_count_z + 1) as usize * column_y_count;
+        let mut noise_values = vec![0.0; column_y_count];
 
         for cell_x in 0..=self.cell_count_x {
             for cell_z in 0..=self.cell_count_z {
-                let mut noise_values = vec![0.0; self.cell_count_y as usize + 1];
-                self.sampler.fill_noise_column(
-                    &mut noise_values,
-                    cell_min_x + cell_x,
-                    cell_min_z + cell_z,
+                let noise_cell_x = cell_min_x + cell_x;
+                let noise_cell_z = cell_min_z + cell_z;
+                let density = self.compute_cached_biome_density(
+                    noise_cell_x,
+                    noise_cell_z,
                     noise_settings,
-                    self.sea_level,
+                    &biome_cache,
+                );
+                self.sampler.fill_noise_column_with_density(
+                    &mut noise_values,
+                    noise_cell_x,
+                    noise_cell_z,
+                    noise_settings,
                     self.min_cell_y,
                     self.cell_count_y,
+                    density,
                 );
 
-                for (cell_y, value) in noise_values.into_iter().enumerate() {
-                    columns[column_index(
-                        cell_x,
-                        cell_z,
-                        cell_y as i32,
-                        self.cell_count_z,
-                        self.cell_count_y,
-                    )] = value;
-                }
+                let column_base =
+                    cell_x as usize * column_x_stride + cell_z as usize * column_z_stride;
+                columns[column_base..column_base + column_y_count].copy_from_slice(&noise_values);
             }
         }
 
         columns
+    }
+
+    fn create_noise_biome_cache(&self, cell_min_x: i32, cell_min_z: i32) -> NoiseBiomeCache {
+        let min_x = cell_min_x - BIOME_WEIGHT_RADIUS;
+        let min_z = cell_min_z - BIOME_WEIGHT_RADIUS;
+        let width = self.cell_count_x + 1 + BIOME_WEIGHT_RADIUS * 2;
+        let depth = self.cell_count_z + 1 + BIOME_WEIGHT_RADIUS * 2;
+        let mut biomes = Vec::with_capacity((width * depth) as usize);
+
+        for offset_x in 0..width {
+            for offset_z in 0..depth {
+                biomes.push(self.sampler.biome_source.get_noise_biome(
+                    min_x + offset_x,
+                    self.sea_level,
+                    min_z + offset_z,
+                ));
+            }
+        }
+
+        NoiseBiomeCache {
+            min_x,
+            min_z,
+            z_count: depth,
+            biomes,
+        }
+    }
+
+    fn compute_cached_biome_density(
+        &self,
+        cell_x: i32,
+        cell_z: i32,
+        noise_settings: &NoiseSettings,
+        biome_cache: &NoiseBiomeCache,
+    ) -> BiomeDensity {
+        let center_depth = biome_cache.get(cell_x, cell_z).get_depth();
+        compute_biome_density_from_neighborhood(
+            center_depth,
+            noise_settings,
+            |offset_x, offset_z| biome_cache.get(cell_x + offset_x, cell_z + offset_z),
+        )
     }
 
     fn resolve_terrain_block(&self, y: i32, noise: f64) -> u8 {
@@ -1314,9 +1374,31 @@ pub struct OverworldFeatureBatchTiming {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SurfaceFillTiming {
+    pub chunk_alloc_us: u128,
+    pub noise_columns_us: u128,
+    pub terrain_fill_us: u128,
+    pub non_air_blocks_written: usize,
+}
+
+impl SurfaceFillTiming {
+    pub fn total_us(self) -> u128 {
+        self.chunk_alloc_us + self.noise_columns_us + self.terrain_fill_us
+    }
+
+    pub fn add_assign(&mut self, other: Self) {
+        self.chunk_alloc_us += other.chunk_alloc_us;
+        self.noise_columns_us += other.noise_columns_us;
+        self.terrain_fill_us += other.terrain_fill_us;
+        self.non_air_blocks_written += other.non_air_blocks_written;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct OverworldDependencyGenerationTiming {
     pub generator_setup_us: u128,
     pub surface_fill_us: u128,
+    pub surface_fill: SurfaceFillTiming,
     pub surface_bedrock_us: u128,
     pub air_carvers_us: u128,
     pub liquid_carvers_us: u128,
@@ -1336,6 +1418,7 @@ impl OverworldDependencyGenerationTiming {
     pub fn add_assign(&mut self, other: Self) {
         self.generator_setup_us += other.generator_setup_us;
         self.surface_fill_us += other.surface_fill_us;
+        self.surface_fill.add_assign(other.surface_fill);
         self.surface_bedrock_us += other.surface_bedrock_us;
         self.air_carvers_us += other.air_carvers_us;
         self.liquid_carvers_us += other.liquid_carvers_us;
@@ -1719,8 +1802,10 @@ fn generate_overworld_liquid_carved_buffer_with_generator_timed(
 ) -> TimedDependencyBuffer {
     let mut timing = OverworldDependencyGenerationTiming::default();
     let surface_fill_start = timing_start();
-    let mut chunk = generator.fill_from_noise(chunk_x, chunk_z);
+    let surface_fill = generator.fill_from_noise_timed(chunk_x, chunk_z);
     timing.surface_fill_us = timing_elapsed_us(surface_fill_start);
+    timing.surface_fill = surface_fill.timing;
+    let mut chunk = surface_fill.chunk;
 
     let surface_bedrock_start = timing_start();
     generator.build_surface_and_bedrock(&mut chunk);
@@ -1753,6 +1838,54 @@ impl TimedDependencyBuffer {
 struct BiomeDensity {
     depth: f64,
     scale: f64,
+}
+
+fn compute_biome_density_from_neighborhood(
+    center_depth: f32,
+    noise_settings: &NoiseSettings,
+    mut biome_at_offset: impl FnMut(i32, i32) -> NoiseBiome,
+) -> BiomeDensity {
+    let mut weighted_scale = 0.0_f32;
+    let mut weighted_depth = 0.0_f32;
+    let mut total_weight = 0.0_f32;
+
+    for offset_x in -BIOME_WEIGHT_RADIUS..=BIOME_WEIGHT_RADIUS {
+        for offset_z in -BIOME_WEIGHT_RADIUS..=BIOME_WEIGHT_RADIUS {
+            let biome = biome_at_offset(offset_x, offset_z);
+            let biome_depth = biome.get_depth();
+            let biome_scale = biome.get_scale();
+            let (adjusted_depth, adjusted_scale) =
+                if noise_settings.is_amplified() && biome_depth > 0.0 {
+                    (
+                        1.0_f32 + biome_depth * 2.0_f32,
+                        1.0_f32 + biome_scale * 4.0_f32,
+                    )
+                } else {
+                    (biome_depth, biome_scale)
+                };
+
+            let weight_multiplier = if biome_depth > center_depth {
+                0.5_f32
+            } else {
+                1.0_f32
+            };
+            let weight =
+                (weight_multiplier * biome_weight(offset_x, offset_z)) / (adjusted_depth + 2.0_f32);
+            weighted_scale += adjusted_scale * weight;
+            weighted_depth += adjusted_depth * weight;
+            total_weight += weight;
+        }
+    }
+
+    let average_depth = weighted_depth / total_weight;
+    let average_scale = weighted_scale / total_weight;
+    let depth_offset = average_depth * 0.5_f32 - 0.125_f32;
+    let scale_factor = average_scale * 0.9_f32 + 0.1_f32;
+
+    BiomeDensity {
+        depth: f64::from(depth_offset) * 0.265625,
+        scale: 96.0 / f64::from(scale_factor),
+    }
 }
 
 fn biome_weight(offset_x: i32, offset_z: i32) -> f32 {
@@ -1813,47 +1946,8 @@ fn set_block_at_i64_y_if_inside(
     }
 }
 
-fn column_index(
-    cell_x: i32,
-    cell_z: i32,
-    cell_y: i32,
-    cell_count_z: i32,
-    cell_count_y: i32,
-) -> usize {
-    ((cell_x * (cell_count_z + 1) + cell_z) * (cell_count_y + 1) + cell_y) as usize
-}
-
 fn lerp(delta: f64, start: f64, end: f64) -> f64 {
     start + delta * (end - start)
-}
-
-fn lerp2(delta_x: f64, delta_y: f64, x0_y0: f64, x1_y0: f64, x0_y1: f64, x1_y1: f64) -> f64 {
-    lerp(
-        delta_y,
-        lerp(delta_x, x0_y0, x1_y0),
-        lerp(delta_x, x0_y1, x1_y1),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn lerp3(
-    delta_x: f64,
-    delta_y: f64,
-    delta_z: f64,
-    x0_y0_z0: f64,
-    x1_y0_z0: f64,
-    x0_y1_z0: f64,
-    x1_y1_z0: f64,
-    x0_y0_z1: f64,
-    x1_y0_z1: f64,
-    x0_y1_z1: f64,
-    x1_y1_z1: f64,
-) -> f64 {
-    lerp(
-        delta_z,
-        lerp2(delta_x, delta_y, x0_y0_z0, x1_y0_z0, x0_y1_z0, x1_y1_z0),
-        lerp2(delta_x, delta_y, x0_y0_z1, x1_y0_z1, x0_y1_z1, x1_y1_z1),
-    )
 }
 
 #[cfg(test)]
