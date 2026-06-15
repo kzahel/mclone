@@ -8,6 +8,17 @@ Native Rust tactical docs live in [`../docs/tactical/native/`](../docs/tactical/
 
 Use `~/code/playbox` as the reference Rust engine for native app/render/XR patterns. In particular, its `winit`/`wgpu` setup, frame pacing, headless capture, render-target, camera, diagnostics, Android NativeActivity, and OpenXR code are useful references. Do not depend on Playbox directly, and do not copy its PhysX/VaM-specific runtime shape.
 
+Playbox reference entry points:
+
+- `~/code/playbox/Cargo.toml`: debug-profile optimization policy for meaningful `cargo run` perf numbers.
+- `~/code/playbox/docs/architecture/rendering.md`: render view/target boundaries and `wgpu` escape-hatch policy.
+- `~/code/playbox/docs/architecture/platforms.md`: desktop, flat Android, desktop OpenXR, and Android XR host boundaries.
+- `~/code/playbox/android/README.md`: flat Android NativeActivity build/validation notes.
+- `~/code/playbox/android-xr/README.md`: Quest/OpenXR package, runtime, and validation notes.
+- `~/code/playbox/docs/tactical/106-desktop-xr-companion-window.md`: desktop OpenXR companion window/mirror/input design notes.
+
+This workspace intentionally keeps native `profile.dev` optimized at `opt-level = 2`, following Playbox's policy. Debug assertions and incremental rebuild behavior remain enabled, but movement/render/worldgen perf smokes should not be interpreted as fully unoptimized Rust numbers.
+
 The Rust workspace is quarantined from the TypeScript implementation:
 
 - Rust crates may read shared docs, fixtures, and extracted assets.

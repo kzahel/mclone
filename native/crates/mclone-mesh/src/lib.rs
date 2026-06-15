@@ -12,6 +12,7 @@ use mclone_core::{AIR_BLOCK_STATE_ID, BlockStateId};
 
 pub const CHUNK_WIDTH: i32 = 16;
 pub const RENDER_SECTION_HEIGHT: i32 = 16;
+pub const QUAD_FACE_INDEX_COUNT: u32 = 6;
 pub const AIR_BLOCK_ID: u8 = 0;
 pub const CAVE_AIR_BLOCK_ID: u8 = 71;
 pub const CAVE_AIR_BLOCK_STATE_ID: BlockStateId = BlockStateId(71);
@@ -20,6 +21,21 @@ pub const CAVE_AIR_BLOCK_STATE_ID: BlockStateId = BlockStateId(71);
 pub struct SectionMeshStats {
     pub vertex_count: u32,
     pub index_count: u32,
+}
+
+impl SectionMeshStats {
+    pub fn face_count(&self) -> u32 {
+        quad_face_count_from_indices(self.index_count)
+    }
+}
+
+pub fn quad_face_count_from_indices(index_count: u32) -> u32 {
+    debug_assert_eq!(
+        index_count % QUAD_FACE_INDEX_COUNT,
+        0,
+        "chunk meshes should emit whole quad faces"
+    );
+    index_count / QUAD_FACE_INDEX_COUNT
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -416,8 +432,27 @@ pub fn build_textured_render_sections(
     inputs: &[TexturedChunkMeshInput<'_>],
     catalog: &TexturedMeshCatalog,
 ) -> Result<Vec<TexturedRenderSectionMesh>, TexturedMeshError> {
+    build_textured_render_sections_for_chunks(inputs, catalog, None)
+}
+
+pub fn build_textured_render_sections_for_chunk_set(
+    inputs: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    target_chunks: &BTreeSet<(i32, i32)>,
+) -> Result<Vec<TexturedRenderSectionMesh>, TexturedMeshError> {
+    build_textured_render_sections_for_chunks(inputs, catalog, Some(target_chunks))
+}
+
+fn build_textured_render_sections_for_chunks(
+    inputs: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    target_chunks: Option<&BTreeSet<(i32, i32)>>,
+) -> Result<Vec<TexturedRenderSectionMesh>, TexturedMeshError> {
     let mut sections = Vec::new();
     for input in inputs {
+        if target_chunks.is_some_and(|targets| !targets.contains(&(input.chunk_x, input.chunk_z))) {
+            continue;
+        }
         for local_y_start in (0..input.height).step_by(RENDER_SECTION_HEIGHT as usize) {
             let local_y_end = (local_y_start + RENDER_SECTION_HEIGHT).min(input.height);
             let mut mesh = TexturedVisibleChunkMesh::default();
@@ -929,6 +964,7 @@ mod tests {
     fn empty_mesh_stats_are_zero() {
         assert_eq!(SectionMeshStats::default().vertex_count, 0);
         assert_eq!(SectionMeshStats::default().index_count, 0);
+        assert_eq!(SectionMeshStats::default().face_count(), 0);
     }
 
     #[test]
@@ -938,6 +974,7 @@ mod tests {
 
         assert_eq!(mesh.stats().vertex_count, 24);
         assert_eq!(mesh.stats().index_count, 36);
+        assert_eq!(mesh.stats().face_count(), 6);
     }
 
     #[test]
@@ -947,6 +984,17 @@ mod tests {
 
         assert_eq!(mesh.stats().vertex_count, 40);
         assert_eq!(mesh.stats().index_count, 60);
+        assert_eq!(mesh.stats().face_count(), 10);
+    }
+
+    #[test]
+    fn solid_section_culls_internal_faces_in_debug_mesh() {
+        let blocks = vec![1; (16 * 16 * 16) as usize];
+        let mesh = build_visible_chunk_mesh(ChunkMeshInput::new(0, 0, 0, 16, &blocks));
+
+        assert_eq!(mesh.stats().face_count(), 6 * 16 * 16);
+        assert_eq!(mesh.stats().vertex_count, 6 * 16 * 16 * 4);
+        assert_eq!(mesh.stats().index_count, 6 * 16 * 16 * 6);
     }
 
     #[test]
@@ -1131,6 +1179,69 @@ mod tests {
 
         assert_eq!(mesh.stats().vertex_count, 40);
         assert_eq!(mesh.stats().index_count, 60);
+        assert_eq!(mesh.stats().face_count(), 10);
+    }
+
+    #[test]
+    fn solid_textured_section_culls_internal_model_faces() {
+        let catalog = stone_textured_catalog();
+        let blocks = vec![BlockStateId(1); (16 * 16 * 16) as usize];
+        let sections = build_textured_render_sections(
+            &[TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks)],
+            &catalog,
+        )
+        .unwrap();
+
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].stats().face_count(), 6 * 16 * 16);
+        assert_eq!(sections[0].stats().vertex_count, 6 * 16 * 16 * 4);
+        assert_eq!(sections[0].stats().index_count, 6 * 16 * 16 * 6);
+    }
+
+    #[test]
+    fn adjacent_solid_textured_chunks_cull_shared_boundary_side() {
+        let catalog = stone_textured_catalog();
+        let left = vec![BlockStateId(1); (16 * 16 * 16) as usize];
+        let right = vec![BlockStateId(1); (16 * 16 * 16) as usize];
+        let sections = build_textured_render_sections(
+            &[
+                TexturedChunkMeshInput::new(0, 0, 0, 16, &left),
+                TexturedChunkMeshInput::new(1, 0, 0, 16, &right),
+            ],
+            &catalog,
+        )
+        .unwrap();
+
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].stats().face_count(), 5 * 16 * 16);
+        assert_eq!(sections[1].stats().face_count(), 5 * 16 * 16);
+        assert_eq!(
+            sections
+                .iter()
+                .map(|section| section.stats().face_count())
+                .sum::<u32>(),
+            2 * (32 * 16 + 32 * 16 + 16 * 16)
+        );
+    }
+
+    #[test]
+    fn selective_textured_section_build_uses_neighbors_for_culling() {
+        let catalog = stone_textured_catalog();
+        let left = vec![BlockStateId(1); (16 * 16 * 16) as usize];
+        let right = vec![BlockStateId(1); (16 * 16 * 16) as usize];
+        let sections = build_textured_render_sections_for_chunk_set(
+            &[
+                TexturedChunkMeshInput::new(0, 0, 0, 16, &left),
+                TexturedChunkMeshInput::new(1, 0, 0, 16, &right),
+            ],
+            &catalog,
+            &BTreeSet::from([(1, 0)]),
+        )
+        .unwrap();
+
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].key, RenderSectionKey::new(1, 0, 0));
+        assert_eq!(sections[0].stats().face_count(), 5 * 16 * 16);
     }
 
     #[test]

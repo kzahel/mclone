@@ -1,6 +1,6 @@
 # 020: Native Movement Perf And Render Culling
 
-Status: active.
+Status: completed.
 
 ## Purpose
 

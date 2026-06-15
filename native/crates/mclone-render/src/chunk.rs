@@ -5,6 +5,7 @@ use glam::{Mat4, Vec3, Vec4};
 use mclone_mesh::{
     CHUNK_WIDTH as MESH_CHUNK_WIDTH, RENDER_SECTION_HEIGHT, RenderSectionKey,
     TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh,
+    quad_face_count_from_indices,
 };
 use wgpu::util::DeviceExt;
 
@@ -215,6 +216,30 @@ pub struct TexturedSectionRenderStats {
     pub drawn_section_count: usize,
     pub loaded_index_count: u32,
     pub drawn_index_count: u32,
+}
+
+impl TexturedSectionRenderStats {
+    pub fn loaded_face_count(&self) -> u32 {
+        quad_face_count_from_indices(self.loaded_index_count)
+    }
+
+    pub fn drawn_face_count(&self) -> u32 {
+        quad_face_count_from_indices(self.drawn_index_count)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TexturedSectionUploadReport {
+    pub uploaded_section_count: usize,
+    pub removed_section_count: usize,
+    pub uploaded_vertex_count: u32,
+    pub uploaded_index_count: u32,
+}
+
+impl TexturedSectionUploadReport {
+    pub fn uploaded_face_count(&self) -> u32 {
+        quad_face_count_from_indices(self.uploaded_index_count)
+    }
 }
 
 pub fn textured_section_visibility_stats(
@@ -899,7 +924,7 @@ impl TexturedSectionDrawResources {
             sections: BTreeMap::new(),
             atlas,
         };
-        resources.update_sections(device, sections)?;
+        let _ = resources.update_sections(device, sections)?;
         Ok(resources)
     }
 
@@ -907,18 +932,45 @@ impl TexturedSectionDrawResources {
         &mut self,
         device: &wgpu::Device,
         sections: &[TexturedRenderSectionMesh],
-    ) -> Result<()> {
+    ) -> Result<TexturedSectionUploadReport> {
         let wanted = sections
             .iter()
             .filter(|section| !section.is_empty())
             .map(|section| section.key)
             .collect::<BTreeSet<_>>();
-        self.sections.retain(|key, _| wanted.contains(key));
+        let removed = self
+            .sections
+            .keys()
+            .copied()
+            .filter(|key| !wanted.contains(key))
+            .collect::<BTreeSet<_>>();
+        self.apply_section_updates(device, sections, &removed)
+    }
+
+    pub fn apply_section_updates(
+        &mut self,
+        device: &wgpu::Device,
+        sections: &[TexturedRenderSectionMesh],
+        removed: &BTreeSet<RenderSectionKey>,
+    ) -> Result<TexturedSectionUploadReport> {
+        let mut report = TexturedSectionUploadReport::default();
+        for key in removed {
+            if self.sections.remove(key).is_some() {
+                report.removed_section_count += 1;
+            }
+        }
 
         for section in sections {
             if section.is_empty() {
+                if self.sections.remove(&section.key).is_some() {
+                    report.removed_section_count += 1;
+                }
                 continue;
             }
+            let stats = section.stats();
+            report.uploaded_section_count += 1;
+            report.uploaded_vertex_count += stats.vertex_count;
+            report.uploaded_index_count += stats.index_count;
             self.sections.insert(
                 section.key,
                 GpuTexturedChunkMesh::new(device, &section.mesh).with_context(|| {
@@ -926,7 +978,7 @@ impl TexturedSectionDrawResources {
                 })?,
             );
         }
-        Ok(())
+        Ok(report)
     }
 
     pub fn section_count(&self) -> usize {
@@ -1088,6 +1140,27 @@ mod tests {
         let target_delta = Vec3::from_array(camera.target) - target;
         assert!((eye_delta - target_delta).length() < 0.001);
         assert!((eye_delta.length() - 3.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn textured_section_render_stats_report_quad_faces() {
+        let stats = TexturedSectionRenderStats {
+            loaded_section_count: 2,
+            drawn_section_count: 1,
+            loaded_index_count: 60,
+            drawn_index_count: 36,
+        };
+
+        assert_eq!(stats.loaded_face_count(), 10);
+        assert_eq!(stats.drawn_face_count(), 6);
+
+        let upload = TexturedSectionUploadReport {
+            uploaded_section_count: 1,
+            removed_section_count: 0,
+            uploaded_vertex_count: 40,
+            uploaded_index_count: 60,
+        };
+        assert_eq!(upload.uploaded_face_count(), 10);
     }
 
     #[test]

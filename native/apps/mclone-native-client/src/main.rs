@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -14,14 +14,15 @@ use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT,
 };
 use mclone_mesh::{
-    TexturedChunkMeshInput, TexturedMeshCatalog, TexturedRenderSectionMesh,
-    build_textured_render_sections,
+    RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog, TexturedRenderSectionMesh,
+    build_textured_render_sections, build_textured_render_sections_for_chunk_set,
+    quad_face_count_from_indices,
 };
 use mclone_net::{LocalTransport, request_server_updates};
 use mclone_protocol::{ChunkInterest, ServerUpdate};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
-    TexturedSectionDrawResources, textured_section_visibility_stats,
+    TexturedSectionDrawResources, TexturedSectionUploadReport, textured_section_visibility_stats,
 };
 use mclone_render::headless::{
     HeadlessChunkOptions, HeadlessClearOptions, write_headless_clear_png,
@@ -447,8 +448,15 @@ struct MovementPerfStepReport {
     deferred_fluid_ticks: usize,
     fluid_mutated_blocks: usize,
     scheduled_fluid_ticks: usize,
+    rebuilt_sections: usize,
+    removed_sections: usize,
+    rebuilt_vertices: u32,
+    rebuilt_faces: u32,
+    rebuilt_indices: u32,
     loaded_sections: usize,
     visible_sections: usize,
+    loaded_faces: u32,
+    visible_faces: u32,
     loaded_indices: u32,
     visible_indices: u32,
 }
@@ -486,6 +494,20 @@ impl MovementPerfReport {
                     step.index,
                     step.visible_sections,
                     step.loaded_sections
+                );
+            }
+            if step.visible_faces == 0 {
+                bail!(
+                    "movement step {} frustum culled every render face",
+                    step.index
+                );
+            }
+            if step.visible_faces > step.loaded_faces {
+                bail!(
+                    "movement step {} visible_faces={} exceeds loaded_faces={}",
+                    step.index,
+                    step.visible_faces,
+                    step.loaded_faces
                 );
             }
         }
@@ -587,8 +609,15 @@ impl MovementPerfReport {
                 "      \"scheduled_fluid_ticks\": {},",
                 step.scheduled_fluid_ticks
             );
+            println!("      \"rebuilt_sections\": {},", step.rebuilt_sections);
+            println!("      \"removed_sections\": {},", step.removed_sections);
+            println!("      \"rebuilt_vertices\": {},", step.rebuilt_vertices);
+            println!("      \"rebuilt_faces\": {},", step.rebuilt_faces);
+            println!("      \"rebuilt_indices\": {},", step.rebuilt_indices);
             println!("      \"loaded_sections\": {},", step.loaded_sections);
             println!("      \"visible_sections\": {},", step.visible_sections);
+            println!("      \"loaded_faces\": {},", step.loaded_faces);
+            println!("      \"visible_faces\": {},", step.visible_faces);
             println!("      \"loaded_indices\": {},", step.loaded_indices);
             println!("      \"visible_indices\": {}", step.visible_indices);
             println!("    }}{suffix}");
@@ -621,7 +650,8 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
         let (poll_count, poll_ms) = poll_window_runtime_until_idle(&mut runtime)?;
 
         let remesh_start = Instant::now();
-        let sections = runtime.build_sections()?;
+        let section_update = runtime.sync_render_sections()?;
+        let sections = runtime.cached_sections();
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let camera = spectator.camera(runtime.radius_chunks);
         let render_view = camera.render_view(options.width, options.height);
@@ -651,8 +681,15 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
             deferred_fluid_ticks: stats.last_simulation_deferred_fluid_ticks,
             fluid_mutated_blocks: stats.last_simulation_fluid_mutated_blocks,
             scheduled_fluid_ticks: stats.scheduled_fluid_ticks,
+            rebuilt_sections: section_update.rebuilt_section_count(),
+            removed_sections: section_update.removed_section_count(),
+            rebuilt_vertices: section_update.rebuilt_vertex_count,
+            rebuilt_faces: section_update.rebuilt_face_count(),
+            rebuilt_indices: section_update.rebuilt_index_count,
             loaded_sections: visibility.loaded_section_count,
             visible_sections: visibility.drawn_section_count,
+            loaded_faces: visibility.loaded_face_count(),
+            visible_faces: visibility.drawn_face_count(),
             loaded_indices: visibility.loaded_index_count,
             visible_indices: visibility.drawn_index_count,
         });
@@ -763,11 +800,20 @@ fn build_client_textured_sections(
     client: &ClientRuntime,
     catalog: &TexturedMeshCatalog,
 ) -> Result<Vec<TexturedRenderSectionMesh>> {
-    let chunks = client
+    let chunks = mesh_chunks_from_client(client)?;
+    let inputs = textured_mesh_inputs(&chunks);
+    build_textured_render_sections(&inputs, catalog).context("failed to build textured sections")
+}
+
+fn mesh_chunks_from_client(client: &ClientRuntime) -> Result<Vec<MeshChunkBlocks>> {
+    client
         .chunk_snapshots()
         .map(snapshot_mesh_block_state_ids)
-        .collect::<Result<Vec<_>>>()?;
-    let inputs = chunks
+        .collect::<Result<Vec<_>>>()
+}
+
+fn textured_mesh_inputs(chunks: &[MeshChunkBlocks]) -> Vec<TexturedChunkMeshInput<'_>> {
+    chunks
         .iter()
         .map(|chunk| {
             TexturedChunkMeshInput::new(
@@ -778,8 +824,106 @@ fn build_client_textured_sections(
                 &chunk.blocks,
             )
         })
-        .collect::<Vec<_>>();
-    build_textured_render_sections(&inputs, catalog).context("failed to build textured sections")
+        .collect()
+}
+
+#[derive(Clone, Debug, Default)]
+struct CachedTexturedRenderSections {
+    sections: BTreeMap<RenderSectionKey, TexturedRenderSectionMesh>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct RenderSectionCacheUpdate {
+    rebuilt_sections: Vec<TexturedRenderSectionMesh>,
+    removed_section_keys: BTreeSet<RenderSectionKey>,
+    rebuilt_vertex_count: u32,
+    rebuilt_index_count: u32,
+}
+
+impl RenderSectionCacheUpdate {
+    fn rebuilt_section_count(&self) -> usize {
+        self.rebuilt_sections.len()
+    }
+
+    fn removed_section_count(&self) -> usize {
+        self.removed_section_keys.len()
+    }
+
+    fn rebuilt_face_count(&self) -> u32 {
+        quad_face_count_from_indices(self.rebuilt_index_count)
+    }
+}
+
+impl CachedTexturedRenderSections {
+    fn is_empty(&self) -> bool {
+        self.sections.is_empty()
+    }
+
+    fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
+        self.sections.values().cloned().collect()
+    }
+
+    fn rebuild_dirty(
+        &mut self,
+        client: &ClientRuntime,
+        catalog: &TexturedMeshCatalog,
+        dirty_chunks: &BTreeSet<ChunkPos>,
+    ) -> Result<RenderSectionCacheUpdate> {
+        if dirty_chunks.is_empty() {
+            return Ok(RenderSectionCacheUpdate::default());
+        }
+
+        let chunks = mesh_chunks_from_client(client)?;
+        let inputs = textured_mesh_inputs(&chunks);
+        let loaded_targets = chunks
+            .iter()
+            .map(|chunk| (chunk.chunk_x, chunk.chunk_z))
+            .collect::<BTreeSet<_>>();
+        let target_chunks = dirty_chunks
+            .iter()
+            .map(|pos| (pos.x, pos.z))
+            .filter(|coord| loaded_targets.contains(coord))
+            .collect::<BTreeSet<_>>();
+        let rebuilt_sections =
+            build_textured_render_sections_for_chunk_set(&inputs, catalog, &target_chunks)
+                .context("failed to build dirty textured sections")?;
+        let rebuilt_keys = rebuilt_sections
+            .iter()
+            .map(|section| section.key)
+            .collect::<BTreeSet<_>>();
+        let dirty_coords = dirty_chunks
+            .iter()
+            .map(|pos| (pos.x, pos.z))
+            .collect::<BTreeSet<_>>();
+        let old_dirty_keys = self
+            .sections
+            .keys()
+            .copied()
+            .filter(|key| dirty_coords.contains(&(key.chunk_x, key.chunk_z)))
+            .collect::<BTreeSet<_>>();
+        let removed_section_keys = old_dirty_keys
+            .difference(&rebuilt_keys)
+            .copied()
+            .collect::<BTreeSet<_>>();
+
+        for key in &removed_section_keys {
+            self.sections.remove(key);
+        }
+
+        let mut report = RenderSectionCacheUpdate {
+            rebuilt_sections,
+            removed_section_keys,
+            rebuilt_vertex_count: 0,
+            rebuilt_index_count: 0,
+        };
+        for section in &report.rebuilt_sections {
+            let stats = section.stats();
+            report.rebuilt_vertex_count += stats.vertex_count;
+            report.rebuilt_index_count += stats.index_count;
+            self.sections.insert(section.key, section.clone());
+        }
+        Ok(report)
+    }
 }
 
 fn write_headless_chunk_scenarios(
@@ -867,6 +1011,8 @@ struct WindowSceneRuntime {
     radius_chunks: u32,
     interest_center: ChunkPos,
     mesh_assets: TexturedMeshAssets,
+    render_sections: CachedTexturedRenderSections,
+    dirty_render_chunks: BTreeSet<ChunkPos>,
     last_tick: u64,
     last_simulation_tick: u64,
     last_tick_unloads_processed: usize,
@@ -927,6 +1073,8 @@ impl WindowSceneRuntime {
             radius_chunks,
             interest_center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
             mesh_assets: load_textured_mesh_assets()?,
+            render_sections: CachedTexturedRenderSections::default(),
+            dirty_render_chunks: BTreeSet::new(),
             last_tick: 0,
             last_simulation_tick: 0,
             last_tick_unloads_processed: 0,
@@ -962,7 +1110,7 @@ impl WindowSceneRuntime {
             let updates = request_server_updates(remote_addr.as_str(), &command)
                 .with_context(|| format!("failed to request chunk updates from {remote_addr}"))?;
             let changed = !updates.is_empty();
-            self.client.apply_updates(updates);
+            self.apply_server_updates(updates);
             return Ok(changed);
         }
 
@@ -1011,12 +1159,52 @@ impl WindowSceneRuntime {
 
     fn apply_server_updates(&mut self, updates: Vec<ServerUpdate>) -> bool {
         let changed = !updates.is_empty();
+        for update in &updates {
+            match update {
+                ServerUpdate::ChunkSnapshot(snapshot) => {
+                    self.mark_render_chunk_dirty(snapshot.pos);
+                }
+                ServerUpdate::ChunkUnload { pos } => {
+                    self.mark_render_chunk_dirty(*pos);
+                }
+            }
+        }
         self.client.apply_updates(updates);
         changed
     }
 
-    fn build_sections(&self) -> Result<Vec<TexturedRenderSectionMesh>> {
-        build_client_textured_sections(&self.client, &self.mesh_assets.catalog)
+    fn mark_render_chunk_dirty(&mut self, pos: ChunkPos) {
+        self.dirty_render_chunks
+            .extend(render_dirty_chunk_neighborhood(pos));
+    }
+
+    fn sync_render_sections(&mut self) -> Result<RenderSectionCacheUpdate> {
+        if self.render_sections.is_empty()
+            && self.client.loaded_chunk_count() > 0
+            && self.dirty_render_chunks.is_empty()
+        {
+            let loaded = self
+                .client
+                .chunk_snapshots()
+                .map(|snapshot| snapshot.pos)
+                .collect::<Vec<_>>();
+            for pos in loaded {
+                self.mark_render_chunk_dirty(pos);
+            }
+        }
+
+        let dirty_chunks = self.dirty_render_chunks.clone();
+        let report = self.render_sections.rebuild_dirty(
+            &self.client,
+            &self.mesh_assets.catalog,
+            &dirty_chunks,
+        )?;
+        self.dirty_render_chunks.clear();
+        Ok(report)
+    }
+
+    fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
+        self.render_sections.sections()
     }
 
     fn pending_job_count(&self) -> usize {
@@ -1382,12 +1570,34 @@ fn world_block_to_chunk_coord(value: f32) -> i32 {
     (value / CHUNK_WIDTH as f32).floor() as i32
 }
 
+fn render_dirty_chunk_neighborhood(pos: ChunkPos) -> [ChunkPos; 5] {
+    [
+        pos,
+        ChunkPos::new(pos.x - 1, pos.z),
+        ChunkPos::new(pos.x + 1, pos.z),
+        ChunkPos::new(pos.x, pos.z - 1),
+        ChunkPos::new(pos.x, pos.z + 1),
+    ]
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct RenderStreamStats {
     section_count: usize,
     drawn_section_count: usize,
+    face_count: u32,
+    drawn_face_count: u32,
     index_count: u32,
     drawn_index_count: u32,
+    last_rebuilt_section_count: usize,
+    last_removed_section_count: usize,
+    last_rebuilt_vertex_count: u32,
+    last_rebuilt_face_count: u32,
+    last_rebuilt_index_count: u32,
+    last_uploaded_section_count: usize,
+    last_upload_removed_section_count: usize,
+    last_uploaded_vertex_count: u32,
+    last_uploaded_face_count: u32,
+    last_uploaded_index_count: u32,
     last_remesh_ms: f64,
     last_upload_ms: f64,
     last_frame_ms: f32,
@@ -1478,28 +1688,63 @@ impl ChunkApp {
             return Ok(());
         };
         let remesh_start = Instant::now();
-        let sections = self.runtime.build_sections()?;
+        let section_update = self.runtime.sync_render_sections()?;
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let upload_start = Instant::now();
-        draw.update_sections(&surface.device, &sections)
-            .context("failed to upload streamed chunk sections")?;
+        let upload_report = draw
+            .apply_section_updates(
+                &surface.device,
+                &section_update.rebuilt_sections,
+                &section_update.removed_section_keys,
+            )
+            .context("failed to upload streamed chunk section updates")?;
         let upload_ms = elapsed_ms(upload_start.elapsed());
-        self.render_stats.section_count = draw.section_count();
-        self.render_stats.index_count = draw.index_count();
+        let section_count = draw.section_count();
+        let index_count = draw.index_count();
+        let face_count = quad_face_count_from_indices(index_count);
+        self.render_stats.section_count = section_count;
+        self.render_stats.index_count = index_count;
+        self.render_stats.face_count = face_count;
         self.render_stats.drawn_section_count = 0;
+        self.render_stats.drawn_face_count = 0;
         self.render_stats.drawn_index_count = 0;
+        self.record_section_update_stats(&section_update, upload_report);
         self.render_stats.last_remesh_ms = remesh_ms;
         self.render_stats.last_upload_ms = upload_ms;
         log::info!(
-            "streamed chunks loaded={} sections={} indices={} remesh_ms={:.3} upload_ms={:.3}",
+            "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} remesh_ms={:.3} upload_ms={:.3}",
             self.runtime.client.loaded_chunk_count(),
-            draw.section_count(),
-            draw.index_count(),
+            section_count,
+            face_count,
+            index_count,
+            section_update.rebuilt_section_count(),
+            upload_report.uploaded_section_count,
+            upload_report.uploaded_vertex_count,
+            upload_report.uploaded_face_count(),
+            upload_report.uploaded_index_count,
+            upload_report.removed_section_count,
             remesh_ms,
             upload_ms
         );
         self.update_window_title(true);
         Ok(())
+    }
+
+    fn record_section_update_stats(
+        &mut self,
+        section_update: &RenderSectionCacheUpdate,
+        upload_report: TexturedSectionUploadReport,
+    ) {
+        self.render_stats.last_rebuilt_section_count = section_update.rebuilt_section_count();
+        self.render_stats.last_removed_section_count = section_update.removed_section_count();
+        self.render_stats.last_rebuilt_vertex_count = section_update.rebuilt_vertex_count;
+        self.render_stats.last_rebuilt_face_count = section_update.rebuilt_face_count();
+        self.render_stats.last_rebuilt_index_count = section_update.rebuilt_index_count;
+        self.render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
+        self.render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
+        self.render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
+        self.render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
+        self.render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
     }
 
     fn update_window_title(&mut self, force: bool) {
@@ -1514,7 +1759,7 @@ impl ChunkApp {
         let runtime = self.runtime.stats();
         let pos = self.spectator.position;
         window.set_title(&format!(
-            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} fluid {}/{}/{}/{} | sim {:.3}/{:.3}/{:.3}/{:.3}ms | sections {}/{} idx {}/{} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
+            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} fluid {}/{}/{}/{} | sim {:.3}/{:.3}/{:.3}/{:.3}ms | sections {}/{} faces {}/{} idx {}/{} | rebuilt {}/{}f upload {}/{}v/{}f/{}i rm {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
             pos.x,
             pos.y,
             pos.z,
@@ -1542,8 +1787,17 @@ impl ChunkApp {
             runtime.last_simulation_entity_tick_ms,
             self.render_stats.drawn_section_count,
             self.render_stats.section_count,
+            self.render_stats.drawn_face_count,
+            self.render_stats.face_count,
             self.render_stats.drawn_index_count,
             self.render_stats.index_count,
+            self.render_stats.last_rebuilt_section_count,
+            self.render_stats.last_rebuilt_face_count,
+            self.render_stats.last_uploaded_section_count,
+            self.render_stats.last_uploaded_vertex_count,
+            self.render_stats.last_uploaded_face_count,
+            self.render_stats.last_uploaded_index_count,
+            self.render_stats.last_upload_removed_section_count,
             self.render_stats.last_frame_ms,
             self.render_stats.last_remesh_ms,
             self.render_stats.last_upload_ms
@@ -1576,14 +1830,15 @@ impl ApplicationHandler for ChunkApp {
             }
         };
         let remesh_start = Instant::now();
-        let sections = match self.runtime.build_sections() {
-            Ok(sections) => sections,
+        let section_update = match self.runtime.sync_render_sections() {
+            Ok(update) => update,
             Err(err) => {
                 log::error!("failed to build initial chunk sections: {err:#}");
                 event_loop.exit();
                 return;
             }
         };
+        let sections = self.runtime.cached_sections();
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let upload_start = Instant::now();
         let depth =
@@ -1605,13 +1860,26 @@ impl ApplicationHandler for ChunkApp {
         let upload_ms = elapsed_ms(upload_start.elapsed());
         self.render_stats.section_count = draw.section_count();
         self.render_stats.index_count = draw.index_count();
+        self.render_stats.face_count = quad_face_count_from_indices(self.render_stats.index_count);
         self.render_stats.drawn_section_count = 0;
+        self.render_stats.drawn_face_count = 0;
         self.render_stats.drawn_index_count = 0;
+        self.record_section_update_stats(
+            &section_update,
+            TexturedSectionUploadReport {
+                uploaded_section_count: section_update.rebuilt_section_count(),
+                removed_section_count: section_update.removed_section_count(),
+                uploaded_vertex_count: section_update.rebuilt_vertex_count,
+                uploaded_index_count: section_update.rebuilt_index_count,
+            },
+        );
         self.render_stats.last_remesh_ms = remesh_ms;
         self.render_stats.last_upload_ms = upload_ms;
         log::info!(
-            "uploaded {} initial render sections with {} indices remesh_ms={:.3} upload_ms={:.3}",
+            "uploaded {} initial render sections with {} vertices / {} faces / {} indices remesh_ms={:.3} upload_ms={:.3}",
             draw.section_count(),
+            section_update.rebuilt_vertex_count,
+            self.render_stats.face_count,
             draw.index_count(),
             remesh_ms,
             upload_ms
@@ -1722,6 +1990,7 @@ impl ApplicationHandler for ChunkApp {
                 };
                 if let Some(frame_stats) = frame_render_stats {
                     self.render_stats.drawn_section_count = frame_stats.drawn_section_count;
+                    self.render_stats.drawn_face_count = frame_stats.drawn_face_count();
                     self.render_stats.drawn_index_count = frame_stats.drawn_index_count;
                 }
                 match result {
@@ -1825,7 +2094,10 @@ mod tests {
         assert_eq!(initial_stats.pending_jobs, 0);
         assert!(runtime.client.chunk_snapshot(initial_center).is_some());
 
-        let initial_sections = runtime.build_sections().unwrap();
+        let initial_update = runtime.sync_render_sections().unwrap();
+        assert!(initial_update.rebuilt_section_count() > 0);
+        assert_eq!(initial_update.removed_section_count(), 0);
+        let initial_sections = runtime.cached_sections();
         assert!(!initial_sections.is_empty());
         assert!(section_index_count(&initial_sections) > 0);
         assert!(
@@ -1851,7 +2123,10 @@ mod tests {
         assert!(runtime.client.chunk_snapshot(initial_center).is_none());
         assert!(runtime.client.chunk_snapshot(next_center).is_some());
 
-        let moved_sections = runtime.build_sections().unwrap();
+        let moved_update = runtime.sync_render_sections().unwrap();
+        assert!(moved_update.rebuilt_section_count() > 0);
+        assert!(moved_update.removed_section_count() > 0);
+        let moved_sections = runtime.cached_sections();
         assert!(!moved_sections.is_empty());
         assert!(section_index_count(&moved_sections) > 0);
         assert!(

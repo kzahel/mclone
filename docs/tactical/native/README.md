@@ -4,6 +4,8 @@ Native-first Rust implementation tacticals live here, separated from the legacy 
 
 Use zero-padded numeric prefixes for new native tactical docs: `000-topic.md`, `001-next-topic.md`, and so on. Keep one active implementation slice per doc. Parent sequencing checklists are allowed when they keep the native workstream focused; mark them clearly as parent docs and add every new native tactical to this index.
 
+For native platform, renderer-boundary, performance, Android, or XR tacticals, use the sibling Playbox repo at `~/code/playbox` as a pattern library. Start with `~/code/playbox/Cargo.toml`, `docs/architecture/rendering.md`, `docs/architecture/platforms.md`, `android/README.md`, and `android-xr/README.md`. Mclone's native `profile.dev` is optimized at `opt-level = 2`, following Playbox, so debug movement/render smokes are less misleading while still retaining debug assertions.
+
 | Doc | Status | Purpose |
 |---|---|---|
 | [`000-native-render-bringup.md`](000-native-render-bringup.md) | completed | `winit`/`wgpu` clear-frame bring-up, headless PNG capture, and the Minecraft coordinate contract. |
@@ -29,3 +31,5 @@ Use zero-padded numeric prefixes for new native tactical docs: `000-topic.md`, `
 | [`020-native-movement-perf-and-render-culling.md`](020-native-movement-perf-and-render-culling.md) | completed | Circular native movement perf smoke, frustum render-section culling, and the scheduled-fluid-tick follow-up plan. |
 | [`021-scheduled-fluid-ticks.md`](021-scheduled-fluid-ticks.md) | active | Server-owned scheduled liquid tick queue, generated liquid tick carry-through, level-bearing water/lava ids, Java-shaped water/lava spread helpers, exact water/lava/cross-chunk fixture matrix, live chunk mutations, snapshot publication, and native app fluid tick counters. |
 | [`022-platform-target-contract-and-render-boundary.md`](022-platform-target-contract-and-render-boundary.md) | proposed | Document platform target boundaries and make chunk renderer view/target inputs explicit before Android/OpenXR scaffolding. |
+| [`023-render-mesh-culling-parity-and-perf.md`](023-render-mesh-culling-parity-and-perf.md) | completed | Dense-section model-face culling tests, face-pressure diagnostics, and explicit deferral of greedy meshing / Java occlusion traversal. |
+| [`024-render-section-dirty-cache-and-upload-diffs.md`](024-render-section-dirty-cache-and-upload-diffs.md) | completed | CPU render-section dirty cache, incremental GPU section updates, and rebuilt/uploaded vertex/face/index diagnostics. |

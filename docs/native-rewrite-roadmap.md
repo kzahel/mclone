@@ -19,6 +19,9 @@ Reference Rust engine for native app/render/XR patterns:
 
 - local path: `~/code/playbox`
 - use it for `winit`/`wgpu` bring-up, frame pacing, headless capture, render target, camera, diagnostics, Android/OpenXR reference, and validation patterns
+- start with `~/code/playbox/Cargo.toml` for debug-profile optimization policy
+- use `~/code/playbox/docs/architecture/rendering.md` and `~/code/playbox/docs/architecture/platforms.md` for render/view/target and platform host boundaries
+- use `~/code/playbox/android/README.md`, `~/code/playbox/android-xr/README.md`, and `~/code/playbox/docs/tactical/106-desktop-xr-companion-window.md` when planning flat Android, Quest/OpenXR, or desktop OpenXR companion/mirror work
 - do not import it as a dependency or copy its PhysX/VaM-specific architecture
 
 ## Direction
@@ -43,6 +46,8 @@ Native is the better proving ground for engine internals:
 - native threads and lower-friction worker scheduling
 - native `wgpu` without browser lifecycle/header/storage constraints
 - direct path to Android and OpenXR later
+
+Native debug builds are intentionally optimized at `opt-level = 2` in `native/Cargo.toml`, following Playbox's policy. Use release builds for final budgets, but debug `cargo run` and pnpm native smokes should still be close enough to avoid chasing artifacts from completely unoptimized hot loops.
 
 The browser build is still a product promise, but it should not be the place where every low-level engine decision is first discovered.
 

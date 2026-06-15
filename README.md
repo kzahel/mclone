@@ -17,6 +17,7 @@ Runtime/host arc status: `R0` through `R8` are landed: browser singleplayer, ded
 - **Renderer:** `wgpu`, native first, web-compatible capability checks at renderer milestones.
 - **Worldgen:** direct Rust port of MC Java 1.17.1's pipeline; bit-exact seed parity is the correctness bar.
 - **Protocol/runtime:** `mclone_protocol`, `mclone_net`, `mclone_server`, and `mclone_client` are first-class from the start so singleplayer uses the same client/server boundary as multiplayer.
+- **Sibling reference engine:** `~/code/playbox` is the local Rust `winit`/`wgpu`/headless/Android/OpenXR pattern library. For platform or XR work, start with its `Cargo.toml`, `docs/architecture/rendering.md`, `docs/architecture/platforms.md`, `android/README.md`, and `android-xr/README.md`.
 - **Legacy implementation:** TypeScript remains available as a working/reference implementation and browser experiment, not the main path for new engine systems.
 
 ## Worldgen strategy

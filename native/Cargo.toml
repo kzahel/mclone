@@ -42,3 +42,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 wgpu = { version = "25", features = ["metal", "vulkan", "vulkan-portability"] }
 winit = "0.30"
+
+# Keep native debug runs useful for movement/render/worldgen performance work.
+# This mirrors the Playbox policy in ~/code/playbox/Cargo.toml: optimize dev
+# builds enough that `cargo run` and pnpm native smokes are not dominated by
+# unoptimized physics/render/worldgen hot loops, while preserving debug
+# assertions and incremental rebuild behavior.
+[profile.dev]
+opt-level = 2
