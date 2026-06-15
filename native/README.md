@@ -56,7 +56,10 @@ Useful gates:
 
 - `cargo test --workspace`
 - `pnpm native:scheduler:smoke`
+- `pnpm native:perf:smoke`
 - `cargo check -p mclone-web-client --target wasm32-unknown-unknown`
 - `pnpm native:web:smoke`
+
+Native benchmark baselines are recorded in [`../docs/performance-records.md`](../docs/performance-records.md). Use `pnpm native:worldgen:smoke`, `pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke` for the standard optimized-dev smoke lanes; use the matching `:perf` scripts for release-oriented runs.
 
 Start narrow: prefer oracle-backed engine slices and small platform-boundary refactors over broad platform scaffolding. The next defensive platform work should make renderer view/projection and render-target inputs explicit before any Android or OpenXR app target is added.

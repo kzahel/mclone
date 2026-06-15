@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use mclone_mesh::{TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh};
@@ -48,6 +49,32 @@ pub struct HeadlessChunkReport {
     pub byte_len: usize,
     pub vertex_count: u32,
     pub index_count: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct HeadlessTimedemoOptions {
+    pub width: u32,
+    pub height: u32,
+    pub color: wgpu::Color,
+    pub cameras: Vec<ChunkCamera>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeadlessTimedemoReport {
+    pub width: u32,
+    pub height: u32,
+    pub frame_count: usize,
+    pub setup_ms: f64,
+    pub total_frame_ms: f64,
+    pub average_frame_ms: f64,
+    pub min_frame_ms: f64,
+    pub max_frame_ms: f64,
+    pub loaded_section_count: usize,
+    pub average_drawn_section_count: f64,
+    pub max_drawn_section_count: usize,
+    pub loaded_index_count: u32,
+    pub average_drawn_index_count: f64,
+    pub max_drawn_index_count: u32,
 }
 
 pub fn write_headless_clear_png(options: HeadlessClearOptions) -> Result<HeadlessClearReport> {
@@ -223,6 +250,95 @@ pub fn write_headless_textured_sections_png(
     })
 }
 
+pub fn run_headless_textured_sections_timedemo(
+    options: HeadlessTimedemoOptions,
+    sections: &[TexturedRenderSectionMesh],
+    atlas: ChunkTextureAtlas<'_>,
+) -> Result<HeadlessTimedemoReport> {
+    let width = options.width.max(1);
+    let height = options.height.max(1);
+    let setup_start = Instant::now();
+    let (device, queue) = create_headless_device()?;
+    let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
+    let depth = ChunkDepthTarget::new(&device, width, height);
+    let draw =
+        TexturedSectionDrawResources::new(&device, &queue, HEADLESS_FORMAT, sections, atlas)?;
+    let setup_ms = elapsed_ms(setup_start.elapsed());
+
+    let mut total_frame_ms = 0.0;
+    let mut min_frame_ms = f64::INFINITY;
+    let mut max_frame_ms = 0.0_f64;
+    let mut drawn_section_count = 0_usize;
+    let mut max_drawn_section_count = 0_usize;
+    let mut drawn_index_count = 0_u64;
+    let mut max_drawn_index_count = 0_u32;
+
+    for camera in &options.cameras {
+        let frame_start = Instant::now();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_headless_timedemo_encoder"),
+        });
+        let stats = {
+            let frame =
+                RenderFrameContext::new(&device, &queue, &mut encoder, target.render_target());
+            let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
+            let render_target = ChunkRenderTarget::from_frame_target(
+                frame.target.with_depth(&depth.view),
+                options.color,
+            )?;
+            draw.render(frame.queue, frame.encoder, render_target, render_view)?
+        };
+        queue.submit(std::iter::once(encoder.finish()));
+        device
+            .poll(wgpu::PollType::Wait)
+            .context("device poll failed")?;
+
+        let frame_ms = elapsed_ms(frame_start.elapsed());
+        total_frame_ms += frame_ms;
+        min_frame_ms = min_frame_ms.min(frame_ms);
+        max_frame_ms = max_frame_ms.max(frame_ms);
+        drawn_section_count += stats.drawn_section_count;
+        max_drawn_section_count = max_drawn_section_count.max(stats.drawn_section_count);
+        drawn_index_count += u64::from(stats.drawn_index_count);
+        max_drawn_index_count = max_drawn_index_count.max(stats.drawn_index_count);
+    }
+
+    let frame_count = options.cameras.len();
+    let average_frame_ms = if frame_count == 0 {
+        0.0
+    } else {
+        total_frame_ms / frame_count as f64
+    };
+    let min_frame_ms = if frame_count == 0 { 0.0 } else { min_frame_ms };
+    let average_drawn_section_count = if frame_count == 0 {
+        0.0
+    } else {
+        drawn_section_count as f64 / frame_count as f64
+    };
+    let average_drawn_index_count = if frame_count == 0 {
+        0.0
+    } else {
+        drawn_index_count as f64 / frame_count as f64
+    };
+
+    Ok(HeadlessTimedemoReport {
+        width,
+        height,
+        frame_count,
+        setup_ms,
+        total_frame_ms,
+        average_frame_ms,
+        min_frame_ms,
+        max_frame_ms,
+        loaded_section_count: draw.section_count(),
+        average_drawn_section_count,
+        max_drawn_section_count,
+        loaded_index_count: draw.index_count(),
+        average_drawn_index_count,
+        max_drawn_index_count,
+    })
+}
+
 fn create_headless_device() -> Result<(wgpu::Device, wgpu::Queue)> {
     pollster::block_on(async {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -384,6 +500,10 @@ fn ensure_parent_dir(path: &Path) -> Result<()> {
 
 fn padded_row_bytes(unpadded_row_bytes: u32) -> u32 {
     unpadded_row_bytes.div_ceil(COPY_BYTES_PER_ROW_ALIGNMENT) * COPY_BYTES_PER_ROW_ALIGNMENT
+}
+
+fn elapsed_ms(duration: std::time::Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
 }
 
 #[cfg(test)]

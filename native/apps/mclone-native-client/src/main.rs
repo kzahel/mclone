@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
@@ -25,7 +26,8 @@ use mclone_render::chunk::{
     TexturedSectionDrawResources, TexturedSectionUploadReport, textured_section_visibility_stats,
 };
 use mclone_render::headless::{
-    HeadlessChunkOptions, HeadlessClearOptions, write_headless_clear_png,
+    HeadlessChunkOptions, HeadlessClearOptions, HeadlessTimedemoOptions,
+    run_headless_textured_sections_timedemo, write_headless_clear_png,
     write_headless_textured_sections_png,
 };
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
@@ -43,7 +45,10 @@ const DEFAULT_CHUNK_RADIUS: i32 = 1;
 const MAX_CHUNK_RADIUS: i32 = 4;
 const DEFAULT_MOVEMENT_PERF_STEPS: usize = 12;
 const DEFAULT_MOVEMENT_PERF_PATH_RADIUS: i32 = 4;
+const DEFAULT_TIMEDEMO_FRAMES: usize = 120;
+const DEFAULT_TIMEDEMO_PATH_RADIUS: i32 = 4;
 const MAX_MOVEMENT_PERF_STEPS: usize = 512;
+const MAX_TIMEDEMO_FRAMES: usize = 4096;
 const MAX_MOVEMENT_PERF_PATH_RADIUS: i32 = 128;
 const SPECTATOR_BASE_SPEED: f32 = 32.0;
 const SPECTATOR_MIN_SPEED: f32 = 2.0;
@@ -135,6 +140,12 @@ fn main() -> Result<()> {
             report.print_json();
             Ok(())
         }
+        Cli::Timedemo { options } => {
+            let report = run_timedemo(&options)?;
+            report.validate()?;
+            report.print_json();
+            Ok(())
+        }
         Cli::Window { scene } => run_window(scene),
     }
 }
@@ -157,6 +168,15 @@ struct MovementPerfOptions {
     path_radius_chunks: i32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TimedemoOptions {
+    scene: SceneOptions,
+    width: u32,
+    height: u32,
+    frames: usize,
+    path_radius_chunks: i32,
+}
+
 impl Default for MovementPerfOptions {
     fn default() -> Self {
         Self {
@@ -165,6 +185,18 @@ impl Default for MovementPerfOptions {
             height: 720,
             steps: DEFAULT_MOVEMENT_PERF_STEPS,
             path_radius_chunks: DEFAULT_MOVEMENT_PERF_PATH_RADIUS,
+        }
+    }
+}
+
+impl Default for TimedemoOptions {
+    fn default() -> Self {
+        Self {
+            scene: SceneOptions::default(),
+            width: 1280,
+            height: 720,
+            frames: DEFAULT_TIMEDEMO_FRAMES,
+            path_radius_chunks: DEFAULT_TIMEDEMO_PATH_RADIUS,
         }
     }
 }
@@ -206,6 +238,9 @@ enum Cli {
     MovementPerf {
         options: MovementPerfOptions,
     },
+    Timedemo {
+        options: TimedemoOptions,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -222,8 +257,10 @@ impl Cli {
         let mut height = None;
         let mut scene = SceneOptions::default();
         let mut movement_perf = false;
+        let mut timedemo = false;
         let mut movement_steps = DEFAULT_MOVEMENT_PERF_STEPS;
-        let mut movement_path_radius = DEFAULT_MOVEMENT_PERF_PATH_RADIUS;
+        let mut timedemo_frames = DEFAULT_TIMEDEMO_FRAMES;
+        let mut path_radius = DEFAULT_MOVEMENT_PERF_PATH_RADIUS;
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
@@ -232,15 +269,27 @@ impl Cli {
                     if mode.is_some() {
                         bail!("--movement-perf cannot be combined with a headless output mode");
                     }
+                    if timedemo {
+                        bail!("--movement-perf cannot be combined with --timedemo");
+                    }
                     movement_perf = true;
+                }
+                "--timedemo" => {
+                    if mode.is_some() {
+                        bail!("--timedemo cannot be combined with a headless output mode");
+                    }
+                    if movement_perf {
+                        bail!("--timedemo cannot be combined with --movement-perf");
+                    }
+                    timedemo = true;
                 }
                 "--headless-clear" => {
                     let path = args
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-clear requires an output PNG path")?;
-                    if movement_perf {
-                        bail!("headless output modes cannot be combined with --movement-perf");
+                    if movement_perf || timedemo {
+                        bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Clear(path))?;
                 }
@@ -249,8 +298,8 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-chunk requires an output PNG path")?;
-                    if movement_perf {
-                        bail!("headless output modes cannot be combined with --movement-perf");
+                    if movement_perf || timedemo {
+                        bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Chunk(path))?;
                 }
@@ -259,8 +308,8 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-chunk-scenarios requires an output directory")?;
-                    if movement_perf {
-                        bail!("headless output modes cannot be combined with --movement-perf");
+                    if movement_perf || timedemo {
+                        bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::ChunkScenarios(path))?;
                 }
@@ -280,9 +329,16 @@ impl Cli {
                     movement_perf = true;
                     movement_steps = parse_movement_steps_arg("--movement-steps", args.next())?;
                 }
-                "--path-radius" | "--movement-path-radius" => {
+                "--timedemo-frames" => {
+                    timedemo = true;
+                    timedemo_frames = parse_timedemo_frames_arg("--timedemo-frames", args.next())?;
+                }
+                "--movement-path-radius" => {
                     movement_perf = true;
-                    movement_path_radius = parse_movement_path_radius_arg(&arg, args.next())?;
+                    path_radius = parse_path_radius_arg(&arg, args.next())?;
+                }
+                "--path-radius" => {
+                    path_radius = parse_path_radius_arg(&arg, args.next())?;
                 }
                 "--help" | "-h" => {
                     print_help();
@@ -290,6 +346,10 @@ impl Cli {
                 }
                 _ => bail!("unknown argument `{arg}`; pass --help for usage"),
             }
+        }
+
+        if movement_perf && timedemo {
+            bail!("--movement-perf cannot be combined with --timedemo");
         }
 
         match mode {
@@ -316,7 +376,16 @@ impl Cli {
                     width: width.unwrap_or(1280),
                     height: height.unwrap_or(720),
                     steps: movement_steps,
-                    path_radius_chunks: movement_path_radius,
+                    path_radius_chunks: path_radius,
+                },
+            }),
+            None if timedemo => Ok(Self::Timedemo {
+                options: TimedemoOptions {
+                    scene,
+                    width: width.unwrap_or(1280),
+                    height: height.unwrap_or(720),
+                    frames: timedemo_frames,
+                    path_radius_chunks: path_radius,
                 },
             }),
             None => Ok(Self::Window { scene }),
@@ -376,7 +445,18 @@ fn parse_movement_steps_arg(flag: &str, value: Option<String>) -> Result<usize> 
     Ok(parsed)
 }
 
-fn parse_movement_path_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
+fn parse_timedemo_frames_arg(flag: &str, value: Option<String>) -> Result<usize> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<usize>()
+        .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
+    if !(1..=MAX_TIMEDEMO_FRAMES).contains(&parsed) {
+        bail!("{flag} must be between 1 and {MAX_TIMEDEMO_FRAMES}");
+    }
+    Ok(parsed)
+}
+
+fn parse_path_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
     let parsed = parse_i32_arg(flag, value)?;
     if !(1..=MAX_MOVEMENT_PERF_PATH_RADIUS).contains(&parsed) {
         bail!("{flag} must be between 1 and {MAX_MOVEMENT_PERF_PATH_RADIUS}");
@@ -393,7 +473,8 @@ fn print_help() {
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4]\n\n\
-         Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, and wheel speed controls. Headless modes write PNGs for GPU validation."
+           mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4]\n\n\
+         Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, and wheel speed controls. Headless modes write PNGs for GPU validation. Perf modes write JSON."
     );
 }
 
@@ -523,6 +604,7 @@ impl MovementPerfReport {
 
     fn print_json(&self) {
         println!("{{");
+        print_benchmark_metadata("native_runtime_movement", "  ", true);
         println!("  \"seed\": {},", self.options.scene.seed);
         println!(
             "  \"origin\": {{ \"x\": {}, \"z\": {} }},",
@@ -627,6 +709,95 @@ impl MovementPerfReport {
     }
 }
 
+#[derive(Clone, Debug)]
+struct TimedemoReport {
+    options: TimedemoOptions,
+    scene_build_ms: f64,
+    section_count: usize,
+    vertex_count: u32,
+    face_count: u32,
+    index_count: u32,
+    render: mclone_render::headless::HeadlessTimedemoReport,
+}
+
+impl TimedemoReport {
+    fn validate(&self) -> Result<()> {
+        if self.render.frame_count != self.options.frames {
+            bail!(
+                "timedemo rendered {} frames, expected {}",
+                self.render.frame_count,
+                self.options.frames
+            );
+        }
+        if self.section_count == 0 || self.index_count == 0 {
+            bail!("timedemo scene produced no render sections");
+        }
+        if self.render.max_drawn_section_count == 0 {
+            bail!("timedemo drew no render sections");
+        }
+        Ok(())
+    }
+
+    fn print_json(&self) {
+        println!("{{");
+        print_benchmark_metadata("native_render_timedemo", "  ", true);
+        println!("  \"seed\": {},", self.options.scene.seed);
+        println!(
+            "  \"origin\": {{ \"x\": {}, \"z\": {} }},",
+            self.options.scene.chunk_x, self.options.scene.chunk_z
+        );
+        println!("  \"chunk_radius\": {},", self.options.scene.chunk_radius);
+        println!(
+            "  \"path_radius_chunks\": {},",
+            self.options.path_radius_chunks
+        );
+        println!("  \"frames\": {},", self.options.frames);
+        println!("  \"width\": {},", self.options.width);
+        println!("  \"height\": {},", self.options.height);
+        println!("  \"scene_build_ms\": {:.3},", self.scene_build_ms);
+        println!("  \"section_count\": {},", self.section_count);
+        println!("  \"vertex_count\": {},", self.vertex_count);
+        println!("  \"face_count\": {},", self.face_count);
+        println!("  \"index_count\": {},", self.index_count);
+        println!("  \"render\": {{");
+        println!("    \"frame_count\": {},", self.render.frame_count);
+        println!("    \"setup_ms\": {:.3},", self.render.setup_ms);
+        println!("    \"total_frame_ms\": {:.3},", self.render.total_frame_ms);
+        println!(
+            "    \"average_frame_ms\": {:.3},",
+            self.render.average_frame_ms
+        );
+        println!("    \"min_frame_ms\": {:.3},", self.render.min_frame_ms);
+        println!("    \"max_frame_ms\": {:.3},", self.render.max_frame_ms);
+        println!(
+            "    \"loaded_section_count\": {},",
+            self.render.loaded_section_count
+        );
+        println!(
+            "    \"average_drawn_section_count\": {:.3},",
+            self.render.average_drawn_section_count
+        );
+        println!(
+            "    \"max_drawn_section_count\": {},",
+            self.render.max_drawn_section_count
+        );
+        println!(
+            "    \"loaded_index_count\": {},",
+            self.render.loaded_index_count
+        );
+        println!(
+            "    \"average_drawn_index_count\": {:.3},",
+            self.render.average_drawn_index_count
+        );
+        println!(
+            "    \"max_drawn_index_count\": {}",
+            self.render.max_drawn_index_count
+        );
+        println!("  }}");
+        println!("}}");
+    }
+}
+
 fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerfReport> {
     if options.scene.remote_addr.is_some() {
         bail!("--movement-perf currently requires the local integrated server path");
@@ -702,6 +873,46 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
     })
 }
 
+fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> {
+    if options.scene.remote_addr.is_some() {
+        bail!("--timedemo currently requires the local integrated server path");
+    }
+    let scene_start = Instant::now();
+    let scene_mesh = build_scene_textured_sections(&options.scene)?;
+    let scene_build_ms = elapsed_ms(scene_start.elapsed());
+    let cameras = timedemo_cameras(&options.scene, options.path_radius_chunks, options.frames);
+    let render = run_headless_textured_sections_timedemo(
+        HeadlessTimedemoOptions {
+            width: options.width,
+            height: options.height,
+            color: mclone_render::default_clear_color(),
+            cameras,
+        },
+        &scene_mesh.sections,
+        scene_mesh.atlas.as_upload(),
+    )?;
+
+    let vertex_count = scene_mesh
+        .sections
+        .iter()
+        .map(|section| section.stats().vertex_count)
+        .sum();
+    let index_count = scene_mesh
+        .sections
+        .iter()
+        .map(|section| section.stats().index_count)
+        .sum();
+    Ok(TimedemoReport {
+        options: options.clone(),
+        scene_build_ms,
+        section_count: scene_mesh.sections.len(),
+        vertex_count,
+        face_count: quad_face_count_from_indices(index_count),
+        index_count,
+        render,
+    })
+}
+
 fn circular_movement_spectator(
     scene: &SceneOptions,
     path_radius_chunks: i32,
@@ -725,6 +936,41 @@ fn circular_movement_spectator(
         yaw: direction.x.atan2(direction.z),
         pitch: direction.y.atan2(horizontal),
         speed: SPECTATOR_BASE_SPEED,
+    }
+}
+
+fn timedemo_cameras(
+    scene: &SceneOptions,
+    path_radius_chunks: i32,
+    frames: usize,
+) -> Vec<ChunkCamera> {
+    (0..frames)
+        .map(|index| timedemo_camera(scene, path_radius_chunks, index, frames))
+        .collect()
+}
+
+fn timedemo_camera(
+    scene: &SceneOptions,
+    path_radius_chunks: i32,
+    index: usize,
+    frames: usize,
+) -> ChunkCamera {
+    let center_x = scene.chunk_x as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+    let center_z = scene.chunk_z as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+    let radius_blocks = path_radius_chunks.max(1) as f32 * CHUNK_WIDTH as f32;
+    let angle = std::f32::consts::TAU * index as f32 / frames.max(1) as f32;
+    let bob = (angle * 2.0).sin() * 8.0;
+    ChunkCamera {
+        eye: [
+            center_x + radius_blocks * angle.cos(),
+            92.0 + bob,
+            center_z + radius_blocks * angle.sin(),
+        ],
+        target: [center_x, 52.0, center_z],
+        up: [0.0, 1.0, 0.0],
+        fov_y_radians: 65.0_f32.to_radians(),
+        z_near: 0.1,
+        z_far: 900.0,
     }
 }
 
@@ -2028,6 +2274,59 @@ fn micros_to_ms(micros: u128) -> f64 {
     micros as f64 / 1000.0
 }
 
+fn print_benchmark_metadata(name: &str, indent: &str, trailing_comma: bool) {
+    println!("{indent}\"benchmark\": \"{}\",", json_escape(name));
+    println!(
+        "{indent}\"recorded_unix_seconds\": {},",
+        current_unix_seconds()
+    );
+    println!(
+        "{indent}\"git_commit\": \"{}\",",
+        json_escape(&git_short_commit())
+    );
+    println!("{indent}\"git_dirty\": {},", git_dirty());
+    let suffix = if trailing_comma { "," } else { "" };
+    println!(
+        "{indent}\"debug_assertions\": {}{suffix}",
+        cfg!(debug_assertions)
+    );
+}
+
+fn current_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
+fn git_short_commit() -> String {
+    Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn git_dirty() -> bool {
+    Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| !output.stdout.is_empty())
+        .unwrap_or(true)
+}
+
+fn json_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2274,6 +2573,40 @@ mod tests {
                     height: 600,
                     steps: 6,
                     path_radius_chunks: 3,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_timedemo_options() {
+        let cli = Cli::parse([
+            "--timedemo".to_owned(),
+            "--timedemo-frames".to_owned(),
+            "48".to_owned(),
+            "--path-radius".to_owned(),
+            "5".to_owned(),
+            "--chunk-radius".to_owned(),
+            "2".to_owned(),
+            "--width".to_owned(),
+            "1024".to_owned(),
+            "--height".to_owned(),
+            "768".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::Timedemo {
+                options: TimedemoOptions {
+                    scene: SceneOptions {
+                        chunk_radius: 2,
+                        ..SceneOptions::default()
+                    },
+                    width: 1024,
+                    height: 768,
+                    frames: 48,
+                    path_radius_chunks: 5,
                 },
             }
         );

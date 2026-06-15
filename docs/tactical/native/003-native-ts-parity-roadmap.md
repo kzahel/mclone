@@ -104,7 +104,7 @@ Expect about 20 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-After the [`024-render-section-dirty-cache-and-upload-diffs.md`](024-render-section-dirty-cache-and-upload-diffs.md) pass, the next renderer/perf decision point is release-mode movement/render baselining with the rebuilt/uploaded counters now in place. Java oracle comparison for uploaded vertex counts should wait until we either port `VisGraph` / `VisibilitySet` or explicitly choose a simpler invariant, because Java's traversal can make draw pressure differ even when chunk model compilation is correct.
+After the [`024-render-section-dirty-cache-and-upload-diffs.md`](024-render-section-dirty-cache-and-upload-diffs.md) pass, native perf baselines live in [`../../performance-records.md`](../../performance-records.md). The next renderer/perf decision point is Java `VisGraph` / `VisibilitySet` culling, measured against the worldgen, movement/loading, and timedemo lanes. Java oracle comparison for uploaded vertex counts should wait until we either port that visibility traversal or explicitly choose a simpler invariant, because Java's traversal can make draw pressure differ even when chunk model compilation is correct.
 
 Do not start structures until the movement perf/culling harness can show whether runtime work is causing frame or remesh spikes, and until scheduled fluid ticks have exercised the no-op simulation lanes with a real workload. Keep clean `FEATURES` parity stable while separating initial liquid placement from live liquid simulation.
 

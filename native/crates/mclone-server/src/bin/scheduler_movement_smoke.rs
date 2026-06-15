@@ -1,4 +1,9 @@
-use std::{env, thread, time::Duration, time::Instant};
+use std::{
+    env,
+    process::Command,
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
 use mclone_core::ChunkPos;
 use mclone_protocol::ChunkInterest;
@@ -360,6 +365,7 @@ impl SmokeReport {
         let active_chunks =
             active_square_count(self.config.radius_chunks).expect("validated radius");
         println!("{{");
+        print_benchmark_metadata("native_runtime_loading", "  ", true);
         println!("  \"seed\": {},", self.config.seed);
         println!("  \"radius_chunks\": {},", self.config.radius_chunks);
         println!("  \"steps\": {},", self.config.steps);
@@ -773,4 +779,57 @@ impl std::str::FromStr for PollMode {
 
 fn usage() -> String {
     "usage: scheduler_movement_smoke [--seed N] [--radius N] [--steps N] [--max-polls N] [--poll-mode completion|sleep|spin] [--poll-sleep-ms N] [--completion-wait-ms N]".to_owned()
+}
+
+fn print_benchmark_metadata(name: &str, indent: &str, trailing_comma: bool) {
+    println!("{indent}\"benchmark\": \"{}\",", json_escape(name));
+    println!(
+        "{indent}\"recorded_unix_seconds\": {},",
+        current_unix_seconds()
+    );
+    println!(
+        "{indent}\"git_commit\": \"{}\",",
+        json_escape(&git_short_commit())
+    );
+    println!("{indent}\"git_dirty\": {},", git_dirty());
+    let suffix = if trailing_comma { "," } else { "" };
+    println!(
+        "{indent}\"debug_assertions\": {}{suffix}",
+        cfg!(debug_assertions)
+    );
+}
+
+fn current_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
+fn git_short_commit() -> String {
+    Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn git_dirty() -> bool {
+    Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| !output.stdout.is_empty())
+        .unwrap_or(true)
+}
+
+fn json_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
