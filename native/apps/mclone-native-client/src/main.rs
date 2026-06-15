@@ -441,7 +441,6 @@ impl Cli {
         if movement_perf && timedemo {
             bail!("--movement-perf cannot be combined with --timedemo");
         }
-
         match mode {
             Some(HeadlessMode::Clear(path)) => Ok(Self::HeadlessClear {
                 path,
@@ -586,7 +585,7 @@ fn print_help() {
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a free-fly spectator camera with WASD, Space/X vertical movement, mouse-lock look, Shift boost, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path."
+         Window mode streams chunks around a free-fly spectator camera with WASD, Space/X vertical movement, mouse-lock look, Shift boost, tilde debug pane toggle, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path."
     );
 }
 
@@ -2125,6 +2124,72 @@ struct RenderStreamStats {
     last_frame_ms: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DebugPaneStats {
+    position: Vec3,
+    speed: f32,
+    runtime: WindowRuntimeStats,
+    render: RenderStreamStats,
+    section_occlusion: bool,
+    force_fullbright: bool,
+}
+
+impl DebugPaneStats {
+    fn lines(self) -> [String; 10] {
+        let occlusion = if self.section_occlusion { "ON" } else { "OFF" };
+        let lighting = if self.force_fullbright { "FULL" } else { "LIGHT" };
+        [
+            "DEBUG".to_string(),
+            format!(
+                "POS {:.1} {:.1} {:.1}",
+                self.position.x, self.position.y, self.position.z
+            ),
+            format!(
+                "CHUNK {} {} SPEED {:.1}",
+                self.runtime.interest_center.x, self.runtime.interest_center.z, self.speed
+            ),
+            format!("OCC {}  {}", occlusion, lighting),
+            format!(
+                "TICK {} SIM {}",
+                self.runtime.last_tick, self.runtime.last_simulation_tick
+            ),
+            format!(
+                "CHUNKS L{} V{} P{}",
+                self.runtime.loaded_chunks,
+                self.runtime.client_visible_chunks,
+                self.runtime.pending_jobs
+            ),
+            format!(
+                "TICKING B{}:{} E{}:{}",
+                self.runtime.block_ticking_chunks,
+                self.runtime.last_simulation_block_tick_chunks,
+                self.runtime.entity_ticking_chunks,
+                self.runtime.last_simulation_entity_tick_chunks
+            ),
+            format!(
+                "FLUID {}/{}/{}/{}",
+                self.runtime.last_simulation_fluid_ticks_executed,
+                self.runtime.last_simulation_deferred_fluid_ticks,
+                self.runtime.last_simulation_fluid_mutated_blocks,
+                self.runtime.scheduled_fluid_ticks
+            ),
+            format!(
+                "DRAW S {}/{} F {}/{}",
+                self.render.drawn_section_count,
+                self.render.section_count,
+                self.render.drawn_face_count,
+                self.render.face_count
+            ),
+            format!(
+                "MESH R{} U{} F {:.1}MS",
+                self.render.last_rebuilt_section_count,
+                self.render.last_uploaded_section_count,
+                self.render.last_frame_ms
+            ),
+        ]
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NativeScreen {
     Title,
@@ -2291,6 +2356,35 @@ impl NativeUi {
             None => {}
         }
         draw
+    }
+
+    fn render_debug_pane(&self, draw: &mut GuiDrawList, stats: &DebugPaneStats) {
+        let line_height = self.font.line_height();
+        let panel_width = 190.0_f32.min(self.scale.width - 8.0).max(120.0);
+        let panel_height = 8.0 + line_height * 10.0;
+        let panel = Rect::new(
+            4.0,
+            4.0,
+            panel_width,
+            panel_height.min((self.scale.height - 8.0).max(0.0)),
+        );
+        draw.fill(panel, Color::rgba(6, 9, 10, 185));
+        draw.outline(panel, Color::rgba(110, 140, 136, 230));
+        draw.push_clip(panel.inset(4.0));
+        let text = Color::rgba(220, 238, 220, 255);
+        let muted = Color::rgba(165, 186, 176, 255);
+        let mut y = panel.y + 5.0;
+        for (index, line) in stats.lines().iter().enumerate() {
+            self.font.draw_shadow(
+                draw,
+                line,
+                panel.x + 6.0,
+                y,
+                if index == 0 { text } else { muted },
+            );
+            y += line_height;
+        }
+        draw.pop_clip();
     }
 
     fn widget_at(&self, point: Point) -> Option<WidgetId> {
@@ -2546,8 +2640,8 @@ struct ChunkApp {
     pressed_keys: std::collections::HashSet<KeyCode>,
     mouse_locked: bool,
     last_cursor: Option<(f64, f64)>,
+    debug_visible: bool,
     last_frame: Instant,
-    last_title_update: Instant,
     render_stats: RenderStreamStats,
 }
 
@@ -2571,8 +2665,8 @@ impl ChunkApp {
             pressed_keys: std::collections::HashSet::new(),
             mouse_locked: false,
             last_cursor: None,
+            debug_visible: false,
             last_frame: Instant::now(),
-            last_title_update: Instant::now(),
             render_stats: RenderStreamStats::default(),
         }
     }
@@ -2653,7 +2747,6 @@ impl ChunkApp {
         self.pressed_keys.clear();
         self.last_cursor = None;
         self.sync_mouse_lock();
-        self.update_window_title(true);
         self.request_redraw();
     }
 
@@ -2772,7 +2865,6 @@ impl ChunkApp {
             remesh_ms,
             upload_ms
         );
-        self.update_window_title(true);
         Ok(())
     }
 
@@ -2799,76 +2891,15 @@ impl ChunkApp {
         self.render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
     }
 
-    fn update_window_title(&mut self, force: bool) {
-        let now = Instant::now();
-        if !force && now.duration_since(self.last_title_update) < Duration::from_millis(250) {
-            return;
+    fn debug_pane_stats(&self) -> DebugPaneStats {
+        DebugPaneStats {
+            position: self.spectator.position,
+            speed: self.spectator.speed,
+            runtime: self.runtime.stats(),
+            render: self.render_stats,
+            section_occlusion: self.render_options.section_occlusion_culling,
+            force_fullbright: self.render_options.force_fullbright,
         }
-        self.last_title_update = now;
-        let Some(window) = &self.window else {
-            return;
-        };
-        let runtime = self.runtime.stats();
-        let pos = self.spectator.position;
-        let occlusion = if self.render_options.section_occlusion_culling {
-            "on"
-        } else {
-            "off"
-        };
-        let lighting = if self.render_options.force_fullbright {
-            "fullbright"
-        } else {
-            "light"
-        };
-        window.set_title(&format!(
-            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | occ {} | {} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} fluid {}/{}/{}/{} | sim {:.3}/{:.3}/{:.3}/{:.3}ms | sections {}/{} faces {}/{} idx {}/{} | rebuilt {}/{}f vis {}/{:.3}/{:.3}ms upload {}/{}v/{}f/{}i rm {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
-            pos.x,
-            pos.y,
-            pos.z,
-            runtime.interest_center.x,
-            runtime.interest_center.z,
-            occlusion,
-            lighting,
-            runtime.last_tick,
-            runtime.last_simulation_tick,
-            runtime.loaded_chunks,
-            runtime.client_visible_chunks,
-            runtime.pending_jobs,
-            runtime.active_ticket_chunks,
-            runtime.pending_unload_chunks,
-            runtime.last_tick_unloads_processed,
-            runtime.block_ticking_chunks,
-            runtime.last_simulation_block_tick_chunks,
-            runtime.entity_ticking_chunks,
-            runtime.last_simulation_entity_tick_chunks,
-            runtime.last_simulation_fluid_ticks_executed,
-            runtime.last_simulation_deferred_fluid_ticks,
-            runtime.last_simulation_fluid_mutated_blocks,
-            runtime.scheduled_fluid_ticks,
-            runtime.last_simulation_scheduler_tick_ms,
-            runtime.last_simulation_block_tick_ms,
-            runtime.last_simulation_fluid_tick_ms,
-            runtime.last_simulation_entity_tick_ms,
-            self.render_stats.drawn_section_count,
-            self.render_stats.section_count,
-            self.render_stats.drawn_face_count,
-            self.render_stats.face_count,
-            self.render_stats.drawn_index_count,
-            self.render_stats.index_count,
-            self.render_stats.last_rebuilt_section_count,
-            self.render_stats.last_rebuilt_face_count,
-            self.render_stats.last_visibility_graph_build_count,
-            self.render_stats.last_visibility_graph_total_ms,
-            self.render_stats.last_visibility_graph_worst_ms,
-            self.render_stats.last_uploaded_section_count,
-            self.render_stats.last_uploaded_vertex_count,
-            self.render_stats.last_uploaded_face_count,
-            self.render_stats.last_uploaded_index_count,
-            self.render_stats.last_upload_removed_section_count,
-            self.render_stats.last_frame_ms,
-            self.render_stats.last_remesh_ms,
-            self.render_stats.last_upload_ms
-        ));
     }
 }
 
@@ -2966,7 +2997,6 @@ impl ApplicationHandler for ChunkApp {
         self.window = Some(window);
         event_loop.listen_device_events(DeviceEvents::WhenFocused);
         self.sync_mouse_lock();
-        self.update_window_title(true);
         self.request_redraw();
     }
 
@@ -2990,6 +3020,14 @@ impl ApplicationHandler for ChunkApp {
                 if let PhysicalKey::Code(key_code) = event.physical_key {
                     if let Some(scale) = self.gui_scale() {
                         self.ui.set_scale(scale);
+                    }
+                    if key_code == KeyCode::Backquote
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        self.debug_visible = !self.debug_visible;
+                        self.request_redraw();
+                        return;
                     }
                     if event.state == ElementState::Pressed && self.ui.is_active() {
                         let (handled, action) = self.ui.key_pressed(key_code);
@@ -3025,7 +3063,6 @@ impl ApplicationHandler for ChunkApp {
                                 "disabled"
                             }
                         );
-                        self.update_window_title(true);
                         self.request_redraw();
                         return;
                     }
@@ -3043,7 +3080,6 @@ impl ApplicationHandler for ChunkApp {
                                 "disabled"
                             }
                         );
-                        self.update_window_title(true);
                         self.request_redraw();
                         return;
                     }
@@ -3148,7 +3184,12 @@ impl ApplicationHandler for ChunkApp {
                 let render_options = self.render_options;
                 let ui_active = self.ui.is_active();
                 let ui_covers_world = self.ui.covers_world();
-                let ui_draw = self.ui.render_draw_list(render_options);
+                let mut ui_draw = self.ui.render_draw_list(render_options);
+                if self.debug_visible {
+                    self.ui
+                        .render_debug_pane(&mut ui_draw, &self.debug_pane_stats());
+                }
+                let gui_active = ui_active || self.debug_visible;
                 let mut frame_render_stats = None;
                 let result = {
                     let (Some(surface), Some(depth), Some(draw), Some(gui)) = (
@@ -3176,7 +3217,7 @@ impl ApplicationHandler for ChunkApp {
                             )?;
                             frame_render_stats = Some(frame_stats);
                         }
-                        if ui_active {
+                        if gui_active {
                             gui.render(
                                 frame.device,
                                 frame.queue,
@@ -3212,7 +3253,6 @@ impl ApplicationHandler for ChunkApp {
                         return;
                     }
                 }
-                self.update_window_title(false);
                 self.request_redraw();
             }
             _ => {}
@@ -3373,6 +3413,61 @@ mod tests {
 
         keys.remove(&KeyCode::Space);
         assert_eq!(vertical_axis(&keys), -1.0);
+    }
+
+    #[test]
+    fn debug_pane_formats_and_draws_runtime_stats() {
+        let stats = DebugPaneStats {
+            position: Vec3::new(1.25, 64.0, -2.5),
+            speed: 32.0,
+            runtime: WindowRuntimeStats {
+                interest_center: ChunkPos::new(3, -4),
+                loaded_chunks: 9,
+                pending_jobs: 1,
+                client_visible_chunks: 8,
+                active_ticket_chunks: 9,
+                pending_unload_chunks: 0,
+                block_ticking_chunks: 4,
+                entity_ticking_chunks: 2,
+                last_tick: 12,
+                last_simulation_tick: 11,
+                last_tick_unloads_processed: 0,
+                last_simulation_block_tick_chunks: 4,
+                last_simulation_entity_tick_chunks: 2,
+                last_simulation_scheduler_tick_ms: 0.1,
+                last_simulation_block_tick_ms: 0.2,
+                last_simulation_fluid_tick_ms: 0.3,
+                last_simulation_entity_tick_ms: 0.4,
+                last_simulation_fluid_ticks_executed: 5,
+                last_simulation_deferred_fluid_ticks: 6,
+                last_simulation_fluid_mutated_blocks: 7,
+                scheduled_fluid_ticks: 8,
+            },
+            render: RenderStreamStats {
+                section_count: 16,
+                drawn_section_count: 10,
+                face_count: 200,
+                drawn_face_count: 120,
+                last_rebuilt_section_count: 2,
+                last_uploaded_section_count: 2,
+                last_frame_ms: 16.7,
+                ..RenderStreamStats::default()
+            },
+            section_occlusion: true,
+            force_fullbright: false,
+        };
+
+        let lines = stats.lines();
+        assert_eq!(lines[0], "DEBUG");
+        assert_eq!(lines[1], "POS 1.2 64.0 -2.5");
+        assert_eq!(lines[2], "CHUNK 3 -4 SPEED 32.0");
+        assert_eq!(lines[3], "OCC ON  LIGHT");
+
+        let mut ui = NativeUi::new(1);
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+        let mut draw = GuiDrawList::new();
+        ui.render_debug_pane(&mut draw, &stats);
+        assert!(!draw.commands().is_empty());
     }
 
     #[test]
