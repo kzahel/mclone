@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use glam::Vec3;
 use mclone_assets::{
     AssetSource, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
     FilesystemAssetSource, TextureAtlasPlan,
@@ -36,6 +37,11 @@ const DEFAULT_CHUNK_X: i32 = 0;
 const DEFAULT_CHUNK_Z: i32 = 0;
 const DEFAULT_CHUNK_RADIUS: i32 = 1;
 const MAX_CHUNK_RADIUS: i32 = 4;
+const SPECTATOR_BASE_SPEED: f32 = 32.0;
+const SPECTATOR_MIN_SPEED: f32 = 2.0;
+const SPECTATOR_MAX_SPEED: f32 = 256.0;
+const SPECTATOR_MOUSE_SENSITIVITY: f32 = 0.0035;
+const SPECTATOR_PITCH_LIMIT: f32 = 1.52;
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -294,34 +300,26 @@ fn print_help() {
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\n\
-         Window mode renders generated chunks with WASD/QE, mouse drag, and wheel camera controls. Headless modes write PNGs for GPU validation."
+         Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, and wheel speed controls. Headless modes write PNGs for GPU validation."
     );
 }
 
 fn run_window(scene: SceneOptions) -> Result<()> {
-    let scene_mesh = build_scene_textured_sections(&scene)?;
-    let chunk_count = scene.chunk_span() * scene.chunk_span();
+    let runtime = WindowSceneRuntime::new(&scene)?;
     log::info!(
-        "client-runtime textured chunk area seed={} center=({}, {}) radius={} remote={:?} chunks={} sections={} vertices={} indices={} atlas={}x{}",
+        "native window runtime seed={} initial_center=({}, {}) radius={} remote={:?} atlas={}x{}",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
         scene.chunk_radius,
         scene.remote_addr,
-        chunk_count,
-        scene_mesh.section_count(),
-        scene_mesh.vertex_count(),
-        scene_mesh.index_count(),
-        scene_mesh.atlas.width,
-        scene_mesh.atlas.height
+        runtime.mesh_assets.atlas.width,
+        runtime.mesh_assets.atlas.height
     );
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = ChunkApp::new(
-        scene_mesh,
-        ChunkCamera::overview_for_chunk_area(scene.chunk_x, scene.chunk_z, scene.chunk_radius),
-    );
+    let mut app = ChunkApp::new(runtime, SpectatorCamera::spawn_for_scene(&scene));
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -333,17 +331,12 @@ struct SceneTexturedSections {
 }
 
 impl SceneTexturedSections {
+    #[cfg(test)]
     fn section_count(&self) -> usize {
         self.sections.len()
     }
 
-    fn vertex_count(&self) -> u32 {
-        self.sections
-            .iter()
-            .map(|section| section.stats().vertex_count)
-            .sum()
-    }
-
+    #[cfg(test)]
     fn index_count(&self) -> u32 {
         self.sections
             .iter()
@@ -371,24 +364,8 @@ impl TextureAtlasImage {
 
 fn build_scene_textured_sections(scene: &SceneOptions) -> Result<SceneTexturedSections> {
     let client = build_scene_client_runtime(scene)?;
-    let chunks = client
-        .chunk_snapshots()
-        .map(snapshot_mesh_block_state_ids)
-        .collect::<Result<Vec<_>>>()?;
     let mesh_assets = load_textured_mesh_assets()?;
-    let inputs = chunks
-        .iter()
-        .map(|chunk| {
-            TexturedChunkMeshInput::new(
-                chunk.chunk_x,
-                chunk.chunk_z,
-                chunk.min_y,
-                chunk.height,
-                &chunk.blocks,
-            )
-        })
-        .collect::<Vec<_>>();
-    let sections = build_textured_render_sections(&inputs, &mesh_assets.catalog)?;
+    let sections = build_client_textured_sections(&client, &mesh_assets.catalog)?;
     if sections.is_empty() {
         bail!(
             "generated chunk area seed={} center=({}, {}) radius={} produced no textured render sections",
@@ -402,6 +379,29 @@ fn build_scene_textured_sections(scene: &SceneOptions) -> Result<SceneTexturedSe
         sections,
         atlas: mesh_assets.atlas,
     })
+}
+
+fn build_client_textured_sections(
+    client: &ClientRuntime,
+    catalog: &TexturedMeshCatalog,
+) -> Result<Vec<TexturedRenderSectionMesh>> {
+    let chunks = client
+        .chunk_snapshots()
+        .map(snapshot_mesh_block_state_ids)
+        .collect::<Result<Vec<_>>>()?;
+    let inputs = chunks
+        .iter()
+        .map(|chunk| {
+            TexturedChunkMeshInput::new(
+                chunk.chunk_x,
+                chunk.chunk_z,
+                chunk.min_y,
+                chunk.height,
+                &chunk.blocks,
+            )
+        })
+        .collect::<Vec<_>>();
+    build_textured_render_sections(&inputs, catalog).context("failed to build textured sections")
 }
 
 fn write_headless_chunk_scenarios(
@@ -478,6 +478,104 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
         client.apply_updates(transport.drain_server_updates());
     }
     Ok(client)
+}
+
+#[derive(Debug)]
+struct WindowSceneRuntime {
+    client: ClientRuntime,
+    server: Option<IntegratedServer>,
+    transport: LocalTransport,
+    remote_addr: Option<String>,
+    radius_chunks: u32,
+    interest_center: ChunkPos,
+    mesh_assets: TexturedMeshAssets,
+}
+
+impl WindowSceneRuntime {
+    fn new(scene: &SceneOptions) -> Result<Self> {
+        let client = if scene.remote_addr.is_some() {
+            ClientRuntime::new(ClientHost::RemoteDedicated)
+        } else {
+            ClientRuntime::local_integrated()
+        };
+        let radius_chunks =
+            u32::try_from(scene.chunk_radius).context("chunk radius must be positive")?;
+        let mut runtime = Self {
+            client,
+            server: scene
+                .remote_addr
+                .is_none()
+                .then(|| IntegratedServer::new(scene.seed)),
+            transport: LocalTransport::new(),
+            remote_addr: scene.remote_addr.clone(),
+            radius_chunks,
+            interest_center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
+            mesh_assets: load_textured_mesh_assets()?,
+        };
+        runtime.set_interest_center(runtime.interest_center)?;
+        Ok(runtime)
+    }
+
+    fn set_interest_center(&mut self, center: ChunkPos) -> Result<bool> {
+        if self.client.chunk_interest().is_some_and(|interest| {
+            interest.center == center && interest.radius_chunks == self.radius_chunks
+        }) {
+            return Ok(false);
+        }
+
+        self.interest_center = center;
+        let command = self.client.set_chunk_interest(ChunkInterest {
+            center,
+            radius_chunks: self.radius_chunks,
+        });
+
+        if let Some(remote_addr) = &self.remote_addr {
+            let updates = request_server_updates(remote_addr.as_str(), &command)
+                .with_context(|| format!("failed to request chunk updates from {remote_addr}"))?;
+            let changed = !updates.is_empty();
+            self.client.apply_updates(updates);
+            return Ok(changed);
+        }
+
+        self.transport.send_client_command(command);
+        self.flush_local_commands()
+    }
+
+    fn poll(&mut self) -> Result<bool> {
+        let mut changed = self.flush_local_commands()?;
+        if let Some(server) = &mut self.server {
+            let updates = server
+                .try_poll()
+                .context("failed to poll integrated server worldgen jobs")?;
+            changed |= self.apply_server_updates(updates);
+        }
+        Ok(changed)
+    }
+
+    fn flush_local_commands(&mut self) -> Result<bool> {
+        let Some(server) = &mut self.server else {
+            return Ok(false);
+        };
+        let mut changed = false;
+        for command in self.transport.drain_client_commands() {
+            for update in server.handle_command(command) {
+                self.transport.send_server_update(update);
+            }
+        }
+        let updates = self.transport.drain_server_updates();
+        changed |= self.apply_server_updates(updates);
+        Ok(changed)
+    }
+
+    fn apply_server_updates(&mut self, updates: Vec<ServerUpdate>) -> bool {
+        let changed = !updates.is_empty();
+        self.client.apply_updates(updates);
+        changed
+    }
+
+    fn build_sections(&self) -> Result<Vec<TexturedRenderSectionMesh>> {
+        build_client_textured_sections(&self.client, &self.mesh_assets.catalog)
+    }
 }
 
 fn poll_integrated_server_until_idle(server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
@@ -672,10 +770,6 @@ fn snapshot_mesh_block_state_ids(snapshot: &ChunkSnapshot) -> Result<MeshChunkBl
 }
 
 impl SceneOptions {
-    fn chunk_span(&self) -> i32 {
-        self.chunk_radius * 2 + 1
-    }
-
     #[cfg(test)]
     fn chunk_positions(&self) -> impl Iterator<Item = (i32, i32)> {
         let min_x = self.chunk_x - self.chunk_radius;
@@ -687,28 +781,119 @@ impl SceneOptions {
     }
 }
 
+#[derive(Clone, Debug)]
+struct SpectatorCamera {
+    position: Vec3,
+    yaw: f32,
+    pitch: f32,
+    speed: f32,
+}
+
+impl SpectatorCamera {
+    fn spawn_for_scene(scene: &SceneOptions) -> Self {
+        let center_x = scene.chunk_x as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+        let center_z = scene.chunk_z as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+        Self {
+            position: Vec3::new(center_x, 88.0, center_z),
+            yaw: 0.55,
+            pitch: -0.35,
+            speed: SPECTATOR_BASE_SPEED,
+        }
+    }
+
+    fn camera(&self, chunk_radius: u32) -> ChunkCamera {
+        let forward = self.forward();
+        ChunkCamera {
+            eye: self.position.to_array(),
+            target: (self.position + forward).to_array(),
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 64.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 700.0 + chunk_radius as f32 * 128.0,
+        }
+    }
+
+    fn chunk_pos(&self) -> ChunkPos {
+        ChunkPos::new(
+            world_block_to_chunk_coord(self.position.x),
+            world_block_to_chunk_coord(self.position.z),
+        )
+    }
+
+    fn look(&mut self, yaw_delta: f32, pitch_delta: f32) {
+        if yaw_delta.is_finite() {
+            self.yaw += yaw_delta;
+        }
+        if pitch_delta.is_finite() {
+            self.pitch =
+                (self.pitch + pitch_delta).clamp(-SPECTATOR_PITCH_LIMIT, SPECTATOR_PITCH_LIMIT);
+        }
+    }
+
+    fn adjust_speed(&mut self, wheel_amount: f32) {
+        if !wheel_amount.is_finite() {
+            return;
+        }
+        let multiplier = (1.0 + wheel_amount * 0.18).clamp(0.5, 1.8);
+        self.speed = (self.speed * multiplier).clamp(SPECTATOR_MIN_SPEED, SPECTATOR_MAX_SPEED);
+    }
+
+    fn move_local(
+        &mut self,
+        right_axis: f32,
+        up_axis: f32,
+        forward_axis: f32,
+        boosted: bool,
+        dt: f32,
+    ) -> bool {
+        if dt <= 0.0 {
+            return false;
+        }
+
+        let forward = self.forward();
+        let right = forward.cross(Vec3::Y).normalize_or_zero();
+        let direction = right * right_axis + Vec3::Y * up_axis + forward * forward_axis;
+        let Some(direction) = direction.try_normalize() else {
+            return false;
+        };
+        let boost = if boosted { 3.0 } else { 1.0 };
+        self.position += direction * self.speed * boost * dt;
+        true
+    }
+
+    fn forward(&self) -> Vec3 {
+        let (yaw_sin, yaw_cos) = self.yaw.sin_cos();
+        let (pitch_sin, pitch_cos) = self.pitch.sin_cos();
+        Vec3::new(yaw_sin * pitch_cos, pitch_sin, yaw_cos * pitch_cos).normalize()
+    }
+}
+
+fn world_block_to_chunk_coord(value: f32) -> i32 {
+    (value / CHUNK_WIDTH as f32).floor() as i32
+}
+
 struct ChunkApp {
-    scene_mesh: SceneTexturedSections,
-    camera: ChunkCamera,
+    runtime: WindowSceneRuntime,
+    spectator: SpectatorCamera,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
     draw: Option<TexturedSectionDrawResources>,
     pressed_keys: std::collections::HashSet<KeyCode>,
-    orbit_dragging: bool,
+    look_dragging: bool,
     last_cursor: Option<(f64, f64)>,
     last_frame: Instant,
 }
 
 impl ChunkApp {
-    fn new(scene_mesh: SceneTexturedSections, camera: ChunkCamera) -> Self {
+    fn new(runtime: WindowSceneRuntime, spectator: SpectatorCamera) -> Self {
         Self {
-            scene_mesh,
-            camera,
+            runtime,
+            spectator,
             window: None,
             surface: None,
             draw: None,
             pressed_keys: std::collections::HashSet::new(),
-            orbit_dragging: false,
+            look_dragging: false,
             last_cursor: None,
             last_frame: Instant::now(),
         }
@@ -720,7 +905,7 @@ impl ChunkApp {
         }
     }
 
-    fn update_camera_from_keys(&mut self) {
+    fn update_camera_from_keys(&mut self) -> Result<()> {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.05);
         self.last_frame = now;
@@ -730,8 +915,50 @@ impl ChunkApp {
         let forward = key_axis(&self.pressed_keys, KeyCode::KeyW, KeyCode::KeyS);
         let boosted = self.pressed_keys.contains(&KeyCode::ShiftLeft)
             || self.pressed_keys.contains(&KeyCode::ShiftRight);
-        let speed = if boosted { 95.0 } else { 32.0 };
-        self.camera.move_local(right, up, forward, speed * dt);
+        if self.spectator.move_local(right, up, forward, boosted, dt) {
+            self.update_interest_from_spectator()?;
+        }
+        Ok(())
+    }
+
+    fn update_interest_from_spectator(&mut self) -> Result<()> {
+        let center = self.spectator.chunk_pos();
+        if self.runtime.set_interest_center(center)? {
+            log::info!(
+                "chunk interest moved to ({}, {}) at spectator position ({:.1}, {:.1}, {:.1})",
+                center.x,
+                center.z,
+                self.spectator.position.x,
+                self.spectator.position.y,
+                self.spectator.position.z
+            );
+            self.upload_runtime_sections()?;
+        }
+        Ok(())
+    }
+
+    fn poll_runtime_and_upload(&mut self) -> Result<()> {
+        if !self.runtime.poll()? {
+            return Ok(());
+        }
+        self.upload_runtime_sections()?;
+        Ok(())
+    }
+
+    fn upload_runtime_sections(&mut self) -> Result<()> {
+        let (Some(surface), Some(draw)) = (&self.surface, &mut self.draw) else {
+            return Ok(());
+        };
+        let sections = self.runtime.build_sections()?;
+        draw.update_sections(&surface.device, &sections)
+            .context("failed to upload streamed chunk sections")?;
+        log::info!(
+            "streamed chunks loaded={} sections={} indices={}",
+            self.runtime.client.loaded_chunk_count(),
+            draw.section_count(),
+            draw.index_count()
+        );
+        Ok(())
     }
 }
 
@@ -759,14 +986,22 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
+        let sections = match self.runtime.build_sections() {
+            Ok(sections) => sections,
+            Err(err) => {
+                log::error!("failed to build initial chunk sections: {err:#}");
+                event_loop.exit();
+                return;
+            }
+        };
         let draw = match TexturedSectionDrawResources::new(
             &surface.device,
             &surface.queue,
             surface.config.format,
             surface.config.width,
             surface.config.height,
-            &self.scene_mesh.sections,
-            self.scene_mesh.atlas.as_upload(),
+            &sections,
+            self.runtime.mesh_assets.atlas.as_upload(),
         ) {
             Ok(draw) => draw,
             Err(err) => {
@@ -776,7 +1011,7 @@ impl ApplicationHandler for ChunkApp {
             }
         };
         log::info!(
-            "uploaded {} render sections with {} indices",
+            "uploaded {} initial render sections with {} indices",
             draw.section_count(),
             draw.index_count()
         );
@@ -817,17 +1052,20 @@ impl ApplicationHandler for ChunkApp {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left || button == MouseButton::Right {
-                    self.orbit_dragging = state == ElementState::Pressed;
+                    self.look_dragging = state == ElementState::Pressed;
                     self.last_cursor = None;
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let cursor = (position.x, position.y);
-                if self.orbit_dragging {
+                if self.look_dragging {
                     if let Some(previous) = self.last_cursor {
                         let dx = (cursor.0 - previous.0) as f32;
                         let dy = (cursor.1 - previous.1) as f32;
-                        self.camera.orbit(-dx * 0.006, -dy * 0.004);
+                        self.spectator.look(
+                            -dx * SPECTATOR_MOUSE_SENSITIVITY,
+                            -dy * SPECTATOR_MOUSE_SENSITIVITY,
+                        );
                         self.request_redraw();
                     }
                     self.last_cursor = Some(cursor);
@@ -838,16 +1076,27 @@ impl ApplicationHandler for ChunkApp {
                     MouseScrollDelta::LineDelta(_, y) => y * 0.12,
                     MouseScrollDelta::PixelDelta(position) => position.y as f32 * 0.001,
                 };
-                self.camera.zoom(amount);
+                self.spectator.adjust_speed(amount);
+                log::info!("spectator speed {:.1} blocks/s", self.spectator.speed);
                 self.request_redraw();
             }
             WindowEvent::Focused(false) => {
                 self.pressed_keys.clear();
-                self.orbit_dragging = false;
+                self.look_dragging = false;
                 self.last_cursor = None;
             }
             WindowEvent::RedrawRequested => {
-                self.update_camera_from_keys();
+                if let Err(err) = self.update_camera_from_keys() {
+                    log::error!("failed to update spectator camera: {err:#}");
+                    event_loop.exit();
+                    return;
+                }
+                if let Err(err) = self.poll_runtime_and_upload() {
+                    log::error!("failed to poll chunk runtime: {err:#}");
+                    event_loop.exit();
+                    return;
+                }
+                let camera = self.spectator.camera(self.runtime.radius_chunks);
                 let result = {
                     let (Some(surface), Some(draw)) = (&mut self.surface, &mut self.draw) else {
                         return;
@@ -858,7 +1107,7 @@ impl ApplicationHandler for ChunkApp {
                             encoder,
                             view,
                             size,
-                            self.camera,
+                            camera,
                             mclone_render::default_clear_color(),
                         )
                     })
@@ -893,6 +1142,47 @@ fn key_axis(
 mod tests {
     use super::*;
     use mclone_core::{BlockStateId, ChunkRevision, ChunkStatus};
+
+    #[test]
+    fn world_block_to_chunk_coord_floors_negative_positions() {
+        assert_eq!(world_block_to_chunk_coord(0.0), 0);
+        assert_eq!(world_block_to_chunk_coord(15.99), 0);
+        assert_eq!(world_block_to_chunk_coord(16.0), 1);
+        assert_eq!(world_block_to_chunk_coord(-0.01), -1);
+        assert_eq!(world_block_to_chunk_coord(-16.0), -1);
+        assert_eq!(world_block_to_chunk_coord(-16.01), -2);
+    }
+
+    #[test]
+    fn spectator_spawn_starts_interest_in_scene_center_chunk() {
+        let scene = SceneOptions {
+            chunk_x: 3,
+            chunk_z: -2,
+            ..SceneOptions::default()
+        };
+        let spectator = SpectatorCamera::spawn_for_scene(&scene);
+
+        assert_eq!(spectator.chunk_pos(), ChunkPos::new(3, -2));
+    }
+
+    #[test]
+    fn spectator_crossing_chunk_boundary_changes_interest_center() {
+        let scene = SceneOptions::default();
+        let mut spectator = SpectatorCamera::spawn_for_scene(&scene);
+        spectator.position.x = 16.25;
+        spectator.position.z = -0.25;
+
+        assert_eq!(spectator.chunk_pos(), ChunkPos::new(1, -1));
+    }
+
+    #[test]
+    fn spectator_pitch_is_clamped() {
+        let mut spectator = SpectatorCamera::spawn_for_scene(&SceneOptions::default());
+        spectator.look(0.0, 100.0);
+        assert_eq!(spectator.pitch, SPECTATOR_PITCH_LIMIT);
+        spectator.look(0.0, -200.0);
+        assert_eq!(spectator.pitch, -SPECTATOR_PITCH_LIMIT);
+    }
 
     #[test]
     fn cli_defaults_to_window() {
