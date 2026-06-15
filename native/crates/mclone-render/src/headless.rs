@@ -16,7 +16,7 @@ use crate::target::{RenderFrameContext, RenderFrameTarget};
 
 const BYTES_PER_PIXEL: u32 = 4;
 const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
-const HEADLESS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+pub const HEADLESS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 #[derive(Clone, Debug)]
 pub struct HeadlessClearOptions {
@@ -68,6 +68,21 @@ pub struct HeadlessUiReport {
     pub height: u32,
     pub byte_len: usize,
     pub command_count: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct HeadlessFrameOptions {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HeadlessFrameReport {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub byte_len: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -339,6 +354,41 @@ pub fn write_headless_ui_png(
         byte_len: pixels.len(),
         command_count: draw_list.commands().len(),
     })
+}
+
+pub fn write_headless_frame_png<T, F>(
+    options: HeadlessFrameOptions,
+    render: F,
+) -> Result<(HeadlessFrameReport, T)>
+where
+    F: FnOnce(RenderFrameContext<'_>) -> Result<T>,
+{
+    let width = options.width.max(1);
+    let height = options.height.max(1);
+    let (device, queue) = create_headless_device()?;
+    let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_headless_frame_encoder"),
+    });
+    let render_output = {
+        let frame = RenderFrameContext::new(&device, &queue, &mut encoder, target.render_target());
+        render(frame)?
+    };
+    queue.submit(std::iter::once(encoder.finish()));
+
+    let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
+    save_rgba_png(&options.path, width, height, &pixels)?;
+
+    Ok((
+        HeadlessFrameReport {
+            path: options.path,
+            width,
+            height,
+            byte_len: pixels.len(),
+        },
+        render_output,
+    ))
 }
 
 pub fn run_headless_textured_sections_timedemo(

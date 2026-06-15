@@ -30,11 +30,13 @@ use mclone_render::chunk::{
 };
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::headless::{
-    HeadlessChunkOptions, HeadlessClearOptions, HeadlessTimedemoOptions, HeadlessUiOptions,
-    run_headless_textured_sections_timedemo, write_headless_clear_png,
+    HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessClearOptions, HeadlessFrameOptions,
+    HeadlessTimedemoOptions, HeadlessUiOptions, run_headless_textured_sections_timedemo,
+    write_headless_clear_png, write_headless_frame_png,
     write_headless_textured_sections_png_with_options, write_headless_ui_png,
 };
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
+use mclone_render::target::RenderFrameContext;
 use mclone_server::IntegratedServer;
 use mclone_ui::{
     Button, Checkbox, Color, CycleButton, Font, GuiDrawList, GuiScale, Interaction, Point, Rect,
@@ -178,6 +180,20 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Cli::HeadlessScreenshot { options } => {
+            let report = run_headless_screenshot(&options)?;
+            println!(
+                "headless full-frame screenshot saved to {} ({}x{}, {} bytes, {} sections, {} drawn sections, {} GUI commands)",
+                report.path.display(),
+                report.width,
+                report.height,
+                report.byte_len,
+                report.section_count,
+                report.drawn_section_count,
+                report.gui_command_count
+            );
+            Ok(())
+        }
         Cli::MovementPerf { options } => {
             let report = run_movement_perf_smoke(&options)?;
             report.validate()?;
@@ -224,6 +240,27 @@ struct TimedemoOptions {
     height: u32,
     frames: usize,
     path_radius_chunks: i32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HeadlessScreenshotOptions {
+    path: PathBuf,
+    width: u32,
+    height: u32,
+    scene: SceneOptions,
+    render_options: TexturedSectionRenderOptions,
+    ui: HeadlessScreenshotUi,
+    debug_pane: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum HeadlessScreenshotUi {
+    #[default]
+    None,
+    Title,
+    Pause,
+    OptionsTitle,
+    OptionsPause,
 }
 
 impl Default for MovementPerfOptions {
@@ -294,6 +331,9 @@ enum Cli {
         width: u32,
         height: u32,
     },
+    HeadlessScreenshot {
+        options: HeadlessScreenshotOptions,
+    },
     MovementPerf {
         options: MovementPerfOptions,
     },
@@ -308,6 +348,7 @@ enum HeadlessMode {
     Chunk(PathBuf),
     ChunkScenarios(PathBuf),
     Ui(PathBuf),
+    Screenshot(PathBuf),
 }
 
 impl Cli {
@@ -317,6 +358,8 @@ impl Cli {
         let mut height = None;
         let mut scene = SceneOptions::default();
         let mut render_options = TexturedSectionRenderOptions::default();
+        let mut screenshot_ui = HeadlessScreenshotUi::None;
+        let mut screenshot_debug_pane = false;
         let mut movement_perf = false;
         let mut timedemo = false;
         let mut movement_steps = DEFAULT_MOVEMENT_PERF_STEPS;
@@ -383,6 +426,22 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Ui(path))?;
+                }
+                "--screenshot" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--screenshot requires an output PNG path")?;
+                    if movement_perf || timedemo {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::Screenshot(path))?;
+                }
+                "--screenshot-ui" => {
+                    screenshot_ui = parse_screenshot_ui_arg("--screenshot-ui", args.next())?;
+                }
+                "--screenshot-debug-pane" => {
+                    screenshot_debug_pane = parse_bool_arg("--screenshot-debug-pane", args.next())?;
                 }
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
                 "--height" => height = Some(parse_u32_arg("--height", args.next())?),
@@ -465,6 +524,17 @@ impl Cli {
                 path,
                 width: width.unwrap_or(960),
                 height: height.unwrap_or(540),
+            }),
+            Some(HeadlessMode::Screenshot(path)) => Ok(Self::HeadlessScreenshot {
+                options: HeadlessScreenshotOptions {
+                    path,
+                    width: width.unwrap_or(1280),
+                    height: height.unwrap_or(720),
+                    scene,
+                    render_options,
+                    ui: screenshot_ui,
+                    debug_pane: screenshot_debug_pane,
+                },
             }),
             None if movement_perf => Ok(Self::MovementPerf {
                 options: MovementPerfOptions {
@@ -574,6 +644,22 @@ fn parse_bool_arg(flag: &str, value: Option<String>) -> Result<bool> {
     }
 }
 
+fn parse_screenshot_ui_arg(flag: &str, value: Option<String>) -> Result<HeadlessScreenshotUi> {
+    let value = value.with_context(|| {
+        format!("{flag} requires none, title, pause, options-title, or options-pause")
+    })?;
+    match value.as_str() {
+        "none" | "off" | "false" | "0" => Ok(HeadlessScreenshotUi::None),
+        "title" => Ok(HeadlessScreenshotUi::Title),
+        "pause" => Ok(HeadlessScreenshotUi::Pause),
+        "options-title" | "options_title" => Ok(HeadlessScreenshotUi::OptionsTitle),
+        "options-pause" | "options_pause" | "options" => Ok(HeadlessScreenshotUi::OptionsPause),
+        _ => bail!(
+            "{flag} must be none, title, pause, options-title, or options-pause, got `{value}`"
+        ),
+    }
+}
+
 fn print_help() {
     println!(
         "mclone-native-client\n\n\
@@ -581,6 +667,7 @@ fn print_help() {
            mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --headless-ui /tmp/mclone-ui-title.png [--width 960] [--height 540]\n\
+           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
@@ -1467,6 +1554,99 @@ fn write_headless_chunk_scenarios(
     Ok(reports)
 }
 
+fn run_headless_screenshot(
+    options: &HeadlessScreenshotOptions,
+) -> Result<HeadlessScreenshotReport> {
+    let mut runtime = WindowSceneRuntime::new(&options.scene)?;
+    poll_window_runtime_until_idle(&mut runtime)?;
+    let section_update = runtime.sync_render_sections()?;
+    let sections = runtime.cached_sections();
+    if sections.is_empty() {
+        bail!(
+            "headless screenshot seed={} center=({}, {}) radius={} produced no render sections",
+            options.scene.seed,
+            options.scene.chunk_x,
+            options.scene.chunk_z,
+            options.scene.chunk_radius
+        );
+    }
+
+    let spectator = SpectatorCamera::spawn_for_scene(&options.scene);
+    let mut ui = NativeUi::new(options.scene.chunk_radius);
+    ui.set_screen(options.ui.native_screen());
+    ui.set_scale(GuiScale::from_pixels(options.width, options.height));
+
+    let mut render_stats = RenderStreamStats::default();
+    let debug_pane = options.debug_pane;
+    let render_options = options.render_options;
+    let camera = spectator.camera(runtime.radius_chunks);
+    let runtime_stats = runtime.stats();
+    let initial_upload = TexturedSectionUploadReport {
+        uploaded_section_count: section_update.rebuilt_section_count(),
+        removed_section_count: section_update.removed_section_count(),
+        uploaded_vertex_count: section_update.rebuilt_vertex_count,
+        uploaded_index_count: section_update.rebuilt_index_count,
+    };
+
+    let (frame_report, summary) = write_headless_frame_png(
+        HeadlessFrameOptions {
+            path: options.path.clone(),
+            width: options.width,
+            height: options.height,
+        },
+        |frame| {
+            let depth =
+                ChunkDepthTarget::new(frame.device, frame.target.size[0], frame.target.size[1]);
+            let mut draw = TexturedSectionDrawResources::new(
+                frame.device,
+                frame.queue,
+                HEADLESS_FORMAT,
+                &sections,
+                runtime.mesh_assets.atlas.as_upload(),
+            )?;
+            let mut gui = GuiRenderer::new(frame.device, HEADLESS_FORMAT);
+
+            render_stats.section_count = draw.section_count();
+            render_stats.index_count = draw.index_count();
+            render_stats.face_count = quad_face_count_from_indices(render_stats.index_count);
+            record_render_section_update_stats(&mut render_stats, &section_update, initial_upload);
+
+            let debug_stats = debug_pane.then_some(DebugPaneStats {
+                position: spectator.position,
+                speed: spectator.speed,
+                runtime: runtime_stats,
+                render: render_stats,
+                section_occlusion: render_options.section_occlusion_culling,
+                force_fullbright: render_options.force_fullbright,
+            });
+
+            render_full_frame(
+                frame,
+                &depth,
+                &mut draw,
+                &mut gui,
+                camera,
+                render_options,
+                &ui,
+                debug_stats,
+                &mut render_stats,
+            )
+        },
+    )?;
+
+    Ok(HeadlessScreenshotReport {
+        path: frame_report.path,
+        width: frame_report.width,
+        height: frame_report.height,
+        byte_len: frame_report.byte_len,
+        section_count: summary.section_count,
+        drawn_section_count: summary.drawn_section_count,
+        index_count: summary.index_count,
+        drawn_index_count: summary.drawn_index_count,
+        gui_command_count: summary.gui_command_count,
+    })
+}
+
 fn chunk_capture_scenarios(scene: &SceneOptions) -> [(&'static str, ChunkCamera); 3] {
     let overview =
         ChunkCamera::overview_for_chunk_area(scene.chunk_x, scene.chunk_z, scene.chunk_radius);
@@ -2124,6 +2304,28 @@ struct RenderStreamStats {
     last_frame_ms: f32,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct FullFrameRenderSummary {
+    section_count: usize,
+    drawn_section_count: usize,
+    index_count: u32,
+    drawn_index_count: u32,
+    gui_command_count: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HeadlessScreenshotReport {
+    path: PathBuf,
+    width: u32,
+    height: u32,
+    byte_len: usize,
+    section_count: usize,
+    drawn_section_count: usize,
+    index_count: u32,
+    drawn_index_count: u32,
+    gui_command_count: usize,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DebugPaneStats {
     position: Vec3,
@@ -2137,7 +2339,11 @@ struct DebugPaneStats {
 impl DebugPaneStats {
     fn lines(self) -> [String; 10] {
         let occlusion = if self.section_occlusion { "ON" } else { "OFF" };
-        let lighting = if self.force_fullbright { "FULL" } else { "LIGHT" };
+        let lighting = if self.force_fullbright {
+            "FULL"
+        } else {
+            "LIGHT"
+        };
         [
             "DEBUG".to_string(),
             format!(
@@ -2195,6 +2401,22 @@ enum NativeScreen {
     Title,
     Pause,
     Options { parent: OptionsParent },
+}
+
+impl HeadlessScreenshotUi {
+    fn native_screen(self) -> Option<NativeScreen> {
+        match self {
+            Self::None => None,
+            Self::Title => Some(NativeScreen::Title),
+            Self::Pause => Some(NativeScreen::Pause),
+            Self::OptionsTitle => Some(NativeScreen::Options {
+                parent: OptionsParent::Title,
+            }),
+            Self::OptionsPause => Some(NativeScreen::Options {
+                parent: OptionsParent::Pause,
+            }),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2270,6 +2492,11 @@ impl NativeUi {
 
     fn close(&mut self) {
         self.screen = None;
+        self.pressed = None;
+    }
+
+    fn set_screen(&mut self, screen: Option<NativeScreen>) {
+        self.screen = screen;
         self.pressed = None;
     }
 
@@ -2627,6 +2854,75 @@ fn render_static_title_ui(width: u32, height: u32) -> GuiDrawList {
     ui.render_draw_list(TexturedSectionRenderOptions::default())
 }
 
+fn render_full_frame(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    draw: &mut TexturedSectionDrawResources,
+    gui: &mut GuiRenderer,
+    camera: ChunkCamera,
+    render_options: TexturedSectionRenderOptions,
+    ui: &NativeUi,
+    debug_stats: Option<DebugPaneStats>,
+    render_stats: &mut RenderStreamStats,
+) -> Result<FullFrameRenderSummary> {
+    let ui_active = ui.is_active();
+    let ui_covers_world = ui.covers_world();
+    let gui_active = ui_active || debug_stats.is_some();
+
+    if !ui_covers_world {
+        let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
+        let render_target = ChunkRenderTarget::from_frame_target(
+            frame.target.with_depth(&depth.view),
+            mclone_render::default_clear_color(),
+        )?;
+        let frame_stats = draw.render_with_options(
+            frame.queue,
+            frame.encoder,
+            render_target,
+            render_view,
+            render_options,
+        )?;
+        render_stats.drawn_section_count = frame_stats.drawn_section_count;
+        render_stats.drawn_face_count = frame_stats.drawn_face_count();
+        render_stats.drawn_index_count = frame_stats.drawn_index_count;
+    } else {
+        render_stats.drawn_section_count = 0;
+        render_stats.drawn_face_count = 0;
+        render_stats.drawn_index_count = 0;
+    }
+
+    let mut ui_draw = ui.render_draw_list(render_options);
+    if let Some(mut stats) = debug_stats {
+        stats.render = *render_stats;
+        ui.render_debug_pane(&mut ui_draw, &stats);
+    }
+
+    let gui_command_count = ui_draw.commands().len();
+    if gui_active {
+        gui.render(
+            frame.device,
+            frame.queue,
+            frame.encoder,
+            frame.target,
+            [ui.scale.width, ui.scale.height],
+            &ui_draw,
+            if ui_covers_world {
+                GuiRenderOptions::clear(mclone_render::default_clear_color())
+            } else {
+                GuiRenderOptions::overlay()
+            },
+        )?;
+    }
+
+    Ok(FullFrameRenderSummary {
+        section_count: draw.section_count(),
+        drawn_section_count: render_stats.drawn_section_count,
+        index_count: draw.index_count(),
+        drawn_index_count: render_stats.drawn_index_count,
+        gui_command_count,
+    })
+}
+
 struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
@@ -2873,22 +3169,7 @@ impl ChunkApp {
         section_update: &RenderSectionCacheUpdate,
         upload_report: TexturedSectionUploadReport,
     ) {
-        self.render_stats.last_rebuilt_section_count = section_update.rebuilt_section_count();
-        self.render_stats.last_removed_section_count = section_update.removed_section_count();
-        self.render_stats.last_rebuilt_vertex_count = section_update.rebuilt_vertex_count;
-        self.render_stats.last_rebuilt_face_count = section_update.rebuilt_face_count();
-        self.render_stats.last_rebuilt_index_count = section_update.rebuilt_index_count;
-        self.render_stats.last_visibility_graph_build_count =
-            section_update.visibility_graph_stats.build_count;
-        self.render_stats.last_visibility_graph_total_ms =
-            section_update.visibility_graph_stats.total_ms;
-        self.render_stats.last_visibility_graph_worst_ms =
-            section_update.visibility_graph_stats.worst_ms;
-        self.render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
-        self.render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
-        self.render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
-        self.render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
-        self.render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
+        record_render_section_update_stats(&mut self.render_stats, section_update, upload_report);
     }
 
     fn debug_pane_stats(&self) -> DebugPaneStats {
@@ -2901,6 +3182,27 @@ impl ChunkApp {
             force_fullbright: self.render_options.force_fullbright,
         }
     }
+}
+
+fn record_render_section_update_stats(
+    render_stats: &mut RenderStreamStats,
+    section_update: &RenderSectionCacheUpdate,
+    upload_report: TexturedSectionUploadReport,
+) {
+    render_stats.last_rebuilt_section_count = section_update.rebuilt_section_count();
+    render_stats.last_removed_section_count = section_update.removed_section_count();
+    render_stats.last_rebuilt_vertex_count = section_update.rebuilt_vertex_count;
+    render_stats.last_rebuilt_face_count = section_update.rebuilt_face_count();
+    render_stats.last_rebuilt_index_count = section_update.rebuilt_index_count;
+    render_stats.last_visibility_graph_build_count =
+        section_update.visibility_graph_stats.build_count;
+    render_stats.last_visibility_graph_total_ms = section_update.visibility_graph_stats.total_ms;
+    render_stats.last_visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
+    render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
+    render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
+    render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
+    render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
+    render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
 }
 
 impl ApplicationHandler for ChunkApp {
@@ -3182,15 +3484,8 @@ impl ApplicationHandler for ChunkApp {
                 self.ui.set_scale(gui_scale);
                 let camera = self.spectator.camera(self.runtime.radius_chunks);
                 let render_options = self.render_options;
-                let ui_active = self.ui.is_active();
-                let ui_covers_world = self.ui.covers_world();
-                let mut ui_draw = self.ui.render_draw_list(render_options);
-                if self.debug_visible {
-                    self.ui
-                        .render_debug_pane(&mut ui_draw, &self.debug_pane_stats());
-                }
-                let gui_active = ui_active || self.debug_visible;
-                let mut frame_render_stats = None;
+                let debug_stats = self.debug_visible.then(|| self.debug_pane_stats());
+                let mut render_stats = self.render_stats;
                 let result = {
                     let (Some(surface), Some(depth), Some(draw), Some(gui)) = (
                         &mut self.surface,
@@ -3201,51 +3496,24 @@ impl ApplicationHandler for ChunkApp {
                         return;
                     };
                     surface.render_with(|frame| {
-                        if !ui_covers_world {
-                            let render_view =
-                                camera.render_view(frame.target.size[0], frame.target.size[1]);
-                            let render_target = ChunkRenderTarget::from_frame_target(
-                                frame.target.with_depth(&depth.view),
-                                mclone_render::default_clear_color(),
-                            )?;
-                            let frame_stats = draw.render_with_options(
-                                frame.queue,
-                                frame.encoder,
-                                render_target,
-                                render_view,
-                                render_options,
-                            )?;
-                            frame_render_stats = Some(frame_stats);
-                        }
-                        if gui_active {
-                            gui.render(
-                                frame.device,
-                                frame.queue,
-                                frame.encoder,
-                                frame.target,
-                                [gui_scale.width, gui_scale.height],
-                                &ui_draw,
-                                if ui_covers_world {
-                                    GuiRenderOptions::clear(mclone_render::default_clear_color())
-                                } else {
-                                    GuiRenderOptions::overlay()
-                                },
-                            )?;
-                        }
+                        render_full_frame(
+                            frame,
+                            depth,
+                            draw,
+                            gui,
+                            camera,
+                            render_options,
+                            &self.ui,
+                            debug_stats,
+                            &mut render_stats,
+                        )?;
                         Ok(())
                     })
                 };
-                if let Some(frame_stats) = frame_render_stats {
-                    self.render_stats.drawn_section_count = frame_stats.drawn_section_count;
-                    self.render_stats.drawn_face_count = frame_stats.drawn_face_count();
-                    self.render_stats.drawn_index_count = frame_stats.drawn_index_count;
-                } else if ui_covers_world {
-                    self.render_stats.drawn_section_count = 0;
-                    self.render_stats.drawn_face_count = 0;
-                    self.render_stats.drawn_index_count = 0;
-                }
                 match result {
-                    Ok(SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped) => {}
+                    Ok(SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped) => {
+                        self.render_stats = render_stats;
+                    }
                     Ok(SurfaceFrameStatus::Reconfigured) => self.request_redraw(),
                     Err(err) => {
                         log::error!("render failed: {err:#}");
@@ -3607,6 +3875,63 @@ mod tests {
                 height: 540,
             }
         );
+    }
+
+    #[test]
+    fn cli_parses_full_frame_screenshot_options() {
+        let cli = Cli::parse([
+            "--screenshot".to_owned(),
+            "/tmp/mclone-frame.png".to_owned(),
+            "--width".to_owned(),
+            "960".to_owned(),
+            "--height".to_owned(),
+            "540".to_owned(),
+            "--screenshot-ui".to_owned(),
+            "pause".to_owned(),
+            "--screenshot-debug-pane".to_owned(),
+            "true".to_owned(),
+            "--force-fullbright".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessScreenshot {
+                options: HeadlessScreenshotOptions {
+                    path: PathBuf::from("/tmp/mclone-frame.png"),
+                    width: 960,
+                    height: 540,
+                    scene: SceneOptions::default(),
+                    render_options: TexturedSectionRenderOptions {
+                        force_fullbright: true,
+                        ..TexturedSectionRenderOptions::default()
+                    },
+                    ui: HeadlessScreenshotUi::Pause,
+                    debug_pane: true,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn parse_screenshot_ui_accepts_named_screens() {
+        assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("none".to_owned())).unwrap(),
+            HeadlessScreenshotUi::None
+        );
+        assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("title".to_owned())).unwrap(),
+            HeadlessScreenshotUi::Title
+        );
+        assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("options-title".to_owned())).unwrap(),
+            HeadlessScreenshotUi::OptionsTitle
+        );
+        assert_eq!(
+            parse_screenshot_ui_arg("--screenshot-ui", Some("options".to_owned())).unwrap(),
+            HeadlessScreenshotUi::OptionsPause
+        );
+        assert!(parse_screenshot_ui_arg("--screenshot-ui", Some("bad".to_owned())).is_err());
     }
 
     #[test]
