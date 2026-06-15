@@ -6,6 +6,7 @@ use mclone_server::{
     ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics, MAX_CHUNK_DISTANCE,
     PLAYER_TICKET_LEVEL,
 };
+use mclone_worldgen::levelgen::OverworldFeatureBatchTiming;
 
 const DEFAULT_SEED: i64 = 12_345;
 const DEFAULT_RADIUS_CHUNKS: u32 = 1;
@@ -29,6 +30,7 @@ fn run() -> Result<(), String> {
     let mut steps = Vec::with_capacity(config.steps);
 
     for index in 0..config.steps {
+        let previous_job_count = scheduler.job_count();
         let center = ChunkPos::new(i32::try_from(index).expect("step index exceeded i32"), 0);
         let step_start = Instant::now();
         let apply_start = Instant::now();
@@ -107,6 +109,8 @@ fn run() -> Result<(), String> {
             .iter()
             .filter(|event| matches!(event, ChunkSchedulerEvent::StatusChanged { .. }))
             .count();
+        let (feature_jobs, feature_timing) =
+            feature_timing_since_job_count(&scheduler, previous_job_count);
 
         steps.push(StepReport {
             index,
@@ -128,6 +132,8 @@ fn run() -> Result<(), String> {
             scheduler_events: events.len(),
             client_updates: snapshots + unloads,
             status_events,
+            feature_jobs,
+            feature_timing,
             snapshots,
             unloads,
             metrics: scheduler.metrics(),
@@ -228,6 +234,8 @@ struct StepReport {
     scheduler_events: usize,
     client_updates: usize,
     status_events: usize,
+    feature_jobs: usize,
+    feature_timing: OverworldFeatureBatchTiming,
     snapshots: usize,
     unloads: usize,
     metrics: ChunkSchedulerMetrics,
@@ -401,6 +409,8 @@ impl SmokeReport {
             println!("      \"scheduler_events\": {},", step.scheduler_events);
             println!("      \"client_updates\": {},", step.client_updates);
             println!("      \"status_events\": {},", step.status_events);
+            println!("      \"feature_jobs\": {},", step.feature_jobs);
+            print_timing_json("      ", step.feature_timing, true);
             println!("      \"snapshots\": {},", step.snapshots);
             println!("      \"unloads\": {},", step.unloads);
             print_metrics_json("      ", step.metrics, false);
@@ -467,6 +477,71 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
     println!("{indent}}}{suffix}");
 }
 
+fn print_timing_json(indent: &str, timing: OverworldFeatureBatchTiming, trailing_comma: bool) {
+    println!("{indent}\"feature_timing\": {{");
+    println!(
+        "{indent}  \"total_ms\": {:.3},",
+        micros_to_ms(timing.total_us())
+    );
+    println!(
+        "{indent}  \"seed_dependency_insert_ms\": {:.3},",
+        micros_to_ms(timing.seed_dependency_insert_us)
+    );
+    println!(
+        "{indent}  \"plan_ms\": {:.3},",
+        micros_to_ms(timing.plan_us)
+    );
+    println!(
+        "{indent}  \"dependency_cache_hit_clone_ms\": {:.3},",
+        micros_to_ms(timing.dependency_cache_hit_clone_us)
+    );
+    println!(
+        "{indent}  \"dependency_generate_ms\": {:.3},",
+        micros_to_ms(timing.dependency_generate_us)
+    );
+    println!(
+        "{indent}  \"dependency_insert_clone_ms\": {:.3},",
+        micros_to_ms(timing.dependency_insert_clone_us)
+    );
+    println!(
+        "{indent}  \"dependency_retain_ms\": {:.3},",
+        micros_to_ms(timing.dependency_retain_us)
+    );
+    println!(
+        "{indent}  \"retained_dependency_clone_ms\": {:.3},",
+        micros_to_ms(timing.retained_dependency_clone_us)
+    );
+    println!(
+        "{indent}  \"feature_region_init_ms\": {:.3},",
+        micros_to_ms(timing.feature_region_init_us)
+    );
+    println!(
+        "{indent}  \"feature_decoration_ms\": {:.3},",
+        micros_to_ms(timing.feature_decoration_us)
+    );
+    println!(
+        "{indent}  \"target_extract_ms\": {:.3}",
+        micros_to_ms(timing.target_extract_us)
+    );
+    let suffix = if trailing_comma { "," } else { "" };
+    println!("{indent}}}{suffix}");
+}
+
+fn feature_timing_since_job_count(
+    scheduler: &ChunkScheduler,
+    previous_job_count: usize,
+) -> (usize, OverworldFeatureBatchTiming) {
+    let mut timing = OverworldFeatureBatchTiming::default();
+    let mut jobs = 0;
+    for job in scheduler.jobs().skip(previous_job_count) {
+        if let Some(job_timing) = scheduler.job_timing(job.id) {
+            timing.add_assign(job_timing);
+            jobs += 1;
+        }
+    }
+    (jobs, timing)
+}
+
 fn square_count(radius_chunks: u32) -> Result<usize, String> {
     let width = usize::try_from(radius_chunks)
         .map_err(|_| "radius did not fit in usize".to_owned())?
@@ -490,6 +565,10 @@ fn active_square_count(radius_chunks: u32) -> Result<usize, String> {
 
 fn elapsed_ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1_000.0
+}
+
+fn micros_to_ms(micros: u128) -> f64 {
+    micros as f64 / 1_000.0
 }
 
 fn parse_next<T: std::str::FromStr>(

@@ -1,5 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+
 use crate::biome::OverworldBiomeSource;
 use crate::block::{
     AIR, BEDROCK, GLOW_LICHEN, GeneratedBlockId, RawBlockId, STONE, WATER,
@@ -1294,11 +1297,54 @@ pub struct OverworldFeatureDependencyCacheReport {
     pub retained_dependency_chunks: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct OverworldFeatureBatchTiming {
+    pub seed_dependency_insert_us: u128,
+    pub plan_us: u128,
+    pub dependency_cache_hit_clone_us: u128,
+    pub dependency_generate_us: u128,
+    pub dependency_insert_clone_us: u128,
+    pub dependency_retain_us: u128,
+    pub retained_dependency_clone_us: u128,
+    pub feature_region_init_us: u128,
+    pub feature_decoration_us: u128,
+    pub target_extract_us: u128,
+}
+
+impl OverworldFeatureBatchTiming {
+    pub fn total_us(self) -> u128 {
+        self.seed_dependency_insert_us
+            + self.plan_us
+            + self.dependency_cache_hit_clone_us
+            + self.dependency_generate_us
+            + self.dependency_insert_clone_us
+            + self.dependency_retain_us
+            + self.retained_dependency_clone_us
+            + self.feature_region_init_us
+            + self.feature_decoration_us
+            + self.target_extract_us
+    }
+
+    pub fn add_assign(&mut self, other: Self) {
+        self.seed_dependency_insert_us += other.seed_dependency_insert_us;
+        self.plan_us += other.plan_us;
+        self.dependency_cache_hit_clone_us += other.dependency_cache_hit_clone_us;
+        self.dependency_generate_us += other.dependency_generate_us;
+        self.dependency_insert_clone_us += other.dependency_insert_clone_us;
+        self.dependency_retain_us += other.dependency_retain_us;
+        self.retained_dependency_clone_us += other.retained_dependency_clone_us;
+        self.feature_region_init_us += other.feature_region_init_us;
+        self.feature_decoration_us += other.feature_decoration_us;
+        self.target_extract_us += other.target_extract_us;
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OverworldFeatureBatchResult {
     pub chunks: BTreeMap<ChunkPos, GeneratedChunk>,
     pub retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
     pub cache_report: OverworldFeatureDependencyCacheReport,
+    pub timing: OverworldFeatureBatchTiming,
 }
 
 #[derive(Debug, Default)]
@@ -1340,14 +1386,19 @@ impl OverworldFeatureDependencyCache {
             self.chunks.clear();
         }
 
+        let mut timing = OverworldFeatureBatchTiming::default();
+        let seed_dependency_insert_start = timing_start();
         for dependency in dependencies {
             self.chunks.insert(
                 ChunkPos::new(dependency.chunk_x, dependency.chunk_z),
                 dependency,
             );
         }
+        timing.seed_dependency_insert_us = timing_elapsed_us(seed_dependency_insert_start);
 
+        let plan_start = timing_start();
         let plan = FeatureBatchPlan::new(targets);
+        timing.plan_us = timing_elapsed_us(plan_start);
         let mut cache_report = OverworldFeatureDependencyCacheReport {
             requested_dependency_chunks: plan.dependency_chunks.len(),
             ..OverworldFeatureDependencyCacheReport::default()
@@ -1359,6 +1410,7 @@ impl OverworldFeatureDependencyCache {
                 chunks: BTreeMap::new(),
                 retained_dependencies: self.chunks.clone(),
                 cache_report,
+                timing,
             };
         }
 
@@ -1367,54 +1419,85 @@ impl OverworldFeatureDependencyCache {
         for pos in sorted_chunk_positions_z_major(plan.dependency_chunks.iter().copied()) {
             if let Some(chunk) = self.chunks.get(&pos) {
                 cache_report.cache_hits += 1;
+                let clone_start = timing_start();
                 region_chunks.push(chunk.clone());
+                timing.dependency_cache_hit_clone_us += timing_elapsed_us(clone_start);
                 continue;
             }
 
+            let generate_start = timing_start();
             let chunk = generate_overworld_liquid_carved_buffer_with_biome_source(
                 seed,
                 pos.x,
                 pos.z,
                 biome_source.clone(),
             );
+            timing.dependency_generate_us += timing_elapsed_us(generate_start);
             cache_report.generated_dependency_chunks += 1;
+            let insert_start = timing_start();
             self.chunks.insert(pos, chunk.clone());
             region_chunks.push(chunk);
+            timing.dependency_insert_clone_us += timing_elapsed_us(insert_start);
         }
 
+        let retain_start = timing_start();
         self.chunks
             .retain(|pos, _| plan.dependency_chunks.contains(pos));
+        timing.dependency_retain_us = timing_elapsed_us(retain_start);
         cache_report.retained_dependency_chunks = self.chunks.len();
+        let retained_clone_start = timing_start();
         let retained_dependencies = self.chunks.clone();
+        timing.retained_dependency_clone_us = timing_elapsed_us(retained_clone_start);
 
-        let chunks =
-            generate_overworld_features_chunks_from_plan(seed, &biome_source, plan, region_chunks);
+        let feature_result = generate_overworld_features_chunks_from_plan_timed(
+            seed,
+            &biome_source,
+            plan,
+            region_chunks,
+        );
+        timing.add_assign(feature_result.timing);
         OverworldFeatureBatchResult {
-            chunks,
+            chunks: feature_result.chunks,
             retained_dependencies,
             cache_report,
+            timing,
         }
     }
 }
 
-fn generate_overworld_features_chunks_from_plan(
+#[derive(Debug)]
+struct FeatureBatchChunkResult {
+    chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+    timing: OverworldFeatureBatchTiming,
+}
+
+fn generate_overworld_features_chunks_from_plan_timed(
     seed: i64,
     biome_source: &OverworldBiomeSource,
     plan: FeatureBatchPlan,
     chunks: Vec<MutableChunkBlockBuffer>,
-) -> BTreeMap<ChunkPos, GeneratedChunk> {
+) -> FeatureBatchChunkResult {
     if plan.targets.is_empty() {
-        return BTreeMap::new();
+        return FeatureBatchChunkResult {
+            chunks: BTreeMap::new(),
+            timing: OverworldFeatureBatchTiming::default(),
+        };
     }
 
+    let mut timing = OverworldFeatureBatchTiming::default();
     let first_target = *plan.targets.iter().next().expect("non-empty targets");
+    let region_init_start = timing_start();
     let mut region = FeatureRegion::new(first_target.x, first_target.z, chunks);
+    timing.feature_region_init_us = timing_elapsed_us(region_init_start);
 
+    let decoration_start = timing_start();
     for center in plan.ordered_feature_centers() {
         region.set_center(center.x, center.z);
         apply_overworld_biome_decoration_to_region(seed, biome_source, &mut region);
     }
+    timing.feature_decoration_us = timing_elapsed_us(decoration_start);
 
+    let target_extract_start = timing_start();
     let mut generated = BTreeMap::new();
     for target in plan.targets {
         let chunk = region.remove_chunk(target.x, target.z).unwrap_or_else(|| {
@@ -1425,7 +1508,31 @@ fn generate_overworld_features_chunks_from_plan(
         });
         generated.insert(target, GeneratedChunk::from_mutable_buffer(chunk));
     }
-    generated
+    timing.target_extract_us = timing_elapsed_us(target_extract_start);
+    FeatureBatchChunkResult {
+        chunks: generated,
+        timing,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn timing_start() -> Option<Instant> {
+    Some(Instant::now())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn timing_start() -> Option<()> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn timing_elapsed_us(start: Option<Instant>) -> u128 {
+    start.map_or(0, |start| start.elapsed().as_micros())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn timing_elapsed_us(_start: Option<()>) -> u128 {
+    0
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

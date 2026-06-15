@@ -40,12 +40,14 @@ Key Java facts for this slice:
 - `ChunkSchedulerMetrics` exposes ticket, holder, visibility, dirty, job, and dependency-reuse counters.
 - Tests now assert direct ticket count, propagated active holder count, client-visible count, dependency buffer count, forced retention, stale ticket expiry, and adjacent feature-job dependency seeding.
 - `scheduler_movement_smoke` now runs a deterministic adjacent chunk-interest path, validates scheduler invariants, and prints JSON metrics/timing.
+- Feature-generation jobs now report phase timings for dependency seeding, dependency generation, retained dependency cloning, feature-region setup, decoration, and target extraction.
+- `FeatureRegion` stores dependency chunks in an indexed rectangle instead of a `BTreeMap`, and hot decoration uses cached immutable biome feature tables instead of rebuilding feature vectors for each center.
 
 ## Current Limits
 
 - Propagated non-direct holders are treated as clean lower-status dependency holders. Native does not yet generate Java's full feature-status halo for `level 34` chunks.
 - The clean dependency buffer is still stored as a worldgen `MutableChunkBlockBuffer`, not a long-lived protochunk type with explicit status transitions.
-- Moving scheduler-owned buffers through the worker currently clones chunk buffers. This is acceptable for correctness scaffolding, but performance work should replace it with shared/owned transfer accounting once the shape stabilizes.
+- Moving scheduler-owned buffers through the worker currently clones chunk buffers. Current profiling shows this is not the first bottleneck for radius-1 movement, but performance work should still replace it with shared/owned transfer accounting once the shape stabilizes.
 - Pending unloads are still immediate for non-visible chunks when no propagated ticket keeps them active. Java's delayed `pendingUnloads` queue remains unported.
 - The smoke records split timing, but no fixed perf budget is enforced yet. Use release mode for performance comparisons.
 
@@ -83,6 +85,7 @@ Timing fields:
 - `worker_wait_ms`: wall-clock wait after `apply_interest`, including poll sleeps and poll calls.
 - `non_poll_wait_ms`: wall-clock wait minus time spent inside `poll()`.
 - `max_main_thread_call_ms`: largest single synchronous scheduler call in the step.
+- `feature_timing`: worker-side feature-generation phase timings. `feature_decoration_ms` is the active biome feature placement loop; `dependency_generate_ms` is lower-status carved dependency generation; clone/retain fields measure current buffer-copy overhead.
 
 Observed debug-mode baseline on this host with default `poll_mode=completion`:
 
@@ -90,10 +93,10 @@ Observed debug-mode baseline on this host with default `poll_mode=completion`:
 steps: 3
 radius: 1
 completion_wait_ms: 30,000 timeout cap, zero observed timeouts
-total_elapsed_ms: ~25,033
-step 0 elapsed_ms: ~14,395, completion_wait_ms: ~14,335, main_thread_scheduler_ms: ~60.739, polls: 1, snapshots 9, unloads 0
-step 1 elapsed_ms: ~5,302, completion_wait_ms: ~5,282, main_thread_scheduler_ms: ~20.294, polls: 1, snapshots 3, unloads 3
-step 2 elapsed_ms: ~5,329, completion_wait_ms: ~5,309, main_thread_scheduler_ms: ~19.174, polls: 1, snapshots 3, unloads 3
+total_elapsed_ms: ~25,037
+step 0 elapsed_ms: ~14,482, feature_total_ms: ~14,427, dependency_generate_ms: ~5,237, feature_decoration_ms: ~9,184, polls: 1, snapshots 9, unloads 0
+step 1 elapsed_ms: ~5,277, feature_total_ms: ~5,254, dependency_generate_ms: ~254, feature_decoration_ms: ~4,995, polls: 1, snapshots 3, unloads 3
+step 2 elapsed_ms: ~5,271, feature_total_ms: ~5,250, dependency_generate_ms: ~256, feature_decoration_ms: ~4,990, polls: 1, snapshots 3, unloads 3
 final metrics:
   active_ticket_chunks: 841
   client_visible_chunks: 9
@@ -109,10 +112,10 @@ Observed release-mode baseline on this host with default `poll_mode=completion`:
 steps: 3
 radius: 1
 completion_wait_ms: 30,000 timeout cap, zero observed timeouts
-total_elapsed_ms: ~925
-step 0 elapsed_ms: ~589, completion_wait_ms: ~586, main_thread_scheduler_ms: ~2.815, polls: 1, snapshots 9, unloads 0
-step 1 elapsed_ms: ~170, completion_wait_ms: ~168, main_thread_scheduler_ms: ~1.946, polls: 1, snapshots 3, unloads 3
-step 2 elapsed_ms: ~165, completion_wait_ms: ~164, main_thread_scheduler_ms: ~1.774, polls: 1, snapshots 3, unloads 3
+total_elapsed_ms: ~876
+step 0 elapsed_ms: ~583, feature_total_ms: ~575, dependency_generate_ms: ~334, feature_decoration_ms: ~237, polls: 1, snapshots 9, unloads 0
+step 1 elapsed_ms: ~147, feature_total_ms: ~145, dependency_generate_ms: ~14.6, feature_decoration_ms: ~128, polls: 1, snapshots 3, unloads 3
+step 2 elapsed_ms: ~146, feature_total_ms: ~144, dependency_generate_ms: ~14.7, feature_decoration_ms: ~128, polls: 1, snapshots 3, unloads 3
 final metrics:
   active_ticket_chunks: 841
   client_visible_chunks: 9
@@ -122,7 +125,9 @@ final metrics:
   total_dependency_cache_misses: 483
 ```
 
-The release baseline suggests adjacent movement is primarily worker throughput / scheduler-idle latency, not active scheduler CPU work: default adjacent steps take about `165-170ms` end-to-end, while synchronous scheduler work is about `1.8-2.0ms`. In completion mode the smoke blocks while waiting for that worker result; a renderer/tick loop should keep using nonblocking `poll()` or event-loop wakeups instead of waiting on the render thread.
+The release baseline suggests adjacent movement is primarily worker throughput / scheduler-idle latency, not active scheduler CPU work: default adjacent steps take about `146ms` end-to-end, while synchronous scheduler work is about `1.5ms`. In completion mode the smoke blocks while waiting for that worker result; a renderer/tick loop should keep using nonblocking `poll()` or event-loop wakeups instead of waiting on the render thread.
+
+The worker profile says the main adjacent-step bottleneck is actual biome feature decoration (`~128ms`). Dependency generation for the new strip is second (`~15ms`). Retained dependency cloning and seeded cache-hit cloning are below `2ms` combined for the adjacent movement path on this host.
 
 The old sleep-poll lane is still available for comparison:
 
@@ -142,7 +147,8 @@ On this host it kept similar end-to-end latency (`~910ms` total), but burned cal
 
 ## Next Implementation Steps
 
-1. Replace per-job dependency buffer cloning with a cheaper ownership/transfer strategy or an `Arc`-backed clean dependency store if profiling confirms it is material.
+1. Split feature decoration timing by `DecorationStep` / feature family so the remaining `~128ms` adjacent-step decoration cost points at ores, vegetation, lakes, springs, or top-layer work instead of one opaque bucket.
 2. Introduce an explicit protochunk/dependency-holder type so lower-status holder data is not stored as ad hoc worldgen buffers.
-3. Add delayed pending-unload processing so save/unload work can be bounded per tick.
-4. Decide whether to model Java's full `level 34 -> FEATURES` propagated halo before structures, or keep the MVP scoped to direct feature targets plus lower-status dependency holders.
+3. Replace per-job dependency buffer cloning with a cheaper ownership/transfer strategy if profiling changes or larger view-distance movement makes it material.
+4. Add delayed pending-unload processing so save/unload work can be bounded per tick.
+5. Decide whether to model Java's full `level 34 -> FEATURES` propagated halo before structures, or keep the MVP scoped to direct feature targets plus lower-status dependency holders.

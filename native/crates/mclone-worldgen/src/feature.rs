@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::OnceLock};
+use std::sync::OnceLock;
 
 use crate::biome::{BiomeDefinition, OverworldBiomeSource};
 use crate::block::{
@@ -261,7 +261,10 @@ pub struct FeatureRegion {
     center_chunk_z: i32,
     dependency_radius: i32,
     write_radius_cutoff: i32,
-    chunks: BTreeMap<(i32, i32), MutableChunkBlockBuffer>,
+    chunk_min_x: i32,
+    chunk_min_z: i32,
+    chunk_width: usize,
+    chunks: Vec<Option<MutableChunkBlockBuffer>>,
     glow_lichen_spread_directions: [Direction; 6],
     metrics: FeatureRegionMetrics,
 }
@@ -300,16 +303,54 @@ impl FeatureRegion {
             );
         }
 
-        let chunks = chunks
-            .into_iter()
-            .map(|chunk| ((chunk.chunk_x, chunk.chunk_z), chunk))
-            .collect();
+        let chunks = chunks.into_iter().collect::<Vec<_>>();
+        let chunk_min_x = chunks
+            .iter()
+            .map(|chunk| chunk.chunk_x)
+            .min()
+            .unwrap_or(center_chunk_x);
+        let chunk_max_x = chunks
+            .iter()
+            .map(|chunk| chunk.chunk_x)
+            .max()
+            .unwrap_or(center_chunk_x);
+        let chunk_min_z = chunks
+            .iter()
+            .map(|chunk| chunk.chunk_z)
+            .min()
+            .unwrap_or(center_chunk_z);
+        let chunk_max_z = chunks
+            .iter()
+            .map(|chunk| chunk.chunk_z)
+            .max()
+            .unwrap_or(center_chunk_z);
+        let chunk_width = usize::try_from(chunk_max_x - chunk_min_x + 1)
+            .expect("feature region chunk width must fit usize");
+        let chunk_height = usize::try_from(chunk_max_z - chunk_min_z + 1)
+            .expect("feature region chunk height must fit usize");
+        let mut chunk_slots = Vec::with_capacity(chunk_width * chunk_height);
+        chunk_slots.resize_with(chunk_width * chunk_height, || None);
+        for chunk in chunks {
+            let index = region_chunk_index(
+                chunk_min_x,
+                chunk_min_z,
+                chunk_width,
+                chunk.chunk_x,
+                chunk.chunk_z,
+            )
+            .expect("chunk bounds were computed from provided chunks");
+            chunk_slots[index] = Some(chunk);
+        }
+
         Self {
             center_chunk_x,
             center_chunk_z,
             dependency_radius,
             write_radius_cutoff,
-            chunks,
+            chunk_min_x,
+            chunk_min_z,
+            chunk_width,
+            chunks: chunk_slots,
             // Java mutates MultifaceBlock.DIRECTIONS globally while spawn chunks generate in
             // parallel. This order matches the committed vanilla scheduler fixture at the start
             // of the native 3x3 feature replay.
@@ -343,7 +384,7 @@ impl FeatureRegion {
     }
 
     pub fn chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&MutableChunkBlockBuffer> {
-        self.chunks.get(&(chunk_x, chunk_z))
+        self.chunk_slot(chunk_x, chunk_z).and_then(Option::as_ref)
     }
 
     pub fn chunk_mut(
@@ -351,35 +392,31 @@ impl FeatureRegion {
         chunk_x: i32,
         chunk_z: i32,
     ) -> Option<&mut MutableChunkBlockBuffer> {
-        self.chunks.get_mut(&(chunk_x, chunk_z))
+        self.chunk_slot_mut(chunk_x, chunk_z)
+            .and_then(Option::as_mut)
     }
 
     pub fn into_chunk(mut self, chunk_x: i32, chunk_z: i32) -> Option<MutableChunkBlockBuffer> {
-        self.chunks.remove(&(chunk_x, chunk_z))
+        self.remove_chunk(chunk_x, chunk_z)
     }
 
     pub fn remove_chunk(&mut self, chunk_x: i32, chunk_z: i32) -> Option<MutableChunkBlockBuffer> {
-        self.chunks.remove(&(chunk_x, chunk_z))
+        self.chunk_slot_mut(chunk_x, chunk_z).and_then(Option::take)
     }
 
     fn get_chunk(&self, chunk_x: i32, chunk_z: i32) -> &MutableChunkBlockBuffer {
         self.ensure_within_dependency_window(chunk_x, chunk_z);
-        self.chunks.get(&(chunk_x, chunk_z)).unwrap_or_else(|| {
-            panic!(
-                "feature region missing dependency chunk ({chunk_x}, {chunk_z}) for center ({}, {})",
-                self.center_chunk_x, self.center_chunk_z
-            )
-        })
+        self.chunk(chunk_x, chunk_z)
+            .unwrap_or_else(|| self.missing_dependency_chunk(chunk_x, chunk_z))
     }
 
     fn get_chunk_mut(&mut self, chunk_x: i32, chunk_z: i32) -> &mut MutableChunkBlockBuffer {
         self.ensure_within_dependency_window(chunk_x, chunk_z);
-        self.chunks.get_mut(&(chunk_x, chunk_z)).unwrap_or_else(|| {
-            panic!(
-                "feature region missing dependency chunk ({chunk_x}, {chunk_z}) for center ({}, {})",
-                self.center_chunk_x, self.center_chunk_z
-            )
-        })
+        if self.chunk(chunk_x, chunk_z).is_none() {
+            self.missing_dependency_chunk(chunk_x, chunk_z);
+        }
+        self.chunk_mut(chunk_x, chunk_z)
+            .expect("dependency chunk was checked above")
     }
 
     fn ensure_within_dependency_window(&self, chunk_x: i32, chunk_z: i32) {
@@ -396,6 +433,38 @@ impl FeatureRegion {
     fn can_write_chunk(&self, chunk_x: i32, chunk_z: i32) -> bool {
         (chunk_x - self.center_chunk_x).abs() <= self.write_radius_cutoff
             && (chunk_z - self.center_chunk_z).abs() <= self.write_radius_cutoff
+    }
+
+    fn chunk_slot(&self, chunk_x: i32, chunk_z: i32) -> Option<&Option<MutableChunkBlockBuffer>> {
+        self.chunk_index(chunk_x, chunk_z)
+            .and_then(|index| self.chunks.get(index))
+    }
+
+    fn chunk_slot_mut(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+    ) -> Option<&mut Option<MutableChunkBlockBuffer>> {
+        self.chunk_index(chunk_x, chunk_z)
+            .and_then(|index| self.chunks.get_mut(index))
+    }
+
+    fn chunk_index(&self, chunk_x: i32, chunk_z: i32) -> Option<usize> {
+        region_chunk_index(
+            self.chunk_min_x,
+            self.chunk_min_z,
+            self.chunk_width,
+            chunk_x,
+            chunk_z,
+        )
+        .filter(|index| *index < self.chunks.len())
+    }
+
+    fn missing_dependency_chunk(&self, chunk_x: i32, chunk_z: i32) -> ! {
+        panic!(
+            "feature region missing dependency chunk ({chunk_x}, {chunk_z}) for center ({}, {})",
+            self.center_chunk_x, self.center_chunk_z
+        )
     }
 }
 
@@ -420,7 +489,8 @@ impl FeatureWorld for FeatureRegion {
 
     fn non_air_block_count(&self) -> usize {
         self.chunks
-            .values()
+            .iter()
+            .filter_map(Option::as_ref)
             .map(MutableChunkBlockBuffer::non_air_block_count)
             .sum()
     }
@@ -1400,7 +1470,7 @@ fn apply_overworld_biome_features_with_biomes<W: FeatureWorld, B: FeatureBiomeRe
     let min_block_x = world.center_chunk_x() * CHUNK_WIDTH;
     let min_block_z = world.center_chunk_z() * CHUNK_WIDTH;
     let origin = BlockPos::new(min_block_x, world.min_y(), min_block_z);
-    let features = overworld_features_for_biome(biome);
+    let features = overworld_features_for_biome_cached(biome);
     let mut random = WorldgenRandom::default();
     let decoration_seed = random.set_decoration_seed(seed, min_block_x, min_block_z);
     let mut placed_features = 0;
@@ -1428,51 +1498,144 @@ fn apply_overworld_biome_features_with_biomes<W: FeatureWorld, B: FeatureBiomeRe
 }
 
 pub fn overworld_features_for_biome(biome: BiomeDefinition) -> Vec<PlacedFeature> {
-    let mut biome_features = match biome.key() {
-        "minecraft:plains" | "minecraft:sunflower_plains" => plains_features(),
+    overworld_features_for_biome_cached(biome).to_vec()
+}
+
+fn overworld_features_for_biome_cached(biome: BiomeDefinition) -> &'static [PlacedFeature] {
+    match biome.key() {
+        "minecraft:plains" | "minecraft:sunflower_plains" => plains_feature_table(),
         "minecraft:forest" | "minecraft:wooded_hills" | "minecraft:flower_forest" => {
-            forest_features()
+            forest_feature_table()
         }
         "minecraft:birch_forest"
         | "minecraft:birch_forest_hills"
         | "minecraft:tall_birch_forest"
-        | "minecraft:tall_birch_hills" => birch_forest_features(),
+        | "minecraft:tall_birch_hills" => birch_forest_feature_table(),
         "minecraft:taiga"
         | "minecraft:taiga_hills"
         | "minecraft:taiga_mountains"
         | "minecraft:giant_tree_taiga"
         | "minecraft:giant_tree_taiga_hills"
         | "minecraft:giant_spruce_taiga"
-        | "minecraft:giant_spruce_taiga_hills" => taiga_features(),
+        | "minecraft:giant_spruce_taiga_hills" => taiga_feature_table(),
         "minecraft:snowy_taiga"
         | "minecraft:snowy_taiga_hills"
         | "minecraft:snowy_taiga_mountains"
         | "minecraft:snowy_tundra"
-        | "minecraft:snowy_mountains" => snowy_features(),
+        | "minecraft:snowy_mountains" => snowy_feature_table(),
         "minecraft:mountains"
         | "minecraft:wooded_mountains"
         | "minecraft:mountain_edge"
         | "minecraft:gravelly_mountains"
-        | "minecraft:modified_gravelly_mountains" => mountain_features(),
+        | "minecraft:modified_gravelly_mountains" => mountain_feature_table(),
         "minecraft:desert" | "minecraft:desert_hills" | "minecraft:desert_lakes" => {
-            desert_features()
+            desert_feature_table()
         }
         "minecraft:badlands"
         | "minecraft:badlands_plateau"
         | "minecraft:wooded_badlands_plateau"
         | "minecraft:modified_badlands_plateau"
         | "minecraft:modified_wooded_badlands_plateau"
-        | "minecraft:eroded_badlands" => badlands_features(),
-        "minecraft:swamp" | "minecraft:swamp_hills" => swamp_features(),
-        "minecraft:mushroom_fields" | "minecraft:mushroom_field_shore" => mushroom_field_features(),
-        _ => default_land_features(),
-    };
-    let mut features = default_lake_features(biome.key());
+        | "minecraft:eroded_badlands" => badlands_feature_table(),
+        "minecraft:swamp" | "minecraft:swamp_hills" => swamp_feature_table(),
+        "minecraft:mushroom_fields" | "minecraft:mushroom_field_shore" => {
+            mushroom_field_feature_table()
+        }
+        _ => default_land_feature_table(),
+    }
+}
+
+fn build_overworld_feature_table(
+    biome_key: &str,
+    mut biome_features: Vec<PlacedFeature>,
+) -> Vec<PlacedFeature> {
+    let mut features = default_lake_features(biome_key);
     features.extend(default_underground_variety_features());
     features.extend(default_ore_features());
     features.append(&mut biome_features);
     features.extend(default_top_layer_features());
     features
+}
+
+fn plains_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:plains", plains_features()))
+        .as_slice()
+}
+
+fn forest_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:forest", forest_features()))
+        .as_slice()
+}
+
+fn birch_forest_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:birch_forest", birch_forest_features())
+        })
+        .as_slice()
+}
+
+fn taiga_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:taiga", taiga_features()))
+        .as_slice()
+}
+
+fn snowy_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:snowy_taiga", snowy_features()))
+        .as_slice()
+}
+
+fn mountain_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:mountains", mountain_features()))
+        .as_slice()
+}
+
+fn desert_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:desert", desert_features()))
+        .as_slice()
+}
+
+fn badlands_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:badlands", badlands_features()))
+        .as_slice()
+}
+
+fn swamp_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:swamp", swamp_features()))
+        .as_slice()
+}
+
+fn mushroom_field_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| {
+            build_overworld_feature_table("minecraft:mushroom_fields", mushroom_field_features())
+        })
+        .as_slice()
+}
+
+fn default_land_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| build_overworld_feature_table("minecraft:plains", default_land_features()))
+        .as_slice()
 }
 
 fn chunk_primary_biome(
@@ -3267,6 +3430,20 @@ fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool
 
 fn block_to_chunk_coord(block: i32) -> i32 {
     block.div_euclid(CHUNK_WIDTH)
+}
+
+fn region_chunk_index(
+    min_chunk_x: i32,
+    min_chunk_z: i32,
+    chunk_width: usize,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> Option<usize> {
+    let local_x = usize::try_from(chunk_x.checked_sub(min_chunk_x)?).ok()?;
+    let local_z = usize::try_from(chunk_z.checked_sub(min_chunk_z)?).ok()?;
+    local_z
+        .checked_mul(chunk_width)
+        .and_then(|row| row.checked_add(local_x))
 }
 
 fn ceil_f32(value: f32) -> i32 {

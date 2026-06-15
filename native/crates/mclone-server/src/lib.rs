@@ -15,8 +15,8 @@ use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
 use mclone_worldgen::feature::{FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
 use mclone_worldgen::levelgen::{
-    GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureDependencyCache,
-    OverworldFeatureDependencyCacheReport,
+    GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureBatchTiming,
+    OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport,
 };
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
@@ -545,6 +545,7 @@ pub struct ChunkScheduler {
     holders: BTreeMap<ChunkPos, ChunkHolder>,
     distance_manager: ChunkDistanceManager,
     jobs: BTreeMap<ChunkJobId, ChunkStatusJob>,
+    job_timings: BTreeMap<ChunkJobId, OverworldFeatureBatchTiming>,
     worldgen_mailbox: WorldgenMailbox,
     dirty_chunks: BTreeSet<ChunkPos>,
     next_job_id: u64,
@@ -563,6 +564,7 @@ impl ChunkScheduler {
             holders: BTreeMap::new(),
             distance_manager: ChunkDistanceManager::new(),
             jobs: BTreeMap::new(),
+            job_timings: BTreeMap::new(),
             worldgen_mailbox: WorldgenMailbox::new(),
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
@@ -726,6 +728,10 @@ impl ChunkScheduler {
 
     pub fn jobs(&self) -> impl Iterator<Item = &ChunkStatusJob> {
         self.jobs.values()
+    }
+
+    pub fn job_timing(&self, id: ChunkJobId) -> Option<OverworldFeatureBatchTiming> {
+        self.job_timings.get(&id).copied()
     }
 
     pub fn job_count(&self) -> usize {
@@ -1039,7 +1045,7 @@ impl ChunkScheduler {
             }
         }
 
-        self.mark_job_complete(completed.job_id, completed.cache_report);
+        self.mark_job_complete(completed.job_id, completed.cache_report, completed.timing);
         Ok(events)
     }
 
@@ -1083,6 +1089,7 @@ impl ChunkScheduler {
         &mut self,
         id: ChunkJobId,
         cache_report: OverworldFeatureDependencyCacheReport,
+        timing: OverworldFeatureBatchTiming,
     ) {
         let job = self
             .jobs
@@ -1092,6 +1099,7 @@ impl ChunkScheduler {
         job.dependency_cache_misses = cache_report.generated_dependency_chunks;
         job.retained_dependency_chunks = cache_report.retained_dependency_chunks;
         job.state = ChunkJobState::Complete;
+        self.job_timings.insert(id, timing);
     }
 
     fn load_stored_snapshot(
@@ -1186,6 +1194,7 @@ struct WorldgenCompletedJob {
     generated_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
     retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
     cache_report: OverworldFeatureDependencyCacheReport,
+    timing: OverworldFeatureBatchTiming,
 }
 
 struct WorldgenMailbox {
@@ -1267,6 +1276,7 @@ impl WorldgenMailboxBackend {
             generated_chunks: result.chunks,
             retained_dependencies: result.retained_dependencies,
             cache_report: result.cache_report,
+            timing: result.timing,
         });
     }
 
@@ -1326,6 +1336,7 @@ impl WorldgenMailboxBackend {
                                     generated_chunks: result.chunks,
                                     retained_dependencies: result.retained_dependencies,
                                     cache_report: result.cache_report,
+                                    timing: result.timing,
                                 })
                                 .is_err()
                             {
