@@ -212,6 +212,7 @@ impl<'a> ChunkRenderTarget<'a> {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TexturedSectionRenderStats {
+    pub section_occlusion_culling: bool,
     pub loaded_section_count: usize,
     pub drawn_section_count: usize,
     pub frustum_section_count: usize,
@@ -221,6 +222,19 @@ pub struct TexturedSectionRenderStats {
     pub drawn_index_count: u32,
     pub frustum_index_count: u32,
     pub graph_culled_index_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TexturedSectionRenderOptions {
+    pub section_occlusion_culling: bool,
+}
+
+impl Default for TexturedSectionRenderOptions {
+    fn default() -> Self {
+        Self {
+            section_occlusion_culling: true,
+        }
+    }
 }
 
 impl TexturedSectionRenderStats {
@@ -259,6 +273,18 @@ pub fn textured_section_visibility_stats(
     sections: &[TexturedRenderSectionMesh],
     render_view: ChunkRenderView,
 ) -> TexturedSectionRenderStats {
+    textured_section_visibility_stats_with_options(
+        sections,
+        render_view,
+        TexturedSectionRenderOptions::default(),
+    )
+}
+
+pub fn textured_section_visibility_stats_with_options(
+    sections: &[TexturedRenderSectionMesh],
+    render_view: ChunkRenderView,
+    options: TexturedSectionRenderOptions,
+) -> TexturedSectionRenderStats {
     let records = sections
         .iter()
         .map(|section| {
@@ -272,7 +298,7 @@ pub fn textured_section_visibility_stats(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    cull_textured_sections(&records, render_view).stats
+    cull_textured_sections(&records, render_view, options).stats
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -325,9 +351,11 @@ impl RenderSectionTraversalInfo {
 fn cull_textured_sections(
     records: &BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
     render_view: ChunkRenderView,
+    options: TexturedSectionRenderOptions,
 ) -> TexturedSectionCullingResult {
     let frustum = ClipFrustum::from_render_view(render_view);
     let mut stats = TexturedSectionRenderStats {
+        section_occlusion_culling: options.section_occlusion_culling,
         loaded_section_count: records.values().filter(|record| record.drawable).count(),
         loaded_index_count: records
             .values()
@@ -346,6 +374,15 @@ fn cull_textured_sections(
                 stats.frustum_index_count += record.index_count;
             }
         }
+    }
+
+    if !options.section_occlusion_culling {
+        stats.drawn_section_count = stats.frustum_section_count;
+        stats.drawn_index_count = stats.frustum_index_count;
+        return TexturedSectionCullingResult {
+            stats,
+            drawn_keys: frustum_keys,
+        };
     }
 
     let Some(start_key) = render_section_key_containing(render_view.camera_position) else {
@@ -1217,6 +1254,23 @@ impl TexturedSectionDrawResources {
         target: ChunkRenderTarget<'_>,
         render_view: ChunkRenderView,
     ) -> Result<TexturedSectionRenderStats> {
+        self.render_with_options(
+            queue,
+            encoder,
+            target,
+            render_view,
+            TexturedSectionRenderOptions::default(),
+        )
+    }
+
+    pub fn render_with_options(
+        &self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+    ) -> Result<TexturedSectionRenderStats> {
         let records = self
             .visibility_sections
             .iter()
@@ -1232,7 +1286,7 @@ impl TexturedSectionDrawResources {
                 )
             })
             .collect::<BTreeMap<_, _>>();
-        let culling = cull_textured_sections(&records, render_view);
+        let culling = cull_textured_sections(&records, render_view, options);
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
@@ -1477,6 +1531,49 @@ mod tests {
         assert_eq!(stats.drawn_section_count, 2);
         assert_eq!(stats.graph_culled_section_count, 1);
         assert_eq!(stats.graph_culled_index_count, 6);
+    }
+
+    #[test]
+    fn textured_section_visibility_stats_can_disable_section_occlusion() {
+        let mut wall_visibility = VisibilitySet::all_visible();
+        wall_visibility.set(SectionFace::West, SectionFace::East, false);
+        let sections = vec![
+            fake_section(
+                RenderSectionKey::new(0, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(RenderSectionKey::new(1, 0, 0), 6, wall_visibility),
+            fake_section(
+                RenderSectionKey::new(2, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+        ];
+        let camera = ChunkCamera {
+            eye: [8.0, 8.0, 8.0],
+            target: [48.0, 8.0, 8.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 90.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 200.0,
+        };
+
+        let stats = textured_section_visibility_stats_with_options(
+            &sections,
+            camera.render_view(800, 600),
+            TexturedSectionRenderOptions {
+                section_occlusion_culling: false,
+            },
+        );
+
+        assert!(!stats.section_occlusion_culling);
+        assert!(!stats.graph_cull_enabled);
+        assert_eq!(stats.frustum_section_count, 3);
+        assert_eq!(stats.drawn_section_count, stats.frustum_section_count);
+        assert_eq!(stats.graph_culled_section_count, 0);
+        assert_eq!(stats.drawn_index_count, stats.frustum_index_count);
+        assert_eq!(stats.graph_culled_index_count, 0);
     }
 
     #[test]

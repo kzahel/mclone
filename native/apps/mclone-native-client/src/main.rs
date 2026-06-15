@@ -15,20 +15,22 @@ use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT,
 };
 use mclone_mesh::{
-    RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog, TexturedRenderSectionMesh,
-    build_textured_render_sections, build_textured_render_sections_for_chunk_set,
-    quad_face_count_from_indices,
+    RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog,
+    TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, VisibilityGraphBuildStats,
+    build_textured_render_sections_for_chunk_set_with_stats,
+    build_textured_render_sections_with_stats, quad_face_count_from_indices,
 };
 use mclone_net::{LocalTransport, request_server_updates};
 use mclone_protocol::{ChunkInterest, ServerUpdate};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
-    TexturedSectionDrawResources, TexturedSectionUploadReport, textured_section_visibility_stats,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
+    textured_section_visibility_stats_with_options,
 };
 use mclone_render::headless::{
     HeadlessChunkOptions, HeadlessClearOptions, HeadlessTimedemoOptions,
     run_headless_textured_sections_timedemo, write_headless_clear_png,
-    write_headless_textured_sections_png,
+    write_headless_textured_sections_png_with_options,
 };
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_server::IntegratedServer;
@@ -84,9 +86,10 @@ fn main() -> Result<()> {
             width,
             height,
             scene,
+            render_options,
         } => {
             let scene_mesh = build_scene_textured_sections(&scene)?;
-            let report = write_headless_textured_sections_png(
+            let report = write_headless_textured_sections_png_with_options(
                 HeadlessChunkOptions {
                     path,
                     width,
@@ -100,6 +103,7 @@ fn main() -> Result<()> {
                 },
                 &scene_mesh.sections,
                 scene_mesh.atlas.as_upload(),
+                render_options,
             )?;
             println!(
                 "headless textured sections saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
@@ -117,10 +121,17 @@ fn main() -> Result<()> {
             width,
             height,
             scene,
+            render_options,
         } => {
             let scene_mesh = build_scene_textured_sections(&scene)?;
-            let reports =
-                write_headless_chunk_scenarios(&directory, width, height, &scene, &scene_mesh)?;
+            let reports = write_headless_chunk_scenarios(
+                &directory,
+                width,
+                height,
+                &scene,
+                &scene_mesh,
+                render_options,
+            )?;
             for report in reports {
                 println!(
                     "headless textured scenario saved to {} ({}x{}, {} bytes, {} vertices, {} indices)",
@@ -146,7 +157,10 @@ fn main() -> Result<()> {
             report.print_json();
             Ok(())
         }
-        Cli::Window { scene } => run_window(scene),
+        Cli::Window {
+            scene,
+            render_options,
+        } => run_window(scene, render_options),
     }
 }
 
@@ -162,6 +176,7 @@ struct SceneOptions {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct MovementPerfOptions {
     scene: SceneOptions,
+    render_options: TexturedSectionRenderOptions,
     width: u32,
     height: u32,
     steps: usize,
@@ -171,6 +186,7 @@ struct MovementPerfOptions {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct TimedemoOptions {
     scene: SceneOptions,
+    render_options: TexturedSectionRenderOptions,
     width: u32,
     height: u32,
     frames: usize,
@@ -181,6 +197,7 @@ impl Default for MovementPerfOptions {
     fn default() -> Self {
         Self {
             scene: SceneOptions::default(),
+            render_options: TexturedSectionRenderOptions::default(),
             width: 1280,
             height: 720,
             steps: DEFAULT_MOVEMENT_PERF_STEPS,
@@ -193,6 +210,7 @@ impl Default for TimedemoOptions {
     fn default() -> Self {
         Self {
             scene: SceneOptions::default(),
+            render_options: TexturedSectionRenderOptions::default(),
             width: 1280,
             height: 720,
             frames: DEFAULT_TIMEDEMO_FRAMES,
@@ -217,6 +235,7 @@ impl Default for SceneOptions {
 enum Cli {
     Window {
         scene: SceneOptions,
+        render_options: TexturedSectionRenderOptions,
     },
     HeadlessClear {
         path: PathBuf,
@@ -228,12 +247,14 @@ enum Cli {
         width: u32,
         height: u32,
         scene: SceneOptions,
+        render_options: TexturedSectionRenderOptions,
     },
     HeadlessChunkScenarios {
         directory: PathBuf,
         width: u32,
         height: u32,
         scene: SceneOptions,
+        render_options: TexturedSectionRenderOptions,
     },
     MovementPerf {
         options: MovementPerfOptions,
@@ -256,6 +277,7 @@ impl Cli {
         let mut width = None;
         let mut height = None;
         let mut scene = SceneOptions::default();
+        let mut render_options = TexturedSectionRenderOptions::default();
         let mut movement_perf = false;
         let mut timedemo = false;
         let mut movement_steps = DEFAULT_MOVEMENT_PERF_STEPS;
@@ -325,6 +347,16 @@ impl Cli {
                     scene.remote_addr =
                         Some(args.next().context("--remote-addr requires HOST:PORT")?);
                 }
+                "--section-occlusion" => {
+                    render_options.section_occlusion_culling =
+                        parse_bool_arg("--section-occlusion", args.next())?;
+                }
+                "--disable-section-occlusion" => {
+                    render_options.section_occlusion_culling = false;
+                }
+                "--enable-section-occlusion" => {
+                    render_options.section_occlusion_culling = true;
+                }
                 "--movement-steps" => {
                     movement_perf = true;
                     movement_steps = parse_movement_steps_arg("--movement-steps", args.next())?;
@@ -363,16 +395,19 @@ impl Cli {
                 width: width.unwrap_or(640),
                 height: height.unwrap_or(480),
                 scene,
+                render_options,
             }),
             Some(HeadlessMode::ChunkScenarios(directory)) => Ok(Self::HeadlessChunkScenarios {
                 directory,
                 width: width.unwrap_or(960),
                 height: height.unwrap_or(640),
                 scene,
+                render_options,
             }),
             None if movement_perf => Ok(Self::MovementPerf {
                 options: MovementPerfOptions {
                     scene,
+                    render_options,
                     width: width.unwrap_or(1280),
                     height: height.unwrap_or(720),
                     steps: movement_steps,
@@ -382,13 +417,17 @@ impl Cli {
             None if timedemo => Ok(Self::Timedemo {
                 options: TimedemoOptions {
                     scene,
+                    render_options,
                     width: width.unwrap_or(1280),
                     height: height.unwrap_or(720),
                     frames: timedemo_frames,
                     path_radius_chunks: path_radius,
                 },
             }),
-            None => Ok(Self::Window { scene }),
+            None => Ok(Self::Window {
+                scene,
+                render_options,
+            }),
         }
     }
 }
@@ -464,21 +503,30 @@ fn parse_path_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
     Ok(parsed)
 }
 
+fn parse_bool_arg(flag: &str, value: Option<String>) -> Result<bool> {
+    let value = value.with_context(|| format!("{flag} requires true or false"))?;
+    match value.as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => bail!("{flag} must be true or false, got `{value}`"),
+    }
+}
+
 fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\
+           mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
-           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565]\n\
-           mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\
-           mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4]\n\n\
-           mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4]\n\n\
-         Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, and wheel speed controls. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path."
+           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false]\n\
+           mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false]\n\
+           mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false]\n\n\
+           mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false]\n\n\
+         Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, O section-occlusion toggle, and wheel speed controls. Use --disable-section-occlusion or --enable-section-occlusion as shortcuts for the same option. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path."
     );
 }
 
-fn run_window(scene: SceneOptions) -> Result<()> {
+fn run_window(scene: SceneOptions, render_options: TexturedSectionRenderOptions) -> Result<()> {
     let runtime = WindowSceneRuntime::new(&scene)?;
     log::info!(
         "native window runtime seed={} initial_center=({}, {}) radius={} remote={:?} atlas={}x{}",
@@ -493,7 +541,11 @@ fn run_window(scene: SceneOptions) -> Result<()> {
 
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = ChunkApp::new(runtime, SpectatorCamera::spawn_for_scene(&scene));
+    let mut app = ChunkApp::new(
+        runtime,
+        SpectatorCamera::spawn_for_scene(&scene),
+        render_options,
+    );
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -534,6 +586,10 @@ struct MovementPerfStepReport {
     rebuilt_vertices: u32,
     rebuilt_faces: u32,
     rebuilt_indices: u32,
+    visibility_graph_build_count: usize,
+    visibility_graph_total_ms: f64,
+    visibility_graph_average_ms: f64,
+    visibility_graph_worst_ms: f64,
     loaded_sections: usize,
     visible_sections: usize,
     frustum_sections: usize,
@@ -619,6 +675,10 @@ impl MovementPerfReport {
         );
         println!("  \"chunk_radius\": {},", self.options.scene.chunk_radius);
         println!(
+            "  \"section_occlusion_culling\": {},",
+            self.options.render_options.section_occlusion_culling
+        );
+        println!(
             "  \"path_radius_chunks\": {},",
             self.options.path_radius_chunks
         );
@@ -703,6 +763,22 @@ impl MovementPerfReport {
             println!("      \"rebuilt_vertices\": {},", step.rebuilt_vertices);
             println!("      \"rebuilt_faces\": {},", step.rebuilt_faces);
             println!("      \"rebuilt_indices\": {},", step.rebuilt_indices);
+            println!(
+                "      \"visibility_graph_build_count\": {},",
+                step.visibility_graph_build_count
+            );
+            println!(
+                "      \"visibility_graph_total_ms\": {:.3},",
+                step.visibility_graph_total_ms
+            );
+            println!(
+                "      \"visibility_graph_average_ms\": {:.6},",
+                step.visibility_graph_average_ms
+            );
+            println!(
+                "      \"visibility_graph_worst_ms\": {:.6},",
+                step.visibility_graph_worst_ms
+            );
             println!("      \"loaded_sections\": {},", step.loaded_sections);
             println!("      \"visible_sections\": {},", step.visible_sections);
             println!("      \"frustum_sections\": {},", step.frustum_sections);
@@ -733,6 +809,7 @@ impl MovementPerfReport {
 struct TimedemoReport {
     options: TimedemoOptions,
     loaded_chunk_radius: i32,
+    visibility_graph_stats: VisibilityGraphBuildStats,
     scene_build_ms: f64,
     section_count: usize,
     vertex_count: u32,
@@ -770,6 +847,10 @@ impl TimedemoReport {
         println!("  \"chunk_radius\": {},", self.options.scene.chunk_radius);
         println!("  \"loaded_chunk_radius\": {},", self.loaded_chunk_radius);
         println!(
+            "  \"section_occlusion_culling\": {},",
+            self.options.render_options.section_occlusion_culling
+        );
+        println!(
             "  \"path_radius_chunks\": {},",
             self.options.path_radius_chunks
         );
@@ -777,6 +858,22 @@ impl TimedemoReport {
         println!("  \"width\": {},", self.options.width);
         println!("  \"height\": {},", self.options.height);
         println!("  \"scene_build_ms\": {:.3},", self.scene_build_ms);
+        println!(
+            "  \"visibility_graph_build_count\": {},",
+            self.visibility_graph_stats.build_count
+        );
+        println!(
+            "  \"visibility_graph_total_ms\": {:.3},",
+            self.visibility_graph_stats.total_ms
+        );
+        println!(
+            "  \"visibility_graph_average_ms\": {:.6},",
+            self.visibility_graph_stats.average_ms()
+        );
+        println!(
+            "  \"visibility_graph_worst_ms\": {:.6},",
+            self.visibility_graph_stats.worst_ms
+        );
         println!("  \"section_count\": {},", self.section_count);
         println!("  \"vertex_count\": {},", self.vertex_count);
         println!("  \"face_count\": {},", self.face_count);
@@ -884,7 +981,11 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let camera = spectator.camera(runtime.radius_chunks);
         let render_view = camera.render_view(options.width, options.height);
-        let visibility = textured_section_visibility_stats(&sections, render_view);
+        let visibility = textured_section_visibility_stats_with_options(
+            &sections,
+            render_view,
+            options.render_options,
+        );
         let stats = runtime.stats();
 
         steps.push(MovementPerfStepReport {
@@ -915,6 +1016,10 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
             rebuilt_vertices: section_update.rebuilt_vertex_count,
             rebuilt_faces: section_update.rebuilt_face_count(),
             rebuilt_indices: section_update.rebuilt_index_count,
+            visibility_graph_build_count: section_update.visibility_graph_stats.build_count,
+            visibility_graph_total_ms: section_update.visibility_graph_stats.total_ms,
+            visibility_graph_average_ms: section_update.visibility_graph_stats.average_ms(),
+            visibility_graph_worst_ms: section_update.visibility_graph_stats.worst_ms,
             loaded_sections: visibility.loaded_section_count,
             visible_sections: visibility.drawn_section_count,
             frustum_sections: visibility.frustum_section_count,
@@ -953,6 +1058,7 @@ fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> {
             height: options.height,
             color: mclone_render::default_clear_color(),
             cameras,
+            render_options: options.render_options,
         },
         &scene_mesh.sections,
         scene_mesh.atlas.as_upload(),
@@ -971,6 +1077,7 @@ fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> {
     Ok(TimedemoReport {
         options: options.clone(),
         loaded_chunk_radius: loaded_scene.chunk_radius,
+        visibility_graph_stats: scene_mesh.visibility_graph_stats,
         scene_build_ms,
         section_count: scene_mesh.sections.len(),
         vertex_count,
@@ -1067,6 +1174,7 @@ fn square_count(radius: i32) -> Result<usize> {
 #[derive(Clone, Debug)]
 struct SceneTexturedSections {
     sections: Vec<TexturedRenderSectionMesh>,
+    visibility_graph_stats: VisibilityGraphBuildStats,
     atlas: TextureAtlasImage,
 }
 
@@ -1105,8 +1213,8 @@ impl TextureAtlasImage {
 fn build_scene_textured_sections(scene: &SceneOptions) -> Result<SceneTexturedSections> {
     let client = build_scene_client_runtime(scene)?;
     let mesh_assets = load_textured_mesh_assets()?;
-    let sections = build_client_textured_sections(&client, &mesh_assets.catalog)?;
-    if sections.is_empty() {
+    let build = build_client_textured_sections(&client, &mesh_assets.catalog)?;
+    if build.sections.is_empty() {
         bail!(
             "generated chunk area seed={} center=({}, {}) radius={} produced no textured render sections",
             scene.seed,
@@ -1116,7 +1224,8 @@ fn build_scene_textured_sections(scene: &SceneOptions) -> Result<SceneTexturedSe
         );
     }
     Ok(SceneTexturedSections {
-        sections,
+        sections: build.sections,
+        visibility_graph_stats: build.visibility_graph,
         atlas: mesh_assets.atlas,
     })
 }
@@ -1124,10 +1233,11 @@ fn build_scene_textured_sections(scene: &SceneOptions) -> Result<SceneTexturedSe
 fn build_client_textured_sections(
     client: &ClientRuntime,
     catalog: &TexturedMeshCatalog,
-) -> Result<Vec<TexturedRenderSectionMesh>> {
+) -> Result<TexturedRenderSectionBuildReport> {
     let chunks = mesh_chunks_from_client(client)?;
     let inputs = textured_mesh_inputs(&chunks);
-    build_textured_render_sections(&inputs, catalog).context("failed to build textured sections")
+    build_textured_render_sections_with_stats(&inputs, catalog)
+        .context("failed to build textured sections")
 }
 
 fn mesh_chunks_from_client(client: &ClientRuntime) -> Result<Vec<MeshChunkBlocks>> {
@@ -1163,6 +1273,7 @@ struct RenderSectionCacheUpdate {
     removed_section_keys: BTreeSet<RenderSectionKey>,
     rebuilt_vertex_count: u32,
     rebuilt_index_count: u32,
+    visibility_graph_stats: VisibilityGraphBuildStats,
 }
 
 impl RenderSectionCacheUpdate {
@@ -1209,10 +1320,14 @@ impl CachedTexturedRenderSections {
             .map(|pos| (pos.x, pos.z))
             .filter(|coord| loaded_targets.contains(coord))
             .collect::<BTreeSet<_>>();
-        let rebuilt_sections =
-            build_textured_render_sections_for_chunk_set(&inputs, catalog, &target_chunks)
-                .context("failed to build dirty textured sections")?;
-        let rebuilt_keys = rebuilt_sections
+        let rebuilt_report = build_textured_render_sections_for_chunk_set_with_stats(
+            &inputs,
+            catalog,
+            &target_chunks,
+        )
+        .context("failed to build dirty textured sections")?;
+        let rebuilt_keys = rebuilt_report
+            .sections
             .iter()
             .map(|section| section.key)
             .collect::<BTreeSet<_>>();
@@ -1236,10 +1351,11 @@ impl CachedTexturedRenderSections {
         }
 
         let mut report = RenderSectionCacheUpdate {
-            rebuilt_sections,
+            rebuilt_sections: rebuilt_report.sections,
             removed_section_keys,
             rebuilt_vertex_count: 0,
             rebuilt_index_count: 0,
+            visibility_graph_stats: rebuilt_report.visibility_graph,
         };
         for section in &report.rebuilt_sections {
             let stats = section.stats();
@@ -1257,11 +1373,12 @@ fn write_headless_chunk_scenarios(
     height: u32,
     scene: &SceneOptions,
     scene_mesh: &SceneTexturedSections,
+    render_options: TexturedSectionRenderOptions,
 ) -> Result<Vec<mclone_render::headless::HeadlessChunkReport>> {
     let mut reports = Vec::new();
     for (name, camera) in chunk_capture_scenarios(scene) {
         let path = directory.join(format!("{name}.png"));
-        reports.push(write_headless_textured_sections_png(
+        reports.push(write_headless_textured_sections_png_with_options(
             HeadlessChunkOptions {
                 path,
                 width,
@@ -1271,6 +1388,7 @@ fn write_headless_chunk_scenarios(
             },
             &scene_mesh.sections,
             scene_mesh.atlas.as_upload(),
+            render_options,
         )?);
     }
     Ok(reports)
@@ -1918,6 +2036,9 @@ struct RenderStreamStats {
     last_rebuilt_vertex_count: u32,
     last_rebuilt_face_count: u32,
     last_rebuilt_index_count: u32,
+    last_visibility_graph_build_count: usize,
+    last_visibility_graph_total_ms: f64,
+    last_visibility_graph_worst_ms: f64,
     last_uploaded_section_count: usize,
     last_upload_removed_section_count: usize,
     last_uploaded_vertex_count: u32,
@@ -1931,6 +2052,7 @@ struct RenderStreamStats {
 struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
+    render_options: TexturedSectionRenderOptions,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
     depth: Option<ChunkDepthTarget>,
@@ -1944,10 +2066,15 @@ struct ChunkApp {
 }
 
 impl ChunkApp {
-    fn new(runtime: WindowSceneRuntime, spectator: SpectatorCamera) -> Self {
+    fn new(
+        runtime: WindowSceneRuntime,
+        spectator: SpectatorCamera,
+        render_options: TexturedSectionRenderOptions,
+    ) -> Self {
         Self {
             runtime,
             spectator,
+            render_options,
             window: None,
             surface: None,
             depth: None,
@@ -2037,12 +2164,15 @@ impl ChunkApp {
         self.render_stats.last_remesh_ms = remesh_ms;
         self.render_stats.last_upload_ms = upload_ms;
         log::info!(
-            "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} remesh_ms={:.3} upload_ms={:.3}",
+            "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} remesh_ms={:.3} upload_ms={:.3}",
             self.runtime.client.loaded_chunk_count(),
             section_count,
             face_count,
             index_count,
             section_update.rebuilt_section_count(),
+            section_update.visibility_graph_stats.build_count,
+            section_update.visibility_graph_stats.total_ms,
+            section_update.visibility_graph_stats.worst_ms,
             upload_report.uploaded_section_count,
             upload_report.uploaded_vertex_count,
             upload_report.uploaded_face_count(),
@@ -2065,6 +2195,12 @@ impl ChunkApp {
         self.render_stats.last_rebuilt_vertex_count = section_update.rebuilt_vertex_count;
         self.render_stats.last_rebuilt_face_count = section_update.rebuilt_face_count();
         self.render_stats.last_rebuilt_index_count = section_update.rebuilt_index_count;
+        self.render_stats.last_visibility_graph_build_count =
+            section_update.visibility_graph_stats.build_count;
+        self.render_stats.last_visibility_graph_total_ms =
+            section_update.visibility_graph_stats.total_ms;
+        self.render_stats.last_visibility_graph_worst_ms =
+            section_update.visibility_graph_stats.worst_ms;
         self.render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
         self.render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
         self.render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
@@ -2083,13 +2219,19 @@ impl ChunkApp {
         };
         let runtime = self.runtime.stats();
         let pos = self.spectator.position;
+        let occlusion = if self.render_options.section_occlusion_culling {
+            "on"
+        } else {
+            "off"
+        };
         window.set_title(&format!(
-            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} fluid {}/{}/{}/{} | sim {:.3}/{:.3}/{:.3}/{:.3}ms | sections {}/{} faces {}/{} idx {}/{} | rebuilt {}/{}f upload {}/{}v/{}f/{}i rm {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
+            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | occ {} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} fluid {}/{}/{}/{} | sim {:.3}/{:.3}/{:.3}/{:.3}ms | sections {}/{} faces {}/{} idx {}/{} | rebuilt {}/{}f vis {}/{:.3}/{:.3}ms upload {}/{}v/{}f/{}i rm {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
             pos.x,
             pos.y,
             pos.z,
             runtime.interest_center.x,
             runtime.interest_center.z,
+            occlusion,
             runtime.last_tick,
             runtime.last_simulation_tick,
             runtime.loaded_chunks,
@@ -2118,6 +2260,9 @@ impl ChunkApp {
             self.render_stats.index_count,
             self.render_stats.last_rebuilt_section_count,
             self.render_stats.last_rebuilt_face_count,
+            self.render_stats.last_visibility_graph_build_count,
+            self.render_stats.last_visibility_graph_total_ms,
+            self.render_stats.last_visibility_graph_worst_ms,
             self.render_stats.last_uploaded_section_count,
             self.render_stats.last_uploaded_vertex_count,
             self.render_stats.last_uploaded_face_count,
@@ -2201,11 +2346,14 @@ impl ApplicationHandler for ChunkApp {
         self.render_stats.last_remesh_ms = remesh_ms;
         self.render_stats.last_upload_ms = upload_ms;
         log::info!(
-            "uploaded {} initial render sections with {} vertices / {} faces / {} indices remesh_ms={:.3} upload_ms={:.3}",
+            "uploaded {} initial render sections with {} vertices / {} faces / {} indices visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} remesh_ms={:.3} upload_ms={:.3}",
             draw.section_count(),
             section_update.rebuilt_vertex_count,
             self.render_stats.face_count,
             draw.index_count(),
+            section_update.visibility_graph_stats.build_count,
+            section_update.visibility_graph_stats.total_ms,
+            section_update.visibility_graph_stats.worst_ms,
             remesh_ms,
             upload_ms
         );
@@ -2233,6 +2381,24 @@ impl ApplicationHandler for ChunkApp {
                 if let PhysicalKey::Code(key_code) = event.physical_key {
                     if key_code == KeyCode::Escape {
                         event_loop.exit();
+                        return;
+                    }
+                    if key_code == KeyCode::KeyO
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        self.render_options.section_occlusion_culling =
+                            !self.render_options.section_occlusion_culling;
+                        log::info!(
+                            "section occlusion culling {}",
+                            if self.render_options.section_occlusion_culling {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            }
+                        );
+                        self.update_window_title(true);
+                        self.request_redraw();
                         return;
                     }
                     match event.state {
@@ -2293,6 +2459,7 @@ impl ApplicationHandler for ChunkApp {
                     return;
                 }
                 let camera = self.spectator.camera(self.runtime.radius_chunks);
+                let render_options = self.render_options;
                 let mut frame_render_stats = None;
                 let result = {
                     let (Some(surface), Some(depth), Some(draw)) =
@@ -2307,8 +2474,13 @@ impl ApplicationHandler for ChunkApp {
                             frame.target.with_depth(&depth.view),
                             mclone_render::default_clear_color(),
                         )?;
-                        let frame_stats =
-                            draw.render(frame.queue, frame.encoder, render_target, render_view)?;
+                        let frame_stats = draw.render_with_options(
+                            frame.queue,
+                            frame.encoder,
+                            render_target,
+                            render_view,
+                            render_options,
+                        )?;
                         frame_render_stats = Some(frame_stats);
                         Ok(())
                     })
@@ -2519,7 +2691,8 @@ mod tests {
         assert_eq!(
             Cli::parse([]).unwrap(),
             Cli::Window {
-                scene: SceneOptions::default()
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
             }
         );
     }
@@ -2595,6 +2768,7 @@ mod tests {
                     chunk_radius: DEFAULT_CHUNK_RADIUS,
                     remote_addr: None,
                 },
+                render_options: TexturedSectionRenderOptions::default(),
             }
         );
     }
@@ -2619,6 +2793,45 @@ mod tests {
                     chunk_radius: 2,
                     ..SceneOptions::default()
                 },
+                render_options: TexturedSectionRenderOptions::default(),
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_section_occlusion_toggle() {
+        let cli = Cli::parse([
+            "--headless-chunk".to_owned(),
+            "/tmp/mclone-chunk.png".to_owned(),
+            "--section-occlusion".to_owned(),
+            "false".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessChunk {
+                path: PathBuf::from("/tmp/mclone-chunk.png"),
+                width: 640,
+                height: 480,
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions {
+                    section_occlusion_culling: false,
+                },
+            }
+        );
+
+        let cli = Cli::parse([
+            "--disable-section-occlusion".to_owned(),
+            "--enable-section-occlusion".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::Window {
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
             }
         );
     }
@@ -2648,6 +2861,7 @@ mod tests {
                         chunk_radius: 2,
                         ..SceneOptions::default()
                     },
+                    render_options: TexturedSectionRenderOptions::default(),
                     width: 800,
                     height: 600,
                     steps: 6,
@@ -2682,6 +2896,7 @@ mod tests {
                         chunk_radius: 2,
                         ..SceneOptions::default()
                     },
+                    render_options: TexturedSectionRenderOptions::default(),
                     width: 1024,
                     height: 768,
                     frames: 48,
@@ -2746,6 +2961,7 @@ mod tests {
                     chunk_radius: 2,
                     ..SceneOptions::default()
                 },
+                render_options: TexturedSectionRenderOptions::default(),
             }
         );
     }
@@ -2770,6 +2986,7 @@ mod tests {
                     remote_addr: Some("127.0.0.1:25565".to_owned()),
                     ..SceneOptions::default()
                 },
+                render_options: TexturedSectionRenderOptions::default(),
             }
         );
     }

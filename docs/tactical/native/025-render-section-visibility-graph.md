@@ -1,6 +1,6 @@
 # 025: Render Section Visibility Graph
 
-Status: first implementation landed; follow-up needed for outside-retained-section traversal seeding and graph-build timing.
+Status: first implementation landed; follow-up needed for outside-retained-section traversal seeding and release-sized perf baselines.
 
 ## Purpose
 
@@ -149,6 +149,8 @@ Implemented first pass:
 
 - `TexturedSectionDrawResources` stores the per-section `VisibilitySet` beside uploaded GPU section meshes.
 - The draw path and `textured_section_visibility_stats` use the same graph-aware traversal.
+- Section occlusion traversal is controlled by `TexturedSectionRenderOptions.section_occlusion_culling`.
+- Native client window mode can toggle section occlusion at runtime with `O`; CLI/headless/perf modes can use `--section-occlusion true|false`, `--disable-section-occlusion`, or `--enable-section-occlusion`.
 - Empty mesh sections inside retained chunk snapshot height are kept as traversal nodes but are not uploaded to the GPU.
 - Timedemo loads an effective static scene radius of `max(chunk_radius, path_radius_chunks)` so the default orbit stays inside retained sections.
 - Traversal falls back to frustum-only if the camera starts outside the retained section set.
@@ -181,11 +183,14 @@ Implemented first-pass counters:
 - graph-drawn sections/faces/indices
 - graph-culled sections/faces/indices
 - graph-cull enabled frame/step counts in movement/timedemo reports
+- visibility graph build time split out from total remesh time
+- average/worst graph build time per section
+- window title/log diagnostics for last render-section rebuild graph cost
+- enabled/disabled section-occlusion state in movement/timedemo reports
 
 Still pending:
 
-- visibility graph build time split out from total remesh time
-- average/worst graph build time per section
+- release-sized clean perf records with occlusion enabled vs disabled
 
 Expected perf signal:
 

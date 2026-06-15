@@ -7,7 +7,7 @@ use mclone_mesh::{TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleCh
 
 use crate::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkDrawResources, ChunkRenderTarget, ChunkTextureAtlas,
-    TexturedChunkDrawResources, TexturedSectionDrawResources,
+    TexturedChunkDrawResources, TexturedSectionDrawResources, TexturedSectionRenderOptions,
 };
 use crate::gpu_util::{native_backends, optional_gpu_features};
 use crate::target::{RenderFrameContext, RenderFrameTarget};
@@ -57,6 +57,7 @@ pub struct HeadlessTimedemoOptions {
     pub height: u32,
     pub color: wgpu::Color,
     pub cameras: Vec<ChunkCamera>,
+    pub render_options: TexturedSectionRenderOptions,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -214,6 +215,20 @@ pub fn write_headless_textured_sections_png(
     sections: &[TexturedRenderSectionMesh],
     atlas: ChunkTextureAtlas<'_>,
 ) -> Result<HeadlessChunkReport> {
+    write_headless_textured_sections_png_with_options(
+        options,
+        sections,
+        atlas,
+        TexturedSectionRenderOptions::default(),
+    )
+}
+
+pub fn write_headless_textured_sections_png_with_options(
+    options: HeadlessChunkOptions,
+    sections: &[TexturedRenderSectionMesh],
+    atlas: ChunkTextureAtlas<'_>,
+    render_options: TexturedSectionRenderOptions,
+) -> Result<HeadlessChunkReport> {
     let width = options.width.max(1);
     let height = options.height.max(1);
     let (device, queue) = create_headless_device()?;
@@ -234,7 +249,13 @@ pub fn write_headless_textured_sections_png(
             frame.target.with_depth(&depth.view),
             options.color,
         )?;
-        draw.render(frame.queue, frame.encoder, render_target, render_view)?;
+        draw.render_with_options(
+            frame.queue,
+            frame.encoder,
+            render_target,
+            render_view,
+            render_options,
+        )?;
     }
     queue.submit(std::iter::once(encoder.finish()));
 
@@ -304,7 +325,13 @@ pub fn run_headless_textured_sections_timedemo(
                 frame.target.with_depth(&depth.view),
                 options.color,
             )?;
-            draw.render(frame.queue, frame.encoder, render_target, render_view)?
+            draw.render_with_options(
+                frame.queue,
+                frame.encoder,
+                render_target,
+                render_view,
+                options.render_options,
+            )?
         };
         queue.submit(std::iter::once(encoder.finish()));
         device

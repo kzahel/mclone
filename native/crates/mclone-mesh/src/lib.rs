@@ -3,6 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 
 use mclone_assets::{
     AssetError, BakedBlockModelFace, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
@@ -144,6 +146,40 @@ impl VisibilitySet {
 pub struct VisGraph {
     bitset: [u64; VIS_GRAPH_WORD_COUNT],
     empty: usize,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug)]
+struct VisibilityGraphTimer {
+    start: Instant,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl VisibilityGraphTimer {
+    fn start() -> Self {
+        Self {
+            start: Instant::now(),
+        }
+    }
+
+    fn elapsed_ms(self) -> f64 {
+        self.start.elapsed().as_secs_f64() * 1000.0
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy, Debug)]
+struct VisibilityGraphTimer;
+
+#[cfg(target_arch = "wasm32")]
+impl VisibilityGraphTimer {
+    fn start() -> Self {
+        Self
+    }
+
+    fn elapsed_ms(self) -> f64 {
+        0.0
+    }
 }
 
 impl Default for VisGraph {
@@ -361,6 +397,35 @@ impl TexturedRenderSectionMesh {
     pub fn stats(&self) -> SectionMeshStats {
         self.mesh.stats()
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct VisibilityGraphBuildStats {
+    pub build_count: usize,
+    pub total_ms: f64,
+    pub worst_ms: f64,
+}
+
+impl VisibilityGraphBuildStats {
+    pub fn average_ms(self) -> f64 {
+        if self.build_count == 0 {
+            0.0
+        } else {
+            self.total_ms / self.build_count as f64
+        }
+    }
+
+    fn record_ms(&mut self, elapsed_ms: f64) {
+        self.build_count += 1;
+        self.total_ms += elapsed_ms;
+        self.worst_ms = self.worst_ms.max(elapsed_ms);
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TexturedRenderSectionBuildReport {
+    pub sections: Vec<TexturedRenderSectionMesh>,
+    pub visibility_graph: VisibilityGraphBuildStats,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -669,7 +734,7 @@ pub fn build_textured_render_sections(
     inputs: &[TexturedChunkMeshInput<'_>],
     catalog: &TexturedMeshCatalog,
 ) -> Result<Vec<TexturedRenderSectionMesh>, TexturedMeshError> {
-    build_textured_render_sections_for_chunks(inputs, catalog, None)
+    Ok(build_textured_render_sections_with_stats(inputs, catalog)?.sections)
 }
 
 pub fn build_textured_render_sections_for_chunk_set(
@@ -677,6 +742,24 @@ pub fn build_textured_render_sections_for_chunk_set(
     catalog: &TexturedMeshCatalog,
     target_chunks: &BTreeSet<(i32, i32)>,
 ) -> Result<Vec<TexturedRenderSectionMesh>, TexturedMeshError> {
+    Ok(
+        build_textured_render_sections_for_chunk_set_with_stats(inputs, catalog, target_chunks)?
+            .sections,
+    )
+}
+
+pub fn build_textured_render_sections_with_stats(
+    inputs: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
+    build_textured_render_sections_for_chunks(inputs, catalog, None)
+}
+
+pub fn build_textured_render_sections_for_chunk_set_with_stats(
+    inputs: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    target_chunks: &BTreeSet<(i32, i32)>,
+) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
     build_textured_render_sections_for_chunks(inputs, catalog, Some(target_chunks))
 }
 
@@ -684,8 +767,9 @@ fn build_textured_render_sections_for_chunks(
     inputs: &[TexturedChunkMeshInput<'_>],
     catalog: &TexturedMeshCatalog,
     target_chunks: Option<&BTreeSet<(i32, i32)>>,
-) -> Result<Vec<TexturedRenderSectionMesh>, TexturedMeshError> {
+) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
     let mut sections = Vec::new();
+    let mut visibility_graph = VisibilityGraphBuildStats::default();
     for input in inputs {
         if target_chunks.is_some_and(|targets| !targets.contains(&(input.chunk_x, input.chunk_z))) {
             continue;
@@ -693,8 +777,10 @@ fn build_textured_render_sections_for_chunks(
         for local_y_start in (0..input.height).step_by(RENDER_SECTION_HEIGHT as usize) {
             let local_y_end = (local_y_start + RENDER_SECTION_HEIGHT).min(input.height);
             let mut mesh = TexturedVisibleChunkMesh::default();
+            let visibility_start = VisibilityGraphTimer::start();
             let visibility =
                 build_textured_section_visibility(*input, catalog, local_y_start, local_y_end);
+            visibility_graph.record_ms(visibility_start.elapsed_ms());
             add_textured_chunk_range_to_mesh(
                 &mut mesh,
                 *input,
@@ -714,7 +800,10 @@ fn build_textured_render_sections_for_chunks(
             });
         }
     }
-    Ok(sections)
+    Ok(TexturedRenderSectionBuildReport {
+        sections,
+        visibility_graph,
+    })
 }
 
 fn build_textured_section_visibility(

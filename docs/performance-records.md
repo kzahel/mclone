@@ -159,6 +159,61 @@ Timedemo, seed `12345`, chunk radius `1`, 60 frames:
 
 Observation: movement cameras exercise the graph on every step after retaining empty-section visibility records for traversal. Timedemo now loads an effective static scene radius of `max(chunk_radius, path_radius_chunks)`, so the default radius-4 orbit stays inside retained sections and exercises graph culling on every frame.
 
+### 2026-06-15 - VisGraph Timing And Toggle Smoke
+
+Commit reported by benchmark JSON: `07c0852`.
+
+Note: `git_dirty=true` because this was captured while adding visibility graph build timing and the section-occlusion client toggle. Treat it as a paired implementation smoke, not a clean budget.
+
+Commands:
+
+```bash
+pnpm --silent native:movement:smoke
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --movement-perf --disable-section-occlusion
+pnpm --silent native:timedemo:smoke
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --timedemo --timedemo-frames 60 --disable-section-occlusion
+```
+
+Movement/loading, seed `12345`, chunk radius `1`, 12-step circular path:
+
+| Metric | Occlusion On | Occlusion Off |
+|---|---:|---:|
+| total elapsed | 1623.555 ms | 1582.340 ms |
+| graph-cull-enabled steps | 12 / 12 | 0 / 12 |
+| visibility graph builds per step | 144 | 144 |
+| visibility graph total build range | 2.342-2.837 ms | 2.221-2.552 ms |
+| visibility graph avg/section range | 0.016265-0.019703 ms | 0.015425-0.017726 ms |
+| visibility graph worst section range | 0.051292-0.075875 ms | 0.049042-0.060667 ms |
+| frustum sections range | 13-23 | 13-23 |
+| drawn sections range | 3-13 | 13-23 |
+| graph-culled sections range | 3-18 | 0 |
+| frustum faces range | 6,863-22,315 | 6,863-22,315 |
+| drawn faces range | 783-13,114 | 6,863-22,315 |
+| graph-culled indices range | 9,432-77,820 | 0 |
+
+Timedemo, seed `12345`, chunk radius `1`, loaded chunk radius `4`, 60 frames:
+
+| Metric | Occlusion On | Occlusion Off |
+|---|---:|---:|
+| scene build | 967.136 ms | 1033.014 ms |
+| visibility graph builds | 1,296 | 1,296 |
+| visibility graph total build | 21.014 ms | 21.413 ms |
+| visibility graph avg/section | 0.016214 ms | 0.016522 ms |
+| visibility graph worst section | 0.055500 ms | 0.057833 ms |
+| render setup | 69.390 ms | 67.782 ms |
+| average frame | 2.056 ms | 3.575 ms |
+| min frame | 1.647 ms | 3.213 ms |
+| max frame | 13.258 ms | 16.071 ms |
+| graph-cull-enabled frames | 60 / 60 | 0 / 60 |
+| average frustum sections | 393.717 | 393.717 |
+| average drawn sections | 89.783 | 393.717 |
+| average graph-culled sections | 303.933 | 0 |
+| average frustum indices | 1,474,974.9 | 1,474,974.9 |
+| average drawn indices | 440,756.4 | 1,474,974.9 |
+| average graph-culled indices | 1,034,218.5 | 0 |
+
+Observation: the graph build itself is currently about `0.016 ms` per render section in optimized dev. The timedemo toggle control confirms section occlusion is reducing submitted draw pressure by roughly `3.35x` on this camera path, while leaving frustum pressure unchanged.
+
 ## Near-Term Perf Questions
 
 - Keep tracking whether graph culling is enabled for each camera lane. Movement and timedemo now both exercise the graph; outside-retained-section traversal seeding is still a separate Java-parity follow-up for ad-hoc camera paths.
