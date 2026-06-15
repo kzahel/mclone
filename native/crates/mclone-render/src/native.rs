@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use winit::dpi::PhysicalSize;
@@ -15,6 +16,7 @@ pub struct NativeSurfaceContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
+    supported_present_modes: Vec<wgpu::PresentMode>,
 }
 
 impl NativeSurfaceContext {
@@ -84,6 +86,7 @@ impl NativeSurfaceContext {
             device,
             queue,
             config,
+            supported_present_modes: caps.present_modes,
         })
     }
 
@@ -91,6 +94,33 @@ impl NativeSurfaceContext {
         self.config.width = size.width.max(1);
         self.config.height = size.height.max(1);
         self.surface.configure(&self.device, &self.config);
+    }
+
+    pub fn set_present_mode_preference(
+        &mut self,
+        preference: SurfacePresentModePreference,
+    ) -> wgpu::PresentMode {
+        self.set_present_mode(preference.requested_present_mode())
+    }
+
+    pub fn present_mode(&self) -> wgpu::PresentMode {
+        self.config.present_mode
+    }
+
+    fn set_present_mode(&mut self, requested: wgpu::PresentMode) -> wgpu::PresentMode {
+        let mode = selected_present_mode(&self.supported_present_modes, requested);
+        if self.config.present_mode == mode {
+            return mode;
+        }
+        log::info!(
+            "reconfiguring native surface present_mode {:?} -> {:?} (requested {:?})",
+            self.config.present_mode,
+            mode,
+            requested
+        );
+        self.config.present_mode = mode;
+        self.surface.configure(&self.device, &self.config);
+        mode
     }
 
     pub fn render_clear(&mut self, color: wgpu::Color) -> Result<SurfaceFrameStatus> {
@@ -118,18 +148,33 @@ impl NativeSurfaceContext {
     where
         F: FnOnce(RenderFrameContext<'_>) -> Result<()>,
     {
+        Ok(self.render_with_report(encode)?.status)
+    }
+
+    pub fn render_with_report<F>(&mut self, encode: F) -> Result<SurfaceFrameReport>
+    where
+        F: FnOnce(RenderFrameContext<'_>) -> Result<()>,
+    {
+        let acquire_start = Instant::now();
         let frame = match self.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 self.surface.configure(&self.device, &self.config);
-                return Ok(SurfaceFrameStatus::Reconfigured);
+                return Ok(SurfaceFrameReport::new(
+                    SurfaceFrameStatus::Reconfigured,
+                    elapsed_ms(acquire_start),
+                ));
             }
             Err(wgpu::SurfaceError::OutOfMemory) => bail!("wgpu surface out of memory"),
             Err(err) => {
                 log::warn!("surface acquire failed: {err:?}");
-                return Ok(SurfaceFrameStatus::Skipped);
+                return Ok(SurfaceFrameReport::new(
+                    SurfaceFrameStatus::Skipped,
+                    elapsed_ms(acquire_start),
+                ));
             }
         };
+        let acquire_ms = elapsed_ms(acquire_start);
 
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self
@@ -139,15 +184,42 @@ impl NativeSurfaceContext {
             });
         let target =
             RenderFrameTarget::color(&view, [self.config.width.max(1), self.config.height.max(1)]);
+        let encode_start = Instant::now();
         encode(RenderFrameContext::new(
             &self.device,
             &self.queue,
             &mut encoder,
             target,
         ))?;
+        let encode_ms = elapsed_ms(encode_start);
+        let submit_start = Instant::now();
         self.queue.submit(std::iter::once(encoder.finish()));
+        let submit_ms = elapsed_ms(submit_start);
+        let present_start = Instant::now();
         frame.present();
-        Ok(SurfaceFrameStatus::Presented)
+        let present_ms = elapsed_ms(present_start);
+        Ok(SurfaceFrameReport {
+            status: SurfaceFrameStatus::Presented,
+            acquire_ms,
+            encode_ms,
+            submit_ms,
+            present_ms,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SurfacePresentModePreference {
+    Vsync,
+    NoVsync,
+}
+
+impl SurfacePresentModePreference {
+    fn requested_present_mode(self) -> wgpu::PresentMode {
+        match self {
+            Self::Vsync => wgpu::PresentMode::Fifo,
+            Self::NoVsync => wgpu::PresentMode::AutoNoVsync,
+        }
     }
 }
 
@@ -156,6 +228,42 @@ pub enum SurfaceFrameStatus {
     Presented,
     Reconfigured,
     Skipped,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SurfaceFrameReport {
+    pub status: SurfaceFrameStatus,
+    pub acquire_ms: f64,
+    pub encode_ms: f64,
+    pub submit_ms: f64,
+    pub present_ms: f64,
+}
+
+impl SurfaceFrameReport {
+    fn new(status: SurfaceFrameStatus, acquire_ms: f64) -> Self {
+        Self {
+            status,
+            acquire_ms,
+            encode_ms: 0.0,
+            submit_ms: 0.0,
+            present_ms: 0.0,
+        }
+    }
+}
+
+pub fn surface_present_mode_label(mode: wgpu::PresentMode) -> &'static str {
+    match mode {
+        wgpu::PresentMode::AutoVsync => "auto-vsync",
+        wgpu::PresentMode::AutoNoVsync => "auto-no-vsync",
+        wgpu::PresentMode::Fifo => "fifo",
+        wgpu::PresentMode::FifoRelaxed => "fifo-relaxed",
+        wgpu::PresentMode::Immediate => "immediate",
+        wgpu::PresentMode::Mailbox => "mailbox",
+    }
+}
+
+fn elapsed_ms(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
 }
 
 fn preferred_surface_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
@@ -179,6 +287,32 @@ fn preferred_surface_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFo
 
 fn selected_surface_format(caps: &wgpu::SurfaceCapabilities) -> wgpu::TextureFormat {
     selected_surface_format_with_override(caps, surface_format_override())
+}
+
+fn selected_present_mode(
+    supported: &[wgpu::PresentMode],
+    requested: wgpu::PresentMode,
+) -> wgpu::PresentMode {
+    if supported.contains(&requested) {
+        return requested;
+    }
+    if requested == wgpu::PresentMode::AutoNoVsync
+        && supported.contains(&wgpu::PresentMode::Immediate)
+    {
+        return wgpu::PresentMode::Immediate;
+    }
+    if requested == wgpu::PresentMode::AutoNoVsync
+        && supported.contains(&wgpu::PresentMode::Mailbox)
+    {
+        return wgpu::PresentMode::Mailbox;
+    }
+    if supported.contains(&wgpu::PresentMode::Fifo) {
+        return wgpu::PresentMode::Fifo;
+    }
+    supported
+        .first()
+        .copied()
+        .unwrap_or(wgpu::PresentMode::Fifo)
 }
 
 fn selected_surface_format_with_override(
@@ -276,6 +410,25 @@ mod tests {
         assert_eq!(
             selected_surface_format_with_override(&caps, Some(wgpu::TextureFormat::Bgra8UnormSrgb)),
             wgpu::TextureFormat::Rgba8Unorm
+        );
+    }
+
+    #[test]
+    fn present_mode_uses_requested_when_supported() {
+        assert_eq!(
+            selected_present_mode(
+                &[wgpu::PresentMode::Fifo, wgpu::PresentMode::AutoNoVsync],
+                wgpu::PresentMode::AutoNoVsync,
+            ),
+            wgpu::PresentMode::AutoNoVsync
+        );
+    }
+
+    #[test]
+    fn present_mode_falls_back_to_fifo() {
+        assert_eq!(
+            selected_present_mode(&[wgpu::PresentMode::Fifo], wgpu::PresentMode::AutoNoVsync),
+            wgpu::PresentMode::Fifo
         );
     }
 }

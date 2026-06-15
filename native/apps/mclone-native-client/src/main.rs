@@ -35,7 +35,10 @@ use mclone_render::headless::{
     write_headless_clear_png, write_headless_frame_png,
     write_headless_textured_sections_png_with_options, write_headless_ui_png,
 };
-use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
+use mclone_render::native::{
+    NativeSurfaceContext, SurfaceFrameStatus, SurfacePresentModePreference,
+    surface_present_mode_label,
+};
 use mclone_render::target::RenderFrameContext;
 use mclone_server::IntegratedServer;
 use mclone_ui::{
@@ -67,6 +70,8 @@ const SPECTATOR_MIN_SPEED: f32 = 2.0;
 const SPECTATOR_MAX_SPEED: f32 = 256.0;
 const SPECTATOR_MOUSE_SENSITIVITY: f32 = 0.0035;
 const SPECTATOR_PITCH_LIMIT: f32 = 1.52;
+const DEFAULT_FPS_CAP: u32 = 120;
+const FPS_CAPS: [u32; 6] = [60, 90, 120, 144, 165, 240];
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -1616,6 +1621,8 @@ fn run_headless_screenshot(
                 speed: spectator.speed,
                 runtime: runtime_stats,
                 render: render_stats,
+                frame: FrameTimingStats::default(),
+                pacing: FramePacingDebugStats::default(),
                 section_occlusion: render_options.section_occlusion_culling,
                 force_fullbright: render_options.force_fullbright,
             });
@@ -1627,6 +1634,7 @@ fn run_headless_screenshot(
                 &mut gui,
                 camera,
                 render_options,
+                FramePacingUiState::default(),
                 &ui,
                 debug_stats,
                 &mut render_stats,
@@ -2305,6 +2313,235 @@ struct RenderStreamStats {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum FramePacingMode {
+    #[default]
+    Vsync,
+    Capped,
+    Uncapped,
+}
+
+impl FramePacingMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Vsync => "VSync",
+            Self::Capped => "Max FPS",
+            Self::Uncapped => "Uncapped",
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            Self::Vsync => Self::Capped,
+            Self::Capped => Self::Uncapped,
+            Self::Uncapped => Self::Vsync,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct FramePacing {
+    mode: FramePacingMode,
+    fps_cap: u32,
+    monitor_name: Option<String>,
+    monitor_refresh_hz: Option<f32>,
+    active_present_mode_label: &'static str,
+}
+
+impl Default for FramePacing {
+    fn default() -> Self {
+        Self {
+            mode: FramePacingMode::Vsync,
+            fps_cap: DEFAULT_FPS_CAP,
+            monitor_name: None,
+            monitor_refresh_hz: None,
+            active_present_mode_label: "fifo",
+        }
+    }
+}
+
+impl FramePacing {
+    fn present_mode_preference(&self) -> SurfacePresentModePreference {
+        match self.mode {
+            FramePacingMode::Vsync => SurfacePresentModePreference::Vsync,
+            FramePacingMode::Capped | FramePacingMode::Uncapped => {
+                SurfacePresentModePreference::NoVsync
+            }
+        }
+    }
+
+    fn target_frame_duration(&self) -> Option<Duration> {
+        if self.mode != FramePacingMode::Capped {
+            return None;
+        }
+        Some(Duration::from_secs_f64(1.0 / self.fps_cap.max(1) as f64))
+    }
+
+    fn target_frame_ms(&self) -> Option<f64> {
+        match self.mode {
+            FramePacingMode::Vsync => self
+                .monitor_refresh_hz
+                .filter(|refresh_hz| *refresh_hz > 1.0)
+                .map(|refresh_hz| 1000.0 / refresh_hz as f64),
+            FramePacingMode::Capped => Some(1000.0 / self.fps_cap.max(1) as f64),
+            FramePacingMode::Uncapped => None,
+        }
+    }
+
+    fn update_monitor(&mut self, window: &Window) {
+        if let Some(monitor) = window.current_monitor() {
+            self.monitor_name = monitor.name();
+            self.monitor_refresh_hz = monitor
+                .refresh_rate_millihertz()
+                .map(|millihertz| millihertz as f32 / 1000.0);
+        } else {
+            self.monitor_name = None;
+            self.monitor_refresh_hz = None;
+        }
+    }
+
+    fn apply_to_surface(&mut self, surface: &mut NativeSurfaceContext) {
+        let active = surface.set_present_mode_preference(self.present_mode_preference());
+        self.active_present_mode_label = surface_present_mode_label(active);
+    }
+
+    fn cycle_mode(&mut self) {
+        self.mode = self.mode.next();
+    }
+
+    fn cycle_fps_cap(&mut self) {
+        let current = FPS_CAPS
+            .iter()
+            .position(|cap| *cap == self.fps_cap)
+            .unwrap_or_else(|| {
+                FPS_CAPS
+                    .iter()
+                    .position(|cap| *cap >= self.fps_cap)
+                    .unwrap_or(FPS_CAPS.len() - 1)
+            });
+        self.fps_cap = FPS_CAPS[(current + 1) % FPS_CAPS.len()];
+    }
+
+    fn ui_state(&self) -> FramePacingUiState {
+        FramePacingUiState {
+            mode: self.mode,
+            fps_cap: self.fps_cap,
+        }
+    }
+
+    fn debug_stats(&self) -> FramePacingDebugStats {
+        FramePacingDebugStats {
+            mode: self.mode,
+            fps_cap: self.fps_cap,
+            monitor_refresh_hz: self.monitor_refresh_hz,
+            target_frame_ms: self.target_frame_ms(),
+            active_present_mode_label: self.active_present_mode_label,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FramePacingUiState {
+    mode: FramePacingMode,
+    fps_cap: u32,
+}
+
+impl Default for FramePacingUiState {
+    fn default() -> Self {
+        Self {
+            mode: FramePacingMode::Vsync,
+            fps_cap: DEFAULT_FPS_CAP,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FramePacingDebugStats {
+    mode: FramePacingMode,
+    fps_cap: u32,
+    monitor_refresh_hz: Option<f32>,
+    target_frame_ms: Option<f64>,
+    active_present_mode_label: &'static str,
+}
+
+impl Default for FramePacingDebugStats {
+    fn default() -> Self {
+        FramePacing::default().debug_stats()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct FrameTimingStats {
+    frame_count: u64,
+    over_budget_count: u64,
+    over_2x_budget_count: u64,
+    over_4x_budget_count: u64,
+    last_frame_ms: f64,
+    worst_frame_ms: f64,
+    budget_ms: Option<f64>,
+    last_runtime_poll_ms: f64,
+    last_remesh_ms: f64,
+    last_upload_ms: f64,
+    last_render_ms: f64,
+    last_surface_acquire_ms: f64,
+    last_surface_encode_ms: f64,
+    last_surface_submit_ms: f64,
+    last_surface_present_ms: f64,
+}
+
+impl FrameTimingStats {
+    fn begin_frame(&mut self, frame_ms: f64, budget_ms: Option<f64>) {
+        self.frame_count = self.frame_count.saturating_add(1);
+        self.last_frame_ms = frame_ms;
+        self.worst_frame_ms = self.worst_frame_ms.max(frame_ms);
+        self.budget_ms = budget_ms;
+        self.last_runtime_poll_ms = 0.0;
+        self.last_remesh_ms = 0.0;
+        self.last_upload_ms = 0.0;
+        self.last_render_ms = 0.0;
+        self.last_surface_acquire_ms = 0.0;
+        self.last_surface_encode_ms = 0.0;
+        self.last_surface_submit_ms = 0.0;
+        self.last_surface_present_ms = 0.0;
+
+        if let Some(budget_ms) = budget_ms.filter(|budget_ms| *budget_ms > 0.0) {
+            if frame_ms > budget_ms {
+                self.over_budget_count = self.over_budget_count.saturating_add(1);
+            }
+            if frame_ms > budget_ms * 2.0 {
+                self.over_2x_budget_count = self.over_2x_budget_count.saturating_add(1);
+            }
+            if frame_ms > budget_ms * 4.0 {
+                self.over_4x_budget_count = self.over_4x_budget_count.saturating_add(1);
+            }
+        }
+    }
+
+    fn record_runtime_poll(&mut self, ms: f64) {
+        self.last_runtime_poll_ms = ms;
+    }
+
+    fn record_remesh_upload(&mut self, remesh_ms: f64, upload_ms: f64) {
+        self.last_remesh_ms = remesh_ms;
+        self.last_upload_ms = upload_ms;
+    }
+
+    fn record_surface_frame(
+        &mut self,
+        render_ms: f64,
+        acquire_ms: f64,
+        encode_ms: f64,
+        submit_ms: f64,
+        present_ms: f64,
+    ) {
+        self.last_render_ms = render_ms;
+        self.last_surface_acquire_ms = acquire_ms;
+        self.last_surface_encode_ms = encode_ms;
+        self.last_surface_submit_ms = submit_ms;
+        self.last_surface_present_ms = present_ms;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct FullFrameRenderSummary {
     section_count: usize,
     drawn_section_count: usize,
@@ -2332,19 +2569,35 @@ struct DebugPaneStats {
     speed: f32,
     runtime: WindowRuntimeStats,
     render: RenderStreamStats,
+    frame: FrameTimingStats,
+    pacing: FramePacingDebugStats,
     section_occlusion: bool,
     force_fullbright: bool,
 }
 
 impl DebugPaneStats {
-    fn lines(self) -> [String; 10] {
+    fn lines(self) -> Vec<String> {
         let occlusion = if self.section_occlusion { "ON" } else { "OFF" };
         let lighting = if self.force_fullbright {
             "FULL"
         } else {
             "LIGHT"
         };
-        [
+        let budget = self
+            .pacing
+            .target_frame_ms
+            .map(|ms| format!("{ms:.1}MS"))
+            .unwrap_or_else(|| "UNCAPPED".to_owned());
+        let refresh = self
+            .pacing
+            .monitor_refresh_hz
+            .map(|hz| format!("{hz:.1}HZ"))
+            .unwrap_or_else(|| "UNKNOWN".to_owned());
+        let pacing_target = match self.pacing.mode {
+            FramePacingMode::Capped => format!("{}FPS", self.pacing.fps_cap),
+            FramePacingMode::Vsync | FramePacingMode::Uncapped => refresh,
+        };
+        vec![
             "DEBUG".to_string(),
             format!(
                 "POS {:.1} {:.1} {:.1}",
@@ -2392,6 +2645,33 @@ impl DebugPaneStats {
                 self.render.last_uploaded_section_count,
                 self.render.last_frame_ms
             ),
+            format!("BUDGET {} FRAME {:.1}MS", budget, self.frame.last_frame_ms),
+            format!(
+                "OVER {}/{}/{} WORST {:.1}",
+                self.frame.over_budget_count,
+                self.frame.over_2x_budget_count,
+                self.frame.over_4x_budget_count,
+                self.frame.worst_frame_ms
+            ),
+            format!(
+                "STAGE POLL {:.1} MESH {:.1} UP {:.1}",
+                self.frame.last_runtime_poll_ms,
+                self.frame.last_remesh_ms,
+                self.frame.last_upload_ms
+            ),
+            format!(
+                "GPU ACQ {:.1} ENC {:.1} SUB {:.1} PRS {:.1}",
+                self.frame.last_surface_acquire_ms,
+                self.frame.last_surface_encode_ms,
+                self.frame.last_surface_submit_ms,
+                self.frame.last_surface_present_ms
+            ),
+            format!(
+                "PACE {} {} {}",
+                self.pacing.mode.label(),
+                pacing_target,
+                self.pacing.active_present_mode_label.to_ascii_uppercase()
+            ),
         ]
     }
 }
@@ -2434,6 +2714,8 @@ enum NativeUiAction {
     BackToPause,
     ToggleSectionOcclusion,
     ToggleFullbright,
+    CycleFramePacing,
+    CycleFpsCap,
     Quit,
 }
 
@@ -2456,6 +2738,8 @@ const ID_OPTIONS_OCCLUSION: WidgetId = WidgetId(7);
 const ID_OPTIONS_FULLBRIGHT: WidgetId = WidgetId(8);
 const ID_OPTIONS_RADIUS: WidgetId = WidgetId(9);
 const ID_OPTIONS_BACK: WidgetId = WidgetId(10);
+const ID_OPTIONS_FRAME_PACING: WidgetId = WidgetId(11);
+const ID_OPTIONS_FPS_CAP: WidgetId = WidgetId(12);
 
 impl NativeUi {
     fn new(chunk_radius: i32) -> Self {
@@ -2568,17 +2852,23 @@ impl NativeUi {
             }
             NativeUiAction::ToggleSectionOcclusion
             | NativeUiAction::ToggleFullbright
+            | NativeUiAction::CycleFramePacing
+            | NativeUiAction::CycleFpsCap
             | NativeUiAction::Quit => {}
         }
     }
 
-    fn render_draw_list(&self, render_options: TexturedSectionRenderOptions) -> GuiDrawList {
+    fn render_draw_list(
+        &self,
+        render_options: TexturedSectionRenderOptions,
+        frame_pacing: FramePacingUiState,
+    ) -> GuiDrawList {
         let mut draw = GuiDrawList::new();
         match self.screen {
             Some(NativeScreen::Title) => self.render_title(&mut draw),
             Some(NativeScreen::Pause) => self.render_pause(&mut draw),
             Some(NativeScreen::Options { parent }) => {
-                self.render_options_screen(&mut draw, render_options, parent)
+                self.render_options_screen(&mut draw, render_options, frame_pacing, parent)
             }
             None => {}
         }
@@ -2587,8 +2877,9 @@ impl NativeUi {
 
     fn render_debug_pane(&self, draw: &mut GuiDrawList, stats: &DebugPaneStats) {
         let line_height = self.font.line_height();
-        let panel_width = 190.0_f32.min(self.scale.width - 8.0).max(120.0);
-        let panel_height = 8.0 + line_height * 10.0;
+        let lines = stats.lines();
+        let panel_width = 236.0_f32.min(self.scale.width - 8.0).max(120.0);
+        let panel_height = 8.0 + line_height * lines.len() as f32;
         let panel = Rect::new(
             4.0,
             4.0,
@@ -2601,7 +2892,7 @@ impl NativeUi {
         let text = Color::rgba(220, 238, 220, 255);
         let muted = Color::rgba(165, 186, 176, 255);
         let mut y = panel.y + 5.0;
-        for (index, line) in stats.lines().iter().enumerate() {
+        for (index, line) in lines.iter().enumerate() {
             self.font.draw_shadow(
                 draw,
                 line,
@@ -2630,6 +2921,10 @@ impl NativeUi {
                     Some(ID_OPTIONS_OCCLUSION)
                 } else if rects.fullbright.contains(point) {
                     Some(ID_OPTIONS_FULLBRIGHT)
+                } else if rects.frame_pacing.contains(point) {
+                    Some(ID_OPTIONS_FRAME_PACING)
+                } else if rects.fps_cap.contains(point) {
+                    Some(ID_OPTIONS_FPS_CAP)
                 } else if rects.back.contains(point) {
                     Some(ID_OPTIONS_BACK)
                 } else {
@@ -2649,6 +2944,8 @@ impl NativeUi {
             ID_PAUSE_TITLE => Some(NativeUiAction::BackToTitle),
             ID_OPTIONS_OCCLUSION => Some(NativeUiAction::ToggleSectionOcclusion),
             ID_OPTIONS_FULLBRIGHT => Some(NativeUiAction::ToggleFullbright),
+            ID_OPTIONS_FRAME_PACING => Some(NativeUiAction::CycleFramePacing),
+            ID_OPTIONS_FPS_CAP => Some(NativeUiAction::CycleFpsCap),
             ID_OPTIONS_BACK => match self.screen {
                 Some(NativeScreen::Options {
                     parent: OptionsParent::Title,
@@ -2727,13 +3024,14 @@ impl NativeUi {
         &self,
         draw: &mut GuiDrawList,
         render_options: TexturedSectionRenderOptions,
+        frame_pacing: FramePacingUiState,
         parent: OptionsParent,
     ) {
         draw.fill(
             Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
             Color::rgba(0, 0, 0, 150),
         );
-        let panel = centered_panel(self.scale, 230.0, 142.0);
+        let panel = centered_panel(self.scale, 242.0, 190.0);
         draw.fill_gradient(
             panel,
             Color::rgba(33, 45, 47, 245),
@@ -2762,6 +3060,20 @@ impl NativeUi {
             render_options.force_fullbright,
         )
         .render(draw, &self.font, self.interaction());
+        CycleButton::new(
+            ID_OPTIONS_FRAME_PACING,
+            widgets.frame_pacing,
+            "Frame Pacing",
+            frame_pacing.mode.label(),
+        )
+        .render(draw, &self.font, self.interaction());
+        CycleButton::new(
+            ID_OPTIONS_FPS_CAP,
+            widgets.fps_cap,
+            "FPS Cap",
+            frame_pacing.fps_cap.to_string(),
+        )
+        .render(draw, &self.font, self.interaction());
         let mut radius = CycleButton::new(
             ID_OPTIONS_RADIUS,
             widgets.radius,
@@ -2786,6 +3098,8 @@ impl NativeUi {
 struct OptionWidgetRects {
     occlusion: Rect,
     fullbright: Rect,
+    frame_pacing: Rect,
+    fps_cap: Rect,
     radius: Rect,
     back: Rect,
 }
@@ -2825,12 +3139,14 @@ fn pause_buttons(scale: GuiScale) -> [Button; 3] {
 }
 
 fn option_widgets(scale: GuiScale) -> OptionWidgetRects {
-    let panel = centered_panel(scale, 230.0, 142.0);
+    let panel = centered_panel(scale, 242.0, 190.0);
     OptionWidgetRects {
-        occlusion: Rect::new(panel.x + 26.0, panel.y + 38.0, 180.0, 18.0),
-        fullbright: Rect::new(panel.x + 26.0, panel.y + 60.0, 180.0, 18.0),
-        radius: Rect::new(panel.x + 25.0, panel.y + 84.0, 180.0, 20.0),
-        back: Rect::new(panel.center_x() - 55.0, panel.y + 112.0, 110.0, 20.0),
+        occlusion: Rect::new(panel.x + 26.0, panel.y + 38.0, 190.0, 18.0),
+        fullbright: Rect::new(panel.x + 26.0, panel.y + 60.0, 190.0, 18.0),
+        frame_pacing: Rect::new(panel.x + 25.0, panel.y + 84.0, 192.0, 20.0),
+        fps_cap: Rect::new(panel.x + 25.0, panel.y + 108.0, 192.0, 20.0),
+        radius: Rect::new(panel.x + 25.0, panel.y + 132.0, 192.0, 20.0),
+        back: Rect::new(panel.center_x() - 55.0, panel.y + 160.0, 110.0, 20.0),
     }
 }
 
@@ -2851,7 +3167,10 @@ fn render_static_title_ui(width: u32, height: u32) -> GuiDrawList {
     let scale = GuiScale::from_pixels(width, height);
     let mut ui = NativeUi::new(DEFAULT_CHUNK_RADIUS);
     ui.set_scale(scale);
-    ui.render_draw_list(TexturedSectionRenderOptions::default())
+    ui.render_draw_list(
+        TexturedSectionRenderOptions::default(),
+        FramePacingUiState::default(),
+    )
 }
 
 fn render_full_frame(
@@ -2861,12 +3180,14 @@ fn render_full_frame(
     gui: &mut GuiRenderer,
     camera: ChunkCamera,
     render_options: TexturedSectionRenderOptions,
+    frame_pacing: FramePacingUiState,
     ui: &NativeUi,
     debug_stats: Option<DebugPaneStats>,
     render_stats: &mut RenderStreamStats,
 ) -> Result<FullFrameRenderSummary> {
     let ui_active = ui.is_active();
     let ui_covers_world = ui.covers_world();
+    let debug_stats = (!ui_active).then_some(debug_stats).flatten();
     let gui_active = ui_active || debug_stats.is_some();
 
     if !ui_covers_world {
@@ -2891,7 +3212,7 @@ fn render_full_frame(
         render_stats.drawn_index_count = 0;
     }
 
-    let mut ui_draw = ui.render_draw_list(render_options);
+    let mut ui_draw = ui.render_draw_list(render_options, frame_pacing);
     if let Some(mut stats) = debug_stats {
         stats.render = *render_stats;
         ui.render_debug_pane(&mut ui_draw, &stats);
@@ -2927,6 +3248,7 @@ struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
     render_options: TexturedSectionRenderOptions,
+    frame_pacing: FramePacing,
     ui: NativeUi,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
@@ -2938,7 +3260,9 @@ struct ChunkApp {
     last_cursor: Option<(f64, f64)>,
     debug_visible: bool,
     last_frame: Instant,
+    next_redraw_at: Option<Instant>,
     render_stats: RenderStreamStats,
+    frame_timing: FrameTimingStats,
 }
 
 impl ChunkApp {
@@ -2952,6 +3276,7 @@ impl ChunkApp {
             runtime,
             spectator,
             render_options,
+            frame_pacing: FramePacing::default(),
             ui: NativeUi::new(chunk_radius),
             window: None,
             surface: None,
@@ -2963,7 +3288,9 @@ impl ChunkApp {
             last_cursor: None,
             debug_visible: false,
             last_frame: Instant::now(),
+            next_redraw_at: None,
             render_stats: RenderStreamStats::default(),
+            frame_timing: FrameTimingStats::default(),
         }
     }
 
@@ -2973,11 +3300,35 @@ impl ChunkApp {
         }
     }
 
-    fn update_camera_from_keys(&mut self) -> Result<()> {
-        let now = Instant::now();
-        let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.05);
+    fn finish_redraw(&mut self, event_loop: &ActiveEventLoop, frame_start: Instant) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        if let Some(frame_duration) = self.frame_pacing.target_frame_duration() {
+            let next_redraw_at = next_capped_redraw_deadline(
+                frame_start,
+                Instant::now(),
+                self.next_redraw_at,
+                frame_duration,
+            );
+            self.next_redraw_at = Some(next_redraw_at);
+            event_loop.set_control_flow(ControlFlow::WaitUntil(next_redraw_at));
+        } else {
+            self.next_redraw_at = None;
+            event_loop.set_control_flow(ControlFlow::Poll);
+            window.request_redraw();
+        }
+    }
+
+    fn update_camera_from_keys(&mut self, now: Instant) -> Result<()> {
+        let frame_dt = now.duration_since(self.last_frame);
+        let movement_dt = frame_dt.as_secs_f32().min(0.05);
         self.last_frame = now;
-        self.render_stats.last_frame_ms = dt * 1000.0;
+        self.render_stats.last_frame_ms = (frame_dt.as_secs_f64() * 1000.0) as f32;
+        self.frame_timing.begin_frame(
+            frame_dt.as_secs_f64() * 1000.0,
+            self.frame_pacing.target_frame_ms(),
+        );
 
         if self.ui.is_active() {
             return Ok(());
@@ -2988,7 +3339,10 @@ impl ChunkApp {
         let forward = key_axis(&self.pressed_keys, KeyCode::KeyW, KeyCode::KeyS);
         let boosted = self.pressed_keys.contains(&KeyCode::ShiftLeft)
             || self.pressed_keys.contains(&KeyCode::ShiftRight);
-        if self.spectator.move_local(right, up, forward, boosted, dt) {
+        if self
+            .spectator
+            .move_local(right, up, forward, boosted, movement_dt)
+        {
             self.update_interest_from_spectator()?;
         }
         Ok(())
@@ -3028,6 +3382,23 @@ impl ChunkApp {
                         "disabled"
                     }
                 );
+            }
+            NativeUiAction::CycleFramePacing => {
+                self.frame_pacing.cycle_mode();
+                self.next_redraw_at = None;
+                if let Some(surface) = &mut self.surface {
+                    self.frame_pacing.apply_to_surface(surface);
+                }
+                log::info!(
+                    "frame pacing set to {} at cap {} fps",
+                    self.frame_pacing.mode.label(),
+                    self.frame_pacing.fps_cap
+                );
+            }
+            NativeUiAction::CycleFpsCap => {
+                self.frame_pacing.cycle_fps_cap();
+                self.next_redraw_at = None;
+                log::info!("fps cap set to {}", self.frame_pacing.fps_cap);
             }
             NativeUiAction::Quit => {
                 event_loop.exit();
@@ -3108,7 +3479,11 @@ impl ChunkApp {
     }
 
     fn poll_runtime_and_upload(&mut self) -> Result<()> {
-        if !self.runtime.poll()? {
+        let poll_start = Instant::now();
+        let changed = self.runtime.poll()?;
+        self.frame_timing
+            .record_runtime_poll(elapsed_ms(poll_start.elapsed()));
+        if !changed {
             return Ok(());
         }
         self.upload_runtime_sections()?;
@@ -3143,6 +3518,7 @@ impl ChunkApp {
         self.record_section_update_stats(&section_update, upload_report);
         self.render_stats.last_remesh_ms = remesh_ms;
         self.render_stats.last_upload_ms = upload_ms;
+        self.frame_timing.record_remesh_upload(remesh_ms, upload_ms);
         log::info!(
             "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} remesh_ms={:.3} upload_ms={:.3}",
             self.runtime.client.loaded_chunk_count(),
@@ -3178,6 +3554,8 @@ impl ChunkApp {
             speed: self.spectator.speed,
             runtime: self.runtime.stats(),
             render: self.render_stats,
+            frame: self.frame_timing,
+            pacing: self.frame_pacing.debug_stats(),
             section_occlusion: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
         }
@@ -3221,7 +3599,7 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
-        let surface = match NativeSurfaceContext::new(window.clone()) {
+        let mut surface = match NativeSurfaceContext::new(window.clone()) {
             Ok(surface) => surface,
             Err(err) => {
                 log::error!("failed to initialize native GPU: {err:#}");
@@ -3229,6 +3607,8 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
+        self.frame_pacing.update_monitor(&window);
+        self.frame_pacing.apply_to_surface(&mut surface);
         let remesh_start = Instant::now();
         let section_update = match self.runtime.sync_render_sections() {
             Ok(update) => update,
@@ -3297,6 +3677,9 @@ impl ApplicationHandler for ChunkApp {
         self.gui = Some(gui);
         self.surface = Some(surface);
         self.window = Some(window);
+        self.last_frame = Instant::now();
+        self.frame_timing = FrameTimingStats::default();
+        self.next_redraw_at = None;
         event_loop.listen_device_events(DeviceEvents::WhenFocused);
         self.sync_mouse_lock();
         self.request_redraw();
@@ -3468,7 +3851,11 @@ impl ApplicationHandler for ChunkApp {
                 self.sync_mouse_lock();
             }
             WindowEvent::RedrawRequested => {
-                if let Err(err) = self.update_camera_from_keys() {
+                let frame_start = Instant::now();
+                if let Some(window) = &self.window {
+                    self.frame_pacing.update_monitor(window);
+                }
+                if let Err(err) = self.update_camera_from_keys(frame_start) {
                     log::error!("failed to update spectator camera: {err:#}");
                     event_loop.exit();
                     return;
@@ -3484,8 +3871,10 @@ impl ApplicationHandler for ChunkApp {
                 self.ui.set_scale(gui_scale);
                 let camera = self.spectator.camera(self.runtime.radius_chunks);
                 let render_options = self.render_options;
+                let frame_pacing = self.frame_pacing.ui_state();
                 let debug_stats = self.debug_visible.then(|| self.debug_pane_stats());
                 let mut render_stats = self.render_stats;
+                let render_start = Instant::now();
                 let result = {
                     let (Some(surface), Some(depth), Some(draw), Some(gui)) = (
                         &mut self.surface,
@@ -3495,7 +3884,8 @@ impl ApplicationHandler for ChunkApp {
                     ) else {
                         return;
                     };
-                    surface.render_with(|frame| {
+                    self.frame_pacing.apply_to_surface(surface);
+                    surface.render_with_report(|frame| {
                         render_full_frame(
                             frame,
                             depth,
@@ -3503,6 +3893,7 @@ impl ApplicationHandler for ChunkApp {
                             gui,
                             camera,
                             render_options,
+                            frame_pacing,
                             &self.ui,
                             debug_stats,
                             &mut render_stats,
@@ -3511,17 +3902,28 @@ impl ApplicationHandler for ChunkApp {
                     })
                 };
                 match result {
-                    Ok(SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped) => {
-                        self.render_stats = render_stats;
+                    Ok(report) => {
+                        self.frame_timing.record_surface_frame(
+                            elapsed_ms(render_start.elapsed()),
+                            report.acquire_ms,
+                            report.encode_ms,
+                            report.submit_ms,
+                            report.present_ms,
+                        );
+                        match report.status {
+                            SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped => {
+                                self.render_stats = render_stats;
+                                self.finish_redraw(event_loop, frame_start);
+                            }
+                            SurfaceFrameStatus::Reconfigured => self.request_redraw(),
+                        }
                     }
-                    Ok(SurfaceFrameStatus::Reconfigured) => self.request_redraw(),
                     Err(err) => {
                         log::error!("render failed: {err:#}");
                         event_loop.exit();
                         return;
                     }
                 }
-                self.request_redraw();
             }
             _ => {}
         }
@@ -3564,6 +3966,19 @@ fn vertical_axis(keys: &std::collections::HashSet<KeyCode>) -> f32 {
 
 fn elapsed_ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
+}
+
+fn next_capped_redraw_deadline(
+    frame_start: Instant,
+    finish: Instant,
+    previous_deadline: Option<Instant>,
+    frame_duration: Duration,
+) -> Instant {
+    let mut next = previous_deadline.unwrap_or(frame_start) + frame_duration;
+    while next <= finish {
+        next += frame_duration;
+    }
+    next
 }
 
 fn micros_to_ms(micros: u128) -> f64 {
@@ -3684,6 +4099,45 @@ mod tests {
     }
 
     #[test]
+    fn capped_redraw_deadline_skips_missed_frames() {
+        let frame_duration = Duration::from_millis(8);
+        let start = Instant::now();
+        let previous_deadline = start + frame_duration;
+        let finish = start + Duration::from_millis(27);
+
+        let next =
+            next_capped_redraw_deadline(start, finish, Some(previous_deadline), frame_duration);
+
+        assert!(next > finish);
+        assert_eq!(next.duration_since(start), frame_duration * 4);
+    }
+
+    #[test]
+    fn frame_timing_counts_budget_overruns() {
+        let mut stats = FrameTimingStats::default();
+
+        stats.begin_frame(9.0, Some(8.0));
+        stats.begin_frame(17.0, Some(8.0));
+        stats.begin_frame(33.0, Some(8.0));
+
+        assert_eq!(stats.frame_count, 3);
+        assert_eq!(stats.over_budget_count, 3);
+        assert_eq!(stats.over_2x_budget_count, 2);
+        assert_eq!(stats.over_4x_budget_count, 1);
+        assert_eq!(stats.worst_frame_ms, 33.0);
+    }
+
+    #[test]
+    fn frame_pacing_cycles_mode_and_fps_cap() {
+        let mut pacing = FramePacing::default();
+
+        pacing.cycle_mode();
+        assert_eq!(pacing.mode, FramePacingMode::Capped);
+        pacing.cycle_fps_cap();
+        assert_eq!(pacing.fps_cap, 144);
+    }
+
+    #[test]
     fn debug_pane_formats_and_draws_runtime_stats() {
         let stats = DebugPaneStats {
             position: Vec3::new(1.25, 64.0, -2.5),
@@ -3721,6 +4175,30 @@ mod tests {
                 last_frame_ms: 16.7,
                 ..RenderStreamStats::default()
             },
+            frame: FrameTimingStats {
+                frame_count: 12,
+                over_budget_count: 3,
+                over_2x_budget_count: 1,
+                over_4x_budget_count: 0,
+                last_frame_ms: 16.7,
+                worst_frame_ms: 33.4,
+                budget_ms: Some(8.3),
+                last_runtime_poll_ms: 5.0,
+                last_remesh_ms: 2.0,
+                last_upload_ms: 1.0,
+                last_surface_acquire_ms: 0.2,
+                last_surface_encode_ms: 1.4,
+                last_surface_submit_ms: 0.1,
+                last_surface_present_ms: 0.0,
+                ..FrameTimingStats::default()
+            },
+            pacing: FramePacingDebugStats {
+                mode: FramePacingMode::Vsync,
+                fps_cap: 120,
+                monitor_refresh_hz: Some(120.0),
+                target_frame_ms: Some(8.3),
+                active_present_mode_label: "fifo",
+            },
             section_occlusion: true,
             force_fullbright: false,
         };
@@ -3730,6 +4208,8 @@ mod tests {
         assert_eq!(lines[1], "POS 1.2 64.0 -2.5");
         assert_eq!(lines[2], "CHUNK 3 -4 SPEED 32.0");
         assert_eq!(lines[3], "OCC ON  LIGHT");
+        assert!(lines.iter().any(|line| line == "BUDGET 8.3MS FRAME 16.7MS"));
+        assert!(lines.iter().any(|line| line == "OVER 3/1/0 WORST 33.4"));
 
         let mut ui = NativeUi::new(1);
         ui.set_scale(GuiScale::from_pixels(960, 540));
