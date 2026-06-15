@@ -59,8 +59,19 @@ adapter.
    - frames over 1x, 2x, and 4x budget
    - last runtime poll, remesh, upload, render, surface acquire, and present
      timings
-4. Keep this first slice diagnostic and pacing-focused. Do not yet change chunk
+4. Add a separate headless frame-budget probe:
+   - fixed seed, camera/chunk-interest path, frame count, and target Hz
+   - no sleep, no swapchain, no VSync, and no monitor present-mode simulation
+   - count offscreen work frames over 1x, 2x, and 4x the requested budget
+   - report per-frame poll, remesh, upload, render, submit, and device-wait
+     timings
+5. Keep this first slice diagnostic and pacing-focused. Do not yet change chunk
    scheduling, mesh threading, or GPU upload budgeting.
+
+The headless probe is deterministic in workload shape, not in measured wall
+clock. CPU/GPU throttling, other processes, backend driver behavior, and power
+state can still move timings. Treat it as a repeatable regression probe, not as
+a substitute for live desktop/XR present-pacing validation.
 
 ## Follow-Up Performance Slices
 
@@ -85,6 +96,7 @@ cargo check --manifest-path native/Cargo.toml --workspace
 cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
 pnpm native:movement:smoke
 pnpm native:runtime:smoke
+pnpm native:frame-budget:smoke
 git diff --check
 ```
 
@@ -103,4 +115,6 @@ Manual validation:
 - player can choose VSync, capped FPS, or uncapped from native Options.
 - debug pane reports frame budget overruns and stage timings.
 - surface present mode changes without restarting the client.
+- `--frame-budget-probe --target-hz 120` reports deterministic offscreen budget
+  misses and stage attribution.
 - existing movement/runtime perf lanes still pass.

@@ -30,9 +30,9 @@ use mclone_render::chunk::{
 };
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::headless::{
-    HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessClearOptions, HeadlessFrameOptions,
-    HeadlessTimedemoOptions, HeadlessUiOptions, run_headless_textured_sections_timedemo,
-    write_headless_clear_png, write_headless_frame_png,
+    HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessClearOptions, HeadlessFrameLoopOptions,
+    HeadlessFrameOptions, HeadlessTimedemoOptions, HeadlessUiOptions, run_headless_frame_loop,
+    run_headless_textured_sections_timedemo, write_headless_clear_png, write_headless_frame_png,
     write_headless_textured_sections_png_with_options, write_headless_ui_png,
 };
 use mclone_render::native::{
@@ -62,8 +62,11 @@ const DEFAULT_MOVEMENT_PERF_STEPS: usize = 12;
 const DEFAULT_MOVEMENT_PERF_PATH_RADIUS: i32 = 4;
 const DEFAULT_TIMEDEMO_FRAMES: usize = 120;
 const DEFAULT_TIMEDEMO_PATH_RADIUS: i32 = 4;
+const DEFAULT_FRAME_BUDGET_PROBE_FRAMES: usize = 240;
+const DEFAULT_FRAME_BUDGET_TARGET_HZ: f64 = 120.0;
 const MAX_MOVEMENT_PERF_STEPS: usize = 512;
 const MAX_TIMEDEMO_FRAMES: usize = 4096;
+const MAX_FRAME_BUDGET_PROBE_FRAMES: usize = 4096;
 const MAX_MOVEMENT_PERF_PATH_RADIUS: i32 = 128;
 const SPECTATOR_BASE_SPEED: f32 = 32.0;
 const SPECTATOR_MIN_SPEED: f32 = 2.0;
@@ -211,6 +214,12 @@ fn main() -> Result<()> {
             report.print_json();
             Ok(())
         }
+        Cli::FrameBudgetProbe { options } => {
+            let report = run_frame_budget_probe(&options)?;
+            report.validate()?;
+            report.print_json();
+            Ok(())
+        }
         Cli::Window {
             scene,
             render_options,
@@ -245,6 +254,17 @@ struct TimedemoOptions {
     height: u32,
     frames: usize,
     path_radius_chunks: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct FrameBudgetProbeOptions {
+    scene: SceneOptions,
+    render_options: TexturedSectionRenderOptions,
+    width: u32,
+    height: u32,
+    frames: usize,
+    path_radius_chunks: i32,
+    target_hz: f64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -294,6 +314,20 @@ impl Default for TimedemoOptions {
     }
 }
 
+impl Default for FrameBudgetProbeOptions {
+    fn default() -> Self {
+        Self {
+            scene: SceneOptions::default(),
+            render_options: TexturedSectionRenderOptions::default(),
+            width: 1280,
+            height: 720,
+            frames: DEFAULT_FRAME_BUDGET_PROBE_FRAMES,
+            path_radius_chunks: DEFAULT_MOVEMENT_PERF_PATH_RADIUS,
+            target_hz: DEFAULT_FRAME_BUDGET_TARGET_HZ,
+        }
+    }
+}
+
 impl Default for SceneOptions {
     fn default() -> Self {
         Self {
@@ -306,7 +340,7 @@ impl Default for SceneOptions {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Cli {
     Window {
         scene: SceneOptions,
@@ -345,6 +379,9 @@ enum Cli {
     Timedemo {
         options: TimedemoOptions,
     },
+    FrameBudgetProbe {
+        options: FrameBudgetProbeOptions,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -367,8 +404,11 @@ impl Cli {
         let mut screenshot_debug_pane = false;
         let mut movement_perf = false;
         let mut timedemo = false;
+        let mut frame_budget_probe = false;
         let mut movement_steps = DEFAULT_MOVEMENT_PERF_STEPS;
         let mut timedemo_frames = DEFAULT_TIMEDEMO_FRAMES;
+        let mut frame_budget_frames = DEFAULT_FRAME_BUDGET_PROBE_FRAMES;
+        let mut target_hz = DEFAULT_FRAME_BUDGET_TARGET_HZ;
         let mut path_radius = DEFAULT_MOVEMENT_PERF_PATH_RADIUS;
         let mut args = args.into_iter();
 
@@ -392,12 +432,20 @@ impl Cli {
                     }
                     timedemo = true;
                 }
+                "--frame-budget-probe" => {
+                    if mode.is_some() {
+                        bail!(
+                            "--frame-budget-probe cannot be combined with a headless output mode"
+                        );
+                    }
+                    frame_budget_probe = true;
+                }
                 "--headless-clear" => {
                     let path = args
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-clear requires an output PNG path")?;
-                    if movement_perf || timedemo {
+                    if movement_perf || timedemo || frame_budget_probe {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Clear(path))?;
@@ -407,7 +455,7 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-chunk requires an output PNG path")?;
-                    if movement_perf || timedemo {
+                    if movement_perf || timedemo || frame_budget_probe {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Chunk(path))?;
@@ -417,7 +465,7 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-chunk-scenarios requires an output directory")?;
-                    if movement_perf || timedemo {
+                    if movement_perf || timedemo || frame_budget_probe {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::ChunkScenarios(path))?;
@@ -427,7 +475,7 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-ui requires an output PNG path")?;
-                    if movement_perf || timedemo {
+                    if movement_perf || timedemo || frame_budget_probe {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Ui(path))?;
@@ -437,7 +485,7 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--screenshot requires an output PNG path")?;
-                    if movement_perf || timedemo {
+                    if movement_perf || timedemo || frame_budget_probe {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Screenshot(path))?;
@@ -487,6 +535,15 @@ impl Cli {
                     timedemo = true;
                     timedemo_frames = parse_timedemo_frames_arg("--timedemo-frames", args.next())?;
                 }
+                "--frame-budget-frames" => {
+                    frame_budget_probe = true;
+                    frame_budget_frames =
+                        parse_frame_budget_frames_arg("--frame-budget-frames", args.next())?;
+                }
+                "--target-hz" => {
+                    frame_budget_probe = true;
+                    target_hz = parse_target_hz_arg("--target-hz", args.next())?;
+                }
                 "--movement-path-radius" => {
                     movement_perf = true;
                     path_radius = parse_path_radius_arg(&arg, args.next())?;
@@ -502,8 +559,9 @@ impl Cli {
             }
         }
 
-        if movement_perf && timedemo {
-            bail!("--movement-perf cannot be combined with --timedemo");
+        let perf_mode_count = movement_perf as u8 + timedemo as u8 + frame_budget_probe as u8;
+        if perf_mode_count > 1 {
+            bail!("--movement-perf, --timedemo, and --frame-budget-probe are mutually exclusive");
         }
         match mode {
             Some(HeadlessMode::Clear(path)) => Ok(Self::HeadlessClear {
@@ -559,6 +617,17 @@ impl Cli {
                     height: height.unwrap_or(720),
                     frames: timedemo_frames,
                     path_radius_chunks: path_radius,
+                },
+            }),
+            None if frame_budget_probe => Ok(Self::FrameBudgetProbe {
+                options: FrameBudgetProbeOptions {
+                    scene,
+                    render_options,
+                    width: width.unwrap_or(1280),
+                    height: height.unwrap_or(720),
+                    frames: frame_budget_frames,
+                    path_radius_chunks: path_radius,
+                    target_hz,
                 },
             }),
             None => Ok(Self::Window {
@@ -632,6 +701,28 @@ fn parse_timedemo_frames_arg(flag: &str, value: Option<String>) -> Result<usize>
     Ok(parsed)
 }
 
+fn parse_frame_budget_frames_arg(flag: &str, value: Option<String>) -> Result<usize> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<usize>()
+        .with_context(|| format!("{flag} requires an unsigned integer, got `{value}`"))?;
+    if !(1..=MAX_FRAME_BUDGET_PROBE_FRAMES).contains(&parsed) {
+        bail!("{flag} must be between 1 and {MAX_FRAME_BUDGET_PROBE_FRAMES}");
+    }
+    Ok(parsed)
+}
+
+fn parse_target_hz_arg(flag: &str, value: Option<String>) -> Result<f64> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<f64>()
+        .with_context(|| format!("{flag} requires a positive number, got `{value}`"))?;
+    if !parsed.is_finite() || !(1.0..=1000.0).contains(&parsed) {
+        bail!("{flag} must be between 1 and 1000");
+    }
+    Ok(parsed)
+}
+
 fn parse_path_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
     let parsed = parse_i32_arg(flag, value)?;
     if !(1..=MAX_MOVEMENT_PERF_PATH_RADIUS).contains(&parsed) {
@@ -677,7 +768,8 @@ fn print_help() {
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a free-fly spectator camera with WASD, Space/X vertical movement, mouse-lock look, Shift boost, tilde debug pane toggle, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path."
+           mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+         Window mode streams chunks around a free-fly spectator camera with WASD, Space/X vertical movement, mouse-lock look, Shift boost, tilde debug pane toggle, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen camera/chunk-interest script and counts work frames over an explicit target Hz budget."
     );
 }
 
@@ -978,6 +1070,105 @@ struct TimedemoReport {
     render: mclone_render::headless::HeadlessTimedemoReport,
 }
 
+#[derive(Clone, Debug)]
+struct FrameBudgetProbeReport {
+    options: FrameBudgetProbeOptions,
+    runtime_setup_ms: f64,
+    initial_poll_count: usize,
+    initial_poll_ms: f64,
+    initial_remesh_ms: f64,
+    initial_section_count: usize,
+    initial_face_count: u32,
+    initial_index_count: u32,
+    headless: mclone_render::headless::HeadlessFrameLoopReport,
+    frames: Vec<FrameBudgetProbeFrameReport>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FrameBudgetProbeFrameReport {
+    index: usize,
+    center: ChunkPos,
+    interest_center_changed: bool,
+    interest_updates_changed: bool,
+    runtime_changed: bool,
+    set_interest_ms: f64,
+    poll_ms: f64,
+    remesh_ms: f64,
+    upload_ms: f64,
+    render_ms: f64,
+    rebuilt_sections: usize,
+    removed_sections: usize,
+    uploaded_sections: usize,
+    upload_removed_sections: usize,
+    uploaded_vertices: u32,
+    uploaded_indices: u32,
+    loaded_chunks: usize,
+    pending_jobs: usize,
+    drawn_sections: usize,
+    drawn_indices: u32,
+}
+
+impl Default for FrameBudgetProbeFrameReport {
+    fn default() -> Self {
+        Self {
+            index: 0,
+            center: ChunkPos::new(0, 0),
+            interest_center_changed: false,
+            interest_updates_changed: false,
+            runtime_changed: false,
+            set_interest_ms: 0.0,
+            poll_ms: 0.0,
+            remesh_ms: 0.0,
+            upload_ms: 0.0,
+            render_ms: 0.0,
+            rebuilt_sections: 0,
+            removed_sections: 0,
+            uploaded_sections: 0,
+            upload_removed_sections: 0,
+            uploaded_vertices: 0,
+            uploaded_indices: 0,
+            loaded_chunks: 0,
+            pending_jobs: 0,
+            drawn_sections: 0,
+            drawn_indices: 0,
+        }
+    }
+}
+
+impl FrameBudgetProbeFrameReport {
+    fn add_section_timing(&mut self, timing: FrameBudgetProbeSectionTiming) {
+        self.remesh_ms += timing.remesh_ms;
+        self.upload_ms += timing.upload_ms;
+        self.rebuilt_sections += timing.rebuilt_sections;
+        self.removed_sections += timing.removed_sections;
+        self.uploaded_sections += timing.uploaded_sections;
+        self.upload_removed_sections += timing.upload_removed_sections;
+        self.uploaded_vertices += timing.uploaded_vertices;
+        self.uploaded_indices += timing.uploaded_indices;
+    }
+}
+
+struct FrameBudgetProbeState {
+    runtime: WindowSceneRuntime,
+    depth: ChunkDepthTarget,
+    draw: TexturedSectionDrawResources,
+    gui: GuiRenderer,
+    ui: NativeUi,
+    render_stats: RenderStreamStats,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct FrameBudgetProbeSectionTiming {
+    remesh_ms: f64,
+    upload_ms: f64,
+    rebuilt_sections: usize,
+    removed_sections: usize,
+    uploaded_sections: usize,
+    upload_removed_sections: usize,
+    uploaded_vertices: u32,
+    uploaded_indices: u32,
+}
+
 impl TimedemoReport {
     fn validate(&self) -> Result<()> {
         if self.render.frame_count != self.options.frames {
@@ -1117,6 +1308,186 @@ impl TimedemoReport {
     }
 }
 
+impl FrameBudgetProbeReport {
+    fn target_frame_ms(&self) -> f64 {
+        target_frame_ms(self.options.target_hz)
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.headless.frame_count != self.options.frames {
+            bail!(
+                "frame-budget probe rendered {} frames, expected {}",
+                self.headless.frame_count,
+                self.options.frames
+            );
+        }
+        if self.frames.len() != self.options.frames {
+            bail!(
+                "frame-budget probe recorded {} frame reports, expected {}",
+                self.frames.len(),
+                self.options.frames
+            );
+        }
+        if self.initial_section_count == 0 || self.initial_index_count == 0 {
+            bail!("frame-budget probe initial scene produced no render sections");
+        }
+        Ok(())
+    }
+
+    fn print_json(&self) {
+        let target_frame_ms = self.target_frame_ms();
+        let over_budget = frame_budget_over_count(&self.headless.frames, target_frame_ms, 1.0);
+        let over_2x = frame_budget_over_count(&self.headless.frames, target_frame_ms, 2.0);
+        let over_4x = frame_budget_over_count(&self.headless.frames, target_frame_ms, 4.0);
+        let p95 = frame_budget_percentile_ms(&self.headless.frames, 0.95);
+        let p99 = frame_budget_percentile_ms(&self.headless.frames, 0.99);
+        println!("{{");
+        print_benchmark_metadata("native_frame_budget_probe", "  ", true);
+        println!("  \"seed\": {},", self.options.scene.seed);
+        println!(
+            "  \"origin\": {{ \"x\": {}, \"z\": {} }},",
+            self.options.scene.chunk_x, self.options.scene.chunk_z
+        );
+        println!("  \"chunk_radius\": {},", self.options.scene.chunk_radius);
+        println!(
+            "  \"section_occlusion_culling\": {},",
+            self.options.render_options.section_occlusion_culling
+        );
+        println!(
+            "  \"force_fullbright\": {},",
+            self.options.render_options.force_fullbright
+        );
+        println!(
+            "  \"path_radius_chunks\": {},",
+            self.options.path_radius_chunks
+        );
+        println!("  \"frames\": {},", self.options.frames);
+        println!("  \"width\": {},", self.options.width);
+        println!("  \"height\": {},", self.options.height);
+        println!("  \"target_hz\": {:.3},", self.options.target_hz);
+        println!("  \"target_frame_ms\": {:.3},", target_frame_ms);
+        println!("  \"over_budget_frames\": {},", over_budget);
+        println!("  \"over_2x_budget_frames\": {},", over_2x);
+        println!("  \"over_4x_budget_frames\": {},", over_4x);
+        println!("  \"p95_frame_ms\": {:.3},", p95);
+        println!("  \"p99_frame_ms\": {:.3},", p99);
+        println!("  \"max_frame_ms\": {:.3},", self.headless.max_frame_ms);
+        println!("  \"runtime_setup_ms\": {:.3},", self.runtime_setup_ms);
+        println!("  \"initial_poll_count\": {},", self.initial_poll_count);
+        println!("  \"initial_poll_ms\": {:.3},", self.initial_poll_ms);
+        println!("  \"initial_remesh_ms\": {:.3},", self.initial_remesh_ms);
+        println!(
+            "  \"initial_section_count\": {},",
+            self.initial_section_count
+        );
+        println!("  \"initial_face_count\": {},", self.initial_face_count);
+        println!("  \"initial_index_count\": {},", self.initial_index_count);
+        println!("  \"headless\": {{");
+        println!("    \"setup_ms\": {:.3},", self.headless.setup_ms);
+        println!(
+            "    \"total_frame_ms\": {:.3},",
+            self.headless.total_frame_ms
+        );
+        println!(
+            "    \"average_frame_ms\": {:.3},",
+            self.headless.average_frame_ms
+        );
+        println!("    \"min_frame_ms\": {:.3},", self.headless.min_frame_ms);
+        println!("    \"max_frame_ms\": {:.3}", self.headless.max_frame_ms);
+        println!("  }},");
+        println!("  \"frame_reports\": [");
+        for (index, frame) in self.frames.iter().enumerate() {
+            let timing = self.headless.frames.get(index).copied().unwrap_or_default();
+            let suffix = if index + 1 == self.frames.len() {
+                ""
+            } else {
+                ","
+            };
+            println!("    {{");
+            println!("      \"index\": {},", frame.index);
+            println!(
+                "      \"center\": {{ \"x\": {}, \"z\": {} }},",
+                frame.center.x, frame.center.z
+            );
+            println!("      \"frame_ms\": {:.3},", timing.frame_ms);
+            println!(
+                "      \"budget_multiple\": {:.3},",
+                timing.frame_ms / target_frame_ms
+            );
+            println!(
+                "      \"over_budget\": {},",
+                timing.frame_ms > target_frame_ms
+            );
+            println!(
+                "      \"interest_center_changed\": {},",
+                frame.interest_center_changed
+            );
+            println!(
+                "      \"interest_updates_changed\": {},",
+                frame.interest_updates_changed
+            );
+            println!("      \"runtime_changed\": {},", frame.runtime_changed);
+            println!("      \"set_interest_ms\": {:.3},", frame.set_interest_ms);
+            println!("      \"poll_ms\": {:.3},", frame.poll_ms);
+            println!("      \"remesh_ms\": {:.3},", frame.remesh_ms);
+            println!("      \"upload_ms\": {:.3},", frame.upload_ms);
+            println!("      \"render_ms\": {:.3},", frame.render_ms);
+            println!("      \"encode_ms\": {:.3},", timing.encode_ms);
+            println!("      \"submit_ms\": {:.3},", timing.submit_ms);
+            println!("      \"device_poll_ms\": {:.3},", timing.device_poll_ms);
+            println!("      \"rebuilt_sections\": {},", frame.rebuilt_sections);
+            println!("      \"removed_sections\": {},", frame.removed_sections);
+            println!("      \"uploaded_sections\": {},", frame.uploaded_sections);
+            println!(
+                "      \"upload_removed_sections\": {},",
+                frame.upload_removed_sections
+            );
+            println!("      \"uploaded_vertices\": {},", frame.uploaded_vertices);
+            println!("      \"uploaded_indices\": {},", frame.uploaded_indices);
+            println!("      \"loaded_chunks\": {},", frame.loaded_chunks);
+            println!("      \"pending_jobs\": {},", frame.pending_jobs);
+            println!("      \"drawn_sections\": {},", frame.drawn_sections);
+            println!("      \"drawn_indices\": {}", frame.drawn_indices);
+            println!("    }}{suffix}");
+        }
+        println!("  ]");
+        println!("}}");
+    }
+}
+
+fn target_frame_ms(target_hz: f64) -> f64 {
+    1000.0 / target_hz.max(1.0)
+}
+
+fn frame_budget_over_count(
+    frames: &[mclone_render::headless::HeadlessFrameLoopTiming],
+    target_frame_ms: f64,
+    multiplier: f64,
+) -> usize {
+    let threshold = target_frame_ms * multiplier;
+    frames
+        .iter()
+        .filter(|frame| frame.frame_ms > threshold)
+        .count()
+}
+
+fn frame_budget_percentile_ms(
+    frames: &[mclone_render::headless::HeadlessFrameLoopTiming],
+    percentile: f64,
+) -> f64 {
+    if frames.is_empty() {
+        return 0.0;
+    }
+    let mut values = frames
+        .iter()
+        .map(|frame| frame.frame_ms)
+        .collect::<Vec<_>>();
+    values.sort_by(f64::total_cmp);
+    let clamped = percentile.clamp(0.0, 1.0);
+    let index = ((values.len() - 1) as f64 * clamped).ceil() as usize;
+    values[index.min(values.len() - 1)]
+}
+
 fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerfReport> {
     if options.scene.remote_addr.is_some() {
         bail!("--movement-perf currently requires the local integrated server path");
@@ -1248,6 +1619,200 @@ fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> {
         face_count: quad_face_count_from_indices(index_count),
         index_count,
         render,
+    })
+}
+
+fn probe_sync_upload_sections(
+    frame: &RenderFrameContext<'_>,
+    state: &mut FrameBudgetProbeState,
+) -> Result<FrameBudgetProbeSectionTiming> {
+    let remesh_start = Instant::now();
+    let section_update = state.runtime.sync_render_sections()?;
+    let remesh_ms = elapsed_ms(remesh_start.elapsed());
+    let upload_start = Instant::now();
+    let upload_report = state
+        .draw
+        .apply_section_updates(
+            frame.device,
+            &section_update.rebuilt_sections,
+            &section_update.removed_section_keys,
+        )
+        .context("failed to upload frame-budget probe section updates")?;
+    let upload_ms = elapsed_ms(upload_start.elapsed());
+
+    state.render_stats.section_count = state.draw.section_count();
+    state.render_stats.index_count = state.draw.index_count();
+    state.render_stats.face_count = quad_face_count_from_indices(state.render_stats.index_count);
+    state.render_stats.drawn_section_count = 0;
+    state.render_stats.drawn_face_count = 0;
+    state.render_stats.drawn_index_count = 0;
+    record_render_section_update_stats(&mut state.render_stats, &section_update, upload_report);
+    state.render_stats.last_remesh_ms = remesh_ms;
+    state.render_stats.last_upload_ms = upload_ms;
+
+    Ok(FrameBudgetProbeSectionTiming {
+        remesh_ms,
+        upload_ms,
+        rebuilt_sections: section_update.rebuilt_section_count(),
+        removed_sections: section_update.removed_section_count(),
+        uploaded_sections: upload_report.uploaded_section_count,
+        upload_removed_sections: upload_report.removed_section_count,
+        uploaded_vertices: upload_report.uploaded_vertex_count,
+        uploaded_indices: upload_report.uploaded_index_count,
+    })
+}
+
+fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudgetProbeReport> {
+    if options.scene.remote_addr.is_some() {
+        bail!("--frame-budget-probe currently requires the local integrated server path");
+    }
+
+    let runtime_setup_start = Instant::now();
+    let initial_spectator = circular_movement_spectator(
+        &options.scene,
+        options.path_radius_chunks,
+        0,
+        options.frames,
+    );
+    let initial_center = initial_spectator.chunk_pos();
+    let mut runtime_scene = options.scene.clone();
+    runtime_scene.chunk_x = initial_center.x;
+    runtime_scene.chunk_z = initial_center.z;
+    let mut runtime = WindowSceneRuntime::new(&runtime_scene)?;
+    let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)?;
+    let initial_remesh_start = Instant::now();
+    let initial_update = runtime.sync_render_sections()?;
+    let initial_sections = runtime.cached_sections();
+    let initial_remesh_ms = elapsed_ms(initial_remesh_start.elapsed());
+    if initial_sections.is_empty() {
+        bail!(
+            "frame-budget probe seed={} center=({}, {}) radius={} produced no initial render sections",
+            options.scene.seed,
+            options.scene.chunk_x,
+            options.scene.chunk_z,
+            options.scene.chunk_radius
+        );
+    }
+    let initial_index_count = initial_sections
+        .iter()
+        .map(|section| section.stats().index_count)
+        .sum::<u32>();
+    let initial_section_count = initial_sections.len();
+    let initial_face_count = quad_face_count_from_indices(initial_index_count);
+    let runtime_setup_ms = elapsed_ms(runtime_setup_start.elapsed());
+
+    let mut frame_reports = Vec::with_capacity(options.frames);
+    let scene = options.scene.clone();
+    let render_options = options.render_options;
+    let path_radius_chunks = options.path_radius_chunks;
+    let frame_count = options.frames;
+    let chunk_radius = options.scene.chunk_radius;
+    let initial_upload = TexturedSectionUploadReport {
+        uploaded_section_count: initial_update.rebuilt_section_count(),
+        removed_section_count: initial_update.removed_section_count(),
+        uploaded_vertex_count: initial_update.rebuilt_vertex_count,
+        uploaded_index_count: initial_update.rebuilt_index_count,
+    };
+
+    let (headless, _state) = run_headless_frame_loop(
+        HeadlessFrameLoopOptions {
+            width: options.width,
+            height: options.height,
+            frame_count: options.frames,
+        },
+        move |device, queue, format, size| {
+            let depth = ChunkDepthTarget::new(device, size[0], size[1]);
+            let draw = TexturedSectionDrawResources::new(
+                device,
+                queue,
+                format,
+                &initial_sections,
+                runtime.mesh_assets.atlas.as_upload(),
+            )?;
+            let gui = GuiRenderer::new(device, format);
+            let mut render_stats = RenderStreamStats {
+                section_count: draw.section_count(),
+                index_count: draw.index_count(),
+                face_count: quad_face_count_from_indices(draw.index_count()),
+                ..RenderStreamStats::default()
+            };
+            record_render_section_update_stats(&mut render_stats, &initial_update, initial_upload);
+            let mut ui = NativeUi::new(chunk_radius);
+            ui.set_screen(None);
+            ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
+            Ok(FrameBudgetProbeState {
+                runtime,
+                depth,
+                draw,
+                gui,
+                ui,
+                render_stats,
+            })
+        },
+        |index, frame, state| {
+            let spectator =
+                circular_movement_spectator(&scene, path_radius_chunks, index, frame_count);
+            let center = spectator.chunk_pos();
+            let mut report = FrameBudgetProbeFrameReport {
+                index,
+                center,
+                ..FrameBudgetProbeFrameReport::default()
+            };
+
+            let set_interest_start = Instant::now();
+            report.interest_center_changed = state.runtime.interest_center != center;
+            report.interest_updates_changed = state.runtime.set_interest_center(center)?;
+            report.set_interest_ms = elapsed_ms(set_interest_start.elapsed());
+            if report.interest_updates_changed {
+                let update = probe_sync_upload_sections(&frame, state)?;
+                report.add_section_timing(update);
+            }
+
+            let poll_start = Instant::now();
+            report.runtime_changed = state.runtime.poll()?;
+            report.poll_ms = elapsed_ms(poll_start.elapsed());
+            if report.runtime_changed {
+                let update = probe_sync_upload_sections(&frame, state)?;
+                report.add_section_timing(update);
+            }
+
+            let camera = spectator.camera(state.runtime.radius_chunks);
+            let render_start = Instant::now();
+            render_full_frame(
+                frame,
+                &state.depth,
+                &mut state.draw,
+                &mut state.gui,
+                camera,
+                render_options,
+                FramePacingUiState::default(),
+                &state.ui,
+                None,
+                &mut state.render_stats,
+            )?;
+            report.render_ms = elapsed_ms(render_start.elapsed());
+
+            let stats = state.runtime.stats();
+            report.loaded_chunks = stats.loaded_chunks;
+            report.pending_jobs = stats.pending_jobs;
+            report.drawn_sections = state.render_stats.drawn_section_count;
+            report.drawn_indices = state.render_stats.drawn_index_count;
+            frame_reports.push(report);
+            Ok(())
+        },
+    )?;
+
+    Ok(FrameBudgetProbeReport {
+        options: options.clone(),
+        runtime_setup_ms,
+        initial_poll_count,
+        initial_poll_ms,
+        initial_remesh_ms,
+        initial_section_count,
+        initial_face_count,
+        initial_index_count,
+        headless,
+        frames: frame_reports,
     })
 }
 
@@ -4128,6 +4693,34 @@ mod tests {
     }
 
     #[test]
+    fn frame_budget_helpers_count_and_percentile_frame_times() {
+        let frames = [
+            mclone_render::headless::HeadlessFrameLoopTiming {
+                frame_ms: 4.0,
+                ..Default::default()
+            },
+            mclone_render::headless::HeadlessFrameLoopTiming {
+                frame_ms: 9.0,
+                ..Default::default()
+            },
+            mclone_render::headless::HeadlessFrameLoopTiming {
+                frame_ms: 17.0,
+                ..Default::default()
+            },
+            mclone_render::headless::HeadlessFrameLoopTiming {
+                frame_ms: 35.0,
+                ..Default::default()
+            },
+        ];
+
+        assert_eq!(target_frame_ms(125.0), 8.0);
+        assert_eq!(frame_budget_over_count(&frames, 8.0, 1.0), 3);
+        assert_eq!(frame_budget_over_count(&frames, 8.0, 2.0), 2);
+        assert_eq!(frame_budget_over_count(&frames, 8.0, 4.0), 1);
+        assert_eq!(frame_budget_percentile_ms(&frames, 0.95), 35.0);
+    }
+
+    #[test]
     fn frame_pacing_cycles_mode_and_fps_cap() {
         let mut pacing = FramePacing::default();
 
@@ -4614,6 +5207,59 @@ mod tests {
                     height: 768,
                     frames: 48,
                     path_radius_chunks: 5,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_frame_budget_probe_options() {
+        let cli = Cli::parse([
+            "--frame-budget-probe".to_owned(),
+            "--frame-budget-frames".to_owned(),
+            "36".to_owned(),
+            "--target-hz".to_owned(),
+            "120".to_owned(),
+            "--path-radius".to_owned(),
+            "5".to_owned(),
+            "--chunk-radius".to_owned(),
+            "2".to_owned(),
+            "--width".to_owned(),
+            "1024".to_owned(),
+            "--height".to_owned(),
+            "768".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::FrameBudgetProbe {
+                options: FrameBudgetProbeOptions {
+                    scene: SceneOptions {
+                        chunk_radius: 2,
+                        ..SceneOptions::default()
+                    },
+                    render_options: TexturedSectionRenderOptions::default(),
+                    width: 1024,
+                    height: 768,
+                    frames: 36,
+                    path_radius_chunks: 5,
+                    target_hz: 120.0,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_target_hz_selects_frame_budget_probe() {
+        let cli = Cli::parse(["--target-hz".to_owned(), "90".to_owned()]).unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::FrameBudgetProbe {
+                options: FrameBudgetProbeOptions {
+                    target_hz: 90.0,
+                    ..FrameBudgetProbeOptions::default()
                 },
             }
         );
