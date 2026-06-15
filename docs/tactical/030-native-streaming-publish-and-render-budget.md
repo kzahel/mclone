@@ -100,9 +100,11 @@ GPU upload work is queued; the frame loop consumes those queues under a budget.
    - Keep dedicated/headless "wait until idle" helpers aware of pending
      publication so they do not sleep while already-completed work is queued.
 2. Add render-section build queue:
-   - Convert dirty chunk/section keys into CPU mesh jobs.
-   - Let worker jobs produce `TexturedRenderSectionMesh` values.
-   - Main thread publishes completed section meshes only.
+   - Convert dirty chunk/section keys into queued CPU mesh work.
+   - First bound the amount of queued work consumed per frame.
+   - Then move queued builds to worker jobs that produce
+     `TexturedRenderSectionMesh` values.
+   - Keep the main thread responsible for publishing completed section meshes.
    - Keep a synchronous fallback for wasm if worker support is not introduced
      there yet.
 3. Add GPU upload budget:
@@ -173,6 +175,66 @@ dominant steady hitch. Remaining over-budget frames are concentrated in frames
 that synchronously rebuild and upload many render sections, for example 192-240
 rebuilt sections plus 82-93 uploaded sections in the worst frames. The next
 slice should queue CPU render-section builds and then add a GPU upload budget.
+
+## Second Slice
+
+Implement bounded render-section mesh work on the frame path:
+
+- Keep startup, screenshots, timedemo setup, and movement smoke paths able to
+  fully drain render mesh work.
+- Convert live/window and frame-budget probe streaming to a one dirty chunk per
+  frame mesh-build budget.
+- Process old-section removals alongside the budgeted rebuild so unloaded
+  chunks do not linger just because CPU mesh work is capped.
+- Consume mesh work once per redraw after chunk-interest updates and integrated
+  server polling have both run, instead of rebuilding once after interest and
+  again after poll in the same frame.
+- Expose pending render chunk count in live debug stats and frame-budget probe
+  JSON.
+
+This is intentionally still single-threaded CPU mesh construction. It adds the
+Java-style queue and frame budget boundary first; the later worker-thread slice
+can move the queued build itself off the frame thread without changing the
+high-level publication contract.
+
+## Second Slice Result
+
+Release-mode probe comparison against the first slice result:
+
+| Metric | After first slice | After second slice |
+|---|---:|---:|
+| over-budget frames | 14 / 120 | 9 / 120 |
+| over 2x budget | 7 / 120 | 4 / 120 |
+| over 4x budget | 3 / 120 | 1 / 120 |
+| average frame work | 4.975 ms | 3.949 ms |
+| p95 frame | 20.606 ms | 9.064 ms |
+| p99 frame | 54.383 ms | 32.124 ms |
+| max frame | 59.848 ms | 34.671 ms |
+| average `remesh_ms` | 1.117 ms | 0.394 ms |
+| max `remesh_ms` | 19.006 ms | 1.673 ms |
+| average `upload_ms` | 0.355 ms | 0.144 ms |
+| max `upload_ms` | 5.513 ms | 0.863 ms |
+
+Interpretation: render-section rebuild and upload are no longer the dominant
+hitch. Budgeted mesh publishing spreads rebuild work across more frames
+(`36/120` frames rebuilt one chunk each, `576` total rebuilt sections), but the
+mesh/upload phase stayed small enough that rebuilt frames averaged `7.858 ms`.
+No-rebuild frames averaged `2.274 ms`.
+
+The remaining p99/max misses are now dominated by integrated server `poll_ms`
+spikes, not renderer work. The worst release frames were:
+
+- frame `118`: `34.671 ms` total, `30.694 ms poll_ms`, `1.410 ms remesh_ms`,
+  `0.598 ms upload_ms`
+- frame `113`: `32.124 ms` total, `28.399 ms poll_ms`, `1.436 ms remesh_ms`,
+  `0.371 ms upload_ms`
+- frame `108`: `30.208 ms` total, `26.634 ms poll_ms`, `1.272 ms remesh_ms`,
+  `0.383 ms upload_ms`
+
+The next slice should instrument and budget the integrated server poll path
+under frame-budget probe, with particular attention to scheduler tick,
+publication/event application, and any main-thread chunk tick work that runs
+while worldgen backlog is high.
 
 ## Validation
 

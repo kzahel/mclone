@@ -75,6 +75,7 @@ const SPECTATOR_MOUSE_SENSITIVITY: f32 = 0.0035;
 const SPECTATOR_PITCH_LIMIT: f32 = 1.52;
 const DEFAULT_FPS_CAP: u32 = 120;
 const FPS_CAPS: [u32; 6] = [60, 90, 120, 144, 165, 240];
+const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -1105,6 +1106,7 @@ struct FrameBudgetProbeFrameReport {
     loaded_chunks: usize,
     pending_jobs: usize,
     pending_publications: usize,
+    pending_render_chunks: usize,
     drawn_sections: usize,
     drawn_indices: u32,
 }
@@ -1131,6 +1133,7 @@ impl Default for FrameBudgetProbeFrameReport {
             loaded_chunks: 0,
             pending_jobs: 0,
             pending_publications: 0,
+            pending_render_chunks: 0,
             drawn_sections: 0,
             drawn_indices: 0,
         }
@@ -1452,6 +1455,10 @@ impl FrameBudgetProbeReport {
                 "      \"pending_publications\": {},",
                 frame.pending_publications
             );
+            println!(
+                "      \"pending_render_chunks\": {},",
+                frame.pending_render_chunks
+            );
             println!("      \"drawn_sections\": {},", frame.drawn_sections);
             println!("      \"drawn_indices\": {}", frame.drawn_indices);
             println!("    }}{suffix}");
@@ -1517,7 +1524,7 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
         let (poll_count, poll_ms) = poll_window_runtime_until_idle(&mut runtime)?;
 
         let remesh_start = Instant::now();
-        let section_update = runtime.sync_render_sections()?;
+        let section_update = runtime.sync_all_render_sections()?;
         let sections = runtime.cached_sections();
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let camera = spectator.camera(runtime.radius_chunks);
@@ -1687,7 +1694,7 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
     let mut runtime = WindowSceneRuntime::new(&runtime_scene)?;
     let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)?;
     let initial_remesh_start = Instant::now();
-    let initial_update = runtime.sync_render_sections()?;
+    let initial_update = runtime.sync_all_render_sections()?;
     let initial_sections = runtime.cached_sections();
     let initial_remesh_ms = elapsed_ms(initial_remesh_start.elapsed());
     if initial_sections.is_empty() {
@@ -1769,15 +1776,10 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
             report.interest_center_changed = state.runtime.interest_center != center;
             report.interest_updates_changed = state.runtime.set_interest_center(center)?;
             report.set_interest_ms = elapsed_ms(set_interest_start.elapsed());
-            if report.interest_updates_changed {
-                let update = probe_sync_upload_sections(&frame, state)?;
-                report.add_section_timing(update);
-            }
-
             let poll_start = Instant::now();
             report.runtime_changed = state.runtime.poll()?;
             report.poll_ms = elapsed_ms(poll_start.elapsed());
-            if report.runtime_changed {
+            if state.runtime.has_pending_render_work() {
                 let update = probe_sync_upload_sections(&frame, state)?;
                 report.add_section_timing(update);
             }
@@ -1802,6 +1804,7 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
             report.loaded_chunks = stats.loaded_chunks;
             report.pending_jobs = stats.pending_jobs;
             report.pending_publications = stats.pending_publications;
+            report.pending_render_chunks = stats.pending_render_chunks;
             report.drawn_sections = state.render_stats.drawn_section_count;
             report.drawn_indices = state.render_stats.drawn_index_count;
             frame_reports.push(report);
@@ -2032,6 +2035,12 @@ impl CachedTexturedRenderSections {
         self.sections.is_empty()
     }
 
+    fn contains_chunk(&self, pos: ChunkPos) -> bool {
+        self.sections
+            .keys()
+            .any(|key| key.chunk_x == pos.x && key.chunk_z == pos.z)
+    }
+
     fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
         self.sections.values().cloned().collect()
     }
@@ -2136,7 +2145,7 @@ fn run_headless_screenshot(
 ) -> Result<HeadlessScreenshotReport> {
     let mut runtime = WindowSceneRuntime::new(&options.scene)?;
     poll_window_runtime_until_idle(&mut runtime)?;
-    let section_update = runtime.sync_render_sections()?;
+    let section_update = runtime.sync_all_render_sections()?;
     let sections = runtime.cached_sections();
     if sections.is_empty() {
         bail!(
@@ -2310,6 +2319,7 @@ struct WindowRuntimeStats {
     loaded_chunks: usize,
     pending_jobs: usize,
     pending_publications: usize,
+    pending_render_chunks: usize,
     client_visible_chunks: usize,
     active_ticket_chunks: usize,
     pending_unload_chunks: usize,
@@ -2456,6 +2466,17 @@ impl WindowSceneRuntime {
     }
 
     fn sync_render_sections(&mut self) -> Result<RenderSectionCacheUpdate> {
+        self.sync_render_sections_with_budget(DEFAULT_RENDER_CHUNK_MESH_BUDGET)
+    }
+
+    fn sync_all_render_sections(&mut self) -> Result<RenderSectionCacheUpdate> {
+        self.sync_render_sections_with_budget(usize::MAX)
+    }
+
+    fn sync_render_sections_with_budget(
+        &mut self,
+        chunk_budget: usize,
+    ) -> Result<RenderSectionCacheUpdate> {
         if self.render_sections.is_empty()
             && self.client.loaded_chunk_count() > 0
             && self.dirty_render_chunks.is_empty()
@@ -2470,18 +2491,61 @@ impl WindowSceneRuntime {
             }
         }
 
-        let dirty_chunks = self.dirty_render_chunks.clone();
+        if chunk_budget == 0 || self.dirty_render_chunks.is_empty() {
+            return Ok(RenderSectionCacheUpdate::default());
+        }
+
+        let mut stale_dirty_chunks = Vec::new();
+        let mut loaded_dirty_chunks = Vec::new();
+        let mut removal_dirty_chunks = Vec::new();
+        for pos in self.dirty_render_chunks.iter().copied() {
+            if self.client.chunk_snapshot(pos).is_some() {
+                loaded_dirty_chunks.push(pos);
+            } else if self.render_sections.contains_chunk(pos) {
+                removal_dirty_chunks.push(pos);
+            } else {
+                stale_dirty_chunks.push(pos);
+            }
+        }
+        let dirty_chunks = loaded_dirty_chunks
+            .into_iter()
+            .take(chunk_budget)
+            .chain(removal_dirty_chunks)
+            .collect::<BTreeSet<_>>();
+        for pos in stale_dirty_chunks {
+            self.dirty_render_chunks.remove(&pos);
+        }
+        if dirty_chunks.is_empty() {
+            return Ok(RenderSectionCacheUpdate::default());
+        }
+
         let report = self.render_sections.rebuild_dirty(
             &self.client,
             &self.mesh_assets.catalog,
             &dirty_chunks,
         )?;
-        self.dirty_render_chunks.clear();
+        for pos in dirty_chunks {
+            self.dirty_render_chunks.remove(&pos);
+        }
         Ok(report)
     }
 
     fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
         self.render_sections.sections()
+    }
+
+    fn has_pending_render_work(&self) -> bool {
+        self.pending_render_chunk_count() > 0
+    }
+
+    fn pending_render_chunk_count(&self) -> usize {
+        self.dirty_render_chunks
+            .iter()
+            .filter(|pos| {
+                self.client.chunk_snapshot(**pos).is_some()
+                    || self.render_sections.contains_chunk(**pos)
+            })
+            .count()
     }
 
     fn pending_job_count(&self) -> usize {
@@ -2506,6 +2570,7 @@ impl WindowSceneRuntime {
             loaded_chunks: self.client.loaded_chunk_count(),
             pending_jobs: self.pending_job_count(),
             pending_publications: self.pending_publication_count(),
+            pending_render_chunks: self.pending_render_chunk_count(),
             client_visible_chunks: scheduler_metrics
                 .map_or(self.client.loaded_chunk_count(), |metrics| {
                     metrics.client_visible_chunks
@@ -3203,6 +3268,7 @@ impl DebugPaneStats {
                 self.runtime.pending_jobs
             ),
             format!("STREAM PUB{}", self.runtime.pending_publications),
+            format!("MESH Q{}", self.runtime.pending_render_chunks),
             format!(
                 "TICKING B{}:{} E{}:{}",
                 self.runtime.block_ticking_chunks,
@@ -4058,7 +4124,6 @@ impl ChunkApp {
                 self.spectator.position.y,
                 self.spectator.position.z
             );
-            self.upload_runtime_sections()?;
         }
         Ok(())
     }
@@ -4068,7 +4133,7 @@ impl ChunkApp {
         let changed = self.runtime.poll()?;
         self.frame_timing
             .record_runtime_poll(elapsed_ms(poll_start.elapsed()));
-        if !changed {
+        if !changed && !self.runtime.has_pending_render_work() {
             return Ok(());
         }
         self.upload_runtime_sections()?;
@@ -4195,7 +4260,7 @@ impl ApplicationHandler for ChunkApp {
         self.frame_pacing.update_monitor(&window);
         self.frame_pacing.apply_to_surface(&mut surface);
         let remesh_start = Instant::now();
-        let section_update = match self.runtime.sync_render_sections() {
+        let section_update = match self.runtime.sync_all_render_sections() {
             Ok(update) => update,
             Err(err) => {
                 log::error!("failed to build initial chunk sections: {err:#}");
@@ -4760,6 +4825,7 @@ mod tests {
                 loaded_chunks: 9,
                 pending_jobs: 1,
                 pending_publications: 2,
+                pending_render_chunks: 3,
                 client_visible_chunks: 8,
                 active_ticket_chunks: 9,
                 pending_unload_chunks: 0,
@@ -4892,6 +4958,34 @@ mod tests {
                 .iter()
                 .all(|section| section.key.chunk_x == 1 && section.key.chunk_z == 0)
         );
+    }
+
+    #[test]
+    fn window_runtime_mesh_queue_drains_by_chunk_budget() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let scene = SceneOptions {
+            chunk_radius: 1,
+            ..SceneOptions::default()
+        };
+        let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
+        poll_window_runtime_until_idle(&mut runtime).unwrap();
+
+        assert_eq!(runtime.stats().loaded_chunks, 9);
+        let first_update = runtime.sync_render_sections().unwrap();
+        assert!(first_update.rebuilt_section_count() > 0);
+        assert!(runtime.pending_render_chunk_count() > 0);
+
+        let first_sections = runtime.cached_sections();
+        assert!(!first_sections.is_empty());
+        assert!(section_index_count(&first_sections) > 0);
+
+        let remaining_update = runtime.sync_all_render_sections().unwrap();
+        assert!(remaining_update.rebuilt_section_count() > 0);
+        assert_eq!(runtime.pending_render_chunk_count(), 0);
+        assert!(runtime.cached_sections().len() > first_sections.len());
     }
 
     #[test]
