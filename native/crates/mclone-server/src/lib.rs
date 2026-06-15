@@ -3,12 +3,11 @@
 mod persistence;
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fmt,
+    time::Duration,
 };
 
-#[cfg(target_arch = "wasm32")]
-use std::collections::VecDeque;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{sync::mpsc, thread};
 
@@ -586,6 +585,10 @@ impl ChunkScheduler {
 
     pub fn poll(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         self.publish_completed_worldgen_jobs()
+    }
+
+    pub fn wait_for_worldgen_completion(&mut self, timeout: Duration) -> bool {
+        self.worldgen_mailbox.wait_for_completed(timeout)
     }
 
     pub fn tick(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
@@ -1211,6 +1214,10 @@ impl WorldgenMailbox {
         self.backend.drain_completed()
     }
 
+    fn wait_for_completed(&mut self, timeout: Duration) -> bool {
+        self.backend.wait_for_completed(timeout)
+    }
+
     fn kind(&self) -> WorldgenMailboxKind {
         self.backend.kind()
     }
@@ -1266,12 +1273,17 @@ impl WorldgenMailboxBackend {
     fn drain_completed(&mut self) -> Vec<WorldgenCompletedJob> {
         self.completed.drain(..).collect()
     }
+
+    fn wait_for_completed(&mut self, _timeout: Duration) -> bool {
+        !self.completed.is_empty()
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 struct WorldgenMailboxBackend {
     sender: mpsc::Sender<WorldgenRequest>,
     completion_receiver: mpsc::Receiver<WorldgenCompletedJob>,
+    completed: VecDeque<WorldgenCompletedJob>,
     worker: Option<thread::JoinHandle<()>>,
 }
 
@@ -1329,6 +1341,7 @@ impl WorldgenMailboxBackend {
         Self {
             sender,
             completion_receiver,
+            completed: VecDeque::new(),
             worker: Some(worker),
         }
     }
@@ -1355,11 +1368,25 @@ impl WorldgenMailboxBackend {
     }
 
     fn drain_completed(&mut self) -> Vec<WorldgenCompletedJob> {
-        let mut completed = Vec::new();
+        let mut completed = self.completed.drain(..).collect::<Vec<_>>();
         while let Ok(job) = self.completion_receiver.try_recv() {
             completed.push(job);
         }
         completed
+    }
+
+    fn wait_for_completed(&mut self, timeout: Duration) -> bool {
+        if !self.completed.is_empty() {
+            return true;
+        }
+
+        match self.completion_receiver.recv_timeout(timeout) {
+            Ok(job) => {
+                self.completed.push_back(job);
+                true
+            }
+            Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => false,
+        }
     }
 }
 
@@ -1452,6 +1479,10 @@ impl IntegratedServer {
 
     pub fn pending_job_count(&self) -> usize {
         self.scheduler.pending_job_count()
+    }
+
+    pub fn wait_for_worldgen_completion(&mut self, timeout: Duration) -> bool {
+        self.scheduler.wait_for_worldgen_completion(timeout)
     }
 
     pub fn scheduler(&self) -> &ChunkScheduler {
@@ -1591,7 +1622,7 @@ mod tests {
             if scheduler.pending_job_count() == 0 {
                 return events;
             }
-            wait_for_worker_tick();
+            wait_for_scheduler_completion(scheduler);
         }
         panic!("timed out waiting for scheduler worldgen jobs");
     }
@@ -1627,16 +1658,17 @@ mod tests {
             if server.pending_job_count() == 0 {
                 return Ok(updates);
             }
-            wait_for_worker_tick();
+            wait_for_server_completion(server);
         }
         panic!("timed out waiting for integrated server worldgen jobs");
     }
 
-    fn wait_for_worker_tick() {
-        #[cfg(not(target_arch = "wasm32"))]
-        std::thread::sleep(std::time::Duration::from_millis(1));
-        #[cfg(target_arch = "wasm32")]
-        std::hint::spin_loop();
+    fn wait_for_scheduler_completion(scheduler: &mut ChunkScheduler) {
+        scheduler.wait_for_worldgen_completion(std::time::Duration::from_secs(30));
+    }
+
+    fn wait_for_server_completion(server: &mut IntegratedServer) {
+        server.wait_for_worldgen_completion(std::time::Duration::from_secs(30));
     }
 
     #[test]

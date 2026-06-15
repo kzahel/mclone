@@ -12,6 +12,8 @@ const DEFAULT_RADIUS_CHUNKS: u32 = 1;
 const DEFAULT_STEPS: usize = 3;
 const DEFAULT_MAX_POLLS: usize = 120_000;
 const DEFAULT_POLL_SLEEP_MS: u64 = 1;
+const DEFAULT_COMPLETION_WAIT_MS: u64 = 30_000;
+const DEFAULT_POLL_MODE: PollMode = PollMode::Completion;
 
 fn main() {
     if let Err(error) = run() {
@@ -44,7 +46,10 @@ fn run() -> Result<(), String> {
         let mut poll_call_ms = 0.0_f64;
         let mut empty_poll_call_ms = 0.0_f64;
         let mut publish_poll_call_ms = 0.0_f64;
+        let mut completion_wait_ms = 0.0_f64;
         let mut max_poll_call_ms = 0.0_f64;
+        let mut completion_waits = 0_usize;
+        let mut completion_timeouts = 0_usize;
         let worker_wait_start = Instant::now();
         while scheduler.pending_job_count() > 0 {
             if polls >= config.max_polls {
@@ -53,8 +58,24 @@ fn run() -> Result<(), String> {
                     center.x, center.z
                 ));
             }
-            if config.poll_sleep_ms > 0 {
-                thread::sleep(Duration::from_millis(config.poll_sleep_ms));
+            match config.poll_mode {
+                PollMode::Completion => {
+                    completion_waits += 1;
+                    let completion_wait_start = Instant::now();
+                    let completed = scheduler.wait_for_worldgen_completion(Duration::from_millis(
+                        config.completion_wait_ms,
+                    ));
+                    completion_wait_ms += elapsed_ms(completion_wait_start.elapsed());
+                    if !completed {
+                        completion_timeouts += 1;
+                    }
+                }
+                PollMode::Sleep => {
+                    if config.poll_sleep_ms > 0 {
+                        thread::sleep(Duration::from_millis(config.poll_sleep_ms));
+                    }
+                }
+                PollMode::Spin => {}
             }
             let poll_start = Instant::now();
             let poll_events = scheduler.poll().map_err(|error| error.to_string())?;
@@ -96,11 +117,14 @@ fn run() -> Result<(), String> {
             poll_call_ms,
             empty_poll_call_ms,
             publish_poll_call_ms,
+            completion_wait_ms,
             non_poll_wait_ms,
             max_poll_call_ms,
             polls,
             empty_polls,
             publish_polls,
+            completion_waits,
+            completion_timeouts,
             scheduler_events: events.len(),
             client_updates: snapshots + unloads,
             status_events,
@@ -127,7 +151,9 @@ struct Config {
     radius_chunks: u32,
     steps: usize,
     max_polls: usize,
+    poll_mode: PollMode,
     poll_sleep_ms: u64,
+    completion_wait_ms: u64,
 }
 
 impl Config {
@@ -137,7 +163,9 @@ impl Config {
             radius_chunks: DEFAULT_RADIUS_CHUNKS,
             steps: DEFAULT_STEPS,
             max_polls: DEFAULT_MAX_POLLS,
+            poll_mode: DEFAULT_POLL_MODE,
             poll_sleep_ms: DEFAULT_POLL_SLEEP_MS,
+            completion_wait_ms: DEFAULT_COMPLETION_WAIT_MS,
         };
 
         let mut args = args.into_iter();
@@ -155,8 +183,14 @@ impl Config {
                 "--max-polls" => {
                     config.max_polls = parse_next(&mut args, "--max-polls")?;
                 }
+                "--poll-mode" => {
+                    config.poll_mode = parse_next(&mut args, "--poll-mode")?;
+                }
                 "--poll-sleep-ms" => {
                     config.poll_sleep_ms = parse_next(&mut args, "--poll-sleep-ms")?;
+                }
+                "--completion-wait-ms" => {
+                    config.completion_wait_ms = parse_next(&mut args, "--completion-wait-ms")?;
                 }
                 "--help" | "-h" => {
                     return Err(usage());
@@ -183,11 +217,14 @@ struct StepReport {
     poll_call_ms: f64,
     empty_poll_call_ms: f64,
     publish_poll_call_ms: f64,
+    completion_wait_ms: f64,
     non_poll_wait_ms: f64,
     max_poll_call_ms: f64,
     polls: usize,
     empty_polls: usize,
     publish_polls: usize,
+    completion_waits: usize,
+    completion_timeouts: usize,
     scheduler_events: usize,
     client_updates: usize,
     status_events: usize,
@@ -294,7 +331,12 @@ impl SmokeReport {
         println!("  \"seed\": {},", self.config.seed);
         println!("  \"radius_chunks\": {},", self.config.radius_chunks);
         println!("  \"steps\": {},", self.config.steps);
+        println!("  \"poll_mode\": \"{}\",", self.config.poll_mode.as_str());
         println!("  \"poll_sleep_ms\": {},", self.config.poll_sleep_ms);
+        println!(
+            "  \"completion_wait_ms\": {},",
+            self.config.completion_wait_ms
+        );
         println!("  \"total_elapsed_ms\": {:.3},", self.total_elapsed_ms);
         println!("  \"expected_interest_chunks\": {interest_chunks},");
         println!("  \"expected_active_chunks\": {active_chunks},");
@@ -325,6 +367,10 @@ impl SmokeReport {
                 step.apply_interest_ms + step.publish_poll_call_ms
             );
             println!(
+                "      \"main_thread_blocked_ms\": {:.3},",
+                step.apply_interest_ms + step.completion_wait_ms + step.poll_call_ms
+            );
+            println!(
                 "      \"max_main_thread_call_ms\": {:.3},",
                 step.apply_interest_ms.max(step.max_poll_call_ms)
             );
@@ -338,11 +384,20 @@ impl SmokeReport {
                 "      \"publish_poll_call_ms\": {:.3},",
                 step.publish_poll_call_ms
             );
+            println!(
+                "      \"completion_wait_ms\": {:.3},",
+                step.completion_wait_ms
+            );
             println!("      \"non_poll_wait_ms\": {:.3},", step.non_poll_wait_ms);
             println!("      \"max_poll_call_ms\": {:.3},", step.max_poll_call_ms);
             println!("      \"polls\": {},", step.polls);
             println!("      \"empty_polls\": {},", step.empty_polls);
             println!("      \"publish_polls\": {},", step.publish_polls);
+            println!("      \"completion_waits\": {},", step.completion_waits);
+            println!(
+                "      \"completion_timeouts\": {},",
+                step.completion_timeouts
+            );
             println!("      \"scheduler_events\": {},", step.scheduler_events);
             println!("      \"client_updates\": {},", step.client_updates);
             println!("      \"status_events\": {},", step.status_events);
@@ -449,6 +504,36 @@ fn parse_next<T: std::str::FromStr>(
         .map_err(|_| format!("invalid value for {name}: {value}"))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PollMode {
+    Completion,
+    Sleep,
+    Spin,
+}
+
+impl PollMode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Completion => "completion",
+            Self::Sleep => "sleep",
+            Self::Spin => "spin",
+        }
+    }
+}
+
+impl std::str::FromStr for PollMode {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "completion" | "wait" => Ok(Self::Completion),
+            "sleep" => Ok(Self::Sleep),
+            "spin" => Ok(Self::Spin),
+            _ => Err(()),
+        }
+    }
+}
+
 fn usage() -> String {
-    "usage: scheduler_movement_smoke [--seed N] [--radius N] [--steps N] [--max-polls N] [--poll-sleep-ms N]".to_owned()
+    "usage: scheduler_movement_smoke [--seed N] [--radius N] [--steps N] [--max-polls N] [--poll-mode completion|sleep|spin] [--poll-sleep-ms N] [--completion-wait-ms N]".to_owned()
 }

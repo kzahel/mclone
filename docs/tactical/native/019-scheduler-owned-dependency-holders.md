@@ -63,7 +63,7 @@ Release-mode perf command:
 pnpm native:scheduler:perf
 ```
 
-The smoke defaults to seed `12345`, radius `1`, and `3` adjacent movement steps. It fails if:
+The smoke defaults to seed `12345`, radius `1`, `3` adjacent movement steps, and `poll_mode=completion`. Completion mode waits for the native worldgen worker to post a completed job, then calls nonblocking `poll()` once to publish it. It fails if:
 
 - direct ticket count differs from the client-visible interest square
 - propagated active holder count differs from the expected Chebyshev ticket halo
@@ -78,19 +78,22 @@ Timing fields:
 - `poll_call_ms`: total synchronous caller-thread time spent inside scheduler `poll()` calls.
 - `main_thread_scheduler_ms`: `apply_interest_ms + poll_call_ms`.
 - `main_thread_publish_path_ms`: `apply_interest_ms + publish_poll_call_ms`, the frame-sensitive path when only completion polls return events.
+- `completion_wait_ms`: time spent blocked in the smoke waiting for worker completion notification. This is a diagnostic/server wait path, not the renderer frame path.
+- `main_thread_blocked_ms`: `apply_interest_ms + completion_wait_ms + poll_call_ms`; useful for headless smoke latency, not a frame budget when the app uses nonblocking polling.
 - `worker_wait_ms`: wall-clock wait after `apply_interest`, including poll sleeps and poll calls.
 - `non_poll_wait_ms`: wall-clock wait minus time spent inside `poll()`.
 - `max_main_thread_call_ms`: largest single synchronous scheduler call in the step.
 
-Observed debug-mode baseline on this host with default `poll_sleep_ms=1`:
+Observed debug-mode baseline on this host with default `poll_mode=completion`:
 
 ```text
 steps: 3
 radius: 1
-total_elapsed_ms: ~24,142
-step 0 elapsed_ms: ~13,834, main_thread_scheduler_ms: ~50.247, max_main_thread_call_ms: ~43.190, snapshots 9, unloads 0
-step 1 elapsed_ms: ~5,149, main_thread_scheduler_ms: ~20.241, max_main_thread_call_ms: ~14.511, snapshots 3, unloads 3
-step 2 elapsed_ms: ~5,153, main_thread_scheduler_ms: ~19.345, max_main_thread_call_ms: ~13.392, snapshots 3, unloads 3
+completion_wait_ms: 30,000 timeout cap, zero observed timeouts
+total_elapsed_ms: ~25,033
+step 0 elapsed_ms: ~14,395, completion_wait_ms: ~14,335, main_thread_scheduler_ms: ~60.739, polls: 1, snapshots 9, unloads 0
+step 1 elapsed_ms: ~5,302, completion_wait_ms: ~5,282, main_thread_scheduler_ms: ~20.294, polls: 1, snapshots 3, unloads 3
+step 2 elapsed_ms: ~5,329, completion_wait_ms: ~5,309, main_thread_scheduler_ms: ~19.174, polls: 1, snapshots 3, unloads 3
 final metrics:
   active_ticket_chunks: 841
   client_visible_chunks: 9
@@ -100,15 +103,16 @@ final metrics:
   total_dependency_cache_misses: 483
 ```
 
-Observed release-mode baseline on this host with default `poll_sleep_ms=1`:
+Observed release-mode baseline on this host with default `poll_mode=completion`:
 
 ```text
 steps: 3
 radius: 1
-total_elapsed_ms: ~913
-step 0 elapsed_ms: ~593, main_thread_scheduler_ms: ~6.611, max_main_thread_call_ms: ~4.648, polls: 390, snapshots 9, unloads 0
-step 1 elapsed_ms: ~160, main_thread_scheduler_ms: ~1.920, max_main_thread_call_ms: ~1.144, polls: 106, snapshots 3, unloads 3
-step 2 elapsed_ms: ~158, main_thread_scheduler_ms: ~1.799, max_main_thread_call_ms: ~1.095, polls: 104, snapshots 3, unloads 3
+completion_wait_ms: 30,000 timeout cap, zero observed timeouts
+total_elapsed_ms: ~925
+step 0 elapsed_ms: ~589, completion_wait_ms: ~586, main_thread_scheduler_ms: ~2.815, polls: 1, snapshots 9, unloads 0
+step 1 elapsed_ms: ~170, completion_wait_ms: ~168, main_thread_scheduler_ms: ~1.946, polls: 1, snapshots 3, unloads 3
+step 2 elapsed_ms: ~165, completion_wait_ms: ~164, main_thread_scheduler_ms: ~1.774, polls: 1, snapshots 3, unloads 3
 final metrics:
   active_ticket_chunks: 841
   client_visible_chunks: 9
@@ -118,15 +122,23 @@ final metrics:
   total_dependency_cache_misses: 483
 ```
 
-The release baseline suggests adjacent movement is primarily worker throughput / scheduler-idle latency, not caller-thread scheduler blocking: default adjacent steps take about `158-160ms` end-to-end, while synchronous scheduler work is about `1.8-1.9ms` and the largest single caller-thread scheduler call is about `1.1ms`.
+The release baseline suggests adjacent movement is primarily worker throughput / scheduler-idle latency, not active scheduler CPU work: default adjacent steps take about `165-170ms` end-to-end, while synchronous scheduler work is about `1.8-2.0ms`. In completion mode the smoke blocks while waiting for that worker result; a renderer/tick loop should keep using nonblocking `poll()` or event-loop wakeups instead of waiting on the render thread.
 
-Zero-sleep polling is a contention/stress mode rather than the default timing lane:
+The old sleep-poll lane is still available for comparison:
 
 ```bash
-cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --poll-sleep-ms 0 --max-polls 50000000
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --poll-mode sleep
 ```
 
-On this host it kept similar end-to-end latency (`~916ms` total), but burned caller-thread time on millions of empty polls (`~70ms` per adjacent step inside `poll()` calls). The normal scheduler should therefore wake from tick/frame cadence or completion notification, not tight spin-poll.
+On this host it kept similar end-to-end latency (`~930ms` total) but needed hundreds of empty polls on initial load and about a hundred empty polls per adjacent movement step.
+
+Spin polling is a contention/stress mode:
+
+```bash
+cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --poll-mode spin --max-polls 50000000
+```
+
+On this host it kept similar end-to-end latency (`~910ms` total), but burned caller-thread time on millions of empty polls (`~76ms` per adjacent step inside `poll()` calls). The normal scheduler should therefore wake from tick/frame cadence or completion notification, not tight spin-poll.
 
 ## Next Implementation Steps
 
