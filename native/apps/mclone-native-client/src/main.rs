@@ -499,6 +499,8 @@ struct WindowRuntimeStats {
     client_visible_chunks: usize,
     active_ticket_chunks: usize,
     pending_unload_chunks: usize,
+    block_ticking_chunks: usize,
+    entity_ticking_chunks: usize,
 }
 
 impl WindowSceneRuntime {
@@ -610,6 +612,10 @@ impl WindowSceneRuntime {
                 .map_or(0, |metrics| metrics.active_ticket_chunks),
             pending_unload_chunks: scheduler_metrics
                 .map_or(0, |metrics| metrics.pending_unload_chunks),
+            block_ticking_chunks: scheduler_metrics
+                .map_or(0, |metrics| metrics.block_ticking_chunks),
+            entity_ticking_chunks: scheduler_metrics
+                .map_or(0, |metrics| metrics.entity_ticking_status_chunks),
         }
     }
 }
@@ -1034,7 +1040,7 @@ impl ChunkApp {
         let runtime = self.runtime.stats();
         let pos = self.spectator.position;
         window.set_title(&format!(
-            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | loaded {} visible {} pending {} active {} unload {} | sections {} idx {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
+            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | loaded {} visible {} pending {} active {} unload {} tick {} entity {} | sections {} idx {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
             pos.x,
             pos.y,
             pos.z,
@@ -1045,6 +1051,8 @@ impl ChunkApp {
             runtime.pending_jobs,
             runtime.active_ticket_chunks,
             runtime.pending_unload_chunks,
+            runtime.block_ticking_chunks,
+            runtime.entity_ticking_chunks,
             self.render_stats.section_count,
             self.render_stats.index_count,
             self.render_stats.last_frame_ms,

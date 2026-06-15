@@ -45,12 +45,14 @@ Key Java facts for this slice:
 - Scheduler batch feature generation bypasses `DecorationReport.added_non_air_blocks` accounting, which otherwise scans the whole feature-region dependency window before and after every decoration center. Public decoration report APIs still compute that field for tests/debug callers.
 - Lower-status dependency generation now reuses one `NoiseBasedChunkGenerator` per feature job instead of recreating it for every dependency chunk, and reports generator setup, surface fill, surface/bedrock, air carver, liquid carver, and heightmap timing.
 - Ticket removal now queues holders in a native pending-unload set instead of dropping/saving them synchronously. Returned tickets rescue pending holders, `ChunkScheduler::process_pending_unloads(...)` drains a bounded amount of save/drop work, `tick()` processes the Java-shaped default budget, and native window mode ticks the integrated server each frame.
+- `ChunkSchedulerMetrics` now exposes exact active full-status rings (`Inaccessible`, `Border`, `Ticking`, `EntityTicking`) plus the block-ticking lane. Tests assert the vanilla player-ticket radius math and that client visibility is independent from ticking status.
 
 ## Current Limits
 
 - Propagated non-direct holders are treated as clean lower-status dependency holders. Native does not yet generate Java's full feature-status halo for `level 34` chunks.
 - The clean dependency buffer is still stored as a worldgen `MutableChunkBlockBuffer`, not a long-lived protochunk type with explicit status transitions.
 - Moving scheduler-owned buffers through the worker currently clones chunk buffers. Current profiling shows this is not the first bottleneck for radius-1 movement, but performance work should still replace it with shared/owned transfer accounting once the shape stabilizes.
+- Ticking/entity-ticking are currently lane facts only. No block ticks, random ticks, fluid ticks, entity ticking, or spawn systems are driven by these lanes yet.
 - The smoke records split timing, but no fixed perf budget is enforced yet. Use release mode for performance comparisons.
 
 ## Movement Smoke
@@ -72,6 +74,7 @@ The smoke defaults to seed `12345`, radius `1`, `3` adjacent movement steps, and
 - direct ticket count differs from the client-visible interest square
 - propagated active holder count differs from the expected Chebyshev ticket halo
 - pending unloads remain after the smoke's explicit unload-drain step
+- full-status/ticking-lane counts differ from the expected player-ticket rings
 - client-visible chunk count differs from direct interest
 - movement steps stop publishing one new strip and one unload strip
 - scheduler-owned dependency seeding no longer matches worker cache hits
@@ -102,6 +105,11 @@ step 1 elapsed_ms: ~406, feature_total_ms: ~384, dependency_generate_ms: ~235, s
 step 2 elapsed_ms: ~400, feature_total_ms: ~379, dependency_generate_ms: ~232, surface_fill_ms: ~128, surface_bedrock_ms: ~44, air_carvers_ms: ~30, feature_decoration_ms: ~144, polls: 1, snapshots 3, unloads 3
 final metrics:
   active_ticket_chunks: 841
+  inaccessible_status_chunks: 792
+  border_status_chunks: 24
+  ticking_status_chunks: 16
+  entity_ticking_status_chunks: 9
+  block_ticking_chunks: 25
   client_visible_chunks: 9
   ready_dependency_chunks: 483
   total_seeded_dependency_chunks: 756
@@ -121,6 +129,11 @@ step 1 elapsed_ms: ~25.0, feature_total_ms: ~22.6, dependency_generate_ms: ~12.4
 step 2 elapsed_ms: ~23.0, feature_total_ms: ~21.1, dependency_generate_ms: ~12.5, surface_fill_ms: ~7.4, surface_bedrock_ms: ~2.2, air_carvers_ms: ~2.1, feature_decoration_ms: ~7.2, polls: 1, snapshots 3, unloads 3
 final metrics:
   active_ticket_chunks: 841
+  inaccessible_status_chunks: 792
+  border_status_chunks: 24
+  ticking_status_chunks: 16
+  entity_ticking_status_chunks: 9
+  block_ticking_chunks: 25
   client_visible_chunks: 9
   ready_dependency_chunks: 483
   total_seeded_dependency_chunks: 756
@@ -150,8 +163,9 @@ On this host it keeps similar end-to-end latency, but burns caller-thread time o
 
 ## Next Implementation Steps
 
-1. Profile deeper inside `ImprovedNoise::noise_scaled` / `sample_and_lerp` if surface fill remains the target; otherwise shift to feature decoration because it is now comparable to surface fill in adjacent movement.
-2. Consider a feature-family split inside `underground_ores` if decoration remains material after the noise-column work.
-3. Introduce an explicit protochunk/dependency-holder type so lower-status holder data is not stored as ad hoc worldgen buffers.
-4. Replace per-job dependency buffer cloning with a cheaper ownership/transfer strategy if profiling changes or larger view-distance movement makes it material.
-5. Decide whether to model Java's full `level 34 -> FEATURES` propagated halo before structures, or keep the MVP scoped to direct feature targets plus lower-status dependency holders.
+1. Add a server tick report/event layer that consumes the block-ticking and entity-ticking lanes without adding real simulation yet.
+2. Profile deeper inside `ImprovedNoise::noise_scaled` / `sample_and_lerp` if surface fill remains the target; otherwise shift to feature decoration because it is now comparable to surface fill in adjacent movement.
+3. Consider a feature-family split inside `underground_ores` if decoration remains material after the noise-column work.
+4. Introduce an explicit protochunk/dependency-holder type so lower-status holder data is not stored as ad hoc worldgen buffers.
+5. Replace per-job dependency buffer cloning with a cheaper ownership/transfer strategy if profiling changes or larger view-distance movement makes it material.
+6. Decide whether to model Java's full `level 34 -> FEATURES` propagated halo before structures, or keep the MVP scoped to direct feature targets plus lower-status dependency holders.

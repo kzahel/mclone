@@ -258,6 +258,7 @@ impl SmokeReport {
         let movement_strip_chunks =
             usize::try_from(self.config.radius_chunks).expect("radius fits usize") * 2 + 1;
         let active_chunks = active_square_count(self.config.radius_chunks)?;
+        let expected_status_counts = player_status_counts(self.config.radius_chunks)?;
 
         for step in &self.steps {
             if step.metrics.direct_ticket_chunks != interest_chunks {
@@ -294,6 +295,19 @@ impl SmokeReport {
                 return Err(format!(
                     "step {} still has {} pending unloads",
                     step.index, step.metrics.pending_unload_chunks
+                ));
+            }
+            let status_counts = (
+                step.metrics.inaccessible_status_chunks,
+                step.metrics.border_status_chunks,
+                step.metrics.ticking_status_chunks,
+                step.metrics.entity_ticking_status_chunks,
+                step.metrics.block_ticking_chunks,
+            );
+            if status_counts != expected_status_counts {
+                return Err(format!(
+                    "step {} status counts {:?} expected {:?}",
+                    step.index, status_counts, expected_status_counts
                 ));
             }
 
@@ -451,6 +465,26 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
     println!(
         "{indent}  \"pending_unload_chunks\": {},",
         metrics.pending_unload_chunks
+    );
+    println!(
+        "{indent}  \"inaccessible_status_chunks\": {},",
+        metrics.inaccessible_status_chunks
+    );
+    println!(
+        "{indent}  \"border_status_chunks\": {},",
+        metrics.border_status_chunks
+    );
+    println!(
+        "{indent}  \"ticking_status_chunks\": {},",
+        metrics.ticking_status_chunks
+    );
+    println!(
+        "{indent}  \"entity_ticking_status_chunks\": {},",
+        metrics.entity_ticking_status_chunks
+    );
+    println!(
+        "{indent}  \"block_ticking_chunks\": {},",
+        metrics.block_ticking_chunks
     );
     println!(
         "{indent}  \"client_visible_chunks\": {},",
@@ -663,6 +697,28 @@ fn active_square_count(radius_chunks: u32) -> Result<usize, String> {
             .checked_add(ticket_radius)
             .ok_or_else(|| "active radius overflowed u32".to_owned())?,
     )
+}
+
+fn player_status_counts(radius_chunks: u32) -> Result<(usize, usize, usize, usize, usize), String> {
+    let entity_ticking = square_count(radius_chunks)?;
+    let block_ticking = square_count(
+        radius_chunks
+            .checked_add(1)
+            .ok_or_else(|| "ticking radius overflowed u32".to_owned())?,
+    )?;
+    let border_outer = square_count(
+        radius_chunks
+            .checked_add(2)
+            .ok_or_else(|| "border radius overflowed u32".to_owned())?,
+    )?;
+    let active = active_square_count(radius_chunks)?;
+    Ok((
+        active - border_outer,
+        border_outer - block_ticking,
+        block_ticking - entity_ticking,
+        entity_ticking,
+        block_ticking,
+    ))
 }
 
 fn elapsed_ms(duration: Duration) -> f64 {

@@ -172,6 +172,11 @@ pub struct ChunkSchedulerMetrics {
     pub active_ticket_chunks: usize,
     pub holder_chunks: usize,
     pub pending_unload_chunks: usize,
+    pub inaccessible_status_chunks: usize,
+    pub border_status_chunks: usize,
+    pub ticking_status_chunks: usize,
+    pub entity_ticking_status_chunks: usize,
+    pub block_ticking_chunks: usize,
     pub client_visible_chunks: usize,
     pub loaded_snapshot_chunks: usize,
     pub dependency_holder_chunks: usize,
@@ -687,6 +692,34 @@ impl ChunkScheduler {
             .count()
     }
 
+    pub fn full_status_chunk_count(&self, status: FullChunkStatus) -> usize {
+        self.holders
+            .values()
+            .filter(|holder| holder.ticket_level <= MAX_CHUNK_DISTANCE)
+            .filter(|holder| holder.full_status() == status)
+            .count()
+    }
+
+    pub fn block_ticking_chunk_count(&self) -> usize {
+        self.holders
+            .values()
+            .filter(|holder| holder.ticket_level <= MAX_CHUNK_DISTANCE)
+            .filter(|holder| holder.full_status().is_or_after(FullChunkStatus::Ticking))
+            .count()
+    }
+
+    pub fn entity_ticking_chunk_count(&self) -> usize {
+        self.holders
+            .values()
+            .filter(|holder| holder.ticket_level <= MAX_CHUNK_DISTANCE)
+            .filter(|holder| {
+                holder
+                    .full_status()
+                    .is_or_after(FullChunkStatus::EntityTicking)
+            })
+            .count()
+    }
+
     pub fn dependency_holder_count(&self) -> usize {
         self.holders
             .values()
@@ -767,6 +800,12 @@ impl ChunkScheduler {
             active_ticket_chunks: self.active_ticketed_chunk_count(),
             holder_chunks: self.holder_count(),
             pending_unload_chunks: self.pending_unload_count(),
+            inaccessible_status_chunks: self.full_status_chunk_count(FullChunkStatus::Inaccessible),
+            border_status_chunks: self.full_status_chunk_count(FullChunkStatus::Border),
+            ticking_status_chunks: self.full_status_chunk_count(FullChunkStatus::Ticking),
+            entity_ticking_status_chunks: self
+                .full_status_chunk_count(FullChunkStatus::EntityTicking),
+            block_ticking_chunks: self.block_ticking_chunk_count(),
             client_visible_chunks: self.client_visible_chunk_count(),
             loaded_snapshot_chunks: self.loaded_chunk_count(),
             dependency_holder_chunks: self.dependency_holder_count(),
@@ -1740,6 +1779,24 @@ mod tests {
         side * side
     }
 
+    fn square_side_for_radius(radius: u32) -> usize {
+        usize::try_from(radius).expect("chunk radius must fit usize") * 2 + 1
+    }
+
+    fn player_status_counts(radius: u32) -> (usize, usize, usize, usize, usize) {
+        let entity_ticking = square_side_for_radius(radius).pow(2);
+        let block_ticking = square_side_for_radius(radius + 1).pow(2);
+        let ticking = block_ticking - entity_ticking;
+        let border_outer = square_side_for_radius(radius + 2).pow(2);
+        let border = border_outer - block_ticking;
+        let active = square_side_for_radius(
+            radius + u32::try_from(MAX_CHUNK_DISTANCE - PLAYER_TICKET_LEVEL).unwrap(),
+        )
+        .pow(2);
+        let inaccessible = active - border_outer;
+        (inaccessible, border, ticking, entity_ticking, block_ticking)
+    }
+
     #[test]
     fn distinguishes_integrated_and_dedicated_modes() {
         assert_ne!(ServerMode::Integrated, ServerMode::Dedicated);
@@ -1778,6 +1835,25 @@ mod tests {
         assert_eq!(server.scheduler().client_visible_chunk_count(), 9);
         assert_eq!(server.scheduler().holder_count(), 29 * 29);
         assert_eq!(server.scheduler().active_ticketed_chunk_count(), 29 * 29);
+        assert_eq!(
+            (
+                server
+                    .scheduler()
+                    .full_status_chunk_count(FullChunkStatus::Inaccessible),
+                server
+                    .scheduler()
+                    .full_status_chunk_count(FullChunkStatus::Border),
+                server
+                    .scheduler()
+                    .full_status_chunk_count(FullChunkStatus::Ticking),
+                server
+                    .scheduler()
+                    .full_status_chunk_count(FullChunkStatus::EntityTicking),
+                server.scheduler().block_ticking_chunk_count(),
+                server.scheduler().entity_ticking_chunk_count(),
+            ),
+            (792, 24, 16, 9, 25, 9)
+        );
         assert_eq!(server.scheduler().ready_dependency_chunk_count(), 21 * 21);
         assert_eq!(
             server.scheduler().metrics(),
@@ -1786,6 +1862,11 @@ mod tests {
                 active_ticket_chunks: 29 * 29,
                 holder_chunks: 29 * 29,
                 pending_unload_chunks: 0,
+                inaccessible_status_chunks: 792,
+                border_status_chunks: 24,
+                ticking_status_chunks: 16,
+                entity_ticking_status_chunks: 9,
+                block_ticking_chunks: 25,
                 client_visible_chunks: 9,
                 loaded_snapshot_chunks: 9,
                 dependency_holder_chunks: 29 * 29 - 9,
@@ -1830,6 +1911,90 @@ mod tests {
                 .iter()
                 .all(|update| matches!(update, ServerUpdate::ChunkSnapshot(_)))
         );
+    }
+
+    #[test]
+    fn player_ticket_levels_define_runtime_status_lanes() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+
+        scheduler
+            .apply_interest(ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            })
+            .unwrap();
+
+        assert_eq!(player_status_counts(0), (704, 16, 8, 1, 9));
+        assert_eq!(
+            (
+                scheduler.full_status_chunk_count(FullChunkStatus::Inaccessible),
+                scheduler.full_status_chunk_count(FullChunkStatus::Border),
+                scheduler.full_status_chunk_count(FullChunkStatus::Ticking),
+                scheduler.full_status_chunk_count(FullChunkStatus::EntityTicking),
+                scheduler.block_ticking_chunk_count(),
+                scheduler.entity_ticking_chunk_count(),
+            ),
+            (704, 16, 8, 1, 9, 1)
+        );
+        assert_eq!(
+            scheduler
+                .holder(ChunkPos::new(0, 0))
+                .map(ChunkHolder::full_status),
+            Some(FullChunkStatus::EntityTicking)
+        );
+        assert_eq!(
+            scheduler
+                .holder(ChunkPos::new(1, 0))
+                .map(ChunkHolder::full_status),
+            Some(FullChunkStatus::Ticking)
+        );
+        assert_eq!(
+            scheduler
+                .holder(ChunkPos::new(2, 0))
+                .map(ChunkHolder::full_status),
+            Some(FullChunkStatus::Border)
+        );
+        assert_eq!(
+            scheduler
+                .holder(ChunkPos::new(3, 0))
+                .map(ChunkHolder::full_status),
+            Some(FullChunkStatus::Inaccessible)
+        );
+        assert!(scheduler.holder(ChunkPos::new(14, 0)).is_none());
+    }
+
+    #[test]
+    fn client_visibility_is_separate_from_ticking_status() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+
+        apply_interest_and_poll(
+            &mut scheduler,
+            ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            },
+        );
+        assert!(
+            scheduler
+                .holder(ChunkPos::new(0, 0))
+                .unwrap()
+                .is_client_visible()
+        );
+
+        apply_interest_and_poll(
+            &mut scheduler,
+            ChunkInterest {
+                center: ChunkPos::new(1, 0),
+                radius_chunks: 0,
+            },
+        );
+
+        let old_center = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
+        assert!(!old_center.is_client_visible());
+        assert_eq!(old_center.full_status(), FullChunkStatus::Ticking);
+        assert_eq!(scheduler.client_visible_chunk_count(), 1);
+        assert_eq!(scheduler.entity_ticking_chunk_count(), 1);
+        assert_eq!(scheduler.block_ticking_chunk_count(), 9);
     }
 
     #[test]
