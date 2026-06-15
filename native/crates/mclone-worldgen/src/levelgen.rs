@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::biome::OverworldBiomeSource;
 use crate::block::{
-    AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER, generated_block_state_id,
-    is_air_like, material_blocks_motion,
+    AIR, BEDROCK, GLOW_LICHEN, GeneratedBlockId, RawBlockId, STONE, WATER,
+    generated_block_state_id, is_air_like, material_blocks_motion,
 };
 use crate::carver::{apply_overworld_air_carvers, apply_overworld_liquid_carvers};
 use crate::feature::{
@@ -639,6 +639,7 @@ pub struct MutableChunkBlockBuffer {
     pub height: i32,
     pub blocks: Vec<u8>,
     worldgen_heightmaps: Option<ChunkWorldgenHeightmaps>,
+    glow_lichen_faces: BTreeMap<usize, u8>,
     block_ticks: Vec<ScheduledTick>,
     liquid_ticks: Vec<ScheduledTick>,
 }
@@ -695,6 +696,7 @@ impl MutableChunkBlockBuffer {
             height,
             blocks: vec![AIR; height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize],
             worldgen_heightmaps: None,
+            glow_lichen_faces: BTreeMap::new(),
             block_ticks: Vec::new(),
             liquid_ticks: Vec::new(),
         }
@@ -707,6 +709,9 @@ impl MutableChunkBlockBuffer {
     pub fn set_block(&mut self, local_x: i32, local_y: i32, local_z: i32, block_id: u8) {
         let index = block_buffer_index(local_x, local_y, local_z);
         self.blocks[index] = block_id;
+        if block_id != GLOW_LICHEN {
+            self.glow_lichen_faces.remove(&index);
+        }
     }
 
     pub fn get_block_at_y(&self, local_x: i32, y: i32, local_z: i32) -> u8 {
@@ -715,6 +720,24 @@ impl MutableChunkBlockBuffer {
 
     pub fn set_block_at_y(&mut self, local_x: i32, y: i32, local_z: i32, block_id: u8) {
         self.set_block(local_x, y - self.min_y, local_z, block_id);
+    }
+
+    pub fn glow_lichen_faces_at_y(&self, local_x: i32, y: i32, local_z: i32) -> u8 {
+        if self.get_block_at_y(local_x, y, local_z) != GLOW_LICHEN {
+            return 0;
+        }
+        let index = block_buffer_index(local_x, y - self.min_y, local_z);
+        *self.glow_lichen_faces.get(&index).unwrap_or(&0)
+    }
+
+    pub fn set_glow_lichen_faces_at_y(&mut self, local_x: i32, y: i32, local_z: i32, faces: u8) {
+        self.set_block_at_y(local_x, y, local_z, GLOW_LICHEN);
+        let index = block_buffer_index(local_x, y - self.min_y, local_z);
+        if faces == 0 {
+            self.glow_lichen_faces.remove(&index);
+        } else {
+            self.glow_lichen_faces.insert(index, faces);
+        }
     }
 
     pub fn world_surface_height(&self, local_x: i32, local_z: i32) -> i32 {
@@ -2985,7 +3008,7 @@ mod tests {
         for (local_x, y, local_z, expected_name) in [
             (9, 12, 15, "minecraft:air"),
             (10, 17, 2, "minecraft:air"),
-            (7, 17, 8, "minecraft:air"),
+            (7, 17, 10, "minecraft:glow_lichen"),
             (9, 18, 2, "minecraft:water"),
             (10, 18, 2, "minecraft:air"),
         ] {
@@ -2995,6 +3018,13 @@ mod tests {
         }
 
         let report = compare_generated_chunk_to_full_fixture(&actual, expected);
+        assert_eq!(report.mismatched_blocks, 5);
+        assert!(report.top_mismatch_pairs.iter().all(|bucket| {
+            !matches!(
+                (bucket.actual.as_str(), bucket.expected.as_str()),
+                ("minecraft:glow_lichen", _) | (_, "minecraft:glow_lichen")
+            )
+        }));
         assert!(
             report.top_mismatch_pairs.iter().all(|bucket| {
                 !matches!(

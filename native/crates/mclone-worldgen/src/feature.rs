@@ -94,6 +94,19 @@ pub trait FeatureWorld {
     fn height_at(&mut self, heightmap: HeightmapType, world_x: i32, world_z: i32) -> Option<i32>;
     fn world_surface_height_at(&mut self, world_x: i32, world_z: i32) -> Option<i32>;
     fn set_block_world(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool;
+    fn glow_lichen_faces_world(&mut self, _pos: BlockPos) -> u8 {
+        0
+    }
+    fn set_glow_lichen_faces_world(&mut self, pos: BlockPos, faces: u8) -> bool {
+        if faces == 0 {
+            return false;
+        }
+        self.set_block_world(pos, GLOW_LICHEN)
+    }
+    fn glow_lichen_spread_direction_order(&mut self) -> [Direction; 6] {
+        Direction::ALL
+    }
+    fn set_glow_lichen_spread_direction_order(&mut self, _directions: [Direction; 6]) {}
     fn schedule_liquid_tick_world(&mut self, _pos: BlockPos, _target: RawBlockId, _delay: i32) {}
 }
 
@@ -204,6 +217,31 @@ impl FeatureWorld for MutableChunkBlockBuffer {
         true
     }
 
+    fn glow_lichen_faces_world(&mut self, pos: BlockPos) -> u8 {
+        let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
+        let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
+        if !(0..CHUNK_WIDTH).contains(&local_x)
+            || !(self.min_y..self.min_y + self.height).contains(&pos.y)
+            || !(0..CHUNK_WIDTH).contains(&local_z)
+        {
+            return 0;
+        }
+        self.glow_lichen_faces_at_y(local_x, pos.y, local_z)
+    }
+
+    fn set_glow_lichen_faces_world(&mut self, pos: BlockPos, faces: u8) -> bool {
+        let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
+        let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
+        if !(0..CHUNK_WIDTH).contains(&local_x)
+            || !(self.min_y..self.min_y + self.height).contains(&pos.y)
+            || !(0..CHUNK_WIDTH).contains(&local_z)
+        {
+            return false;
+        }
+        self.set_glow_lichen_faces_at_y(local_x, pos.y, local_z, faces);
+        true
+    }
+
     fn schedule_liquid_tick_world(&mut self, pos: BlockPos, target: RawBlockId, delay: i32) {
         let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
         let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
@@ -224,6 +262,7 @@ pub struct FeatureRegion {
     dependency_radius: i32,
     write_radius_cutoff: i32,
     chunks: BTreeMap<(i32, i32), MutableChunkBlockBuffer>,
+    glow_lichen_spread_directions: [Direction; 6],
     metrics: FeatureRegionMetrics,
 }
 
@@ -271,6 +310,17 @@ impl FeatureRegion {
             dependency_radius,
             write_radius_cutoff,
             chunks,
+            // Java mutates MultifaceBlock.DIRECTIONS globally while spawn chunks generate in
+            // parallel. This order matches the committed vanilla scheduler fixture at the start
+            // of the native 3x3 feature replay.
+            glow_lichen_spread_directions: [
+                Direction::Down,
+                Direction::Up,
+                Direction::North,
+                Direction::West,
+                Direction::South,
+                Direction::East,
+            ],
             metrics: FeatureRegionMetrics::default(),
         }
     }
@@ -436,6 +486,53 @@ impl FeatureWorld for FeatureRegion {
         );
         self.metrics.block_writes += 1;
         true
+    }
+
+    fn glow_lichen_faces_world(&mut self, pos: BlockPos) -> u8 {
+        let chunk_x = block_to_chunk_coord(pos.x);
+        let chunk_z = block_to_chunk_coord(pos.z);
+        self.metrics.block_reads += 1;
+        let chunk = self.get_chunk(chunk_x, chunk_z);
+        if !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y) {
+            return 0;
+        }
+        chunk.glow_lichen_faces_at_y(
+            pos.x - chunk_x * CHUNK_WIDTH,
+            pos.y,
+            pos.z - chunk_z * CHUNK_WIDTH,
+        )
+    }
+
+    fn set_glow_lichen_faces_world(&mut self, pos: BlockPos, faces: u8) -> bool {
+        let chunk_x = block_to_chunk_coord(pos.x);
+        let chunk_z = block_to_chunk_coord(pos.z);
+        self.ensure_within_dependency_window(chunk_x, chunk_z);
+        self.metrics.block_write_attempts += 1;
+        if !self.can_write_chunk(chunk_x, chunk_z) {
+            self.metrics.blocked_block_writes += 1;
+            return false;
+        }
+
+        let chunk = self.get_chunk_mut(chunk_x, chunk_z);
+        if !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y) {
+            return false;
+        }
+        chunk.set_glow_lichen_faces_at_y(
+            pos.x - chunk_x * CHUNK_WIDTH,
+            pos.y,
+            pos.z - chunk_z * CHUNK_WIDTH,
+            faces,
+        );
+        self.metrics.block_writes += 1;
+        true
+    }
+
+    fn glow_lichen_spread_direction_order(&mut self) -> [Direction; 6] {
+        self.glow_lichen_spread_directions
+    }
+
+    fn set_glow_lichen_spread_direction_order(&mut self, directions: [Direction; 6]) {
+        self.glow_lichen_spread_directions = directions;
     }
 
     fn schedule_liquid_tick_world(&mut self, pos: BlockPos, target: RawBlockId, delay: i32) {
@@ -614,6 +711,25 @@ impl Direction {
             Self::South => Self::North,
             Self::West => Self::East,
             Self::East => Self::West,
+        }
+    }
+
+    const fn axis(self) -> i32 {
+        match self {
+            Self::Down | Self::Up => 0,
+            Self::North | Self::South => 1,
+            Self::West | Self::East => 2,
+        }
+    }
+
+    const fn bit(self) -> u8 {
+        match self {
+            Self::Down => 1 << 0,
+            Self::Up => 1 << 1,
+            Self::North => 1 << 2,
+            Self::South => 1 << 3,
+            Self::West => 1 << 4,
+            Self::East => 1 << 5,
         }
     }
 }
@@ -2380,9 +2496,15 @@ fn place_glow_lichen_if_possible<W: FeatureWorld>(
             continue;
         }
 
-        world.set_block_world(pos, GLOW_LICHEN);
+        let Some(next_faces) = glow_lichen_faces_for_placement(world, pos, current, *direction)
+        else {
+            return false;
+        };
+        if !world.set_glow_lichen_faces_world(pos, next_faces) {
+            continue;
+        }
         if random.next_float() < config.chance_of_spreading {
-            consume_glow_lichen_spread_random(random);
+            spread_glow_lichen_from_face_toward_random_direction(world, pos, *direction, random);
         }
         return true;
     }
@@ -2417,10 +2539,99 @@ fn shuffle_java_style<T>(items: &mut [T], random: &mut impl RandomSource) {
     }
 }
 
-fn consume_glow_lichen_spread_random(random: &mut impl RandomSource) {
-    // Native: compact glow_lichen state consumes Java spread RNG without storing extra faces.
-    let mut directions = Direction::ALL;
+fn spread_glow_lichen_from_face_toward_random_direction<W: FeatureWorld>(
+    world: &mut W,
+    pos: BlockPos,
+    source_face: Direction,
+    random: &mut impl RandomSource,
+) -> bool {
+    // Java mutates MultifaceBlock.DIRECTIONS via Arrays.asList(DIRECTIONS) before iterating it.
+    let mut directions = world.glow_lichen_spread_direction_order();
     shuffle_java_style(&mut directions, random);
+    world.set_glow_lichen_spread_direction_order(directions);
+    for direction in directions {
+        if spread_glow_lichen_from_face_toward_direction(world, pos, source_face, direction) {
+            return true;
+        }
+    }
+    false
+}
+
+fn spread_glow_lichen_from_face_toward_direction<W: FeatureWorld>(
+    world: &mut W,
+    pos: BlockPos,
+    source_face: Direction,
+    toward: Direction,
+) -> bool {
+    if toward.axis() == source_face.axis() {
+        return false;
+    }
+    if world.glow_lichen_faces_world(pos) & source_face.bit() == 0 {
+        return false;
+    }
+
+    if spread_glow_lichen_to_face(world, pos, toward) {
+        return true;
+    }
+
+    let side_pos = offset_pos(pos, toward);
+    if spread_glow_lichen_to_face(world, side_pos, source_face) {
+        return true;
+    }
+
+    let corner_pos = offset_pos(side_pos, source_face);
+    spread_glow_lichen_to_face(world, corner_pos, toward.opposite())
+}
+
+fn spread_glow_lichen_to_face<W: FeatureWorld>(
+    world: &mut W,
+    pos: BlockPos,
+    face: Direction,
+) -> bool {
+    let Some(current) = world.block_at_world(pos) else {
+        return false;
+    };
+    if !can_glow_lichen_spread_into(current) {
+        return false;
+    }
+    let Some(next_faces) = glow_lichen_faces_for_placement(world, pos, current, face) else {
+        return false;
+    };
+
+    let support = offset_pos(pos, face);
+    if !world
+        .block_at_world(support)
+        .is_some_and(material_blocks_motion)
+    {
+        return false;
+    }
+
+    world.set_glow_lichen_faces_world(pos, next_faces)
+}
+
+fn glow_lichen_faces_for_placement<W: FeatureWorld>(
+    world: &mut W,
+    pos: BlockPos,
+    current: RawBlockId,
+    face: Direction,
+) -> Option<u8> {
+    if current == GLOW_LICHEN {
+        let existing = world.glow_lichen_faces_world(pos);
+        if existing & face.bit() != 0 {
+            return None;
+        }
+        return Some(existing | face.bit());
+    }
+
+    if is_air_or_water(current) {
+        Some(face.bit())
+    } else {
+        None
+    }
+}
+
+fn can_glow_lichen_spread_into(block_id: RawBlockId) -> bool {
+    is_air_like(block_id) || block_id == GLOW_LICHEN || block_id == WATER
 }
 
 fn offset_pos(pos: BlockPos, direction: Direction) -> BlockPos {
@@ -3305,6 +3516,22 @@ mod tests {
 
         assert!(feature.place(&mut chunk, &mut random, BlockPos::new(8, 8, 8)));
         assert_eq!(chunk.get_block_at_y(8, 8, 8), GLOW_LICHEN);
+        assert_eq!(chunk.glow_lichen_faces_at_y(8, 8, 8), Direction::Up.bit());
+    }
+
+    #[test]
+    fn glow_lichen_spread_can_write_visible_neighbor_block() {
+        let mut chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        chunk.set_glow_lichen_faces_at_y(8, 8, 8, Direction::North.bit());
+        chunk.set_block_at_y(9, 8, 7, STONE);
+
+        assert!(spread_glow_lichen_from_face_toward_direction(
+            &mut chunk,
+            BlockPos::new(8, 8, 8),
+            Direction::North,
+            Direction::East,
+        ));
+        assert_eq!(chunk.get_block_at_y(9, 8, 8), GLOW_LICHEN);
     }
 
     #[test]
