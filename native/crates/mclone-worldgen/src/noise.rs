@@ -7,6 +7,7 @@ const SIMPLEX_G2: f64 = (3.0 - SQRT_3) / 6.0;
 const SIMPLEX_F3: f64 = 0.333_333_333_333_333_3;
 const SIMPLEX_G3: f64 = 0.166_666_666_666_666_66;
 const ROUND_OFF: f64 = 33_554_432.0;
+const HALF_ROUND_OFF: f64 = ROUND_OFF * 0.5;
 const PERLIN_SIMPLEX_RESEED_FACTOR: f64 = 9.223372E18_f32 as f64;
 const LIMIT_OCTAVES: [i32; 16] = [
     -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0,
@@ -454,6 +455,9 @@ impl PerlinNoise {
     }
 
     pub fn wrap(value: f64) -> f64 {
+        if (-HALF_ROUND_OFF..HALF_ROUND_OFF).contains(&value) {
+            return value;
+        }
         value - floor_i64(value / ROUND_OFF + 0.5) as f64 * ROUND_OFF
     }
 }
@@ -561,6 +565,20 @@ pub struct BlendedNoise {
     main_noise: PerlinNoise,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct BlendedNoiseColumnCache {
+    main_vertical_scale: f64,
+    main_input_factors: [f64; 8],
+    main_y_scales: [f64; 8],
+    main_x: [f64; 8],
+    main_z: [f64; 8],
+    limit_vertical_scale: f64,
+    limit_input_factors: [f64; 16],
+    limit_y_scales: [f64; 16],
+    limit_x: [f64; 16],
+    limit_z: [f64; 16],
+}
+
 impl BlendedNoise {
     pub fn new(random: &mut impl RandomSource) -> Self {
         let min_limit_noise = PerlinNoise::from_octaves(random, &LIMIT_OCTAVES);
@@ -592,44 +610,114 @@ impl BlendedNoise {
         main_horizontal_scale: f64,
         main_vertical_scale: f64,
     ) -> f64 {
-        let mut min = 0.0;
-        let mut max = 0.0;
-        let mut main = 0.0;
+        let cache = Self::create_column_cache(
+            x,
+            z,
+            limit_horizontal_scale,
+            limit_vertical_scale,
+            main_horizontal_scale,
+            main_vertical_scale,
+        );
+        self.sample_and_clamp_noise_cached(y, &cache)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn create_column_cache(
+        x: i32,
+        z: i32,
+        limit_horizontal_scale: f64,
+        limit_vertical_scale: f64,
+        main_horizontal_scale: f64,
+        main_vertical_scale: f64,
+    ) -> BlendedNoiseColumnCache {
+        let mut main_input_factors = [0.0; 8];
+        let mut main_y_scales = [0.0; 8];
+        let mut main_x = [0.0; 8];
+        let mut main_z = [0.0; 8];
+        let main_base_x = x as f64 * main_horizontal_scale;
+        let main_base_z = z as f64 * main_horizontal_scale;
         let mut input_factor = 1.0;
 
         for octave in 0..8 {
+            main_input_factors[octave] = input_factor;
+            main_y_scales[octave] = main_vertical_scale * input_factor;
+            main_x[octave] = PerlinNoise::wrap(main_base_x * input_factor);
+            main_z[octave] = PerlinNoise::wrap(main_base_z * input_factor);
+            input_factor /= 2.0;
+        }
+
+        let mut limit_input_factors = [0.0; 16];
+        let mut limit_y_scales = [0.0; 16];
+        let mut limit_x = [0.0; 16];
+        let mut limit_z = [0.0; 16];
+        let limit_base_x = x as f64 * limit_horizontal_scale;
+        let limit_base_z = z as f64 * limit_horizontal_scale;
+        input_factor = 1.0;
+
+        for octave in 0..16 {
+            limit_input_factors[octave] = input_factor;
+            limit_y_scales[octave] = limit_vertical_scale * input_factor;
+            limit_x[octave] = PerlinNoise::wrap(limit_base_x * input_factor);
+            limit_z[octave] = PerlinNoise::wrap(limit_base_z * input_factor);
+            input_factor /= 2.0;
+        }
+
+        BlendedNoiseColumnCache {
+            main_vertical_scale,
+            main_input_factors,
+            main_y_scales,
+            main_x,
+            main_z,
+            limit_vertical_scale,
+            limit_input_factors,
+            limit_y_scales,
+            limit_x,
+            limit_z,
+        }
+    }
+
+    pub(crate) fn sample_and_clamp_noise_cached(
+        &self,
+        y: i32,
+        cache: &BlendedNoiseColumnCache,
+    ) -> f64 {
+        let mut min = 0.0;
+        let mut max = 0.0;
+        let mut main = 0.0;
+
+        for octave in 0..8 {
             if let Some(noise) = self.main_noise.get_octave_noise(octave) {
+                let input_factor = cache.main_input_factors[octave as usize];
+                let scaled_y = (y as f64 * cache.main_vertical_scale) * input_factor;
                 main += noise.noise_scaled(
-                    PerlinNoise::wrap(x as f64 * main_horizontal_scale * input_factor),
-                    PerlinNoise::wrap(y as f64 * main_vertical_scale * input_factor),
-                    PerlinNoise::wrap(z as f64 * main_horizontal_scale * input_factor),
-                    main_vertical_scale * input_factor,
-                    y as f64 * main_vertical_scale * input_factor,
+                    cache.main_x[octave as usize],
+                    PerlinNoise::wrap(scaled_y),
+                    cache.main_z[octave as usize],
+                    cache.main_y_scales[octave as usize],
+                    scaled_y,
                 ) / input_factor;
             }
-
-            input_factor /= 2.0;
         }
 
         let blend = (main / 10.0 + 1.0) / 2.0;
         let skip_min = blend >= 1.0;
         let skip_max = blend <= 0.0;
-        input_factor = 1.0;
 
         for octave in 0..16 {
-            let wrapped_x = PerlinNoise::wrap(x as f64 * limit_horizontal_scale * input_factor);
-            let wrapped_y = PerlinNoise::wrap(y as f64 * limit_vertical_scale * input_factor);
-            let wrapped_z = PerlinNoise::wrap(z as f64 * limit_horizontal_scale * input_factor);
-            let y_scale = limit_vertical_scale * input_factor;
+            let input_factor = cache.limit_input_factors[octave as usize];
+            let scaled_y = (y as f64 * cache.limit_vertical_scale) * input_factor;
+            let wrapped_y = PerlinNoise::wrap(scaled_y);
+            let y_scale = cache.limit_y_scales[octave as usize];
+            let y_max = y as f64 * y_scale;
 
             if !skip_min {
                 if let Some(noise) = self.min_limit_noise.get_octave_noise(octave) {
                     min += noise.noise_scaled(
-                        wrapped_x,
+                        cache.limit_x[octave as usize],
                         wrapped_y,
-                        wrapped_z,
+                        cache.limit_z[octave as usize],
                         y_scale,
-                        y as f64 * y_scale,
+                        y_max,
                     ) / input_factor;
                 }
             }
@@ -637,16 +725,14 @@ impl BlendedNoise {
             if !skip_max {
                 if let Some(noise) = self.max_limit_noise.get_octave_noise(octave) {
                     max += noise.noise_scaled(
-                        wrapped_x,
+                        cache.limit_x[octave as usize],
                         wrapped_y,
-                        wrapped_z,
+                        cache.limit_z[octave as usize],
                         y_scale,
-                        y as f64 * y_scale,
+                        y_max,
                     ) / input_factor;
                 }
             }
-
-            input_factor /= 2.0;
         }
 
         clamped_lerp(min / 512.0, max / 512.0, blend)
@@ -1283,6 +1369,22 @@ mod tests {
             noise
                 .get_value_scaled(0.5, -0.75, 1.25, 0.0, 0.0, false)
                 .to_bits()
+        );
+    }
+
+    #[test]
+    fn perlin_wrap_fast_path_preserves_java_boundaries() {
+        assert_eq!(
+            PerlinNoise::wrap(HALF_ROUND_OFF - 1.0).to_bits(),
+            (HALF_ROUND_OFF - 1.0).to_bits()
+        );
+        assert_eq!(
+            PerlinNoise::wrap(-HALF_ROUND_OFF).to_bits(),
+            (-HALF_ROUND_OFF).to_bits()
+        );
+        assert_eq!(
+            PerlinNoise::wrap(HALF_ROUND_OFF).to_bits(),
+            (-HALF_ROUND_OFF).to_bits()
         );
     }
 

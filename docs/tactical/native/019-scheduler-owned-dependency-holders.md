@@ -114,10 +114,10 @@ Observed release-mode baseline on this host with default `poll_mode=completion`:
 steps: 3
 radius: 1
 completion_wait_ms: 30,000 timeout cap, zero observed timeouts
-total_elapsed_ms: ~375
-step 0 elapsed_ms: ~324, feature_total_ms: ~319, dependency_generate_ms: ~303, surface_fill_ms: ~198, surface_bedrock_ms: ~50, air_carvers_ms: ~35, feature_decoration_ms: ~12.5, polls: 1, snapshots 9, unloads 0
-step 1 elapsed_ms: ~25.6, feature_total_ms: ~23.1, dependency_generate_ms: ~13.8, surface_fill_ms: ~8.8, surface_bedrock_ms: ~2.1, air_carvers_ms: ~2.0, feature_decoration_ms: ~7.4, polls: 1, snapshots 3, unloads 3
-step 2 elapsed_ms: ~24.6, feature_total_ms: ~22.6, dependency_generate_ms: ~14.0, surface_fill_ms: ~8.9, surface_bedrock_ms: ~2.2, air_carvers_ms: ~2.1, feature_decoration_ms: ~7.3, polls: 1, snapshots 3, unloads 3
+total_elapsed_ms: ~337
+step 0 elapsed_ms: ~288, feature_total_ms: ~283, dependency_generate_ms: ~267, surface_fill_ms: ~161, surface_bedrock_ms: ~50, air_carvers_ms: ~35, feature_decoration_ms: ~12.4, polls: 1, snapshots 9, unloads 0
+step 1 elapsed_ms: ~25.0, feature_total_ms: ~22.6, dependency_generate_ms: ~12.4, surface_fill_ms: ~7.3, surface_bedrock_ms: ~2.2, air_carvers_ms: ~2.0, feature_decoration_ms: ~7.5, polls: 1, snapshots 3, unloads 3
+step 2 elapsed_ms: ~23.0, feature_total_ms: ~21.1, dependency_generate_ms: ~12.5, surface_fill_ms: ~7.4, surface_bedrock_ms: ~2.2, air_carvers_ms: ~2.1, feature_decoration_ms: ~7.2, polls: 1, snapshots 3, unloads 3
 final metrics:
   active_ticket_chunks: 841
   client_visible_chunks: 9
@@ -127,9 +127,9 @@ final metrics:
   total_dependency_cache_misses: 483
 ```
 
-The release baseline suggests adjacent movement is primarily worker throughput / scheduler-idle latency, not active scheduler CPU work: default adjacent steps take about `25ms` end-to-end, while synchronous scheduler work is about `1.7-2.0ms`. In completion mode the smoke blocks while waiting for that worker result; a renderer/tick loop should keep using nonblocking `poll()` or event-loop wakeups instead of waiting on the render thread.
+The release baseline suggests adjacent movement is primarily worker throughput / scheduler-idle latency, not active scheduler CPU work: default adjacent steps take about `23-25ms` end-to-end, while synchronous scheduler work is about `1.7-2.0ms`. In completion mode the smoke blocks while waiting for that worker result; a renderer/tick loop should keep using nonblocking `poll()` or event-loop wakeups instead of waiting on the render thread.
 
-The worker profile says the main adjacent-step bottleneck is now dependency generation for the new strip (`~14ms`). Within that, surface noise fill dominates (`~8.8-8.9ms`), followed by surface/bedrock (`~2.1ms`) and air carvers (`~2.0ms`). The surface-fill split shows that noise-column sampling is the hot part (`~6.7-6.9ms` adjacent) while interpolation/block writes are much smaller (`~2.0ms` adjacent). Actual feature placement is second (`~7.3-7.4ms`), mostly `underground_ores` (`~5.3-5.4ms`) and `top_layer_modification` (`~1.4ms`). Retained dependency cloning and seeded cache-hit cloning are below `2ms` combined for the adjacent movement path on this host.
+The worker profile says the main adjacent-step bottleneck is now dependency generation for the new strip (`~12.4-12.5ms`). Within that, surface noise fill dominates (`~7.3-7.4ms`), followed by surface/bedrock (`~2.2ms`) and air carvers (`~2.0-2.1ms`). The surface-fill split shows that noise-column sampling is still the hot part (`~5.1-5.2ms` adjacent) while interpolation/block writes are about `~2.1ms` adjacent. Actual feature placement is second (`~7.2-7.5ms`), mostly `underground_ores` (`~5.3-5.5ms`) and `top_layer_modification` (`~1.4ms`). Retained dependency cloning and seeded cache-hit cloning are below `2ms` combined for the adjacent movement path on this host.
 
 The old sleep-poll lane is still available for comparison:
 
@@ -149,8 +149,8 @@ On this host it keeps similar end-to-end latency, but burns caller-thread time o
 
 ## Next Implementation Steps
 
-1. Profile and optimize noise-column sampling inside surface fill (`NoiseSampler` / `BlendedNoise` / Perlin hot paths), because interpolation and block writes are no longer the dominant part.
-2. Consider a feature-family split inside `underground_ores` if decoration remains material after dependency generation work.
+1. Profile deeper inside `ImprovedNoise::noise_scaled` / `sample_and_lerp` if surface fill remains the target; otherwise shift to feature decoration because it is now comparable to surface fill in adjacent movement.
+2. Consider a feature-family split inside `underground_ores` if decoration remains material after the noise-column work.
 3. Introduce an explicit protochunk/dependency-holder type so lower-status holder data is not stored as ad hoc worldgen buffers.
 4. Replace per-job dependency buffer cloning with a cheaper ownership/transfer strategy if profiling changes or larger view-distance movement makes it material.
 5. Add delayed pending-unload processing so save/unload work can be bounded per tick.

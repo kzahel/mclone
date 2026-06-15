@@ -486,6 +486,14 @@ impl<B: NoiseBiomeSource> NoiseSampler<B> {
         let limit_vertical_scale = 684.412 * sampling.y_scale();
         let main_horizontal_scale = limit_horizontal_scale / sampling.xz_factor();
         let main_vertical_scale = limit_vertical_scale / sampling.y_factor();
+        let blended_noise_column = BlendedNoise::create_column_cache(
+            cell_x,
+            cell_z,
+            limit_horizontal_scale,
+            limit_vertical_scale,
+            main_horizontal_scale,
+            main_vertical_scale,
+        );
         let random_density_offset = if noise_settings.random_density_offset() {
             self.get_random_density(cell_x, cell_z)
         } else {
@@ -494,15 +502,9 @@ impl<B: NoiseBiomeSource> NoiseSampler<B> {
 
         for index in 0..=cell_count_y {
             let y = index + min_cell_y;
-            let mut noise = self.blended_noise.sample_and_clamp_noise(
-                cell_x,
-                y,
-                cell_z,
-                limit_horizontal_scale,
-                limit_vertical_scale,
-                main_horizontal_scale,
-                main_vertical_scale,
-            );
+            let mut noise = self
+                .blended_noise
+                .sample_and_clamp_noise_cached(y, &blended_noise_column);
             noise = self.compute_initial_density(
                 y,
                 density.depth,
