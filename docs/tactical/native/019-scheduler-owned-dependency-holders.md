@@ -47,13 +47,14 @@ Key Java facts for this slice:
 - Ticket removal now queues holders in a native pending-unload set instead of dropping/saving them synchronously. Returned tickets rescue pending holders, `ChunkScheduler::process_pending_unloads(...)` drains a bounded amount of save/drop work, `tick()` processes the Java-shaped default budget, and native window mode ticks the integrated server each frame.
 - `ChunkSchedulerMetrics` now exposes exact active full-status rings (`Inaccessible`, `Border`, `Ticking`, `EntityTicking`) plus the block-ticking lane. Tests assert the vanilla player-ticket radius math and that client visibility is independent from ticking status.
 - `ChunkScheduler::tick_report()` and `IntegratedServer::tick_report()` now expose deterministic z-major block-ticking and entity-ticking chunk lists, bounded pending-unload drain counts, and protocol updates/events. Native window mode uses the report and shows the tick id plus last unload-drain count in the title.
+- `IntegratedServer::simulation_tick_report()` now consumes the chunk tick report through no-op block/entity phases, records phase counts and native timing, and preserves existing `tick()` protocol-update behavior. Native window diagnostics show simulation tick id, phase counts, and phase timing.
 
 ## Current Limits
 
 - Propagated non-direct holders are treated as clean lower-status dependency holders. Native does not yet generate Java's full feature-status halo for `level 34` chunks.
 - The clean dependency buffer is still stored as a worldgen `MutableChunkBlockBuffer`, not a long-lived protochunk type with explicit status transitions.
 - Moving scheduler-owned buffers through the worker currently clones chunk buffers. Current profiling shows this is not the first bottleneck for radius-1 movement, but performance work should still replace it with shared/owned transfer accounting once the shape stabilizes.
-- Ticking/entity-ticking are currently report facts only. No block ticks, random ticks, fluid ticks, entity ticking, or spawn systems mutate world state through these lanes yet.
+- Ticking/entity-ticking currently pass through no-op simulation phases only. No block ticks, random ticks, fluid ticks, entity ticking, or spawn systems mutate world state through these lanes yet.
 - The smoke records split timing, but no fixed perf budget is enforced yet. Use release mode for performance comparisons.
 
 ## Movement Smoke
@@ -164,7 +165,7 @@ On this host it keeps similar end-to-end latency, but burns caller-thread time o
 
 ## Next Implementation Steps
 
-1. Add a no-op server simulation tick layer that consumes `tick_report()` and records future block/entity tick phases without mutating chunks yet.
+1. Add a first real block-tick queue/scheduled-tick lane on top of the no-op block phase, starting with deterministic reports before mutation.
 2. Profile deeper inside `ImprovedNoise::noise_scaled` / `sample_and_lerp` if surface fill remains the target; otherwise shift to feature decoration because it is now comparable to surface fill in adjacent movement.
 3. Consider a feature-family split inside `underground_ores` if decoration remains material after the noise-column work.
 4. Introduce an explicit protochunk/dependency-holder type so lower-status holder data is not stored as ad hoc worldgen buffers.

@@ -9,6 +9,8 @@ use std::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
 use std::{sync::mpsc, thread};
 
 use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
@@ -197,6 +199,14 @@ pub struct ChunkSchedulerTickReport {
     pub entity_ticking_chunks: Vec<ChunkPos>,
     pub pending_unloads_processed: usize,
     pub events: Vec<ChunkSchedulerEvent>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ServerSimulationTickTiming {
+    pub total_us: u128,
+    pub scheduler_tick_us: u128,
+    pub block_tick_us: u128,
+    pub entity_tick_us: u128,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1542,6 +1552,7 @@ enum WorldgenRequest {
 pub struct IntegratedServer {
     seed: i64,
     scheduler: ChunkScheduler,
+    simulation_tick: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1553,6 +1564,17 @@ pub struct ServerTickReport {
     pub updates: Vec<ServerUpdate>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ServerSimulationTickReport {
+    pub simulation_tick: u64,
+    pub chunk_tick: u64,
+    pub block_tick_chunks: usize,
+    pub entity_tick_chunks: usize,
+    pub pending_unloads_processed: usize,
+    pub updates: Vec<ServerUpdate>,
+    pub timing: ServerSimulationTickTiming,
+}
+
 impl IntegratedServer {
     pub fn new(seed: i64) -> Self {
         Self::with_chunk_store(seed, Box::<NullChunkSnapshotStore>::default())
@@ -1562,11 +1584,16 @@ impl IntegratedServer {
         Self {
             seed,
             scheduler: ChunkScheduler::with_store(seed, store),
+            simulation_tick: 0,
         }
     }
 
     pub const fn seed(&self) -> i64 {
         self.seed
+    }
+
+    pub const fn simulation_tick(&self) -> u64 {
+        self.simulation_tick
     }
 
     pub fn handle_command(&mut self, command: ClientCommand) -> Vec<ServerUpdate> {
@@ -1601,7 +1628,7 @@ impl IntegratedServer {
     }
 
     pub fn try_tick(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        Ok(self.try_tick_report()?.updates)
+        Ok(self.try_simulation_tick_report()?.updates)
     }
 
     pub fn tick_report(&mut self) -> ServerTickReport {
@@ -1622,6 +1649,44 @@ impl IntegratedServer {
             entity_ticking_chunks: report.entity_ticking_chunks,
             pending_unloads_processed: report.pending_unloads_processed,
             updates,
+        })
+    }
+
+    pub fn simulation_tick_report(&mut self) -> ServerSimulationTickReport {
+        self.try_simulation_tick_report()
+            .expect("integrated server simulation tick report failed")
+    }
+
+    pub fn try_simulation_tick_report(&mut self) -> ChunkStoreResult<ServerSimulationTickReport> {
+        let total_start = simulation_timing_start();
+        let scheduler_start = simulation_timing_start();
+        let tick_report = self.try_tick_report()?;
+        let scheduler_tick_us = simulation_timing_elapsed_us(scheduler_start);
+
+        let simulation_tick = self.simulation_tick.saturating_add(1);
+        self.simulation_tick = simulation_tick;
+
+        let block_tick_start = simulation_timing_start();
+        let block_tick_chunks = run_noop_simulation_phase(&tick_report.block_ticking_chunks);
+        let block_tick_us = simulation_timing_elapsed_us(block_tick_start);
+
+        let entity_tick_start = simulation_timing_start();
+        let entity_tick_chunks = run_noop_simulation_phase(&tick_report.entity_ticking_chunks);
+        let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
+
+        Ok(ServerSimulationTickReport {
+            simulation_tick,
+            chunk_tick: tick_report.ticket_tick,
+            block_tick_chunks,
+            entity_tick_chunks,
+            pending_unloads_processed: tick_report.pending_unloads_processed,
+            updates: tick_report.updates,
+            timing: ServerSimulationTickTiming {
+                total_us: simulation_timing_elapsed_us(total_start),
+                scheduler_tick_us,
+                block_tick_us,
+                entity_tick_us,
+            },
         })
     }
 
@@ -1668,6 +1733,30 @@ fn server_update_from_scheduler_event(event: ChunkSchedulerEvent) -> Option<Serv
         ChunkSchedulerEvent::Unloaded { pos } => Some(ServerUpdate::ChunkUnload { pos }),
         ChunkSchedulerEvent::StatusChanged { .. } => None,
     }
+}
+
+fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {
+    chunks.iter().fold(0, |count, _pos| count + 1)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn simulation_timing_start() -> Option<Instant> {
+    Some(Instant::now())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn simulation_timing_start() -> Option<()> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn simulation_timing_elapsed_us(start: Option<Instant>) -> u128 {
+    start.map_or(0, |start| start.elapsed().as_micros())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn simulation_timing_elapsed_us(_start: Option<()>) -> u128 {
+    0
 }
 
 fn feature_job_positions(targets: &[ChunkPos]) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkPos>) {
@@ -2103,6 +2192,49 @@ mod tests {
         assert_eq!(report.entity_ticking_chunks, vec![ChunkPos::new(0, 0)]);
         assert_eq!(report.pending_unloads_processed, 0);
         assert!(report.updates.is_empty());
+    }
+
+    #[test]
+    fn integrated_server_simulation_tick_report_records_noop_phases() {
+        let mut server = IntegratedServer::new(12_345);
+
+        handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkInterest(ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            }),
+        );
+        let before_metrics = server.scheduler().metrics();
+
+        let report = server.simulation_tick_report();
+
+        assert_eq!(report.simulation_tick, 1);
+        assert_eq!(report.chunk_tick, 1);
+        assert_eq!(report.block_tick_chunks, 9);
+        assert_eq!(report.entity_tick_chunks, 1);
+        assert_eq!(report.pending_unloads_processed, 0);
+        assert!(report.updates.is_empty());
+        assert_eq!(server.scheduler().metrics(), before_metrics);
+    }
+
+    #[test]
+    fn integrated_server_tick_uses_noop_simulation_layer() {
+        let mut server = IntegratedServer::new(12_345);
+
+        handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkInterest(ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            }),
+        );
+
+        assert_eq!(server.simulation_tick(), 0);
+        assert!(server.tick().is_empty());
+        assert_eq!(server.simulation_tick(), 1);
+        assert!(server.tick().is_empty());
+        assert_eq!(server.simulation_tick(), 2);
     }
 
     #[test]

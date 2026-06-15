@@ -490,7 +490,13 @@ struct WindowSceneRuntime {
     interest_center: ChunkPos,
     mesh_assets: TexturedMeshAssets,
     last_tick: u64,
+    last_simulation_tick: u64,
     last_tick_unloads_processed: usize,
+    last_simulation_block_tick_chunks: usize,
+    last_simulation_entity_tick_chunks: usize,
+    last_simulation_scheduler_tick_ms: f64,
+    last_simulation_block_tick_ms: f64,
+    last_simulation_entity_tick_ms: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -504,7 +510,13 @@ struct WindowRuntimeStats {
     block_ticking_chunks: usize,
     entity_ticking_chunks: usize,
     last_tick: u64,
+    last_simulation_tick: u64,
     last_tick_unloads_processed: usize,
+    last_simulation_block_tick_chunks: usize,
+    last_simulation_entity_tick_chunks: usize,
+    last_simulation_scheduler_tick_ms: f64,
+    last_simulation_block_tick_ms: f64,
+    last_simulation_entity_tick_ms: f64,
 }
 
 impl WindowSceneRuntime {
@@ -528,7 +540,13 @@ impl WindowSceneRuntime {
             interest_center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
             mesh_assets: load_textured_mesh_assets()?,
             last_tick: 0,
+            last_simulation_tick: 0,
             last_tick_unloads_processed: 0,
+            last_simulation_block_tick_chunks: 0,
+            last_simulation_entity_tick_chunks: 0,
+            last_simulation_scheduler_tick_ms: 0.0,
+            last_simulation_block_tick_ms: 0.0,
+            last_simulation_entity_tick_ms: 0.0,
         };
         runtime.set_interest_center(runtime.interest_center)?;
         Ok(runtime)
@@ -563,10 +581,16 @@ impl WindowSceneRuntime {
         let mut changed = self.flush_local_commands()?;
         if let Some(server) = &mut self.server {
             let report = server
-                .try_tick_report()
+                .try_simulation_tick_report()
                 .context("failed to tick integrated server")?;
-            self.last_tick = report.ticket_tick;
+            self.last_tick = report.chunk_tick;
+            self.last_simulation_tick = report.simulation_tick;
             self.last_tick_unloads_processed = report.pending_unloads_processed;
+            self.last_simulation_block_tick_chunks = report.block_tick_chunks;
+            self.last_simulation_entity_tick_chunks = report.entity_tick_chunks;
+            self.last_simulation_scheduler_tick_ms = micros_to_ms(report.timing.scheduler_tick_us);
+            self.last_simulation_block_tick_ms = micros_to_ms(report.timing.block_tick_us);
+            self.last_simulation_entity_tick_ms = micros_to_ms(report.timing.entity_tick_us);
             changed |= self.apply_server_updates(report.updates);
         }
         Ok(changed)
@@ -625,7 +649,13 @@ impl WindowSceneRuntime {
             entity_ticking_chunks: scheduler_metrics
                 .map_or(0, |metrics| metrics.entity_ticking_status_chunks),
             last_tick: self.last_tick,
+            last_simulation_tick: self.last_simulation_tick,
             last_tick_unloads_processed: self.last_tick_unloads_processed,
+            last_simulation_block_tick_chunks: self.last_simulation_block_tick_chunks,
+            last_simulation_entity_tick_chunks: self.last_simulation_entity_tick_chunks,
+            last_simulation_scheduler_tick_ms: self.last_simulation_scheduler_tick_ms,
+            last_simulation_block_tick_ms: self.last_simulation_block_tick_ms,
+            last_simulation_entity_tick_ms: self.last_simulation_entity_tick_ms,
         }
     }
 }
@@ -1050,13 +1080,14 @@ impl ChunkApp {
         let runtime = self.runtime.stats();
         let pos = self.spectator.position;
         window.set_title(&format!(
-            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | t {} | loaded {} visible {} pending {} active {} unload {} drained {} tick {} entity {} | sections {} idx {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
+            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} | sim {:.3}/{:.3}/{:.3}ms | sections {} idx {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
             pos.x,
             pos.y,
             pos.z,
             runtime.interest_center.x,
             runtime.interest_center.z,
             runtime.last_tick,
+            runtime.last_simulation_tick,
             runtime.loaded_chunks,
             runtime.client_visible_chunks,
             runtime.pending_jobs,
@@ -1064,7 +1095,12 @@ impl ChunkApp {
             runtime.pending_unload_chunks,
             runtime.last_tick_unloads_processed,
             runtime.block_ticking_chunks,
+            runtime.last_simulation_block_tick_chunks,
             runtime.entity_ticking_chunks,
+            runtime.last_simulation_entity_tick_chunks,
+            runtime.last_simulation_scheduler_tick_ms,
+            runtime.last_simulation_block_tick_ms,
+            runtime.last_simulation_entity_tick_ms,
             self.render_stats.section_count,
             self.render_stats.index_count,
             self.render_stats.last_frame_ms,
@@ -1264,6 +1300,10 @@ fn key_axis(
 
 fn elapsed_ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
+}
+
+fn micros_to_ms(micros: u128) -> f64 {
+    micros as f64 / 1000.0
 }
 
 #[cfg(test)]
