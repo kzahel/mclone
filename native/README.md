@@ -37,6 +37,7 @@ Applications:
 Useful gates:
 
 - `cargo test --workspace`
+- `pnpm native:scheduler:smoke`
 - `cargo check -p mclone-web-client --target wasm32-unknown-unknown`
 - `pnpm native:web:smoke`
 

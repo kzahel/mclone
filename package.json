@@ -31,6 +31,8 @@
     "perf:worldgen:flyby": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./scripts/worldgen-host-flyby.ts",
     "perf:worldgen:browser-flyby": "playwright test --config playwright.worldgen-perf.config.ts --workers=1",
     "observe:chunks": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./scripts/chunk-lifecycle-observatory.ts",
+    "native:scheduler:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke --",
+    "native:scheduler:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke --",
     "native:web:build": "cargo build --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown",
     "native:web:smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs",
     "build": "vite build",
