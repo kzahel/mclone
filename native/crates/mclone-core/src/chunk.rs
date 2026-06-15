@@ -5,6 +5,7 @@ use crate::{BitStorage, local_palette_bits_for};
 pub const CHUNK_WIDTH: i32 = 16;
 pub const SECTION_HEIGHT: i32 = 16;
 pub const CHUNK_SECTION_VOLUME: usize = 4096;
+pub const LIGHT_DATA_LAYER_BYTE_COUNT: usize = 2048;
 pub const AIR_BLOCK_STATE_ID: BlockStateId = BlockStateId(0);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -117,6 +118,43 @@ impl PackedChunkSection {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PackedLightSection {
+    pub section_y: i32,
+    pub sky: Option<Vec<u8>>,
+    pub block: Option<Vec<u8>>,
+}
+
+impl PackedLightSection {
+    pub fn new(section_y: i32, sky: Option<Vec<u8>>, block: Option<Vec<u8>>) -> Self {
+        if let Some(sky) = &sky {
+            assert_eq!(
+                sky.len(),
+                LIGHT_DATA_LAYER_BYTE_COUNT,
+                "sky light section {section_y} had {} bytes instead of {LIGHT_DATA_LAYER_BYTE_COUNT}",
+                sky.len()
+            );
+        }
+        if let Some(block) = &block {
+            assert_eq!(
+                block.len(),
+                LIGHT_DATA_LAYER_BYTE_COUNT,
+                "block light section {section_y} had {} bytes instead of {LIGHT_DATA_LAYER_BYTE_COUNT}",
+                block.len()
+            );
+        }
+        Self {
+            section_y,
+            sky,
+            block,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sky.is_none() && self.block.is_none()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkSnapshot {
     pub pos: ChunkPos,
     pub status: ChunkStatus,
@@ -124,6 +162,8 @@ pub struct ChunkSnapshot {
     pub min_y: i32,
     pub height: i32,
     pub sections: Vec<PackedChunkSection>,
+    pub light_correct: bool,
+    pub light_sections: Vec<PackedLightSection>,
 }
 
 impl ChunkSnapshot {
@@ -177,7 +217,22 @@ impl ChunkSnapshot {
             min_y,
             height,
             sections,
+            light_correct: false,
+            light_sections: Vec::new(),
         }
+    }
+
+    pub fn with_light_sections(
+        mut self,
+        light_correct: bool,
+        light_sections: Vec<PackedLightSection>,
+    ) -> Self {
+        self.light_correct = light_correct;
+        self.light_sections = light_sections
+            .into_iter()
+            .filter(|section| !section.is_empty())
+            .collect();
+        self
     }
 }
 
@@ -245,5 +300,16 @@ mod tests {
             snapshot.sections[0].unpack_block_state_ids()[0],
             BlockStateId(1)
         );
+        assert!(!snapshot.light_correct);
+        assert!(snapshot.light_sections.is_empty());
+    }
+
+    #[test]
+    fn packed_light_section_validates_layer_lengths() {
+        let section = PackedLightSection::new(2, Some(vec![0xFF; 2048]), None);
+
+        assert_eq!(section.section_y, 2);
+        assert!(section.sky.is_some());
+        assert!(section.block.is_none());
     }
 }

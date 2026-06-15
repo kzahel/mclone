@@ -4,7 +4,8 @@ use std::error::Error;
 use std::fmt;
 
 use mclone_core::{
-    BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus, PackedChunkSection,
+    BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus, LIGHT_DATA_LAYER_BYTE_COUNT,
+    PackedChunkSection, PackedLightSection,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -148,6 +149,10 @@ impl ByteWriter {
         self.bytes.push(value);
     }
 
+    fn write_bool(&mut self, value: bool) {
+        self.write_u8(u8::from(value));
+    }
+
     fn write_i32(&mut self, value: i32) {
         self.bytes.extend_from_slice(&value.to_le_bytes());
     }
@@ -192,6 +197,11 @@ impl ByteWriter {
         for section in &snapshot.sections {
             self.write_section(section)?;
         }
+        self.write_bool(snapshot.light_correct);
+        self.write_len("light sections", snapshot.light_sections.len())?;
+        for section in &snapshot.light_sections {
+            self.write_light_section(section)?;
+        }
         Ok(())
     }
 
@@ -205,6 +215,31 @@ impl ByteWriter {
         self.write_len("section packed indices", section.packed_block_indices.len())?;
         for packed in &section.packed_block_indices {
             self.write_u64(*packed);
+        }
+        Ok(())
+    }
+
+    fn write_light_section(&mut self, section: &PackedLightSection) -> ProtocolCodecResult<()> {
+        self.write_i32(section.section_y);
+        self.write_optional_light_layer("sky light layer", &section.sky)?;
+        self.write_optional_light_layer("block light layer", &section.block)?;
+        Ok(())
+    }
+
+    fn write_optional_light_layer(
+        &mut self,
+        field: &'static str,
+        layer: &Option<Vec<u8>>,
+    ) -> ProtocolCodecResult<()> {
+        match layer {
+            Some(bytes) => {
+                if bytes.len() != LIGHT_DATA_LAYER_BYTE_COUNT {
+                    return Err(ProtocolCodecError::InvalidData(field));
+                }
+                self.write_bool(true);
+                self.bytes.extend_from_slice(bytes);
+            }
+            None => self.write_bool(false),
         }
         Ok(())
     }
@@ -247,6 +282,16 @@ impl<'a> ByteReader<'a> {
         Ok(self.read_exact::<1>()?[0])
     }
 
+    fn read_bool(&mut self) -> ProtocolCodecResult<bool> {
+        match self.read_u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(ProtocolCodecError::InvalidData(
+                "boolean value must be 0 or 1",
+            )),
+        }
+    }
+
     fn read_i32(&mut self) -> ProtocolCodecResult<i32> {
         Ok(i32::from_le_bytes(self.read_exact::<4>()?))
     }
@@ -287,6 +332,10 @@ impl<'a> ByteReader<'a> {
         let sections = (0..self.read_len()?)
             .map(|_| self.read_section())
             .collect::<ProtocolCodecResult<Vec<_>>>()?;
+        let light_correct = self.read_bool()?;
+        let light_sections = (0..self.read_len()?)
+            .map(|_| self.read_light_section())
+            .collect::<ProtocolCodecResult<Vec<_>>>()?;
 
         Ok(ChunkSnapshot {
             pos,
@@ -295,6 +344,8 @@ impl<'a> ByteReader<'a> {
             min_y,
             height,
             sections,
+            light_correct,
+            light_sections,
         })
     }
 
@@ -320,6 +371,30 @@ impl<'a> ByteReader<'a> {
             packed_block_indices,
         })
     }
+
+    fn read_light_section(&mut self) -> ProtocolCodecResult<PackedLightSection> {
+        let section_y = self.read_i32()?;
+        let sky = self.read_optional_light_layer()?;
+        let block = self.read_optional_light_layer()?;
+        Ok(PackedLightSection::new(section_y, sky, block))
+    }
+
+    fn read_optional_light_layer(&mut self) -> ProtocolCodecResult<Option<Vec<u8>>> {
+        if !self.read_bool()? {
+            return Ok(None);
+        }
+        let remaining = self.bytes.len() - self.offset;
+        if remaining < LIGHT_DATA_LAYER_BYTE_COUNT {
+            return Err(ProtocolCodecError::UnexpectedEof {
+                needed: LIGHT_DATA_LAYER_BYTE_COUNT,
+                remaining,
+            });
+        }
+        let end = self.offset + LIGHT_DATA_LAYER_BYTE_COUNT;
+        let bytes = self.bytes[self.offset..end].to_vec();
+        self.offset = end;
+        Ok(Some(bytes))
+    }
 }
 
 #[cfg(test)]
@@ -327,7 +402,7 @@ mod tests {
     use super::*;
     use mclone_core::{
         AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus,
-        chunk_section_index,
+        LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, chunk_section_index,
     };
 
     #[test]
@@ -399,6 +474,18 @@ mod tests {
             -64,
             16,
             &blocks,
+        )
+        .with_light_sections(
+            false,
+            vec![
+                PackedLightSection::new(-4, Some(vec![0xFF; LIGHT_DATA_LAYER_BYTE_COUNT]), None),
+                PackedLightSection::new(-3, None, Some(vec![0x11; LIGHT_DATA_LAYER_BYTE_COUNT])),
+                PackedLightSection::new(
+                    -2,
+                    Some(vec![0x22; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                    Some(vec![0x33; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                ),
+            ],
         );
         let update = ServerUpdate::ChunkSnapshot(snapshot);
 

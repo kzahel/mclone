@@ -14,12 +14,15 @@ use std::{
 use mclone_core::{ChunkPos, ChunkSnapshot};
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
-use mclone_core::{BlockStateId, ChunkRevision, ChunkStatus, PackedChunkSection};
+use mclone_core::{
+    BlockStateId, ChunkRevision, ChunkStatus, LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection,
+    PackedLightSection,
+};
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
 const SNAPSHOT_MAGIC: &[u8; 12] = b"MCLONESNAP\0\0";
 #[cfg(any(test, not(target_arch = "wasm32")))]
-const SNAPSHOT_FORMAT_VERSION: u32 = 1;
+const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 
 pub type ChunkStoreResult<T> = Result<T, ChunkStoreError>;
 
@@ -130,6 +133,11 @@ fn write_snapshot(writer: &mut impl Write, snapshot: &ChunkSnapshot) -> ChunkSto
     for section in &snapshot.sections {
         write_section(writer, section)?;
     }
+    write_bool(writer, snapshot.light_correct)?;
+    write_len(writer, snapshot.light_sections.len(), "light section count")?;
+    for section in &snapshot.light_sections {
+        write_light_section(writer, section)?;
+    }
     writer.flush()?;
     Ok(())
 }
@@ -145,7 +153,7 @@ fn read_snapshot(reader: &mut impl Read) -> ChunkStoreResult<ChunkSnapshot> {
     }
 
     let version = read_u32(reader)?;
-    if version != SNAPSHOT_FORMAT_VERSION {
+    if !(1..=SNAPSHOT_FORMAT_VERSION).contains(&version) {
         return Err(ChunkStoreError::InvalidData(format!(
             "unsupported chunk snapshot format version {version}"
         )));
@@ -161,6 +169,17 @@ fn read_snapshot(reader: &mut impl Read) -> ChunkStoreResult<ChunkSnapshot> {
     for _ in 0..section_count {
         sections.push(read_section(reader)?);
     }
+    let (light_correct, light_sections) = if version >= 2 {
+        let light_correct = read_bool(reader)?;
+        let light_section_count = read_len(reader)?;
+        let mut light_sections = Vec::with_capacity(light_section_count);
+        for _ in 0..light_section_count {
+            light_sections.push(read_light_section(reader)?);
+        }
+        (light_correct, light_sections)
+    } else {
+        (false, Vec::new())
+    };
 
     Ok(ChunkSnapshot {
         pos,
@@ -169,6 +188,8 @@ fn read_snapshot(reader: &mut impl Read) -> ChunkStoreResult<ChunkSnapshot> {
         min_y,
         height,
         sections,
+        light_correct,
+        light_sections,
     })
 }
 
@@ -211,6 +232,57 @@ fn read_section(reader: &mut impl Read) -> ChunkStoreResult<PackedChunkSection> 
         bits_per_block,
         packed_block_indices,
     })
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_light_section(
+    writer: &mut impl Write,
+    section: &PackedLightSection,
+) -> ChunkStoreResult<()> {
+    write_i32(writer, section.section_y)?;
+    write_optional_light_layer(writer, &section.sky, "sky light layer")?;
+    write_optional_light_layer(writer, &section.block, "block light layer")?;
+    Ok(())
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_light_section(reader: &mut impl Read) -> ChunkStoreResult<PackedLightSection> {
+    let section_y = read_i32(reader)?;
+    let sky = read_optional_light_layer(reader)?;
+    let block = read_optional_light_layer(reader)?;
+    Ok(PackedLightSection::new(section_y, sky, block))
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_optional_light_layer(
+    writer: &mut impl Write,
+    layer: &Option<Vec<u8>>,
+    name: &str,
+) -> ChunkStoreResult<()> {
+    match layer {
+        Some(bytes) => {
+            if bytes.len() != LIGHT_DATA_LAYER_BYTE_COUNT {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "{name} has {} bytes; expected {LIGHT_DATA_LAYER_BYTE_COUNT}",
+                    bytes.len()
+                )));
+            }
+            write_bool(writer, true)?;
+            writer.write_all(bytes)?;
+        }
+        None => write_bool(writer, false)?,
+    }
+    Ok(())
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_optional_light_layer(reader: &mut impl Read) -> ChunkStoreResult<Option<Vec<u8>>> {
+    if !read_bool(reader)? {
+        return Ok(None);
+    }
+    let mut bytes = vec![0; LIGHT_DATA_LAYER_BYTE_COUNT];
+    reader.read_exact(&mut bytes)?;
+    Ok(Some(bytes))
 }
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
@@ -266,6 +338,22 @@ fn read_u8(reader: &mut impl Read) -> ChunkStoreResult<u8> {
 }
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
+fn write_bool(writer: &mut impl Write, value: bool) -> ChunkStoreResult<()> {
+    write_u8(writer, u8::from(value))
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+fn read_bool(reader: &mut impl Read) -> ChunkStoreResult<bool> {
+    match read_u8(reader)? {
+        0 => Ok(false),
+        1 => Ok(true),
+        value => Err(ChunkStoreError::InvalidData(format!(
+            "boolean value must be 0 or 1, got {value}"
+        ))),
+    }
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
 fn write_u32(writer: &mut impl Write, value: u32) -> ChunkStoreResult<()> {
     writer.write_all(&value.to_le_bytes())?;
     Ok(())
@@ -307,7 +395,7 @@ fn read_u64(reader: &mut impl Read) -> ChunkStoreResult<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME};
+    use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, LIGHT_DATA_LAYER_BYTE_COUNT};
 
     #[test]
     fn binary_snapshot_format_roundtrips_sections() {
@@ -320,6 +408,17 @@ mod tests {
             0,
             16,
             &block_state_ids,
+        )
+        .with_light_sections(
+            false,
+            vec![
+                PackedLightSection::new(0, Some(vec![0xFF; LIGHT_DATA_LAYER_BYTE_COUNT]), None),
+                PackedLightSection::new(
+                    1,
+                    Some(vec![0x22; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                    Some(vec![0x33; LIGHT_DATA_LAYER_BYTE_COUNT]),
+                ),
+            ],
         );
         let mut bytes = Vec::new();
 

@@ -10,7 +10,8 @@ use mclone_assets::{
     AssetError, BakedBlockModelFace, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
     ModelFaceDirection, ResourceLocation, TextureAtlasPlan, TextureMaterial,
 };
-use mclone_core::{AIR_BLOCK_STATE_ID, BlockStateId};
+use mclone_core::{AIR_BLOCK_STATE_ID, BlockStateId, PackedLightSection, chunk_section_index};
+use mclone_light::{FULL_BRIGHT, pack_light};
 
 pub const CHUNK_WIDTH: i32 = 16;
 pub const RENDER_SECTION_HEIGHT: i32 = 16;
@@ -340,6 +341,7 @@ pub struct TexturedChunkVertex {
     pub position: [f32; 3],
     pub uv: [f32; 2],
     pub color: [f32; 4],
+    pub packed_light: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -672,6 +674,7 @@ pub struct TexturedChunkMeshInput<'a> {
     pub min_y: i32,
     pub height: i32,
     pub blocks: &'a [BlockStateId],
+    pub light_sections: &'a [PackedLightSection],
 }
 
 impl<'a> TexturedChunkMeshInput<'a> {
@@ -698,7 +701,13 @@ impl<'a> TexturedChunkMeshInput<'a> {
             min_y,
             height,
             blocks,
+            light_sections: &[],
         }
+    }
+
+    pub fn with_light_sections(mut self, light_sections: &'a [PackedLightSection]) -> Self {
+        self.light_sections = light_sections;
+        self
     }
 
     fn block_at_or_air(&self, local_x: i32, local_y: i32, local_z: i32) -> BlockStateId {
@@ -709,6 +718,41 @@ impl<'a> TexturedChunkMeshInput<'a> {
             return AIR_BLOCK_STATE_ID;
         }
         self.blocks[block_index(local_x, local_y, local_z)]
+    }
+
+    fn has_light_data(&self) -> bool {
+        !self.light_sections.is_empty()
+    }
+
+    fn packed_light_at_or_fullbright(&self, local_x: i32, y: i32, local_z: i32) -> u32 {
+        if !(0..CHUNK_WIDTH).contains(&local_x)
+            || !(self.min_y..self.min_y + self.height).contains(&y)
+            || !(0..CHUNK_WIDTH).contains(&local_z)
+        {
+            return FULL_BRIGHT;
+        }
+        if !self.has_light_data() {
+            return FULL_BRIGHT;
+        }
+
+        let section_y = y.div_euclid(RENDER_SECTION_HEIGHT);
+        let Some(section) = self
+            .light_sections
+            .iter()
+            .find(|section| section.section_y == section_y)
+        else {
+            return pack_light(0, 0);
+        };
+        let index = chunk_section_index(local_x, y.rem_euclid(RENDER_SECTION_HEIGHT), local_z);
+        let sky = section
+            .sky
+            .as_deref()
+            .map_or(0, |layer| data_layer_value(layer, index));
+        let block = section
+            .block
+            .as_deref()
+            .map_or(0, |layer| data_layer_value(layer, index));
+        pack_light(block, sky)
     }
 }
 
@@ -908,7 +952,14 @@ fn add_textured_chunk_range_to_mesh(
                             continue;
                         }
                     }
-                    add_textured_face(mesh, world_x, world_y, world_z, face);
+                    let sample_offset = direction_offset(face.cullface.unwrap_or(face.direction));
+                    let packed_light = packed_light_at_world_or_fullbright(
+                        area,
+                        world_x + sample_offset[0],
+                        world_y + sample_offset[1],
+                        world_z + sample_offset[2],
+                    );
+                    add_textured_face(mesh, world_x, world_y, world_z, face, packed_light);
                 }
             }
         }
@@ -1030,6 +1081,7 @@ fn add_textured_face(
     world_y: i32,
     world_z: i32,
     face: &TexturedBlockFace,
+    packed_light: u32,
 ) {
     let base_index = mesh.vertices.len() as u32;
     let color = textured_face_color(face);
@@ -1045,6 +1097,7 @@ fn add_textured_face(
             ],
             uv: uvs[index],
             color,
+            packed_light,
         });
     }
     mesh.indices.extend_from_slice(&[
@@ -1253,6 +1306,30 @@ fn block_state_at_world_or_air(
         .unwrap_or(AIR_BLOCK_STATE_ID)
 }
 
+fn packed_light_at_world_or_fullbright(
+    inputs: &[TexturedChunkMeshInput<'_>],
+    world_x: i32,
+    y: i32,
+    world_z: i32,
+) -> u32 {
+    let chunk_x = world_x.div_euclid(CHUNK_WIDTH);
+    let chunk_z = world_z.div_euclid(CHUNK_WIDTH);
+    let local_x = world_x.rem_euclid(CHUNK_WIDTH);
+    let local_z = world_z.rem_euclid(CHUNK_WIDTH);
+    inputs
+        .iter()
+        .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
+        .map(|input| input.packed_light_at_or_fullbright(local_x, y, local_z))
+        .unwrap_or(FULL_BRIGHT)
+}
+
+fn data_layer_value(layer: &[u8], index: usize) -> u8 {
+    debug_assert_eq!(layer.len(), mclone_light::DATA_LAYER_SIZE);
+    let byte = layer[index >> 1];
+    let shift = 4 * (index & 1);
+    (byte >> shift) & 15
+}
+
 fn chunk_world_origin(chunk_coord: i32) -> i32 {
     chunk_coord * CHUNK_WIDTH
 }
@@ -1375,6 +1452,8 @@ mod tests {
         AssetPath, BlockModelLibrary, BlockStateAssetIndex, BlockStateRecord, BlockStateRegistry,
         MemoryAssetSource, ResourceLocation, TextureAtlasPlan,
     };
+    use mclone_core::{LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection};
+    use mclone_light::{DataLayer, pack_light};
 
     fn chunk_blocks(height: i32, filled: &[(i32, i32, i32, u8)]) -> Vec<u8> {
         let mut blocks = vec![AIR_BLOCK_ID; height as usize * 16 * 16];
@@ -1740,6 +1819,48 @@ mod tests {
     }
 
     #[test]
+    fn textured_mesh_samples_packed_light_from_face_neighbor() {
+        let catalog = stone_textured_catalog();
+        let blocks = textured_chunk_blocks(16, &[(0, 0, 0, BlockStateId(1))]);
+        let mut sky = DataLayer::new();
+        sky.set(0, 1, 0, 15);
+        let light_sections = [PackedLightSection::new(0, sky.into_bytes(), None)];
+        let input =
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks).with_light_sections(&light_sections);
+
+        let mesh = build_textured_visible_chunk_mesh(input, &catalog).unwrap();
+
+        assert_eq!(mesh.stats().face_count(), 6);
+        let top_face_light = pack_light(0, 15);
+        assert!(mesh.vertices.chunks_exact(4).any(|face| {
+            face.iter()
+                .all(|vertex| vertex.packed_light == top_face_light)
+        }));
+        assert!(
+            mesh.vertices
+                .iter()
+                .any(|vertex| vertex.packed_light != FULL_BRIGHT)
+        );
+    }
+
+    #[test]
+    fn textured_mesh_uses_fullbright_without_light_payload() {
+        let catalog = stone_textured_catalog();
+        let blocks = textured_chunk_blocks(16, &[(0, 0, 0, BlockStateId(1))]);
+        let mesh = build_textured_visible_chunk_mesh(
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+            &catalog,
+        )
+        .unwrap();
+
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex.packed_light == FULL_BRIGHT)
+        );
+    }
+
+    #[test]
     fn cave_air_is_invisible_and_non_occluding_in_textured_mesh() {
         let catalog = stone_textured_catalog();
         let blocks = textured_chunk_blocks(
@@ -1844,6 +1965,15 @@ mod tests {
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].key, RenderSectionKey::new(1, 0, 0));
         assert_eq!(sections[0].stats().face_count(), 5 * 16 * 16);
+    }
+
+    #[test]
+    fn data_layer_value_uses_java_nibble_order() {
+        let mut bytes = vec![0; LIGHT_DATA_LAYER_BYTE_COUNT];
+        bytes[0] = 0xA3;
+
+        assert_eq!(data_layer_value(&bytes, 0), 3);
+        assert_eq!(data_layer_value(&bytes, 1), 10);
     }
 
     #[test]

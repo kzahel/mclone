@@ -15,8 +15,9 @@ use std::{sync::mpsc, thread};
 
 use mclone_core::{
     BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot,
-    ChunkStatus, SECTION_HEIGHT, chunk_section_index,
+    ChunkStatus, PackedLightSection, SECTION_HEIGHT, chunk_section_index,
 };
+use mclone_light::DataLayer;
 use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
 use mclone_worldgen::block::{
     LAVA, OBSIDIAN, RawBlockId, STONE, WATER, fluid_level, generated_block_state_id, is_lava,
@@ -2016,7 +2017,10 @@ impl ChunkScheduler {
                 )
             });
             events.extend(fluid_tick_events_from_generated_chunk(&chunk));
-            let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
+            let snapshot = snapshot_with_provisional_lighting(
+                chunk.to_chunk_snapshot(revision, ChunkStatus::Features),
+                chunk.blocks(),
+            );
             self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
             events.push(ChunkSchedulerEvent::StatusChanged {
                 pos,
@@ -2823,19 +2827,85 @@ fn snapshot_from_mutable_buffer(
         .iter()
         .map(|block_id| generated_block_state_id(*block_id))
         .collect::<Vec<_>>();
-    ChunkSnapshot::from_block_state_ids(
+    let snapshot = ChunkSnapshot::from_block_state_ids(
         ChunkPos::new(buffer.chunk_x, buffer.chunk_z),
         status,
         revision,
         buffer.min_y,
         buffer.height,
         &block_state_ids,
-    )
+    );
+    snapshot_with_provisional_lighting(snapshot, &buffer.blocks)
+}
+
+fn snapshot_with_provisional_lighting(
+    snapshot: ChunkSnapshot,
+    raw_blocks: &[RawBlockId],
+) -> ChunkSnapshot {
+    let expected_len = snapshot.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
+    assert_eq!(
+        raw_blocks.len(),
+        expected_len,
+        "chunk {:?} lighting input had {} blocks instead of {expected_len}",
+        snapshot.pos,
+        raw_blocks.len()
+    );
+    let light_sections =
+        provisional_direct_sky_light_sections(snapshot.min_y, snapshot.height, raw_blocks);
+    snapshot.with_light_sections(false, light_sections)
+}
+
+fn provisional_direct_sky_light_sections(
+    min_y: i32,
+    height: i32,
+    raw_blocks: &[RawBlockId],
+) -> Vec<PackedLightSection> {
+    debug_assert_eq!(
+        raw_blocks.len(),
+        height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize
+    );
+    let section_count = height / SECTION_HEIGHT;
+    let min_section_y = min_y.div_euclid(SECTION_HEIGHT);
+    let mut sky_layers = (0..section_count)
+        .map(|_| DataLayer::new())
+        .collect::<Vec<_>>();
+
+    for local_z in 0..CHUNK_WIDTH {
+        for local_x in 0..CHUNK_WIDTH {
+            let mut sky_open = true;
+            for local_y in (0..height).rev() {
+                let block_id = raw_blocks[chunk_block_index(local_x, local_y, local_z)];
+                if sky_open && material_blocks_motion(block_id) {
+                    sky_open = false;
+                    continue;
+                }
+                if sky_open {
+                    let section_offset = local_y.div_euclid(SECTION_HEIGHT);
+                    let section_local_y = local_y.rem_euclid(SECTION_HEIGHT);
+                    sky_layers[section_offset as usize].set(local_x, section_local_y, local_z, 15);
+                }
+            }
+        }
+    }
+
+    sky_layers
+        .into_iter()
+        .enumerate()
+        .filter_map(|(offset, layer)| {
+            layer
+                .into_bytes()
+                .map(|sky| PackedLightSection::new(min_section_y + offset as i32, Some(sky), None))
+        })
+        .collect()
 }
 
 fn raw_block_id_from_state_id(state_id: BlockStateId) -> RawBlockId {
     RawBlockId::try_from(state_id.0)
         .unwrap_or_else(|_| panic!("block state id {} does not fit native raw id", state_id.0))
+}
+
+fn chunk_block_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
+    ((local_y << 8) | (local_z << 4) | local_x) as usize
 }
 
 fn offset_pos(pos: WorldBlockPos, direction: FluidDirection) -> WorldBlockPos {
@@ -2971,6 +3041,26 @@ mod tests {
             wait_for_scheduler_completion(scheduler);
         }
         panic!("timed out waiting for scheduler worldgen jobs");
+    }
+
+    #[test]
+    fn provisional_direct_sky_light_stops_at_motion_blocking_blocks() {
+        let mut blocks = vec![AIR; (CHUNK_WIDTH * SECTION_HEIGHT * CHUNK_WIDTH) as usize];
+        blocks[chunk_block_index(0, 14, 0)] = STONE;
+
+        let sections = provisional_direct_sky_light_sections(0, SECTION_HEIGHT, &blocks);
+
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].section_y, 0);
+        assert!(sections[0].block.is_none());
+        let sky =
+            mclone_light::packed_light_section_layer(&sections[0], mclone_light::LightLayer::Sky)
+                .unwrap()
+                .unwrap();
+        assert_eq!(sky.get(0, 15, 0), 15);
+        assert_eq!(sky.get(0, 14, 0), 0);
+        assert_eq!(sky.get(0, 13, 0), 0);
+        assert_eq!(sky.get(1, 0, 0), 15);
     }
 
     fn handle_command_and_poll(

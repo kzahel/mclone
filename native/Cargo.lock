@@ -1050,6 +1050,7 @@ version = "0.0.0"
 dependencies = [
  "mclone-assets",
  "mclone-core",
+ "mclone-light",
  "serde_json",
 ]
 

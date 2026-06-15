@@ -12,7 +12,8 @@ use mclone_assets::{
 };
 use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT,
+    AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
+    PackedLightSection, SECTION_HEIGHT,
 };
 use mclone_mesh::{
     RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog,
@@ -351,11 +352,20 @@ impl Cli {
                     render_options.section_occlusion_culling =
                         parse_bool_arg("--section-occlusion", args.next())?;
                 }
+                "--fullbright" => {
+                    render_options.force_fullbright = parse_bool_arg("--fullbright", args.next())?;
+                }
                 "--disable-section-occlusion" => {
                     render_options.section_occlusion_culling = false;
                 }
                 "--enable-section-occlusion" => {
                     render_options.section_occlusion_culling = true;
+                }
+                "--force-fullbright" => {
+                    render_options.force_fullbright = true;
+                }
+                "--disable-fullbright" => {
+                    render_options.force_fullbright = false;
                 }
                 "--movement-steps" => {
                     movement_perf = true;
@@ -518,11 +528,11 @@ fn print_help() {
          Usage:\n\
            mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
-           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false]\n\
-           mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false]\n\
-           mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false]\n\n\
-           mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false]\n\n\
-         Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, O section-occlusion toggle, and wheel speed controls. Use --disable-section-occlusion or --enable-section-occlusion as shortcuts for the same option. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path."
+           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+         Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path."
     );
 }
 
@@ -677,6 +687,10 @@ impl MovementPerfReport {
         println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
+        );
+        println!(
+            "  \"force_fullbright\": {},",
+            self.options.render_options.force_fullbright
         );
         println!(
             "  \"path_radius_chunks\": {},",
@@ -849,6 +863,10 @@ impl TimedemoReport {
         println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
+        );
+        println!(
+            "  \"force_fullbright\": {},",
+            self.options.render_options.force_fullbright
         );
         println!(
             "  \"path_radius_chunks\": {},",
@@ -1258,6 +1276,7 @@ fn textured_mesh_inputs(chunks: &[MeshChunkBlocks]) -> Vec<TexturedChunkMeshInpu
                 chunk.height,
                 &chunk.blocks,
             )
+            .with_light_sections(&chunk.light_sections)
         })
         .collect()
 }
@@ -1860,6 +1879,7 @@ struct MeshChunkBlocks {
     min_y: i32,
     height: i32,
     blocks: Vec<mclone_core::BlockStateId>,
+    light_sections: Vec<PackedLightSection>,
 }
 
 fn snapshot_mesh_block_state_ids(snapshot: &ChunkSnapshot) -> Result<MeshChunkBlocks> {
@@ -1907,6 +1927,7 @@ fn snapshot_mesh_block_state_ids(snapshot: &ChunkSnapshot) -> Result<MeshChunkBl
         min_y: snapshot.min_y,
         height: snapshot.height,
         blocks,
+        light_sections: snapshot.light_sections.clone(),
     })
 }
 
@@ -2224,14 +2245,20 @@ impl ChunkApp {
         } else {
             "off"
         };
+        let lighting = if self.render_options.force_fullbright {
+            "fullbright"
+        } else {
+            "light"
+        };
         window.set_title(&format!(
-            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | occ {} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} fluid {}/{}/{}/{} | sim {:.3}/{:.3}/{:.3}/{:.3}ms | sections {}/{} faces {}/{} idx {}/{} | rebuilt {}/{}f vis {}/{:.3}/{:.3}ms upload {}/{}v/{}f/{}i rm {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
+            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | occ {} | {} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} fluid {}/{}/{}/{} | sim {:.3}/{:.3}/{:.3}/{:.3}ms | sections {}/{} faces {}/{} idx {}/{} | rebuilt {}/{}f vis {}/{:.3}/{:.3}ms upload {}/{}v/{}f/{}i rm {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
             pos.x,
             pos.y,
             pos.z,
             runtime.interest_center.x,
             runtime.interest_center.z,
             occlusion,
+            lighting,
             runtime.last_tick,
             runtime.last_simulation_tick,
             runtime.loaded_chunks,
@@ -2392,6 +2419,24 @@ impl ApplicationHandler for ChunkApp {
                         log::info!(
                             "section occlusion culling {}",
                             if self.render_options.section_occlusion_culling {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            }
+                        );
+                        self.update_window_title(true);
+                        self.request_redraw();
+                        return;
+                    }
+                    if key_code == KeyCode::KeyL
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        self.render_options.force_fullbright =
+                            !self.render_options.force_fullbright;
+                        log::info!(
+                            "fullbright {}",
+                            if self.render_options.force_fullbright {
                                 "enabled"
                             } else {
                                 "disabled"
@@ -2817,6 +2862,7 @@ mod tests {
                 scene: SceneOptions::default(),
                 render_options: TexturedSectionRenderOptions {
                     section_occlusion_culling: false,
+                    ..TexturedSectionRenderOptions::default()
                 },
             }
         );
@@ -2824,6 +2870,45 @@ mod tests {
         let cli = Cli::parse([
             "--disable-section-occlusion".to_owned(),
             "--enable-section-occlusion".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::Window {
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_fullbright_toggle() {
+        let cli = Cli::parse([
+            "--headless-chunk".to_owned(),
+            "/tmp/mclone-chunk.png".to_owned(),
+            "--fullbright".to_owned(),
+            "true".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessChunk {
+                path: PathBuf::from("/tmp/mclone-chunk.png"),
+                width: 640,
+                height: 480,
+                scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions {
+                    force_fullbright: true,
+                    ..TexturedSectionRenderOptions::default()
+                },
+            }
+        );
+
+        let cli = Cli::parse([
+            "--force-fullbright".to_owned(),
+            "--disable-fullbright".to_owned(),
         ])
         .unwrap();
 

@@ -16,10 +16,8 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 const VERTEX_FLOAT_COUNT: usize = 7;
 const VERTEX_BYTE_SIZE: wgpu::BufferAddress =
     (VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
-const TEXTURED_VERTEX_FLOAT_COUNT: usize = 9;
-const TEXTURED_VERTEX_BYTE_SIZE: wgpu::BufferAddress =
-    (TEXTURED_VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
-const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 64;
+const TEXTURED_VERTEX_BYTE_SIZE: wgpu::BufferAddress = 40;
+const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 80;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChunkCamera {
@@ -213,6 +211,7 @@ impl<'a> ChunkRenderTarget<'a> {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TexturedSectionRenderStats {
     pub section_occlusion_culling: bool,
+    pub force_fullbright: bool,
     pub loaded_section_count: usize,
     pub drawn_section_count: usize,
     pub frustum_section_count: usize,
@@ -227,12 +226,14 @@ pub struct TexturedSectionRenderStats {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TexturedSectionRenderOptions {
     pub section_occlusion_culling: bool,
+    pub force_fullbright: bool,
 }
 
 impl Default for TexturedSectionRenderOptions {
     fn default() -> Self {
         Self {
             section_occlusion_culling: true,
+            force_fullbright: false,
         }
     }
 }
@@ -356,6 +357,7 @@ fn cull_textured_sections(
     let frustum = ClipFrustum::from_render_view(render_view);
     let mut stats = TexturedSectionRenderStats {
         section_occlusion_culling: options.section_occlusion_culling,
+        force_fullbright: options.force_fullbright,
         loaded_section_count: records.values().filter(|record| record.drawable).count(),
         loaded_index_count: records
             .values()
@@ -1033,6 +1035,11 @@ impl TexturedChunkRenderer {
                             shader_location: 2,
                             format: wgpu::VertexFormat::Float32x4,
                         },
+                        wgpu::VertexAttribute {
+                            offset: 36,
+                            shader_location: 3,
+                            format: wgpu::VertexFormat::Uint32,
+                        },
                     ],
                 }],
             },
@@ -1102,7 +1109,7 @@ impl ChunkDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &matrix_bytes(render_view.uniform_matrix()),
+            &uniform_bytes(render_view.uniform_matrix(), false),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1174,7 +1181,7 @@ impl TexturedChunkDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &matrix_bytes(render_view.uniform_matrix()),
+            &uniform_bytes(render_view.uniform_matrix(), false),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1343,7 +1350,7 @@ impl TexturedSectionDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &matrix_bytes(render_view.uniform_matrix()),
+            &uniform_bytes(render_view.uniform_matrix(), options.force_fullbright),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1392,7 +1399,7 @@ fn vertex_bytes(mesh: &VisibleChunkMesh) -> Vec<u8> {
 }
 
 fn textured_vertex_bytes(mesh: &TexturedVisibleChunkMesh) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(mesh.vertices.len() * TEXTURED_VERTEX_FLOAT_COUNT * 4);
+    let mut bytes = Vec::with_capacity(mesh.vertices.len() * TEXTURED_VERTEX_BYTE_SIZE as usize);
     for vertex in &mesh.vertices {
         for value in vertex
             .position
@@ -1402,6 +1409,7 @@ fn textured_vertex_bytes(mesh: &TexturedVisibleChunkMesh) -> Vec<u8> {
         {
             bytes.extend_from_slice(&value.to_ne_bytes());
         }
+        bytes.extend_from_slice(&vertex.packed_light.to_ne_bytes());
     }
     bytes
 }
@@ -1423,6 +1431,17 @@ fn matrix_bytes(matrix: [[f32; 4]; 4]) -> [u8; 64] {
     bytes
 }
 
+fn uniform_bytes(matrix: [[f32; 4]; 4], force_fullbright: bool) -> [u8; 80] {
+    let mut bytes = [0; 80];
+    bytes[..64].copy_from_slice(&matrix_bytes(matrix));
+    let options = [if force_fullbright { 1.0_f32 } else { 0.0 }, 0.0, 0.0, 0.0];
+    for (index, value) in options.into_iter().enumerate() {
+        let start = 64 + index * 4;
+        bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1435,7 +1454,7 @@ mod tests {
         let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
         let matrix = render_view.uniform_matrix();
         assert_eq!(
-            matrix_bytes(matrix).len() as wgpu::BufferAddress,
+            uniform_bytes(matrix, false).len() as wgpu::BufferAddress,
             UNIFORM_BYTE_SIZE
         );
         assert!(matrix.into_iter().flatten().all(f32::is_finite));
@@ -1652,10 +1671,12 @@ mod tests {
             camera.render_view(800, 600),
             TexturedSectionRenderOptions {
                 section_occlusion_culling: false,
+                ..TexturedSectionRenderOptions::default()
             },
         );
 
         assert!(!stats.section_occlusion_culling);
+        assert!(!stats.force_fullbright);
         assert!(!stats.graph_cull_enabled);
         assert_eq!(stats.frustum_section_count, 3);
         assert_eq!(stats.drawn_section_count, stats.frustum_section_count);
@@ -1714,6 +1735,7 @@ mod tests {
                 position: [1.0, 2.0, 3.0],
                 uv: [0.25, 0.75],
                 color: [1.0, 0.5, 0.25, 1.0],
+                packed_light: 15_728_880,
             }],
             indices: vec![0],
         };
