@@ -129,6 +129,32 @@ pub const fn is_air_like(block_id: RawBlockId) -> bool {
     block_id == AIR || block_id == CAVE_AIR
 }
 
+pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
+    !matches!(
+        block_id,
+        AIR | CAVE_AIR
+            | WATER
+            | LAVA
+            | SNOW
+            | GRASS
+            | FERN
+            | DANDELION
+            | POPPY
+            | DEAD_BUSH
+            | LARGE_FERN_LOWER
+            | LARGE_FERN_UPPER
+            | GLOW_LICHEN
+    )
+}
+
+pub const fn has_fluid(block_id: RawBlockId) -> bool {
+    matches!(block_id, WATER | LAVA)
+}
+
+pub const fn is_leaves(block_id: RawBlockId) -> bool {
+    matches!(block_id, OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES)
+}
+
 pub const fn generated_block_state_id(block_id: RawBlockId) -> BlockStateId {
     BlockStateId(block_id as u32)
 }

@@ -8,7 +8,8 @@ use crate::block::{
     DIAMOND_ORE, DIORITE, DIRT, FERN, GLOW_LICHEN, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL,
     ICE, IRON_ORE, LAPIS_ORE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES,
     OAK_LOG, PODZOL, POPPY, RED_SAND, REDSTONE_ORE, RawBlockId, SAND, SNOW, SPRUCE_LEAVES,
-    SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER, is_air_like,
+    SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER, has_fluid, is_air_like, is_leaves,
+    material_blocks_motion,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::placement::{
@@ -2339,7 +2340,8 @@ fn place_tree<W: FeatureWorld>(
     if !can_survive_tree_sapling(world, base) {
         return false;
     }
-    if get_max_free_tree_height(world, tree_height, base, config) < tree_height {
+    let max_free_tree_height = get_max_free_tree_height(world, tree_height, base, config);
+    if max_free_tree_height < tree_height {
         return false;
     }
 
@@ -2536,11 +2538,10 @@ fn place_ore<W: FeatureWorld>(
 
     for x in min_x..=min_x + width_xz {
         for z in min_z..=min_z + width_xz {
-            if min_y
-                <= world
-                    .height_at(HeightmapType::OceanFloorWg, x, z)
-                    .unwrap_or(world.min_y() - 1)
-            {
+            let height = world
+                .height_at(HeightmapType::OceanFloorWg, x, z)
+                .unwrap_or(world.min_y() - 1);
+            if min_y <= height {
                 return do_place_ore(
                     world, random, config, start_x, end_x, start_z, end_z, start_y, end_y, min_x,
                     min_y, min_z, width_xz, height_y,
@@ -2741,6 +2742,10 @@ fn heightmap_height(
     local_x: i32,
     local_z: i32,
 ) -> i32 {
+    if let Some(height) = chunk.cached_worldgen_height(heightmap, local_x, local_z) {
+        return height;
+    }
+
     for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
         if heightmap_is_opaque(heightmap, chunk.get_block_at_y(local_x, y, local_z)) {
             return y + 1;
@@ -2758,32 +2763,6 @@ fn heightmap_is_opaque(heightmap: HeightmapType, block_id: RawBlockId) -> bool {
             (material_blocks_motion(block_id) || has_fluid(block_id)) && !is_leaves(block_id)
         }
     }
-}
-
-fn material_blocks_motion(block_id: RawBlockId) -> bool {
-    !matches!(
-        block_id,
-        AIR | CAVE_AIR
-            | WATER
-            | LAVA
-            | SNOW
-            | GRASS
-            | FERN
-            | DANDELION
-            | POPPY
-            | DEAD_BUSH
-            | LARGE_FERN_LOWER
-            | LARGE_FERN_UPPER
-            | GLOW_LICHEN
-    )
-}
-
-fn has_fluid(block_id: RawBlockId) -> bool {
-    matches!(block_id, WATER | LAVA)
-}
-
-fn is_leaves(block_id: RawBlockId) -> bool {
-    matches!(block_id, OAK_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES)
 }
 
 fn matches_allowed(allowed: &[RawBlockId], block_id: RawBlockId) -> bool {
@@ -3162,6 +3141,22 @@ mod tests {
             chunk.height_at(HeightmapType::MotionBlockingNoLeaves, 8, 8),
             Some(4)
         );
+    }
+
+    #[test]
+    fn primed_worldgen_heightmaps_ignore_later_feature_writes() {
+        let mut chunk = MutableChunkBlockBuffer::new(0, 0, 0, 16);
+        chunk.set_block_at_y(8, 2, 8, DIRT);
+        chunk.prime_worldgen_heightmaps();
+        chunk.set_block_at_y(8, 5, 8, SPRUCE_LEAVES);
+
+        assert_eq!(
+            chunk.height_at(HeightmapType::WorldSurfaceWg, 8, 8),
+            Some(3)
+        );
+        assert_eq!(chunk.height_at(HeightmapType::OceanFloorWg, 8, 8), Some(3));
+        assert_eq!(chunk.height_at(HeightmapType::WorldSurface, 8, 8), Some(6));
+        assert_eq!(chunk.height_at(HeightmapType::OceanFloor, 8, 8), Some(6));
     }
 
     #[test]

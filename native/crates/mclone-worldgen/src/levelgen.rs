@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::biome::OverworldBiomeSource;
 use crate::block::{
-    AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER, generated_block_state_id, is_air_like,
+    AIR, BEDROCK, GeneratedBlockId, RawBlockId, STONE, WATER, generated_block_state_id,
+    is_air_like, material_blocks_motion,
 };
 use crate::carver::{apply_overworld_air_carvers, apply_overworld_liquid_carvers};
 use crate::feature::{
@@ -10,6 +11,7 @@ use crate::feature::{
     apply_overworld_biome_decoration_to_region,
 };
 use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
+use crate::placement::HeightmapType;
 use crate::prng::WorldgenRandom;
 use crate::surface::apply_overworld_surface;
 use mclone_core::{BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
@@ -636,8 +638,48 @@ pub struct MutableChunkBlockBuffer {
     pub min_y: i32,
     pub height: i32,
     pub blocks: Vec<u8>,
+    worldgen_heightmaps: Option<ChunkWorldgenHeightmaps>,
     block_ticks: Vec<ScheduledTick>,
     liquid_ticks: Vec<ScheduledTick>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ChunkWorldgenHeightmaps {
+    world_surface_wg: [i32; 256],
+    ocean_floor_wg: [i32; 256],
+}
+
+impl ChunkWorldgenHeightmaps {
+    fn from_chunk(chunk: &MutableChunkBlockBuffer) -> Self {
+        let mut world_surface_wg = [chunk.min_y; 256];
+        let mut ocean_floor_wg = [chunk.min_y; 256];
+
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                let index = heightmap_column_index(local_x, local_z);
+                world_surface_wg[index] =
+                    scan_heightmap_height(chunk, local_x, local_z, |block_id| {
+                        !is_air_like(block_id)
+                    });
+                ocean_floor_wg[index] =
+                    scan_heightmap_height(chunk, local_x, local_z, material_blocks_motion);
+            }
+        }
+
+        Self {
+            world_surface_wg,
+            ocean_floor_wg,
+        }
+    }
+
+    fn height(&self, heightmap: HeightmapType, local_x: i32, local_z: i32) -> Option<i32> {
+        let index = heightmap_column_index(local_x, local_z);
+        match heightmap {
+            HeightmapType::WorldSurfaceWg => Some(self.world_surface_wg[index]),
+            HeightmapType::OceanFloorWg => Some(self.ocean_floor_wg[index]),
+            _ => None,
+        }
+    }
 }
 
 impl MutableChunkBlockBuffer {
@@ -652,6 +694,7 @@ impl MutableChunkBlockBuffer {
             min_y,
             height,
             blocks: vec![AIR; height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize],
+            worldgen_heightmaps: None,
             block_ticks: Vec::new(),
             liquid_ticks: Vec::new(),
         }
@@ -676,6 +719,21 @@ impl MutableChunkBlockBuffer {
 
     pub fn world_surface_height(&self, local_x: i32, local_z: i32) -> i32 {
         world_surface_height(self, local_x, local_z)
+    }
+
+    pub fn prime_worldgen_heightmaps(&mut self) {
+        self.worldgen_heightmaps = Some(ChunkWorldgenHeightmaps::from_chunk(self));
+    }
+
+    pub fn cached_worldgen_height(
+        &self,
+        heightmap: HeightmapType,
+        local_x: i32,
+        local_z: i32,
+    ) -> Option<i32> {
+        self.worldgen_heightmaps
+            .as_ref()
+            .and_then(|heightmaps| heightmaps.height(heightmap, local_x, local_z))
     }
 
     pub fn non_air_block_count(&self) -> usize {
@@ -1414,6 +1472,7 @@ fn generate_overworld_liquid_carved_buffer_with_biome_source(
     );
     apply_overworld_air_carvers(seed, &biome_source, &mut chunk);
     apply_overworld_liquid_carvers(seed, &biome_source, &mut chunk);
+    chunk.prime_worldgen_heightmaps();
     chunk
 }
 
@@ -1440,6 +1499,24 @@ fn clamped_lerp(start: f64, end: f64, delta: f64) -> f64 {
 
 fn block_buffer_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
     ((local_y << 8) | (local_z << 4) | local_x) as usize
+}
+
+fn heightmap_column_index(local_x: i32, local_z: i32) -> usize {
+    (local_x + local_z * CHUNK_WIDTH) as usize
+}
+
+fn scan_heightmap_height(
+    chunk: &MutableChunkBlockBuffer,
+    local_x: i32,
+    local_z: i32,
+    is_opaque: impl Fn(u8) -> bool,
+) -> i32 {
+    for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
+        if is_opaque(chunk.get_block_at_y(local_x, y, local_z)) {
+            return y + 1;
+        }
+    }
+    chunk.min_y
 }
 
 fn world_surface_height(chunk: &MutableChunkBlockBuffer, local_x: i32, local_z: i32) -> i32 {
