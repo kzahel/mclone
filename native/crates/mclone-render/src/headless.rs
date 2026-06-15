@@ -4,12 +4,14 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use mclone_mesh::{TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh};
+use mclone_ui::{GuiDrawList, GuiScale};
 
 use crate::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkDrawResources, ChunkRenderTarget, ChunkTextureAtlas,
     TexturedChunkDrawResources, TexturedSectionDrawResources, TexturedSectionRenderOptions,
 };
 use crate::gpu_util::{native_backends, optional_gpu_features};
+use crate::gui::{GuiRenderOptions, GuiRenderer};
 use crate::target::{RenderFrameContext, RenderFrameTarget};
 
 const BYTES_PER_PIXEL: u32 = 4;
@@ -49,6 +51,23 @@ pub struct HeadlessChunkReport {
     pub byte_len: usize,
     pub vertex_count: u32,
     pub index_count: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct HeadlessUiOptions {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub color: wgpu::Color,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HeadlessUiReport {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub byte_len: usize,
+    pub command_count: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -277,6 +296,48 @@ pub fn write_headless_textured_sections_png_with_options(
         byte_len: pixels.len(),
         vertex_count,
         index_count,
+    })
+}
+
+pub fn write_headless_ui_png(
+    options: HeadlessUiOptions,
+    draw_list: &GuiDrawList,
+) -> Result<HeadlessUiReport> {
+    let width = options.width.max(1);
+    let height = options.height.max(1);
+    let (device, queue) = create_headless_device()?;
+    let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
+    let mut gui = GuiRenderer::new(&device, HEADLESS_FORMAT);
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("mclone_headless_ui_encoder"),
+    });
+    {
+        let frame = RenderFrameContext::new(&device, &queue, &mut encoder, target.render_target());
+        gui.render(
+            frame.device,
+            frame.queue,
+            frame.encoder,
+            frame.target,
+            {
+                let scale = GuiScale::from_pixels(width, height);
+                [scale.width, scale.height]
+            },
+            draw_list,
+            GuiRenderOptions::clear(options.color),
+        )?;
+    }
+    queue.submit(std::iter::once(encoder.finish()));
+
+    let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
+    save_rgba_png(&options.path, width, height, &pixels)?;
+
+    Ok(HeadlessUiReport {
+        path: options.path,
+        width,
+        height,
+        byte_len: pixels.len(),
+        command_count: draw_list.commands().len(),
     })
 }
 

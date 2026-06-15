@@ -9,6 +9,7 @@ members = [
   "crates/mclone-protocol",
   "crates/mclone-render",
   "crates/mclone-server",
+  "crates/mclone-ui",
   "crates/mclone-worldgen",
   "apps/mclone-dedicated-server",
   "apps/mclone-native-client",
@@ -36,6 +37,7 @@ mclone-net = { path = "crates/mclone-net" }
 mclone-protocol = { path = "crates/mclone-protocol" }
 mclone-render = { path = "crates/mclone-render" }
 mclone-server = { path = "crates/mclone-server" }
+mclone-ui = { path = "crates/mclone-ui" }
 mclone-worldgen = { path = "crates/mclone-worldgen" }
 pollster = "0.4"
 serde = { version = "1", features = ["derive"] }

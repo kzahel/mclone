@@ -19,6 +19,7 @@ mclone-net.workspace = true
 mclone-protocol.workspace = true
 mclone-render.workspace = true
 mclone-server.workspace = true
+mclone-ui.workspace = true
 winit.workspace = true
 
 [[bin]]

@@ -28,18 +28,25 @@ use mclone_render::chunk::{
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
     textured_section_visibility_stats_with_options,
 };
+use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::headless::{
-    HeadlessChunkOptions, HeadlessClearOptions, HeadlessTimedemoOptions,
+    HeadlessChunkOptions, HeadlessClearOptions, HeadlessTimedemoOptions, HeadlessUiOptions,
     run_headless_textured_sections_timedemo, write_headless_clear_png,
-    write_headless_textured_sections_png_with_options,
+    write_headless_textured_sections_png_with_options, write_headless_ui_png,
 };
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_server::IntegratedServer;
+use mclone_ui::{
+    Button, Checkbox, Color, CycleButton, Font, GuiDrawList, GuiScale, Interaction, Point, Rect,
+    WidgetId,
+};
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event::{
+    DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
+};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorGrabMode, Window, WindowId};
 
 const DEFAULT_SEED: i64 = 12345;
 const DEFAULT_CHUNK_X: i32 = 0;
@@ -144,6 +151,31 @@ fn main() -> Result<()> {
                     report.index_count
                 );
             }
+            Ok(())
+        }
+        Cli::HeadlessUi {
+            path,
+            width,
+            height,
+        } => {
+            let draw = render_static_title_ui(width, height);
+            let report = write_headless_ui_png(
+                HeadlessUiOptions {
+                    path,
+                    width,
+                    height,
+                    color: mclone_render::default_clear_color(),
+                },
+                &draw,
+            )?;
+            println!(
+                "headless UI saved to {} ({}x{}, {} bytes, {} commands)",
+                report.path.display(),
+                report.width,
+                report.height,
+                report.byte_len,
+                report.command_count
+            );
             Ok(())
         }
         Cli::MovementPerf { options } => {
@@ -257,6 +289,11 @@ enum Cli {
         scene: SceneOptions,
         render_options: TexturedSectionRenderOptions,
     },
+    HeadlessUi {
+        path: PathBuf,
+        width: u32,
+        height: u32,
+    },
     MovementPerf {
         options: MovementPerfOptions,
     },
@@ -270,6 +307,7 @@ enum HeadlessMode {
     Clear(PathBuf),
     Chunk(PathBuf),
     ChunkScenarios(PathBuf),
+    Ui(PathBuf),
 }
 
 impl Cli {
@@ -335,6 +373,16 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::ChunkScenarios(path))?;
+                }
+                "--headless-ui" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--headless-ui requires an output PNG path")?;
+                    if movement_perf || timedemo {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::Ui(path))?;
                 }
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
                 "--height" => height = Some(parse_u32_arg("--height", args.next())?),
@@ -413,6 +461,11 @@ impl Cli {
                 height: height.unwrap_or(640),
                 scene,
                 render_options,
+            }),
+            Some(HeadlessMode::Ui(path)) => Ok(Self::HeadlessUi {
+                path,
+                width: width.unwrap_or(960),
+                height: height.unwrap_or(540),
             }),
             None if movement_perf => Ok(Self::MovementPerf {
                 options: MovementPerfOptions {
@@ -528,11 +581,12 @@ fn print_help() {
          Usage:\n\
            mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
+           mclone-native-client --headless-ui /tmp/mclone-ui-title.png [--width 960] [--height 540]\n\
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path."
+         Window mode streams chunks around a free-fly spectator camera with WASD, Space/X vertical movement, mouse-lock look, Shift boost, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path."
     );
 }
 
@@ -555,6 +609,7 @@ fn run_window(scene: SceneOptions, render_options: TexturedSectionRenderOptions)
         runtime,
         SpectatorCamera::spawn_for_scene(&scene),
         render_options,
+        scene.chunk_radius,
     );
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -2070,16 +2125,426 @@ struct RenderStreamStats {
     last_frame_ms: f32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeScreen {
+    Title,
+    Pause,
+    Options { parent: OptionsParent },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OptionsParent {
+    Title,
+    Pause,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeUiAction {
+    StartWorld,
+    Resume,
+    OpenOptions(OptionsParent),
+    BackToTitle,
+    BackToPause,
+    ToggleSectionOcclusion,
+    ToggleFullbright,
+    Quit,
+}
+
+struct NativeUi {
+    screen: Option<NativeScreen>,
+    pointer: Option<Point>,
+    pressed: Option<WidgetId>,
+    font: Font,
+    chunk_radius: i32,
+    scale: GuiScale,
+}
+
+const ID_TITLE_START: WidgetId = WidgetId(1);
+const ID_TITLE_OPTIONS: WidgetId = WidgetId(2);
+const ID_TITLE_QUIT: WidgetId = WidgetId(3);
+const ID_PAUSE_RESUME: WidgetId = WidgetId(4);
+const ID_PAUSE_OPTIONS: WidgetId = WidgetId(5);
+const ID_PAUSE_TITLE: WidgetId = WidgetId(6);
+const ID_OPTIONS_OCCLUSION: WidgetId = WidgetId(7);
+const ID_OPTIONS_FULLBRIGHT: WidgetId = WidgetId(8);
+const ID_OPTIONS_RADIUS: WidgetId = WidgetId(9);
+const ID_OPTIONS_BACK: WidgetId = WidgetId(10);
+
+impl NativeUi {
+    fn new(chunk_radius: i32) -> Self {
+        Self {
+            screen: Some(NativeScreen::Title),
+            pointer: None,
+            pressed: None,
+            font: Font::default(),
+            chunk_radius,
+            scale: GuiScale::from_pixels(1280, 900),
+        }
+    }
+
+    fn set_scale(&mut self, scale: GuiScale) {
+        self.scale = scale;
+        self.pointer = self.pointer.map(|point| Point {
+            x: point.x.clamp(0.0, scale.width),
+            y: point.y.clamp(0.0, scale.height),
+        });
+    }
+
+    fn is_active(&self) -> bool {
+        self.screen.is_some()
+    }
+
+    fn covers_world(&self) -> bool {
+        self.screen == Some(NativeScreen::Title)
+    }
+
+    fn open_pause(&mut self) {
+        self.screen = Some(NativeScreen::Pause);
+        self.pressed = None;
+    }
+
+    fn close(&mut self) {
+        self.screen = None;
+        self.pressed = None;
+    }
+
+    fn clear_input(&mut self) {
+        self.pointer = None;
+        self.pressed = None;
+    }
+
+    fn pointer_move(&mut self, point: Point) -> bool {
+        if !self.is_active() {
+            return false;
+        }
+        self.pointer = Some(point);
+        true
+    }
+
+    fn pointer_down(&mut self, point: Point) -> bool {
+        if !self.is_active() {
+            return false;
+        }
+        self.pointer = Some(point);
+        self.pressed = self.widget_at(point);
+        true
+    }
+
+    fn pointer_up(&mut self, point: Point) -> (bool, Option<NativeUiAction>) {
+        if !self.is_active() {
+            return (false, None);
+        }
+        self.pointer = Some(point);
+        let pressed = self.pressed.take();
+        let released = self.widget_at(point);
+        let action = match (pressed, released) {
+            (Some(id), Some(released)) if id == released => self.action_for(id),
+            _ => None,
+        };
+        (true, action)
+    }
+
+    fn key_pressed(&mut self, key: KeyCode) -> (bool, Option<NativeUiAction>) {
+        let Some(screen) = self.screen else {
+            return (false, None);
+        };
+        match (screen, key) {
+            (NativeScreen::Pause, KeyCode::Escape) => (true, Some(NativeUiAction::Resume)),
+            (NativeScreen::Options { parent }, KeyCode::Escape) => match parent {
+                OptionsParent::Title => (true, Some(NativeUiAction::BackToTitle)),
+                OptionsParent::Pause => (true, Some(NativeUiAction::BackToPause)),
+            },
+            (NativeScreen::Title, KeyCode::Escape) => (true, None),
+            _ => (false, None),
+        }
+    }
+
+    fn apply_action(&mut self, action: NativeUiAction) {
+        match action {
+            NativeUiAction::StartWorld | NativeUiAction::Resume => self.close(),
+            NativeUiAction::OpenOptions(parent) => {
+                self.screen = Some(NativeScreen::Options { parent });
+                self.pressed = None;
+            }
+            NativeUiAction::BackToTitle => {
+                self.screen = Some(NativeScreen::Title);
+                self.pressed = None;
+            }
+            NativeUiAction::BackToPause => {
+                self.screen = Some(NativeScreen::Pause);
+                self.pressed = None;
+            }
+            NativeUiAction::ToggleSectionOcclusion
+            | NativeUiAction::ToggleFullbright
+            | NativeUiAction::Quit => {}
+        }
+    }
+
+    fn render_draw_list(&self, render_options: TexturedSectionRenderOptions) -> GuiDrawList {
+        let mut draw = GuiDrawList::new();
+        match self.screen {
+            Some(NativeScreen::Title) => self.render_title(&mut draw),
+            Some(NativeScreen::Pause) => self.render_pause(&mut draw),
+            Some(NativeScreen::Options { parent }) => {
+                self.render_options_screen(&mut draw, render_options, parent)
+            }
+            None => {}
+        }
+        draw
+    }
+
+    fn widget_at(&self, point: Point) -> Option<WidgetId> {
+        match self.screen? {
+            NativeScreen::Title => title_buttons(self.scale)
+                .into_iter()
+                .find(|button| button.contains(point))
+                .map(|button| button.id),
+            NativeScreen::Pause => pause_buttons(self.scale)
+                .into_iter()
+                .find(|button| button.contains(point))
+                .map(|button| button.id),
+            NativeScreen::Options { .. } => {
+                let rects = option_widgets(self.scale);
+                if rects.occlusion.contains(point) {
+                    Some(ID_OPTIONS_OCCLUSION)
+                } else if rects.fullbright.contains(point) {
+                    Some(ID_OPTIONS_FULLBRIGHT)
+                } else if rects.back.contains(point) {
+                    Some(ID_OPTIONS_BACK)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn action_for(&self, id: WidgetId) -> Option<NativeUiAction> {
+        match id {
+            ID_TITLE_START => Some(NativeUiAction::StartWorld),
+            ID_TITLE_OPTIONS => Some(NativeUiAction::OpenOptions(OptionsParent::Title)),
+            ID_TITLE_QUIT => Some(NativeUiAction::Quit),
+            ID_PAUSE_RESUME => Some(NativeUiAction::Resume),
+            ID_PAUSE_OPTIONS => Some(NativeUiAction::OpenOptions(OptionsParent::Pause)),
+            ID_PAUSE_TITLE => Some(NativeUiAction::BackToTitle),
+            ID_OPTIONS_OCCLUSION => Some(NativeUiAction::ToggleSectionOcclusion),
+            ID_OPTIONS_FULLBRIGHT => Some(NativeUiAction::ToggleFullbright),
+            ID_OPTIONS_BACK => match self.screen {
+                Some(NativeScreen::Options {
+                    parent: OptionsParent::Title,
+                }) => Some(NativeUiAction::BackToTitle),
+                Some(NativeScreen::Options {
+                    parent: OptionsParent::Pause,
+                }) => Some(NativeUiAction::BackToPause),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn interaction(&self) -> Interaction {
+        Interaction {
+            pointer: self.pointer,
+            pressed: self.pressed,
+            focused: None,
+        }
+    }
+
+    fn render_title(&self, draw: &mut GuiDrawList) {
+        draw.fill_gradient(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(24, 44, 51, 255),
+            Color::rgba(7, 10, 12, 255),
+        );
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 55),
+        );
+        self.font.draw_centered(
+            draw,
+            "MCLONE",
+            self.scale.width * 0.5,
+            34.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        self.font.draw_centered(
+            draw,
+            "NATIVE RUST CLIENT",
+            self.scale.width * 0.5,
+            48.0,
+            Color::rgba(185, 212, 198, 255),
+        );
+        for button in title_buttons(self.scale) {
+            button.render(draw, &self.font, self.interaction());
+        }
+        self.font.draw_shadow(
+            draw,
+            "MINECRAFT 1.17.1 TARGET",
+            4.0,
+            self.scale.height - 12.0,
+            Color::rgba(160, 176, 170, 255),
+        );
+    }
+
+    fn render_pause(&self, draw: &mut GuiDrawList) {
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 135),
+        );
+        self.font.draw_centered(
+            draw,
+            "PAUSED",
+            self.scale.width * 0.5,
+            self.scale.height * 0.25,
+            Color::rgba(245, 252, 234, 255),
+        );
+        for button in pause_buttons(self.scale) {
+            button.render(draw, &self.font, self.interaction());
+        }
+    }
+
+    fn render_options_screen(
+        &self,
+        draw: &mut GuiDrawList,
+        render_options: TexturedSectionRenderOptions,
+        parent: OptionsParent,
+    ) {
+        draw.fill(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(0, 0, 0, 150),
+        );
+        let panel = centered_panel(self.scale, 230.0, 142.0);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(33, 45, 47, 245),
+            Color::rgba(15, 20, 22, 245),
+        );
+        draw.outline(panel, Color::rgba(130, 166, 154, 255));
+        self.font.draw_centered(
+            draw,
+            "OPTIONS",
+            panel.center_x(),
+            panel.y + 12.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        let widgets = option_widgets(self.scale);
+        Checkbox::new(
+            ID_OPTIONS_OCCLUSION,
+            widgets.occlusion,
+            "Section Occlusion",
+            render_options.section_occlusion_culling,
+        )
+        .render(draw, &self.font, self.interaction());
+        Checkbox::new(
+            ID_OPTIONS_FULLBRIGHT,
+            widgets.fullbright,
+            "Force Fullbright",
+            render_options.force_fullbright,
+        )
+        .render(draw, &self.font, self.interaction());
+        let mut radius = CycleButton::new(
+            ID_OPTIONS_RADIUS,
+            widgets.radius,
+            "Chunk Radius",
+            format!("{} restart", self.chunk_radius),
+        );
+        radius.enabled = false;
+        radius.render(draw, &self.font, self.interaction());
+        Button::new(
+            ID_OPTIONS_BACK,
+            widgets.back,
+            match parent {
+                OptionsParent::Title => "Back",
+                OptionsParent::Pause => "Done",
+            },
+        )
+        .render(draw, &self.font, self.interaction());
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct OptionWidgetRects {
+    occlusion: Rect,
+    fullbright: Rect,
+    radius: Rect,
+    back: Rect,
+}
+
+fn title_buttons(scale: GuiScale) -> [Button; 3] {
+    let y = scale.height * 0.5 - 22.0;
+    [
+        Button::new(
+            ID_TITLE_START,
+            menu_button_rect(scale, y),
+            "Start Local World",
+        ),
+        Button::new(
+            ID_TITLE_OPTIONS,
+            menu_button_rect(scale, y + 24.0),
+            "Options",
+        ),
+        Button::new(ID_TITLE_QUIT, menu_button_rect(scale, y + 48.0), "Quit"),
+    ]
+}
+
+fn pause_buttons(scale: GuiScale) -> [Button; 3] {
+    let y = scale.height * 0.5 - 22.0;
+    [
+        Button::new(ID_PAUSE_RESUME, menu_button_rect(scale, y), "Back To Game"),
+        Button::new(
+            ID_PAUSE_OPTIONS,
+            menu_button_rect(scale, y + 24.0),
+            "Options",
+        ),
+        Button::new(
+            ID_PAUSE_TITLE,
+            menu_button_rect(scale, y + 48.0),
+            "Quit To Title",
+        ),
+    ]
+}
+
+fn option_widgets(scale: GuiScale) -> OptionWidgetRects {
+    let panel = centered_panel(scale, 230.0, 142.0);
+    OptionWidgetRects {
+        occlusion: Rect::new(panel.x + 26.0, panel.y + 38.0, 180.0, 18.0),
+        fullbright: Rect::new(panel.x + 26.0, panel.y + 60.0, 180.0, 18.0),
+        radius: Rect::new(panel.x + 25.0, panel.y + 84.0, 180.0, 20.0),
+        back: Rect::new(panel.center_x() - 55.0, panel.y + 112.0, 110.0, 20.0),
+    }
+}
+
+fn centered_panel(scale: GuiScale, width: f32, height: f32) -> Rect {
+    Rect::new(
+        (scale.width - width).max(0.0) * 0.5,
+        (scale.height - height).max(0.0) * 0.5,
+        width.min(scale.width),
+        height.min(scale.height),
+    )
+}
+
+fn menu_button_rect(scale: GuiScale, y: f32) -> Rect {
+    Rect::new(scale.width * 0.5 - 90.0, y, 180.0, 20.0)
+}
+
+fn render_static_title_ui(width: u32, height: u32) -> GuiDrawList {
+    let scale = GuiScale::from_pixels(width, height);
+    let mut ui = NativeUi::new(DEFAULT_CHUNK_RADIUS);
+    ui.set_scale(scale);
+    ui.render_draw_list(TexturedSectionRenderOptions::default())
+}
+
 struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
     render_options: TexturedSectionRenderOptions,
+    ui: NativeUi,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
     depth: Option<ChunkDepthTarget>,
     draw: Option<TexturedSectionDrawResources>,
+    gui: Option<GuiRenderer>,
     pressed_keys: std::collections::HashSet<KeyCode>,
-    look_dragging: bool,
+    mouse_locked: bool,
     last_cursor: Option<(f64, f64)>,
     last_frame: Instant,
     last_title_update: Instant,
@@ -2091,17 +2556,20 @@ impl ChunkApp {
         runtime: WindowSceneRuntime,
         spectator: SpectatorCamera,
         render_options: TexturedSectionRenderOptions,
+        chunk_radius: i32,
     ) -> Self {
         Self {
             runtime,
             spectator,
             render_options,
+            ui: NativeUi::new(chunk_radius),
             window: None,
             surface: None,
             depth: None,
             draw: None,
+            gui: None,
             pressed_keys: std::collections::HashSet::new(),
-            look_dragging: false,
+            mouse_locked: false,
             last_cursor: None,
             last_frame: Instant::now(),
             last_title_update: Instant::now(),
@@ -2121,8 +2589,12 @@ impl ChunkApp {
         self.last_frame = now;
         self.render_stats.last_frame_ms = dt * 1000.0;
 
+        if self.ui.is_active() {
+            return Ok(());
+        }
+
         let right = key_axis(&self.pressed_keys, KeyCode::KeyD, KeyCode::KeyA);
-        let up = key_axis(&self.pressed_keys, KeyCode::KeyE, KeyCode::KeyQ);
+        let up = vertical_axis(&self.pressed_keys);
         let forward = key_axis(&self.pressed_keys, KeyCode::KeyW, KeyCode::KeyS);
         let boosted = self.pressed_keys.contains(&KeyCode::ShiftLeft)
             || self.pressed_keys.contains(&KeyCode::ShiftRight);
@@ -2130,6 +2602,104 @@ impl ChunkApp {
             self.update_interest_from_spectator()?;
         }
         Ok(())
+    }
+
+    fn gui_scale(&self) -> Option<GuiScale> {
+        self.surface.as_ref().map(|surface| {
+            GuiScale::from_pixels(surface.config.width.max(1), surface.config.height.max(1))
+        })
+    }
+
+    fn gui_point(&self, x: f64, y: f64) -> Option<Point> {
+        self.gui_scale().map(|scale| scale.client_to_gui(x, y))
+    }
+
+    fn apply_ui_action(&mut self, action: NativeUiAction, event_loop: &ActiveEventLoop) {
+        match action {
+            NativeUiAction::ToggleSectionOcclusion => {
+                self.render_options.section_occlusion_culling =
+                    !self.render_options.section_occlusion_culling;
+                log::info!(
+                    "section occlusion culling {}",
+                    if self.render_options.section_occlusion_culling {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+            }
+            NativeUiAction::ToggleFullbright => {
+                self.render_options.force_fullbright = !self.render_options.force_fullbright;
+                log::info!(
+                    "fullbright {}",
+                    if self.render_options.force_fullbright {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+            }
+            NativeUiAction::Quit => {
+                event_loop.exit();
+                return;
+            }
+            NativeUiAction::StartWorld
+            | NativeUiAction::Resume
+            | NativeUiAction::OpenOptions(_)
+            | NativeUiAction::BackToTitle
+            | NativeUiAction::BackToPause => {}
+        }
+        self.ui.apply_action(action);
+        self.pressed_keys.clear();
+        self.last_cursor = None;
+        self.sync_mouse_lock();
+        self.update_window_title(true);
+        self.request_redraw();
+    }
+
+    fn sync_mouse_lock(&mut self) {
+        self.set_mouse_lock(!self.ui.is_active());
+    }
+
+    fn set_mouse_lock(&mut self, should_lock: bool) {
+        let Some(window) = &self.window else {
+            self.mouse_locked = false;
+            return;
+        };
+        if should_lock == self.mouse_locked {
+            return;
+        }
+
+        if should_lock {
+            let grab_result =
+                window
+                    .set_cursor_grab(CursorGrabMode::Locked)
+                    .or_else(|locked_err| {
+                        log::warn!(
+                            "cursor lock unavailable ({locked_err}); trying confined cursor grab"
+                        );
+                        window.set_cursor_grab(CursorGrabMode::Confined)
+                    });
+            match grab_result {
+                Ok(()) => {
+                    window.set_cursor_visible(false);
+                    self.mouse_locked = true;
+                    self.last_cursor = None;
+                }
+                Err(err) => {
+                    log::warn!("failed to grab cursor for mouse look: {err}");
+                    window.set_cursor_visible(true);
+                    self.mouse_locked = false;
+                }
+            }
+        } else {
+            if let Err(err) = window.set_cursor_grab(CursorGrabMode::None) {
+                log::warn!("failed to release cursor grab: {err}");
+            }
+            window.set_cursor_visible(true);
+            self.mouse_locked = false;
+            self.last_cursor = None;
+        }
     }
 
     fn update_interest_from_spectator(&mut self) -> Result<()> {
@@ -2355,6 +2925,11 @@ impl ApplicationHandler for ChunkApp {
             }
         };
         let upload_ms = elapsed_ms(upload_start.elapsed());
+        let gui = GuiRenderer::new(&surface.device, surface.config.format);
+        self.ui.set_scale(GuiScale::from_pixels(
+            surface.config.width,
+            surface.config.height,
+        ));
         self.render_stats.section_count = draw.section_count();
         self.render_stats.index_count = draw.index_count();
         self.render_stats.face_count = quad_face_count_from_indices(self.render_stats.index_count);
@@ -2386,8 +2961,11 @@ impl ApplicationHandler for ChunkApp {
         );
         self.depth = Some(depth);
         self.draw = Some(draw);
+        self.gui = Some(gui);
         self.surface = Some(surface);
         self.window = Some(window);
+        event_loop.listen_device_events(DeviceEvents::WhenFocused);
+        self.sync_mouse_lock();
         self.update_window_title(true);
         self.request_redraw();
     }
@@ -2401,13 +2979,36 @@ impl ApplicationHandler for ChunkApp {
                 }
                 if let (Some(surface), Some(depth)) = (&self.surface, &mut self.depth) {
                     depth.resize(&surface.device, surface.config.width, surface.config.height);
+                    self.ui.set_scale(GuiScale::from_pixels(
+                        surface.config.width,
+                        surface.config.height,
+                    ));
                 }
                 self.request_redraw();
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key_code) = event.physical_key {
-                    if key_code == KeyCode::Escape {
-                        event_loop.exit();
+                    if let Some(scale) = self.gui_scale() {
+                        self.ui.set_scale(scale);
+                    }
+                    if event.state == ElementState::Pressed && self.ui.is_active() {
+                        let (handled, action) = self.ui.key_pressed(key_code);
+                        if let Some(action) = action {
+                            self.apply_ui_action(action, event_loop);
+                        } else if handled {
+                            self.request_redraw();
+                        }
+                        return;
+                    }
+                    if key_code == KeyCode::Escape
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        self.ui.open_pause();
+                        self.pressed_keys.clear();
+                        self.last_cursor = None;
+                        self.sync_mouse_lock();
+                        self.request_redraw();
                         return;
                     }
                     if key_code == KeyCode::KeyO
@@ -2458,14 +3059,43 @@ impl ApplicationHandler for ChunkApp {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
+                if self.ui.is_active() {
+                    if button == MouseButton::Left {
+                        if let Some((x, y)) = self.last_cursor
+                            && let Some(point) = self.gui_point(x, y)
+                        {
+                            match state {
+                                ElementState::Pressed => {
+                                    self.ui.pointer_down(point);
+                                }
+                                ElementState::Released => {
+                                    let (_handled, action) = self.ui.pointer_up(point);
+                                    if let Some(action) = action {
+                                        self.apply_ui_action(action, event_loop);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        self.request_redraw();
+                    }
+                    return;
+                }
                 if button == MouseButton::Left || button == MouseButton::Right {
-                    self.look_dragging = state == ElementState::Pressed;
                     self.last_cursor = None;
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let cursor = (position.x, position.y);
-                if self.look_dragging {
+                if self.ui.is_active() {
+                    self.last_cursor = Some(cursor);
+                    if let Some(point) = self.gui_point(cursor.0, cursor.1) {
+                        self.ui.pointer_move(point);
+                    }
+                    self.request_redraw();
+                    return;
+                }
+                if !self.mouse_locked {
                     if let Some(previous) = self.last_cursor {
                         let dx = (cursor.0 - previous.0) as f32;
                         let dy = (cursor.1 - previous.1) as f32;
@@ -2475,10 +3105,13 @@ impl ApplicationHandler for ChunkApp {
                         );
                         self.request_redraw();
                     }
-                    self.last_cursor = Some(cursor);
                 }
+                self.last_cursor = Some(cursor);
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                if self.ui.is_active() {
+                    return;
+                }
                 let amount = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y * 0.12,
                     MouseScrollDelta::PixelDelta(position) => position.y as f32 * 0.001,
@@ -2489,8 +3122,12 @@ impl ApplicationHandler for ChunkApp {
             }
             WindowEvent::Focused(false) => {
                 self.pressed_keys.clear();
-                self.look_dragging = false;
                 self.last_cursor = None;
+                self.ui.clear_input();
+                self.set_mouse_lock(false);
+            }
+            WindowEvent::Focused(true) => {
+                self.sync_mouse_lock();
             }
             WindowEvent::RedrawRequested => {
                 if let Err(err) = self.update_camera_from_keys() {
@@ -2503,30 +3140,57 @@ impl ApplicationHandler for ChunkApp {
                     event_loop.exit();
                     return;
                 }
+                let Some(gui_scale) = self.gui_scale() else {
+                    return;
+                };
+                self.ui.set_scale(gui_scale);
                 let camera = self.spectator.camera(self.runtime.radius_chunks);
                 let render_options = self.render_options;
+                let ui_active = self.ui.is_active();
+                let ui_covers_world = self.ui.covers_world();
+                let ui_draw = self.ui.render_draw_list(render_options);
                 let mut frame_render_stats = None;
                 let result = {
-                    let (Some(surface), Some(depth), Some(draw)) =
-                        (&mut self.surface, &self.depth, &mut self.draw)
-                    else {
+                    let (Some(surface), Some(depth), Some(draw), Some(gui)) = (
+                        &mut self.surface,
+                        &self.depth,
+                        &mut self.draw,
+                        &mut self.gui,
+                    ) else {
                         return;
                     };
                     surface.render_with(|frame| {
-                        let render_view =
-                            camera.render_view(frame.target.size[0], frame.target.size[1]);
-                        let render_target = ChunkRenderTarget::from_frame_target(
-                            frame.target.with_depth(&depth.view),
-                            mclone_render::default_clear_color(),
-                        )?;
-                        let frame_stats = draw.render_with_options(
-                            frame.queue,
-                            frame.encoder,
-                            render_target,
-                            render_view,
-                            render_options,
-                        )?;
-                        frame_render_stats = Some(frame_stats);
+                        if !ui_covers_world {
+                            let render_view =
+                                camera.render_view(frame.target.size[0], frame.target.size[1]);
+                            let render_target = ChunkRenderTarget::from_frame_target(
+                                frame.target.with_depth(&depth.view),
+                                mclone_render::default_clear_color(),
+                            )?;
+                            let frame_stats = draw.render_with_options(
+                                frame.queue,
+                                frame.encoder,
+                                render_target,
+                                render_view,
+                                render_options,
+                            )?;
+                            frame_render_stats = Some(frame_stats);
+                        }
+                        if ui_active {
+                            gui.render(
+                                frame.device,
+                                frame.queue,
+                                frame.encoder,
+                                frame.target,
+                                [gui_scale.width, gui_scale.height],
+                                &ui_draw,
+                                if ui_covers_world {
+                                    GuiRenderOptions::clear(mclone_render::default_clear_color())
+                                } else {
+                                    GuiRenderOptions::overlay()
+                                },
+                            )?;
+                        }
                         Ok(())
                     })
                 };
@@ -2534,6 +3198,10 @@ impl ApplicationHandler for ChunkApp {
                     self.render_stats.drawn_section_count = frame_stats.drawn_section_count;
                     self.render_stats.drawn_face_count = frame_stats.drawn_face_count();
                     self.render_stats.drawn_index_count = frame_stats.drawn_index_count;
+                } else if ui_covers_world {
+                    self.render_stats.drawn_section_count = 0;
+                    self.render_stats.drawn_face_count = 0;
+                    self.render_stats.drawn_index_count = 0;
                 }
                 match result {
                     Ok(SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped) => {}
@@ -2550,6 +3218,26 @@ impl ApplicationHandler for ChunkApp {
             _ => {}
         }
     }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        if self.ui.is_active() || !self.mouse_locked {
+            return;
+        }
+        if let DeviceEvent::MouseMotion { delta } = event {
+            let dx = delta.0 as f32;
+            let dy = delta.1 as f32;
+            self.spectator.look(
+                -dx * SPECTATOR_MOUSE_SENSITIVITY,
+                -dy * SPECTATOR_MOUSE_SENSITIVITY,
+            );
+            self.request_redraw();
+        }
+    }
 }
 
 fn key_axis(
@@ -2560,6 +3248,10 @@ fn key_axis(
     let positive = keys.contains(&positive) as i32;
     let negative = keys.contains(&negative) as i32;
     (positive - negative) as f32
+}
+
+fn vertical_axis(keys: &std::collections::HashSet<KeyCode>) -> f32 {
+    key_axis(keys, KeyCode::Space, KeyCode::KeyX)
 }
 
 fn elapsed_ms(duration: Duration) -> f64 {
@@ -2667,6 +3359,20 @@ mod tests {
         assert_eq!(spectator.pitch, SPECTATOR_PITCH_LIMIT);
         spectator.look(0.0, -200.0);
         assert_eq!(spectator.pitch, -SPECTATOR_PITCH_LIMIT);
+    }
+
+    #[test]
+    fn vertical_axis_uses_space_for_up_and_x_for_down() {
+        let mut keys = std::collections::HashSet::new();
+
+        keys.insert(KeyCode::Space);
+        assert_eq!(vertical_axis(&keys), 1.0);
+
+        keys.insert(KeyCode::KeyX);
+        assert_eq!(vertical_axis(&keys), 0.0);
+
+        keys.remove(&KeyCode::Space);
+        assert_eq!(vertical_axis(&keys), -1.0);
     }
 
     #[test]
@@ -2782,6 +3488,28 @@ mod tests {
                 path: PathBuf::from("/tmp/mclone.png"),
                 width: 32,
                 height: 16,
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_headless_ui_dimensions() {
+        let cli = Cli::parse([
+            "--headless-ui".to_owned(),
+            "/tmp/mclone-ui.png".to_owned(),
+            "--width".to_owned(),
+            "960".to_owned(),
+            "--height".to_owned(),
+            "540".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::HeadlessUi {
+                path: PathBuf::from("/tmp/mclone-ui.png"),
+                width: 960,
+                height: 540,
             }
         );
     }
