@@ -57,8 +57,13 @@ impl ChunkCamera {
     }
 
     pub fn view_projection(self, width: u32, height: u32) -> [[f32; 4]; 4] {
-        self.view_projection_matrix(width, height)
-            .to_cols_array_2d()
+        self.render_view(width, height).uniform_matrix()
+    }
+
+    pub fn render_view(self, width: u32, height: u32) -> ChunkRenderView {
+        ChunkRenderView {
+            view_projection: self.view_projection_matrix(width, height),
+        }
     }
 
     fn view_projection_matrix(self, width: u32, height: u32) -> Mat4 {
@@ -135,6 +140,40 @@ impl ChunkCamera {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChunkRenderView {
+    pub view_projection: Mat4,
+}
+
+impl ChunkRenderView {
+    pub fn uniform_matrix(self) -> [[f32; 4]; 4] {
+        self.view_projection.to_cols_array_2d()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ChunkRenderTarget<'a> {
+    pub color_view: &'a wgpu::TextureView,
+    pub size: [u32; 2],
+    pub clear_color: wgpu::Color,
+    pub clear_depth: f32,
+}
+
+impl<'a> ChunkRenderTarget<'a> {
+    pub fn new(
+        color_view: &'a wgpu::TextureView,
+        size: [u32; 2],
+        clear_color: wgpu::Color,
+    ) -> Self {
+        Self {
+            color_view,
+            size,
+            clear_color,
+            clear_depth: 1.0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TexturedSectionRenderStats {
     pub loaded_section_count: usize,
@@ -145,11 +184,9 @@ pub struct TexturedSectionRenderStats {
 
 pub fn textured_section_visibility_stats(
     sections: &[TexturedRenderSectionMesh],
-    camera: ChunkCamera,
-    width: u32,
-    height: u32,
+    render_view: ChunkRenderView,
 ) -> TexturedSectionRenderStats {
-    let frustum = ClipFrustum::from_camera(camera, width, height);
+    let frustum = ClipFrustum::from_render_view(render_view);
     let mut stats = TexturedSectionRenderStats::default();
     for section in sections.iter().filter(|section| !section.is_empty()) {
         let index_count = section.stats().index_count;
@@ -169,9 +206,9 @@ struct ClipFrustum {
 }
 
 impl ClipFrustum {
-    fn from_camera(camera: ChunkCamera, width: u32, height: u32) -> Self {
+    fn from_render_view(render_view: ChunkRenderView) -> Self {
         Self {
-            view_projection: camera.view_projection_matrix(width, height),
+            view_projection: render_view.view_projection,
         }
     }
 
@@ -701,32 +738,29 @@ impl ChunkDrawResources {
         &self,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        color_view: &wgpu::TextureView,
-        size: [u32; 2],
-        camera: ChunkCamera,
-        clear_color: wgpu::Color,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
     ) -> Result<()> {
-        let view_projection = camera.view_projection(size[0], size[1]);
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &matrix_bytes(view_projection),
+            &matrix_bytes(render_view.uniform_matrix()),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_chunk_render_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: color_view,
+                view: target.color_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear_color),
+                    load: wgpu::LoadOp::Clear(target.clear_color),
                     store: wgpu::StoreOp::Store,
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth.view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    load: wgpu::LoadOp::Clear(target.clear_depth),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -784,32 +818,29 @@ impl TexturedChunkDrawResources {
         &self,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        color_view: &wgpu::TextureView,
-        size: [u32; 2],
-        camera: ChunkCamera,
-        clear_color: wgpu::Color,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
     ) -> Result<()> {
-        let view_projection = camera.view_projection(size[0], size[1]);
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &matrix_bytes(view_projection),
+            &matrix_bytes(render_view.uniform_matrix()),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_textured_chunk_render_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: color_view,
+                view: target.color_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear_color),
+                    load: wgpu::LoadOp::Clear(target.clear_color),
                     store: wgpu::StoreOp::Store,
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth.view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    load: wgpu::LoadOp::Clear(target.clear_depth),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -899,33 +930,30 @@ impl TexturedSectionDrawResources {
         &self,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        color_view: &wgpu::TextureView,
-        size: [u32; 2],
-        camera: ChunkCamera,
-        clear_color: wgpu::Color,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
     ) -> Result<TexturedSectionRenderStats> {
-        let frustum = ClipFrustum::from_camera(camera, size[0], size[1]);
-        let view_projection = camera.view_projection(size[0], size[1]);
+        let frustum = ClipFrustum::from_render_view(render_view);
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &matrix_bytes(view_projection),
+            &matrix_bytes(render_view.uniform_matrix()),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_textured_section_render_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: color_view,
+                view: target.color_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear_color),
+                    load: wgpu::LoadOp::Clear(target.clear_color),
                     store: wgpu::StoreOp::Store,
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth.view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    load: wgpu::LoadOp::Clear(target.clear_depth),
                     store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
@@ -1005,12 +1033,14 @@ mod tests {
 
     #[test]
     fn camera_matrix_serializes_to_uniform_size() {
-        let matrix = ChunkCamera::overview_for_chunk(0, 0).view_projection(640, 480);
+        let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
+        let matrix = render_view.uniform_matrix();
         assert_eq!(
             matrix_bytes(matrix).len() as wgpu::BufferAddress,
             UNIFORM_BYTE_SIZE
         );
         assert!(matrix.into_iter().flatten().all(f32::is_finite));
+        assert!(render_view.view_projection.is_finite());
     }
 
     #[test]
@@ -1059,7 +1089,7 @@ mod tests {
             z_near: 0.05,
             z_far: 700.0,
         };
-        let frustum = ClipFrustum::from_camera(camera, 1280, 720);
+        let frustum = ClipFrustum::from_render_view(camera.render_view(1280, 720));
 
         assert!(frustum.is_render_section_visible(RenderSectionKey::new(0, 3, 0)));
     }
@@ -1074,7 +1104,7 @@ mod tests {
             z_near: 0.05,
             z_far: 700.0,
         };
-        let frustum = ClipFrustum::from_camera(camera, 1280, 720);
+        let frustum = ClipFrustum::from_render_view(camera.render_view(1280, 720));
 
         assert!(!frustum.is_render_section_visible(RenderSectionKey::new(0, 3, -8)));
     }

@@ -20,7 +20,8 @@ use mclone_mesh::{
 use mclone_net::{LocalTransport, request_server_updates};
 use mclone_protocol::{ChunkInterest, ServerUpdate};
 use mclone_render::chunk::{
-    ChunkCamera, ChunkTextureAtlas, TexturedSectionDrawResources, textured_section_visibility_stats,
+    ChunkCamera, ChunkRenderTarget, ChunkTextureAtlas, TexturedSectionDrawResources,
+    textured_section_visibility_stats,
 };
 use mclone_render::headless::{
     HeadlessChunkOptions, HeadlessClearOptions, write_headless_clear_png,
@@ -618,8 +619,8 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
         let sections = runtime.build_sections()?;
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let camera = spectator.camera(runtime.radius_chunks);
-        let visibility =
-            textured_section_visibility_stats(&sections, camera, options.width, options.height);
+        let render_view = camera.render_view(options.width, options.height);
+        let visibility = textured_section_visibility_stats(&sections, render_view);
         let stats = runtime.stats();
 
         steps.push(MovementPerfStepReport {
@@ -1689,15 +1690,15 @@ impl ApplicationHandler for ChunkApp {
                     let (Some(surface), Some(draw)) = (&mut self.surface, &mut self.draw) else {
                         return;
                     };
-                    surface.render_with(|_device, queue, encoder, view, size| {
-                        let frame_stats = draw.render(
-                            queue,
-                            encoder,
-                            view,
+                    surface.render_with(|_device, queue, encoder, color_view, size| {
+                        let render_view = camera.render_view(size[0], size[1]);
+                        let render_target = ChunkRenderTarget::new(
+                            color_view,
                             size,
-                            camera,
                             mclone_render::default_clear_color(),
-                        )?;
+                        );
+                        let frame_stats =
+                            draw.render(queue, encoder, render_target, render_view)?;
                         frame_render_stats = Some(frame_stats);
                         Ok(())
                     })

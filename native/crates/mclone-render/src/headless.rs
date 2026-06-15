@@ -5,8 +5,8 @@ use anyhow::{Context, Result};
 use mclone_mesh::{TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh};
 
 use crate::chunk::{
-    ChunkCamera, ChunkDrawResources, ChunkTextureAtlas, TexturedChunkDrawResources,
-    TexturedSectionDrawResources,
+    ChunkCamera, ChunkDrawResources, ChunkRenderTarget, ChunkTextureAtlas,
+    TexturedChunkDrawResources, TexturedSectionDrawResources,
 };
 use crate::gpu_util::{native_backends, optional_gpu_features};
 
@@ -99,14 +99,9 @@ pub fn write_headless_chunk_png(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_chunk_encoder"),
     });
-    draw.render(
-        &queue,
-        &mut encoder,
-        &target.view,
-        [width, height],
-        options.camera,
-        options.color,
-    )?;
+    let render_view = options.camera.render_view(width, height);
+    let render_target = ChunkRenderTarget::new(&target.view, [width, height], options.color);
+    draw.render(&queue, &mut encoder, render_target, render_view)?;
     queue.submit(std::iter::once(encoder.finish()));
 
     let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
@@ -145,14 +140,9 @@ pub fn write_headless_textured_chunk_png(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_textured_chunk_encoder"),
     });
-    draw.render(
-        &queue,
-        &mut encoder,
-        &target.view,
-        [width, height],
-        options.camera,
-        options.color,
-    )?;
+    let render_view = options.camera.render_view(width, height);
+    let render_target = ChunkRenderTarget::new(&target.view, [width, height], options.color);
+    draw.render(&queue, &mut encoder, render_target, render_view)?;
     queue.submit(std::iter::once(encoder.finish()));
 
     let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
@@ -191,14 +181,9 @@ pub fn write_headless_textured_sections_png(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_textured_sections_encoder"),
     });
-    draw.render(
-        &queue,
-        &mut encoder,
-        &target.view,
-        [width, height],
-        options.camera,
-        options.color,
-    )?;
+    let render_view = options.camera.render_view(width, height);
+    let render_target = ChunkRenderTarget::new(&target.view, [width, height], options.color);
+    draw.render(&queue, &mut encoder, render_target, render_view)?;
     queue.submit(std::iter::once(encoder.finish()));
 
     let pixels = read_rgba8(&device, &queue, &target.texture, width, height)?;
