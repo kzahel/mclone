@@ -97,11 +97,12 @@ Expect about 20 implementation tacticals after this parent roadmap before native
 | [`024-render-section-dirty-cache-and-upload-diffs.md`](024-render-section-dirty-cache-and-upload-diffs.md) | renderer/perf | **done** - CPU render-section cache, dirty chunk rebuilds, incremental GPU section updates, and rebuilt/uploaded vertex diagnostics | native movement smoke plus mesh/render/native-client tests |
 | [`025-render-section-visibility-graph.md`](025-render-section-visibility-graph.md) | renderer/perf | **first pass landed** - Java `VisGraph` / `VisibilitySet` parity, synthetic oracle fixture, conservative section occlusion traversal, outside-retained camera seeding, client toggle, movement/timedemo culling counters, and graph-build timing | oracle fixture plus movement/timedemo smoke deltas |
 | [`026-lighting-pipeline.md`](026-lighting-pipeline.md) | lighting | `DataLayer`, light sections, solver/service boundary, initial light facts, renderer consumption | light fixture tests and non-fullbright terrain capture |
-| `027-live-light-and-liquid-updates.md` | simulation/runtime | light deltas, block/liquid dirty updates, pending liquid ticks, water flow baseline | update/delta tests and runtime smoke |
-| `028-player-movement-and-collision.md` | gameplay/runtime | shared body/collision view, sequenced input commands, native prediction/reconciliation baseline | local and remote movement integration tests |
-| `029-structures-foundation.md` | worldgen parity | status-aware structure starts/references, first true structure, template/block-entity scaffolding | server-backed fixture diff for first structure slice |
-| `030-entities-and-passive-mobs.md` | gameplay/render | entity sections, snapshots/deltas, passive spawn baseline, first render path | generated entity fixture and visible entity capture |
-| `031-native-xr-and-parity-consolidation.md` | platform/perf | OpenXR presentation smoke shape, Android XR / Quest target review, perf counters, fly-through benchmark, parity gap report | native smoke plus tracked perf/parity report |
+| [`027-mclone-ui-foundation.md`](027-mclone-ui-foundation.md) | UI/render/platform | first-party `mclone-ui`, `wgpu` GUI overlay, original skin, and title/pause/options/progress foundations | headless UI screenshot, native window smoke, and WASM check |
+| `028-live-light-and-liquid-updates.md` | simulation/runtime | light deltas, block/liquid dirty updates, pending liquid ticks, water flow baseline | update/delta tests and runtime smoke |
+| `029-player-movement-and-collision.md` | gameplay/runtime | shared body/collision view, sequenced input commands, native prediction/reconciliation baseline | local and remote movement integration tests |
+| `030-structures-foundation.md` | worldgen parity | status-aware structure starts/references, first true structure, template/block-entity scaffolding | server-backed fixture diff for first structure slice |
+| `031-entities-and-passive-mobs.md` | gameplay/render | entity sections, snapshots/deltas, passive spawn baseline, first render path | generated entity fixture and visible entity capture |
+| `032-native-xr-and-parity-consolidation.md` | platform/perf | OpenXR presentation smoke shape, Android XR / Quest target review, perf counters, fly-through benchmark, parity gap report | native smoke plus tracked perf/parity report |
 
 ## Immediate Focus
 

@@ -7,7 +7,7 @@ Render a small generated chunk area and add enough native camera control to insp
 ## Dependencies
 
 - [`001-one-generated-chunk-render.md`](001-one-generated-chunk-render.md)
-- [`../../native-rewrite-roadmap.md`](../../native-rewrite-roadmap.md)
+- [`../native-rewrite-roadmap.md`](../native-rewrite-roadmap.md)
 
 Use `~/code/playbox` only as a reference for camera/input/render-loop patterns. Keep the renderer data path voxel-specific and Minecraft-coordinate-native.
 

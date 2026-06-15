@@ -9,10 +9,10 @@ Define the first real native chunk snapshot and protocol contract before wiring 
 Depends on:
 
 - [`003-native-ts-parity-roadmap.md`](003-native-ts-parity-roadmap.md)
-- [`../../runtime-data-model.md`](../../runtime-data-model.md)
-- [`../../protocol.md`](../../protocol.md)
-- [`../../loading-persistence.md`](../../loading-persistence.md)
-- [`../../worldgen-deterministic-order.md`](../../worldgen-deterministic-order.md)
+- [`../runtime-data-model.md`](../runtime-data-model.md)
+- [`../protocol.md`](../protocol.md)
+- [`../loading-persistence.md`](../loading-persistence.md)
+- [`../worldgen-deterministic-order.md`](../worldgen-deterministic-order.md)
 
 Reference TypeScript implementation:
 

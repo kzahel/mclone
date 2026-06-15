@@ -10,9 +10,9 @@ Depends on:
 
 - [`003-native-ts-parity-roadmap.md`](003-native-ts-parity-roadmap.md)
 - [`004-canonical-chunk-snapshot-protocol.md`](004-canonical-chunk-snapshot-protocol.md)
-- [`../../architecture.md`](../../architecture.md)
-- [`../../protocol.md`](../../protocol.md)
-- [`../../runtime-data-model.md`](../../runtime-data-model.md)
+- [`../architecture.md`](../architecture.md)
+- [`../protocol.md`](../protocol.md)
+- [`../runtime-data-model.md`](../runtime-data-model.md)
 
 Reference TypeScript implementation:
 

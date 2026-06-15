@@ -166,7 +166,7 @@ render via wgpu/web
 2. **Native minimal app**
 
    Add `winit` + `wgpu`, clear screen, camera/input, and one chunk. This becomes the main development loop.
-   The native tactical sequence starts at [`tactical/native/000-native-render-bringup.md`](tactical/native/000-native-render-bringup.md); the index is [`tactical/native/README.md`](tactical/native/README.md). The parent checklist for reaching the current TypeScript capability horizon is [`tactical/native/003-native-ts-parity-roadmap.md`](tactical/native/003-native-ts-parity-roadmap.md).
+   The native tactical sequence starts at [`tactical/000-native-render-bringup.md`](tactical/000-native-render-bringup.md); the index is [`tactical/README.md`](tactical/README.md). The parent checklist for reaching the current TypeScript capability horizon is [`tactical/003-native-ts-parity-roadmap.md`](tactical/003-native-ts-parity-roadmap.md).
 
 3. **Web smoke very early**
 
@@ -182,7 +182,7 @@ render via wgpu/web
 
 6. **Preserve future Android XR boundaries**
 
-   Before adding Android or OpenXR app crates, make renderer view/projection inputs and render targets explicit enough that desktop, headless, web, flat Android, and stereo XR hosts can drive the same renderer without desktop `winit` assumptions leaking into shared crates. The near-term tactical for this is [`tactical/native/022-platform-target-contract-and-render-boundary.md`](tactical/native/022-platform-target-contract-and-render-boundary.md).
+   Before adding Android or OpenXR app crates, make renderer view/projection inputs and render targets explicit enough that desktop, headless, web, flat Android, and stereo XR hosts can drive the same renderer without desktop `winit` assumptions leaking into shared crates. The near-term tactical for this is [`tactical/022-platform-target-contract-and-render-boundary.md`](tactical/022-platform-target-contract-and-render-boundary.md).
 
 ## Rule Of Thumb
 

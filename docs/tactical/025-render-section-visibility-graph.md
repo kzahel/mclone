@@ -174,7 +174,7 @@ Record these in:
 - `native:movement:smoke`
 - `native:timedemo:smoke`
 - window title/log diagnostics where useful
-- [`../../performance-records.md`](../../performance-records.md) when taking a baseline
+- [`../performance-records.md`](../performance-records.md) when taking a baseline
 
 Implemented first-pass counters:
 

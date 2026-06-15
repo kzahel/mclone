@@ -8,7 +8,7 @@ Build the first native desktop render path and headless GPU validation path for 
 
 Primary native roadmap:
 
-- [`../../native-rewrite-roadmap.md`](../../native-rewrite-roadmap.md)
+- [`../native-rewrite-roadmap.md`](../native-rewrite-roadmap.md)
 
 Reference Rust engine:
 

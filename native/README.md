@@ -4,7 +4,7 @@ This workspace is the clean Rust track for the native-first engine. Native deskt
 
 The durable direction is documented in [`../docs/native-rewrite-roadmap.md`](../docs/native-rewrite-roadmap.md). The short version: native desktop is the primary development target now, web/WASM is an early compatibility gate, Android XR / Quest is a later native target, and the TypeScript implementation is now legacy/reference rather than the main engine direction.
 
-Native Rust tactical docs live in [`../docs/tactical/native/`](../docs/tactical/native/README.md) and use zero-padded numeric filenames such as `000-native-render-bringup.md`. Keep new native workstream tacticals there instead of adding them beside the legacy TypeScript/browser tacticals.
+Native Rust tactical docs live in [`../docs/tactical/`](../docs/tactical/README.md) and use zero-padded numeric filenames such as `000-native-render-bringup.md`. Legacy TypeScript/browser tacticals are archived under `../docs/tactical/legacy/`.
 
 Use `~/code/playbox` as the reference Rust engine for native app/render/XR patterns. In particular, its `winit`/`wgpu` setup, frame pacing, headless capture, render-target, camera, diagnostics, Android NativeActivity, and OpenXR code are useful references. Do not depend on Playbox directly, and do not copy its PhysX/VaM-specific runtime shape.
 

@@ -8,7 +8,7 @@ Introduce native lighting in the Java-shaped direction without trying to land th
 
 The first implementation should make light a real chunk fact owned by the runtime, carried through snapshots/protocol, consumed by meshing, and visible in native/headless rendering. It should not become a renderer-only brightness hack.
 
-Keep [`../../lighting.md`](../../lighting.md) as the broad architecture reference. This tactical is the first concrete native slice.
+Keep [`../lighting.md`](../lighting.md) as the broad architecture reference. This tactical is the first concrete native slice.
 
 ## Reference Source
 
@@ -172,7 +172,7 @@ Add counters before performance tuning:
 - vertex layout byte size before/after
 - headless capture path and file name in `/tmp`
 
-Record a smoke baseline in [`../../performance-records.md`](../../performance-records.md) once the first non-fullbright capture lands.
+Record a smoke baseline in [`../performance-records.md`](../performance-records.md) once the first non-fullbright capture lands.
 
 ## Follow-Up Slices
 
@@ -203,7 +203,7 @@ Wire `ChunkStatus::Light` as a real status after the solver exists:
 
 ### Live Updates
 
-Defer to `027-live-light-and-liquid-updates.md`:
+Defer to `028-live-light-and-liquid-updates.md`:
 
 - block mutations call `checkBlock`
 - light deltas publish to clients
