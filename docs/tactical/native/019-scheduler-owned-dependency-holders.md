@@ -25,6 +25,7 @@ Key Java facts for this slice:
 - `DistanceManager.ChunkTicketTracker` sets `ChunkHolder.ticketLevel` from propagated ticket levels, not just direct tickets.
 - `ChunkHolder` uses ticket level to decide accessible status and full/ticking/entity-ticking state.
 - `ChunkMap.updateChunkScheduling(...)` owns holder creation/removal from ticket levels; client tracking is a separate concern handled by view-distance/player tracking.
+- `ServerTickList.tick()` removes a due block/fluid tick from the pending set only when `ServerLevel.isPositionTickingWithEntitiesLoaded(pos)` is true. Due ticks outside entity-ticking chunks remain pending with zero/overdue delay until the position becomes tick-active again.
 
 ## Landed In First Slice
 
@@ -49,6 +50,7 @@ Key Java facts for this slice:
 - `ChunkScheduler::tick_report()` and `IntegratedServer::tick_report()` now expose deterministic z-major block-ticking and entity-ticking chunk lists, bounded pending-unload drain counts, and protocol updates/events. Native window mode uses the report and shows the tick id plus last unload-drain count in the title.
 - `IntegratedServer::simulation_tick_report()` now consumes the chunk tick report through no-op block/entity phases, records phase counts and native timing, and preserves existing `tick()` protocol-update behavior. Native window diagnostics show simulation tick id, phase counts, and phase timing.
 - After scheduled fluid ticks landed, chunks in the block-ticking or entity-ticking lanes are promoted to full generated live chunks even when they are not client-visible. This keeps client publication narrow while giving runtime systems mutable block access across chunk boundaries.
+- Scheduled fluid ticks now report due-but-deferred counts separately from total pending ticks. Tests cover both loaded non-entity-ticking neighbors and fully unloaded holders: an overdue water tick stays pending while its chunk is removed from scheduler holders, then executes after the chunk reloads and becomes entity-ticking again.
 
 ## Current Limits
 
@@ -56,6 +58,7 @@ Key Java facts for this slice:
 - The clean dependency buffer is still stored as a worldgen `MutableChunkBlockBuffer`, not a long-lived protochunk type with explicit status transitions.
 - Moving scheduler-owned buffers through the worker currently clones chunk buffers. Current profiling shows this is not the first bottleneck for radius-1 movement, but performance work should still replace it with shared/owned transfer accounting once the shape stabilizes.
 - Block-ticking chunks now have live generated block buffers for scheduled fluid mutation. General block ticks, random ticks, entity ticking, and spawn systems are still not implemented.
+- Live fluid spread does not synthesize missing holders across an unloaded boundary. It may mutate non-visible live generated holders, but fully absent chunks must arrive through the normal ticket/load path before their queued ticks can run.
 - The smoke records split timing, but no fixed perf budget is enforced yet. Use release mode for performance comparisons.
 
 ## Movement Smoke

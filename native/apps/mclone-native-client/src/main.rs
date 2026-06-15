@@ -444,6 +444,7 @@ struct MovementPerfStepReport {
     simulation_fluid_tick_ms: f64,
     simulation_entity_tick_ms: f64,
     fluid_ticks_executed: usize,
+    deferred_fluid_ticks: usize,
     fluid_mutated_blocks: usize,
     scheduled_fluid_ticks: usize,
     loaded_sections: usize,
@@ -575,6 +576,10 @@ impl MovementPerfReport {
                 step.fluid_ticks_executed
             );
             println!(
+                "      \"deferred_fluid_ticks\": {},",
+                step.deferred_fluid_ticks
+            );
+            println!(
                 "      \"fluid_mutated_blocks\": {},",
                 step.fluid_mutated_blocks
             );
@@ -643,6 +648,7 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
             simulation_fluid_tick_ms: stats.last_simulation_fluid_tick_ms,
             simulation_entity_tick_ms: stats.last_simulation_entity_tick_ms,
             fluid_ticks_executed: stats.last_simulation_fluid_ticks_executed,
+            deferred_fluid_ticks: stats.last_simulation_deferred_fluid_ticks,
             fluid_mutated_blocks: stats.last_simulation_fluid_mutated_blocks,
             scheduled_fluid_ticks: stats.scheduled_fluid_ticks,
             loaded_sections: visibility.loaded_section_count,
@@ -871,6 +877,7 @@ struct WindowSceneRuntime {
     last_simulation_fluid_tick_ms: f64,
     last_simulation_entity_tick_ms: f64,
     last_simulation_fluid_ticks_executed: usize,
+    last_simulation_deferred_fluid_ticks: usize,
     last_simulation_fluid_mutated_blocks: usize,
     scheduled_fluid_ticks: usize,
 }
@@ -895,6 +902,7 @@ struct WindowRuntimeStats {
     last_simulation_fluid_tick_ms: f64,
     last_simulation_entity_tick_ms: f64,
     last_simulation_fluid_ticks_executed: usize,
+    last_simulation_deferred_fluid_ticks: usize,
     last_simulation_fluid_mutated_blocks: usize,
     scheduled_fluid_ticks: usize,
 }
@@ -929,6 +937,7 @@ impl WindowSceneRuntime {
             last_simulation_fluid_tick_ms: 0.0,
             last_simulation_entity_tick_ms: 0.0,
             last_simulation_fluid_ticks_executed: 0,
+            last_simulation_deferred_fluid_ticks: 0,
             last_simulation_fluid_mutated_blocks: 0,
             scheduled_fluid_ticks: 0,
         };
@@ -977,6 +986,7 @@ impl WindowSceneRuntime {
             self.last_simulation_fluid_tick_ms = micros_to_ms(report.timing.fluid_tick_us);
             self.last_simulation_entity_tick_ms = micros_to_ms(report.timing.entity_tick_us);
             self.last_simulation_fluid_ticks_executed = report.fluid_ticks_executed;
+            self.last_simulation_deferred_fluid_ticks = report.deferred_fluid_ticks;
             self.last_simulation_fluid_mutated_blocks = report.fluid_mutated_blocks;
             self.scheduled_fluid_ticks = report.scheduled_fluid_ticks;
             changed |= self.apply_server_updates(report.updates);
@@ -1046,6 +1056,7 @@ impl WindowSceneRuntime {
             last_simulation_fluid_tick_ms: self.last_simulation_fluid_tick_ms,
             last_simulation_entity_tick_ms: self.last_simulation_entity_tick_ms,
             last_simulation_fluid_ticks_executed: self.last_simulation_fluid_ticks_executed,
+            last_simulation_deferred_fluid_ticks: self.last_simulation_deferred_fluid_ticks,
             last_simulation_fluid_mutated_blocks: self.last_simulation_fluid_mutated_blocks,
             scheduled_fluid_ticks: self.scheduled_fluid_ticks,
         }
@@ -1501,7 +1512,7 @@ impl ChunkApp {
         let runtime = self.runtime.stats();
         let pos = self.spectator.position;
         window.set_title(&format!(
-            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} fluid {}/{}/{} | sim {:.3}/{:.3}/{:.3}/{:.3}ms | sections {}/{} idx {}/{} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
+            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | t {}/{} | loaded {} visible {} pending {} active {} unload {} drained {} tick {}:{} entity {}:{} fluid {}/{}/{}/{} | sim {:.3}/{:.3}/{:.3}/{:.3}ms | sections {}/{} idx {}/{} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
             pos.x,
             pos.y,
             pos.z,
@@ -1520,6 +1531,7 @@ impl ChunkApp {
             runtime.entity_ticking_chunks,
             runtime.last_simulation_entity_tick_chunks,
             runtime.last_simulation_fluid_ticks_executed,
+            runtime.last_simulation_deferred_fluid_ticks,
             runtime.last_simulation_fluid_mutated_blocks,
             runtime.scheduled_fluid_ticks,
             runtime.last_simulation_scheduler_tick_ms,

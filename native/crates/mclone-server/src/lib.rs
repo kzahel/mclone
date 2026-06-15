@@ -394,6 +394,7 @@ pub struct ServerSimulationTickTiming {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct FluidTickPhaseReport {
     pub scheduled_ticks: usize,
+    pub deferred_due_ticks: usize,
     pub executed_ticks: usize,
     pub mutated_blocks: usize,
 }
@@ -474,14 +475,22 @@ impl FluidTickList {
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
-        let due_ticks = self
+        let mut deferred_due_ticks = 0;
+        let mut due_ticks = Vec::new();
+        for entry in self
             .scheduled_ticks
             .iter()
             .take_while(|entry| entry.trigger_tick <= game_time)
-            .filter(|entry| ticking_chunks.contains(&entry.key.pos.chunk_pos()))
-            .take(MAX_SCHEDULED_FLUID_TICKS_PER_TICK)
-            .copied()
-            .collect::<Vec<_>>();
+        {
+            if ticking_chunks.contains(&entry.key.pos.chunk_pos()) {
+                due_ticks.push(*entry);
+                if due_ticks.len() == MAX_SCHEDULED_FLUID_TICKS_PER_TICK {
+                    break;
+                }
+            } else {
+                deferred_due_ticks += 1;
+            }
+        }
 
         let mut events = Vec::new();
         let mut executed_ticks = 0;
@@ -505,6 +514,7 @@ impl FluidTickList {
         (
             FluidTickPhaseReport {
                 scheduled_ticks: self.size(),
+                deferred_due_ticks,
                 executed_ticks,
                 mutated_blocks,
             },
@@ -2437,6 +2447,7 @@ pub struct ServerSimulationTickReport {
     pub chunk_tick: u64,
     pub block_tick_chunks: usize,
     pub fluid_ticks_executed: usize,
+    pub deferred_fluid_ticks: usize,
     pub fluid_mutated_blocks: usize,
     pub scheduled_fluid_ticks: usize,
     pub entity_tick_chunks: usize,
@@ -2566,6 +2577,7 @@ impl IntegratedServer {
             chunk_tick: tick_report.ticket_tick,
             block_tick_chunks,
             fluid_ticks_executed: fluid_report.executed_ticks,
+            deferred_fluid_ticks: fluid_report.deferred_due_ticks,
             fluid_mutated_blocks: fluid_report.mutated_blocks,
             scheduled_fluid_ticks: fluid_report.scheduled_ticks,
             entity_tick_chunks,
@@ -4235,6 +4247,87 @@ mod tests {
             "the manually scheduled tick in the old non-entity-ticking chunk should remain pending"
         );
         assert_ne!(server.scheduler().block_at_world(below), Some(WATER));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn scheduled_fluid_tick_survives_fully_unloaded_chunk_until_reload() {
+        let root =
+            unique_temp_dir("scheduled_fluid_tick_survives_fully_unloaded_chunk_until_reload");
+        let original_interest = ChunkInterest {
+            center: ChunkPos::new(0, 0),
+            radius_chunks: 0,
+        };
+        let source = WorldBlockPos::new(8, 120, 8);
+        let below = source.below();
+        let mut server = IntegratedServer::with_chunk_store(
+            12_345,
+            Box::new(FilesystemChunkSnapshotStore::new(&root)),
+        );
+        handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkInterest(original_interest.clone()),
+        );
+        server.liquid_ticks = FluidTickList::new();
+        server.scheduler_mut().set_block_at_world(source, WATER);
+        server.scheduler_mut().set_block_at_world(below, AIR);
+
+        handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkInterest(ChunkInterest {
+                center: ChunkPos::new(100, 100),
+                radius_chunks: 0,
+            }),
+        );
+        server
+            .scheduler_mut()
+            .process_pending_unloads(usize::MAX)
+            .unwrap();
+        assert!(
+            server.scheduler().holder(ChunkPos::new(0, 0)).is_none(),
+            "the original chunk should be fully removed from scheduler holders"
+        );
+
+        server.liquid_ticks = FluidTickList::new();
+        server.schedule_fluid_tick(source, FluidKind::Water, 0);
+        let deferred = server.simulation_tick_report();
+
+        assert_eq!(deferred.fluid_ticks_executed, 0);
+        assert_eq!(deferred.deferred_fluid_ticks, 1);
+        assert_eq!(deferred.scheduled_fluid_ticks, 1);
+        assert!(
+            server
+                .liquid_ticks
+                .has_scheduled_tick(source, FluidKind::Water),
+            "a due tick outside any entity-ticking holder should stay pending"
+        );
+
+        let updates = handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkInterest(original_interest),
+        );
+        assert!(
+            snapshot_update_for(&updates, ChunkPos::new(0, 0)).is_some(),
+            "the original chunk should reload from the snapshot store"
+        );
+        let executed = server.simulation_tick_report();
+
+        assert_eq!(executed.deferred_fluid_ticks, 0);
+        assert_eq!(executed.fluid_ticks_executed, 1);
+        assert_eq!(
+            server.scheduler().block_at_world(below),
+            Some(WATER_LEVEL_8),
+            "the overdue fluid tick should run after the chunk becomes entity-ticking again"
+        );
+        let pending_after_execution = server
+            .liquid_ticks
+            .scheduled_tick_entries(server.simulation_tick());
+        assert!(
+            !pending_after_execution.contains(&(source, FluidKind::Water, 0)),
+            "the overdue zero-delay source tick should be consumed: {pending_after_execution:?}"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
