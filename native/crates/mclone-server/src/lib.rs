@@ -16,7 +16,8 @@ use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
 use mclone_worldgen::feature::{FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
 use mclone_worldgen::levelgen::{
-    GeneratedChunk, OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport,
+    GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureDependencyCache,
+    OverworldFeatureDependencyCacheReport,
 };
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
@@ -160,9 +161,28 @@ pub struct ChunkStatusJob {
     pub target_chunks: Vec<ChunkPos>,
     pub feature_centers: Vec<ChunkPos>,
     pub dependency_chunks: Vec<ChunkPos>,
+    pub seeded_dependency_chunks: usize,
     pub dependency_cache_hits: usize,
     pub dependency_cache_misses: usize,
     pub retained_dependency_chunks: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ChunkSchedulerMetrics {
+    pub direct_ticket_chunks: usize,
+    pub active_ticket_chunks: usize,
+    pub holder_chunks: usize,
+    pub client_visible_chunks: usize,
+    pub loaded_snapshot_chunks: usize,
+    pub dependency_holder_chunks: usize,
+    pub ready_dependency_chunks: usize,
+    pub dirty_chunks: usize,
+    pub pending_jobs: usize,
+    pub completed_jobs: usize,
+    pub total_seeded_dependency_chunks: usize,
+    pub total_dependency_cache_hits: usize,
+    pub total_dependency_cache_misses: usize,
+    pub total_retained_dependency_chunks: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -193,6 +213,8 @@ pub struct ChunkHolder {
     target_status: Option<ChunkStatus>,
     status_slots: BTreeMap<ChunkStatus, ChunkStatusSlot>,
     published_snapshot: Option<ChunkSnapshot>,
+    dependency_buffer: Option<MutableChunkBlockBuffer>,
+    client_visible: bool,
     residency: ChunkResidency,
     dirty: bool,
 }
@@ -205,6 +227,8 @@ impl ChunkHolder {
             target_status: None,
             status_slots: BTreeMap::new(),
             published_snapshot: None,
+            dependency_buffer: None,
+            client_visible: false,
             residency: ChunkResidency::NotResident,
             dirty: false,
         }
@@ -247,6 +271,14 @@ impl ChunkHolder {
 
     pub fn snapshot(&self) -> Option<&ChunkSnapshot> {
         self.published_snapshot.as_ref()
+    }
+
+    pub fn has_dependency_buffer(&self) -> bool {
+        self.dependency_buffer.is_some()
+    }
+
+    pub fn is_client_visible(&self) -> bool {
+        self.client_visible
     }
 
     fn mark_scheduled(&mut self, status: ChunkStatus) {
@@ -305,6 +337,27 @@ impl ChunkHolder {
 
     fn set_ticket_level(&mut self, ticket_level: i32) {
         self.ticket_level = ticket_level;
+    }
+
+    fn set_target_status(&mut self, target_status: ChunkStatus) {
+        if self
+            .target_status
+            .is_none_or(|current| current < target_status)
+        {
+            self.target_status = Some(target_status);
+        }
+    }
+
+    fn set_dependency_buffer(&mut self, buffer: MutableChunkBlockBuffer) {
+        self.dependency_buffer = Some(buffer);
+    }
+
+    fn dependency_buffer(&self) -> Option<&MutableChunkBlockBuffer> {
+        self.dependency_buffer.as_ref()
+    }
+
+    fn set_client_visible(&mut self, client_visible: bool) {
+        self.client_visible = client_visible;
     }
 }
 
@@ -421,16 +474,40 @@ impl ChunkDistanceManager {
         }
     }
 
-    fn ticketed_chunks(&self) -> Vec<ChunkPos> {
-        self.tickets
-            .iter()
-            .filter_map(|(pos, tickets)| {
-                tickets
-                    .first()
-                    .is_some_and(|ticket| ticket.level <= MAX_CHUNK_DISTANCE)
-                    .then_some(*pos)
-            })
-            .collect()
+    fn active_levels(&self) -> BTreeMap<ChunkPos, i32> {
+        let mut levels: BTreeMap<ChunkPos, i32> = BTreeMap::new();
+
+        for (source_pos, tickets) in &self.tickets {
+            let Some(ticket) = tickets.first() else {
+                continue;
+            };
+            if ticket.level > MAX_CHUNK_DISTANCE {
+                continue;
+            }
+
+            let radius = MAX_CHUNK_DISTANCE - ticket.level;
+            for dz in -radius..=radius {
+                for dx in -radius..=radius {
+                    let distance = dx.abs().max(dz.abs());
+                    let level = ticket.level + distance;
+                    if level > MAX_CHUNK_DISTANCE {
+                        continue;
+                    }
+
+                    let pos = ChunkPos::new(source_pos.x + dx, source_pos.z + dz);
+                    levels
+                        .entry(pos)
+                        .and_modify(|current| *current = (*current).min(level))
+                        .or_insert(level);
+                }
+            }
+        }
+
+        levels
+    }
+
+    fn player_interest_positions(&self) -> BTreeSet<ChunkPos> {
+        self.player_ticket_positions.clone()
     }
 
     fn ticketed_chunk_count(&self) -> usize {
@@ -453,6 +530,13 @@ impl ChunkDistanceManager {
             .get(&pos)
             .and_then(|tickets| tickets.first())
             .map_or(UNLOADED_CHUNK_LEVEL, |ticket| ticket.level)
+    }
+
+    fn active_level_at(&self, pos: ChunkPos) -> i32 {
+        self.active_levels()
+            .get(&pos)
+            .copied()
+            .unwrap_or(UNLOADED_CHUNK_LEVEL)
     }
 }
 
@@ -579,6 +663,32 @@ impl ChunkScheduler {
             .count()
     }
 
+    pub fn client_visible_chunk_count(&self) -> usize {
+        self.holders
+            .values()
+            .filter(|holder| holder.client_visible)
+            .count()
+    }
+
+    pub fn dependency_holder_count(&self) -> usize {
+        self.holders
+            .values()
+            .filter(|holder| {
+                holder
+                    .target_status
+                    .is_some_and(|status| status <= ChunkStatus::Surface)
+                    && holder.published_snapshot.is_none()
+            })
+            .count()
+    }
+
+    pub fn ready_dependency_chunk_count(&self) -> usize {
+        self.holders
+            .values()
+            .filter(|holder| holder.dependency_buffer.is_some())
+            .count()
+    }
+
     pub fn dirty_chunk_count(&self) -> usize {
         self.dirty_chunks.len()
     }
@@ -591,12 +701,20 @@ impl ChunkScheduler {
         self.distance_manager.ticketed_chunk_count()
     }
 
+    pub fn active_ticketed_chunk_count(&self) -> usize {
+        self.distance_manager.active_levels().len()
+    }
+
     pub fn ticket_count_at(&self, pos: ChunkPos) -> usize {
         self.distance_manager.ticket_count_at(pos)
     }
 
     pub fn ticket_level_at(&self, pos: ChunkPos) -> i32 {
         self.distance_manager.ticket_level_at(pos)
+    }
+
+    pub fn active_ticket_level_at(&self, pos: ChunkPos) -> i32 {
+        self.distance_manager.active_level_at(pos)
     }
 
     pub fn job(&self, id: ChunkJobId) -> Option<&ChunkStatusJob> {
@@ -622,6 +740,45 @@ impl ChunkScheduler {
         self.worldgen_mailbox.kind()
     }
 
+    pub fn metrics(&self) -> ChunkSchedulerMetrics {
+        ChunkSchedulerMetrics {
+            direct_ticket_chunks: self.ticketed_chunk_count(),
+            active_ticket_chunks: self.active_ticketed_chunk_count(),
+            holder_chunks: self.holder_count(),
+            client_visible_chunks: self.client_visible_chunk_count(),
+            loaded_snapshot_chunks: self.loaded_chunk_count(),
+            dependency_holder_chunks: self.dependency_holder_count(),
+            ready_dependency_chunks: self.ready_dependency_chunk_count(),
+            dirty_chunks: self.dirty_chunk_count(),
+            pending_jobs: self.pending_job_count(),
+            completed_jobs: self
+                .jobs
+                .values()
+                .filter(|job| job.state == ChunkJobState::Complete)
+                .count(),
+            total_seeded_dependency_chunks: self
+                .jobs
+                .values()
+                .map(|job| job.seeded_dependency_chunks)
+                .sum(),
+            total_dependency_cache_hits: self
+                .jobs
+                .values()
+                .map(|job| job.dependency_cache_hits)
+                .sum(),
+            total_dependency_cache_misses: self
+                .jobs
+                .values()
+                .map(|job| job.dependency_cache_misses)
+                .sum(),
+            total_retained_dependency_chunks: self
+                .jobs
+                .values()
+                .map(|job| job.retained_dependency_chunks)
+                .sum(),
+        }
+    }
+
     pub fn save_dirty_chunks(&mut self) -> ChunkStoreResult<usize> {
         let dirty_chunks = self.dirty_chunks.iter().copied().collect::<Vec<_>>();
         let mut saved = 0;
@@ -643,8 +800,9 @@ impl ChunkScheduler {
     }
 
     fn reconcile_ticketed_holders(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        let ticketed_chunks = self.distance_manager.ticketed_chunks();
-        let desired_set = ticketed_chunks.iter().copied().collect::<BTreeSet<_>>();
+        let active_levels = self.distance_manager.active_levels();
+        let desired_set = active_levels.keys().copied().collect::<BTreeSet<_>>();
+        let client_visible_set = self.distance_manager.player_interest_positions();
         let mut events = Vec::new();
 
         for pos in self
@@ -656,38 +814,69 @@ impl ChunkScheduler {
         {
             let mut holder = self.holders.remove(&pos).expect("holder key disappeared");
             holder.set_ticket_level(UNLOADED_CHUNK_LEVEL);
+            if holder.client_visible {
+                events.push(ChunkSchedulerEvent::Unloaded { pos });
+                holder.set_client_visible(false);
+            }
             if holder.dirty {
                 self.save_holder(&holder)?;
                 self.dirty_chunks.remove(&pos);
             }
-            if holder.published_snapshot.is_some() {
-                events.push(ChunkSchedulerEvent::Unloaded { pos });
-            }
         }
 
         let mut feature_targets = BTreeSet::new();
-        for pos in ticketed_chunks {
-            let ticket_level = self.distance_manager.ticket_level_at(pos);
-            let holder = self
-                .holders
-                .entry(pos)
-                .or_insert_with(|| ChunkHolder::new(pos));
-            holder.set_ticket_level(ticket_level);
-            if ticket_level_status_target(ticket_level)
-                .is_some_and(|status| status >= ChunkStatus::Features)
+        for (pos, ticket_level) in active_levels {
+            let should_be_client_visible = client_visible_set.contains(&pos);
+            let has_direct_feature_ticket =
+                self.distance_manager.ticket_level_at(pos) <= CHUNK_LEVEL_FULL + 1;
+            let target_status = if should_be_client_visible || has_direct_feature_ticket {
+                ChunkStatus::Features
+            } else {
+                ticket_level_dependency_status_target(ticket_level)
+            };
+            let mut snapshot_to_publish = None;
             {
+                let holder = self
+                    .holders
+                    .entry(pos)
+                    .or_insert_with(|| ChunkHolder::new(pos));
+                holder.set_ticket_level(ticket_level);
+                holder.set_target_status(target_status);
+
+                if !should_be_client_visible && holder.client_visible {
+                    holder.set_client_visible(false);
+                    events.push(ChunkSchedulerEvent::Unloaded { pos });
+                } else if should_be_client_visible
+                    && !holder.client_visible
+                    && holder.published_snapshot.is_some()
+                {
+                    holder.set_client_visible(true);
+                    snapshot_to_publish = holder.published_snapshot.clone();
+                }
+            }
+
+            if let Some(snapshot) = snapshot_to_publish {
+                events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+            }
+
+            if target_status >= ChunkStatus::Features {
                 feature_targets.insert(pos);
+            } else {
+                self.ensure_dependency_status_scheduled(pos, target_status);
             }
         }
 
-        events
-            .extend(self.enqueue_feature_chunks(sorted_chunk_positions_z_major(feature_targets))?);
+        events.extend(self.enqueue_feature_chunks(
+            sorted_chunk_positions_z_major(feature_targets),
+            &client_visible_set,
+        )?);
         Ok(events)
     }
 
     fn enqueue_feature_chunks(
         &mut self,
         desired_chunks: Vec<ChunkPos>,
+        client_visible_set: &BTreeSet<ChunkPos>,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let mut events = Vec::new();
         let mut to_generate = Vec::new();
@@ -735,7 +924,13 @@ impl ChunkScheduler {
                             status,
                             step: ChunkStatusStep::Ready,
                         });
-                        events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+                        if client_visible_set.contains(&pos) {
+                            self.holders
+                                .get_mut(&pos)
+                                .expect("holder must exist before marking visible")
+                                .set_client_visible(true);
+                            events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+                        }
                     } else {
                         to_generate.push(pos);
                     }
@@ -755,7 +950,7 @@ impl ChunkScheduler {
         }
 
         if !to_generate.is_empty() {
-            let job_id = self.create_feature_job(&to_generate);
+            let (job_id, seeded_dependencies) = self.create_feature_job(&to_generate);
             for pos in &to_generate {
                 self.holders
                     .get_mut(pos)
@@ -764,8 +959,12 @@ impl ChunkScheduler {
             }
 
             self.mark_job_state(job_id, ChunkJobState::Running);
-            self.worldgen_mailbox
-                .enqueue_features(job_id, self.seed, &to_generate);
+            self.worldgen_mailbox.enqueue_features(
+                job_id,
+                self.seed,
+                &to_generate,
+                seeded_dependencies,
+            );
         }
 
         Ok(events)
@@ -792,6 +991,9 @@ impl ChunkScheduler {
 
         let mut events = Vec::new();
         let mut generated = completed.generated_chunks;
+        for dependency in completed.retained_dependencies.into_values() {
+            self.mark_dependency_ready(dependency);
+        }
 
         for pos in job.target_chunks {
             let should_publish = self
@@ -821,17 +1023,34 @@ impl ChunkScheduler {
                 status: ChunkStatus::Features,
                 step: ChunkStatusStep::Ready,
             });
-            events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+            if self
+                .distance_manager
+                .player_interest_positions()
+                .contains(&pos)
+            {
+                self.holders
+                    .get_mut(&pos)
+                    .expect("holder must exist before marking visible")
+                    .set_client_visible(true);
+                events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+            }
         }
 
         self.mark_job_complete(completed.job_id, completed.cache_report);
         Ok(events)
     }
 
-    fn create_feature_job(&mut self, targets: &[ChunkPos]) -> ChunkJobId {
+    fn create_feature_job(
+        &mut self,
+        targets: &[ChunkPos],
+    ) -> (ChunkJobId, Vec<MutableChunkBlockBuffer>) {
         let id = ChunkJobId(self.next_job_id);
         self.next_job_id += 1;
         let (target_chunks, feature_centers, dependency_chunks) = feature_job_positions(targets);
+        let seeded_dependencies = self.seeded_dependency_buffers(&dependency_chunks);
+        for pos in &dependency_chunks {
+            self.ensure_dependency_status_scheduled(*pos, ChunkStatus::Surface);
+        }
         self.jobs.insert(
             id,
             ChunkStatusJob {
@@ -841,12 +1060,13 @@ impl ChunkScheduler {
                 target_chunks,
                 feature_centers,
                 dependency_chunks,
+                seeded_dependency_chunks: seeded_dependencies.len(),
                 dependency_cache_hits: 0,
                 dependency_cache_misses: 0,
                 retained_dependency_chunks: 0,
             },
         );
-        id
+        (id, seeded_dependencies)
     }
 
     fn mark_job_state(&mut self, id: ChunkJobId, state: ChunkJobState) {
@@ -907,6 +1127,48 @@ impl ChunkScheduler {
         }
     }
 
+    fn ensure_dependency_status_scheduled(&mut self, pos: ChunkPos, target_status: ChunkStatus) {
+        let holder = self
+            .holders
+            .entry(pos)
+            .or_insert_with(|| ChunkHolder::new(pos));
+        holder.set_target_status(target_status);
+
+        for status in status_path_to(target_status) {
+            if holder.status_slot(status).is_none() {
+                holder.mark_scheduled(status);
+            }
+        }
+    }
+
+    fn mark_dependency_ready(&mut self, buffer: MutableChunkBlockBuffer) {
+        let pos = ChunkPos::new(buffer.chunk_x, buffer.chunk_z);
+        let holder = self
+            .holders
+            .entry(pos)
+            .or_insert_with(|| ChunkHolder::new(pos));
+        holder.set_target_status(ChunkStatus::Surface);
+        holder.set_dependency_buffer(buffer);
+        for status in status_path_to(ChunkStatus::Surface) {
+            holder.mark_ready(status, None);
+        }
+    }
+
+    fn seeded_dependency_buffers(
+        &self,
+        dependency_chunks: &[ChunkPos],
+    ) -> Vec<MutableChunkBlockBuffer> {
+        dependency_chunks
+            .iter()
+            .filter_map(|pos| {
+                self.holders
+                    .get(pos)
+                    .and_then(ChunkHolder::dependency_buffer)
+                    .cloned()
+            })
+            .collect()
+    }
+
     fn save_holder(&mut self, holder: &ChunkHolder) -> ChunkStoreResult<()> {
         if let Some(snapshot) = holder.snapshot() {
             self.store.save_chunk(snapshot)?;
@@ -919,6 +1181,7 @@ impl ChunkScheduler {
 struct WorldgenCompletedJob {
     job_id: ChunkJobId,
     generated_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+    retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
     cache_report: OverworldFeatureDependencyCacheReport,
 }
 
@@ -933,8 +1196,15 @@ impl WorldgenMailbox {
         }
     }
 
-    fn enqueue_features(&mut self, job_id: ChunkJobId, seed: i64, targets: &[ChunkPos]) {
-        self.backend.enqueue_features(job_id, seed, targets);
+    fn enqueue_features(
+        &mut self,
+        job_id: ChunkJobId,
+        seed: i64,
+        targets: &[ChunkPos],
+        dependencies: Vec<MutableChunkBlockBuffer>,
+    ) {
+        self.backend
+            .enqueue_features(job_id, seed, targets, dependencies);
     }
 
     fn drain_completed(&mut self) -> Vec<WorldgenCompletedJob> {
@@ -958,7 +1228,6 @@ impl fmt::Debug for WorldgenMailbox {
 #[derive(Debug)]
 struct WorldgenMailboxBackend {
     completed: VecDeque<WorldgenCompletedJob>,
-    dependency_cache: OverworldFeatureDependencyCache,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -966,7 +1235,6 @@ impl WorldgenMailboxBackend {
     fn new() -> Self {
         Self {
             completed: VecDeque::new(),
-            dependency_cache: OverworldFeatureDependencyCache::new(),
         }
     }
 
@@ -974,13 +1242,23 @@ impl WorldgenMailboxBackend {
         WorldgenMailboxKind::Inline
     }
 
-    fn enqueue_features(&mut self, job_id: ChunkJobId, seed: i64, targets: &[ChunkPos]) {
-        let result = self
-            .dependency_cache
-            .generate_features_chunks(seed, targets.iter().copied());
+    fn enqueue_features(
+        &mut self,
+        job_id: ChunkJobId,
+        seed: i64,
+        targets: &[ChunkPos],
+        dependencies: Vec<MutableChunkBlockBuffer>,
+    ) {
+        let mut dependency_cache = OverworldFeatureDependencyCache::new();
+        let result = dependency_cache.generate_features_chunks_with_dependencies(
+            seed,
+            targets.iter().copied(),
+            dependencies,
+        );
         self.completed.push_back(WorldgenCompletedJob {
             job_id,
             generated_chunks: result.chunks,
+            retained_dependencies: result.retained_dependencies,
             cache_report: result.cache_report,
         });
     }
@@ -1015,20 +1293,26 @@ impl WorldgenMailboxBackend {
         let worker = thread::Builder::new()
             .name("mclone-worldgen".to_owned())
             .spawn(move || {
-                let mut dependency_cache = OverworldFeatureDependencyCache::new();
                 while let Ok(request) = receiver.recv() {
                     match request {
                         WorldgenRequest::GenerateFeatures {
                             job_id,
                             seed,
                             targets,
+                            dependencies,
                         } => {
+                            let mut dependency_cache = OverworldFeatureDependencyCache::new();
                             let result = dependency_cache
-                                .generate_features_chunks(seed, targets.iter().copied());
+                                .generate_features_chunks_with_dependencies(
+                                    seed,
+                                    targets.iter().copied(),
+                                    dependencies,
+                                );
                             if completion_sender
                                 .send(WorldgenCompletedJob {
                                     job_id,
                                     generated_chunks: result.chunks,
+                                    retained_dependencies: result.retained_dependencies,
                                     cache_report: result.cache_report,
                                 })
                                 .is_err()
@@ -1053,12 +1337,19 @@ impl WorldgenMailboxBackend {
         WorldgenMailboxKind::NativeThread
     }
 
-    fn enqueue_features(&mut self, job_id: ChunkJobId, seed: i64, targets: &[ChunkPos]) {
+    fn enqueue_features(
+        &mut self,
+        job_id: ChunkJobId,
+        seed: i64,
+        targets: &[ChunkPos],
+        dependencies: Vec<MutableChunkBlockBuffer>,
+    ) {
         self.sender
             .send(WorldgenRequest::GenerateFeatures {
                 job_id,
                 seed,
                 targets: targets.to_vec(),
+                dependencies,
             })
             .expect("native worldgen worker stopped before receiving job");
     }
@@ -1088,6 +1379,7 @@ enum WorldgenRequest {
         job_id: ChunkJobId,
         seed: i64,
         targets: Vec<ChunkPos>,
+        dependencies: Vec<MutableChunkBlockBuffer>,
     },
     Shutdown,
 }
@@ -1267,14 +1559,8 @@ fn full_chunk_status_for_ticket_level(ticket_level: i32) -> FullChunkStatus {
     }
 }
 
-fn ticket_level_status_target(ticket_level: i32) -> Option<ChunkStatus> {
-    if ticket_level > MAX_CHUNK_DISTANCE {
-        None
-    } else if ticket_level <= CHUNK_LEVEL_FULL + 1 {
-        Some(ChunkStatus::Features)
-    } else {
-        Some(ChunkStatus::Terrain)
-    }
+fn ticket_level_dependency_status_target(_ticket_level: i32) -> ChunkStatus {
+    ChunkStatus::Surface
 }
 
 const ALL_STATUSES: [ChunkStatus; 5] = [
@@ -1388,7 +1674,29 @@ mod tests {
 
         assert_eq!(updates.len(), 9);
         assert_eq!(server.loaded_chunk_count(), 9);
-        assert_eq!(server.scheduler().holder_count(), 9);
+        assert_eq!(server.scheduler().client_visible_chunk_count(), 9);
+        assert_eq!(server.scheduler().holder_count(), 29 * 29);
+        assert_eq!(server.scheduler().active_ticketed_chunk_count(), 29 * 29);
+        assert_eq!(server.scheduler().ready_dependency_chunk_count(), 21 * 21);
+        assert_eq!(
+            server.scheduler().metrics(),
+            ChunkSchedulerMetrics {
+                direct_ticket_chunks: 9,
+                active_ticket_chunks: 29 * 29,
+                holder_chunks: 29 * 29,
+                client_visible_chunks: 9,
+                loaded_snapshot_chunks: 9,
+                dependency_holder_chunks: 29 * 29 - 9,
+                ready_dependency_chunks: 21 * 21,
+                dirty_chunks: 9,
+                pending_jobs: 0,
+                completed_jobs: 1,
+                total_seeded_dependency_chunks: 0,
+                total_dependency_cache_hits: 0,
+                total_dependency_cache_misses: 21 * 21,
+                total_retained_dependency_chunks: 21 * 21,
+            }
+        );
         assert_eq!(server.scheduler().job_count(), 1);
         let job = server.scheduler().jobs().next().unwrap();
         assert_eq!(job.id, ChunkJobId(1));
@@ -1397,6 +1705,7 @@ mod tests {
         assert_eq!(job.target_chunks.len(), 9);
         assert_eq!(job.feature_centers.len(), 5 * 5);
         assert_eq!(job.dependency_chunks.len(), 21 * 21);
+        assert_eq!(job.seeded_dependency_chunks, 0);
         assert_eq!(job.dependency_cache_hits, 0);
         assert_eq!(job.dependency_cache_misses, 21 * 21);
         assert_eq!(job.retained_dependency_chunks, 21 * 21);
@@ -1462,11 +1771,12 @@ mod tests {
         );
         assert_eq!(
             server.scheduler().job(ChunkJobId(1)).map(|job| (
+                job.seeded_dependency_chunks,
                 job.dependency_cache_hits,
                 job.dependency_cache_misses,
                 job.retained_dependency_chunks
             )),
-            Some((0, 19 * 19, 19 * 19))
+            Some((0, 0, 19 * 19, 19 * 19))
         );
 
         assert_eq!(
@@ -1482,11 +1792,12 @@ mod tests {
         );
         assert_eq!(
             server.scheduler().job(ChunkJobId(2)).map(|job| (
+                job.seeded_dependency_chunks,
                 job.dependency_cache_hits,
                 job.dependency_cache_misses,
                 job.retained_dependency_chunks
             )),
-            Some((18 * 19, 19, 19 * 19))
+            Some((18 * 19, 18 * 19, 19, 19 * 19))
         );
     }
 
@@ -1585,7 +1896,11 @@ mod tests {
             scheduler.ticket_level_at(ChunkPos::new(0, 0)),
             UNLOADED_CHUNK_LEVEL
         );
-        assert!(scheduler.holder(ChunkPos::new(0, 0)).is_none());
+        assert_eq!(
+            scheduler.active_ticket_level_at(ChunkPos::new(0, 0)),
+            PLAYER_TICKET_LEVEL + 1
+        );
+        assert!(scheduler.holder(ChunkPos::new(0, 0)).is_some());
         assert_eq!(
             scheduler
                 .holder(ChunkPos::new(1, 0))
@@ -1653,9 +1968,9 @@ mod tests {
             },
         );
 
-        assert!(events
-            .iter()
-            .all(|event| !matches!(event, ChunkSchedulerEvent::Unloaded { pos } if *pos == ChunkPos::new(0, 0))));
+        assert!(events.iter().any(
+            |event| matches!(event, ChunkSchedulerEvent::Unloaded { pos } if *pos == ChunkPos::new(0, 0))
+        ));
         assert!(scheduler.holder(ChunkPos::new(0, 0)).is_some());
         assert!(scheduler.holder(ChunkPos::new(1, 0)).is_some());
         assert_eq!(scheduler.loaded_chunk_count(), 2);
@@ -1664,14 +1979,13 @@ mod tests {
             .set_chunk_forced(ChunkPos::new(0, 0), false)
             .unwrap();
 
-        assert_eq!(
-            events,
-            vec![ChunkSchedulerEvent::Unloaded {
-                pos: ChunkPos::new(0, 0)
-            }]
-        );
+        assert!(events.is_empty());
         assert_eq!(scheduler.ticket_count_at(ChunkPos::new(0, 0)), 0);
-        assert!(scheduler.holder(ChunkPos::new(0, 0)).is_none());
+        assert_eq!(
+            scheduler.active_ticket_level_at(ChunkPos::new(0, 0)),
+            PLAYER_TICKET_LEVEL + 1
+        );
+        assert!(scheduler.holder(ChunkPos::new(0, 0)).is_some());
     }
 
     #[test]
@@ -1684,8 +1998,9 @@ mod tests {
         assert_eq!(events.len(), 5);
         assert_eq!(scheduler.ticketed_chunk_count(), 1);
         assert_eq!(scheduler.ticket_level_at(ChunkPos::new(0, 0)), 33);
-        assert_eq!(poll_scheduler_until_idle(&mut scheduler).len(), 2);
+        assert_eq!(poll_scheduler_until_idle(&mut scheduler).len(), 1);
         assert_eq!(scheduler.loaded_chunk_count(), 1);
+        assert_eq!(scheduler.client_visible_chunk_count(), 0);
 
         assert!(scheduler.tick().unwrap().is_empty());
         assert_eq!(scheduler.ticket_tick(), 1);
@@ -1695,12 +2010,7 @@ mod tests {
 
         assert_eq!(scheduler.ticket_tick(), 2);
         assert_eq!(scheduler.ticketed_chunk_count(), 0);
-        assert_eq!(
-            events,
-            vec![ChunkSchedulerEvent::Unloaded {
-                pos: ChunkPos::new(0, 0)
-            }]
-        );
+        assert!(events.is_empty());
         assert!(scheduler.holder(ChunkPos::new(0, 0)).is_none());
     }
 
@@ -1787,6 +2097,7 @@ mod tests {
                 dependency_chunks: (-9..=9)
                     .flat_map(|z| (-9..=9).map(move |x| ChunkPos::new(x, z)))
                     .collect(),
+                seeded_dependency_chunks: 0,
                 dependency_cache_hits: 0,
                 dependency_cache_misses: 19 * 19,
                 retained_dependency_chunks: 19 * 19,

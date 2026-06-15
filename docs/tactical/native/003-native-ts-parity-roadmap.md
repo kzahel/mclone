@@ -28,11 +28,12 @@ Landed:
 - biome-keyed native feature profiles with visible oak/birch/spruce tree families, ferns, dead bushes, and `COUNT_EXTRA` placement
 - full decorated chunk parity gauntlet for seed `12345`, chunk `0,0`, carvers wired into the native `Features` generation path, first region-backed 3x3 feature spillover pass, batched feature dependency reuse for interest updates, durable scheduler job records, native worker-mailbox execution, split enqueue/poll job publication, worker-local lower-status dependency reuse across adjacent feature jobs, Java-order decorated feature random interleaving, the default underground variety ore blobs through tuff/deepslate, active default ore block families with normal/deepslate targets, Java-shaped taiga spruce/pine tree configs for the target biome, world-backed tree heightmap/water-depth decorators, nested configured-feature decorators for vanilla pine, lower/upper large-fern block support for future double-plant features, Java-shaped taiga `FLOWER_DEFAULT` / `PATCH_GRASS_TAIGA_2`, Java-shaped `OreFeature` `OCEAN_FLOOR_WG` precheck behavior, `CAVE_AIR` preservation for lake cavities, glow-lichen face state, Java-shaped positive worldgen skylight lake restoration, and exact clean scheduler `FEATURES` parity for chunk `(0,0)`
 - first Java-shaped native chunk ticket layer: `PLAYER`/`FORCED`/timeout ticket types, numeric holder ticket levels, holder full-status facts, forced chunk retention, stale `UNKNOWN` ticket expiry, and ticket-driven holder load/unload reconciliation
+- propagated native ticket levels, client visibility separated from server residency, scheduler-owned clean lower-status dependency buffers, feature worker seeding from scheduler-owned dependencies, and aggregate scheduler metrics
 
 Still missing compared with the TypeScript engine:
 
 - no long-lived remote sessions or browser remote network transport
-- no full Java-style distance propagation or scheduler-owned dependency protochunk holder graph; dependency reuse is currently worker-local clean lower-status buffers
+- no explicit protochunk holder type, delayed pending-unload queue, or automated movement benchmark/perf budget
 - persistence is a temporary snapshot format, not Anvil/NBT or browser storage
 - web/WASM has a runtime smoke gate, not browser storage, network transport, or render path
 - no true frustum rejection, dirty-only section upload diffs, true liquid renderer, or AO/lighted textured path
@@ -85,8 +86,8 @@ Expect about 20 implementation tacticals after this parent roadmap before native
 | [`015-decoration-framework-foundation.md`](015-decoration-framework-foundation.md) | worldgen parity | **done** - configured/decorated feature framework, starter trees/plants, feature snapshots, and visible decorated terrain capture; full water/lake parity deferred behind liquid rendering | oracle/unit coverage plus visible decorated terrain capture |
 | [`016-biome-feature-breadth.md`](016-biome-feature-breadth.md) | worldgen parity | **done** - chunk-center biome feature profiles, oak/birch/spruce visible families, fern/dead-bush patches, and `COUNT_EXTRA`; exact trees/ores/water fixtures deferred | selected fixture matrix and visual probes |
 | [`017-full-decorated-chunk-parity-gauntlet.md`](017-full-decorated-chunk-parity-gauntlet.md) | worldgen parity | **completed milestone** - exact clean `FEATURES` chunk parity for seed `12345`, chunk `(0,0)`; older full-runtime liquid/glow-lichen tails deferred | normal exact clean fixture test plus ignored full-runtime mismatch diagnostic |
-| [`018-chunk-ticket-distance-manager.md`](018-chunk-ticket-distance-manager.md) | server runtime/perf | **active** - Java-shaped ticket types, numeric holder levels, full-status facts, forced/stale tickets, and ticket-driven load/unload reconciliation | server tests for player interest tickets, forced retention, stale ticket expiry, and existing interest movement |
-| `019-scheduler-owned-dependency-holders.md` | server runtime/perf | distance propagation, lower-status holder halos, scheduler-owned dependency protochunks, and generation reuse counters | movement benchmark plus holder/dependency reuse tests |
+| [`018-chunk-ticket-distance-manager.md`](018-chunk-ticket-distance-manager.md) | server runtime/perf | **done** - Java-shaped ticket types, numeric holder levels, full-status facts, forced/stale tickets, and ticket-driven load/unload reconciliation | server tests for player interest tickets, forced retention, stale ticket expiry, and existing interest movement |
+| [`019-scheduler-owned-dependency-holders.md`](019-scheduler-owned-dependency-holders.md) | server runtime/perf | **active** - propagated ticket levels, lower-status holder halos, client visibility split, scheduler-owned dependency buffers, worker seeding, and generation reuse counters | movement benchmark plus holder/dependency reuse tests |
 | `020-structures-foundation.md` | worldgen parity | status-aware structure starts/references, first true structure, template/block-entity scaffolding | server-backed fixture diff for first structure slice |
 | `021-lighting-pipeline.md` | lighting | `DataLayer`, light sections, solver/service boundary, initial light facts, renderer consumption | light fixture tests and non-fullbright terrain capture |
 | `022-live-light-and-liquid-updates.md` | simulation/runtime | light deltas, block/liquid dirty updates, pending liquid ticks, water flow baseline | update/delta tests and runtime smoke |
@@ -96,9 +97,9 @@ Expect about 20 implementation tacticals after this parent roadmap before native
 
 ## Immediate Focus
 
-The next implementation tactical should stay on [`018-chunk-ticket-distance-manager.md`](018-chunk-ticket-distance-manager.md) and then move into scheduler-owned dependency holders.
+The next implementation tactical should stay on [`019-scheduler-owned-dependency-holders.md`](019-scheduler-owned-dependency-holders.md).
 
-Do not start structures until ticket-driven residency has full distance propagation or we explicitly accept a narrower MVP. The immediate focus is promoting worker-local dependency reuse into scheduler-owned lower-status holders, adding performance counters/benchmarks around interest movement, and keeping clean `FEATURES` parity stable while deferring runtime liquid simulation tails.
+Do not start structures until the propagated residency/dependency-holder path has an automated movement benchmark and we understand the cost of cloning dependency buffers through the worker. The immediate focus is adding a benchmark/perf smoke, reducing dependency-transfer overhead if it is material, and keeping clean `FEATURES` parity stable while deferring runtime liquid simulation tails.
 
 ## Deferral Notes
 

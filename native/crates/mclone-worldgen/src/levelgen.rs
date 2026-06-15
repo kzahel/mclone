@@ -1297,6 +1297,7 @@ pub struct OverworldFeatureDependencyCacheReport {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OverworldFeatureBatchResult {
     pub chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+    pub retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
     pub cache_report: OverworldFeatureDependencyCacheReport,
 }
 
@@ -1325,9 +1326,25 @@ impl OverworldFeatureDependencyCache {
         seed: i64,
         targets: impl IntoIterator<Item = ChunkPos>,
     ) -> OverworldFeatureBatchResult {
+        self.generate_features_chunks_with_dependencies(seed, targets, std::iter::empty())
+    }
+
+    pub fn generate_features_chunks_with_dependencies(
+        &mut self,
+        seed: i64,
+        targets: impl IntoIterator<Item = ChunkPos>,
+        dependencies: impl IntoIterator<Item = MutableChunkBlockBuffer>,
+    ) -> OverworldFeatureBatchResult {
         if self.seed != Some(seed) {
             self.seed = Some(seed);
             self.chunks.clear();
+        }
+
+        for dependency in dependencies {
+            self.chunks.insert(
+                ChunkPos::new(dependency.chunk_x, dependency.chunk_z),
+                dependency,
+            );
         }
 
         let plan = FeatureBatchPlan::new(targets);
@@ -1340,6 +1357,7 @@ impl OverworldFeatureDependencyCache {
             cache_report.retained_dependency_chunks = self.chunks.len();
             return OverworldFeatureBatchResult {
                 chunks: BTreeMap::new(),
+                retained_dependencies: self.chunks.clone(),
                 cache_report,
             };
         }
@@ -1367,11 +1385,13 @@ impl OverworldFeatureDependencyCache {
         self.chunks
             .retain(|pos, _| plan.dependency_chunks.contains(pos));
         cache_report.retained_dependency_chunks = self.chunks.len();
+        let retained_dependencies = self.chunks.clone();
 
         let chunks =
             generate_overworld_features_chunks_from_plan(seed, &biome_source, plan, region_chunks);
         OverworldFeatureBatchResult {
             chunks,
+            retained_dependencies,
             cache_report,
         }
     }

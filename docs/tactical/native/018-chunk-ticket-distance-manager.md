@@ -1,6 +1,6 @@
 # 018: Chunk Ticket Distance Manager
 
-Status: active.
+Status: completed; successor tactical is `019-scheduler-owned-dependency-holders.md`.
 
 ## Purpose
 
@@ -42,18 +42,18 @@ Key Java facts for this slice:
 
 ## Current Limits
 
-- The native distance manager does not yet implement Java's full `ChunkTracker` distance propagation. Current player interest creates direct player tickets for the protocol view chunks, preserving existing runtime behavior.
+- Java-shaped propagated ticket levels are now covered by `019-scheduler-owned-dependency-holders.md`.
 - Holder futures are still simplified `ChunkStatusSlot`s, not Java's full `CompletableFuture` graph.
-- Lower-status dependency chunks are still worker-local clean buffers. They are not yet scheduler-owned protochunk holders with ticket levels.
+- Lower-status dependency chunks are now scheduler-owned clean buffers in `019`, but not yet explicit protochunk holder objects.
 - Pending unloads are immediate after ticket removal, except dirty chunks are saved before removal. Java's delayed `pendingUnloads` queue is still a future refinement.
 - Only `FEATURES` publication is wired to the scheduler. `LIGHT`, `FULL`, ticking chunks, and entity ticking are represented by ticket/full-status facts but not by real runtime systems yet.
 
-## Next Implementation Steps
+## Successor Work
 
-1. Add distance propagation over ticket sources so non-player tickets can retain lower-status halos the way Java's `ChunkTicketTracker` does.
-2. Split holder target status from publication status so propagated dependency holders can stop at `Terrain`, `Surface`, or `Features` without necessarily publishing snapshots to clients.
-3. Promote worker-local clean dependency chunks into scheduler-owned protochunk/dependency holders, with reuse keyed by status and seed.
-4. Add scheduler performance counters: ticketed holder count, propagated holder count, generated dependency count, reused dependency count, unload count, and per-job elapsed time.
-5. Add a small native benchmark/smoke for interest movement over a radius view so chunk residency and worldgen reuse regressions are visible.
-6. Keep the browser/WASM build compiling after the API changes; browser worker plumbing can remain deferred until the scheduler boundary is stable.
+The first four follow-ups moved into `019-scheduler-owned-dependency-holders.md`: propagated ticket levels, client visibility split, scheduler-owned clean dependency buffers, and aggregate scheduler metrics.
 
+Remaining successor work:
+
+1. Add a small native benchmark/smoke for interest movement over a radius view so chunk residency and worldgen reuse regressions are visible.
+2. Replace cloned dependency-buffer transfer with a cheaper ownership or shared-buffer strategy if the benchmark shows material overhead.
+3. Keep the browser/WASM build compiling after the API changes; browser worker plumbing can remain deferred until the scheduler boundary is stable.
