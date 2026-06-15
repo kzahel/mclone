@@ -3404,6 +3404,12 @@ impl NativeUi {
         }
     }
 
+    fn new_ingame(chunk_radius: i32) -> Self {
+        let mut ui = Self::new(chunk_radius);
+        ui.set_screen(None);
+        ui
+    }
+
     fn set_scale(&mut self, scale: GuiScale) {
         self.scale = scale;
         self.pointer = self.pointer.map(|point| Point {
@@ -3929,7 +3935,7 @@ impl ChunkApp {
             spectator,
             render_options,
             frame_pacing: FramePacing::default(),
-            ui: NativeUi::new(chunk_radius),
+            ui: NativeUi::new_ingame(chunk_radius),
             window: None,
             surface: None,
             depth: None,
@@ -5139,6 +5145,17 @@ mod tests {
             HeadlessScreenshotUi::OptionsPause
         );
         assert!(parse_screenshot_ui_arg("--screenshot-ui", Some("bad".to_owned())).is_err());
+    }
+
+    #[test]
+    fn native_ui_has_title_and_ingame_start_modes() {
+        let title_ui = NativeUi::new(1);
+        assert!(title_ui.is_active());
+        assert!(title_ui.covers_world());
+
+        let ingame_ui = NativeUi::new_ingame(1);
+        assert!(!ingame_ui.is_active());
+        assert!(!ingame_ui.covers_world());
     }
 
     #[test]
