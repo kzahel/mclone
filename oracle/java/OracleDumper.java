@@ -17,9 +17,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Registry;
 import net.minecraft.data.BuiltinRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.client.renderer.chunk.VisGraph;
+import net.minecraft.client.renderer.chunk.VisibilitySet;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
@@ -216,6 +219,9 @@ public final class OracleDumper {
                options
             );
             break;
+         case "visgraph":
+            json = dumpVisGraph();
+            break;
          default:
             throw new IllegalArgumentException("unsupported module '" + module + "'");
       }
@@ -379,6 +385,120 @@ public final class OracleDumper {
       }
 
       throw new IllegalArgumentException("unsupported biome class '" + className + "'");
+   }
+
+   private static String dumpVisGraph() {
+      Map<String, Object> root = new LinkedHashMap<>();
+      root.put("module", "visgraph");
+      root.put("minecraftVersion", MINECRAFT_VERSION);
+      root.put("visGraphClass", VisGraph.class.getName());
+      root.put("visibilitySetClass", VisibilitySet.class.getName());
+      root.put("faceOrder", directionNames());
+
+      List<Map<String, Object>> cases = new ArrayList<>();
+      cases.add(dumpVisGraphCase("empty", new ArrayList<>()));
+      cases.add(dumpVisGraphCase("solid", solidCells()));
+      cases.add(dumpVisGraphCase("lightlyOpaque", lightlyOpaqueCells()));
+      cases.add(dumpVisGraphCase("xWall", xWallCells()));
+      cases.add(dumpVisGraphCase("westEastTunnel", westEastTunnelCells()));
+      cases.add(dumpVisGraphCase("enclosedCavity", enclosedCavityCells()));
+      root.put("cases", cases);
+      return GSON.toJson(root) + "\n";
+   }
+
+   private static Map<String, Object> dumpVisGraphCase(String name, List<int[]> opaqueCells) {
+      VisGraph graph = new VisGraph();
+      for (int[] cell : opaqueCells) {
+         graph.setOpaque(new BlockPos(cell[0], cell[1], cell[2]));
+      }
+      VisibilitySet visibility = graph.resolve();
+
+      Map<String, Object> result = new LinkedHashMap<>();
+      result.put("name", name);
+      result.put("opaqueCount", opaqueCells.size());
+      result.put("opaque", opaqueCells);
+      result.put("visibility", visibilityRows(visibility));
+      return result;
+   }
+
+   private static String[] directionNames() {
+      Direction[] directions = Direction.values();
+      String[] names = new String[directions.length];
+      for (int index = 0; index < directions.length; index++) {
+         names[index] = directions[index].getName();
+      }
+      return names;
+   }
+
+   private static boolean[][] visibilityRows(VisibilitySet visibility) {
+      Direction[] directions = Direction.values();
+      boolean[][] rows = new boolean[directions.length][directions.length];
+      for (Direction row : directions) {
+         for (Direction column : directions) {
+            rows[row.ordinal()][column.ordinal()] = visibility.visibilityBetween(row, column);
+         }
+      }
+      return rows;
+   }
+
+   private static List<int[]> lightlyOpaqueCells() {
+      List<int[]> cells = new ArrayList<>();
+      for (int x = 0; x < 15; x++) {
+         for (int z = 0; z < 15; z++) {
+            cells.add(new int[]{x, 0, z});
+         }
+      }
+      return cells;
+   }
+
+   private static List<int[]> xWallCells() {
+      List<int[]> cells = new ArrayList<>();
+      for (int y = 0; y < 16; y++) {
+         for (int z = 0; z < 16; z++) {
+            cells.add(new int[]{8, y, z});
+         }
+      }
+      return cells;
+   }
+
+   private static List<int[]> westEastTunnelCells() {
+      List<int[]> cells = new ArrayList<>();
+      for (int y = 0; y < 16; y++) {
+         for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+               if (y != 8 || z != 8) {
+                  cells.add(new int[]{x, y, z});
+               }
+            }
+         }
+      }
+      return cells;
+   }
+
+   private static List<int[]> enclosedCavityCells() {
+      List<int[]> cells = new ArrayList<>();
+      for (int y = 0; y < 16; y++) {
+         for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+               if (x != 8 || y != 8 || z != 8) {
+                  cells.add(new int[]{x, y, z});
+               }
+            }
+         }
+      }
+      return cells;
+   }
+
+   private static List<int[]> solidCells() {
+      List<int[]> cells = new ArrayList<>();
+      for (int y = 0; y < 16; y++) {
+         for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+               cells.add(new int[]{x, y, z});
+            }
+         }
+      }
+      return cells;
    }
 
    private static String dumpImprovedNoise(long seed) {
@@ -2348,6 +2468,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper liquid-carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper feature-order-trace --seed <long> --chunk-x <int> --chunk-z <int> [--generate-structures <true|false>]");
       System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full] [--generate-structures <true|false>] [--dump-chunks <true|false>] [--dump-only-target-chunk <true|false>] [--probe-blocks <x,y,z;...>] [--probe-target-tree-blocks <true|false>] [--probe-tree-candidates <true|false>] [--tree-probe-center-x <int>] [--tree-probe-center-z <int>] [--tree-probe-step-index <int>] [--tree-probe-feature-index <int>] [--probe-ore-placements <true|false>] [--ore-probe-center-x <int>] [--ore-probe-center-z <int>] [--ore-probe-step-index <int>] [--ore-probe-feature-index <int>]");
+      System.err.println("  oracle-dumper visgraph --seed <long>");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");

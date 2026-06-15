@@ -474,7 +474,7 @@ fn print_help() {
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4]\n\n\
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4]\n\n\
-         Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, and wheel speed controls. Headless modes write PNGs for GPU validation. Perf modes write JSON."
+         Window mode streams chunks around a free-fly spectator camera with WASD/QE, mouse-drag look, Shift boost, and wheel speed controls. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path."
     );
 }
 
@@ -536,10 +536,17 @@ struct MovementPerfStepReport {
     rebuilt_indices: u32,
     loaded_sections: usize,
     visible_sections: usize,
+    frustum_sections: usize,
+    graph_cull_enabled: bool,
+    graph_culled_sections: usize,
     loaded_faces: u32,
     visible_faces: u32,
+    frustum_faces: u32,
+    graph_culled_faces: u32,
     loaded_indices: u32,
     visible_indices: u32,
+    frustum_indices: u32,
+    graph_culled_indices: u32,
 }
 
 impl MovementPerfReport {
@@ -698,10 +705,23 @@ impl MovementPerfReport {
             println!("      \"rebuilt_indices\": {},", step.rebuilt_indices);
             println!("      \"loaded_sections\": {},", step.loaded_sections);
             println!("      \"visible_sections\": {},", step.visible_sections);
+            println!("      \"frustum_sections\": {},", step.frustum_sections);
+            println!("      \"graph_cull_enabled\": {},", step.graph_cull_enabled);
+            println!(
+                "      \"graph_culled_sections\": {},",
+                step.graph_culled_sections
+            );
             println!("      \"loaded_faces\": {},", step.loaded_faces);
             println!("      \"visible_faces\": {},", step.visible_faces);
+            println!("      \"frustum_faces\": {},", step.frustum_faces);
+            println!("      \"graph_culled_faces\": {},", step.graph_culled_faces);
             println!("      \"loaded_indices\": {},", step.loaded_indices);
-            println!("      \"visible_indices\": {}", step.visible_indices);
+            println!("      \"visible_indices\": {},", step.visible_indices);
+            println!("      \"frustum_indices\": {},", step.frustum_indices);
+            println!(
+                "      \"graph_culled_indices\": {}",
+                step.graph_culled_indices
+            );
             println!("    }}{suffix}");
         }
         println!("  ]");
@@ -712,6 +732,7 @@ impl MovementPerfReport {
 #[derive(Clone, Debug)]
 struct TimedemoReport {
     options: TimedemoOptions,
+    loaded_chunk_radius: i32,
     scene_build_ms: f64,
     section_count: usize,
     vertex_count: u32,
@@ -747,6 +768,7 @@ impl TimedemoReport {
             self.options.scene.chunk_x, self.options.scene.chunk_z
         );
         println!("  \"chunk_radius\": {},", self.options.scene.chunk_radius);
+        println!("  \"loaded_chunk_radius\": {},", self.loaded_chunk_radius);
         println!(
             "  \"path_radius_chunks\": {},",
             self.options.path_radius_chunks
@@ -782,6 +804,26 @@ impl TimedemoReport {
             self.render.max_drawn_section_count
         );
         println!(
+            "    \"average_frustum_section_count\": {:.3},",
+            self.render.average_frustum_section_count
+        );
+        println!(
+            "    \"max_frustum_section_count\": {},",
+            self.render.max_frustum_section_count
+        );
+        println!(
+            "    \"graph_cull_enabled_frame_count\": {},",
+            self.render.graph_cull_enabled_frame_count
+        );
+        println!(
+            "    \"average_graph_culled_section_count\": {:.3},",
+            self.render.average_graph_culled_section_count
+        );
+        println!(
+            "    \"max_graph_culled_section_count\": {},",
+            self.render.max_graph_culled_section_count
+        );
+        println!(
             "    \"loaded_index_count\": {},",
             self.render.loaded_index_count
         );
@@ -790,8 +832,24 @@ impl TimedemoReport {
             self.render.average_drawn_index_count
         );
         println!(
-            "    \"max_drawn_index_count\": {}",
+            "    \"max_drawn_index_count\": {},",
             self.render.max_drawn_index_count
+        );
+        println!(
+            "    \"average_frustum_index_count\": {:.3},",
+            self.render.average_frustum_index_count
+        );
+        println!(
+            "    \"max_frustum_index_count\": {},",
+            self.render.max_frustum_index_count
+        );
+        println!(
+            "    \"average_graph_culled_index_count\": {:.3},",
+            self.render.average_graph_culled_index_count
+        );
+        println!(
+            "    \"max_graph_culled_index_count\": {}",
+            self.render.max_graph_culled_index_count
         );
         println!("  }}");
         println!("}}");
@@ -859,10 +917,17 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
             rebuilt_indices: section_update.rebuilt_index_count,
             loaded_sections: visibility.loaded_section_count,
             visible_sections: visibility.drawn_section_count,
+            frustum_sections: visibility.frustum_section_count,
+            graph_cull_enabled: visibility.graph_cull_enabled,
+            graph_culled_sections: visibility.graph_culled_section_count,
             loaded_faces: visibility.loaded_face_count(),
             visible_faces: visibility.drawn_face_count(),
+            frustum_faces: visibility.frustum_face_count(),
+            graph_culled_faces: visibility.graph_culled_face_count(),
             loaded_indices: visibility.loaded_index_count,
             visible_indices: visibility.drawn_index_count,
+            frustum_indices: visibility.frustum_index_count,
+            graph_culled_indices: visibility.graph_culled_index_count,
         });
     }
 
@@ -877,8 +942,9 @@ fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> {
     if options.scene.remote_addr.is_some() {
         bail!("--timedemo currently requires the local integrated server path");
     }
+    let loaded_scene = timedemo_loaded_scene(options)?;
     let scene_start = Instant::now();
-    let scene_mesh = build_scene_textured_sections(&options.scene)?;
+    let scene_mesh = build_scene_textured_sections(&loaded_scene)?;
     let scene_build_ms = elapsed_ms(scene_start.elapsed());
     let cameras = timedemo_cameras(&options.scene, options.path_radius_chunks, options.frames);
     let render = run_headless_textured_sections_timedemo(
@@ -904,6 +970,7 @@ fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> {
         .sum();
     Ok(TimedemoReport {
         options: options.clone(),
+        loaded_chunk_radius: loaded_scene.chunk_radius,
         scene_build_ms,
         section_count: scene_mesh.sections.len(),
         vertex_count,
@@ -911,6 +978,18 @@ fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> {
         index_count,
         render,
     })
+}
+
+fn timedemo_loaded_scene(options: &TimedemoOptions) -> Result<SceneOptions> {
+    let loaded_radius = options.scene.chunk_radius.max(options.path_radius_chunks);
+    if loaded_radius > MAX_CHUNK_RADIUS {
+        bail!(
+            "--timedemo requires static loaded radius {loaded_radius}, but the current max is {MAX_CHUNK_RADIUS}; lower --path-radius"
+        );
+    }
+    let mut scene = options.scene.clone();
+    scene.chunk_radius = loaded_radius;
+    Ok(scene)
 }
 
 fn circular_movement_spectator(
@@ -2610,6 +2689,37 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn timedemo_loaded_scene_covers_camera_path_radius() {
+        let options = TimedemoOptions {
+            scene: SceneOptions {
+                chunk_radius: 1,
+                ..SceneOptions::default()
+            },
+            path_radius_chunks: 4,
+            ..TimedemoOptions::default()
+        };
+
+        let loaded_scene = timedemo_loaded_scene(&options).unwrap();
+
+        assert_eq!(loaded_scene.chunk_radius, 4);
+        assert_eq!(options.scene.chunk_radius, 1);
+    }
+
+    #[test]
+    fn timedemo_loaded_scene_rejects_oversized_static_radius() {
+        let options = TimedemoOptions {
+            scene: SceneOptions {
+                chunk_radius: 1,
+                ..SceneOptions::default()
+            },
+            path_radius_chunks: MAX_CHUNK_RADIUS + 1,
+            ..TimedemoOptions::default()
+        };
+
+        assert!(timedemo_loaded_scene(&options).is_err());
     }
 
     #[test]

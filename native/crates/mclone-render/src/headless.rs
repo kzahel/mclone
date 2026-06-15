@@ -72,9 +72,18 @@ pub struct HeadlessTimedemoReport {
     pub loaded_section_count: usize,
     pub average_drawn_section_count: f64,
     pub max_drawn_section_count: usize,
+    pub average_frustum_section_count: f64,
+    pub max_frustum_section_count: usize,
+    pub graph_cull_enabled_frame_count: usize,
+    pub average_graph_culled_section_count: f64,
+    pub max_graph_culled_section_count: usize,
     pub loaded_index_count: u32,
     pub average_drawn_index_count: f64,
     pub max_drawn_index_count: u32,
+    pub average_frustum_index_count: f64,
+    pub max_frustum_index_count: u32,
+    pub average_graph_culled_index_count: f64,
+    pub max_graph_culled_index_count: u32,
 }
 
 pub fn write_headless_clear_png(options: HeadlessClearOptions) -> Result<HeadlessClearReport> {
@@ -270,8 +279,17 @@ pub fn run_headless_textured_sections_timedemo(
     let mut max_frame_ms = 0.0_f64;
     let mut drawn_section_count = 0_usize;
     let mut max_drawn_section_count = 0_usize;
+    let mut frustum_section_count = 0_usize;
+    let mut max_frustum_section_count = 0_usize;
+    let mut graph_cull_enabled_frame_count = 0_usize;
+    let mut graph_culled_section_count = 0_usize;
+    let mut max_graph_culled_section_count = 0_usize;
     let mut drawn_index_count = 0_u64;
     let mut max_drawn_index_count = 0_u32;
+    let mut frustum_index_count = 0_u64;
+    let mut max_frustum_index_count = 0_u32;
+    let mut graph_culled_index_count = 0_u64;
+    let mut max_graph_culled_index_count = 0_u32;
 
     for camera in &options.cameras {
         let frame_start = Instant::now();
@@ -299,8 +317,21 @@ pub fn run_headless_textured_sections_timedemo(
         max_frame_ms = max_frame_ms.max(frame_ms);
         drawn_section_count += stats.drawn_section_count;
         max_drawn_section_count = max_drawn_section_count.max(stats.drawn_section_count);
+        frustum_section_count += stats.frustum_section_count;
+        max_frustum_section_count = max_frustum_section_count.max(stats.frustum_section_count);
+        if stats.graph_cull_enabled {
+            graph_cull_enabled_frame_count += 1;
+        }
+        graph_culled_section_count += stats.graph_culled_section_count;
+        max_graph_culled_section_count =
+            max_graph_culled_section_count.max(stats.graph_culled_section_count);
         drawn_index_count += u64::from(stats.drawn_index_count);
         max_drawn_index_count = max_drawn_index_count.max(stats.drawn_index_count);
+        frustum_index_count += u64::from(stats.frustum_index_count);
+        max_frustum_index_count = max_frustum_index_count.max(stats.frustum_index_count);
+        graph_culled_index_count += u64::from(stats.graph_culled_index_count);
+        max_graph_culled_index_count =
+            max_graph_culled_index_count.max(stats.graph_culled_index_count);
     }
 
     let frame_count = options.cameras.len();
@@ -315,10 +346,30 @@ pub fn run_headless_textured_sections_timedemo(
     } else {
         drawn_section_count as f64 / frame_count as f64
     };
+    let average_frustum_section_count = if frame_count == 0 {
+        0.0
+    } else {
+        frustum_section_count as f64 / frame_count as f64
+    };
+    let average_graph_culled_section_count = if frame_count == 0 {
+        0.0
+    } else {
+        graph_culled_section_count as f64 / frame_count as f64
+    };
     let average_drawn_index_count = if frame_count == 0 {
         0.0
     } else {
         drawn_index_count as f64 / frame_count as f64
+    };
+    let average_frustum_index_count = if frame_count == 0 {
+        0.0
+    } else {
+        frustum_index_count as f64 / frame_count as f64
+    };
+    let average_graph_culled_index_count = if frame_count == 0 {
+        0.0
+    } else {
+        graph_culled_index_count as f64 / frame_count as f64
     };
 
     Ok(HeadlessTimedemoReport {
@@ -333,9 +384,18 @@ pub fn run_headless_textured_sections_timedemo(
         loaded_section_count: draw.section_count(),
         average_drawn_section_count,
         max_drawn_section_count,
+        average_frustum_section_count,
+        max_frustum_section_count,
+        graph_cull_enabled_frame_count,
+        average_graph_culled_section_count,
+        max_graph_culled_section_count,
         loaded_index_count: draw.index_count(),
         average_drawn_index_count,
         max_drawn_index_count,
+        average_frustum_index_count,
+        max_frustum_index_count,
+        average_graph_culled_index_count,
+        max_graph_culled_index_count,
     })
 }
 

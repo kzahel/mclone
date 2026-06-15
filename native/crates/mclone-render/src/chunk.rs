@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Vec3, Vec4};
 use mclone_mesh::{
-    CHUNK_WIDTH as MESH_CHUNK_WIDTH, RENDER_SECTION_HEIGHT, RenderSectionKey,
-    TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh,
+    CHUNK_WIDTH as MESH_CHUNK_WIDTH, RENDER_SECTION_HEIGHT, RenderSectionKey, SectionFace,
+    TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibilitySet, VisibleChunkMesh,
     quad_face_count_from_indices,
 };
 use wgpu::util::DeviceExt;
@@ -214,8 +214,13 @@ impl<'a> ChunkRenderTarget<'a> {
 pub struct TexturedSectionRenderStats {
     pub loaded_section_count: usize,
     pub drawn_section_count: usize,
+    pub frustum_section_count: usize,
+    pub graph_cull_enabled: bool,
+    pub graph_culled_section_count: usize,
     pub loaded_index_count: u32,
     pub drawn_index_count: u32,
+    pub frustum_index_count: u32,
+    pub graph_culled_index_count: u32,
 }
 
 impl TexturedSectionRenderStats {
@@ -225,6 +230,14 @@ impl TexturedSectionRenderStats {
 
     pub fn drawn_face_count(&self) -> u32 {
         quad_face_count_from_indices(self.drawn_index_count)
+    }
+
+    pub fn frustum_face_count(&self) -> u32 {
+        quad_face_count_from_indices(self.frustum_index_count)
+    }
+
+    pub fn graph_culled_face_count(&self) -> u32 {
+        quad_face_count_from_indices(self.graph_culled_index_count)
     }
 }
 
@@ -246,18 +259,207 @@ pub fn textured_section_visibility_stats(
     sections: &[TexturedRenderSectionMesh],
     render_view: ChunkRenderView,
 ) -> TexturedSectionRenderStats {
-    let frustum = ClipFrustum::from_render_view(render_view);
-    let mut stats = TexturedSectionRenderStats::default();
-    for section in sections.iter().filter(|section| !section.is_empty()) {
-        let index_count = section.stats().index_count;
-        stats.loaded_section_count += 1;
-        stats.loaded_index_count += index_count;
-        if frustum.is_render_section_visible(section.key) {
-            stats.drawn_section_count += 1;
-            stats.drawn_index_count += index_count;
+    let records = sections
+        .iter()
+        .map(|section| {
+            (
+                section.key,
+                TexturedSectionCullingRecord {
+                    index_count: section.stats().index_count,
+                    visibility: section.visibility,
+                    drawable: !section.is_empty(),
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    cull_textured_sections(&records, render_view).stats
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TexturedSectionCullingRecord {
+    index_count: u32,
+    visibility: VisibilitySet,
+    drawable: bool,
+}
+
+#[derive(Clone, Debug)]
+struct TexturedSectionCullingResult {
+    stats: TexturedSectionRenderStats,
+    drawn_keys: BTreeSet<RenderSectionKey>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RenderSectionTraversalInfo {
+    source_directions: u8,
+    directions: u8,
+}
+
+impl RenderSectionTraversalInfo {
+    fn start() -> Self {
+        Self {
+            source_directions: 0,
+            directions: 0,
         }
     }
-    stats
+
+    fn from_parent(parent_directions: u8, direction: SectionFace) -> Self {
+        Self {
+            source_directions: direction.mask(),
+            directions: parent_directions | direction.mask(),
+        }
+    }
+
+    fn has_direction(self, direction: SectionFace) -> bool {
+        self.directions & direction.mask() != 0
+    }
+
+    fn add_source_direction(&mut self, direction: SectionFace) {
+        self.source_directions |= direction.mask();
+    }
+
+    fn has_source_directions(self) -> bool {
+        self.source_directions != 0
+    }
+}
+
+fn cull_textured_sections(
+    records: &BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
+    render_view: ChunkRenderView,
+) -> TexturedSectionCullingResult {
+    let frustum = ClipFrustum::from_render_view(render_view);
+    let mut stats = TexturedSectionRenderStats {
+        loaded_section_count: records.values().filter(|record| record.drawable).count(),
+        loaded_index_count: records
+            .values()
+            .filter(|record| record.drawable)
+            .map(|record| record.index_count)
+            .sum(),
+        ..TexturedSectionRenderStats::default()
+    };
+
+    let mut frustum_keys = BTreeSet::new();
+    for (key, record) in records {
+        if frustum.is_render_section_visible(*key) {
+            frustum_keys.insert(*key);
+            if record.drawable {
+                stats.frustum_section_count += 1;
+                stats.frustum_index_count += record.index_count;
+            }
+        }
+    }
+
+    let Some(start_key) = render_section_key_containing(render_view.camera_position) else {
+        stats.drawn_section_count = stats.frustum_section_count;
+        stats.drawn_index_count = stats.frustum_index_count;
+        return TexturedSectionCullingResult {
+            stats,
+            drawn_keys: frustum_keys,
+        };
+    };
+
+    if !records.contains_key(&start_key) {
+        stats.drawn_section_count = stats.frustum_section_count;
+        stats.drawn_index_count = stats.frustum_index_count;
+        return TexturedSectionCullingResult {
+            stats,
+            drawn_keys: frustum_keys,
+        };
+    }
+
+    let mut queue = VecDeque::new();
+    let mut infos = BTreeMap::new();
+    let mut drawn_keys = BTreeSet::new();
+    infos.insert(start_key, RenderSectionTraversalInfo::start());
+    queue.push_back(start_key);
+
+    while let Some(key) = queue.pop_front() {
+        let Some(record) = records.get(&key) else {
+            continue;
+        };
+        let Some(info) = infos.get(&key).copied() else {
+            continue;
+        };
+        if frustum_keys.contains(&key) {
+            drawn_keys.insert(key);
+        }
+
+        for direction in SectionFace::ALL {
+            if info.has_direction(direction.opposite()) {
+                continue;
+            }
+            if info.has_source_directions()
+                && !can_see_through_source(record.visibility, info.source_directions, direction)
+            {
+                continue;
+            }
+
+            let neighbor_key = section_neighbor_key(key, direction);
+            if !records.contains_key(&neighbor_key) || !frustum_keys.contains(&neighbor_key) {
+                continue;
+            }
+
+            if let Some(existing) = infos.get_mut(&neighbor_key) {
+                existing.add_source_direction(direction);
+            } else {
+                infos.insert(
+                    neighbor_key,
+                    RenderSectionTraversalInfo::from_parent(info.directions, direction),
+                );
+                queue.push_back(neighbor_key);
+            }
+        }
+    }
+
+    stats.graph_cull_enabled = true;
+    stats.drawn_section_count = drawn_keys
+        .iter()
+        .filter_map(|key| records.get(key))
+        .filter(|record| record.drawable)
+        .count();
+    stats.drawn_index_count = drawn_keys
+        .iter()
+        .filter_map(|key| records.get(key))
+        .filter(|record| record.drawable)
+        .map(|record| record.index_count)
+        .sum();
+    stats.graph_culled_section_count = stats
+        .frustum_section_count
+        .saturating_sub(stats.drawn_section_count);
+    stats.graph_culled_index_count = stats
+        .frustum_index_count
+        .saturating_sub(stats.drawn_index_count);
+
+    TexturedSectionCullingResult { stats, drawn_keys }
+}
+
+fn can_see_through_source(
+    visibility: VisibilitySet,
+    source_directions: u8,
+    exit_direction: SectionFace,
+) -> bool {
+    SectionFace::ALL.into_iter().any(|source| {
+        source_directions & source.mask() != 0
+            && visibility.visibility_between(source.opposite(), exit_direction)
+    })
+}
+
+fn render_section_key_containing(position: Vec3) -> Option<RenderSectionKey> {
+    if !position.is_finite() {
+        return None;
+    }
+    let block_x = position.x.floor() as i32;
+    let block_y = position.y.floor() as i32;
+    let block_z = position.z.floor() as i32;
+    Some(RenderSectionKey::new(
+        block_x.div_euclid(MESH_CHUNK_WIDTH),
+        block_y.div_euclid(RENDER_SECTION_HEIGHT),
+        block_z.div_euclid(MESH_CHUNK_WIDTH),
+    ))
+}
+
+fn section_neighbor_key(key: RenderSectionKey, face: SectionFace) -> RenderSectionKey {
+    let [dx, dy, dz] = face.section_delta();
+    RenderSectionKey::new(key.chunk_x + dx, key.section_y + dy, key.chunk_z + dz)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -361,10 +563,19 @@ pub struct GpuTexturedChunkMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    visibility: VisibilitySet,
 }
 
 impl GpuTexturedChunkMesh {
     pub fn new(device: &wgpu::Device, mesh: &TexturedVisibleChunkMesh) -> Result<Self> {
+        Self::with_visibility(device, mesh, VisibilitySet::all_visible())
+    }
+
+    pub fn with_visibility(
+        device: &wgpu::Device,
+        mesh: &TexturedVisibleChunkMesh,
+        visibility: VisibilitySet,
+    ) -> Result<Self> {
         if mesh.is_empty() {
             bail!("cannot upload an empty textured chunk mesh");
         }
@@ -382,11 +593,16 @@ impl GpuTexturedChunkMesh {
             vertex_buffer,
             index_buffer,
             index_count: mesh.indices.len() as u32,
+            visibility,
         })
     }
 
     pub fn index_count(&self) -> u32 {
         self.index_count
+    }
+
+    pub fn visibility(&self) -> VisibilitySet {
+        self.visibility
     }
 }
 
@@ -904,6 +1120,7 @@ impl TexturedChunkDrawResources {
 pub struct TexturedSectionDrawResources {
     renderer: TexturedChunkRenderer,
     sections: BTreeMap<RenderSectionKey, GpuTexturedChunkMesh>,
+    visibility_sections: BTreeMap<RenderSectionKey, VisibilitySet>,
     atlas: GpuChunkTextureAtlas,
 }
 
@@ -922,6 +1139,7 @@ impl TexturedSectionDrawResources {
         let mut resources = Self {
             renderer,
             sections: BTreeMap::new(),
+            visibility_sections: BTreeMap::new(),
             atlas,
         };
         let _ = resources.update_sections(device, sections)?;
@@ -935,11 +1153,10 @@ impl TexturedSectionDrawResources {
     ) -> Result<TexturedSectionUploadReport> {
         let wanted = sections
             .iter()
-            .filter(|section| !section.is_empty())
             .map(|section| section.key)
             .collect::<BTreeSet<_>>();
         let removed = self
-            .sections
+            .visibility_sections
             .keys()
             .copied()
             .filter(|key| !wanted.contains(key))
@@ -958,9 +1175,12 @@ impl TexturedSectionDrawResources {
             if self.sections.remove(key).is_some() {
                 report.removed_section_count += 1;
             }
+            self.visibility_sections.remove(key);
         }
 
         for section in sections {
+            self.visibility_sections
+                .insert(section.key, section.visibility);
             if section.is_empty() {
                 if self.sections.remove(&section.key).is_some() {
                     report.removed_section_count += 1;
@@ -973,9 +1193,10 @@ impl TexturedSectionDrawResources {
             report.uploaded_index_count += stats.index_count;
             self.sections.insert(
                 section.key,
-                GpuTexturedChunkMesh::new(device, &section.mesh).with_context(|| {
-                    format!("failed to upload render section {:?}", section.key)
-                })?,
+                GpuTexturedChunkMesh::with_visibility(device, &section.mesh, section.visibility)
+                    .with_context(|| {
+                        format!("failed to upload render section {:?}", section.key)
+                    })?,
             );
         }
         Ok(report)
@@ -996,7 +1217,22 @@ impl TexturedSectionDrawResources {
         target: ChunkRenderTarget<'_>,
         render_view: ChunkRenderView,
     ) -> Result<TexturedSectionRenderStats> {
-        let frustum = ClipFrustum::from_render_view(render_view);
+        let records = self
+            .visibility_sections
+            .iter()
+            .map(|(key, visibility)| {
+                let mesh = self.sections.get(key);
+                (
+                    *key,
+                    TexturedSectionCullingRecord {
+                        index_count: mesh.map_or(0, GpuTexturedChunkMesh::index_count),
+                        visibility: *visibility,
+                        drawable: mesh.is_some(),
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let culling = cull_textured_sections(&records, render_view);
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
@@ -1026,22 +1262,15 @@ impl TexturedSectionDrawResources {
         pass.set_pipeline(&self.renderer.pipeline);
         pass.set_bind_group(0, &self.renderer.bind_group, &[]);
         pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-        let mut stats = TexturedSectionRenderStats {
-            loaded_section_count: self.sections.len(),
-            loaded_index_count: self.index_count(),
-            ..TexturedSectionRenderStats::default()
-        };
         for (key, mesh) in &self.sections {
-            if !frustum.is_render_section_visible(*key) {
+            if !culling.drawn_keys.contains(key) {
                 continue;
             }
-            stats.drawn_section_count += 1;
-            stats.drawn_index_count += mesh.index_count();
             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.index_count, 0, 0..1);
         }
-        Ok(stats)
+        Ok(culling.stats)
     }
 }
 
@@ -1147,12 +1376,19 @@ mod tests {
         let stats = TexturedSectionRenderStats {
             loaded_section_count: 2,
             drawn_section_count: 1,
+            frustum_section_count: 2,
+            graph_culled_section_count: 1,
             loaded_index_count: 60,
             drawn_index_count: 36,
+            frustum_index_count: 60,
+            graph_culled_index_count: 24,
+            ..TexturedSectionRenderStats::default()
         };
 
         assert_eq!(stats.loaded_face_count(), 10);
         assert_eq!(stats.drawn_face_count(), 6);
+        assert_eq!(stats.frustum_face_count(), 10);
+        assert_eq!(stats.graph_culled_face_count(), 4);
 
         let upload = TexturedSectionUploadReport {
             uploaded_section_count: 1,
@@ -1161,6 +1397,86 @@ mod tests {
             uploaded_index_count: 60,
         };
         assert_eq!(upload.uploaded_face_count(), 10);
+    }
+
+    fn fake_section(
+        key: RenderSectionKey,
+        index_count: usize,
+        visibility: VisibilitySet,
+    ) -> TexturedRenderSectionMesh {
+        TexturedRenderSectionMesh {
+            key,
+            mesh: TexturedVisibleChunkMesh {
+                vertices: Vec::new(),
+                indices: vec![0; index_count],
+            },
+            visibility,
+        }
+    }
+
+    #[test]
+    fn textured_section_visibility_stats_falls_back_without_camera_section() {
+        let sections = vec![
+            fake_section(
+                RenderSectionKey::new(0, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(
+                RenderSectionKey::new(1, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+        ];
+        let camera = ChunkCamera {
+            eye: [8.0, 8.0, -40.0],
+            target: [16.0, 8.0, 8.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 80.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 200.0,
+        };
+
+        let stats = textured_section_visibility_stats(&sections, camera.render_view(800, 600));
+
+        assert!(!stats.graph_cull_enabled);
+        assert_eq!(stats.frustum_section_count, stats.drawn_section_count);
+        assert_eq!(stats.frustum_index_count, stats.drawn_index_count);
+    }
+
+    #[test]
+    fn textured_section_visibility_stats_prunes_through_section_graph() {
+        let mut wall_visibility = VisibilitySet::all_visible();
+        wall_visibility.set(SectionFace::West, SectionFace::East, false);
+        let sections = vec![
+            fake_section(
+                RenderSectionKey::new(0, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(RenderSectionKey::new(1, 0, 0), 6, wall_visibility),
+            fake_section(
+                RenderSectionKey::new(2, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+        ];
+        let camera = ChunkCamera {
+            eye: [8.0, 8.0, 8.0],
+            target: [48.0, 8.0, 8.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 90.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 200.0,
+        };
+
+        let stats = textured_section_visibility_stats(&sections, camera.render_view(800, 600));
+
+        assert!(stats.graph_cull_enabled);
+        assert_eq!(stats.frustum_section_count, 3);
+        assert_eq!(stats.drawn_section_count, 2);
+        assert_eq!(stats.graph_culled_section_count, 1);
+        assert_eq!(stats.graph_culled_index_count, 6);
     }
 
     #[test]

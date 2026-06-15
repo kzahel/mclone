@@ -16,6 +16,242 @@ pub const QUAD_FACE_INDEX_COUNT: u32 = 6;
 pub const AIR_BLOCK_ID: u8 = 0;
 pub const CAVE_AIR_BLOCK_ID: u8 = 71;
 pub const CAVE_AIR_BLOCK_STATE_ID: BlockStateId = BlockStateId(71);
+const VIS_GRAPH_SIZE: usize = 4096;
+const VIS_GRAPH_WORD_COUNT: usize = VIS_GRAPH_SIZE / u64::BITS as usize;
+const VIS_GRAPH_MASK: usize = 15;
+const VIS_GRAPH_LIGHT_OPAQUE_THRESHOLD: usize = 256;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
+pub enum SectionFace {
+    Down = 0,
+    Up = 1,
+    North = 2,
+    South = 3,
+    West = 4,
+    East = 5,
+}
+
+impl SectionFace {
+    pub const ALL: [Self; 6] = [
+        Self::Down,
+        Self::Up,
+        Self::North,
+        Self::South,
+        Self::West,
+        Self::East,
+    ];
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn mask(self) -> u8 {
+        1 << self.index()
+    }
+
+    pub fn opposite(self) -> Self {
+        match self {
+            Self::Down => Self::Up,
+            Self::Up => Self::Down,
+            Self::North => Self::South,
+            Self::South => Self::North,
+            Self::West => Self::East,
+            Self::East => Self::West,
+        }
+    }
+
+    pub fn section_delta(self) -> [i32; 3] {
+        match self {
+            Self::Down => [0, -1, 0],
+            Self::Up => [0, 1, 0],
+            Self::North => [0, 0, -1],
+            Self::South => [0, 0, 1],
+            Self::West => [-1, 0, 0],
+            Self::East => [1, 0, 0],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VisibilitySet {
+    bits: u64,
+}
+
+impl VisibilitySet {
+    const FACE_COUNT: usize = SectionFace::ALL.len();
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn all_visible() -> Self {
+        let mut visibility = Self::new();
+        visibility.set_all(true);
+        visibility
+    }
+
+    pub fn set_all(&mut self, value: bool) {
+        if value {
+            self.bits = (1_u64 << (Self::FACE_COUNT * Self::FACE_COUNT)) - 1;
+        } else {
+            self.bits = 0;
+        }
+    }
+
+    pub fn add_faces(&mut self, faces: u8) {
+        for first in SectionFace::ALL {
+            if faces & first.mask() == 0 {
+                continue;
+            }
+            for second in SectionFace::ALL {
+                if faces & second.mask() != 0 {
+                    self.set(first, second, true);
+                }
+            }
+        }
+    }
+
+    pub fn set(&mut self, first: SectionFace, second: SectionFace, value: bool) {
+        self.set_one_way(first, second, value);
+        self.set_one_way(second, first, value);
+    }
+
+    pub fn visibility_between(self, first: SectionFace, second: SectionFace) -> bool {
+        self.bits & Self::pair_bit(first, second) != 0
+    }
+
+    pub fn bits(self) -> u64 {
+        self.bits
+    }
+
+    fn set_one_way(&mut self, first: SectionFace, second: SectionFace, value: bool) {
+        let bit = Self::pair_bit(first, second);
+        if value {
+            self.bits |= bit;
+        } else {
+            self.bits &= !bit;
+        }
+    }
+
+    fn pair_bit(first: SectionFace, second: SectionFace) -> u64 {
+        let index = first.index() + second.index() * Self::FACE_COUNT;
+        1_u64 << index
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VisGraph {
+    bitset: [u64; VIS_GRAPH_WORD_COUNT],
+    empty: usize,
+}
+
+impl Default for VisGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VisGraph {
+    pub fn new() -> Self {
+        Self {
+            bitset: [0; VIS_GRAPH_WORD_COUNT],
+            empty: VIS_GRAPH_SIZE,
+        }
+    }
+
+    pub fn index(local_x: usize, local_y: usize, local_z: usize) -> usize {
+        debug_assert!(local_x < 16);
+        debug_assert!(local_y < 16);
+        debug_assert!(local_z < 16);
+        local_x | (local_z << 4) | (local_y << 8)
+    }
+
+    pub fn set_opaque_local(&mut self, local_x: usize, local_y: usize, local_z: usize) {
+        self.set_opaque_index(Self::index(local_x, local_y, local_z));
+    }
+
+    pub fn set_opaque_index(&mut self, index: usize) {
+        debug_assert!(index < VIS_GRAPH_SIZE);
+        let word = index / u64::BITS as usize;
+        let bit = 1_u64 << (index % u64::BITS as usize);
+        if self.bitset[word] & bit == 0 {
+            self.bitset[word] |= bit;
+            self.empty -= 1;
+        }
+    }
+
+    pub fn opaque_count(&self) -> usize {
+        VIS_GRAPH_SIZE - self.empty
+    }
+
+    pub fn resolve(mut self) -> VisibilitySet {
+        let mut visibility = VisibilitySet::new();
+        if self.opaque_count() < VIS_GRAPH_LIGHT_OPAQUE_THRESHOLD {
+            visibility.set_all(true);
+        } else if self.empty == 0 {
+            visibility.set_all(false);
+        } else {
+            for x in 0..16 {
+                for y in 0..16 {
+                    for z in 0..16 {
+                        if x != 0
+                            && x != VIS_GRAPH_MASK
+                            && y != 0
+                            && y != VIS_GRAPH_MASK
+                            && z != 0
+                            && z != VIS_GRAPH_MASK
+                        {
+                            continue;
+                        }
+                        let index = Self::index(x, y, z);
+                        if !self.is_set(index) {
+                            let faces = self.flood_fill(index);
+                            visibility.add_faces(faces);
+                        }
+                    }
+                }
+            }
+        }
+
+        visibility
+    }
+
+    fn flood_fill(&mut self, start: usize) -> u8 {
+        let mut faces = 0_u8;
+        let mut queue = [0_usize; VIS_GRAPH_SIZE];
+        let mut read = 0_usize;
+        let mut write = 0_usize;
+        queue[write] = start;
+        write += 1;
+        self.set_opaque_index(start);
+
+        while read < write {
+            let index = queue[read];
+            read += 1;
+            faces |= edge_faces(index);
+
+            for face in SectionFace::ALL {
+                let Some(neighbor_index) = neighbor_index_at_face(index, face) else {
+                    continue;
+                };
+                if !self.is_set(neighbor_index) {
+                    self.set_opaque_index(neighbor_index);
+                    queue[write] = neighbor_index;
+                    write += 1;
+                }
+            }
+        }
+
+        faces
+    }
+
+    fn is_set(&self, index: usize) -> bool {
+        let word = index / u64::BITS as usize;
+        let bit = 1_u64 << (index % u64::BITS as usize);
+        self.bitset[word] & bit != 0
+    }
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SectionMeshStats {
@@ -114,6 +350,7 @@ impl RenderSectionKey {
 pub struct TexturedRenderSectionMesh {
     pub key: RenderSectionKey,
     pub mesh: TexturedVisibleChunkMesh,
+    pub visibility: VisibilitySet,
 }
 
 impl TexturedRenderSectionMesh {
@@ -456,6 +693,8 @@ fn build_textured_render_sections_for_chunks(
         for local_y_start in (0..input.height).step_by(RENDER_SECTION_HEIGHT as usize) {
             let local_y_end = (local_y_start + RENDER_SECTION_HEIGHT).min(input.height);
             let mut mesh = TexturedVisibleChunkMesh::default();
+            let visibility =
+                build_textured_section_visibility(*input, catalog, local_y_start, local_y_end);
             add_textured_chunk_range_to_mesh(
                 &mut mesh,
                 *input,
@@ -464,19 +703,42 @@ fn build_textured_render_sections_for_chunks(
                 local_y_start,
                 local_y_end,
             )?;
-            if !mesh.is_empty() {
-                sections.push(TexturedRenderSectionMesh {
-                    key: RenderSectionKey::new(
-                        input.chunk_x,
-                        (input.min_y + local_y_start).div_euclid(RENDER_SECTION_HEIGHT),
-                        input.chunk_z,
-                    ),
-                    mesh,
-                });
-            }
+            sections.push(TexturedRenderSectionMesh {
+                key: RenderSectionKey::new(
+                    input.chunk_x,
+                    (input.min_y + local_y_start).div_euclid(RENDER_SECTION_HEIGHT),
+                    input.chunk_z,
+                ),
+                mesh,
+                visibility,
+            });
         }
     }
     Ok(sections)
+}
+
+fn build_textured_section_visibility(
+    input: TexturedChunkMeshInput<'_>,
+    catalog: &TexturedMeshCatalog,
+    local_y_start: i32,
+    local_y_end: i32,
+) -> VisibilitySet {
+    let mut graph = VisGraph::new();
+    for local_y in local_y_start..local_y_end {
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                let state_id = input.block_at_or_air(local_x, local_y, local_z);
+                if catalog.occludes(state_id) {
+                    graph.set_opaque_local(
+                        local_x as usize,
+                        (local_y - local_y_start) as usize,
+                        local_z as usize,
+                    );
+                }
+            }
+        }
+    }
+    graph.resolve()
 }
 
 fn add_chunk_to_mesh(
@@ -917,6 +1179,79 @@ fn direction_offset(direction: ModelFaceDirection) -> [i32; 3] {
     }
 }
 
+fn edge_faces(index: usize) -> u8 {
+    let mut faces = 0_u8;
+    let x = index & VIS_GRAPH_MASK;
+    if x == 0 {
+        faces |= SectionFace::West.mask();
+    } else if x == VIS_GRAPH_MASK {
+        faces |= SectionFace::East.mask();
+    }
+
+    let y = (index >> 8) & VIS_GRAPH_MASK;
+    if y == 0 {
+        faces |= SectionFace::Down.mask();
+    } else if y == VIS_GRAPH_MASK {
+        faces |= SectionFace::Up.mask();
+    }
+
+    let z = (index >> 4) & VIS_GRAPH_MASK;
+    if z == 0 {
+        faces |= SectionFace::North.mask();
+    } else if z == VIS_GRAPH_MASK {
+        faces |= SectionFace::South.mask();
+    }
+
+    faces
+}
+
+fn neighbor_index_at_face(index: usize, face: SectionFace) -> Option<usize> {
+    match face {
+        SectionFace::Down => {
+            if (index >> 8) & VIS_GRAPH_MASK == 0 {
+                None
+            } else {
+                Some(index - 256)
+            }
+        }
+        SectionFace::Up => {
+            if (index >> 8) & VIS_GRAPH_MASK == VIS_GRAPH_MASK {
+                None
+            } else {
+                Some(index + 256)
+            }
+        }
+        SectionFace::North => {
+            if (index >> 4) & VIS_GRAPH_MASK == 0 {
+                None
+            } else {
+                Some(index - 16)
+            }
+        }
+        SectionFace::South => {
+            if (index >> 4) & VIS_GRAPH_MASK == VIS_GRAPH_MASK {
+                None
+            } else {
+                Some(index + 16)
+            }
+        }
+        SectionFace::West => {
+            if index & VIS_GRAPH_MASK == 0 {
+                None
+            } else {
+                Some(index - 1)
+            }
+        }
+        SectionFace::East => {
+            if index & VIS_GRAPH_MASK == VIS_GRAPH_MASK {
+                None
+            } else {
+                Some(index + 1)
+            }
+        }
+    }
+}
+
 fn full_cube_occluder(faces: &[TexturedBlockFace]) -> bool {
     let mut covered = BTreeSet::new();
     for face in faces {
@@ -1038,6 +1373,178 @@ mod tests {
             block_at_world_or_air(&[ChunkMeshInput::new(-1, -1, 0, 16, &chunk)], -1, 0, -1),
             1
         );
+    }
+
+    fn assert_visibility(
+        visibility: VisibilitySet,
+        first: SectionFace,
+        second: SectionFace,
+        expected: bool,
+    ) {
+        assert_eq!(
+            visibility.visibility_between(first, second),
+            expected,
+            "visibility between {first:?} and {second:?}"
+        );
+        assert_eq!(
+            visibility.visibility_between(second, first),
+            expected,
+            "visibility between {second:?} and {first:?}"
+        );
+    }
+
+    #[test]
+    fn vis_graph_index_packing_matches_minecraft() {
+        assert_eq!(VisGraph::index(0, 0, 0), 0);
+        assert_eq!(VisGraph::index(1, 0, 0), 1);
+        assert_eq!(VisGraph::index(0, 0, 1), 16);
+        assert_eq!(VisGraph::index(0, 1, 0), 256);
+        assert_eq!(VisGraph::index(15, 15, 15), 4095);
+    }
+
+    #[test]
+    fn vis_graph_empty_and_lightly_opaque_sections_are_all_visible() {
+        let empty = VisGraph::new().resolve();
+        for first in SectionFace::ALL {
+            for second in SectionFace::ALL {
+                assert_visibility(empty, first, second, true);
+            }
+        }
+
+        let mut graph = VisGraph::new();
+        for x in 0..15 {
+            for z in 0..15 {
+                graph.set_opaque_local(x, 0, z);
+            }
+        }
+        assert_eq!(graph.opaque_count(), 225);
+        let light = graph.resolve();
+        for first in SectionFace::ALL {
+            for second in SectionFace::ALL {
+                assert_visibility(light, first, second, true);
+            }
+        }
+    }
+
+    #[test]
+    fn vis_graph_solid_section_has_no_face_visibility() {
+        let mut graph = VisGraph::new();
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    graph.set_opaque_local(x, y, z);
+                }
+            }
+        }
+
+        let visibility = graph.resolve();
+        for first in SectionFace::ALL {
+            for second in SectionFace::ALL {
+                assert_visibility(visibility, first, second, false);
+            }
+        }
+    }
+
+    #[test]
+    fn vis_graph_solid_wall_splits_west_from_east() {
+        let mut graph = VisGraph::new();
+        for y in 0..16 {
+            for z in 0..16 {
+                graph.set_opaque_local(8, y, z);
+            }
+        }
+
+        let visibility = graph.resolve();
+        assert_visibility(visibility, SectionFace::West, SectionFace::East, false);
+        assert_visibility(visibility, SectionFace::West, SectionFace::Down, true);
+        assert_visibility(visibility, SectionFace::East, SectionFace::Down, true);
+        assert_visibility(visibility, SectionFace::North, SectionFace::South, true);
+        assert_visibility(visibility, SectionFace::Down, SectionFace::Up, true);
+    }
+
+    #[test]
+    fn vis_graph_tunnel_through_solid_section_only_connects_tunnel_faces() {
+        let mut graph = VisGraph::new();
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    if y != 8 || z != 8 {
+                        graph.set_opaque_local(x, y, z);
+                    }
+                }
+            }
+        }
+
+        let visibility = graph.resolve();
+        assert_visibility(visibility, SectionFace::West, SectionFace::East, true);
+        assert_visibility(visibility, SectionFace::West, SectionFace::Down, false);
+        assert_visibility(visibility, SectionFace::East, SectionFace::Up, false);
+        assert_visibility(visibility, SectionFace::North, SectionFace::South, false);
+    }
+
+    #[test]
+    fn vis_graph_enclosed_cavity_has_no_outer_face_visibility() {
+        let mut graph = VisGraph::new();
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    if x != 8 || y != 8 || z != 8 {
+                        graph.set_opaque_local(x, y, z);
+                    }
+                }
+            }
+        }
+
+        let visibility = graph.resolve();
+        for first in SectionFace::ALL {
+            for second in SectionFace::ALL {
+                assert_visibility(visibility, first, second, false);
+            }
+        }
+    }
+
+    #[test]
+    fn vis_graph_matches_java_oracle_synthetic_cases() {
+        let fixture = include_str!("../../../../test/fixtures/render/visgraph-synthetic.json");
+        let json: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        assert_eq!(json["module"], "visgraph");
+        assert_eq!(
+            json["faceOrder"],
+            serde_json::json!(["down", "up", "north", "south", "west", "east"])
+        );
+
+        let cases = json["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 6);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let mut graph = VisGraph::new();
+            for opaque in case["opaque"].as_array().unwrap() {
+                let cell = opaque.as_array().unwrap();
+                graph.set_opaque_local(
+                    cell[0].as_u64().unwrap() as usize,
+                    cell[1].as_u64().unwrap() as usize,
+                    cell[2].as_u64().unwrap() as usize,
+                );
+            }
+            assert_eq!(
+                graph.opaque_count(),
+                case["opaqueCount"].as_u64().unwrap() as usize,
+                "opaque count for {name}"
+            );
+
+            let visibility = graph.resolve();
+            let rows = case["visibility"].as_array().unwrap();
+            for first in SectionFace::ALL {
+                let columns = rows[first.index()].as_array().unwrap();
+                for second in SectionFace::ALL {
+                    assert_eq!(
+                        visibility.visibility_between(first, second),
+                        columns[second.index()].as_bool().unwrap(),
+                        "visibility mismatch for case {name}, {first:?} -> {second:?}"
+                    );
+                }
+            }
+        }
     }
 
     fn textured_chunk_blocks(
@@ -1196,6 +1703,12 @@ mod tests {
         assert_eq!(sections[0].stats().face_count(), 6 * 16 * 16);
         assert_eq!(sections[0].stats().vertex_count, 6 * 16 * 16 * 4);
         assert_eq!(sections[0].stats().index_count, 6 * 16 * 16 * 6);
+        assert_visibility(
+            sections[0].visibility,
+            SectionFace::North,
+            SectionFace::South,
+            false,
+        );
     }
 
     #[test]

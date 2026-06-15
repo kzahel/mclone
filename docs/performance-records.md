@@ -113,8 +113,54 @@ Timedemo, seed `12345`, chunk radius `1`, 60 frames:
 | max drawn sections | 58 |
 | average drawn indices | 281,794 |
 
+### 2026-06-15 - VisGraph Implementation Smoke
+
+Commit reported by benchmark JSON: `1edc3c9`.
+
+Note: `git_dirty=true` because this was captured while implementing native `VisGraph` / `VisibilitySet` and render traversal. Treat it as an implementation-check record, not a clean budget.
+
+Commands:
+
+```bash
+pnpm --silent native:movement:smoke
+pnpm --silent native:timedemo:smoke
+```
+
+Movement/loading, seed `12345`, chunk radius `1`, 12-step circular path:
+
+| Metric | Value |
+|---|---:|
+| total elapsed | 1565.930 ms |
+| graph-cull-enabled steps | 12 / 12 |
+| frustum sections range | 13-23 |
+| graph-drawn sections range | 3-13 |
+| graph-culled sections range | 3-18 |
+| frustum faces range | 6,863-22,315 |
+| graph-drawn faces range | 783-13,114 |
+| graph-culled indices range | 9,432-77,820 |
+
+Timedemo, seed `12345`, chunk radius `1`, 60 frames:
+
+| Metric | Value |
+|---|---:|
+| loaded chunk radius | 4 |
+| scene build | 1024.147 ms |
+| render setup | 74.344 ms |
+| average frame | 1.979 ms |
+| min frame | 1.610 ms |
+| max frame | 13.359 ms |
+| graph-cull-enabled frames | 60 / 60 |
+| average frustum sections | 393.717 |
+| average drawn sections | 89.783 |
+| average graph-culled sections | 303.933 |
+| average frustum indices | 1,474,974.9 |
+| average drawn indices | 440,756.4 |
+| average graph-culled indices | 1,034,218.5 |
+
+Observation: movement cameras exercise the graph on every step after retaining empty-section visibility records for traversal. Timedemo now loads an effective static scene radius of `max(chunk_radius, path_radius_chunks)`, so the default radius-4 orbit stays inside retained sections and exercises graph culling on every frame.
+
 ## Near-Term Perf Questions
 
-- Re-run the three-lane smoke after Java `VisGraph` / `VisibilitySet` culling lands. Expected movement/timedemo changes should show lower drawn section/index pressure; worldgen should be unchanged.
+- Keep tracking whether graph culling is enabled for each camera lane. Movement and timedemo now both exercise the graph; outside-retained-section traversal seeding is still a separate Java-parity follow-up for ad-hoc camera paths.
 - Add release records before enforcing budgets.
 - Add larger radius/view-distance variants once radius `1` is stable enough to avoid hiding regressions in bootstrap noise.
