@@ -3908,6 +3908,7 @@ struct ChunkApp {
     gui: Option<GuiRenderer>,
     pressed_keys: std::collections::HashSet<KeyCode>,
     mouse_locked: bool,
+    mouse_lock_requested: bool,
     last_cursor: Option<(f64, f64)>,
     debug_visible: bool,
     last_frame: Instant,
@@ -3936,6 +3937,7 @@ impl ChunkApp {
             gui: None,
             pressed_keys: std::collections::HashSet::new(),
             mouse_locked: false,
+            mouse_lock_requested: false,
             last_cursor: None,
             debug_visible: false,
             last_frame: Instant::now(),
@@ -4009,7 +4011,14 @@ impl ChunkApp {
         self.gui_scale().map(|scale| scale.client_to_gui(x, y))
     }
 
-    fn apply_ui_action(&mut self, action: NativeUiAction, event_loop: &ActiveEventLoop) {
+    fn apply_ui_action(
+        &mut self,
+        action: NativeUiAction,
+        event_loop: &ActiveEventLoop,
+        from_pointer_click: bool,
+    ) {
+        let should_arm_mouse_lock = from_pointer_click
+            && matches!(action, NativeUiAction::StartWorld | NativeUiAction::Resume);
         match action {
             NativeUiAction::ToggleSectionOcclusion => {
                 self.render_options.section_occlusion_culling =
@@ -4062,6 +4071,9 @@ impl ChunkApp {
             | NativeUiAction::BackToPause => {}
         }
         self.ui.apply_action(action);
+        if should_arm_mouse_lock {
+            self.mouse_lock_requested = true;
+        }
         self.pressed_keys.clear();
         self.last_cursor = None;
         self.sync_mouse_lock();
@@ -4069,7 +4081,7 @@ impl ChunkApp {
     }
 
     fn sync_mouse_lock(&mut self) {
-        self.set_mouse_lock(!self.ui.is_active());
+        self.set_mouse_lock(self.mouse_lock_requested && !self.ui.is_active());
     }
 
     fn set_mouse_lock(&mut self, should_lock: bool) {
@@ -4367,7 +4379,7 @@ impl ApplicationHandler for ChunkApp {
                     if event.state == ElementState::Pressed && self.ui.is_active() {
                         let (handled, action) = self.ui.key_pressed(key_code);
                         if let Some(action) = action {
-                            self.apply_ui_action(action, event_loop);
+                            self.apply_ui_action(action, event_loop, false);
                         } else if handled {
                             self.request_redraw();
                         }
@@ -4377,6 +4389,7 @@ impl ApplicationHandler for ChunkApp {
                         && event.state == ElementState::Pressed
                         && !event.repeat
                     {
+                        self.mouse_lock_requested = false;
                         self.ui.open_pause();
                         self.pressed_keys.clear();
                         self.last_cursor = None;
@@ -4442,7 +4455,7 @@ impl ApplicationHandler for ChunkApp {
                                 ElementState::Released => {
                                     let (_handled, action) = self.ui.pointer_up(point);
                                     if let Some(action) = action {
-                                        self.apply_ui_action(action, event_loop);
+                                        self.apply_ui_action(action, event_loop, true);
                                         return;
                                     }
                                 }
@@ -4452,7 +4465,12 @@ impl ApplicationHandler for ChunkApp {
                     }
                     return;
                 }
-                if button == MouseButton::Left || button == MouseButton::Right {
+                if state == ElementState::Pressed {
+                    self.mouse_lock_requested = true;
+                    self.last_cursor = None;
+                    self.sync_mouse_lock();
+                    self.request_redraw();
+                } else if button == MouseButton::Left || button == MouseButton::Right {
                     self.last_cursor = None;
                 }
             }
@@ -4466,7 +4484,7 @@ impl ApplicationHandler for ChunkApp {
                     self.request_redraw();
                     return;
                 }
-                if !self.mouse_locked {
+                if self.mouse_lock_requested && !self.mouse_locked {
                     if let Some(previous) = self.last_cursor {
                         let dx = (cursor.0 - previous.0) as f32;
                         let dy = (cursor.1 - previous.1) as f32;
@@ -4492,6 +4510,7 @@ impl ApplicationHandler for ChunkApp {
                 self.request_redraw();
             }
             WindowEvent::Focused(false) => {
+                self.mouse_lock_requested = false;
                 self.pressed_keys.clear();
                 self.last_cursor = None;
                 self.ui.clear_input();
