@@ -6,6 +6,7 @@ use mclone_server::{
     ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics, MAX_CHUNK_DISTANCE,
     PLAYER_TICKET_LEVEL,
 };
+use mclone_worldgen::feature::DecorationStep;
 use mclone_worldgen::levelgen::OverworldFeatureBatchTiming;
 
 const DEFAULT_SEED: i64 = 12_345;
@@ -519,10 +520,37 @@ fn print_timing_json(indent: &str, timing: OverworldFeatureBatchTiming, trailing
         "{indent}  \"feature_decoration_ms\": {:.3},",
         micros_to_ms(timing.feature_decoration_us)
     );
+    print_decoration_steps_json(
+        &format!("{indent}  "),
+        timing.feature_decoration_steps,
+        true,
+    );
     println!(
         "{indent}  \"target_extract_ms\": {:.3}",
         micros_to_ms(timing.target_extract_us)
     );
+    let suffix = if trailing_comma { "," } else { "" };
+    println!("{indent}}}{suffix}");
+}
+
+fn print_decoration_steps_json(
+    indent: &str,
+    timing: mclone_worldgen::feature::FeatureDecorationTiming,
+    trailing_comma: bool,
+) {
+    println!("{indent}\"feature_decoration_steps\": {{");
+    for (index, step) in DecorationStep::ALL.iter().copied().enumerate() {
+        let suffix = if index + 1 == DecorationStep::COUNT {
+            ""
+        } else {
+            ","
+        };
+        println!(
+            "{indent}  \"{}\": {:.3}{suffix}",
+            step.key(),
+            micros_to_ms(timing.step_us[index])
+        );
+    }
     let suffix = if trailing_comma { "," } else { "" };
     println!("{indent}}}{suffix}");
 }

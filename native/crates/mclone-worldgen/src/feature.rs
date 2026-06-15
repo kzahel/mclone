@@ -1,5 +1,8 @@
 use std::sync::OnceLock;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+
 use crate::biome::{BiomeDefinition, OverworldBiomeSource};
 use crate::block::{
     AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, COAL_ORE, COARSE_DIRT, COPPER_ORE, DANDELION,
@@ -59,6 +62,20 @@ pub enum DecorationStep {
 }
 
 impl DecorationStep {
+    pub const COUNT: usize = 10;
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::RawGeneration,
+        Self::Lakes,
+        Self::LocalModifications,
+        Self::UndergroundStructures,
+        Self::SurfaceStructures,
+        Self::Strongholds,
+        Self::UndergroundOres,
+        Self::UndergroundDecoration,
+        Self::VegetalDecoration,
+        Self::TopLayerModification,
+    ];
+
     pub const fn index(self) -> i32 {
         match self {
             Self::RawGeneration => 0,
@@ -71,6 +88,38 @@ impl DecorationStep {
             Self::UndergroundDecoration => 7,
             Self::VegetalDecoration => 8,
             Self::TopLayerModification => 9,
+        }
+    }
+
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::RawGeneration => "raw_generation",
+            Self::Lakes => "lakes",
+            Self::LocalModifications => "local_modifications",
+            Self::UndergroundStructures => "underground_structures",
+            Self::SurfaceStructures => "surface_structures",
+            Self::Strongholds => "strongholds",
+            Self::UndergroundOres => "underground_ores",
+            Self::UndergroundDecoration => "underground_decoration",
+            Self::VegetalDecoration => "vegetal_decoration",
+            Self::TopLayerModification => "top_layer_modification",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FeatureDecorationTiming {
+    pub step_us: [u128; DecorationStep::COUNT],
+}
+
+impl FeatureDecorationTiming {
+    pub fn total_us(self) -> u128 {
+        self.step_us.iter().sum()
+    }
+
+    pub fn add_assign(&mut self, other: Self) {
+        for (target, value) in self.step_us.iter_mut().zip(other.step_us) {
+            *target += value;
         }
     }
 }
@@ -1427,6 +1476,12 @@ pub struct DecorationReport {
     pub added_non_air_blocks: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TimedDecorationReport {
+    pub report: DecorationReport,
+    pub timing: FeatureDecorationTiming,
+}
+
 pub fn apply_overworld_biome_decoration(
     seed: i64,
     biome_source: &OverworldBiomeSource,
@@ -1434,7 +1489,7 @@ pub fn apply_overworld_biome_decoration(
 ) -> DecorationReport {
     let biome = chunk_primary_biome(biome_source, chunk.chunk_x, chunk.chunk_z);
     let biomes = OverworldFeatureBiomeResolver::new(seed, biome_source);
-    apply_overworld_biome_features_with_biomes(seed, biome, &biomes, chunk)
+    apply_overworld_biome_features_with_biomes_timed(seed, biome, &biomes, chunk, true).report
 }
 
 pub fn apply_overworld_biome_decoration_to_region(
@@ -1448,7 +1503,21 @@ pub fn apply_overworld_biome_decoration_to_region(
         region.center_chunk_z(),
     );
     let biomes = OverworldFeatureBiomeResolver::new(seed, biome_source);
-    apply_overworld_biome_features_with_biomes(seed, biome, &biomes, region)
+    apply_overworld_biome_features_with_biomes_timed(seed, biome, &biomes, region, true).report
+}
+
+pub(crate) fn apply_overworld_biome_decoration_to_region_timed(
+    seed: i64,
+    biome_source: &OverworldBiomeSource,
+    region: &mut FeatureRegion,
+) -> TimedDecorationReport {
+    let biome = chunk_primary_biome(
+        biome_source,
+        region.center_chunk_x(),
+        region.center_chunk_z(),
+    );
+    let biomes = OverworldFeatureBiomeResolver::new(seed, biome_source);
+    apply_overworld_biome_features_with_biomes_timed(seed, biome, &biomes, region, false)
 }
 
 pub fn apply_overworld_biome_features<W: FeatureWorld>(
@@ -1457,16 +1526,21 @@ pub fn apply_overworld_biome_features<W: FeatureWorld>(
     world: &mut W,
 ) -> DecorationReport {
     let biomes = ConstantFeatureBiomeResolver::new(biome);
-    apply_overworld_biome_features_with_biomes(seed, biome, &biomes, world)
+    apply_overworld_biome_features_with_biomes_timed(seed, biome, &biomes, world, true).report
 }
 
-fn apply_overworld_biome_features_with_biomes<W: FeatureWorld, B: FeatureBiomeResolver>(
+fn apply_overworld_biome_features_with_biomes_timed<W: FeatureWorld, B: FeatureBiomeResolver>(
     seed: i64,
     biome: BiomeDefinition,
     biomes: &B,
     world: &mut W,
-) -> DecorationReport {
-    let before = world.non_air_block_count();
+    count_added_blocks: bool,
+) -> TimedDecorationReport {
+    let before = if count_added_blocks {
+        world.non_air_block_count()
+    } else {
+        0
+    };
     let min_block_x = world.center_chunk_x() * CHUNK_WIDTH;
     let min_block_z = world.center_chunk_z() * CHUNK_WIDTH;
     let origin = BlockPos::new(min_block_x, world.min_y(), min_block_z);
@@ -1474,9 +1548,12 @@ fn apply_overworld_biome_features_with_biomes<W: FeatureWorld, B: FeatureBiomeRe
     let mut random = WorldgenRandom::default();
     let decoration_seed = random.set_decoration_seed(seed, min_block_x, min_block_z);
     let mut placed_features = 0;
+    let mut timing = FeatureDecorationTiming::default();
 
-    for step_index in 0..=DecorationStep::TopLayerModification.index() {
+    for step in DecorationStep::ALL {
+        let step_index = step.index();
         let mut feature_index = 0;
+        let step_start = feature_timing_start();
         for feature in features
             .iter()
             .filter(|feature| feature.step.index() == step_index)
@@ -1487,13 +1564,21 @@ fn apply_overworld_biome_features_with_biomes<W: FeatureWorld, B: FeatureBiomeRe
             }
             feature_index += 1;
         }
+        timing.step_us[step_index as usize] += feature_timing_elapsed_us(step_start);
     }
 
-    DecorationReport {
-        biome_key: biome.key(),
-        attempted_features: features.len(),
-        placed_features,
-        added_non_air_blocks: world.non_air_block_count().saturating_sub(before),
+    TimedDecorationReport {
+        report: DecorationReport {
+            biome_key: biome.key(),
+            attempted_features: features.len(),
+            placed_features,
+            added_non_air_blocks: if count_added_blocks {
+                world.non_air_block_count().saturating_sub(before)
+            } else {
+                0
+            },
+        },
+        timing,
     }
 }
 
@@ -3444,6 +3529,26 @@ fn region_chunk_index(
     local_z
         .checked_mul(chunk_width)
         .and_then(|row| row.checked_add(local_x))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn feature_timing_start() -> Option<Instant> {
+    Some(Instant::now())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn feature_timing_start() -> Option<()> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn feature_timing_elapsed_us(start: Option<Instant>) -> u128 {
+    start.map_or(0, |start| start.elapsed().as_micros())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn feature_timing_elapsed_us(_start: Option<()>) -> u128 {
+    0
 }
 
 fn ceil_f32(value: f32) -> i32 {

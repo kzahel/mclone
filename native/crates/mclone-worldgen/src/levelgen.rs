@@ -10,8 +10,8 @@ use crate::block::{
 };
 use crate::carver::{apply_overworld_air_carvers, apply_overworld_liquid_carvers};
 use crate::feature::{
-    FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF, FeatureRegion,
-    apply_overworld_biome_decoration_to_region,
+    FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF, FeatureDecorationTiming,
+    FeatureRegion, apply_overworld_biome_decoration_to_region_timed,
 };
 use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
 use crate::placement::HeightmapType;
@@ -1308,6 +1308,7 @@ pub struct OverworldFeatureBatchTiming {
     pub retained_dependency_clone_us: u128,
     pub feature_region_init_us: u128,
     pub feature_decoration_us: u128,
+    pub feature_decoration_steps: FeatureDecorationTiming,
     pub target_extract_us: u128,
 }
 
@@ -1335,6 +1336,8 @@ impl OverworldFeatureBatchTiming {
         self.retained_dependency_clone_us += other.retained_dependency_clone_us;
         self.feature_region_init_us += other.feature_region_init_us;
         self.feature_decoration_us += other.feature_decoration_us;
+        self.feature_decoration_steps
+            .add_assign(other.feature_decoration_steps);
         self.target_extract_us += other.target_extract_us;
     }
 }
@@ -1493,7 +1496,9 @@ fn generate_overworld_features_chunks_from_plan_timed(
     let decoration_start = timing_start();
     for center in plan.ordered_feature_centers() {
         region.set_center(center.x, center.z);
-        apply_overworld_biome_decoration_to_region(seed, biome_source, &mut region);
+        let report =
+            apply_overworld_biome_decoration_to_region_timed(seed, biome_source, &mut region);
+        timing.feature_decoration_steps.add_assign(report.timing);
     }
     timing.feature_decoration_us = timing_elapsed_us(decoration_start);
 
