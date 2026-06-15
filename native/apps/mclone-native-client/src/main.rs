@@ -20,8 +20,8 @@ use mclone_mesh::{
 use mclone_net::{LocalTransport, request_server_updates};
 use mclone_protocol::{ChunkInterest, ServerUpdate};
 use mclone_render::chunk::{
-    ChunkCamera, ChunkRenderTarget, ChunkTextureAtlas, TexturedSectionDrawResources,
-    textured_section_visibility_stats,
+    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
+    TexturedSectionDrawResources, textured_section_visibility_stats,
 };
 use mclone_render::headless::{
     HeadlessChunkOptions, HeadlessClearOptions, write_headless_clear_png,
@@ -1398,6 +1398,7 @@ struct ChunkApp {
     spectator: SpectatorCamera,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
+    depth: Option<ChunkDepthTarget>,
     draw: Option<TexturedSectionDrawResources>,
     pressed_keys: std::collections::HashSet<KeyCode>,
     look_dragging: bool,
@@ -1414,6 +1415,7 @@ impl ChunkApp {
             spectator,
             window: None,
             surface: None,
+            depth: None,
             draw: None,
             pressed_keys: std::collections::HashSet::new(),
             look_dragging: false,
@@ -1584,12 +1586,12 @@ impl ApplicationHandler for ChunkApp {
         };
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let upload_start = Instant::now();
+        let depth =
+            ChunkDepthTarget::new(&surface.device, surface.config.width, surface.config.height);
         let draw = match TexturedSectionDrawResources::new(
             &surface.device,
             &surface.queue,
             surface.config.format,
-            surface.config.width,
-            surface.config.height,
             &sections,
             self.runtime.mesh_assets.atlas.as_upload(),
         ) {
@@ -1614,6 +1616,7 @@ impl ApplicationHandler for ChunkApp {
             remesh_ms,
             upload_ms
         );
+        self.depth = Some(depth);
         self.draw = Some(draw);
         self.surface = Some(surface);
         self.window = Some(window);
@@ -1628,8 +1631,8 @@ impl ApplicationHandler for ChunkApp {
                 if let Some(surface) = &mut self.surface {
                     surface.resize(size);
                 }
-                if let (Some(surface), Some(draw)) = (&self.surface, &mut self.draw) {
-                    draw.resize(&surface.device, surface.config.width, surface.config.height);
+                if let (Some(surface), Some(depth)) = (&self.surface, &mut self.depth) {
+                    depth.resize(&surface.device, surface.config.width, surface.config.height);
                 }
                 self.request_redraw();
             }
@@ -1699,13 +1702,16 @@ impl ApplicationHandler for ChunkApp {
                 let camera = self.spectator.camera(self.runtime.radius_chunks);
                 let mut frame_render_stats = None;
                 let result = {
-                    let (Some(surface), Some(draw)) = (&mut self.surface, &mut self.draw) else {
+                    let (Some(surface), Some(depth), Some(draw)) =
+                        (&mut self.surface, &self.depth, &mut self.draw)
+                    else {
                         return;
                     };
                     surface.render_with(|_device, queue, encoder, color_view, size| {
                         let render_view = camera.render_view(size[0], size[1]);
                         let render_target = ChunkRenderTarget::new(
                             color_view,
+                            &depth.view,
                             size,
                             mclone_render::default_clear_color(),
                         );

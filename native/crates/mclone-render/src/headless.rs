@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use mclone_mesh::{TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibleChunkMesh};
 
 use crate::chunk::{
-    ChunkCamera, ChunkDrawResources, ChunkRenderTarget, ChunkTextureAtlas,
+    ChunkCamera, ChunkDepthTarget, ChunkDrawResources, ChunkRenderTarget, ChunkTextureAtlas,
     TexturedChunkDrawResources, TexturedSectionDrawResources,
 };
 use crate::gpu_util::{native_backends, optional_gpu_features};
@@ -94,13 +94,15 @@ pub fn write_headless_chunk_png(
     let height = options.height.max(1);
     let (device, queue) = create_headless_device()?;
     let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
-    let draw = ChunkDrawResources::new(&device, HEADLESS_FORMAT, width, height, mesh)?;
+    let depth = ChunkDepthTarget::new(&device, width, height);
+    let draw = ChunkDrawResources::new(&device, HEADLESS_FORMAT, mesh)?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_chunk_encoder"),
     });
     let render_view = options.camera.render_view(width, height);
-    let render_target = ChunkRenderTarget::new(&target.view, [width, height], options.color);
+    let render_target =
+        ChunkRenderTarget::new(&target.view, &depth.view, [width, height], options.color);
     draw.render(&queue, &mut encoder, render_target, render_view)?;
     queue.submit(std::iter::once(encoder.finish()));
 
@@ -127,21 +129,15 @@ pub fn write_headless_textured_chunk_png(
     let height = options.height.max(1);
     let (device, queue) = create_headless_device()?;
     let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
-    let draw = TexturedChunkDrawResources::new(
-        &device,
-        &queue,
-        HEADLESS_FORMAT,
-        width,
-        height,
-        mesh,
-        atlas,
-    )?;
+    let depth = ChunkDepthTarget::new(&device, width, height);
+    let draw = TexturedChunkDrawResources::new(&device, &queue, HEADLESS_FORMAT, mesh, atlas)?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_textured_chunk_encoder"),
     });
     let render_view = options.camera.render_view(width, height);
-    let render_target = ChunkRenderTarget::new(&target.view, [width, height], options.color);
+    let render_target =
+        ChunkRenderTarget::new(&target.view, &depth.view, [width, height], options.color);
     draw.render(&queue, &mut encoder, render_target, render_view)?;
     queue.submit(std::iter::once(encoder.finish()));
 
@@ -168,21 +164,16 @@ pub fn write_headless_textured_sections_png(
     let height = options.height.max(1);
     let (device, queue) = create_headless_device()?;
     let target = OffscreenTarget::new(&device, width, height, HEADLESS_FORMAT);
-    let draw = TexturedSectionDrawResources::new(
-        &device,
-        &queue,
-        HEADLESS_FORMAT,
-        width,
-        height,
-        sections,
-        atlas,
-    )?;
+    let depth = ChunkDepthTarget::new(&device, width, height);
+    let draw =
+        TexturedSectionDrawResources::new(&device, &queue, HEADLESS_FORMAT, sections, atlas)?;
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_headless_textured_sections_encoder"),
     });
     let render_view = options.camera.render_view(width, height);
-    let render_target = ChunkRenderTarget::new(&target.view, [width, height], options.color);
+    let render_target =
+        ChunkRenderTarget::new(&target.view, &depth.view, [width, height], options.color);
     draw.render(&queue, &mut encoder, render_target, render_view)?;
     queue.submit(std::iter::once(encoder.finish()));
 

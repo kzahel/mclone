@@ -61,25 +61,30 @@ impl ChunkCamera {
     }
 
     pub fn render_view(self, width: u32, height: u32) -> ChunkRenderView {
-        ChunkRenderView {
-            view_projection: self.view_projection_matrix(width, height),
-        }
-    }
-
-    fn view_projection_matrix(self, width: u32, height: u32) -> Mat4 {
         let aspect = width.max(1) as f32 / height.max(1) as f32;
-        let view = Mat4::look_at_rh(
-            Vec3::from_array(self.eye),
-            Vec3::from_array(self.target),
-            Vec3::from_array(self.up),
-        );
-        let projection = Mat4::perspective_rh(
-            self.fov_y_radians,
-            aspect.max(0.01),
-            self.z_near,
-            self.z_far,
-        );
-        projection * view
+        let aspect = aspect.max(0.01);
+        let eye = Vec3::from_array(self.eye);
+        let target = Vec3::from_array(self.target);
+        let world_up = Vec3::from_array(self.up);
+        let view = Mat4::look_at_rh(eye, target, world_up);
+        let projection = Mat4::perspective_rh(self.fov_y_radians, aspect, self.z_near, self.z_far);
+        let forward = (target - eye).normalize_or_zero();
+        let right = forward.cross(world_up).normalize_or_zero();
+        let up = right.cross(forward).normalize_or_zero();
+
+        ChunkRenderView {
+            view,
+            projection,
+            view_projection: projection * view,
+            camera_position: eye,
+            camera_forward: forward,
+            camera_right: right,
+            camera_up: up,
+            aspect,
+            fov_y_radians: self.fov_y_radians,
+            z_near: self.z_near,
+            z_far: self.z_far,
+        }
     }
 
     pub fn orbit(&mut self, yaw_delta: f32, pitch_delta: f32) {
@@ -142,7 +147,17 @@ impl ChunkCamera {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChunkRenderView {
+    pub view: Mat4,
+    pub projection: Mat4,
     pub view_projection: Mat4,
+    pub camera_position: Vec3,
+    pub camera_forward: Vec3,
+    pub camera_right: Vec3,
+    pub camera_up: Vec3,
+    pub aspect: f32,
+    pub fov_y_radians: f32,
+    pub z_near: f32,
+    pub z_far: f32,
 }
 
 impl ChunkRenderView {
@@ -154,6 +169,7 @@ impl ChunkRenderView {
 #[derive(Clone, Copy)]
 pub struct ChunkRenderTarget<'a> {
     pub color_view: &'a wgpu::TextureView,
+    pub depth_view: &'a wgpu::TextureView,
     pub size: [u32; 2],
     pub clear_color: wgpu::Color,
     pub clear_depth: f32,
@@ -162,11 +178,13 @@ pub struct ChunkRenderTarget<'a> {
 impl<'a> ChunkRenderTarget<'a> {
     pub fn new(
         color_view: &'a wgpu::TextureView,
+        depth_view: &'a wgpu::TextureView,
         size: [u32; 2],
         clear_color: wgpu::Color,
     ) -> Self {
         Self {
             color_view,
+            depth_view,
             size,
             clear_color,
             clear_depth: 1.0,
@@ -429,14 +447,14 @@ impl GpuChunkTextureAtlas {
     }
 }
 
-pub struct DepthTarget {
+pub struct ChunkDepthTarget {
     _texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub width: u32,
     pub height: u32,
 }
 
-impl DepthTarget {
+impl ChunkDepthTarget {
     pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
         let width = width.max(1);
         let height = height.max(1);
@@ -708,26 +726,18 @@ impl TexturedChunkRenderer {
 pub struct ChunkDrawResources {
     renderer: ChunkRenderer,
     mesh: GpuChunkMesh,
-    depth: DepthTarget,
 }
 
 impl ChunkDrawResources {
     pub fn new(
         device: &wgpu::Device,
         color_format: wgpu::TextureFormat,
-        width: u32,
-        height: u32,
         mesh: &VisibleChunkMesh,
     ) -> Result<Self> {
         Ok(Self {
             renderer: ChunkRenderer::new(device, color_format),
             mesh: GpuChunkMesh::new(device, mesh).context("failed to upload chunk mesh")?,
-            depth: DepthTarget::new(device, width, height),
         })
-    }
-
-    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        self.depth.resize(device, width, height);
     }
 
     pub fn index_count(&self) -> u32 {
@@ -758,7 +768,7 @@ impl ChunkDrawResources {
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.depth.view,
+                view: target.depth_view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(target.clear_depth),
                     store: wgpu::StoreOp::Store,
@@ -780,7 +790,6 @@ pub struct TexturedChunkDrawResources {
     renderer: TexturedChunkRenderer,
     mesh: GpuTexturedChunkMesh,
     atlas: GpuChunkTextureAtlas,
-    depth: DepthTarget,
 }
 
 impl TexturedChunkDrawResources {
@@ -788,8 +797,6 @@ impl TexturedChunkDrawResources {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
-        width: u32,
-        height: u32,
         mesh: &TexturedVisibleChunkMesh,
         atlas: ChunkTextureAtlas<'_>,
     ) -> Result<Self> {
@@ -802,12 +809,7 @@ impl TexturedChunkDrawResources {
             mesh: GpuTexturedChunkMesh::new(device, mesh)
                 .context("failed to upload textured chunk mesh")?,
             atlas,
-            depth: DepthTarget::new(device, width, height),
         })
-    }
-
-    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        self.depth.resize(device, width, height);
     }
 
     pub fn index_count(&self) -> u32 {
@@ -838,7 +840,7 @@ impl TexturedChunkDrawResources {
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.depth.view,
+                view: target.depth_view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(target.clear_depth),
                     store: wgpu::StoreOp::Store,
@@ -861,7 +863,6 @@ pub struct TexturedSectionDrawResources {
     renderer: TexturedChunkRenderer,
     sections: BTreeMap<RenderSectionKey, GpuTexturedChunkMesh>,
     atlas: GpuChunkTextureAtlas,
-    depth: DepthTarget,
 }
 
 impl TexturedSectionDrawResources {
@@ -869,8 +870,6 @@ impl TexturedSectionDrawResources {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
-        width: u32,
-        height: u32,
         sections: &[TexturedRenderSectionMesh],
         atlas: ChunkTextureAtlas<'_>,
     ) -> Result<Self> {
@@ -882,7 +881,6 @@ impl TexturedSectionDrawResources {
             renderer,
             sections: BTreeMap::new(),
             atlas,
-            depth: DepthTarget::new(device, width, height),
         };
         resources.update_sections(device, sections)?;
         Ok(resources)
@@ -912,10 +910,6 @@ impl TexturedSectionDrawResources {
             );
         }
         Ok(())
-    }
-
-    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        self.depth.resize(device, width, height);
     }
 
     pub fn section_count(&self) -> usize {
@@ -951,7 +945,7 @@ impl TexturedSectionDrawResources {
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.depth.view,
+                view: target.depth_view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(target.clear_depth),
                     store: wgpu::StoreOp::Store,
