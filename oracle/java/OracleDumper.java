@@ -6,8 +6,10 @@ import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -19,13 +21,16 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Registry;
+import net.minecraft.core.SectionPos;
 import net.minecraft.data.BuiltinRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.client.renderer.chunk.VisGraph;
 import net.minecraft.client.renderer.chunk.VisibilitySet;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.TickList;
 import net.minecraft.world.level.TickPriority;
@@ -36,9 +41,12 @@ import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.FuzzyOffsetConstantColumnBiomeZoomer;
 import net.minecraft.world.level.biome.OverworldBiomeSource;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.chunk.LightChunkGetter;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.NoiseModifier;
@@ -60,6 +68,9 @@ import net.minecraft.world.level.levelgen.synth.PerlinSimplexNoise;
 import net.minecraft.world.level.levelgen.synth.SimplexNoise;
 import net.minecraft.world.level.levelgen.synth.SurfaceNoise;
 import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.lighting.LayerLightEventListener;
+import net.minecraft.world.level.lighting.LevelLightEngine;
 
 public final class OracleDumper {
    private static final String MINECRAFT_VERSION = "1.17.1";
@@ -82,6 +93,10 @@ public final class OracleDumper {
    private static final int[] SURFACE_NOISE_OCTAVES = createIntAxis(-3, 1, 4);
    private static final int[] BLENDED_LIMIT_OCTAVES = createIntAxis(-15, 1, 16);
    private static final int[] BLENDED_MAIN_OCTAVES = createIntAxis(-7, 1, 8);
+   private static final int SYNTHETIC_LIGHT_MIN_Y = -16;
+   private static final int SYNTHETIC_LIGHT_HEIGHT = 48;
+   private static final int SYNTHETIC_LIGHT_MIN_SECTION_Y = -1;
+   private static final int SYNTHETIC_LIGHT_MAX_SECTION_Y_EXCLUSIVE = 2;
    private static final String[] SURFACE_AND_CARVED_PALETTE = new String[]{
       "minecraft:air",
       "minecraft:stone",
@@ -221,6 +236,9 @@ public final class OracleDumper {
             break;
          case "visgraph":
             json = dumpVisGraph();
+            break;
+         case "synthetic-light":
+            json = dumpSyntheticLight();
             break;
          default:
             throw new IllegalArgumentException("unsupported module '" + module + "'");
@@ -419,6 +437,266 @@ public final class OracleDumper {
       result.put("opaque", opaqueCells);
       result.put("visibility", visibilityRows(visibility));
       return result;
+   }
+
+   private static String dumpSyntheticLight() throws Exception {
+      java.io.PrintStream originalOut = System.out;
+      try {
+         System.setOut(System.err);
+         SharedConstants.tryDetectVersion();
+         Bootstrap.bootStrap();
+      } finally {
+         System.setOut(originalOut);
+      }
+
+      Map<String, Object> root = new LinkedHashMap<>();
+      root.put("module", "synthetic-light");
+      root.put("minecraftVersion", MINECRAFT_VERSION);
+      root.put("lightEngineClass", LevelLightEngine.class.getName());
+
+      Map<String, Object> level = new LinkedHashMap<>();
+      level.put("minY", SYNTHETIC_LIGHT_MIN_Y);
+      level.put("height", SYNTHETIC_LIGHT_HEIGHT);
+      level.put("minSectionY", SYNTHETIC_LIGHT_MIN_SECTION_Y);
+      level.put("maxSectionYExclusive", SYNTHETIC_LIGHT_MAX_SECTION_Y_EXCLUSIVE);
+      root.put("level", level);
+
+      Map<String, Object> blockPalette = new LinkedHashMap<>();
+      blockPalette.put("air", "minecraft:air");
+      blockPalette.put("stone", "minecraft:stone");
+      root.put("blockPalette", blockPalette);
+
+      List<Map<String, Object>> cases = new ArrayList<>();
+      cases.add(dumpSyntheticSkyCase(
+         "openColumn",
+         chunkList(new int[]{0, 0}),
+         new ArrayList<>(),
+         sampleList(new int[]{4, 15, 4}, new int[]{4, 0, 4}, new int[]{0, 0, 0}, new int[]{15, 0, 15})
+      ));
+      cases.add(dumpSyntheticSkyCase(
+         "fullRoof",
+         chunkList(new int[]{0, 0}),
+         fullRoofCells(14),
+         sampleList(new int[]{8, 15, 8}, new int[]{8, 14, 8}, new int[]{8, 13, 8}, new int[]{0, 13, 0})
+      ));
+      cases.add(dumpSyntheticSkyCase(
+         "singleOverhang",
+         chunkList(new int[]{0, 0}),
+         sampleList(new int[]{0, 14, 0}),
+         sampleList(new int[]{0, 15, 0}, new int[]{0, 14, 0}, new int[]{0, 13, 0}, new int[]{1, 13, 0}, new int[]{1, 0, 0})
+      ));
+      cases.add(dumpSyntheticSkyCase(
+         "stoneRoom",
+         chunkList(new int[]{0, 0}),
+         stoneRoomCells(3, 5, 0, 14, 3, 5),
+         sampleList(new int[]{4, 15, 4}, new int[]{4, 14, 4}, new int[]{4, 13, 4}, new int[]{2, 13, 4}, new int[]{6, 13, 4})
+      ));
+      cases.add(dumpSyntheticSkyCase(
+         "chunkBoundaryOverhang",
+         chunkList(new int[]{0, 0}, new int[]{1, 0}),
+         sampleList(new int[]{15, 14, 0}),
+         sampleList(new int[]{15, 15, 0}, new int[]{15, 14, 0}, new int[]{15, 13, 0}, new int[]{16, 13, 0}, new int[]{16, 0, 0})
+      ));
+      root.put("cases", cases);
+
+      return GSON.toJson(root) + "\n";
+   }
+
+   private static Map<String, Object> dumpSyntheticSkyCase(
+      String name,
+      List<int[]> chunks,
+      List<int[]> opaqueCells,
+      List<int[]> samplePositions
+   ) {
+      SyntheticLightLevel level = new SyntheticLightLevel(SYNTHETIC_LIGHT_MIN_Y, SYNTHETIC_LIGHT_HEIGHT);
+      LevelLightEngine engine = new LevelLightEngine(level, false, true);
+
+      for (int[] chunk : chunks) {
+         level.addChunk(chunk[0], chunk[1]);
+         for (int sectionY = SYNTHETIC_LIGHT_MIN_SECTION_Y; sectionY < SYNTHETIC_LIGHT_MAX_SECTION_Y_EXCLUSIVE; sectionY++) {
+            engine.updateSectionStatus(SectionPos.of(chunk[0], sectionY, chunk[1]), false);
+         }
+      }
+
+      for (int[] cell : opaqueCells) {
+         level.setBlock(cell[0], cell[1], cell[2], Blocks.STONE.defaultBlockState());
+      }
+
+      for (int[] chunk : chunks) {
+         engine.enableLightSources(new ChunkPos(chunk[0], chunk[1]), true);
+      }
+      runLightUntilIdle(engine);
+
+      Map<String, Object> result = new LinkedHashMap<>();
+      result.put("name", name);
+      result.put("chunks", chunks);
+      result.put("opaqueCount", opaqueCells.size());
+      result.put("opaque", opaqueCells);
+
+      List<Map<String, Object>> samples = new ArrayList<>();
+      for (int[] position : samplePositions) {
+         samples.add(lightSample(engine, position[0], position[1], position[2]));
+      }
+      result.put("samples", samples);
+
+      List<Map<String, Object>> skySections = new ArrayList<>();
+      for (int[] chunk : chunks) {
+         for (int sectionY = SYNTHETIC_LIGHT_MIN_SECTION_Y; sectionY < SYNTHETIC_LIGHT_MAX_SECTION_Y_EXCLUSIVE; sectionY++) {
+            skySections.add(lightSection(engine, chunk[0], sectionY, chunk[1]));
+         }
+      }
+      result.put("skySections", skySections);
+      return result;
+   }
+
+   private static void runLightUntilIdle(LevelLightEngine engine) {
+      for (int pass = 0; pass < 100; pass++) {
+         if (!engine.hasLightWork()) {
+            return;
+         }
+         engine.runUpdates(100_000, true, false);
+      }
+      throw new IllegalStateException("LevelLightEngine did not become idle");
+   }
+
+   private static Map<String, Object> lightSample(LevelLightEngine engine, int x, int y, int z) {
+      BlockPos pos = new BlockPos(x, y, z);
+      Map<String, Object> sample = new LinkedHashMap<>();
+      sample.put("x", x);
+      sample.put("y", y);
+      sample.put("z", z);
+      sample.put("sky", engine.getLayerListener(LightLayer.SKY).getLightValue(pos));
+      sample.put("block", engine.getLayerListener(LightLayer.BLOCK).getLightValue(pos));
+      sample.put("raw0", engine.getRawBrightness(pos, 0));
+      return sample;
+   }
+
+   private static Map<String, Object> lightSection(LevelLightEngine engine, int sectionX, int sectionY, int sectionZ) {
+      LayerLightEventListener sky = engine.getLayerListener(LightLayer.SKY);
+      DataLayer data = sky.getDataLayerData(SectionPos.of(sectionX, sectionY, sectionZ));
+      byte[] bytes = data == null ? new byte[2048] : data.getData();
+
+      Map<String, Object> section = new LinkedHashMap<>();
+      section.put("sectionX", sectionX);
+      section.put("sectionY", sectionY);
+      section.put("sectionZ", sectionZ);
+      section.put("dataHex", bytesToHex(bytes));
+      return section;
+   }
+
+   private static List<int[]> chunkList(int[]... chunks) {
+      List<int[]> result = new ArrayList<>();
+      for (int[] chunk : chunks) {
+         result.add(chunk);
+      }
+      return result;
+   }
+
+   private static List<int[]> sampleList(int[]... samples) {
+      List<int[]> result = new ArrayList<>();
+      for (int[] sample : samples) {
+         result.add(sample);
+      }
+      return result;
+   }
+
+   private static List<int[]> fullRoofCells(int y) {
+      List<int[]> cells = new ArrayList<>();
+      for (int z = 0; z < 16; z++) {
+         for (int x = 0; x < 16; x++) {
+            cells.add(new int[]{x, y, z});
+         }
+      }
+      return cells;
+   }
+
+   private static List<int[]> stoneRoomCells(int minX, int maxX, int minY, int maxY, int minZ, int maxZ) {
+      List<int[]> cells = new ArrayList<>();
+      for (int y = minY; y <= maxY; y++) {
+         for (int z = minZ; z <= maxZ; z++) {
+            for (int x = minX; x <= maxX; x++) {
+               boolean wall = x == minX || x == maxX || z == minZ || z == maxZ || y == maxY;
+               if (wall) {
+                  cells.add(new int[]{x, y, z});
+               }
+            }
+         }
+      }
+      return cells;
+   }
+
+   private static String bytesToHex(byte[] bytes) {
+      char[] result = new char[bytes.length * 2];
+      char[] alphabet = "0123456789abcdef".toCharArray();
+      for (int index = 0; index < bytes.length; index++) {
+         int value = bytes[index] & 0xFF;
+         result[index * 2] = alphabet[value >>> 4];
+         result[index * 2 + 1] = alphabet[value & 15];
+      }
+      return new String(result);
+   }
+
+   private static final class SyntheticLightLevel implements BlockGetter, LightChunkGetter {
+      private final int minY;
+      private final int height;
+      private final Set<Long> loadedChunks = new HashSet<>();
+      private final Map<Long, BlockState> blocks = new HashMap<>();
+
+      SyntheticLightLevel(int minY, int height) {
+         this.minY = minY;
+         this.height = height;
+      }
+
+      void addChunk(int chunkX, int chunkZ) {
+         this.loadedChunks.add(ChunkPos.asLong(chunkX, chunkZ));
+      }
+
+      void setBlock(int x, int y, int z, BlockState state) {
+         long key = BlockPos.asLong(x, y, z);
+         if (state.isAir()) {
+            this.blocks.remove(key);
+         } else {
+            this.blocks.put(key, state);
+         }
+      }
+
+      @Override
+      public BlockGetter getChunkForLighting(int chunkX, int chunkZ) {
+         return this.loadedChunks.contains(ChunkPos.asLong(chunkX, chunkZ)) ? this : null;
+      }
+
+      @Override
+      public BlockGetter getLevel() {
+         return this;
+      }
+
+      @Override
+      public BlockEntity getBlockEntity(BlockPos pos) {
+         return null;
+      }
+
+      @Override
+      public BlockState getBlockState(BlockPos pos) {
+         if (this.isOutsideBuildHeight(pos)) {
+            return Blocks.AIR.defaultBlockState();
+         }
+         return this.blocks.getOrDefault(pos.asLong(), Blocks.AIR.defaultBlockState());
+      }
+
+      @Override
+      public FluidState getFluidState(BlockPos pos) {
+         return this.getBlockState(pos).getFluidState();
+      }
+
+      @Override
+      public int getHeight() {
+         return this.height;
+      }
+
+      @Override
+      public int getMinBuildHeight() {
+         return this.minY;
+      }
    }
 
    private static String[] directionNames() {
@@ -2469,6 +2747,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper feature-order-trace --seed <long> --chunk-x <int> --chunk-z <int> [--generate-structures <true|false>]");
       System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full] [--generate-structures <true|false>] [--dump-chunks <true|false>] [--dump-only-target-chunk <true|false>] [--probe-blocks <x,y,z;...>] [--probe-target-tree-blocks <true|false>] [--probe-tree-candidates <true|false>] [--tree-probe-center-x <int>] [--tree-probe-center-z <int>] [--tree-probe-step-index <int>] [--tree-probe-feature-index <int>] [--probe-ore-placements <true|false>] [--ore-probe-center-x <int>] [--ore-probe-center-z <int>] [--ore-probe-step-index <int>] [--ore-probe-feature-index <int>]");
       System.err.println("  oracle-dumper visgraph --seed <long>");
+      System.err.println("  oracle-dumper synthetic-light --seed <long>");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinNoise --seed <long> --octaves <csv> --samples <path>");
       System.err.println("  oracle-dumper noise --class PerlinSimplexNoise --seed <long> --octaves <csv> --samples2d <path>");

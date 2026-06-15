@@ -3188,6 +3188,184 @@ mod tests {
         assert_eq!(sky.get(8, 8, 8), 0);
     }
 
+    #[test]
+    fn provisional_sky_light_matches_java_synthetic_fixture() {
+        let fixture = serde_json::from_str::<Value>(include_str!(
+            "../../../../test/fixtures/lighting/sky-synthetic.json"
+        ))
+        .unwrap();
+        assert_eq!(fixture["module"], "synthetic-light");
+        let min_y = fixture_i32(&fixture["level"], "minY");
+        let height = fixture_i32(&fixture["level"], "height");
+        assert_eq!(min_y, -SECTION_HEIGHT);
+        assert_eq!(height, SECTION_HEIGHT * 3);
+
+        for case_name in ["openColumn", "fullRoof", "singleOverhang", "stoneRoom"] {
+            let case = synthetic_light_case(&fixture, case_name);
+            let blocks = native_blocks_from_synthetic_light_case(case, min_y, height);
+            let sections = provisional_sky_light_sections(min_y, height, &blocks);
+
+            assert_synthetic_light_samples(case, &sections);
+            let java_section = synthetic_light_section(case, 0, 0, 0);
+            assert_eq!(
+                sky_section_hex(&sections, 0),
+                java_section["dataHex"]
+                    .as_str()
+                    .expect("synthetic light dataHex must be a string"),
+                "sky DataLayer mismatch for synthetic light case `{case_name}`"
+            );
+        }
+    }
+
+    #[test]
+    fn synthetic_light_fixture_records_cross_chunk_boundary_case() {
+        let fixture = serde_json::from_str::<Value>(include_str!(
+            "../../../../test/fixtures/lighting/sky-synthetic.json"
+        ))
+        .unwrap();
+        let case = synthetic_light_case(&fixture, "chunkBoundaryOverhang");
+
+        assert_eq!(case["skySections"].as_array().unwrap().len(), 6);
+        assert_eq!(
+            case["samples"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|sample| {
+                    fixture_i32(sample, "x") == 16
+                        && fixture_i32(sample, "y") == 13
+                        && fixture_i32(sample, "z") == 0
+                })
+                .map(|sample| fixture_i32(sample, "sky")),
+            Some(15)
+        );
+    }
+
+    fn synthetic_light_case<'a>(fixture: &'a Value, name: &str) -> &'a Value {
+        fixture["cases"]
+            .as_array()
+            .expect("synthetic light fixture cases must be an array")
+            .iter()
+            .find(|case| case["name"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("synthetic light fixture missing case `{name}`"))
+    }
+
+    fn synthetic_light_section(
+        case: &Value,
+        section_x: i32,
+        section_y: i32,
+        section_z: i32,
+    ) -> &Value {
+        case["skySections"]
+            .as_array()
+            .expect("synthetic light case skySections must be an array")
+            .iter()
+            .find(|section| {
+                fixture_i32(section, "sectionX") == section_x
+                    && fixture_i32(section, "sectionY") == section_y
+                    && fixture_i32(section, "sectionZ") == section_z
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "synthetic light case missing section ({section_x}, {section_y}, {section_z})"
+                )
+            })
+    }
+
+    fn native_blocks_from_synthetic_light_case(
+        case: &Value,
+        min_y: i32,
+        height: i32,
+    ) -> Vec<RawBlockId> {
+        let mut blocks = vec![AIR; (CHUNK_WIDTH * height * CHUNK_WIDTH) as usize];
+        for cell in case["opaque"]
+            .as_array()
+            .expect("synthetic light case opaque must be an array")
+        {
+            let coords = cell
+                .as_array()
+                .expect("synthetic light opaque cell must be an array");
+            assert_eq!(coords.len(), 3);
+            let x = coords[0].as_i64().unwrap() as i32;
+            let y = coords[1].as_i64().unwrap() as i32;
+            let z = coords[2].as_i64().unwrap() as i32;
+            assert!((0..CHUNK_WIDTH).contains(&x));
+            assert!((min_y..min_y + height).contains(&y));
+            assert!((0..CHUNK_WIDTH).contains(&z));
+            blocks[chunk_block_index(x, y - min_y, z)] = STONE;
+        }
+        blocks
+    }
+
+    fn assert_synthetic_light_samples(case: &Value, sections: &[PackedLightSection]) {
+        let case_name = case["name"].as_str().unwrap();
+        for sample in case["samples"]
+            .as_array()
+            .expect("synthetic light case samples must be an array")
+        {
+            let x = fixture_i32(sample, "x");
+            let y = fixture_i32(sample, "y");
+            let z = fixture_i32(sample, "z");
+            let expected_sky = fixture_i32(sample, "sky") as u8;
+            assert_eq!(
+                sample_sky_light(sections, x, y, z),
+                expected_sky,
+                "sky sample mismatch for synthetic light case `{case_name}` at ({x}, {y}, {z})"
+            );
+            assert_eq!(
+                fixture_i32(sample, "block"),
+                0,
+                "synthetic sky fixture should not emit block light"
+            );
+        }
+    }
+
+    fn sample_sky_light(sections: &[PackedLightSection], x: i32, y: i32, z: i32) -> u8 {
+        let section_y = y.div_euclid(SECTION_HEIGHT);
+        let Some(section) = sections
+            .iter()
+            .find(|section| section.section_y == section_y)
+        else {
+            return 0;
+        };
+        let Some(layer) =
+            mclone_light::packed_light_section_layer(section, mclone_light::LightLayer::Sky)
+                .unwrap()
+        else {
+            return 0;
+        };
+        layer.get(
+            x.rem_euclid(CHUNK_WIDTH),
+            y.rem_euclid(SECTION_HEIGHT),
+            z.rem_euclid(CHUNK_WIDTH),
+        )
+    }
+
+    fn sky_section_hex(sections: &[PackedLightSection], section_y: i32) -> String {
+        let section = sections
+            .iter()
+            .find(|section| section.section_y == section_y)
+            .unwrap_or_else(|| panic!("missing sky light section {section_y}"));
+        let layer =
+            mclone_light::packed_light_section_layer(section, mclone_light::LightLayer::Sky)
+                .unwrap()
+                .unwrap_or_else(mclone_light::DataLayer::new);
+        data_layer_hex(&layer)
+    }
+
+    fn data_layer_hex(layer: &mclone_light::DataLayer) -> String {
+        let bytes = layer
+            .as_bytes()
+            .map(|bytes| bytes.as_slice())
+            .unwrap_or(&[0; mclone_light::DATA_LAYER_SIZE]);
+        let mut hex = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            use std::fmt::Write;
+            write!(&mut hex, "{byte:02x}").unwrap();
+        }
+        hex
+    }
+
     fn handle_command_and_poll(
         server: &mut IntegratedServer,
         command: ClientCommand,
