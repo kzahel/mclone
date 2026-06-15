@@ -489,6 +489,8 @@ struct WindowSceneRuntime {
     radius_chunks: u32,
     interest_center: ChunkPos,
     mesh_assets: TexturedMeshAssets,
+    last_tick: u64,
+    last_tick_unloads_processed: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -501,6 +503,8 @@ struct WindowRuntimeStats {
     pending_unload_chunks: usize,
     block_ticking_chunks: usize,
     entity_ticking_chunks: usize,
+    last_tick: u64,
+    last_tick_unloads_processed: usize,
 }
 
 impl WindowSceneRuntime {
@@ -523,6 +527,8 @@ impl WindowSceneRuntime {
             radius_chunks,
             interest_center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
             mesh_assets: load_textured_mesh_assets()?,
+            last_tick: 0,
+            last_tick_unloads_processed: 0,
         };
         runtime.set_interest_center(runtime.interest_center)?;
         Ok(runtime)
@@ -556,10 +562,12 @@ impl WindowSceneRuntime {
     fn poll(&mut self) -> Result<bool> {
         let mut changed = self.flush_local_commands()?;
         if let Some(server) = &mut self.server {
-            let updates = server
-                .try_tick()
+            let report = server
+                .try_tick_report()
                 .context("failed to tick integrated server")?;
-            changed |= self.apply_server_updates(updates);
+            self.last_tick = report.ticket_tick;
+            self.last_tick_unloads_processed = report.pending_unloads_processed;
+            changed |= self.apply_server_updates(report.updates);
         }
         Ok(changed)
     }
@@ -616,6 +624,8 @@ impl WindowSceneRuntime {
                 .map_or(0, |metrics| metrics.block_ticking_chunks),
             entity_ticking_chunks: scheduler_metrics
                 .map_or(0, |metrics| metrics.entity_ticking_status_chunks),
+            last_tick: self.last_tick,
+            last_tick_unloads_processed: self.last_tick_unloads_processed,
         }
     }
 }
@@ -1040,17 +1050,19 @@ impl ChunkApp {
         let runtime = self.runtime.stats();
         let pos = self.spectator.position;
         window.set_title(&format!(
-            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | loaded {} visible {} pending {} active {} unload {} tick {} entity {} | sections {} idx {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
+            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | t {} | loaded {} visible {} pending {} active {} unload {} drained {} tick {} entity {} | sections {} idx {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
             pos.x,
             pos.y,
             pos.z,
             runtime.interest_center.x,
             runtime.interest_center.z,
+            runtime.last_tick,
             runtime.loaded_chunks,
             runtime.client_visible_chunks,
             runtime.pending_jobs,
             runtime.active_ticket_chunks,
             runtime.pending_unload_chunks,
+            runtime.last_tick_unloads_processed,
             runtime.block_ticking_chunks,
             runtime.entity_ticking_chunks,
             self.render_stats.section_count,

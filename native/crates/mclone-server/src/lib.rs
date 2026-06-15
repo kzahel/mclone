@@ -191,6 +191,15 @@ pub struct ChunkSchedulerMetrics {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChunkSchedulerTickReport {
+    pub ticket_tick: u64,
+    pub block_ticking_chunks: Vec<ChunkPos>,
+    pub entity_ticking_chunks: Vec<ChunkPos>,
+    pub pending_unloads_processed: usize,
+    pub events: Vec<ChunkSchedulerEvent>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChunkSchedulerEvent {
     StatusChanged {
         pos: ChunkPos,
@@ -602,11 +611,22 @@ impl ChunkScheduler {
     }
 
     pub fn tick(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        Ok(self.tick_report()?.events)
+    }
+
+    pub fn tick_report(&mut self) -> ChunkStoreResult<ChunkSchedulerTickReport> {
         self.distance_manager.purge_stale_tickets();
         let mut events = self.reconcile_ticketed_holders()?;
         events.extend(self.poll()?);
-        self.process_pending_unloads(DEFAULT_PENDING_UNLOAD_BUDGET)?;
-        Ok(events)
+        let pending_unloads_processed =
+            self.process_pending_unloads(DEFAULT_PENDING_UNLOAD_BUDGET)?;
+        Ok(ChunkSchedulerTickReport {
+            ticket_tick: self.ticket_tick(),
+            block_ticking_chunks: self.block_ticking_chunks(),
+            entity_ticking_chunks: self.entity_ticking_chunks(),
+            pending_unloads_processed,
+            events,
+        })
     }
 
     pub fn add_region_ticket(
@@ -701,23 +721,19 @@ impl ChunkScheduler {
     }
 
     pub fn block_ticking_chunk_count(&self) -> usize {
-        self.holders
-            .values()
-            .filter(|holder| holder.ticket_level <= MAX_CHUNK_DISTANCE)
-            .filter(|holder| holder.full_status().is_or_after(FullChunkStatus::Ticking))
-            .count()
+        self.block_ticking_chunks().len()
     }
 
     pub fn entity_ticking_chunk_count(&self) -> usize {
-        self.holders
-            .values()
-            .filter(|holder| holder.ticket_level <= MAX_CHUNK_DISTANCE)
-            .filter(|holder| {
-                holder
-                    .full_status()
-                    .is_or_after(FullChunkStatus::EntityTicking)
-            })
-            .count()
+        self.entity_ticking_chunks().len()
+    }
+
+    pub fn block_ticking_chunks(&self) -> Vec<ChunkPos> {
+        self.full_status_chunks_at_or_after(FullChunkStatus::Ticking)
+    }
+
+    pub fn entity_ticking_chunks(&self) -> Vec<ChunkPos> {
+        self.full_status_chunks_at_or_after(FullChunkStatus::EntityTicking)
     }
 
     pub fn dependency_holder_count(&self) -> usize {
@@ -1275,6 +1291,17 @@ impl ChunkScheduler {
         }
         Ok(())
     }
+
+    fn full_status_chunks_at_or_after(&self, status: FullChunkStatus) -> Vec<ChunkPos> {
+        let positions = self
+            .holders
+            .values()
+            .filter(|holder| holder.ticket_level <= MAX_CHUNK_DISTANCE)
+            .filter(|holder| holder.full_status().is_or_after(status))
+            .map(ChunkHolder::pos)
+            .collect::<BTreeSet<_>>();
+        sorted_chunk_positions_z_major(positions)
+    }
 }
 
 #[derive(Debug)]
@@ -1517,6 +1544,15 @@ pub struct IntegratedServer {
     scheduler: ChunkScheduler,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ServerTickReport {
+    pub ticket_tick: u64,
+    pub block_ticking_chunks: Vec<ChunkPos>,
+    pub entity_ticking_chunks: Vec<ChunkPos>,
+    pub pending_unloads_processed: usize,
+    pub updates: Vec<ServerUpdate>,
+}
+
 impl IntegratedServer {
     pub fn new(seed: i64) -> Self {
         Self::with_chunk_store(seed, Box::<NullChunkSnapshotStore>::default())
@@ -1565,12 +1601,28 @@ impl IntegratedServer {
     }
 
     pub fn try_tick(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        Ok(self
-            .scheduler
-            .tick()?
+        Ok(self.try_tick_report()?.updates)
+    }
+
+    pub fn tick_report(&mut self) -> ServerTickReport {
+        self.try_tick_report()
+            .expect("integrated server tick report failed")
+    }
+
+    pub fn try_tick_report(&mut self) -> ChunkStoreResult<ServerTickReport> {
+        let report = self.scheduler.tick_report()?;
+        let updates = report
+            .events
             .into_iter()
             .filter_map(server_update_from_scheduler_event)
-            .collect())
+            .collect();
+        Ok(ServerTickReport {
+            ticket_tick: report.ticket_tick,
+            block_ticking_chunks: report.block_ticking_chunks,
+            entity_ticking_chunks: report.entity_ticking_chunks,
+            pending_unloads_processed: report.pending_unloads_processed,
+            updates,
+        })
     }
 
     pub fn loaded_chunk_count(&self) -> usize {
@@ -1797,6 +1849,14 @@ mod tests {
         (inaccessible, border, ticking, entity_ticking, block_ticking)
     }
 
+    fn chunk_square(center: ChunkPos, radius: i32) -> Vec<ChunkPos> {
+        (-radius..=radius)
+            .flat_map(|z| {
+                (-radius..=radius).map(move |x| ChunkPos::new(center.x + x, center.z + z))
+            })
+            .collect()
+    }
+
     #[test]
     fn distinguishes_integrated_and_dedicated_modes() {
         assert_ne!(ServerMode::Integrated, ServerMode::Dedicated);
@@ -1995,6 +2055,85 @@ mod tests {
         assert_eq!(scheduler.client_visible_chunk_count(), 1);
         assert_eq!(scheduler.entity_ticking_chunk_count(), 1);
         assert_eq!(scheduler.block_ticking_chunk_count(), 9);
+    }
+
+    #[test]
+    fn scheduler_tick_report_lists_runtime_lanes_without_simulation() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+
+        apply_interest_and_poll(
+            &mut scheduler,
+            ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            },
+        );
+
+        let report = scheduler.tick_report().unwrap();
+
+        assert_eq!(report.ticket_tick, 1);
+        assert_eq!(
+            report.block_ticking_chunks,
+            chunk_square(ChunkPos::new(0, 0), 1)
+        );
+        assert_eq!(report.entity_ticking_chunks, vec![ChunkPos::new(0, 0)]);
+        assert_eq!(report.pending_unloads_processed, 0);
+        assert!(report.events.is_empty());
+    }
+
+    #[test]
+    fn integrated_server_tick_report_exposes_protocol_updates_and_lanes() {
+        let mut server = IntegratedServer::new(12_345);
+
+        handle_command_and_poll(
+            &mut server,
+            ClientCommand::SetChunkInterest(ChunkInterest {
+                center: ChunkPos::new(0, 0),
+                radius_chunks: 0,
+            }),
+        );
+
+        let report = server.tick_report();
+
+        assert_eq!(report.ticket_tick, 1);
+        assert_eq!(
+            report.block_ticking_chunks,
+            chunk_square(ChunkPos::new(0, 0), 1)
+        );
+        assert_eq!(report.entity_ticking_chunks, vec![ChunkPos::new(0, 0)]);
+        assert_eq!(report.pending_unloads_processed, 0);
+        assert!(report.updates.is_empty());
+    }
+
+    #[test]
+    fn scheduler_tick_report_counts_bounded_pending_unload_work() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+
+        scheduler
+            .add_region_ticket(ChunkTicketType::Unknown, ChunkPos::new(0, 0), 0)
+            .unwrap();
+        poll_scheduler_until_idle(&mut scheduler);
+
+        let first_report = scheduler.tick_report().unwrap();
+        assert_eq!(first_report.ticket_tick, 1);
+        assert_eq!(first_report.pending_unloads_processed, 0);
+        assert!(first_report.block_ticking_chunks.is_empty());
+        assert!(first_report.entity_ticking_chunks.is_empty());
+        assert!(first_report.events.is_empty());
+
+        let second_report = scheduler.tick_report().unwrap();
+        assert_eq!(second_report.ticket_tick, 2);
+        assert_eq!(
+            second_report.pending_unloads_processed,
+            DEFAULT_PENDING_UNLOAD_BUDGET
+        );
+        assert!(second_report.block_ticking_chunks.is_empty());
+        assert!(second_report.entity_ticking_chunks.is_empty());
+        assert!(second_report.events.is_empty());
+        assert_eq!(
+            scheduler.pending_unload_count(),
+            active_ticket_square_count(CHUNK_LEVEL_FULL) - DEFAULT_PENDING_UNLOAD_BUDGET
+        );
     }
 
     #[test]
