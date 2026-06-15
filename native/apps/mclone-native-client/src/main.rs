@@ -491,6 +491,15 @@ struct WindowSceneRuntime {
     mesh_assets: TexturedMeshAssets,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct WindowRuntimeStats {
+    interest_center: ChunkPos,
+    loaded_chunks: usize,
+    pending_jobs: usize,
+    client_visible_chunks: usize,
+    active_ticket_chunks: usize,
+}
+
 impl WindowSceneRuntime {
     fn new(scene: &SceneOptions) -> Result<Self> {
         let client = if scene.remote_addr.is_some() {
@@ -575,6 +584,30 @@ impl WindowSceneRuntime {
 
     fn build_sections(&self) -> Result<Vec<TexturedRenderSectionMesh>> {
         build_client_textured_sections(&self.client, &self.mesh_assets.catalog)
+    }
+
+    fn pending_job_count(&self) -> usize {
+        self.server
+            .as_ref()
+            .map_or(0, IntegratedServer::pending_job_count)
+    }
+
+    fn stats(&self) -> WindowRuntimeStats {
+        let scheduler_metrics = self
+            .server
+            .as_ref()
+            .map(|server| server.scheduler().metrics());
+        WindowRuntimeStats {
+            interest_center: self.interest_center,
+            loaded_chunks: self.client.loaded_chunk_count(),
+            pending_jobs: self.pending_job_count(),
+            client_visible_chunks: scheduler_metrics
+                .map_or(self.client.loaded_chunk_count(), |metrics| {
+                    metrics.client_visible_chunks
+                }),
+            active_ticket_chunks: scheduler_metrics
+                .map_or(0, |metrics| metrics.active_ticket_chunks),
+        }
     }
 }
 
@@ -872,6 +905,15 @@ fn world_block_to_chunk_coord(value: f32) -> i32 {
     (value / CHUNK_WIDTH as f32).floor() as i32
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct RenderStreamStats {
+    section_count: usize,
+    index_count: u32,
+    last_remesh_ms: f64,
+    last_upload_ms: f64,
+    last_frame_ms: f32,
+}
+
 struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
@@ -882,6 +924,8 @@ struct ChunkApp {
     look_dragging: bool,
     last_cursor: Option<(f64, f64)>,
     last_frame: Instant,
+    last_title_update: Instant,
+    render_stats: RenderStreamStats,
 }
 
 impl ChunkApp {
@@ -896,6 +940,8 @@ impl ChunkApp {
             look_dragging: false,
             last_cursor: None,
             last_frame: Instant::now(),
+            last_title_update: Instant::now(),
+            render_stats: RenderStreamStats::default(),
         }
     }
 
@@ -909,6 +955,7 @@ impl ChunkApp {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.05);
         self.last_frame = now;
+        self.render_stats.last_frame_ms = dt * 1000.0;
 
         let right = key_axis(&self.pressed_keys, KeyCode::KeyD, KeyCode::KeyA);
         let up = key_axis(&self.pressed_keys, KeyCode::KeyE, KeyCode::KeyQ);
@@ -949,16 +996,57 @@ impl ChunkApp {
         let (Some(surface), Some(draw)) = (&self.surface, &mut self.draw) else {
             return Ok(());
         };
+        let remesh_start = Instant::now();
         let sections = self.runtime.build_sections()?;
+        let remesh_ms = elapsed_ms(remesh_start.elapsed());
+        let upload_start = Instant::now();
         draw.update_sections(&surface.device, &sections)
             .context("failed to upload streamed chunk sections")?;
+        let upload_ms = elapsed_ms(upload_start.elapsed());
+        self.render_stats.section_count = draw.section_count();
+        self.render_stats.index_count = draw.index_count();
+        self.render_stats.last_remesh_ms = remesh_ms;
+        self.render_stats.last_upload_ms = upload_ms;
         log::info!(
-            "streamed chunks loaded={} sections={} indices={}",
+            "streamed chunks loaded={} sections={} indices={} remesh_ms={:.3} upload_ms={:.3}",
             self.runtime.client.loaded_chunk_count(),
             draw.section_count(),
-            draw.index_count()
+            draw.index_count(),
+            remesh_ms,
+            upload_ms
         );
+        self.update_window_title(true);
         Ok(())
+    }
+
+    fn update_window_title(&mut self, force: bool) {
+        let now = Instant::now();
+        if !force && now.duration_since(self.last_title_update) < Duration::from_millis(250) {
+            return;
+        }
+        self.last_title_update = now;
+        let Some(window) = &self.window else {
+            return;
+        };
+        let runtime = self.runtime.stats();
+        let pos = self.spectator.position;
+        window.set_title(&format!(
+            "mclone native | pos {:.1},{:.1},{:.1} | chunk {},{} | loaded {} visible {} pending {} active {} | sections {} idx {} | frame {:.1}ms remesh {:.1}ms upload {:.1}ms",
+            pos.x,
+            pos.y,
+            pos.z,
+            runtime.interest_center.x,
+            runtime.interest_center.z,
+            runtime.loaded_chunks,
+            runtime.client_visible_chunks,
+            runtime.pending_jobs,
+            runtime.active_ticket_chunks,
+            self.render_stats.section_count,
+            self.render_stats.index_count,
+            self.render_stats.last_frame_ms,
+            self.render_stats.last_remesh_ms,
+            self.render_stats.last_upload_ms
+        ));
     }
 }
 
@@ -986,6 +1074,7 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
+        let remesh_start = Instant::now();
         let sections = match self.runtime.build_sections() {
             Ok(sections) => sections,
             Err(err) => {
@@ -994,6 +1083,8 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
+        let remesh_ms = elapsed_ms(remesh_start.elapsed());
+        let upload_start = Instant::now();
         let draw = match TexturedSectionDrawResources::new(
             &surface.device,
             &surface.queue,
@@ -1010,14 +1101,22 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
+        let upload_ms = elapsed_ms(upload_start.elapsed());
+        self.render_stats.section_count = draw.section_count();
+        self.render_stats.index_count = draw.index_count();
+        self.render_stats.last_remesh_ms = remesh_ms;
+        self.render_stats.last_upload_ms = upload_ms;
         log::info!(
-            "uploaded {} initial render sections with {} indices",
+            "uploaded {} initial render sections with {} indices remesh_ms={:.3} upload_ms={:.3}",
             draw.section_count(),
-            draw.index_count()
+            draw.index_count(),
+            remesh_ms,
+            upload_ms
         );
         self.draw = Some(draw);
         self.surface = Some(surface);
         self.window = Some(window);
+        self.update_window_title(true);
         self.request_redraw();
     }
 
@@ -1121,6 +1220,7 @@ impl ApplicationHandler for ChunkApp {
                         return;
                     }
                 }
+                self.update_window_title(false);
                 self.request_redraw();
             }
             _ => {}
@@ -1136,6 +1236,10 @@ fn key_axis(
     let positive = keys.contains(&positive) as i32;
     let negative = keys.contains(&negative) as i32;
     (positive - negative) as f32
+}
+
+fn elapsed_ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
 }
 
 #[cfg(test)]
@@ -1182,6 +1286,62 @@ mod tests {
         assert_eq!(spectator.pitch, SPECTATOR_PITCH_LIMIT);
         spectator.look(0.0, -200.0);
         assert_eq!(spectator.pitch, -SPECTATOR_PITCH_LIMIT);
+    }
+
+    #[test]
+    fn window_runtime_streams_chunks_when_spectator_crosses_boundary() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let scene = SceneOptions {
+            chunk_radius: 0,
+            ..SceneOptions::default()
+        };
+        let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
+        poll_window_runtime_until_idle(&mut runtime).unwrap();
+
+        let initial_center = ChunkPos::new(0, 0);
+        let initial_stats = runtime.stats();
+        assert_eq!(initial_stats.interest_center, initial_center);
+        assert_eq!(initial_stats.loaded_chunks, 1);
+        assert_eq!(initial_stats.pending_jobs, 0);
+        assert!(runtime.client.chunk_snapshot(initial_center).is_some());
+
+        let initial_sections = runtime.build_sections().unwrap();
+        assert!(!initial_sections.is_empty());
+        assert!(section_index_count(&initial_sections) > 0);
+        assert!(
+            initial_sections
+                .iter()
+                .all(|section| section.key.chunk_x == 0 && section.key.chunk_z == 0)
+        );
+
+        let mut spectator = SpectatorCamera::spawn_for_scene(&scene);
+        spectator.position.x = 16.25;
+        let next_center = spectator.chunk_pos();
+        assert_eq!(next_center, ChunkPos::new(1, 0));
+        assert!(runtime.set_interest_center(next_center).unwrap());
+        assert_eq!(runtime.stats().interest_center, next_center);
+        assert!(runtime.client.chunk_snapshot(initial_center).is_none());
+
+        poll_window_runtime_until_idle(&mut runtime).unwrap();
+
+        let moved_stats = runtime.stats();
+        assert_eq!(moved_stats.interest_center, next_center);
+        assert_eq!(moved_stats.loaded_chunks, 1);
+        assert_eq!(moved_stats.pending_jobs, 0);
+        assert!(runtime.client.chunk_snapshot(initial_center).is_none());
+        assert!(runtime.client.chunk_snapshot(next_center).is_some());
+
+        let moved_sections = runtime.build_sections().unwrap();
+        assert!(!moved_sections.is_empty());
+        assert!(section_index_count(&moved_sections) > 0);
+        assert!(
+            moved_sections
+                .iter()
+                .all(|section| section.key.chunk_x == 1 && section.key.chunk_z == 0)
+        );
     }
 
     #[test]
@@ -1444,5 +1604,26 @@ mod tests {
         assert_eq!(mesh_blocks.blocks.len(), CHUNK_SECTION_VOLUME * 2);
         assert_eq!(mesh_blocks.blocks[0], AIR_BLOCK_STATE_ID);
         assert_eq!(mesh_blocks.blocks[CHUNK_SECTION_VOLUME], BlockStateId(1));
+    }
+
+    fn poll_window_runtime_until_idle(runtime: &mut WindowSceneRuntime) -> Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            runtime.poll()?;
+            if runtime.pending_job_count() == 0 {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                bail!("timed out waiting for window runtime worldgen jobs");
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn section_index_count(sections: &[TexturedRenderSectionMesh]) -> u32 {
+        sections
+            .iter()
+            .map(|section| section.stats().index_count)
+            .sum()
     }
 }
