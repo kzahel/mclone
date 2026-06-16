@@ -43,7 +43,7 @@ use mclone_render::target::RenderFrameContext;
 use mclone_server::IntegratedServer;
 use mclone_ui::{
     Button, Checkbox, Color, CycleButton, Font, GuiDrawList, GuiScale, Interaction, Point, Rect,
-    WidgetId,
+    Slider, WidgetId,
 };
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -2658,21 +2658,32 @@ impl WindowSceneRuntime {
             scheduled_fluid_ticks: 0,
             last_poll_diagnostics: RuntimePollDiagnostics::default(),
         };
-        runtime.set_interest_center(runtime.interest_center)?;
+        runtime.set_chunk_interest(runtime.interest_center, runtime.radius_chunks)?;
         Ok(runtime)
     }
 
     fn set_interest_center(&mut self, center: ChunkPos) -> Result<bool> {
+        self.set_chunk_interest(center, self.radius_chunks)
+    }
+
+    fn set_radius_chunks(&mut self, radius_chunks: u32) -> Result<bool> {
+        self.set_chunk_interest(self.interest_center, radius_chunks)
+    }
+
+    fn set_chunk_interest(&mut self, center: ChunkPos, radius_chunks: u32) -> Result<bool> {
         if self.client.chunk_interest().is_some_and(|interest| {
-            interest.center == center && interest.radius_chunks == self.radius_chunks
+            interest.center == center && interest.radius_chunks == radius_chunks
         }) {
+            self.interest_center = center;
+            self.radius_chunks = radius_chunks;
             return Ok(false);
         }
 
         self.interest_center = center;
+        self.radius_chunks = radius_chunks;
         let command = self.client.set_chunk_interest(ChunkInterest {
             center,
-            radius_chunks: self.radius_chunks,
+            radius_chunks,
         });
 
         if let Some(remote_addr) = &self.remote_addr {
@@ -3790,6 +3801,7 @@ enum NativeUiAction {
     ToggleFullbright,
     CycleFramePacing,
     CycleFpsCap,
+    SetChunkRadius(i32),
     Quit,
 }
 
@@ -3869,12 +3881,17 @@ impl NativeUi {
         self.pressed = None;
     }
 
-    fn pointer_move(&mut self, point: Point) -> bool {
+    fn pointer_move(&mut self, point: Point) -> (bool, Option<NativeUiAction>) {
         if !self.is_active() {
-            return false;
+            return (false, None);
         }
         self.pointer = Some(point);
-        true
+        let action = if self.pressed == Some(ID_OPTIONS_RADIUS) {
+            Some(self.chunk_radius_action_at(point))
+        } else {
+            None
+        };
+        (true, action)
     }
 
     fn pointer_down(&mut self, point: Point) -> bool {
@@ -3894,6 +3911,9 @@ impl NativeUi {
         let pressed = self.pressed.take();
         let released = self.widget_at(point);
         let action = match (pressed, released) {
+            (Some(ID_OPTIONS_RADIUS), Some(ID_OPTIONS_RADIUS)) => {
+                Some(self.chunk_radius_action_at(point))
+            }
             (Some(id), Some(released)) if id == released => self.action_for(id),
             _ => None,
         };
@@ -3929,6 +3949,9 @@ impl NativeUi {
             NativeUiAction::BackToPause => {
                 self.screen = Some(NativeScreen::Pause);
                 self.pressed = None;
+            }
+            NativeUiAction::SetChunkRadius(radius) => {
+                self.chunk_radius = radius.clamp(0, MAX_CHUNK_RADIUS);
             }
             NativeUiAction::ToggleSectionOcclusion
             | NativeUiAction::ToggleFullbright
@@ -4005,6 +4028,8 @@ impl NativeUi {
                     Some(ID_OPTIONS_FRAME_PACING)
                 } else if rects.fps_cap.contains(point) {
                     Some(ID_OPTIONS_FPS_CAP)
+                } else if rects.radius.contains(point) {
+                    Some(ID_OPTIONS_RADIUS)
                 } else if rects.back.contains(point) {
                     Some(ID_OPTIONS_BACK)
                 } else {
@@ -4037,6 +4062,18 @@ impl NativeUi {
             },
             _ => None,
         }
+    }
+
+    fn chunk_radius_action_at(&self, point: Point) -> NativeUiAction {
+        let slider = Slider::new(
+            ID_OPTIONS_RADIUS,
+            option_widgets(self.scale).radius,
+            "",
+            chunk_radius_slider_value(self.chunk_radius),
+        );
+        NativeUiAction::SetChunkRadius(chunk_radius_from_slider_value(
+            slider.value_from_point(point),
+        ))
     }
 
     fn interaction(&self) -> Interaction {
@@ -4154,14 +4191,13 @@ impl NativeUi {
             frame_pacing.fps_cap.to_string(),
         )
         .render(draw, &self.font, self.interaction());
-        let mut radius = CycleButton::new(
+        Slider::new(
             ID_OPTIONS_RADIUS,
             widgets.radius,
-            "Chunk Radius",
-            format!("{} restart", self.chunk_radius),
-        );
-        radius.enabled = false;
-        radius.render(draw, &self.font, self.interaction());
+            chunk_radius_label(self.chunk_radius),
+            chunk_radius_slider_value(self.chunk_radius),
+        )
+        .render(draw, &self.font, self.interaction());
         Button::new(
             ID_OPTIONS_BACK,
             widgets.back,
@@ -4228,6 +4264,24 @@ fn option_widgets(scale: GuiScale) -> OptionWidgetRects {
         radius: Rect::new(panel.x + 25.0, panel.y + 132.0, 192.0, 20.0),
         back: Rect::new(panel.center_x() - 55.0, panel.y + 160.0, 110.0, 20.0),
     }
+}
+
+fn chunk_radius_slider_value(radius: i32) -> f32 {
+    if MAX_CHUNK_RADIUS <= 0 {
+        0.0
+    } else {
+        radius.clamp(0, MAX_CHUNK_RADIUS) as f32 / MAX_CHUNK_RADIUS as f32
+    }
+}
+
+fn chunk_radius_from_slider_value(value: f32) -> i32 {
+    (value.clamp(0.0, 1.0) * MAX_CHUNK_RADIUS as f32).round() as i32
+}
+
+fn chunk_radius_label(radius: i32) -> String {
+    let radius = radius.clamp(0, MAX_CHUNK_RADIUS);
+    let suffix = if radius == 1 { "chunk" } else { "chunks" };
+    format!("Chunk Radius: {radius} {suffix}")
 }
 
 fn centered_panel(scale: GuiScale, width: f32, height: f32) -> Rect {
@@ -4457,6 +4511,7 @@ impl ChunkApp {
     ) {
         let should_arm_mouse_lock = from_pointer_click
             && matches!(action, NativeUiAction::StartWorld | NativeUiAction::Resume);
+        let preserve_pointer_state = matches!(action, NativeUiAction::SetChunkRadius(_));
         match action {
             NativeUiAction::ToggleSectionOcclusion => {
                 self.render_options.section_occlusion_culling =
@@ -4498,6 +4553,21 @@ impl ChunkApp {
                 self.next_redraw_at = None;
                 log::info!("fps cap set to {}", self.frame_pacing.fps_cap);
             }
+            NativeUiAction::SetChunkRadius(radius) => {
+                let radius = radius.clamp(0, MAX_CHUNK_RADIUS);
+                let radius_chunks =
+                    u32::try_from(radius).expect("clamped chunk radius must fit u32");
+                match self.runtime.set_radius_chunks(radius_chunks) {
+                    Ok(true) => {
+                        log::info!("chunk radius set to {radius}");
+                    }
+                    Ok(false) => {}
+                    Err(err) => {
+                        log::error!("failed to set chunk radius to {radius}: {err:#}");
+                        return;
+                    }
+                }
+            }
             NativeUiAction::Quit => {
                 event_loop.exit();
                 return;
@@ -4513,7 +4583,9 @@ impl ChunkApp {
             self.mouse_lock_requested = true;
         }
         self.pressed_keys.clear();
-        self.last_cursor = None;
+        if !preserve_pointer_state {
+            self.last_cursor = None;
+        }
         self.sync_mouse_lock();
         self.schedule_next_redraw(event_loop);
     }
@@ -4935,7 +5007,11 @@ impl ApplicationHandler for ChunkApp {
                 if self.ui.is_active() {
                     self.last_cursor = Some(cursor);
                     if let Some(point) = self.gui_point(cursor.0, cursor.1) {
-                        self.ui.pointer_move(point);
+                        let (_handled, action) = self.ui.pointer_move(point);
+                        if let Some(action) = action {
+                            self.apply_ui_action(action, event_loop, true);
+                            return;
+                        }
                     }
                     self.schedule_next_redraw(event_loop);
                     return;
@@ -5466,6 +5542,28 @@ mod tests {
     }
 
     #[test]
+    fn options_radius_slider_sets_chunk_radius() {
+        let mut ui = NativeUi::new(1);
+        ui.set_screen(Some(NativeScreen::Options {
+            parent: OptionsParent::Pause,
+        }));
+        ui.set_scale(GuiScale::from_pixels(960, 540));
+
+        let radius = option_widgets(ui.scale).radius;
+        let point = Point {
+            x: radius.right() - 0.1,
+            y: radius.y + radius.height * 0.5,
+        };
+        assert!(ui.pointer_down(point));
+        let (_handled, action) = ui.pointer_up(point);
+
+        let action = action.expect("radius slider release should produce an action");
+        assert_eq!(action, NativeUiAction::SetChunkRadius(MAX_CHUNK_RADIUS));
+        ui.apply_action(action);
+        assert_eq!(ui.chunk_radius, MAX_CHUNK_RADIUS);
+    }
+
+    #[test]
     fn window_runtime_streams_chunks_when_spectator_crosses_boundary() {
         if !extracted_asset_root().exists() {
             return;
@@ -5525,6 +5623,47 @@ mod tests {
                 .iter()
                 .all(|section| section.key.chunk_x == 1 && section.key.chunk_z == 0)
         );
+    }
+
+    #[test]
+    fn window_runtime_updates_chunk_radius_live() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let scene = SceneOptions {
+            chunk_radius: 0,
+            ..SceneOptions::default()
+        };
+        let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
+        poll_window_runtime_until_idle(&mut runtime).unwrap();
+
+        assert_eq!(runtime.radius_chunks, 0);
+        assert_eq!(runtime.stats().loaded_chunks, square_count(0).unwrap());
+
+        assert!(runtime.set_radius_chunks(1).unwrap());
+        assert_eq!(runtime.radius_chunks, 1);
+        assert_eq!(runtime.client.chunk_interest().unwrap().radius_chunks, 1);
+        poll_window_runtime_until_idle(&mut runtime).unwrap();
+        assert_eq!(runtime.stats().loaded_chunks, square_count(1).unwrap());
+
+        let grown_update = runtime.sync_all_render_sections().unwrap();
+        assert!(grown_update.rebuilt_section_count() > 0);
+        assert_eq!(grown_update.removed_section_count(), 0);
+        assert!(runtime.cached_sections().iter().any(|section| {
+            section.key.chunk_x != scene.chunk_x || section.key.chunk_z != scene.chunk_z
+        }));
+
+        assert!(runtime.set_radius_chunks(0).unwrap());
+        poll_window_runtime_until_idle(&mut runtime).unwrap();
+        assert_eq!(runtime.radius_chunks, 0);
+        assert_eq!(runtime.stats().loaded_chunks, square_count(0).unwrap());
+
+        let shrunk_update = runtime.sync_all_render_sections().unwrap();
+        assert!(shrunk_update.removed_section_count() > 0);
+        assert!(runtime.cached_sections().iter().all(|section| {
+            section.key.chunk_x == scene.chunk_x && section.key.chunk_z == scene.chunk_z
+        }));
     }
 
     #[test]
