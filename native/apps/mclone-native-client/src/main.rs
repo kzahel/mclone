@@ -3953,16 +3953,27 @@ impl ChunkApp {
         }
     }
 
-    fn request_redraw(&self) {
-        if let Some(window) = &self.window {
-            window.request_redraw();
+    fn schedule_next_redraw(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+
+        if self.frame_pacing.mode != FramePacingMode::Capped {
+            self.next_redraw_at = None;
+        }
+
+        match redraw_schedule(self.frame_pacing.mode, Instant::now(), self.next_redraw_at) {
+            RedrawSchedule::RequestNow => {
+                event_loop.set_control_flow(ControlFlow::Poll);
+                window.request_redraw();
+            }
+            RedrawSchedule::WaitUntil(deadline) => {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            }
         }
     }
 
     fn finish_redraw(&mut self, event_loop: &ActiveEventLoop, frame_start: Instant) {
-        let Some(window) = &self.window else {
-            return;
-        };
         if let Some(frame_duration) = self.frame_pacing.target_frame_duration() {
             let next_redraw_at = next_capped_redraw_deadline(
                 frame_start,
@@ -3971,12 +3982,10 @@ impl ChunkApp {
                 frame_duration,
             );
             self.next_redraw_at = Some(next_redraw_at);
-            event_loop.set_control_flow(ControlFlow::WaitUntil(next_redraw_at));
         } else {
             self.next_redraw_at = None;
-            event_loop.set_control_flow(ControlFlow::Poll);
-            window.request_redraw();
         }
+        self.schedule_next_redraw(event_loop);
     }
 
     fn update_camera_from_keys(&mut self, now: Instant) -> Result<()> {
@@ -4083,7 +4092,7 @@ impl ChunkApp {
         self.pressed_keys.clear();
         self.last_cursor = None;
         self.sync_mouse_lock();
-        self.request_redraw();
+        self.schedule_next_redraw(event_loop);
     }
 
     fn sync_mouse_lock(&mut self) {
@@ -4350,7 +4359,7 @@ impl ApplicationHandler for ChunkApp {
         self.next_redraw_at = None;
         event_loop.listen_device_events(DeviceEvents::WhenFocused);
         self.sync_mouse_lock();
-        self.request_redraw();
+        self.schedule_next_redraw(event_loop);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -4367,7 +4376,7 @@ impl ApplicationHandler for ChunkApp {
                         surface.config.height,
                     ));
                 }
-                self.request_redraw();
+                self.schedule_next_redraw(event_loop);
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key_code) = event.physical_key {
@@ -4379,7 +4388,7 @@ impl ApplicationHandler for ChunkApp {
                         && !event.repeat
                     {
                         self.debug_visible = !self.debug_visible;
-                        self.request_redraw();
+                        self.schedule_next_redraw(event_loop);
                         return;
                     }
                     if event.state == ElementState::Pressed && self.ui.is_active() {
@@ -4387,7 +4396,7 @@ impl ApplicationHandler for ChunkApp {
                         if let Some(action) = action {
                             self.apply_ui_action(action, event_loop, false);
                         } else if handled {
-                            self.request_redraw();
+                            self.schedule_next_redraw(event_loop);
                         }
                         return;
                     }
@@ -4400,7 +4409,7 @@ impl ApplicationHandler for ChunkApp {
                         self.pressed_keys.clear();
                         self.last_cursor = None;
                         self.sync_mouse_lock();
-                        self.request_redraw();
+                        self.schedule_next_redraw(event_loop);
                         return;
                     }
                     if key_code == KeyCode::KeyO
@@ -4417,7 +4426,7 @@ impl ApplicationHandler for ChunkApp {
                                 "disabled"
                             }
                         );
-                        self.request_redraw();
+                        self.schedule_next_redraw(event_loop);
                         return;
                     }
                     if key_code == KeyCode::KeyL
@@ -4434,7 +4443,7 @@ impl ApplicationHandler for ChunkApp {
                                 "disabled"
                             }
                         );
-                        self.request_redraw();
+                        self.schedule_next_redraw(event_loop);
                         return;
                     }
                     match event.state {
@@ -4445,7 +4454,7 @@ impl ApplicationHandler for ChunkApp {
                             self.pressed_keys.remove(&key_code);
                         }
                     }
-                    self.request_redraw();
+                    self.schedule_next_redraw(event_loop);
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -4467,7 +4476,7 @@ impl ApplicationHandler for ChunkApp {
                                 }
                             }
                         }
-                        self.request_redraw();
+                        self.schedule_next_redraw(event_loop);
                     }
                     return;
                 }
@@ -4475,7 +4484,7 @@ impl ApplicationHandler for ChunkApp {
                     self.mouse_lock_requested = true;
                     self.last_cursor = None;
                     self.sync_mouse_lock();
-                    self.request_redraw();
+                    self.schedule_next_redraw(event_loop);
                 } else if button == MouseButton::Left || button == MouseButton::Right {
                     self.last_cursor = None;
                 }
@@ -4487,7 +4496,7 @@ impl ApplicationHandler for ChunkApp {
                     if let Some(point) = self.gui_point(cursor.0, cursor.1) {
                         self.ui.pointer_move(point);
                     }
-                    self.request_redraw();
+                    self.schedule_next_redraw(event_loop);
                     return;
                 }
                 if self.mouse_lock_requested && !self.mouse_locked {
@@ -4498,7 +4507,7 @@ impl ApplicationHandler for ChunkApp {
                             -dx * SPECTATOR_MOUSE_SENSITIVITY,
                             -dy * SPECTATOR_MOUSE_SENSITIVITY,
                         );
-                        self.request_redraw();
+                        self.schedule_next_redraw(event_loop);
                     }
                 }
                 self.last_cursor = Some(cursor);
@@ -4513,7 +4522,7 @@ impl ApplicationHandler for ChunkApp {
                 };
                 self.spectator.adjust_speed(amount);
                 log::info!("spectator speed {:.1} blocks/s", self.spectator.speed);
-                self.request_redraw();
+                self.schedule_next_redraw(event_loop);
             }
             WindowEvent::Focused(false) => {
                 self.mouse_lock_requested = false;
@@ -4590,7 +4599,9 @@ impl ApplicationHandler for ChunkApp {
                                 self.render_stats = render_stats;
                                 self.finish_redraw(event_loop, frame_start);
                             }
-                            SurfaceFrameStatus::Reconfigured => self.request_redraw(),
+                            SurfaceFrameStatus::Reconfigured => {
+                                self.schedule_next_redraw(event_loop);
+                            }
                         }
                     }
                     Err(err) => {
@@ -4606,7 +4617,7 @@ impl ApplicationHandler for ChunkApp {
 
     fn device_event(
         &mut self,
-        _event_loop: &ActiveEventLoop,
+        event_loop: &ActiveEventLoop,
         _device_id: DeviceId,
         event: DeviceEvent,
     ) {
@@ -4620,8 +4631,12 @@ impl ApplicationHandler for ChunkApp {
                 -dx * SPECTATOR_MOUSE_SENSITIVITY,
                 -dy * SPECTATOR_MOUSE_SENSITIVITY,
             );
-            self.request_redraw();
+            self.schedule_next_redraw(event_loop);
         }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.schedule_next_redraw(event_loop);
     }
 }
 
@@ -4641,6 +4656,26 @@ fn vertical_axis(keys: &std::collections::HashSet<KeyCode>) -> f32 {
 
 fn elapsed_ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RedrawSchedule {
+    RequestNow,
+    WaitUntil(Instant),
+}
+
+fn redraw_schedule(
+    mode: FramePacingMode,
+    now: Instant,
+    next_redraw_at: Option<Instant>,
+) -> RedrawSchedule {
+    if mode == FramePacingMode::Capped
+        && let Some(deadline) = next_redraw_at
+        && now < deadline
+    {
+        return RedrawSchedule::WaitUntil(deadline);
+    }
+    RedrawSchedule::RequestNow
 }
 
 fn next_capped_redraw_deadline(
@@ -4785,6 +4820,29 @@ mod tests {
 
         assert!(next > finish);
         assert_eq!(next.duration_since(start), frame_duration * 4);
+    }
+
+    #[test]
+    fn capped_redraw_schedule_waits_until_due() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_millis(16);
+
+        assert_eq!(
+            redraw_schedule(FramePacingMode::Capped, now, Some(deadline)),
+            RedrawSchedule::WaitUntil(deadline)
+        );
+        assert_eq!(
+            redraw_schedule(FramePacingMode::Capped, deadline, Some(deadline)),
+            RedrawSchedule::RequestNow
+        );
+        assert_eq!(
+            redraw_schedule(FramePacingMode::Capped, now, None),
+            RedrawSchedule::RequestNow
+        );
+        assert_eq!(
+            redraw_schedule(FramePacingMode::Vsync, now, Some(deadline)),
+            RedrawSchedule::RequestNow
+        );
     }
 
     #[test]
