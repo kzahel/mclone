@@ -13,11 +13,12 @@ use mclone_render::headless::{
 };
 use mclone_ui::GuiScale;
 
+use crate::camera::SpectatorCamera;
 use crate::cli::{HeadlessScreenshotOptions, SceneOptions};
 use crate::{
     DebugPaneStats, FramePacingDebugStats, FramePacingUiState, FrameTimingStats, NativeUi,
-    RenderStreamStats, SceneTexturedSections, SpectatorCamera, WindowSceneRuntime,
-    poll_window_runtime_until_idle, record_render_section_update_stats, render_full_frame,
+    RenderStreamStats, SceneTexturedSections, WindowSceneRuntime, poll_window_runtime_until_idle,
+    record_render_section_update_stats, render_full_frame,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

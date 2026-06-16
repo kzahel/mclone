@@ -16,13 +16,15 @@ use mclone_render::headless::{
 use mclone_render::target::RenderFrameContext;
 use mclone_ui::GuiScale;
 
+use crate::camera::{
+    SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
+};
 use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, MovementPerfOptions, SceneOptions,
     TimedemoOptions,
 };
 use crate::{
-    FramePacingUiState, MAX_CHUNK_RADIUS, NativeUi, RenderStreamStats, SPECTATOR_BASE_SPEED,
-    SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera, WindowSceneRuntime,
+    FramePacingUiState, MAX_CHUNK_RADIUS, NativeUi, RenderStreamStats, WindowSceneRuntime,
     build_scene_textured_sections, elapsed_ms, poll_window_runtime_until_idle,
     print_benchmark_metadata, record_render_section_update_stats, render_full_frame, square_count,
 };
