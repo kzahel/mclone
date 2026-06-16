@@ -70,22 +70,22 @@ pub(crate) fn run_headless_screenshot(
     let sections = runtime.cached_sections();
     if sections.is_empty() {
         bail!(
-            "headless screenshot seed={} center=({}, {}) radius={} produced no render sections",
+            "headless screenshot seed={} center=({}, {}) render_distance={} produced no render sections",
             options.scene.seed,
             options.scene.chunk_x,
             options.scene.chunk_z,
-            options.scene.chunk_radius
+            options.scene.render_distance
         );
     }
 
-    let mut ui = NativeUi::new(options.scene.chunk_radius);
+    let mut ui = NativeUi::new(options.scene.render_distance);
     ui.set_screen(options.ui.native_screen());
     ui.set_scale(GuiScale::from_pixels(options.width, options.height));
 
     let mut render_stats = RenderStreamStats::default();
     let debug_pane = options.debug_pane;
     let render_options = options.render_options;
-    let camera = spectator.camera(runtime.radius_chunks);
+    let camera = spectator.camera(runtime.render_distance);
     let runtime_stats = runtime.stats();
     let initial_upload = TexturedSectionUploadReport {
         uploaded_section_count: section_update.rebuilt_section_count(),
@@ -161,7 +161,7 @@ pub(crate) fn run_headless_screenshot(
 
 fn chunk_capture_scenarios(scene: &SceneOptions) -> [(&'static str, ChunkCamera); 3] {
     let overview =
-        ChunkCamera::overview_for_chunk_area(scene.chunk_x, scene.chunk_z, scene.chunk_radius);
+        ChunkCamera::overview_for_chunk_area(scene.chunk_x, scene.chunk_z, scene.render_distance);
     let mut orbit = overview;
     orbit.orbit(0.7, -0.16);
     let mut close = overview;

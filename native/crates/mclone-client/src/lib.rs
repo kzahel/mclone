@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use mclone_core::{CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
-use mclone_protocol::{ChunkInterest, ClientCommand, SectionBlockUpdate, ServerUpdate};
+use mclone_protocol::{ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClientHost {
@@ -14,7 +14,7 @@ pub enum ClientHost {
 #[derive(Clone, Debug)]
 pub struct ClientRuntime {
     host: ClientHost,
-    chunk_interest: Option<ChunkInterest>,
+    chunk_view: Option<ChunkView>,
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
 }
 
@@ -22,7 +22,7 @@ impl ClientRuntime {
     pub fn new(host: ClientHost) -> Self {
         Self {
             host,
-            chunk_interest: None,
+            chunk_view: None,
             chunks: BTreeMap::new(),
         }
     }
@@ -35,13 +35,13 @@ impl ClientRuntime {
         self.host
     }
 
-    pub fn set_chunk_interest(&mut self, interest: ChunkInterest) -> ClientCommand {
-        self.chunk_interest = Some(interest.clone());
-        ClientCommand::SetChunkInterest(interest)
+    pub fn set_chunk_view(&mut self, view: ChunkView) -> ClientCommand {
+        self.chunk_view = Some(view.clone());
+        ClientCommand::SetChunkView(view)
     }
 
-    pub fn chunk_interest(&self) -> Option<&ChunkInterest> {
-        self.chunk_interest.as_ref()
+    pub fn chunk_view(&self) -> Option<&ChunkView> {
+        self.chunk_view.as_ref()
     }
 
     pub fn apply_update(&mut self, update: ServerUpdate) {
@@ -123,18 +123,19 @@ mod tests {
     }
 
     #[test]
-    fn set_chunk_interest_returns_protocol_command() {
+    fn set_chunk_view_returns_protocol_command() {
         let mut runtime = ClientRuntime::local_integrated();
-        let interest = ChunkInterest {
+        let view = ChunkView {
             center: ChunkPos::new(2, -3),
-            radius_chunks: 4,
+            render_distance: 4,
+            chunk_tracking_radius: 5,
         };
 
         assert_eq!(
-            runtime.set_chunk_interest(interest.clone()),
-            ClientCommand::SetChunkInterest(interest.clone())
+            runtime.set_chunk_view(view.clone()),
+            ClientCommand::SetChunkView(view.clone())
         );
-        assert_eq!(runtime.chunk_interest(), Some(&interest));
+        assert_eq!(runtime.chunk_view(), Some(&view));
     }
 
     #[test]

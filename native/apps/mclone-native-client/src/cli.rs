@@ -5,11 +5,11 @@ use mclone_render::chunk::TexturedSectionRenderOptions;
 
 use crate::camera::{SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED};
 use crate::{
-    DEFAULT_CHUNK_RADIUS, DEFAULT_CHUNK_X, DEFAULT_CHUNK_Z, DEFAULT_FRAME_BUDGET_PROBE_FRAMES,
+    DEFAULT_CHUNK_X, DEFAULT_CHUNK_Z, DEFAULT_FRAME_BUDGET_PROBE_FRAMES,
     DEFAULT_FRAME_BUDGET_TARGET_HZ, DEFAULT_MOVEMENT_PERF_PATH_RADIUS, DEFAULT_MOVEMENT_PERF_STEPS,
-    DEFAULT_SEED, DEFAULT_TIMEDEMO_FRAMES, DEFAULT_TIMEDEMO_PATH_RADIUS, MAX_CHUNK_RADIUS,
+    DEFAULT_RENDER_DISTANCE, DEFAULT_SEED, DEFAULT_TIMEDEMO_FRAMES, DEFAULT_TIMEDEMO_PATH_RADIUS,
     MAX_FRAME_BUDGET_PROBE_FRAMES, MAX_MOVEMENT_PERF_PATH_RADIUS, MAX_MOVEMENT_PERF_STEPS,
-    MAX_TIMEDEMO_FRAMES,
+    MAX_RENDER_DISTANCE, MAX_TIMEDEMO_FRAMES, MIN_RENDER_DISTANCE,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,7 +17,7 @@ pub(crate) struct SceneOptions {
     pub(crate) seed: i64,
     pub(crate) chunk_x: i32,
     pub(crate) chunk_z: i32,
-    pub(crate) chunk_radius: i32,
+    pub(crate) render_distance: i32,
     pub(crate) remote_addr: Option<String>,
 }
 
@@ -145,7 +145,7 @@ impl Default for SceneOptions {
             seed: DEFAULT_SEED,
             chunk_x: DEFAULT_CHUNK_X,
             chunk_z: DEFAULT_CHUNK_Z,
-            chunk_radius: DEFAULT_CHUNK_RADIUS,
+            render_distance: DEFAULT_RENDER_DISTANCE,
             remote_addr: None,
         }
     }
@@ -335,8 +335,9 @@ impl Cli {
                 "--seed" => scene.seed = parse_i64_arg("--seed", args.next())?,
                 "--chunk-x" => scene.chunk_x = parse_i32_arg("--chunk-x", args.next())?,
                 "--chunk-z" => scene.chunk_z = parse_i32_arg("--chunk-z", args.next())?,
-                "--chunk-radius" => {
-                    scene.chunk_radius = parse_chunk_radius_arg("--chunk-radius", args.next())?
+                "--render-distance" => {
+                    scene.render_distance =
+                        parse_render_distance_arg("--render-distance", args.next())?
                 }
                 "--remote-addr" => {
                     scene.remote_addr =
@@ -531,10 +532,10 @@ fn parse_i64_arg(flag: &str, value: Option<String>) -> Result<i64> {
         .with_context(|| format!("{flag} requires a signed 64-bit integer, got `{value}`"))
 }
 
-fn parse_chunk_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
+fn parse_render_distance_arg(flag: &str, value: Option<String>) -> Result<i32> {
     let parsed = parse_i32_arg(flag, value)?;
-    if !(0..=MAX_CHUNK_RADIUS).contains(&parsed) {
-        bail!("{flag} must be between 0 and {MAX_CHUNK_RADIUS}");
+    if !(MIN_RENDER_DISTANCE..=MAX_RENDER_DISTANCE).contains(&parsed) {
+        bail!("{flag} must be between {MIN_RENDER_DISTANCE} and {MAX_RENDER_DISTANCE}");
     }
     Ok(parsed)
 }
@@ -634,16 +635,16 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false]\n\
+           mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --headless-ui /tmp/mclone-ui-title.png [--width 960] [--height 540]\n\
-           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false] [--fullbright true|false]\n\
-           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--fullbright true|false]\n\
-           mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false] [--fullbright true|false]\n\
-           mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-           mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-           mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
-           mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a free-fly spectator camera with WASD, Space/X vertical movement, mouse-lock look, Shift boost, tilde debug pane toggle, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
+           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+           mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+         Window mode streams chunks around a free-fly spectator camera with WASD, Space/X vertical movement, mouse-lock look, Shift boost, tilde debug pane toggle, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }

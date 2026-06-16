@@ -13,9 +13,9 @@ use crate::frame_pacing::{
     FramePacingDebugStats, FramePacingMode, FramePacingUiState, FrameTimingStats,
 };
 use crate::scene_runtime::WindowRuntimeStats;
-use crate::{DEFAULT_CHUNK_RADIUS, MAX_CHUNK_RADIUS, RenderStreamStats};
+use crate::{DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, RenderStreamStats};
 
-const MIN_UI_CHUNK_RADIUS: i32 = 1;
+const MIN_UI_RENDER_DISTANCE: i32 = MIN_RENDER_DISTANCE;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DebugPaneStats {
@@ -60,6 +60,10 @@ impl DebugPaneStats {
             format!(
                 "CHUNK {} {} SPEED {:.1}",
                 self.runtime.interest_center.x, self.runtime.interest_center.z, self.speed
+            ),
+            format!(
+                "VIEW R{} T{}",
+                self.runtime.render_distance, self.runtime.chunk_tracking_radius
             ),
             format!("OCC {}  {}", occlusion, lighting),
             format!(
@@ -176,7 +180,7 @@ pub(crate) enum NativeUiAction {
     ToggleFullbright,
     CycleFramePacing,
     CycleFpsCap,
-    SetChunkRadius(i32),
+    SetRenderDistance(i32),
     Quit,
 }
 
@@ -185,7 +189,7 @@ pub(crate) struct NativeUi {
     pub(crate) pointer: Option<Point>,
     pub(crate) pressed: Option<WidgetId>,
     pub(crate) font: Font,
-    pub(crate) chunk_radius: i32,
+    pub(crate) render_distance: i32,
     pub(crate) scale: GuiScale,
 }
 
@@ -203,19 +207,19 @@ const ID_OPTIONS_FRAME_PACING: WidgetId = WidgetId(11);
 const ID_OPTIONS_FPS_CAP: WidgetId = WidgetId(12);
 
 impl NativeUi {
-    pub(crate) fn new(chunk_radius: i32) -> Self {
+    pub(crate) fn new(render_distance: i32) -> Self {
         Self {
             screen: Some(NativeScreen::Title),
             pointer: None,
             pressed: None,
             font: Font::default(),
-            chunk_radius,
+            render_distance,
             scale: GuiScale::from_pixels(1280, 900),
         }
     }
 
-    pub(crate) fn new_ingame(chunk_radius: i32) -> Self {
-        let mut ui = Self::new(chunk_radius);
+    pub(crate) fn new_ingame(render_distance: i32) -> Self {
+        let mut ui = Self::new(render_distance);
         ui.set_screen(None);
         ui
     }
@@ -262,7 +266,7 @@ impl NativeUi {
         }
         self.pointer = Some(point);
         let action = if self.pressed == Some(ID_OPTIONS_RADIUS) {
-            Some(self.chunk_radius_action_at(point))
+            Some(self.render_distance_action_at(point))
         } else {
             None
         };
@@ -287,7 +291,7 @@ impl NativeUi {
         let released = self.widget_at(point);
         let action = match (pressed, released) {
             (Some(ID_OPTIONS_RADIUS), Some(ID_OPTIONS_RADIUS)) => {
-                Some(self.chunk_radius_action_at(point))
+                Some(self.render_distance_action_at(point))
             }
             (Some(id), Some(released)) if id == released => self.action_for(id),
             _ => None,
@@ -325,8 +329,8 @@ impl NativeUi {
                 self.screen = Some(NativeScreen::Pause);
                 self.pressed = None;
             }
-            NativeUiAction::SetChunkRadius(radius) => {
-                self.chunk_radius = radius.clamp(0, MAX_CHUNK_RADIUS);
+            NativeUiAction::SetRenderDistance(radius) => {
+                self.render_distance = radius.clamp(MIN_UI_RENDER_DISTANCE, MAX_RENDER_DISTANCE);
             }
             NativeUiAction::ToggleSectionOcclusion
             | NativeUiAction::ToggleFullbright
@@ -439,14 +443,14 @@ impl NativeUi {
         }
     }
 
-    fn chunk_radius_action_at(&self, point: Point) -> NativeUiAction {
+    fn render_distance_action_at(&self, point: Point) -> NativeUiAction {
         let slider = Slider::new(
             ID_OPTIONS_RADIUS,
             option_widgets(self.scale).radius,
             "",
-            chunk_radius_slider_value(self.chunk_radius),
+            render_distance_slider_value(self.render_distance),
         );
-        NativeUiAction::SetChunkRadius(chunk_radius_from_slider_value(
+        NativeUiAction::SetRenderDistance(render_distance_from_slider_value(
             slider.value_from_point(point),
         ))
     }
@@ -569,8 +573,8 @@ impl NativeUi {
         Slider::new(
             ID_OPTIONS_RADIUS,
             widgets.radius,
-            chunk_radius_label(self.chunk_radius),
-            chunk_radius_slider_value(self.chunk_radius),
+            render_distance_label(self.render_distance),
+            render_distance_slider_value(self.render_distance),
         )
         .render(draw, &self.font, self.interaction());
         Button::new(
@@ -641,24 +645,25 @@ fn option_widgets(scale: GuiScale) -> OptionWidgetRects {
     }
 }
 
-fn chunk_radius_slider_value(radius: i32) -> f32 {
-    if MAX_CHUNK_RADIUS <= MIN_UI_CHUNK_RADIUS {
+fn render_distance_slider_value(radius: i32) -> f32 {
+    if MAX_RENDER_DISTANCE <= MIN_UI_RENDER_DISTANCE {
         0.0
     } else {
-        (radius.clamp(MIN_UI_CHUNK_RADIUS, MAX_CHUNK_RADIUS) - MIN_UI_CHUNK_RADIUS) as f32
-            / (MAX_CHUNK_RADIUS - MIN_UI_CHUNK_RADIUS) as f32
+        (radius.clamp(MIN_UI_RENDER_DISTANCE, MAX_RENDER_DISTANCE) - MIN_UI_RENDER_DISTANCE) as f32
+            / (MAX_RENDER_DISTANCE - MIN_UI_RENDER_DISTANCE) as f32
     }
 }
 
-fn chunk_radius_from_slider_value(value: f32) -> i32 {
-    MIN_UI_CHUNK_RADIUS
-        + (value.clamp(0.0, 1.0) * (MAX_CHUNK_RADIUS - MIN_UI_CHUNK_RADIUS) as f32).round() as i32
+fn render_distance_from_slider_value(value: f32) -> i32 {
+    MIN_UI_RENDER_DISTANCE
+        + (value.clamp(0.0, 1.0) * (MAX_RENDER_DISTANCE - MIN_UI_RENDER_DISTANCE) as f32).round()
+            as i32
 }
 
-fn chunk_radius_label(radius: i32) -> String {
-    let radius = radius.clamp(0, MAX_CHUNK_RADIUS);
+fn render_distance_label(radius: i32) -> String {
+    let radius = radius.clamp(MIN_UI_RENDER_DISTANCE, MAX_RENDER_DISTANCE);
     let suffix = if radius == 1 { "chunk" } else { "chunks" };
-    format!("Chunk Radius: {radius} {suffix}")
+    format!("Render Distance: {radius} {suffix}")
 }
 
 fn centered_panel(scale: GuiScale, width: f32, height: f32) -> Rect {
@@ -676,7 +681,7 @@ fn menu_button_rect(scale: GuiScale, y: f32) -> Rect {
 
 pub(crate) fn render_static_title_ui(width: u32, height: u32) -> GuiDrawList {
     let scale = GuiScale::from_pixels(width, height);
-    let mut ui = NativeUi::new(DEFAULT_CHUNK_RADIUS);
+    let mut ui = NativeUi::new(DEFAULT_RENDER_DISTANCE);
     ui.set_scale(scale);
     ui.render_draw_list(
         TexturedSectionRenderOptions::default(),
@@ -706,6 +711,8 @@ mod tests {
             speed: 32.0,
             runtime: WindowRuntimeStats {
                 interest_center: ChunkPos::new(3, -4),
+                render_distance: 2,
+                chunk_tracking_radius: 3,
                 loaded_chunks: 9,
                 pending_jobs: 1,
                 pending_publications: 2,
@@ -773,7 +780,8 @@ mod tests {
         assert_eq!(lines[0], "DEBUG");
         assert_eq!(lines[1], "POS 1.2 64.0 -2.5");
         assert_eq!(lines[2], "CHUNK 3 -4 SPEED 32.0");
-        assert_eq!(lines[3], "OCC ON  LIGHT");
+        assert_eq!(lines[3], "VIEW R2 T3");
+        assert_eq!(lines[4], "OCC ON  LIGHT");
         assert!(lines.iter().any(|line| line == "BUDGET 8.3MS FRAME 16.7MS"));
         assert!(lines.iter().any(|line| line == "OVER 3/1/0 WORST 33.4"));
 
@@ -785,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn options_radius_slider_sets_chunk_radius() {
+    fn options_radius_slider_sets_render_distance() {
         let mut ui = NativeUi::new(1);
         ui.set_screen(Some(NativeScreen::Options {
             parent: OptionsParent::Pause,
@@ -801,9 +809,12 @@ mod tests {
         let (_handled, action) = ui.pointer_up(point);
 
         let action = action.expect("radius slider release should produce an action");
-        assert_eq!(action, NativeUiAction::SetChunkRadius(MAX_CHUNK_RADIUS));
+        assert_eq!(
+            action,
+            NativeUiAction::SetRenderDistance(MAX_RENDER_DISTANCE)
+        );
         ui.apply_action(action);
-        assert_eq!(ui.chunk_radius, MAX_CHUNK_RADIUS);
+        assert_eq!(ui.render_distance, MAX_RENDER_DISTANCE);
 
         let point = Point {
             x: radius.x,
@@ -813,8 +824,11 @@ mod tests {
         let (_handled, action) = ui.pointer_up(point);
 
         let action = action.expect("radius slider release should produce an action");
-        assert_eq!(action, NativeUiAction::SetChunkRadius(MIN_UI_CHUNK_RADIUS));
+        assert_eq!(
+            action,
+            NativeUiAction::SetRenderDistance(MIN_UI_RENDER_DISTANCE)
+        );
         ui.apply_action(action);
-        assert_eq!(ui.chunk_radius, MIN_UI_CHUNK_RADIUS);
+        assert_eq!(ui.render_distance, MIN_UI_RENDER_DISTANCE);
     }
 }

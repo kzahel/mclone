@@ -60,8 +60,9 @@ use winit::window::{CursorGrabMode, Window, WindowId};
 const DEFAULT_SEED: i64 = 12345;
 const DEFAULT_CHUNK_X: i32 = 0;
 const DEFAULT_CHUNK_Z: i32 = 0;
-const DEFAULT_CHUNK_RADIUS: i32 = 1;
-const MAX_CHUNK_RADIUS: i32 = 16;
+const MIN_RENDER_DISTANCE: i32 = 2;
+const DEFAULT_RENDER_DISTANCE: i32 = 2;
+const MAX_RENDER_DISTANCE: i32 = 16;
 const DEFAULT_MOVEMENT_PERF_STEPS: usize = 12;
 const DEFAULT_MOVEMENT_PERF_PATH_RADIUS: i32 = 4;
 const DEFAULT_TIMEDEMO_FRAMES: usize = 120;
@@ -113,7 +114,7 @@ fn main() -> Result<()> {
                     camera: ChunkCamera::overview_for_chunk_area(
                         scene.chunk_x,
                         scene.chunk_z,
-                        scene.chunk_radius,
+                        scene.render_distance,
                     ),
                 },
                 &scene_mesh.sections,
@@ -227,11 +228,12 @@ fn main() -> Result<()> {
 fn run_window(scene: SceneOptions, render_options: TexturedSectionRenderOptions) -> Result<()> {
     let runtime = WindowSceneRuntime::new(&scene)?;
     log::info!(
-        "native window runtime seed={} initial_center=({}, {}) radius={} remote={:?} atlas={}x{}",
+        "native window runtime seed={} initial_center=({}, {}) render_distance={} chunk_tracking_radius={} remote={:?} atlas={}x{}",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
-        scene.chunk_radius,
+        scene.render_distance,
+        runtime.chunk_tracking_radius,
         scene.remote_addr,
         runtime.mesh_assets.atlas.width,
         runtime.mesh_assets.atlas.height
@@ -243,7 +245,7 @@ fn run_window(scene: SceneOptions, render_options: TexturedSectionRenderOptions)
         runtime,
         SpectatorCamera::spawn_for_scene(&scene),
         render_options,
-        scene.chunk_radius,
+        scene.render_distance,
     );
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -389,14 +391,14 @@ impl ChunkApp {
         runtime: WindowSceneRuntime,
         spectator: SpectatorCamera,
         render_options: TexturedSectionRenderOptions,
-        chunk_radius: i32,
+        render_distance: i32,
     ) -> Self {
         Self {
             runtime,
             spectator,
             render_options,
             frame_pacing: FramePacing::default(),
-            ui: NativeUi::new_ingame(chunk_radius),
+            ui: NativeUi::new_ingame(render_distance),
             window: None,
             surface: None,
             depth: None,
@@ -495,7 +497,7 @@ impl ChunkApp {
     ) {
         let should_arm_mouse_lock = from_pointer_click
             && matches!(action, NativeUiAction::StartWorld | NativeUiAction::Resume);
-        let preserve_pointer_state = matches!(action, NativeUiAction::SetChunkRadius(_));
+        let preserve_pointer_state = matches!(action, NativeUiAction::SetRenderDistance(_));
         match action {
             NativeUiAction::ToggleSectionOcclusion => {
                 self.render_options.section_occlusion_culling =
@@ -537,17 +539,22 @@ impl ChunkApp {
                 self.next_redraw_at = None;
                 log::info!("fps cap set to {}", self.frame_pacing.fps_cap);
             }
-            NativeUiAction::SetChunkRadius(radius) => {
-                let radius = radius.clamp(0, MAX_CHUNK_RADIUS);
-                let radius_chunks =
-                    u32::try_from(radius).expect("clamped chunk radius must fit u32");
-                match self.runtime.set_radius_chunks(radius_chunks) {
+            NativeUiAction::SetRenderDistance(render_distance) => {
+                let render_distance =
+                    render_distance.clamp(MIN_RENDER_DISTANCE, MAX_RENDER_DISTANCE);
+                let render_distance_chunks =
+                    u32::try_from(render_distance).expect("clamped render distance must fit u32");
+                match self.runtime.set_render_distance(render_distance_chunks) {
                     Ok(true) => {
-                        log::info!("chunk radius set to {radius}");
+                        log::info!(
+                            "render distance set to {} (chunk tracking radius {})",
+                            render_distance,
+                            self.runtime.chunk_tracking_radius
+                        );
                     }
                     Ok(false) => {}
                     Err(err) => {
-                        log::error!("failed to set chunk radius to {radius}: {err:#}");
+                        log::error!("failed to set render distance to {render_distance}: {err:#}");
                         return;
                     }
                 }
@@ -1076,7 +1083,7 @@ impl ApplicationHandler for ChunkApp {
                     return;
                 };
                 self.ui.set_scale(gui_scale);
-                let camera = self.spectator.camera(self.runtime.radius_chunks);
+                let camera = self.spectator.camera(self.runtime.render_distance);
                 let render_options = self.effective_render_options();
                 let frame_pacing = self.frame_pacing.ui_state();
                 let debug_stats = self
@@ -1429,7 +1436,7 @@ mod tests {
                     seed: -9,
                     chunk_x: 2,
                     chunk_z: -3,
-                    chunk_radius: DEFAULT_CHUNK_RADIUS,
+                    render_distance: DEFAULT_RENDER_DISTANCE,
                     remote_addr: None,
                 },
                 render_options: TexturedSectionRenderOptions::default(),
@@ -1438,11 +1445,11 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_chunk_radius() {
+    fn cli_parses_render_distance() {
         let cli = Cli::parse([
             "--headless-chunk".to_owned(),
             "/tmp/mclone-chunk.png".to_owned(),
-            "--chunk-radius".to_owned(),
+            "--render-distance".to_owned(),
             "16".to_owned(),
         ])
         .unwrap();
@@ -1454,12 +1461,26 @@ mod tests {
                 width: 640,
                 height: 480,
                 scene: SceneOptions {
-                    chunk_radius: 16,
+                    render_distance: 16,
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
             }
         );
+    }
+
+    #[test]
+    fn cli_rejects_render_distance_below_java_minimum() {
+        let err = Cli::parse([
+            "--headless-chunk".to_owned(),
+            "/tmp/mclone-chunk.png".to_owned(),
+            "--render-distance".to_owned(),
+            "1".to_owned(),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("--render-distance must be between 2 and 16"));
     }
 
     #[test]
@@ -1548,7 +1569,7 @@ mod tests {
             "6".to_owned(),
             "--path-radius".to_owned(),
             "3".to_owned(),
-            "--chunk-radius".to_owned(),
+            "--render-distance".to_owned(),
             "2".to_owned(),
             "--width".to_owned(),
             "800".to_owned(),
@@ -1562,7 +1583,7 @@ mod tests {
             Cli::MovementPerf {
                 options: MovementPerfOptions {
                     scene: SceneOptions {
-                        chunk_radius: 2,
+                        render_distance: 2,
                         ..SceneOptions::default()
                     },
                     render_options: TexturedSectionRenderOptions::default(),
@@ -1583,7 +1604,7 @@ mod tests {
             "48".to_owned(),
             "--path-radius".to_owned(),
             "5".to_owned(),
-            "--chunk-radius".to_owned(),
+            "--render-distance".to_owned(),
             "2".to_owned(),
             "--width".to_owned(),
             "1024".to_owned(),
@@ -1597,7 +1618,7 @@ mod tests {
             Cli::Timedemo {
                 options: TimedemoOptions {
                     scene: SceneOptions {
-                        chunk_radius: 2,
+                        render_distance: 2,
                         ..SceneOptions::default()
                     },
                     render_options: TexturedSectionRenderOptions::default(),
@@ -1620,7 +1641,7 @@ mod tests {
             "120".to_owned(),
             "--path-radius".to_owned(),
             "5".to_owned(),
-            "--chunk-radius".to_owned(),
+            "--render-distance".to_owned(),
             "2".to_owned(),
             "--width".to_owned(),
             "1024".to_owned(),
@@ -1634,7 +1655,7 @@ mod tests {
             Cli::FrameBudgetProbe {
                 options: FrameBudgetProbeOptions {
                     scene: SceneOptions {
-                        chunk_radius: 2,
+                        render_distance: 2,
                         ..SceneOptions::default()
                     },
                     render_options: TexturedSectionRenderOptions::default(),
@@ -1677,7 +1698,7 @@ mod tests {
             "48".to_owned(),
             "--path-radius".to_owned(),
             "5".to_owned(),
-            "--chunk-radius".to_owned(),
+            "--render-distance".to_owned(),
             "2".to_owned(),
             "--width".to_owned(),
             "1024".to_owned(),
@@ -1691,7 +1712,7 @@ mod tests {
             Cli::FrameBudgetProbe {
                 options: FrameBudgetProbeOptions {
                     scene: SceneOptions {
-                        chunk_radius: 2,
+                        render_distance: 2,
                         ..SceneOptions::default()
                     },
                     render_options: TexturedSectionRenderOptions::default(),
@@ -1716,7 +1737,7 @@ mod tests {
             "320".to_owned(),
             "--height".to_owned(),
             "180".to_owned(),
-            "--chunk-radius".to_owned(),
+            "--render-distance".to_owned(),
             "2".to_owned(),
         ])
         .unwrap();
@@ -1728,7 +1749,7 @@ mod tests {
                 width: 320,
                 height: 180,
                 scene: SceneOptions {
-                    chunk_radius: 2,
+                    render_distance: 2,
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),

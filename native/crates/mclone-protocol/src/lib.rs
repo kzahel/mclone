@@ -8,22 +8,23 @@ use mclone_core::{
     LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection, SECTION_HEIGHT,
 };
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
-const CLIENT_COMMAND_SET_CHUNK_INTEREST: u8 = 1;
+const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ChunkInterest {
+pub struct ChunkView {
     pub center: ChunkPos,
-    pub radius_chunks: u32,
+    pub render_distance: u32,
+    pub chunk_tracking_radius: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientCommand {
-    SetChunkInterest(ChunkInterest),
+    SetChunkView(ChunkView),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,10 +93,11 @@ impl Error for ProtocolCodecError {}
 pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec<u8>> {
     let mut writer = ByteWriter::new();
     match command {
-        ClientCommand::SetChunkInterest(interest) => {
-            writer.write_u8(CLIENT_COMMAND_SET_CHUNK_INTEREST);
-            writer.write_chunk_pos(interest.center);
-            writer.write_u32(interest.radius_chunks);
+        ClientCommand::SetChunkView(view) => {
+            writer.write_u8(CLIENT_COMMAND_SET_CHUNK_VIEW);
+            writer.write_chunk_pos(view.center);
+            writer.write_u32(view.render_distance);
+            writer.write_u32(view.chunk_tracking_radius);
         }
     }
     Ok(writer.into_inner())
@@ -105,12 +107,14 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
     let mut reader = ByteReader::new(bytes);
     let tag = reader.read_u8()?;
     let command = match tag {
-        CLIENT_COMMAND_SET_CHUNK_INTEREST => {
+        CLIENT_COMMAND_SET_CHUNK_VIEW => {
             let center = reader.read_chunk_pos()?;
-            let radius_chunks = reader.read_u32()?;
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            let render_distance = reader.read_u32()?;
+            let chunk_tracking_radius = reader.read_u32()?;
+            ClientCommand::SetChunkView(ChunkView {
                 center,
-                radius_chunks,
+                render_distance,
+                chunk_tracking_radius,
             })
         }
         _ => return Err(ProtocolCodecError::UnknownClientCommandTag(tag)),
@@ -489,26 +493,29 @@ mod tests {
     };
 
     #[test]
-    fn chunk_interest_is_data_only() {
-        let interest = ChunkInterest {
+    fn chunk_view_is_data_only() {
+        let view = ChunkView {
             center: ChunkPos::new(0, 0),
-            radius_chunks: 8,
+            render_distance: 8,
+            chunk_tracking_radius: 9,
         };
-        assert_eq!(interest.radius_chunks, 8);
+        assert_eq!(view.render_distance, 8);
+        assert_eq!(view.chunk_tracking_radius, 9);
     }
 
     #[test]
-    fn distinguishes_interest_commands_from_server_updates() {
-        let interest = ChunkInterest {
+    fn distinguishes_view_commands_from_server_updates() {
+        let view = ChunkView {
             center: ChunkPos::new(1, -2),
-            radius_chunks: 3,
+            render_distance: 3,
+            chunk_tracking_radius: 4,
         };
-        let command = ClientCommand::SetChunkInterest(interest.clone());
+        let command = ClientCommand::SetChunkView(view.clone());
         let unload = ServerUpdate::ChunkUnload {
             pos: ChunkPos::new(4, 5),
         };
 
-        assert_eq!(command, ClientCommand::SetChunkInterest(interest));
+        assert_eq!(command, ClientCommand::SetChunkView(view));
         assert_eq!(
             unload,
             ServerUpdate::ChunkUnload {
@@ -535,10 +542,11 @@ mod tests {
     }
 
     #[test]
-    fn client_command_codec_round_trips_chunk_interest() {
-        let command = ClientCommand::SetChunkInterest(ChunkInterest {
+    fn client_command_codec_round_trips_chunk_view() {
+        let command = ClientCommand::SetChunkView(ChunkView {
             center: ChunkPos::new(-12, 34),
-            radius_chunks: 3,
+            render_distance: 3,
+            chunk_tracking_radius: 4,
         });
 
         let bytes = encode_client_command(&command).unwrap();
@@ -646,9 +654,10 @@ mod tests {
 
     #[test]
     fn codec_rejects_trailing_bytes() {
-        let mut bytes = encode_client_command(&ClientCommand::SetChunkInterest(ChunkInterest {
+        let mut bytes = encode_client_command(&ClientCommand::SetChunkView(ChunkView {
             center: ChunkPos::new(0, 0),
-            radius_chunks: 0,
+            render_distance: 2,
+            chunk_tracking_radius: 3,
         }))
         .unwrap();
         bytes.push(99);

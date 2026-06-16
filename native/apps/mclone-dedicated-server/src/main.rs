@@ -160,7 +160,7 @@ mod tests {
     use super::*;
     use mclone_core::ChunkPos;
     use mclone_net::{read_server_update_batch, write_client_command_frame};
-    use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
+    use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
 
     #[test]
     fn cli_defaults_to_localhost_server() {
@@ -191,9 +191,10 @@ mod tests {
         let mut request = Vec::new();
         write_client_command_frame(
             &mut request,
-            &ClientCommand::SetChunkInterest(ChunkInterest {
+            &ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         )
         .unwrap();

@@ -25,11 +25,12 @@ use crate::cli::{
 };
 use crate::frame_pacing::{FramePacingUiState, elapsed_ms};
 use crate::scene_runtime::{
-    WindowSceneRuntime, build_scene_textured_sections, poll_window_runtime_until_idle, square_count,
+    WindowSceneRuntime, build_scene_textured_sections, chunk_tracking_radius_for_render_distance,
+    poll_window_runtime_until_idle, square_count,
 };
 use crate::ui::NativeUi;
 use crate::{
-    MAX_CHUNK_RADIUS, RenderStreamStats, print_benchmark_metadata,
+    MAX_RENDER_DISTANCE, RenderStreamStats, print_benchmark_metadata,
     record_render_section_update_stats, render_full_frame,
 };
 
@@ -90,18 +91,23 @@ struct MovementPerfStepReport {
 
 impl MovementPerfReport {
     pub(crate) fn validate(&self) -> Result<()> {
-        let expected_visible_chunks = square_count(self.options.scene.chunk_radius)?;
+        let render_distance = u32::try_from(self.options.scene.render_distance)
+            .context("render distance must be non-negative")?;
+        let expected_tracking_radius =
+            i32::try_from(chunk_tracking_radius_for_render_distance(render_distance))
+                .context("chunk tracking radius exceeds i32")?;
+        let expected_tracked_chunks = square_count(expected_tracking_radius)?;
         for step in &self.steps {
-            if step.loaded_chunks != expected_visible_chunks {
+            if step.loaded_chunks != expected_tracked_chunks {
                 bail!(
-                    "movement step {} loaded_chunks={} expected {expected_visible_chunks}",
+                    "movement step {} loaded_chunks={} expected {expected_tracked_chunks}",
                     step.index,
                     step.loaded_chunks
                 );
             }
-            if step.client_visible_chunks != expected_visible_chunks {
+            if step.client_visible_chunks != expected_tracked_chunks {
                 bail!(
-                    "movement step {} client_visible_chunks={} expected {expected_visible_chunks}",
+                    "movement step {} client_visible_chunks={} expected {expected_tracked_chunks}",
                     step.index,
                     step.client_visible_chunks
                 );
@@ -156,7 +162,10 @@ impl MovementPerfReport {
             "  \"origin\": {{ \"x\": {}, \"z\": {} }},",
             self.options.scene.chunk_x, self.options.scene.chunk_z
         );
-        println!("  \"chunk_radius\": {},", self.options.scene.chunk_radius);
+        println!(
+            "  \"render_distance\": {},",
+            self.options.scene.render_distance
+        );
         println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
@@ -295,7 +304,7 @@ impl MovementPerfReport {
 #[derive(Clone, Debug)]
 pub(crate) struct TimedemoReport {
     options: TimedemoOptions,
-    loaded_chunk_radius: i32,
+    loaded_render_distance: i32,
     visibility_graph_stats: VisibilityGraphBuildStats,
     scene_build_ms: f64,
     section_count: usize,
@@ -518,8 +527,14 @@ impl TimedemoReport {
             "  \"origin\": {{ \"x\": {}, \"z\": {} }},",
             self.options.scene.chunk_x, self.options.scene.chunk_z
         );
-        println!("  \"chunk_radius\": {},", self.options.scene.chunk_radius);
-        println!("  \"loaded_chunk_radius\": {},", self.loaded_chunk_radius);
+        println!(
+            "  \"render_distance\": {},",
+            self.options.scene.render_distance
+        );
+        println!(
+            "  \"loaded_render_distance\": {},",
+            self.loaded_render_distance
+        );
         println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
@@ -672,7 +687,10 @@ impl FrameBudgetProbeReport {
             "  \"origin\": {{ \"x\": {}, \"z\": {} }},",
             self.options.scene.chunk_x, self.options.scene.chunk_z
         );
-        println!("  \"chunk_radius\": {},", self.options.scene.chunk_radius);
+        println!(
+            "  \"render_distance\": {},",
+            self.options.scene.render_distance
+        );
         println!(
             "  \"section_occlusion_culling\": {},",
             self.options.render_options.section_occlusion_culling
@@ -1004,7 +1022,7 @@ pub(crate) fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<M
         let sections = runtime.cached_sections();
         let ready_sections = runtime.traversal_ready_render_section_keys(spectator.position);
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
-        let camera = spectator.camera(runtime.radius_chunks);
+        let camera = spectator.camera(runtime.render_distance);
         let render_view = camera.render_view(options.width, options.height);
         let visibility = textured_section_visibility_stats_with_options_and_ready_sections(
             &sections,
@@ -1102,7 +1120,7 @@ pub(crate) fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> 
         .sum();
     Ok(TimedemoReport {
         options: options.clone(),
-        loaded_chunk_radius: loaded_scene.chunk_radius,
+        loaded_render_distance: loaded_scene.render_distance,
         visibility_graph_stats: scene_mesh.visibility_graph_stats,
         scene_build_ms,
         section_count: scene_mesh.sections.len(),
@@ -1178,11 +1196,11 @@ pub(crate) fn run_frame_budget_probe(
     let initial_remesh_ms = elapsed_ms(initial_remesh_start.elapsed());
     if initial_sections.is_empty() {
         bail!(
-            "frame-budget probe seed={} center=({}, {}) radius={} produced no initial render sections",
+            "frame-budget probe seed={} center=({}, {}) render_distance={} produced no initial render sections",
             options.scene.seed,
             options.scene.chunk_x,
             options.scene.chunk_z,
-            options.scene.chunk_radius
+            options.scene.render_distance
         );
     }
     let initial_index_count = initial_sections
@@ -1196,7 +1214,7 @@ pub(crate) fn run_frame_budget_probe(
     let mut frame_reports = Vec::with_capacity(options.frames);
     let probe_options = options.clone();
     let render_options = options.render_options;
-    let chunk_radius = options.scene.chunk_radius;
+    let render_distance = options.scene.render_distance;
     let initial_upload = TexturedSectionUploadReport {
         uploaded_section_count: initial_update.rebuilt_section_count(),
         removed_section_count: initial_update.removed_section_count(),
@@ -1231,7 +1249,7 @@ pub(crate) fn run_frame_budget_probe(
                 ..RenderStreamStats::default()
             };
             record_render_section_update_stats(&mut render_stats, &initial_update, initial_upload);
-            let mut ui = NativeUi::new(chunk_radius);
+            let mut ui = NativeUi::new(render_distance);
             ui.set_screen(None);
             ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
             Ok(FrameBudgetProbeState {
@@ -1302,7 +1320,7 @@ pub(crate) fn run_frame_budget_probe(
                 report.add_section_timing(update);
             }
 
-            let camera = spectator.camera(state.runtime.radius_chunks);
+            let camera = spectator.camera(state.runtime.render_distance);
             state.draw.set_traversal_ready_sections(
                 &state
                     .runtime
@@ -1373,14 +1391,17 @@ fn frame_budget_probe_spectator(
 }
 
 fn timedemo_loaded_scene(options: &TimedemoOptions) -> Result<SceneOptions> {
-    let loaded_radius = options.scene.chunk_radius.max(options.path_radius_chunks);
-    if loaded_radius > MAX_CHUNK_RADIUS {
+    let loaded_radius = options
+        .scene
+        .render_distance
+        .max(options.path_radius_chunks);
+    if loaded_radius > MAX_RENDER_DISTANCE {
         bail!(
-            "--timedemo requires static loaded radius {loaded_radius}, but the current max is {MAX_CHUNK_RADIUS}; lower --path-radius"
+            "--timedemo requires static loaded radius {loaded_radius}, but the current max is {MAX_RENDER_DISTANCE}; lower --path-radius"
         );
     }
     let mut scene = options.scene.clone();
-    scene.chunk_radius = loaded_radius;
+    scene.render_distance = loaded_radius;
     Ok(scene)
 }
 
@@ -1510,7 +1531,7 @@ mod tests {
     fn timedemo_loaded_scene_covers_camera_path_radius() {
         let options = TimedemoOptions {
             scene: SceneOptions {
-                chunk_radius: 1,
+                render_distance: 1,
                 ..SceneOptions::default()
             },
             path_radius_chunks: 4,
@@ -1519,18 +1540,18 @@ mod tests {
 
         let loaded_scene = timedemo_loaded_scene(&options).unwrap();
 
-        assert_eq!(loaded_scene.chunk_radius, 4);
-        assert_eq!(options.scene.chunk_radius, 1);
+        assert_eq!(loaded_scene.render_distance, 4);
+        assert_eq!(options.scene.render_distance, 1);
     }
 
     #[test]
     fn timedemo_loaded_scene_rejects_oversized_static_radius() {
         let options = TimedemoOptions {
             scene: SceneOptions {
-                chunk_radius: 1,
+                render_distance: 1,
                 ..SceneOptions::default()
             },
-            path_radius_chunks: MAX_CHUNK_RADIUS + 1,
+            path_radius_chunks: MAX_RENDER_DISTANCE + 1,
             ..TimedemoOptions::default()
         };
 

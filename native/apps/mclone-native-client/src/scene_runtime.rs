@@ -7,9 +7,10 @@ use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_net::{LocalTransport, request_server_updates};
-use mclone_protocol::{ChunkInterest, SectionBlockUpdate, ServerUpdate};
+use mclone_protocol::{ChunkView, SectionBlockUpdate, ServerUpdate};
 use mclone_server::IntegratedServer;
 
+use crate::MIN_RENDER_DISTANCE;
 use crate::cli::SceneOptions;
 use crate::frame_pacing::{elapsed_ms, micros_to_ms};
 use crate::render_cache::{
@@ -32,17 +33,38 @@ pub(crate) fn square_count(radius: i32) -> Result<usize> {
     Ok(side * side)
 }
 
+pub(crate) fn chunk_tracking_radius_for_render_distance(render_distance: u32) -> u32 {
+    // Java 1.17.1 exposes render distance with a minimum of 2, then the
+    // integrated server path arrives at ChunkMap's clamped minimum of 3.
+    if render_distance < MIN_RENDER_DISTANCE as u32 {
+        return render_distance;
+    }
+    render_distance.max(3)
+}
+
+fn scene_render_distance(scene: &SceneOptions) -> Result<u32> {
+    u32::try_from(scene.render_distance).context("render distance must be non-negative")
+}
+
+fn chunk_view(center: ChunkPos, render_distance: u32) -> ChunkView {
+    ChunkView {
+        center,
+        render_distance,
+        chunk_tracking_radius: chunk_tracking_radius_for_render_distance(render_distance),
+    }
+}
+
 pub(crate) fn build_scene_textured_sections(scene: &SceneOptions) -> Result<SceneTexturedSections> {
     let client = build_scene_client_runtime(scene)?;
     let mesh_assets = load_textured_mesh_assets()?;
     let build = build_client_textured_sections(&client, &mesh_assets.catalog)?;
     if build.sections.is_empty() {
         bail!(
-            "generated chunk area seed={} center=({}, {}) radius={} produced no textured render sections",
+            "generated chunk area seed={} center=({}, {}) render_distance={} produced no textured render sections",
             scene.seed,
             scene.chunk_x,
             scene.chunk_z,
-            scene.chunk_radius
+            scene.render_distance
         );
     }
     Ok(SceneTexturedSections {
@@ -58,13 +80,12 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
     } else {
         ClientRuntime::local_integrated()
     };
-    let radius_chunks =
-        u32::try_from(scene.chunk_radius).context("chunk radius must be positive")?;
+    let render_distance = scene_render_distance(scene)?;
 
-    let command = client.set_chunk_interest(ChunkInterest {
-        center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
-        radius_chunks,
-    });
+    let command = client.set_chunk_view(chunk_view(
+        ChunkPos::new(scene.chunk_x, scene.chunk_z),
+        render_distance,
+    ));
 
     if let Some(remote_addr) = &scene.remote_addr {
         let updates = request_server_updates(remote_addr.as_str(), &command)
@@ -94,7 +115,8 @@ pub(crate) struct WindowSceneRuntime {
     server: Option<IntegratedServer>,
     transport: LocalTransport,
     remote_addr: Option<String>,
-    pub(crate) radius_chunks: u32,
+    pub(crate) render_distance: u32,
+    pub(crate) chunk_tracking_radius: u32,
     pub(crate) interest_center: ChunkPos,
     pub(crate) mesh_assets: TexturedMeshAssets,
     render_sections: CachedTexturedRenderSections,
@@ -172,6 +194,8 @@ struct RuntimeUpdateApplyReport {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct WindowRuntimeStats {
     pub(crate) interest_center: ChunkPos,
+    pub(crate) render_distance: u32,
+    pub(crate) chunk_tracking_radius: u32,
     pub(crate) loaded_chunks: usize,
     pub(crate) pending_jobs: usize,
     pub(crate) pending_publications: usize,
@@ -205,8 +229,8 @@ impl WindowSceneRuntime {
         } else {
             ClientRuntime::local_integrated()
         };
-        let radius_chunks =
-            u32::try_from(scene.chunk_radius).context("chunk radius must be positive")?;
+        let render_distance = scene_render_distance(scene)?;
+        let chunk_tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
         let mesh_assets = load_textured_mesh_assets()?;
         let render_compile_worker = RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
         let mut runtime = Self {
@@ -217,7 +241,8 @@ impl WindowSceneRuntime {
                 .then(|| IntegratedServer::new(scene.seed)),
             transport: LocalTransport::new(),
             remote_addr: scene.remote_addr.clone(),
-            radius_chunks,
+            render_distance,
+            chunk_tracking_radius,
             interest_center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
             mesh_assets,
             render_sections: CachedTexturedRenderSections::default(),
@@ -241,32 +266,50 @@ impl WindowSceneRuntime {
             scheduled_fluid_ticks: 0,
             last_poll_diagnostics: RuntimePollDiagnostics::default(),
         };
-        runtime.set_chunk_interest(runtime.interest_center, runtime.radius_chunks)?;
+        runtime.set_chunk_view(
+            runtime.interest_center,
+            runtime.render_distance,
+            runtime.chunk_tracking_radius,
+        )?;
         Ok(runtime)
     }
 
     pub(crate) fn set_interest_center(&mut self, center: ChunkPos) -> Result<bool> {
-        self.set_chunk_interest(center, self.radius_chunks)
+        self.set_chunk_view(center, self.render_distance, self.chunk_tracking_radius)
     }
 
-    pub(crate) fn set_radius_chunks(&mut self, radius_chunks: u32) -> Result<bool> {
-        self.set_chunk_interest(self.interest_center, radius_chunks)
+    pub(crate) fn set_render_distance(&mut self, render_distance: u32) -> Result<bool> {
+        self.set_chunk_view(
+            self.interest_center,
+            render_distance,
+            chunk_tracking_radius_for_render_distance(render_distance),
+        )
     }
 
-    fn set_chunk_interest(&mut self, center: ChunkPos, radius_chunks: u32) -> Result<bool> {
-        if self.client.chunk_interest().is_some_and(|interest| {
-            interest.center == center && interest.radius_chunks == radius_chunks
+    fn set_chunk_view(
+        &mut self,
+        center: ChunkPos,
+        render_distance: u32,
+        chunk_tracking_radius: u32,
+    ) -> Result<bool> {
+        if self.client.chunk_view().is_some_and(|view| {
+            view.center == center
+                && view.render_distance == render_distance
+                && view.chunk_tracking_radius == chunk_tracking_radius
         }) {
             self.interest_center = center;
-            self.radius_chunks = radius_chunks;
+            self.render_distance = render_distance;
+            self.chunk_tracking_radius = chunk_tracking_radius;
             return Ok(false);
         }
 
         self.interest_center = center;
-        self.radius_chunks = radius_chunks;
-        let command = self.client.set_chunk_interest(ChunkInterest {
+        self.render_distance = render_distance;
+        self.chunk_tracking_radius = chunk_tracking_radius;
+        let command = self.client.set_chunk_view(ChunkView {
             center,
-            radius_chunks,
+            render_distance,
+            chunk_tracking_radius,
         });
 
         if let Some(remote_addr) = &self.remote_addr {
@@ -792,9 +835,19 @@ impl WindowSceneRuntime {
         self.render_sections
             .section_keys()
             .filter(|key| {
-                render_section_neighbor_readiness(&self.client, *key, camera_position).is_ready()
+                self.render_section_within_render_distance(*key)
+                    && render_section_neighbor_readiness(&self.client, *key, camera_position)
+                        .is_ready()
             })
             .collect()
+    }
+
+    fn render_section_within_render_distance(&self, key: RenderSectionKey) -> bool {
+        let distance = i32::try_from(self.render_distance).unwrap_or(i32::MAX);
+        (key.chunk_x - self.interest_center.x)
+            .abs()
+            .max((key.chunk_z - self.interest_center.z).abs())
+            <= distance
     }
 
     pub(crate) fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
@@ -923,6 +976,8 @@ impl WindowSceneRuntime {
             .map(|server| server.scheduler().metrics());
         WindowRuntimeStats {
             interest_center: self.interest_center,
+            render_distance: self.render_distance,
+            chunk_tracking_radius: self.chunk_tracking_radius,
             loaded_chunks: self.client.loaded_chunk_count(),
             pending_jobs: self.pending_job_count(),
             pending_publications: self.pending_publication_count(),
@@ -1006,10 +1061,10 @@ pub(crate) fn poll_window_runtime_until_idle(
 impl SceneOptions {
     #[cfg(test)]
     fn chunk_positions(&self) -> impl Iterator<Item = (i32, i32)> {
-        let min_x = self.chunk_x - self.chunk_radius;
-        let max_x = self.chunk_x + self.chunk_radius;
-        let min_z = self.chunk_z - self.chunk_radius;
-        let max_z = self.chunk_z + self.chunk_radius;
+        let min_x = self.chunk_x - self.render_distance;
+        let max_x = self.chunk_x + self.render_distance;
+        let min_z = self.chunk_z - self.render_distance;
+        let max_z = self.chunk_z + self.render_distance;
         (min_x..=max_x)
             .flat_map(move |chunk_x| (min_z..=max_z).map(move |chunk_z| (chunk_x, chunk_z)))
     }
@@ -1313,6 +1368,15 @@ mod tests {
     }
 
     #[test]
+    fn render_distance_derives_java_shaped_tracking_radius() {
+        assert_eq!(chunk_tracking_radius_for_render_distance(0), 0);
+        assert_eq!(chunk_tracking_radius_for_render_distance(1), 1);
+        assert_eq!(chunk_tracking_radius_for_render_distance(2), 3);
+        assert_eq!(chunk_tracking_radius_for_render_distance(3), 3);
+        assert_eq!(chunk_tracking_radius_for_render_distance(4), 4);
+    }
+
+    #[test]
     fn render_section_keys_cover_snapshot_height() {
         let snapshot = ChunkSnapshot::from_block_state_ids(
             ChunkPos::new(-1, 4),
@@ -1383,7 +1447,7 @@ mod tests {
         }
 
         let scene = SceneOptions {
-            chunk_radius: 0,
+            render_distance: 0,
             ..SceneOptions::default()
         };
         let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
@@ -1454,7 +1518,7 @@ mod tests {
         }
 
         let scene = SceneOptions {
-            chunk_radius: 0,
+            render_distance: 0,
             ..SceneOptions::default()
         };
         let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
@@ -1540,7 +1604,7 @@ mod tests {
         }
 
         let scene = SceneOptions {
-            chunk_radius: 0,
+            render_distance: 0,
             ..SceneOptions::default()
         };
         let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
@@ -1576,24 +1640,30 @@ mod tests {
     }
 
     #[test]
-    fn window_runtime_updates_chunk_radius_live() {
+    fn window_runtime_updates_render_distance_live() {
         if !extracted_asset_root().exists() {
             return;
         }
 
         let scene = SceneOptions {
-            chunk_radius: 0,
+            render_distance: 0,
             ..SceneOptions::default()
         };
         let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
         poll_window_runtime_until_idle(&mut runtime).unwrap();
 
-        assert_eq!(runtime.radius_chunks, 0);
+        assert_eq!(runtime.render_distance, 0);
+        assert_eq!(runtime.chunk_tracking_radius, 0);
         assert_eq!(runtime.stats().loaded_chunks, square_count(0).unwrap());
 
-        assert!(runtime.set_radius_chunks(1).unwrap());
-        assert_eq!(runtime.radius_chunks, 1);
-        assert_eq!(runtime.client.chunk_interest().unwrap().radius_chunks, 1);
+        assert!(runtime.set_render_distance(1).unwrap());
+        assert_eq!(runtime.render_distance, 1);
+        assert_eq!(runtime.chunk_tracking_radius, 1);
+        assert_eq!(runtime.client.chunk_view().unwrap().render_distance, 1);
+        assert_eq!(
+            runtime.client.chunk_view().unwrap().chunk_tracking_radius,
+            1
+        );
         poll_window_runtime_until_idle(&mut runtime).unwrap();
         assert_eq!(runtime.stats().loaded_chunks, square_count(1).unwrap());
 
@@ -1607,9 +1677,10 @@ mod tests {
             section.key.chunk_x != scene.chunk_x || section.key.chunk_z != scene.chunk_z
         }));
 
-        assert!(runtime.set_radius_chunks(0).unwrap());
+        assert!(runtime.set_render_distance(0).unwrap());
         poll_window_runtime_until_idle(&mut runtime).unwrap();
-        assert_eq!(runtime.radius_chunks, 0);
+        assert_eq!(runtime.render_distance, 0);
+        assert_eq!(runtime.chunk_tracking_radius, 0);
         assert_eq!(runtime.stats().loaded_chunks, square_count(0).unwrap());
 
         let shrunk_update = runtime
@@ -1628,7 +1699,7 @@ mod tests {
         }
 
         let scene = SceneOptions {
-            chunk_radius: 1,
+            render_distance: 1,
             ..SceneOptions::default()
         };
         let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
@@ -1654,13 +1725,44 @@ mod tests {
     }
 
     #[test]
+    fn render_distance_two_tracks_extra_ring_without_drawing_it() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let scene = SceneOptions {
+            render_distance: 2,
+            ..SceneOptions::default()
+        };
+        let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
+        poll_window_runtime_until_idle(&mut runtime).unwrap();
+
+        assert_eq!(runtime.render_distance, 2);
+        assert_eq!(runtime.chunk_tracking_radius, 3);
+        assert_eq!(runtime.stats().loaded_chunks, square_count(3).unwrap());
+        assert!(runtime.client.chunk_snapshots().any(|snapshot| {
+            chunk_distance_from_scene_center(&scene, snapshot.pos.x, snapshot.pos.z) == 3
+        }));
+
+        let spectator = SpectatorCamera::spawn_for_scene(&scene);
+        runtime
+            .sync_all_render_sections(spectator.position)
+            .unwrap();
+        let ready_sections = runtime.traversal_ready_render_section_keys(spectator.position);
+        assert!(!ready_sections.is_empty());
+        assert!(ready_sections.iter().all(|key| {
+            chunk_distance_from_scene_center(&scene, key.chunk_x, key.chunk_z) <= 2
+        }));
+    }
+
+    #[test]
     fn high_altitude_radius_one_keeps_neighbor_chunks_draw_ready() {
         if !extracted_asset_root().exists() {
             return;
         }
 
         let scene = SceneOptions {
-            chunk_radius: 1,
+            render_distance: 1,
             ..SceneOptions::default()
         };
         let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
@@ -1719,7 +1821,7 @@ mod tests {
             seed: 0,
             chunk_x: -2,
             chunk_z: 3,
-            chunk_radius: 1,
+            render_distance: 1,
             remote_addr: None,
         }
         .chunk_positions()
@@ -1734,7 +1836,7 @@ mod tests {
     #[test]
     fn scene_client_runtime_loads_center_chunk_from_integrated_server() {
         let scene = SceneOptions {
-            chunk_radius: 0,
+            render_distance: 0,
             ..SceneOptions::default()
         };
         let client = build_scene_client_runtime(&scene).unwrap();
@@ -1760,7 +1862,7 @@ mod tests {
             mclone_net::write_server_update_batch(&mut stream, &updates).unwrap();
         });
         let scene = SceneOptions {
-            chunk_radius: 0,
+            render_distance: 0,
             remote_addr: Some(addr.to_string()),
             ..SceneOptions::default()
         };
@@ -1783,7 +1885,7 @@ mod tests {
             return;
         }
         let scene_mesh = build_scene_textured_sections(&SceneOptions {
-            chunk_radius: 0,
+            render_distance: 0,
             ..SceneOptions::default()
         })
         .unwrap();
@@ -1792,6 +1894,12 @@ mod tests {
         assert!(scene_mesh.index_count() > 0);
         assert!(scene_mesh.atlas.width > 0);
         assert!(scene_mesh.atlas.height > 0);
+    }
+
+    fn chunk_distance_from_scene_center(scene: &SceneOptions, chunk_x: i32, chunk_z: i32) -> i32 {
+        (chunk_x - scene.chunk_x)
+            .abs()
+            .max((chunk_z - scene.chunk_z).abs())
     }
 
     fn empty_test_snapshot(pos: ChunkPos) -> ChunkSnapshot {

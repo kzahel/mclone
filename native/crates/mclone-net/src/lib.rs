@@ -211,7 +211,7 @@ mod native_tcp {
 mod tests {
     use super::*;
     use mclone_core::ChunkPos;
-    use mclone_protocol::ChunkInterest;
+    use mclone_protocol::ChunkView;
 
     #[test]
     fn distinguishes_local_native_and_web_transports() {
@@ -222,9 +222,10 @@ mod tests {
     #[test]
     fn local_transport_queues_and_drains_protocol_messages() {
         let mut transport = LocalTransport::new();
-        transport.send_client_command(ClientCommand::SetChunkInterest(ChunkInterest {
+        transport.send_client_command(ClientCommand::SetChunkView(ChunkView {
             center: ChunkPos::new(0, 0),
-            radius_chunks: 1,
+            render_distance: 1,
+            chunk_tracking_radius: 1,
         }));
         transport.send_server_update(ServerUpdate::ChunkUnload {
             pos: ChunkPos::new(4, -2),
@@ -241,9 +242,10 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn native_command_frame_round_trips() {
-        let command = ClientCommand::SetChunkInterest(ChunkInterest {
+        let command = ClientCommand::SetChunkView(ChunkView {
             center: ChunkPos::new(-2, 4),
-            radius_chunks: 2,
+            render_distance: 2,
+            chunk_tracking_radius: 2,
         });
         let mut bytes = Vec::new();
 
@@ -281,9 +283,10 @@ mod tests {
     fn native_tcp_loopback_requests_updates() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        let command = ClientCommand::SetChunkInterest(ChunkInterest {
+        let command = ClientCommand::SetChunkView(ChunkView {
             center: ChunkPos::new(0, 0),
-            radius_chunks: 0,
+            render_distance: 0,
+            chunk_tracking_radius: 0,
         });
         let server_command = command.clone();
         let expected_updates = vec![ServerUpdate::ChunkUnload {

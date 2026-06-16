@@ -30,7 +30,7 @@ impl SpectatorCamera {
         }
     }
 
-    pub(crate) fn camera(&self, chunk_radius: u32) -> ChunkCamera {
+    pub(crate) fn camera(&self, render_distance: u32) -> ChunkCamera {
         let forward = self.forward();
         ChunkCamera {
             eye: self.position.to_array(),
@@ -38,7 +38,7 @@ impl SpectatorCamera {
             up: [0.0, 1.0, 0.0],
             fov_y_radians: 64.0_f32.to_radians(),
             z_near: 0.05,
-            z_far: 700.0 + chunk_radius as f32 * 128.0,
+            z_far: 700.0 + render_distance as f32 * 128.0,
         }
     }
 

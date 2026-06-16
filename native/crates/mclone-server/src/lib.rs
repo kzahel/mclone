@@ -18,7 +18,7 @@ use mclone_core::{
     ChunkStatus, PackedLightSection, SECTION_HEIGHT, chunk_section_index,
 };
 use mclone_light::{DataLayer, LightLayer};
-use mclone_protocol::{ChunkInterest, ClientCommand, SectionBlockUpdate, ServerUpdate};
+use mclone_protocol::{ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate};
 use mclone_worldgen::block::{
     LAVA, OBSIDIAN, RawBlockId, STONE, WATER, fluid_level, generated_block_state_id, is_lava,
     is_water, lava_block_for_level, material_blocks_motion, water_block_for_level,
@@ -807,8 +807,8 @@ impl ChunkDistanceManager {
         self.ticket_tick
     }
 
-    fn set_player_interest(&mut self, interest: ChunkInterest) {
-        let new_positions = interest_positions(&interest)
+    fn set_player_view(&mut self, view: ChunkView) {
+        let new_positions = chunk_view_positions(&view)
             .into_iter()
             .collect::<BTreeSet<_>>();
         let old_positions = std::mem::take(&mut self.player_ticket_positions);
@@ -1012,9 +1012,9 @@ impl ChunkScheduler {
 
     pub fn apply_interest(
         &mut self,
-        interest: ChunkInterest,
+        view: ChunkView,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        self.distance_manager.set_player_interest(interest);
+        self.distance_manager.set_player_view(view);
         self.reconcile_ticketed_holders()
     }
 
@@ -2780,7 +2780,7 @@ impl IntegratedServer {
         command: ClientCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         match command {
-            ClientCommand::SetChunkInterest(interest) => self.set_chunk_interest(interest),
+            ClientCommand::SetChunkView(view) => self.set_chunk_view(view),
         }
     }
 
@@ -2941,11 +2941,8 @@ impl IntegratedServer {
         self.scheduler.save_dirty_chunks()
     }
 
-    fn set_chunk_interest(
-        &mut self,
-        interest: ChunkInterest,
-    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        let events = self.scheduler.apply_interest(interest)?;
+    fn set_chunk_view(&mut self, view: ChunkView) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        let events = self.scheduler.apply_interest(view)?;
         Ok(self.apply_scheduler_events(events))
     }
 
@@ -3060,12 +3057,13 @@ fn sorted_chunk_positions_z_major(positions: BTreeSet<ChunkPos>) -> Vec<ChunkPos
     positions
 }
 
-fn interest_positions(interest: &ChunkInterest) -> Vec<ChunkPos> {
-    let radius = i32::try_from(interest.radius_chunks).expect("chunk interest radius exceeds i32");
-    let min_x = interest.center.x - radius;
-    let max_x = interest.center.x + radius;
-    let min_z = interest.center.z - radius;
-    let max_z = interest.center.z + radius;
+fn chunk_view_positions(view: &ChunkView) -> Vec<ChunkPos> {
+    let radius =
+        i32::try_from(view.chunk_tracking_radius).expect("chunk tracking radius exceeds i32");
+    let min_x = view.center.x - radius;
+    let max_x = view.center.x + radius;
+    let min_z = view.center.z - radius;
+    let max_z = view.center.z + radius;
     (min_x..=max_x)
         .flat_map(|x| (min_z..=max_z).map(move |z| ChunkPos::new(x, z)))
         .collect()
@@ -3703,7 +3701,7 @@ mod tests {
 
     fn apply_interest_and_poll(
         scheduler: &mut ChunkScheduler,
-        interest: ChunkInterest,
+        interest: ChunkView,
     ) -> Vec<ChunkSchedulerEvent> {
         let mut events = scheduler.apply_interest(interest).unwrap();
         events.extend(poll_scheduler_until_idle(scheduler));
@@ -4365,9 +4363,10 @@ mod tests {
         let mut server = IntegratedServer::new(12_345);
         handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks,
+                render_distance: radius_chunks,
+                chunk_tracking_radius: radius_chunks,
             }),
         );
         server.liquid_ticks = FluidTickList::new();
@@ -4865,9 +4864,10 @@ mod tests {
 
         let updates = handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 1,
+                render_distance: 1,
+                chunk_tracking_radius: 1,
             }),
         );
 
@@ -4959,9 +4959,10 @@ mod tests {
         let mut scheduler = ChunkScheduler::new(12_345);
 
         scheduler
-            .apply_interest(ChunkInterest {
+            .apply_interest(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             })
             .unwrap();
 
@@ -5010,9 +5011,10 @@ mod tests {
 
         apply_interest_and_poll(
             &mut scheduler,
-            ChunkInterest {
+            ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             },
         );
         assert!(
@@ -5024,9 +5026,10 @@ mod tests {
 
         apply_interest_and_poll(
             &mut scheduler,
-            ChunkInterest {
+            ChunkView {
                 center: ChunkPos::new(1, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             },
         );
 
@@ -5044,9 +5047,10 @@ mod tests {
 
         apply_interest_and_poll(
             &mut scheduler,
-            ChunkInterest {
+            ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             },
         );
 
@@ -5068,9 +5072,10 @@ mod tests {
 
         handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
 
@@ -5092,9 +5097,10 @@ mod tests {
 
         handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
         let before_metrics = server.scheduler().metrics();
@@ -5155,9 +5161,10 @@ mod tests {
 
         let updates = handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center,
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
 
@@ -5188,9 +5195,10 @@ mod tests {
         let mut server = IntegratedServer::new(12_345);
         let initial_updates = handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
         let mut client_snapshot = snapshot_update_for(&initial_updates, ChunkPos::new(0, 0))
@@ -5372,9 +5380,10 @@ mod tests {
 
         handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(1, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
         run_simulation_ticks(&mut server, 1);
@@ -5532,9 +5541,10 @@ mod tests {
         let mut server = IntegratedServer::new(12_345);
         handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
         let source = WorldBlockPos::new(8, 120, 8);
@@ -5545,9 +5555,10 @@ mod tests {
 
         handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(1, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
         let report = server.simulation_tick_report();
@@ -5572,9 +5583,10 @@ mod tests {
     fn scheduled_fluid_tick_survives_fully_unloaded_chunk_until_reload() {
         let root =
             unique_temp_dir("scheduled_fluid_tick_survives_fully_unloaded_chunk_until_reload");
-        let original_interest = ChunkInterest {
+        let original_interest = ChunkView {
             center: ChunkPos::new(0, 0),
-            radius_chunks: 0,
+            render_distance: 0,
+            chunk_tracking_radius: 0,
         };
         let source = WorldBlockPos::new(8, 120, 8);
         let below = source.below();
@@ -5584,7 +5596,7 @@ mod tests {
         );
         handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(original_interest.clone()),
+            ClientCommand::SetChunkView(original_interest.clone()),
         );
         server.liquid_ticks = FluidTickList::new();
         server.scheduler_mut().set_block_at_world(source, WATER);
@@ -5592,9 +5604,10 @@ mod tests {
 
         handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(100, 100),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
         server
@@ -5620,10 +5633,8 @@ mod tests {
             "a due tick outside any entity-ticking holder should stay pending"
         );
 
-        let updates = handle_command_and_poll(
-            &mut server,
-            ClientCommand::SetChunkInterest(original_interest),
-        );
+        let updates =
+            handle_command_and_poll(&mut server, ClientCommand::SetChunkView(original_interest));
         assert!(
             snapshot_update_for(&updates, ChunkPos::new(0, 0)).is_some(),
             "the original chunk should reload from the snapshot store"
@@ -5654,9 +5665,10 @@ mod tests {
 
         handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
 
@@ -5701,22 +5713,20 @@ mod tests {
     #[test]
     fn duplicate_interest_does_not_regenerate_loaded_chunks() {
         let mut server = IntegratedServer::new(12_345);
-        let interest = ChunkInterest {
+        let interest = ChunkView {
             center: ChunkPos::new(0, 0),
-            radius_chunks: 0,
+            render_distance: 0,
+            chunk_tracking_radius: 0,
         };
 
         assert_eq!(
-            handle_command_and_poll(
-                &mut server,
-                ClientCommand::SetChunkInterest(interest.clone())
-            )
-            .len(),
+            handle_command_and_poll(&mut server, ClientCommand::SetChunkView(interest.clone()))
+                .len(),
             1
         );
         assert_eq!(server.scheduler().job_count(), 1);
         assert_eq!(
-            handle_command_and_poll(&mut server, ClientCommand::SetChunkInterest(interest)).len(),
+            handle_command_and_poll(&mut server, ClientCommand::SetChunkView(interest)).len(),
             0
         );
         assert_eq!(server.scheduler().job_count(), 1);
@@ -5729,9 +5739,10 @@ mod tests {
         assert_eq!(
             handle_command_and_poll(
                 &mut server,
-                ClientCommand::SetChunkInterest(ChunkInterest {
+                ClientCommand::SetChunkView(ChunkView {
                     center: ChunkPos::new(0, 0),
-                    radius_chunks: 0,
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
                 }),
             )
             .len(),
@@ -5750,9 +5761,10 @@ mod tests {
         assert_eq!(
             handle_command_and_poll(
                 &mut server,
-                ClientCommand::SetChunkInterest(ChunkInterest {
+                ClientCommand::SetChunkView(ChunkView {
                     center: ChunkPos::new(1, 0),
-                    radius_chunks: 0,
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
                 }),
             )
             .len(),
@@ -5774,9 +5786,10 @@ mod tests {
         let mut scheduler = ChunkScheduler::new(12_345);
 
         let events = scheduler
-            .apply_interest(ChunkInterest {
+            .apply_interest(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             })
             .unwrap();
 
@@ -5821,9 +5834,10 @@ mod tests {
     fn chunk_scheduler_poll_slices_completed_publication() {
         let mut scheduler = ChunkScheduler::new(12_345);
         scheduler
-            .apply_interest(ChunkInterest {
+            .apply_interest(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             })
             .unwrap();
         wait_for_scheduler_completion(&mut scheduler);
@@ -5855,9 +5869,10 @@ mod tests {
         let mut scheduler = ChunkScheduler::new(12_345);
 
         let events = scheduler
-            .apply_interest(ChunkInterest {
+            .apply_interest(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             })
             .unwrap();
 
@@ -5874,9 +5889,10 @@ mod tests {
         assert_eq!(events.len(), 9 * 5);
 
         let moved_events = scheduler
-            .apply_interest(ChunkInterest {
+            .apply_interest(ChunkView {
                 center: ChunkPos::new(1, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             })
             .unwrap();
 
@@ -5908,9 +5924,10 @@ mod tests {
     #[test]
     fn duplicate_interest_while_job_running_does_not_enqueue_second_job() {
         let mut scheduler = ChunkScheduler::new(12_345);
-        let interest = ChunkInterest {
+        let interest = ChunkView {
             center: ChunkPos::new(0, 0),
-            radius_chunks: 0,
+            render_distance: 0,
+            chunk_tracking_radius: 0,
         };
 
         let first_events = scheduler.apply_interest(interest.clone()).unwrap();
@@ -5937,9 +5954,10 @@ mod tests {
 
         apply_interest_and_poll(
             &mut scheduler,
-            ChunkInterest {
+            ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             },
         );
         assert!(
@@ -5956,9 +5974,10 @@ mod tests {
 
         let events = apply_interest_and_poll(
             &mut scheduler,
-            ChunkInterest {
+            ChunkView {
                 center: ChunkPos::new(1, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             },
         );
 
@@ -6099,9 +6118,10 @@ mod tests {
 
         let events = apply_interest_and_poll(
             &mut scheduler,
-            ChunkInterest {
+            ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             },
         );
 
@@ -6177,9 +6197,10 @@ mod tests {
     #[test]
     fn chunk_scheduler_coalesces_duplicate_status_requests() {
         let mut scheduler = ChunkScheduler::new(12_345);
-        let interest = ChunkInterest {
+        let interest = ChunkView {
             center: ChunkPos::new(0, 0),
-            radius_chunks: 0,
+            render_distance: 0,
+            chunk_tracking_radius: 0,
         };
 
         assert_eq!(
@@ -6199,9 +6220,10 @@ mod tests {
         let mut scheduler = ChunkScheduler::new(12_345);
         apply_interest_and_poll(
             &mut scheduler,
-            ChunkInterest {
+            ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             },
         );
 
@@ -6222,9 +6244,10 @@ mod tests {
     #[test]
     fn integrated_server_saves_and_reloads_resident_chunk() {
         let root = unique_temp_dir("integrated_server_saves_and_reloads_resident_chunk");
-        let interest = ChunkInterest {
+        let interest = ChunkView {
             center: ChunkPos::new(0, 0),
-            radius_chunks: 0,
+            render_distance: 0,
+            chunk_tracking_radius: 0,
         };
         let first_snapshot = {
             let mut server = IntegratedServer::with_chunk_store(
@@ -6233,7 +6256,7 @@ mod tests {
             );
             let updates = try_handle_command_and_poll(
                 &mut server,
-                ClientCommand::SetChunkInterest(interest.clone()),
+                ClientCommand::SetChunkView(interest.clone()),
             )
             .unwrap();
             let ServerUpdate::ChunkSnapshot(snapshot) = updates.first().unwrap() else {
@@ -6268,7 +6291,7 @@ mod tests {
             Box::new(FilesystemChunkSnapshotStore::new(&root)),
         );
         let updates =
-            try_handle_command_and_poll(&mut reloaded, ClientCommand::SetChunkInterest(interest))
+            try_handle_command_and_poll(&mut reloaded, ClientCommand::SetChunkView(interest))
                 .unwrap();
 
         assert_eq!(updates, vec![ServerUpdate::ChunkSnapshot(first_snapshot)]);
@@ -6286,17 +6309,19 @@ mod tests {
         let mut server = IntegratedServer::new(12_345);
         handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(0, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
 
         let updates = handle_command_and_poll(
             &mut server,
-            ClientCommand::SetChunkInterest(ChunkInterest {
+            ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(1, 0),
-                radius_chunks: 0,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
             }),
         );
 

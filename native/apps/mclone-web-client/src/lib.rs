@@ -4,7 +4,7 @@ use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::ChunkPos;
 use mclone_net::LocalTransport;
 use mclone_protocol::{
-    ChunkInterest, ClientCommand, ProtocolCodecError, ProtocolCodecResult, ServerUpdate,
+    ChunkView, ClientCommand, ProtocolCodecError, ProtocolCodecResult, ServerUpdate,
     decode_client_command, decode_server_update, encode_client_command, encode_server_update,
 };
 use mclone_render::RenderBackend;
@@ -96,14 +96,16 @@ impl WebRuntime {
         }
     }
 
-    pub fn request_chunk_interest(
+    pub fn request_chunk_view(
         &mut self,
         center: ChunkPos,
-        radius_chunks: u32,
+        render_distance: u32,
+        chunk_tracking_radius: u32,
     ) -> ProtocolCodecResult<WebRuntimeStepReport> {
-        let command = self.client.set_chunk_interest(ChunkInterest {
+        let command = self.client.set_chunk_view(ChunkView {
             center,
-            radius_chunks,
+            render_distance,
+            chunk_tracking_radius,
         });
         let exchange = self.host.exchange(command)?;
 
@@ -251,13 +253,17 @@ struct WebExchange {
 pub fn try_run_web_runtime_smoke() -> ProtocolCodecResult<WebSmokeReport> {
     let mut runtime = WebRuntime::local_integrated(SMOKE_SEED);
 
-    runtime.request_chunk_interest(SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS)?;
+    runtime.request_chunk_view(
+        SMOKE_INITIAL_CENTER,
+        SMOKE_RADIUS_CHUNKS,
+        SMOKE_RADIUS_CHUNKS,
+    )?;
     let center_chunk_loaded = runtime
         .client()
         .chunk_snapshot(SMOKE_INITIAL_CENTER)
         .is_some();
 
-    runtime.request_chunk_interest(SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS)?;
+    runtime.request_chunk_view(SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_RADIUS_CHUNKS)?;
     let moved_chunk_loaded = runtime
         .client()
         .chunk_snapshot(SMOKE_MOVED_CENTER)
@@ -354,7 +360,11 @@ mod tests {
 
         assert_eq!(
             runtime
-                .request_chunk_interest(SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS)
+                .request_chunk_view(
+                    SMOKE_INITIAL_CENTER,
+                    SMOKE_RADIUS_CHUNKS,
+                    SMOKE_RADIUS_CHUNKS
+                )
                 .unwrap(),
             WebRuntimeStepReport {
                 command_count: 1,
@@ -373,7 +383,7 @@ mod tests {
 
         assert_eq!(
             runtime
-                .request_chunk_interest(SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS)
+                .request_chunk_view(SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_RADIUS_CHUNKS)
                 .unwrap(),
             WebRuntimeStepReport {
                 command_count: 1,

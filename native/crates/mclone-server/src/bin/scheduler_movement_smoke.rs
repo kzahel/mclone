@@ -6,7 +6,7 @@ use std::{
 };
 
 use mclone_core::ChunkPos;
-use mclone_protocol::ChunkInterest;
+use mclone_protocol::ChunkView;
 use mclone_server::{
     ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics, MAX_CHUNK_DISTANCE,
     PLAYER_TICKET_LEVEL,
@@ -41,9 +41,10 @@ fn run() -> Result<(), String> {
         let step_start = Instant::now();
         let apply_start = Instant::now();
         let mut events = scheduler
-            .apply_interest(ChunkInterest {
+            .apply_interest(ChunkView {
                 center,
-                radius_chunks: config.radius_chunks,
+                render_distance: config.radius_chunks,
+                chunk_tracking_radius: config.radius_chunks,
             })
             .map_err(|error| error.to_string())?;
         let apply_interest_ms = elapsed_ms(apply_start.elapsed());
