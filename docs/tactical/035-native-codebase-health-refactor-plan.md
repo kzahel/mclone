@@ -1,6 +1,6 @@
 # 035: Native Codebase Health Refactor Plan
 
-Status: proposed parent.
+Status: active parent.
 
 ## Purpose
 
@@ -83,8 +83,8 @@ module.
 ## Tracking Checklist
 
 - [ ] Split `mclone-native-client` into app-local modules:
-  `cli`, `headless`, `perf`, `scene_runtime`, `render_cache`, `camera`,
-  `frame_pacing`, `ui`, and `app`.
+  `cli` (done), `headless` (done), `perf` (done), `scene_runtime`,
+  `render_cache`, `camera`, `frame_pacing`, `ui`, and `app`.
 - [ ] Split `mclone-server` after active block-delta/fluid mutation work
   stabilizes: `types`, `tickets`, `distance_manager`, `holder`, `scheduler`,
   `worldgen_mailbox`, `fluid`, `integrated`, `lighting_seed`, and `timing`.
