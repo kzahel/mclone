@@ -24,10 +24,11 @@ use crate::cli::{
     TimedemoOptions,
 };
 use crate::frame_pacing::{FramePacingUiState, elapsed_ms};
+use crate::ui::NativeUi;
 use crate::{
-    MAX_CHUNK_RADIUS, NativeUi, RenderStreamStats, WindowSceneRuntime,
-    build_scene_textured_sections, poll_window_runtime_until_idle, print_benchmark_metadata,
-    record_render_section_update_stats, render_full_frame, square_count,
+    MAX_CHUNK_RADIUS, RenderStreamStats, WindowSceneRuntime, build_scene_textured_sections,
+    poll_window_runtime_until_idle, print_benchmark_metadata, record_render_section_update_stats,
+    render_full_frame, square_count,
 };
 
 #[derive(Clone, Debug)]
