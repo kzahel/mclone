@@ -1,9 +1,12 @@
 use crate::biome::OverworldBiomeSource;
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::prng::{RandomSource, SimpleRandomSource, WorldgenRandom};
+use mclone_core::{
+    CHUNK_WIDTH, chunk_block_coord, chunk_middle_block_coord, chunk_min_block_coord,
+    local_block_coord,
+};
 use std::sync::OnceLock;
 
-const CHUNK_WIDTH: i32 = 16;
 const CARVER_RANGE: i32 = 4;
 const SIN_TABLE_SIZE: usize = 65_536;
 const SIN_TABLE_MASK: i32 = 65_535;
@@ -574,9 +577,9 @@ fn cave_carve(
     let mut carved = false;
 
     for _ in 0..cave_count {
-        let x = chunk_block_x(source_chunk_x, random.next_int_bound(CHUNK_WIDTH)) as f64;
+        let x = chunk_block_coord(source_chunk_x, random.next_int_bound(CHUNK_WIDTH)) as f64;
         let y = config.base.y.sample(random, context) as f64;
-        let z = chunk_block_z(source_chunk_z, random.next_int_bound(CHUNK_WIDTH)) as f64;
+        let z = chunk_block_coord(source_chunk_z, random.next_int_bound(CHUNK_WIDTH)) as f64;
         let horizontal_radius_multiplier = config.horizontal_radius_multiplier.sample(random);
         let vertical_radius_multiplier = config.vertical_radius_multiplier.sample(random);
         let floor_level = config.floor_level.sample(random);
@@ -807,9 +810,9 @@ fn canyon_carve(
     source_chunk_z: i32,
     mask: &mut CarvingMask,
 ) -> bool {
-    let x = chunk_block_x(source_chunk_x, random.next_int_bound(CHUNK_WIDTH)) as f64;
+    let x = chunk_block_coord(source_chunk_x, random.next_int_bound(CHUNK_WIDTH)) as f64;
     let y = config.base.y.sample(random, context) as f64;
-    let z = chunk_block_z(source_chunk_z, random.next_int_bound(CHUNK_WIDTH)) as f64;
+    let z = chunk_block_coord(source_chunk_z, random.next_int_bound(CHUNK_WIDTH)) as f64;
     let yaw = random.next_float() * TWO_PI;
     let pitch = config.vertical_rotation.sample(random);
     let y_scale = config.base.y_scale.sample(random);
@@ -993,8 +996,8 @@ fn carve_ellipsoid(
         return false;
     }
 
-    let min_block_x = chunk_min_block_x(chunk.chunk_x);
-    let min_block_z = chunk_min_block_z(chunk.chunk_z);
+    let min_block_x = chunk_min_block_coord(chunk.chunk_x);
+    let min_block_z = chunk_min_block_coord(chunk.chunk_z);
     let min_x = ((floor(x - horizontal_radius) - min_block_x - 1).max(0)).min(15);
     let max_x = ((floor(x + horizontal_radius) - min_block_x).max(0)).min(15);
     let min_y = (floor(y - vertical_radius) - 1).max(context.min_y() + 1);
@@ -1054,8 +1057,8 @@ fn can_carve_chunk(
     z: f64,
     horizontal_radius: f64,
 ) -> bool {
-    let chunk_middle_x = chunk_middle_block_x(chunk.chunk_x) as f64;
-    let chunk_middle_z = chunk_middle_block_z(chunk.chunk_z) as f64;
+    let chunk_middle_x = chunk_middle_block_coord(chunk.chunk_x) as f64;
+    let chunk_middle_z = chunk_middle_block_coord(chunk.chunk_z) as f64;
     (x - chunk_middle_x).abs() <= 16.0 + horizontal_radius * 2.0
         && (z - chunk_middle_z).abs() <= 16.0 + horizontal_radius * 2.0
 }
@@ -1289,7 +1292,11 @@ fn should_schedule_water_tick(
             return true;
         }
 
-        if chunk.get_block_at_y(local_coord(neighbor_x), neighbor_y, local_coord(neighbor_z)) == AIR
+        if chunk.get_block_at_y(
+            local_block_coord(neighbor_x),
+            neighbor_y,
+            local_block_coord(neighbor_z),
+        ) == AIR
         {
             return true;
         }
@@ -1306,8 +1313,8 @@ fn can_reach(
     branch_count: i32,
     width: f64,
 ) -> bool {
-    let chunk_middle_x = chunk_middle_block_x(chunk.chunk_x) as f64;
-    let chunk_middle_z = chunk_middle_block_z(chunk.chunk_z) as f64;
+    let chunk_middle_x = chunk_middle_block_coord(chunk.chunk_x) as f64;
+    let chunk_middle_z = chunk_middle_block_coord(chunk.chunk_z) as f64;
     let delta_x = x - chunk_middle_x;
     let delta_z = z - chunk_middle_z;
     let remaining_branch_count = branch_count - current_branch;
@@ -1317,34 +1324,6 @@ fn can_reach(
 
 fn get_range() -> i32 {
     CARVER_RANGE
-}
-
-fn chunk_block_x(chunk_x: i32, local_x: i32) -> i32 {
-    chunk_x * CHUNK_WIDTH + local_x
-}
-
-fn chunk_block_z(chunk_z: i32, local_z: i32) -> i32 {
-    chunk_z * CHUNK_WIDTH + local_z
-}
-
-fn chunk_min_block_x(chunk_x: i32) -> i32 {
-    chunk_x * CHUNK_WIDTH
-}
-
-fn chunk_min_block_z(chunk_z: i32) -> i32 {
-    chunk_z * CHUNK_WIDTH
-}
-
-fn chunk_middle_block_x(chunk_x: i32) -> i32 {
-    chunk_min_block_x(chunk_x) + 8
-}
-
-fn chunk_middle_block_z(chunk_z: i32) -> i32 {
-    chunk_min_block_z(chunk_z) + 8
-}
-
-fn local_coord(world_coord: i32) -> i32 {
-    world_coord & (CHUNK_WIDTH - 1)
 }
 
 fn floor(value: f64) -> i32 {

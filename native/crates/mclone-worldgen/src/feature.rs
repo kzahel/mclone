@@ -21,8 +21,8 @@ use crate::placement::{
 };
 use crate::prng::{RandomSource, WorldgenRandom};
 use crate::surface::biome_temperature;
+use mclone_core::{CHUNK_WIDTH, block_to_chunk_coord, chunk_min_block_coord, local_block_coord};
 
-const CHUNK_WIDTH: i32 = 16;
 pub const FEATURES_CHUNK_DEPENDENCY_RADIUS: i32 = 8;
 pub const FEATURES_WRITE_RADIUS_CUTOFF: i32 = 1;
 const SIN_TABLE_SIZE: usize = 65_536;
@@ -224,8 +224,8 @@ impl FeatureWorld for MutableChunkBlockBuffer {
     }
 
     fn block_at_world(&mut self, pos: BlockPos) -> Option<RawBlockId> {
-        let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
-        let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
+        let local_x = pos.x - chunk_min_block_coord(self.chunk_x);
+        let local_z = pos.z - chunk_min_block_coord(self.chunk_z);
         if !(0..CHUNK_WIDTH).contains(&local_x)
             || !(self.min_y..self.min_y + self.height).contains(&pos.y)
             || !(0..CHUNK_WIDTH).contains(&local_z)
@@ -236,8 +236,8 @@ impl FeatureWorld for MutableChunkBlockBuffer {
     }
 
     fn height_at(&mut self, heightmap: HeightmapType, world_x: i32, world_z: i32) -> Option<i32> {
-        let local_x = world_x - self.chunk_x * CHUNK_WIDTH;
-        let local_z = world_z - self.chunk_z * CHUNK_WIDTH;
+        let local_x = world_x - chunk_min_block_coord(self.chunk_x);
+        let local_z = world_z - chunk_min_block_coord(self.chunk_z);
         if !(0..CHUNK_WIDTH).contains(&local_x) || !(0..CHUNK_WIDTH).contains(&local_z) {
             return None;
         }
@@ -245,8 +245,8 @@ impl FeatureWorld for MutableChunkBlockBuffer {
     }
 
     fn world_surface_height_at(&mut self, world_x: i32, world_z: i32) -> Option<i32> {
-        let local_x = world_x - self.chunk_x * CHUNK_WIDTH;
-        let local_z = world_z - self.chunk_z * CHUNK_WIDTH;
+        let local_x = world_x - chunk_min_block_coord(self.chunk_x);
+        let local_z = world_z - chunk_min_block_coord(self.chunk_z);
         if !(0..CHUNK_WIDTH).contains(&local_x) || !(0..CHUNK_WIDTH).contains(&local_z) {
             return None;
         }
@@ -254,8 +254,8 @@ impl FeatureWorld for MutableChunkBlockBuffer {
     }
 
     fn set_block_world(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool {
-        let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
-        let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
+        let local_x = pos.x - chunk_min_block_coord(self.chunk_x);
+        let local_z = pos.z - chunk_min_block_coord(self.chunk_z);
         if !(0..CHUNK_WIDTH).contains(&local_x)
             || !(self.min_y..self.min_y + self.height).contains(&pos.y)
             || !(0..CHUNK_WIDTH).contains(&local_z)
@@ -267,8 +267,8 @@ impl FeatureWorld for MutableChunkBlockBuffer {
     }
 
     fn glow_lichen_faces_world(&mut self, pos: BlockPos) -> u8 {
-        let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
-        let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
+        let local_x = pos.x - chunk_min_block_coord(self.chunk_x);
+        let local_z = pos.z - chunk_min_block_coord(self.chunk_z);
         if !(0..CHUNK_WIDTH).contains(&local_x)
             || !(self.min_y..self.min_y + self.height).contains(&pos.y)
             || !(0..CHUNK_WIDTH).contains(&local_z)
@@ -279,8 +279,8 @@ impl FeatureWorld for MutableChunkBlockBuffer {
     }
 
     fn set_glow_lichen_faces_world(&mut self, pos: BlockPos, faces: u8) -> bool {
-        let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
-        let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
+        let local_x = pos.x - chunk_min_block_coord(self.chunk_x);
+        let local_z = pos.z - chunk_min_block_coord(self.chunk_z);
         if !(0..CHUNK_WIDTH).contains(&local_x)
             || !(self.min_y..self.min_y + self.height).contains(&pos.y)
             || !(0..CHUNK_WIDTH).contains(&local_z)
@@ -292,8 +292,8 @@ impl FeatureWorld for MutableChunkBlockBuffer {
     }
 
     fn schedule_liquid_tick_world(&mut self, pos: BlockPos, target: RawBlockId, delay: i32) {
-        let local_x = pos.x - self.chunk_x * CHUNK_WIDTH;
-        let local_z = pos.z - self.chunk_z * CHUNK_WIDTH;
+        let local_x = pos.x - chunk_min_block_coord(self.chunk_x);
+        let local_z = pos.z - chunk_min_block_coord(self.chunk_z);
         if !(0..CHUNK_WIDTH).contains(&local_x)
             || !(self.min_y..self.min_y + self.height).contains(&pos.y)
             || !(0..CHUNK_WIDTH).contains(&local_z)
@@ -552,11 +552,7 @@ impl FeatureWorld for FeatureRegion {
         if !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y) {
             return None;
         }
-        Some(chunk.get_block_at_y(
-            pos.x - chunk_x * CHUNK_WIDTH,
-            pos.y,
-            pos.z - chunk_z * CHUNK_WIDTH,
-        ))
+        Some(chunk.get_block_at_y(local_block_coord(pos.x), pos.y, local_block_coord(pos.z)))
     }
 
     fn height_at(&mut self, heightmap: HeightmapType, world_x: i32, world_z: i32) -> Option<i32> {
@@ -567,8 +563,8 @@ impl FeatureWorld for FeatureRegion {
         Some(heightmap_height(
             chunk,
             heightmap,
-            world_x - chunk_x * CHUNK_WIDTH,
-            world_z - chunk_z * CHUNK_WIDTH,
+            local_block_coord(world_x),
+            local_block_coord(world_z),
         ))
     }
 
@@ -577,10 +573,7 @@ impl FeatureWorld for FeatureRegion {
         let chunk_z = block_to_chunk_coord(world_z);
         self.metrics.height_queries += 1;
         let chunk = self.get_chunk(chunk_x, chunk_z);
-        Some(chunk.world_surface_height(
-            world_x - chunk_x * CHUNK_WIDTH,
-            world_z - chunk_z * CHUNK_WIDTH,
-        ))
+        Some(chunk.world_surface_height(local_block_coord(world_x), local_block_coord(world_z)))
     }
 
     fn set_block_world(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool {
@@ -598,9 +591,9 @@ impl FeatureWorld for FeatureRegion {
             return false;
         }
         chunk.set_block_at_y(
-            pos.x - chunk_x * CHUNK_WIDTH,
+            local_block_coord(pos.x),
             pos.y,
-            pos.z - chunk_z * CHUNK_WIDTH,
+            local_block_coord(pos.z),
             block_id,
         );
         self.metrics.block_writes += 1;
@@ -615,11 +608,7 @@ impl FeatureWorld for FeatureRegion {
         if !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y) {
             return 0;
         }
-        chunk.glow_lichen_faces_at_y(
-            pos.x - chunk_x * CHUNK_WIDTH,
-            pos.y,
-            pos.z - chunk_z * CHUNK_WIDTH,
-        )
+        chunk.glow_lichen_faces_at_y(local_block_coord(pos.x), pos.y, local_block_coord(pos.z))
     }
 
     fn set_glow_lichen_faces_world(&mut self, pos: BlockPos, faces: u8) -> bool {
@@ -637,9 +626,9 @@ impl FeatureWorld for FeatureRegion {
             return false;
         }
         chunk.set_glow_lichen_faces_at_y(
-            pos.x - chunk_x * CHUNK_WIDTH,
+            local_block_coord(pos.x),
             pos.y,
-            pos.z - chunk_z * CHUNK_WIDTH,
+            local_block_coord(pos.z),
             faces,
         );
         self.metrics.block_writes += 1;
@@ -1541,8 +1530,8 @@ fn apply_overworld_biome_features_with_biomes_timed<W: FeatureWorld, B: FeatureB
     } else {
         0
     };
-    let min_block_x = world.center_chunk_x() * CHUNK_WIDTH;
-    let min_block_z = world.center_chunk_z() * CHUNK_WIDTH;
+    let min_block_x = chunk_min_block_coord(world.center_chunk_x());
+    let min_block_z = chunk_min_block_coord(world.center_chunk_z());
     let origin = BlockPos::new(min_block_x, world.min_y(), min_block_z);
     let features = overworld_features_for_biome_cached(biome);
     let mut random = WorldgenRandom::default();
@@ -2194,8 +2183,8 @@ pub(crate) mod test_support {
         world: &mut W,
         feature_index: i32,
     ) -> bool {
-        let min_block_x = world.center_chunk_x() * CHUNK_WIDTH;
-        let min_block_z = world.center_chunk_z() * CHUNK_WIDTH;
+        let min_block_x = chunk_min_block_coord(world.center_chunk_x());
+        let min_block_z = chunk_min_block_coord(world.center_chunk_z());
         let origin = BlockPos::new(min_block_x, world.min_y(), min_block_z);
         let mut random = WorldgenRandom::default();
         let decoration_seed = random.set_decoration_seed(seed, min_block_x, min_block_z);
@@ -3511,10 +3500,6 @@ fn can_replace_tree_block<W: FeatureWorld>(world: &mut W, pos: BlockPos) -> bool
             | SPRUCE_LEAVES
             | SPRUCE_LOG
     )
-}
-
-fn block_to_chunk_coord(block: i32) -> i32 {
-    block.div_euclid(CHUNK_WIDTH)
 }
 
 fn region_chunk_index(

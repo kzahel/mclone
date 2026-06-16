@@ -1099,6 +1099,7 @@ dependencies = [
  "image",
  "log",
  "mclone-assets",
+ "mclone-core",
  "mclone-mesh",
  "mclone-ui",
  "pollster",

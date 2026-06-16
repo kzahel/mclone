@@ -1,6 +1,7 @@
 use crate::levelgen::{NoiseBiome, NoiseBiomeSource};
 use crate::noise::ImprovedNoise;
 use crate::prng::SimpleRandomSource;
+use mclone_core::chunk_min_block_coord;
 use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
@@ -482,8 +483,8 @@ impl ChunkBiomeContainer {
         let quart_min_y = quart_from_block(min_build_height);
         let quart_height = quart_from_block(height) - 1;
         let mut biomes = vec![0; HORIZONTAL_AREA * ceil_div(height, 4) as usize];
-        let min_quart_x = quart_from_block(chunk_x * 16);
-        let min_quart_z = quart_from_block(chunk_z * 16);
+        let min_quart_x = quart_from_block(chunk_min_block_coord(chunk_x));
+        let min_quart_z = quart_from_block(chunk_min_block_coord(chunk_z));
 
         for index in 0..biomes.len() {
             biomes[index] = Self::generate_biome_for_index(

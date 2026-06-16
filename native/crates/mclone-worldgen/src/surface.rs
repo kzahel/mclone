@@ -10,10 +10,10 @@ use crate::block::{
 use crate::levelgen::MutableChunkBlockBuffer;
 use crate::noise::PerlinSimplexNoise;
 use crate::prng::WorldgenRandom;
+use mclone_core::local_block_coord;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-const CHUNK_WIDTH: i32 = 16;
 const BADLANDS_BAND_LENGTH: usize = 64;
 const MAX_CLAY_DEPTH: i32 = 15;
 
@@ -223,8 +223,8 @@ pub fn apply_overworld_surface(
             if biome_info_noise().get_value(world_x as f64 * 0.25, world_z as f64 * 0.25, false)
                 > 0.0
             {
-                let local_x = local_coord(world_x);
-                let local_z = local_coord(world_z);
+                let local_x = local_block_coord(world_x);
+                let local_z = local_block_coord(world_z);
                 for y in (min_surface_level..=height).rev() {
                     let block_id = get_block_at_y_or_air(chunk, local_x, y, local_z);
                     if block_id == AIR {
@@ -389,8 +389,8 @@ fn apply_default_surface(
     min_surface_level: i32,
     config: SurfaceBuilderConfiguration,
 ) {
-    let local_x = local_coord(world_x);
-    let local_z = local_coord(world_z);
+    let local_x = local_block_coord(world_x);
+    let local_z = local_block_coord(world_z);
     let surface_depth = (noise / 3.0 + 3.0 + random.next_double() * 0.25) as i32;
 
     if surface_depth == 0 {
@@ -479,8 +479,8 @@ fn apply_badlands_surface(
     wooded: bool,
     eroded: bool,
 ) {
-    let local_x = local_coord(world_x);
-    let local_z = local_coord(world_z);
+    let local_x = local_block_coord(world_x);
+    let local_z = local_block_coord(world_z);
     let state = badlands_noise_state(seed);
     let mut pillar_height = 0.0;
 
@@ -729,8 +729,8 @@ fn apply_frozen_ocean_surface(
 
     let iceberg_height_int = iceberg_height as i32;
     let iceberg_base_y_int = iceberg_base_y as i32;
-    let local_x = local_coord(world_x);
-    let local_z = local_coord(world_z);
+    let local_x = local_block_coord(world_x);
+    let local_z = local_block_coord(world_z);
     let mut under_material = config.under_material;
     let mut top_material = config.top_material;
     let surface_depth = (noise / 3.0 + 3.0 + random.next_double() * 0.25) as i32;
@@ -1067,10 +1067,6 @@ fn frozen_temperature_noise() -> &'static PerlinSimplexNoise {
         let mut random = WorldgenRandom::new(3456);
         PerlinSimplexNoise::from_octaves(&mut random, &FROZEN_TEMPERATURE_NOISE_OCTAVES)
     })
-}
-
-fn local_coord(world_coord: i32) -> i32 {
-    world_coord & (CHUNK_WIDTH - 1)
 }
 
 fn is_inside_chunk_y(chunk: &MutableChunkBlockBuffer, y: i32) -> bool {

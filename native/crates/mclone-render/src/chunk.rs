@@ -2,6 +2,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Vec3, Vec4};
+use mclone_core::{
+    block_to_chunk_coord, block_to_section_coord, chunk_middle_block_coord, chunk_min_block_coord,
+};
 use mclone_mesh::{
     CHUNK_WIDTH as MESH_CHUNK_WIDTH, RENDER_SECTION_HEIGHT, RenderSectionKey, SectionFace,
     TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibilitySet, VisibleChunkMesh,
@@ -41,8 +44,8 @@ impl ChunkCamera {
     ) -> Self {
         let radius = chunk_radius.max(0);
         let scale = 1.0 + radius as f32 * 1.1;
-        let center_x = center_chunk_x as f32 * 16.0 + 8.0;
-        let center_z = center_chunk_z as f32 * 16.0 + 8.0;
+        let center_x = chunk_middle_block_coord(center_chunk_x) as f32;
+        let center_z = chunk_middle_block_coord(center_chunk_z) as f32;
         Self {
             eye: [
                 center_x + 54.0 * scale,
@@ -581,9 +584,9 @@ fn render_section_key_containing(position: Vec3) -> Option<RenderSectionKey> {
     let block_y = position.y.floor() as i32;
     let block_z = position.z.floor() as i32;
     Some(RenderSectionKey::new(
-        block_x.div_euclid(MESH_CHUNK_WIDTH),
-        block_y.div_euclid(RENDER_SECTION_HEIGHT),
-        block_z.div_euclid(MESH_CHUNK_WIDTH),
+        block_to_chunk_coord(block_x),
+        block_to_section_coord(block_y),
+        block_to_chunk_coord(block_z),
     ))
 }
 
@@ -594,9 +597,9 @@ fn section_neighbor_key(key: RenderSectionKey, face: SectionFace) -> RenderSecti
 
 fn render_section_center(key: RenderSectionKey) -> Vec3 {
     Vec3::new(
-        (key.chunk_x * MESH_CHUNK_WIDTH) as f32 + MESH_CHUNK_WIDTH as f32 * 0.5,
+        chunk_middle_block_coord(key.chunk_x) as f32,
         key.min_y() as f32 + RENDER_SECTION_HEIGHT as f32 * 0.5,
-        (key.chunk_z * MESH_CHUNK_WIDTH) as f32 + MESH_CHUNK_WIDTH as f32 * 0.5,
+        chunk_middle_block_coord(key.chunk_z) as f32,
     )
 }
 
@@ -614,9 +617,9 @@ impl ClipFrustum {
 
     fn is_render_section_visible(&self, key: RenderSectionKey) -> bool {
         let min = Vec3::new(
-            (key.chunk_x * MESH_CHUNK_WIDTH) as f32,
+            chunk_min_block_coord(key.chunk_x) as f32,
             key.min_y() as f32,
-            (key.chunk_z * MESH_CHUNK_WIDTH) as f32,
+            chunk_min_block_coord(key.chunk_z) as f32,
         );
         let max = min
             + Vec3::new(

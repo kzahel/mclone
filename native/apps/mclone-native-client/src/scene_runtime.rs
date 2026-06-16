@@ -4,7 +4,11 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::{ClientHost, ClientRuntime};
-use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
+use mclone_core::{
+    AIR_BLOCK_STATE_ID, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, block_to_chunk_coord,
+    block_to_section_coord, chunk_block_coord, chunk_middle_block_coord, local_block_coord,
+    local_section_block_coord,
+};
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_net::{LocalTransport, request_server_updates};
 use mclone_protocol::{ChunkView, SectionBlockUpdate, ServerUpdate};
@@ -960,10 +964,7 @@ impl WindowSceneRuntime {
         world_y: i32,
         world_z: i32,
     ) -> Option<mclone_core::BlockStateId> {
-        let pos = ChunkPos::new(
-            world_x.div_euclid(CHUNK_WIDTH),
-            world_z.div_euclid(CHUNK_WIDTH),
-        );
+        let pos = ChunkPos::from_block_coords(world_x, world_z);
         self.client
             .chunk_snapshot(pos)
             .and_then(|snapshot| snapshot_block_state_at_world(snapshot, world_x, world_y, world_z))
@@ -1076,9 +1077,7 @@ fn snapshot_block_state_at_world(
     world_y: i32,
     world_z: i32,
 ) -> Option<mclone_core::BlockStateId> {
-    let chunk_x = world_x.div_euclid(CHUNK_WIDTH);
-    let chunk_z = world_z.div_euclid(CHUNK_WIDTH);
-    if snapshot.pos != ChunkPos::new(chunk_x, chunk_z) {
+    if snapshot.pos != ChunkPos::from_block_coords(world_x, world_z) {
         return None;
     }
 
@@ -1087,10 +1086,10 @@ fn snapshot_block_state_at_world(
         return None;
     }
 
-    let section_y = world_y.div_euclid(SECTION_HEIGHT);
-    let local_x = world_x.rem_euclid(CHUNK_WIDTH);
-    let local_z = world_z.rem_euclid(CHUNK_WIDTH);
-    let local_section_y = world_y.rem_euclid(SECTION_HEIGHT);
+    let section_y = block_to_section_coord(world_y);
+    let local_x = local_block_coord(world_x);
+    let local_z = local_block_coord(world_z);
+    let local_section_y = local_section_block_coord(world_y);
     let index = mclone_core::chunk_section_index(local_x, local_section_y, local_z);
     Some(
         snapshot
@@ -1120,7 +1119,7 @@ impl RenderNeighborReadiness {
 }
 
 fn render_section_keys_for_snapshot(snapshot: &ChunkSnapshot) -> Vec<RenderSectionKey> {
-    let min_section_y = snapshot.min_y.div_euclid(SECTION_HEIGHT);
+    let min_section_y = block_to_section_coord(snapshot.min_y);
     let section_count = snapshot.height / SECTION_HEIGHT;
     (0..section_count)
         .map(|offset| RenderSectionKey::new(snapshot.pos.x, min_section_y + offset, snapshot.pos.z))
@@ -1142,26 +1141,22 @@ fn render_dirty_section_keys_for_block_update(
     section_y: i32,
     update: &SectionBlockUpdate,
 ) -> BTreeSet<RenderSectionKey> {
-    let world_x = pos.x * CHUNK_WIDTH + update.local_x as i32;
+    let world_x = chunk_block_coord(pos.x, update.local_x as i32);
     let world_y = section_y * SECTION_HEIGHT + update.local_y as i32;
-    let world_z = pos.z * CHUNK_WIDTH + update.local_z as i32;
+    let world_z = chunk_block_coord(pos.z, update.local_z as i32);
     let mut keys = BTreeSet::new();
     for z in world_z - 1..=world_z + 1 {
         for x in world_x - 1..=world_x + 1 {
             for y in world_y - 1..=world_y + 1 {
                 keys.insert(RenderSectionKey::new(
-                    render_section_coord_from_block(x),
-                    y.div_euclid(SECTION_HEIGHT),
-                    render_section_coord_from_block(z),
+                    block_to_chunk_coord(x),
+                    block_to_section_coord(y),
+                    block_to_chunk_coord(z),
                 ));
             }
         }
     }
     keys
-}
-
-fn render_section_coord_from_block(block_coord: i32) -> i32 {
-    block_coord.div_euclid(CHUNK_WIDTH)
 }
 
 fn render_section_neighbor_readiness(
@@ -1245,18 +1240,18 @@ fn dirty_section_chunk_distance_sq(
 
 fn render_chunk_distance_sq(pos: ChunkPos, camera_position: Vec3) -> f32 {
     let center = Vec3::new(
-        render_chunk_world_origin(pos.x) as f32 + CHUNK_WIDTH as f32 * 0.5,
+        chunk_middle_block_coord(pos.x) as f32,
         camera_position.y,
-        render_chunk_world_origin(pos.z) as f32 + CHUNK_WIDTH as f32 * 0.5,
+        chunk_middle_block_coord(pos.z) as f32,
     );
     center.distance_squared(camera_position)
 }
 
 fn render_section_center(key: RenderSectionKey) -> Vec3 {
     Vec3::new(
-        render_chunk_world_origin(key.chunk_x) as f32 + CHUNK_WIDTH as f32 * 0.5,
+        chunk_middle_block_coord(key.chunk_x) as f32,
         (key.section_y * SECTION_HEIGHT) as f32 + SECTION_HEIGHT as f32 * 0.5,
-        render_chunk_world_origin(key.chunk_z) as f32 + CHUNK_WIDTH as f32 * 0.5,
+        chunk_middle_block_coord(key.chunk_z) as f32,
     )
 }
 
@@ -1269,10 +1264,6 @@ fn has_horizontal_neighbor_snapshots(client: &ClientRuntime, pos: ChunkPos) -> b
     ]
     .into_iter()
     .all(|neighbor| client.chunk_snapshot(neighbor).is_some())
-}
-
-fn render_chunk_world_origin(chunk_coord: i32) -> i32 {
-    chunk_coord * CHUNK_WIDTH
 }
 
 fn render_dirty_chunk_neighborhood(pos: ChunkPos) -> [ChunkPos; 5] {

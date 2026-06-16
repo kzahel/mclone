@@ -15,7 +15,8 @@ use std::{sync::mpsc, thread};
 
 use mclone_core::{
     BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot,
-    ChunkStatus, PackedLightSection, SECTION_HEIGHT, chunk_section_index,
+    ChunkStatus, PackedLightSection, SECTION_HEIGHT, block_to_section_coord, chunk_block_index,
+    chunk_section_index, local_block_coord, local_section_block_coord,
 };
 use mclone_light::{DataLayer, LightLayer};
 use mclone_protocol::{ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate};
@@ -90,7 +91,7 @@ impl WorldBlockPos {
     }
 
     fn chunk_pos(self) -> ChunkPos {
-        ChunkPos::new(block_to_chunk_coord(self.x), block_to_chunk_coord(self.z))
+        ChunkPos::from_block_coords(self.x, self.z)
     }
 }
 
@@ -1326,8 +1327,8 @@ impl ChunkScheduler {
         let chunk_pos = pos.chunk_pos();
         let local_x = local_block_coord(pos.x);
         let local_z = local_block_coord(pos.z);
-        let local_y = pos.y.rem_euclid(SECTION_HEIGHT);
-        let section_y = pos.y.div_euclid(SECTION_HEIGHT);
+        let local_y = local_section_block_coord(pos.y);
+        let section_y = block_to_section_coord(pos.y);
         let block_state = generated_block_state_id(block_id);
         let record_delta;
         {
@@ -3104,14 +3105,6 @@ const LAVA_SOURCE_CONTACT_DIRECTIONS: [FluidDirection; 5] = [
     FluidDirection::East,
 ];
 
-fn block_to_chunk_coord(value: i32) -> i32 {
-    value.div_euclid(CHUNK_WIDTH)
-}
-
-fn local_block_coord(value: i32) -> i32 {
-    value.rem_euclid(CHUNK_WIDTH)
-}
-
 fn section_block_update_from_index(
     local_index: usize,
     block_state: BlockStateId,
@@ -3483,7 +3476,7 @@ impl<'a> ProvisionalSkyLightWorld<'a> {
             self.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize
         );
         let section_count = self.height / SECTION_HEIGHT;
-        let min_section_y = self.min_y.div_euclid(SECTION_HEIGHT);
+        let min_section_y = block_to_section_coord(self.min_y);
 
         let mut layers = (0..section_count)
             .map(|_| DataLayer::new())
@@ -3495,8 +3488,8 @@ impl<'a> ProvisionalSkyLightWorld<'a> {
                     if level == 0 {
                         continue;
                     }
-                    let section_offset = local_y.div_euclid(SECTION_HEIGHT);
-                    let section_local_y = local_y.rem_euclid(SECTION_HEIGHT);
+                    let section_offset = block_to_section_coord(local_y);
+                    let section_local_y = local_section_block_coord(local_y);
                     layers[section_offset as usize].set(local_x, section_local_y, local_z, level);
                 }
             }
@@ -3579,10 +3572,6 @@ fn sky_light_opacity(block_id: RawBlockId) -> u8 {
 fn raw_block_id_from_state_id(state_id: BlockStateId) -> RawBlockId {
     RawBlockId::try_from(state_id.0)
         .unwrap_or_else(|_| panic!("block state id {} does not fit native raw id", state_id.0))
-}
-
-fn chunk_block_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
-    ((local_y << 8) | (local_z << 4) | local_x) as usize
 }
 
 fn offset_pos(pos: WorldBlockPos, direction: FluidDirection) -> WorldBlockPos {
@@ -4191,7 +4180,7 @@ mod tests {
         y: i32,
         z: i32,
     ) -> u8 {
-        let section_y = y.div_euclid(SECTION_HEIGHT);
+        let section_y = block_to_section_coord(y);
         let Some(section) = sections
             .iter()
             .find(|section| section.section_y == section_y)
@@ -4203,9 +4192,9 @@ mod tests {
             return 0;
         };
         data_layer.get(
-            x.rem_euclid(CHUNK_WIDTH),
-            y.rem_euclid(SECTION_HEIGHT),
-            z.rem_euclid(CHUNK_WIDTH),
+            local_block_coord(x),
+            local_section_block_coord(y),
+            local_block_coord(z),
         )
     }
 
@@ -4822,8 +4811,8 @@ mod tests {
             snapshot.min_y + snapshot.height
         );
 
-        let section_y = pos.y.div_euclid(SECTION_HEIGHT);
-        let section_local_y = pos.y.rem_euclid(SECTION_HEIGHT);
+        let section_y = block_to_section_coord(pos.y);
+        let section_local_y = local_section_block_coord(pos.y);
         let local_x = local_block_coord(pos.x);
         let local_z = local_block_coord(pos.z);
         let Some(section) = snapshot

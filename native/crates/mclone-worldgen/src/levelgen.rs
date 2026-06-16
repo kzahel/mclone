@@ -17,15 +17,16 @@ use crate::noise::{BlendedNoise, PerlinNoise, PerlinSimplexNoise, SimplexNoise};
 use crate::placement::HeightmapType;
 use crate::prng::WorldgenRandom;
 use crate::surface::apply_overworld_surface;
-use mclone_core::{BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
+use mclone_core::{
+    BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus, SECTION_HEIGHT,
+    chunk_block_index, chunk_min_block_coord,
+};
 
 const OLD_CELL_COUNT_Y: i32 = 32;
 const BIOME_WEIGHT_RADIUS: i32 = 2;
 const BITS_FOR_Y: i32 = 12;
 const Y_SIZE: i32 = (1 << BITS_FOR_Y) - 32;
 const MAX_Y: i32 = (Y_SIZE >> 1) - 1;
-const CHUNK_WIDTH: i32 = 16;
-const SECTION_HEIGHT: i32 = 16;
 const SURFACE_NOISE_OCTAVES: [i32; 4] = [-3, -2, -1, 0];
 const DEPTH_NOISE_OCTAVES: [i32; 16] = [
     -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0,
@@ -693,11 +694,11 @@ impl MutableChunkBlockBuffer {
     }
 
     pub fn get_block(&self, local_x: i32, local_y: i32, local_z: i32) -> u8 {
-        self.blocks[block_buffer_index(local_x, local_y, local_z)]
+        self.blocks[chunk_block_index(local_x, local_y, local_z)]
     }
 
     pub fn set_block(&mut self, local_x: i32, local_y: i32, local_z: i32, block_id: u8) {
-        let index = block_buffer_index(local_x, local_y, local_z);
+        let index = chunk_block_index(local_x, local_y, local_z);
         self.blocks[index] = block_id;
         if block_id != GLOW_LICHEN {
             self.glow_lichen_faces.remove(&index);
@@ -716,13 +717,13 @@ impl MutableChunkBlockBuffer {
         if self.get_block_at_y(local_x, y, local_z) != GLOW_LICHEN {
             return 0;
         }
-        let index = block_buffer_index(local_x, y - self.min_y, local_z);
+        let index = chunk_block_index(local_x, y - self.min_y, local_z);
         *self.glow_lichen_faces.get(&index).unwrap_or(&0)
     }
 
     pub fn set_glow_lichen_faces_at_y(&mut self, local_x: i32, y: i32, local_z: i32, faces: u8) {
         self.set_block_at_y(local_x, y, local_z, GLOW_LICHEN);
-        let index = block_buffer_index(local_x, y - self.min_y, local_z);
+        let index = chunk_block_index(local_x, y - self.min_y, local_z);
         if faces == 0 {
             self.glow_lichen_faces.remove(&index);
         } else {
@@ -868,7 +869,7 @@ impl GeneratedChunk {
 
     pub fn block_at_local(&self, local_x: i32, local_y: i32, local_z: i32) -> GeneratedBlockId {
         self.assert_local_position(local_x, local_y, local_z);
-        GeneratedBlockId(self.blocks[block_buffer_index(local_x, local_y, local_z)])
+        GeneratedBlockId(self.blocks[chunk_block_index(local_x, local_y, local_z)])
     }
 
     pub fn block_at_y(&self, local_x: i32, y: i32, local_z: i32) -> GeneratedBlockId {
@@ -1282,8 +1283,8 @@ impl NoiseBasedChunkGenerator<OverworldBiomeSource> {
     }
 
     fn build_surface(&self, chunk: &mut MutableChunkBlockBuffer, random: &mut WorldgenRandom) {
-        let min_block_x = chunk.chunk_x * CHUNK_WIDTH;
-        let min_block_z = chunk.chunk_z * CHUNK_WIDTH;
+        let min_block_x = chunk_min_block_coord(chunk.chunk_x);
+        let min_block_z = chunk_min_block_coord(chunk.chunk_z);
         let min_surface_level = self.settings.min_surface_level();
 
         for local_x in 0..CHUNK_WIDTH {
@@ -1940,10 +1941,6 @@ fn clamped_lerp(start: f64, end: f64, delta: f64) -> f64 {
     }
 }
 
-fn block_buffer_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
-    ((local_y << 8) | (local_z << 4) | local_x) as usize
-}
-
 fn heightmap_column_index(local_x: i32, local_z: i32) -> usize {
     (local_x + local_z * CHUNK_WIDTH) as usize
 }
@@ -2529,8 +2526,8 @@ mod tests {
             region.set_center(center.x, center.z);
             let biome = biome_source.get_primary_biome_definition(center.x, center.z);
             let biome_key = biome.key();
-            let min_block_x = center.x * CHUNK_WIDTH;
-            let min_block_z = center.z * CHUNK_WIDTH;
+            let min_block_x = chunk_min_block_coord(center.x);
+            let min_block_z = chunk_min_block_coord(center.z);
             let origin = crate::placement::BlockPos::new(min_block_x, region.min_y(), min_block_z);
             let features = crate::feature::overworld_features_for_biome(biome);
             let mut random = WorldgenRandom::default();
@@ -2750,7 +2747,7 @@ mod tests {
                         panic!("palette index {palette_index} outside section palette")
                     })
                     .clone();
-                let index = block_buffer_index(local_x, y - min_y, local_z);
+                let index = chunk_block_index(local_x, y - min_y, local_z);
                 blocks[index] = block_name;
             }
         }

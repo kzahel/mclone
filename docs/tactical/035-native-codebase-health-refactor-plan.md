@@ -136,14 +136,17 @@ module.
 - [ ] Move native-client frame/render reporting into a small app-local module
   after `app.rs`: `RenderStreamStats`, full-frame summaries, render update stat
   recording, and benchmark metadata helpers if they remain app-local.
-- [ ] Centralize exact shared chunk/block primitives in `mclone_core`:
-  block-to-chunk conversion, local block coordinate conversion, chunk-local
-  block indexing, chunk/world origins, and world block position types where
-  dependency direction allows it.
-- [ ] Replace duplicate dimension constants with `mclone_core` exports where
+- [x] Centralize exact shared chunk/block/section coordinate helpers in
+  `mclone_core`: block-to-chunk conversion, local block coordinate conversion,
+  section coordinate conversion, chunk-local block indexing, and chunk/world
+  origins.
+- [x] Replace duplicate dimension constants with `mclone_core` exports where
   semantics match exactly: especially `mclone_mesh::CHUNK_WIDTH`,
   `mclone_mesh::RENDER_SECTION_HEIGHT`, and `mclone_worldgen::feature`'s local
   `CHUNK_WIDTH`.
+- [ ] Revisit shared world block position types only if server fluid/runtime
+  positions and worldgen placement positions converge enough that the dependency
+  direction and semantics are exact.
 - [ ] Extract shared benchmark/report helpers into an appropriate native utility
   module or crate if they stay useful across binaries: elapsed/micros
   conversion, git metadata, JSON string escaping, and square-count helpers.
@@ -166,7 +169,7 @@ module.
 
 1. Finish the native-client `app.rs` split. This completes the current
    app-local module extraction pass and leaves `main.rs` close to CLI dispatch.
-2. Do a focused shared-core primitive pass. Move only exact shared
+2. Do a focused shared-core primitive pass. (done) Move only exact shared
    chunk/block/section coordinate contracts into `mclone_core`, update the
    duplicated constants/helpers, and keep behavior identical.
 3. Split `mclone-worldgen::feature` and `mclone-worldgen::levelgen` before more
@@ -187,14 +190,14 @@ module.
    - Expected behavior change: none.
    - Validation: native-client tests plus a full-frame screenshot under `/tmp`.
 
-2. `mclone_core` shared coordinate primitives
+2. `mclone_core` shared coordinate primitives (done)
    - Add exact shared helpers/types for chunk/block coordinate conversion and
      local block indexing.
    - Replace duplicate constants and helpers in mesh, worldgen feature, server,
      native camera, render, and scene runtime where semantics match exactly.
    - Expected behavior change: none.
-   - Validation: full native workspace tests/checks, WASM check, and worldgen
-     smoke because shared primitives touch parity-sensitive paths.
+   - Validation: full native workspace tests/checks, native web build/smoke,
+     worldgen smoke, and a native full-frame screenshot under `/tmp`.
 
 3. `worldgen::feature` first split
    - Start with low-risk move-only boundaries: `context`, `region`,

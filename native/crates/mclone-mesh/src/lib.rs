@@ -10,11 +10,14 @@ use mclone_assets::{
     AssetError, BakedBlockModelFace, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
     ModelFaceDirection, ResourceLocation, TextureAtlasPlan, TextureMaterial,
 };
-use mclone_core::{AIR_BLOCK_STATE_ID, BlockStateId, PackedLightSection, chunk_section_index};
+use mclone_core::{
+    AIR_BLOCK_STATE_ID, BlockStateId, PackedLightSection, block_to_chunk_coord,
+    block_to_section_coord, chunk_block_index, chunk_min_block_coord, chunk_section_index,
+    local_block_coord, local_section_block_coord,
+};
+pub use mclone_core::{CHUNK_WIDTH, SECTION_HEIGHT as RENDER_SECTION_HEIGHT};
 use mclone_light::{FULL_BRIGHT, pack_light};
 
-pub const CHUNK_WIDTH: i32 = 16;
-pub const RENDER_SECTION_HEIGHT: i32 = 16;
 pub const QUAD_FACE_INDEX_COUNT: u32 = 6;
 pub const AIR_BLOCK_ID: u8 = 0;
 pub const CAVE_AIR_BLOCK_ID: u8 = 71;
@@ -651,7 +654,7 @@ impl<'a> ChunkMeshInput<'a> {
         {
             return AIR_BLOCK_ID;
         }
-        self.blocks[block_index(local_x, local_y, local_z)]
+        self.blocks[chunk_block_index(local_x, local_y, local_z)]
     }
 }
 
@@ -685,8 +688,8 @@ impl<'a> TexturedChunkMeshInput<'a> {
         height: i32,
         blocks: &'a [BlockStateId],
     ) -> Self {
-        if height <= 0 || height % CHUNK_WIDTH != 0 {
-            panic!("chunk height {height} must be a positive multiple of {CHUNK_WIDTH}");
+        if height <= 0 || height % RENDER_SECTION_HEIGHT != 0 {
+            panic!("chunk height {height} must be a positive multiple of {RENDER_SECTION_HEIGHT}");
         }
         let expected_len = height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
         if blocks.len() != expected_len {
@@ -717,7 +720,7 @@ impl<'a> TexturedChunkMeshInput<'a> {
         {
             return AIR_BLOCK_STATE_ID;
         }
-        self.blocks[block_index(local_x, local_y, local_z)]
+        self.blocks[chunk_block_index(local_x, local_y, local_z)]
     }
 
     fn has_light_data(&self) -> bool {
@@ -735,7 +738,7 @@ impl<'a> TexturedChunkMeshInput<'a> {
             return FULL_BRIGHT;
         }
 
-        let section_y = y.div_euclid(RENDER_SECTION_HEIGHT);
+        let section_y = block_to_section_coord(y);
         let Some(section) = self
             .light_sections
             .iter()
@@ -743,7 +746,7 @@ impl<'a> TexturedChunkMeshInput<'a> {
         else {
             return pack_light(0, 0);
         };
-        let index = chunk_section_index(local_x, y.rem_euclid(RENDER_SECTION_HEIGHT), local_z);
+        let index = chunk_section_index(local_x, local_section_block_coord(y), local_z);
         let sky = section
             .sky
             .as_deref()
@@ -831,7 +834,7 @@ fn build_textured_render_sections_for_chunks(
             let local_y_end = (local_y_start + RENDER_SECTION_HEIGHT).min(input.height);
             let key = RenderSectionKey::new(
                 input.chunk_x,
-                (input.min_y + local_y_start).div_euclid(RENDER_SECTION_HEIGHT),
+                block_to_section_coord(input.min_y + local_y_start),
                 input.chunk_z,
             );
             if target_sections.is_some_and(|targets| !targets.contains(&key)) {
@@ -892,8 +895,8 @@ fn add_chunk_to_mesh(
     input: ChunkMeshInput<'_>,
     area: &[ChunkMeshInput<'_>],
 ) {
-    let world_origin_x = chunk_world_origin(input.chunk_x);
-    let world_origin_z = chunk_world_origin(input.chunk_z);
+    let world_origin_x = chunk_min_block_coord(input.chunk_x);
+    let world_origin_z = chunk_min_block_coord(input.chunk_z);
 
     for local_y in 0..input.height {
         for local_z in 0..CHUNK_WIDTH {
@@ -930,8 +933,8 @@ fn add_textured_chunk_range_to_mesh(
     local_y_start: i32,
     local_y_end: i32,
 ) -> Result<(), TexturedMeshError> {
-    let world_origin_x = chunk_world_origin(input.chunk_x);
-    let world_origin_z = chunk_world_origin(input.chunk_z);
+    let world_origin_x = chunk_min_block_coord(input.chunk_x);
+    let world_origin_z = chunk_min_block_coord(input.chunk_z);
 
     for local_y in local_y_start..local_y_end {
         for local_z in 0..CHUNK_WIDTH {
@@ -1278,15 +1281,11 @@ fn base_color(block_id: u8) -> [f32; 3] {
     }
 }
 
-fn block_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
-    ((local_y << 8) | (local_z << 4) | local_x) as usize
-}
-
 fn block_at_world_or_air(inputs: &[ChunkMeshInput<'_>], world_x: i32, y: i32, world_z: i32) -> u8 {
-    let chunk_x = world_x.div_euclid(CHUNK_WIDTH);
-    let chunk_z = world_z.div_euclid(CHUNK_WIDTH);
-    let local_x = world_x.rem_euclid(CHUNK_WIDTH);
-    let local_z = world_z.rem_euclid(CHUNK_WIDTH);
+    let chunk_x = block_to_chunk_coord(world_x);
+    let chunk_z = block_to_chunk_coord(world_z);
+    let local_x = local_block_coord(world_x);
+    let local_z = local_block_coord(world_z);
     inputs
         .iter()
         .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
@@ -1308,10 +1307,10 @@ fn block_state_at_world_or_air(
     y: i32,
     world_z: i32,
 ) -> BlockStateId {
-    let chunk_x = world_x.div_euclid(CHUNK_WIDTH);
-    let chunk_z = world_z.div_euclid(CHUNK_WIDTH);
-    let local_x = world_x.rem_euclid(CHUNK_WIDTH);
-    let local_z = world_z.rem_euclid(CHUNK_WIDTH);
+    let chunk_x = block_to_chunk_coord(world_x);
+    let chunk_z = block_to_chunk_coord(world_z);
+    let local_x = local_block_coord(world_x);
+    let local_z = local_block_coord(world_z);
     inputs
         .iter()
         .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
@@ -1325,10 +1324,10 @@ fn packed_light_at_world_or_fullbright(
     y: i32,
     world_z: i32,
 ) -> u32 {
-    let chunk_x = world_x.div_euclid(CHUNK_WIDTH);
-    let chunk_z = world_z.div_euclid(CHUNK_WIDTH);
-    let local_x = world_x.rem_euclid(CHUNK_WIDTH);
-    let local_z = world_z.rem_euclid(CHUNK_WIDTH);
+    let chunk_x = block_to_chunk_coord(world_x);
+    let chunk_z = block_to_chunk_coord(world_z);
+    let local_x = local_block_coord(world_x);
+    let local_z = local_block_coord(world_z);
     inputs
         .iter()
         .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
@@ -1341,10 +1340,6 @@ fn data_layer_value(layer: &[u8], index: usize) -> u8 {
     let byte = layer[index >> 1];
     let shift = 4 * (index & 1);
     (byte >> shift) & 15
-}
-
-fn chunk_world_origin(chunk_coord: i32) -> i32 {
-    chunk_coord * CHUNK_WIDTH
 }
 
 fn direction_offset(direction: ModelFaceDirection) -> [i32; 3] {
@@ -1471,7 +1466,7 @@ mod tests {
     fn chunk_blocks(height: i32, filled: &[(i32, i32, i32, u8)]) -> Vec<u8> {
         let mut blocks = vec![AIR_BLOCK_ID; height as usize * 16 * 16];
         for &(x, y, z, block_id) in filled {
-            blocks[block_index(x, y, z)] = block_id;
+            blocks[chunk_block_index(x, y, z)] = block_id;
         }
         blocks
     }
@@ -1734,7 +1729,7 @@ mod tests {
     ) -> Vec<BlockStateId> {
         let mut blocks = vec![AIR_BLOCK_STATE_ID; height as usize * 16 * 16];
         for &(x, y, z, block_id) in filled {
-            blocks[block_index(x, y, z)] = block_id;
+            blocks[chunk_block_index(x, y, z)] = block_id;
         }
         blocks
     }

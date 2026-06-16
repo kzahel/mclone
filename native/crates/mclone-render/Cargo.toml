@@ -9,6 +9,7 @@ publish.workspace = true
 anyhow.workspace = true
 glam.workspace = true
 mclone-assets.workspace = true
+mclone-core.workspace = true
 mclone-mesh.workspace = true
 mclone-ui.workspace = true
 wgpu.workspace = true

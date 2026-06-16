@@ -1,5 +1,5 @@
 use glam::Vec3;
-use mclone_core::{CHUNK_WIDTH, ChunkPos};
+use mclone_core::{ChunkPos, block_to_chunk_coord, chunk_middle_block_coord};
 use mclone_render::chunk::ChunkCamera;
 
 use crate::cli::SceneOptions;
@@ -20,8 +20,8 @@ pub(crate) struct SpectatorCamera {
 
 impl SpectatorCamera {
     pub(crate) fn spawn_for_scene(scene: &SceneOptions) -> Self {
-        let center_x = scene.chunk_x as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
-        let center_z = scene.chunk_z as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+        let center_x = chunk_middle_block_coord(scene.chunk_x) as f32;
+        let center_z = chunk_middle_block_coord(scene.chunk_z) as f32;
         Self {
             position: Vec3::new(center_x, 88.0, center_z),
             yaw: 0.55,
@@ -44,8 +44,8 @@ impl SpectatorCamera {
 
     pub(crate) fn chunk_pos(&self) -> ChunkPos {
         ChunkPos::new(
-            world_block_to_chunk_coord(self.position.x),
-            world_block_to_chunk_coord(self.position.z),
+            world_coord_to_chunk_coord(self.position.x),
+            world_coord_to_chunk_coord(self.position.z),
         )
     }
 
@@ -97,8 +97,8 @@ impl SpectatorCamera {
     }
 }
 
-pub(crate) fn world_block_to_chunk_coord(value: f32) -> i32 {
-    (value / CHUNK_WIDTH as f32).floor() as i32
+fn world_coord_to_chunk_coord(value: f32) -> i32 {
+    block_to_chunk_coord(value.floor() as i32)
 }
 
 #[cfg(test)]
@@ -106,13 +106,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn world_block_to_chunk_coord_floors_negative_positions() {
-        assert_eq!(world_block_to_chunk_coord(0.0), 0);
-        assert_eq!(world_block_to_chunk_coord(15.99), 0);
-        assert_eq!(world_block_to_chunk_coord(16.0), 1);
-        assert_eq!(world_block_to_chunk_coord(-0.01), -1);
-        assert_eq!(world_block_to_chunk_coord(-16.0), -1);
-        assert_eq!(world_block_to_chunk_coord(-16.01), -2);
+    fn world_coord_to_chunk_coord_floors_negative_positions() {
+        assert_eq!(world_coord_to_chunk_coord(0.0), 0);
+        assert_eq!(world_coord_to_chunk_coord(15.99), 0);
+        assert_eq!(world_coord_to_chunk_coord(16.0), 1);
+        assert_eq!(world_coord_to_chunk_coord(-0.01), -1);
+        assert_eq!(world_coord_to_chunk_coord(-16.0), -1);
+        assert_eq!(world_coord_to_chunk_coord(-16.01), -2);
     }
 
     #[test]

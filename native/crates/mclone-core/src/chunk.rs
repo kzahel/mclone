@@ -21,6 +21,29 @@ impl ChunkPos {
     pub const fn new(x: i32, z: i32) -> Self {
         Self { x, z }
     }
+
+    pub fn from_block_coords(x: i32, z: i32) -> Self {
+        Self {
+            x: block_to_chunk_coord(x),
+            z: block_to_chunk_coord(z),
+        }
+    }
+
+    pub fn min_block_x(self) -> i32 {
+        chunk_min_block_coord(self.x)
+    }
+
+    pub fn min_block_z(self) -> i32 {
+        chunk_min_block_coord(self.z)
+    }
+
+    pub fn middle_block_x(self) -> i32 {
+        chunk_middle_block_coord(self.x)
+    }
+
+    pub fn middle_block_z(self) -> i32 {
+        chunk_middle_block_coord(self.z)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -311,6 +334,47 @@ pub fn chunk_section_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
     ((local_y << 8) | (local_z << 4) | local_x) as usize
 }
 
+pub fn chunk_block_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
+    assert!(
+        (0..CHUNK_WIDTH).contains(&local_x),
+        "local_x {local_x} out of chunk bounds"
+    );
+    assert!(local_y >= 0, "local_y {local_y} out of chunk bounds");
+    assert!(
+        (0..CHUNK_WIDTH).contains(&local_z),
+        "local_z {local_z} out of chunk bounds"
+    );
+    ((local_y << 8) | (local_z << 4) | local_x) as usize
+}
+
+pub fn block_to_chunk_coord(block_coord: i32) -> i32 {
+    block_coord.div_euclid(CHUNK_WIDTH)
+}
+
+pub fn local_block_coord(block_coord: i32) -> i32 {
+    block_coord.rem_euclid(CHUNK_WIDTH)
+}
+
+pub fn chunk_min_block_coord(chunk_coord: i32) -> i32 {
+    chunk_coord * CHUNK_WIDTH
+}
+
+pub fn chunk_middle_block_coord(chunk_coord: i32) -> i32 {
+    chunk_min_block_coord(chunk_coord) + CHUNK_WIDTH / 2
+}
+
+pub fn chunk_block_coord(chunk_coord: i32, local_coord: i32) -> i32 {
+    chunk_min_block_coord(chunk_coord) + local_coord
+}
+
+pub fn block_to_section_coord(block_y: i32) -> i32 {
+    block_y.div_euclid(SECTION_HEIGHT)
+}
+
+pub fn local_section_block_coord(block_y: i32) -> i32 {
+    block_y.rem_euclid(SECTION_HEIGHT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,6 +385,47 @@ mod tests {
         assert_eq!(chunk_section_index(15, 0, 0), 15);
         assert_eq!(chunk_section_index(0, 0, 1), 16);
         assert_eq!(chunk_section_index(0, 1, 0), 256);
+    }
+
+    #[test]
+    fn chunk_block_index_matches_vanilla_order() {
+        assert_eq!(chunk_block_index(0, 0, 0), 0);
+        assert_eq!(chunk_block_index(15, 0, 0), 15);
+        assert_eq!(chunk_block_index(0, 0, 1), 16);
+        assert_eq!(chunk_block_index(0, 1, 0), 256);
+        assert_eq!(chunk_block_index(0, 16, 0), 4096);
+    }
+
+    #[test]
+    fn block_and_section_coordinate_helpers_floor_negative_positions() {
+        assert_eq!(block_to_chunk_coord(0), 0);
+        assert_eq!(block_to_chunk_coord(15), 0);
+        assert_eq!(block_to_chunk_coord(16), 1);
+        assert_eq!(block_to_chunk_coord(-1), -1);
+        assert_eq!(block_to_chunk_coord(-16), -1);
+        assert_eq!(block_to_chunk_coord(-17), -2);
+
+        assert_eq!(local_block_coord(0), 0);
+        assert_eq!(local_block_coord(15), 15);
+        assert_eq!(local_block_coord(16), 0);
+        assert_eq!(local_block_coord(-1), 15);
+        assert_eq!(local_block_coord(-16), 0);
+        assert_eq!(local_block_coord(-17), 15);
+
+        assert_eq!(block_to_section_coord(-1), -1);
+        assert_eq!(local_section_block_coord(-1), 15);
+    }
+
+    #[test]
+    fn chunk_position_reports_vanilla_block_extents() {
+        let pos = ChunkPos::from_block_coords(-1, 32);
+
+        assert_eq!(pos, ChunkPos::new(-1, 2));
+        assert_eq!(pos.min_block_x(), -16);
+        assert_eq!(pos.middle_block_x(), -8);
+        assert_eq!(pos.min_block_z(), 32);
+        assert_eq!(pos.middle_block_z(), 40);
+        assert_eq!(chunk_block_coord(pos.x, 15), -1);
     }
 
     #[test]
