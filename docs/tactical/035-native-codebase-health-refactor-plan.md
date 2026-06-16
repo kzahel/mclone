@@ -86,6 +86,30 @@ that intentionally mirrors a specific source class should remain local.
 
 ## Reference Shape
 
+**Before designing any split, look at how the Java 1.17.1 source organizes the
+same system, and let that be the primary guide for the module boundaries.** The
+reference engine has already solved "what are the separate responsibilities
+here" — it is a mature codebase that spreads each concept across small,
+single-purpose files and folders. That existing organization is almost always
+the most reasonable way to factor our oversized Rust files, so the default first
+move for any slice is:
+
+1. Find the corresponding Java package/folder for the system being split (for
+   example `world/level/levelgen/feature/*` for worldgen features, or
+   `server/level/*` for server chunk management).
+2. Note how Java separates the concerns — typically data vs. behavior vs.
+   placement, and one file per concrete type.
+3. Mirror those same boundaries as Rust modules, using Java's split as the
+   starting hypothesis for our own module layout.
+
+For example, the worldgen feature package keeps these as distinct concerns:
+configuration data (`feature/configurations/*`), per-feature placement behavior
+(`feature/*` — one file per feature like `OreFeature`, `LakeFeature`,
+`TreeFeature`), placement decorators (`levelgen/placement/*`), and tree
+sub-pieces (`feature/trunkplacers/*`, `foliageplacers/*`, `featuresize/*`). Our
+`feature.rs` split follows the same data/behavior/placement and
+one-module-per-feature shape.
+
 Use the Java 1.17.1 source tree as a boundary guide for parity-critical systems:
 
 - `server/level/DistanceManager.java`, `ChunkHolder.java`, `ChunkMap.java`, and
@@ -110,6 +134,9 @@ module.
 
 ## Refactor Principles
 
+- Consult the corresponding Java 1.17.1 organization first and use it as the
+  default guide for where the module boundaries should fall (see Reference
+  Shape). Diverge only when a native/web/runtime constraint forces it.
 - Prefer move-only module extraction before logic edits.
 - Keep public APIs stable unless a small API adjustment is required to make the
   split coherent.
@@ -243,6 +270,8 @@ module.
 Each child refactor should have its own tactical or checklist update when it
 becomes active. A good child slice should:
 
+- start from the corresponding Java 1.17.1 package/folder and use its concern
+  boundaries as the proposed module split
 - name the module boundary being extracted
 - list the files moved or created
 - state whether public APIs changed
