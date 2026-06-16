@@ -1114,7 +1114,12 @@ fn render_section_neighbor_readiness(
     key: RenderSectionKey,
     camera_position: Vec3,
 ) -> RenderNeighborReadiness {
-    if render_section_distance_sq(key, camera_position) <= RENDER_NEIGHBOR_READY_DISTANCE_SQ {
+    // Native currently keeps an exact client snapshot radius, unlike Java's
+    // overfetched client chunk cache. Keep this gate horizontal so flying above
+    // a loaded column does not make the boundary ring disappear.
+    if render_section_horizontal_distance_sq(key, camera_position)
+        <= RENDER_NEIGHBOR_READY_DISTANCE_SQ
+    {
         return RenderNeighborReadiness::ReadyNearCamera;
     }
     if has_horizontal_neighbor_snapshots(client, ChunkPos::new(key.chunk_x, key.chunk_z)) {
@@ -1127,6 +1132,13 @@ fn render_section_neighbor_readiness(
 fn render_section_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f32 {
     let center = render_section_center(key);
     center.distance_squared(camera_position)
+}
+
+fn render_section_horizontal_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f32 {
+    let center = render_section_center(key);
+    let dx = center.x - camera_position.x;
+    let dz = center.z - camera_position.z;
+    dx * dx + dz * dz
 }
 
 fn sort_chunk_positions_by_distance(
@@ -1225,6 +1237,10 @@ mod tests {
     use crate::camera::SpectatorCamera;
     use crate::render_cache::extracted_asset_root;
     use mclone_core::{BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
+    use mclone_render::chunk::{
+        ChunkCamera, TexturedSectionRenderOptions,
+        textured_section_visibility_stats_with_options_and_ready_sections,
+    };
 
     #[test]
     fn snapshot_block_state_lookup_reads_loaded_sections_and_omitted_air() {
@@ -1260,6 +1276,18 @@ mod tests {
 
         assert_eq!(
             render_section_neighbor_readiness(&client, key, render_section_center(key)),
+            RenderNeighborReadiness::ReadyNearCamera
+        );
+
+        let high_camera = render_section_center(key) + Vec3::new(0.0, 256.0, 0.0);
+        assert_eq!(
+            render_section_neighbor_readiness(&client, key, high_camera),
+            RenderNeighborReadiness::ReadyNearCamera
+        );
+
+        let diagonal_neighbor_key = RenderSectionKey::new(target.x + 1, 0, target.z + 1);
+        assert_eq!(
+            render_section_neighbor_readiness(&client, diagonal_neighbor_key, high_camera),
             RenderNeighborReadiness::ReadyNearCamera
         );
 
@@ -1433,19 +1461,15 @@ mod tests {
         poll_window_runtime_until_idle(&mut runtime).unwrap();
 
         let spectator = SpectatorCamera::spawn_for_scene(&scene);
-        let update = runtime
-            .sync_all_render_sections(spectator.position)
-            .unwrap();
+        let far_camera = spectator.position + Vec3::new(128.0, 0.0, 0.0);
+        let update = runtime.sync_all_render_sections(far_camera).unwrap();
 
-        assert!(update.rebuilt_section_count() > 0);
-        assert!(update.near_exception_section_count > 0);
+        assert_eq!(update.rebuilt_section_count(), 0);
+        assert_eq!(update.near_exception_section_count, 0);
         assert!(update.deferred_section_count > 0);
         assert!(runtime.pending_render_chunk_count() > 0);
-        assert!(!runtime.has_pending_render_work(spectator.position));
-        assert!(runtime.cached_sections().iter().all(|section| {
-            render_section_distance_sq(section.key, spectator.position)
-                <= RENDER_NEIGHBOR_READY_DISTANCE_SQ
-        }));
+        assert!(!runtime.has_pending_render_work(far_camera));
+        assert!(runtime.cached_sections().is_empty());
 
         let deferred_key = *runtime
             .dirty_render_sections
@@ -1627,6 +1651,66 @@ mod tests {
         assert!(remaining_update.rebuilt_section_count() > 0);
         assert!(!runtime.has_pending_render_work(spectator.position));
         assert!(!runtime.cached_sections().is_empty());
+    }
+
+    #[test]
+    fn high_altitude_radius_one_keeps_neighbor_chunks_draw_ready() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let scene = SceneOptions {
+            chunk_radius: 1,
+            ..SceneOptions::default()
+        };
+        let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
+        poll_window_runtime_until_idle(&mut runtime).unwrap();
+
+        let spectator = SpectatorCamera::spawn_for_scene(&scene);
+        runtime
+            .sync_all_render_sections(spectator.position)
+            .unwrap();
+        let sections = runtime.cached_sections();
+        assert!(sections.iter().any(|section| {
+            section.key.chunk_x != scene.chunk_x || section.key.chunk_z != scene.chunk_z
+        }));
+
+        let high_position = spectator.position + Vec3::new(0.0, 256.0, 0.0);
+        let ready_sections = runtime.traversal_ready_render_section_keys(high_position);
+        assert!(
+            ready_sections
+                .iter()
+                .any(|key| { key.chunk_x != scene.chunk_x || key.chunk_z != scene.chunk_z })
+        );
+
+        let center_drawable_sections = sections
+            .iter()
+            .filter(|section| {
+                section.key.chunk_x == scene.chunk_x
+                    && section.key.chunk_z == scene.chunk_z
+                    && !section.is_empty()
+            })
+            .count();
+        let camera = ChunkCamera {
+            eye: high_position.to_array(),
+            target: (high_position + Vec3::NEG_Y).to_array(),
+            up: [0.0, 0.0, 1.0],
+            fov_y_radians: 100.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 700.0,
+        };
+        let stats = textured_section_visibility_stats_with_options_and_ready_sections(
+            &sections,
+            camera.render_view(960, 640),
+            TexturedSectionRenderOptions {
+                section_occlusion_culling: false,
+                ..TexturedSectionRenderOptions::default()
+            },
+            Some(&ready_sections),
+        );
+
+        assert_eq!(stats.readiness_culled_section_count, 0);
+        assert!(stats.drawn_section_count > center_drawable_sections);
     }
 
     #[test]
