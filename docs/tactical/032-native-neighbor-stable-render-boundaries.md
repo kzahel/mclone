@@ -168,6 +168,17 @@ Implemented first slice:
   sections normally
 - the debug pane reports deferred section count as `D`
 
+Implemented traversal slice:
+
+- `mclone-render` records per-section traversal readiness and applies it even
+  when section visibility graph culling is disabled
+- traversal starts and neighbor enqueue steps ignore not-ready sections, so the
+  renderer does not step through far sections whose W/N/E/S chunk neighbors are
+  missing
+- visibility stats now separate readiness-cull counts from graph-cull counts
+- native interactive, screenshot, frame-budget, and movement-perf paths refresh
+  the ready-section set from the current camera position before render
+
 ### 1. Pure readiness helpers
 
 Add small tested helpers before changing renderer behavior:
@@ -243,6 +254,11 @@ This should be separate from section visibility graph culling:
 
 The mesh gating is the higher priority. Traversal gating should follow once the
 record/cache can express readiness cleanly.
+
+Implemented with `TexturedSectionCullingRecord::traversal_ready` and
+`TexturedSectionDrawResources::set_traversal_ready_sections`. Readiness remains
+separate from the section visibility graph: pressing `O` can disable graph
+culling, but not-ready sections are still withheld from traversal/draw.
 
 ### 5. Instrument the behavior
 

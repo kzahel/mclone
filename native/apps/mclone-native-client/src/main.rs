@@ -26,7 +26,7 @@ use mclone_protocol::{ChunkInterest, ServerUpdate};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
-    textured_section_visibility_stats_with_options,
+    textured_section_visibility_stats_with_options_and_ready_sections,
 };
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::headless::{
@@ -1729,13 +1729,15 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
         let remesh_start = Instant::now();
         let section_update = runtime.sync_all_render_sections(spectator.position)?;
         let sections = runtime.cached_sections();
+        let ready_sections = runtime.traversal_ready_render_section_keys(spectator.position);
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let camera = spectator.camera(runtime.radius_chunks);
         let render_view = camera.render_view(options.width, options.height);
-        let visibility = textured_section_visibility_stats_with_options(
+        let visibility = textured_section_visibility_stats_with_options_and_ready_sections(
             &sections,
             render_view,
             options.render_options,
+            Some(&ready_sections),
         );
         let stats = runtime.stats();
 
@@ -1946,6 +1948,10 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
                 &initial_sections,
                 runtime.mesh_assets.atlas.as_upload(),
             )?;
+            let mut draw = draw;
+            draw.set_traversal_ready_sections(
+                &runtime.traversal_ready_render_section_keys(initial_spectator.position),
+            );
             let gui = GuiRenderer::new(device, format);
             let mut render_stats = RenderStreamStats {
                 section_count: draw.section_count(),
@@ -2027,6 +2033,11 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
             }
 
             let camera = spectator.camera(state.runtime.radius_chunks);
+            state.draw.set_traversal_ready_sections(
+                &state
+                    .runtime
+                    .traversal_ready_render_section_keys(spectator.position),
+            );
             let render_start = Instant::now();
             render_full_frame(
                 frame,
@@ -2290,6 +2301,10 @@ impl CachedTexturedRenderSections {
         self.sections.values().cloned().collect()
     }
 
+    fn section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {
+        self.sections.keys().copied()
+    }
+
     fn rebuild_dirty(
         &mut self,
         client: &ClientRuntime,
@@ -2441,6 +2456,9 @@ fn run_headless_screenshot(
                 &sections,
                 runtime.mesh_assets.atlas.as_upload(),
             )?;
+            draw.set_traversal_ready_sections(
+                &runtime.traversal_ready_render_section_keys(spectator.position),
+            );
             let mut gui = GuiRenderer::new(frame.device, HEADLESS_FORMAT);
 
             render_stats.section_count = draw.section_count();
@@ -2962,6 +2980,18 @@ impl WindowSceneRuntime {
 
     fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
         self.render_sections.sections()
+    }
+
+    fn traversal_ready_render_section_keys(
+        &self,
+        camera_position: Vec3,
+    ) -> BTreeSet<RenderSectionKey> {
+        self.render_sections
+            .section_keys()
+            .filter(|key| {
+                render_section_neighbor_readiness(&self.client, *key, camera_position).is_ready()
+            })
+            .collect()
     }
 
     fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
@@ -4993,6 +5023,12 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
+        let mut draw = draw;
+        draw.set_traversal_ready_sections(
+            &self
+                .runtime
+                .traversal_ready_render_section_keys(self.spectator.position),
+        );
         let upload_ms = elapsed_ms(upload_start.elapsed());
         let gui = GuiRenderer::new(&surface.device, surface.config.format);
         self.ui.set_scale(GuiScale::from_pixels(
@@ -5242,6 +5278,9 @@ impl ApplicationHandler for ChunkApp {
                 let debug_stats = self
                     .debug_visible
                     .then(|| self.debug_pane_stats(render_options));
+                let traversal_ready_sections = self
+                    .runtime
+                    .traversal_ready_render_section_keys(self.spectator.position);
                 let mut render_stats = self.render_stats;
                 let render_start = Instant::now();
                 let result = {
@@ -5253,6 +5292,7 @@ impl ApplicationHandler for ChunkApp {
                     ) else {
                         return;
                     };
+                    draw.set_traversal_ready_sections(&traversal_ready_sections);
                     self.frame_pacing.apply_to_surface(surface);
                     surface.render_with_report(|frame| {
                         render_full_frame(

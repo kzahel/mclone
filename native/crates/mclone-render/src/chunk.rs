@@ -215,11 +215,13 @@ pub struct TexturedSectionRenderStats {
     pub loaded_section_count: usize,
     pub drawn_section_count: usize,
     pub frustum_section_count: usize,
+    pub readiness_culled_section_count: usize,
     pub graph_cull_enabled: bool,
     pub graph_culled_section_count: usize,
     pub loaded_index_count: u32,
     pub drawn_index_count: u32,
     pub frustum_index_count: u32,
+    pub readiness_culled_index_count: u32,
     pub graph_culled_index_count: u32,
 }
 
@@ -254,6 +256,10 @@ impl TexturedSectionRenderStats {
     pub fn graph_culled_face_count(&self) -> u32 {
         quad_face_count_from_indices(self.graph_culled_index_count)
     }
+
+    pub fn readiness_culled_face_count(&self) -> u32 {
+        quad_face_count_from_indices(self.readiness_culled_index_count)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -286,6 +292,20 @@ pub fn textured_section_visibility_stats_with_options(
     render_view: ChunkRenderView,
     options: TexturedSectionRenderOptions,
 ) -> TexturedSectionRenderStats {
+    textured_section_visibility_stats_with_options_and_ready_sections(
+        sections,
+        render_view,
+        options,
+        None,
+    )
+}
+
+pub fn textured_section_visibility_stats_with_options_and_ready_sections(
+    sections: &[TexturedRenderSectionMesh],
+    render_view: ChunkRenderView,
+    options: TexturedSectionRenderOptions,
+    ready_sections: Option<&BTreeSet<RenderSectionKey>>,
+) -> TexturedSectionRenderStats {
     let records = sections
         .iter()
         .map(|section| {
@@ -295,6 +315,8 @@ pub fn textured_section_visibility_stats_with_options(
                     index_count: section.stats().index_count,
                     visibility: section.visibility,
                     drawable: !section.is_empty(),
+                    traversal_ready: ready_sections
+                        .is_none_or(|ready| ready.contains(&section.key)),
                 },
             )
         })
@@ -307,6 +329,7 @@ struct TexturedSectionCullingRecord {
     index_count: u32,
     visibility: VisibilitySet,
     drawable: bool,
+    traversal_ready: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -368,32 +391,40 @@ fn cull_textured_sections(
     };
 
     let mut frustum_keys = BTreeSet::new();
+    let mut ready_frustum_keys = BTreeSet::new();
     for (key, record) in records {
         if frustum.is_render_section_visible(*key) {
             frustum_keys.insert(*key);
+            if record.traversal_ready {
+                ready_frustum_keys.insert(*key);
+            }
             if record.drawable {
                 stats.frustum_section_count += 1;
                 stats.frustum_index_count += record.index_count;
+                if !record.traversal_ready {
+                    stats.readiness_culled_section_count += 1;
+                    stats.readiness_culled_index_count += record.index_count;
+                }
             }
         }
     }
 
-    if !options.section_occlusion_culling {
-        stats.drawn_section_count = stats.frustum_section_count;
-        stats.drawn_index_count = stats.frustum_index_count;
-        return TexturedSectionCullingResult {
-            stats,
-            drawn_keys: frustum_keys,
-        };
-    }
-
     let start_keys = traversal_start_keys(records, &frustum_keys, render_view.camera_position);
     if start_keys.is_empty() {
-        stats.drawn_section_count = stats.frustum_section_count;
-        stats.drawn_index_count = stats.frustum_index_count;
+        stats.drawn_section_count = ready_frustum_keys
+            .iter()
+            .filter_map(|key| records.get(key))
+            .filter(|record| record.drawable)
+            .count();
+        stats.drawn_index_count = ready_frustum_keys
+            .iter()
+            .filter_map(|key| records.get(key))
+            .filter(|record| record.drawable)
+            .map(|record| record.index_count)
+            .sum();
         return TexturedSectionCullingResult {
             stats,
-            drawn_keys: frustum_keys,
+            drawn_keys: ready_frustum_keys,
         };
     }
 
@@ -420,14 +451,18 @@ fn cull_textured_sections(
             if info.has_direction(direction.opposite()) {
                 continue;
             }
-            if info.has_source_directions()
+            if options.section_occlusion_culling
+                && info.has_source_directions()
                 && !can_see_through_source(record.visibility, info.source_directions, direction)
             {
                 continue;
             }
 
             let neighbor_key = section_neighbor_key(key, direction);
-            if !records.contains_key(&neighbor_key) || !frustum_keys.contains(&neighbor_key) {
+            let Some(neighbor_record) = records.get(&neighbor_key) else {
+                continue;
+            };
+            if !neighbor_record.traversal_ready || !frustum_keys.contains(&neighbor_key) {
                 continue;
             }
 
@@ -443,7 +478,7 @@ fn cull_textured_sections(
         }
     }
 
-    stats.graph_cull_enabled = true;
+    stats.graph_cull_enabled = options.section_occlusion_culling;
     stats.drawn_section_count = drawn_keys
         .iter()
         .filter_map(|key| records.get(key))
@@ -457,9 +492,11 @@ fn cull_textured_sections(
         .sum();
     stats.graph_culled_section_count = stats
         .frustum_section_count
+        .saturating_sub(stats.readiness_culled_section_count)
         .saturating_sub(stats.drawn_section_count);
     stats.graph_culled_index_count = stats
         .frustum_index_count
+        .saturating_sub(stats.readiness_culled_index_count)
         .saturating_sub(stats.drawn_index_count);
 
     TexturedSectionCullingResult { stats, drawn_keys }
@@ -473,7 +510,10 @@ fn traversal_start_keys(
     let Some(camera_key) = render_section_key_containing(camera_position) else {
         return Vec::new();
     };
-    if records.contains_key(&camera_key) {
+    if records
+        .get(&camera_key)
+        .is_some_and(|record| record.traversal_ready)
+    {
         return vec![camera_key];
     }
 
@@ -506,7 +546,13 @@ fn outside_retained_section_start_keys(
     let mut starts = records
         .keys()
         .copied()
-        .filter(|key| key.section_y == target_section_y && frustum_keys.contains(key))
+        .filter(|key| {
+            key.section_y == target_section_y
+                && frustum_keys.contains(key)
+                && records
+                    .get(key)
+                    .is_some_and(|record| record.traversal_ready)
+        })
         .collect::<Vec<_>>();
     starts.sort_by(|a, b| {
         let a_distance = render_section_center(*a).distance_squared(camera_position);
@@ -1218,6 +1264,7 @@ pub struct TexturedSectionDrawResources {
     renderer: TexturedChunkRenderer,
     sections: BTreeMap<RenderSectionKey, GpuTexturedChunkMesh>,
     visibility_sections: BTreeMap<RenderSectionKey, VisibilitySet>,
+    traversal_ready_sections: BTreeSet<RenderSectionKey>,
     atlas: GpuChunkTextureAtlas,
 }
 
@@ -1237,6 +1284,7 @@ impl TexturedSectionDrawResources {
             renderer,
             sections: BTreeMap::new(),
             visibility_sections: BTreeMap::new(),
+            traversal_ready_sections: BTreeSet::new(),
             atlas,
         };
         let _ = resources.update_sections(device, sections)?;
@@ -1273,11 +1321,13 @@ impl TexturedSectionDrawResources {
                 report.removed_section_count += 1;
             }
             self.visibility_sections.remove(key);
+            self.traversal_ready_sections.remove(key);
         }
 
         for section in sections {
             self.visibility_sections
                 .insert(section.key, section.visibility);
+            self.traversal_ready_sections.insert(section.key);
             if section.is_empty() {
                 if self.sections.remove(&section.key).is_some() {
                     report.removed_section_count += 1;
@@ -1297,6 +1347,15 @@ impl TexturedSectionDrawResources {
             );
         }
         Ok(report)
+    }
+
+    pub fn set_traversal_ready_sections(&mut self, ready_sections: &BTreeSet<RenderSectionKey>) {
+        self.traversal_ready_sections = self
+            .visibility_sections
+            .keys()
+            .copied()
+            .filter(|key| ready_sections.contains(key))
+            .collect();
     }
 
     pub fn section_count(&self) -> usize {
@@ -1342,6 +1401,7 @@ impl TexturedSectionDrawResources {
                         index_count: mesh.map_or(0, GpuTexturedChunkMesh::index_count),
                         visibility: *visibility,
                         drawable: mesh.is_some(),
+                        traversal_ready: self.traversal_ready_sections.contains(key),
                     },
                 )
             })
@@ -1683,6 +1743,56 @@ mod tests {
         assert_eq!(stats.graph_culled_section_count, 0);
         assert_eq!(stats.drawn_index_count, stats.frustum_index_count);
         assert_eq!(stats.graph_culled_index_count, 0);
+    }
+
+    #[test]
+    fn textured_section_visibility_stats_culls_not_ready_sections_even_without_graph() {
+        let sections = vec![
+            fake_section(
+                RenderSectionKey::new(0, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(
+                RenderSectionKey::new(1, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(
+                RenderSectionKey::new(2, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+        ];
+        let ready = BTreeSet::from([
+            RenderSectionKey::new(0, 0, 0),
+            RenderSectionKey::new(1, 0, 0),
+        ]);
+        let camera = ChunkCamera {
+            eye: [8.0, 8.0, 8.0],
+            target: [48.0, 8.0, 8.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 90.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 200.0,
+        };
+
+        let stats = textured_section_visibility_stats_with_options_and_ready_sections(
+            &sections,
+            camera.render_view(800, 600),
+            TexturedSectionRenderOptions {
+                section_occlusion_culling: false,
+                ..TexturedSectionRenderOptions::default()
+            },
+            Some(&ready),
+        );
+
+        assert!(!stats.graph_cull_enabled);
+        assert_eq!(stats.frustum_section_count, 3);
+        assert_eq!(stats.drawn_section_count, 2);
+        assert_eq!(stats.readiness_culled_section_count, 1);
+        assert_eq!(stats.readiness_culled_index_count, 6);
+        assert_eq!(stats.graph_culled_section_count, 0);
     }
 
     #[test]
