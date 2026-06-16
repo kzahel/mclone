@@ -154,7 +154,7 @@ module.
   stabilizes: `types`, `tickets`, `distance_manager`, `holder`, `scheduler`,
   `worldgen_mailbox`, `fluid`, `integrated`, `lighting_seed`, and `timing`.
 - [ ] Split `mclone-worldgen::feature` around Java-shaped concepts:
-  `context`, `region` (done), `configured`, `placed`, `tables`, `lake`,
+  `context` (done), `region` (done), `configured`, `placed`, `tables`, `lake`,
   `spring`, `ore`, `tree`, `patch`, `glow_lichen`, and `top_layer`.
 - [ ] Split `mclone-worldgen::levelgen` into chunk data, settings, sampler,
   generator, feature-batch, and timing modules.
@@ -202,8 +202,11 @@ module.
 3. `worldgen::feature` first split (in progress)
    - `region` boundary done: moved `FeatureRegion`, `FeatureRegionMetrics`,
      and region chunk indexing into `feature/region.rs`.
-   - Continue with low-risk move-only boundaries: `context`, `configured`,
-     `placed`, and `tables`.
+   - `context` boundary done: moved `DecorationStep`,
+     `FeatureDecorationTiming`, `FeatureWorld`, the biome resolvers, and the
+     `MutableChunkBlockBuffer` feature-world adapter into `feature/context.rs`.
+   - Continue with low-risk move-only boundaries: `configured`, `placed`, and
+     `tables`.
    - Leave individual feature behavior (`lake`, `spring`, `ore`, `tree`,
      `patch`, `glow_lichen`, `top_layer`) for follow-up slices.
 
