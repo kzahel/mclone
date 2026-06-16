@@ -236,6 +236,11 @@ under frame-budget probe, with particular attention to scheduler tick,
 publication/event application, and any main-thread chunk tick work that runs
 while worldgen backlog is high.
 
+The later worker-thread render compile follow-up is implemented in
+[`033-native-async-render-section-compile-queue.md`](033-native-async-render-section-compile-queue.md).
+That slice moves CPU render-section compilation off the frame path while keeping
+GPU upload on the render thread.
+
 ## Poll Instrumentation Result
 
 Added frame-budget probe instrumentation for native integrated-server polling:

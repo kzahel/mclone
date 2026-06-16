@@ -52,7 +52,9 @@ Key Java facts for this slice:
   so light-section dirtying remains deferred to the lighting pipeline.
 - GPU buffers are still recreated for changed sections rather than updated in-place or pooled.
 - No release-mode perf budget is enforced yet.
-- CPU render-section compilation still runs synchronously on the frame path.
+- CPU render-section compilation has moved off the frame path in
+  [`033`](033-native-async-render-section-compile-queue.md), but stale worker
+  output is still handled conservatively.
 
 ## Optimized Dev Baseline
 
@@ -90,10 +92,10 @@ pnpm native:movement:smoke
 
 ## Follow-Ups
 
-1. Move CPU render-section compilation off the frame path with a Java-shaped
-   compile queue and render-thread upload consumption.
-2. Refresh release-mode movement/render baselines and decide budget thresholds
+1. Refresh release-mode movement/render baselines and decide budget thresholds
    for rebuilt/uploaded sections and vertices.
+2. Reduce async compile stale churn with per-section/chunk input revisions and
+   distance priority.
 3. Add GPU buffer reuse/pooling if upload allocation becomes material after
    dirty diffs.
 4. Add light deltas and light-section dirtying through the lighting pipeline.

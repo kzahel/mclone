@@ -58,6 +58,53 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-16 - Async Render Section Compile Queue Release Probe
+
+Commit reported by benchmark JSON: `ba23d22`.
+
+Note: `git_dirty=true` because this was captured while implementing the async
+render-section compile queue, before committing the slice. Treat it as the
+release probe for that working-tree implementation, not as a clean historical
+commit record.
+
+Command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --frame-budget-probe --frame-budget-frames 120 --target-hz 120
+```
+
+Frame budget probe, target `120 Hz`, `120` frames:
+
+| Metric | Value |
+|---|---:|
+| over-budget frames | `0 / 120` |
+| over 2x budget frames | `0 / 120` |
+| over 4x budget frames | `0 / 120` |
+| p95 frame | `4.030 ms` |
+| p99 frame | `4.260 ms` |
+| max frame | `6.968 ms` |
+| headless average frame | `2.360 ms` |
+| max `poll_ms` | `1.611 ms` |
+| max `remesh_ms` | `0.060 ms` |
+| max `upload_ms` | `0.326 ms` |
+| max pending render chunks | `9` |
+| max pending compile jobs | `1` |
+| max in-flight sections | `16` |
+| submitted compile sections | `78` |
+| completed compile sections | `42` |
+| stale compile sections | `33` |
+| total section block update batches | `27` |
+| total fluid mutated blocks | `80` |
+| total rebuilt sections | `42` |
+| max rebuilt sections on a frame | `16` |
+| total uploaded sections | `31` |
+
+Observation: CPU render-section compilation is no longer a material frame-path
+cost in this probe. `remesh_ms` now reflects submission/drain bookkeeping.
+The global compile epoch correctly discards stale worker output, but it is
+conservative: continuous movement/fluid updates caused `33` stale sections out
+of `78` submitted.
+
 ### 2026-06-16 - Section-Precise Dirtying Release Probe
 
 Commit reported by benchmark JSON: `9078e8b`.

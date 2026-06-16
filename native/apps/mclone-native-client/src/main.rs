@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
@@ -1135,6 +1136,9 @@ struct FrameBudgetProbeFrameReport {
     render_ms: f64,
     rebuilt_sections: usize,
     removed_sections: usize,
+    submitted_compile_sections: usize,
+    completed_compile_sections: usize,
+    stale_compile_sections: usize,
     uploaded_sections: usize,
     upload_removed_sections: usize,
     uploaded_vertices: u32,
@@ -1143,6 +1147,8 @@ struct FrameBudgetProbeFrameReport {
     pending_jobs: usize,
     pending_publications: usize,
     pending_render_chunks: usize,
+    pending_render_compile_jobs: usize,
+    inflight_render_sections: usize,
     drawn_sections: usize,
     drawn_indices: u32,
 }
@@ -1196,6 +1202,9 @@ impl Default for FrameBudgetProbeFrameReport {
             render_ms: 0.0,
             rebuilt_sections: 0,
             removed_sections: 0,
+            submitted_compile_sections: 0,
+            completed_compile_sections: 0,
+            stale_compile_sections: 0,
             uploaded_sections: 0,
             upload_removed_sections: 0,
             uploaded_vertices: 0,
@@ -1204,6 +1213,8 @@ impl Default for FrameBudgetProbeFrameReport {
             pending_jobs: 0,
             pending_publications: 0,
             pending_render_chunks: 0,
+            pending_render_compile_jobs: 0,
+            inflight_render_sections: 0,
             drawn_sections: 0,
             drawn_indices: 0,
         }
@@ -1216,6 +1227,9 @@ impl FrameBudgetProbeFrameReport {
         self.upload_ms += timing.upload_ms;
         self.rebuilt_sections += timing.rebuilt_sections;
         self.removed_sections += timing.removed_sections;
+        self.submitted_compile_sections += timing.submitted_compile_sections;
+        self.completed_compile_sections += timing.completed_compile_sections;
+        self.stale_compile_sections += timing.stale_compile_sections;
         self.uploaded_sections += timing.uploaded_sections;
         self.upload_removed_sections += timing.upload_removed_sections;
         self.uploaded_vertices += timing.uploaded_vertices;
@@ -1238,6 +1252,9 @@ struct FrameBudgetProbeSectionTiming {
     upload_ms: f64,
     rebuilt_sections: usize,
     removed_sections: usize,
+    submitted_compile_sections: usize,
+    completed_compile_sections: usize,
+    stale_compile_sections: usize,
     uploaded_sections: usize,
     upload_removed_sections: usize,
     uploaded_vertices: u32,
@@ -1645,6 +1662,18 @@ impl FrameBudgetProbeReport {
             println!("      \"device_poll_ms\": {:.3},", timing.device_poll_ms);
             println!("      \"rebuilt_sections\": {},", frame.rebuilt_sections);
             println!("      \"removed_sections\": {},", frame.removed_sections);
+            println!(
+                "      \"submitted_compile_sections\": {},",
+                frame.submitted_compile_sections
+            );
+            println!(
+                "      \"completed_compile_sections\": {},",
+                frame.completed_compile_sections
+            );
+            println!(
+                "      \"stale_compile_sections\": {},",
+                frame.stale_compile_sections
+            );
             println!("      \"uploaded_sections\": {},", frame.uploaded_sections);
             println!(
                 "      \"upload_removed_sections\": {},",
@@ -1661,6 +1690,14 @@ impl FrameBudgetProbeReport {
             println!(
                 "      \"pending_render_chunks\": {},",
                 frame.pending_render_chunks
+            );
+            println!(
+                "      \"pending_render_compile_jobs\": {},",
+                frame.pending_render_compile_jobs
+            );
+            println!(
+                "      \"inflight_render_sections\": {},",
+                frame.inflight_render_sections
             );
             println!("      \"drawn_sections\": {},", frame.drawn_sections);
             println!("      \"drawn_indices\": {}", frame.drawn_indices);
@@ -1874,6 +1911,9 @@ fn probe_sync_upload_sections(
         upload_ms,
         rebuilt_sections: section_update.rebuilt_section_count(),
         removed_sections: section_update.removed_section_count(),
+        submitted_compile_sections: section_update.submitted_compile_section_count,
+        completed_compile_sections: section_update.completed_compile_section_count,
+        stale_compile_sections: section_update.stale_compile_section_count,
         uploaded_sections: upload_report.uploaded_section_count,
         upload_removed_sections: upload_report.removed_section_count,
         uploaded_vertices: upload_report.uploaded_vertex_count,
@@ -2058,6 +2098,8 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
             report.pending_jobs = stats.pending_jobs;
             report.pending_publications = stats.pending_publications;
             report.pending_render_chunks = stats.pending_render_chunks;
+            report.pending_render_compile_jobs = stats.pending_render_compile_jobs;
+            report.inflight_render_sections = stats.inflight_render_sections;
             report.drawn_sections = state.render_stats.drawn_section_count;
             report.drawn_indices = state.render_stats.drawn_index_count;
             frame_reports.push(report);
@@ -2232,6 +2274,20 @@ fn build_client_textured_sections(
         .context("failed to build textured sections")
 }
 
+fn build_render_sections_from_snapshots(
+    snapshots: &[ChunkSnapshot],
+    catalog: &TexturedMeshCatalog,
+    target_sections: &BTreeSet<RenderSectionKey>,
+) -> Result<TexturedRenderSectionBuildReport> {
+    let chunks = snapshots
+        .iter()
+        .map(snapshot_mesh_block_state_ids)
+        .collect::<Result<Vec<_>>>()?;
+    let inputs = textured_mesh_inputs(&chunks);
+    build_textured_render_sections_for_section_set_with_stats(&inputs, catalog, target_sections)
+        .context("failed to build queued textured render sections")
+}
+
 fn mesh_chunks_from_client(client: &ClientRuntime) -> Result<Vec<MeshChunkBlocks>> {
     client
         .chunk_snapshots()
@@ -2269,6 +2325,10 @@ struct RenderSectionCacheUpdate {
     neighbor_ready_section_count: usize,
     near_exception_section_count: usize,
     deferred_section_count: usize,
+    submitted_compile_section_count: usize,
+    completed_compile_section_count: usize,
+    stale_compile_section_count: usize,
+    pending_compile_jobs: usize,
     visibility_graph_stats: VisibilityGraphBuildStats,
 }
 
@@ -2283,6 +2343,131 @@ impl RenderSectionCacheUpdate {
 
     fn rebuilt_face_count(&self) -> u32 {
         quad_face_count_from_indices(self.rebuilt_index_count)
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.rebuilt_sections.extend(other.rebuilt_sections);
+        self.removed_section_keys.extend(other.removed_section_keys);
+        self.rebuilt_vertex_count += other.rebuilt_vertex_count;
+        self.rebuilt_index_count += other.rebuilt_index_count;
+        self.neighbor_ready_section_count += other.neighbor_ready_section_count;
+        self.near_exception_section_count += other.near_exception_section_count;
+        self.deferred_section_count += other.deferred_section_count;
+        self.submitted_compile_section_count += other.submitted_compile_section_count;
+        self.completed_compile_section_count += other.completed_compile_section_count;
+        self.stale_compile_section_count += other.stale_compile_section_count;
+        self.pending_compile_jobs = other.pending_compile_jobs;
+        self.visibility_graph_stats.build_count += other.visibility_graph_stats.build_count;
+        self.visibility_graph_stats.total_ms += other.visibility_graph_stats.total_ms;
+        self.visibility_graph_stats.worst_ms = self
+            .visibility_graph_stats
+            .worst_ms
+            .max(other.visibility_graph_stats.worst_ms);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RenderSectionCompileRequest {
+    epoch: u64,
+    target_sections: BTreeSet<RenderSectionKey>,
+    snapshots: Vec<ChunkSnapshot>,
+}
+
+#[derive(Debug)]
+struct RenderSectionCompileResult {
+    epoch: u64,
+    target_sections: BTreeSet<RenderSectionKey>,
+    result: std::result::Result<TexturedRenderSectionBuildReport, String>,
+}
+
+enum RenderSectionCompileCommand {
+    Build(RenderSectionCompileRequest),
+    Shutdown,
+}
+
+#[derive(Debug)]
+struct RenderSectionCompileWorker {
+    sender: mpsc::Sender<RenderSectionCompileCommand>,
+    receiver: mpsc::Receiver<RenderSectionCompileResult>,
+    handle: Option<thread::JoinHandle<()>>,
+    pending_jobs: usize,
+}
+
+impl RenderSectionCompileWorker {
+    fn new(catalog: TexturedMeshCatalog) -> Result<Self> {
+        let (sender, command_receiver) = mpsc::channel::<RenderSectionCompileCommand>();
+        let (result_sender, receiver) = mpsc::channel::<RenderSectionCompileResult>();
+        let handle = thread::Builder::new()
+            .name("mclone-render-compile".to_string())
+            .spawn(move || {
+                while let Ok(command) = command_receiver.recv() {
+                    match command {
+                        RenderSectionCompileCommand::Build(request) => {
+                            let result = build_render_sections_from_snapshots(
+                                &request.snapshots,
+                                &catalog,
+                                &request.target_sections,
+                            )
+                            .map_err(|error| format!("{error:#}"));
+                            if result_sender
+                                .send(RenderSectionCompileResult {
+                                    epoch: request.epoch,
+                                    target_sections: request.target_sections,
+                                    result,
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        RenderSectionCompileCommand::Shutdown => break,
+                    }
+                }
+            })
+            .context("failed to spawn render section compile worker")?;
+        Ok(Self {
+            sender,
+            receiver,
+            handle: Some(handle),
+            pending_jobs: 0,
+        })
+    }
+
+    fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()> {
+        self.sender
+            .send(RenderSectionCompileCommand::Build(request))
+            .context("failed to submit render section compile task")?;
+        self.pending_jobs += 1;
+        Ok(())
+    }
+
+    fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>> {
+        let mut completed = Vec::new();
+        loop {
+            match self.receiver.try_recv() {
+                Ok(result) => {
+                    self.pending_jobs = self.pending_jobs.saturating_sub(1);
+                    completed.push(result);
+                }
+                Err(mpsc::TryRecvError::Empty) => return Ok(completed),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    bail!("render section compile worker disconnected")
+                }
+            }
+        }
+    }
+
+    fn pending_job_count(&self) -> usize {
+        self.pending_jobs
+    }
+}
+
+impl Drop for RenderSectionCompileWorker {
+    fn drop(&mut self) {
+        let _ = self.sender.send(RenderSectionCompileCommand::Shutdown);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -2309,33 +2494,13 @@ impl CachedTexturedRenderSections {
         self.sections.keys().copied()
     }
 
-    fn rebuild_dirty(
+    fn apply_build_report(
         &mut self,
-        client: &ClientRuntime,
-        catalog: &TexturedMeshCatalog,
         ready_section_keys: &BTreeSet<RenderSectionKey>,
+        rebuilt_report: TexturedRenderSectionBuildReport,
         removal_chunks: &BTreeSet<ChunkPos>,
         removal_section_keys: &BTreeSet<RenderSectionKey>,
-    ) -> Result<RenderSectionCacheUpdate> {
-        if ready_section_keys.is_empty()
-            && removal_chunks.is_empty()
-            && removal_section_keys.is_empty()
-        {
-            return Ok(RenderSectionCacheUpdate::default());
-        }
-
-        let rebuilt_report = if ready_section_keys.is_empty() {
-            Default::default()
-        } else {
-            let chunks = mesh_chunks_from_client(client)?;
-            let inputs = textured_mesh_inputs(&chunks);
-            build_textured_render_sections_for_section_set_with_stats(
-                &inputs,
-                catalog,
-                ready_section_keys,
-            )
-            .context("failed to build dirty textured sections")?
-        };
+    ) -> RenderSectionCacheUpdate {
         let rebuilt_keys = rebuilt_report
             .sections
             .iter()
@@ -2376,6 +2541,7 @@ impl CachedTexturedRenderSections {
             rebuilt_index_count: 0,
             visibility_graph_stats: rebuilt_report.visibility_graph,
             neighbor_ready_section_count: ready_section_keys.len(),
+            completed_compile_section_count: ready_section_keys.len(),
             ..RenderSectionCacheUpdate::default()
         };
         for section in &report.rebuilt_sections {
@@ -2384,7 +2550,20 @@ impl CachedTexturedRenderSections {
             report.rebuilt_index_count += stats.index_count;
             self.sections.insert(section.key, section.clone());
         }
-        Ok(report)
+        report
+    }
+
+    fn remove_sections(
+        &mut self,
+        removal_chunks: &BTreeSet<ChunkPos>,
+        removal_section_keys: &BTreeSet<RenderSectionKey>,
+    ) -> RenderSectionCacheUpdate {
+        self.apply_build_report(
+            &BTreeSet::new(),
+            TexturedRenderSectionBuildReport::default(),
+            removal_chunks,
+            removal_section_keys,
+        )
     }
 }
 
@@ -2577,6 +2756,9 @@ struct WindowSceneRuntime {
     render_sections: CachedTexturedRenderSections,
     dirty_render_chunks: BTreeSet<ChunkPos>,
     dirty_render_sections: BTreeSet<RenderSectionKey>,
+    inflight_render_sections: BTreeSet<RenderSectionKey>,
+    render_compile_epoch: u64,
+    render_compile_worker: RenderSectionCompileWorker,
     last_tick: u64,
     last_simulation_tick: u64,
     last_tick_unloads_processed: usize,
@@ -2650,6 +2832,8 @@ struct WindowRuntimeStats {
     pending_jobs: usize,
     pending_publications: usize,
     pending_render_chunks: usize,
+    pending_render_compile_jobs: usize,
+    inflight_render_sections: usize,
     client_visible_chunks: usize,
     active_ticket_chunks: usize,
     pending_unload_chunks: usize,
@@ -2679,6 +2863,8 @@ impl WindowSceneRuntime {
         };
         let radius_chunks =
             u32::try_from(scene.chunk_radius).context("chunk radius must be positive")?;
+        let mesh_assets = load_textured_mesh_assets()?;
+        let render_compile_worker = RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
         let mut runtime = Self {
             client,
             server: scene
@@ -2689,10 +2875,13 @@ impl WindowSceneRuntime {
             remote_addr: scene.remote_addr.clone(),
             radius_chunks,
             interest_center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
-            mesh_assets: load_textured_mesh_assets()?,
+            mesh_assets,
             render_sections: CachedTexturedRenderSections::default(),
             dirty_render_chunks: BTreeSet::new(),
             dirty_render_sections: BTreeSet::new(),
+            inflight_render_sections: BTreeSet::new(),
+            render_compile_epoch: 0,
+            render_compile_worker,
             last_tick: 0,
             last_simulation_tick: 0,
             last_tick_unloads_processed: 0,
@@ -2845,6 +3034,9 @@ impl WindowSceneRuntime {
         let mut snapshot_updates = 0;
         let mut section_block_updates = 0;
         let mut unload_updates = 0;
+        if changed {
+            self.render_compile_epoch = self.render_compile_epoch.wrapping_add(1);
+        }
         let dirty_mark_start = Instant::now();
         for update in &updates {
             match update {
@@ -2901,6 +3093,64 @@ impl WindowSceneRuntime {
         }
     }
 
+    fn drain_completed_render_compile_jobs(&mut self) -> Result<RenderSectionCacheUpdate> {
+        let mut update = RenderSectionCacheUpdate::default();
+        for completed in self.render_compile_worker.try_recv_completed()? {
+            for key in &completed.target_sections {
+                self.inflight_render_sections.remove(key);
+            }
+
+            if completed.epoch != self.render_compile_epoch {
+                update.stale_compile_section_count += completed.target_sections.len();
+                self.requeue_stale_render_sections(completed.target_sections);
+                continue;
+            }
+
+            let build_report = completed.result.map_err(anyhow::Error::msg)?;
+            let completed_update = self.render_sections.apply_build_report(
+                &completed.target_sections,
+                build_report,
+                &BTreeSet::new(),
+                &BTreeSet::new(),
+            );
+            update.merge(completed_update);
+        }
+        update.pending_compile_jobs = self.render_compile_worker.pending_job_count();
+        Ok(update)
+    }
+
+    fn requeue_stale_render_sections(&mut self, target_sections: BTreeSet<RenderSectionKey>) {
+        for key in target_sections {
+            let pos = render_section_chunk_pos(key);
+            let snapshot_contains = self
+                .client
+                .chunk_snapshot(pos)
+                .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key));
+            if snapshot_contains || self.render_sections.contains_section(key) {
+                self.dirty_render_sections.insert(key);
+            }
+        }
+    }
+
+    fn submit_render_compile_job(
+        &mut self,
+        ready_section_keys: BTreeSet<RenderSectionKey>,
+    ) -> Result<usize> {
+        if ready_section_keys.is_empty() {
+            return Ok(0);
+        }
+        let submitted_count = ready_section_keys.len();
+        let snapshots = self.client.chunk_snapshots().cloned().collect();
+        self.render_compile_worker
+            .submit(RenderSectionCompileRequest {
+                epoch: self.render_compile_epoch,
+                target_sections: ready_section_keys.clone(),
+                snapshots,
+            })?;
+        self.inflight_render_sections.extend(ready_section_keys);
+        Ok(submitted_count)
+    }
+
     fn sync_render_sections(&mut self, camera_position: Vec3) -> Result<RenderSectionCacheUpdate> {
         self.sync_render_sections_with_budget(camera_position, DEFAULT_RENDER_CHUNK_MESH_BUDGET)
     }
@@ -2909,7 +3159,29 @@ impl WindowSceneRuntime {
         &mut self,
         camera_position: Vec3,
     ) -> Result<RenderSectionCacheUpdate> {
-        self.sync_render_sections_with_budget(camera_position, usize::MAX)
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let mut combined = RenderSectionCacheUpdate::default();
+        loop {
+            let update = self.sync_render_sections_with_budget(camera_position, usize::MAX)?;
+            let progressed = update.rebuilt_section_count() > 0
+                || update.removed_section_count() > 0
+                || update.submitted_compile_section_count > 0
+                || update.completed_compile_section_count > 0
+                || update.stale_compile_section_count > 0;
+            combined.merge(update);
+            if self.render_compile_worker.pending_job_count() == 0
+                && !self.has_ready_pending_render_work(camera_position)
+            {
+                combined.pending_compile_jobs = 0;
+                return Ok(combined);
+            }
+            if Instant::now() >= deadline {
+                bail!("timed out waiting for render section compile queue");
+            }
+            if !progressed {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
     }
 
     fn sync_render_sections_with_budget(
@@ -2917,10 +3189,13 @@ impl WindowSceneRuntime {
         camera_position: Vec3,
         chunk_budget: usize,
     ) -> Result<RenderSectionCacheUpdate> {
+        let mut report = self.drain_completed_render_compile_jobs()?;
+
         if self.render_sections.is_empty()
             && self.client.loaded_chunk_count() > 0
             && self.dirty_render_chunks.is_empty()
             && self.dirty_render_sections.is_empty()
+            && self.inflight_render_sections.is_empty()
         {
             let loaded = self
                 .client
@@ -2935,7 +3210,8 @@ impl WindowSceneRuntime {
         if chunk_budget == 0
             || (self.dirty_render_chunks.is_empty() && self.dirty_render_sections.is_empty())
         {
-            return Ok(RenderSectionCacheUpdate::default());
+            report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
+            return Ok(report);
         }
 
         let mut stale_dirty_chunks = BTreeSet::new();
@@ -2993,6 +3269,10 @@ impl WindowSceneRuntime {
                 continue;
             };
             for key in render_section_keys_for_snapshot(snapshot) {
+                if self.inflight_render_sections.contains(&key) {
+                    deferred_section_keys.insert(key);
+                    continue;
+                }
                 let readiness =
                     render_section_neighbor_readiness(&self.client, key, camera_position);
                 if readiness.is_ready() {
@@ -3009,6 +3289,10 @@ impl WindowSceneRuntime {
         for pos in &budgeted_dirty_section_chunks {
             if let Some(keys) = loaded_dirty_sections_by_chunk.get(pos) {
                 for key in keys {
+                    if self.inflight_render_sections.contains(key) {
+                        deferred_section_keys.insert(*key);
+                        continue;
+                    }
                     let readiness =
                         render_section_neighbor_readiness(&self.client, *key, camera_position);
                     if readiness.is_ready() {
@@ -3037,25 +3321,31 @@ impl WindowSceneRuntime {
                 self.dirty_render_chunks.remove(&pos);
             }
             self.dirty_render_sections.extend(deferred_section_keys);
-            return Ok(RenderSectionCacheUpdate {
+            report.merge(RenderSectionCacheUpdate {
                 deferred_section_count,
                 near_exception_section_count,
                 ..RenderSectionCacheUpdate::default()
             });
+            report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
+            return Ok(report);
         }
 
-        let report = self.render_sections.rebuild_dirty(
-            &self.client,
-            &self.mesh_assets.catalog,
-            &ready_section_keys,
-            &removal_dirty_chunks,
-            &removal_dirty_sections,
-        )?;
-        let mut report = RenderSectionCacheUpdate {
+        if !removal_dirty_chunks.is_empty() || !removal_dirty_sections.is_empty() {
+            let removal_update = self
+                .render_sections
+                .remove_sections(&removal_dirty_chunks, &removal_dirty_sections);
+            report.merge(removal_update);
+        }
+
+        let submitted_compile_section_count =
+            self.submit_render_compile_job(ready_section_keys.clone())?;
+        report.merge(RenderSectionCacheUpdate {
             deferred_section_count,
             near_exception_section_count,
-            ..report
-        };
+            submitted_compile_section_count,
+            ..RenderSectionCacheUpdate::default()
+        });
+
         for pos in budgeted_loaded_chunks {
             self.dirty_render_chunks.remove(&pos);
         }
@@ -3063,15 +3353,18 @@ impl WindowSceneRuntime {
             self.dirty_render_chunks.remove(&pos);
             self.dirty_render_sections
                 .retain(|key| render_section_chunk_pos(*key) != pos);
+            self.inflight_render_sections
+                .retain(|key| render_section_chunk_pos(*key) != pos);
         }
         for key in &ready_section_keys {
             self.dirty_render_sections.remove(key);
         }
         for key in &removal_dirty_sections {
-            self.dirty_render_sections.remove(&key);
+            self.dirty_render_sections.remove(key);
+            self.inflight_render_sections.remove(key);
         }
         self.dirty_render_sections.extend(deferred_section_keys);
-        report.neighbor_ready_section_count = ready_section_keys.len();
+        report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
         Ok(report)
     }
 
@@ -3092,7 +3385,8 @@ impl WindowSceneRuntime {
     }
 
     fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
-        self.has_ready_pending_render_work(camera_position)
+        self.render_compile_worker.pending_job_count() > 0
+            || self.has_ready_pending_render_work(camera_position)
     }
 
     fn pending_render_chunk_count(&self) -> usize {
@@ -3116,6 +3410,12 @@ impl WindowSceneRuntime {
                 })
                 .map(render_section_chunk_pos),
         );
+        pending.extend(
+            self.inflight_render_sections
+                .iter()
+                .copied()
+                .map(render_section_chunk_pos),
+        );
         pending.len()
     }
 
@@ -3131,9 +3431,14 @@ impl WindowSceneRuntime {
             render_section_keys_for_snapshot(snapshot)
                 .into_iter()
                 .any(|key| {
-                    render_section_neighbor_readiness(&self.client, key, camera_position).is_ready()
+                    !self.inflight_render_sections.contains(&key)
+                        && render_section_neighbor_readiness(&self.client, key, camera_position)
+                            .is_ready()
                 })
         }) || self.dirty_render_sections.iter().copied().any(|key| {
+            if self.inflight_render_sections.contains(&key) {
+                return false;
+            }
             if self.render_sections.contains_section(key)
                 && self
                     .client
@@ -3209,6 +3514,8 @@ impl WindowSceneRuntime {
             pending_jobs: self.pending_job_count(),
             pending_publications: self.pending_publication_count(),
             pending_render_chunks: self.pending_render_chunk_count(),
+            pending_render_compile_jobs: self.render_compile_worker.pending_job_count(),
+            inflight_render_sections: self.inflight_render_sections.len(),
             client_visible_chunks: scheduler_metrics
                 .map_or(self.client.loaded_chunk_count(), |metrics| {
                     metrics.client_visible_chunks
@@ -3726,6 +4033,10 @@ struct RenderStreamStats {
     last_neighbor_ready_section_count: usize,
     last_near_exception_section_count: usize,
     last_deferred_section_count: usize,
+    last_submitted_compile_section_count: usize,
+    last_completed_compile_section_count: usize,
+    last_stale_compile_section_count: usize,
+    last_pending_compile_jobs: usize,
     last_visibility_graph_build_count: usize,
     last_visibility_graph_total_ms: f64,
     last_visibility_graph_worst_ms: f64,
@@ -4069,10 +4380,13 @@ impl DebugPaneStats {
                 self.render.face_count
             ),
             format!(
-                "MESH R{} U{} D{} F {:.1}MS",
+                "MESH R{} U{} D{} SQ{} CQ{} X{} F {:.1}MS",
                 self.render.last_rebuilt_section_count,
                 self.render.last_uploaded_section_count,
                 self.render.last_deferred_section_count,
+                self.render.last_submitted_compile_section_count,
+                self.render.last_completed_compile_section_count,
+                self.render.last_stale_compile_section_count,
                 self.render.last_frame_ms
             ),
             format!("BUDGET {} FRAME {:.1}MS", budget, self.frame.last_frame_ms),
@@ -5116,6 +5430,12 @@ fn record_render_section_update_stats(
     render_stats.last_neighbor_ready_section_count = section_update.neighbor_ready_section_count;
     render_stats.last_near_exception_section_count = section_update.near_exception_section_count;
     render_stats.last_deferred_section_count = section_update.deferred_section_count;
+    render_stats.last_submitted_compile_section_count =
+        section_update.submitted_compile_section_count;
+    render_stats.last_completed_compile_section_count =
+        section_update.completed_compile_section_count;
+    render_stats.last_stale_compile_section_count = section_update.stale_compile_section_count;
+    render_stats.last_pending_compile_jobs = section_update.pending_compile_jobs;
     render_stats.last_visibility_graph_build_count =
         section_update.visibility_graph_stats.build_count;
     render_stats.last_visibility_graph_total_ms = section_update.visibility_graph_stats.total_ms;
@@ -5944,6 +6264,8 @@ mod tests {
                 pending_jobs: 1,
                 pending_publications: 2,
                 pending_render_chunks: 3,
+                pending_render_compile_jobs: 1,
+                inflight_render_sections: 4,
                 client_visible_chunks: 8,
                 active_ticket_chunks: 9,
                 pending_unload_chunks: 0,
@@ -6071,7 +6393,14 @@ mod tests {
         assert!(runtime.client.chunk_snapshot(initial_center).is_some());
 
         let mut spectator = SpectatorCamera::spawn_for_scene(&scene);
-        let initial_update = runtime.sync_render_sections(spectator.position).unwrap();
+        let initial_submit = runtime.sync_render_sections(spectator.position).unwrap();
+        assert_eq!(initial_submit.rebuilt_section_count(), 0);
+        assert!(initial_submit.submitted_compile_section_count > 0);
+        assert!(runtime.stats().pending_render_compile_jobs > 0);
+
+        let initial_update = runtime
+            .sync_all_render_sections(spectator.position)
+            .unwrap();
         assert!(initial_update.rebuilt_section_count() > 0);
         assert_eq!(initial_update.removed_section_count(), 0);
         let initial_sections = runtime.cached_sections();
@@ -6099,7 +6428,9 @@ mod tests {
         assert!(runtime.client.chunk_snapshot(initial_center).is_none());
         assert!(runtime.client.chunk_snapshot(next_center).is_some());
 
-        let moved_update = runtime.sync_render_sections(spectator.position).unwrap();
+        let moved_update = runtime
+            .sync_all_render_sections(spectator.position)
+            .unwrap();
         assert!(moved_update.rebuilt_section_count() > 0);
         assert!(moved_update.removed_section_count() > 0);
         let moved_sections = runtime.cached_sections();
@@ -6242,19 +6573,20 @@ mod tests {
         assert_eq!(runtime.stats().loaded_chunks, 9);
         let spectator = SpectatorCamera::spawn_for_scene(&scene);
         let first_update = runtime.sync_render_sections(spectator.position).unwrap();
-        assert!(first_update.rebuilt_section_count() > 0);
+        assert_eq!(first_update.rebuilt_section_count(), 0);
+        assert!(first_update.submitted_compile_section_count > 0);
+        assert!(runtime.stats().pending_render_compile_jobs > 0);
         assert!(runtime.pending_render_chunk_count() > 0);
 
         let first_sections = runtime.cached_sections();
-        assert!(!first_sections.is_empty());
-        assert!(section_index_count(&first_sections) > 0);
+        assert!(first_sections.is_empty());
 
         let remaining_update = runtime
             .sync_all_render_sections(spectator.position)
             .unwrap();
         assert!(remaining_update.rebuilt_section_count() > 0);
         assert!(!runtime.has_pending_render_work(spectator.position));
-        assert!(runtime.cached_sections().len() > first_sections.len());
+        assert!(!runtime.cached_sections().is_empty());
     }
 
     #[test]
