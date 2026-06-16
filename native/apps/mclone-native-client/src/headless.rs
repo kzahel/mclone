@@ -15,10 +15,10 @@ use mclone_ui::GuiScale;
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{HeadlessScreenshotOptions, SceneOptions};
+use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
 use crate::{
-    DebugPaneStats, FramePacingDebugStats, FramePacingUiState, FrameTimingStats, NativeUi,
-    RenderStreamStats, SceneTexturedSections, WindowSceneRuntime, poll_window_runtime_until_idle,
-    record_render_section_update_stats, render_full_frame,
+    DebugPaneStats, NativeUi, RenderStreamStats, SceneTexturedSections, WindowSceneRuntime,
+    poll_window_runtime_until_idle, record_render_section_update_stats, render_full_frame,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

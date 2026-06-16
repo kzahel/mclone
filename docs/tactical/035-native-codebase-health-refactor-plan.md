@@ -84,7 +84,7 @@ module.
 
 - [ ] Split `mclone-native-client` into app-local modules:
   `cli` (done), `headless` (done), `perf` (done), `render_cache` (done),
-  `camera` (done), `scene_runtime`, `frame_pacing`, `ui`, and `app`.
+  `camera` (done), `frame_pacing` (done), `scene_runtime`, `ui`, and `app`.
 - [ ] Split `mclone-server` after active block-delta/fluid mutation work
   stabilizes: `types`, `tickets`, `distance_manager`, `holder`, `scheduler`,
   `worldgen_mailbox`, `fluid`, `integrated`, `lighting_seed`, and `timing`.

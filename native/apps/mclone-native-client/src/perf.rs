@@ -23,10 +23,11 @@ use crate::cli::{
     FrameBudgetProbeMode, FrameBudgetProbeOptions, MovementPerfOptions, SceneOptions,
     TimedemoOptions,
 };
+use crate::frame_pacing::{FramePacingUiState, elapsed_ms};
 use crate::{
-    FramePacingUiState, MAX_CHUNK_RADIUS, NativeUi, RenderStreamStats, WindowSceneRuntime,
-    build_scene_textured_sections, elapsed_ms, poll_window_runtime_until_idle,
-    print_benchmark_metadata, record_render_section_update_stats, render_full_frame, square_count,
+    MAX_CHUNK_RADIUS, NativeUi, RenderStreamStats, WindowSceneRuntime,
+    build_scene_textured_sections, poll_window_runtime_until_idle, print_benchmark_metadata,
+    record_render_section_update_stats, render_full_frame, square_count,
 };
 
 #[derive(Clone, Debug)]
