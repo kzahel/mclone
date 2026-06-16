@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use mclone_core::{ChunkPos, ChunkSnapshot};
-use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
+use mclone_core::{CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
+use mclone_protocol::{ChunkInterest, ClientCommand, SectionBlockUpdate, ServerUpdate};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClientHost {
@@ -52,6 +52,13 @@ impl ClientRuntime {
             ServerUpdate::ChunkUnload { pos } => {
                 self.chunks.remove(&pos);
             }
+            ServerUpdate::SectionBlockUpdates {
+                pos,
+                section_y,
+                updates,
+            } => {
+                self.apply_section_block_updates(pos, section_y, &updates);
+            }
         }
     }
 
@@ -72,12 +79,43 @@ impl ClientRuntime {
     pub fn loaded_chunk_count(&self) -> usize {
         self.chunks.len()
     }
+
+    pub fn apply_section_block_updates(
+        &mut self,
+        pos: ChunkPos,
+        section_y: i32,
+        updates: &[SectionBlockUpdate],
+    ) -> bool {
+        let Some(snapshot) = self.chunks.get_mut(&pos) else {
+            return false;
+        };
+        let mut changed = false;
+        for update in updates {
+            if update.local_x as i32 >= CHUNK_WIDTH
+                || update.local_y as i32 >= SECTION_HEIGHT
+                || update.local_z as i32 >= CHUNK_WIDTH
+            {
+                continue;
+            }
+            changed |= snapshot.patch_section_block(
+                section_y,
+                update.local_x as i32,
+                update.local_y as i32,
+                update.local_z as i32,
+                update.block_state,
+            );
+        }
+        changed
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
+    use mclone_core::{
+        AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus,
+        chunk_section_index,
+    };
 
     #[test]
     fn distinguishes_local_and_remote_hosts() {
@@ -122,5 +160,54 @@ mod tests {
 
         assert_eq!(runtime.loaded_chunk_count(), 0);
         assert_eq!(runtime.chunk_snapshot(ChunkPos::new(0, 0)), None);
+    }
+
+    #[test]
+    fn client_runtime_applies_section_block_updates_to_loaded_snapshot() {
+        let mut runtime = ClientRuntime::local_integrated();
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            16,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        );
+        runtime.apply_update(ServerUpdate::ChunkSnapshot(snapshot));
+
+        runtime.apply_update(ServerUpdate::SectionBlockUpdates {
+            pos: ChunkPos::new(0, 0),
+            section_y: 0,
+            updates: vec![SectionBlockUpdate {
+                local_x: 1,
+                local_y: 2,
+                local_z: 3,
+                block_state: BlockStateId(42),
+            }],
+        });
+
+        let snapshot = runtime.chunk_snapshot(ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(snapshot.sections.len(), 1);
+        assert_eq!(
+            snapshot.sections[0].unpack_block_state_ids()[chunk_section_index(1, 2, 3)],
+            BlockStateId(42)
+        );
+    }
+
+    #[test]
+    fn client_runtime_ignores_section_block_updates_for_unloaded_chunks() {
+        let mut runtime = ClientRuntime::local_integrated();
+
+        assert!(!runtime.apply_section_block_updates(
+            ChunkPos::new(5, 6),
+            0,
+            &[SectionBlockUpdate {
+                local_x: 1,
+                local_y: 2,
+                local_z: 3,
+                block_state: BlockStateId(42),
+            }],
+        ));
+        assert_eq!(runtime.loaded_chunk_count(), 0);
     }
 }

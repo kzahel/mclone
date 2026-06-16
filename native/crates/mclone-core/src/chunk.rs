@@ -234,6 +234,65 @@ impl ChunkSnapshot {
             .collect();
         self
     }
+
+    pub fn patch_section_block(
+        &mut self,
+        section_y: i32,
+        local_x: i32,
+        local_y: i32,
+        local_z: i32,
+        block_state: BlockStateId,
+    ) -> bool {
+        assert!(
+            (0..CHUNK_WIDTH).contains(&local_x),
+            "local_x {local_x} out of section bounds"
+        );
+        assert!(
+            (0..SECTION_HEIGHT).contains(&local_y),
+            "local_y {local_y} out of section bounds"
+        );
+        assert!(
+            (0..CHUNK_WIDTH).contains(&local_z),
+            "local_z {local_z} out of section bounds"
+        );
+        let section_base_y = section_y * SECTION_HEIGHT;
+        if section_base_y < self.min_y || section_base_y >= self.min_y + self.height {
+            return false;
+        }
+
+        let section_index = self
+            .sections
+            .iter()
+            .position(|section| section.section_y == section_y);
+        let mut blocks = section_index.map_or_else(
+            || vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+            |index| self.sections[index].unpack_block_state_ids(),
+        );
+        let block_index = chunk_section_index(local_x, local_y, local_z);
+        if blocks[block_index] == block_state {
+            return false;
+        }
+        blocks[block_index] = block_state;
+
+        if blocks
+            .iter()
+            .all(|state_id| *state_id == AIR_BLOCK_STATE_ID)
+        {
+            if let Some(index) = section_index {
+                self.sections.remove(index);
+            }
+            return true;
+        }
+
+        let packed = PackedChunkSection::pack(section_y, &blocks);
+        if let Some(index) = section_index {
+            self.sections[index] = packed;
+        } else {
+            self.sections.push(packed);
+            self.sections.sort_by_key(|section| section.section_y);
+        }
+        true
+    }
 }
 
 pub fn chunk_section_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
@@ -302,6 +361,29 @@ mod tests {
         );
         assert!(!snapshot.light_correct);
         assert!(snapshot.light_sections.is_empty());
+    }
+
+    #[test]
+    fn chunk_snapshot_patches_section_blocks() {
+        let mut snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            16,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        );
+
+        assert!(snapshot.patch_section_block(0, 1, 2, 3, BlockStateId(7)));
+        assert_eq!(snapshot.sections.len(), 1);
+        assert_eq!(
+            snapshot.sections[0].unpack_block_state_ids()[chunk_section_index(1, 2, 3)],
+            BlockStateId(7)
+        );
+        assert!(!snapshot.patch_section_block(0, 1, 2, 3, BlockStateId(7)));
+
+        assert!(snapshot.patch_section_block(0, 1, 2, 3, AIR_BLOCK_STATE_ID));
+        assert!(snapshot.sections.is_empty());
     }
 
     #[test]

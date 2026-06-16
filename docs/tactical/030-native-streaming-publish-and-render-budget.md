@@ -236,6 +236,76 @@ under frame-budget probe, with particular attention to scheduler tick,
 publication/event application, and any main-thread chunk tick work that runs
 while worldgen backlog is high.
 
+## Poll Instrumentation Result
+
+Added frame-budget probe instrumentation for native integrated-server polling:
+
+- split `poll_ms` into local command flush, server tick, server-reported tick
+  total, scheduler report, scheduler event application, client update
+  application, and render mesh/update work.
+- split scheduler report into stale ticket purge, holder reconciliation,
+  completed publication, and pending unload processing.
+- split fluid tick work into due scan, due removal, fluid mutation, and
+  block-set/snapshot publication timing.
+- exposed per-frame counts for scheduler events, snapshot/unload updates, fluid
+  due/executed/deferred ticks, mutated blocks, snapshot events, and scheduled
+  fluid ticks.
+
+Release-mode 120 Hz probe with the instrumentation:
+
+| Metric | Value |
+|---|---:|
+| over-budget frames | 8 / 120 |
+| over 2x budget | 4 / 120 |
+| over 4x budget | 2 / 120 |
+| average frame work | 3.934 ms |
+| p95 frame | 9.053 ms |
+| p99 frame | 33.424 ms |
+| max frame | 35.750 ms |
+| max `poll_ms` | 31.635 ms |
+| max `poll_fluid_tick_ms` | 31.066 ms |
+| max `poll_fluid_set_block_ms` | 30.859 ms |
+| max `poll_scheduler_report_ms` | 0.637 ms |
+| max `poll_apply_updates_ms` | 0.015 ms |
+
+The worst frame (`118`) was `35.750 ms` total:
+
+- `31.635 ms poll_ms`
+- `31.066 ms poll_fluid_tick_ms`
+- `30.859 ms poll_fluid_set_block_ms`
+- `0.551 ms poll_scheduler_report_ms`
+- `0.015 ms poll_apply_updates_ms`
+- `18` mutated fluid blocks, `18` snapshot events, `18` snapshot updates
+
+Across the probe, only `15/120` frames executed fluid ticks. Those frames
+produced `80` mutated blocks and `80` snapshot events. The fluid-heavy frames
+dominated every remaining over-budget miss:
+
+- over-budget frames averaged `15.297 ms` in `poll_fluid_tick_ms`
+- `poll_fluid_set_block_ms` averaged `15.221 ms` in those same frames
+- frames without executed fluid ticks averaged `2.539 ms` and had `0` budget
+  misses
+
+Interpretation: the remaining hitch is not chunk scheduler publication,
+pending unload processing, render mesh work, GPU upload, or client update
+application. It is fluid simulation publishing full chunk snapshots one block
+mutation at a time through `ChunkScheduler::set_block_at_world`. Each changed
+fluid block calls `snapshot_from_mutable_buffer`, increments the chunk revision,
+updates the holder's published snapshot, and emits a whole `ChunkSnapshot`
+event when client-visible. This makes a cluster of water/lava ticks scale as
+number of mutations times full chunk snapshot build/copy cost.
+
+Next implementation slice:
+
+- Change fluid ticks to batch mutations per chunk for one simulation tick.
+- Apply all block changes to the live chunk buffers first.
+- Publish at most one final `ChunkSnapshot` per mutated visible chunk per tick.
+- Preserve scheduling semantics for neighboring fluid ticks and lava/water
+  contact resolution while deferring snapshot publication until after the fluid
+  tick batch.
+- Keep the new fluid instrumentation in the frame-budget probe until the batched
+  path proves `poll_fluid_set_block_ms` no longer dominates p99/max frames.
+
 ## Validation
 
 Targeted gates:

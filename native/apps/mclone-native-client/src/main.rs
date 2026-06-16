@@ -1094,6 +1094,39 @@ struct FrameBudgetProbeFrameReport {
     runtime_changed: bool,
     set_interest_ms: f64,
     poll_ms: f64,
+    poll_flush_commands_ms: f64,
+    poll_server_tick_ms: f64,
+    poll_server_reported_total_ms: f64,
+    poll_scheduler_tick_ms: f64,
+    poll_scheduler_report_ms: f64,
+    poll_scheduler_purge_stale_tickets_ms: f64,
+    poll_scheduler_reconcile_holders_ms: f64,
+    poll_scheduler_publish_completed_ms: f64,
+    poll_scheduler_pending_unload_ms: f64,
+    poll_scheduler_apply_events_ms: f64,
+    poll_block_tick_ms: f64,
+    poll_fluid_tick_ms: f64,
+    poll_fluid_event_apply_ms: f64,
+    poll_fluid_due_scan_ms: f64,
+    poll_fluid_remove_due_ms: f64,
+    poll_fluid_tick_fluid_ms: f64,
+    poll_fluid_set_block_ms: f64,
+    poll_entity_tick_ms: f64,
+    poll_apply_updates_ms: f64,
+    poll_dirty_mark_ms: f64,
+    poll_client_apply_updates_ms: f64,
+    poll_scheduler_events: usize,
+    poll_updates: usize,
+    poll_snapshot_updates: usize,
+    poll_unload_updates: usize,
+    poll_pending_unloads_processed: usize,
+    poll_fluid_due_ticks: usize,
+    poll_fluid_executed_ticks: usize,
+    poll_fluid_deferred_ticks: usize,
+    poll_fluid_mutated_blocks: usize,
+    poll_fluid_snapshot_events: usize,
+    poll_fluid_event_count: usize,
+    poll_scheduled_fluid_ticks: usize,
     remesh_ms: f64,
     upload_ms: f64,
     render_ms: f64,
@@ -1121,6 +1154,39 @@ impl Default for FrameBudgetProbeFrameReport {
             runtime_changed: false,
             set_interest_ms: 0.0,
             poll_ms: 0.0,
+            poll_flush_commands_ms: 0.0,
+            poll_server_tick_ms: 0.0,
+            poll_server_reported_total_ms: 0.0,
+            poll_scheduler_tick_ms: 0.0,
+            poll_scheduler_report_ms: 0.0,
+            poll_scheduler_purge_stale_tickets_ms: 0.0,
+            poll_scheduler_reconcile_holders_ms: 0.0,
+            poll_scheduler_publish_completed_ms: 0.0,
+            poll_scheduler_pending_unload_ms: 0.0,
+            poll_scheduler_apply_events_ms: 0.0,
+            poll_block_tick_ms: 0.0,
+            poll_fluid_tick_ms: 0.0,
+            poll_fluid_event_apply_ms: 0.0,
+            poll_fluid_due_scan_ms: 0.0,
+            poll_fluid_remove_due_ms: 0.0,
+            poll_fluid_tick_fluid_ms: 0.0,
+            poll_fluid_set_block_ms: 0.0,
+            poll_entity_tick_ms: 0.0,
+            poll_apply_updates_ms: 0.0,
+            poll_dirty_mark_ms: 0.0,
+            poll_client_apply_updates_ms: 0.0,
+            poll_scheduler_events: 0,
+            poll_updates: 0,
+            poll_snapshot_updates: 0,
+            poll_unload_updates: 0,
+            poll_pending_unloads_processed: 0,
+            poll_fluid_due_ticks: 0,
+            poll_fluid_executed_ticks: 0,
+            poll_fluid_deferred_ticks: 0,
+            poll_fluid_mutated_blocks: 0,
+            poll_fluid_snapshot_events: 0,
+            poll_fluid_event_count: 0,
+            poll_scheduled_fluid_ticks: 0,
             remesh_ms: 0.0,
             upload_ms: 0.0,
             render_ms: 0.0,
@@ -1434,6 +1500,135 @@ impl FrameBudgetProbeReport {
             println!("      \"runtime_changed\": {},", frame.runtime_changed);
             println!("      \"set_interest_ms\": {:.3},", frame.set_interest_ms);
             println!("      \"poll_ms\": {:.3},", frame.poll_ms);
+            println!(
+                "      \"poll_flush_commands_ms\": {:.3},",
+                frame.poll_flush_commands_ms
+            );
+            println!(
+                "      \"poll_server_tick_ms\": {:.3},",
+                frame.poll_server_tick_ms
+            );
+            println!(
+                "      \"poll_server_reported_total_ms\": {:.3},",
+                frame.poll_server_reported_total_ms
+            );
+            println!(
+                "      \"poll_scheduler_tick_ms\": {:.3},",
+                frame.poll_scheduler_tick_ms
+            );
+            println!(
+                "      \"poll_scheduler_report_ms\": {:.3},",
+                frame.poll_scheduler_report_ms
+            );
+            println!(
+                "      \"poll_scheduler_purge_stale_tickets_ms\": {:.3},",
+                frame.poll_scheduler_purge_stale_tickets_ms
+            );
+            println!(
+                "      \"poll_scheduler_reconcile_holders_ms\": {:.3},",
+                frame.poll_scheduler_reconcile_holders_ms
+            );
+            println!(
+                "      \"poll_scheduler_publish_completed_ms\": {:.3},",
+                frame.poll_scheduler_publish_completed_ms
+            );
+            println!(
+                "      \"poll_scheduler_pending_unload_ms\": {:.3},",
+                frame.poll_scheduler_pending_unload_ms
+            );
+            println!(
+                "      \"poll_scheduler_apply_events_ms\": {:.3},",
+                frame.poll_scheduler_apply_events_ms
+            );
+            println!(
+                "      \"poll_block_tick_ms\": {:.3},",
+                frame.poll_block_tick_ms
+            );
+            println!(
+                "      \"poll_fluid_tick_ms\": {:.3},",
+                frame.poll_fluid_tick_ms
+            );
+            println!(
+                "      \"poll_fluid_event_apply_ms\": {:.3},",
+                frame.poll_fluid_event_apply_ms
+            );
+            println!(
+                "      \"poll_fluid_due_scan_ms\": {:.3},",
+                frame.poll_fluid_due_scan_ms
+            );
+            println!(
+                "      \"poll_fluid_remove_due_ms\": {:.3},",
+                frame.poll_fluid_remove_due_ms
+            );
+            println!(
+                "      \"poll_fluid_tick_fluid_ms\": {:.3},",
+                frame.poll_fluid_tick_fluid_ms
+            );
+            println!(
+                "      \"poll_fluid_set_block_ms\": {:.3},",
+                frame.poll_fluid_set_block_ms
+            );
+            println!(
+                "      \"poll_entity_tick_ms\": {:.3},",
+                frame.poll_entity_tick_ms
+            );
+            println!(
+                "      \"poll_apply_updates_ms\": {:.3},",
+                frame.poll_apply_updates_ms
+            );
+            println!(
+                "      \"poll_dirty_mark_ms\": {:.3},",
+                frame.poll_dirty_mark_ms
+            );
+            println!(
+                "      \"poll_client_apply_updates_ms\": {:.3},",
+                frame.poll_client_apply_updates_ms
+            );
+            println!(
+                "      \"poll_scheduler_events\": {},",
+                frame.poll_scheduler_events
+            );
+            println!("      \"poll_updates\": {},", frame.poll_updates);
+            println!(
+                "      \"poll_snapshot_updates\": {},",
+                frame.poll_snapshot_updates
+            );
+            println!(
+                "      \"poll_unload_updates\": {},",
+                frame.poll_unload_updates
+            );
+            println!(
+                "      \"poll_pending_unloads_processed\": {},",
+                frame.poll_pending_unloads_processed
+            );
+            println!(
+                "      \"poll_fluid_due_ticks\": {},",
+                frame.poll_fluid_due_ticks
+            );
+            println!(
+                "      \"poll_fluid_executed_ticks\": {},",
+                frame.poll_fluid_executed_ticks
+            );
+            println!(
+                "      \"poll_fluid_deferred_ticks\": {},",
+                frame.poll_fluid_deferred_ticks
+            );
+            println!(
+                "      \"poll_fluid_mutated_blocks\": {},",
+                frame.poll_fluid_mutated_blocks
+            );
+            println!(
+                "      \"poll_fluid_snapshot_events\": {},",
+                frame.poll_fluid_snapshot_events
+            );
+            println!(
+                "      \"poll_fluid_event_count\": {},",
+                frame.poll_fluid_event_count
+            );
+            println!(
+                "      \"poll_scheduled_fluid_ticks\": {},",
+                frame.poll_scheduled_fluid_ticks
+            );
             println!("      \"remesh_ms\": {:.3},", frame.remesh_ms);
             println!("      \"upload_ms\": {:.3},", frame.upload_ms);
             println!("      \"render_ms\": {:.3},", frame.render_ms);
@@ -1779,6 +1974,43 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
             let poll_start = Instant::now();
             report.runtime_changed = state.runtime.poll()?;
             report.poll_ms = elapsed_ms(poll_start.elapsed());
+            let poll_diagnostics = state.runtime.last_poll_diagnostics();
+            report.poll_flush_commands_ms = poll_diagnostics.flush_commands_ms;
+            report.poll_server_tick_ms = poll_diagnostics.server_tick_ms;
+            report.poll_server_reported_total_ms = poll_diagnostics.server_reported_total_ms;
+            report.poll_scheduler_tick_ms = poll_diagnostics.scheduler_tick_ms;
+            report.poll_scheduler_report_ms = poll_diagnostics.scheduler_report_ms;
+            report.poll_scheduler_purge_stale_tickets_ms =
+                poll_diagnostics.scheduler_purge_stale_tickets_ms;
+            report.poll_scheduler_reconcile_holders_ms =
+                poll_diagnostics.scheduler_reconcile_holders_ms;
+            report.poll_scheduler_publish_completed_ms =
+                poll_diagnostics.scheduler_publish_completed_ms;
+            report.poll_scheduler_pending_unload_ms = poll_diagnostics.scheduler_pending_unload_ms;
+            report.poll_scheduler_apply_events_ms = poll_diagnostics.scheduler_apply_events_ms;
+            report.poll_block_tick_ms = poll_diagnostics.block_tick_ms;
+            report.poll_fluid_tick_ms = poll_diagnostics.fluid_tick_ms;
+            report.poll_fluid_event_apply_ms = poll_diagnostics.fluid_event_apply_ms;
+            report.poll_fluid_due_scan_ms = poll_diagnostics.fluid_due_scan_ms;
+            report.poll_fluid_remove_due_ms = poll_diagnostics.fluid_remove_due_ms;
+            report.poll_fluid_tick_fluid_ms = poll_diagnostics.fluid_tick_fluid_ms;
+            report.poll_fluid_set_block_ms = poll_diagnostics.fluid_set_block_ms;
+            report.poll_entity_tick_ms = poll_diagnostics.entity_tick_ms;
+            report.poll_apply_updates_ms = poll_diagnostics.apply_updates_ms;
+            report.poll_dirty_mark_ms = poll_diagnostics.dirty_mark_ms;
+            report.poll_client_apply_updates_ms = poll_diagnostics.client_apply_updates_ms;
+            report.poll_scheduler_events = poll_diagnostics.scheduler_events;
+            report.poll_updates = poll_diagnostics.updates;
+            report.poll_snapshot_updates = poll_diagnostics.snapshot_updates;
+            report.poll_unload_updates = poll_diagnostics.unload_updates;
+            report.poll_pending_unloads_processed = poll_diagnostics.pending_unloads_processed;
+            report.poll_fluid_due_ticks = poll_diagnostics.fluid_due_ticks;
+            report.poll_fluid_executed_ticks = poll_diagnostics.fluid_executed_ticks;
+            report.poll_fluid_deferred_ticks = poll_diagnostics.fluid_deferred_ticks;
+            report.poll_fluid_mutated_blocks = poll_diagnostics.fluid_mutated_blocks;
+            report.poll_fluid_snapshot_events = poll_diagnostics.fluid_snapshot_events;
+            report.poll_fluid_event_count = poll_diagnostics.fluid_event_count;
+            report.poll_scheduled_fluid_ticks = poll_diagnostics.scheduled_fluid_ticks;
             if state.runtime.has_pending_render_work() {
                 let update = probe_sync_upload_sections(&frame, state)?;
                 report.add_section_timing(update);
@@ -2311,6 +2543,55 @@ struct WindowSceneRuntime {
     last_simulation_deferred_fluid_ticks: usize,
     last_simulation_fluid_mutated_blocks: usize,
     scheduled_fluid_ticks: usize,
+    last_poll_diagnostics: RuntimePollDiagnostics,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct RuntimePollDiagnostics {
+    flush_commands_ms: f64,
+    server_tick_ms: f64,
+    server_reported_total_ms: f64,
+    scheduler_tick_ms: f64,
+    scheduler_report_ms: f64,
+    scheduler_purge_stale_tickets_ms: f64,
+    scheduler_reconcile_holders_ms: f64,
+    scheduler_publish_completed_ms: f64,
+    scheduler_pending_unload_ms: f64,
+    scheduler_apply_events_ms: f64,
+    block_tick_ms: f64,
+    fluid_tick_ms: f64,
+    fluid_event_apply_ms: f64,
+    fluid_due_scan_ms: f64,
+    fluid_remove_due_ms: f64,
+    fluid_tick_fluid_ms: f64,
+    fluid_set_block_ms: f64,
+    entity_tick_ms: f64,
+    apply_updates_ms: f64,
+    dirty_mark_ms: f64,
+    client_apply_updates_ms: f64,
+    scheduler_events: usize,
+    updates: usize,
+    snapshot_updates: usize,
+    unload_updates: usize,
+    pending_unloads_processed: usize,
+    fluid_due_ticks: usize,
+    fluid_executed_ticks: usize,
+    fluid_deferred_ticks: usize,
+    fluid_mutated_blocks: usize,
+    fluid_snapshot_events: usize,
+    fluid_event_count: usize,
+    scheduled_fluid_ticks: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct RuntimeUpdateApplyReport {
+    changed: bool,
+    total_ms: f64,
+    dirty_mark_ms: f64,
+    client_apply_updates_ms: f64,
+    updates: usize,
+    snapshot_updates: usize,
+    unload_updates: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2375,6 +2656,7 @@ impl WindowSceneRuntime {
             last_simulation_deferred_fluid_ticks: 0,
             last_simulation_fluid_mutated_blocks: 0,
             scheduled_fluid_ticks: 0,
+            last_poll_diagnostics: RuntimePollDiagnostics::default(),
         };
         runtime.set_interest_center(runtime.interest_center)?;
         Ok(runtime)
@@ -2406,11 +2688,46 @@ impl WindowSceneRuntime {
     }
 
     fn poll(&mut self) -> Result<bool> {
+        let mut diagnostics = RuntimePollDiagnostics::default();
+        let flush_start = Instant::now();
         let mut changed = self.flush_local_commands()?;
+        diagnostics.flush_commands_ms = elapsed_ms(flush_start.elapsed());
         if let Some(server) = &mut self.server {
+            let server_tick_start = Instant::now();
             let report = server
                 .try_simulation_tick_report()
                 .context("failed to tick integrated server")?;
+            diagnostics.server_tick_ms = elapsed_ms(server_tick_start.elapsed());
+            diagnostics.server_reported_total_ms = micros_to_ms(report.timing.total_us);
+            diagnostics.scheduler_tick_ms = micros_to_ms(report.timing.scheduler_tick_us);
+            diagnostics.scheduler_report_ms = micros_to_ms(report.timing.scheduler_report_us);
+            diagnostics.scheduler_purge_stale_tickets_ms =
+                micros_to_ms(report.timing.scheduler_purge_stale_tickets_us);
+            diagnostics.scheduler_reconcile_holders_ms =
+                micros_to_ms(report.timing.scheduler_reconcile_holders_us);
+            diagnostics.scheduler_publish_completed_ms =
+                micros_to_ms(report.timing.scheduler_publish_completed_us);
+            diagnostics.scheduler_pending_unload_ms =
+                micros_to_ms(report.timing.scheduler_pending_unload_us);
+            diagnostics.scheduler_apply_events_ms =
+                micros_to_ms(report.timing.scheduler_apply_events_us);
+            diagnostics.block_tick_ms = micros_to_ms(report.timing.block_tick_us);
+            diagnostics.fluid_tick_ms = micros_to_ms(report.timing.fluid_tick_us);
+            diagnostics.fluid_event_apply_ms = micros_to_ms(report.timing.fluid_event_apply_us);
+            diagnostics.fluid_due_scan_ms = micros_to_ms(report.timing.fluid_due_scan_us);
+            diagnostics.fluid_remove_due_ms = micros_to_ms(report.timing.fluid_remove_due_us);
+            diagnostics.fluid_tick_fluid_ms = micros_to_ms(report.timing.fluid_tick_fluid_us);
+            diagnostics.fluid_set_block_ms = micros_to_ms(report.timing.fluid_set_block_us);
+            diagnostics.entity_tick_ms = micros_to_ms(report.timing.entity_tick_us);
+            diagnostics.scheduler_events = report.scheduler_event_count;
+            diagnostics.pending_unloads_processed = report.pending_unloads_processed;
+            diagnostics.fluid_due_ticks = report.fluid_due_ticks;
+            diagnostics.fluid_executed_ticks = report.fluid_ticks_executed;
+            diagnostics.fluid_deferred_ticks = report.deferred_fluid_ticks;
+            diagnostics.fluid_mutated_blocks = report.fluid_mutated_blocks;
+            diagnostics.fluid_snapshot_events = report.fluid_snapshot_events;
+            diagnostics.fluid_event_count = report.fluid_event_count;
+            diagnostics.scheduled_fluid_ticks = report.scheduled_fluid_ticks;
             self.last_tick = report.chunk_tick;
             self.last_simulation_tick = report.simulation_tick;
             self.last_tick_unloads_processed = report.pending_unloads_processed;
@@ -2424,8 +2741,16 @@ impl WindowSceneRuntime {
             self.last_simulation_deferred_fluid_ticks = report.deferred_fluid_ticks;
             self.last_simulation_fluid_mutated_blocks = report.fluid_mutated_blocks;
             self.scheduled_fluid_ticks = report.scheduled_fluid_ticks;
-            changed |= self.apply_server_updates(report.updates);
+            let apply_report = self.apply_server_updates_report(report.updates);
+            diagnostics.apply_updates_ms = apply_report.total_ms;
+            diagnostics.dirty_mark_ms = apply_report.dirty_mark_ms;
+            diagnostics.client_apply_updates_ms = apply_report.client_apply_updates_ms;
+            diagnostics.updates = apply_report.updates;
+            diagnostics.snapshot_updates = apply_report.snapshot_updates;
+            diagnostics.unload_updates = apply_report.unload_updates;
+            changed |= apply_report.changed;
         }
+        self.last_poll_diagnostics = diagnostics;
         Ok(changed)
     }
 
@@ -2445,19 +2770,48 @@ impl WindowSceneRuntime {
     }
 
     fn apply_server_updates(&mut self, updates: Vec<ServerUpdate>) -> bool {
+        self.apply_server_updates_report(updates).changed
+    }
+
+    fn apply_server_updates_report(
+        &mut self,
+        updates: Vec<ServerUpdate>,
+    ) -> RuntimeUpdateApplyReport {
+        let total_start = Instant::now();
         let changed = !updates.is_empty();
+        let update_count = updates.len();
+        let mut snapshot_updates = 0;
+        let mut unload_updates = 0;
+        let dirty_mark_start = Instant::now();
         for update in &updates {
             match update {
                 ServerUpdate::ChunkSnapshot(snapshot) => {
+                    snapshot_updates += 1;
                     self.mark_render_chunk_dirty(snapshot.pos);
                 }
                 ServerUpdate::ChunkUnload { pos } => {
+                    unload_updates += 1;
+                    self.mark_render_chunk_dirty(*pos);
+                }
+                ServerUpdate::SectionBlockUpdates { pos, .. } => {
+                    snapshot_updates += 1;
                     self.mark_render_chunk_dirty(*pos);
                 }
             }
         }
+        let dirty_mark_ms = elapsed_ms(dirty_mark_start.elapsed());
+        let client_apply_start = Instant::now();
         self.client.apply_updates(updates);
-        changed
+        let client_apply_updates_ms = elapsed_ms(client_apply_start.elapsed());
+        RuntimeUpdateApplyReport {
+            changed,
+            total_ms: elapsed_ms(total_start.elapsed()),
+            dirty_mark_ms,
+            client_apply_updates_ms,
+            updates: update_count,
+            snapshot_updates,
+            unload_updates,
+        }
     }
 
     fn mark_render_chunk_dirty(&mut self, pos: ChunkPos) {
@@ -2558,6 +2912,10 @@ impl WindowSceneRuntime {
         self.server
             .as_ref()
             .map_or(0, IntegratedServer::pending_publication_count)
+    }
+
+    fn last_poll_diagnostics(&self) -> RuntimePollDiagnostics {
+        self.last_poll_diagnostics
     }
 
     fn camera_inside_occluding_block(&self, position: Vec3) -> bool {

@@ -4,8 +4,8 @@ use std::error::Error;
 use std::fmt;
 
 use mclone_core::{
-    BlockStateId, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus, LIGHT_DATA_LAYER_BYTE_COUNT,
-    PackedChunkSection, PackedLightSection,
+    BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus,
+    LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection, SECTION_HEIGHT,
 };
 
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -13,6 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 const CLIENT_COMMAND_SET_CHUNK_INTEREST: u8 = 1;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
+const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkInterest {
@@ -28,7 +29,22 @@ pub enum ClientCommand {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ServerUpdate {
     ChunkSnapshot(ChunkSnapshot),
-    ChunkUnload { pos: ChunkPos },
+    ChunkUnload {
+        pos: ChunkPos,
+    },
+    SectionBlockUpdates {
+        pos: ChunkPos,
+        section_y: i32,
+        updates: Vec<SectionBlockUpdate>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SectionBlockUpdate {
+    pub local_x: u8,
+    pub local_y: u8,
+    pub local_z: u8,
+    pub block_state: BlockStateId,
 }
 
 pub type ProtocolCodecResult<T> = Result<T, ProtocolCodecError>;
@@ -114,6 +130,25 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             writer.write_u8(SERVER_UPDATE_CHUNK_UNLOAD);
             writer.write_chunk_pos(*pos);
         }
+        ServerUpdate::SectionBlockUpdates {
+            pos,
+            section_y,
+            updates,
+        } => {
+            if updates.is_empty() {
+                return Err(ProtocolCodecError::InvalidData(
+                    "section block update list is empty",
+                ));
+            }
+            writer.write_u8(SERVER_UPDATE_SECTION_BLOCK_UPDATES);
+            writer.write_chunk_pos(*pos);
+            writer.write_i32(*section_y);
+            writer.write_len("section block updates", updates.len())?;
+            for update in updates {
+                validate_section_block_update(update)?;
+                writer.write_section_block_update(update);
+            }
+        }
     }
     Ok(writer.into_inner())
 }
@@ -126,10 +161,40 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
         SERVER_UPDATE_CHUNK_UNLOAD => ServerUpdate::ChunkUnload {
             pos: reader.read_chunk_pos()?,
         },
+        SERVER_UPDATE_SECTION_BLOCK_UPDATES => {
+            let pos = reader.read_chunk_pos()?;
+            let section_y = reader.read_i32()?;
+            let updates = (0..reader.read_len()?)
+                .map(|_| reader.read_section_block_update())
+                .collect::<ProtocolCodecResult<Vec<_>>>()?;
+            if updates.is_empty() {
+                return Err(ProtocolCodecError::InvalidData(
+                    "section block update list is empty",
+                ));
+            }
+            ServerUpdate::SectionBlockUpdates {
+                pos,
+                section_y,
+                updates,
+            }
+        }
         _ => return Err(ProtocolCodecError::UnknownServerUpdateTag(tag)),
     };
     reader.finish()?;
     Ok(update)
+}
+
+fn validate_section_block_update(update: &SectionBlockUpdate) -> ProtocolCodecResult<()> {
+    if update.local_x as i32 >= CHUNK_WIDTH {
+        return Err(ProtocolCodecError::InvalidData("section update local_x"));
+    }
+    if update.local_y as i32 >= SECTION_HEIGHT {
+        return Err(ProtocolCodecError::InvalidData("section update local_y"));
+    }
+    if update.local_z as i32 >= CHUNK_WIDTH {
+        return Err(ProtocolCodecError::InvalidData("section update local_z"));
+    }
+    Ok(())
 }
 
 struct ByteWriter {
@@ -224,6 +289,13 @@ impl ByteWriter {
         self.write_optional_light_layer("sky light layer", &section.sky)?;
         self.write_optional_light_layer("block light layer", &section.block)?;
         Ok(())
+    }
+
+    fn write_section_block_update(&mut self, update: &SectionBlockUpdate) {
+        self.write_u8(update.local_x);
+        self.write_u8(update.local_y);
+        self.write_u8(update.local_z);
+        self.write_u32(update.block_state.0);
     }
 
     fn write_optional_light_layer(
@@ -379,6 +451,17 @@ impl<'a> ByteReader<'a> {
         Ok(PackedLightSection::new(section_y, sky, block))
     }
 
+    fn read_section_block_update(&mut self) -> ProtocolCodecResult<SectionBlockUpdate> {
+        let update = SectionBlockUpdate {
+            local_x: self.read_u8()?,
+            local_y: self.read_u8()?,
+            local_z: self.read_u8()?,
+            block_state: BlockStateId(self.read_u32()?),
+        };
+        validate_section_block_update(&update)?;
+        Ok(update)
+    }
+
     fn read_optional_light_layer(&mut self) -> ProtocolCodecResult<Option<Vec<u8>>> {
         if !self.read_bool()? {
             return Ok(None);
@@ -503,6 +586,62 @@ mod tests {
         let bytes = encode_server_update(&update).unwrap();
 
         assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn server_update_codec_round_trips_section_block_updates() {
+        let update = ServerUpdate::SectionBlockUpdates {
+            pos: ChunkPos::new(-2, 5),
+            section_y: -3,
+            updates: vec![
+                SectionBlockUpdate {
+                    local_x: 1,
+                    local_y: 2,
+                    local_z: 3,
+                    block_state: BlockStateId(17),
+                },
+                SectionBlockUpdate {
+                    local_x: 15,
+                    local_y: 15,
+                    local_z: 15,
+                    block_state: BlockStateId(0),
+                },
+            ],
+        };
+
+        let bytes = encode_server_update(&update).unwrap();
+
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn section_block_update_codec_rejects_invalid_payloads() {
+        let empty = ServerUpdate::SectionBlockUpdates {
+            pos: ChunkPos::new(0, 0),
+            section_y: 0,
+            updates: Vec::new(),
+        };
+        assert_eq!(
+            encode_server_update(&empty),
+            Err(ProtocolCodecError::InvalidData(
+                "section block update list is empty"
+            ))
+        );
+
+        let invalid = ServerUpdate::SectionBlockUpdates {
+            pos: ChunkPos::new(0, 0),
+            section_y: 0,
+            updates: vec![SectionBlockUpdate {
+                local_x: 16,
+                local_y: 0,
+                local_z: 0,
+                block_state: BlockStateId(1),
+            }],
+        };
+        assert_eq!(
+            encode_server_update(&invalid),
+            Err(ProtocolCodecError::InvalidData("section update local_x"))
+        );
     }
 
     #[test]

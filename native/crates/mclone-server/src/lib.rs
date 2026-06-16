@@ -18,7 +18,7 @@ use mclone_core::{
     ChunkStatus, PackedLightSection, SECTION_HEIGHT, chunk_section_index,
 };
 use mclone_light::{DataLayer, LightLayer};
-use mclone_protocol::{ChunkInterest, ClientCommand, ServerUpdate};
+use mclone_protocol::{ChunkInterest, ClientCommand, SectionBlockUpdate, ServerUpdate};
 use mclone_worldgen::block::{
     LAVA, OBSIDIAN, RawBlockId, STONE, WATER, fluid_level, generated_block_state_id, is_lava,
     is_water, lava_block_for_level, material_blocks_motion, water_block_for_level,
@@ -381,23 +381,62 @@ pub struct ChunkSchedulerTickReport {
     pub entity_ticking_chunks: Vec<ChunkPos>,
     pub pending_unloads_processed: usize,
     pub events: Vec<ChunkSchedulerEvent>,
+    pub timing: ChunkSchedulerTickTiming,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ServerSimulationTickTiming {
     pub total_us: u128,
     pub scheduler_tick_us: u128,
+    pub scheduler_report_us: u128,
+    pub scheduler_purge_stale_tickets_us: u128,
+    pub scheduler_reconcile_holders_us: u128,
+    pub scheduler_publish_completed_us: u128,
+    pub scheduler_pending_unload_us: u128,
+    pub scheduler_apply_events_us: u128,
     pub block_tick_us: u128,
     pub fluid_tick_us: u128,
+    pub fluid_event_apply_us: u128,
+    pub fluid_due_scan_us: u128,
+    pub fluid_remove_due_us: u128,
+    pub fluid_tick_fluid_us: u128,
+    pub fluid_set_block_us: u128,
     pub entity_tick_us: u128,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ChunkSchedulerTickTiming {
+    pub total_us: u128,
+    pub purge_stale_tickets_us: u128,
+    pub reconcile_holders_us: u128,
+    pub publish_completed_us: u128,
+    pub pending_unload_us: u128,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ServerTickTiming {
+    pub total_us: u128,
+    pub scheduler_report_us: u128,
+    pub scheduler_purge_stale_tickets_us: u128,
+    pub scheduler_reconcile_holders_us: u128,
+    pub scheduler_publish_completed_us: u128,
+    pub scheduler_pending_unload_us: u128,
+    pub scheduler_apply_events_us: u128,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct FluidTickPhaseReport {
     pub scheduled_ticks: usize,
+    pub due_ticks: usize,
     pub deferred_due_ticks: usize,
     pub executed_ticks: usize,
     pub mutated_blocks: usize,
+    pub snapshot_events: usize,
+    pub event_count: usize,
+    pub due_scan_us: u128,
+    pub remove_due_us: u128,
+    pub tick_fluid_us: u128,
+    pub set_block_us: u128,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -472,11 +511,12 @@ impl FluidTickList {
         entity_ticking_chunks: &[ChunkPos],
         scheduler: &mut ChunkScheduler,
     ) -> (FluidTickPhaseReport, Vec<ChunkSchedulerEvent>) {
+        let due_scan_start = simulation_timing_start();
         let ticking_chunks = entity_ticking_chunks
             .iter()
             .copied()
             .collect::<BTreeSet<_>>();
-        let mut deferred_due_ticks = 0;
+        let mut deferred_due_ticks: usize = 0;
         let mut due_ticks = Vec::new();
         for entry in self
             .scheduled_ticks
@@ -492,32 +532,50 @@ impl FluidTickList {
                 deferred_due_ticks += 1;
             }
         }
+        let due_scan_us = simulation_timing_elapsed_us(due_scan_start);
 
         let mut events = Vec::new();
-        let mut executed_ticks = 0;
-        let mut mutated_blocks = 0;
+        let mut executed_ticks: usize = 0;
+        let mut mutated_blocks: usize = 0;
+        let mut snapshot_events: usize = 0;
+        let mut tick_fluid_us = 0;
+        let mut set_block_us = 0;
+        let remove_due_start = simulation_timing_start();
         for entry in &due_ticks {
             self.scheduled_ticks.remove(entry);
             self.scheduled_keys.remove(&entry.key);
         }
+        let remove_due_us = simulation_timing_elapsed_us(remove_due_start);
 
         for entry in due_ticks {
             executed_ticks += 1;
 
+            let tick_fluid_start = simulation_timing_start();
             let mutation = scheduler.tick_fluid(entry.key.pos, entry.key.fluid);
+            tick_fluid_us += simulation_timing_elapsed_us(tick_fluid_start);
             mutated_blocks += mutation.mutated_positions.len();
+            snapshot_events += mutation.snapshot_events;
+            set_block_us += mutation.set_block_us;
             for scheduled in mutation.scheduled_ticks {
                 self.schedule_tick(scheduled.pos, scheduled.fluid, scheduled.delay, game_time);
             }
             events.extend(mutation.events);
         }
+        let event_count = events.len();
 
         (
             FluidTickPhaseReport {
                 scheduled_ticks: self.size(),
+                due_ticks: executed_ticks.saturating_add(deferred_due_ticks),
                 deferred_due_ticks,
                 executed_ticks,
                 mutated_blocks,
+                snapshot_events,
+                event_count,
+                due_scan_us,
+                remove_due_us,
+                tick_fluid_us,
+                set_block_us,
             },
             events,
         )
@@ -547,6 +605,8 @@ struct FluidMutationReport {
     events: Vec<ChunkSchedulerEvent>,
     mutated_positions: Vec<WorldBlockPos>,
     scheduled_ticks: Vec<ScheduledFluidTickRequest>,
+    snapshot_events: usize,
+    set_block_us: u128,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -911,6 +971,7 @@ pub struct ChunkScheduler {
     job_timings: BTreeMap<ChunkJobId, OverworldFeatureBatchTiming>,
     worldgen_mailbox: WorldgenMailbox,
     pending_worldgen_publications: VecDeque<PendingWorldgenPublication>,
+    pending_block_deltas: BTreeMap<(ChunkPos, i32), BTreeMap<usize, BlockStateId>>,
     dirty_chunks: BTreeSet<ChunkPos>,
     next_job_id: u64,
     next_revision: u64,
@@ -932,6 +993,7 @@ impl ChunkScheduler {
             job_timings: BTreeMap::new(),
             worldgen_mailbox: WorldgenMailbox::new(),
             pending_worldgen_publications: VecDeque::new(),
+            pending_block_deltas: BTreeMap::new(),
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
             next_revision: 1,
@@ -964,17 +1026,36 @@ impl ChunkScheduler {
     }
 
     pub fn tick_report(&mut self) -> ChunkStoreResult<ChunkSchedulerTickReport> {
+        let total_start = simulation_timing_start();
+        let purge_start = simulation_timing_start();
         self.distance_manager.purge_stale_tickets();
+        let purge_stale_tickets_us = simulation_timing_elapsed_us(purge_start);
+
+        let reconcile_start = simulation_timing_start();
         let mut events = self.reconcile_ticketed_holders()?;
+        let reconcile_holders_us = simulation_timing_elapsed_us(reconcile_start);
+
+        let publish_start = simulation_timing_start();
         events.extend(self.poll()?);
+        let publish_completed_us = simulation_timing_elapsed_us(publish_start);
+
+        let pending_unload_start = simulation_timing_start();
         let pending_unloads_processed =
             self.process_pending_unloads(DEFAULT_PENDING_UNLOAD_BUDGET)?;
+        let pending_unload_us = simulation_timing_elapsed_us(pending_unload_start);
         Ok(ChunkSchedulerTickReport {
             ticket_tick: self.ticket_tick(),
             block_ticking_chunks: self.block_ticking_chunks(),
             entity_ticking_chunks: self.entity_ticking_chunks(),
             pending_unloads_processed,
             events,
+            timing: ChunkSchedulerTickTiming {
+                total_us: simulation_timing_elapsed_us(total_start),
+                purge_stale_tickets_us,
+                reconcile_holders_us,
+                publish_completed_us,
+                pending_unload_us,
+            },
         })
     }
 
@@ -1412,7 +1493,11 @@ impl ChunkScheduler {
         report: &mut FluidMutationReport,
     ) {
         let before = self.block_at_world(pos);
-        if let Some(event) = self.set_block_at_world(pos, block_id) {
+        let set_block_start = simulation_timing_start();
+        let event = self.set_block_at_world(pos, block_id);
+        report.set_block_us += simulation_timing_elapsed_us(set_block_start);
+        if let Some(event) = event {
+            report.snapshot_events += 1;
             report.events.push(event);
         }
         let changed = before != self.block_at_world(pos);
@@ -1440,7 +1525,11 @@ impl ChunkScheduler {
         }
 
         for candidate in candidates {
-            if let Some(event) = self.resolve_lava_source_contact_at(candidate) {
+            let set_block_start = simulation_timing_start();
+            let event = self.resolve_lava_source_contact_at(candidate);
+            report.set_block_us += simulation_timing_elapsed_us(set_block_start);
+            if let Some(event) = event {
+                report.snapshot_events += 1;
                 report.events.push(event);
                 report.mutated_positions.push(candidate);
             }
@@ -2569,7 +2658,9 @@ pub struct ServerTickReport {
     pub block_ticking_chunks: Vec<ChunkPos>,
     pub entity_ticking_chunks: Vec<ChunkPos>,
     pub pending_unloads_processed: usize,
+    pub scheduler_event_count: usize,
     pub updates: Vec<ServerUpdate>,
+    pub timing: ServerTickTiming,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2578,11 +2669,15 @@ pub struct ServerSimulationTickReport {
     pub chunk_tick: u64,
     pub block_tick_chunks: usize,
     pub fluid_ticks_executed: usize,
+    pub fluid_due_ticks: usize,
     pub deferred_fluid_ticks: usize,
     pub fluid_mutated_blocks: usize,
+    pub fluid_snapshot_events: usize,
+    pub fluid_event_count: usize,
     pub scheduled_fluid_ticks: usize,
     pub entity_tick_chunks: usize,
     pub pending_unloads_processed: usize,
+    pub scheduler_event_count: usize,
     pub updates: Vec<ServerUpdate>,
     pub timing: ServerSimulationTickTiming,
 }
@@ -2655,14 +2750,31 @@ impl IntegratedServer {
     }
 
     pub fn try_tick_report(&mut self) -> ChunkStoreResult<ServerTickReport> {
+        let total_start = simulation_timing_start();
+        let scheduler_start = simulation_timing_start();
         let report = self.scheduler.tick_report()?;
+        let scheduler_report_us = simulation_timing_elapsed_us(scheduler_start);
+        let scheduler_event_count = report.events.len();
+        let scheduler_apply_start = simulation_timing_start();
         let updates = self.apply_scheduler_events(report.events);
+        let scheduler_apply_events_us = simulation_timing_elapsed_us(scheduler_apply_start);
+        let scheduler_timing = report.timing;
         Ok(ServerTickReport {
             ticket_tick: report.ticket_tick,
             block_ticking_chunks: report.block_ticking_chunks,
             entity_ticking_chunks: report.entity_ticking_chunks,
             pending_unloads_processed: report.pending_unloads_processed,
+            scheduler_event_count,
             updates,
+            timing: ServerTickTiming {
+                total_us: simulation_timing_elapsed_us(total_start),
+                scheduler_report_us,
+                scheduler_purge_stale_tickets_us: scheduler_timing.purge_stale_tickets_us,
+                scheduler_reconcile_holders_us: scheduler_timing.reconcile_holders_us,
+                scheduler_publish_completed_us: scheduler_timing.publish_completed_us,
+                scheduler_pending_unload_us: scheduler_timing.pending_unload_us,
+                scheduler_apply_events_us,
+            },
         })
     }
 
@@ -2676,6 +2788,7 @@ impl IntegratedServer {
         let scheduler_start = simulation_timing_start();
         let tick_report = self.try_tick_report()?;
         let scheduler_tick_us = simulation_timing_elapsed_us(scheduler_start);
+        let tick_timing = tick_report.timing;
 
         let simulation_tick = self.simulation_tick.saturating_add(1);
         self.simulation_tick = simulation_tick;
@@ -2697,28 +2810,45 @@ impl IntegratedServer {
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let mut updates = tick_report.updates;
+        let fluid_event_apply_start = simulation_timing_start();
         updates.extend(
             fluid_events
                 .into_iter()
                 .filter_map(server_update_from_scheduler_event),
         );
+        let fluid_event_apply_us = simulation_timing_elapsed_us(fluid_event_apply_start);
 
         Ok(ServerSimulationTickReport {
             simulation_tick,
             chunk_tick: tick_report.ticket_tick,
             block_tick_chunks,
             fluid_ticks_executed: fluid_report.executed_ticks,
+            fluid_due_ticks: fluid_report.due_ticks,
             deferred_fluid_ticks: fluid_report.deferred_due_ticks,
             fluid_mutated_blocks: fluid_report.mutated_blocks,
+            fluid_snapshot_events: fluid_report.snapshot_events,
+            fluid_event_count: fluid_report.event_count,
             scheduled_fluid_ticks: fluid_report.scheduled_ticks,
             entity_tick_chunks,
             pending_unloads_processed: tick_report.pending_unloads_processed,
+            scheduler_event_count: tick_report.scheduler_event_count,
             updates,
             timing: ServerSimulationTickTiming {
                 total_us: simulation_timing_elapsed_us(total_start),
                 scheduler_tick_us,
+                scheduler_report_us: tick_timing.scheduler_report_us,
+                scheduler_purge_stale_tickets_us: tick_timing.scheduler_purge_stale_tickets_us,
+                scheduler_reconcile_holders_us: tick_timing.scheduler_reconcile_holders_us,
+                scheduler_publish_completed_us: tick_timing.scheduler_publish_completed_us,
+                scheduler_pending_unload_us: tick_timing.scheduler_pending_unload_us,
+                scheduler_apply_events_us: tick_timing.scheduler_apply_events_us,
                 block_tick_us,
                 fluid_tick_us,
+                fluid_event_apply_us,
+                fluid_due_scan_us: fluid_report.due_scan_us,
+                fluid_remove_due_us: fluid_report.remove_due_us,
+                fluid_tick_fluid_us: fluid_report.tick_fluid_us,
+                fluid_set_block_us: fluid_report.set_block_us,
                 entity_tick_us,
             },
         })
