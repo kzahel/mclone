@@ -6,6 +6,8 @@ Use zero-padded numeric prefixes for new native tactical docs: `000-topic.md`, `
 
 For native platform, renderer-boundary, performance, Android, or XR tacticals, use the sibling Playbox repo at `~/code/playbox` as a pattern library. Start with `~/code/playbox/Cargo.toml`, `docs/architecture/rendering.md`, `docs/architecture/platforms.md`, `android/README.md`, and `android-xr/README.md`. Mclone's native `profile.dev` is optimized at `opt-level = 2`, following Playbox, so debug movement/render smokes are less misleading while still retaining debug assertions.
 
+For current native performance priority, baseline, and Java-shaped follow-up order, see [`../topics/performance.md`](../topics/performance.md). The tactical docs below remain the detailed implementation records.
+
 | Doc | Status | Purpose |
 |---|---|---|
 | [`000-native-render-bringup.md`](000-native-render-bringup.md) | completed | `winit`/`wgpu` clear-frame bring-up, headless PNG capture, and the Minecraft coordinate contract. |

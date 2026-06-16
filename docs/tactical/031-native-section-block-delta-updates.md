@@ -180,13 +180,19 @@ only patch known chunks.
 
 ## Renderer Shape
 
-For the first slice, treat section deltas like current snapshot dirtying:
+The first implementation treated section deltas like current snapshot dirtying:
 
 - mark the changed chunk and direct horizontal neighbors dirty
 - keep the existing one-dirty-chunk mesh budget
 
-Later, when render dirty keys become section-precise, use the delta section key
-to dirty only the affected render section and its neighbor sections.
+The render follow-up is now landed:
+
+- section/block deltas mark the affected render section and direct block-boundary
+  neighbor sections dirty
+- dirty section targets are grouped by chunk for the existing budget, but only
+  the selected sections are rebuilt/removed
+- full chunk snapshots and unloads remain conservative chunk-neighborhood
+  dirtying
 
 ## Persistence Shape
 
@@ -238,6 +244,9 @@ cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
   runtime dirty marking, server pending section delta accumulation, simulation
   tick delta flush, and server fluid coverage now validate section deltas
   instead of per-block chunk snapshots.
+- Implemented follow-up: native renderer now uses section-precise dirty keys for
+  `SectionBlockUpdates`, including immediate render-section neighbors when a
+  changed block sits on a local section boundary.
 - Validated:
   - `cargo test --manifest-path native/Cargo.toml -p mclone-core -p
     mclone-protocol -p mclone-client -p mclone-server -p

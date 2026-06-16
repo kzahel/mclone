@@ -58,6 +58,48 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-16 - Section-Precise Dirtying Release Probe
+
+Commit reported by benchmark JSON: `9078e8b`.
+
+Note: `git_dirty=true` because this was captured while implementing
+section-precise render dirtying, before committing the slice. Treat it as the
+release probe for that working-tree implementation, not as a clean historical
+commit record.
+
+Command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --frame-budget-probe --frame-budget-frames 120 --target-hz 120
+```
+
+Frame budget probe, target `120 Hz`, `120` frames:
+
+| Metric | Value |
+|---|---:|
+| over-budget frames | `0 / 120` |
+| over 2x budget frames | `0 / 120` |
+| over 4x budget frames | `0 / 120` |
+| p95 frame | `4.093 ms` |
+| p99 frame | `5.146 ms` |
+| max frame | `5.430 ms` |
+| headless average frame | `2.442 ms` |
+| max `poll_ms` | `1.589 ms` |
+| max `remesh_ms` | `1.629 ms` |
+| max `upload_ms` | `0.346 ms` |
+| max pending render chunks | `9` |
+| total section block update batches | `27` |
+| total fluid mutated blocks | `80` |
+| total rebuilt sections | `79` |
+| max rebuilt sections on a frame | `16` |
+| total uploaded sections | `52` |
+
+Observation: section-delta frames now rebuild the affected render sections
+instead of broad chunk neighborhoods. The largest frame in this probe was the
+startup/device-poll frame, not a live section-delta frame. Nonzero pending
+render chunks include retained deferred sections that are not actionable until
+neighbor/camera readiness changes.
+
 ### 2026-06-15 - Optimized-Dev Smoke Baseline
 
 Commit reported by benchmark JSON: `509c0e3`.

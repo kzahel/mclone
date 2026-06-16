@@ -1,6 +1,6 @@
 # 032: Native Neighbor-Stable Render Boundaries
 
-Status: draft.
+Status: completed first pass; tuning and capture comparisons remain open.
 
 ## Purpose
 
