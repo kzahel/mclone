@@ -11,50 +11,50 @@ invalidates an older recommendation, or establishes a new baseline.
 
 ## Current Baseline
 
-Current validated slice: native async render-section compile queue, on top of
-section block deltas, section-precise dirtying, and neighbor-ready render
-boundaries.
+Current validated slice: native movement-frame release probe, on top of the
+async render-section compile queue, section block deltas, section-precise
+dirtying, and neighbor-ready render boundaries.
 
-Latest 120 Hz release frame-budget probe was captured during that slice at:
+Latest 120 Hz release movement-frame probe was captured during that slice at:
 
 ```text
-/tmp/mclone-frame-budget-release-async-render-compile.json
+/tmp/mclone-movement-frame-probe-release.json
 ```
 
 Summary:
 
 | Metric | Value |
 |---|---:|
-| over-budget frames | `0 / 120` |
-| p95 frame | `4.030 ms` |
-| p99 frame | `4.260 ms` |
-| max frame | `6.968 ms` |
-| headless average frame | `2.360 ms` |
-| max `poll_ms` | `1.611 ms` |
-| max `remesh_ms` | `0.060 ms` |
-| max `upload_ms` | `0.326 ms` |
+| probe mode | `movement_walk` |
+| target | `120 Hz` / `8.333 ms` |
+| frames | `240` |
+| movement speed | `32 blocks/sec` |
+| over-budget frames | `0 / 240` |
+| p95 frame | `3.317 ms` |
+| p99 frame | `4.198 ms` |
+| max frame | `7.066 ms` |
+| headless average frame | `2.054 ms` |
+| max `poll_ms` | `1.295 ms` |
+| max `remesh_ms` | `0.094 ms` |
+| max `upload_ms` | `0.399 ms` |
 | max pending render chunks | `9` |
-| max rebuilt sections | `16` |
-| total rebuilt sections | `42` |
-| total uploaded sections | `31` |
-| submitted compile sections | `78` |
-| completed compile sections | `42` |
-| stale compile sections | `33` |
+| submitted compile sections | `91` |
+| completed compile sections | `61` |
+| stale compile sections | `30` |
 | max pending compile jobs | `1` |
 | max in-flight sections | `16` |
-| total fluid mutated blocks | `80` |
-| total snapshot updates | `0` |
-| total section block updates | `27` |
-| total fluid snapshot events | `0` |
+| total fluid mutated blocks | `299` |
+| total snapshot updates | `5` |
+| total section block updates | `102` |
 
-Interpretation: the measured full-snapshot-per-fluid-block hitch is fixed.
-Fluid mutations now publish section deltas, and section/block update frames now
-dirty only the affected render section neighborhood. CPU render-section
-compilation is now off the frame path; `remesh_ms` in the frame probe is
-submission/drain bookkeeping rather than mesh generation. Nonzero pending render
-chunks include retained deferred sections and in-flight worker sections. The
-global compile epoch intentionally stales some worker output during continuous
-updates; this is correct but conservative.
+Interpretation: the movement-shaped headless probe does not reproduce the
+visible 120 Hz hitch on this host. The worst frame was frame `0` at `7.066 ms`,
+mostly `device_poll_ms = 6.102`, with no render compile/upload work on that
+frame. Runtime polling, render-section submission/drain bookkeeping, and GPU
+upload remain comfortably under budget in this release lane. The remaining
+likely gap is desktop-present/input pacing or a workload not represented by the
+probe, rather than known synchronous chunk publication, fluid snapshot, or CPU
+mesh compilation work.
 
 For durable historical trends, use [`../performance-records.md`](../performance-records.md).
 
@@ -62,8 +62,8 @@ For durable historical trends, use [`../performance-records.md`](../performance-
 
 | Priority | Work | Java-shaped | Tactical | Status | Why It Matters |
 |---|---|---:|---|---|---|
-| P0 | Movement-shaped release frame probe | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`../performance-records.md`](../performance-records.md) | next recommended | The original issue is visible walking hitching. The current frame-budget probe is green, while `native:movement:smoke` fully drains work per step and is not a live frame-pacing model. Add a release probe that moves like the desktop client without forcing full drains. |
-| P1 | Render compile queue stale/prioritization refinement | Yes | [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | recommended | Java prioritizes/cancels compile tasks. Native's first worker queue uses a conservative global epoch; the release probe saw `33` stale sections out of `78` submitted. Per-section/chunk revisions and distance priority would reduce wasted worker work. |
+| P0 | Desktop-present pacing attribution | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`../performance-records.md`](../performance-records.md) | next recommended | The movement-frame headless probe is green, but the original report was visible desktop walking hitching on a 120 Hz display. Add comparable desktop-side frame timing or present/wait attribution so we can separate engine work from swapchain/OS pacing. |
+| P1 | Render compile queue stale/prioritization refinement | Yes | [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | recommended | Java prioritizes/cancels compile tasks. Native's first worker queue uses a conservative global epoch; release probes saw stale output during streaming (`33 / 78` in the stress probe, `30 / 91` in the movement-frame probe). Per-section/chunk revisions and distance priority would reduce wasted worker work. |
 | P2 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and this probe's max upload was only `0.326 ms`. Do this when probes show upload/allocation cost is material again. |
 | P3 | Live light deltas and light-section dirtying | Yes | [`026`](../tactical/026-lighting-pipeline.md), [`031`](../tactical/031-native-section-block-delta-updates.md) | pending larger subsystem | Section block deltas currently leave light payloads unchanged. Correct live lighting needs Java-shaped light propagation/deltas and render dirtying by changed light sections. |
 | P4 | Release perf budgets and durable records | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`../performance-records.md`](../performance-records.md) | ongoing | Once baselines stabilize, add budget thresholds that catch regressions without failing on normal host noise. |
@@ -117,6 +117,9 @@ Use these local sources when implementing or reviewing performance work:
   [`031`](../tactical/031-native-section-block-delta-updates.md)
 - Async CPU render-section compile queue first pass:
   [`033`](../tactical/033-native-async-render-section-compile-queue.md)
+- Movement-shaped release frame probe:
+  [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md),
+  [`033`](../tactical/033-native-async-render-section-compile-queue.md)
 
 ## Tactical Index
 
@@ -148,6 +151,7 @@ cargo test --manifest-path native/Cargo.toml -p mclone-server -p mclone-native-c
 cargo check --manifest-path native/Cargo.toml --workspace
 cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
 pnpm --silent native:frame-budget:smoke
+pnpm --silent native:movement-frame:smoke
 git diff --check
 ```
 
@@ -156,6 +160,8 @@ Release comparison:
 ```bash
 cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
   --frame-budget-probe --frame-budget-frames 120 --target-hz 120
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --movement-frame-probe --frame-budget-frames 240 --target-hz 120
 ```
 
 Movement and render pressure:

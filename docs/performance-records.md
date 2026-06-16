@@ -17,6 +17,7 @@ Individual lanes:
 ```bash
 pnpm native:worldgen:smoke
 pnpm native:movement:smoke
+pnpm native:movement-frame:smoke
 pnpm native:timedemo:smoke
 ```
 
@@ -25,6 +26,7 @@ Release-oriented lanes:
 ```bash
 pnpm native:worldgen:perf
 pnpm native:movement:perf
+pnpm native:movement-frame:perf
 pnpm native:timedemo:perf
 ```
 
@@ -39,6 +41,7 @@ pnpm native:runtime:perf
 
 - `native:worldgen:*`: surface chunk generation plus cold/warm full `FEATURES` batch generation. Reports dependency generation, carvers, feature decoration, cache hits, and chunks/sec.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
+- `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
 - `native:timedemo:*`: deterministic headless GPU render path over a fixed camera orbit. Reports scene build time, render setup, per-frame render time, and drawn section/index pressure. It does not read back PNGs per frame.
 - `native:runtime:*`: lower-level server scheduler movement benchmark without client remesh/render work.
 
@@ -57,6 +60,64 @@ When adding a record, include:
 The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, `git_dirty`, and `debug_assertions`.
 
 ## Records
+
+### 2026-06-16 - Movement Frame Probe Release Baseline
+
+Commit reported by benchmark JSON: `f8855ce`.
+
+Note: `git_dirty=true` because this was captured while adding the movement-frame
+probe itself, before committing the slice. Treat it as the release probe for
+that working-tree implementation, not as a clean historical commit record.
+
+Command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --movement-frame-probe --frame-budget-frames 240 --target-hz 120 --path-radius 4
+```
+
+Movement-frame probe, mode `movement_walk`, target `120 Hz`, `240` frames,
+speed `32 blocks/sec`:
+
+| Metric | Value |
+|---|---:|
+| over-budget frames | `0 / 240` |
+| over 2x budget frames | `0 / 240` |
+| over 4x budget frames | `0 / 240` |
+| p95 frame | `3.317 ms` |
+| p99 frame | `4.198 ms` |
+| max frame | `7.066 ms` |
+| headless average frame | `2.054 ms` |
+| max `poll_ms` | `1.295 ms` |
+| max `remesh_ms` | `0.094 ms` |
+| max `upload_ms` | `0.399 ms` |
+| max pending render chunks | `9` |
+| max pending compile jobs | `1` |
+| max in-flight sections | `16` |
+| submitted compile sections | `91` |
+| completed compile sections | `61` |
+| stale compile sections | `30` |
+| total snapshot updates | `5` |
+| total section block update batches | `102` |
+| total fluid mutated blocks | `299` |
+
+Worst frame:
+
+| Field | Value |
+|---|---:|
+| frame index | `0` |
+| frame time | `7.066 ms` |
+| budget multiple | `0.848x` |
+| `poll_ms` | `0.322 ms` |
+| `remesh_ms` | `0.000 ms` |
+| `upload_ms` | `0.000 ms` |
+| `render_ms` | `0.393 ms` |
+| `device_poll_ms` | `6.102 ms` |
+
+Observation: this movement-shaped headless lane does not reproduce the visible
+120 Hz walking hitch on this host. Engine-side runtime, render compile, and GPU
+upload work stayed below budget. The remaining investigative gap is likely
+desktop present/wait/input pacing or a workload not represented by the headless
+probe.
 
 ### 2026-06-16 - Async Render Section Compile Queue Release Probe
 

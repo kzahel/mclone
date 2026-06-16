@@ -15,7 +15,7 @@ desktop frame intervals, missed refresh counts, or per-frame attribution.
 
 ## Findings
 
-Current native behavior:
+Initial native behavior when this tactical was opened:
 
 - `mclone-worldgen` runs feature generation on a background thread.
 - completed chunk publication still runs on the main scheduler/presentation
@@ -25,9 +25,15 @@ Current native behavior:
 - desktop present mode is fixed to FIFO, with no app-facing VSync/capped/uncapped
   controls.
 
-This means background worldgen does not prevent frame hitches. The frame can
+That meant background worldgen did not prevent frame hitches: the frame could
 still block on completed-job publication, dirty-section rebuilds, and GPU buffer
 churn.
+
+Later performance slices reduced the main-thread engine work substantially:
+section block deltas avoid full snapshot publication for fluid/block updates,
+section-precise dirtying reduced rebuild scope, and async render-section
+compilation moved CPU mesh generation off the frame path. The current status and
+priority order live in [`../topics/performance.md`](../topics/performance.md).
 
 ## Playbox Reference
 
@@ -65,7 +71,11 @@ adapter.
    - count offscreen work frames over 1x, 2x, and 4x the requested budget
    - report per-frame poll, remesh, upload, render, submit, and device-wait
      timings
-5. Keep this first slice diagnostic and pacing-focused. Do not yet change chunk
+5. Add a movement-shaped headless frame-budget probe:
+   - speed-based spectator movement at the requested target Hz
+   - same live-frame poll/render-work/upload/render path as the stress probe
+   - no full render-work drain per movement step
+6. Keep this first slice diagnostic and pacing-focused. Do not yet change chunk
    scheduling, mesh threading, or GPU upload budgeting.
 
 The headless probe is deterministic in workload shape, not in measured wall
@@ -75,16 +85,10 @@ a substitute for live desktop/XR present-pacing validation.
 
 ## Follow-Up Performance Slices
 
-1. Move completed chunk publish work off the presentation path or slice it by a
-   per-frame budget. Snapshot packing and provisional lighting are the main
-   candidates.
-2. Move CPU mesh builds to worker jobs that return section mesh data.
-3. Budget GPU uploads on the render thread by section count or byte count per
-   frame.
-4. Reduce dirty rebuild scope from chunk-neighborhood-wide to section-aware once
-   block/light deltas carry enough coordinates.
-5. Add benchmark budgets for movement/runtime perf after release-mode baselines
-   are refreshed with the new frame timing counters.
+See [`../topics/performance.md`](../topics/performance.md) for the live priority
+queue. As of the movement-frame probe slice, the next investigation is desktop
+present/wait attribution because the headless walking probe is green while the
+reported symptom is visible desktop walking hitching.
 
 ## Validation
 
@@ -97,6 +101,7 @@ cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm
 pnpm native:movement:smoke
 pnpm native:runtime:smoke
 pnpm native:frame-budget:smoke
+pnpm native:movement-frame:smoke
 git diff --check
 ```
 
@@ -117,4 +122,6 @@ Manual validation:
 - surface present mode changes without restarting the client.
 - `--frame-budget-probe --target-hz 120` reports deterministic offscreen budget
   misses and stage attribution.
+- `--movement-frame-probe --target-hz 120` reports speed-based walking budget
+  misses without fully draining render work per movement step.
 - existing movement/runtime perf lanes still pass.

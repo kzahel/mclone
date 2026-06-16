@@ -149,14 +149,44 @@ pressure. In this run, the largest step was dominated by polling/waiting for
 worldgen publication (`poll_ms = 323.175`) rather than frame-path render
 compilation.
 
+Movement-frame release probe:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --movement-frame-probe --frame-budget-frames 240 --target-hz 120 --path-radius 4
+```
+
+| Metric | Value |
+|---|---:|
+| over-budget frames | `0 / 240` |
+| p95 frame | `3.317 ms` |
+| p99 frame | `4.198 ms` |
+| max frame | `7.066 ms` |
+| headless average frame | `2.054 ms` |
+| max `poll_ms` | `1.295 ms` |
+| max `remesh_ms` | `0.094 ms` |
+| max `upload_ms` | `0.399 ms` |
+| submitted compile sections | `91` |
+| completed compile sections | `61` |
+| stale compile sections | `30` |
+| max pending compile jobs | `1` |
+| max in-flight sections | `16` |
+
+Interpretation: the movement-shaped headless probe does not reproduce the
+visible 120 Hz desktop walking hitch on this host. The worst frame was frame
+`0` at `7.066 ms`, mostly `device_poll_ms = 6.102`, with no remesh/upload work
+on that frame. Runtime polling, render-section compile submission/drain, and GPU
+upload stayed under budget.
+
 Rendered validation:
 
 - `/tmp/mclone-async-render-compile-verify.png` captured and inspected.
 
 ## Follow-Ups
 
-1. Add a movement-shaped release frame probe that simulates interactive walking
-   without fully draining render work per step.
+1. Add desktop present/wait attribution for the visible walking hitch path; the
+   movement-shaped headless frame probe is green, so desktop swapchain pacing is
+   now the larger unknown.
 2. Replace the global render compile epoch with per-chunk or per-section input
    revisions so unrelated updates do not stale otherwise valid compile output.
 3. Add distance-prioritized compile scheduling and cancellation/coalescing for
@@ -176,6 +206,8 @@ cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm
 pnpm --silent native:frame-budget:smoke
 cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
   --frame-budget-probe --frame-budget-frames 120 --target-hz 120
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --movement-frame-probe --frame-budget-frames 240 --target-hz 120 --path-radius 4
 git diff --check
 ```
 

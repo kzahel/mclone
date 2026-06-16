@@ -266,9 +266,33 @@ struct FrameBudgetProbeOptions {
     render_options: TexturedSectionRenderOptions,
     width: u32,
     height: u32,
+    mode: FrameBudgetProbeMode,
     frames: usize,
     path_radius_chunks: i32,
     target_hz: f64,
+    movement_speed: f32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FrameBudgetProbeMode {
+    StressOrbit,
+    MovementWalk,
+}
+
+impl FrameBudgetProbeMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::StressOrbit => "stress_orbit",
+            Self::MovementWalk => "movement_walk",
+        }
+    }
+
+    fn benchmark_name(self) -> &'static str {
+        match self {
+            Self::StressOrbit => "native_frame_budget_probe",
+            Self::MovementWalk => "native_movement_frame_probe",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -325,9 +349,11 @@ impl Default for FrameBudgetProbeOptions {
             render_options: TexturedSectionRenderOptions::default(),
             width: 1280,
             height: 720,
+            mode: FrameBudgetProbeMode::StressOrbit,
             frames: DEFAULT_FRAME_BUDGET_PROBE_FRAMES,
             path_radius_chunks: DEFAULT_MOVEMENT_PERF_PATH_RADIUS,
             target_hz: DEFAULT_FRAME_BUDGET_TARGET_HZ,
+            movement_speed: SPECTATOR_BASE_SPEED,
         }
     }
 }
@@ -409,10 +435,13 @@ impl Cli {
         let mut movement_perf = false;
         let mut timedemo = false;
         let mut frame_budget_probe = false;
+        let mut explicit_frame_budget_probe = false;
+        let mut movement_frame_probe = false;
         let mut movement_steps = DEFAULT_MOVEMENT_PERF_STEPS;
         let mut timedemo_frames = DEFAULT_TIMEDEMO_FRAMES;
         let mut frame_budget_frames = DEFAULT_FRAME_BUDGET_PROBE_FRAMES;
         let mut target_hz = DEFAULT_FRAME_BUDGET_TARGET_HZ;
+        let mut movement_speed = SPECTATOR_BASE_SPEED;
         let mut path_radius = DEFAULT_MOVEMENT_PERF_PATH_RADIUS;
         let mut args = args.into_iter();
 
@@ -442,14 +471,34 @@ impl Cli {
                             "--frame-budget-probe cannot be combined with a headless output mode"
                         );
                     }
+                    if movement_frame_probe {
+                        bail!(
+                            "--frame-budget-probe cannot be combined with --movement-frame-probe"
+                        );
+                    }
                     frame_budget_probe = true;
+                    explicit_frame_budget_probe = true;
+                }
+                "--movement-frame-probe" => {
+                    if mode.is_some() {
+                        bail!(
+                            "--movement-frame-probe cannot be combined with a headless output mode"
+                        );
+                    }
+                    if explicit_frame_budget_probe {
+                        bail!(
+                            "--movement-frame-probe cannot be combined with --frame-budget-probe"
+                        );
+                    }
+                    frame_budget_probe = false;
+                    movement_frame_probe = true;
                 }
                 "--headless-clear" => {
                     let path = args
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-clear requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe {
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Clear(path))?;
@@ -459,7 +508,7 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-chunk requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe {
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Chunk(path))?;
@@ -469,7 +518,7 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-chunk-scenarios requires an output directory")?;
-                    if movement_perf || timedemo || frame_budget_probe {
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::ChunkScenarios(path))?;
@@ -479,7 +528,7 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--headless-ui requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe {
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Ui(path))?;
@@ -489,7 +538,7 @@ impl Cli {
                         .next()
                         .map(PathBuf::from)
                         .context("--screenshot requires an output PNG path")?;
-                    if movement_perf || timedemo || frame_budget_probe {
+                    if movement_perf || timedemo || frame_budget_probe || movement_frame_probe {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::Screenshot(path))?;
@@ -540,13 +589,28 @@ impl Cli {
                     timedemo_frames = parse_timedemo_frames_arg("--timedemo-frames", args.next())?;
                 }
                 "--frame-budget-frames" => {
-                    frame_budget_probe = true;
+                    if !movement_frame_probe {
+                        frame_budget_probe = true;
+                    }
                     frame_budget_frames =
                         parse_frame_budget_frames_arg("--frame-budget-frames", args.next())?;
                 }
                 "--target-hz" => {
-                    frame_budget_probe = true;
+                    if !movement_frame_probe {
+                        frame_budget_probe = true;
+                    }
                     target_hz = parse_target_hz_arg("--target-hz", args.next())?;
+                }
+                "--movement-frame-speed" => {
+                    if explicit_frame_budget_probe {
+                        bail!(
+                            "--movement-frame-speed cannot be combined with --frame-budget-probe"
+                        );
+                    }
+                    frame_budget_probe = false;
+                    movement_frame_probe = true;
+                    movement_speed =
+                        parse_movement_speed_arg("--movement-frame-speed", args.next())?;
                 }
                 "--movement-path-radius" => {
                     movement_perf = true;
@@ -563,9 +627,14 @@ impl Cli {
             }
         }
 
-        let perf_mode_count = movement_perf as u8 + timedemo as u8 + frame_budget_probe as u8;
+        let perf_mode_count = movement_perf as u8
+            + timedemo as u8
+            + frame_budget_probe as u8
+            + movement_frame_probe as u8;
         if perf_mode_count > 1 {
-            bail!("--movement-perf, --timedemo, and --frame-budget-probe are mutually exclusive");
+            bail!(
+                "--movement-perf, --timedemo, --frame-budget-probe, and --movement-frame-probe are mutually exclusive"
+            );
         }
         match mode {
             Some(HeadlessMode::Clear(path)) => Ok(Self::HeadlessClear {
@@ -623,15 +692,21 @@ impl Cli {
                     path_radius_chunks: path_radius,
                 },
             }),
-            None if frame_budget_probe => Ok(Self::FrameBudgetProbe {
+            None if frame_budget_probe || movement_frame_probe => Ok(Self::FrameBudgetProbe {
                 options: FrameBudgetProbeOptions {
                     scene,
                     render_options,
                     width: width.unwrap_or(1280),
                     height: height.unwrap_or(720),
+                    mode: if movement_frame_probe {
+                        FrameBudgetProbeMode::MovementWalk
+                    } else {
+                        FrameBudgetProbeMode::StressOrbit
+                    },
                     frames: frame_budget_frames,
                     path_radius_chunks: path_radius,
                     target_hz,
+                    movement_speed,
                 },
             }),
             None => Ok(Self::Window {
@@ -727,6 +802,17 @@ fn parse_target_hz_arg(flag: &str, value: Option<String>) -> Result<f64> {
     Ok(parsed)
 }
 
+fn parse_movement_speed_arg(flag: &str, value: Option<String>) -> Result<f32> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    let parsed = value
+        .parse::<f32>()
+        .with_context(|| format!("{flag} requires a positive number, got `{value}`"))?;
+    if !parsed.is_finite() || !(SPECTATOR_MIN_SPEED..=SPECTATOR_MAX_SPEED).contains(&parsed) {
+        bail!("{flag} must be between {SPECTATOR_MIN_SPEED} and {SPECTATOR_MAX_SPEED}");
+    }
+    Ok(parsed)
+}
+
 fn parse_path_radius_arg(flag: &str, value: Option<String>) -> Result<i32> {
     let parsed = parse_i32_arg(flag, value)?;
     if !(1..=MAX_MOVEMENT_PERF_PATH_RADIUS).contains(&parsed) {
@@ -772,8 +858,9 @@ fn print_help() {
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
            mclone-native-client --timedemo [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--timedemo-frames 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-           mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\
-         Window mode streams chunks around a free-fly spectator camera with WASD, Space/X vertical movement, mouse-lock look, Shift boost, tilde debug pane toggle, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen camera/chunk-interest script and counts work frames over an explicit target Hz budget."
+           mclone-native-client --frame-budget-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\
+           mclone-native-client --movement-frame-probe [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--chunk-radius 1] [--frame-budget-frames 240] [--target-hz 120] [--path-radius 4] [--movement-frame-speed 32] [--section-occlusion true|false] [--fullbright true|false]\n\n\
+         Window mode streams chunks around a free-fly spectator camera with WASD, Space/X vertical movement, mouse-lock look, Shift boost, tilde debug pane toggle, O section-occlusion toggle, L fullbright toggle, and wheel speed controls. Use --disable-section-occlusion/--enable-section-occlusion and --force-fullbright/--disable-fullbright as shortcuts. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static chunk radius large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget."
     );
 }
 
@@ -1434,7 +1521,8 @@ impl FrameBudgetProbeReport {
         let p95 = frame_budget_percentile_ms(&self.headless.frames, 0.95);
         let p99 = frame_budget_percentile_ms(&self.headless.frames, 0.99);
         println!("{{");
-        print_benchmark_metadata("native_frame_budget_probe", "  ", true);
+        print_benchmark_metadata(self.options.mode.benchmark_name(), "  ", true);
+        println!("  \"probe_mode\": \"{}\",", self.options.mode.as_str());
         println!("  \"seed\": {},", self.options.scene.seed);
         println!(
             "  \"origin\": {{ \"x\": {}, \"z\": {} }},",
@@ -1458,6 +1546,10 @@ impl FrameBudgetProbeReport {
         println!("  \"height\": {},", self.options.height);
         println!("  \"target_hz\": {:.3},", self.options.target_hz);
         println!("  \"target_frame_ms\": {:.3},", target_frame_ms);
+        println!(
+            "  \"movement_speed_blocks_per_sec\": {:.3},",
+            self.options.movement_speed
+        );
         println!("  \"over_budget_frames\": {},", over_budget);
         println!("  \"over_2x_budget_frames\": {},", over_2x);
         println!("  \"over_4x_budget_frames\": {},", over_4x);
@@ -1923,16 +2015,11 @@ fn probe_sync_upload_sections(
 
 fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudgetProbeReport> {
     if options.scene.remote_addr.is_some() {
-        bail!("--frame-budget-probe currently requires the local integrated server path");
+        bail!("frame-budget probes currently require the local integrated server path");
     }
 
     let runtime_setup_start = Instant::now();
-    let initial_spectator = circular_movement_spectator(
-        &options.scene,
-        options.path_radius_chunks,
-        0,
-        options.frames,
-    );
+    let initial_spectator = frame_budget_probe_spectator(options, 0);
     let initial_center = initial_spectator.chunk_pos();
     let mut runtime_scene = options.scene.clone();
     runtime_scene.chunk_x = initial_center.x;
@@ -1961,10 +2048,8 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
     let runtime_setup_ms = elapsed_ms(runtime_setup_start.elapsed());
 
     let mut frame_reports = Vec::with_capacity(options.frames);
-    let scene = options.scene.clone();
+    let probe_options = options.clone();
     let render_options = options.render_options;
-    let path_radius_chunks = options.path_radius_chunks;
-    let frame_count = options.frames;
     let chunk_radius = options.scene.chunk_radius;
     let initial_upload = TexturedSectionUploadReport {
         uploaded_section_count: initial_update.rebuilt_section_count(),
@@ -2013,8 +2098,7 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
             })
         },
         |index, frame, state| {
-            let spectator =
-                circular_movement_spectator(&scene, path_radius_chunks, index, frame_count);
+            let spectator = frame_budget_probe_spectator(&probe_options, index);
             let center = spectator.chunk_pos();
             let mut report = FrameBudgetProbeFrameReport {
                 index,
@@ -2121,6 +2205,27 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
     })
 }
 
+fn frame_budget_probe_spectator(
+    options: &FrameBudgetProbeOptions,
+    index: usize,
+) -> SpectatorCamera {
+    match options.mode {
+        FrameBudgetProbeMode::StressOrbit => circular_movement_spectator(
+            &options.scene,
+            options.path_radius_chunks,
+            index,
+            options.frames,
+        ),
+        FrameBudgetProbeMode::MovementWalk => movement_frame_probe_spectator(
+            &options.scene,
+            options.path_radius_chunks,
+            index,
+            options.target_hz,
+            options.movement_speed,
+        ),
+    }
+}
+
 fn timedemo_loaded_scene(options: &TimedemoOptions) -> Result<SceneOptions> {
     let loaded_radius = options.scene.chunk_radius.max(options.path_radius_chunks);
     if loaded_radius > MAX_CHUNK_RADIUS {
@@ -2156,6 +2261,35 @@ fn circular_movement_spectator(
         yaw: direction.x.atan2(direction.z),
         pitch: direction.y.atan2(horizontal),
         speed: SPECTATOR_BASE_SPEED,
+    }
+}
+
+fn movement_frame_probe_spectator(
+    scene: &SceneOptions,
+    path_radius_chunks: i32,
+    index: usize,
+    target_hz: f64,
+    movement_speed: f32,
+) -> SpectatorCamera {
+    let origin_x = scene.chunk_x as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+    let origin_z = scene.chunk_z as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+    let radius_blocks = path_radius_chunks.max(1) as f32 * CHUNK_WIDTH as f32;
+    let elapsed_secs = index as f32 / target_hz.max(1.0) as f32;
+    let angle = movement_speed.clamp(SPECTATOR_MIN_SPEED, SPECTATOR_MAX_SPEED) * elapsed_secs
+        / radius_blocks;
+    let position = Vec3::new(
+        origin_x + radius_blocks * angle.cos(),
+        88.0,
+        origin_z + radius_blocks * angle.sin(),
+    );
+    let target = Vec3::new(origin_x, 56.0, origin_z);
+    let direction = (target - position).normalize_or_zero();
+    let horizontal = Vec3::new(direction.x, 0.0, direction.z).length();
+    SpectatorCamera {
+        position,
+        yaw: direction.x.atan2(direction.z),
+        pitch: direction.y.atan2(horizontal),
+        speed: movement_speed,
     }
 }
 
@@ -6969,9 +7103,11 @@ mod tests {
                     render_options: TexturedSectionRenderOptions::default(),
                     width: 1024,
                     height: 768,
+                    mode: FrameBudgetProbeMode::StressOrbit,
                     frames: 36,
                     path_radius_chunks: 5,
                     target_hz: 120.0,
+                    movement_speed: SPECTATOR_BASE_SPEED,
                 },
             }
         );
@@ -6987,6 +7123,48 @@ mod tests {
                 options: FrameBudgetProbeOptions {
                     target_hz: 90.0,
                     ..FrameBudgetProbeOptions::default()
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_movement_frame_probe_options() {
+        let cli = Cli::parse([
+            "--target-hz".to_owned(),
+            "120".to_owned(),
+            "--movement-frame-probe".to_owned(),
+            "--frame-budget-frames".to_owned(),
+            "36".to_owned(),
+            "--movement-frame-speed".to_owned(),
+            "48".to_owned(),
+            "--path-radius".to_owned(),
+            "5".to_owned(),
+            "--chunk-radius".to_owned(),
+            "2".to_owned(),
+            "--width".to_owned(),
+            "1024".to_owned(),
+            "--height".to_owned(),
+            "768".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::FrameBudgetProbe {
+                options: FrameBudgetProbeOptions {
+                    scene: SceneOptions {
+                        chunk_radius: 2,
+                        ..SceneOptions::default()
+                    },
+                    render_options: TexturedSectionRenderOptions::default(),
+                    width: 1024,
+                    height: 768,
+                    mode: FrameBudgetProbeMode::MovementWalk,
+                    frames: 36,
+                    path_radius_chunks: 5,
+                    target_hz: 120.0,
+                    movement_speed: 48.0,
                 },
             }
         );
@@ -7103,6 +7281,18 @@ mod tests {
         assert_eq!(spectator.chunk_pos(), ChunkPos::new(4, 0));
         assert!(spectator.forward().x < -0.5);
         assert!(spectator.forward().z.abs() < 0.2);
+    }
+
+    #[test]
+    fn movement_frame_probe_spectator_advances_by_speed_and_target_hz() {
+        let scene = SceneOptions::default();
+        let spectator = movement_frame_probe_spectator(&scene, 4, 120, 120.0, 32.0);
+        let origin_x = scene.chunk_x as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+        let origin_z = scene.chunk_z as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5;
+        let angle = (spectator.position.z - origin_z).atan2(spectator.position.x - origin_x);
+
+        assert!((angle - 0.5).abs() < 0.001);
+        assert_eq!(spectator.speed, 32.0);
     }
 
     #[test]
