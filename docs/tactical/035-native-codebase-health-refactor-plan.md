@@ -180,10 +180,11 @@ module.
 - [ ] Split `mclone-server` after active block-delta/fluid mutation work
   stabilizes: `types`, `tickets`, `distance_manager`, `holder`, `scheduler`,
   `worldgen_mailbox`, `fluid`, `integrated`, `lighting_seed`, and `timing`.
-- [ ] Split `mclone-worldgen::feature` around Java-shaped concepts:
+- [x] Split `mclone-worldgen::feature` around Java-shaped concepts:
   `context` (done), `region` (done), `tables` (done), `configured` (done),
-  `placed` (done), `lake`, `spring`, `ore`, `tree`, `patch`, `glow_lichen`, and
-  `top_layer`.
+  `placed` (done), `glow_lichen` (done), `lake` (done), `spring` (done),
+  `ore` (done), `patch` (done), `tree` (done), and `top_layer` (done). Only the
+  `Direction` core/geometry relocation remains as a separate follow-up.
 - [ ] Split `mclone-worldgen::levelgen` into chunk data, settings, sampler,
   generator, feature-batch, and timing modules.
 - [ ] Split `mclone-mesh` into visibility, mesh data, textured catalog, and
@@ -257,12 +258,18 @@ module.
      `PlacedFeature` re-exported from `feature.rs`; `test_support` re-exported
      under `#[cfg(test)]`). The `ConfiguredFeature::place`/`place_with_biomes`
      dispatch and all per-feature `place_*` behavior stay in `feature.rs`.
-   - First-split boundaries are complete. Remaining feature slices are the
-     per-feature behavior modules: `lake`, `spring`, `ore`, `tree`, `patch`,
-     `glow_lichen`, and `top_layer` (mirroring Java's one-file-per-feature
-     layout), plus moving `Direction` toward a core/geometry module.
-   - Leave individual feature behavior (`lake`, `spring`, `ore`, `tree`,
-     `patch`, `glow_lichen`, `top_layer`) for follow-up slices.
+   - Per-feature behavior modules are complete: `glow_lichen`, `lake`,
+     `spring`, `ore`, `patch`, `tree`, and `top_layer` each live in their own
+     `feature/<name>.rs`, mirroring Java's one-file-per-feature layout, with
+     the per-feature `place_*` behavior and feature-local helpers moved out of
+     `feature.rs`. The dispatch `impl ConfiguredFeature` and the genuinely
+     shared scaffolding (`Direction`, `offset_pos`, `project_to_surface`,
+     `heightmap_*`, and the `RandomSelectorFeature` dispatch) stay in the
+     parent module. `feature.rs` is now ~1,110 lines (down from ~3,841); the
+     production surface is ~215 lines and the remainder is the inline test
+     suite, which is left for the later test-move slice.
+   - The only remaining feature-area slice is moving `Direction` toward a
+     core/geometry module (`net.minecraft.core.Direction`).
 
 4. `worldgen::levelgen` first split
    - Separate generated chunk data and mutable chunk buffers from settings,
