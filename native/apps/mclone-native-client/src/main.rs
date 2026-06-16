@@ -2560,6 +2560,39 @@ impl WindowSceneRuntime {
             .map_or(0, IntegratedServer::pending_publication_count)
     }
 
+    fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
+        let Some(state_id) = self.block_state_at_position(position) else {
+            return false;
+        };
+        self.mesh_assets.catalog.occludes(state_id)
+    }
+
+    fn block_state_at_position(&self, position: Vec3) -> Option<mclone_core::BlockStateId> {
+        if !position.is_finite() {
+            return None;
+        }
+        self.block_state_at_world(
+            position.x.floor() as i32,
+            position.y.floor() as i32,
+            position.z.floor() as i32,
+        )
+    }
+
+    fn block_state_at_world(
+        &self,
+        world_x: i32,
+        world_y: i32,
+        world_z: i32,
+    ) -> Option<mclone_core::BlockStateId> {
+        let pos = ChunkPos::new(
+            world_x.div_euclid(CHUNK_WIDTH),
+            world_z.div_euclid(CHUNK_WIDTH),
+        );
+        self.client
+            .chunk_snapshot(pos)
+            .and_then(|snapshot| snapshot_block_state_at_world(snapshot, world_x, world_y, world_z))
+    }
+
     fn stats(&self) -> WindowRuntimeStats {
         let scheduler_metrics = self
             .server
@@ -2923,6 +2956,38 @@ impl SpectatorCamera {
 
 fn world_block_to_chunk_coord(value: f32) -> i32 {
     (value / CHUNK_WIDTH as f32).floor() as i32
+}
+
+fn snapshot_block_state_at_world(
+    snapshot: &ChunkSnapshot,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+) -> Option<mclone_core::BlockStateId> {
+    let chunk_x = world_x.div_euclid(CHUNK_WIDTH);
+    let chunk_z = world_z.div_euclid(CHUNK_WIDTH);
+    if snapshot.pos != ChunkPos::new(chunk_x, chunk_z) {
+        return None;
+    }
+
+    let local_y = world_y - snapshot.min_y;
+    if !(0..snapshot.height).contains(&local_y) {
+        return None;
+    }
+
+    let section_y = world_y.div_euclid(SECTION_HEIGHT);
+    let local_x = world_x.rem_euclid(CHUNK_WIDTH);
+    let local_z = world_z.rem_euclid(CHUNK_WIDTH);
+    let local_section_y = world_y.rem_euclid(SECTION_HEIGHT);
+    let index = mclone_core::chunk_section_index(local_x, local_section_y, local_z);
+    Some(
+        snapshot
+            .sections
+            .iter()
+            .find(|section| section.section_y == section_y)
+            .map(|section| section.unpack_block_state_ids()[index])
+            .unwrap_or(AIR_BLOCK_STATE_ID),
+    )
 }
 
 fn render_dirty_chunk_neighborhood(pos: ChunkPos) -> [ChunkPos; 5] {
@@ -4225,7 +4290,15 @@ impl ChunkApp {
         record_render_section_update_stats(&mut self.render_stats, section_update, upload_report);
     }
 
-    fn debug_pane_stats(&self) -> DebugPaneStats {
+    fn effective_render_options(&self) -> TexturedSectionRenderOptions {
+        effective_render_options_for_camera(
+            self.render_options,
+            self.runtime
+                .camera_inside_occluding_block(self.spectator.position),
+        )
+    }
+
+    fn debug_pane_stats(&self, render_options: TexturedSectionRenderOptions) -> DebugPaneStats {
         DebugPaneStats {
             position: self.spectator.position,
             speed: self.spectator.speed,
@@ -4233,10 +4306,20 @@ impl ChunkApp {
             render: self.render_stats,
             frame: self.frame_timing,
             pacing: self.frame_pacing.debug_stats(),
-            section_occlusion: self.render_options.section_occlusion_culling,
-            force_fullbright: self.render_options.force_fullbright,
+            section_occlusion: render_options.section_occlusion_culling,
+            force_fullbright: render_options.force_fullbright,
         }
     }
+}
+
+fn effective_render_options_for_camera(
+    mut render_options: TexturedSectionRenderOptions,
+    camera_inside_occluding_block: bool,
+) -> TexturedSectionRenderOptions {
+    if camera_inside_occluding_block {
+        render_options.section_occlusion_culling = false;
+    }
+    render_options
 }
 
 fn record_render_section_update_stats(
@@ -4554,9 +4637,11 @@ impl ApplicationHandler for ChunkApp {
                 };
                 self.ui.set_scale(gui_scale);
                 let camera = self.spectator.camera(self.runtime.radius_chunks);
-                let render_options = self.render_options;
+                let render_options = self.effective_render_options();
                 let frame_pacing = self.frame_pacing.ui_state();
-                let debug_stats = self.debug_visible.then(|| self.debug_pane_stats());
+                let debug_stats = self
+                    .debug_visible
+                    .then(|| self.debug_pane_stats(render_options));
                 let mut render_stats = self.render_stats;
                 let render_start = Instant::now();
                 let result = {
@@ -4761,6 +4846,47 @@ mod tests {
         assert_eq!(world_block_to_chunk_coord(-0.01), -1);
         assert_eq!(world_block_to_chunk_coord(-16.0), -1);
         assert_eq!(world_block_to_chunk_coord(-16.01), -2);
+    }
+
+    #[test]
+    fn snapshot_block_state_lookup_reads_loaded_sections_and_omitted_air() {
+        let mut block_state_ids = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME * 2];
+        block_state_ids[mclone_core::chunk_section_index(1, 15, 15)] = BlockStateId(42);
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(1, -1),
+            ChunkStatus::Full,
+            ChunkRevision(1),
+            -16,
+            32,
+            &block_state_ids,
+        );
+
+        assert_eq!(
+            snapshot_block_state_at_world(&snapshot, 17, -1, -1),
+            Some(BlockStateId(42))
+        );
+        assert_eq!(
+            snapshot_block_state_at_world(&snapshot, 17, 0, -1),
+            Some(AIR_BLOCK_STATE_ID)
+        );
+        assert_eq!(snapshot_block_state_at_world(&snapshot, 0, -1, -1), None);
+        assert_eq!(snapshot_block_state_at_world(&snapshot, 17, 16, -1), None);
+    }
+
+    #[test]
+    fn effective_render_options_disable_section_occlusion_inside_occluding_block() {
+        let enabled = TexturedSectionRenderOptions {
+            section_occlusion_culling: true,
+            ..TexturedSectionRenderOptions::default()
+        };
+        let disabled = TexturedSectionRenderOptions {
+            section_occlusion_culling: false,
+            ..TexturedSectionRenderOptions::default()
+        };
+
+        assert!(effective_render_options_for_camera(enabled, false).section_occlusion_culling);
+        assert!(!effective_render_options_for_camera(enabled, true).section_occlusion_culling);
+        assert!(!effective_render_options_for_camera(disabled, true).section_occlusion_culling);
     }
 
     #[test]
