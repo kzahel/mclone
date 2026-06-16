@@ -5,24 +5,30 @@ use std::time::Instant;
 
 use crate::biome::{BiomeDefinition, OverworldBiomeSource};
 use crate::block::{
-    AIR, ANDESITE, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, COARSE_DIRT, DANDELION, DEAD_BUSH, DEEPSLATE,
-    DIORITE, DIRT, FERN, GLOW_LICHEN, GRANITE, GRASS, GRASS_BLOCK, ICE, LARGE_FERN_LOWER,
-    LARGE_FERN_UPPER, LAVA, MYCELIUM, OAK_LEAVES, OAK_LOG, PODZOL, POPPY, RED_SAND, RawBlockId,
-    SAND, SNOW, SPRUCE_LEAVES, SPRUCE_LOG, STONE, TERRACOTTA, TUFF, WATER, has_fluid, is_air_like,
-    is_leaves, material_blocks_motion,
+    AIR, BIRCH_LEAVES, BIRCH_LOG, CAVE_AIR, COARSE_DIRT, DANDELION, DEAD_BUSH, DIRT, FERN,
+    GLOW_LICHEN, GRASS, GRASS_BLOCK, ICE, LARGE_FERN_LOWER, LARGE_FERN_UPPER, LAVA, MYCELIUM,
+    OAK_LEAVES, OAK_LOG, PODZOL, POPPY, RED_SAND, RawBlockId, SAND, SNOW, SPRUCE_LEAVES,
+    SPRUCE_LOG, STONE, TERRACOTTA, WATER, has_fluid, is_air_like, is_leaves,
+    material_blocks_motion,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
-use crate::placement::{
-    BlockPos, ConfiguredDecorator, DecorationContext, HeightmapType, IntProvider,
-};
+use crate::placement::{BlockPos, ConfiguredDecorator, DecorationContext, HeightmapType};
 use crate::prng::{RandomSource, WorldgenRandom};
 use crate::surface::biome_temperature;
 use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord};
 
+mod configured;
 mod context;
 mod region;
 mod tables;
 
+pub use configured::{
+    BasicTreeConfiguration, ConfiguredFeature, DecoratedFeatureConfiguration,
+    FoliagePlacerConfiguration, GlowLichenConfiguration, LakeConfiguration, OreConfiguration,
+    OreTarget, OreTargetBlockState, RandomFeatureConfiguration, RandomPatchConfiguration,
+    SimpleBlockConfiguration, SpringConfiguration, StraightTrunkPlacerConfiguration,
+    TreeConfiguration, TwoLayersFeatureSize, WeightedBlockState, WeightedConfiguredFeature,
+};
 pub use context::{DecorationStep, FeatureDecorationTiming, FeatureWorld};
 pub use region::{FeatureRegion, FeatureRegionMetrics};
 pub use tables::overworld_features_for_biome;
@@ -37,9 +43,6 @@ pub const FEATURES_WRITE_RADIUS_CUTOFF: i32 = 1;
 const SIN_TABLE_SIZE: usize = 65_536;
 const SIN_TABLE_MASK: i32 = 65_535;
 const SIN_SCALE: f32 = 10_430.378_f32;
-const WATER_SPRING_VALID_BLOCKS: [RawBlockId; 4] = [STONE, GRANITE, DIORITE, ANDESITE];
-const LAVA_SPRING_VALID_BLOCKS: [RawBlockId; 6] =
-    [STONE, GRANITE, DIORITE, ANDESITE, DEEPSLATE, TUFF];
 const SPRING_NEIGHBOR_DIRECTIONS: [Direction; 5] = [
     Direction::West,
     Direction::East,
@@ -47,124 +50,6 @@ const SPRING_NEIGHBOR_DIRECTIONS: [Direction; 5] = [
     Direction::South,
     Direction::Down,
 ];
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SimpleBlockConfiguration {
-    pub to_place: RawBlockId,
-    pub place_on: &'static [RawBlockId],
-    pub place_in: &'static [RawBlockId],
-    pub place_under: &'static [RawBlockId],
-}
-
-impl SimpleBlockConfiguration {
-    pub const fn new(to_place: RawBlockId) -> Self {
-        Self {
-            to_place,
-            place_on: &[],
-            place_in: &[],
-            place_under: &[],
-        }
-    }
-
-    pub const fn place_on(mut self, place_on: &'static [RawBlockId]) -> Self {
-        self.place_on = place_on;
-        self
-    }
-
-    pub const fn place_in(mut self, place_in: &'static [RawBlockId]) -> Self {
-        self.place_in = place_in;
-        self
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LakeConfiguration {
-    pub state: RawBlockId,
-}
-
-impl LakeConfiguration {
-    pub const fn new(state: RawBlockId) -> Self {
-        Self { state }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SpringConfiguration {
-    pub state: RawBlockId,
-    pub requires_block_below: bool,
-    pub rock_count: i32,
-    pub hole_count: i32,
-    pub valid_blocks: &'static [RawBlockId],
-}
-
-impl SpringConfiguration {
-    pub const fn new(
-        state: RawBlockId,
-        requires_block_below: bool,
-        rock_count: i32,
-        hole_count: i32,
-        valid_blocks: &'static [RawBlockId],
-    ) -> Self {
-        Self {
-            state,
-            requires_block_below,
-            rock_count,
-            hole_count,
-            valid_blocks,
-        }
-    }
-
-    pub const fn water() -> Self {
-        Self::new(WATER, true, 4, 1, &WATER_SPRING_VALID_BLOCKS)
-    }
-
-    pub const fn lava() -> Self {
-        Self::new(LAVA, true, 4, 1, &LAVA_SPRING_VALID_BLOCKS)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WeightedBlockState {
-    pub state: RawBlockId,
-    pub weight: i32,
-}
-
-impl WeightedBlockState {
-    pub const fn new(state: RawBlockId, weight: i32) -> Self {
-        Self { state, weight }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RandomPatchConfiguration {
-    pub state: RawBlockId,
-    pub weighted_states: &'static [WeightedBlockState],
-    pub tries: i32,
-    pub xspread: i32,
-    pub yspread: i32,
-    pub zspread: i32,
-    pub project: bool,
-    pub can_replace: bool,
-    pub double_plant: bool,
-    pub place_on: &'static [RawBlockId],
-}
-
-impl RandomPatchConfiguration {
-    pub const fn new(state: RawBlockId) -> Self {
-        Self {
-            state,
-            weighted_states: &[],
-            tries: 64,
-            xspread: 7,
-            yspread: 3,
-            zspread: 7,
-            project: true,
-            can_replace: false,
-            double_plant: false,
-            place_on: &[GRASS_BLOCK],
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Direction {
@@ -231,412 +116,7 @@ impl Direction {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GlowLichenConfiguration {
-    pub search_range: i32,
-    pub chance_of_spreading: f32,
-    pub can_be_placed_on: &'static [RawBlockId],
-}
-
-impl Eq for GlowLichenConfiguration {}
-
-impl GlowLichenConfiguration {
-    pub const fn default_overworld() -> Self {
-        Self {
-            search_range: 20,
-            chance_of_spreading: 0.5,
-            can_be_placed_on: &[STONE, ANDESITE, DIORITE, GRANITE, TUFF, DEEPSLATE],
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct BasicTreeConfiguration {
-    pub log: RawBlockId,
-    pub leaves: RawBlockId,
-    pub min_height: i32,
-    pub random_height: i32,
-}
-
-impl BasicTreeConfiguration {
-    pub const fn new(
-        log: RawBlockId,
-        leaves: RawBlockId,
-        min_height: i32,
-        random_height: i32,
-    ) -> Self {
-        Self {
-            log,
-            leaves,
-            min_height,
-            random_height,
-        }
-    }
-
-    pub const fn oak() -> Self {
-        Self::new(OAK_LOG, OAK_LEAVES, 4, 3)
-    }
-
-    pub const fn birch() -> Self {
-        Self::new(BIRCH_LOG, BIRCH_LEAVES, 5, 3)
-    }
-
-    pub const fn spruce() -> Self {
-        Self::new(SPRUCE_LOG, SPRUCE_LEAVES, 6, 4)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StraightTrunkPlacerConfiguration {
-    pub base_height: i32,
-    pub height_rand_a: i32,
-    pub height_rand_b: i32,
-}
-
-impl StraightTrunkPlacerConfiguration {
-    pub const fn new(base_height: i32, height_rand_a: i32, height_rand_b: i32) -> Self {
-        Self {
-            base_height,
-            height_rand_a,
-            height_rand_b,
-        }
-    }
-
-    fn tree_height(self, random: &mut impl RandomSource) -> i32 {
-        self.base_height
-            + random.next_int_bound(self.height_rand_a + 1)
-            + random.next_int_bound(self.height_rand_b + 1)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FoliagePlacerConfiguration {
-    Spruce {
-        radius: IntProvider,
-        offset: IntProvider,
-        trunk_height: IntProvider,
-    },
-    Pine {
-        radius: IntProvider,
-        offset: IntProvider,
-        height: IntProvider,
-    },
-}
-
-impl FoliagePlacerConfiguration {
-    fn foliage_height(
-        self,
-        random: &mut impl RandomSource,
-        tree_height: i32,
-        _config: TreeConfiguration,
-    ) -> i32 {
-        match self {
-            Self::Spruce { trunk_height, .. } => (tree_height - trunk_height.sample(random)).max(4),
-            Self::Pine { height, .. } => height.sample(random),
-        }
-    }
-
-    fn foliage_radius(self, random: &mut impl RandomSource, trunk_height: i32) -> i32 {
-        match self {
-            Self::Spruce { radius, .. } => radius.sample(random),
-            Self::Pine { radius, .. } => {
-                radius.sample(random) + random.next_int_bound((trunk_height + 1).max(1))
-            }
-        }
-    }
-
-    fn offset(self, random: &mut impl RandomSource) -> i32 {
-        match self {
-            Self::Spruce { offset, .. } | Self::Pine { offset, .. } => offset.sample(random),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TwoLayersFeatureSize {
-    pub limit: i32,
-    pub lower_size: i32,
-    pub upper_size: i32,
-}
-
-impl TwoLayersFeatureSize {
-    pub const fn new(limit: i32, lower_size: i32, upper_size: i32) -> Self {
-        Self {
-            limit,
-            lower_size,
-            upper_size,
-        }
-    }
-
-    pub const fn size_at_height(self, height: i32) -> i32 {
-        if height < self.limit {
-            self.lower_size
-        } else {
-            self.upper_size
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TreeConfiguration {
-    pub log: RawBlockId,
-    pub leaves: RawBlockId,
-    pub trunk_placer: StraightTrunkPlacerConfiguration,
-    pub foliage_placer: FoliagePlacerConfiguration,
-    pub minimum_size: TwoLayersFeatureSize,
-}
-
-impl TreeConfiguration {
-    pub const fn new(
-        log: RawBlockId,
-        leaves: RawBlockId,
-        trunk_placer: StraightTrunkPlacerConfiguration,
-        foliage_placer: FoliagePlacerConfiguration,
-        minimum_size: TwoLayersFeatureSize,
-    ) -> Self {
-        Self {
-            log,
-            leaves,
-            trunk_placer,
-            foliage_placer,
-            minimum_size,
-        }
-    }
-
-    pub const fn spruce() -> Self {
-        Self::new(
-            SPRUCE_LOG,
-            SPRUCE_LEAVES,
-            StraightTrunkPlacerConfiguration::new(5, 2, 1),
-            FoliagePlacerConfiguration::Spruce {
-                radius: IntProvider::uniform(2, 3),
-                offset: IntProvider::uniform(0, 2),
-                trunk_height: IntProvider::uniform(1, 2),
-            },
-            TwoLayersFeatureSize::new(2, 0, 2),
-        )
-    }
-
-    pub const fn pine() -> Self {
-        Self::new(
-            SPRUCE_LOG,
-            SPRUCE_LEAVES,
-            StraightTrunkPlacerConfiguration::new(6, 4, 0),
-            FoliagePlacerConfiguration::Pine {
-                radius: IntProvider::constant(1),
-                offset: IntProvider::constant(1),
-                height: IntProvider::uniform(3, 4),
-            },
-            TwoLayersFeatureSize::new(2, 0, 2),
-        )
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct WeightedConfiguredFeature {
-    pub feature: Box<ConfiguredFeature>,
-    pub chance: f32,
-}
-
-impl Eq for WeightedConfiguredFeature {}
-
-impl WeightedConfiguredFeature {
-    pub fn new(feature: ConfiguredFeature, chance: f32) -> Self {
-        Self {
-            feature: Box::new(feature),
-            chance,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct RandomFeatureConfiguration {
-    pub features: Vec<WeightedConfiguredFeature>,
-    pub default_feature: Box<ConfiguredFeature>,
-}
-
-impl Eq for RandomFeatureConfiguration {}
-
-impl RandomFeatureConfiguration {
-    pub fn new(
-        features: impl Into<Vec<WeightedConfiguredFeature>>,
-        default_feature: ConfiguredFeature,
-    ) -> Self {
-        Self {
-            features: features.into(),
-            default_feature: Box::new(default_feature),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DecoratedFeatureConfiguration {
-    pub feature: Box<ConfiguredFeature>,
-    pub decorators: Vec<ConfiguredDecorator>,
-}
-
-impl DecoratedFeatureConfiguration {
-    pub fn new(
-        feature: ConfiguredFeature,
-        decorators: impl Into<Vec<ConfiguredDecorator>>,
-    ) -> Self {
-        Self {
-            feature: Box::new(feature),
-            decorators: decorators.into(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum OreTarget {
-    NaturalStone,
-    StoneOreReplaceables,
-    DeepslateOreReplaceables,
-}
-
-impl OreTarget {
-    fn matches(self, block_id: RawBlockId) -> bool {
-        match self {
-            Self::NaturalStone => {
-                matches!(
-                    block_id,
-                    STONE | GRANITE | DIORITE | ANDESITE | TUFF | DEEPSLATE
-                )
-            }
-            Self::StoneOreReplaceables => matches!(block_id, STONE | GRANITE | DIORITE | ANDESITE),
-            Self::DeepslateOreReplaceables => matches!(block_id, TUFF | DEEPSLATE),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct OreTargetBlockState {
-    pub target: OreTarget,
-    pub state: RawBlockId,
-}
-
-impl OreTargetBlockState {
-    pub const fn new(target: OreTarget, state: RawBlockId) -> Self {
-        Self { target, state }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct OreConfiguration {
-    pub target_states: Vec<OreTargetBlockState>,
-    pub size: i32,
-    pub discard_chance_on_air_exposure: f32,
-}
-
-impl Eq for OreConfiguration {}
-
-impl OreConfiguration {
-    pub fn new(
-        target_states: impl Into<Vec<OreTargetBlockState>>,
-        size: i32,
-        discard_chance_on_air_exposure: f32,
-    ) -> Self {
-        Self {
-            target_states: target_states.into(),
-            size,
-            discard_chance_on_air_exposure,
-        }
-    }
-
-    pub fn natural_stone(state: RawBlockId, size: i32) -> Self {
-        Self::new(
-            [OreTargetBlockState::new(OreTarget::NaturalStone, state)],
-            size,
-            0.0,
-        )
-    }
-
-    pub fn stone_and_deepslate_ore(
-        stone_ore: RawBlockId,
-        deepslate_ore: RawBlockId,
-        size: i32,
-    ) -> Self {
-        Self::new(
-            [
-                OreTargetBlockState::new(OreTarget::StoneOreReplaceables, stone_ore),
-                OreTargetBlockState::new(OreTarget::DeepslateOreReplaceables, deepslate_ore),
-            ],
-            size,
-            0.0,
-        )
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ConfiguredFeature {
-    Noop,
-    Lake(LakeConfiguration),
-    Spring(SpringConfiguration),
-    SimpleBlock(SimpleBlockConfiguration),
-    RandomPatch(RandomPatchConfiguration),
-    Flower(RandomPatchConfiguration),
-    GlowLichen(GlowLichenConfiguration),
-    BasicTree(BasicTreeConfiguration),
-    Tree(TreeConfiguration),
-    RandomSelector(RandomFeatureConfiguration),
-    Decorated(DecoratedFeatureConfiguration),
-    Ore(OreConfiguration),
-    FreezeTopLayer,
-}
-
 impl ConfiguredFeature {
-    pub const fn noop() -> Self {
-        Self::Noop
-    }
-
-    pub const fn lake(config: LakeConfiguration) -> Self {
-        Self::Lake(config)
-    }
-
-    pub const fn spring(config: SpringConfiguration) -> Self {
-        Self::Spring(config)
-    }
-
-    pub const fn simple_block(config: SimpleBlockConfiguration) -> Self {
-        Self::SimpleBlock(config)
-    }
-
-    pub const fn random_patch(config: RandomPatchConfiguration) -> Self {
-        Self::RandomPatch(config)
-    }
-
-    pub const fn flower(config: RandomPatchConfiguration) -> Self {
-        Self::Flower(config)
-    }
-
-    pub const fn glow_lichen(config: GlowLichenConfiguration) -> Self {
-        Self::GlowLichen(config)
-    }
-
-    pub const fn basic_tree(config: BasicTreeConfiguration) -> Self {
-        Self::BasicTree(config)
-    }
-
-    pub const fn tree(config: TreeConfiguration) -> Self {
-        Self::Tree(config)
-    }
-
-    pub fn random_selector(config: RandomFeatureConfiguration) -> Self {
-        Self::RandomSelector(config)
-    }
-
-    pub fn decorated(config: DecoratedFeatureConfiguration) -> Self {
-        Self::Decorated(config)
-    }
-
-    pub const fn ore(config: OreConfiguration) -> Self {
-        Self::Ore(config)
-    }
-
-    pub const fn freeze_top_layer() -> Self {
-        Self::FreezeTopLayer
-    }
-
     pub fn place<W: FeatureWorld>(
         &self,
         world: &mut W,
@@ -2315,9 +1795,10 @@ mod tests {
     use super::*;
     use crate::biome::get_layered_biome_by_id;
     use crate::block::{
-        COAL_ORE, COPPER_ORE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE, DEEPSLATE_DIAMOND_ORE,
-        DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE, DEEPSLATE_REDSTONE_ORE,
-        DIAMOND_ORE, GOLD_ORE, GRAVEL, IRON_ORE, LAPIS_ORE, REDSTONE_ORE, STONE,
+        ANDESITE, COAL_ORE, COPPER_ORE, DEEPSLATE, DEEPSLATE_COAL_ORE, DEEPSLATE_COPPER_ORE,
+        DEEPSLATE_DIAMOND_ORE, DEEPSLATE_GOLD_ORE, DEEPSLATE_IRON_ORE, DEEPSLATE_LAPIS_ORE,
+        DEEPSLATE_REDSTONE_ORE, DIAMOND_ORE, DIORITE, GOLD_ORE, GRANITE, GRAVEL, IRON_ORE,
+        LAPIS_ORE, REDSTONE_ORE, STONE, TUFF,
     };
     use crate::placement::{HeightProvider, VerticalAnchor};
     use crate::prng::WorldgenRandom;

@@ -181,8 +181,9 @@ module.
   stabilizes: `types`, `tickets`, `distance_manager`, `holder`, `scheduler`,
   `worldgen_mailbox`, `fluid`, `integrated`, `lighting_seed`, and `timing`.
 - [ ] Split `mclone-worldgen::feature` around Java-shaped concepts:
-  `context` (done), `region` (done), `tables` (done), `configured`, `placed`,
-  `lake`, `spring`, `ore`, `tree`, `patch`, `glow_lichen`, and `top_layer`.
+  `context` (done), `region` (done), `tables` (done), `configured` (done),
+  `placed`, `lake`, `spring`, `ore`, `tree`, `patch`, `glow_lichen`, and
+  `top_layer`.
 - [ ] Split `mclone-worldgen::levelgen` into chunk data, settings, sampler,
   generator, feature-batch, and timing modules.
 - [ ] Split `mclone-mesh` into visibility, mesh data, textured catalog, and
@@ -237,7 +238,17 @@ module.
      vegetal/patch builders, and the `TAIGA_GRASS_STATES`/`DEFAULT_FLOWER_STATES`
      consts into `feature/tables.rs`. `chunk_primary_biome`, `test_support`, and
      the apply/place path stay in `feature.rs`.
-   - Continue with low-risk move-only boundaries: `configured` and `placed`.
+   - `configured` boundary done: mirrors Java's `feature/configurations/` (data)
+     vs. `feature/` (behavior). Moved all `*Configuration` structs, the tree
+     trunk/foliage/size and ore-target configs, and the `ConfiguredFeature` enum
+     plus its constructor `impl` into `feature/configured.rs` (all re-exported
+     from `feature.rs`). The `ConfiguredFeature::place`/`place_with_biomes`
+     dispatch `impl` stays in `feature.rs` next to the `place_*` behavior (a
+     second inherent `impl` block in the parent module). `Direction` stays in
+     `feature.rs` because Java models it as a core type (`net.minecraft.core`),
+     not a feature configuration; a later slice may move it toward a core/
+     geometry module.
+   - Continue with the low-risk move-only boundary `placed` next.
    - Leave individual feature behavior (`lake`, `spring`, `ore`, `tree`,
      `patch`, `glow_lichen`, `top_layer`) for follow-up slices.
 
