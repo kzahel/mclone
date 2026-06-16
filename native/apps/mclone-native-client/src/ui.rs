@@ -8,12 +8,13 @@ use mclone_ui::{
 };
 use winit::keyboard::KeyCode;
 
+use crate::app::RenderStreamStats;
 use crate::cli::HeadlessScreenshotUi;
 use crate::frame_pacing::{
     FramePacingDebugStats, FramePacingMode, FramePacingUiState, FrameTimingStats,
 };
 use crate::scene_runtime::WindowRuntimeStats;
-use crate::{DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, RenderStreamStats};
+use crate::{DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 
 const MIN_UI_RENDER_DISTANCE: i32 = MIN_RENDER_DISTANCE;
 

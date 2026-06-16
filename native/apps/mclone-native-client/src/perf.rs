@@ -16,6 +16,7 @@ use mclone_render::headless::{
 use mclone_render::target::RenderFrameContext;
 use mclone_ui::GuiScale;
 
+use crate::app::{RenderStreamStats, record_render_section_update_stats, render_full_frame};
 use crate::camera::{
     SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
 };
@@ -29,10 +30,7 @@ use crate::scene_runtime::{
     poll_window_runtime_until_idle, square_count,
 };
 use crate::ui::NativeUi;
-use crate::{
-    MAX_RENDER_DISTANCE, RenderStreamStats, print_benchmark_metadata,
-    record_render_section_update_stats, render_full_frame,
-};
+use crate::{MAX_RENDER_DISTANCE, print_benchmark_metadata};
 
 #[derive(Clone, Debug)]
 pub(crate) struct MovementPerfReport {
