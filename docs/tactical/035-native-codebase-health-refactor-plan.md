@@ -182,7 +182,7 @@ module.
   `worldgen_mailbox`, `fluid`, `integrated`, `lighting_seed`, and `timing`.
 - [ ] Split `mclone-worldgen::feature` around Java-shaped concepts:
   `context` (done), `region` (done), `tables` (done), `configured` (done),
-  `placed`, `lake`, `spring`, `ore`, `tree`, `patch`, `glow_lichen`, and
+  `placed` (done), `lake`, `spring`, `ore`, `tree`, `patch`, `glow_lichen`, and
   `top_layer`.
 - [ ] Split `mclone-worldgen::levelgen` into chunk data, settings, sampler,
   generator, feature-batch, and timing modules.
@@ -248,7 +248,19 @@ module.
      `feature.rs` because Java models it as a core type (`net.minecraft.core`),
      not a feature configuration; a later slice may move it toward a core/
      geometry module.
-   - Continue with the low-risk move-only boundary `placed` next.
+   - `placed` boundary done: mirrors Java's `levelgen/placement/` +
+     `PlacedFeature`. Moved `PlacedFeature`, the decorator-application plumbing
+     (`decorator_positions`, `place_configured_decorated_feature*`),
+     `DecorationReport`/`TimedDecorationReport`, the public `apply_*` entry
+     points, `chunk_primary_biome`, the feature-timing helpers, and the
+     `test_support` seed-flow helper into `feature/placed.rs` (entry points and
+     `PlacedFeature` re-exported from `feature.rs`; `test_support` re-exported
+     under `#[cfg(test)]`). The `ConfiguredFeature::place`/`place_with_biomes`
+     dispatch and all per-feature `place_*` behavior stay in `feature.rs`.
+   - First-split boundaries are complete. Remaining feature slices are the
+     per-feature behavior modules: `lake`, `spring`, `ore`, `tree`, `patch`,
+     `glow_lichen`, and `top_layer` (mirroring Java's one-file-per-feature
+     layout), plus moving `Direction` toward a core/geometry module.
    - Leave individual feature behavior (`lake`, `spring`, `ore`, `tree`,
      `patch`, `glow_lichen`, `top_layer`) for follow-up slices.
 
