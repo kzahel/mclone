@@ -18,7 +18,7 @@ use mclone_core::{
 use mclone_mesh::{
     RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog,
     TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, VisibilityGraphBuildStats,
-    build_textured_render_sections_for_chunk_set_with_stats,
+    build_textured_render_sections_for_section_set_with_stats,
     build_textured_render_sections_with_stats, quad_face_count_from_indices,
 };
 use mclone_net::{LocalTransport, request_server_updates};
@@ -77,6 +77,7 @@ const SPECTATOR_PITCH_LIMIT: f32 = 1.52;
 const DEFAULT_FPS_CAP: u32 = 120;
 const FPS_CAPS: [u32; 6] = [60, 90, 120, 144, 165, 240];
 const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
+const RENDER_NEIGHBOR_READY_DISTANCE_SQ: f32 = 24.0 * 24.0;
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -1726,7 +1727,7 @@ fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<MovementPerf
         let (poll_count, poll_ms) = poll_window_runtime_until_idle(&mut runtime)?;
 
         let remesh_start = Instant::now();
-        let section_update = runtime.sync_all_render_sections()?;
+        let section_update = runtime.sync_all_render_sections(spectator.position)?;
         let sections = runtime.cached_sections();
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let camera = spectator.camera(runtime.radius_chunks);
@@ -1840,9 +1841,10 @@ fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> {
 fn probe_sync_upload_sections(
     frame: &RenderFrameContext<'_>,
     state: &mut FrameBudgetProbeState,
+    camera_position: Vec3,
 ) -> Result<FrameBudgetProbeSectionTiming> {
     let remesh_start = Instant::now();
-    let section_update = state.runtime.sync_render_sections()?;
+    let section_update = state.runtime.sync_render_sections(camera_position)?;
     let remesh_ms = elapsed_ms(remesh_start.elapsed());
     let upload_start = Instant::now();
     let upload_report = state
@@ -1896,7 +1898,7 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
     let mut runtime = WindowSceneRuntime::new(&runtime_scene)?;
     let (initial_poll_count, initial_poll_ms) = poll_window_runtime_until_idle(&mut runtime)?;
     let initial_remesh_start = Instant::now();
-    let initial_update = runtime.sync_all_render_sections()?;
+    let initial_update = runtime.sync_all_render_sections(initial_spectator.position)?;
     let initial_sections = runtime.cached_sections();
     let initial_remesh_ms = elapsed_ms(initial_remesh_start.elapsed());
     if initial_sections.is_empty() {
@@ -2019,8 +2021,8 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
             report.poll_fluid_snapshot_events = poll_diagnostics.fluid_snapshot_events;
             report.poll_fluid_event_count = poll_diagnostics.fluid_event_count;
             report.poll_scheduled_fluid_ticks = poll_diagnostics.scheduled_fluid_ticks;
-            if state.runtime.has_pending_render_work() {
-                let update = probe_sync_upload_sections(&frame, state)?;
+            if state.runtime.has_pending_render_work(spectator.position) {
+                let update = probe_sync_upload_sections(&frame, state, spectator.position)?;
                 report.add_section_timing(update);
             }
 
@@ -2253,6 +2255,9 @@ struct RenderSectionCacheUpdate {
     removed_section_keys: BTreeSet<RenderSectionKey>,
     rebuilt_vertex_count: u32,
     rebuilt_index_count: u32,
+    neighbor_ready_section_count: usize,
+    near_exception_section_count: usize,
+    deferred_section_count: usize,
     visibility_graph_stats: VisibilityGraphBuildStats,
 }
 
@@ -2289,59 +2294,65 @@ impl CachedTexturedRenderSections {
         &mut self,
         client: &ClientRuntime,
         catalog: &TexturedMeshCatalog,
-        dirty_chunks: &BTreeSet<ChunkPos>,
+        ready_section_keys: &BTreeSet<RenderSectionKey>,
+        removal_chunks: &BTreeSet<ChunkPos>,
     ) -> Result<RenderSectionCacheUpdate> {
-        if dirty_chunks.is_empty() {
+        if ready_section_keys.is_empty() && removal_chunks.is_empty() {
             return Ok(RenderSectionCacheUpdate::default());
         }
 
-        let chunks = mesh_chunks_from_client(client)?;
-        let inputs = textured_mesh_inputs(&chunks);
-        let loaded_targets = chunks
-            .iter()
-            .map(|chunk| (chunk.chunk_x, chunk.chunk_z))
-            .collect::<BTreeSet<_>>();
-        let target_chunks = dirty_chunks
-            .iter()
-            .map(|pos| (pos.x, pos.z))
-            .filter(|coord| loaded_targets.contains(coord))
-            .collect::<BTreeSet<_>>();
-        let rebuilt_report = build_textured_render_sections_for_chunk_set_with_stats(
-            &inputs,
-            catalog,
-            &target_chunks,
-        )
-        .context("failed to build dirty textured sections")?;
+        let rebuilt_report = if ready_section_keys.is_empty() {
+            Default::default()
+        } else {
+            let chunks = mesh_chunks_from_client(client)?;
+            let inputs = textured_mesh_inputs(&chunks);
+            build_textured_render_sections_for_section_set_with_stats(
+                &inputs,
+                catalog,
+                ready_section_keys,
+            )
+            .context("failed to build dirty textured sections")?
+        };
         let rebuilt_keys = rebuilt_report
             .sections
             .iter()
             .map(|section| section.key)
             .collect::<BTreeSet<_>>();
-        let dirty_coords = dirty_chunks
-            .iter()
-            .map(|pos| (pos.x, pos.z))
-            .collect::<BTreeSet<_>>();
-        let old_dirty_keys = self
+        let rebuilt_sections = rebuilt_report
+            .sections
+            .into_iter()
+            .filter(|section| ready_section_keys.contains(&section.key))
+            .collect::<Vec<_>>();
+        let old_ready_keys = self
             .sections
             .keys()
             .copied()
-            .filter(|key| dirty_coords.contains(&(key.chunk_x, key.chunk_z)))
+            .filter(|key| ready_section_keys.contains(key))
             .collect::<BTreeSet<_>>();
-        let removed_section_keys = old_dirty_keys
+        let removal_keys = self
+            .sections
+            .keys()
+            .copied()
+            .filter(|key| removal_chunks.contains(&ChunkPos::new(key.chunk_x, key.chunk_z)))
+            .collect::<BTreeSet<_>>();
+        let mut removed_section_keys = old_ready_keys
             .difference(&rebuilt_keys)
             .copied()
             .collect::<BTreeSet<_>>();
+        removed_section_keys.extend(removal_keys);
 
         for key in &removed_section_keys {
             self.sections.remove(key);
         }
 
         let mut report = RenderSectionCacheUpdate {
-            rebuilt_sections: rebuilt_report.sections,
+            rebuilt_sections,
             removed_section_keys,
             rebuilt_vertex_count: 0,
             rebuilt_index_count: 0,
             visibility_graph_stats: rebuilt_report.visibility_graph,
+            neighbor_ready_section_count: ready_section_keys.len(),
+            ..RenderSectionCacheUpdate::default()
         };
         for section in &report.rebuilt_sections {
             let stats = section.stats();
@@ -2385,7 +2396,8 @@ fn run_headless_screenshot(
 ) -> Result<HeadlessScreenshotReport> {
     let mut runtime = WindowSceneRuntime::new(&options.scene)?;
     poll_window_runtime_until_idle(&mut runtime)?;
-    let section_update = runtime.sync_all_render_sections()?;
+    let spectator = SpectatorCamera::spawn_for_scene(&options.scene);
+    let section_update = runtime.sync_all_render_sections(spectator.position)?;
     let sections = runtime.cached_sections();
     if sections.is_empty() {
         bail!(
@@ -2397,7 +2409,6 @@ fn run_headless_screenshot(
         );
     }
 
-    let spectator = SpectatorCamera::spawn_for_scene(&options.scene);
     let mut ui = NativeUi::new(options.scene.chunk_radius);
     ui.set_screen(options.ui.native_screen());
     ui.set_scale(GuiScale::from_pixels(options.width, options.height));
@@ -2843,16 +2854,20 @@ impl WindowSceneRuntime {
             .extend(render_dirty_chunk_neighborhood(pos));
     }
 
-    fn sync_render_sections(&mut self) -> Result<RenderSectionCacheUpdate> {
-        self.sync_render_sections_with_budget(DEFAULT_RENDER_CHUNK_MESH_BUDGET)
+    fn sync_render_sections(&mut self, camera_position: Vec3) -> Result<RenderSectionCacheUpdate> {
+        self.sync_render_sections_with_budget(camera_position, DEFAULT_RENDER_CHUNK_MESH_BUDGET)
     }
 
-    fn sync_all_render_sections(&mut self) -> Result<RenderSectionCacheUpdate> {
-        self.sync_render_sections_with_budget(usize::MAX)
+    fn sync_all_render_sections(
+        &mut self,
+        camera_position: Vec3,
+    ) -> Result<RenderSectionCacheUpdate> {
+        self.sync_render_sections_with_budget(camera_position, usize::MAX)
     }
 
     fn sync_render_sections_with_budget(
         &mut self,
+        camera_position: Vec3,
         chunk_budget: usize,
     ) -> Result<RenderSectionCacheUpdate> {
         if self.render_sections.is_empty()
@@ -2873,38 +2888,75 @@ impl WindowSceneRuntime {
             return Ok(RenderSectionCacheUpdate::default());
         }
 
-        let mut stale_dirty_chunks = Vec::new();
-        let mut loaded_dirty_chunks = Vec::new();
-        let mut removal_dirty_chunks = Vec::new();
+        let mut stale_dirty_chunks = BTreeSet::new();
+        let mut loaded_dirty_chunks = BTreeSet::new();
+        let mut removal_dirty_chunks = BTreeSet::new();
         for pos in self.dirty_render_chunks.iter().copied() {
             if self.client.chunk_snapshot(pos).is_some() {
-                loaded_dirty_chunks.push(pos);
+                loaded_dirty_chunks.insert(pos);
             } else if self.render_sections.contains_chunk(pos) {
-                removal_dirty_chunks.push(pos);
+                removal_dirty_chunks.insert(pos);
             } else {
-                stale_dirty_chunks.push(pos);
+                stale_dirty_chunks.insert(pos);
             }
         }
-        let dirty_chunks = loaded_dirty_chunks
+
+        let budgeted_loaded_chunks = loaded_dirty_chunks
             .into_iter()
             .take(chunk_budget)
-            .chain(removal_dirty_chunks)
             .collect::<BTreeSet<_>>();
+        let mut ready_section_keys = BTreeSet::new();
+        let mut near_exception_section_count = 0;
+        let mut deferred_section_count = 0;
+        for pos in &budgeted_loaded_chunks {
+            let Some(snapshot) = self.client.chunk_snapshot(*pos) else {
+                continue;
+            };
+            for key in render_section_keys_for_snapshot(snapshot) {
+                let readiness =
+                    render_section_neighbor_readiness(&self.client, key, camera_position);
+                if readiness.is_ready() {
+                    if readiness.is_near_exception() {
+                        near_exception_section_count += 1;
+                    }
+                    ready_section_keys.insert(key);
+                } else {
+                    deferred_section_count += 1;
+                }
+            }
+        }
         for pos in stale_dirty_chunks {
             self.dirty_render_chunks.remove(&pos);
         }
-        if dirty_chunks.is_empty() {
-            return Ok(RenderSectionCacheUpdate::default());
+        if ready_section_keys.is_empty() && removal_dirty_chunks.is_empty() {
+            for pos in budgeted_loaded_chunks {
+                self.dirty_render_chunks.remove(&pos);
+            }
+            return Ok(RenderSectionCacheUpdate {
+                deferred_section_count,
+                near_exception_section_count,
+                ..RenderSectionCacheUpdate::default()
+            });
         }
 
         let report = self.render_sections.rebuild_dirty(
             &self.client,
             &self.mesh_assets.catalog,
-            &dirty_chunks,
+            &ready_section_keys,
+            &removal_dirty_chunks,
         )?;
-        for pos in dirty_chunks {
+        let mut report = RenderSectionCacheUpdate {
+            deferred_section_count,
+            near_exception_section_count,
+            ..report
+        };
+        for pos in budgeted_loaded_chunks
+            .into_iter()
+            .chain(removal_dirty_chunks)
+        {
             self.dirty_render_chunks.remove(&pos);
         }
+        report.neighbor_ready_section_count = ready_section_keys.len();
         Ok(report)
     }
 
@@ -2912,8 +2964,8 @@ impl WindowSceneRuntime {
         self.render_sections.sections()
     }
 
-    fn has_pending_render_work(&self) -> bool {
-        self.pending_render_chunk_count() > 0
+    fn has_pending_render_work(&self, camera_position: Vec3) -> bool {
+        self.has_ready_pending_render_work(camera_position)
     }
 
     fn pending_render_chunk_count(&self) -> usize {
@@ -2924,6 +2976,23 @@ impl WindowSceneRuntime {
                     || self.render_sections.contains_chunk(**pos)
             })
             .count()
+    }
+
+    fn has_ready_pending_render_work(&self, camera_position: Vec3) -> bool {
+        self.dirty_render_chunks.iter().copied().any(|pos| {
+            if self.render_sections.contains_chunk(pos) && self.client.chunk_snapshot(pos).is_none()
+            {
+                return true;
+            }
+            let Some(snapshot) = self.client.chunk_snapshot(pos) else {
+                return false;
+            };
+            render_section_keys_for_snapshot(snapshot)
+                .into_iter()
+                .any(|key| {
+                    render_section_neighbor_readiness(&self.client, key, camera_position).is_ready()
+                })
+        })
     }
 
     fn pending_job_count(&self) -> usize {
@@ -3372,6 +3441,74 @@ fn snapshot_block_state_at_world(
     )
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RenderNeighborReadiness {
+    ReadyWithNeighbors,
+    ReadyNearCamera,
+    DeferredMissingNeighbors,
+}
+
+impl RenderNeighborReadiness {
+    const fn is_ready(self) -> bool {
+        matches!(self, Self::ReadyWithNeighbors | Self::ReadyNearCamera)
+    }
+
+    const fn is_near_exception(self) -> bool {
+        matches!(self, Self::ReadyNearCamera)
+    }
+}
+
+fn render_section_keys_for_snapshot(snapshot: &ChunkSnapshot) -> Vec<RenderSectionKey> {
+    let min_section_y = snapshot.min_y.div_euclid(SECTION_HEIGHT);
+    let section_count = snapshot.height / SECTION_HEIGHT;
+    (0..section_count)
+        .map(|offset| RenderSectionKey::new(snapshot.pos.x, min_section_y + offset, snapshot.pos.z))
+        .collect()
+}
+
+fn render_section_neighbor_readiness(
+    client: &ClientRuntime,
+    key: RenderSectionKey,
+    camera_position: Vec3,
+) -> RenderNeighborReadiness {
+    if render_section_distance_sq(key, camera_position) <= RENDER_NEIGHBOR_READY_DISTANCE_SQ {
+        return RenderNeighborReadiness::ReadyNearCamera;
+    }
+    if has_horizontal_neighbor_snapshots(client, ChunkPos::new(key.chunk_x, key.chunk_z)) {
+        RenderNeighborReadiness::ReadyWithNeighbors
+    } else {
+        RenderNeighborReadiness::DeferredMissingNeighbors
+    }
+}
+
+fn render_section_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f32 {
+    let center = render_section_center(key);
+    center.distance_squared(camera_position)
+}
+
+fn render_section_center(key: RenderSectionKey) -> Vec3 {
+    Vec3::new(
+        render_chunk_world_origin(key.chunk_x) as f32 + CHUNK_WIDTH as f32 * 0.5,
+        (key.section_y * SECTION_HEIGHT) as f32 + SECTION_HEIGHT as f32 * 0.5,
+        render_chunk_world_origin(key.chunk_z) as f32 + CHUNK_WIDTH as f32 * 0.5,
+    )
+}
+
+fn has_horizontal_neighbor_snapshots(client: &ClientRuntime, pos: ChunkPos) -> bool {
+    [
+        ChunkPos::new(pos.x - 1, pos.z),
+        ChunkPos::new(pos.x + 1, pos.z),
+        ChunkPos::new(pos.x, pos.z - 1),
+        ChunkPos::new(pos.x, pos.z + 1),
+    ]
+    .into_iter()
+    .all(|neighbor| client.chunk_snapshot(neighbor).is_some())
+}
+
+fn render_chunk_world_origin(chunk_coord: i32) -> i32 {
+    chunk_coord * CHUNK_WIDTH
+}
+
 fn render_dirty_chunk_neighborhood(pos: ChunkPos) -> [ChunkPos; 5] {
     [
         pos,
@@ -3395,6 +3532,9 @@ struct RenderStreamStats {
     last_rebuilt_vertex_count: u32,
     last_rebuilt_face_count: u32,
     last_rebuilt_index_count: u32,
+    last_neighbor_ready_section_count: usize,
+    last_near_exception_section_count: usize,
+    last_deferred_section_count: usize,
     last_visibility_graph_build_count: usize,
     last_visibility_graph_total_ms: f64,
     last_visibility_graph_worst_ms: f64,
@@ -3738,9 +3878,10 @@ impl DebugPaneStats {
                 self.render.face_count
             ),
             format!(
-                "MESH R{} U{} F {:.1}MS",
+                "MESH R{} U{} D{} F {:.1}MS",
                 self.render.last_rebuilt_section_count,
                 self.render.last_uploaded_section_count,
+                self.render.last_deferred_section_count,
                 self.render.last_frame_ms
             ),
             format!("BUDGET {} FRAME {:.1}MS", budget, self.frame.last_frame_ms),
@@ -4670,7 +4811,11 @@ impl ChunkApp {
         let changed = self.runtime.poll()?;
         self.frame_timing
             .record_runtime_poll(elapsed_ms(poll_start.elapsed()));
-        if !changed && !self.runtime.has_pending_render_work() {
+        if !changed
+            && !self
+                .runtime
+                .has_pending_render_work(self.spectator.position)
+        {
             return Ok(());
         }
         self.upload_runtime_sections()?;
@@ -4682,7 +4827,7 @@ impl ChunkApp {
             return Ok(());
         };
         let remesh_start = Instant::now();
-        let section_update = self.runtime.sync_render_sections()?;
+        let section_update = self.runtime.sync_render_sections(self.spectator.position)?;
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let upload_start = Instant::now();
         let upload_report = draw
@@ -4777,6 +4922,9 @@ fn record_render_section_update_stats(
     render_stats.last_rebuilt_vertex_count = section_update.rebuilt_vertex_count;
     render_stats.last_rebuilt_face_count = section_update.rebuilt_face_count();
     render_stats.last_rebuilt_index_count = section_update.rebuilt_index_count;
+    render_stats.last_neighbor_ready_section_count = section_update.neighbor_ready_section_count;
+    render_stats.last_near_exception_section_count = section_update.near_exception_section_count;
+    render_stats.last_deferred_section_count = section_update.deferred_section_count;
     render_stats.last_visibility_graph_build_count =
         section_update.visibility_graph_stats.build_count;
     render_stats.last_visibility_graph_total_ms = section_update.visibility_graph_stats.total_ms;
@@ -4815,7 +4963,10 @@ impl ApplicationHandler for ChunkApp {
         self.frame_pacing.update_monitor(&window);
         self.frame_pacing.apply_to_surface(&mut surface);
         let remesh_start = Instant::now();
-        let section_update = match self.runtime.sync_all_render_sections() {
+        let section_update = match self
+            .runtime
+            .sync_all_render_sections(self.spectator.position)
+        {
             Ok(update) => update,
             Err(err) => {
                 log::error!("failed to build initial chunk sections: {err:#}");
@@ -5339,6 +5490,70 @@ mod tests {
     }
 
     #[test]
+    fn render_section_readiness_uses_near_exception_and_horizontal_neighbors() {
+        let target = ChunkPos::new(2, -3);
+        let key = RenderSectionKey::new(target.x, 0, target.z);
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(empty_test_snapshot(target)));
+
+        assert_eq!(
+            render_section_neighbor_readiness(&client, key, render_section_center(key)),
+            RenderNeighborReadiness::ReadyNearCamera
+        );
+
+        let far_camera = render_section_center(key) + Vec3::new(128.0, 0.0, 0.0);
+        assert_eq!(
+            render_section_neighbor_readiness(&client, key, far_camera),
+            RenderNeighborReadiness::DeferredMissingNeighbors
+        );
+
+        for neighbor in [
+            ChunkPos::new(target.x - 1, target.z),
+            ChunkPos::new(target.x + 1, target.z),
+            ChunkPos::new(target.x, target.z - 1),
+            ChunkPos::new(target.x, target.z + 1),
+        ] {
+            client.apply_update(ServerUpdate::ChunkSnapshot(empty_test_snapshot(neighbor)));
+        }
+
+        assert_eq!(
+            render_section_neighbor_readiness(&client, key, far_camera),
+            RenderNeighborReadiness::ReadyWithNeighbors
+        );
+    }
+
+    #[test]
+    fn render_section_keys_cover_snapshot_height() {
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(-1, 4),
+            ChunkStatus::Full,
+            ChunkRevision(1),
+            -16,
+            32,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME * 2],
+        );
+
+        assert_eq!(
+            render_section_keys_for_snapshot(&snapshot),
+            vec![
+                RenderSectionKey::new(-1, -1, 4),
+                RenderSectionKey::new(-1, 0, 4)
+            ]
+        );
+    }
+
+    fn empty_test_snapshot(pos: ChunkPos) -> ChunkSnapshot {
+        ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Full,
+            ChunkRevision(1),
+            0,
+            16,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        )
+    }
+
+    #[test]
     fn spectator_spawn_starts_interest_in_scene_center_chunk() {
         let scene = SceneOptions {
             chunk_x: 3,
@@ -5610,7 +5825,8 @@ mod tests {
         assert_eq!(initial_stats.pending_jobs, 0);
         assert!(runtime.client.chunk_snapshot(initial_center).is_some());
 
-        let initial_update = runtime.sync_render_sections().unwrap();
+        let mut spectator = SpectatorCamera::spawn_for_scene(&scene);
+        let initial_update = runtime.sync_render_sections(spectator.position).unwrap();
         assert!(initial_update.rebuilt_section_count() > 0);
         assert_eq!(initial_update.removed_section_count(), 0);
         let initial_sections = runtime.cached_sections();
@@ -5622,7 +5838,6 @@ mod tests {
                 .all(|section| section.key.chunk_x == 0 && section.key.chunk_z == 0)
         );
 
-        let mut spectator = SpectatorCamera::spawn_for_scene(&scene);
         spectator.position.x = 16.25;
         let next_center = spectator.chunk_pos();
         assert_eq!(next_center, ChunkPos::new(1, 0));
@@ -5639,7 +5854,7 @@ mod tests {
         assert!(runtime.client.chunk_snapshot(initial_center).is_none());
         assert!(runtime.client.chunk_snapshot(next_center).is_some());
 
-        let moved_update = runtime.sync_render_sections().unwrap();
+        let moved_update = runtime.sync_render_sections(spectator.position).unwrap();
         assert!(moved_update.rebuilt_section_count() > 0);
         assert!(moved_update.removed_section_count() > 0);
         let moved_sections = runtime.cached_sections();
@@ -5650,6 +5865,35 @@ mod tests {
                 .iter()
                 .all(|section| section.key.chunk_x == 1 && section.key.chunk_z == 0)
         );
+    }
+
+    #[test]
+    fn window_runtime_defers_far_boundary_sections_without_neighbors() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let scene = SceneOptions {
+            chunk_radius: 0,
+            ..SceneOptions::default()
+        };
+        let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
+        poll_window_runtime_until_idle(&mut runtime).unwrap();
+
+        let spectator = SpectatorCamera::spawn_for_scene(&scene);
+        let update = runtime
+            .sync_all_render_sections(spectator.position)
+            .unwrap();
+
+        assert!(update.rebuilt_section_count() > 0);
+        assert!(update.near_exception_section_count > 0);
+        assert!(update.deferred_section_count > 0);
+        assert_eq!(runtime.pending_render_chunk_count(), 0);
+        assert!(!runtime.has_pending_render_work(spectator.position));
+        assert!(runtime.cached_sections().iter().all(|section| {
+            render_section_distance_sq(section.key, spectator.position)
+                <= RENDER_NEIGHBOR_READY_DISTANCE_SQ
+        }));
     }
 
     #[test]
@@ -5674,7 +5918,10 @@ mod tests {
         poll_window_runtime_until_idle(&mut runtime).unwrap();
         assert_eq!(runtime.stats().loaded_chunks, square_count(1).unwrap());
 
-        let grown_update = runtime.sync_all_render_sections().unwrap();
+        let spectator = SpectatorCamera::spawn_for_scene(&scene);
+        let grown_update = runtime
+            .sync_all_render_sections(spectator.position)
+            .unwrap();
         assert!(grown_update.rebuilt_section_count() > 0);
         assert_eq!(grown_update.removed_section_count(), 0);
         assert!(runtime.cached_sections().iter().any(|section| {
@@ -5686,7 +5933,9 @@ mod tests {
         assert_eq!(runtime.radius_chunks, 0);
         assert_eq!(runtime.stats().loaded_chunks, square_count(0).unwrap());
 
-        let shrunk_update = runtime.sync_all_render_sections().unwrap();
+        let shrunk_update = runtime
+            .sync_all_render_sections(spectator.position)
+            .unwrap();
         assert!(shrunk_update.removed_section_count() > 0);
         assert!(runtime.cached_sections().iter().all(|section| {
             section.key.chunk_x == scene.chunk_x && section.key.chunk_z == scene.chunk_z
@@ -5707,7 +5956,8 @@ mod tests {
         poll_window_runtime_until_idle(&mut runtime).unwrap();
 
         assert_eq!(runtime.stats().loaded_chunks, 9);
-        let first_update = runtime.sync_render_sections().unwrap();
+        let spectator = SpectatorCamera::spawn_for_scene(&scene);
+        let first_update = runtime.sync_render_sections(spectator.position).unwrap();
         assert!(first_update.rebuilt_section_count() > 0);
         assert!(runtime.pending_render_chunk_count() > 0);
 
@@ -5715,7 +5965,9 @@ mod tests {
         assert!(!first_sections.is_empty());
         assert!(section_index_count(&first_sections) > 0);
 
-        let remaining_update = runtime.sync_all_render_sections().unwrap();
+        let remaining_update = runtime
+            .sync_all_render_sections(spectator.position)
+            .unwrap();
         assert!(remaining_update.rebuilt_section_count() > 0);
         assert_eq!(runtime.pending_render_chunk_count(), 0);
         assert!(runtime.cached_sections().len() > first_sections.len());

@@ -796,7 +796,7 @@ pub fn build_textured_render_sections_with_stats(
     inputs: &[TexturedChunkMeshInput<'_>],
     catalog: &TexturedMeshCatalog,
 ) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
-    build_textured_render_sections_for_chunks(inputs, catalog, None)
+    build_textured_render_sections_for_chunks(inputs, catalog, None, None)
 }
 
 pub fn build_textured_render_sections_for_chunk_set_with_stats(
@@ -804,13 +804,22 @@ pub fn build_textured_render_sections_for_chunk_set_with_stats(
     catalog: &TexturedMeshCatalog,
     target_chunks: &BTreeSet<(i32, i32)>,
 ) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
-    build_textured_render_sections_for_chunks(inputs, catalog, Some(target_chunks))
+    build_textured_render_sections_for_chunks(inputs, catalog, Some(target_chunks), None)
+}
+
+pub fn build_textured_render_sections_for_section_set_with_stats(
+    inputs: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    target_sections: &BTreeSet<RenderSectionKey>,
+) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
+    build_textured_render_sections_for_chunks(inputs, catalog, None, Some(target_sections))
 }
 
 fn build_textured_render_sections_for_chunks(
     inputs: &[TexturedChunkMeshInput<'_>],
     catalog: &TexturedMeshCatalog,
     target_chunks: Option<&BTreeSet<(i32, i32)>>,
+    target_sections: Option<&BTreeSet<RenderSectionKey>>,
 ) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
     let mut sections = Vec::new();
     let mut visibility_graph = VisibilityGraphBuildStats::default();
@@ -820,6 +829,14 @@ fn build_textured_render_sections_for_chunks(
         }
         for local_y_start in (0..input.height).step_by(RENDER_SECTION_HEIGHT as usize) {
             let local_y_end = (local_y_start + RENDER_SECTION_HEIGHT).min(input.height);
+            let key = RenderSectionKey::new(
+                input.chunk_x,
+                (input.min_y + local_y_start).div_euclid(RENDER_SECTION_HEIGHT),
+                input.chunk_z,
+            );
+            if target_sections.is_some_and(|targets| !targets.contains(&key)) {
+                continue;
+            }
             let mut mesh = TexturedVisibleChunkMesh::default();
             let visibility_start = VisibilityGraphTimer::start();
             let visibility =
@@ -834,11 +851,7 @@ fn build_textured_render_sections_for_chunks(
                 local_y_end,
             )?;
             sections.push(TexturedRenderSectionMesh {
-                key: RenderSectionKey::new(
-                    input.chunk_x,
-                    (input.min_y + local_y_start).div_euclid(RENDER_SECTION_HEIGHT),
-                    input.chunk_z,
-                ),
+                key,
                 mesh,
                 visibility,
             });

@@ -158,6 +158,16 @@ meshes are only trusted when the needed neighbor data is available.
 
 ## Recommended Implementation Slices
 
+Implemented first slice:
+
+- native streaming remesh now computes readiness per render section using the
+  Java 24-block near-camera threshold and W/N/E/S snapshot presence
+- ready sections are passed to a section-targeted mesh builder; deferred
+  sections are skipped before visibility graph and mesh generation
+- old deferred sections are retained, and unloaded chunks still remove cached
+  sections normally
+- the debug pane reports deferred section count as `D`
+
 ### 1. Pure readiness helpers
 
 Add small tested helpers before changing renderer behavior:
@@ -272,6 +282,14 @@ Integration/headless tests:
 
 - move the camera underground across a chunk boundary with `--chunk-radius 1`
   and compare consecutive captures for large boundary-face pops.
+- lock chunk interest to a fixed player-ticket center with a very small view
+  radius, then render from a detached inspection camera outside or near the
+  loaded-world boundary. This should make fake void-facing boundary faces easy
+  to inspect without conflating camera movement with streaming movement.
+- capture the same fixed-ticket boundary from a near-camera position and a
+  far-camera position. The near capture may show the Java near-camera exception;
+  the far capture should demonstrate that chunks without W/N/E/S neighbor data
+  are not rebuilt against fake air.
 - repeat with section occlusion on and with the camera embedded in rock; the
   effective option should disable graph culling while embedded.
 - repeat with manual `O` toggled off; boundary readiness should still prevent
