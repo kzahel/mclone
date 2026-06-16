@@ -57,7 +57,8 @@ const DEFAULT_SEED: i64 = 12345;
 const DEFAULT_CHUNK_X: i32 = 0;
 const DEFAULT_CHUNK_Z: i32 = 0;
 const DEFAULT_CHUNK_RADIUS: i32 = 1;
-const MAX_CHUNK_RADIUS: i32 = 4;
+const MIN_UI_CHUNK_RADIUS: i32 = 1;
+const MAX_CHUNK_RADIUS: i32 = 16;
 const DEFAULT_MOVEMENT_PERF_STEPS: usize = 12;
 const DEFAULT_MOVEMENT_PERF_PATH_RADIUS: i32 = 4;
 const DEFAULT_TIMEDEMO_FRAMES: usize = 120;
@@ -4267,15 +4268,17 @@ fn option_widgets(scale: GuiScale) -> OptionWidgetRects {
 }
 
 fn chunk_radius_slider_value(radius: i32) -> f32 {
-    if MAX_CHUNK_RADIUS <= 0 {
+    if MAX_CHUNK_RADIUS <= MIN_UI_CHUNK_RADIUS {
         0.0
     } else {
-        radius.clamp(0, MAX_CHUNK_RADIUS) as f32 / MAX_CHUNK_RADIUS as f32
+        (radius.clamp(MIN_UI_CHUNK_RADIUS, MAX_CHUNK_RADIUS) - MIN_UI_CHUNK_RADIUS) as f32
+            / (MAX_CHUNK_RADIUS - MIN_UI_CHUNK_RADIUS) as f32
     }
 }
 
 fn chunk_radius_from_slider_value(value: f32) -> i32 {
-    (value.clamp(0.0, 1.0) * MAX_CHUNK_RADIUS as f32).round() as i32
+    MIN_UI_CHUNK_RADIUS
+        + (value.clamp(0.0, 1.0) * (MAX_CHUNK_RADIUS - MIN_UI_CHUNK_RADIUS) as f32).round() as i32
 }
 
 fn chunk_radius_label(radius: i32) -> String {
@@ -5561,6 +5564,18 @@ mod tests {
         assert_eq!(action, NativeUiAction::SetChunkRadius(MAX_CHUNK_RADIUS));
         ui.apply_action(action);
         assert_eq!(ui.chunk_radius, MAX_CHUNK_RADIUS);
+
+        let point = Point {
+            x: radius.x,
+            y: radius.y + radius.height * 0.5,
+        };
+        assert!(ui.pointer_down(point));
+        let (_handled, action) = ui.pointer_up(point);
+
+        let action = action.expect("radius slider release should produce an action");
+        assert_eq!(action, NativeUiAction::SetChunkRadius(MIN_UI_CHUNK_RADIUS));
+        ui.apply_action(action);
+        assert_eq!(ui.chunk_radius, MIN_UI_CHUNK_RADIUS);
     }
 
     #[test]
@@ -5877,7 +5892,7 @@ mod tests {
             "--headless-chunk".to_owned(),
             "/tmp/mclone-chunk.png".to_owned(),
             "--chunk-radius".to_owned(),
-            "2".to_owned(),
+            "16".to_owned(),
         ])
         .unwrap();
 
@@ -5888,7 +5903,7 @@ mod tests {
                 width: 640,
                 height: 480,
                 scene: SceneOptions {
-                    chunk_radius: 2,
+                    chunk_radius: 16,
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
