@@ -234,3 +234,31 @@ cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- \
 ## Status Log
 
 - Planned: tactical created with Java reference shape and first-slice scope.
+- Implemented: protocol `SectionBlockUpdates`, client snapshot patching, native
+  runtime dirty marking, server pending section delta accumulation, simulation
+  tick delta flush, and server fluid coverage now validate section deltas
+  instead of per-block chunk snapshots.
+- Validated:
+  - `cargo test --manifest-path native/Cargo.toml -p mclone-core -p
+    mclone-protocol -p mclone-client -p mclone-server -p
+    mclone-native-client`
+  - `cargo fmt --manifest-path native/Cargo.toml --all -- --check`
+  - `cargo check --manifest-path native/Cargo.toml --workspace`
+  - `cargo check --manifest-path native/Cargo.toml -p mclone-web-client
+    --target wasm32-unknown-unknown`
+  - `pnpm --silent native:frame-budget:smoke`
+  - native screenshot inspected at `/tmp/mclone-section-delta-verify.png`
+  - `git diff --check`
+- Release 120 Hz frame-budget probe saved to
+  `/tmp/mclone-frame-budget-release-section-deltas.json`:
+  - over-budget frames: `0 / 120`
+  - p95 frame: `5.487 ms`
+  - p99 frame: `6.367 ms`
+  - max frame: `7.483 ms`
+  - max `poll_ms`: `1.681 ms`
+  - max `poll_fluid_tick_ms`: `0.803 ms`
+  - max `poll_fluid_set_block_ms`: `0.582 ms`
+  - total fluid mutated blocks: `80`
+  - total snapshot updates: `0`
+  - total section block updates: `27`
+  - total fluid snapshot events: `0`

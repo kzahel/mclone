@@ -593,6 +593,11 @@ pub enum ChunkSchedulerEvent {
     Unloaded {
         pos: ChunkPos,
     },
+    SectionBlockUpdates {
+        pos: ChunkPos,
+        section_y: i32,
+        updates: Vec<SectionBlockUpdate>,
+    },
     FluidTickScheduled {
         pos: WorldBlockPos,
         fluid: FluidKind,
@@ -1317,37 +1322,98 @@ impl ChunkScheduler {
             })
     }
 
-    fn set_block_at_world(
-        &mut self,
-        pos: WorldBlockPos,
-        block_id: RawBlockId,
-    ) -> Option<ChunkSchedulerEvent> {
+    fn set_block_at_world(&mut self, pos: WorldBlockPos, block_id: RawBlockId) -> bool {
         let chunk_pos = pos.chunk_pos();
         let local_x = local_block_coord(pos.x);
         let local_z = local_block_coord(pos.z);
-        let holder = self.holders.get_mut(&chunk_pos)?;
-        let live_blocks = holder.live_blocks.as_mut()?;
-        if pos.y < live_blocks.min_y || pos.y >= live_blocks.min_y + live_blocks.height {
-            return None;
-        }
-        if live_blocks.get_block_at_y(local_x, pos.y, local_z) == block_id {
-            return None;
-        }
+        let local_y = pos.y.rem_euclid(SECTION_HEIGHT);
+        let section_y = pos.y.div_euclid(SECTION_HEIGHT);
+        let block_state = generated_block_state_id(block_id);
+        let record_delta;
+        {
+            let Some(holder) = self.holders.get_mut(&chunk_pos) else {
+                return false;
+            };
+            let Some(live_blocks) = holder.live_blocks.as_mut() else {
+                return false;
+            };
+            if pos.y < live_blocks.min_y || pos.y >= live_blocks.min_y + live_blocks.height {
+                return false;
+            }
+            if live_blocks.get_block_at_y(local_x, pos.y, local_z) == block_id {
+                return false;
+            }
 
-        live_blocks.set_block_at_y(local_x, pos.y, local_z, block_id);
-        let status = holder
-            .published_snapshot
-            .as_ref()
-            .map_or(ChunkStatus::Features, |snapshot| snapshot.status);
-        let residency = holder.residency;
-        let client_visible = holder.client_visible;
-        let snapshot =
-            snapshot_from_mutable_buffer(live_blocks, ChunkRevision(self.next_revision), status);
-        self.next_revision = self.next_revision.saturating_add(1);
-        holder.publish_snapshot(snapshot.clone(), residency, true);
+            live_blocks.set_block_at_y(local_x, pos.y, local_z, block_id);
+            let revision = ChunkRevision(self.next_revision);
+            self.next_revision = self.next_revision.saturating_add(1);
+            let published_status = if let Some(snapshot) = holder.published_snapshot.as_mut() {
+                snapshot.revision = revision;
+                snapshot.patch_section_block(section_y, local_x, local_y, local_z, block_state);
+                Some(snapshot.status)
+            } else {
+                None
+            };
+            if let Some(status) = published_status {
+                holder.mark_ready(status, Some(revision));
+            }
+            holder.dirty = true;
+            record_delta = holder.client_visible;
+        }
         self.dirty_chunks.insert(chunk_pos);
+        if record_delta {
+            self.record_section_block_delta(
+                chunk_pos,
+                section_y,
+                local_x,
+                local_y,
+                local_z,
+                block_state,
+            );
+        }
 
-        client_visible.then_some(ChunkSchedulerEvent::SnapshotReady(snapshot))
+        true
+    }
+
+    fn record_section_block_delta(
+        &mut self,
+        pos: ChunkPos,
+        section_y: i32,
+        local_x: i32,
+        local_y: i32,
+        local_z: i32,
+        block_state: BlockStateId,
+    ) {
+        let local_index = chunk_section_index(local_x, local_y, local_z);
+        self.pending_block_deltas
+            .entry((pos, section_y))
+            .or_default()
+            .insert(local_index, block_state);
+    }
+
+    fn drain_pending_block_delta_events(&mut self) -> Vec<ChunkSchedulerEvent> {
+        let pending = std::mem::take(&mut self.pending_block_deltas);
+        pending
+            .into_iter()
+            .filter_map(|((pos, section_y), section_updates)| {
+                if !self.holders.get(&pos).is_some_and(|holder| {
+                    holder.client_visible && holder.published_snapshot.is_some()
+                }) {
+                    return None;
+                }
+                let updates = section_updates
+                    .into_iter()
+                    .map(|(local_index, block_state)| {
+                        section_block_update_from_index(local_index, block_state)
+                    })
+                    .collect::<Vec<_>>();
+                (!updates.is_empty()).then_some(ChunkSchedulerEvent::SectionBlockUpdates {
+                    pos,
+                    section_y,
+                    updates,
+                })
+            })
+            .collect()
     }
 
     fn tick_fluid(&mut self, pos: WorldBlockPos, fluid: FluidKind) -> FluidMutationReport {
@@ -1494,14 +1560,10 @@ impl ChunkScheduler {
     ) {
         let before = self.block_at_world(pos);
         let set_block_start = simulation_timing_start();
-        let event = self.set_block_at_world(pos, block_id);
+        let changed_by_set = self.set_block_at_world(pos, block_id);
         report.set_block_us += simulation_timing_elapsed_us(set_block_start);
-        if let Some(event) = event {
-            report.snapshot_events += 1;
-            report.events.push(event);
-        }
         let changed = before != self.block_at_world(pos);
-        if changed && self.block_at_world(pos) == Some(block_id) {
+        if changed_by_set && changed && self.block_at_world(pos) == Some(block_id) {
             report.mutated_positions.push(pos);
             self.schedule_fluid_ticks_after_block_change(pos, block_id, report);
             self.resolve_lava_contacts_after_block_change(pos, report);
@@ -1526,28 +1588,23 @@ impl ChunkScheduler {
 
         for candidate in candidates {
             let set_block_start = simulation_timing_start();
-            let event = self.resolve_lava_source_contact_at(candidate);
+            let changed = self.resolve_lava_source_contact_at(candidate);
             report.set_block_us += simulation_timing_elapsed_us(set_block_start);
-            if let Some(event) = event {
-                report.snapshot_events += 1;
-                report.events.push(event);
+            if changed {
                 report.mutated_positions.push(candidate);
             }
         }
     }
 
-    fn resolve_lava_source_contact_at(
-        &mut self,
-        pos: WorldBlockPos,
-    ) -> Option<ChunkSchedulerEvent> {
+    fn resolve_lava_source_contact_at(&mut self, pos: WorldBlockPos) -> bool {
         let state = self.fluid_state_at_world(pos);
         if state.kind != Some(FluidKind::Lava) || !state.source {
-            return None;
+            return false;
         }
         if !LAVA_SOURCE_CONTACT_DIRECTIONS.iter().any(|direction| {
             self.fluid_state_at_world(offset_pos(pos, *direction)).kind == Some(FluidKind::Water)
         }) {
-            return None;
+            return false;
         }
         self.set_block_at_world(pos, OBSIDIAN)
     }
@@ -2798,12 +2855,14 @@ impl IntegratedServer {
         let block_tick_us = simulation_timing_elapsed_us(block_tick_start);
 
         let fluid_tick_start = simulation_timing_start();
-        let (fluid_report, fluid_events) = self.liquid_ticks.tick(
+        let (fluid_report, mut fluid_events) = self.liquid_ticks.tick(
             simulation_tick,
             &tick_report.entity_ticking_chunks,
             &mut self.scheduler,
         );
         let fluid_tick_us = simulation_timing_elapsed_us(fluid_tick_start);
+        fluid_events.extend(self.scheduler.drain_pending_block_delta_events());
+        let fluid_event_count = fluid_events.len();
 
         let entity_tick_start = simulation_timing_start();
         let entity_tick_chunks = run_noop_simulation_phase(&tick_report.entity_ticking_chunks);
@@ -2827,7 +2886,7 @@ impl IntegratedServer {
             deferred_fluid_ticks: fluid_report.deferred_due_ticks,
             fluid_mutated_blocks: fluid_report.mutated_blocks,
             fluid_snapshot_events: fluid_report.snapshot_events,
-            fluid_event_count: fluid_report.event_count,
+            fluid_event_count,
             scheduled_fluid_ticks: fluid_report.scheduled_ticks,
             entity_tick_chunks,
             pending_unloads_processed: tick_report.pending_unloads_processed,
@@ -2913,6 +2972,15 @@ fn server_update_from_scheduler_event(event: ChunkSchedulerEvent) -> Option<Serv
     match event {
         ChunkSchedulerEvent::SnapshotReady(snapshot) => Some(ServerUpdate::ChunkSnapshot(snapshot)),
         ChunkSchedulerEvent::Unloaded { pos } => Some(ServerUpdate::ChunkUnload { pos }),
+        ChunkSchedulerEvent::SectionBlockUpdates {
+            pos,
+            section_y,
+            updates,
+        } => Some(ServerUpdate::SectionBlockUpdates {
+            pos,
+            section_y,
+            updates,
+        }),
         ChunkSchedulerEvent::StatusChanged { .. }
         | ChunkSchedulerEvent::FluidTickScheduled { .. } => None,
     }
@@ -3046,6 +3114,19 @@ fn local_block_coord(value: i32) -> i32 {
     value.rem_euclid(CHUNK_WIDTH)
 }
 
+fn section_block_update_from_index(
+    local_index: usize,
+    block_state: BlockStateId,
+) -> SectionBlockUpdate {
+    debug_assert!(local_index < CHUNK_SECTION_VOLUME);
+    SectionBlockUpdate {
+        local_x: (local_index & 0xF) as u8,
+        local_y: ((local_index >> 8) & 0xF) as u8,
+        local_z: ((local_index >> 4) & 0xF) as u8,
+        block_state,
+    }
+}
+
 fn mutable_buffer_from_snapshot(snapshot: &ChunkSnapshot) -> MutableChunkBlockBuffer {
     let mut buffer = MutableChunkBlockBuffer::new(
         snapshot.pos.x,
@@ -3078,27 +3159,7 @@ fn mutable_buffer_from_snapshot(snapshot: &ChunkSnapshot) -> MutableChunkBlockBu
     buffer
 }
 
-fn snapshot_from_mutable_buffer(
-    buffer: &MutableChunkBlockBuffer,
-    revision: ChunkRevision,
-    status: ChunkStatus,
-) -> ChunkSnapshot {
-    let block_state_ids = buffer
-        .blocks
-        .iter()
-        .map(|block_id| generated_block_state_id(*block_id))
-        .collect::<Vec<_>>();
-    let snapshot = ChunkSnapshot::from_block_state_ids(
-        ChunkPos::new(buffer.chunk_x, buffer.chunk_z),
-        status,
-        revision,
-        buffer.min_y,
-        buffer.height,
-        &block_state_ids,
-    );
-    snapshot_with_provisional_lighting(snapshot, &buffer.blocks)
-}
-
+#[cfg(test)]
 fn snapshot_with_provisional_lighting(
     snapshot: ChunkSnapshot,
     raw_blocks: &[RawBlockId],
@@ -3106,6 +3167,7 @@ fn snapshot_with_provisional_lighting(
     snapshot_with_provisional_lighting_from_neighbors(snapshot, raw_blocks, std::iter::empty())
 }
 
+#[cfg(test)]
 fn snapshot_with_provisional_lighting_from_neighbors<'a>(
     snapshot: ChunkSnapshot,
     raw_blocks: &'a [RawBlockId],
@@ -4593,10 +4655,7 @@ mod tests {
         server.scheduler_mut().set_block_at_world(water, WATER);
         server.schedule_fluid_tick(water, FluidKind::Water, FluidKind::Water.tick_delay());
         assert!(
-            server
-                .scheduler_mut()
-                .resolve_lava_source_contact_at(lava)
-                .is_some(),
+            server.scheduler_mut().resolve_lava_source_contact_at(lava),
             "water neighbor should convert lava source to obsidian"
         );
     }
@@ -4720,6 +4779,38 @@ mod tests {
             ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos == pos => Some(snapshot),
             _ => None,
         })
+    }
+
+    fn apply_section_updates_to_snapshot(
+        snapshot: &mut ChunkSnapshot,
+        updates: &[ServerUpdate],
+    ) -> usize {
+        let mut applied = 0;
+        for update in updates {
+            let ServerUpdate::SectionBlockUpdates {
+                pos,
+                section_y,
+                updates,
+            } = update
+            else {
+                continue;
+            };
+            if *pos != snapshot.pos {
+                continue;
+            }
+            for update in updates {
+                if snapshot.patch_section_block(
+                    *section_y,
+                    update.local_x as i32,
+                    update.local_y as i32,
+                    update.local_z as i32,
+                    update.block_state,
+                ) {
+                    applied += 1;
+                }
+            }
+        }
+        applied
     }
 
     fn snapshot_block_state(snapshot: &ChunkSnapshot, pos: WorldBlockPos) -> BlockStateId {
@@ -5093,15 +5184,18 @@ mod tests {
     }
 
     #[test]
-    fn scheduled_water_tick_spreads_down_and_publishes_snapshot_update() {
+    fn scheduled_water_tick_spreads_down_and_publishes_section_update() {
         let mut server = IntegratedServer::new(12_345);
-        handle_command_and_poll(
+        let initial_updates = handle_command_and_poll(
             &mut server,
             ClientCommand::SetChunkInterest(ChunkInterest {
                 center: ChunkPos::new(0, 0),
                 radius_chunks: 0,
             }),
         );
+        let mut client_snapshot = snapshot_update_for(&initial_updates, ChunkPos::new(0, 0))
+            .expect("initial interest should publish visible chunk snapshot")
+            .clone();
         let source = WorldBlockPos::new(8, 120, 8);
         let below = source.below();
 
@@ -5118,14 +5212,24 @@ mod tests {
             server.scheduler().block_at_world(below),
             Some(WATER_LEVEL_8)
         );
-        let snapshot = snapshot_update_for(&report.updates, ChunkPos::new(0, 0))
-            .expect("fluid mutation should publish visible chunk snapshot");
         assert_eq!(
-            snapshot_block_state(snapshot, source),
+            report.fluid_snapshot_events, 0,
+            "fluid mutation should no longer publish per-block chunk snapshots"
+        );
+        assert!(
+            snapshot_update_for(&report.updates, ChunkPos::new(0, 0)).is_none(),
+            "fluid mutation should publish section deltas instead of chunk snapshots"
+        );
+        assert!(
+            apply_section_updates_to_snapshot(&mut client_snapshot, &report.updates) >= 1,
+            "fluid mutation should publish at least one section block update"
+        );
+        assert_eq!(
+            snapshot_block_state(&client_snapshot, source),
             generated_block_state_id(WATER)
         );
         assert_eq!(
-            snapshot_block_state(snapshot, below),
+            snapshot_block_state(&client_snapshot, below),
             generated_block_state_id(WATER_LEVEL_8)
         );
     }

@@ -1119,6 +1119,7 @@ struct FrameBudgetProbeFrameReport {
     poll_scheduler_events: usize,
     poll_updates: usize,
     poll_snapshot_updates: usize,
+    poll_section_block_updates: usize,
     poll_unload_updates: usize,
     poll_pending_unloads_processed: usize,
     poll_fluid_due_ticks: usize,
@@ -1179,6 +1180,7 @@ impl Default for FrameBudgetProbeFrameReport {
             poll_scheduler_events: 0,
             poll_updates: 0,
             poll_snapshot_updates: 0,
+            poll_section_block_updates: 0,
             poll_unload_updates: 0,
             poll_pending_unloads_processed: 0,
             poll_fluid_due_ticks: 0,
@@ -1595,6 +1597,10 @@ impl FrameBudgetProbeReport {
                 frame.poll_snapshot_updates
             );
             println!(
+                "      \"poll_section_block_updates\": {},",
+                frame.poll_section_block_updates
+            );
+            println!(
                 "      \"poll_unload_updates\": {},",
                 frame.poll_unload_updates
             );
@@ -2003,6 +2009,7 @@ fn run_frame_budget_probe(options: &FrameBudgetProbeOptions) -> Result<FrameBudg
             report.poll_scheduler_events = poll_diagnostics.scheduler_events;
             report.poll_updates = poll_diagnostics.updates;
             report.poll_snapshot_updates = poll_diagnostics.snapshot_updates;
+            report.poll_section_block_updates = poll_diagnostics.section_block_updates;
             report.poll_unload_updates = poll_diagnostics.unload_updates;
             report.poll_pending_unloads_processed = poll_diagnostics.pending_unloads_processed;
             report.poll_fluid_due_ticks = poll_diagnostics.fluid_due_ticks;
@@ -2573,6 +2580,7 @@ struct RuntimePollDiagnostics {
     scheduler_events: usize,
     updates: usize,
     snapshot_updates: usize,
+    section_block_updates: usize,
     unload_updates: usize,
     pending_unloads_processed: usize,
     fluid_due_ticks: usize,
@@ -2592,6 +2600,7 @@ struct RuntimeUpdateApplyReport {
     client_apply_updates_ms: f64,
     updates: usize,
     snapshot_updates: usize,
+    section_block_updates: usize,
     unload_updates: usize,
 }
 
@@ -2759,6 +2768,7 @@ impl WindowSceneRuntime {
             diagnostics.client_apply_updates_ms = apply_report.client_apply_updates_ms;
             diagnostics.updates = apply_report.updates;
             diagnostics.snapshot_updates = apply_report.snapshot_updates;
+            diagnostics.section_block_updates = apply_report.section_block_updates;
             diagnostics.unload_updates = apply_report.unload_updates;
             changed |= apply_report.changed;
         }
@@ -2793,6 +2803,7 @@ impl WindowSceneRuntime {
         let changed = !updates.is_empty();
         let update_count = updates.len();
         let mut snapshot_updates = 0;
+        let mut section_block_updates = 0;
         let mut unload_updates = 0;
         let dirty_mark_start = Instant::now();
         for update in &updates {
@@ -2806,7 +2817,7 @@ impl WindowSceneRuntime {
                     self.mark_render_chunk_dirty(*pos);
                 }
                 ServerUpdate::SectionBlockUpdates { pos, .. } => {
-                    snapshot_updates += 1;
+                    section_block_updates += 1;
                     self.mark_render_chunk_dirty(*pos);
                 }
             }
@@ -2822,6 +2833,7 @@ impl WindowSceneRuntime {
             client_apply_updates_ms,
             updates: update_count,
             snapshot_updates,
+            section_block_updates,
             unload_updates,
         }
     }

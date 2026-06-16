@@ -295,16 +295,11 @@ updates the holder's published snapshot, and emits a whole `ChunkSnapshot`
 event when client-visible. This makes a cluster of water/lava ticks scale as
 number of mutations times full chunk snapshot build/copy cost.
 
-Next implementation slice:
-
-- Change fluid ticks to batch mutations per chunk for one simulation tick.
-- Apply all block changes to the live chunk buffers first.
-- Publish at most one final `ChunkSnapshot` per mutated visible chunk per tick.
-- Preserve scheduling semantics for neighboring fluid ticks and lava/water
-  contact resolution while deferring snapshot publication until after the fluid
-  tick batch.
-- Keep the new fluid instrumentation in the frame-budget probe until the batched
-  path proves `poll_fluid_set_block_ms` no longer dominates p99/max frames.
+Next implementation slice was revised by
+[`031-native-section-block-delta-updates.md`](031-native-section-block-delta-updates.md).
+The Java-shaped fix is not one full snapshot per mutated chunk; it is section
+block deltas for runtime mutations, with full snapshots reserved for initial
+chunk publication, reload, and recovery.
 
 ## Validation
 
