@@ -19,6 +19,7 @@ mod glow_lichen;
 mod lake;
 mod placed;
 mod region;
+mod spring;
 mod tables;
 
 pub use configured::{
@@ -50,13 +51,6 @@ pub const FEATURES_WRITE_RADIUS_CUTOFF: i32 = 1;
 const SIN_TABLE_SIZE: usize = 65_536;
 const SIN_TABLE_MASK: i32 = 65_535;
 const SIN_SCALE: f32 = 10_430.378_f32;
-const SPRING_NEIGHBOR_DIRECTIONS: [Direction; 5] = [
-    Direction::West,
-    Direction::East,
-    Direction::North,
-    Direction::South,
-    Direction::Down,
-];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Direction {
@@ -144,7 +138,7 @@ impl ConfiguredFeature {
         match self {
             Self::Noop => false,
             Self::Lake(config) => lake::place_lake(world, random, origin, *config),
-            Self::Spring(config) => place_spring(world, origin, *config),
+            Self::Spring(config) => spring::place_spring(world, origin, *config),
             Self::SimpleBlock(config) => place_simple_block(world, random, origin, *config),
             Self::RandomPatch(config) => place_random_patch(world, random, origin, *config),
             Self::Flower(config) => place_flower(world, random, origin, *config),
@@ -162,61 +156,6 @@ impl ConfiguredFeature {
             Self::Ore(config) => place_ore(world, random, origin, config),
             Self::FreezeTopLayer => place_freeze_top_layer(world, biomes, origin),
         }
-    }
-}
-
-fn place_spring<W: FeatureWorld>(
-    world: &mut W,
-    origin: BlockPos,
-    config: SpringConfiguration,
-) -> bool {
-    let above = offset_pos(origin, Direction::Up);
-    let below = offset_pos(origin, Direction::Down);
-    if !world
-        .block_at_world(above)
-        .is_some_and(|block_id| config.valid_blocks.contains(&block_id))
-    {
-        return false;
-    }
-    if config.requires_block_below
-        && !world
-            .block_at_world(below)
-            .is_some_and(|block_id| config.valid_blocks.contains(&block_id))
-    {
-        return false;
-    }
-
-    let Some(current) = world.block_at_world(origin) else {
-        return false;
-    };
-    if !is_air_like(current) && !config.valid_blocks.contains(&current) {
-        return false;
-    }
-
-    let mut rock_count = 0;
-    let mut hole_count = 0;
-    for direction in SPRING_NEIGHBOR_DIRECTIONS {
-        let neighbor = offset_pos(origin, direction);
-        let Some(block_id) = world.block_at_world(neighbor) else {
-            continue;
-        };
-        if config.valid_blocks.contains(&block_id) {
-            rock_count += 1;
-        }
-        if is_air_like(block_id) {
-            hole_count += 1;
-        }
-    }
-
-    if rock_count != config.rock_count || hole_count != config.hole_count {
-        return false;
-    }
-
-    if world.set_block_world(origin, config.state) {
-        world.schedule_liquid_tick_world(origin, config.state, 0);
-        true
-    } else {
-        false
     }
 }
 
