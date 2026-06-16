@@ -154,8 +154,8 @@ module.
   stabilizes: `types`, `tickets`, `distance_manager`, `holder`, `scheduler`,
   `worldgen_mailbox`, `fluid`, `integrated`, `lighting_seed`, and `timing`.
 - [ ] Split `mclone-worldgen::feature` around Java-shaped concepts:
-  `context` (done), `region` (done), `configured`, `placed`, `tables`, `lake`,
-  `spring`, `ore`, `tree`, `patch`, `glow_lichen`, and `top_layer`.
+  `context` (done), `region` (done), `tables` (done), `configured`, `placed`,
+  `lake`, `spring`, `ore`, `tree`, `patch`, `glow_lichen`, and `top_layer`.
 - [ ] Split `mclone-worldgen::levelgen` into chunk data, settings, sampler,
   generator, feature-batch, and timing modules.
 - [ ] Split `mclone-mesh` into visibility, mesh data, textured catalog, and
@@ -205,8 +205,12 @@ module.
    - `context` boundary done: moved `DecorationStep`,
      `FeatureDecorationTiming`, `FeatureWorld`, the biome resolvers, and the
      `MutableChunkBlockBuffer` feature-world adapter into `feature/context.rs`.
-   - Continue with low-risk move-only boundaries: `configured`, `placed`, and
-     `tables`.
+   - `tables` boundary done: moved `overworld_features_for_biome` (re-exported
+     from `feature.rs`), the per-biome feature tables, lake/ore/top-layer/
+     vegetal/patch builders, and the `TAIGA_GRASS_STATES`/`DEFAULT_FLOWER_STATES`
+     consts into `feature/tables.rs`. `chunk_primary_biome`, `test_support`, and
+     the apply/place path stay in `feature.rs`.
+   - Continue with low-risk move-only boundaries: `configured` and `placed`.
    - Leave individual feature behavior (`lake`, `spring`, `ore`, `tree`,
      `patch`, `glow_lichen`, `top_layer`) for follow-up slices.
 
