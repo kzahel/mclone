@@ -12,7 +12,8 @@ use crate::cli::HeadlessScreenshotUi;
 use crate::frame_pacing::{
     FramePacingDebugStats, FramePacingMode, FramePacingUiState, FrameTimingStats,
 };
-use crate::{DEFAULT_CHUNK_RADIUS, MAX_CHUNK_RADIUS, RenderStreamStats, WindowRuntimeStats};
+use crate::scene_runtime::WindowRuntimeStats;
+use crate::{DEFAULT_CHUNK_RADIUS, MAX_CHUNK_RADIUS, RenderStreamStats};
 
 const MIN_UI_CHUNK_RADIUS: i32 = 1;
 
