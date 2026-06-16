@@ -184,14 +184,12 @@ Rendered validation:
 
 ## Follow-Ups
 
-1. Add desktop present/wait attribution for the visible walking hitch path; the
-   movement-shaped headless frame probe is green, so desktop swapchain pacing is
-   now the larger unknown.
-2. Replace the global render compile epoch with per-chunk or per-section input
-   revisions so unrelated updates do not stale otherwise valid compile output.
-3. Add distance-prioritized compile scheduling and cancellation/coalescing for
-   queued stale work, matching Java's priority/cancel shape more closely.
-4. Add GPU upload byte/section budgeting only if probes show upload cost becomes
+1. Per-section compile input revisions, distance priority, and conservative
+   single-worker queue coalescing were implemented in
+   [`034`](034-native-render-compile-revisions-and-priority.md).
+2. Add cancellable render compile tasks or smaller compile task granularity so
+   active worker work can stop when sections unload or are superseded.
+3. Add GPU upload byte/section budgeting only if probes show upload cost becomes
    material again.
 
 ## Validation

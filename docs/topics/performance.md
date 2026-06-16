@@ -11,14 +11,14 @@ invalidates an older recommendation, or establishes a new baseline.
 
 ## Current Baseline
 
-Current validated slice: native movement-frame release probe, on top of the
-async render-section compile queue, section block deltas, section-precise
-dirtying, and neighbor-ready render boundaries.
+Current validated slice: native render compile revisions and priority, on top
+of the movement-frame probe, async render-section compile queue, section block
+deltas, section-precise dirtying, and neighbor-ready render boundaries.
 
 Latest 120 Hz release movement-frame probe was captured during that slice at:
 
 ```text
-/tmp/mclone-movement-frame-probe-release.json
+/tmp/mclone-movement-frame-probe-release-render-compile-revisions.json
 ```
 
 Summary:
@@ -30,31 +30,29 @@ Summary:
 | frames | `240` |
 | movement speed | `32 blocks/sec` |
 | over-budget frames | `0 / 240` |
-| p95 frame | `3.317 ms` |
-| p99 frame | `4.198 ms` |
-| max frame | `7.066 ms` |
-| headless average frame | `2.054 ms` |
-| max `poll_ms` | `1.295 ms` |
-| max `remesh_ms` | `0.094 ms` |
-| max `upload_ms` | `0.399 ms` |
+| p95 frame | `3.010 ms` |
+| p99 frame | `4.156 ms` |
+| max frame | `7.234 ms` |
+| max `poll_ms` | `1.453 ms` |
+| max `remesh_ms` | `0.130 ms` |
+| max `upload_ms` | `0.400 ms` |
 | max pending render chunks | `9` |
-| submitted compile sections | `91` |
-| completed compile sections | `61` |
-| stale compile sections | `30` |
+| submitted compile sections | `107` |
+| completed compile sections | `107` |
+| stale compile sections | `0` |
 | max pending compile jobs | `1` |
 | max in-flight sections | `16` |
 | total fluid mutated blocks | `299` |
 | total snapshot updates | `5` |
 | total section block updates | `102` |
 
-Interpretation: the movement-shaped headless probe does not reproduce the
-visible 120 Hz hitch on this host. The worst frame was frame `0` at `7.066 ms`,
-mostly `device_poll_ms = 6.102`, with no render compile/upload work on that
-frame. Runtime polling, render-section submission/drain bookkeeping, and GPU
-upload remain comfortably under budget in this release lane. The remaining
-likely gap is desktop-present/input pacing or a workload not represented by the
-probe, rather than known synchronous chunk publication, fluid snapshot, or CPU
-mesh compilation work.
+Interpretation: the movement-shaped headless probe remains under budget, and
+the Java-shaped per-section revision slice removed stale compile output from
+the normal walking lane (`30` stale sections before, `0` after). Runtime
+polling, render-section submission/drain bookkeeping, and GPU upload remain
+comfortably below 120 Hz budget. Fast stress-orbit streaming can still stale
+active worker tasks when chunks unload before a compile finishes, but queued
+backlog is now coalesced.
 
 For durable historical trends, use [`../performance-records.md`](../performance-records.md).
 
@@ -62,11 +60,11 @@ For durable historical trends, use [`../performance-records.md`](../performance-
 
 | Priority | Work | Java-shaped | Tactical | Status | Why It Matters |
 |---|---|---:|---|---|---|
-| P0 | Desktop-present pacing attribution | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`../performance-records.md`](../performance-records.md) | next recommended | The movement-frame headless probe is green, but the original report was visible desktop walking hitching on a 120 Hz display. Add comparable desktop-side frame timing or present/wait attribution so we can separate engine work from swapchain/OS pacing. |
-| P1 | Render compile queue stale/prioritization refinement | Yes | [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | recommended | Java prioritizes/cancels compile tasks. Native's first worker queue uses a conservative global epoch; release probes saw stale output during streaming (`33 / 78` in the stress probe, `30 / 91` in the movement-frame probe). Per-section/chunk revisions and distance priority would reduce wasted worker work. |
-| P2 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and this probe's max upload was only `0.326 ms`. Do this when probes show upload/allocation cost is material again. |
-| P3 | Live light deltas and light-section dirtying | Yes | [`026`](../tactical/026-lighting-pipeline.md), [`031`](../tactical/031-native-section-block-delta-updates.md) | pending larger subsystem | Section block deltas currently leave light payloads unchanged. Correct live lighting needs Java-shaped light propagation/deltas and render dirtying by changed light sections. |
-| P4 | Release perf budgets and durable records | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`../performance-records.md`](../performance-records.md) | ongoing | Once baselines stabilize, add budget thresholds that catch regressions without failing on normal host noise. |
+| P0 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | next recommended | Native now avoids stale queued backlog and accepts unchanged sections, but an already-running worker request cannot be interrupted. Java render chunk tasks have cancellation flags. Cancellable or smaller-granularity tasks would reduce wasted CPU during fast streaming/unloads, relevant to battery/thermal targets. |
+| P1 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and this probe's max upload was only `0.400 ms`. Do this when probes show upload/allocation cost is material again, or before adding multiple compile workers. |
+| P2 | Live light deltas and light-section dirtying | Yes | [`026`](../tactical/026-lighting-pipeline.md), [`031`](../tactical/031-native-section-block-delta-updates.md) | pending larger subsystem | Section block deltas currently leave light payloads unchanged. Correct live lighting needs Java-shaped light propagation/deltas and render dirtying by changed light sections. |
+| P3 | Desktop-present pacing attribution | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`../performance-records.md`](../performance-records.md) | optional | Do this if visible desktop hitching returns or if we need end-to-end swapchain/present attribution. Current priority is worker efficiency because desktop/headless probes are under budget. |
+| P4 | Release perf budgets and durable records | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`../performance-records.md`](../performance-records.md) | ongoing | Once baselines stabilize, add budget thresholds that catch regressions without failing on normal host noise. |
 
 ## Java Reference Anchors
 
@@ -120,6 +118,8 @@ Use these local sources when implementing or reviewing performance work:
 - Movement-shaped release frame probe:
   [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md),
   [`033`](../tactical/033-native-async-render-section-compile-queue.md)
+- Render compile queue revision/priority refinement:
+  [`034`](../tactical/034-native-render-compile-revisions-and-priority.md)
 
 ## Tactical Index
 
@@ -134,6 +134,7 @@ Primary performance tacticals:
 - [`031-native-section-block-delta-updates.md`](../tactical/031-native-section-block-delta-updates.md)
 - [`032-native-neighbor-stable-render-boundaries.md`](../tactical/032-native-neighbor-stable-render-boundaries.md)
 - [`033-native-async-render-section-compile-queue.md`](../tactical/033-native-async-render-section-compile-queue.md)
+- [`034-native-render-compile-revisions-and-priority.md`](../tactical/034-native-render-compile-revisions-and-priority.md)
 
 Related subsystem tacticals:
 

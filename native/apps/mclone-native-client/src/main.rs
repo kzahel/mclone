@@ -2502,15 +2502,15 @@ impl RenderSectionCacheUpdate {
 
 #[derive(Clone, Debug)]
 struct RenderSectionCompileRequest {
-    epoch: u64,
     target_sections: BTreeSet<RenderSectionKey>,
+    section_revisions: BTreeMap<RenderSectionKey, u64>,
     snapshots: Vec<ChunkSnapshot>,
 }
 
 #[derive(Debug)]
 struct RenderSectionCompileResult {
-    epoch: u64,
     target_sections: BTreeSet<RenderSectionKey>,
+    section_revisions: BTreeMap<RenderSectionKey, u64>,
     result: std::result::Result<TexturedRenderSectionBuildReport, String>,
 }
 
@@ -2545,8 +2545,8 @@ impl RenderSectionCompileWorker {
                             .map_err(|error| format!("{error:#}"));
                             if result_sender
                                 .send(RenderSectionCompileResult {
-                                    epoch: request.epoch,
                                     target_sections: request.target_sections,
+                                    section_revisions: request.section_revisions,
                                     result,
                                 })
                                 .is_err()
@@ -2891,7 +2891,7 @@ struct WindowSceneRuntime {
     dirty_render_chunks: BTreeSet<ChunkPos>,
     dirty_render_sections: BTreeSet<RenderSectionKey>,
     inflight_render_sections: BTreeSet<RenderSectionKey>,
-    render_compile_epoch: u64,
+    render_section_revisions: BTreeMap<RenderSectionKey, u64>,
     render_compile_worker: RenderSectionCompileWorker,
     last_tick: u64,
     last_simulation_tick: u64,
@@ -3014,7 +3014,7 @@ impl WindowSceneRuntime {
             dirty_render_chunks: BTreeSet::new(),
             dirty_render_sections: BTreeSet::new(),
             inflight_render_sections: BTreeSet::new(),
-            render_compile_epoch: 0,
+            render_section_revisions: BTreeMap::new(),
             render_compile_worker,
             last_tick: 0,
             last_simulation_tick: 0,
@@ -3168,9 +3168,6 @@ impl WindowSceneRuntime {
         let mut snapshot_updates = 0;
         let mut section_block_updates = 0;
         let mut unload_updates = 0;
-        if changed {
-            self.render_compile_epoch = self.render_compile_epoch.wrapping_add(1);
-        }
         let dirty_mark_start = Instant::now();
         for update in &updates {
             match update {
@@ -3209,8 +3206,10 @@ impl WindowSceneRuntime {
     }
 
     fn mark_render_chunk_dirty(&mut self, pos: ChunkPos) {
-        self.dirty_render_chunks
-            .extend(render_dirty_chunk_neighborhood(pos));
+        for dirty_pos in render_dirty_chunk_neighborhood(pos) {
+            self.bump_known_render_chunk_section_revisions(dirty_pos);
+            self.dirty_render_chunks.insert(dirty_pos);
+        }
     }
 
     fn mark_render_section_updates_dirty(
@@ -3220,11 +3219,55 @@ impl WindowSceneRuntime {
         updates: &[SectionBlockUpdate],
     ) {
         for update in updates {
-            self.dirty_render_sections
-                .extend(render_dirty_section_keys_for_block_update(
-                    pos, section_y, update,
-                ));
+            for key in render_dirty_section_keys_for_block_update(pos, section_y, update) {
+                self.bump_render_section_revision(key);
+                self.dirty_render_sections.insert(key);
+            }
         }
+    }
+
+    fn bump_known_render_chunk_section_revisions(&mut self, pos: ChunkPos) {
+        let keys = self.known_render_section_keys_for_chunk(pos);
+        for key in keys {
+            self.bump_render_section_revision(key);
+        }
+    }
+
+    fn known_render_section_keys_for_chunk(&self, pos: ChunkPos) -> BTreeSet<RenderSectionKey> {
+        let mut keys = BTreeSet::new();
+        if let Some(snapshot) = self.client.chunk_snapshot(pos) {
+            keys.extend(render_section_keys_for_snapshot(snapshot));
+        }
+        keys.extend(
+            self.render_sections
+                .section_keys()
+                .filter(|key| render_section_chunk_pos(*key) == pos),
+        );
+        keys.extend(
+            self.dirty_render_sections
+                .iter()
+                .copied()
+                .filter(|key| render_section_chunk_pos(*key) == pos),
+        );
+        keys.extend(
+            self.inflight_render_sections
+                .iter()
+                .copied()
+                .filter(|key| render_section_chunk_pos(*key) == pos),
+        );
+        keys
+    }
+
+    fn bump_render_section_revision(&mut self, key: RenderSectionKey) {
+        let revision = self.render_section_revisions.entry(key).or_default();
+        *revision = revision.wrapping_add(1);
+    }
+
+    fn render_section_revision(&self, key: RenderSectionKey) -> u64 {
+        self.render_section_revisions
+            .get(&key)
+            .copied()
+            .unwrap_or_default()
     }
 
     fn drain_completed_render_compile_jobs(&mut self) -> Result<RenderSectionCacheUpdate> {
@@ -3234,15 +3277,32 @@ impl WindowSceneRuntime {
                 self.inflight_render_sections.remove(key);
             }
 
-            if completed.epoch != self.render_compile_epoch {
-                update.stale_compile_section_count += completed.target_sections.len();
-                self.requeue_stale_render_sections(completed.target_sections);
+            let mut accepted_sections = BTreeSet::new();
+            let mut stale_sections = BTreeSet::new();
+            for key in &completed.target_sections {
+                let submitted_revision = completed
+                    .section_revisions
+                    .get(key)
+                    .copied()
+                    .unwrap_or_default();
+                if self.render_section_revision(*key) == submitted_revision {
+                    accepted_sections.insert(*key);
+                } else {
+                    stale_sections.insert(*key);
+                }
+            }
+
+            if !stale_sections.is_empty() {
+                update.stale_compile_section_count += stale_sections.len();
+                self.requeue_stale_render_sections(stale_sections);
+            }
+            if accepted_sections.is_empty() {
                 continue;
             }
 
             let build_report = completed.result.map_err(anyhow::Error::msg)?;
             let completed_update = self.render_sections.apply_build_report(
-                &completed.target_sections,
+                &accepted_sections,
                 build_report,
                 &BTreeSet::new(),
                 &BTreeSet::new(),
@@ -3275,10 +3335,14 @@ impl WindowSceneRuntime {
         }
         let submitted_count = ready_section_keys.len();
         let snapshots = self.client.chunk_snapshots().cloned().collect();
+        let section_revisions = ready_section_keys
+            .iter()
+            .map(|key| (*key, self.render_section_revision(*key)))
+            .collect();
         self.render_compile_worker
             .submit(RenderSectionCompileRequest {
-                epoch: self.render_compile_epoch,
                 target_sections: ready_section_keys.clone(),
+                section_revisions,
                 snapshots,
             })?;
         self.inflight_render_sections.extend(ready_section_keys);
@@ -3341,9 +3405,7 @@ impl WindowSceneRuntime {
             }
         }
 
-        if chunk_budget == 0
-            || (self.dirty_render_chunks.is_empty() && self.dirty_render_sections.is_empty())
-        {
+        if self.dirty_render_chunks.is_empty() && self.dirty_render_sections.is_empty() {
             report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
             return Ok(report);
         }
@@ -3383,17 +3445,48 @@ impl WindowSceneRuntime {
             }
         }
 
-        let budgeted_loaded_chunks = loaded_dirty_chunks
-            .into_iter()
-            .take(chunk_budget)
-            .collect::<BTreeSet<_>>();
+        for pos in stale_dirty_chunks {
+            self.dirty_render_chunks.remove(&pos);
+        }
+        for key in stale_dirty_sections {
+            self.dirty_render_sections.remove(&key);
+        }
+
+        if !removal_dirty_chunks.is_empty() || !removal_dirty_sections.is_empty() {
+            let removal_update = self
+                .render_sections
+                .remove_sections(&removal_dirty_chunks, &removal_dirty_sections);
+            report.merge(removal_update);
+            for pos in &removal_dirty_chunks {
+                self.dirty_render_chunks.remove(pos);
+                self.dirty_render_sections
+                    .retain(|key| render_section_chunk_pos(*key) != *pos);
+                self.inflight_render_sections
+                    .retain(|key| render_section_chunk_pos(*key) != *pos);
+            }
+            for key in &removal_dirty_sections {
+                self.dirty_render_sections.remove(key);
+                self.inflight_render_sections.remove(key);
+            }
+        }
+
+        if chunk_budget == 0 || self.render_compile_worker.pending_job_count() > 0 {
+            report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
+            return Ok(report);
+        }
+
+        let budgeted_loaded_chunks =
+            sort_chunk_positions_by_distance(loaded_dirty_chunks.iter().copied(), camera_position)
+                .into_iter()
+                .take(chunk_budget)
+                .collect::<BTreeSet<_>>();
         let remaining_chunk_budget = chunk_budget.saturating_sub(budgeted_loaded_chunks.len());
-        let budgeted_dirty_section_chunks = loaded_dirty_sections_by_chunk
-            .keys()
-            .copied()
-            .filter(|pos| !budgeted_loaded_chunks.contains(pos))
-            .take(remaining_chunk_budget)
-            .collect::<BTreeSet<_>>();
+        let budgeted_dirty_section_chunks =
+            sort_dirty_section_chunks_by_distance(&loaded_dirty_sections_by_chunk, camera_position)
+                .into_iter()
+                .filter(|pos| !budgeted_loaded_chunks.contains(pos))
+                .take(remaining_chunk_budget)
+                .collect::<BTreeSet<_>>();
         let mut ready_section_keys = BTreeSet::new();
         let mut deferred_section_keys = BTreeSet::new();
         let mut near_exception_section_count = 0;
@@ -3441,16 +3534,7 @@ impl WindowSceneRuntime {
                 }
             }
         }
-        for pos in stale_dirty_chunks {
-            self.dirty_render_chunks.remove(&pos);
-        }
-        for key in stale_dirty_sections {
-            self.dirty_render_sections.remove(&key);
-        }
-        if ready_section_keys.is_empty()
-            && removal_dirty_chunks.is_empty()
-            && removal_dirty_sections.is_empty()
-        {
+        if ready_section_keys.is_empty() {
             for pos in budgeted_loaded_chunks {
                 self.dirty_render_chunks.remove(&pos);
             }
@@ -3462,13 +3546,6 @@ impl WindowSceneRuntime {
             });
             report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
             return Ok(report);
-        }
-
-        if !removal_dirty_chunks.is_empty() || !removal_dirty_sections.is_empty() {
-            let removal_update = self
-                .render_sections
-                .remove_sections(&removal_dirty_chunks, &removal_dirty_sections);
-            report.merge(removal_update);
         }
 
         let submitted_compile_section_count =
@@ -3483,19 +3560,8 @@ impl WindowSceneRuntime {
         for pos in budgeted_loaded_chunks {
             self.dirty_render_chunks.remove(&pos);
         }
-        for pos in removal_dirty_chunks {
-            self.dirty_render_chunks.remove(&pos);
-            self.dirty_render_sections
-                .retain(|key| render_section_chunk_pos(*key) != pos);
-            self.inflight_render_sections
-                .retain(|key| render_section_chunk_pos(*key) != pos);
-        }
         for key in &ready_section_keys {
             self.dirty_render_sections.remove(key);
-        }
-        for key in &removal_dirty_sections {
-            self.dirty_render_sections.remove(key);
-            self.inflight_render_sections.remove(key);
         }
         self.dirty_render_sections.extend(deferred_section_keys);
         report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
@@ -4115,6 +4181,62 @@ fn render_section_neighbor_readiness(
 
 fn render_section_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f32 {
     let center = render_section_center(key);
+    center.distance_squared(camera_position)
+}
+
+fn sort_chunk_positions_by_distance(
+    positions: impl IntoIterator<Item = ChunkPos>,
+    camera_position: Vec3,
+) -> Vec<ChunkPos> {
+    let mut positions = positions.into_iter().collect::<Vec<_>>();
+    positions.sort_by(|left, right| {
+        render_chunk_distance_sq(*left, camera_position)
+            .total_cmp(&render_chunk_distance_sq(*right, camera_position))
+            .then_with(|| left.x.cmp(&right.x))
+            .then_with(|| left.z.cmp(&right.z))
+    });
+    positions
+}
+
+fn sort_dirty_section_chunks_by_distance(
+    sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    camera_position: Vec3,
+) -> Vec<ChunkPos> {
+    let mut positions = sections_by_chunk.keys().copied().collect::<Vec<_>>();
+    positions.sort_by(|left, right| {
+        dirty_section_chunk_distance_sq(sections_by_chunk, *left, camera_position)
+            .total_cmp(&dirty_section_chunk_distance_sq(
+                sections_by_chunk,
+                *right,
+                camera_position,
+            ))
+            .then_with(|| left.x.cmp(&right.x))
+            .then_with(|| left.z.cmp(&right.z))
+    });
+    positions
+}
+
+fn dirty_section_chunk_distance_sq(
+    sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    pos: ChunkPos,
+    camera_position: Vec3,
+) -> f32 {
+    sections_by_chunk
+        .get(&pos)
+        .and_then(|keys| {
+            keys.iter()
+                .map(|key| render_section_distance_sq(*key, camera_position))
+                .min_by(f32::total_cmp)
+        })
+        .unwrap_or_else(|| render_chunk_distance_sq(pos, camera_position))
+}
+
+fn render_chunk_distance_sq(pos: ChunkPos, camera_position: Vec3) -> f32 {
+    let center = Vec3::new(
+        render_chunk_world_origin(pos.x) as f32 + CHUNK_WIDTH as f32 * 0.5,
+        camera_position.y,
+        render_chunk_world_origin(pos.z) as f32 + CHUNK_WIDTH as f32 * 0.5,
+    );
     center.distance_squared(camera_position)
 }
 
@@ -6634,7 +6756,7 @@ mod tests {
                 local_x: 8,
                 local_y: 8,
                 local_z: 8,
-                block_state: BlockStateId(42),
+                block_state: AIR_BLOCK_STATE_ID,
             }],
         }]);
 
@@ -6643,6 +6765,70 @@ mod tests {
             runtime.dirty_render_sections,
             BTreeSet::from([RenderSectionKey::new(0, 7, 0)])
         );
+    }
+
+    #[test]
+    fn render_compile_scheduling_orders_dirty_chunks_by_camera_distance() {
+        let camera = Vec3::new(8.0, 88.0, 8.0);
+        let sorted = sort_chunk_positions_by_distance(
+            [
+                ChunkPos::new(4, 0),
+                ChunkPos::new(0, 0),
+                ChunkPos::new(-2, 0),
+            ],
+            camera,
+        );
+
+        assert_eq!(
+            sorted,
+            vec![
+                ChunkPos::new(0, 0),
+                ChunkPos::new(-2, 0),
+                ChunkPos::new(4, 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn render_compile_revisions_stale_only_changed_sections() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let scene = SceneOptions {
+            chunk_radius: 0,
+            ..SceneOptions::default()
+        };
+        let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
+        poll_window_runtime_until_idle(&mut runtime).unwrap();
+
+        let spectator = SpectatorCamera::spawn_for_scene(&scene);
+        let initial_submit = runtime.sync_render_sections(spectator.position).unwrap();
+        assert!(initial_submit.submitted_compile_section_count > 1);
+        let changed_key = RenderSectionKey::new(0, 5, 0);
+        assert!(runtime.inflight_render_sections.contains(&changed_key));
+
+        runtime.apply_server_updates(vec![ServerUpdate::SectionBlockUpdates {
+            pos: ChunkPos::new(0, 0),
+            section_y: 5,
+            updates: vec![SectionBlockUpdate {
+                local_x: 8,
+                local_y: 8,
+                local_z: 8,
+                block_state: AIR_BLOCK_STATE_ID,
+            }],
+        }]);
+
+        let completed = runtime
+            .sync_all_render_sections(spectator.position)
+            .unwrap();
+
+        assert_eq!(completed.stale_compile_section_count, 1);
+        assert!(
+            completed.completed_compile_section_count
+                >= initial_submit.submitted_compile_section_count
+        );
+        assert!(!runtime.has_pending_render_work(spectator.position));
     }
 
     #[test]

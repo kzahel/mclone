@@ -61,6 +61,75 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-16 - Render Compile Revisions And Priority Release Baseline
+
+Commit reported by benchmark JSON: `3bc5e7d`.
+
+Note: `git_dirty=true` because this was captured while implementing the render
+compile revision/priority slice, before committing the slice. Treat it as the
+release probe for that working-tree implementation, not as a clean historical
+commit record.
+
+Movement-frame command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --movement-frame-probe --frame-budget-frames 240 --target-hz 120 --path-radius 4
+```
+
+Movement-frame probe, mode `movement_walk`, target `120 Hz`, `240` frames,
+speed `32 blocks/sec`:
+
+| Metric | Value |
+|---|---:|
+| over-budget frames | `0 / 240` |
+| over 2x budget frames | `0 / 240` |
+| over 4x budget frames | `0 / 240` |
+| p95 frame | `3.010 ms` |
+| p99 frame | `4.156 ms` |
+| max frame | `7.234 ms` |
+| max `poll_ms` | `1.453 ms` |
+| max `remesh_ms` | `0.130 ms` |
+| max `upload_ms` | `0.400 ms` |
+| max pending compile jobs | `1` |
+| max in-flight sections | `16` |
+| submitted compile sections | `107` |
+| completed compile sections | `107` |
+| stale compile sections | `0` |
+| total snapshot updates | `5` |
+| total section block update batches | `102` |
+| total fluid mutated blocks | `299` |
+
+Stress-orbit command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --frame-budget-probe --frame-budget-frames 120 --target-hz 120
+```
+
+Stress-orbit frame-budget probe, target `120 Hz`, `120` frames:
+
+| Metric | Value |
+|---|---:|
+| over-budget frames | `0 / 120` |
+| p95 frame | `3.724 ms` |
+| p99 frame | `4.361 ms` |
+| max frame | `7.112 ms` |
+| max `poll_ms` | `1.571 ms` |
+| max `remesh_ms` | `0.080 ms` |
+| max `upload_ms` | `0.342 ms` |
+| max pending compile jobs | `1` |
+| max in-flight sections | `16` |
+| submitted compile sections | `115` |
+| completed compile sections | `98` |
+| stale compile sections | `14` |
+| total section block update batches | `27` |
+| total fluid mutated blocks | `80` |
+
+Observation: per-section compile revisions removed stale worker output from the
+normal movement-frame lane (`30` stale sections before, `0` after). The stress
+orbit still stales active work during fast streaming/unload churn, but stale
+sections dropped from `33` to `14`. Frame timing remains below the 120 Hz
+budget.
+
 ### 2026-06-16 - Movement Frame Probe Release Baseline
 
 Commit reported by benchmark JSON: `f8855ce`.
