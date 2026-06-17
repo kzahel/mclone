@@ -20,10 +20,10 @@ use mclone_worldgen::levelgen::{
     OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport,
 };
 
-use crate::{
-    ChunkJobId, WorldgenMailboxKind, provisional_light_sections_from_neighbors,
-    provisional_sky_light_includes_chunk,
+use crate::lighting_seed::{
+    provisional_light_sections_from_neighbors, provisional_sky_light_includes_chunk,
 };
+use crate::{ChunkJobId, WorldgenMailboxKind};
 
 #[derive(Debug)]
 pub(crate) struct WorldgenCompletedJob {
