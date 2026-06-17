@@ -49,7 +49,9 @@ After the first native-client module splits, the largest current Rust files are:
 
 - `native/crates/mclone-server/src/lib.rs`: still over 6k lines.
 - `native/crates/mclone-worldgen/src/feature.rs`: still over 4k lines.
-- `native/crates/mclone-worldgen/src/levelgen.rs`: still over 3.5k lines.
+- `native/crates/mclone-worldgen/src/levelgen.rs`: split complete; the parent
+  file is now ~1.7k lines (almost entirely the inline test suite) with all
+  production code in `levelgen/` submodules.
 - `native/crates/mclone-mesh/src/lib.rs` and
   `native/crates/mclone-render/src/chunk.rs`: both near or over 2k lines.
 - `native/apps/mclone-native-client/src/main.rs`,
@@ -185,8 +187,15 @@ module.
   `placed` (done), `glow_lichen` (done), `lake` (done), `spring` (done),
   `ore` (done), `patch` (done), `tree` (done), and `top_layer` (done). Only the
   `Direction` core/geometry relocation remains as a separate follow-up.
-- [ ] Split `mclone-worldgen::levelgen` into chunk data, settings, sampler,
-  generator, feature-batch, and timing modules.
+- [x] Split `mclone-worldgen::levelgen` into chunk data, settings, sampler,
+  generator, feature-batch, and timing modules. All six submodules extracted
+  (`chunk`, `settings`, `sampler`, `timing`, `generator`, `feature_batch`);
+  `levelgen.rs` is now a thin facade (mod decls, re-exports, inline tests). The
+  noise biome-source abstraction (`NoiseBiome`/`NoiseBiomeSource`) was relocated
+  to `crate::biome` to match Java's biome-package home and break the
+  `biome → levelgen` cycle. `feature_batch` is native orchestration (the
+  cross-chunk dependency cache diverges from Java's inline per-chunk
+  decoration), not a Java 1:1 module. Move-only; `levelgen::` paths preserved.
 - [ ] Split `mclone-mesh` into visibility, mesh data, textured catalog, and
   mesh-builder modules.
 - [ ] Split `mclone-render::chunk` into camera/view, culling, GPU resources,
@@ -271,9 +280,12 @@ module.
    - The only remaining feature-area slice is moving `Direction` toward a
      core/geometry module (`net.minecraft.core.Direction`).
 
-4. `worldgen::levelgen` first split
-   - Separate generated chunk data and mutable chunk buffers from settings,
-     sampler, generator, feature-batch cache, and timing.
+4. `worldgen::levelgen` first split (done)
+   - Generated chunk data and mutable chunk buffers (`chunk`), noise settings
+     (`settings`), `NoiseSampler` (`sampler`), diagnostics (`timing`),
+     `NoiseBasedChunkGenerator` (`generator`), and the feature-batch cache +
+     generation entry points (`feature_batch`) are each in their own
+     `levelgen/<name>.rs`. Move-only; public `levelgen::` paths preserved.
 
 5. `mclone-server` first split
    - Split stable support modules first: `types`, `timing`, and
