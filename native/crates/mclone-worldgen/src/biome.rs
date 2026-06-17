@@ -1,4 +1,3 @@
-use crate::levelgen::{NoiseBiome, NoiseBiomeSource};
 use crate::noise::ImprovedNoise;
 use crate::prng::SimpleRandomSource;
 use mclone_core::chunk_min_block_coord;
@@ -6,6 +5,47 @@ use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoiseBiome {
+    depth: f32,
+    scale: f32,
+}
+
+impl NoiseBiome {
+    pub fn new(depth: f32, scale: f32) -> Self {
+        Self { depth, scale }
+    }
+
+    pub fn get_depth(&self) -> f32 {
+        self.depth
+    }
+
+    pub fn get_scale(&self) -> f32 {
+        self.scale
+    }
+}
+
+pub trait NoiseBiomeSource {
+    fn get_noise_biome(&self, x: i32, y: i32, z: i32) -> NoiseBiome;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConstantBiomeSource {
+    biome: NoiseBiome,
+}
+
+impl ConstantBiomeSource {
+    pub fn new(biome: NoiseBiome) -> Self {
+        Self { biome }
+    }
+}
+
+impl NoiseBiomeSource for ConstantBiomeSource {
+    fn get_noise_biome(&self, _x: i32, _y: i32, _z: i32) -> NoiseBiome {
+        self.biome
+    }
+}
 
 const MAX_CACHE: usize = 1024;
 const WARM_ID: i32 = 1;

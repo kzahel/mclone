@@ -24,10 +24,11 @@ mod chunk;
 mod sampler;
 mod settings;
 
+pub use crate::biome::{ConstantBiomeSource, NoiseBiome, NoiseBiomeSource};
 use chunk::world_surface_height;
 pub use chunk::{GeneratedChunk, MutableChunkBlockBuffer, ScheduledTick};
+pub use sampler::NoiseSampler;
 use sampler::{BIOME_WEIGHT_RADIUS, BiomeDensity, compute_biome_density_from_neighborhood};
-pub use sampler::{ConstantBiomeSource, NoiseBiome, NoiseBiomeSource, NoiseSampler};
 pub use settings::{
     NoiseGeneratorSettings, NoiseModifier, NoiseSamplingSettings, NoiseSettings, NoiseSlideSettings,
 };

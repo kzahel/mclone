@@ -1,50 +1,10 @@
+use crate::biome::{NoiseBiome, NoiseBiomeSource};
 use crate::noise::{BlendedNoise, PerlinNoise, SimplexNoise};
 
 use super::{NoiseModifier, NoiseSettings};
 
 const OLD_CELL_COUNT_Y: i32 = 32;
 pub(super) const BIOME_WEIGHT_RADIUS: i32 = 2;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct NoiseBiome {
-    depth: f32,
-    scale: f32,
-}
-
-impl NoiseBiome {
-    pub fn new(depth: f32, scale: f32) -> Self {
-        Self { depth, scale }
-    }
-
-    pub fn get_depth(&self) -> f32 {
-        self.depth
-    }
-
-    pub fn get_scale(&self) -> f32 {
-        self.scale
-    }
-}
-
-pub trait NoiseBiomeSource {
-    fn get_noise_biome(&self, x: i32, y: i32, z: i32) -> NoiseBiome;
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ConstantBiomeSource {
-    biome: NoiseBiome,
-}
-
-impl ConstantBiomeSource {
-    pub fn new(biome: NoiseBiome) -> Self {
-        Self { biome }
-    }
-}
-
-impl NoiseBiomeSource for ConstantBiomeSource {
-    fn get_noise_biome(&self, _x: i32, _y: i32, _z: i32) -> NoiseBiome {
-        self.biome
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct NoiseSampler<B: NoiseBiomeSource> {
