@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod distance_manager;
+mod fluid;
 mod holder;
 mod lighting_seed;
 mod persistence;
@@ -14,6 +15,12 @@ use std::{
 };
 
 use distance_manager::ChunkDistanceManager;
+use fluid::{
+    ALL_FLUID_DIRECTIONS, FluidDirection, HORIZONTAL_FLUID_DIRECTIONS,
+    LAVA_SOURCE_CONTACT_DIRECTIONS, NativeFluidState, fluid_cache_key, fluid_can_convert_to_source,
+    fluid_drop_off, fluid_slope_find_distance, legacy_block_for_fluid_state, offset_pos,
+    target_fluid_can_be_replaced_with,
+};
 pub use holder::{ChunkHolder, ChunkStatusSlot};
 #[cfg(test)]
 use lighting_seed::{
@@ -36,8 +43,7 @@ use mclone_protocol::{ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate
 #[cfg(test)]
 use mclone_worldgen::block::{LAVA, WATER};
 use mclone_worldgen::block::{
-    OBSIDIAN, RawBlockId, STONE, fluid_level, generated_block_state_id, is_water,
-    material_blocks_motion,
+    OBSIDIAN, RawBlockId, STONE, generated_block_state_id, is_water, material_blocks_motion,
 };
 use mclone_worldgen::feature::{FEATURES_CHUNK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
 use mclone_worldgen::levelgen::{
@@ -62,101 +68,6 @@ use worldgen_mailbox::{PendingWorldgenPublication, WorldgenMailbox};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use persistence::FilesystemChunkSnapshotStore;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct NativeFluidState {
-    kind: Option<FluidKind>,
-    amount: u8,
-    falling: bool,
-    source: bool,
-}
-
-impl NativeFluidState {
-    const EMPTY: Self = Self {
-        kind: None,
-        amount: 0,
-        falling: false,
-        source: false,
-    };
-
-    const fn source(kind: FluidKind) -> Self {
-        Self {
-            kind: Some(kind),
-            amount: 8,
-            falling: false,
-            source: true,
-        }
-    }
-
-    const fn flowing(kind: FluidKind, amount: u8, falling: bool) -> Self {
-        Self {
-            kind: Some(kind),
-            amount,
-            falling,
-            source: false,
-        }
-    }
-
-    fn from_block_id(block_id: RawBlockId) -> Self {
-        let Some(kind) = FluidKind::from_block_id(block_id) else {
-            return Self::EMPTY;
-        };
-        match fluid_level(block_id).unwrap_or(0) {
-            0 => Self::source(kind),
-            8 => Self::flowing(kind, 8, true),
-            level => Self::flowing(kind, 8_u8.saturating_sub(level), false),
-        }
-    }
-
-    const fn is_empty(self) -> bool {
-        self.kind.is_none()
-    }
-
-    const fn is_same_fluid(self, fluid: FluidKind) -> bool {
-        matches!(self.kind, Some(kind) if kind as u8 == fluid as u8)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum FluidDirection {
-    Down,
-    Up,
-    North,
-    East,
-    South,
-    West,
-}
-
-impl FluidDirection {
-    const fn offset(self) -> (i32, i32, i32) {
-        match self {
-            Self::Down => (0, -1, 0),
-            Self::Up => (0, 1, 0),
-            Self::North => (0, 0, -1),
-            Self::East => (1, 0, 0),
-            Self::South => (0, 0, 1),
-            Self::West => (-1, 0, 0),
-        }
-    }
-
-    const fn opposite(self) -> Self {
-        match self {
-            Self::Down => Self::Up,
-            Self::Up => Self::Down,
-            Self::North => Self::South,
-            Self::East => Self::West,
-            Self::South => Self::North,
-            Self::West => Self::East,
-        }
-    }
-}
-
-const HORIZONTAL_FLUID_DIRECTIONS: [FluidDirection; 4] = [
-    FluidDirection::North,
-    FluidDirection::East,
-    FluidDirection::South,
-    FluidDirection::West,
-];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkStatusJob {
@@ -2150,21 +2061,6 @@ fn status_path_to(target_status: ChunkStatus) -> Vec<ChunkStatus> {
 const DEFAULT_PENDING_UNLOAD_BUDGET: usize = 200;
 const DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET: usize = 1;
 const MAX_SCHEDULED_FLUID_TICKS_PER_TICK: usize = 65_536;
-const ALL_FLUID_DIRECTIONS: [FluidDirection; 6] = [
-    FluidDirection::Down,
-    FluidDirection::Up,
-    FluidDirection::North,
-    FluidDirection::South,
-    FluidDirection::West,
-    FluidDirection::East,
-];
-const LAVA_SOURCE_CONTACT_DIRECTIONS: [FluidDirection; 5] = [
-    FluidDirection::Up,
-    FluidDirection::North,
-    FluidDirection::South,
-    FluidDirection::West,
-    FluidDirection::East,
-];
 
 fn section_block_update_from_index(
     local_index: usize,
@@ -2214,59 +2110,6 @@ pub(crate) fn mutable_buffer_from_snapshot(snapshot: &ChunkSnapshot) -> MutableC
 fn raw_block_id_from_state_id(state_id: BlockStateId) -> RawBlockId {
     RawBlockId::try_from(state_id.0)
         .unwrap_or_else(|_| panic!("block state id {} does not fit native raw id", state_id.0))
-}
-
-fn offset_pos(pos: WorldBlockPos, direction: FluidDirection) -> WorldBlockPos {
-    let (dx, dy, dz) = direction.offset();
-    pos.offset(dx, dy, dz)
-}
-
-fn legacy_block_for_fluid_state(state: NativeFluidState) -> Option<RawBlockId> {
-    let fluid = state.kind?;
-    let legacy_level = if state.source {
-        0
-    } else {
-        8_u8.saturating_sub(state.amount.min(8))
-            .saturating_add(if state.falling { 8 } else { 0 })
-            .min(8)
-    };
-    fluid.block_for_level(legacy_level)
-}
-
-fn fluid_can_convert_to_source(fluid: FluidKind) -> bool {
-    matches!(fluid, FluidKind::Water)
-}
-
-fn fluid_drop_off(fluid: FluidKind) -> u8 {
-    match fluid {
-        FluidKind::Water => 1,
-        FluidKind::Lava => 2,
-    }
-}
-
-fn fluid_slope_find_distance(fluid: FluidKind) -> i32 {
-    match fluid {
-        FluidKind::Water => 4,
-        FluidKind::Lava => 2,
-    }
-}
-
-fn target_fluid_can_be_replaced_with(
-    target: NativeFluidState,
-    incoming: FluidKind,
-    direction: FluidDirection,
-) -> bool {
-    match target.kind {
-        None => true,
-        Some(FluidKind::Water) => direction == FluidDirection::Down && incoming != FluidKind::Water,
-        Some(FluidKind::Lava) => direction == FluidDirection::Down && incoming != FluidKind::Lava,
-    }
-}
-
-fn fluid_cache_key(origin: WorldBlockPos, pos: WorldBlockPos) -> i32 {
-    let x = pos.x - origin.x;
-    let z = pos.z - origin.z;
-    ((x + 128) & 0xff) << 8 | ((z + 128) & 0xff)
 }
 
 fn cached_block_and_fluid(
