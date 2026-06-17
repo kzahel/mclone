@@ -8,12 +8,13 @@ use mclone_core::{
     LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection, SECTION_HEIGHT,
 };
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
+const SERVER_UPDATE_TIME: u8 = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkView {
@@ -37,6 +38,11 @@ pub enum ServerUpdate {
         pos: ChunkPos,
         section_y: i32,
         updates: Vec<SectionBlockUpdate>,
+    },
+    /// Authoritative world day-time (in ticks) for the day/night cycle. Mirrors
+    /// the day-time half of Java's `ClientboundSetTimePacket`.
+    TimeUpdate {
+        day_time: u64,
     },
 }
 
@@ -153,6 +159,10 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
                 writer.write_section_block_update(update);
             }
         }
+        ServerUpdate::TimeUpdate { day_time } => {
+            writer.write_u8(SERVER_UPDATE_TIME);
+            writer.write_u64(*day_time);
+        }
     }
     Ok(writer.into_inner())
 }
@@ -182,6 +192,9 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
                 updates,
             }
         }
+        SERVER_UPDATE_TIME => ServerUpdate::TimeUpdate {
+            day_time: reader.read_u64()?,
+        },
         _ => return Err(ProtocolCodecError::UnknownServerUpdateTag(tag)),
     };
     reader.finish()?;
@@ -590,6 +603,15 @@ mod tests {
         let update = ServerUpdate::ChunkUnload {
             pos: ChunkPos::new(7, -8),
         };
+
+        let bytes = encode_server_update(&update).unwrap();
+
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn server_update_codec_round_trips_time() {
+        let update = ServerUpdate::TimeUpdate { day_time: 1_000 };
 
         let bytes = encode_server_update(&update).unwrap();
 

@@ -16,6 +16,7 @@ pub struct ClientRuntime {
     host: ClientHost,
     chunk_view: Option<ChunkView>,
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
+    day_time: u64,
 }
 
 impl ClientRuntime {
@@ -24,6 +25,7 @@ impl ClientRuntime {
             host,
             chunk_view: None,
             chunks: BTreeMap::new(),
+            day_time: 0,
         }
     }
 
@@ -59,6 +61,9 @@ impl ClientRuntime {
             } => {
                 self.apply_section_block_updates(pos, section_y, &updates);
             }
+            ServerUpdate::TimeUpdate { day_time } => {
+                self.day_time = day_time;
+            }
         }
     }
 
@@ -78,6 +83,22 @@ impl ClientRuntime {
 
     pub fn loaded_chunk_count(&self) -> usize {
         self.chunks.len()
+    }
+
+    /// Latest authoritative world day-time (ticks) from the server.
+    pub const fn day_time(&self) -> u64 {
+        self.day_time
+    }
+
+    /// Celestial phase in `[0, 1)` for the current day-time. See
+    /// [`mclone_core::time::time_of_day`].
+    pub fn time_of_day(&self) -> f32 {
+        mclone_core::time::time_of_day(self.day_time)
+    }
+
+    /// Celestial rig rotation in radians. See [`mclone_core::time::sun_angle`].
+    pub fn sun_angle(&self) -> f32 {
+        mclone_core::time::sun_angle(self.day_time)
     }
 
     pub fn apply_section_block_updates(
@@ -161,6 +182,19 @@ mod tests {
 
         assert_eq!(runtime.loaded_chunk_count(), 0);
         assert_eq!(runtime.chunk_snapshot(ChunkPos::new(0, 0)), None);
+    }
+
+    #[test]
+    fn client_runtime_tracks_day_time_from_server() {
+        let mut runtime = ClientRuntime::local_integrated();
+        assert_eq!(runtime.day_time(), 0);
+
+        runtime.apply_update(ServerUpdate::TimeUpdate { day_time: 6_000 });
+
+        assert_eq!(runtime.day_time(), 6_000);
+        // dayTime 6000 is noon, which the smoothed curve maps to phase ~0.0.
+        assert!(runtime.time_of_day().abs() < 1e-4);
+        assert!(runtime.sun_angle().abs() < 1e-3);
     }
 
     #[test]

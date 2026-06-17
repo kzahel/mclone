@@ -420,7 +420,12 @@ impl WindowSceneRuntime {
         updates: Vec<ServerUpdate>,
     ) -> RuntimeUpdateApplyReport {
         let total_start = Instant::now();
-        let changed = !updates.is_empty();
+        // Time updates arrive every tick and animate the sky, but they do not
+        // dirty any chunk geometry; the renderer reads time-of-day each frame, so
+        // they must not by themselves force a section re-upload.
+        let changed = updates
+            .iter()
+            .any(|update| !matches!(update, ServerUpdate::TimeUpdate { .. }));
         let update_count = updates.len();
         let mut snapshot_updates = 0;
         let mut section_block_updates = 0;
@@ -444,6 +449,7 @@ impl WindowSceneRuntime {
                     section_block_updates += 1;
                     self.mark_render_section_updates_dirty(*pos, *section_y, updates);
                 }
+                ServerUpdate::TimeUpdate { .. } => {}
             }
         }
         let dirty_mark_ms = elapsed_ms(dirty_mark_start.elapsed());
@@ -830,6 +836,19 @@ impl WindowSceneRuntime {
 
     pub(crate) fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
         self.render_sections.sections()
+    }
+
+    /// Sky clear color for the current day-time, driving the day/night gradient.
+    pub(crate) fn sky_clear_color(&self) -> wgpu::Color {
+        mclone_render::sky::overworld_clear_color(self.client.time_of_day())
+    }
+
+    /// Force the client day/night clock to a specific `dayTime`. Debug-only hook
+    /// for captures; the next server tick will overwrite it with authoritative
+    /// time.
+    pub(crate) fn force_day_time(&mut self, day_time: u64) {
+        self.client
+            .apply_update(ServerUpdate::TimeUpdate { day_time });
     }
 
     pub(crate) fn traversal_ready_render_section_keys(
@@ -1814,6 +1833,7 @@ mod tests {
             chunk_z: 3,
             render_distance: 1,
             remote_addr: None,
+            day_time_override: None,
         }
         .chunk_positions()
         .collect::<Vec<_>>();

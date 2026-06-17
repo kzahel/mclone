@@ -2,6 +2,7 @@
 
 mod bit_storage;
 mod chunk;
+pub mod time;
 
 pub use bit_storage::{BitStorage, local_palette_bits_for, palette_bits_for};
 pub use chunk::{

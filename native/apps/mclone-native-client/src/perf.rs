@@ -1319,6 +1319,7 @@ pub(crate) fn run_frame_budget_probe(
             }
 
             let camera = spectator.camera(state.runtime.render_distance);
+            let sky_clear_color = state.runtime.sky_clear_color();
             state.draw.set_traversal_ready_sections(
                 &state
                     .runtime
@@ -1331,6 +1332,7 @@ pub(crate) fn run_frame_budget_probe(
                 &mut state.draw,
                 &mut state.gui,
                 camera,
+                sky_clear_color,
                 render_options,
                 FramePacingUiState::default(),
                 &state.ui,

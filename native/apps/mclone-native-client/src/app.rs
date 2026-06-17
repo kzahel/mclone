@@ -107,6 +107,7 @@ pub(crate) fn render_full_frame(
     draw: &mut TexturedSectionDrawResources,
     gui: &mut GuiRenderer,
     camera: ChunkCamera,
+    sky_clear_color: wgpu::Color,
     render_options: TexturedSectionRenderOptions,
     frame_pacing: FramePacingUiState,
     ui: &NativeUi,
@@ -122,7 +123,7 @@ pub(crate) fn render_full_frame(
         let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
         let render_target = ChunkRenderTarget::from_frame_target(
             frame.target.with_depth(&depth.view),
-            mclone_render::default_clear_color(),
+            sky_clear_color,
         )?;
         let frame_stats = draw.render_with_options(
             frame.queue,
@@ -892,6 +893,7 @@ impl ApplicationHandler for ChunkApp {
                 };
                 self.ui.set_scale(gui_scale);
                 let camera = self.spectator.camera(self.runtime.render_distance);
+                let sky_clear_color = self.runtime.sky_clear_color();
                 let render_options = self.effective_render_options();
                 let frame_pacing = self.frame_pacing.ui_state();
                 let debug_stats = self
@@ -920,6 +922,7 @@ impl ApplicationHandler for ChunkApp {
                             draw,
                             gui,
                             camera,
+                            sky_clear_color,
                             render_options,
                             frame_pacing,
                             &self.ui,

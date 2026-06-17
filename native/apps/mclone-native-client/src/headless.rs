@@ -65,6 +65,9 @@ pub(crate) fn run_headless_screenshot(
 ) -> Result<HeadlessScreenshotReport> {
     let mut runtime = WindowSceneRuntime::new(&options.scene)?;
     poll_window_runtime_until_idle(&mut runtime)?;
+    if let Some(day_time) = options.scene.day_time_override {
+        runtime.force_day_time(day_time);
+    }
     let spectator = SpectatorCamera::spawn_for_scene(&options.scene);
     let section_update = runtime.sync_all_render_sections(spectator.position)?;
     let sections = runtime.cached_sections();
@@ -86,6 +89,7 @@ pub(crate) fn run_headless_screenshot(
     let debug_pane = options.debug_pane;
     let render_options = options.render_options;
     let camera = spectator.camera(runtime.render_distance);
+    let sky_clear_color = runtime.sky_clear_color();
     let runtime_stats = runtime.stats();
     let initial_upload = TexturedSectionUploadReport {
         uploaded_section_count: section_update.rebuilt_section_count(),
@@ -137,6 +141,7 @@ pub(crate) fn run_headless_screenshot(
                 &mut draw,
                 &mut gui,
                 camera,
+                sky_clear_color,
                 render_options,
                 FramePacingUiState::default(),
                 &ui,

@@ -23,7 +23,11 @@ pub struct IntegratedServer {
     scheduler: ChunkScheduler,
     pub(crate) liquid_ticks: FluidTickList,
     simulation_tick: u64,
+    day_time: u64,
 }
+
+/// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
+const INITIAL_DAY_TIME: u64 = 1000;
 
 impl IntegratedServer {
     pub fn new(seed: i64) -> Self {
@@ -36,6 +40,7 @@ impl IntegratedServer {
             scheduler: ChunkScheduler::with_store(seed, store),
             liquid_ticks: FluidTickList::new(),
             simulation_tick: 0,
+            day_time: INITIAL_DAY_TIME,
         }
     }
 
@@ -45,6 +50,11 @@ impl IntegratedServer {
 
     pub const fn simulation_tick(&self) -> u64 {
         self.simulation_tick
+    }
+
+    /// Authoritative world day-time in ticks, driving the day/night cycle.
+    pub const fn day_time(&self) -> u64 {
+        self.day_time
     }
 
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
@@ -136,6 +146,12 @@ impl IntegratedServer {
         let simulation_tick = self.simulation_tick.saturating_add(1);
         self.simulation_tick = simulation_tick;
 
+        // Advance the day/night clock one tick (Java `ServerLevel.tickTime` with
+        // `doDaylightCycle` on). Coupled to the simulation tick cadence, which is
+        // itself frame-driven in the current runtime; revisit if/when ticks are
+        // fixed-step.
+        self.day_time = self.day_time.wrapping_add(1);
+
         let block_tick_start = simulation_timing_start();
         let block_tick_chunks = run_noop_simulation_phase(&tick_report.block_ticking_chunks);
         let block_tick_us = simulation_timing_elapsed_us(block_tick_start);
@@ -155,6 +171,9 @@ impl IntegratedServer {
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let mut updates = tick_report.updates;
+        updates.push(ServerUpdate::TimeUpdate {
+            day_time: self.day_time,
+        });
         let fluid_event_apply_start = simulation_timing_start();
         updates.extend(
             fluid_events

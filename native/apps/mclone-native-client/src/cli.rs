@@ -19,6 +19,9 @@ pub(crate) struct SceneOptions {
     pub(crate) chunk_z: i32,
     pub(crate) render_distance: i32,
     pub(crate) remote_addr: Option<String>,
+    /// Debug override: force the day/night clock to this `dayTime` (ticks) for
+    /// captures, instead of using whatever the simulation has advanced to.
+    pub(crate) day_time_override: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -147,6 +150,7 @@ impl Default for SceneOptions {
             chunk_z: DEFAULT_CHUNK_Z,
             render_distance: DEFAULT_RENDER_DISTANCE,
             remote_addr: None,
+            day_time_override: None,
         }
     }
 }
@@ -333,6 +337,10 @@ impl Cli {
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
                 "--height" => height = Some(parse_u32_arg("--height", args.next())?),
                 "--seed" => scene.seed = parse_i64_arg("--seed", args.next())?,
+                "--day-time" => {
+                    scene.day_time_override =
+                        Some(parse_u64_arg("--day-time", args.next())?);
+                }
                 "--chunk-x" => scene.chunk_x = parse_i32_arg("--chunk-x", args.next())?,
                 "--chunk-z" => scene.chunk_z = parse_i32_arg("--chunk-z", args.next())?,
                 "--render-distance" => {
@@ -530,6 +538,13 @@ fn parse_i64_arg(flag: &str, value: Option<String>) -> Result<i64> {
     value
         .parse::<i64>()
         .with_context(|| format!("{flag} requires a signed 64-bit integer, got `{value}`"))
+}
+
+fn parse_u64_arg(flag: &str, value: Option<String>) -> Result<u64> {
+    let value = value.with_context(|| format!("{flag} requires a value"))?;
+    value
+        .parse::<u64>()
+        .with_context(|| format!("{flag} requires an unsigned 64-bit integer, got `{value}`"))
 }
 
 fn parse_render_distance_arg(flag: &str, value: Option<String>) -> Result<i32> {
