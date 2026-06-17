@@ -212,8 +212,23 @@ module.
   `biome → levelgen` cycle. `feature_batch` is native orchestration (the
   cross-chunk dependency cache diverges from Java's inline per-chunk
   decoration), not a Java 1:1 module. Move-only; `levelgen::` paths preserved.
-- [ ] Split `mclone-mesh` into visibility, mesh data, textured catalog, and
-  mesh-builder modules.
+- [x] Split `mclone-mesh` into visibility, mesh data, textured catalog, and
+  mesh-builder modules. All move-only: `visibility` (`SectionFace`,
+  `VisibilitySet`, `VisGraph`, `VisibilityGraphTimer`, the `VIS_GRAPH_*`
+  consts, and the `edge_faces`/`neighbor_index_at_face` flood-fill helpers,
+  mirroring Java `VisGraph`/`VisibilitySet`), `data` (vertex/mesh/section
+  structs, `RenderSectionKey`, build-stat/report types,
+  `quad_face_count_from_indices`), `catalog` (`TexturedMeshCatalog`,
+  `AtlasSpriteUv`, `TexturedBlockFace`/`Model`, `TexturedMeshError`, plus the
+  `full_cube_occluder` occlusion helpers), and `builder` (`ChunkMeshInput`,
+  `TexturedChunkMeshInput`, every `build_*` entry point, the `FACES` table,
+  and the face/color/light helpers). `lib.rs` dropped from ~2,040 to a thin
+  crate-root facade (module decls, `pub use` re-exports, the four top-level
+  `pub const`s) plus the inline test suite. Cross-module internals use
+  `pub(crate)` (`VisibilityGraphTimer`, `VisibilityGraphBuildStats::record_ms`,
+  `AtlasSpriteUv::map`, and the `block_at_world_or_air`/`data_layer_value`
+  helpers the tests reach). Public `mclone_mesh::` paths preserved. Inline
+  tests stay in `lib.rs` for the later test-move slice.
 - [ ] Split `mclone-render::chunk` into camera/view, culling, GPU resources,
   pipelines, depth target, and stats modules.
 - [ ] Move large inline test suites into module-local test files where doing so
