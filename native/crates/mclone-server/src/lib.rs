@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod holder;
 mod lighting_seed;
 mod persistence;
 mod timing;
@@ -11,6 +12,7 @@ use std::{
     time::Duration,
 };
 
+pub use holder::{ChunkHolder, ChunkStatusSlot};
 #[cfg(test)]
 use lighting_seed::{
     provisional_block_light_sections_for_chunk, provisional_sky_light_sections,
@@ -387,172 +389,6 @@ struct ScheduledFluidTickRequest {
     pos: WorldBlockPos,
     fluid: FluidKind,
     delay: i32,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ChunkStatusSlot {
-    pub status: ChunkStatus,
-    pub step: ChunkStatusStep,
-    pub revision: Option<ChunkRevision>,
-    pub job_id: Option<ChunkJobId>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ChunkHolder {
-    pos: ChunkPos,
-    ticket_level: i32,
-    target_status: Option<ChunkStatus>,
-    status_slots: BTreeMap<ChunkStatus, ChunkStatusSlot>,
-    published_snapshot: Option<ChunkSnapshot>,
-    live_blocks: Option<MutableChunkBlockBuffer>,
-    dependency_buffer: Option<MutableChunkBlockBuffer>,
-    client_visible: bool,
-    residency: ChunkResidency,
-    dirty: bool,
-}
-
-impl ChunkHolder {
-    fn new(pos: ChunkPos) -> Self {
-        Self {
-            pos,
-            ticket_level: UNLOADED_CHUNK_LEVEL,
-            target_status: None,
-            status_slots: BTreeMap::new(),
-            published_snapshot: None,
-            live_blocks: None,
-            dependency_buffer: None,
-            client_visible: false,
-            residency: ChunkResidency::NotResident,
-            dirty: false,
-        }
-    }
-
-    pub const fn pos(&self) -> ChunkPos {
-        self.pos
-    }
-
-    pub fn target_status(&self) -> Option<ChunkStatus> {
-        self.target_status
-    }
-
-    pub fn ticket_level(&self) -> i32 {
-        self.ticket_level
-    }
-
-    pub fn full_status(&self) -> FullChunkStatus {
-        full_chunk_status_for_ticket_level(self.ticket_level)
-    }
-
-    pub fn status_slot(&self, status: ChunkStatus) -> Option<&ChunkStatusSlot> {
-        self.status_slots.get(&status)
-    }
-
-    pub fn ready_status_count(&self) -> usize {
-        self.status_slots
-            .values()
-            .filter(|slot| slot.step == ChunkStatusStep::Ready)
-            .count()
-    }
-
-    pub fn residency(&self) -> ChunkResidency {
-        self.residency
-    }
-
-    pub fn is_dirty(&self) -> bool {
-        self.dirty
-    }
-
-    pub fn snapshot(&self) -> Option<&ChunkSnapshot> {
-        self.published_snapshot.as_ref()
-    }
-
-    pub fn has_dependency_buffer(&self) -> bool {
-        self.dependency_buffer.is_some()
-    }
-
-    pub fn is_client_visible(&self) -> bool {
-        self.client_visible
-    }
-
-    fn mark_scheduled(&mut self, status: ChunkStatus) {
-        self.status_slots.insert(
-            status,
-            ChunkStatusSlot {
-                status,
-                step: ChunkStatusStep::Scheduled,
-                revision: None,
-                job_id: None,
-            },
-        );
-    }
-
-    fn mark_ready(&mut self, status: ChunkStatus, revision: Option<ChunkRevision>) {
-        let job_id = self.status_slots.get(&status).and_then(|slot| slot.job_id);
-        self.status_slots.insert(
-            status,
-            ChunkStatusSlot {
-                status,
-                step: ChunkStatusStep::Ready,
-                revision,
-                job_id,
-            },
-        );
-    }
-
-    fn assign_status_job(&mut self, status: ChunkStatus, job_id: ChunkJobId) {
-        self.status_slots
-            .entry(status)
-            .or_insert(ChunkStatusSlot {
-                status,
-                step: ChunkStatusStep::Scheduled,
-                revision: None,
-                job_id: None,
-            })
-            .job_id = Some(job_id);
-    }
-
-    fn publish_snapshot(
-        &mut self,
-        snapshot: ChunkSnapshot,
-        residency: ChunkResidency,
-        dirty: bool,
-    ) {
-        self.mark_ready(snapshot.status, Some(snapshot.revision));
-        self.live_blocks = Some(mutable_buffer_from_snapshot(&snapshot));
-        self.published_snapshot = Some(snapshot);
-        self.residency = residency;
-        self.dirty = dirty;
-    }
-
-    fn mark_saved(&mut self) {
-        self.dirty = false;
-        self.residency = ChunkResidency::Saved;
-    }
-
-    fn set_ticket_level(&mut self, ticket_level: i32) {
-        self.ticket_level = ticket_level;
-    }
-
-    fn set_target_status(&mut self, target_status: ChunkStatus) {
-        if self
-            .target_status
-            .is_none_or(|current| current < target_status)
-        {
-            self.target_status = Some(target_status);
-        }
-    }
-
-    fn set_dependency_buffer(&mut self, buffer: MutableChunkBlockBuffer) {
-        self.dependency_buffer = Some(buffer);
-    }
-
-    fn dependency_buffer(&self) -> Option<&MutableChunkBlockBuffer> {
-        self.dependency_buffer.as_ref()
-    }
-
-    fn set_client_visible(&mut self, client_visible: bool) {
-        self.client_visible = client_visible;
-    }
 }
 
 #[derive(Debug)]
@@ -2532,7 +2368,7 @@ fn section_block_update_from_index(
     }
 }
 
-fn mutable_buffer_from_snapshot(snapshot: &ChunkSnapshot) -> MutableChunkBlockBuffer {
+pub(crate) fn mutable_buffer_from_snapshot(snapshot: &ChunkSnapshot) -> MutableChunkBlockBuffer {
     let mut buffer = MutableChunkBlockBuffer::new(
         snapshot.pos.x,
         snapshot.pos.z,
@@ -2652,7 +2488,7 @@ fn record_scheduled_fluid_tick(
     }
 }
 
-fn full_chunk_status_for_ticket_level(ticket_level: i32) -> FullChunkStatus {
+pub(crate) fn full_chunk_status_for_ticket_level(ticket_level: i32) -> FullChunkStatus {
     match (CHUNK_LEVEL_FULL - ticket_level + 1).clamp(0, 3) {
         0 => FullChunkStatus::Inaccessible,
         1 => FullChunkStatus::Border,
