@@ -47,7 +47,9 @@ more likely to accumulate accidental coupling.
 
 After the first native-client module splits, the largest current Rust files are:
 
-- `native/crates/mclone-server/src/lib.rs`: still over 6k lines.
+- `native/crates/mclone-server/src/lib.rs`: split complete; the parent file is
+  now ~2.8k lines (a thin crate-root facade plus the inline integration test
+  suite) with all production code in `mclone-server/src/<name>.rs` submodules.
 - `native/crates/mclone-worldgen/src/feature.rs`: still over 4k lines.
 - `native/crates/mclone-worldgen/src/levelgen.rs`: split complete; the parent
   file is now ~1.7k lines (almost entirely the inline test suite) with all
@@ -179,14 +181,23 @@ module.
 - [ ] Extract shared benchmark/report helpers into an appropriate native utility
   module or crate if they stay useful across binaries: elapsed/micros
   conversion, git metadata, JSON string escaping, and square-count helpers.
-- [ ] Split `mclone-server` after active block-delta/fluid mutation work
-  stabilizes: `types` (done), `timing` (done), `worldgen_mailbox` (done),
-  `tickets`, `distance_manager`, `holder`, `scheduler`, `fluid`, `integrated`,
-  and `lighting_seed`. The three stable support modules are extracted move-only
-  (`types.rs`, `timing.rs`, `worldgen_mailbox.rs`); `lib.rs` dropped from ~6,340
-  to ~5,750 lines. The remaining `tickets`/`distance_manager`/`holder`/
-  `scheduler`/`fluid` splits are still gated on block-delta/fluid mutation work
-  being stable, since those are where live-mutation slices land.
+- [x] Split `mclone-server` into Java-shaped support modules (all move-only):
+  `types` (done), `timing` (done), `worldgen_mailbox` (done),
+  `lighting_seed` (done), `holder` (done), `distance_manager` (done),
+  `fluid` (done), `integrated` (done), and `scheduler` (done). `tickets` is
+  absorbed: ticket data types live in `types`, ticket distance management in
+  `distance_manager`. `lib.rs` dropped from ~6,340 to ~2,770 lines and is now a
+  crate-root facade (module decls, `pub use` re-exports, three shared helpers —
+  `mutable_buffer_from_snapshot`, `raw_block_id_from_state_id`,
+  `full_chunk_status_for_ticket_level` — used by both `holder` and `scheduler`)
+  plus the inline integration test suite (~2,650 lines), which still reaches
+  scheduler internals via `super::*`. The coupled cluster
+  (`holder`/`distance_manager`/`scheduler`) uses `pub(crate)` for the internals
+  the scheduler drives; `fluid.rs` holds the material state + flow rules
+  (Java `world/level/material/*`) while the scheduler-coupled fluid-tick
+  machinery moved with `scheduler`. Public `mclone_server::` paths preserved.
+  Follow-up: relocate the inline test suite into module-local test files now
+  that the production boundaries are stable (see Follow-Up Queue).
 - [x] Split `mclone-worldgen::feature` around Java-shaped concepts:
   `context` (done), `region` (done), `tables` (done), `configured` (done),
   `placed` (done), `glow_lichen` (done), `lake` (done), `spring` (done),
@@ -292,18 +303,24 @@ module.
      generation entry points (`feature_batch`) are each in their own
      `levelgen/<name>.rs`. Move-only; public `levelgen::` paths preserved.
 
-5. `mclone-server` first split (support modules done)
-   - Stable support modules extracted move-only: `types` (server data/enums +
+5. `mclone-server` split (done)
+   - Stable support modules first (move-only): `types` (server data/enums +
      dimension/level consts), `timing` (tick timing/report structs + cfg-gated
      sample helpers, mirroring `levelgen/timing.rs`), and `worldgen_mailbox`
      (mailbox, both cfg-gated backends, `WorldgenRequest`, completed-job /
      pending-publication carriers, and `precompute_completed_light_sections`).
-     Public `mclone_server::` paths preserved via `pub use`; scheduler-internal
-     types use `pub(crate)`. The provisional-lighting helpers the mailbox calls
-     stayed in `lib.rs` (future `lighting_seed` slice) and were widened to
-     `pub(crate)`.
-   - Still gated: split `tickets`/`distance_manager`/`holder`/`scheduler`/
-     `fluid` once nearby active block-delta/fluid mutation work is stable.
+   - Then the remaining modules (move-only): `lighting_seed` (provisional sky/
+     block light flood-fill + propagation rules), `holder` (`ChunkHolder`,
+     Java `ChunkHolder`), `distance_manager` (`ChunkDistanceManager` + ticket
+     storage, Java `DistanceManager`), `fluid` (`NativeFluidState`,
+     `FluidDirection`, and the pure flow rules, Java `world/level/material/*`),
+     `integrated` (`IntegratedServer` facade), and `scheduler`
+     (`ChunkScheduler` core + the fluid-tick machinery, Java `ChunkMap` +
+     `ServerChunkCache`).
+   - Public `mclone_server::` paths preserved via `pub use`; the tightly-coupled
+     scheduler/holder/distance-manager/fluid-tick internals use `pub(crate)`
+     rather than widening the public API. `lib.rs` is now a thin crate-root
+     facade plus the inline integration test suite.
 
 ## Follow-Up Queue
 
