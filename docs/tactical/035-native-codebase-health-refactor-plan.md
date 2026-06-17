@@ -180,8 +180,13 @@ module.
   module or crate if they stay useful across binaries: elapsed/micros
   conversion, git metadata, JSON string escaping, and square-count helpers.
 - [ ] Split `mclone-server` after active block-delta/fluid mutation work
-  stabilizes: `types`, `tickets`, `distance_manager`, `holder`, `scheduler`,
-  `worldgen_mailbox`, `fluid`, `integrated`, `lighting_seed`, and `timing`.
+  stabilizes: `types` (done), `timing` (done), `worldgen_mailbox` (done),
+  `tickets`, `distance_manager`, `holder`, `scheduler`, `fluid`, `integrated`,
+  and `lighting_seed`. The three stable support modules are extracted move-only
+  (`types.rs`, `timing.rs`, `worldgen_mailbox.rs`); `lib.rs` dropped from ~6,340
+  to ~5,750 lines. The remaining `tickets`/`distance_manager`/`holder`/
+  `scheduler`/`fluid` splits are still gated on block-delta/fluid mutation work
+  being stable, since those are where live-mutation slices land.
 - [x] Split `mclone-worldgen::feature` around Java-shaped concepts:
   `context` (done), `region` (done), `tables` (done), `configured` (done),
   `placed` (done), `glow_lichen` (done), `lake` (done), `spring` (done),
@@ -287,11 +292,18 @@ module.
      generation entry points (`feature_batch`) are each in their own
      `levelgen/<name>.rs`. Move-only; public `levelgen::` paths preserved.
 
-5. `mclone-server` first split
-   - Split stable support modules first: `types`, `timing`, and
-     `worldgen_mailbox`.
-   - Then split ticket/distance/holder/scheduler/fluid once nearby active
-     mutation work is stable.
+5. `mclone-server` first split (support modules done)
+   - Stable support modules extracted move-only: `types` (server data/enums +
+     dimension/level consts), `timing` (tick timing/report structs + cfg-gated
+     sample helpers, mirroring `levelgen/timing.rs`), and `worldgen_mailbox`
+     (mailbox, both cfg-gated backends, `WorldgenRequest`, completed-job /
+     pending-publication carriers, and `precompute_completed_light_sections`).
+     Public `mclone_server::` paths preserved via `pub use`; scheduler-internal
+     types use `pub(crate)`. The provisional-lighting helpers the mailbox calls
+     stayed in `lib.rs` (future `lighting_seed` slice) and were widened to
+     `pub(crate)`.
+   - Still gated: split `tickets`/`distance_manager`/`holder`/`scheduler`/
+     `fluid` once nearby active block-delta/fluid mutation work is stable.
 
 ## Follow-Up Queue
 
