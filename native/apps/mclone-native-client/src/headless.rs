@@ -7,6 +7,7 @@ use mclone_render::chunk::{
     TexturedSectionUploadReport,
 };
 use mclone_render::gui::GuiRenderer;
+use mclone_render::sky_render::SkyRenderer;
 use mclone_render::headless::{
     HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessFrameOptions, write_headless_frame_png,
     write_headless_textured_sections_png_with_options,
@@ -90,6 +91,8 @@ pub(crate) fn run_headless_screenshot(
     let render_options = options.render_options;
     let camera = spectator.camera(runtime.render_distance);
     let sky_clear_color = runtime.sky_clear_color();
+    let time_of_day = runtime.time_of_day();
+    let sun_angle = runtime.sun_angle();
     let runtime_stats = runtime.stats();
     let initial_upload = TexturedSectionUploadReport {
         uploaded_section_count: section_update.rebuilt_section_count(),
@@ -117,6 +120,7 @@ pub(crate) fn run_headless_screenshot(
             draw.set_traversal_ready_sections(
                 &runtime.traversal_ready_render_section_keys(spectator.position),
             );
+            let sky = SkyRenderer::new(frame.device, HEADLESS_FORMAT);
             let mut gui = GuiRenderer::new(frame.device, HEADLESS_FORMAT);
 
             render_stats.section_count = draw.section_count();
@@ -138,10 +142,13 @@ pub(crate) fn run_headless_screenshot(
             render_full_frame(
                 frame,
                 &depth,
+                &sky,
                 &mut draw,
                 &mut gui,
                 camera,
                 sky_clear_color,
+                time_of_day,
+                sun_angle,
                 render_options,
                 FramePacingUiState::default(),
                 &ui,

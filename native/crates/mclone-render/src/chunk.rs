@@ -168,6 +168,15 @@ impl ChunkRenderView {
     pub fn uniform_matrix(self) -> [[f32; 4]; 4] {
         self.view_projection.to_cols_array_2d()
     }
+
+    /// View-projection with the camera translation dropped, so geometry rendered
+    /// with it (the sky dome, celestial bodies) is anchored at infinity. Mirrors
+    /// Minecraft's `renderSky`, which draws into a pose stack carrying only the
+    /// camera rotation.
+    pub fn sky_view_projection(self) -> Mat4 {
+        let rotation_only_view = Mat4::look_at_rh(Vec3::ZERO, self.camera_forward, self.camera_up);
+        self.projection * rotation_only_view
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -177,6 +186,9 @@ pub struct ChunkRenderTarget<'a> {
     pub size: [u32; 2],
     pub clear_color: wgpu::Color,
     pub clear_depth: f32,
+    /// When `true`, the color attachment is loaded instead of cleared — used when
+    /// an earlier pass (the sky dome) has already drawn the background.
+    pub load_color: bool,
 }
 
 impl<'a> ChunkRenderTarget<'a> {
@@ -192,6 +204,7 @@ impl<'a> ChunkRenderTarget<'a> {
             size,
             clear_color,
             clear_depth: 1.0,
+            load_color: false,
         }
     }
 
@@ -208,6 +221,21 @@ impl<'a> ChunkRenderTarget<'a> {
             target.size,
             clear_color,
         ))
+    }
+
+    /// Preserve the color attachment's existing contents instead of clearing,
+    /// so a previously drawn sky shows through where no chunk geometry covers it.
+    pub fn with_loaded_color(mut self) -> Self {
+        self.load_color = true;
+        self
+    }
+
+    fn color_load_op(self) -> wgpu::LoadOp<wgpu::Color> {
+        if self.load_color {
+            wgpu::LoadOp::Load
+        } else {
+            wgpu::LoadOp::Clear(self.clear_color)
+        }
     }
 }
 
@@ -1167,7 +1195,7 @@ impl ChunkDrawResources {
                 view: target.color_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(target.clear_color),
+                    load: target.color_load_op(),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -1239,7 +1267,7 @@ impl TexturedChunkDrawResources {
                 view: target.color_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(target.clear_color),
+                    load: target.color_load_op(),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -1422,7 +1450,7 @@ impl TexturedSectionDrawResources {
                 view: target.color_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(target.clear_color),
+                    load: target.color_load_op(),
                     store: wgpu::StoreOp::Store,
                 },
             })],

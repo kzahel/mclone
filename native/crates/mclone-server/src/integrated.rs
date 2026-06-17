@@ -24,6 +24,7 @@ pub struct IntegratedServer {
     pub(crate) liquid_ticks: FluidTickList,
     simulation_tick: u64,
     day_time: u64,
+    day_time_frozen: bool,
 }
 
 /// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
@@ -41,6 +42,7 @@ impl IntegratedServer {
             liquid_ticks: FluidTickList::new(),
             simulation_tick: 0,
             day_time: INITIAL_DAY_TIME,
+            day_time_frozen: false,
         }
     }
 
@@ -55,6 +57,17 @@ impl IntegratedServer {
     /// Authoritative world day-time in ticks, driving the day/night cycle.
     pub const fn day_time(&self) -> u64 {
         self.day_time
+    }
+
+    /// Set the authoritative day-time. Debug hook for forcing a starting time.
+    pub fn set_day_time(&mut self, day_time: u64) {
+        self.day_time = day_time;
+    }
+
+    /// Freeze or resume the day/night clock. While frozen, simulation ticks leave
+    /// `day_time` unchanged (debug hook for inspecting a fixed time of day).
+    pub fn set_day_time_frozen(&mut self, frozen: bool) {
+        self.day_time_frozen = frozen;
     }
 
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
@@ -149,8 +162,10 @@ impl IntegratedServer {
         // Advance the day/night clock one tick (Java `ServerLevel.tickTime` with
         // `doDaylightCycle` on). Coupled to the simulation tick cadence, which is
         // itself frame-driven in the current runtime; revisit if/when ticks are
-        // fixed-step.
-        self.day_time = self.day_time.wrapping_add(1);
+        // fixed-step. Skipped while frozen (debug `--freeze-time`).
+        if !self.day_time_frozen {
+            self.day_time = self.day_time.wrapping_add(1);
+        }
 
         let block_tick_start = simulation_timing_start();
         let block_tick_chunks = run_noop_simulation_phase(&tick_report.block_ticking_chunks);
@@ -290,4 +305,43 @@ fn server_update_from_scheduler_event(event: ChunkSchedulerEvent) -> Option<Serv
 
 fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {
     chunks.iter().fold(0, |count, _pos| count + 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mclone_protocol::ServerUpdate;
+
+    fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
+        report
+            .updates
+            .iter()
+            .rev()
+            .find_map(|update| match update {
+                ServerUpdate::TimeUpdate { day_time } => Some(*day_time),
+                _ => None,
+            })
+            .expect("simulation tick should emit a TimeUpdate")
+    }
+
+    #[test]
+    fn day_time_advances_each_tick_by_default() {
+        let mut server = IntegratedServer::new(0);
+        let start = server.day_time();
+        let report = server.try_simulation_tick_report().expect("tick");
+        assert_eq!(server.day_time(), start + 1);
+        assert_eq!(last_time_update(&report), start + 1);
+    }
+
+    #[test]
+    fn frozen_day_time_holds_a_forced_value() {
+        let mut server = IntegratedServer::new(0);
+        server.set_day_time(23000);
+        server.set_day_time_frozen(true);
+        for _ in 0..5 {
+            let report = server.try_simulation_tick_report().expect("tick");
+            assert_eq!(server.day_time(), 23000);
+            assert_eq!(last_time_update(&report), 23000);
+        }
+    }
 }

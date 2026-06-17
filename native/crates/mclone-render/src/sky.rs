@@ -10,7 +10,7 @@
 //! - `VanillaBiomes.calculateSkyColor` — `reference/.../data/worldgen/biome/VanillaBiomes.java:27`
 //! - `Mth.hsvToRgb` — `reference/.../util/Mth.java:504`
 
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
 
 /// Plains temperature, the biome whose sky color we use until biome data reaches
 /// the client renderer (`VanillaBiomes` passes `0.8` for plains).
@@ -74,6 +74,27 @@ pub fn overworld_clear_color(time_of_day: f32) -> wgpu::Color {
     }
 }
 
+/// Port of `DimensionSpecialEffects.getSunriseColor` (overworld). Returns the
+/// sunrise/sunset glow color as `[r, g, b, a]` when the sun is within ±0.4 of the
+/// dawn/dusk band (in `cos(timeOfDay·2π)` space), or `None` outside it.
+///
+/// Reference: `reference/.../client/renderer/DimensionSpecialEffects.java:40`.
+pub fn sunrise_color(time_of_day: f32) -> Option<[f32; 4]> {
+    let cos_phase = (time_of_day * TAU).cos();
+    if !(-0.4..=0.4).contains(&cos_phase) {
+        return None;
+    }
+    let t = cos_phase / 0.4 * 0.5 + 0.5;
+    let mut alpha = 1.0 - (1.0 - (t * PI).sin()) * 0.99;
+    alpha *= alpha;
+    Some([
+        t * 0.3 + 0.7,
+        t * t * 0.7 + 0.2,
+        t * t * 0.0 + 0.2,
+        alpha,
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +121,20 @@ mod tests {
     fn night_sky_is_black() {
         let color = overworld_clear_color(0.5);
         assert_eq!((color.r, color.g, color.b), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn sunrise_glow_is_present_at_dawn_band_and_absent_at_noon() {
+        // Noon (phase 0.0): cos = 1.0, well outside the ±0.4 band.
+        assert!(sunrise_color(0.0).is_none());
+        // Midnight (phase 0.5): cos = -1.0, also outside the band.
+        assert!(sunrise_color(0.5).is_none());
+        // Dusk-ish: phase where cos(phase·2π) sits inside ±0.4 (e.g. 0.25 -> cos=0).
+        let glow = sunrise_color(0.25).expect("dusk band should produce a glow color");
+        // Center of the band: t = 0.5, so reddish-orange with mid alpha.
+        assert!((glow[0] - 0.85).abs() < 1e-5, "r = {}", glow[0]);
+        assert!(glow[1] > glow[2], "green {} should exceed blue {}", glow[1], glow[2]);
+        assert!((0.0..=1.0).contains(&glow[3]), "alpha {} out of range", glow[3]);
     }
 
     #[test]

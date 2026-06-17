@@ -8,6 +8,7 @@ use mclone_render::chunk::{
     TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
+use mclone_render::sky_render::SkyRenderer;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_render::target::RenderFrameContext;
 use mclone_ui::{GuiScale, Point};
@@ -101,13 +102,17 @@ pub(crate) struct FullFrameRenderSummary {
     pub(crate) gui_command_count: usize,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_full_frame(
     frame: RenderFrameContext<'_>,
     depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
     gui: &mut GuiRenderer,
     camera: ChunkCamera,
     sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
     render_options: TexturedSectionRenderOptions,
     frame_pacing: FramePacingUiState,
     ui: &NativeUi,
@@ -121,10 +126,21 @@ pub(crate) fn render_full_frame(
 
     if !ui_covers_world {
         let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
+        sky.render(
+            frame.queue,
+            frame.encoder,
+            frame.target.color_view,
+            sky_clear_color,
+            render_view.sky_view_projection(),
+            time_of_day,
+            sun_angle,
+        );
+        // The sky pass cleared and drew the background; the chunk pass loads it.
         let render_target = ChunkRenderTarget::from_frame_target(
             frame.target.with_depth(&depth.view),
             sky_clear_color,
-        )?;
+        )?
+        .with_loaded_color();
         let frame_stats = draw.render_with_options(
             frame.queue,
             frame.encoder,
@@ -182,6 +198,7 @@ struct ChunkApp {
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
     depth: Option<ChunkDepthTarget>,
+    sky: Option<SkyRenderer>,
     draw: Option<TexturedSectionDrawResources>,
     gui: Option<GuiRenderer>,
     pressed_keys: std::collections::HashSet<KeyCode>,
@@ -211,6 +228,7 @@ impl ChunkApp {
             window: None,
             surface: None,
             depth: None,
+            sky: None,
             draw: None,
             gui: None,
             pressed_keys: std::collections::HashSet::new(),
@@ -650,6 +668,7 @@ impl ApplicationHandler for ChunkApp {
                 .traversal_ready_render_section_keys(self.spectator.position),
         );
         let upload_ms = elapsed_ms(upload_start.elapsed());
+        let sky = SkyRenderer::new(&surface.device, surface.config.format);
         let gui = GuiRenderer::new(&surface.device, surface.config.format);
         self.ui.set_scale(GuiScale::from_pixels(
             surface.config.width,
@@ -685,6 +704,7 @@ impl ApplicationHandler for ChunkApp {
             upload_ms
         );
         self.depth = Some(depth);
+        self.sky = Some(sky);
         self.draw = Some(draw);
         self.gui = Some(gui);
         self.surface = Some(surface);
@@ -894,6 +914,8 @@ impl ApplicationHandler for ChunkApp {
                 self.ui.set_scale(gui_scale);
                 let camera = self.spectator.camera(self.runtime.render_distance);
                 let sky_clear_color = self.runtime.sky_clear_color();
+                let time_of_day = self.runtime.time_of_day();
+                let sun_angle = self.runtime.sun_angle();
                 let render_options = self.effective_render_options();
                 let frame_pacing = self.frame_pacing.ui_state();
                 let debug_stats = self
@@ -905,9 +927,10 @@ impl ApplicationHandler for ChunkApp {
                 let mut render_stats = self.render_stats;
                 let render_start = Instant::now();
                 let result = {
-                    let (Some(surface), Some(depth), Some(draw), Some(gui)) = (
+                    let (Some(surface), Some(depth), Some(sky), Some(draw), Some(gui)) = (
                         &mut self.surface,
                         &self.depth,
+                        &self.sky,
                         &mut self.draw,
                         &mut self.gui,
                     ) else {
@@ -919,10 +942,13 @@ impl ApplicationHandler for ChunkApp {
                         render_full_frame(
                             frame,
                             depth,
+                            sky,
                             draw,
                             gui,
                             camera,
                             sky_clear_color,
+                            time_of_day,
+                            sun_angle,
                             render_options,
                             frame_pacing,
                             &self.ui,

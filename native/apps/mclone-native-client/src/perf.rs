@@ -9,6 +9,7 @@ use mclone_render::chunk::{
     textured_section_visibility_stats_with_options_and_ready_sections,
 };
 use mclone_render::gui::GuiRenderer;
+use mclone_render::sky_render::SkyRenderer;
 use mclone_render::headless::{
     HeadlessFrameLoopOptions, HeadlessTimedemoOptions, run_headless_frame_loop,
     run_headless_textured_sections_timedemo,
@@ -478,6 +479,7 @@ impl FrameBudgetProbeFrameReport {
 struct FrameBudgetProbeState {
     runtime: WindowSceneRuntime,
     depth: ChunkDepthTarget,
+    sky: SkyRenderer,
     draw: TexturedSectionDrawResources,
     gui: GuiRenderer,
     ui: NativeUi,
@@ -1239,6 +1241,7 @@ pub(crate) fn run_frame_budget_probe(
             draw.set_traversal_ready_sections(
                 &runtime.traversal_ready_render_section_keys(initial_spectator.position),
             );
+            let sky = SkyRenderer::new(device, format);
             let gui = GuiRenderer::new(device, format);
             let mut render_stats = RenderStreamStats {
                 section_count: draw.section_count(),
@@ -1253,6 +1256,7 @@ pub(crate) fn run_frame_budget_probe(
             Ok(FrameBudgetProbeState {
                 runtime,
                 depth,
+                sky,
                 draw,
                 gui,
                 ui,
@@ -1320,6 +1324,8 @@ pub(crate) fn run_frame_budget_probe(
 
             let camera = spectator.camera(state.runtime.render_distance);
             let sky_clear_color = state.runtime.sky_clear_color();
+            let time_of_day = state.runtime.time_of_day();
+            let sun_angle = state.runtime.sun_angle();
             state.draw.set_traversal_ready_sections(
                 &state
                     .runtime
@@ -1329,10 +1335,13 @@ pub(crate) fn run_frame_budget_probe(
             render_full_frame(
                 frame,
                 &state.depth,
+                &state.sky,
                 &mut state.draw,
                 &mut state.gui,
                 camera,
                 sky_clear_color,
+                time_of_day,
+                sun_angle,
                 render_options,
                 FramePacingUiState::default(),
                 &state.ui,

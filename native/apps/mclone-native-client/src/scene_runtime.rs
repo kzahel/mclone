@@ -275,6 +275,20 @@ impl WindowSceneRuntime {
             runtime.render_distance,
             runtime.chunk_tracking_radius,
         )?;
+        // Debug day/night controls. `--freeze-time` stops the integrated server
+        // from advancing the clock; `--day-time` forces a starting tick (and seeds
+        // the client so the first frame is correct before the first server tick).
+        if scene.freeze_time {
+            if let Some(server) = runtime.server.as_mut() {
+                server.set_day_time_frozen(true);
+            }
+        }
+        if let Some(day_time) = scene.day_time_override {
+            if let Some(server) = runtime.server.as_mut() {
+                server.set_day_time(day_time);
+            }
+            runtime.force_day_time(day_time);
+        }
         Ok(runtime)
     }
 
@@ -841,6 +855,16 @@ impl WindowSceneRuntime {
     /// Sky clear color for the current day-time, driving the day/night gradient.
     pub(crate) fn sky_clear_color(&self) -> wgpu::Color {
         mclone_render::sky::overworld_clear_color(self.client.time_of_day())
+    }
+
+    /// Celestial phase in `[0, 1)` for the current day-time (noon = 0).
+    pub(crate) fn time_of_day(&self) -> f32 {
+        self.client.time_of_day()
+    }
+
+    /// Celestial rig rotation in radians for the current day-time.
+    pub(crate) fn sun_angle(&self) -> f32 {
+        self.client.sun_angle()
     }
 
     /// Force the client day/night clock to a specific `dayTime`. Debug-only hook
@@ -1834,6 +1858,7 @@ mod tests {
             render_distance: 1,
             remote_addr: None,
             day_time_override: None,
+            freeze_time: false,
         }
         .chunk_positions()
         .collect::<Vec<_>>();

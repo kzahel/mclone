@@ -22,6 +22,9 @@ pub(crate) struct SceneOptions {
     /// Debug override: force the day/night clock to this `dayTime` (ticks) for
     /// captures, instead of using whatever the simulation has advanced to.
     pub(crate) day_time_override: Option<u64>,
+    /// Debug: stop the integrated server from advancing the day/night clock, so a
+    /// forced (or initial) `dayTime` stays put for inspection.
+    pub(crate) freeze_time: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -151,6 +154,7 @@ impl Default for SceneOptions {
             render_distance: DEFAULT_RENDER_DISTANCE,
             remote_addr: None,
             day_time_override: None,
+            freeze_time: false,
         }
     }
 }
@@ -340,6 +344,9 @@ impl Cli {
                 "--day-time" => {
                     scene.day_time_override =
                         Some(parse_u64_arg("--day-time", args.next())?);
+                }
+                "--freeze-time" => {
+                    scene.freeze_time = true;
                 }
                 "--chunk-x" => scene.chunk_x = parse_i32_arg("--chunk-x", args.next())?,
                 "--chunk-z" => scene.chunk_z = parse_i32_arg("--chunk-z", args.next())?,

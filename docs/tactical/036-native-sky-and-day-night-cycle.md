@@ -57,7 +57,25 @@ Original plan:
   headless, and perf render paths.
 - Validated: noon = plains blue, dusk = dimmed blue, midnight clamps to black.
 
-### Phase 2 — sky dome + sunrise/sunset glow
+### Phase 2 — sky dome + sunrise/sunset glow — DONE
+- `mclone_render::sky_render::SkyRenderer` (new module + `shaders/sky.wgsl`) draws
+  the `buildSkyDisc(+16)` disc (flat-tinted by the day/night sky color) and the
+  `getSunriseColor` glow `TRIANGLE_FAN`, with the celestial rig rotation baked into
+  camera-relative vertices. Position-color pipelines, no depth attachment; the disc
+  is opaque and the glow blends additively (`SRC_ALPHA, ONE`). Fans are expanded to
+  indexed triangle lists (wgpu has no fan topology).
+- `mclone_render::sky::sunrise_color` ports `DimensionSpecialEffects.getSunriseColor`
+  (±0.4 dawn/dusk band), asserted present at dusk / absent at noon+midnight.
+- `ChunkRenderView::sky_view_projection` supplies a rotation-only (camera-at-
+  infinity) view-projection; `ChunkRenderTarget::with_loaded_color` lets the chunk
+  pass load the sky instead of clearing. The sky pass clears + draws before chunks
+  across the live (`app.rs`), headless (`headless.rs`), and perf (`perf.rs`) paths,
+  threading `time_of_day`/`sun_angle` from `WindowSceneRuntime` like `sky_clear_color`.
+- Validated: dawn capture (`--day-time 23000`) shows the orange sunrise bloom on the
+  sun side fading to the dimmed sky; noon is uniform plains blue; terrain composites
+  over the sky correctly. Full native suite (28 binaries) + WASM web build green.
+
+Original plan:
 - New sky render pass (position-color shader, depth-write off, drawn before
   chunks): sky disc + sunrise/sunset glow fan (`getSunriseColor`). Establishes the
   reusable sky-geometry plumbing (vertex buffers, sky shader, ordering).

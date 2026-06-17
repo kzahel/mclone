@@ -6,6 +6,7 @@ mod gpu_util;
 pub mod chunk;
 pub mod gui;
 pub mod sky;
+pub mod sky_render;
 pub mod target;
 
 #[cfg(not(target_arch = "wasm32"))]

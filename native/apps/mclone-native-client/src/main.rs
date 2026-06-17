@@ -426,6 +426,7 @@ mod tests {
                     render_distance: DEFAULT_RENDER_DISTANCE,
                     remote_addr: None,
                     day_time_override: None,
+                    freeze_time: false,
                 },
                 render_options: TexturedSectionRenderOptions::default(),
             }
