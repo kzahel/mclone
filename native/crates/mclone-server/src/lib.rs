@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod persistence;
+mod timing;
 mod types;
 
 use std::{
@@ -9,8 +10,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{sync::mpsc, thread};
 
@@ -35,6 +34,11 @@ use mclone_worldgen::levelgen::{
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
 };
+pub use timing::{
+    ChunkSchedulerTickReport, ChunkSchedulerTickTiming, ServerSimulationTickReport,
+    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
+};
+use timing::{simulation_timing_elapsed_us, simulation_timing_start};
 pub use types::{
     CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState, ChunkResidency, ChunkStatusStep, ChunkTicket,
     ChunkTicketKey, ChunkTicketType, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus,
@@ -176,56 +180,6 @@ pub struct ChunkSchedulerMetrics {
     pub total_dependency_cache_hits: usize,
     pub total_dependency_cache_misses: usize,
     pub total_retained_dependency_chunks: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ChunkSchedulerTickReport {
-    pub ticket_tick: u64,
-    pub block_ticking_chunks: Vec<ChunkPos>,
-    pub entity_ticking_chunks: Vec<ChunkPos>,
-    pub pending_unloads_processed: usize,
-    pub events: Vec<ChunkSchedulerEvent>,
-    pub timing: ChunkSchedulerTickTiming,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ServerSimulationTickTiming {
-    pub total_us: u128,
-    pub scheduler_tick_us: u128,
-    pub scheduler_report_us: u128,
-    pub scheduler_purge_stale_tickets_us: u128,
-    pub scheduler_reconcile_holders_us: u128,
-    pub scheduler_publish_completed_us: u128,
-    pub scheduler_pending_unload_us: u128,
-    pub scheduler_apply_events_us: u128,
-    pub block_tick_us: u128,
-    pub fluid_tick_us: u128,
-    pub fluid_event_apply_us: u128,
-    pub fluid_due_scan_us: u128,
-    pub fluid_remove_due_us: u128,
-    pub fluid_tick_fluid_us: u128,
-    pub fluid_set_block_us: u128,
-    pub entity_tick_us: u128,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ChunkSchedulerTickTiming {
-    pub total_us: u128,
-    pub purge_stale_tickets_us: u128,
-    pub reconcile_holders_us: u128,
-    pub publish_completed_us: u128,
-    pub pending_unload_us: u128,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ServerTickTiming {
-    pub total_us: u128,
-    pub scheduler_report_us: u128,
-    pub scheduler_purge_stale_tickets_us: u128,
-    pub scheduler_reconcile_holders_us: u128,
-    pub scheduler_publish_completed_us: u128,
-    pub scheduler_pending_unload_us: u128,
-    pub scheduler_apply_events_us: u128,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -2513,36 +2467,6 @@ pub struct IntegratedServer {
     simulation_tick: u64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ServerTickReport {
-    pub ticket_tick: u64,
-    pub block_ticking_chunks: Vec<ChunkPos>,
-    pub entity_ticking_chunks: Vec<ChunkPos>,
-    pub pending_unloads_processed: usize,
-    pub scheduler_event_count: usize,
-    pub updates: Vec<ServerUpdate>,
-    pub timing: ServerTickTiming,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ServerSimulationTickReport {
-    pub simulation_tick: u64,
-    pub chunk_tick: u64,
-    pub block_tick_chunks: usize,
-    pub fluid_ticks_executed: usize,
-    pub fluid_due_ticks: usize,
-    pub deferred_fluid_ticks: usize,
-    pub fluid_mutated_blocks: usize,
-    pub fluid_snapshot_events: usize,
-    pub fluid_event_count: usize,
-    pub scheduled_fluid_ticks: usize,
-    pub entity_tick_chunks: usize,
-    pub pending_unloads_processed: usize,
-    pub scheduler_event_count: usize,
-    pub updates: Vec<ServerUpdate>,
-    pub timing: ServerSimulationTickTiming,
-}
-
 impl IntegratedServer {
     pub fn new(seed: i64) -> Self {
         Self::with_chunk_store(seed, Box::<NullChunkSnapshotStore>::default())
@@ -2805,26 +2729,6 @@ fn fluid_tick_event_from_generated_tick(tick: &ScheduledTick) -> Option<ChunkSch
         fluid: FluidKind::from_target(&tick.target)?,
         delay: tick.delay,
     })
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn simulation_timing_start() -> Option<Instant> {
-    Some(Instant::now())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn simulation_timing_start() -> Option<()> {
-    None
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn simulation_timing_elapsed_us(start: Option<Instant>) -> u128 {
-    start.map_or(0, |start| start.elapsed().as_micros())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn simulation_timing_elapsed_us(_start: Option<()>) -> u128 {
-    0
 }
 
 fn feature_job_positions(targets: &[ChunkPos]) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkPos>) {
