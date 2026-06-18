@@ -461,7 +461,22 @@ light-ready view.
 Immediate operational follow-up: make desktop launch responsive while initial
 chunks/light are still warming, either by showing a real loading/progress screen
 or by presenting a partial first view without waiting for the whole
-light-ready radius.
+light-ready radius. After the radius-5 perf pass, the first lighting
+throughput follow-up is more urgent: replace the current per-target temporary
+3x3 light-world recomputation with Java-shaped shared world light state.
+
+Measured radius-5 result on 2026-06-18:
+
+- native lighting disabled: `1,106.492 ms`
+- native lighting enabled: `47,782.677 ms`
+- light-status compute: `46,983.813 ms` across `169` statuses
+- `LevelLightEngine.run_all_updates`: `46,753.960 ms`
+- Java oracle to `FEATURES`: `4,718.254 ms` for `121` target chunks
+
+Interpretation: feature generation is not the active regression. Initial light
+propagation is slow because native drains a fresh isolated graph per light
+status instead of using a long-lived `ThreadedLevelLightEngine`-like world
+engine.
 
 ### P7: Live Deltas And Render Dirtying
 

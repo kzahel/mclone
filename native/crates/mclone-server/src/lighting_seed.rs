@@ -4,12 +4,16 @@
 //! `ChunkStatus::Light` bridge. The actual graph-backed propagation lives in
 //! Java-shaped light bridge modules.
 
-use crate::level_light_bridge::graph_level_light_sections_for_chunk;
-use mclone_core::{CHUNK_WIDTH, ChunkPos, PackedLightSection};
+use mclone_core::ChunkPos;
+#[cfg(test)]
+use mclone_core::{CHUNK_WIDTH, PackedLightSection};
+#[cfg(test)]
 use mclone_worldgen::block::RawBlockId;
 
 #[cfg(test)]
 use crate::block_light_bridge::graph_block_light_sections_for_chunk;
+#[cfg(test)]
+use crate::level_light_bridge::graph_level_light_sections_for_chunk;
 #[cfg(test)]
 use crate::sky_light_bridge::graph_sky_light_sections_for_chunk;
 #[cfg(test)]
@@ -39,6 +43,7 @@ pub(crate) fn snapshot_with_provisional_lighting_from_neighbors<'a>(
     snapshot.with_light_sections(false, light_sections)
 }
 
+#[cfg(test)]
 pub(crate) fn provisional_light_sections_from_neighbors<'a>(
     target_pos: ChunkPos,
     min_y: i32,

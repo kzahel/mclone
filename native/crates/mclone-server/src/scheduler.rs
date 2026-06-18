@@ -34,6 +34,7 @@ use crate::fluid::{
     target_fluid_can_be_replaced_with,
 };
 use crate::holder::ChunkHolder;
+use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_mailbox::{CompletedLightStatus, LightStatusMailbox};
 use crate::light_status::{PendingLightStatus, hydrate_loaded_light_snapshot};
 use crate::persistence::{ChunkSnapshotStore, ChunkStoreResult, NullChunkSnapshotStore};
@@ -84,6 +85,19 @@ pub struct ChunkSchedulerMetrics {
     pub total_dependency_cache_hits: usize,
     pub total_dependency_cache_misses: usize,
     pub total_retained_dependency_chunks: usize,
+    pub completed_light_statuses: usize,
+    pub total_light_status_compute_us: u128,
+    pub max_light_status_compute_us: u128,
+    pub total_light_status_world_init_us: u128,
+    pub total_light_status_active_sections_us: u128,
+    pub total_light_status_sky_source_scan_us: u128,
+    pub total_light_status_block_source_scan_us: u128,
+    pub total_light_status_engine_init_us: u128,
+    pub total_light_status_section_setup_us: u128,
+    pub total_light_status_sky_source_enqueue_us: u128,
+    pub total_light_status_block_source_enqueue_us: u128,
+    pub total_light_status_run_updates_us: u128,
+    pub total_light_status_collect_sections_us: u128,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -305,6 +319,10 @@ pub struct ChunkScheduler {
     pending_worldgen_publications: VecDeque<PendingWorldgenPublication>,
     light_mailbox: LightStatusMailbox,
     pending_light_publications: VecDeque<CompletedLightStatus>,
+    completed_light_statuses: usize,
+    total_light_status_compute_us: u128,
+    max_light_status_compute_us: u128,
+    light_status_timing: LevelLightComputationTiming,
     pending_block_deltas: BTreeMap<(ChunkPos, i32), BTreeMap<usize, BlockStateId>>,
     dirty_chunks: BTreeSet<ChunkPos>,
     next_job_id: u64,
@@ -330,6 +348,10 @@ impl ChunkScheduler {
             pending_worldgen_publications: VecDeque::new(),
             light_mailbox: LightStatusMailbox::new(),
             pending_light_publications: VecDeque::new(),
+            completed_light_statuses: 0,
+            total_light_status_compute_us: 0,
+            max_light_status_compute_us: 0,
+            light_status_timing: LevelLightComputationTiming::default(),
             pending_block_deltas: BTreeMap::new(),
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
@@ -654,6 +676,23 @@ impl ChunkScheduler {
                 .values()
                 .map(|job| job.retained_dependency_chunks)
                 .sum(),
+            completed_light_statuses: self.completed_light_statuses,
+            total_light_status_compute_us: self.total_light_status_compute_us,
+            max_light_status_compute_us: self.max_light_status_compute_us,
+            total_light_status_world_init_us: self.light_status_timing.world_init_us,
+            total_light_status_active_sections_us: self.light_status_timing.active_sections_us,
+            total_light_status_sky_source_scan_us: self.light_status_timing.sky_source_scan_us,
+            total_light_status_block_source_scan_us: self.light_status_timing.block_source_scan_us,
+            total_light_status_engine_init_us: self.light_status_timing.engine_init_us,
+            total_light_status_section_setup_us: self.light_status_timing.section_setup_us,
+            total_light_status_sky_source_enqueue_us: self
+                .light_status_timing
+                .sky_source_enqueue_us,
+            total_light_status_block_source_enqueue_us: self
+                .light_status_timing
+                .block_source_enqueue_us,
+            total_light_status_run_updates_us: self.light_status_timing.run_updates_us,
+            total_light_status_collect_sections_us: self.light_status_timing.collect_sections_us,
         }
     }
 
@@ -1667,6 +1706,13 @@ impl ChunkScheduler {
 
             let revision = ChunkRevision(self.next_revision);
             self.next_revision += 1;
+            self.completed_light_statuses = self.completed_light_statuses.saturating_add(1);
+            self.total_light_status_compute_us = self
+                .total_light_status_compute_us
+                .saturating_add(completed.compute_us);
+            self.max_light_status_compute_us =
+                self.max_light_status_compute_us.max(completed.compute_us);
+            self.light_status_timing.add_assign(completed.timing);
             let mut snapshot = completed.feature_snapshot;
             snapshot.status = ChunkStatus::Light;
             snapshot.revision = revision;

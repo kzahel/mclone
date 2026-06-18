@@ -186,10 +186,16 @@ Options:
 - `--dump-chunks true` adds palette-compressed chunk sections plus pending block/liquid ticks captured at the requested stop status. Use this for generation-status block parity; the Anvil integration fixture is a broader server-startup snapshot and can include later runtime effects.
 - `--dump-only-target-chunk true` keeps `--target-radius` as the completion gate but stores only the requested center chunk in the snapshot.
 - `--record-radius 12` records the wider dependency-window event stream instead of only the target 3x3.
+- `--view-distance <n>` writes the temporary server `view-distance` property; default is `3`.
 - `--timeout-seconds <n>` changes the server-process timeout.
 - `--probe-target-tree-blocks true` switches `FEATURES` decoration to feature-by-feature probe mode and records all target-chunk `spruce_log` / `spruce_leaves` blocks after each configured feature. This is intended for focused taiga tree diagnostics; it is too verbose for the committed scheduler-order fixture.
 - `--probe-tree-candidates true` records final selected `minecraft:tree` attempts from the decorated feature stack. Combine it with `--tree-probe-center-x`, `--tree-probe-center-z`, `--tree-probe-step-index`, and `--tree-probe-feature-index` to keep output focused. Each `tree_candidate` event includes origin, pine/spruce discriminator via foliage placer class, tree dimensions, placement result, random-count range, and rejection details such as `sapling_cannot_survive` or the first block that limited `max_free_tree_height`.
 - `--probe-ore-placements true` records final selected `minecraft:ore` branches from the decorated feature stack. Combine it with `--ore-probe-center-x`, `--ore-probe-center-z`, `--ore-probe-step-index`, and `--ore-probe-feature-index` to keep output focused. Each `ore_placement` event includes the branch origin, ore targets, vein geometry, random-count range, and target-chunk writes.
+
+The trace root includes `totalElapsedMs`, and each scheduler event includes
+`elapsedMs` from the trace recorder's JVM start. These are intended for local
+performance comparison only; committed parity fixtures should still avoid
+asserting exact timings.
 
 Example focused taiga candidate trace:
 

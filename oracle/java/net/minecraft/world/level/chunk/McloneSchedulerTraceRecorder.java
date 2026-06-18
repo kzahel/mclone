@@ -45,6 +45,7 @@ public final class McloneSchedulerTraceRecorder {
    private static final int TARGET_RADIUS = parseIntProperty("mclone.schedulerTrace.radius", 1);
    private static final int RECORD_RADIUS = parseIntProperty("mclone.schedulerTrace.recordRadius", TARGET_RADIUS);
    private static final String STOP_STATUS = System.getProperty("mclone.schedulerTrace.stopStatus", "features").toLowerCase(Locale.ROOT);
+   private static final int VIEW_DISTANCE = parseIntProperty("mclone.schedulerTrace.viewDistance", 3);
    private static final List<ProbeBlock> PROBE_BLOCKS = parseProbeBlocks(System.getProperty("mclone.schedulerTrace.probeBlocks", ""));
    private static final boolean PROBE_TARGET_TREE_BLOCKS = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeTargetTreeBlocks", "false"));
    private static final boolean PROBE_TREE_CANDIDATES = Boolean.parseBoolean(System.getProperty("mclone.schedulerTrace.probeTreeCandidates", "false"));
@@ -65,6 +66,7 @@ public final class McloneSchedulerTraceRecorder {
    private static final ThreadLocal<FeatureProbeContext> CURRENT_FEATURE = new ThreadLocal<>();
    private static final ThreadLocal<TreeCandidateProbe> CURRENT_TREE_CANDIDATE = new ThreadLocal<>();
    private static final ThreadLocal<OrePlacementProbe> CURRENT_ORE_PLACEMENT = new ThreadLocal<>();
+   private static final long START_NANOS = System.nanoTime();
    private static long sequence;
    private static boolean written;
 
@@ -485,6 +487,7 @@ public final class McloneSchedulerTraceRecorder {
 
       Map<String, Object> event = new LinkedHashMap<>();
       event.put("sequence", ++sequence);
+      event.put("elapsedMs", elapsedMs());
       event.put("phase", phase);
       event.put("status", status.getName().toUpperCase(Locale.ROOT));
       event.put("statusName", status.getName());
@@ -837,6 +840,8 @@ public final class McloneSchedulerTraceRecorder {
       root.put("targetRadius", TARGET_RADIUS);
       root.put("recordRadius", RECORD_RADIUS);
       root.put("stopStatus", STOP_STATUS.toUpperCase(Locale.ROOT));
+      root.put("viewDistance", VIEW_DISTANCE);
+      root.put("totalElapsedMs", elapsedMs());
       root.put("availableProcessors", Runtime.getRuntime().availableProcessors());
       root.put("identityHashCodeMode", System.getProperty("mclone.schedulerTrace.identityHashCodeMode", "default"));
       root.put("sourceHooks", new String[]{
@@ -873,6 +878,10 @@ public final class McloneSchedulerTraceRecorder {
          haltThread.setDaemon(true);
          haltThread.start();
       }
+   }
+
+   private static double elapsedMs() {
+      return (System.nanoTime() - START_NANOS) / 1_000_000.0D;
    }
 
    private static List<Map<String, Object>> collectCompletionOrder(String statusName) {

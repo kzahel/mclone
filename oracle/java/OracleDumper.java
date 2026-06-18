@@ -1275,6 +1275,7 @@ public final class OracleDumper {
       int targetRadius = parseIntegerOption(options, "target-radius", 1);
       int recordRadius = parseIntegerOption(options, "record-radius", targetRadius);
       int timeoutSeconds = parseIntegerOption(options, "timeout-seconds", 180);
+      int viewDistance = parseIntegerOption(options, "view-distance", 3);
       if (targetRadius < 0) {
          throw new IllegalArgumentException("target-radius must be non-negative");
       }
@@ -1283,6 +1284,9 @@ public final class OracleDumper {
       }
       if (timeoutSeconds <= 0) {
          throw new IllegalArgumentException("timeout-seconds must be positive");
+      }
+      if (viewDistance <= 0) {
+         throw new IllegalArgumentException("view-distance must be positive");
       }
 
       String scenario = options.getOrDefault("scenario", "spawn_bootstrap");
@@ -1297,7 +1301,7 @@ public final class OracleDumper {
       Path tempDir = Files.createTempDirectory("mclone-scheduler-trace-");
       Path output = tempDir.resolve("scheduler-trace.json");
       Files.writeString(tempDir.resolve("eula.txt"), "eula=true\n", StandardCharsets.UTF_8);
-      Files.writeString(tempDir.resolve("server.properties"), schedulerTraceServerProperties(seed, generateStructures), StandardCharsets.UTF_8);
+      Files.writeString(tempDir.resolve("server.properties"), schedulerTraceServerProperties(seed, generateStructures, viewDistance), StandardCharsets.UTF_8);
 
       List<String> command = new ArrayList<>();
       command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
@@ -1316,6 +1320,7 @@ public final class OracleDumper {
       command.add("-Dmclone.schedulerTrace.recordRadius=" + recordRadius);
       command.add("-Dmclone.schedulerTrace.scenario=" + scenario);
       command.add("-Dmclone.schedulerTrace.stopStatus=" + stopStatus);
+      command.add("-Dmclone.schedulerTrace.viewDistance=" + viewDistance);
       command.add("-Dmclone.schedulerTrace.probeBlocks=" + probeBlocks);
       command.add("-Dmclone.schedulerTrace.probeTargetTreeBlocks=" + probeTargetTreeBlocks);
       command.add("-Dmclone.schedulerTrace.probeTreeCandidates=" + probeTreeCandidates);
@@ -1375,7 +1380,7 @@ public final class OracleDumper {
       return Files.readString(output, StandardCharsets.UTF_8);
    }
 
-   private static String schedulerTraceServerProperties(long seed, boolean generateStructures) {
+   private static String schedulerTraceServerProperties(long seed, boolean generateStructures, int viewDistance) {
       return "allow-flight=true\n"
          + "difficulty=peaceful\n"
          + "enable-command-block=false\n"
@@ -1395,7 +1400,7 @@ public final class OracleDumper {
          + "server-port=0\n"
          + "spawn-protection=0\n"
          + "sync-chunk-writes=false\n"
-         + "view-distance=3\n"
+         + "view-distance=" + viewDistance + "\n"
          + "white-list=false\n";
    }
 
@@ -2828,7 +2833,7 @@ public final class OracleDumper {
       System.err.println("  oracle-dumper carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper liquid-carved-chunk --seed <long> --chunk-x <int> --chunk-z <int>");
       System.err.println("  oracle-dumper feature-order-trace --seed <long> --chunk-x <int> --chunk-z <int> [--generate-structures <true|false>]");
-      System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full] [--generate-structures <true|false>] [--dump-chunks <true|false>] [--dump-only-target-chunk <true|false>] [--probe-blocks <x,y,z;...>] [--probe-target-tree-blocks <true|false>] [--probe-tree-candidates <true|false>] [--tree-probe-center-x <int>] [--tree-probe-center-z <int>] [--tree-probe-step-index <int>] [--tree-probe-feature-index <int>] [--probe-ore-placements <true|false>] [--ore-probe-center-x <int>] [--ore-probe-center-z <int>] [--ore-probe-step-index <int>] [--ore-probe-feature-index <int>]");
+      System.err.println("  oracle-dumper scheduler-trace --seed <long> --chunk-x <int> --chunk-z <int> [--scenario spawn_bootstrap] [--target-radius <int>] [--record-radius <int>] [--stop-status features|full] [--view-distance <int>] [--generate-structures <true|false>] [--dump-chunks <true|false>] [--dump-only-target-chunk <true|false>] [--probe-blocks <x,y,z;...>] [--probe-target-tree-blocks <true|false>] [--probe-tree-candidates <true|false>] [--tree-probe-center-x <int>] [--tree-probe-center-z <int>] [--tree-probe-step-index <int>] [--tree-probe-feature-index <int>] [--probe-ore-placements <true|false>] [--ore-probe-center-x <int>] [--ore-probe-center-z <int>] [--ore-probe-step-index <int>] [--ore-probe-feature-index <int>]");
       System.err.println("  oracle-dumper visgraph --seed <long>");
       System.err.println("  oracle-dumper synthetic-light --seed <long>");
       System.err.println("  oracle-dumper noise --class NormalNoise --seed <long> --first-octave <int> --amplitudes <csv> --samples <path>");

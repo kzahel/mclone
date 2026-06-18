@@ -61,6 +61,67 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-18 - Radius-5 Scheduler/Oracle Lighting Investigation
+
+Commit reported by native benchmark JSON: `48fdd70`.
+
+Note: `git_dirty=true` because this was captured while adding the comparison
+and timing instrumentation. Treat the result as the measured state after
+`48fdd70` plus the local perf-instrumentation changes.
+
+Native `FEATURES`/lighting-disabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 5 --steps 1 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --disable-lighting
+```
+
+Native `LIGHT`/lighting-enabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 5 --steps 1 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --enable-lighting
+```
+
+Java oracle command:
+
+```bash
+pnpm --silent oracle:gen scheduler-trace --seed 12345 --chunk-x 0 --chunk-z 0 --target-radius 5 --record-radius 5 --stop-status features --view-distance 5 --generate-structures false --timeout-seconds 240
+```
+
+Summary:
+
+| Lane | Target chunks | Total |
+|---|---:|---:|
+| Java 1.17.1 oracle to `FEATURES` | `121` | `4,718.254 ms` |
+| Native scheduler, lighting disabled | `121` visible / `169` feature snapshots | `1,106.492 ms` |
+| Native scheduler, lighting enabled | `121` visible / `169` light snapshots | `47,782.677 ms` |
+
+Native lighting-enabled breakdown:
+
+| Metric | Value |
+|---|---:|
+| feature batch timing | `783.943 ms` |
+| completed light statuses | `169` |
+| total light-status compute | `46,983.813 ms` |
+| max single light-status compute | `315.310 ms` |
+| light `run_updates` time | `46,753.960 ms` |
+| block source scan | `120.966 ms` |
+| sky source enqueue | `49.613 ms` |
+| section setup | `24.094 ms` |
+| collect sections | `0.852 ms` |
+
+Interpretation: native worldgen/features are not the desktop startup
+regression. The regression is initial light propagation. The current native
+path computes each `ChunkStatus::Light` payload independently over a temporary
+3x3 raw-chunk light world, so radius 5 performs `169` separate graph drains.
+The Java reference shape is a threaded, long-lived `LevelLightEngine` wrapper
+that batches light tasks against shared world light state. The next optimization
+target should be replacing per-chunk isolated initial light recomputation, not
+renderer frame pacing or feature generation.
+
+The Java oracle `LIGHT` and `FULL` stop-status runs timed out under the current
+spawn-bootstrap trace scenario; `FEATURES` is the reliable oracle comparison
+from this pass.
+
 ### 2026-06-16 - Render Compile Revisions And Priority Release Baseline
 
 Commit reported by benchmark JSON: `3bc5e7d`.

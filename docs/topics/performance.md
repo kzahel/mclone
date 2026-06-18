@@ -11,9 +11,10 @@ invalidates an older recommendation, or establishes a new baseline.
 
 ## Current Baseline
 
-Current validated slice: native render compile revisions and priority, on top
-of the movement-frame probe, async render-section compile queue, section block
-deltas, section-precise dirtying, and neighbor-ready render boundaries.
+Current validated slice: native radius-5 scheduler/oracle comparison after the
+first native light-status worker. The movement-frame probe remains under budget,
+but startup generation with lighting enabled is dominated by per-chunk light
+graph propagation.
 
 Latest 120 Hz release movement-frame probe was captured during that slice at:
 
@@ -60,11 +61,12 @@ For durable historical trends, use [`../performance-records.md`](../performance-
 
 | Priority | Work | Java-shaped | Tactical | Status | Why It Matters |
 |---|---|---:|---|---|---|
-| P0 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | next recommended | Native now avoids stale queued backlog and accepts unchanged sections, but an already-running worker request cannot be interrupted. Java render chunk tasks have cancellation flags. Cancellable or smaller-granularity tasks would reduce wasted CPU during fast streaming/unloads, relevant to battery/thermal targets. |
-| P1 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and this probe's max upload was only `0.400 ms`. Do this when probes show upload/allocation cost is material again, or before adding multiple compile workers. |
-| P2 | Live light deltas and light-section dirtying | Yes | [`lighting topic`](lighting.md), [`026`](../tactical/026-lighting-pipeline.md), [`031`](../tactical/031-native-section-block-delta-updates.md) | pending larger subsystem | Section block deltas currently leave light payloads unchanged. Correct live lighting needs Java-shaped light propagation/deltas and render dirtying by changed light sections. |
-| P3 | Desktop-present pacing attribution | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`../performance-records.md`](../performance-records.md) | optional | Do this if visible desktop hitching returns or if we need end-to-end swapchain/present attribution. Current priority is worker efficiency because desktop/headless probes are under budget. |
-| P4 | Release perf budgets and durable records | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`../performance-records.md`](../performance-records.md) | ongoing | Once baselines stabilize, add budget thresholds that catch regressions without failing on normal host noise. |
+| P0 | Replace per-chunk initial light recomputation | Yes | [`044`](../tactical/044-native-light-status-worker-and-disable-flag.md), [`lighting topic`](lighting.md) | next recommended | Native radius-5 load is `~1.1s` with lighting disabled and `~47.8s` with lighting enabled. Phase timing shows `~46.75s` is `LevelLightEngine.run_all_updates` across `169` independently recomputed light chunks. Java's `ThreadedLevelLightEngine` owns long-lived world light state and batches chunk light tasks instead of recomputing an isolated 3x3 world per target chunk. |
+| P1 | Startup loading/progress presentation | Native policy | [`027`](../tactical/027-mclone-ui-foundation.md), [`028`](../tactical/028-headless-window-frame-unification.md), [`044`](../tactical/044-native-light-status-worker-and-disable-flag.md) | needed after P0 or in parallel | The current window path waits for the initial light-ready scene before opening. That prevents blue-sky-only first frames but makes any light-generation regression look like a frozen app. |
+| P2 | Live light deltas and light-section dirtying | Yes | [`lighting topic`](lighting.md), [`026`](../tactical/026-lighting-pipeline.md), [`031`](../tactical/031-native-section-block-delta-updates.md) | pending larger subsystem | Section block deltas currently leave light payloads unchanged. Correct live lighting needs Java-shaped light propagation/deltas and render dirtying by changed light sections, but initial light throughput should be fixed first. |
+| P3 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful, but radius-5 evidence says lighting is the active desktop blocker. |
+| P4 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and movement probes show upload cost is small. Do this when probes show upload/allocation cost is material again. |
+| P5 | Release perf budgets and durable records | Native policy | [`029`](../tactical/029-native-frame-pacing-and-streaming-hitches.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md), [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`../performance-records.md`](../performance-records.md) | ongoing | Once baselines stabilize, add budget thresholds that catch regressions without failing on normal host noise. |
 
 ## Java Reference Anchors
 

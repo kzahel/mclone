@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::time::Instant;
 
 use mclone_core::{
     CHUNK_WIDTH, ChunkPos, PackedLightSection, SECTION_HEIGHT, block_to_section_coord,
@@ -10,30 +11,93 @@ use mclone_light::{
 };
 use mclone_worldgen::block::{RawBlockId, block_light_emission, block_light_opacity};
 
+#[cfg(test)]
 pub(crate) fn graph_level_light_sections_for_chunk<'a>(
     target_pos: ChunkPos,
     min_y: i32,
     height: i32,
     chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
 ) -> Vec<PackedLightSection> {
-    let world = RawChunkLightWorld::new(target_pos, min_y, height, chunks);
-    let active_sections = world.active_sections();
-    let sky_sources = world.sky_source_blocks();
-    let block_sources = world.block_emission_sources();
-    let mut engine = LevelLightEngine::new(world.clone(), world);
+    graph_level_light_sections_for_chunk_timed(target_pos, min_y, height, chunks).0
+}
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct LevelLightComputationTiming {
+    pub(crate) total_us: u128,
+    pub(crate) world_init_us: u128,
+    pub(crate) active_sections_us: u128,
+    pub(crate) sky_source_scan_us: u128,
+    pub(crate) block_source_scan_us: u128,
+    pub(crate) engine_init_us: u128,
+    pub(crate) section_setup_us: u128,
+    pub(crate) sky_source_enqueue_us: u128,
+    pub(crate) block_source_enqueue_us: u128,
+    pub(crate) run_updates_us: u128,
+    pub(crate) collect_sections_us: u128,
+}
+
+impl LevelLightComputationTiming {
+    pub(crate) fn add_assign(&mut self, other: Self) {
+        self.total_us += other.total_us;
+        self.world_init_us += other.world_init_us;
+        self.active_sections_us += other.active_sections_us;
+        self.sky_source_scan_us += other.sky_source_scan_us;
+        self.block_source_scan_us += other.block_source_scan_us;
+        self.engine_init_us += other.engine_init_us;
+        self.section_setup_us += other.section_setup_us;
+        self.sky_source_enqueue_us += other.sky_source_enqueue_us;
+        self.block_source_enqueue_us += other.block_source_enqueue_us;
+        self.run_updates_us += other.run_updates_us;
+        self.collect_sections_us += other.collect_sections_us;
+    }
+}
+
+pub(crate) fn graph_level_light_sections_for_chunk_timed<'a>(
+    target_pos: ChunkPos,
+    min_y: i32,
+    height: i32,
+    chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
+) -> (Vec<PackedLightSection>, LevelLightComputationTiming) {
+    let total_start = Instant::now();
+    let mut timing = LevelLightComputationTiming::default();
+
+    let start = Instant::now();
+    let world = RawChunkLightWorld::new(target_pos, min_y, height, chunks);
+    timing.world_init_us = start.elapsed().as_micros();
+    let start = Instant::now();
+    let active_sections = world.active_sections();
+    timing.active_sections_us = start.elapsed().as_micros();
+    let start = Instant::now();
+    let sky_sources = world.sky_source_blocks();
+    timing.sky_source_scan_us = start.elapsed().as_micros();
+    let start = Instant::now();
+    let block_sources = world.block_emission_sources();
+    timing.block_source_scan_us = start.elapsed().as_micros();
+    let start = Instant::now();
+    let mut engine = LevelLightEngine::new(world.clone(), world);
+    timing.engine_init_us = start.elapsed().as_micros();
+
+    let start = Instant::now();
     for section in active_sections {
         engine.update_section_status(section, false);
         engine.enable_light_sources(section, true);
     }
+    timing.section_setup_us = start.elapsed().as_micros();
+    let start = Instant::now();
     for source in sky_sources {
         engine.check_sky_source(source);
     }
+    timing.sky_source_enqueue_us = start.elapsed().as_micros();
+    let start = Instant::now();
     for (source, emission) in block_sources {
         engine.on_block_emission_increase(source, emission);
     }
+    timing.block_source_enqueue_us = start.elapsed().as_micros();
+    let start = Instant::now();
     engine.run_all_updates();
+    timing.run_updates_us = start.elapsed().as_micros();
 
+    let start = Instant::now();
     let min_section_y = block_to_section_coord(min_y);
     let section_count = height / SECTION_HEIGHT;
     let mut sections = Vec::new();
@@ -61,7 +125,9 @@ pub(crate) fn graph_level_light_sections_for_chunk<'a>(
             None,
         ));
     }
-    sections
+    timing.collect_sections_us = start.elapsed().as_micros();
+    timing.total_us = total_start.elapsed().as_micros();
+    (sections, timing)
 }
 
 #[derive(Clone, Debug)]

@@ -1351,6 +1351,55 @@ mod tests {
                 total_dependency_cache_hits: 0,
                 total_dependency_cache_misses: 23 * 23,
                 total_retained_dependency_chunks: 23 * 23,
+                completed_light_statuses: 25,
+                total_light_status_compute_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_compute_us,
+                max_light_status_compute_us: server
+                    .scheduler()
+                    .metrics()
+                    .max_light_status_compute_us,
+                total_light_status_world_init_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_world_init_us,
+                total_light_status_active_sections_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_active_sections_us,
+                total_light_status_sky_source_scan_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_sky_source_scan_us,
+                total_light_status_block_source_scan_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_block_source_scan_us,
+                total_light_status_engine_init_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_engine_init_us,
+                total_light_status_section_setup_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_section_setup_us,
+                total_light_status_sky_source_enqueue_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_sky_source_enqueue_us,
+                total_light_status_block_source_enqueue_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_block_source_enqueue_us,
+                total_light_status_run_updates_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_run_updates_us,
+                total_light_status_collect_sections_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_collect_sections_us,
             }
         );
         assert_eq!(server.scheduler().job_count(), 1);

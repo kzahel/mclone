@@ -15,9 +15,10 @@ use mclone_light::{
 use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 
-use crate::lighting_seed::{
-    provisional_light_sections_from_neighbors, provisional_sky_light_includes_chunk,
+use crate::level_light_bridge::{
+    LevelLightComputationTiming, graph_level_light_sections_for_chunk_timed,
 };
+use crate::lighting_seed::provisional_sky_light_includes_chunk;
 use crate::persistence::{ChunkStoreError, ChunkStoreResult};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,15 +63,19 @@ impl PendingLightStatus {
         }
     }
 
-    pub(crate) fn compute_light_sections(&self) -> Vec<PackedLightSection> {
-        provisional_light_sections_from_neighbors(
-            self.pos,
-            self.feature_snapshot.min_y,
-            self.feature_snapshot.height,
-            &self.raw_blocks,
+    pub(crate) fn compute_light_sections_timed(
+        &self,
+    ) -> (Vec<PackedLightSection>, LevelLightComputationTiming) {
+        let chunks = std::iter::once((self.pos, self.raw_blocks.as_slice())).chain(
             self.neighbor_blocks
                 .iter()
                 .map(|(pos, blocks)| (*pos, blocks.as_slice())),
+        );
+        graph_level_light_sections_for_chunk_timed(
+            self.pos,
+            self.feature_snapshot.min_y,
+            self.feature_snapshot.height,
+            chunks,
         )
     }
 }

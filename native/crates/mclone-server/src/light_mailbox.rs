@@ -7,13 +7,14 @@
 
 use std::collections::VecDeque;
 use std::fmt;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::{sync::mpsc, thread};
 
 use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
 
+use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_status::PendingLightStatus;
 
 #[derive(Debug)]
@@ -21,15 +22,21 @@ pub(crate) struct CompletedLightStatus {
     pub(crate) pos: ChunkPos,
     pub(crate) feature_snapshot: ChunkSnapshot,
     pub(crate) light_sections: Vec<PackedLightSection>,
+    pub(crate) compute_us: u128,
+    pub(crate) timing: LevelLightComputationTiming,
 }
 
 impl CompletedLightStatus {
     fn from_pending(pending: PendingLightStatus) -> Self {
-        let light_sections = pending.compute_light_sections();
+        let start = Instant::now();
+        let (light_sections, timing) = pending.compute_light_sections_timed();
+        let compute_us = start.elapsed().as_micros();
         Self {
             pos: pending.pos,
             feature_snapshot: pending.feature_snapshot,
             light_sections,
+            compute_us,
+            timing,
         }
     }
 }

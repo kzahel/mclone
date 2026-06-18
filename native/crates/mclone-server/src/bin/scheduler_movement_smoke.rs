@@ -33,6 +33,7 @@ fn run() -> Result<(), String> {
     let config = Config::parse(env::args().skip(1))?;
     let total_start = Instant::now();
     let mut scheduler = ChunkScheduler::new(config.seed);
+    scheduler.set_lighting_enabled(config.lighting_enabled);
     let mut steps = Vec::with_capacity(config.steps);
 
     for index in 0..config.steps {
@@ -170,6 +171,7 @@ struct Config {
     poll_mode: PollMode,
     poll_sleep_ms: u64,
     completion_wait_ms: u64,
+    lighting_enabled: bool,
 }
 
 impl Config {
@@ -182,6 +184,7 @@ impl Config {
             poll_mode: DEFAULT_POLL_MODE,
             poll_sleep_ms: DEFAULT_POLL_SLEEP_MS,
             completion_wait_ms: DEFAULT_COMPLETION_WAIT_MS,
+            lighting_enabled: true,
         };
 
         let mut args = args.into_iter();
@@ -207,6 +210,15 @@ impl Config {
                 }
                 "--completion-wait-ms" => {
                     config.completion_wait_ms = parse_next(&mut args, "--completion-wait-ms")?;
+                }
+                "--lighting" => {
+                    config.lighting_enabled = parse_bool_next(&mut args, "--lighting")?;
+                }
+                "--disable-lighting" => {
+                    config.lighting_enabled = false;
+                }
+                "--enable-lighting" => {
+                    config.lighting_enabled = true;
                 }
                 "--help" | "-h" => {
                     return Err(usage());
@@ -376,6 +388,7 @@ impl SmokeReport {
             "  \"completion_wait_ms\": {},",
             self.config.completion_wait_ms
         );
+        println!("  \"lighting_enabled\": {},", self.config.lighting_enabled);
         println!("  \"total_elapsed_ms\": {:.3},", self.total_elapsed_ms);
         println!("  \"expected_interest_chunks\": {interest_chunks},");
         println!("  \"expected_active_chunks\": {active_chunks},");
@@ -525,9 +538,63 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         metrics.total_dependency_cache_misses
     );
     println!(
-        "{indent}  \"total_retained_dependency_chunks\": {}",
+        "{indent}  \"total_retained_dependency_chunks\": {},",
         metrics.total_retained_dependency_chunks
     );
+    println!(
+        "{indent}  \"completed_light_statuses\": {},",
+        metrics.completed_light_statuses
+    );
+    println!(
+        "{indent}  \"total_light_status_compute_ms\": {:.3},",
+        micros_to_ms(metrics.total_light_status_compute_us)
+    );
+    println!(
+        "{indent}  \"max_light_status_compute_ms\": {:.3},",
+        micros_to_ms(metrics.max_light_status_compute_us)
+    );
+    println!("{indent}  \"light_status_timing_ms\": {{");
+    println!(
+        "{indent}    \"world_init\": {:.3},",
+        micros_to_ms(metrics.total_light_status_world_init_us)
+    );
+    println!(
+        "{indent}    \"active_sections\": {:.3},",
+        micros_to_ms(metrics.total_light_status_active_sections_us)
+    );
+    println!(
+        "{indent}    \"sky_source_scan\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_source_scan_us)
+    );
+    println!(
+        "{indent}    \"block_source_scan\": {:.3},",
+        micros_to_ms(metrics.total_light_status_block_source_scan_us)
+    );
+    println!(
+        "{indent}    \"engine_init\": {:.3},",
+        micros_to_ms(metrics.total_light_status_engine_init_us)
+    );
+    println!(
+        "{indent}    \"section_setup\": {:.3},",
+        micros_to_ms(metrics.total_light_status_section_setup_us)
+    );
+    println!(
+        "{indent}    \"sky_source_enqueue\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_source_enqueue_us)
+    );
+    println!(
+        "{indent}    \"block_source_enqueue\": {:.3},",
+        micros_to_ms(metrics.total_light_status_block_source_enqueue_us)
+    );
+    println!(
+        "{indent}    \"run_updates\": {:.3},",
+        micros_to_ms(metrics.total_light_status_run_updates_us)
+    );
+    println!(
+        "{indent}    \"collect_sections\": {:.3}",
+        micros_to_ms(metrics.total_light_status_collect_sections_us)
+    );
+    println!("{indent}  }}");
     let suffix = if trailing_comma { "," } else { "" };
     println!("{indent}}}{suffix}");
 }
@@ -748,6 +815,17 @@ fn parse_next<T: std::str::FromStr>(
         .map_err(|_| format!("invalid value for {name}: {value}"))
 }
 
+fn parse_bool_next(args: &mut impl Iterator<Item = String>, name: &str) -> Result<bool, String> {
+    let value = args
+        .next()
+        .ok_or_else(|| format!("{name} requires a value"))?;
+    match value.as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => Err(format!("invalid boolean for {name}: {value}")),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PollMode {
     Completion,
@@ -779,7 +857,7 @@ impl std::str::FromStr for PollMode {
 }
 
 fn usage() -> String {
-    "usage: scheduler_movement_smoke [--seed N] [--radius N] [--steps N] [--max-polls N] [--poll-mode completion|sleep|spin] [--poll-sleep-ms N] [--completion-wait-ms N]".to_owned()
+    "usage: scheduler_movement_smoke [--seed N] [--radius N] [--steps N] [--max-polls N] [--poll-mode completion|sleep|spin] [--poll-sleep-ms N] [--completion-wait-ms N] [--lighting true|false] [--disable-lighting] [--enable-lighting]".to_owned()
 }
 
 fn print_benchmark_metadata(name: &str, indent: &str, trailing_comma: bool) {

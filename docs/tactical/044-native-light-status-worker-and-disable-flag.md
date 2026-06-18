@@ -145,11 +145,25 @@ Movement-frame probe result:
 The captures were inspected and both rendered nonblank daytime terrain with
 `166` cached sections and `26` drawn sections.
 
+Follow-up radius-5 scheduler/oracle measurement:
+
+| Lane | Total |
+|---|---:|
+| Java oracle to `FEATURES`, target radius `5` | `4,718.254 ms` |
+| Native scheduler, lighting disabled | `1,106.492 ms` |
+| Native scheduler, lighting enabled | `47,782.677 ms` |
+
+Native lighting-enabled phase timing shows `46,983.813 ms` spent computing
+`169` light statuses, with `46,753.960 ms` inside
+`LevelLightEngine.run_all_updates`. This confirms that the worker removed the
+foreground frame stall but did not make initial light propagation affordable.
+
 ## Next
 
-The immediate desktop follow-up is startup responsiveness: the window path still
-waits for the initial light-ready view before opening, which avoids a sky-only
-first frame but makes launch latency high.
+The immediate lighting follow-up is to replace per-target temporary 3x3 light
+world recomputation with shared Java-shaped world light state. The window path
+also still needs startup/progress presentation, because it waits for the initial
+light-ready view before opening.
 
 The next pure lighting subsystem remains live light deltas:
 
