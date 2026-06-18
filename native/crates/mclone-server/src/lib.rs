@@ -9,6 +9,7 @@ mod integrated;
 mod level_light_bridge;
 mod light_mailbox;
 mod light_status;
+mod light_world;
 mod lighting_seed;
 mod persistence;
 mod scheduler;

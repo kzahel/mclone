@@ -61,6 +61,57 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-19 - Retained Initial Light World First Pass
+
+Commit reported by native benchmark JSON: `fce2425`.
+
+Note: `git_dirty=true` because this was captured while implementing the retained
+initial light world after `fce2425`. Treat the result as the measured state for
+tactical `046`, not as the clean historical state of `fce2425`.
+
+Radius-5 lighting-enabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 5 --steps 1 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --enable-lighting
+```
+
+Radius-5 summary:
+
+| Metric | Value |
+|---|---:|
+| total elapsed | `11,292.102 ms` |
+| feature batch timing | `1,148.652 ms` |
+| completed light statuses | `169` |
+| completed light batches | `1` |
+| total light-status compute | `9,341.649 ms` |
+| light `run_updates` time | `9,301.529 ms` |
+| retained world upsert | `0.622 ms` |
+| block source scan | `19.330 ms` |
+
+Interpretation: the retained owner does not materially improve the cold
+radius-5 startup case because that path was already one batch and remains one
+large graph drain. This is expected; the purpose of this slice is to preserve
+world light state across batches and make the worker shape closer to Java
+`ThreadedLevelLightEngine`.
+
+Radius-3 two-step lighting-enabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 3 --steps 2 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --enable-lighting
+```
+
+Radius-3 two-step summary:
+
+| Step | Total step time | Loaded snapshots | Light batches | Cumulative light compute | Incremental light compute |
+|---|---:|---:|---:|---:|---:|
+| `0` | `5,513.912 ms` | `81` | `1` | `4,652.194 ms` | `4,652.194 ms` |
+| `1` | `510.729 ms` | `90` | `2` | `5,076.063 ms` | `423.869 ms` |
+
+Interpretation: retained state helps subsequent movement batches: the second
+step lights only newly retained work instead of rebuilding the whole initial
+view's raw light world. The remaining high-priority lighting performance work
+is inside `LevelLightEngine.run_all_updates` itself and its graph queue shape.
+
 ### 2026-06-18 - Shared Initial Light Batch First Pass
 
 Commit reported by native benchmark JSON: `2207e64`.

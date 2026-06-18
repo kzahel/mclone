@@ -16,6 +16,7 @@ use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
 
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_status::PendingLightStatusBatch;
+use crate::light_world::RetainedInitialLightState;
 
 #[derive(Debug)]
 pub(crate) struct CompletedLightStatus {
@@ -28,9 +29,12 @@ pub(crate) struct CompletedLightStatus {
 }
 
 impl CompletedLightStatus {
-    fn from_batch(batch: PendingLightStatusBatch) -> Vec<Self> {
+    fn from_batch(
+        light_state: &mut RetainedInitialLightState,
+        batch: PendingLightStatusBatch,
+    ) -> Vec<Self> {
         let start = Instant::now();
-        let completed = batch.compute_light_sections();
+        let completed = light_state.compute_batch(batch);
         let compute_us = start.elapsed().as_micros();
         completed
             .into_iter()
@@ -98,6 +102,7 @@ impl fmt::Debug for LightStatusMailbox {
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
 struct LightStatusMailboxBackend {
+    light_state: RetainedInitialLightState,
     completed: VecDeque<CompletedLightStatus>,
 }
 
@@ -105,13 +110,16 @@ struct LightStatusMailboxBackend {
 impl LightStatusMailboxBackend {
     fn new() -> Self {
         Self {
+            light_state: RetainedInitialLightState::new(),
             completed: VecDeque::new(),
         }
     }
 
     fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {
-        self.completed
-            .extend(CompletedLightStatus::from_batch(batch));
+        self.completed.extend(CompletedLightStatus::from_batch(
+            &mut self.light_state,
+            batch,
+        ));
     }
 
     fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
@@ -149,10 +157,13 @@ impl LightStatusMailboxBackend {
         let worker = thread::Builder::new()
             .name("mclone-light-status".to_owned())
             .spawn(move || {
+                let mut light_state = RetainedInitialLightState::new();
                 while let Ok(request) = receiver.recv() {
                     match request {
                         LightStatusRequest::ComputeBatch(batch) => {
-                            for completed in CompletedLightStatus::from_batch(batch) {
+                            for completed in
+                                CompletedLightStatus::from_batch(&mut light_state, batch)
+                            {
                                 if completion_sender.send(completed).is_err() {
                                     return;
                                 }

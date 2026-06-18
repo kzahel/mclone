@@ -1,14 +1,19 @@
+#[cfg(test)]
 use std::collections::BTreeMap;
+#[cfg(test)]
 use std::time::Instant;
 
+#[cfg(test)]
 use mclone_core::{
     CHUNK_WIDTH, ChunkPos, PackedLightSection, SECTION_HEIGHT, block_to_section_coord,
     chunk_block_index, local_block_coord,
 };
+#[cfg(test)]
 use mclone_light::{
     BlockLightWorld, BlockPosKey, LevelLightEngine, SkyLightWorld, block_pos_as_long,
     block_pos_get_x, block_pos_get_y, block_pos_get_z, section_as_long,
 };
+#[cfg(test)]
 use mclone_worldgen::block::{RawBlockId, block_light_emission, block_light_opacity};
 
 #[cfg(test)]
@@ -68,6 +73,7 @@ pub(crate) fn graph_level_light_sections_for_chunk_timed<'a>(
     (sections.remove(&target_pos).unwrap_or_default(), timing)
 }
 
+#[cfg(test)]
 pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
     targets: impl IntoIterator<Item = ChunkPos>,
     min_y: i32,
@@ -154,6 +160,7 @@ pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
     (sections_by_chunk, timing)
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 struct RawChunkLightWorld<'a> {
     min_y: i32,
@@ -161,6 +168,7 @@ struct RawChunkLightWorld<'a> {
     chunks: BTreeMap<ChunkPos, &'a [RawBlockId]>,
 }
 
+#[cfg(test)]
 impl<'a> RawChunkLightWorld<'a> {
     fn new(
         target_positions: impl IntoIterator<Item = ChunkPos>,
@@ -275,6 +283,7 @@ impl<'a> RawChunkLightWorld<'a> {
     }
 }
 
+#[cfg(test)]
 impl BlockLightWorld for RawChunkLightWorld<'_> {
     fn light_emission(&self, pos: BlockPosKey) -> u8 {
         self.block_at(pos).map_or(0, block_light_emission)
@@ -285,6 +294,7 @@ impl BlockLightWorld for RawChunkLightWorld<'_> {
     }
 }
 
+#[cfg(test)]
 impl SkyLightWorld for RawChunkLightWorld<'_> {
     fn light_opacity(&self, pos: BlockPosKey) -> Option<u8> {
         self.block_at(pos).map(block_light_opacity)

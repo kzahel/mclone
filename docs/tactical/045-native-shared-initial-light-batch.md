@@ -111,17 +111,16 @@ Lighting-enabled breakdown after batch:
 | total light-status batch compute | `9,323.850 ms` |
 | `LevelLightEngine.run_all_updates` | `9,281.490 ms` |
 
-## Next
+## Follow-Up
 
-The next likely lighting throughput slice is a real retained world light owner:
+The next lighting throughput slice landed in
+[`046-native-retained-initial-light-world.md`](046-native-retained-initial-light-world.md):
+the light worker now owns a retained initial light world and persistent
+`LevelLightEngine`.
 
-- keep it outside `scheduler.rs` so the scheduler does not become a light-engine
-  mega-module
-- retain generated/loaded block facts and light sections across batches
-- queue section status, light-source enablement, and block-emission work against
-  the retained engine
-- instrument graph queue sizes and per-layer drain cost inside
-  `run_all_updates`
+Remaining follow-up from there is graph-drain instrumentation and optimization:
+queue sizes, processed graph nodes, duplicate queueing, and per-layer drain
+time inside `LevelLightEngine.run_all_updates`.
 
 After initial light startup is affordable, return to live block-change light
 deltas and render-section dirtying.

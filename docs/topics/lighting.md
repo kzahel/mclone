@@ -64,6 +64,10 @@ Landed pieces:
   feature-job boundary and runs one shared `LevelLightEngine` solve for the
   target chunks plus their sky-light halo, instead of independently solving one
   temporary 3x3 world per light status.
+- The light-status worker now owns a retained initial light world and persistent
+  `LevelLightEngine` in `mclone-server/src/light_world.rs`, so subsequent light
+  batches reuse retained block facts and light storage instead of rebuilding the
+  whole raw light world.
 - Loaded `ChunkStatus::Light` snapshots hydrate persisted sky/block light bytes
   through `LevelLightEngine` before scheduler publication.
 - Native client and integrated-server startup now expose a diagnostic lighting
@@ -92,8 +96,8 @@ Known gaps:
 
 - The native `LightStatusMailbox` is a first threaded/batched boundary, not a
   full `ThreadedLevelLightEngine` port: no Java-shaped task prioritization,
-  cancellation, light ticket release, long-lived world light state, or live
-  update queue exists yet.
+  cancellation, light ticket release, unload/release policy, or live update
+  queue exists yet.
 - Desktop startup still waits for the initial light-ready view before opening
   the window in the current native path. This avoids a sky-only first frame but
   leaves launch latency high when lighting is enabled.
@@ -116,6 +120,33 @@ Known gaps:
 - Liquid light sampling is not ported.
 
 ## Latest Visual Probe
+
+On 2026-06-19, after moving initial lighting to the retained worker-owned light
+world, a native full-frame capture for seed `12345`, chunk `(0,0)`, render
+distance `2`, `960x540`, with server lighting enabled and shader fullbright
+disabled produced:
+
+```text
+/tmp/mclone-light-retained-world.png
+```
+
+The capture was inspected and rendered nonblank terrain with `166` cached
+sections and `26` drawn sections. It did not reproduce the blue-sky-only
+interactive failure.
+
+Scheduler perf from the same slice:
+
+| Metric | Value |
+|---|---:|
+| radius-5 lighting-enabled total | `11,292.102 ms` |
+| radius-5 light-status compute | `9,341.649 ms` |
+| radius-5 `LevelLightEngine.run_all_updates` | `9,301.529 ms` |
+| radius-3 step 0 light compute | `4,652.194 ms` |
+| radius-3 step 1 incremental light compute | `423.869 ms` |
+
+Interpretation: retained state does not change cold startup materially because
+the first view is still one large graph drain. It does make subsequent movement
+batches much cheaper by reusing retained block/light state.
 
 On 2026-06-18, after batching initial light work per completed feature job, a
 native full-frame capture for seed `12345`, chunk `(0,0)`, render distance `2`,
@@ -280,6 +311,7 @@ Current native entry points:
 | graph-backed level light bridge | `native/crates/mclone-server/src/level_light_bridge.rs` |
 | pending/hydrated light status inputs | `native/crates/mclone-server/src/light_status.rs` |
 | native light status worker | `native/crates/mclone-server/src/light_mailbox.rs` |
+| retained initial light world | `native/crates/mclone-server/src/light_world.rs` |
 | graph-backed block light bridge tests | `native/crates/mclone-server/src/block_light_bridge.rs` |
 | graph-backed sky light bridge tests | `native/crates/mclone-server/src/sky_light_bridge.rs` |
 | scheduler publication | `native/crates/mclone-server/src/scheduler.rs` |
@@ -546,22 +578,52 @@ does not own light tickets, and does not support live `checkBlock` updates.
 
 ### P6.7: Long-Lived Threaded Light State
 
-Status: next recommended.
+Status: completed first pass in
+[`046-native-retained-initial-light-world.md`](../tactical/046-native-retained-initial-light-world.md).
 
 Replace the temporary per-batch raw light world with a server-owned light state
 that more closely follows Java `ThreadedLevelLightEngine`.
 
+Landed:
+
+- Added `mclone-server/src/light_world.rs` as the worker-owned retained initial
+  light world.
+- `LightStatusMailbox` now keeps a persistent `LevelLightEngine` on the light
+  worker side.
+- Newly retained or changed chunks get section-status/source-enable/emission
+  pre-update work; repeated chunks reuse retained state.
+- `scheduler.rs` still owns chunk status publication and does not grow light
+  engine logic.
+
+Measured result on 2026-06-19:
+
+- radius-5 cold startup remains dominated by one graph drain:
+  `9,341.649 ms` light-status compute, `9,301.529 ms` in
+  `LevelLightEngine.run_all_updates`
+- radius-3 two-step movement shows retained-state reuse: step `0` light compute
+  `4,652.194 ms`, step `1` incremental light compute `423.869 ms`
+
+Remaining parity gaps: no Java-shaped task prioritization, cancellation, light
+ticket release, retained-state unload policy, loaded-neighbor stitching, or live
+`checkBlock` queue yet.
+
+### P6.8: Graph Drain Instrumentation And Optimization
+
+Status: next recommended.
+
+Make the remaining `LevelLightEngine.run_all_updates` cost concrete and then
+reduce it.
+
 Initial scope:
 
-- Keep the world light owner outside `scheduler.rs`, likely as a sibling module
-  to `light_mailbox.rs` rather than expanding the scheduler.
-- Retain loaded/generated chunk block facts and light sections across batches.
-- Queue chunk section-status/source-enable work as tasks against that retained
-  state.
-- Measure `run_all_updates` queue size, pending section count, and per-layer
-  drain cost so the next bottleneck is concrete.
-- Preserve the existing scheduler publication budget and
-  `ChunkStatus::Light` holder state.
+- Expose block/sky graph queue sizes before and after each drain.
+- Count processed graph nodes per layer and report per-layer drain time.
+- Check for duplicate queued work from section activation, sky-source checks,
+  and block-emission source checks.
+- Keep the instrumentation in `mclone_light` / `light_world.rs`; do not push
+  graph internals into `scheduler.rs`.
+- Compare radius-5 cold startup and multi-step movement again after each
+  optimization.
 
 Out of scope for the first pass: live block-change propagation, light ticket
 release policy, and render light-delta packets. Those belong after initial
@@ -610,6 +672,7 @@ Primary native lighting docs:
 - [`../tactical/043-native-loaded-light-hydration.md`](../tactical/043-native-loaded-light-hydration.md)
 - [`../tactical/044-native-light-status-worker-and-disable-flag.md`](../tactical/044-native-light-status-worker-and-disable-flag.md)
 - [`../tactical/045-native-shared-initial-light-batch.md`](../tactical/045-native-shared-initial-light-batch.md)
+- [`../tactical/046-native-retained-initial-light-world.md`](../tactical/046-native-retained-initial-light-world.md)
 
 Legacy/reference-only lighting docs:
 
