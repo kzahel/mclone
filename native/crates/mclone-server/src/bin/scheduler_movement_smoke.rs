@@ -546,6 +546,10 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         metrics.completed_light_statuses
     );
     println!(
+        "{indent}  \"completed_light_batches\": {},",
+        metrics.completed_light_batches
+    );
+    println!(
         "{indent}  \"total_light_status_compute_ms\": {:.3},",
         micros_to_ms(metrics.total_light_status_compute_us)
     );

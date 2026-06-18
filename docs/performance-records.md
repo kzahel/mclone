@@ -61,6 +61,58 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-18 - Shared Initial Light Batch First Pass
+
+Commit reported by native benchmark JSON: `2207e64`.
+
+Note: `git_dirty=true` because this was captured while implementing the shared
+initial light batch slice after `2207e64`. Treat the result as the measured
+state for tactical `045`, not as the clean historical state of `2207e64`.
+
+Native `LIGHT`/lighting-enabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 5 --steps 1 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --enable-lighting
+```
+
+Native `FEATURES`/lighting-disabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 5 --steps 1 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --disable-lighting
+```
+
+Summary:
+
+| Lane | Target chunks | Total |
+|---|---:|---:|
+| Native scheduler, lighting disabled | `121` visible / `169` feature snapshots | `1,107.779 ms` |
+| Native scheduler, lighting enabled before batch | `121` visible / `169` light snapshots | `47,782.677 ms` |
+| Native scheduler, lighting enabled after batch | `121` visible / `169` light snapshots | `10,745.617 ms` |
+
+Native lighting-enabled breakdown after batch:
+
+| Metric | Value |
+|---|---:|
+| feature batch timing | `790.832 ms` |
+| completed light statuses | `169` |
+| completed light batches | `1` |
+| total light-status batch compute | `9,323.850 ms` |
+| max light-status batch compute | `9,323.850 ms` |
+| light `run_updates` time | `9,281.490 ms` |
+| block source scan | `21.637 ms` |
+| sky source enqueue | `9.682 ms` |
+| section setup | `4.498 ms` |
+| collect sections | `0.439 ms` |
+
+Interpretation: batching the initial light work at the completed feature-job
+boundary removed most duplicate propagation work, dropping the radius-5
+lighting-enabled scheduler run from `47.8s` to `10.7s`. Native worldgen remains
+around `0.8s`; the remaining light bottleneck is the single large
+`LevelLightEngine.run_all_updates` drain over the shared raw light world. The
+next lighting throughput target should be the Java-shaped long-lived world light
+state/task queue and the graph drain itself, not feature generation or renderer
+frame pacing.
+
 ### 2026-06-18 - Radius-5 Scheduler/Oracle Lighting Investigation
 
 Commit reported by native benchmark JSON: `48fdd70`.

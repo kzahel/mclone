@@ -15,29 +15,38 @@ use std::{sync::mpsc, thread};
 use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
 
 use crate::level_light_bridge::LevelLightComputationTiming;
-use crate::light_status::PendingLightStatus;
+use crate::light_status::PendingLightStatusBatch;
 
 #[derive(Debug)]
 pub(crate) struct CompletedLightStatus {
     pub(crate) pos: ChunkPos,
     pub(crate) feature_snapshot: ChunkSnapshot,
     pub(crate) light_sections: Vec<PackedLightSection>,
+    pub(crate) batch_compute_leader: bool,
     pub(crate) compute_us: u128,
     pub(crate) timing: LevelLightComputationTiming,
 }
 
 impl CompletedLightStatus {
-    fn from_pending(pending: PendingLightStatus) -> Self {
+    fn from_batch(batch: PendingLightStatusBatch) -> Vec<Self> {
         let start = Instant::now();
-        let (light_sections, timing) = pending.compute_light_sections_timed();
+        let completed = batch.compute_light_sections();
         let compute_us = start.elapsed().as_micros();
-        Self {
-            pos: pending.pos,
-            feature_snapshot: pending.feature_snapshot,
-            light_sections,
-            compute_us,
-            timing,
-        }
+        completed
+            .into_iter()
+            .enumerate()
+            .map(|(index, (pending, light_sections, timing))| {
+                let batch_compute_leader = index == 0;
+                Self {
+                    pos: pending.pos,
+                    feature_snapshot: pending.feature_snapshot,
+                    light_sections,
+                    batch_compute_leader,
+                    compute_us: if batch_compute_leader { compute_us } else { 0 },
+                    timing,
+                }
+            })
+            .collect()
     }
 }
 
@@ -54,9 +63,12 @@ impl LightStatusMailbox {
         }
     }
 
-    pub(crate) fn enqueue(&mut self, pending: PendingLightStatus) {
-        self.pending_count = self.pending_count.saturating_add(1);
-        self.backend.enqueue(pending);
+    pub(crate) fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {
+        if batch.is_empty() {
+            return;
+        }
+        self.pending_count = self.pending_count.saturating_add(batch.target_count());
+        self.backend.enqueue_batch(batch);
     }
 
     pub(crate) fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
@@ -97,9 +109,9 @@ impl LightStatusMailboxBackend {
         }
     }
 
-    fn enqueue(&mut self, pending: PendingLightStatus) {
+    fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {
         self.completed
-            .push_back(CompletedLightStatus::from_pending(pending));
+            .extend(CompletedLightStatus::from_batch(batch));
     }
 
     fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
@@ -139,12 +151,11 @@ impl LightStatusMailboxBackend {
             .spawn(move || {
                 while let Ok(request) = receiver.recv() {
                     match request {
-                        LightStatusRequest::Compute(pending) => {
-                            if completion_sender
-                                .send(CompletedLightStatus::from_pending(pending))
-                                .is_err()
-                            {
-                                break;
+                        LightStatusRequest::ComputeBatch(batch) => {
+                            for completed in CompletedLightStatus::from_batch(batch) {
+                                if completion_sender.send(completed).is_err() {
+                                    return;
+                                }
                             }
                         }
                         LightStatusRequest::Shutdown => break,
@@ -161,9 +172,9 @@ impl LightStatusMailboxBackend {
         }
     }
 
-    fn enqueue(&mut self, pending: PendingLightStatus) {
+    fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {
         self.sender
-            .send(LightStatusRequest::Compute(pending))
+            .send(LightStatusRequest::ComputeBatch(batch))
             .expect("native light status worker stopped before receiving job");
     }
 
@@ -202,6 +213,6 @@ impl Drop for LightStatusMailboxBackend {
 
 #[cfg(not(target_arch = "wasm32"))]
 enum LightStatusRequest {
-    Compute(PendingLightStatus),
+    ComputeBatch(PendingLightStatusBatch),
     Shutdown,
 }

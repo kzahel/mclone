@@ -1352,6 +1352,7 @@ mod tests {
                 total_dependency_cache_misses: 23 * 23,
                 total_retained_dependency_chunks: 23 * 23,
                 completed_light_statuses: 25,
+                completed_light_batches: server.scheduler().metrics().completed_light_batches,
                 total_light_status_compute_us: server
                     .scheduler()
                     .metrics()

@@ -60,6 +60,10 @@ Landed pieces:
   `LightStatusMailbox` worker so foreground scheduler polling no longer runs
   initial light propagation directly. WASM still uses an inline mailbox backend
   until worker plumbing exists there.
+- The light-status worker batches initial light inputs at the completed
+  feature-job boundary and runs one shared `LevelLightEngine` solve for the
+  target chunks plus their sky-light halo, instead of independently solving one
+  temporary 3x3 world per light status.
 - Loaded `ChunkStatus::Light` snapshots hydrate persisted sky/block light bytes
   through `LevelLightEngine` before scheduler publication.
 - Native client and integrated-server startup now expose a diagnostic lighting
@@ -86,9 +90,10 @@ Landed pieces:
 
 Known gaps:
 
-- The native `LightStatusMailbox` is a first threaded boundary, not a full
-  `ThreadedLevelLightEngine` port: no Java-shaped task prioritization,
-  cancellation, light ticket release, or live update queue exists yet.
+- The native `LightStatusMailbox` is a first threaded/batched boundary, not a
+  full `ThreadedLevelLightEngine` port: no Java-shaped task prioritization,
+  cancellation, light ticket release, long-lived world light state, or live
+  update queue exists yet.
 - Desktop startup still waits for the initial light-ready view before opening
   the window in the current native path. This avoids a sky-only first frame but
   leaves launch latency high when lighting is enabled.
@@ -111,6 +116,36 @@ Known gaps:
 - Liquid light sampling is not ported.
 
 ## Latest Visual Probe
+
+On 2026-06-18, after batching initial light work per completed feature job, a
+native full-frame capture for seed `12345`, chunk `(0,0)`, render distance `2`,
+`960x540`, with server lighting enabled and shader fullbright disabled
+produced:
+
+```text
+/tmp/mclone-light-batch-shared.png
+```
+
+The capture was inspected and rendered nonblank terrain with `166` cached
+sections and `26` drawn sections. It did not reproduce the blue-sky-only
+interactive failure.
+
+Radius-5 scheduler perf from the same slice:
+
+| Metric | Value |
+|---|---:|
+| lighting disabled total | `1,107.779 ms` |
+| lighting enabled total before batch | `47,782.677 ms` |
+| lighting enabled total after batch | `10,745.617 ms` |
+| completed light statuses | `169` |
+| completed light batches | `1` |
+| light-status batch compute | `9,323.850 ms` |
+| `LevelLightEngine.run_all_updates` | `9,281.490 ms` |
+
+Interpretation: the duplicate per-target graph drain was the largest immediate
+startup regression. The remaining throughput blocker is now the single large
+graph propagation drain and the lack of Java-shaped long-lived world light
+state.
 
 On 2026-06-18, after moving native `ChunkStatus::Light` computation to the
 light-status worker, frozen daytime full-frame captures for seed `12345`, chunk
@@ -461,9 +496,8 @@ light-ready view.
 Immediate operational follow-up: make desktop launch responsive while initial
 chunks/light are still warming, either by showing a real loading/progress screen
 or by presenting a partial first view without waiting for the whole
-light-ready radius. After the radius-5 perf pass, the first lighting
-throughput follow-up is more urgent: replace the current per-target temporary
-3x3 light-world recomputation with Java-shaped shared world light state.
+light-ready radius. The first throughput follow-up, replacing per-target
+temporary 3x3 light-world recomputation, landed in P6.6.
 
 Measured radius-5 result on 2026-06-18:
 
@@ -478,9 +512,64 @@ propagation is slow because native drains a fresh isolated graph per light
 status instead of using a long-lived `ThreadedLevelLightEngine`-like world
 engine.
 
+### P6.6: Shared Initial Light Batch
+
+Status: completed first pass in
+[`045-native-shared-initial-light-batch.md`](../tactical/045-native-shared-initial-light-batch.md).
+
+Batch initial `ChunkStatus::Light` inputs for all publishable targets in one
+completed feature job.
+
+Landed:
+
+- `PendingLightStatusBatch` merges target chunks and dependency halo chunks into
+  one raw light-world input set.
+- `level_light_bridge.rs` can collect packed light sections for multiple target
+  chunks after one shared `LevelLightEngine.run_all_updates` drain.
+- `LightStatusMailbox` accepts batch requests while preserving individual
+  completed-light publication for scheduler budgets and holder status changes.
+- `ChunkScheduler` stages light inputs during sliced feature publication and
+  enqueues the batch only once the feature job has fully published.
+- Scheduler perf JSON now reports `completed_light_batches` separately from
+  `completed_light_statuses`.
+
+Measured radius-5 result on 2026-06-18:
+
+- native lighting disabled: `1,107.779 ms`
+- native lighting enabled after batch: `10,745.617 ms`
+- light-status batch compute: `9,323.850 ms` across `169` statuses in `1` batch
+- `LevelLightEngine.run_all_updates`: `9,281.490 ms`
+
+Remaining parity gaps: the worker still rebuilds a temporary raw light world per
+feature-job batch. It is not yet Java's long-lived threaded world light state,
+does not own light tickets, and does not support live `checkBlock` updates.
+
+### P6.7: Long-Lived Threaded Light State
+
+Status: next recommended.
+
+Replace the temporary per-batch raw light world with a server-owned light state
+that more closely follows Java `ThreadedLevelLightEngine`.
+
+Initial scope:
+
+- Keep the world light owner outside `scheduler.rs`, likely as a sibling module
+  to `light_mailbox.rs` rather than expanding the scheduler.
+- Retain loaded/generated chunk block facts and light sections across batches.
+- Queue chunk section-status/source-enable work as tasks against that retained
+  state.
+- Measure `run_all_updates` queue size, pending section count, and per-layer
+  drain cost so the next bottleneck is concrete.
+- Preserve the existing scheduler publication budget and
+  `ChunkStatus::Light` holder state.
+
+Out of scope for the first pass: live block-change propagation, light ticket
+release policy, and render light-delta packets. Those belong after initial
+startup light is affordable.
+
 ### P7: Live Deltas And Render Dirtying
 
-Status: next recommended pure lighting subsystem.
+Status: pending after the remaining initial-light throughput work.
 
 Connect runtime mutations to the light engine.
 
@@ -520,6 +609,7 @@ Primary native lighting docs:
 - [`../tactical/042-native-light-status-scheduling.md`](../tactical/042-native-light-status-scheduling.md)
 - [`../tactical/043-native-loaded-light-hydration.md`](../tactical/043-native-loaded-light-hydration.md)
 - [`../tactical/044-native-light-status-worker-and-disable-flag.md`](../tactical/044-native-light-status-worker-and-disable-flag.md)
+- [`../tactical/045-native-shared-initial-light-batch.md`](../tactical/045-native-shared-initial-light-batch.md)
 
 Legacy/reference-only lighting docs:
 

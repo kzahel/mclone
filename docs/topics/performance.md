@@ -12,9 +12,9 @@ invalidates an older recommendation, or establishes a new baseline.
 ## Current Baseline
 
 Current validated slice: native radius-5 scheduler/oracle comparison after the
-first native light-status worker. The movement-frame probe remains under budget,
-but startup generation with lighting enabled is dominated by per-chunk light
-graph propagation.
+first shared initial light batch. The movement-frame probe remains under budget,
+but startup generation with lighting enabled is still dominated by the light
+graph propagation drain.
 
 Latest 120 Hz release movement-frame probe was captured during that slice at:
 
@@ -61,7 +61,7 @@ For durable historical trends, use [`../performance-records.md`](../performance-
 
 | Priority | Work | Java-shaped | Tactical | Status | Why It Matters |
 |---|---|---:|---|---|---|
-| P0 | Replace per-chunk initial light recomputation | Yes | [`044`](../tactical/044-native-light-status-worker-and-disable-flag.md), [`lighting topic`](lighting.md) | next recommended | Native radius-5 load is `~1.1s` with lighting disabled and `~47.8s` with lighting enabled. Phase timing shows `~46.75s` is `LevelLightEngine.run_all_updates` across `169` independently recomputed light chunks. Java's `ThreadedLevelLightEngine` owns long-lived world light state and batches chunk light tasks instead of recomputing an isolated 3x3 world per target chunk. |
+| P0 | Reduce batched initial light propagation | Yes | [`045`](../tactical/045-native-shared-initial-light-batch.md), [`lighting topic`](lighting.md) | next recommended | The shared feature-job batch dropped radius-5 lighting startup from `~47.8s` to `~10.7s`, but the remaining cost is still `~9.28s` inside one `LevelLightEngine.run_all_updates` drain. Java's `ThreadedLevelLightEngine` owns long-lived world light state and advances queued chunk light tasks instead of rebuilding a temporary raw light world per batch. |
 | P1 | Startup loading/progress presentation | Native policy | [`027`](../tactical/027-mclone-ui-foundation.md), [`028`](../tactical/028-headless-window-frame-unification.md), [`044`](../tactical/044-native-light-status-worker-and-disable-flag.md) | needed after P0 or in parallel | The current window path waits for the initial light-ready scene before opening. That prevents blue-sky-only first frames but makes any light-generation regression look like a frozen app. |
 | P2 | Live light deltas and light-section dirtying | Yes | [`lighting topic`](lighting.md), [`026`](../tactical/026-lighting-pipeline.md), [`031`](../tactical/031-native-section-block-delta-updates.md) | pending larger subsystem | Section block deltas currently leave light payloads unchanged. Correct live lighting needs Java-shaped light propagation/deltas and render dirtying by changed light sections, but initial light throughput should be fixed first. |
 | P3 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful, but radius-5 evidence says lighting is the active desktop blocker. |
@@ -122,6 +122,8 @@ Use these local sources when implementing or reviewing performance work:
   [`033`](../tactical/033-native-async-render-section-compile-queue.md)
 - Render compile queue revision/priority refinement:
   [`034`](../tactical/034-native-render-compile-revisions-and-priority.md)
+- Shared initial light batch:
+  [`045`](../tactical/045-native-shared-initial-light-batch.md)
 
 ## Tactical Index
 
@@ -143,6 +145,8 @@ Related subsystem tacticals:
 - [`021-scheduled-fluid-ticks.md`](../tactical/021-scheduled-fluid-ticks.md)
 - [`026-lighting-pipeline.md`](../tactical/026-lighting-pipeline.md)
 - [`028-headless-window-frame-unification.md`](../tactical/028-headless-window-frame-unification.md)
+- [`044-native-light-status-worker-and-disable-flag.md`](../tactical/044-native-light-status-worker-and-disable-flag.md)
+- [`045-native-shared-initial-light-batch.md`](../tactical/045-native-shared-initial-light-batch.md)
 
 ## Validation Lanes
 

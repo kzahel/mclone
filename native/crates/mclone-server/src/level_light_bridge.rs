@@ -52,17 +52,37 @@ impl LevelLightComputationTiming {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn graph_level_light_sections_for_chunk_timed<'a>(
     target_pos: ChunkPos,
     min_y: i32,
     height: i32,
     chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
 ) -> (Vec<PackedLightSection>, LevelLightComputationTiming) {
+    let (mut sections, timing) = graph_level_light_sections_for_chunks_timed(
+        std::iter::once(target_pos),
+        min_y,
+        height,
+        chunks,
+    );
+    (sections.remove(&target_pos).unwrap_or_default(), timing)
+}
+
+pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
+    targets: impl IntoIterator<Item = ChunkPos>,
+    min_y: i32,
+    height: i32,
+    chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
+) -> (
+    BTreeMap<ChunkPos, Vec<PackedLightSection>>,
+    LevelLightComputationTiming,
+) {
     let total_start = Instant::now();
     let mut timing = LevelLightComputationTiming::default();
+    let targets = targets.into_iter().collect::<Vec<_>>();
 
     let start = Instant::now();
-    let world = RawChunkLightWorld::new(target_pos, min_y, height, chunks);
+    let world = RawChunkLightWorld::new(targets.iter().copied(), min_y, height, chunks);
     timing.world_init_us = start.elapsed().as_micros();
     let start = Instant::now();
     let active_sections = world.active_sections();
@@ -100,34 +120,38 @@ pub(crate) fn graph_level_light_sections_for_chunk_timed<'a>(
     let start = Instant::now();
     let min_section_y = block_to_section_coord(min_y);
     let section_count = height / SECTION_HEIGHT;
-    let mut sections = Vec::new();
-    for section_offset in 0..section_count {
-        let section_y = min_section_y + section_offset;
-        let section = section_as_long(target_pos.x, section_y, target_pos.z);
-        let sky = engine
-            .sky_engine()
-            .storage()
-            .get_visible_data_layer(section)
-            .and_then(|layer| layer.clone().into_bytes());
-        let block = engine
-            .block_engine()
-            .storage()
-            .get_visible_data_layer(section)
-            .and_then(|layer| layer.clone().into_bytes());
-        if sky.is_some() || block.is_some() {
-            sections.push(PackedLightSection::new(section_y, sky, block));
+    let mut sections_by_chunk = BTreeMap::new();
+    for target_pos in targets {
+        let mut sections = Vec::new();
+        for section_offset in 0..section_count {
+            let section_y = min_section_y + section_offset;
+            let section = section_as_long(target_pos.x, section_y, target_pos.z);
+            let sky = engine
+                .sky_engine()
+                .storage()
+                .get_visible_data_layer(section)
+                .and_then(|layer| layer.clone().into_bytes());
+            let block = engine
+                .block_engine()
+                .storage()
+                .get_visible_data_layer(section)
+                .and_then(|layer| layer.clone().into_bytes());
+            if sky.is_some() || block.is_some() {
+                sections.push(PackedLightSection::new(section_y, sky, block));
+            }
         }
-    }
-    if sections.is_empty() && section_count > 0 {
-        sections.push(PackedLightSection::new(
-            min_section_y,
-            Some(vec![0; mclone_light::DATA_LAYER_SIZE]),
-            None,
-        ));
+        if sections.is_empty() && section_count > 0 {
+            sections.push(PackedLightSection::new(
+                min_section_y,
+                Some(vec![0; mclone_light::DATA_LAYER_SIZE]),
+                None,
+            ));
+        }
+        sections_by_chunk.insert(target_pos, sections);
     }
     timing.collect_sections_us = start.elapsed().as_micros();
     timing.total_us = total_start.elapsed().as_micros();
-    (sections, timing)
+    (sections_by_chunk, timing)
 }
 
 #[derive(Clone, Debug)]
@@ -139,7 +163,7 @@ struct RawChunkLightWorld<'a> {
 
 impl<'a> RawChunkLightWorld<'a> {
     fn new(
-        target_pos: ChunkPos,
+        target_positions: impl IntoIterator<Item = ChunkPos>,
         min_y: i32,
         height: i32,
         chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
@@ -165,10 +189,12 @@ impl<'a> RawChunkLightWorld<'a> {
                 (pos, blocks)
             })
             .collect::<BTreeMap<_, _>>();
-        assert!(
-            chunks.contains_key(&target_pos),
-            "level light target chunk {target_pos:?} was missing from input chunks"
-        );
+        for target_pos in target_positions {
+            assert!(
+                chunks.contains_key(&target_pos),
+                "level light target chunk {target_pos:?} was missing from input chunks"
+            );
+        }
 
         Self {
             min_y,

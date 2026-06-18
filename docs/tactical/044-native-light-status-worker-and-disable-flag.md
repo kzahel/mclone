@@ -158,12 +158,16 @@ Native lighting-enabled phase timing shows `46,983.813 ms` spent computing
 `LevelLightEngine.run_all_updates`. This confirms that the worker removed the
 foreground frame stall but did not make initial light propagation affordable.
 
-## Next
+## Follow-Up
 
-The immediate lighting follow-up is to replace per-target temporary 3x3 light
-world recomputation with shared Java-shaped world light state. The window path
-also still needs startup/progress presentation, because it waits for the initial
-light-ready view before opening.
+The immediate lighting throughput follow-up landed in
+[`045-native-shared-initial-light-batch.md`](045-native-shared-initial-light-batch.md):
+per-target temporary 3x3 light-world recomputation was replaced with one
+feature-job-scoped shared initial light batch.
+
+The window path still needs startup/progress presentation, because it waits for
+the initial light-ready view before opening. The next pure lighting throughput
+step is a retained world light owner closer to Java `ThreadedLevelLightEngine`.
 
 The next pure lighting subsystem remains live light deltas:
 

@@ -36,7 +36,9 @@ use crate::fluid::{
 use crate::holder::ChunkHolder;
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_mailbox::{CompletedLightStatus, LightStatusMailbox};
-use crate::light_status::{PendingLightStatus, hydrate_loaded_light_snapshot};
+use crate::light_status::{
+    PendingLightStatus, PendingLightStatusBatch, hydrate_loaded_light_snapshot,
+};
 use crate::persistence::{ChunkSnapshotStore, ChunkStoreResult, NullChunkSnapshotStore};
 use crate::timing::{
     ChunkSchedulerTickReport, ChunkSchedulerTickTiming, simulation_timing_elapsed_us,
@@ -86,6 +88,7 @@ pub struct ChunkSchedulerMetrics {
     pub total_dependency_cache_misses: usize,
     pub total_retained_dependency_chunks: usize,
     pub completed_light_statuses: usize,
+    pub completed_light_batches: usize,
     pub total_light_status_compute_us: u128,
     pub max_light_status_compute_us: u128,
     pub total_light_status_world_init_us: u128,
@@ -318,8 +321,10 @@ pub struct ChunkScheduler {
     worldgen_mailbox: WorldgenMailbox,
     pending_worldgen_publications: VecDeque<PendingWorldgenPublication>,
     light_mailbox: LightStatusMailbox,
+    pending_light_status_batches: BTreeMap<ChunkJobId, Vec<PendingLightStatus>>,
     pending_light_publications: VecDeque<CompletedLightStatus>,
     completed_light_statuses: usize,
+    completed_light_batches: usize,
     total_light_status_compute_us: u128,
     max_light_status_compute_us: u128,
     light_status_timing: LevelLightComputationTiming,
@@ -347,8 +352,10 @@ impl ChunkScheduler {
             worldgen_mailbox: WorldgenMailbox::new(),
             pending_worldgen_publications: VecDeque::new(),
             light_mailbox: LightStatusMailbox::new(),
+            pending_light_status_batches: BTreeMap::new(),
             pending_light_publications: VecDeque::new(),
             completed_light_statuses: 0,
+            completed_light_batches: 0,
             total_light_status_compute_us: 0,
             max_light_status_compute_us: 0,
             light_status_timing: LevelLightComputationTiming::default(),
@@ -609,6 +616,11 @@ impl ChunkScheduler {
             .filter(|job| matches!(job.state, ChunkJobState::Queued | ChunkJobState::Running))
             .count();
         pending_status_jobs
+            + self
+                .pending_light_status_batches
+                .values()
+                .map(Vec::len)
+                .sum::<usize>()
             + self.light_mailbox.pending_count()
             + self.pending_light_publications.len()
     }
@@ -677,6 +689,7 @@ impl ChunkScheduler {
                 .map(|job| job.retained_dependency_chunks)
                 .sum(),
             completed_light_statuses: self.completed_light_statuses,
+            completed_light_batches: self.completed_light_batches,
             total_light_status_compute_us: self.total_light_status_compute_us,
             max_light_status_compute_us: self.max_light_status_compute_us,
             total_light_status_world_init_us: self.light_status_timing.world_init_us,
@@ -1650,8 +1663,10 @@ impl ChunkScheduler {
                     .and_then(|holder| holder.status_slot(ChunkStatus::Light))
                     .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled);
             if should_light {
-                self.light_mailbox
-                    .enqueue(PendingLightStatus::from_feature_publication(
+                self.pending_light_status_batches
+                    .entry(publication.completed.job_id)
+                    .or_default()
+                    .push(PendingLightStatus::from_feature_publication(
                         pos,
                         snapshot,
                         chunk,
@@ -1677,10 +1692,16 @@ impl ChunkScheduler {
         }
 
         let completed = publication.completed;
+        let pending_light_statuses = self
+            .pending_light_status_batches
+            .remove(&completed.job_id)
+            .unwrap_or_default();
         for dependency in completed.retained_dependencies.into_values() {
             self.mark_dependency_ready(dependency);
         }
         self.mark_job_complete(completed.job_id, completed.cache_report, completed.timing);
+        self.light_mailbox
+            .enqueue_batch(PendingLightStatusBatch::new(pending_light_statuses));
         Ok((events, None))
     }
 
@@ -1707,11 +1728,14 @@ impl ChunkScheduler {
             let revision = ChunkRevision(self.next_revision);
             self.next_revision += 1;
             self.completed_light_statuses = self.completed_light_statuses.saturating_add(1);
-            self.total_light_status_compute_us = self
-                .total_light_status_compute_us
-                .saturating_add(completed.compute_us);
-            self.max_light_status_compute_us =
-                self.max_light_status_compute_us.max(completed.compute_us);
+            if completed.batch_compute_leader {
+                self.completed_light_batches = self.completed_light_batches.saturating_add(1);
+                self.total_light_status_compute_us = self
+                    .total_light_status_compute_us
+                    .saturating_add(completed.compute_us);
+                self.max_light_status_compute_us =
+                    self.max_light_status_compute_us.max(completed.compute_us);
+            }
             self.light_status_timing.add_assign(completed.timing);
             let mut snapshot = completed.feature_snapshot;
             snapshot.status = ChunkStatus::Light;

@@ -1,8 +1,10 @@
 //! Scheduler-owned initial `ChunkStatus::Light` inputs.
 //!
 //! Worldgen produces block facts for `FEATURES`; the scheduler owns the
-//! follow-up light status. This module keeps the raw input carrier and bridge
+//! follow-up light status. This module keeps the raw input carriers and bridge
 //! call out of the already large scheduler module.
+
+use std::collections::BTreeMap;
 
 use mclone_core::{
     ChunkPos, ChunkSnapshot, ChunkStatus, PackedLightSection, SECTION_HEIGHT,
@@ -16,7 +18,7 @@ use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 
 use crate::level_light_bridge::{
-    LevelLightComputationTiming, graph_level_light_sections_for_chunk_timed,
+    LevelLightComputationTiming, graph_level_light_sections_for_chunks_timed,
 };
 use crate::lighting_seed::provisional_sky_light_includes_chunk;
 use crate::persistence::{ChunkStoreError, ChunkStoreResult};
@@ -62,21 +64,77 @@ impl PendingLightStatus {
             neighbor_blocks,
         }
     }
+}
 
-    pub(crate) fn compute_light_sections_timed(
-        &self,
-    ) -> (Vec<PackedLightSection>, LevelLightComputationTiming) {
-        let chunks = std::iter::once((self.pos, self.raw_blocks.as_slice())).chain(
-            self.neighbor_blocks
-                .iter()
-                .map(|(pos, blocks)| (*pos, blocks.as_slice())),
+#[derive(Debug)]
+pub(crate) struct PendingLightStatusBatch {
+    statuses: Vec<PendingLightStatus>,
+}
+
+impl PendingLightStatusBatch {
+    pub(crate) fn new(statuses: Vec<PendingLightStatus>) -> Self {
+        Self { statuses }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.statuses.is_empty()
+    }
+
+    pub(crate) fn target_count(&self) -> usize {
+        self.statuses.len()
+    }
+
+    pub(crate) fn compute_light_sections(
+        self,
+    ) -> Vec<(
+        PendingLightStatus,
+        Vec<PackedLightSection>,
+        LevelLightComputationTiming,
+    )> {
+        let statuses = self.statuses;
+        if statuses.is_empty() {
+            return Vec::new();
+        }
+
+        let min_y = statuses[0].feature_snapshot.min_y;
+        let height = statuses[0].feature_snapshot.height;
+        let mut chunks = BTreeMap::new();
+        for status in &statuses {
+            debug_assert_eq!(status.feature_snapshot.min_y, min_y);
+            debug_assert_eq!(status.feature_snapshot.height, height);
+            chunks
+                .entry(status.pos)
+                .or_insert_with(|| status.raw_blocks.clone());
+            for (neighbor_pos, blocks) in &status.neighbor_blocks {
+                chunks
+                    .entry(*neighbor_pos)
+                    .or_insert_with(|| blocks.clone());
+            }
+        }
+
+        let (sections_by_chunk, timing) = graph_level_light_sections_for_chunks_timed(
+            statuses.iter().map(|status| status.pos),
+            min_y,
+            height,
+            chunks.iter().map(|(pos, blocks)| (*pos, blocks.as_slice())),
         );
-        graph_level_light_sections_for_chunk_timed(
-            self.pos,
-            self.feature_snapshot.min_y,
-            self.feature_snapshot.height,
-            chunks,
-        )
+
+        statuses
+            .into_iter()
+            .enumerate()
+            .map(|(index, status)| {
+                let pos = status.pos;
+                (
+                    status,
+                    sections_by_chunk.get(&pos).cloned().unwrap_or_default(),
+                    if index == 0 {
+                        timing
+                    } else {
+                        LevelLightComputationTiming::default()
+                    },
+                )
+            })
+            .collect()
     }
 }
 
