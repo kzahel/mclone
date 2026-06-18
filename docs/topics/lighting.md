@@ -22,6 +22,13 @@ Landed pieces:
 
 - `mclone_light` has Java-shaped `DataLayer`, `LightLayer`, packed-light
   helpers, and tests for nibble/index/constant parity.
+- `mclone_light` is split into Java-shaped modules for data layers, layers,
+  packed-light helpers, packed positions, storage maps, and section storage.
+- `mclone_light` has Java-compatible packed `BlockPos` / `SectionPos` helpers
+  for future graph solver keys.
+- `mclone_light` has `DataLayerStorageMap`, `BlockDataLayerStorageMap`,
+  `SkyDataLayerStorageMap`, and the non-scheduling storage/lifecycle foundation
+  for `LayerLightSectionStorage`.
 - `ChunkSnapshot` carries `light_correct` plus optional sky/block
   `PackedLightSection` bytes.
 - Native protocol and filesystem persistence roundtrip light payloads.
@@ -40,9 +47,12 @@ Known gaps:
 - `ChunkStatus::Light` exists, but the native server does not run a real light
   status.
 - There is no `DynamicGraphMinFixedPoint` port yet.
-- There is no Java-shaped `DataLayerStorageMap`, `LayerLightSectionStorage`,
-  `BlockLightSectionStorage`, `SkyLightSectionStorage`, `LayerLightEngine`,
-  `BlockLightEngine`, `SkyLightEngine`, or `LevelLightEngine` port yet.
+- There is no graph-driven `LayerLightSectionStorage` integration yet; the
+  storage/lifecycle foundation exists, but `SectionTracker` /
+  `DynamicGraphMinFixedPoint` is still pending.
+- There is no Java-shaped `BlockLightSectionStorage`, `SkyLightSectionStorage`,
+  `LayerLightEngine`, `BlockLightEngine`, `SkyLightEngine`, or
+  `LevelLightEngine` port yet.
 - Light sections are attached to chunk snapshots, but native does not yet model
   Java's padded light-section lifecycle as solver-owned storage.
 - Provisional opacity is coarse (`material_blocks_motion`) and does not use
@@ -122,6 +132,12 @@ Current native entry points:
 | Concern | Native path |
 |---|---|
 | light data helpers | `native/crates/mclone-light/src/lib.rs` |
+| 4-bit data layer | `native/crates/mclone-light/src/data_layer.rs` |
+| layer enum | `native/crates/mclone-light/src/layer.rs` |
+| packed-light helpers | `native/crates/mclone-light/src/packed.rs` |
+| packed block/section positions | `native/crates/mclone-light/src/pos.rs` |
+| storage maps | `native/crates/mclone-light/src/storage_map.rs` |
+| section storage foundation | `native/crates/mclone-light/src/section_storage.rs` |
 | snapshot payload | `native/crates/mclone-core/src/chunk.rs` |
 | provisional producer | `native/crates/mclone-server/src/lighting_seed.rs` |
 | scheduler publication | `native/crates/mclone-server/src/scheduler.rs` |
@@ -176,10 +192,10 @@ Rules:
 
 ### P0: Solver Storage Foundation
 
-Next implementation slice should start the real Java solver foundation without
-trying to wire full chunk status scheduling in the same change.
+Status: completed first pass in
+[`037-native-light-solver-storage-foundation.md`](../tactical/037-native-light-solver-storage-foundation.md).
 
-Scope:
+Landed:
 
 - Split `mclone_light` into small Java-shaped modules.
 - Move existing `DataLayer`, `LightLayer`, and packed helpers behind those
@@ -189,15 +205,9 @@ Scope:
 - Add focused tests for queued sections, visible/updating map separation,
   copy-on-write data layers, changed sections, and padded light-section ranges.
 
-Validation:
-
-```bash
-cargo test --manifest-path native/Cargo.toml -p mclone-light
-cargo test --manifest-path native/Cargo.toml -p mclone-server -p mclone-mesh
-git diff --check
-```
-
 ### P1: Fixed-Point Graph And Block Light
+
+Status: next recommended.
 
 Port `DynamicGraphMinFixedPoint`, then `BlockLightEngine` enough to run
 controlled synthetic block-light fixtures.
@@ -205,6 +215,8 @@ controlled synthetic block-light fixtures.
 Scope:
 
 - Internal inverted levels: `0` full light, `15` dark.
+- The graph should drive the existing `LayerLightSectionStorage` graph-facing
+  methods instead of adding a second storage path.
 - Six-direction propagation.
 - Emission source node behavior.
 - Opacity and face-occlusion hooks, with any temporary coarse opacity explicitly
@@ -270,6 +282,7 @@ Primary native lighting docs:
 - [`../tactical/026-lighting-pipeline.md`](../tactical/026-lighting-pipeline.md)
 - [`../tactical/031-native-section-block-delta-updates.md`](../tactical/031-native-section-block-delta-updates.md)
 - [`../tactical/036-native-sky-and-day-night-cycle.md`](../tactical/036-native-sky-and-day-night-cycle.md)
+- [`../tactical/037-native-light-solver-storage-foundation.md`](../tactical/037-native-light-solver-storage-foundation.md)
 
 Legacy/reference-only lighting docs:
 
