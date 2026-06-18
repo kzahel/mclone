@@ -44,6 +44,12 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
         self.storage.activate_section(section);
     }
 
+    pub fn update_section_status(&mut self, section: SectionPosKey, empty: bool) {
+        if !empty {
+            self.activate_section(section);
+        }
+    }
+
     pub fn enable_light_sources(&mut self, column: SectionPosKey, enabled: bool) {
         self.storage.enable_light_sources(column, enabled);
     }
@@ -90,6 +96,10 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
         };
         self.storage.swap_section_map();
         remaining
+    }
+
+    pub fn has_work(&self) -> bool {
+        self.graph.has_work()
     }
 
     pub fn run_all_updates(&mut self) {

@@ -6,6 +6,7 @@ mod data_layer;
 mod dynamic_graph;
 mod key;
 mod layer;
+mod level_engine;
 mod packed;
 mod pos;
 mod section_storage;
@@ -21,6 +22,7 @@ pub use data_layer::{
 pub use dynamic_graph::{DynamicGraphCallbacks, DynamicGraphMinFixedPoint, NeighborCheck};
 pub use key::LightChunkKey;
 pub use layer::LightLayer;
+pub use level_engine::{LIGHT_SECTION_PADDING, LevelLightEngine, MAX_SOURCE_LEVEL};
 pub use packed::{
     FULL_BLOCK, FULL_BRIGHT, FULL_SKY, pack_light, packed_block_light, packed_light_section_layer,
     packed_sky_light,

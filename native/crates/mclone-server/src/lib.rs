@@ -1,13 +1,16 @@
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
 mod block_light_bridge;
 mod distance_manager;
 mod fluid;
 mod holder;
 mod integrated;
+mod level_light_bridge;
 mod lighting_seed;
 mod persistence;
 mod scheduler;
+#[cfg(test)]
 mod sky_light_bridge;
 mod timing;
 mod types;

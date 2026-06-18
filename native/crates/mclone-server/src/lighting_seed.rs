@@ -2,15 +2,16 @@
 //!
 //! Thin orchestration home for initial light sections generated at chunk
 //! publication time before `ChunkStatus::Light` exists. The actual graph-backed
-//! sky/block propagation lives in the layer-specific bridge modules.
+//! propagation lives in Java-shaped light bridge modules.
 
-use std::collections::BTreeMap;
-
-use crate::block_light_bridge::graph_block_light_sections_for_chunk;
-use crate::sky_light_bridge::graph_sky_light_sections_for_chunk;
+use crate::level_light_bridge::graph_level_light_sections_for_chunk;
 use mclone_core::{CHUNK_WIDTH, ChunkPos, PackedLightSection};
 use mclone_worldgen::block::RawBlockId;
 
+#[cfg(test)]
+use crate::block_light_bridge::graph_block_light_sections_for_chunk;
+#[cfg(test)]
+use crate::sky_light_bridge::graph_sky_light_sections_for_chunk;
 #[cfg(test)]
 use mclone_core::ChunkSnapshot;
 
@@ -55,15 +56,7 @@ pub(crate) fn provisional_light_sections_from_neighbors<'a>(
     );
     let mut chunks = neighbor_blocks.into_iter().collect::<Vec<_>>();
     chunks.push((target_pos, raw_blocks));
-    let sky_sections =
-        provisional_sky_light_sections_for_chunk(target_pos, min_y, height, chunks.iter().copied());
-    let block_sections = provisional_block_light_sections_for_chunk(
-        target_pos,
-        min_y,
-        height,
-        chunks.iter().copied(),
-    );
-    merge_light_sections(sky_sections, block_sections)
+    graph_level_light_sections_for_chunk(target_pos, min_y, height, chunks)
 }
 
 #[cfg(test)]
@@ -80,6 +73,7 @@ pub(crate) fn provisional_sky_light_sections(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn provisional_sky_light_sections_for_chunk<'a>(
     target_pos: ChunkPos,
     min_y: i32,
@@ -89,6 +83,7 @@ pub(crate) fn provisional_sky_light_sections_for_chunk<'a>(
     graph_sky_light_sections_for_chunk(target_pos, min_y, height, chunks)
 }
 
+#[cfg(test)]
 pub(crate) fn provisional_block_light_sections_for_chunk<'a>(
     target_pos: ChunkPos,
     min_y: i32,
@@ -96,27 +91,6 @@ pub(crate) fn provisional_block_light_sections_for_chunk<'a>(
     chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
 ) -> Vec<PackedLightSection> {
     graph_block_light_sections_for_chunk(target_pos, min_y, height, chunks)
-}
-
-fn merge_light_sections(
-    sky_sections: Vec<PackedLightSection>,
-    block_sections: Vec<PackedLightSection>,
-) -> Vec<PackedLightSection> {
-    let mut sections = BTreeMap::<i32, (Option<Vec<u8>>, Option<Vec<u8>>)>::new();
-    for section in sky_sections.into_iter().chain(block_sections) {
-        let entry = sections.entry(section.section_y).or_default();
-        if section.sky.is_some() {
-            entry.0 = section.sky;
-        }
-        if section.block.is_some() {
-            entry.1 = section.block;
-        }
-    }
-
-    sections
-        .into_iter()
-        .map(|(section_y, (sky, block))| PackedLightSection::new(section_y, sky, block))
-        .collect()
 }
 
 pub(crate) fn provisional_sky_light_includes_chunk(

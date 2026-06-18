@@ -45,6 +45,14 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
         self.storage.apply_graph_level(section, crate::LIGHT_ONLY);
     }
 
+    pub fn update_section_status(&mut self, section: SectionPosKey, empty: bool) {
+        if !empty {
+            self.activate_section(section);
+        }
+    }
+
+    pub fn enable_light_sources(&mut self, _column: SectionPosKey, _enabled: bool) {}
+
     pub fn check_block(&mut self, pos: BlockPosKey) {
         let mut delegate = BlockLightGraphDelegate {
             storage: &mut self.storage,
@@ -94,6 +102,10 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
         };
         self.storage.swap_section_map();
         remaining
+    }
+
+    pub fn has_work(&self) -> bool {
+        self.graph.has_work()
     }
 
     pub fn run_all_updates(&mut self) {
