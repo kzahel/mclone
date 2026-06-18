@@ -165,6 +165,26 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
     )
 }
 
+pub const fn block_light_opacity(block_id: RawBlockId) -> u8 {
+    if material_blocks_motion(block_id) {
+        15
+    } else {
+        0
+    }
+}
+
+pub const fn block_light_emission(block_id: RawBlockId) -> u8 {
+    if is_lava(block_id) {
+        15
+    } else {
+        match block_id {
+            MAGMA_BLOCK => 3,
+            GLOW_LICHEN => 7,
+            _ => 0,
+        }
+    }
+}
+
 pub const fn is_water(block_id: RawBlockId) -> bool {
     block_id == WATER || (block_id >= WATER_LEVEL_1 && block_id <= WATER_LEVEL_8)
 }
@@ -309,5 +329,29 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         GLOW_LICHEN => "minecraft:glow_lichen",
         CAVE_AIR => "minecraft:cave_air",
         _ => "minecraft:unknown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn block_light_facts_cover_current_emitting_blocks() {
+        assert_eq!(block_light_emission(LAVA), 15);
+        assert_eq!(block_light_emission(LAVA_LEVEL_8), 15);
+        assert_eq!(block_light_emission(MAGMA_BLOCK), 3);
+        assert_eq!(block_light_emission(GLOW_LICHEN), 7);
+        assert_eq!(block_light_emission(STONE), 0);
+    }
+
+    #[test]
+    fn block_light_opacity_tracks_current_motion_blocking_shape_gap() {
+        assert_eq!(block_light_opacity(STONE), 15);
+        assert_eq!(block_light_opacity(AIR), 0);
+        assert_eq!(block_light_opacity(CAVE_AIR), 0);
+        assert_eq!(block_light_opacity(WATER), 0);
+        assert_eq!(block_light_opacity(LAVA), 0);
+        assert_eq!(block_light_opacity(GLOW_LICHEN), 0);
     }
 }

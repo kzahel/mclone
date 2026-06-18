@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod block_light_bridge;
 mod distance_manager;
 mod fluid;
 mod holder;

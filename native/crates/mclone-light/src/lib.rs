@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod block_engine;
+mod block_storage;
 mod data_layer;
 mod dynamic_graph;
 mod key;
@@ -11,6 +12,7 @@ mod section_storage;
 mod storage_map;
 
 pub use block_engine::{BlockLightEngine, BlockLightWorld};
+pub use block_storage::BlockLightSectionStorage;
 pub use data_layer::{
     DATA_LAYER_SIZE, DATA_LAYER_VALUE_COUNT, DataLayer, DataLayerError, data_layer_index,
 };

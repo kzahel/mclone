@@ -1,7 +1,7 @@
 use crate::{
-    BlockPosKey, DataLayer, Direction, DynamicGraphCallbacks, DynamicGraphMinFixedPoint,
-    LayerLightSectionStorage, LightLayer, NeighborCheck, SectionPosKey, block_pos_get_x,
-    block_pos_get_y, block_pos_get_z, block_pos_offset, block_to_section_key, section_relative,
+    BlockLightSectionStorage, BlockPosKey, DataLayer, Direction, DynamicGraphCallbacks,
+    DynamicGraphMinFixedPoint, NeighborCheck, SectionPosKey, block_pos_get_x, block_pos_get_y,
+    block_pos_get_z, block_pos_offset, block_to_section_key, section_relative,
 };
 
 pub trait BlockLightWorld {
@@ -12,7 +12,7 @@ pub trait BlockLightWorld {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BlockLightEngine<W> {
     graph: DynamicGraphMinFixedPoint,
-    storage: LayerLightSectionStorage,
+    storage: BlockLightSectionStorage,
     world: W,
 }
 
@@ -20,7 +20,7 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
     pub fn new(world: W) -> Self {
         Self {
             graph: DynamicGraphMinFixedPoint::new(16),
-            storage: LayerLightSectionStorage::new(LightLayer::Block),
+            storage: BlockLightSectionStorage::new(),
             world,
         }
     }
@@ -33,11 +33,11 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
         &mut self.world
     }
 
-    pub fn storage(&self) -> &LayerLightSectionStorage {
+    pub fn storage(&self) -> &BlockLightSectionStorage {
         &self.storage
     }
 
-    pub fn storage_mut(&mut self) -> &mut LayerLightSectionStorage {
+    pub fn storage_mut(&mut self) -> &mut BlockLightSectionStorage {
         &mut self.storage
     }
 
@@ -119,7 +119,7 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
 }
 
 struct BlockLightGraphDelegate<'a, W> {
-    storage: &'a mut LayerLightSectionStorage,
+    storage: &'a mut BlockLightSectionStorage,
     world: &'a W,
 }
 

@@ -9,12 +9,13 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
+use crate::block_light_bridge::graph_block_light_sections_for_chunk;
 use mclone_core::{
     CHUNK_WIDTH, ChunkPos, PackedLightSection, SECTION_HEIGHT, block_to_section_coord,
     chunk_block_index, local_section_block_coord,
 };
 use mclone_light::{DataLayer, LightLayer};
-use mclone_worldgen::block::{RawBlockId, is_lava, material_blocks_motion};
+use mclone_worldgen::block::{RawBlockId, block_light_opacity};
 
 #[cfg(test)]
 use mclone_core::ChunkSnapshot;
@@ -101,8 +102,7 @@ pub(crate) fn provisional_block_light_sections_for_chunk<'a>(
     height: i32,
     chunks: impl IntoIterator<Item = (ChunkPos, &'a [RawBlockId])>,
 ) -> Vec<PackedLightSection> {
-    let world = ProvisionalSkyLightWorld::new(target_pos, min_y, height, chunks);
-    world.block_light_sections()
+    graph_block_light_sections_for_chunk(target_pos, min_y, height, chunks)
 }
 
 fn merge_light_sections(
@@ -240,65 +240,6 @@ impl<'a> ProvisionalSkyLightWorld<'a> {
         self.target_light_sections(&sky_values[&self.target_pos], LightLayer::Sky)
     }
 
-    fn block_light_sections(&self) -> Vec<PackedLightSection> {
-        let mut block_values = self
-            .chunks
-            .keys()
-            .map(|pos| {
-                (
-                    *pos,
-                    vec![0_u8; self.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize],
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        let mut queue = VecDeque::new();
-
-        for (&chunk_pos, blocks) in &self.chunks {
-            for local_y in 0..self.height {
-                for local_z in 0..CHUNK_WIDTH {
-                    for local_x in 0..CHUNK_WIDTH {
-                        let index = chunk_block_index(local_x, local_y, local_z);
-                        let emission = block_light_emission(blocks[index]);
-                        if emission > 0 {
-                            block_values.get_mut(&chunk_pos).unwrap()[index] = emission;
-                            queue.push_back((chunk_pos, local_x, local_y, local_z));
-                        }
-                    }
-                }
-            }
-        }
-
-        while let Some((chunk_pos, local_x, local_y, local_z)) = queue.pop_front() {
-            let source_level =
-                block_values[&chunk_pos][chunk_block_index(local_x, local_y, local_z)];
-            if source_level <= 1 {
-                continue;
-            }
-
-            for [dx, dy, dz] in SKY_LIGHT_DIRECTIONS {
-                let Some((next_pos, next_x, next_y, next_z)) =
-                    self.offset_cell(chunk_pos, local_x, local_y, local_z, dx, dy, dz)
-                else {
-                    continue;
-                };
-
-                let next_index = chunk_block_index(next_x, next_y, next_z);
-                let target_block = self.chunks[&next_pos][next_index];
-                let Some(next_level) = propagated_block_light_level(source_level, target_block)
-                else {
-                    continue;
-                };
-                let next_values = block_values.get_mut(&next_pos).unwrap();
-                if next_level > next_values[next_index] {
-                    next_values[next_index] = next_level;
-                    queue.push_back((next_pos, next_x, next_y, next_z));
-                }
-            }
-        }
-
-        self.target_light_sections(&block_values[&self.target_pos], LightLayer::Block)
-    }
-
     fn offset_cell(
         &self,
         chunk_pos: ChunkPos,
@@ -419,24 +360,6 @@ fn propagated_sky_light_level(
     (level > 0).then_some(level)
 }
 
-fn propagated_block_light_level(source_level: u8, target_block: RawBlockId) -> Option<u8> {
-    let opacity = sky_light_opacity(target_block);
-    if source_level == 0 || opacity >= 15 {
-        return None;
-    }
-
-    let level = source_level.saturating_sub(opacity.max(1));
-    (level > 0).then_some(level)
-}
-
-fn block_light_emission(block_id: RawBlockId) -> u8 {
-    if is_lava(block_id) { 15 } else { 0 }
-}
-
 fn sky_light_opacity(block_id: RawBlockId) -> u8 {
-    if material_blocks_motion(block_id) {
-        15
-    } else {
-        0
-    }
+    block_light_opacity(block_id)
 }
