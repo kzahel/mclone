@@ -427,6 +427,7 @@ mod tests {
                     remote_addr: None,
                     day_time_override: None,
                     freeze_time: false,
+                    lighting_enabled: true,
                 },
                 render_options: TexturedSectionRenderOptions::default(),
             }
@@ -545,6 +546,42 @@ mod tests {
             cli,
             Cli::Window {
                 scene: SceneOptions::default(),
+                render_options: TexturedSectionRenderOptions::default(),
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_disable_lighting_as_runtime_bypass() {
+        let cli = Cli::parse(["--disable-lighting".to_owned()]).unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::Window {
+                scene: SceneOptions {
+                    lighting_enabled: false,
+                    ..SceneOptions::default()
+                },
+                render_options: TexturedSectionRenderOptions {
+                    force_fullbright: true,
+                    ..TexturedSectionRenderOptions::default()
+                },
+            }
+        );
+
+        let cli = Cli::parse([
+            "--disable-lighting".to_owned(),
+            "--disable-fullbright".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            cli,
+            Cli::Window {
+                scene: SceneOptions {
+                    lighting_enabled: false,
+                    ..SceneOptions::default()
+                },
                 render_options: TexturedSectionRenderOptions::default(),
             }
         );

@@ -7,11 +7,11 @@ use mclone_render::chunk::{
     TexturedSectionUploadReport,
 };
 use mclone_render::gui::GuiRenderer;
-use mclone_render::sky_render::SkyRenderer;
 use mclone_render::headless::{
     HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessFrameOptions, write_headless_frame_png,
     write_headless_textured_sections_png_with_options,
 };
+use mclone_render::sky_render::SkyRenderer;
 use mclone_ui::GuiScale;
 
 use crate::app::{RenderStreamStats, record_render_section_update_stats, render_full_frame};
@@ -69,7 +69,11 @@ pub(crate) fn run_headless_screenshot(
     if let Some(day_time) = options.scene.day_time_override {
         runtime.force_day_time(day_time);
     }
-    let spectator = SpectatorCamera::spawn_for_scene(&options.scene);
+    let mut spectator = SpectatorCamera::spawn_for_scene(&options.scene);
+    let (world_x, world_z) = spectator.block_column();
+    if let Some(surface_y) = runtime.highest_non_air_block_y_at_world(world_x, world_z) {
+        spectator.place_above_surface(surface_y);
+    }
     let section_update = runtime.sync_all_render_sections(spectator.position)?;
     let sections = runtime.cached_sections();
     if sections.is_empty() {

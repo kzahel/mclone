@@ -7,6 +7,7 @@ mod fluid;
 mod holder;
 mod integrated;
 mod level_light_bridge;
+mod light_mailbox;
 mod light_status;
 mod lighting_seed;
 mod persistence;
@@ -1125,11 +1126,15 @@ mod tests {
     }
 
     fn wait_for_scheduler_completion(scheduler: &mut ChunkScheduler) {
-        scheduler.wait_for_worldgen_completion(std::time::Duration::from_secs(30));
+        let timeout = std::time::Duration::from_millis(1);
+        let _ = scheduler.wait_for_worldgen_completion(timeout);
+        let _ = scheduler.wait_for_light_completion(timeout);
     }
 
     fn wait_for_server_completion(server: &mut IntegratedServer) {
-        server.wait_for_worldgen_completion(std::time::Duration::from_secs(30));
+        let timeout = std::time::Duration::from_millis(1);
+        let _ = server.wait_for_worldgen_completion(timeout);
+        let _ = server.wait_for_light_completion(timeout);
     }
 
     fn active_ticket_square_count(ticket_level: i32) -> usize {
@@ -2275,6 +2280,52 @@ mod tests {
     }
 
     #[test]
+    fn chunk_scheduler_can_publish_features_when_lighting_disabled() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler.set_lighting_enabled(false);
+
+        let events = apply_interest_and_poll(
+            &mut scheduler,
+            ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            },
+        );
+
+        assert_eq!(scheduler.pending_job_count(), 0);
+        assert_eq!(scheduler.loaded_chunk_count(), 9);
+        assert_eq!(
+            status_event_count(&events, ChunkStatus::Features, ChunkStatusStep::Scheduled),
+            9
+        );
+        assert_eq!(
+            status_event_count(&events, ChunkStatus::Features, ChunkStatusStep::Ready),
+            9
+        );
+        assert_eq!(
+            status_event_count(&events, ChunkStatus::Light, ChunkStatusStep::Scheduled),
+            0
+        );
+        assert_eq!(
+            status_event_count(&events, ChunkStatus::Light, ChunkStatusStep::Ready),
+            0
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ChunkSchedulerEvent::SnapshotReady(snapshot)
+                if snapshot.pos == ChunkPos::new(0, 0)
+                    && snapshot.status == ChunkStatus::Features
+                    && !snapshot.light_correct
+                    && snapshot.light_sections.is_empty()
+        )));
+
+        let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
+        assert_eq!(holder.target_status(), Some(ChunkStatus::Features));
+        assert!(holder.status_slot(ChunkStatus::Light).is_none());
+    }
+
+    #[test]
     fn chunk_scheduler_poll_slices_completed_publication() {
         let mut scheduler = ChunkScheduler::new(12_345);
         scheduler
@@ -2284,7 +2335,7 @@ mod tests {
                 chunk_tracking_radius: 0,
             })
             .unwrap();
-        wait_for_scheduler_completion(&mut scheduler);
+        assert!(scheduler.wait_for_worldgen_completion(std::time::Duration::from_secs(30)));
 
         let first_events = scheduler.poll().unwrap();
 
@@ -2293,7 +2344,7 @@ mod tests {
             DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET
         );
         assert!(scheduler.pending_publication_count() > 0);
-        assert_eq!(scheduler.pending_job_count(), 1);
+        assert_eq!(scheduler.pending_job_count(), 2);
         assert!(
             without_fluid_tick_events(&first_events)
                 .iter()
@@ -2614,23 +2665,21 @@ mod tests {
                 job_id: None,
             })
         );
-        assert_eq!(
-            holder.status_slot(ChunkStatus::Features),
-            Some(&ChunkStatusSlot {
-                status: ChunkStatus::Features,
-                step: ChunkStatusStep::Ready,
-                revision: Some(ChunkRevision(9)),
-                job_id: Some(ChunkJobId(1)),
-            })
-        );
-        assert_eq!(
-            holder.status_slot(ChunkStatus::Light),
-            Some(&ChunkStatusSlot {
-                status: ChunkStatus::Light,
-                step: ChunkStatusStep::Ready,
-                revision: Some(ChunkRevision(10)),
-                job_id: None,
-            })
+        let features_slot = holder.status_slot(ChunkStatus::Features).unwrap();
+        assert_eq!(features_slot.status, ChunkStatus::Features);
+        assert_eq!(features_slot.step, ChunkStatusStep::Ready);
+        assert_eq!(features_slot.job_id, Some(ChunkJobId(1)));
+        let feature_revision = features_slot
+            .revision
+            .expect("features should have revision");
+
+        let light_slot = holder.status_slot(ChunkStatus::Light).unwrap();
+        assert_eq!(light_slot.status, ChunkStatus::Light);
+        assert_eq!(light_slot.step, ChunkStatusStep::Ready);
+        assert_eq!(light_slot.job_id, None);
+        assert!(
+            light_slot.revision.expect("light should have revision") > feature_revision,
+            "light status must be published after the feature snapshot it consumes"
         );
         assert_eq!(scheduler.job_count(), 1);
         assert_eq!(

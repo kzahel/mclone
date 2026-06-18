@@ -97,6 +97,7 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
         client.apply_updates(updates);
     } else {
         let mut server = IntegratedServer::new(scene.seed);
+        server.set_lighting_enabled(scene.lighting_enabled);
         let mut transport = LocalTransport::new();
         transport.send_client_command(command);
 
@@ -237,12 +238,16 @@ impl WindowSceneRuntime {
         let chunk_tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
         let mesh_assets = load_textured_mesh_assets()?;
         let render_compile_worker = RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
+        let server = if scene.remote_addr.is_none() {
+            let mut server = IntegratedServer::new(scene.seed);
+            server.set_lighting_enabled(scene.lighting_enabled);
+            Some(server)
+        } else {
+            None
+        };
         let mut runtime = Self {
             client,
-            server: scene
-                .remote_addr
-                .is_none()
-                .then(|| IntegratedServer::new(scene.seed)),
+            server,
             transport: LocalTransport::new(),
             remote_addr: scene.remote_addr.clone(),
             render_distance,
@@ -990,6 +995,21 @@ impl WindowSceneRuntime {
         self.mesh_assets.catalog.occludes(state_id)
     }
 
+    pub(crate) fn highest_non_air_block_y_at_world(
+        &self,
+        world_x: i32,
+        world_z: i32,
+    ) -> Option<i32> {
+        let pos = ChunkPos::from_block_coords(world_x, world_z);
+        let snapshot = self.client.chunk_snapshot(pos)?;
+        (snapshot.min_y..snapshot.min_y + snapshot.height)
+            .rev()
+            .find(|world_y| {
+                snapshot_block_state_at_world(snapshot, world_x, *world_y, world_z)
+                    .is_some_and(|state_id| state_id != AIR_BLOCK_STATE_ID)
+            })
+    }
+
     fn block_state_at_position(&self, position: Vec3) -> Option<mclone_core::BlockStateId> {
         if !position.is_finite() {
             return None;
@@ -1493,6 +1513,11 @@ mod tests {
         assert_eq!(initial_stats.loaded_chunks, 1);
         assert_eq!(initial_stats.pending_jobs, 0);
         assert!(runtime.client.chunk_snapshot(initial_center).is_some());
+        assert!(
+            runtime
+                .highest_non_air_block_y_at_world(8, 8)
+                .is_some_and(|y| (-64..320).contains(&y))
+        );
 
         let mut spectator = SpectatorCamera::spawn_for_scene(&scene);
         let initial_submit = runtime.sync_render_sections(spectator.position).unwrap();
@@ -1859,6 +1884,7 @@ mod tests {
             remote_addr: None,
             day_time_override: None,
             freeze_time: false,
+            lighting_enabled: true,
         }
         .chunk_positions()
         .collect::<Vec<_>>();

@@ -79,6 +79,14 @@ impl IntegratedServer {
         self.liquid_ticks.size()
     }
 
+    pub fn lighting_enabled(&self) -> bool {
+        self.scheduler.lighting_enabled()
+    }
+
+    pub fn set_lighting_enabled(&mut self, enabled: bool) {
+        self.scheduler.set_lighting_enabled(enabled);
+    }
+
     pub fn handle_command(&mut self, command: ClientCommand) -> Vec<ServerUpdate> {
         self.try_handle_command(command)
             .expect("integrated server command failed")
@@ -247,6 +255,10 @@ impl IntegratedServer {
 
     pub fn wait_for_worldgen_completion(&mut self, timeout: Duration) -> bool {
         self.scheduler.wait_for_worldgen_completion(timeout)
+    }
+
+    pub fn wait_for_light_completion(&mut self, timeout: Duration) -> bool {
+        self.scheduler.wait_for_light_completion(timeout)
     }
 
     pub fn scheduler(&self) -> &ChunkScheduler {

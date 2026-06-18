@@ -9,6 +9,8 @@ pub(crate) const SPECTATOR_MIN_SPEED: f32 = 2.0;
 pub(crate) const SPECTATOR_MAX_SPEED: f32 = 256.0;
 pub(crate) const SPECTATOR_MOUSE_SENSITIVITY: f32 = 0.0035;
 pub(crate) const SPECTATOR_PITCH_LIMIT: f32 = 1.52;
+pub(crate) const SPECTATOR_SURFACE_CLEARANCE: f32 = 8.0;
+pub(crate) const SPECTATOR_SURFACE_PITCH: f32 = -0.45;
 
 #[derive(Clone, Debug)]
 pub(crate) struct SpectatorCamera {
@@ -47,6 +49,18 @@ impl SpectatorCamera {
             world_coord_to_chunk_coord(self.position.x),
             world_coord_to_chunk_coord(self.position.z),
         )
+    }
+
+    pub(crate) fn block_column(&self) -> (i32, i32) {
+        (
+            self.position.x.floor() as i32,
+            self.position.z.floor() as i32,
+        )
+    }
+
+    pub(crate) fn place_above_surface(&mut self, surface_y: i32) {
+        self.position.y = surface_y as f32 + SPECTATOR_SURFACE_CLEARANCE;
+        self.pitch = SPECTATOR_SURFACE_PITCH;
     }
 
     pub(crate) fn look(&mut self, yaw_delta: f32, pitch_delta: f32) {
@@ -135,6 +149,16 @@ mod tests {
         spectator.position.z = -0.25;
 
         assert_eq!(spectator.chunk_pos(), ChunkPos::new(1, -1));
+    }
+
+    #[test]
+    fn spectator_can_be_placed_above_loaded_surface() {
+        let mut spectator = SpectatorCamera::spawn_for_scene(&SceneOptions::default());
+
+        spectator.place_above_surface(93);
+
+        assert_eq!(spectator.position.y, 101.0);
+        assert_eq!(spectator.pitch, SPECTATOR_SURFACE_PITCH);
     }
 
     #[test]

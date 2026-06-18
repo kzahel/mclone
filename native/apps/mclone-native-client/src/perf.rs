@@ -9,11 +9,11 @@ use mclone_render::chunk::{
     textured_section_visibility_stats_with_options_and_ready_sections,
 };
 use mclone_render::gui::GuiRenderer;
-use mclone_render::sky_render::SkyRenderer;
 use mclone_render::headless::{
     HeadlessFrameLoopOptions, HeadlessTimedemoOptions, run_headless_frame_loop,
     run_headless_textured_sections_timedemo,
 };
+use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_ui::GuiScale;
 

@@ -8,8 +8,8 @@ use mclone_render::chunk::{
     TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
-use mclone_render::sky_render::SkyRenderer;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
+use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_ui::{GuiScale, Point};
 use winit::application::ApplicationHandler;
@@ -27,7 +27,7 @@ use crate::frame_pacing::{
     next_capped_redraw_deadline, redraw_schedule,
 };
 use crate::render_cache::RenderSectionCacheUpdate;
-use crate::scene_runtime::WindowSceneRuntime;
+use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, NativeUi, NativeUiAction};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 
@@ -37,12 +37,17 @@ pub(crate) fn run_window(
 ) -> Result<()> {
     let runtime = WindowSceneRuntime::new(&scene)?;
     log::info!(
-        "native window runtime seed={} initial_center=({}, {}) render_distance={} chunk_tracking_radius={} remote={:?} atlas={}x{}",
+        "native window runtime seed={} initial_center=({}, {}) render_distance={} chunk_tracking_radius={} lighting={} remote={:?} atlas={}x{}",
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
         scene.render_distance,
         runtime.chunk_tracking_radius,
+        if scene.lighting_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        },
         scene.remote_addr,
         runtime.mesh_assets.atlas.width,
         runtime.mesh_assets.atlas.height
@@ -412,6 +417,25 @@ impl ChunkApp {
         self.set_mouse_lock(self.mouse_lock_requested && !self.ui.is_active());
     }
 
+    fn place_spectator_above_loaded_surface(&mut self) {
+        let (world_x, world_z) = self.spectator.block_column();
+        let Some(surface_y) = self
+            .runtime
+            .highest_non_air_block_y_at_world(world_x, world_z)
+        else {
+            log::warn!(
+                "no loaded surface column found for initial spectator at ({world_x}, {world_z})"
+            );
+            return;
+        };
+        self.spectator.place_above_surface(surface_y);
+        log::info!(
+            "placed spectator above loaded surface column ({world_x}, {world_z}) y={} -> eye_y={:.1}",
+            surface_y,
+            self.spectator.position.y
+        );
+    }
+
     fn set_mouse_lock(&mut self, should_lock: bool) {
         let Some(window) = &self.window else {
             self.mouse_locked = false;
@@ -609,6 +633,25 @@ impl ApplicationHandler for ChunkApp {
         if self.window.is_some() {
             return;
         }
+        let initial_poll_start = Instant::now();
+        let (initial_poll_count, initial_poll_ms) =
+            match poll_window_runtime_until_idle(&mut self.runtime) {
+                Ok(report) => report,
+                Err(err) => {
+                    log::error!("failed to load initial light-ready chunks: {err:#}");
+                    event_loop.exit();
+                    return;
+                }
+            };
+        self.place_spectator_above_loaded_surface();
+        log::info!(
+            "initial light-ready chunks loaded in {} polls poll_ms={:.3} elapsed_ms={:.3} loaded={}",
+            initial_poll_count,
+            initial_poll_ms,
+            elapsed_ms(initial_poll_start.elapsed()),
+            self.runtime.client.loaded_chunk_count()
+        );
+
         let attrs = Window::default_attributes()
             .with_title("mclone native")
             .with_inner_size(winit::dpi::LogicalSize::new(1280, 900));
@@ -643,6 +686,11 @@ impl ApplicationHandler for ChunkApp {
             }
         };
         let sections = self.runtime.cached_sections();
+        if sections.is_empty() {
+            log::error!("initial chunk area produced no render sections after light-ready load");
+            event_loop.exit();
+            return;
+        }
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let upload_start = Instant::now();
         let depth =
