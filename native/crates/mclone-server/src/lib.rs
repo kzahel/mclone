@@ -7,6 +7,7 @@ mod fluid;
 mod holder;
 mod integrated;
 mod level_light_bridge;
+mod light_status;
 mod lighting_seed;
 mod persistence;
 mod scheduler;
@@ -2230,9 +2231,13 @@ mod tests {
                 .iter()
                 .all(|event| !matches!(event, ChunkSchedulerEvent::SnapshotReady(_)))
         );
-        assert_eq!(events.len(), 9 * 5);
+        assert_eq!(events.len(), 9 * 6);
         assert_eq!(
             status_event_count(&events, ChunkStatus::Features, ChunkStatusStep::Scheduled),
+            9
+        );
+        assert_eq!(
+            status_event_count(&events, ChunkStatus::Light, ChunkStatusStep::Scheduled),
             9
         );
 
@@ -2253,7 +2258,20 @@ mod tests {
             ),
             9
         );
+        assert_eq!(
+            status_event_count(
+                &ready_events_without_fluid,
+                ChunkStatus::Light,
+                ChunkStatusStep::Ready
+            ),
+            9
+        );
         assert_eq!(snapshot_ready_count(&ready_events_without_fluid), 1);
+        assert!(ready_events_without_fluid.iter().any(|event| matches!(
+            event,
+            ChunkSchedulerEvent::SnapshotReady(snapshot)
+                if snapshot.status == ChunkStatus::Light && snapshot.light_correct
+        )));
     }
 
     #[test]
@@ -2281,7 +2299,7 @@ mod tests {
                 .iter()
                 .filter(|event| matches!(event, ChunkSchedulerEvent::StatusChanged { .. }))
                 .count()
-                <= DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET
+                <= DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET * 2
         );
 
         poll_scheduler_until_idle(&mut scheduler);
@@ -2312,7 +2330,7 @@ mod tests {
         assert_eq!(holder.ticket_level(), PLAYER_TICKET_LEVEL);
         assert_eq!(holder.full_status(), FullChunkStatus::EntityTicking);
         assert!(holder.full_status().is_or_after(FullChunkStatus::Ticking));
-        assert_eq!(events.len(), 9 * 5);
+        assert_eq!(events.len(), 9 * 6);
 
         let moved_events = scheduler
             .apply_interest(ChunkView {
@@ -2357,7 +2375,7 @@ mod tests {
         };
 
         let first_events = scheduler.apply_interest(interest.clone()).unwrap();
-        assert_eq!(first_events.len(), 9 * 5);
+        assert_eq!(first_events.len(), 9 * 6);
         assert_eq!(scheduler.pending_job_count(), 1);
         assert_eq!(scheduler.job_count(), 1);
 
@@ -2368,7 +2386,7 @@ mod tests {
 
         assert_eq!(
             without_fluid_tick_events(&poll_scheduler_until_idle(&mut scheduler)).len(),
-            10
+            19
         );
         assert_eq!(scheduler.loaded_chunk_count(), 9);
         assert_eq!(scheduler.job_count(), 1);
@@ -2434,12 +2452,12 @@ mod tests {
         let events = scheduler
             .add_region_ticket(ChunkTicketType::Unknown, ChunkPos::new(0, 0), 0)
             .unwrap();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 6);
         assert_eq!(scheduler.ticketed_chunk_count(), 1);
         assert_eq!(scheduler.ticket_level_at(ChunkPos::new(0, 0)), 33);
         assert_eq!(
             without_fluid_tick_events(&poll_scheduler_until_idle(&mut scheduler)).len(),
-            1
+            2
         );
         assert_eq!(scheduler.loaded_chunk_count(), 1);
         assert_eq!(scheduler.client_visible_chunk_count(), 0);
@@ -2556,19 +2574,28 @@ mod tests {
             9
         );
         assert_eq!(
+            status_event_count(&events, ChunkStatus::Light, ChunkStatusStep::Scheduled),
+            9
+        );
+        assert_eq!(
             status_event_count(&events, ChunkStatus::Features, ChunkStatusStep::Ready),
+            9
+        );
+        assert_eq!(
+            status_event_count(&events, ChunkStatus::Light, ChunkStatusStep::Ready),
             9
         );
         assert!(events.iter().any(|event| matches!(
             event,
             ChunkSchedulerEvent::SnapshotReady(snapshot)
                 if snapshot.pos == ChunkPos::new(0, 0)
-                    && snapshot.status == ChunkStatus::Features
+                    && snapshot.status == ChunkStatus::Light
+                    && snapshot.light_correct
         )));
 
         let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
-        assert_eq!(holder.target_status(), Some(ChunkStatus::Features));
-        assert_eq!(holder.ready_status_count(), 3);
+        assert_eq!(holder.target_status(), Some(ChunkStatus::Light));
+        assert_eq!(holder.ready_status_count(), 4);
         assert_eq!(
             holder.status_slot(ChunkStatus::Terrain),
             Some(&ChunkStatusSlot {
@@ -2592,8 +2619,17 @@ mod tests {
             Some(&ChunkStatusSlot {
                 status: ChunkStatus::Features,
                 step: ChunkStatusStep::Ready,
-                revision: Some(ChunkRevision(5)),
+                revision: Some(ChunkRevision(9)),
                 job_id: Some(ChunkJobId(1)),
+            })
+        );
+        assert_eq!(
+            holder.status_slot(ChunkStatus::Light),
+            Some(&ChunkStatusSlot {
+                status: ChunkStatus::Light,
+                step: ChunkStatusStep::Ready,
+                revision: Some(ChunkRevision(10)),
+                job_id: None,
             })
         );
         assert_eq!(scheduler.job_count(), 1);
@@ -2632,7 +2668,7 @@ mod tests {
         assert_eq!(
             without_fluid_tick_events(&apply_interest_and_poll(&mut scheduler, interest.clone()))
                 .len(),
-            55
+            73
         );
         assert_eq!(
             apply_interest_and_poll(&mut scheduler, interest),
@@ -2761,7 +2797,8 @@ mod tests {
             update,
             ServerUpdate::ChunkSnapshot(snapshot)
                 if snapshot.pos == ChunkPos::new(1, 0)
-                    && snapshot.status == ChunkStatus::Features
+                    && snapshot.status == ChunkStatus::Light
+                    && snapshot.light_correct
         )));
     }
 

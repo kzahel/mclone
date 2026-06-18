@@ -34,9 +34,7 @@ use crate::fluid::{
     target_fluid_can_be_replaced_with,
 };
 use crate::holder::ChunkHolder;
-use crate::lighting_seed::{
-    provisional_light_sections_from_neighbors, provisional_sky_light_includes_chunk,
-};
+use crate::light_status::PendingLightStatus;
 use crate::persistence::{ChunkSnapshotStore, ChunkStoreResult, NullChunkSnapshotStore};
 use crate::timing::{
     ChunkSchedulerTickReport, ChunkSchedulerTickTiming, simulation_timing_elapsed_us,
@@ -303,6 +301,7 @@ pub struct ChunkScheduler {
     job_timings: BTreeMap<ChunkJobId, OverworldFeatureBatchTiming>,
     worldgen_mailbox: WorldgenMailbox,
     pending_worldgen_publications: VecDeque<PendingWorldgenPublication>,
+    pending_light_statuses: VecDeque<PendingLightStatus>,
     pending_block_deltas: BTreeMap<(ChunkPos, i32), BTreeMap<usize, BlockStateId>>,
     dirty_chunks: BTreeSet<ChunkPos>,
     next_job_id: u64,
@@ -325,6 +324,7 @@ impl ChunkScheduler {
             job_timings: BTreeMap::new(),
             worldgen_mailbox: WorldgenMailbox::new(),
             pending_worldgen_publications: VecDeque::new(),
+            pending_light_statuses: VecDeque::new(),
             pending_block_deltas: BTreeMap::new(),
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
@@ -346,7 +346,9 @@ impl ChunkScheduler {
     }
 
     pub fn poll(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        self.publish_completed_worldgen_jobs()
+        let mut events = self.publish_completed_worldgen_jobs()?;
+        events.extend(self.publish_pending_light_statuses()?);
+        Ok(events)
     }
 
     pub fn wait_for_worldgen_completion(&mut self, timeout: Duration) -> bool {
@@ -562,10 +564,12 @@ impl ChunkScheduler {
     }
 
     pub fn pending_job_count(&self) -> usize {
-        self.jobs
+        let pending_status_jobs = self
+            .jobs
             .values()
             .filter(|job| matches!(job.state, ChunkJobState::Queued | ChunkJobState::Running))
-            .count()
+            .count();
+        pending_status_jobs + usize::from(!self.pending_light_statuses.is_empty())
     }
 
     pub fn pending_publication_count(&self) -> usize {
@@ -580,7 +584,8 @@ impl ChunkScheduler {
                             .saturating_sub(publication.next_target_index)
                     })
             })
-            .sum()
+            .sum::<usize>()
+            + self.pending_light_statuses.len()
     }
 
     pub fn worldgen_mailbox_kind(&self) -> WorldgenMailboxKind {
@@ -1310,7 +1315,7 @@ impl ChunkScheduler {
             self.pending_unloads.insert(pos);
         }
 
-        let mut feature_targets = BTreeSet::new();
+        let mut runtime_targets = BTreeSet::new();
         for (pos, ticket_level) in active_levels {
             self.pending_unloads.remove(&pos);
             let should_be_client_visible = client_visible_set.contains(&pos);
@@ -1322,7 +1327,7 @@ impl ChunkScheduler {
                 || has_direct_feature_ticket
                 || should_run_block_ticks
             {
-                ChunkStatus::Features
+                ChunkStatus::Light
             } else {
                 ticket_level_dependency_status_target(ticket_level)
             };
@@ -1340,7 +1345,10 @@ impl ChunkScheduler {
                     events.push(ChunkSchedulerEvent::Unloaded { pos });
                 } else if should_be_client_visible
                     && !holder.client_visible
-                    && holder.published_snapshot.is_some()
+                    && holder
+                        .published_snapshot
+                        .as_ref()
+                        .is_some_and(snapshot_is_client_ready)
                 {
                     holder.set_client_visible(true);
                     snapshot_to_publish = holder.published_snapshot.clone();
@@ -1352,20 +1360,20 @@ impl ChunkScheduler {
             }
 
             if target_status >= ChunkStatus::Features {
-                feature_targets.insert(pos);
+                runtime_targets.insert(pos);
             } else {
                 self.ensure_dependency_status_scheduled(pos, target_status);
             }
         }
 
-        events.extend(self.enqueue_feature_chunks(
-            sorted_chunk_positions_z_major(feature_targets),
+        events.extend(self.enqueue_runtime_chunks(
+            sorted_chunk_positions_z_major(runtime_targets),
             &client_visible_set,
         )?);
         Ok(events)
     }
 
-    fn enqueue_feature_chunks(
+    fn enqueue_runtime_chunks(
         &mut self,
         desired_chunks: Vec<ChunkPos>,
         client_visible_set: &BTreeSet<ChunkPos>,
@@ -1377,9 +1385,9 @@ impl ChunkScheduler {
             self.holders
                 .entry(pos)
                 .or_insert_with(|| ChunkHolder::new(pos))
-                .target_status = Some(ChunkStatus::Features);
+                .target_status = Some(ChunkStatus::Light);
 
-            for status in status_path_to(ChunkStatus::Features) {
+            for status in status_path_to(ChunkStatus::Light) {
                 if self
                     .holders
                     .get(&pos)
@@ -1404,7 +1412,37 @@ impl ChunkScheduler {
                 });
 
                 if status == ChunkStatus::Features {
-                    if let Some(snapshot) = self.load_stored_snapshot(pos, ChunkStatus::Features)? {
+                    if let Some(snapshot) = self.load_stored_snapshot(pos, ChunkStatus::Light)? {
+                        let revision = snapshot.revision;
+                        {
+                            let holder = self
+                                .holders
+                                .get_mut(&pos)
+                                .expect("holder must exist before marking features ready");
+                            holder.mark_ready(ChunkStatus::Features, Some(revision));
+                        }
+                        events.push(ChunkSchedulerEvent::StatusChanged {
+                            pos,
+                            status,
+                            step: ChunkStatusStep::Ready,
+                        });
+                        if self
+                            .holders
+                            .get(&pos)
+                            .expect("holder must exist before scheduling light")
+                            .status_slot(ChunkStatus::Light)
+                            .is_none()
+                        {
+                            self.holders
+                                .get_mut(&pos)
+                                .expect("holder must exist before marking light scheduled")
+                                .mark_scheduled(ChunkStatus::Light);
+                            events.push(ChunkSchedulerEvent::StatusChanged {
+                                pos,
+                                status: ChunkStatus::Light,
+                                step: ChunkStatusStep::Scheduled,
+                            });
+                        }
                         self.mark_snapshot_ready(
                             pos,
                             snapshot.clone(),
@@ -1413,10 +1451,11 @@ impl ChunkScheduler {
                         );
                         events.push(ChunkSchedulerEvent::StatusChanged {
                             pos,
-                            status,
+                            status: ChunkStatus::Light,
                             step: ChunkStatusStep::Ready,
                         });
-                        if client_visible_set.contains(&pos) {
+                        if client_visible_set.contains(&pos) && snapshot_is_client_ready(&snapshot)
+                        {
                             self.holders
                                 .get_mut(&pos)
                                 .expect("holder must exist before marking visible")
@@ -1426,7 +1465,7 @@ impl ChunkScheduler {
                     } else {
                         to_generate.push(pos);
                     }
-                } else {
+                } else if status < ChunkStatus::Features {
                     let holder = self
                         .holders
                         .get_mut(&pos)
@@ -1527,49 +1566,29 @@ impl ChunkScheduler {
                 )
             });
             events.extend(fluid_tick_events_from_generated_chunk(&chunk));
-            let light_sections = publication
-                .completed
-                .light_sections
-                .get(&pos)
-                .cloned()
-                .unwrap_or_else(|| {
-                    let light_neighbors = retained_dependencies
-                        .iter()
-                        .filter_map(|(neighbor_pos, buffer)| {
-                            provisional_sky_light_includes_chunk(pos, *neighbor_pos)
-                                .then_some((*neighbor_pos, buffer.blocks.as_slice()))
-                        })
-                        .chain(generated.iter().filter_map(|(neighbor_pos, chunk)| {
-                            provisional_sky_light_includes_chunk(pos, *neighbor_pos)
-                                .then_some((*neighbor_pos, chunk.blocks()))
-                        }));
-                    provisional_light_sections_from_neighbors(
-                        pos,
-                        chunk.min_y,
-                        chunk.height,
-                        chunk.blocks(),
-                        light_neighbors,
-                    )
-                });
-            let snapshot = chunk
-                .to_chunk_snapshot(revision, ChunkStatus::Features)
-                .with_light_sections(false, light_sections);
+            let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
             self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
             events.push(ChunkSchedulerEvent::StatusChanged {
                 pos,
                 status: ChunkStatus::Features,
                 step: ChunkStatusStep::Ready,
             });
-            if self
-                .distance_manager
-                .player_interest_positions()
-                .contains(&pos)
-            {
-                self.holders
-                    .get_mut(&pos)
-                    .expect("holder must exist before marking visible")
-                    .set_client_visible(true);
-                events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+
+            let should_light = self
+                .holders
+                .get(&pos)
+                .and_then(|holder| holder.status_slot(ChunkStatus::Light))
+                .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled);
+            if should_light {
+                self.pending_light_statuses.push_back(
+                    PendingLightStatus::from_feature_publication(
+                        pos,
+                        snapshot,
+                        chunk,
+                        generated.iter(),
+                        retained_dependencies.iter(),
+                    ),
+                );
             }
         }
 
@@ -1583,6 +1602,56 @@ impl ChunkScheduler {
         }
         self.mark_job_complete(completed.job_id, completed.cache_report, completed.timing);
         Ok((events, None))
+    }
+
+    fn publish_pending_light_statuses(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let mut events = Vec::new();
+        let mut remaining_budget = DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET;
+        while remaining_budget > 0 {
+            let Some(pending) = self.pending_light_statuses.pop_front() else {
+                break;
+            };
+            remaining_budget -= 1;
+
+            let should_publish = self
+                .holders
+                .get(&pending.pos)
+                .and_then(|holder| holder.status_slot(ChunkStatus::Light))
+                .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled);
+            if !should_publish {
+                continue;
+            }
+
+            let revision = ChunkRevision(self.next_revision);
+            self.next_revision += 1;
+            let light_sections = pending.compute_light_sections();
+            let mut snapshot = pending.feature_snapshot;
+            snapshot.status = ChunkStatus::Light;
+            snapshot.revision = revision;
+            let snapshot = snapshot.with_light_sections(true, light_sections);
+            let pos = snapshot.pos;
+
+            self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, true);
+            events.push(ChunkSchedulerEvent::StatusChanged {
+                pos,
+                status: ChunkStatus::Light,
+                step: ChunkStatusStep::Ready,
+            });
+            if self
+                .distance_manager
+                .player_interest_positions()
+                .contains(&pos)
+                && snapshot_is_client_ready(&snapshot)
+            {
+                self.holders
+                    .get_mut(&pos)
+                    .expect("holder must exist before marking visible")
+                    .set_client_visible(true);
+                events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+            }
+        }
+
+        Ok(events)
     }
 
     fn create_feature_job(
@@ -1795,7 +1864,13 @@ fn status_path_to(target_status: ChunkStatus) -> Vec<ChunkStatus> {
 
 pub(crate) const DEFAULT_PENDING_UNLOAD_BUDGET: usize = 200;
 pub(crate) const DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET: usize = 1;
+pub(crate) const DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET: usize = 1;
 const MAX_SCHEDULED_FLUID_TICKS_PER_TICK: usize = 65_536;
+
+fn snapshot_is_client_ready(snapshot: &ChunkSnapshot) -> bool {
+    snapshot.status >= ChunkStatus::Light && snapshot.light_correct
+}
+
 fn section_block_update_from_index(
     local_index: usize,
     block_state: BlockStateId,

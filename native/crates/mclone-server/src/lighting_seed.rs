@@ -1,8 +1,8 @@
-//! Provisional ("seed") lighting computed at worldgen publication time.
+//! Initial lighting bridge helpers.
 //!
-//! Thin orchestration home for initial light sections generated at chunk
-//! publication time before `ChunkStatus::Light` exists. The actual graph-backed
-//! propagation lives in Java-shaped light bridge modules.
+//! Thin orchestration home for initial light sections used by the native
+//! `ChunkStatus::Light` bridge. The actual graph-backed propagation lives in
+//! Java-shaped light bridge modules.
 
 use crate::level_light_bridge::graph_level_light_sections_for_chunk;
 use mclone_core::{CHUNK_WIDTH, ChunkPos, PackedLightSection};

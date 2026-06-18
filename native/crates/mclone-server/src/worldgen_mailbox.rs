@@ -2,10 +2,9 @@
 //! generation backend and its completed-job plumbing.
 //!
 //! Move-only home for the worldgen mailbox, both cfg-gated backend variants, the
-//! worker request enum, the completed-job and pending-publication carriers, and
-//! the completed-light precompute used by both backends. The provisional
-//! lighting math it depends on stays in the parent module and is reached via
-//! `crate::` `pub(crate)` helpers.
+//! worker request enum, and the completed-job and pending-publication carriers.
+//! `ChunkStatus::Light` is scheduler-owned and runs after completed feature
+//! chunks are published to holders.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
@@ -14,15 +13,12 @@ use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{sync::mpsc, thread};
 
-use mclone_core::{ChunkPos, PackedLightSection};
+use mclone_core::ChunkPos;
 use mclone_worldgen::levelgen::{
     GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureBatchTiming,
     OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport,
 };
 
-use crate::lighting_seed::{
-    provisional_light_sections_from_neighbors, provisional_sky_light_includes_chunk,
-};
 use crate::{ChunkJobId, WorldgenMailboxKind};
 
 #[derive(Debug)]
@@ -30,7 +26,6 @@ pub(crate) struct WorldgenCompletedJob {
     pub(crate) job_id: ChunkJobId,
     pub(crate) generated_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
     pub(crate) retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
-    pub(crate) light_sections: BTreeMap<ChunkPos, Vec<PackedLightSection>>,
     pub(crate) cache_report: OverworldFeatureDependencyCacheReport,
     pub(crate) timing: OverworldFeatureBatchTiming,
 }
@@ -48,39 +43,6 @@ impl PendingWorldgenPublication {
             next_target_index: 0,
         }
     }
-}
-
-fn precompute_completed_light_sections(
-    generated_chunks: &BTreeMap<ChunkPos, GeneratedChunk>,
-    retained_dependencies: &BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
-    targets: &[ChunkPos],
-) -> BTreeMap<ChunkPos, Vec<PackedLightSection>> {
-    targets
-        .iter()
-        .filter_map(|pos| {
-            let chunk = generated_chunks.get(pos)?;
-            let light_neighbors = retained_dependencies
-                .iter()
-                .filter_map(|(neighbor_pos, buffer)| {
-                    provisional_sky_light_includes_chunk(*pos, *neighbor_pos)
-                        .then_some((*neighbor_pos, buffer.blocks.as_slice()))
-                })
-                .chain(generated_chunks.iter().filter_map(|(neighbor_pos, chunk)| {
-                    provisional_sky_light_includes_chunk(*pos, *neighbor_pos)
-                        .then_some((*neighbor_pos, chunk.blocks()))
-                }));
-            Some((
-                *pos,
-                provisional_light_sections_from_neighbors(
-                    *pos,
-                    chunk.min_y,
-                    chunk.height,
-                    chunk.blocks(),
-                    light_neighbors,
-                ),
-            ))
-        })
-        .collect()
 }
 
 pub(crate) struct WorldgenMailbox {
@@ -157,16 +119,10 @@ impl WorldgenMailboxBackend {
             targets.iter().copied(),
             dependencies,
         );
-        let light_sections = precompute_completed_light_sections(
-            &result.chunks,
-            &result.retained_dependencies,
-            targets,
-        );
         self.completed.push_back(WorldgenCompletedJob {
             job_id,
             generated_chunks: result.chunks,
             retained_dependencies: result.retained_dependencies,
-            light_sections,
             cache_report: result.cache_report,
             timing: result.timing,
         });
@@ -222,17 +178,11 @@ impl WorldgenMailboxBackend {
                                     targets.iter().copied(),
                                     dependencies,
                                 );
-                            let light_sections = precompute_completed_light_sections(
-                                &result.chunks,
-                                &result.retained_dependencies,
-                                &targets,
-                            );
                             if completion_sender
                                 .send(WorldgenCompletedJob {
                                     job_id,
                                     generated_chunks: result.chunks,
                                     retained_dependencies: result.retained_dependencies,
-                                    light_sections,
                                     cache_report: result.cache_report,
                                     timing: result.timing,
                                 })
