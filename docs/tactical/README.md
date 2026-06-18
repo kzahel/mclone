@@ -6,7 +6,7 @@ Use zero-padded numeric prefixes for new native tactical docs: `000-topic.md`, `
 
 For native platform, renderer-boundary, performance, Android, or XR tacticals, use the sibling Playbox repo at `~/code/playbox` as a pattern library. Start with `~/code/playbox/Cargo.toml`, `docs/architecture/rendering.md`, `docs/architecture/platforms.md`, `android/README.md`, and `android-xr/README.md`. Mclone's native `profile.dev` is optimized at `opt-level = 2`, following Playbox, so debug movement/render smokes are less misleading while still retaining debug assertions.
 
-For current native performance priority, baseline, and Java-shaped follow-up order, see [`../topics/performance.md`](../topics/performance.md). The tactical docs below remain the detailed implementation records.
+For durable subsystem progress indexes, see [`../topics/`](../topics/README.md). In particular, current native performance priority lives in [`../topics/performance.md`](../topics/performance.md), and current lighting progress and next solver/status/rendering slices live in [`../topics/lighting.md`](../topics/lighting.md). The tactical docs below remain the detailed implementation records.
 
 | Doc | Status | Purpose |
 |---|---|---|
@@ -36,7 +36,7 @@ For current native performance priority, baseline, and Java-shaped follow-up ord
 | [`023-render-mesh-culling-parity-and-perf.md`](023-render-mesh-culling-parity-and-perf.md) | completed | Dense-section model-face culling tests, face-pressure diagnostics, and explicit deferral of greedy meshing / Java occlusion traversal. |
 | [`024-render-section-dirty-cache-and-upload-diffs.md`](024-render-section-dirty-cache-and-upload-diffs.md) | completed | CPU render-section dirty cache, incremental GPU section updates, and rebuilt/uploaded vertex/face/index diagnostics. |
 | [`025-render-section-visibility-graph.md`](025-render-section-visibility-graph.md) | first pass landed | Java `VisGraph` / `VisibilitySet` parity, oracle fixtures, conservative section occlusion traversal, client toggle, and culling/build-time instrumentation. |
-| [`026-lighting-pipeline.md`](026-lighting-pipeline.md) | proposed | Java-shaped light storage, snapshot/protocol payloads, provisional initial light facts, mesh/render handoff, and fullbright comparison toggle. |
+| [`026-lighting-pipeline.md`](026-lighting-pipeline.md) | active first pass landed | Java-shaped light storage, snapshot/protocol payloads, provisional initial light facts, mesh/render handoff, and fullbright comparison toggle. |
 | [`027-mclone-ui-foundation.md`](027-mclone-ui-foundation.md) | proposed | First-party native `mclone-ui` screen/widget model, `wgpu` overlay renderer, original mclone UI skin, and title/pause/options/progress foundations. |
 | [`028-headless-window-frame-unification.md`](028-headless-window-frame-unification.md) | active | Shared native full-frame composition for window and headless hosts, including world, UI, debug pane, offscreen screenshots, and later MP4 recording. |
 | [`029-native-frame-pacing-and-streaming-hitches.md`](029-native-frame-pacing-and-streaming-hitches.md) | active | Native desktop frame pacing controls, live/headless frame-budget diagnostics, and the follow-up plan for chunk publish, remesh, and upload hitches. |
