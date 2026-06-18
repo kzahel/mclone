@@ -14,9 +14,11 @@ the next recommendation, or the implementation shape needs correction.
 
 ## Current Baseline
 
-The first storage/render handoff has landed. Light is now a real chunk fact
-that can cross the native server/client/render boundary, but the actual Java
-solver and status scheduling are still pending.
+The first storage/render handoff has landed, and the first native
+graph-driven block-light foundation is in place. Light is now a real chunk
+fact that can cross the native server/client/render boundary, but runtime chunk
+lighting still uses the provisional producer until the Java-shaped layer engine
+and status scheduling are wired in.
 
 Landed pieces:
 
@@ -29,6 +31,14 @@ Landed pieces:
 - `mclone_light` has `DataLayerStorageMap`, `BlockDataLayerStorageMap`,
   `SkyDataLayerStorageMap`, and the non-scheduling storage/lifecycle foundation
   for `LayerLightSectionStorage`.
+- `mclone_light` has a reusable `DynamicGraphMinFixedPoint` port with
+  Java-style per-level queues, pending computed levels, and brighten/darken
+  repair behavior.
+- `mclone_light` has a first `BlockLightEngine` foundation over
+  `LayerLightSectionStorage`, using Java's inverted internal levels, the source
+  node shape, six-direction propagation, opacity attenuation, and synthetic
+  fixtures for brightening, darkening/repair, opacity boundaries, and active
+  section boundaries.
 - `ChunkSnapshot` carries `light_correct` plus optional sky/block
   `PackedLightSection` bytes.
 - Native protocol and filesystem persistence roundtrip light payloads.
@@ -46,13 +56,12 @@ Known gaps:
 
 - `ChunkStatus::Light` exists, but the native server does not run a real light
   status.
-- There is no `DynamicGraphMinFixedPoint` port yet.
-- There is no graph-driven `LayerLightSectionStorage` integration yet; the
-  storage/lifecycle foundation exists, but `SectionTracker` /
-  `DynamicGraphMinFixedPoint` is still pending.
-- There is no Java-shaped `BlockLightSectionStorage`, `SkyLightSectionStorage`,
-  `LayerLightEngine`, `BlockLightEngine`, `SkyLightEngine`, or
-  `LevelLightEngine` port yet.
+- There is no full Java-shaped `LayerLightEngine`, `BlockLightSectionStorage`,
+  `SkyLightSectionStorage`, `SkyLightEngine`, `LevelLightEngine`, or threaded
+  light scheduling wrapper yet.
+- The graph-driven `BlockLightEngine` is fixture-backed only; runtime chunks do
+  not yet feed real block-state opacity, emission, or face shape occlusion into
+  it.
 - Light sections are attached to chunk snapshots, but native does not yet model
   Java's padded light-section lifecycle as solver-owned storage.
 - Provisional opacity is coarse (`material_blocks_motion`) and does not use
@@ -138,6 +147,8 @@ Current native entry points:
 | packed block/section positions | `native/crates/mclone-light/src/pos.rs` |
 | storage maps | `native/crates/mclone-light/src/storage_map.rs` |
 | section storage foundation | `native/crates/mclone-light/src/section_storage.rs` |
+| fixed-point graph | `native/crates/mclone-light/src/dynamic_graph.rs` |
+| block light engine foundation | `native/crates/mclone-light/src/block_engine.rs` |
 | snapshot payload | `native/crates/mclone-core/src/chunk.rs` |
 | provisional producer | `native/crates/mclone-server/src/lighting_seed.rs` |
 | scheduler publication | `native/crates/mclone-server/src/scheduler.rs` |
@@ -207,24 +218,47 @@ Landed:
 
 ### P1: Fixed-Point Graph And Block Light
 
+Status: completed first pass in
+[`038-native-light-graph-and-block-engine.md`](../tactical/038-native-light-graph-and-block-engine.md).
+
+Landed:
+
+- Ported `DynamicGraphMinFixedPoint` as a reusable native module.
+- Preserved the Java graph shape: level count, one queue per internal level,
+  pending computed levels, `firstQueuedLevel`, and brighten/darken repair.
+- Added `BlockLightEngine` over `LayerLightSectionStorage`.
+- Added synthetic block input through `BlockLightWorld`.
+- Added source emission, six-direction propagation, attenuation by
+  `max(1, opacity)`, missing-position opacity, and active-section checks.
+- Added focused fixtures for source brightening, opaque section-wall blocking,
+  source removal repair from an alternate source, and cross-section
+  propagation.
+
+Remaining parity gaps in this slice: the block engine does not yet use real
+block states, `BlockState.getLightBlock(...)`, emission tables, or
+`Shapes.faceShapeOccludes(...)`-style face occlusion.
+
+### P2: Block Light Integration Bridge
+
 Status: next recommended.
 
-Port `DynamicGraphMinFixedPoint`, then `BlockLightEngine` enough to run
-controlled synthetic block-light fixtures.
+Wire the new block-light graph foundation into runtime chunk data without
+letting server or renderer code become the owner of propagation logic.
 
 Scope:
 
-- Internal inverted levels: `0` full light, `15` dark.
-- The graph should drive the existing `LayerLightSectionStorage` graph-facing
-  methods instead of adding a second storage path.
-- Six-direction propagation.
-- Emission source node behavior.
-- Opacity and face-occlusion hooks, with any temporary coarse opacity explicitly
-  marked as a parity gap.
-- Torch/lava placement and removal repair behavior.
-- Cross-chunk source near boundary fixture.
+- Add a Java-shaped layer/block engine bridge for loaded sections instead of
+  calling the synthetic test trait directly from runtime code.
+- Port enough `BlockLightSectionStorage` shape to keep block-light storage and
+  section activity separate from generic layer storage.
+- Feed real block-state opacity and emission into `BlockLightEngine`, preserving
+  a clear hook for later face shape occlusion.
+- Replace lava-only provisional block emission for controlled fixtures while
+  keeping the old provisional producer available until sky and status are ready.
+- Add server fixtures that compare the graph-driven block light path against the
+  existing synthetic Java oracle cases.
 
-### P2: Sky Light Storage And Engine
+### P3: Sky Light Storage And Engine
 
 Port `SkyLightSectionStorage` and `SkyLightEngine`.
 
@@ -236,7 +270,7 @@ Scope:
 - Sideways/obstructed sky decays.
 - Roofed cave, vertical shaft, overhang, and chunk-boundary side-spread fixtures.
 
-### P3: LevelLightEngine And ChunkStatus::Light
+### P4: LevelLightEngine And ChunkStatus::Light
 
 Wire the two layer engines behind `LevelLightEngine`, then make
 `ChunkStatus::Light` real.
@@ -250,7 +284,7 @@ Scope:
   dependency radius.
 - Publish chunks as `light_correct=true` only after real light status completes.
 
-### P4: Live Deltas And Render Dirtying
+### P5: Live Deltas And Render Dirtying
 
 Connect runtime mutations to the light engine.
 
@@ -262,7 +296,7 @@ Scope:
 - Changed light sections dirty render sections and neighbor sections as needed.
 - Section block deltas and light deltas are batched when practical.
 
-### P5: Rendering Parity
+### P6: Rendering Parity
 
 Improve visual parity after stored light is correct.
 
@@ -283,6 +317,7 @@ Primary native lighting docs:
 - [`../tactical/031-native-section-block-delta-updates.md`](../tactical/031-native-section-block-delta-updates.md)
 - [`../tactical/036-native-sky-and-day-night-cycle.md`](../tactical/036-native-sky-and-day-night-cycle.md)
 - [`../tactical/037-native-light-solver-storage-foundation.md`](../tactical/037-native-light-solver-storage-foundation.md)
+- [`../tactical/038-native-light-graph-and-block-engine.md`](../tactical/038-native-light-graph-and-block-engine.md)
 
 Legacy/reference-only lighting docs:
 
