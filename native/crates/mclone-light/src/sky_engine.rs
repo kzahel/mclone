@@ -54,6 +54,25 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
         self.storage.enable_light_sources(column, enabled);
     }
 
+    pub fn queue_section_data(
+        &mut self,
+        section: SectionPosKey,
+        data_layer: Option<DataLayer>,
+        trusted: bool,
+    ) {
+        self.storage
+            .queue_section_data(section, data_layer, trusted);
+    }
+
+    pub fn retain_data(&mut self, column: SectionPosKey, retain: bool) {
+        self.storage.retain_data(column, retain);
+    }
+
+    pub fn accept_queued_section_data(&mut self) {
+        self.storage.accept_queued_sections_for_stored_layers();
+        self.storage.swap_section_map();
+    }
+
     pub fn check_sky_source(&mut self, pos: BlockPosKey) {
         if !self
             .storage

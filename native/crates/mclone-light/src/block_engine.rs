@@ -53,6 +53,25 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
 
     pub fn enable_light_sources(&mut self, _column: SectionPosKey, _enabled: bool) {}
 
+    pub fn queue_section_data(
+        &mut self,
+        section: SectionPosKey,
+        data_layer: Option<DataLayer>,
+        trusted: bool,
+    ) {
+        self.storage
+            .queue_section_data(section, data_layer, trusted);
+    }
+
+    pub fn retain_data(&mut self, column: SectionPosKey, retain: bool) {
+        self.storage.retain_data(column, retain);
+    }
+
+    pub fn accept_queued_section_data(&mut self) {
+        self.storage.accept_queued_sections_for_stored_layers();
+        self.storage.swap_section_map();
+    }
+
     pub fn check_block(&mut self, pos: BlockPosKey) {
         let mut delegate = BlockLightGraphDelegate {
             storage: &mut self.storage,

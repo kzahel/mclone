@@ -1,5 +1,6 @@
 use crate::{
-    BlockLightEngine, BlockLightWorld, BlockPosKey, SectionPosKey, SkyLightEngine, SkyLightWorld,
+    BlockLightEngine, BlockLightWorld, BlockPosKey, DataLayer, LightLayer, SectionPosKey,
+    SkyLightEngine, SkyLightWorld,
 };
 
 pub const MAX_SOURCE_LEVEL: u8 = 15;
@@ -43,6 +44,33 @@ impl<B: BlockLightWorld, S: SkyLightWorld> LevelLightEngine<B, S> {
     pub fn enable_light_sources(&mut self, section: SectionPosKey, enabled: bool) {
         self.block_engine.enable_light_sources(section, enabled);
         self.sky_engine.enable_light_sources(section, enabled);
+    }
+
+    pub fn queue_section_data(
+        &mut self,
+        layer: LightLayer,
+        section: SectionPosKey,
+        data_layer: Option<DataLayer>,
+        trusted: bool,
+    ) {
+        match layer {
+            LightLayer::Block => self
+                .block_engine
+                .queue_section_data(section, data_layer, trusted),
+            LightLayer::Sky => self
+                .sky_engine
+                .queue_section_data(section, data_layer, trusted),
+        }
+    }
+
+    pub fn retain_data(&mut self, column: SectionPosKey, retain: bool) {
+        self.block_engine.retain_data(column, retain);
+        self.sky_engine.retain_data(column, retain);
+    }
+
+    pub fn accept_queued_section_data(&mut self) {
+        self.block_engine.accept_queued_section_data();
+        self.sky_engine.accept_queued_section_data();
     }
 
     pub fn on_block_emission_increase(&mut self, pos: BlockPosKey, emission: u8) {
@@ -168,5 +196,28 @@ mod tests {
         engine.run_all_updates();
 
         assert_eq!(engine.sky_engine().stored_light(pos), 0);
+    }
+
+    #[test]
+    fn level_light_engine_accepts_queued_section_data() {
+        let section = section_as_long(0, 0, 0);
+        let block_pos = block_pos_as_long(1, 2, 3);
+        let mut engine = LevelLightEngine::new(
+            SyntheticLightWorld::default(),
+            SyntheticLightWorld::default(),
+        );
+        let mut sky = DataLayer::new();
+        sky.set(1, 2, 3, 9);
+        let mut block = DataLayer::new();
+        block.set(1, 2, 3, 12);
+
+        engine.queue_section_data(LightLayer::Sky, section, Some(sky), true);
+        engine.queue_section_data(LightLayer::Block, section, Some(block), true);
+        engine.update_section_status(section, false);
+        engine.accept_queued_section_data();
+
+        assert_eq!(engine.sky_engine().stored_light(block_pos), 9);
+        assert_eq!(engine.block_engine().stored_light(block_pos), 12);
+        assert_eq!(engine.get_raw_brightness(block_pos, 0), 12);
     }
 }

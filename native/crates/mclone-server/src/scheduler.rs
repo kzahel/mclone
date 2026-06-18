@@ -34,7 +34,7 @@ use crate::fluid::{
     target_fluid_can_be_replaced_with,
 };
 use crate::holder::ChunkHolder;
-use crate::light_status::PendingLightStatus;
+use crate::light_status::{PendingLightStatus, hydrate_loaded_light_snapshot};
 use crate::persistence::{ChunkSnapshotStore, ChunkStoreResult, NullChunkSnapshotStore};
 use crate::timing::{
     ChunkSchedulerTickReport, ChunkSchedulerTickTiming, simulation_timing_elapsed_us,
@@ -1413,6 +1413,7 @@ impl ChunkScheduler {
 
                 if status == ChunkStatus::Features {
                     if let Some(snapshot) = self.load_stored_snapshot(pos, ChunkStatus::Light)? {
+                        let snapshot = hydrate_loaded_light_snapshot(snapshot)?;
                         let revision = snapshot.revision;
                         {
                             let holder = self

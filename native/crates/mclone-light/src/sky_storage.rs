@@ -68,6 +68,23 @@ impl SkyLightSectionStorage {
         self.inner.swap_section_map()
     }
 
+    pub fn queue_section_data(
+        &mut self,
+        section: SectionPosKey,
+        data_layer: Option<DataLayer>,
+        trusted: bool,
+    ) {
+        self.inner.queue_section_data(section, data_layer, trusted);
+    }
+
+    pub fn retain_data(&mut self, column: SectionPosKey, retain: bool) {
+        self.inner.retain_data(column, retain);
+    }
+
+    pub fn accept_queued_sections_for_stored_layers(&mut self) {
+        self.inner.accept_queued_sections_for_stored_layers();
+    }
+
     pub fn enable_light_sources(&mut self, column: SectionPosKey, enabled: bool) {
         let column = section_get_zero_node(column);
         if enabled {
