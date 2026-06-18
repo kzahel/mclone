@@ -8,6 +8,7 @@ mod integrated;
 mod lighting_seed;
 mod persistence;
 mod scheduler;
+mod sky_light_bridge;
 mod timing;
 mod types;
 mod worldgen_mailbox;

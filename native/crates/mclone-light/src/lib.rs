@@ -9,6 +9,8 @@ mod layer;
 mod packed;
 mod pos;
 mod section_storage;
+mod sky_engine;
+mod sky_storage;
 mod storage_map;
 
 pub use block_engine::{BlockLightEngine, BlockLightWorld};
@@ -33,4 +35,6 @@ pub use section_storage::{
     EMPTY as EMPTY_SECTION, LIGHT_AND_DATA, LIGHT_ONLY, LayerLightSectionStorage,
     SectionEdgeUpdate, SectionLevelChange,
 };
+pub use sky_engine::{SkyLightEngine, SkyLightWorld};
+pub use sky_storage::SkyLightSectionStorage;
 pub use storage_map::{BlockDataLayerStorageMap, DataLayerStorageMap, SkyDataLayerStorageMap};
