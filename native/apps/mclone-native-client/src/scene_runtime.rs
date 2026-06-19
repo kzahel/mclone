@@ -212,6 +212,12 @@ pub(crate) struct WindowRuntimeStats {
     pub(crate) inflight_render_sections: usize,
     pub(crate) client_visible_chunks: usize,
     pub(crate) active_ticket_chunks: usize,
+    pub(crate) tracked_players: usize,
+    pub(crate) player_visible_chunks: usize,
+    pub(crate) aggregate_player_ticket_chunks: usize,
+    pub(crate) player_outbound_queue_depth: usize,
+    pub(crate) max_player_visible_chunks: usize,
+    pub(crate) max_player_outbound_queue_depth: usize,
     pub(crate) pending_unload_chunks: usize,
     pub(crate) block_ticking_chunks: usize,
     pub(crate) entity_ticking_chunks: usize,
@@ -1058,6 +1064,10 @@ impl WindowSceneRuntime {
             .server
             .as_ref()
             .map(|server| server.scheduler().metrics());
+        let chunk_tracking = self
+            .server
+            .as_ref()
+            .map(|server| server.chunk_tracking_diagnostics());
         WindowRuntimeStats {
             interest_center: self.interest_center,
             render_distance: self.render_distance,
@@ -1074,6 +1084,28 @@ impl WindowSceneRuntime {
                 }),
             active_ticket_chunks: scheduler_metrics
                 .map_or(0, |metrics| metrics.active_ticket_chunks),
+            tracked_players: chunk_tracking
+                .as_ref()
+                .map_or(0, |diagnostics| diagnostics.player_count),
+            player_visible_chunks: chunk_tracking
+                .as_ref()
+                .map_or(self.client.loaded_chunk_count(), |diagnostics| {
+                    diagnostics.total_player_visible_chunks
+                }),
+            aggregate_player_ticket_chunks: chunk_tracking
+                .as_ref()
+                .map_or(0, |diagnostics| diagnostics.aggregate_player_ticket_chunks),
+            player_outbound_queue_depth: chunk_tracking
+                .as_ref()
+                .map_or(0, |diagnostics| diagnostics.total_outbound_queue_depth),
+            max_player_visible_chunks: chunk_tracking
+                .as_ref()
+                .map_or(self.client.loaded_chunk_count(), |diagnostics| {
+                    diagnostics.max_player_visible_chunks
+                }),
+            max_player_outbound_queue_depth: chunk_tracking
+                .as_ref()
+                .map_or(0, |diagnostics| diagnostics.max_outbound_queue_depth),
             pending_unload_chunks: scheduler_metrics
                 .map_or(0, |metrics| metrics.pending_unload_chunks),
             block_ticking_chunks: scheduler_metrics

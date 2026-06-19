@@ -38,6 +38,9 @@ pub use integrated::IntegratedServer;
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
 };
+pub use player_chunk_tracking::{
+    PlayerChunkTrackingDiagnostics, PlayerChunkTrackingPlayerDiagnostics,
+};
 pub use players::ServerPlayerId;
 pub(crate) use scheduler::FluidTickList;
 pub use scheduler::{

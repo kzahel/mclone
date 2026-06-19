@@ -52,6 +52,10 @@ struct MovementPerfStepReport {
     loaded_chunks: usize,
     client_visible_chunks: usize,
     active_ticket_chunks: usize,
+    tracked_players: usize,
+    player_visible_chunks: usize,
+    aggregate_player_ticket_chunks: usize,
+    player_outbound_queue_depth: usize,
     pending_unload_chunks: usize,
     block_ticking_chunks: usize,
     entity_ticking_chunks: usize,
@@ -207,6 +211,19 @@ impl MovementPerfReport {
             println!(
                 "      \"active_ticket_chunks\": {},",
                 step.active_ticket_chunks
+            );
+            println!("      \"tracked_players\": {},", step.tracked_players);
+            println!(
+                "      \"player_visible_chunks\": {},",
+                step.player_visible_chunks
+            );
+            println!(
+                "      \"aggregate_player_ticket_chunks\": {},",
+                step.aggregate_player_ticket_chunks
+            );
+            println!(
+                "      \"player_outbound_queue_depth\": {},",
+                step.player_outbound_queue_depth
             );
             println!(
                 "      \"pending_unload_chunks\": {},",
@@ -1043,6 +1060,10 @@ pub(crate) fn run_movement_perf_smoke(options: &MovementPerfOptions) -> Result<M
             loaded_chunks: stats.loaded_chunks,
             client_visible_chunks: stats.client_visible_chunks,
             active_ticket_chunks: stats.active_ticket_chunks,
+            tracked_players: stats.tracked_players,
+            player_visible_chunks: stats.player_visible_chunks,
+            aggregate_player_ticket_chunks: stats.aggregate_player_ticket_chunks,
+            player_outbound_queue_depth: stats.player_outbound_queue_depth,
             pending_unload_chunks: stats.pending_unload_chunks,
             block_ticking_chunks: stats.block_ticking_chunks,
             entity_ticking_chunks: stats.entity_ticking_chunks,

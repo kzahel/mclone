@@ -85,6 +85,13 @@ impl DebugPaneStats {
                 self.runtime.pending_jobs
             ),
             format!("STREAM PUB{}", self.runtime.pending_publications),
+            format!(
+                "TRACK P{} V{} A{} Q{}",
+                self.runtime.tracked_players,
+                self.runtime.player_visible_chunks,
+                self.runtime.aggregate_player_ticket_chunks,
+                self.runtime.player_outbound_queue_depth
+            ),
             format!("MESH Q{}", self.runtime.pending_render_chunks),
             format!(
                 "TICKING B{}:{} E{}:{}",
@@ -731,6 +738,12 @@ mod tests {
                 inflight_render_sections: 4,
                 client_visible_chunks: 8,
                 active_ticket_chunks: 9,
+                tracked_players: 1,
+                player_visible_chunks: 8,
+                aggregate_player_ticket_chunks: 8,
+                player_outbound_queue_depth: 0,
+                max_player_visible_chunks: 8,
+                max_player_outbound_queue_depth: 0,
                 pending_unload_chunks: 0,
                 block_ticking_chunks: 4,
                 entity_ticking_chunks: 2,
@@ -793,6 +806,7 @@ mod tests {
         assert_eq!(lines[3], "MODE WALK GROUND Y");
         assert_eq!(lines[4], "VIEW R2 T3");
         assert_eq!(lines[5], "OCC ON  LIGHT");
+        assert!(lines.iter().any(|line| line == "TRACK P1 V8 A8 Q0"));
         assert!(lines.iter().any(|line| line == "BUDGET 8.3MS FRAME 16.7MS"));
         assert!(lines.iter().any(|line| line == "OVER 3/1/0 WORST 33.4"));
 

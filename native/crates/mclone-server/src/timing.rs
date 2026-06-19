@@ -10,7 +10,7 @@ use std::time::Instant;
 use mclone_core::ChunkPos;
 use mclone_protocol::ServerUpdate;
 
-use crate::ChunkSchedulerEvent;
+use crate::{ChunkSchedulerEvent, PlayerChunkTrackingDiagnostics};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkSchedulerTickReport {
@@ -69,6 +69,7 @@ pub struct ServerTickReport {
     pub entity_ticking_chunks: Vec<ChunkPos>,
     pub pending_unloads_processed: usize,
     pub scheduler_event_count: usize,
+    pub chunk_tracking: PlayerChunkTrackingDiagnostics,
     pub updates: Vec<ServerUpdate>,
     pub timing: ServerTickTiming,
 }
@@ -88,6 +89,7 @@ pub struct ServerSimulationTickReport {
     pub entity_tick_chunks: usize,
     pub pending_unloads_processed: usize,
     pub scheduler_event_count: usize,
+    pub chunk_tracking: PlayerChunkTrackingDiagnostics,
     pub updates: Vec<ServerUpdate>,
     pub timing: ServerSimulationTickTiming,
 }

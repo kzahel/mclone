@@ -24,8 +24,9 @@ use crate::spawn::find_safe_surface_spawn;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
     ChunkScheduler, ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult,
-    FluidKind, FluidTickList, NullChunkSnapshotStore, ServerSimulationTickReport,
-    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos,
+    FluidKind, FluidTickList, NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics,
+    ServerSimulationTickReport, ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
+    WorldBlockPos,
 };
 
 #[derive(Debug)]
@@ -237,6 +238,7 @@ impl IntegratedServer {
         let scheduler_apply_start = simulation_timing_start();
         let updates = self.apply_scheduler_events_for_target(target, report.events)?;
         let scheduler_apply_events_us = simulation_timing_elapsed_us(scheduler_apply_start);
+        let chunk_tracking = self.chunk_tracking_diagnostics();
         let scheduler_timing = report.timing;
         Ok(ServerTickReport {
             ticket_tick: report.ticket_tick,
@@ -244,6 +246,7 @@ impl IntegratedServer {
             entity_ticking_chunks: report.entity_ticking_chunks,
             pending_unloads_processed: report.pending_unloads_processed,
             scheduler_event_count,
+            chunk_tracking,
             updates,
             timing: ServerTickTiming {
                 total_us: simulation_timing_elapsed_us(total_start),
@@ -321,6 +324,7 @@ impl IntegratedServer {
         self.route_scheduler_events(fluid_events);
         updates.extend(self.drain_chunk_updates_for_target(target)?);
         let fluid_event_apply_us = simulation_timing_elapsed_us(fluid_event_apply_start);
+        let chunk_tracking = self.chunk_tracking_diagnostics();
 
         Ok(ServerSimulationTickReport {
             simulation_tick,
@@ -336,6 +340,7 @@ impl IntegratedServer {
             entity_tick_chunks,
             pending_unloads_processed: tick_report.pending_unloads_processed,
             scheduler_event_count: tick_report.scheduler_event_count,
+            chunk_tracking,
             updates,
             timing: ServerSimulationTickTiming {
                 total_us: simulation_timing_elapsed_us(total_start),
@@ -360,6 +365,10 @@ impl IntegratedServer {
 
     pub fn loaded_chunk_count(&self) -> usize {
         self.scheduler.loaded_chunk_count()
+    }
+
+    pub fn chunk_tracking_diagnostics(&self) -> PlayerChunkTrackingDiagnostics {
+        self.chunk_tracking.diagnostics()
     }
 
     pub fn pending_job_count(&self) -> usize {
@@ -988,6 +997,65 @@ mod tests {
 
         assert!(has_section_block_updates(&updates_a));
         assert!(!has_section_block_updates(&updates_b));
+    }
+
+    #[test]
+    fn chunk_tracking_diagnostics_reports_outbound_queue_depth() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+        set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 0);
+        server
+            .try_handle_command_for_player(
+                player_a,
+                ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                    position: Vec3d::new(8.5, 80.0, 8.5),
+                    y_rot_degrees: 0.0,
+                    x_rot_degrees: 0.0,
+                    on_ground: true,
+                }),
+            )
+            .expect("move player a");
+        let pos = BlockPos::new(8, 80, 8);
+        assert!(server.scheduler_mut().set_block_at_world(pos, DIRT));
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates_a = server
+            .try_handle_command_for_player(
+                player_a,
+                ClientCommand::PlayerAction(PlayerActionCommand {
+                    pos,
+                    direction: Direction::Up,
+                    kind: PlayerActionKind::DebugInstantBreak,
+                }),
+            )
+            .expect("break block");
+
+        assert!(has_section_block_updates(&updates_a));
+        let diagnostics = server.chunk_tracking_diagnostics();
+        assert_eq!(diagnostics.aggregate_player_ticket_chunks, 1);
+        assert_eq!(diagnostics.total_player_visible_chunks, 2);
+        assert_eq!(diagnostics.total_outbound_queue_depth, 1);
+        assert_eq!(diagnostics.max_outbound_queue_depth, 1);
+        assert_eq!(
+            diagnostics
+                .players
+                .iter()
+                .find(|player| player.player_id == player_b)
+                .map(|player| player.outbound_queue_depth),
+            Some(1)
+        );
+
+        let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
+        assert!(has_section_block_updates(&updates_b));
+        assert_eq!(
+            server
+                .chunk_tracking_diagnostics()
+                .total_outbound_queue_depth,
+            0
+        );
     }
 
     #[test]

@@ -70,6 +70,26 @@ pub(crate) struct PlayerChunkViewChange {
     pub(crate) aggregate_changed: bool,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PlayerChunkTrackingDiagnostics {
+    pub player_count: usize,
+    pub aggregate_player_ticket_chunks: usize,
+    pub total_player_visible_chunks: usize,
+    pub total_outbound_queue_depth: usize,
+    pub max_player_visible_chunks: usize,
+    pub max_outbound_queue_depth: usize,
+    pub players: Vec<PlayerChunkTrackingPlayerDiagnostics>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlayerChunkTrackingPlayerDiagnostics {
+    pub player_id: ServerPlayerId,
+    pub requested_view: Option<ChunkView>,
+    pub accepted_view: Option<ChunkView>,
+    pub visible_chunks: usize,
+    pub outbound_queue_depth: usize,
+}
+
 #[derive(Debug)]
 pub(crate) struct PlayerChunkTracking {
     policy: PlayerChunkTrackingPolicy,
@@ -153,6 +173,49 @@ impl PlayerChunkTracking {
 
     pub(crate) fn aggregate_player_ticket_positions(&self) -> BTreeSet<ChunkPos> {
         self.aggregate_player_ticket_positions.clone()
+    }
+
+    pub(crate) fn diagnostics(&self) -> PlayerChunkTrackingDiagnostics {
+        let players = self
+            .players
+            .iter()
+            .map(|(player_id, state)| {
+                let outbound_queue_depth =
+                    self.pending_updates.get(player_id).map_or(0, VecDeque::len);
+                PlayerChunkTrackingPlayerDiagnostics {
+                    player_id: *player_id,
+                    requested_view: state.requested.clone(),
+                    accepted_view: state.accepted.clone(),
+                    visible_chunks: state.visible_chunks.len(),
+                    outbound_queue_depth,
+                }
+            })
+            .collect::<Vec<_>>();
+        let total_player_visible_chunks = players.iter().map(|player| player.visible_chunks).sum();
+        let total_outbound_queue_depth = players
+            .iter()
+            .map(|player| player.outbound_queue_depth)
+            .sum();
+        let max_player_visible_chunks = players
+            .iter()
+            .map(|player| player.visible_chunks)
+            .max()
+            .unwrap_or(0);
+        let max_outbound_queue_depth = players
+            .iter()
+            .map(|player| player.outbound_queue_depth)
+            .max()
+            .unwrap_or(0);
+
+        PlayerChunkTrackingDiagnostics {
+            player_count: players.len(),
+            aggregate_player_ticket_chunks: self.aggregate_player_ticket_positions.len(),
+            total_player_visible_chunks,
+            total_outbound_queue_depth,
+            max_player_visible_chunks,
+            max_outbound_queue_depth,
+            players,
+        }
     }
 
     #[cfg(test)]
@@ -323,6 +386,13 @@ mod tests {
             tracking.aggregate_player_ticket_positions(),
             BTreeSet::from([ChunkPos::new(1, 0), ChunkPos::new(2, 0)])
         );
+
+        let diagnostics = tracking.diagnostics();
+        assert_eq!(diagnostics.player_count, 2);
+        assert_eq!(diagnostics.aggregate_player_ticket_chunks, 2);
+        assert_eq!(diagnostics.total_player_visible_chunks, 2);
+        assert_eq!(diagnostics.total_outbound_queue_depth, 0);
+        assert_eq!(diagnostics.max_player_visible_chunks, 1);
     }
 
     #[test]
