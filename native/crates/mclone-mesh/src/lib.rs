@@ -402,6 +402,101 @@ mod tests {
         TexturedMeshCatalog::from_assets(&registry, &index, &library, &atlas).unwrap()
     }
 
+    fn partial_and_stone_textured_catalog() -> TexturedMeshCatalog {
+        let mut registry = BlockStateRegistry::new();
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(1),
+                ResourceLocation::parse("minecraft:test_partial").unwrap(),
+                [] as [(&str, &str); 0],
+            ))
+            .unwrap();
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(2),
+                ResourceLocation::parse("minecraft:stone").unwrap(),
+                [] as [(&str, &str); 0],
+            ))
+            .unwrap();
+        let mut source = MemoryAssetSource::new();
+        source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/test_partial.json"),
+            r#"{"variants":{"":{"model":"minecraft:block/test_partial"}}}"#,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/stone.json"),
+            r#"{"variants":{"":{"model":"minecraft:block/stone"}}}"#,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/block.json"),
+            "{}",
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/cube.json"),
+            r##"{
+              "parent":"minecraft:block/block",
+              "elements":[{
+                "from":[0,0,0],
+                "to":[16,16,16],
+                "faces":{
+                  "down":{"texture":"#down","cullface":"down"},
+                  "up":{"texture":"#up","cullface":"up"},
+                  "north":{"texture":"#north","cullface":"north"},
+                  "south":{"texture":"#south","cullface":"south"},
+                  "west":{"texture":"#west","cullface":"west"},
+                  "east":{"texture":"#east","cullface":"east"}
+                }
+              }]
+            }"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/cube_all.json"),
+            r##"{
+              "parent":"minecraft:block/cube",
+              "textures":{
+                "particle":"#all",
+                "down":"#all",
+                "up":"#all",
+                "north":"#all",
+                "east":"#all",
+                "south":"#all",
+                "west":"#all"
+              }
+            }"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/stone.json"),
+            r##"{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/stone"}}"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/test_partial.json"),
+            r##"{
+              "textures":{"all":"minecraft:block/stone"},
+              "elements":[{
+                "from":[4,0,4],
+                "to":[12,16,12],
+                "faces":{"up":{"texture":"#all","cullface":"up"}}
+              }]
+            }"##,
+        );
+        source.insert(
+            AssetPath::new("assets/minecraft/textures/block/stone.png"),
+            png_header(16, 16),
+        );
+
+        let index = BlockStateAssetIndex::load_namespace(&source, "minecraft").unwrap();
+        let library = BlockModelLibrary::load_for_blockstates(&source, &index).unwrap();
+        let materials = library
+            .collect_materials_for_models(
+                index
+                    .assets()
+                    .flat_map(|asset| asset.model_refs.iter().cloned()),
+            )
+            .unwrap();
+        let atlas = TextureAtlasPlan::build(&source, materials).unwrap();
+        TexturedMeshCatalog::from_assets(&registry, &index, &library, &atlas).unwrap()
+    }
+
     #[test]
     fn textured_single_block_uses_baked_model_faces_and_atlas_uvs() {
         let catalog = stone_textured_catalog();
@@ -572,6 +667,45 @@ mod tests {
                 .iter()
                 .all(|vertex| (vertex.color[0] - top_face[0].color[0]).abs() < 0.0001),
             "ambientocclusion=false should keep flat face brightness"
+        );
+    }
+
+    #[test]
+    fn textured_mesh_applies_ambient_occlusion_on_partial_faces() {
+        let catalog = partial_and_stone_textured_catalog();
+        let blocks = textured_chunk_blocks(
+            16,
+            &[(0, 0, 0, BlockStateId(1)), (1, 1, 0, BlockStateId(2))],
+        );
+
+        let mesh = build_textured_visible_chunk_mesh(
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+            &catalog,
+        )
+        .unwrap();
+        let partial_top_face = mesh
+            .vertices
+            .chunks_exact(4)
+            .find(|face| {
+                face.iter().all(|vertex| {
+                    (vertex.position[1] - 1.0).abs() < 0.0001
+                        && (0.25..=0.75).contains(&vertex.position[0])
+                        && (0.25..=0.75).contains(&vertex.position[2])
+                })
+            })
+            .expect("partial block top face should be emitted");
+        let min_brightness = partial_top_face
+            .iter()
+            .map(|vertex| vertex.color[0])
+            .fold(f32::INFINITY, f32::min);
+        let max_brightness = partial_top_face
+            .iter()
+            .map(|vertex| vertex.color[0])
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        assert!(
+            min_brightness < max_brightness,
+            "partial faces should receive per-vertex AO instead of flat brightness"
         );
     }
 

@@ -10,7 +10,8 @@ use mclone_core::{
 use mclone_light::{FULL_BRIGHT, pack_light};
 
 use crate::ambient_occlusion::{
-    AmbientOcclusionFace, AmbientOcclusionSampler, BlockPos, calculate_cubic_ambient_occlusion_face,
+    AmbientOcclusionFace, AmbientOcclusionSampler, AmbientOcclusionShape, BlockPos,
+    calculate_ambient_occlusion_face, calculate_ambient_occlusion_shape,
 };
 use crate::catalog::{TexturedBlockFace, TexturedMeshCatalog, TexturedMeshError};
 use crate::data::{
@@ -398,28 +399,28 @@ fn add_textured_chunk_range_to_mesh(
                             continue;
                         }
                     }
-                    let sample_offset = direction_offset(face.cullface.unwrap_or(face.direction));
-                    let packed_light = packed_light_at_world_or_fullbright(
-                        area,
-                        world_x + sample_offset[0],
-                        world_y + sample_offset[1],
-                        world_z + sample_offset[2],
+                    let corners = textured_face_corners(face);
+                    let ao_shape = calculate_ambient_occlusion_shape(
+                        corners,
+                        face.direction,
+                        block_model.collision_shape_full_block,
                     );
-                    let lighting = if block_model.ambient_occlusion
-                        && block_model.light_emission == 0
-                        && face.is_full_cube_side()
-                    {
-                        calculate_cubic_ambient_occlusion_face(
-                            &ao_sampler,
-                            BlockPos::new(world_x, world_y, world_z),
-                            face.direction,
-                            true,
-                            face.shade,
-                        )
-                    } else {
-                        AmbientOcclusionFace::flat(face.direction, face.shade, packed_light)
-                    };
-                    add_textured_face(mesh, world_x, world_y, world_z, face, lighting);
+                    let lighting =
+                        if block_model.ambient_occlusion && block_model.light_emission == 0 {
+                            calculate_ambient_occlusion_face(
+                                &ao_sampler,
+                                BlockPos::new(world_x, world_y, world_z),
+                                face.direction,
+                                ao_shape,
+                                face.shade,
+                            )
+                        } else {
+                            let packed_light = flat_packed_light_for_face(
+                                area, world_x, world_y, world_z, face, ao_shape,
+                            );
+                            AmbientOcclusionFace::flat(face.direction, face.shade, packed_light)
+                        };
+                    add_textured_face(mesh, world_x, world_y, world_z, face, corners, lighting);
                 }
             }
         }
@@ -541,10 +542,10 @@ fn add_textured_face(
     world_y: i32,
     world_z: i32,
     face: &TexturedBlockFace,
+    corners: [[f32; 3]; 4],
     lighting: AmbientOcclusionFace,
 ) {
     let base_index = mesh.vertices.len() as u32;
-    let corners = textured_face_corners(face);
     let uvs = textured_face_uvs(face);
     for index in 0..4 {
         let corner = corners[index];
@@ -771,6 +772,36 @@ fn packed_light_at_world_or_fullbright(
         .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
         .map(|input| input.packed_light_at_or_fullbright(local_x, y, local_z))
         .unwrap_or(FULL_BRIGHT)
+}
+
+fn flat_packed_light_for_face(
+    area: &[TexturedChunkMeshInput<'_>],
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    face: &TexturedBlockFace,
+    ao_shape: AmbientOcclusionShape,
+) -> u32 {
+    let Some(cullface) = face.cullface else {
+        if ao_shape.use_face_neighbor {
+            let offset = direction_offset(face.direction);
+            return packed_light_at_world_or_fullbright(
+                area,
+                world_x + offset[0],
+                world_y + offset[1],
+                world_z + offset[2],
+            );
+        }
+        return packed_light_at_world_or_fullbright(area, world_x, world_y, world_z);
+    };
+
+    let offset = direction_offset(cullface);
+    packed_light_at_world_or_fullbright(
+        area,
+        world_x + offset[0],
+        world_y + offset[1],
+        world_z + offset[2],
+    )
 }
 
 struct TexturedAmbientOcclusionSampler<'a> {

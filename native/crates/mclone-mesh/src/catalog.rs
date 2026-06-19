@@ -78,6 +78,7 @@ pub struct TexturedBlockModel {
     pub light_block: u8,
     pub view_blocking: bool,
     pub solid_render: bool,
+    pub collision_shape_full_block: bool,
     pub shade_brightness: f32,
 }
 
@@ -140,6 +141,7 @@ impl TexturedMeshCatalog {
                     light_block: facts.light_block,
                     view_blocking: facts.view_blocking,
                     solid_render: facts.solid_render,
+                    collision_shape_full_block: facts.collision_shape_full_block,
                     shade_brightness: facts.shade_brightness,
                 },
             );
@@ -194,6 +196,7 @@ struct BlockRenderFacts {
     light_block: u8,
     view_blocking: bool,
     solid_render: bool,
+    collision_shape_full_block: bool,
     shade_brightness: f32,
 }
 
@@ -241,6 +244,7 @@ fn block_render_facts(block: &ResourceLocation, full_cube_model: bool) -> BlockR
         light_block,
         view_blocking: solid_render,
         solid_render,
+        collision_shape_full_block: full_cube_model,
         shade_brightness: if full_cube_model { 0.2 } else { 1.0 },
     }
 }
