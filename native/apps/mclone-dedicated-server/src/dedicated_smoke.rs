@@ -5,9 +5,15 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use mclone_core::ChunkPos;
+use mclone_core::{
+    AIR_BLOCK_STATE_ID, BlockPos, ChunkPos, ChunkSnapshot, Direction, SECTION_HEIGHT, Vec3d,
+    block_to_section_coord, chunk_section_index, local_block_coord, local_section_block_coord,
+};
 use mclone_net::NativeClientSession;
-use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate, SetCarriedItemCommand};
+use mclone_protocol::{
+    AcceptTeleportCommand, ChunkView, ClientCommand, MovePlayerCommand, PlayerActionCommand,
+    PlayerActionKind, ServerUpdate, SetCarriedItemCommand,
+};
 use mclone_server::{IntegratedServer, PlayerChunkTrackingDiagnostics};
 
 use crate::connection::{DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent};
@@ -64,6 +70,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     drop(result_tx);
 
     wait_for_ready_clients(&ready_rx)?;
+    let mut phases = Vec::new();
 
     send_phase_commands(
         &controls,
@@ -83,6 +90,22 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     let phase_one_diagnostics = smoke_server.process_commands(CLIENT_COUNT)?;
     let phase_one_reports = wait_for_client_reports(&result_rx)?;
     assert_phase_one(&phase_one_diagnostics, &phase_one_reports)?;
+    let spawn_ack_commands = teleport_ack_commands(&phase_one_reports)?;
+    phases.push(PhaseReport {
+        name: "initial_disjoint_views",
+        diagnostics: phase_one_diagnostics,
+        client_reports: phase_one_reports,
+    });
+
+    send_indexed_phase_commands(&controls, spawn_ack_commands)?;
+    let spawn_ack_diagnostics = smoke_server.process_commands(CLIENT_COUNT)?;
+    let spawn_ack_reports = wait_for_client_reports(&result_rx)?;
+    assert_spawn_ack_phase(&spawn_ack_diagnostics, &spawn_ack_reports)?;
+    phases.push(PhaseReport {
+        name: "clients_accept_spawn_teleports",
+        diagnostics: spawn_ack_diagnostics,
+        client_reports: spawn_ack_reports,
+    });
 
     send_phase_commands(
         &controls,
@@ -98,6 +121,97 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     let phase_two_diagnostics = smoke_server.process_commands(CLIENT_COUNT)?;
     let phase_two_reports = wait_for_client_reports(&result_rx)?;
     assert_phase_two(&phase_two_diagnostics, &phase_two_reports)?;
+    let break_targets = break_targets_from_snapshot(
+        client_report(&phase_two_reports, 0)?,
+        ChunkPos::new(1, 0),
+        2,
+    )?;
+    phases.push(PhaseReport {
+        name: "one_client_moves_view",
+        diagnostics: phase_two_diagnostics,
+        client_reports: phase_two_reports,
+    });
+
+    let non_overlapping_target = break_targets[0];
+    send_client_command(
+        &controls,
+        0,
+        move_near_block_command(non_overlapping_target),
+    )?;
+    let actor_move_diagnostics = smoke_server.process_commands(1)?;
+    let actor_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    assert_actor_move_phase(&actor_move_diagnostics, &actor_move_reports, 2)?;
+    phases.push(PhaseReport {
+        name: "actor_moves_for_non_overlapping_delta",
+        diagnostics: actor_move_diagnostics,
+        client_reports: actor_move_reports,
+    });
+
+    send_client_command(&controls, 0, break_block_command(non_overlapping_target))?;
+    let _non_overlap_break_diagnostics = smoke_server.process_commands(1)?;
+    let actor_break_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    send_client_command(&controls, 1, poll_command(2))?;
+    let non_overlap_poll_diagnostics = smoke_server.process_commands(1)?;
+    let observer_poll_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    let non_overlap_reports = merge_phase_reports(actor_break_reports, observer_poll_reports);
+    assert_non_overlapping_block_delta_phase(
+        &non_overlap_poll_diagnostics,
+        &non_overlap_reports,
+        non_overlapping_target,
+    )?;
+    phases.push(PhaseReport {
+        name: "non_overlapping_block_delta",
+        diagnostics: non_overlap_poll_diagnostics,
+        client_reports: non_overlap_reports,
+    });
+
+    send_client_command(
+        &controls,
+        1,
+        ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(1, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        }),
+    )?;
+    let overlap_setup_diagnostics = smoke_server.process_commands(1)?;
+    let overlap_setup_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    assert_overlap_setup_phase(&overlap_setup_diagnostics, &overlap_setup_reports)?;
+    phases.push(PhaseReport {
+        name: "observer_overlaps_actor_chunk",
+        diagnostics: overlap_setup_diagnostics,
+        client_reports: overlap_setup_reports,
+    });
+
+    let overlapping_target = break_targets[1];
+    send_client_command(&controls, 0, move_near_block_command(overlapping_target))?;
+    let overlap_move_diagnostics = smoke_server.process_commands(1)?;
+    let overlap_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    assert_actor_move_phase(&overlap_move_diagnostics, &overlap_move_reports, 1)?;
+    phases.push(PhaseReport {
+        name: "actor_moves_for_overlapping_delta",
+        diagnostics: overlap_move_diagnostics,
+        client_reports: overlap_move_reports,
+    });
+
+    send_client_command(&controls, 0, break_block_command(overlapping_target))?;
+    let _overlap_break_diagnostics = smoke_server.process_commands(1)?;
+    let actor_overlap_break_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    send_client_command(&controls, 1, poll_command(3))?;
+    let overlap_poll_diagnostics = smoke_server.process_commands(1)?;
+    let observer_overlap_poll_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    let overlap_reports =
+        merge_phase_reports(actor_overlap_break_reports, observer_overlap_poll_reports);
+    assert_overlapping_block_delta_phase(
+        &overlap_poll_diagnostics,
+        &overlap_reports,
+        overlapping_target,
+    )?;
+    phases.push(PhaseReport {
+        name: "overlapping_block_delta",
+        diagnostics: overlap_poll_diagnostics,
+        client_reports: overlap_reports,
+    });
 
     for control in controls {
         let _ = control.send(SmokeClientControl::Close);
@@ -105,21 +219,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     smoke_server.drain_disconnects(CLIENT_COUNT)?;
     join_clients(clients)?;
 
-    print_smoke_report(
-        seed,
-        &[
-            PhaseReport {
-                name: "initial_disjoint_views",
-                diagnostics: phase_one_diagnostics,
-                client_reports: phase_one_reports,
-            },
-            PhaseReport {
-                name: "one_client_moves_view",
-                diagnostics: phase_two_diagnostics,
-                client_reports: phase_two_reports,
-            },
-        ],
-    );
+    print_smoke_report(seed, &phases);
 
     Ok(())
 }
@@ -303,11 +403,40 @@ fn send_phase_commands(
     Ok(())
 }
 
+fn send_client_command(
+    controls: &[Sender<SmokeClientControl>],
+    index: usize,
+    command: ClientCommand,
+) -> Result<()> {
+    controls
+        .get(index)
+        .with_context(|| format!("missing smoke client control {index}"))?
+        .send(SmokeClientControl::Command(command))
+        .with_context(|| format!("failed to send smoke client {index} command"))
+}
+
+fn send_indexed_phase_commands(
+    controls: &[Sender<SmokeClientControl>],
+    commands: Vec<(usize, ClientCommand)>,
+) -> Result<()> {
+    for (index, command) in commands {
+        send_client_command(controls, index, command)?;
+    }
+    Ok(())
+}
+
 fn wait_for_client_reports(
     result_rx: &Receiver<std::result::Result<SmokeClientReport, String>>,
 ) -> Result<Vec<SmokeClientReport>> {
+    wait_for_client_reports_count(result_rx, CLIENT_COUNT)
+}
+
+fn wait_for_client_reports_count(
+    result_rx: &Receiver<std::result::Result<SmokeClientReport, String>>,
+    count: usize,
+) -> Result<Vec<SmokeClientReport>> {
     let mut reports = Vec::new();
-    while reports.len() < CLIENT_COUNT {
+    while reports.len() < count {
         match result_rx.recv_timeout(CLIENT_REPORT_TIMEOUT) {
             Ok(Ok(report)) => reports.push(report),
             Ok(Err(message)) => bail!(message),
@@ -316,6 +445,15 @@ fn wait_for_client_reports(
     }
     reports.sort_by_key(|report| report.index);
     Ok(reports)
+}
+
+fn merge_phase_reports(
+    mut first: Vec<SmokeClientReport>,
+    second: Vec<SmokeClientReport>,
+) -> Vec<SmokeClientReport> {
+    first.extend(second);
+    first.sort_by_key(|report| report.index);
+    first
 }
 
 fn join_clients(clients: Vec<JoinHandle<()>>) -> Result<()> {
@@ -331,7 +469,7 @@ fn assert_phase_one(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     reports: &[SmokeClientReport],
 ) -> Result<()> {
-    assert_tracking_diagnostics(diagnostics)?;
+    assert_tracking_diagnostics(diagnostics, 2, 2)?;
     let first = client_report(reports, 0)?;
     let second = client_report(reports, 1)?;
 
@@ -344,7 +482,7 @@ fn assert_phase_two(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     reports: &[SmokeClientReport],
 ) -> Result<()> {
-    assert_tracking_diagnostics(diagnostics)?;
+    assert_tracking_diagnostics(diagnostics, 2, 2)?;
     let moved = client_report(reports, 0)?;
     let stationary = client_report(reports, 1)?;
 
@@ -363,7 +501,93 @@ fn assert_phase_two(
     Ok(())
 }
 
-fn assert_tracking_diagnostics(diagnostics: &PlayerChunkTrackingDiagnostics) -> Result<()> {
+fn assert_spawn_ack_phase(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    reports: &[SmokeClientReport],
+) -> Result<()> {
+    assert_tracking_diagnostics(diagnostics, 2, 2)?;
+    for report in reports {
+        if has_snapshot(&report.updates, ChunkPos::new(0, 0))
+            || has_snapshot(&report.updates, ChunkPos::new(4, 0))
+            || has_any_unload(&report.updates)
+            || has_any_section_block_updates(&report.updates)
+        {
+            bail!(
+                "teleport ack for smoke client {} unexpectedly produced chunk updates",
+                report.index
+            );
+        }
+    }
+    Ok(())
+}
+
+fn assert_actor_move_phase(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    reports: &[SmokeClientReport],
+    expected_aggregate_chunks: usize,
+) -> Result<()> {
+    assert_tracking_diagnostics(diagnostics, expected_aggregate_chunks, 2)?;
+    let actor = client_report(reports, 0)?;
+    if has_any_section_block_updates(&actor.updates) {
+        bail!("actor movement phase unexpectedly produced block deltas");
+    }
+    Ok(())
+}
+
+fn assert_non_overlapping_block_delta_phase(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    reports: &[SmokeClientReport],
+    target: BlockPos,
+) -> Result<()> {
+    assert_tracking_diagnostics(diagnostics, 2, 2)?;
+    let actor = client_report(reports, 0)?;
+    let observer = client_report(reports, 1)?;
+    if !has_air_delta_for_block(&actor.updates, target) {
+        bail!("actor did not receive air block delta for non-overlapping break at {target:?}");
+    }
+    if has_any_section_block_updates(&observer.updates) {
+        bail!("non-overlapping observer received block delta for actor-only chunk");
+    }
+    Ok(())
+}
+
+fn assert_overlap_setup_phase(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    reports: &[SmokeClientReport],
+) -> Result<()> {
+    assert_tracking_diagnostics(diagnostics, 1, 2)?;
+    let observer = client_report(reports, 1)?;
+    if !has_snapshot(&observer.updates, ChunkPos::new(1, 0)) {
+        bail!("observer did not receive snapshot when moving into actor's chunk");
+    }
+    if !has_unload(&observer.updates, ChunkPos::new(4, 0)) {
+        bail!("observer did not receive unload for previous chunk when overlapping actor");
+    }
+    Ok(())
+}
+
+fn assert_overlapping_block_delta_phase(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    reports: &[SmokeClientReport],
+    target: BlockPos,
+) -> Result<()> {
+    assert_tracking_diagnostics(diagnostics, 1, 2)?;
+    let actor = client_report(reports, 0)?;
+    let observer = client_report(reports, 1)?;
+    if !has_air_delta_for_block(&actor.updates, target) {
+        bail!("actor did not receive air block delta for overlapping break at {target:?}");
+    }
+    if !has_air_delta_for_block(&observer.updates, target) {
+        bail!("overlapping observer did not receive actor block delta at {target:?}");
+    }
+    Ok(())
+}
+
+fn assert_tracking_diagnostics(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    expected_aggregate_chunks: usize,
+    expected_total_visible_chunks: usize,
+) -> Result<()> {
     if diagnostics.player_count < CLIENT_COUNT {
         bail!(
             "expected at least {CLIENT_COUNT} tracked players, got {}",
@@ -378,15 +602,15 @@ fn assert_tracking_diagnostics(diagnostics: &PlayerChunkTrackingDiagnostics) -> 
     if visible_players != CLIENT_COUNT {
         bail!("expected {CLIENT_COUNT} players with visible chunks, got {visible_players}");
     }
-    if diagnostics.aggregate_player_ticket_chunks != CLIENT_COUNT {
+    if diagnostics.aggregate_player_ticket_chunks != expected_aggregate_chunks {
         bail!(
-            "expected {CLIENT_COUNT} aggregate player-ticket chunks, got {}",
+            "expected {expected_aggregate_chunks} aggregate player-ticket chunks, got {}",
             diagnostics.aggregate_player_ticket_chunks
         );
     }
-    if diagnostics.total_player_visible_chunks != CLIENT_COUNT {
+    if diagnostics.total_player_visible_chunks != expected_total_visible_chunks {
         bail!(
-            "expected {CLIENT_COUNT} total player-visible chunks, got {}",
+            "expected {expected_total_visible_chunks} total player-visible chunks, got {}",
             diagnostics.total_player_visible_chunks
         );
     }
@@ -404,6 +628,26 @@ fn client_report(reports: &[SmokeClientReport], index: usize) -> Result<&SmokeCl
         .iter()
         .find(|report| report.index == index)
         .with_context(|| format!("missing smoke client {index} report"))
+}
+
+fn teleport_ack_commands(reports: &[SmokeClientReport]) -> Result<Vec<(usize, ClientCommand)>> {
+    let mut commands = Vec::new();
+    for index in 0..CLIENT_COUNT {
+        let report = client_report(reports, index)?;
+        let teleport_id = report
+            .updates
+            .iter()
+            .find_map(|update| match update {
+                ServerUpdate::PlayerPosition(update) => Some(update.teleport_id),
+                _ => None,
+            })
+            .with_context(|| format!("smoke client {index} did not receive spawn teleport"))?;
+        commands.push((
+            index,
+            ClientCommand::AcceptTeleport(AcceptTeleportCommand { id: teleport_id }),
+        ));
+    }
+    Ok(commands)
 }
 
 fn ensure_snapshot_only(
@@ -428,6 +672,76 @@ fn ensure_snapshot_only(
     Ok(())
 }
 
+fn break_targets_from_snapshot(
+    report: &SmokeClientReport,
+    pos: ChunkPos,
+    count: usize,
+) -> Result<Vec<BlockPos>> {
+    let snapshot = report
+        .updates
+        .iter()
+        .find_map(|update| match update {
+            ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos == pos => Some(snapshot),
+            _ => None,
+        })
+        .with_context(|| format!("client {} missing snapshot for {pos:?}", report.index))?;
+    let targets = non_air_blocks(snapshot, count);
+    if targets.len() != count {
+        bail!(
+            "snapshot for {pos:?} had {} non-air break targets, expected {count}",
+            targets.len()
+        );
+    }
+    Ok(targets)
+}
+
+fn non_air_blocks(snapshot: &ChunkSnapshot, count: usize) -> Vec<BlockPos> {
+    let mut targets = Vec::new();
+    for section in &snapshot.sections {
+        let block_state_ids = section.unpack_block_state_ids();
+        for local_y in 0..SECTION_HEIGHT {
+            for local_z in 0..16 {
+                for local_x in 0..16 {
+                    let index = chunk_section_index(local_x, local_y, local_z);
+                    if block_state_ids[index] == AIR_BLOCK_STATE_ID {
+                        continue;
+                    }
+                    targets.push(BlockPos::new(
+                        snapshot.pos.min_block_x() + local_x,
+                        section.section_y * SECTION_HEIGHT + local_y,
+                        snapshot.pos.min_block_z() + local_z,
+                    ));
+                    if targets.len() == count {
+                        return targets;
+                    }
+                }
+            }
+        }
+    }
+    targets
+}
+
+fn move_near_block_command(pos: BlockPos) -> ClientCommand {
+    ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        position: Vec3d::new(pos.x as f64 + 0.5, pos.y as f64, pos.z as f64 + 0.5),
+        y_rot_degrees: 0.0,
+        x_rot_degrees: 0.0,
+        on_ground: true,
+    })
+}
+
+fn break_block_command(pos: BlockPos) -> ClientCommand {
+    ClientCommand::PlayerAction(PlayerActionCommand {
+        pos,
+        direction: Direction::Up,
+        kind: PlayerActionKind::DebugInstantBreak,
+    })
+}
+
+fn poll_command(slot: u8) -> ClientCommand {
+    ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot })
+}
+
 fn has_snapshot(updates: &[ServerUpdate], pos: ChunkPos) -> bool {
     updates.iter().any(
         |update| matches!(update, ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos == pos),
@@ -438,6 +752,40 @@ fn has_unload(updates: &[ServerUpdate], pos: ChunkPos) -> bool {
     updates.iter().any(
         |update| matches!(update, ServerUpdate::ChunkUnload { pos: unloaded } if *unloaded == pos),
     )
+}
+
+fn has_any_unload(updates: &[ServerUpdate]) -> bool {
+    updates
+        .iter()
+        .any(|update| matches!(update, ServerUpdate::ChunkUnload { .. }))
+}
+
+fn has_any_section_block_updates(updates: &[ServerUpdate]) -> bool {
+    updates
+        .iter()
+        .any(|update| matches!(update, ServerUpdate::SectionBlockUpdates { .. }))
+}
+
+fn has_air_delta_for_block(updates: &[ServerUpdate], pos: BlockPos) -> bool {
+    let chunk_pos = pos.chunk_pos();
+    let section_y = block_to_section_coord(pos.y);
+    let local_x = local_block_coord(pos.x) as u8;
+    let local_y = local_section_block_coord(pos.y) as u8;
+    let local_z = local_block_coord(pos.z) as u8;
+
+    updates.iter().any(|update| match update {
+        ServerUpdate::SectionBlockUpdates {
+            pos,
+            section_y: update_section_y,
+            updates,
+        } if *pos == chunk_pos && *update_section_y == section_y => updates.iter().any(|update| {
+            update.local_x == local_x
+                && update.local_y == local_y
+                && update.local_z == local_z
+                && update.block_state == AIR_BLOCK_STATE_ID
+        }),
+        _ => false,
+    })
 }
 
 fn snapshot_count(updates: &[ServerUpdate]) -> usize {
@@ -452,6 +800,16 @@ fn unload_count(updates: &[ServerUpdate]) -> usize {
         .iter()
         .filter(|update| matches!(update, ServerUpdate::ChunkUnload { .. }))
         .count()
+}
+
+fn block_delta_count(updates: &[ServerUpdate]) -> usize {
+    updates
+        .iter()
+        .map(|update| match update {
+            ServerUpdate::SectionBlockUpdates { updates, .. } => updates.len(),
+            _ => 0,
+        })
+        .sum()
 }
 
 fn print_smoke_report(seed: i64, phases: &[PhaseReport]) {
@@ -490,8 +848,12 @@ fn print_smoke_report(seed: i64, phases: &[PhaseReport]) {
                 snapshot_count(&report.updates)
             );
             println!(
-                "          \"unload_count\": {}",
+                "          \"unload_count\": {},",
                 unload_count(&report.updates)
+            );
+            println!(
+                "          \"block_delta_count\": {}",
+                block_delta_count(&report.updates)
             );
             println!("        }}{client_comma}");
         }
