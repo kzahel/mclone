@@ -23,6 +23,8 @@ pub const LOCAL_PLAYER_BLOCK_FRICTION: f64 = 0.6;
 pub const LOCAL_PLAYER_FRICTION_MULTIPLIER: f64 = 0.91;
 pub const LOCAL_PLAYER_VERTICAL_DRAG: f64 = 0.98;
 const LOCAL_PLAYER_GROUND_ACCELERATION_NUMERATOR: f64 = 0.21600002;
+const LOCAL_PLAYER_POSITION_SYNC_DELTA_SQR: f64 = 9.0e-4;
+const LOCAL_PLAYER_POSITION_REMINDER_INTERVAL: u32 = 20;
 const COLLISION_EPSILON: f64 = 1.0e-7;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -278,10 +280,92 @@ pub struct LocalPlayerController {
     pose: LocalPlayerPose,
     keys: PlayerInputKeys,
     input: PlayerInput,
+    move_sync: LocalPlayerMoveSync,
     delta_movement: Vec3d,
     horizontal_collision: bool,
     vertical_collision: bool,
     on_ground: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct LocalPlayerMoveSync {
+    last_position: Vec3d,
+    last_y_rot_degrees: f32,
+    last_x_rot_degrees: f32,
+    last_on_ground: bool,
+    position_reminder: u32,
+}
+
+impl LocalPlayerMoveSync {
+    fn next_command(
+        &mut self,
+        pose: LocalPlayerPose,
+        on_ground: bool,
+    ) -> Option<MovePlayerCommand> {
+        let y_rot_degrees = pose.y_rot_degrees as f32;
+        let x_rot_degrees = pose.x_rot_degrees as f32;
+        self.position_reminder = self.position_reminder.saturating_add(1);
+
+        let position_delta = pose.position.subtract(self.last_position);
+        let moved = position_delta.length_sqr() > LOCAL_PLAYER_POSITION_SYNC_DELTA_SQR
+            || self.position_reminder >= LOCAL_PLAYER_POSITION_REMINDER_INTERVAL;
+        let rotated =
+            y_rot_degrees != self.last_y_rot_degrees || x_rot_degrees != self.last_x_rot_degrees;
+
+        let command = match (moved, rotated, self.last_on_ground != on_ground) {
+            (true, true, _) => Some(MovePlayerCommand::PosRot {
+                position: pose.position,
+                y_rot_degrees,
+                x_rot_degrees,
+                on_ground,
+            }),
+            (true, false, _) => Some(MovePlayerCommand::Pos {
+                position: pose.position,
+                on_ground,
+            }),
+            (false, true, _) => Some(MovePlayerCommand::Rot {
+                y_rot_degrees,
+                x_rot_degrees,
+                on_ground,
+            }),
+            (false, false, true) => Some(MovePlayerCommand::StatusOnly { on_ground }),
+            (false, false, false) => None,
+        };
+
+        if moved {
+            self.record_position(pose.position);
+        }
+        if rotated {
+            self.record_rotation(y_rot_degrees, x_rot_degrees);
+        }
+        self.last_on_ground = on_ground;
+
+        command
+    }
+
+    fn pos_rot_command(&mut self, pose: LocalPlayerPose, on_ground: bool) -> MovePlayerCommand {
+        let y_rot_degrees = pose.y_rot_degrees as f32;
+        let x_rot_degrees = pose.x_rot_degrees as f32;
+        self.record_position(pose.position);
+        self.record_rotation(y_rot_degrees, x_rot_degrees);
+        self.last_on_ground = on_ground;
+        MovePlayerCommand::PosRot {
+            position: pose.position,
+            y_rot_degrees,
+            x_rot_degrees,
+            on_ground,
+        }
+    }
+
+    fn record_position(&mut self, position: Vec3d) {
+        self.last_position = position;
+        self.position_reminder = 0;
+    }
+
+    fn record_rotation(&mut self, y_rot_degrees: f32, x_rot_degrees: f32) {
+        self.last_y_rot_degrees = y_rot_degrees;
+        self.last_x_rot_degrees = x_rot_degrees;
+    }
 }
 
 impl LocalPlayerController {
@@ -321,13 +405,14 @@ impl LocalPlayerController {
         self.pose = pose;
     }
 
-    pub fn move_player_command(&self) -> ClientCommand {
-        ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-            position: self.pose.position,
-            y_rot_degrees: self.pose.y_rot_degrees as f32,
-            x_rot_degrees: self.pose.x_rot_degrees as f32,
-            on_ground: self.on_ground,
-        })
+    pub fn next_move_player_command(&mut self) -> Option<ClientCommand> {
+        self.move_sync
+            .next_command(self.pose, self.on_ground)
+            .map(ClientCommand::MovePlayer)
+    }
+
+    pub fn pos_rot_move_player_command(&mut self) -> ClientCommand {
+        ClientCommand::MovePlayer(self.move_sync.pos_rot_command(self.pose, self.on_ground))
     }
 
     pub fn apply_player_position_update(&mut self, update: PlayerPositionUpdate) -> ClientCommand {
@@ -992,7 +1077,7 @@ mod tests {
     }
 
     #[test]
-    fn controller_builds_java_shaped_move_player_command() {
+    fn controller_selects_java_shaped_move_player_command_variants() {
         let mut controller = LocalPlayerController::new();
         controller.set_pose(LocalPlayerPose {
             position: Vec3d::new(1.25, 63.0, -4.5),
@@ -1002,7 +1087,85 @@ mod tests {
         });
 
         assert_eq!(
-            controller.move_player_command(),
+            controller.next_move_player_command(),
+            Some(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                position: Vec3d::new(1.25, 63.0, -4.5),
+                y_rot_degrees: -181.5,
+                x_rot_degrees: 45.25,
+                on_ground: false,
+            }))
+        );
+        assert_eq!(controller.next_move_player_command(), None);
+
+        controller.set_pose(LocalPlayerPose {
+            y_rot_degrees: -90.0,
+            ..controller.pose()
+        });
+        assert_eq!(
+            controller.next_move_player_command(),
+            Some(ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+                y_rot_degrees: -90.0,
+                x_rot_degrees: 45.25,
+                on_ground: false,
+            }))
+        );
+        assert_eq!(controller.next_move_player_command(), None);
+
+        controller.on_ground = true;
+        assert_eq!(
+            controller.next_move_player_command(),
+            Some(ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly {
+                on_ground: true,
+            }))
+        );
+        assert_eq!(controller.next_move_player_command(), None);
+
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(1.31, 63.0, -4.5),
+            ..controller.pose()
+        });
+        assert_eq!(
+            controller.next_move_player_command(),
+            Some(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(1.31, 63.0, -4.5),
+                on_ground: true,
+            }))
+        );
+    }
+
+    #[test]
+    fn controller_forces_position_sync_after_java_reminder_interval() {
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.01, 0.0, 0.0),
+            ..controller.pose()
+        });
+
+        for _ in 0..(LOCAL_PLAYER_POSITION_REMINDER_INTERVAL - 1) {
+            assert_eq!(controller.next_move_player_command(), None);
+        }
+        assert_eq!(
+            controller.next_move_player_command(),
+            Some(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(0.01, 0.0, 0.0),
+                on_ground: false,
+            }))
+        );
+        assert_eq!(controller.next_move_player_command(), None);
+    }
+
+    #[test]
+    fn controller_can_force_pos_rot_sync_after_server_position_update() {
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(1.25, 63.0, -4.5),
+            y_rot_degrees: -181.5,
+            x_rot_degrees: 45.25,
+            eye_height: LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        });
+
+        assert_eq!(
+            controller.pos_rot_move_player_command(),
             ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
                 position: Vec3d::new(1.25, 63.0, -4.5),
                 y_rot_degrees: -181.5,
@@ -1010,6 +1173,7 @@ mod tests {
                 on_ground: false,
             })
         );
+        assert_eq!(controller.next_move_player_command(), None);
     }
 
     #[test]

@@ -84,6 +84,10 @@ complexity.
   permissive posture. The server still rejects non-finite packets, clamps Java
   world bounds, and uses teleport acknowledgement for server-issued positions,
   but finite client movement deltas are trusted.
+- 2026-06-19: Added Java-shaped native client movement packet selection. Normal
+  sync now chooses `PosRot`, `Pos`, `Rot`, `StatusOnly`, or no packet using the
+  reference position delta, rotation delta, on-ground, and 20-call reminder
+  shape; post-correction acknowledgement still forces an explicit `PosRot`.
 
 ## Native Direction
 
@@ -91,8 +95,8 @@ Keep the first native implementation boring, reference-shaped, and permissive:
 
 - protocol carries the same four movement packet variants
 - client movement remains local and responsive
-- native client may continue to send `PosRot` every movement sync until we add
-  packet suppression / variant selection
+- native client chooses the Java-shaped movement packet variant for each normal
+  sync instead of always sending `PosRot`
 - server stores player position, rotation, `on_ground`, packet counters, and
   first/last good positions
 - server command handling remains no-output for valid movement; correction
@@ -134,7 +138,8 @@ Implement the Java packet/state skeleton without full correction yet:
 
 - `MovePlayerCommand::{Pos, PosRot, Rot, StatusOnly}` in `mclone-protocol`
 - protocol codec round trips for all movement variants
-- client movement sync emits `PosRot` through the new variant
+- client movement sync emits Java-shaped `Pos`, `Rot`, `PosRot`, `StatusOnly`,
+  or no packet based on changed fields and the 20-call position reminder
 - server movement state applies missing-position / missing-rotation fallback
 - server rejects non-finite position or rotation before mutating state
 - server clamps horizontal and vertical Java movement bounds
@@ -156,19 +161,16 @@ This slice intentionally does not yet implement, and now defers:
 - wrong-movement / collision rollback
 - server-owned velocity in movement validation
 - active too-fast movement correction
-- movement packet suppression or optimal `Pos`/`Rot`/`StatusOnly` emission
 - remote-player interpolation
 - FPS-style prediction/reconciliation
 
 ## Near-Term Follow-Ups
 
-1. Make the native client choose `Pos`, `Rot`, `PosRot`, or `StatusOnly` based
-   on changed fields instead of always sending `PosRot`.
-2. Move dedicated transport ingestion toward per-connection movement buffering
+1. Move dedicated transport ingestion toward per-connection movement buffering
    that preserves Java-shaped packet counters.
-3. Add remote-player state publication once the dedicated path has multiple
+2. Add remote-player state publication once the dedicated path has multiple
    connected clients worth visualizing.
-4. Revisit the FPS-style authority option only after the Java-shaped path is
+3. Revisit the FPS-style authority option only after the Java-shaped path is
    usable and measured.
 
 ## Deferred Authority Hardening

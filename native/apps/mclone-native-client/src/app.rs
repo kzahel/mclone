@@ -688,10 +688,13 @@ impl ChunkApp {
     }
 
     fn sync_server_player_pose(&mut self) -> Result<bool> {
-        let changed = self
-            .runtime
-            .send_gameplay_command(self.player.move_player_command())
-            .context("failed to sync player pose to server")?;
+        let changed = if let Some(command) = self.player.next_move_player_command() {
+            self.runtime
+                .send_gameplay_command(command)
+                .context("failed to sync player pose to server")?
+        } else {
+            false
+        };
         Ok(changed || self.apply_pending_player_position_updates()?)
     }
 
@@ -704,7 +707,7 @@ impl ChunkApp {
                 .send_gameplay_command(ack)
                 .context("failed to acknowledge player position correction")?;
             self.runtime
-                .send_gameplay_command(self.player.move_player_command())
+                .send_gameplay_command(self.player.pos_rot_move_player_command())
                 .context("failed to sync corrected player pose to server")?;
             log::warn!(
                 "accepted server player position correction id={} feet=({:.2}, {:.2}, {:.2})",
