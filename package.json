@@ -33,6 +33,7 @@
     "observe:chunks": "node --disable-warning=ExperimentalWarning --experimental-transform-types --experimental-loader ./scripts/node-ts-loader.mjs ./scripts/chunk-lifecycle-observatory.ts",
     "native:scheduler:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke --",
     "native:scheduler:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke --",
+    "native:dedicated:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-dedicated-server -- --multi-client-smoke",
     "native:worldgen:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",
     "native:worldgen:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",
     "native:runtime:smoke": "pnpm native:scheduler:smoke",

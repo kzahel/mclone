@@ -9,12 +9,10 @@ publish.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
 log.workspace = true
+mclone-core.workspace = true
 mclone-net.workspace = true
 mclone-protocol.workspace = true
 mclone-server.workspace = true
-
-[dev-dependencies]
-mclone-core.workspace = true
 
 [[bin]]
 name = "mclone-dedicated-server"

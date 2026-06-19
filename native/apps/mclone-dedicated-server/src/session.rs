@@ -1,12 +1,16 @@
 use std::collections::VecDeque;
+#[cfg(test)]
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use mclone_net::{try_read_client_command_frame, write_server_update_batch};
 use mclone_protocol::{ClientCommand, MovePlayerCommand, ServerUpdate};
 use mclone_server::{IntegratedServer, ServerPlayerId};
 
+#[cfg(test)]
+use mclone_net::{try_read_client_command_frame, write_server_update_batch};
+
+#[cfg(test)]
 pub(crate) fn serve_connection(
     stream: &mut (impl Read + Write),
     server: &mut IntegratedServer,
@@ -35,6 +39,7 @@ impl DedicatedSession {
         self.player_id
     }
 
+    #[cfg(test)]
     fn serve(
         &mut self,
         stream: &mut (impl Read + Write),
@@ -138,14 +143,17 @@ impl DedicatedConnectionState {
         self.known_move_packet_count = self.received_move_packet_count;
     }
 
+    #[cfg(test)]
     fn buffered_move_packet_count(&self) -> usize {
         self.pending_movement.len()
     }
 
+    #[cfg(test)]
     const fn received_move_packet_count(&self) -> u32 {
         self.received_move_packet_count
     }
 
+    #[cfg(test)]
     const fn known_move_packet_count(&self) -> u32 {
         self.known_move_packet_count
     }

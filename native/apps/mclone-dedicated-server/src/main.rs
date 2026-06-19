@@ -1,4 +1,5 @@
 mod connection;
+mod dedicated_smoke;
 mod session;
 
 use std::collections::BTreeMap;
@@ -27,6 +28,7 @@ struct Cli {
     listen: String,
     seed: i64,
     serve_once: bool,
+    multi_client_smoke: bool,
 }
 
 impl Default for Cli {
@@ -35,6 +37,7 @@ impl Default for Cli {
             listen: DEFAULT_LISTEN_ADDR.to_owned(),
             seed: DEFAULT_SEED,
             serve_once: false,
+            multi_client_smoke: false,
         }
     }
 }
@@ -54,6 +57,9 @@ impl Cli {
                 }
                 "--serve-once" => {
                     cli.serve_once = true;
+                }
+                "--multi-client-smoke" => {
+                    cli.multi_client_smoke = true;
                 }
                 "--help" | "-h" => {
                     print_help();
@@ -78,12 +84,23 @@ fn print_help() {
     println!(
         "mclone-dedicated-server\n\n\
          Usage:\n\
-           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--serve-once]\n\n\
+           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--serve-once]\n\
+           mclone-dedicated-server --multi-client-smoke [--seed 12345]\n\n\
          The server accepts persistent native TCP command streams from multiple clients. --serve-once is intended for loopback smokes and exits after the first connection closes."
     );
 }
 
 fn run_server(cli: Cli) -> Result<()> {
+    if cli.multi_client_smoke {
+        if cli.serve_once {
+            bail!("--multi-client-smoke cannot be combined with --serve-once");
+        }
+        if cli.listen != DEFAULT_LISTEN_ADDR {
+            bail!("--multi-client-smoke binds its own ephemeral loopback listener");
+        }
+        return dedicated_smoke::run_multi_client_smoke(cli.seed);
+    }
+
     let listener = TcpListener::bind(&cli.listen)
         .with_context(|| format!("failed to bind dedicated server to {}", cli.listen))?;
     let local_addr = listener
@@ -114,6 +131,7 @@ fn run_server_loop(listener: TcpListener, seed: i64, mode: ServerRunMode) -> Res
     let network = DedicatedNetwork::start(listener)?;
     let mut server = IntegratedServer::new(seed);
     let mut sessions = BTreeMap::<DedicatedConnectionId, DedicatedSession>::new();
+    #[cfg(test)]
     let mut completed_connections = 0_usize;
 
     loop {
@@ -168,6 +186,7 @@ fn run_server_loop(listener: TcpListener, seed: i64, mode: ServerRunMode) -> Res
                 reason,
             } => {
                 remove_session_player(&mut server, &mut sessions, id);
+                #[cfg(test)]
                 if command_count > 0 {
                     completed_connections += 1;
                 }
@@ -244,6 +263,25 @@ mod tests {
                 listen: "127.0.0.1:0".to_owned(),
                 seed: -7,
                 serve_once: true,
+                multi_client_smoke: false,
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_multi_client_smoke() {
+        assert_eq!(
+            Cli::parse([
+                "--multi-client-smoke".to_owned(),
+                "--seed".to_owned(),
+                "99".to_owned(),
+            ])
+            .unwrap(),
+            Cli {
+                listen: DEFAULT_LISTEN_ADDR.to_owned(),
+                seed: 99,
+                serve_once: false,
+                multi_client_smoke: true,
             }
         );
     }

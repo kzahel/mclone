@@ -3,7 +3,7 @@ use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -81,6 +81,16 @@ impl DedicatedNetwork {
             .recv()
             .context("dedicated network event channel closed")
     }
+
+    pub(crate) fn recv_timeout(&self, timeout: Duration) -> Result<Option<DedicatedNetworkEvent>> {
+        match self.events.recv_timeout(timeout) {
+            Ok(event) => Ok(Some(event)),
+            Err(RecvTimeoutError::Timeout) => Ok(None),
+            Err(RecvTimeoutError::Disconnected) => {
+                anyhow::bail!("dedicated network event channel closed")
+            }
+        }
+    }
 }
 
 impl Drop for DedicatedNetwork {
@@ -136,6 +146,17 @@ fn connection_loop(
     peer_addr: SocketAddr,
     events: mpsc::Sender<DedicatedNetworkEvent>,
 ) {
+    if let Err(err) = stream.set_nonblocking(false) {
+        let _ = events.send(DedicatedNetworkEvent::Disconnected {
+            id,
+            peer_addr,
+            command_count: 0,
+            reason: Some(format!(
+                "failed to set blocking mode for {id} {peer_addr}: {err}"
+            )),
+        });
+        return;
+    }
     if let Err(err) = stream.set_nodelay(true) {
         log::warn!("failed to set TCP_NODELAY for {id} {peer_addr}: {err}");
     }
