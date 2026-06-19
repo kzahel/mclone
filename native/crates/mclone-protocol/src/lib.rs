@@ -4,13 +4,16 @@ use std::error::Error;
 use std::fmt;
 
 use mclone_core::{
-    BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus,
-    LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection, SECTION_HEIGHT,
+    BlockHitResult, BlockPos, BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot,
+    ChunkStatus, Direction, LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection,
+    SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
+const CLIENT_COMMAND_PLAYER_ACTION: u8 = 2;
+const CLIENT_COMMAND_USE_ITEM_ON: u8 = 3;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -23,9 +26,37 @@ pub struct ChunkView {
     pub chunk_tracking_radius: u32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ClientCommand {
     SetChunkView(ChunkView),
+    PlayerAction(PlayerActionCommand),
+    UseItemOn(UseItemOnCommand),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlayerActionKind {
+    StartDestroyBlock,
+    StopDestroyBlock,
+    AbortDestroyBlock,
+    DebugInstantBreak,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PlayerActionCommand {
+    pub pos: BlockPos,
+    pub direction: Direction,
+    pub kind: PlayerActionKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UseItemOnCommand {
+    pub hit: BlockHitResult,
+    pub action: UseItemOnKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UseItemOnKind {
+    DebugPlaceBlock { block_state: BlockStateId },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -63,6 +94,9 @@ pub enum ProtocolCodecError {
     UnknownClientCommandTag(u8),
     UnknownServerUpdateTag(u8),
     UnknownChunkStatus(u8),
+    UnknownDirection(u8),
+    UnknownPlayerActionKind(u8),
+    UnknownUseItemOnKind(u8),
     LengthOverflow { field: &'static str, len: usize },
     InvalidData(&'static str),
 }
@@ -86,6 +120,15 @@ impl fmt::Display for ProtocolCodecError {
             Self::UnknownChunkStatus(status) => {
                 write!(f, "unknown chunk status tag {status}")
             }
+            Self::UnknownDirection(direction) => {
+                write!(f, "unknown direction tag {direction}")
+            }
+            Self::UnknownPlayerActionKind(kind) => {
+                write!(f, "unknown player action kind tag {kind}")
+            }
+            Self::UnknownUseItemOnKind(kind) => {
+                write!(f, "unknown use-item-on kind tag {kind}")
+            }
             Self::LengthOverflow { field, len } => {
                 write!(f, "{field} length {len} does not fit in u32")
             }
@@ -105,6 +148,14 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
             writer.write_u32(view.render_distance);
             writer.write_u32(view.chunk_tracking_radius);
         }
+        ClientCommand::PlayerAction(command) => {
+            writer.write_u8(CLIENT_COMMAND_PLAYER_ACTION);
+            writer.write_player_action(command);
+        }
+        ClientCommand::UseItemOn(command) => {
+            writer.write_u8(CLIENT_COMMAND_USE_ITEM_ON);
+            writer.write_use_item_on(command);
+        }
     }
     Ok(writer.into_inner())
 }
@@ -123,6 +174,8 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
                 chunk_tracking_radius,
             })
         }
+        CLIENT_COMMAND_PLAYER_ACTION => ClientCommand::PlayerAction(reader.read_player_action()?),
+        CLIENT_COMMAND_USE_ITEM_ON => ClientCommand::UseItemOn(reader.read_use_item_on()?),
         _ => return Err(ProtocolCodecError::UnknownClientCommandTag(tag)),
     };
     reader.finish()?;
@@ -247,6 +300,10 @@ impl ByteWriter {
         self.bytes.extend_from_slice(&value.to_le_bytes());
     }
 
+    fn write_f64(&mut self, value: f64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
     fn write_len(&mut self, field: &'static str, len: usize) -> ProtocolCodecResult<()> {
         let len =
             u32::try_from(len).map_err(|_| ProtocolCodecError::LengthOverflow { field, len })?;
@@ -257,6 +314,51 @@ impl ByteWriter {
     fn write_chunk_pos(&mut self, pos: ChunkPos) {
         self.write_i32(pos.x);
         self.write_i32(pos.z);
+    }
+
+    fn write_block_pos(&mut self, pos: BlockPos) {
+        self.write_i32(pos.x);
+        self.write_i32(pos.y);
+        self.write_i32(pos.z);
+    }
+
+    fn write_direction(&mut self, direction: Direction) {
+        self.write_u8(direction.index());
+    }
+
+    fn write_vec3d(&mut self, value: Vec3d) {
+        self.write_f64(value.x);
+        self.write_f64(value.y);
+        self.write_f64(value.z);
+    }
+
+    fn write_block_hit_result(&mut self, hit: BlockHitResult) {
+        self.write_bool(hit.miss);
+        self.write_vec3d(hit.location);
+        self.write_direction(hit.direction);
+        self.write_block_pos(hit.block_pos);
+        self.write_bool(hit.inside);
+    }
+
+    fn write_player_action(&mut self, command: &PlayerActionCommand) {
+        self.write_block_pos(command.pos);
+        self.write_direction(command.direction);
+        self.write_u8(match command.kind {
+            PlayerActionKind::StartDestroyBlock => 0,
+            PlayerActionKind::StopDestroyBlock => 1,
+            PlayerActionKind::AbortDestroyBlock => 2,
+            PlayerActionKind::DebugInstantBreak => 3,
+        });
+    }
+
+    fn write_use_item_on(&mut self, command: &UseItemOnCommand) {
+        self.write_block_hit_result(command.hit);
+        match command.action {
+            UseItemOnKind::DebugPlaceBlock { block_state } => {
+                self.write_u8(0);
+                self.write_u32(block_state.0);
+            }
+        }
     }
 
     fn write_status(&mut self, status: ChunkStatus) {
@@ -393,12 +495,80 @@ impl<'a> ByteReader<'a> {
         Ok(u64::from_le_bytes(self.read_exact::<8>()?))
     }
 
+    fn read_f64(&mut self) -> ProtocolCodecResult<f64> {
+        Ok(f64::from_le_bytes(self.read_exact::<8>()?))
+    }
+
     fn read_len(&mut self) -> ProtocolCodecResult<usize> {
         Ok(self.read_u32()? as usize)
     }
 
     fn read_chunk_pos(&mut self) -> ProtocolCodecResult<ChunkPos> {
         Ok(ChunkPos::new(self.read_i32()?, self.read_i32()?))
+    }
+
+    fn read_block_pos(&mut self) -> ProtocolCodecResult<BlockPos> {
+        Ok(BlockPos::new(
+            self.read_i32()?,
+            self.read_i32()?,
+            self.read_i32()?,
+        ))
+    }
+
+    fn read_direction(&mut self) -> ProtocolCodecResult<Direction> {
+        let direction = self.read_u8()?;
+        Direction::from_index(direction).ok_or(ProtocolCodecError::UnknownDirection(direction))
+    }
+
+    fn read_vec3d(&mut self) -> ProtocolCodecResult<Vec3d> {
+        let value = Vec3d::new(self.read_f64()?, self.read_f64()?, self.read_f64()?);
+        if !value.is_finite() {
+            return Err(ProtocolCodecError::InvalidData(
+                "vec3 contains non-finite value",
+            ));
+        }
+        Ok(value)
+    }
+
+    fn read_block_hit_result(&mut self) -> ProtocolCodecResult<BlockHitResult> {
+        let miss = self.read_bool()?;
+        let location = self.read_vec3d()?;
+        let direction = self.read_direction()?;
+        let block_pos = self.read_block_pos()?;
+        let inside = self.read_bool()?;
+        Ok(if miss {
+            BlockHitResult::miss(location, direction, block_pos)
+        } else {
+            BlockHitResult::new(location, direction, block_pos, inside)
+        })
+    }
+
+    fn read_player_action(&mut self) -> ProtocolCodecResult<PlayerActionCommand> {
+        let pos = self.read_block_pos()?;
+        let direction = self.read_direction()?;
+        let kind = match self.read_u8()? {
+            0 => PlayerActionKind::StartDestroyBlock,
+            1 => PlayerActionKind::StopDestroyBlock,
+            2 => PlayerActionKind::AbortDestroyBlock,
+            3 => PlayerActionKind::DebugInstantBreak,
+            kind => return Err(ProtocolCodecError::UnknownPlayerActionKind(kind)),
+        };
+        Ok(PlayerActionCommand {
+            pos,
+            direction,
+            kind,
+        })
+    }
+
+    fn read_use_item_on(&mut self) -> ProtocolCodecResult<UseItemOnCommand> {
+        let hit = self.read_block_hit_result()?;
+        let action = match self.read_u8()? {
+            0 => UseItemOnKind::DebugPlaceBlock {
+                block_state: BlockStateId(self.read_u32()?),
+            },
+            kind => return Err(ProtocolCodecError::UnknownUseItemOnKind(kind)),
+        };
+        Ok(UseItemOnCommand { hit, action })
     }
 
     fn read_status(&mut self) -> ProtocolCodecResult<ChunkStatus> {
@@ -560,6 +730,38 @@ mod tests {
             center: ChunkPos::new(-12, 34),
             render_distance: 3,
             chunk_tracking_radius: 4,
+        });
+
+        let bytes = encode_client_command(&command).unwrap();
+
+        assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
+    fn client_command_codec_round_trips_player_action() {
+        let command = ClientCommand::PlayerAction(PlayerActionCommand {
+            pos: BlockPos::new(-1, 64, 12),
+            direction: Direction::North,
+            kind: PlayerActionKind::DebugInstantBreak,
+        });
+
+        let bytes = encode_client_command(&command).unwrap();
+
+        assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
+    fn client_command_codec_round_trips_use_item_on() {
+        let command = ClientCommand::UseItemOn(UseItemOnCommand {
+            hit: BlockHitResult::new(
+                Vec3d::new(1.25, 64.0, -3.5),
+                Direction::Up,
+                BlockPos::new(1, 63, -4),
+                false,
+            ),
+            action: UseItemOnKind::DebugPlaceBlock {
+                block_state: BlockStateId(42),
+            },
         });
 
         let bytes = encode_client_command(&command).unwrap();

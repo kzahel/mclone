@@ -7,8 +7,12 @@
 
 use std::time::Duration;
 
-use mclone_core::ChunkPos;
-use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
+use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, HitResultType};
+use mclone_protocol::{
+    ChunkView, ClientCommand, PlayerActionCommand, PlayerActionKind, ServerUpdate,
+    UseItemOnCommand, UseItemOnKind,
+};
+use mclone_worldgen::block::RawBlockId;
 
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
@@ -98,6 +102,8 @@ impl IntegratedServer {
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         match command {
             ClientCommand::SetChunkView(view) => self.set_chunk_view(view),
+            ClientCommand::PlayerAction(command) => Ok(self.handle_player_action(command)),
+            ClientCommand::UseItemOn(command) => Ok(self.handle_use_item_on(command)),
         }
     }
 
@@ -278,6 +284,40 @@ impl IntegratedServer {
         Ok(self.apply_scheduler_events(events))
     }
 
+    fn handle_player_action(&mut self, command: PlayerActionCommand) -> Vec<ServerUpdate> {
+        if command.kind == PlayerActionKind::DebugInstantBreak {
+            self.set_block_debug(command.pos, AIR_BLOCK_STATE_ID);
+        }
+        self.drain_pending_block_delta_updates()
+    }
+
+    fn handle_use_item_on(&mut self, command: UseItemOnCommand) -> Vec<ServerUpdate> {
+        match command.action {
+            UseItemOnKind::DebugPlaceBlock { block_state } => {
+                if command.hit.hit_type() == HitResultType::Block {
+                    let target = command.hit.block_pos.relative(command.hit.direction);
+                    self.set_block_debug(target, block_state);
+                }
+            }
+        }
+        self.drain_pending_block_delta_updates()
+    }
+
+    fn set_block_debug(&mut self, pos: BlockPos, block_state: BlockStateId) -> bool {
+        let Some(block_id) = raw_block_id_from_block_state(block_state) else {
+            return false;
+        };
+        self.scheduler.set_block_at_world(pos, block_id)
+    }
+
+    fn drain_pending_block_delta_updates(&mut self) -> Vec<ServerUpdate> {
+        self.scheduler
+            .drain_pending_block_delta_events()
+            .into_iter()
+            .filter_map(server_update_from_scheduler_event)
+            .collect()
+    }
+
     fn apply_scheduler_events(&mut self, events: Vec<ChunkSchedulerEvent>) -> Vec<ServerUpdate> {
         let mut updates = Vec::new();
         for event in events {
@@ -295,6 +335,10 @@ impl IntegratedServer {
         }
         updates
     }
+}
+
+fn raw_block_id_from_block_state(block_state: BlockStateId) -> Option<RawBlockId> {
+    RawBlockId::try_from(block_state.0).ok()
 }
 
 fn server_update_from_scheduler_event(event: ChunkSchedulerEvent) -> Option<ServerUpdate> {
@@ -322,7 +366,9 @@ fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_core::{BlockHitResult, BlockStateId, Direction, Vec3d};
     use mclone_protocol::ServerUpdate;
+    use mclone_worldgen::block::{DIRT, STONE, generated_block_state_id};
 
     fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
         report
@@ -334,6 +380,27 @@ mod tests {
                 _ => None,
             })
             .expect("simulation tick should emit a TimeUpdate")
+    }
+
+    fn load_center_chunk(server: &mut IntegratedServer) {
+        server.set_lighting_enabled(false);
+        server
+            .try_handle_command(ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }))
+            .expect("set chunk view");
+        for _ in 0..60_000 {
+            server.try_poll().expect("poll");
+            if server.pending_job_count() == 0 {
+                return;
+            }
+            if server.pending_publication_count() == 0 {
+                server.wait_for_worldgen_completion(Duration::from_secs(1));
+            }
+        }
+        panic!("timed out loading center chunk");
     }
 
     #[test]
@@ -355,5 +422,61 @@ mod tests {
             assert_eq!(server.day_time(), 23000);
             assert_eq!(last_time_update(&report), 23000);
         }
+    }
+
+    #[test]
+    fn debug_break_command_mutates_block_and_returns_section_delta() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        let pos = BlockPos::new(8, 80, 8);
+        assert!(server.scheduler_mut().set_block_at_world(pos, STONE));
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates = server
+            .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
+                pos,
+                direction: Direction::Up,
+                kind: PlayerActionKind::DebugInstantBreak,
+            }))
+            .expect("break command");
+
+        assert_eq!(server.scheduler().block_at_world(pos), Some(0));
+        assert!(updates.iter().any(|update| {
+            match update {
+                ServerUpdate::SectionBlockUpdates { updates, .. } => updates
+                    .iter()
+                    .any(|update| update.block_state == AIR_BLOCK_STATE_ID),
+                _ => false,
+            }
+        }));
+    }
+
+    #[test]
+    fn debug_place_command_places_adjacent_to_hit_face() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        let clicked = BlockPos::new(8, 80, 8);
+        let target = clicked.relative(Direction::Up);
+        assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates = server
+            .try_handle_command(ClientCommand::UseItemOn(UseItemOnCommand {
+                hit: BlockHitResult::new(Vec3d::new(8.5, 81.0, 8.5), Direction::Up, clicked, false),
+                action: UseItemOnKind::DebugPlaceBlock {
+                    block_state: generated_block_state_id(DIRT),
+                },
+            }))
+            .expect("place command");
+
+        assert_eq!(server.scheduler().block_at_world(target), Some(DIRT));
+        assert!(updates.iter().any(|update| {
+            match update {
+                ServerUpdate::SectionBlockUpdates { updates, .. } => updates
+                    .iter()
+                    .any(|update| update.block_state == BlockStateId(DIRT as u32)),
+                _ => false,
+            }
+        }));
     }
 }

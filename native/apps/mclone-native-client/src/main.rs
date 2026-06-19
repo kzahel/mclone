@@ -355,6 +355,8 @@ mod tests {
             "pause".to_owned(),
             "--screenshot-debug-pane".to_owned(),
             "true".to_owned(),
+            "--screenshot-scripted-interaction".to_owned(),
+            "true".to_owned(),
             "--force-fullbright".to_owned(),
         ])
         .unwrap();
@@ -373,6 +375,7 @@ mod tests {
                     },
                     ui: HeadlessScreenshotUi::Pause,
                     debug_pane: true,
+                    scripted_interaction: true,
                 },
             }
         );

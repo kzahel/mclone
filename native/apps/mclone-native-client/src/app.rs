@@ -2,6 +2,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use mclone_client::ClientInteractionController;
+use mclone_core::Vec3d;
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, TexturedSectionDrawResources,
@@ -199,6 +201,7 @@ pub(crate) fn render_full_frame(
 struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
+    interaction: ClientInteractionController,
     render_options: TexturedSectionRenderOptions,
     frame_pacing: FramePacing,
     ui: NativeUi,
@@ -229,6 +232,7 @@ impl ChunkApp {
         Self {
             runtime,
             spectator,
+            interaction: ClientInteractionController::new(),
             render_options,
             frame_pacing: FramePacing::default(),
             ui: NativeUi::new_ingame(render_distance),
@@ -588,6 +592,36 @@ impl ChunkApp {
             force_fullbright: render_options.force_fullbright,
         }
     }
+
+    fn handle_world_mouse_pressed(&mut self, button: MouseButton) -> Result<()> {
+        let hit = self.interaction.pick_block(
+            &self.runtime.client,
+            vec3d_from_glam(self.spectator.position),
+            vec3d_from_glam(self.spectator.forward()),
+        );
+        let command = match button {
+            MouseButton::Left => self.interaction.debug_instant_break_command(hit),
+            MouseButton::Right => self.interaction.debug_place_block_command(hit),
+            _ => None,
+        };
+        let Some(command) = command else {
+            return Ok(());
+        };
+        let changed = self
+            .runtime
+            .send_gameplay_command(command)
+            .context("failed to send gameplay interaction command")?;
+        log::info!(
+            "gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
+            button,
+            hit.block_pos.x,
+            hit.block_pos.y,
+            hit.block_pos.z,
+            hit.direction,
+            changed
+        );
+        Ok(())
+    }
 }
 
 fn effective_render_options_for_camera(
@@ -598,6 +632,10 @@ fn effective_render_options_for_camera(
         render_options.section_occlusion_culling = false;
     }
     render_options
+}
+
+fn vec3d_from_glam(value: glam::Vec3) -> Vec3d {
+    Vec3d::new(value.x as f64, value.y as f64, value.z as f64)
 }
 
 pub(crate) fn record_render_section_update_stats(
@@ -886,9 +924,18 @@ impl ApplicationHandler for ChunkApp {
                     return;
                 }
                 if state == ElementState::Pressed {
+                    let was_locked = self.mouse_locked;
                     self.mouse_lock_requested = true;
                     self.last_cursor = None;
                     self.sync_mouse_lock();
+                    if was_locked
+                        && matches!(button, MouseButton::Left | MouseButton::Right)
+                        && let Err(err) = self.handle_world_mouse_pressed(button)
+                    {
+                        log::error!("failed to handle world mouse input: {err:#}");
+                        event_loop.exit();
+                        return;
+                    }
                     self.schedule_next_redraw(event_loop);
                 } else if button == MouseButton::Left || button == MouseButton::Right {
                     self.last_cursor = None;

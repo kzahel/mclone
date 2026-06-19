@@ -93,21 +93,47 @@ pub struct ServerSimulationTickReport {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) type TimingSample = Instant;
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) type TimingSample = ();
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn simulation_timing_start() -> Option<Instant> {
-    Some(Instant::now())
+    timing_start()
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn simulation_timing_start() -> Option<()> {
-    None
+    timing_start()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn simulation_timing_elapsed_us(start: Option<Instant>) -> u128 {
-    start.map_or(0, |start| start.elapsed().as_micros())
+    timing_elapsed_us(start)
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn simulation_timing_elapsed_us(_start: Option<()>) -> u128 {
+    timing_elapsed_us(_start)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn timing_start() -> Option<TimingSample> {
+    Some(Instant::now())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn timing_start() -> Option<TimingSample> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn timing_elapsed_us(start: Option<TimingSample>) -> u128 {
+    start.map_or(0, |start| start.elapsed().as_micros())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn timing_elapsed_us(_start: Option<TimingSample>) -> u128 {
     0
 }

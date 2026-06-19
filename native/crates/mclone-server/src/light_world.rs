@@ -8,7 +8,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::time::Instant;
 
 use mclone_core::{
     CHUNK_WIDTH, ChunkPos, PackedLightSection, SECTION_HEIGHT, block_to_section_coord,
@@ -22,6 +21,7 @@ use mclone_worldgen::block::{RawBlockId, block_light_emission, block_light_opaci
 
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
+use crate::timing::{timing_elapsed_us, timing_start};
 
 #[derive(Debug)]
 pub(crate) struct RetainedInitialLightState {
@@ -49,13 +49,13 @@ impl RetainedInitialLightState {
             return Vec::new();
         }
 
-        let total_start = Instant::now();
+        let total_start = timing_start();
         let mut timing = LevelLightComputationTiming::default();
         let min_y = statuses[0].feature_snapshot.min_y;
         let height = statuses[0].feature_snapshot.height;
         let input_chunks = batch_input_chunks(&statuses);
 
-        let start = Instant::now();
+        let start = timing_start();
         let changed_chunks = {
             let mut world = self.world.borrow_mut();
             world.configure(min_y, height);
@@ -64,19 +64,19 @@ impl RetainedInitialLightState {
                 .filter_map(|(&pos, blocks)| world.upsert_chunk(pos, blocks).then_some(pos))
                 .collect::<Vec<_>>()
         };
-        timing.world_init_us = start.elapsed().as_micros();
+        timing.world_init_us = timing_elapsed_us(start);
 
-        let start = Instant::now();
+        let start = timing_start();
         let active_sections = self.world.borrow().section_statuses_for(&changed_chunks);
-        timing.active_sections_us = start.elapsed().as_micros();
-        let start = Instant::now();
+        timing.active_sections_us = timing_elapsed_us(start);
+        let start = timing_start();
         let block_sources = self
             .world
             .borrow()
             .block_emission_sources_for(&changed_chunks);
-        timing.block_source_scan_us = start.elapsed().as_micros();
+        timing.block_source_scan_us = timing_elapsed_us(start);
 
-        let start = Instant::now();
+        let start = timing_start();
         for (section, is_empty) in active_sections {
             self.engine.update_section_status(section, is_empty);
         }
@@ -84,17 +84,17 @@ impl RetainedInitialLightState {
             self.engine
                 .enable_light_sources(section_as_long(chunk_pos.x, 0, chunk_pos.z), true);
         }
-        timing.section_setup_us = start.elapsed().as_micros();
+        timing.section_setup_us = timing_elapsed_us(start);
         timing.sky_source_scan_us = 0;
         timing.sky_source_enqueue_us = 0;
-        let start = Instant::now();
+        let start = timing_start();
         for (source, emission) in block_sources {
             self.engine.on_block_emission_increase(source, emission);
         }
-        timing.block_source_enqueue_us = start.elapsed().as_micros();
-        let start = Instant::now();
+        timing.block_source_enqueue_us = timing_elapsed_us(start);
+        let start = timing_start();
         let run_report = self.engine.run_all_updates_report();
-        timing.run_updates_us = start.elapsed().as_micros();
+        timing.run_updates_us = timing_elapsed_us(start);
         timing.run_update_iterations = run_report.iterations;
         timing.block_run_update_calls = run_report.block.calls;
         timing.sky_run_update_calls = run_report.sky.calls;
@@ -107,7 +107,7 @@ impl RetainedInitialLightState {
         timing.block_run_updates_us = run_report.block.run_updates_us;
         timing.sky_run_updates_us = run_report.sky.run_updates_us;
 
-        let start = Instant::now();
+        let start = timing_start();
         let min_section_y = block_to_section_coord(min_y);
         let section_count = height / SECTION_HEIGHT;
         let mut sections_by_chunk = BTreeMap::new();
@@ -117,8 +117,8 @@ impl RetainedInitialLightState {
                 collect_light_sections(&self.engine, status.pos, min_section_y, section_count),
             );
         }
-        timing.collect_sections_us = start.elapsed().as_micros();
-        timing.total_us = total_start.elapsed().as_micros();
+        timing.collect_sections_us = timing_elapsed_us(start);
+        timing.total_us = timing_elapsed_us(total_start);
 
         statuses
             .into_iter()

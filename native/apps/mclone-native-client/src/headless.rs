@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+use mclone_client::ClientInteractionController;
+use mclone_core::{HitResultType, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
@@ -73,6 +75,9 @@ pub(crate) fn run_headless_screenshot(
     let (world_x, world_z) = spectator.block_column();
     if let Some(surface_y) = runtime.highest_non_air_block_y_at_world(world_x, world_z) {
         spectator.place_above_surface(surface_y);
+    }
+    if options.scripted_interaction {
+        apply_scripted_interaction(&mut runtime, &mut spectator)?;
     }
     let section_update = runtime.sync_all_render_sections(spectator.position)?;
     let sections = runtime.cached_sections();
@@ -173,6 +178,55 @@ pub(crate) fn run_headless_screenshot(
         drawn_index_count: summary.drawn_index_count,
         gui_command_count: summary.gui_command_count,
     })
+}
+
+fn apply_scripted_interaction(
+    runtime: &mut WindowSceneRuntime,
+    spectator: &mut SpectatorCamera,
+) -> Result<()> {
+    let (base_x, base_z) = spectator.block_column();
+    let target_x = base_x;
+    let target_z = base_z + 4;
+    let surface_y = runtime
+        .highest_non_air_block_y_at_world(target_x, target_z)
+        .with_context(|| {
+            format!("no loaded surface for scripted interaction at ({target_x}, {target_z})")
+        })?;
+    let interaction = ClientInteractionController::new();
+    let hit = interaction.pick_block(
+        &runtime.client,
+        Vec3d::new(
+            target_x as f64 + 0.5,
+            surface_y as f64 + 3.0,
+            target_z as f64 + 0.5,
+        ),
+        Vec3d::new(0.0, -1.0, 0.0),
+    );
+    if hit.hit_type() != HitResultType::Block {
+        bail!("scripted interaction ray missed target column");
+    }
+    let break_command = interaction
+        .debug_instant_break_command(hit)
+        .context("scripted interaction did not produce break command")?;
+    let break_changed = runtime.send_gameplay_command(break_command)?;
+    let place_command = interaction
+        .debug_place_block_command(hit)
+        .context("scripted interaction did not produce place command")?;
+    let place_changed = runtime.send_gameplay_command(place_command)?;
+    if !break_changed || !place_changed {
+        bail!(
+            "scripted interaction did not mutate both blocks: break_changed={break_changed} place_changed={place_changed}"
+        );
+    }
+
+    spectator.position = glam::Vec3::new(
+        target_x as f32 + 0.5,
+        surface_y as f32 + 5.0,
+        target_z as f32 - 6.0,
+    );
+    spectator.yaw = 0.0;
+    spectator.pitch = -0.7;
+    Ok(())
 }
 
 fn chunk_capture_scenarios(scene: &SceneOptions) -> [(&'static str, ChunkCamera); 3] {

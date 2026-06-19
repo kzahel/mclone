@@ -2,8 +2,14 @@
 
 use std::collections::BTreeMap;
 
+mod interaction;
+
 use mclone_core::{CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
 use mclone_protocol::{ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate};
+
+pub use interaction::{
+    CREATIVE_PICK_RANGE, ClientInteractionController, DEFAULT_DEBUG_PLACE_BLOCK,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClientHost {

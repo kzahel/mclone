@@ -5,7 +5,7 @@
 //! worldgen mailbox kind, and the dimension/level distance constants. Behavior
 //! that reaches into scheduler/holder/fluid state stays in the parent module.
 
-use mclone_core::ChunkPos;
+use mclone_core::{BlockPos, ChunkPos};
 use mclone_worldgen::block::{
     LAVA, RawBlockId, WATER, is_lava, is_water, lava_block_for_level, water_block_for_level,
 };
@@ -44,30 +44,7 @@ impl FullChunkStatus {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct WorldBlockPos {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
-impl WorldBlockPos {
-    pub const fn new(x: i32, y: i32, z: i32) -> Self {
-        Self { x, y, z }
-    }
-
-    pub(crate) fn below(self) -> Self {
-        Self::new(self.x, self.y - 1, self.z)
-    }
-
-    pub(crate) fn offset(self, dx: i32, dy: i32, dz: i32) -> Self {
-        Self::new(self.x + dx, self.y + dy, self.z + dz)
-    }
-
-    pub(crate) fn chunk_pos(self) -> ChunkPos {
-        ChunkPos::from_block_coords(self.x, self.z)
-    }
-}
+pub type WorldBlockPos = BlockPos;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub enum FluidKind {

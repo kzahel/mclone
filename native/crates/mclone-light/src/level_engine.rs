@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
 use crate::{
@@ -7,6 +8,32 @@ use crate::{
 
 pub const MAX_SOURCE_LEVEL: u8 = 15;
 pub const LIGHT_SECTION_PADDING: i32 = 1;
+
+#[cfg(not(target_arch = "wasm32"))]
+type TimingSample = Instant;
+
+#[cfg(target_arch = "wasm32")]
+type TimingSample = ();
+
+#[cfg(not(target_arch = "wasm32"))]
+fn timing_start() -> Option<TimingSample> {
+    Some(Instant::now())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn timing_start() -> Option<TimingSample> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn timing_elapsed_us(start: Option<TimingSample>) -> u128 {
+    start.map_or(0, |start| start.elapsed().as_micros())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn timing_elapsed_us(_start: Option<TimingSample>) -> u128 {
+    0
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct LightLayerRunReport {
@@ -146,25 +173,23 @@ impl<B: BlockLightWorld, S: SkyLightWorld> LevelLightEngine<B, S> {
         }
         report.iterations = 1;
         let block_budget = budget / 2;
-        let start = Instant::now();
+        let start = timing_start();
         let (remaining_block_budget, block_report) =
             self.block_engine.run_updates_report(block_budget);
         report
             .block
-            .record_call(block_report, start.elapsed().as_micros());
+            .record_call(block_report, timing_elapsed_us(start));
         let sky_budget = budget - block_budget + remaining_block_budget;
-        let start = Instant::now();
+        let start = timing_start();
         let (remaining_sky_budget, sky_report) = self.sky_engine.run_updates_report(sky_budget);
-        report
-            .sky
-            .record_call(sky_report, start.elapsed().as_micros());
+        report.sky.record_call(sky_report, timing_elapsed_us(start));
         if remaining_block_budget == 0 && remaining_sky_budget > 0 {
-            let start = Instant::now();
+            let start = timing_start();
             let (remaining, block_report) =
                 self.block_engine.run_updates_report(remaining_sky_budget);
             report
                 .block
-                .record_call(block_report, start.elapsed().as_micros());
+                .record_call(block_report, timing_elapsed_us(start));
             (remaining, report)
         } else {
             (remaining_sky_budget, report)

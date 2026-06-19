@@ -7,7 +7,7 @@
 
 use std::collections::VecDeque;
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::{sync::mpsc, thread};
@@ -17,6 +17,7 @@ use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_status::PendingLightStatusBatch;
 use crate::light_world::RetainedInitialLightState;
+use crate::timing::{timing_elapsed_us, timing_start};
 
 #[derive(Debug)]
 pub(crate) struct CompletedLightStatus {
@@ -33,9 +34,9 @@ impl CompletedLightStatus {
         light_state: &mut RetainedInitialLightState,
         batch: PendingLightStatusBatch,
     ) -> Vec<Self> {
-        let start = Instant::now();
+        let start = timing_start();
         let completed = light_state.compute_batch(batch);
-        let compute_us = start.elapsed().as_micros();
+        let compute_us = timing_elapsed_us(start);
         completed
             .into_iter()
             .enumerate()

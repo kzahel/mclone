@@ -11,7 +11,7 @@ use mclone_core::{
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_net::{LocalTransport, request_server_updates};
-use mclone_protocol::{ChunkView, SectionBlockUpdate, ServerUpdate};
+use mclone_protocol::{ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate};
 use mclone_server::IntegratedServer;
 
 use crate::MIN_RENDER_DISTANCE;
@@ -335,6 +335,14 @@ impl WindowSceneRuntime {
             chunk_tracking_radius,
         });
 
+        self.dispatch_client_command(command)
+    }
+
+    pub(crate) fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
+        self.dispatch_client_command(command)
+    }
+
+    fn dispatch_client_command(&mut self, command: ClientCommand) -> Result<bool> {
         if let Some(remote_addr) = &self.remote_addr {
             let updates = request_server_updates(remote_addr.as_str(), &command)
                 .with_context(|| format!("failed to request chunk updates from {remote_addr}"))?;
