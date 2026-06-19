@@ -22,6 +22,8 @@ const MIN_UI_RENDER_DISTANCE: i32 = MIN_RENDER_DISTANCE;
 pub(crate) struct DebugPaneStats {
     pub(crate) position: Vec3,
     pub(crate) speed: f32,
+    pub(crate) movement_mode: &'static str,
+    pub(crate) on_ground: bool,
     pub(crate) runtime: WindowRuntimeStats,
     pub(crate) render: RenderStreamStats,
     pub(crate) frame: FrameTimingStats,
@@ -61,6 +63,11 @@ impl DebugPaneStats {
             format!(
                 "CHUNK {} {} SPEED {:.1}",
                 self.runtime.interest_center.x, self.runtime.interest_center.z, self.speed
+            ),
+            format!(
+                "MODE {} GROUND {}",
+                self.movement_mode,
+                if self.on_ground { "Y" } else { "N" }
             ),
             format!(
                 "VIEW R{} T{}",
@@ -710,6 +717,8 @@ mod tests {
         let stats = DebugPaneStats {
             position: Vec3::new(1.25, 64.0, -2.5),
             speed: 32.0,
+            movement_mode: "WALK",
+            on_ground: true,
             runtime: WindowRuntimeStats {
                 interest_center: ChunkPos::new(3, -4),
                 render_distance: 2,
@@ -781,8 +790,9 @@ mod tests {
         assert_eq!(lines[0], "DEBUG");
         assert_eq!(lines[1], "POS 1.2 64.0 -2.5");
         assert_eq!(lines[2], "CHUNK 3 -4 SPEED 32.0");
-        assert_eq!(lines[3], "VIEW R2 T3");
-        assert_eq!(lines[4], "OCC ON  LIGHT");
+        assert_eq!(lines[3], "MODE WALK GROUND Y");
+        assert_eq!(lines[4], "VIEW R2 T3");
+        assert_eq!(lines[5], "OCC ON  LIGHT");
         assert!(lines.iter().any(|line| line == "BUDGET 8.3MS FRAME 16.7MS"));
         assert!(lines.iter().any(|line| line == "OVER 3/1/0 WORST 33.4"));
 

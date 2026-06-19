@@ -12,11 +12,13 @@ pub use interaction::{
     CREATIVE_PICK_RANGE, ClientInteractionController, DEFAULT_DEBUG_PLACE_BLOCK,
 };
 pub use player::{
-    CollisionMovementResult, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_STANDING_HEIGHT,
-    LOCAL_PLAYER_STANDING_WIDTH, LOCAL_PLAYER_X_ROT_LIMIT_DEGREES, LocalPlayerController,
+    CollisionMovementResult, LOCAL_PLAYER_AIR_SPEED, LOCAL_PLAYER_BASE_MOVEMENT_SPEED,
+    LOCAL_PLAYER_GRAVITY, LOCAL_PLAYER_JUMP_POWER, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    LOCAL_PLAYER_STANDING_HEIGHT, LOCAL_PLAYER_STANDING_WIDTH, LOCAL_PLAYER_TICKS_PER_SECOND,
+    LOCAL_PLAYER_VERTICAL_DRAG, LOCAL_PLAYER_X_ROT_LIMIT_DEGREES, LocalPlayerController,
     LocalPlayerPose, MOVING_SLOW_FACTOR, NO_CLIP_BOOST_MULTIPLIER, NoClipMovementStep, PlayerInput,
-    PlayerInputKey, PlayerInputKeys, collide_movement, no_clip_displacement, view_vector,
-    view_vector_from_rot_degrees,
+    PlayerInputKey, PlayerInputKeys, WalkingMovementResult, WalkingMovementStep, collide_movement,
+    no_clip_displacement, view_vector, view_vector_from_rot_degrees,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -140,6 +140,8 @@ pub(crate) fn run_headless_screenshot(
             let debug_stats = debug_pane.then_some(DebugPaneStats {
                 position: spectator.position,
                 speed: spectator.speed,
+                movement_mode: "NOCLIP",
+                on_ground: false,
                 runtime: runtime_stats,
                 render: render_stats,
                 frame: FrameTimingStats::default(),

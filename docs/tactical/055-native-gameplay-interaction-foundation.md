@@ -45,6 +45,10 @@ placement rules.
   movement against loaded full-cube block snapshots with Java-style Y then X/Z
   clipping order while tracking horizontal collision, vertical collision, and
   `on_ground`.
+- 2026-06-19: Wired native window movement through collision-backed walking by
+  default. `LocalPlayerController` now carries Java-style `deltaMovement`,
+  applies first-pass walking input, sprint, jump, gravity, and drag constants,
+  and keeps no-clip behind an explicit native debug toggle.
 
 ## Current Native State
 
@@ -58,9 +62,11 @@ Native code already has several useful pieces:
   - owns `winit` window/input events, cursor lock, UI gating, redraw cadence,
     runtime polling, and render upload
   - maps `WASD`, `Space`, `Shift`, `X`, and `Ctrl` into platform-neutral player
-    input keys before the client controller produces no-clip movement
-    displacement; `Shift` feeds Java-shaped shift/sneak state while `Ctrl`
-    remains the temporary no-clip speed boost
+    input keys; walking is the default mode, `Ctrl` feeds sprint, `Shift` feeds
+    Java-shaped shift/sneak state, and `X` is used only while no-clip debug mode
+    is enabled
+  - owns the native-only movement-mode toggle; no-clip remains a debug mode and
+    the client gameplay controller owns the actual movement calculation
   - left/right mouse buttons request mouse lock first, then send debug
     break/place commands while the world is active and locked
 - `native/apps/mclone-native-client/src/camera.rs`
@@ -85,10 +91,12 @@ Native code already has several useful pieces:
     collision
 - `native/crates/mclone-client/src/player.rs`
   - mirrors Java `Input` impulses, local player `position`/`yRot`/`xRot`, eye
-    position, and standing dimensions
-  - keeps no-clip movement as the currently wired desktop debug movement mode
-  - provides the first collision resolver against full-cube block AABBs for
-    future gravity/walk physics wiring
+    position, standing dimensions, `deltaMovement`, and collision flags
+  - provides no-clip movement for debug mode plus the first collision-backed
+    walking tick with Java-derived speed, jump, gravity, friction, and drag
+    constants
+  - still collides against full-cube AABBs for every non-air loaded snapshot
+    block; exact block collision shapes are a later parity dependency
 - `native/crates/mclone-protocol/src/lib.rs`
   - has chunk-view plus player-action/use-item-on client commands
   - already has `ServerUpdate::SectionBlockUpdates`
@@ -349,20 +357,22 @@ Later parity:
 
 First slice:
 
-- keep current creative/no-clip style movement usable
+- keep creative/no-clip style movement usable through an explicit debug toggle
 - move platform key state into a Java-shaped `Input`/`KeyboardInput` equivalent
   so future movement code consumes input facts rather than `winit` keys
 - keep movement and camera position as the player/camera state feeding pick
   origin and chunk interest
-- add shared AABB and loaded-snapshot full-cube collision clipping, but do not
-  wire it as the default desktop movement mode yet
+- add shared AABB and loaded-snapshot full-cube collision clipping
+- wire native desktop movement through a first walking loop with jump, gravity,
+  sprint, sneak slowdown, and collision flag handling
 
 Later parity:
 
 - server/client entity ownership for AABB, pose, eye height, velocity, and
   collision flags
 - `Entity.move` collision resolution against block-specific collision shapes
-- `LivingEntity.travel` gravity, friction, fluids, ladders, jump, and sprint
+- full `LivingEntity.travel` parity for block friction facts, fluids, ladders,
+  step-up, edge backoff, jump effects, and sprint state transitions
 - `Player.travel` creative flying, swimming adjustments, stats, and abilities
 - server-authoritative player movement and reconciliation
 
@@ -399,7 +409,8 @@ Required tests for the first slice:
 - `mclone-protocol`: roundtrip for new action commands
 - `mclone-client`: raycast against loaded snapshots, miss behavior, and ignored
   unloaded chunks; local player input/pose semantics; full-cube collision wall,
-  landing, sliding, and unloaded-space behavior
+  landing, sliding, and unloaded-space behavior; walking yaw input, jump,
+  sneak slowdown, gravity/drag, and velocity zeroing on collision
 - `mclone-server`: break/place commands mutate live chunks through
   `set_block_at_world` and emit section deltas
 - `mclone-native-client`: scripted interaction dirtying render sections
@@ -431,22 +442,22 @@ must show the broken/placed block result, not only a nonblank world.
 Likely order after the first playable block-interaction pass:
 
 1. Crosshair block outline and hit-result debug/HUD plumbing.
-2. Wire collision-backed creative walking with gravity/jump while preserving a
-   no-clip debug toggle.
+2. Non-cubic outline/collision shape facts shared by raycast and movement.
 3. Held-dig destroy progress with `StartDestroyBlock`, `StopDestroyBlock`, and
    `AbortDestroyBlock`.
 4. Basic inventory/selected hotbar block source, replacing debug placement.
-5. Non-cubic outline/collision shape facts shared by raycast and movement.
-6. Dedicated streaming transport upgrade if request/response commands become a
+5. Dedicated streaming transport upgrade if request/response commands become a
    visible interaction bottleneck.
-7. Entity picking once entities exist.
+6. Entity picking once entities exist.
 
 ## Status Log
 
 - Created: parent tactical grounded in current native client/server/protocol
   state and Java 1.17.1 interaction/movement references.
-- 2026-06-19: Current code has debug break/place and Java-shaped local
-  input/pose wired into native desktop no-clip movement. Collision clipping now
-  exists as a tested client primitive over loaded full-cube block snapshots; the
-  next movement slice should integrate gravity/jump/walk controls and decide
-  how no-clip is toggled.
+- 2026-06-19: Added debug break/place, Java-shaped local input/pose, and a
+  tested collision clipping primitive over loaded full-cube block snapshots.
+- 2026-06-19: Native desktop now starts in collision-backed walking mode and
+  places the player feet on the loaded surface. `N` toggles no-clip debug mode;
+  mouse wheel adjusts no-clip speed. Movement still treats every non-air block
+  as a full cube, so foliage/snow/slabs/liquids need shared shape facts before
+  this can be called vanilla movement parity.

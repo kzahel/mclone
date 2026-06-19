@@ -8,6 +8,18 @@ pub const LOCAL_PLAYER_STANDING_EYE_HEIGHT: f64 = 1.62;
 pub const LOCAL_PLAYER_STANDING_WIDTH: f64 = 0.6;
 pub const LOCAL_PLAYER_STANDING_HEIGHT: f64 = 1.8;
 pub const LOCAL_PLAYER_X_ROT_LIMIT_DEGREES: f64 = 90.0;
+pub const LOCAL_PLAYER_TICKS_PER_SECOND: f64 = 20.0;
+pub const LOCAL_PLAYER_BASE_MOVEMENT_SPEED: f64 = 0.1;
+pub const LOCAL_PLAYER_SPRINT_SPEED_MULTIPLIER: f64 = 1.3;
+pub const LOCAL_PLAYER_AIR_SPEED: f64 = 0.02;
+pub const LOCAL_PLAYER_AIR_SPRINT_SPEED: f64 = 0.026;
+pub const LOCAL_PLAYER_JUMP_POWER: f64 = 0.42;
+pub const LOCAL_PLAYER_SPRINT_JUMP_IMPULSE: f64 = 0.2;
+pub const LOCAL_PLAYER_GRAVITY: f64 = 0.08;
+pub const LOCAL_PLAYER_BLOCK_FRICTION: f64 = 0.6;
+pub const LOCAL_PLAYER_FRICTION_MULTIPLIER: f64 = 0.91;
+pub const LOCAL_PLAYER_VERTICAL_DRAG: f64 = 0.98;
+const LOCAL_PLAYER_GROUND_ACCELERATION_NUMERATOR: f64 = 0.21600002;
 const COLLISION_EPSILON: f64 = 1.0e-7;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -115,6 +127,12 @@ pub struct NoClipMovementStep {
     pub dt_seconds: f64,
     pub descending: bool,
     pub sprinting: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WalkingMovementStep {
+    pub y_rot_degrees: f64,
+    pub dt_seconds: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -257,6 +275,7 @@ pub struct LocalPlayerController {
     pose: LocalPlayerPose,
     keys: PlayerInputKeys,
     input: PlayerInput,
+    delta_movement: Vec3d,
     horizontal_collision: bool,
     vertical_collision: bool,
     on_ground: bool,
@@ -273,6 +292,10 @@ impl LocalPlayerController {
 
     pub const fn input(&self) -> PlayerInput {
         self.input
+    }
+
+    pub const fn delta_movement(&self) -> Vec3d {
+        self.delta_movement
     }
 
     pub const fn pose(&self) -> LocalPlayerPose {
@@ -293,6 +316,16 @@ impl LocalPlayerController {
 
     pub fn set_pose(&mut self, pose: LocalPlayerPose) {
         self.pose = pose;
+    }
+
+    pub fn set_delta_movement(&mut self, delta_movement: Vec3d) {
+        if delta_movement.is_finite() {
+            self.delta_movement = delta_movement;
+        }
+    }
+
+    pub fn clear_delta_movement(&mut self) {
+        self.delta_movement = Vec3d::ZERO;
     }
 
     pub fn set_eye_position(&mut self, eye_position: Vec3d) {
@@ -330,7 +363,80 @@ impl LocalPlayerController {
         self.horizontal_collision = false;
         self.vertical_collision = false;
         self.on_ground = false;
+        self.delta_movement = Vec3d::ZERO;
         Some(displacement)
+    }
+
+    pub fn tick_walking_movement(
+        &mut self,
+        client: &ClientRuntime,
+        step: WalkingMovementStep,
+    ) -> Option<WalkingMovementResult> {
+        if !step.y_rot_degrees.is_finite() || !step.dt_seconds.is_finite() || step.dt_seconds <= 0.0
+        {
+            return None;
+        }
+
+        let tick_scale = step.dt_seconds * LOCAL_PLAYER_TICKS_PER_SECOND;
+        if tick_scale <= 0.0 {
+            return None;
+        }
+
+        let input = self.tick_input(self.keys.shift);
+        let sprinting = self.keys.sprint && input.has_forward_impulse() && !input.shift_key_down;
+        if input.jumping && self.on_ground {
+            self.delta_movement.y = LOCAL_PLAYER_JUMP_POWER;
+            if sprinting {
+                let y_rot = step.y_rot_degrees.to_radians();
+                self.delta_movement = self.delta_movement.add(Vec3d::new(
+                    -y_rot.sin() * LOCAL_PLAYER_SPRINT_JUMP_IMPULSE,
+                    0.0,
+                    y_rot.cos() * LOCAL_PLAYER_SPRINT_JUMP_IMPULSE,
+                ));
+            }
+        }
+
+        let acceleration = walking_input_acceleration(
+            input,
+            step.y_rot_degrees,
+            walking_input_speed(self.on_ground, sprinting),
+        )
+        .scale(tick_scale);
+        self.delta_movement = self.delta_movement.add(acceleration);
+
+        let requested = self.delta_movement.scale(tick_scale);
+        let collision = self.move_colliding(client, requested);
+
+        let mut post_move_delta = self.delta_movement;
+        if !nearly_equal(requested.x, collision.traveled.x) {
+            post_move_delta.x = 0.0;
+        }
+        if !nearly_equal(requested.y, collision.traveled.y) {
+            post_move_delta.y = 0.0;
+        }
+        if !nearly_equal(requested.z, collision.traveled.z) {
+            post_move_delta.z = 0.0;
+        }
+
+        let horizontal_drag = if self.on_ground {
+            LOCAL_PLAYER_BLOCK_FRICTION * LOCAL_PLAYER_FRICTION_MULTIPLIER
+        } else {
+            LOCAL_PLAYER_FRICTION_MULTIPLIER
+        }
+        .powf(tick_scale);
+        let vertical_drag = LOCAL_PLAYER_VERTICAL_DRAG.powf(tick_scale);
+        self.delta_movement = Vec3d::new(
+            post_move_delta.x * horizontal_drag,
+            (post_move_delta.y - LOCAL_PLAYER_GRAVITY * tick_scale) * vertical_drag,
+            post_move_delta.z * horizontal_drag,
+        );
+
+        Some(WalkingMovementResult {
+            input,
+            sprinting,
+            collision,
+            delta_movement: self.delta_movement,
+        })
     }
 
     pub fn move_colliding(
@@ -356,6 +462,14 @@ impl LocalPlayerController {
             on_ground: self.on_ground,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WalkingMovementResult {
+    pub input: PlayerInput,
+    pub sprinting: bool,
+    pub collision: CollisionMovementResult,
+    pub delta_movement: Vec3d,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -514,6 +628,52 @@ fn max_axis(axis: Axis, aabb: Aabb) -> f64 {
     }
 }
 
+fn walking_input_speed(on_ground: bool, sprinting: bool) -> f64 {
+    if on_ground {
+        let base_speed = LOCAL_PLAYER_BASE_MOVEMENT_SPEED
+            * if sprinting {
+                LOCAL_PLAYER_SPRINT_SPEED_MULTIPLIER
+            } else {
+                1.0
+            };
+        base_speed
+            * (LOCAL_PLAYER_GROUND_ACCELERATION_NUMERATOR / LOCAL_PLAYER_BLOCK_FRICTION.powi(3))
+    } else if sprinting {
+        LOCAL_PLAYER_AIR_SPRINT_SPEED
+    } else {
+        LOCAL_PLAYER_AIR_SPEED
+    }
+}
+
+fn walking_input_acceleration(input: PlayerInput, y_rot_degrees: f64, speed: f64) -> Vec3d {
+    if !y_rot_degrees.is_finite() || !speed.is_finite() || speed <= 0.0 {
+        return Vec3d::ZERO;
+    }
+
+    let input_x = input.left_impulse as f64;
+    let input_z = input.forward_impulse as f64;
+    let input_len_sqr = input_x * input_x + input_z * input_z;
+    if input_len_sqr < COLLISION_EPSILON {
+        return Vec3d::ZERO;
+    }
+
+    let scale = if input_len_sqr > 1.0 {
+        speed / input_len_sqr.sqrt()
+    } else {
+        speed
+    };
+    let input_x = input_x * scale;
+    let input_z = input_z * scale;
+    let y_rot = y_rot_degrees.to_radians();
+    let y_sin = y_rot.sin();
+    let y_cos = y_rot.cos();
+    Vec3d::new(
+        input_x * y_cos - input_z * y_sin,
+        0.0,
+        input_z * y_cos + input_x * y_sin,
+    )
+}
+
 pub fn no_clip_displacement(input: PlayerInput, step: NoClipMovementStep) -> Option<Vec3d> {
     if !step.yaw_radians.is_finite()
         || !step.pitch_radians.is_finite()
@@ -634,6 +794,23 @@ mod tests {
         client
     }
 
+    fn one_java_tick_step(y_rot_degrees: f64) -> WalkingMovementStep {
+        WalkingMovementStep {
+            y_rot_degrees,
+            dt_seconds: 1.0 / LOCAL_PLAYER_TICKS_PER_SECOND,
+        }
+    }
+
+    fn settle_controller_on_ground(controller: &mut LocalPlayerController, client: &ClientRuntime) {
+        controller.move_colliding(client, Vec3d::new(0.0, -0.01, 0.0));
+        assert!(controller.on_ground());
+        controller.set_delta_movement(Vec3d::new(
+            0.0,
+            -LOCAL_PLAYER_GRAVITY * LOCAL_PLAYER_VERTICAL_DRAG,
+            0.0,
+        ));
+    }
+
     #[test]
     fn input_tick_matches_java_keyboard_impulses() {
         let mut keys = PlayerInputKeys::default();
@@ -751,6 +928,7 @@ mod tests {
 
         assert_eq!(displacement, Vec3d::new(0.0, -6.0, 0.0));
         assert!(!controller.input().shift_key_down);
+        assert_eq!(controller.delta_movement(), Vec3d::ZERO);
     }
 
     #[test]
@@ -882,6 +1060,124 @@ mod tests {
         assert!(!result.vertical_collision);
         assert!(!result.on_ground);
         assert_eq!(controller.pose().position, Vec3d::new(2.5, -1.0, 1.5));
+    }
+
+    #[test]
+    fn walking_movement_uses_java_yaw_rotated_air_input() {
+        let client = ClientRuntime::local_integrated();
+        let mut controller = LocalPlayerController::new();
+        controller.set_key(PlayerInputKey::Forward, true);
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert_approx_eq(result.collision.traveled.x, 0.0);
+        assert_approx_eq(result.collision.traveled.y, 0.0);
+        assert_approx_eq(result.collision.traveled.z, LOCAL_PLAYER_AIR_SPEED);
+        assert_approx_eq(result.delta_movement.x, 0.0);
+        assert_approx_eq(
+            result.delta_movement.y,
+            -LOCAL_PLAYER_GRAVITY * LOCAL_PLAYER_VERTICAL_DRAG,
+        );
+        assert_approx_eq(
+            result.delta_movement.z,
+            LOCAL_PLAYER_AIR_SPEED * LOCAL_PLAYER_FRICTION_MULTIPLIER,
+        );
+
+        let mut controller = LocalPlayerController::new();
+        controller.set_key(PlayerInputKey::Forward, true);
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(-90.0))
+            .expect("walking movement");
+
+        assert_approx_eq(result.collision.traveled.x, LOCAL_PLAYER_AIR_SPEED);
+        assert_approx_eq(result.collision.traveled.z, 0.0);
+    }
+
+    #[test]
+    fn walking_movement_jumps_from_ground_and_applies_gravity_drag() {
+        let client = client_with_blocks(&[(BlockPos::new(0, 0, 0), BlockStateId(7))]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 1.0, 0.5),
+            ..Default::default()
+        });
+        settle_controller_on_ground(&mut controller, &client);
+        controller.set_key(PlayerInputKey::Jump, true);
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert_approx_eq(result.collision.traveled.y, LOCAL_PLAYER_JUMP_POWER);
+        assert!(!result.collision.on_ground);
+        assert_approx_eq(controller.pose().position.y, 1.0 + LOCAL_PLAYER_JUMP_POWER);
+        assert_approx_eq(
+            result.delta_movement.y,
+            (LOCAL_PLAYER_JUMP_POWER - LOCAL_PLAYER_GRAVITY) * LOCAL_PLAYER_VERTICAL_DRAG,
+        );
+    }
+
+    #[test]
+    fn walking_movement_sneak_scales_ground_input_and_keeps_ground_probe() {
+        let client = client_with_blocks(&[(BlockPos::new(0, 0, 0), BlockStateId(7))]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 1.0, 0.5),
+            ..Default::default()
+        });
+        settle_controller_on_ground(&mut controller, &client);
+        controller.set_key(PlayerInputKey::Forward, true);
+        controller.set_key(PlayerInputKey::Shift, true);
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        let expected_ground_speed = LOCAL_PLAYER_BASE_MOVEMENT_SPEED
+            * (LOCAL_PLAYER_GROUND_ACCELERATION_NUMERATOR / LOCAL_PLAYER_BLOCK_FRICTION.powi(3));
+        let expected_z = expected_ground_speed * MOVING_SLOW_FACTOR as f64;
+        assert_approx_eq(
+            result.input.forward_impulse as f64,
+            MOVING_SLOW_FACTOR as f64,
+        );
+        assert_approx_eq(result.collision.traveled.y, 0.0);
+        assert!(result.collision.on_ground);
+        assert_approx_eq(result.collision.traveled.z, expected_z);
+        assert_approx_eq(
+            result.delta_movement.z,
+            expected_z * (LOCAL_PLAYER_BLOCK_FRICTION * LOCAL_PLAYER_FRICTION_MULTIPLIER),
+        );
+    }
+
+    #[test]
+    fn walking_movement_zeroes_velocity_on_wall_collision() {
+        let client = client_with_blocks(&[
+            (BlockPos::new(0, 0, 0), BlockStateId(7)),
+            (BlockPos::new(0, 1, 1), BlockStateId(7)),
+        ]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 1.0, 0.5),
+            ..Default::default()
+        });
+        settle_controller_on_ground(&mut controller, &client);
+        controller.set_delta_movement(Vec3d::new(
+            0.0,
+            -LOCAL_PLAYER_GRAVITY * LOCAL_PLAYER_VERTICAL_DRAG,
+            1.0,
+        ));
+
+        let result = controller
+            .tick_walking_movement(&client, one_java_tick_step(0.0))
+            .expect("walking movement");
+
+        assert_approx_eq(result.collision.traveled.z, 0.2);
+        assert!(result.collision.horizontal_collision);
+        assert!(result.collision.on_ground);
+        assert_approx_eq(result.delta_movement.z, 0.0);
     }
 
     #[test]

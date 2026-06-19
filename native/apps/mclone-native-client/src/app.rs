@@ -4,7 +4,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use mclone_client::{
     ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LocalPlayerController,
-    LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
+    LocalPlayerPose, NoClipMovementStep, PlayerInputKey, WalkingMovementStep,
 };
 use mclone_core::Vec3d;
 use mclone_mesh::quad_face_count_from_indices;
@@ -35,6 +35,33 @@ use crate::render_cache::RenderSectionCacheUpdate;
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, NativeUi, NativeUiAction};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
+
+const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
+const PLAYER_SURFACE_FEET_OFFSET: f64 = 1.0;
+const GROUND_PROBE_DISTANCE: f64 = 0.01;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum PlayerMovementMode {
+    #[default]
+    Walking,
+    NoClip,
+}
+
+impl PlayerMovementMode {
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Walking => Self::NoClip,
+            Self::NoClip => Self::Walking,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Walking => "WALK",
+            Self::NoClip => "NOCLIP",
+        }
+    }
+}
 
 pub(crate) fn run_window(
     scene: SceneOptions,
@@ -205,6 +232,7 @@ struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
     player: LocalPlayerController,
+    movement_mode: PlayerMovementMode,
     interaction: ClientInteractionController,
     render_options: TexturedSectionRenderOptions,
     frame_pacing: FramePacing,
@@ -238,6 +266,7 @@ impl ChunkApp {
             runtime,
             spectator,
             player,
+            movement_mode: PlayerMovementMode::default(),
             interaction: ClientInteractionController::new(),
             render_options,
             frame_pacing: FramePacing::default(),
@@ -308,21 +337,42 @@ impl ChunkApp {
             return Ok(());
         }
 
-        let pose = self.player.pose();
-        if self
-            .player
-            .tick_no_clip_movement(NoClipMovementStep {
-                yaw_radians: pose.native_yaw_radians(),
-                pitch_radians: pose.native_pitch_radians(),
-                speed_blocks_per_second: self.spectator.speed as f64,
-                dt_seconds: movement_dt as f64,
-                descending: false,
-                sprinting: false,
-            })
-            .is_some()
-        {
-            sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
-            self.update_interest_from_spectator()?;
+        match self.movement_mode {
+            PlayerMovementMode::Walking => {
+                let pose = self.player.pose();
+                if self
+                    .player
+                    .tick_walking_movement(
+                        &self.runtime.client,
+                        WalkingMovementStep {
+                            y_rot_degrees: pose.y_rot_degrees,
+                            dt_seconds: movement_dt as f64,
+                        },
+                    )
+                    .is_some()
+                {
+                    sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+                    self.update_interest_from_spectator()?;
+                }
+            }
+            PlayerMovementMode::NoClip => {
+                let pose = self.player.pose();
+                if self
+                    .player
+                    .tick_no_clip_movement(NoClipMovementStep {
+                        yaw_radians: pose.native_yaw_radians(),
+                        pitch_radians: pose.native_pitch_radians(),
+                        speed_blocks_per_second: self.spectator.speed as f64,
+                        dt_seconds: movement_dt as f64,
+                        descending: false,
+                        sprinting: false,
+                    })
+                    .is_some()
+                {
+                    sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+                    self.update_interest_from_spectator()?;
+                }
+            }
         }
         Ok(())
     }
@@ -433,6 +483,12 @@ impl ChunkApp {
         self.set_mouse_lock(self.mouse_lock_requested && !self.ui.is_active());
     }
 
+    fn toggle_movement_mode(&mut self) {
+        self.movement_mode = self.movement_mode.toggled();
+        self.player.clear_delta_movement();
+        log::info!("player movement mode {}", self.movement_mode.label());
+    }
+
     fn place_spectator_above_loaded_surface(&mut self) {
         let (world_x, world_z) = self.spectator.block_column();
         let Some(surface_y) = self
@@ -444,13 +500,29 @@ impl ChunkApp {
             );
             return;
         };
-        self.spectator.place_above_surface(surface_y);
-        self.player
-            .set_pose(local_player_pose_from_spectator(&self.spectator));
+        self.spectator.pitch = crate::camera::SPECTATOR_SURFACE_PITCH;
+        let eye_position = Vec3d::new(
+            self.spectator.position.x as f64,
+            surface_y as f64 + PLAYER_SURFACE_FEET_OFFSET + LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+            self.spectator.position.z as f64,
+        );
+        self.player.set_pose(LocalPlayerPose::from_eye_position(
+            eye_position,
+            -(self.spectator.yaw as f64).to_degrees(),
+            -(self.spectator.pitch as f64).to_degrees(),
+            LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        ));
+        if self.movement_mode == PlayerMovementMode::Walking {
+            self.player.move_colliding(
+                &self.runtime.client,
+                Vec3d::new(0.0, -GROUND_PROBE_DISTANCE, 0.0),
+            );
+        }
         sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
         log::info!(
-            "placed spectator above loaded surface column ({world_x}, {world_z}) y={} -> eye_y={:.1}",
+            "placed player above loaded surface column ({world_x}, {world_z}) y={} -> feet_y={:.1} eye_y={:.1}",
             surface_y,
+            self.player.pose().position.y,
             self.spectator.position.y
         );
     }
@@ -597,6 +669,8 @@ impl ChunkApp {
         DebugPaneStats {
             position: self.spectator.position,
             speed: self.spectator.speed,
+            movement_mode: self.movement_mode.label(),
+            on_ground: self.player.on_ground(),
             runtime: self.runtime.stats(),
             render: self.render_stats,
             frame: self.frame_timing,
@@ -922,6 +996,14 @@ impl ApplicationHandler for ChunkApp {
                         self.schedule_next_redraw(event_loop);
                         return;
                     }
+                    if key_code == NO_CLIP_TOGGLE_KEY
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        self.toggle_movement_mode();
+                        self.schedule_next_redraw(event_loop);
+                        return;
+                    }
                     if let Some(input_key) = player_input_key_from_key_code(key_code) {
                         self.player
                             .set_key(input_key, event.state == ElementState::Pressed);
@@ -1007,7 +1089,7 @@ impl ApplicationHandler for ChunkApp {
                     MouseScrollDelta::PixelDelta(position) => position.y as f32 * 0.001,
                 };
                 self.spectator.adjust_speed(amount);
-                log::info!("spectator speed {:.1} blocks/s", self.spectator.speed);
+                log::info!("no-clip speed {:.1} blocks/s", self.spectator.speed);
                 self.schedule_next_redraw(event_loop);
             }
             WindowEvent::Focused(false) => {
@@ -1209,6 +1291,21 @@ mod tests {
             player_input_key_from_key_code(KeyCode::ControlLeft),
             Some(PlayerInputKey::Sprint)
         );
+        assert_eq!(player_input_key_from_key_code(NO_CLIP_TOGGLE_KEY), None);
         assert_eq!(player_input_key_from_key_code(KeyCode::KeyO), None);
+    }
+
+    #[test]
+    fn player_movement_mode_toggles_between_walking_and_no_clip() {
+        assert_eq!(
+            PlayerMovementMode::Walking.toggled(),
+            PlayerMovementMode::NoClip
+        );
+        assert_eq!(
+            PlayerMovementMode::NoClip.toggled(),
+            PlayerMovementMode::Walking
+        );
+        assert_eq!(PlayerMovementMode::Walking.label(), "WALK");
+        assert_eq!(PlayerMovementMode::NoClip.label(), "NOCLIP");
     }
 }
