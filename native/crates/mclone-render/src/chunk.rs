@@ -256,10 +256,11 @@ pub struct TexturedSectionRenderStats {
     pub graph_culled_index_count: u32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TexturedSectionRenderOptions {
     pub section_occlusion_culling: bool,
     pub force_fullbright: bool,
+    pub sky_darken: f32,
 }
 
 impl Default for TexturedSectionRenderOptions {
@@ -267,7 +268,15 @@ impl Default for TexturedSectionRenderOptions {
         Self {
             section_occlusion_culling: true,
             force_fullbright: false,
+            sky_darken: 1.0,
         }
+    }
+}
+
+impl TexturedSectionRenderOptions {
+    pub fn with_sky_darken(mut self, sky_darken: f32) -> Self {
+        self.sky_darken = sky_darken.clamp(0.0, 1.0);
+        self
     }
 }
 
@@ -1186,7 +1195,10 @@ impl ChunkDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(render_view.uniform_matrix(), false),
+            &uniform_bytes(
+                render_view.uniform_matrix(),
+                TexturedSectionRenderOptions::default(),
+            ),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1258,7 +1270,10 @@ impl TexturedChunkDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(render_view.uniform_matrix(), false),
+            &uniform_bytes(
+                render_view.uniform_matrix(),
+                TexturedSectionRenderOptions::default(),
+            ),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1441,7 +1456,7 @@ impl TexturedSectionDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(render_view.uniform_matrix(), options.force_fullbright),
+            &uniform_bytes(render_view.uniform_matrix(), options),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1522,11 +1537,20 @@ fn matrix_bytes(matrix: [[f32; 4]; 4]) -> [u8; 64] {
     bytes
 }
 
-fn uniform_bytes(matrix: [[f32; 4]; 4], force_fullbright: bool) -> [u8; 80] {
+fn uniform_bytes(matrix: [[f32; 4]; 4], options: TexturedSectionRenderOptions) -> [u8; 80] {
     let mut bytes = [0; 80];
     bytes[..64].copy_from_slice(&matrix_bytes(matrix));
-    let options = [if force_fullbright { 1.0_f32 } else { 0.0 }, 0.0, 0.0, 0.0];
-    for (index, value) in options.into_iter().enumerate() {
+    let render_options = [
+        if options.force_fullbright {
+            1.0_f32
+        } else {
+            0.0
+        },
+        options.sky_darken.clamp(0.0, 1.0),
+        0.0,
+        0.0,
+    ];
+    for (index, value) in render_options.into_iter().enumerate() {
         let start = 64 + index * 4;
         bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
     }
@@ -1545,11 +1569,34 @@ mod tests {
         let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
         let matrix = render_view.uniform_matrix();
         assert_eq!(
-            uniform_bytes(matrix, false).len() as wgpu::BufferAddress,
+            uniform_bytes(matrix, TexturedSectionRenderOptions::default()).len()
+                as wgpu::BufferAddress,
             UNIFORM_BYTE_SIZE
         );
         assert!(matrix.into_iter().flatten().all(f32::is_finite));
         assert!(render_view.view_projection.is_finite());
+    }
+
+    #[test]
+    fn textured_render_options_serialize_fullbright_and_sky_darken() {
+        let bytes = uniform_bytes(
+            [[0.0; 4]; 4],
+            TexturedSectionRenderOptions {
+                force_fullbright: true,
+                sky_darken: 0.25,
+                ..TexturedSectionRenderOptions::default()
+            },
+        );
+
+        assert_eq!(f32::from_ne_bytes(bytes[64..68].try_into().unwrap()), 1.0);
+        assert_eq!(f32::from_ne_bytes(bytes[68..72].try_into().unwrap()), 0.25);
+    }
+
+    #[test]
+    fn textured_render_options_clamp_sky_darken() {
+        let options = TexturedSectionRenderOptions::default().with_sky_darken(2.0);
+
+        assert_eq!(options.sky_darken, 1.0);
     }
 
     #[test]

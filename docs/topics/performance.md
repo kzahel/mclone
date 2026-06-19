@@ -11,10 +11,11 @@ invalidates an older recommendation, or establishes a new baseline.
 
 ## Current Baseline
 
-Current validated slice: native leaf sky render parity after sky source-section
-ownership. The movement-frame probe remains under budget, cold startup lighting
-is no longer dominated by the sky graph drain, and the dark foliage-top render
-bug is fixed.
+Current validated slice: native `LightTexture` render parity after leaf sky
+render parity. The movement-frame probe remains under budget, cold startup
+lighting is no longer dominated by the sky graph drain, the dark foliage-top
+render bug is fixed, and the textured chunk shader now uses Java's default
+lightmap curve.
 
 Latest 120 Hz release movement-frame probe was captured during that slice at:
 
@@ -62,7 +63,7 @@ For durable historical trends, use [`../performance-records.md`](../performance-
 | Priority | Work | Java-shaped | Tactical | Status | Why It Matters |
 |---|---|---:|---|---|---|
 | P0 | Startup loading/progress presentation | Native policy | [`027`](../tactical/027-mclone-ui-foundation.md), [`028`](../tactical/028-headless-window-frame-unification.md), [`044`](../tactical/044-native-light-status-worker-and-disable-flag.md) | next recommended for desktop feel | Radius-5 lighting-enabled startup dropped to `1,931.110 ms`, but the desktop window path still waits for the first light-ready scene. Even with faster lighting, presenting progress or a partial scene will make regressions diagnosable instead of looking like a frozen app. |
-| P1 | Java lightmap and block-model AO | Yes | [`050`](../tactical/050-native-leaf-sky-render-parity.md), [`lighting topic`](lighting.md) | next recommended for visual lighting parity | Stored sky/block values now reach the renderer sanely, but open-sky terrain still reads close to fullbright because native only applies `max(block, sky) / 15`. Porting Java `LightTexture` and `ModelBlockRenderer.AmbientOcclusionFace` is the next visible parity step. |
+| P1 | Java block-model AO | Yes | [`051`](../tactical/051-native-light-texture-render-parity.md), [`lighting topic`](lighting.md) | next recommended for visual lighting parity | Stored sky/block values now reach the renderer sanely and the shader uses Java's default lightmap curve. Open-sky terrain still reads close to fullbright because `ModelBlockRenderer.AmbientOcclusionFace` per-vertex brightness/lightmap blending is not ported yet. |
 | P2 | Sky neighbor skip-through propagation | Yes | [`049`](../tactical/049-native-sky-source-section-ownership.md), [`lighting topic`](lighting.md) | pending solver parity | Source-section ownership now lives in `SkyLightSectionStorage`, but native still lacks Java `SkyLightEngine.checkNeighborsAfterUpdate(...)` behavior for vertical gaps in light-storage sections. This remains important before live deltas, but it is no longer the current foliage-top visual blocker. |
 | P3 | Live light deltas and light-section dirtying | Yes | [`lighting topic`](lighting.md), [`026`](../tactical/026-lighting-pipeline.md), [`031`](../tactical/031-native-section-block-delta-updates.md) | pending larger subsystem | Section block deltas currently leave light payloads unchanged. Correct live lighting needs Java-shaped light propagation/deltas and render dirtying by changed light sections. |
 | P4 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful for stress-orbit streaming, but current radius-5 evidence no longer puts render compile cancellation ahead of startup presentation or lighting parity. |
@@ -135,6 +136,8 @@ Use these local sources when implementing or reviewing performance work:
   [`049`](../tactical/049-native-sky-source-section-ownership.md)
 - Leaf sky render parity:
   [`050`](../tactical/050-native-leaf-sky-render-parity.md)
+- LightTexture render parity:
+  [`051`](../tactical/051-native-light-texture-render-parity.md)
 
 ## Tactical Index
 
@@ -163,6 +166,7 @@ Related subsystem tacticals:
 - [`048-native-sky-empty-section-light-setup.md`](../tactical/048-native-sky-empty-section-light-setup.md)
 - [`049-native-sky-source-section-ownership.md`](../tactical/049-native-sky-source-section-ownership.md)
 - [`050-native-leaf-sky-render-parity.md`](../tactical/050-native-leaf-sky-render-parity.md)
+- [`051-native-light-texture-render-parity.md`](../tactical/051-native-light-texture-render-parity.md)
 
 ## Validation Lanes
 

@@ -98,8 +98,8 @@ Landed pieces:
 - Textured meshing now reads packed sky light across omitted all-air sky
   sections using Java `SkyLightSectionStorage.getLightValue(...)` semantics:
   exact layer first, then the next sky layer above, then full sky above data.
-- The chunk shader decodes packed sky/block values and applies a simple
-  brightness factor, with a native/headless fullbright toggle.
+- The chunk shader decodes packed sky/block values through a first Java
+  `LightTexture` lightmap port, with a native/headless fullbright toggle.
 
 Known gaps:
 
@@ -124,7 +124,10 @@ Known gaps:
   occlusion.
 - Live block changes do not call `checkBlock`, do not publish light deltas, and
   do not dirty render sections by changed light sections.
-- Rendering does not yet use Java's 16x16 `LightTexture`.
+- Rendering now uses the stable Java `LightTexture` brightness ramp and
+  clear-weather sky-darken curve, but does not yet allocate the exact 16x16 GPU
+  lightmap texture or port torch flicker, gamma, night vision, conduit power,
+  boss-world darkening, rain, or thunder effects.
 - Solid block ambient occlusion and packed-light blending from
   `ModelBlockRenderer.AmbientOcclusionFace` are not ported.
 - Liquid light sampling is not ported.
@@ -239,8 +242,24 @@ The validated captures for this slice are:
 
 Both were inspected and rendered nonblank terrain with `166` cached sections
 and `26` drawn sections. The lit image no longer has near-black canopy-top
-patches; open-sky surfaces still look close to fullbright because Java
-`LightTexture` and block-model ambient occlusion are not ported yet.
+patches; open-sky surfaces still look close to fullbright because block-model
+ambient occlusion is not ported yet.
+
+On 2026-06-19, after porting the stable Java `LightTexture` lightmap curve into
+`mclone-render`, native full-frame captures for seed `12345`, chunk `(0,0)`,
+render distance `2`, `960x540`, server lighting enabled, and shader fullbright
+disabled produced:
+
+```text
+/tmp/mclone-light-lightmap-day.png
+/tmp/mclone-light-lightmap-night.png
+```
+
+Both were inspected and rendered nonblank terrain with `166` cached sections
+and `26` drawn sections. The daytime image is intentionally close to the prior
+fixed daylight capture because Java full sky is nearly white. The night capture
+visibly darkens terrain through the Java sky-darken/lightmap path while keeping
+the same packed light payloads.
 
 On 2026-06-19, after moving initial lighting to the retained worker-owned light
 world, a native full-frame capture for seed `12345`, chunk `(0,0)`, render
@@ -371,8 +390,7 @@ difference is small:
 
 Interpretation: the render handoff works and occluded/cave pixels darken, but
 most visible open terrain still reads close to fullbright. That is expected
-while stored light is provisional and while the renderer lacks Java `LightTexture`
-and model AO.
+while stored light is provisional and while the renderer lacks Java model AO.
 
 Validation run from the same check:
 
@@ -852,8 +870,9 @@ Scope:
 
 - Read Java `BlockModelRenderer`, `ModelBlockRenderer`, and `LightTexture`
   before porting.
-- Port Java `LightTexture` 16x16 lightmap behavior into `mclone-render`.
-- Replace the simple shader `max(block, sky) / 15` factor with lightmap sampling.
+- First Java `LightTexture` lightmap behavior is in `mclone-render`; next,
+  decide whether exact dynamic 16x16 GPU texture allocation is needed or whether
+  the procedural shader curve remains sufficient.
 - Port `ModelBlockRenderer.AmbientOcclusionFace` sampling/blending into
   `mclone-mesh`.
 - Port liquid light sampling from `LiquidBlockRenderer`.
@@ -883,6 +902,7 @@ Primary native lighting docs:
 - [`../tactical/048-native-sky-empty-section-light-setup.md`](../tactical/048-native-sky-empty-section-light-setup.md)
 - [`../tactical/049-native-sky-source-section-ownership.md`](../tactical/049-native-sky-source-section-ownership.md)
 - [`../tactical/050-native-leaf-sky-render-parity.md`](../tactical/050-native-leaf-sky-render-parity.md)
+- [`../tactical/051-native-light-texture-render-parity.md`](../tactical/051-native-light-texture-render-parity.md)
 
 Legacy/reference-only lighting docs:
 

@@ -128,6 +128,8 @@ pub(crate) fn render_full_frame(
     let ui_covers_world = ui.covers_world();
     let debug_stats = (!ui_active).then_some(debug_stats).flatten();
     let gui_active = ui_active || debug_stats.is_some();
+    let render_options =
+        render_options.with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day));
 
     if !ui_covers_world {
         let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);

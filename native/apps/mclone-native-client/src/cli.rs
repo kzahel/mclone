@@ -30,7 +30,7 @@ pub(crate) struct SceneOptions {
     pub(crate) lighting_enabled: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct MovementPerfOptions {
     pub(crate) scene: SceneOptions,
     pub(crate) render_options: TexturedSectionRenderOptions,
@@ -40,7 +40,7 @@ pub(crate) struct MovementPerfOptions {
     pub(crate) path_radius_chunks: i32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TimedemoOptions {
     pub(crate) scene: SceneOptions,
     pub(crate) render_options: TexturedSectionRenderOptions,
@@ -85,7 +85,7 @@ impl FrameBudgetProbeMode {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct HeadlessScreenshotOptions {
     pub(crate) path: PathBuf,
     pub(crate) width: u32,
