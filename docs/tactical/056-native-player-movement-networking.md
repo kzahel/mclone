@@ -80,6 +80,10 @@ complexity.
   server chooses a safe surface-ish spawn near the first requested chunk view,
   sends it as an absolute player-position update, and the native client applies
   and acknowledges it before normal movement sync.
+- 2026-06-19: Disabled normal too-fast movement correction for the near-term
+  permissive posture. The server still rejects non-finite packets, clamps Java
+  world bounds, and uses teleport acknowledgement for server-issued positions,
+  but finite client movement deltas are trusted.
 
 ## Native Direction
 
@@ -138,10 +142,10 @@ Implement the Java packet/state skeleton without full correction yet:
 - server increments `received_move_packet_count` on accepted movement
 - integrated simulation ticks record `first_good_position`,
   `last_good_position`, and `known_move_packet_count`
-- server rejects too-fast positional movement using the Java
-  packet-count-scaled threshold, while treating native server velocity as zero
-- server returns an absolute player-position correction for rejected movement and
-  clears the awaiting correction only after the matching teleport ack
+- server tracks Java-shaped movement packet counters but, for now, trusts finite
+  client position deltas instead of issuing too-fast corrections
+- server returns absolute player-position updates for server-issued position
+  syncs and clears the awaiting correction only after the matching teleport ack
 - server resends stale pending corrections on subsequent movement packets after
   Java's `> 20` tick threshold
 - server sends the first spawn position instead of bootstrapping from the first
@@ -151,6 +155,7 @@ This slice intentionally does not yet implement, and now defers:
 
 - wrong-movement / collision rollback
 - server-owned velocity in movement validation
+- active too-fast movement correction
 - movement packet suppression or optimal `Pos`/`Rot`/`StatusOnly` emission
 - remote-player interpolation
 - FPS-style prediction/reconciliation
@@ -168,8 +173,8 @@ This slice intentionally does not yet implement, and now defers:
 
 ## Deferred Authority Hardening
 
-- Add server-owned velocity facts so too-fast validation can subtract the
-  Java-equivalent `deltaMovement.lengthSqr()` instead of assuming zero.
+- Re-enable too-fast validation only with server-owned velocity facts so it can
+  subtract the Java-equivalent `deltaMovement.lengthSqr()`.
 - Add server collision sanity and wrong-movement rollback once server-side
   entity collision facts are worth owning.
 - Tighten correction/reconciliation semantics only if multiplayer behavior or a

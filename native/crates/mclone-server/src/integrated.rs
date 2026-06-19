@@ -311,11 +311,6 @@ impl IntegratedServer {
                 .map(ServerUpdate::PlayerPosition)
                 .into_iter()
                 .collect(),
-            MovePlayerApplyResult::RejectedTooFast { .. } => {
-                vec![ServerUpdate::PlayerPosition(
-                    self.player.correction_update(self.simulation_tick),
-                )]
-            }
         }
     }
 
@@ -710,54 +705,32 @@ mod tests {
     }
 
     #[test]
-    fn too_fast_move_returns_player_position_correction_until_ack() {
+    fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
         let mut server = IntegratedServer::new(0);
 
-        server
-            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-                position: Vec3d::new(0.0, 64.0, 0.0),
-                y_rot_degrees: 45.0,
-                x_rot_degrees: 10.0,
-                on_ground: true,
-            }))
-            .expect("initial move");
-        server.try_simulation_tick_report().expect("tick boundary");
-
-        let updates = server
-            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-                position: Vec3d::new(11.0, 64.0, 0.0),
-                y_rot_degrees: 90.0,
-                x_rot_degrees: -20.0,
-                on_ground: false,
-            }))
-            .expect("too fast move");
-
-        assert_eq!(updates.len(), 1);
-        let update = match &updates[0] {
-            ServerUpdate::PlayerPosition(update) => *update,
-            _ => panic!("too-fast movement should return a player position correction"),
-        };
-        assert_eq!(update.position, Vec3d::new(0.0, 64.0, 0.0));
-        assert_eq!(update.y_rot_degrees, 45.0);
-        assert_eq!(update.x_rot_degrees, 10.0);
-        assert_eq!(update.relative, PlayerPositionRelativeFlags::ABSOLUTE);
-        assert_eq!(update.teleport_id, 1);
-        assert_eq!(
-            server
-                .player
-                .awaiting_teleport()
-                .map(|awaiting| awaiting.id),
-            Some(1)
+        let first = server.player.initial_position_update(
+            Vec3d::new(0.0, 64.0, 0.0),
+            45.0,
+            10.0,
+            server.simulation_tick,
         );
+        assert_eq!(first.teleport_id, 1);
 
         let updates = server
             .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
-                position: Vec3d::new(1.0, 64.0, 0.0),
+                position: Vec3d::new(32.0, 64.0, 0.0),
                 on_ground: true,
             }))
             .expect("move while awaiting teleport");
         assert!(updates.is_empty());
         assert_eq!(server.player.position(), Vec3d::new(0.0, 64.0, 0.0));
+        assert_eq!(
+            server
+                .player
+                .awaiting_teleport()
+                .map(|awaiting| awaiting.id),
+            Some(first.teleport_id)
+        );
 
         for _ in 0..20 {
             server
@@ -766,7 +739,7 @@ mod tests {
         }
         let updates = server
             .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
-                position: Vec3d::new(1.0, 64.0, 0.0),
+                position: Vec3d::new(32.0, 64.0, 0.0),
                 on_ground: true,
             }))
             .expect("move while awaiting teleport at threshold");
@@ -777,16 +750,19 @@ mod tests {
             .expect("pending teleport resend tick");
         let updates = server
             .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
-                position: Vec3d::new(1.0, 64.0, 0.0),
+                position: Vec3d::new(32.0, 64.0, 0.0),
                 on_ground: true,
             }))
             .expect("move while awaiting stale teleport");
         assert_eq!(updates.len(), 1);
         let resend = match &updates[0] {
             ServerUpdate::PlayerPosition(update) => *update,
-            _ => panic!("stale pending teleport should resend a player position correction"),
+            _ => panic!("stale pending teleport should resend a player position update"),
         };
         assert_eq!(resend.position, Vec3d::new(0.0, 64.0, 0.0));
+        assert_eq!(resend.y_rot_degrees, 45.0);
+        assert_eq!(resend.x_rot_degrees, 10.0);
+        assert_eq!(resend.relative, PlayerPositionRelativeFlags::ABSOLUTE);
         assert_eq!(resend.teleport_id, 2);
         assert_eq!(
             server
@@ -798,7 +774,7 @@ mod tests {
 
         server
             .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
-                id: update.teleport_id,
+                id: first.teleport_id,
             }))
             .expect("accept stale teleport");
         assert_eq!(
@@ -818,12 +794,12 @@ mod tests {
 
         let updates = server
             .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
-                position: Vec3d::new(1.0, 64.0, 0.0),
+                position: Vec3d::new(32.0, 64.0, 0.0),
                 on_ground: true,
             }))
             .expect("move after ack");
         assert!(updates.is_empty());
-        assert_eq!(server.player.position(), Vec3d::new(1.0, 64.0, 0.0));
+        assert_eq!(server.player.position(), Vec3d::new(32.0, 64.0, 0.0));
     }
 
     #[test]

@@ -3,8 +3,6 @@ use mclone_protocol::{MovePlayerCommand, PlayerPositionRelativeFlags, PlayerPosi
 
 const JAVA_HORIZONTAL_MOVE_BOUND: f64 = 3.0e7;
 const JAVA_VERTICAL_MOVE_BOUND: f64 = 2.0e7;
-const JAVA_TOO_FAST_MOVE_THRESHOLD: f64 = 100.0;
-const JAVA_MOVE_PACKET_BURST_LIMIT: u32 = 5;
 const JAVA_MAX_TELEPORT_ID: u32 = i32::MAX as u32;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -34,14 +32,6 @@ pub(crate) enum MovePlayerApplyResult {
     Accepted,
     RejectedInvalid,
     AwaitingTeleport,
-    RejectedTooFast {
-        attempted_position: Vec3d,
-        first_good_position: Vec3d,
-        movement_delta_sqr: f64,
-        velocity_delta_sqr: f64,
-        allowed_delta_sqr: f64,
-        packet_count: u32,
-    },
 }
 
 impl MovePlayerApplyResult {
@@ -91,22 +81,6 @@ impl ServerPlayerState {
         );
         let has_position = command.has_position();
         self.received_move_packet_count = self.received_move_packet_count.saturating_add(1);
-        if has_position && self.has_accepted_position {
-            let packet_count = self.effective_packet_count_since_tick();
-            let movement_delta_sqr = position.distance_to_sqr(self.first_good_position);
-            let velocity_delta_sqr = self.velocity_delta_sqr();
-            let allowed_delta_sqr = JAVA_TOO_FAST_MOVE_THRESHOLD * f64::from(packet_count);
-            if movement_delta_sqr - velocity_delta_sqr > allowed_delta_sqr {
-                return MovePlayerApplyResult::RejectedTooFast {
-                    attempted_position: position,
-                    first_good_position: self.first_good_position,
-                    movement_delta_sqr,
-                    velocity_delta_sqr,
-                    allowed_delta_sqr,
-                    packet_count,
-                };
-            }
-        }
 
         self.position = position;
         self.y_rot_degrees = wrap_degrees(y_rot_degrees);
@@ -201,21 +175,6 @@ impl ServerPlayerState {
         }
         self.teleport_id_counter = id;
         id
-    }
-
-    fn effective_packet_count_since_tick(self) -> u32 {
-        let packet_count = self
-            .received_move_packet_count
-            .saturating_sub(self.known_move_packet_count);
-        if packet_count > JAVA_MOVE_PACKET_BURST_LIMIT {
-            1
-        } else {
-            packet_count.max(1)
-        }
-    }
-
-    fn velocity_delta_sqr(self) -> f64 {
-        0.0
     }
 
     pub(crate) const fn position(self) -> Vec3d {
@@ -479,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn move_player_rejects_too_fast_position_without_mutating_pose() {
+    fn move_player_accepts_large_client_delta_in_permissive_mode() {
         let mut player = ServerPlayerState::default();
         assert!(
             player
@@ -492,7 +451,6 @@ mod tests {
                 .is_accepted()
         );
         player.mark_tick_boundary();
-        let previous = player;
 
         let result = player.apply_move_player(MovePlayerCommand::PosRot {
             position: Vec3d::new(11.0, 64.0, 0.0),
@@ -501,22 +459,12 @@ mod tests {
             on_ground: false,
         });
 
-        assert_eq!(
-            result,
-            MovePlayerApplyResult::RejectedTooFast {
-                attempted_position: Vec3d::new(11.0, 64.0, 0.0),
-                first_good_position: Vec3d::new(0.0, 64.0, 0.0),
-                movement_delta_sqr: 121.0,
-                velocity_delta_sqr: 0.0,
-                allowed_delta_sqr: 100.0,
-                packet_count: 1,
-            }
-        );
-        assert_eq!(player.position(), previous.position());
-        assert_eq!(player.y_rot_degrees(), previous.y_rot_degrees());
-        assert_eq!(player.x_rot_degrees(), previous.x_rot_degrees());
-        assert_eq!(player.on_ground(), previous.on_ground());
-        assert_eq!(player.last_good_position(), previous.last_good_position());
+        assert_eq!(result, MovePlayerApplyResult::Accepted);
+        assert_eq!(player.position(), Vec3d::new(11.0, 64.0, 0.0));
+        assert_eq!(player.y_rot_degrees(), 90.0);
+        assert_eq!(player.x_rot_degrees(), -30.0);
+        assert!(!player.on_ground());
+        assert_eq!(player.last_good_position(), Vec3d::new(11.0, 64.0, 0.0));
         assert_eq!(player.received_move_packet_count(), 2);
         assert_eq!(player.known_move_packet_count(), 1);
     }
@@ -624,7 +572,7 @@ mod tests {
     }
 
     #[test]
-    fn move_player_uses_java_packet_count_threshold_and_burst_clamp() {
+    fn move_player_tracks_packet_counts_without_too_fast_correction() {
         let mut player = ServerPlayerState::default();
         assert!(
             player
@@ -647,7 +595,7 @@ mod tests {
         assert_eq!(player.known_move_packet_count(), 0);
 
         player.mark_tick_boundary();
-        for index in 0..JAVA_MOVE_PACKET_BURST_LIMIT {
+        for index in 0..6 {
             assert!(
                 player
                     .apply_move_player(MovePlayerCommand::Pos {
@@ -658,20 +606,16 @@ mod tests {
             );
         }
 
-        assert_eq!(
-            player.apply_move_player(MovePlayerCommand::Pos {
-                position: Vec3d::new(32.0, 64.0, 0.0),
-                on_ground: true,
-            }),
-            MovePlayerApplyResult::RejectedTooFast {
-                attempted_position: Vec3d::new(32.0, 64.0, 0.0),
-                first_good_position: Vec3d::new(14.0, 64.0, 0.0),
-                movement_delta_sqr: 324.0,
-                velocity_delta_sqr: 0.0,
-                allowed_delta_sqr: 100.0,
-                packet_count: 1,
-            }
+        assert!(
+            player
+                .apply_move_player(MovePlayerCommand::Pos {
+                    position: Vec3d::new(32.0, 64.0, 0.0),
+                    on_ground: true,
+                })
+                .is_accepted()
         );
-        assert_eq!(player.position(), Vec3d::new(19.0, 64.0, 0.0));
+        assert_eq!(player.position(), Vec3d::new(32.0, 64.0, 0.0));
+        assert_eq!(player.received_move_packet_count(), 9);
+        assert_eq!(player.known_move_packet_count(), 2);
     }
 }
