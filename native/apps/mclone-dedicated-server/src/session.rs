@@ -362,6 +362,64 @@ mod tests {
     }
 
     #[test]
+    fn dedicated_sessions_keep_independent_chunk_views() {
+        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        let mut session_a = DedicatedSession::new(player_a);
+        let mut session_b = DedicatedSession::new(player_b);
+
+        let updates_a = session_a
+            .handle_client_command(
+                &mut server,
+                ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(0, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                }),
+            )
+            .unwrap();
+        let updates_b = session_b
+            .handle_client_command(
+                &mut server,
+                ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(4, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                }),
+            )
+            .unwrap();
+
+        assert!(has_snapshot(&updates_a, ChunkPos::new(0, 0)));
+        assert!(!has_snapshot(&updates_a, ChunkPos::new(4, 0)));
+        assert!(has_snapshot(&updates_b, ChunkPos::new(4, 0)));
+        assert!(!has_snapshot(&updates_b, ChunkPos::new(0, 0)));
+
+        let updates_a = session_a
+            .handle_client_command(
+                &mut server,
+                ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(1, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                }),
+            )
+            .unwrap();
+        let updates_b = session_b
+            .handle_client_command(
+                &mut server,
+                ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot: 1 }),
+            )
+            .unwrap();
+
+        assert!(has_unload(&updates_a, ChunkPos::new(0, 0)));
+        assert!(has_snapshot(&updates_a, ChunkPos::new(1, 0)));
+        assert!(!has_unload(&updates_b, ChunkPos::new(4, 0)));
+        assert!(!has_snapshot(&updates_b, ChunkPos::new(1, 0)));
+    }
+
+    #[test]
     fn serve_connection_accepts_persistent_client_command_frames() {
         let mut request = Vec::new();
         write_client_command_frame(
@@ -398,5 +456,17 @@ mod tests {
             second.as_slice(),
             [ServerUpdate::TimeUpdate { .. }]
         ));
+    }
+
+    fn has_snapshot(updates: &[ServerUpdate], pos: ChunkPos) -> bool {
+        updates.iter().any(
+            |update| matches!(update, ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos == pos),
+        )
+    }
+
+    fn has_unload(updates: &[ServerUpdate], pos: ChunkPos) -> bool {
+        updates
+            .iter()
+            .any(|update| matches!(update, ServerUpdate::ChunkUnload { pos: unloaded } if *unloaded == pos))
     }
 }

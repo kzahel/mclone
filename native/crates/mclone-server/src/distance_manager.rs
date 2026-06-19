@@ -9,7 +9,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::ChunkPos;
-use mclone_protocol::ChunkView;
 
 use crate::{
     CHUNK_LEVEL_FULL, ChunkTicket, ChunkTicketKey, ChunkTicketType, MAX_CHUNK_DISTANCE,
@@ -19,7 +18,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct ChunkDistanceManager {
     tickets: BTreeMap<ChunkPos, BTreeSet<ChunkTicket>>,
-    player_ticket_positions: BTreeSet<ChunkPos>,
+    aggregate_player_ticket_positions: BTreeSet<ChunkPos>,
     ticket_tick: u64,
 }
 
@@ -27,7 +26,7 @@ impl ChunkDistanceManager {
     pub(crate) fn new() -> Self {
         Self {
             tickets: BTreeMap::new(),
-            player_ticket_positions: BTreeSet::new(),
+            aggregate_player_ticket_positions: BTreeSet::new(),
             ticket_tick: 0,
         }
     }
@@ -36,11 +35,11 @@ impl ChunkDistanceManager {
         self.ticket_tick
     }
 
-    pub(crate) fn set_player_view(&mut self, view: ChunkView) {
-        let new_positions = chunk_view_positions(&view)
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        let old_positions = std::mem::take(&mut self.player_ticket_positions);
+    pub(crate) fn set_aggregate_player_ticket_positions(
+        &mut self,
+        new_positions: BTreeSet<ChunkPos>,
+    ) {
+        let old_positions = std::mem::take(&mut self.aggregate_player_ticket_positions);
 
         for pos in old_positions.difference(&new_positions).copied() {
             self.remove_ticket(
@@ -60,7 +59,7 @@ impl ChunkDistanceManager {
             );
         }
 
-        self.player_ticket_positions = new_positions;
+        self.aggregate_player_ticket_positions = new_positions;
     }
 
     pub(crate) fn add_region_ticket(
@@ -162,7 +161,7 @@ impl ChunkDistanceManager {
     }
 
     pub(crate) fn player_interest_positions(&self) -> BTreeSet<ChunkPos> {
-        self.player_ticket_positions.clone()
+        self.aggregate_player_ticket_positions.clone()
     }
 
     pub(crate) fn ticketed_chunk_count(&self) -> usize {
@@ -193,16 +192,4 @@ impl ChunkDistanceManager {
             .copied()
             .unwrap_or(UNLOADED_CHUNK_LEVEL)
     }
-}
-
-fn chunk_view_positions(view: &ChunkView) -> Vec<ChunkPos> {
-    let radius =
-        i32::try_from(view.chunk_tracking_radius).expect("chunk tracking radius exceeds i32");
-    let min_x = view.center.x - radius;
-    let max_x = view.center.x + radius;
-    let min_z = view.center.z - radius;
-    let max_z = view.center.z + radius;
-    (min_x..=max_x)
-        .flat_map(|x| (min_z..=max_z).map(move |z| ChunkPos::new(x, z)))
-        .collect()
 }

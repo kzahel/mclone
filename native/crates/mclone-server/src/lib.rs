@@ -16,6 +16,7 @@ mod lighting_seed;
 mod persistence;
 mod placement;
 mod player;
+mod player_chunk_tracking;
 mod players;
 mod scheduler;
 #[cfg(test)]

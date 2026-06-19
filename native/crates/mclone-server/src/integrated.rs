@@ -18,6 +18,7 @@ use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
 use crate::placement::DebugBlockItem;
 use crate::player::{MovePlayerApplyResult, ServerPlayerState};
+use crate::player_chunk_tracking::{PlayerChunkTracking, PlayerChunkTrackingPolicy};
 use crate::players::{ServerPlayerId, ServerPlayerList};
 use crate::spawn::find_safe_surface_spawn;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
@@ -39,6 +40,7 @@ pub struct IntegratedServer {
     player: ServerPlayerState,
     inventory: ServerInventory,
     dedicated_players: ServerPlayerList,
+    chunk_tracking: PlayerChunkTracking,
 }
 
 /// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
@@ -56,6 +58,8 @@ impl IntegratedServer {
     }
 
     pub fn with_chunk_store(seed: i64, store: Box<dyn ChunkSnapshotStore>) -> Self {
+        let mut chunk_tracking = PlayerChunkTracking::new(PlayerChunkTrackingPolicy::default());
+        chunk_tracking.add_player(ServerPlayerId::LOCAL);
         Self {
             seed,
             scheduler: ChunkScheduler::with_store(seed, store),
@@ -67,6 +71,7 @@ impl IntegratedServer {
             player: ServerPlayerState::default(),
             inventory: ServerInventory::default(),
             dedicated_players: ServerPlayerList::default(),
+            chunk_tracking,
         }
     }
 
@@ -112,11 +117,17 @@ impl IntegratedServer {
     }
 
     pub fn add_dedicated_player(&mut self) -> ServerPlayerId {
-        self.dedicated_players.add()
+        let player_id = self.dedicated_players.add();
+        self.chunk_tracking.add_player(player_id);
+        player_id
     }
 
     pub fn remove_dedicated_player(&mut self, player_id: ServerPlayerId) -> bool {
-        self.dedicated_players.remove(player_id).is_some()
+        if self.dedicated_players.remove(player_id).is_none() {
+            return false;
+        }
+        self.remove_player_chunk_tracking(player_id);
+        true
     }
 
     pub fn dedicated_player_count(&self) -> usize {
@@ -307,11 +318,8 @@ impl IntegratedServer {
             day_time: self.day_time,
         });
         let fluid_event_apply_start = simulation_timing_start();
-        updates.extend(
-            fluid_events
-                .into_iter()
-                .filter_map(server_update_from_scheduler_event),
-        );
+        self.route_scheduler_events(fluid_events);
+        updates.extend(self.drain_chunk_updates_for_target(target)?);
         let fluid_event_apply_us = simulation_timing_elapsed_us(fluid_event_apply_start);
 
         Ok(ServerSimulationTickReport {
@@ -389,7 +397,24 @@ impl IntegratedServer {
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         self.ensure_target_exists(target)?;
         self.set_initial_spawn_center_for_target(target, view.center)?;
-        let events = self.scheduler.apply_interest(view)?;
+        let player_id = target.player_id();
+        let change = self.chunk_tracking.set_requested_view(player_id, view);
+        for pos in &change.removed_chunks {
+            self.chunk_tracking.queue_unload_for_player(player_id, *pos);
+        }
+        for pos in &change.added_chunks {
+            if let Some(snapshot) = self.scheduler.client_visible_snapshot(*pos) {
+                self.chunk_tracking
+                    .queue_snapshot_for_player(player_id, snapshot);
+            }
+        }
+        let events = if change.aggregate_changed {
+            self.scheduler.apply_player_ticket_positions(
+                self.chunk_tracking.aggregate_player_ticket_positions(),
+            )?
+        } else {
+            Vec::new()
+        };
         self.apply_scheduler_events_for_target(target, events)
     }
 
@@ -442,7 +467,7 @@ impl IntegratedServer {
                 self.set_block_debug(command.pos, AIR_BLOCK_STATE_ID);
             }
         }
-        Ok(self.drain_pending_block_delta_updates())
+        self.drain_pending_block_delta_updates_for_target(target)
     }
 
     fn handle_use_item_on_for_target(
@@ -455,7 +480,7 @@ impl IntegratedServer {
         {
             self.set_block_debug(target, block_state);
         }
-        Ok(self.drain_pending_block_delta_updates())
+        self.drain_pending_block_delta_updates_for_target(target)
     }
 
     fn held_item_place_target_for_target(
@@ -501,12 +526,12 @@ impl IntegratedServer {
         self.scheduler.set_block_at_world(pos, block_id)
     }
 
-    fn drain_pending_block_delta_updates(&mut self) -> Vec<ServerUpdate> {
-        self.scheduler
-            .drain_pending_block_delta_events()
-            .into_iter()
-            .filter_map(server_update_from_scheduler_event)
-            .collect()
+    fn drain_pending_block_delta_updates_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        let events = self.scheduler.drain_pending_block_delta_events();
+        self.apply_scheduler_events_for_target(target, events)
     }
 
     fn apply_scheduler_events_for_target(
@@ -515,24 +540,47 @@ impl IntegratedServer {
         events: Vec<ChunkSchedulerEvent>,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         self.ensure_target_exists(target)?;
-        let mut updates = Vec::new();
-        for event in events {
-            match event {
-                ChunkSchedulerEvent::FluidTickScheduled { pos, fluid, delay } => {
-                    self.liquid_ticks
-                        .schedule_tick(pos, fluid, delay, self.simulation_tick);
-                }
-                event => {
-                    if let Some(update) = server_update_from_scheduler_event(event) {
-                        updates.push(update);
-                    }
-                }
-            }
-        }
+        self.route_scheduler_events(events);
+        let mut updates = self.drain_chunk_updates_for_target(target)?;
         if let Some(update) = self.initial_spawn_update_for_target(target)? {
             updates.push(ServerUpdate::PlayerPosition(update));
         }
         Ok(updates)
+    }
+
+    fn route_scheduler_events(&mut self, events: Vec<ChunkSchedulerEvent>) {
+        for event in events {
+            match event {
+                ChunkSchedulerEvent::SnapshotReady(snapshot) => {
+                    self.chunk_tracking
+                        .queue_snapshot_for_tracking_players(snapshot);
+                }
+                ChunkSchedulerEvent::Unloaded { pos } => {
+                    self.chunk_tracking.queue_unload_for_tracking_players(pos);
+                }
+                ChunkSchedulerEvent::SectionBlockUpdates {
+                    pos,
+                    section_y,
+                    updates,
+                } => {
+                    self.chunk_tracking
+                        .queue_section_updates_for_tracking_players(pos, section_y, updates);
+                }
+                ChunkSchedulerEvent::FluidTickScheduled { pos, fluid, delay } => {
+                    self.liquid_ticks
+                        .schedule_tick(pos, fluid, delay, self.simulation_tick);
+                }
+                ChunkSchedulerEvent::StatusChanged { .. } => {}
+            }
+        }
+    }
+
+    fn drain_chunk_updates_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.ensure_target_exists(target)?;
+        Ok(self.chunk_tracking.drain_updates(target.player_id()))
     }
 
     fn initial_spawn_update_for_target(
@@ -670,6 +718,27 @@ impl IntegratedServer {
             player.state.mark_tick_boundary();
         }
     }
+
+    fn remove_player_chunk_tracking(&mut self, player_id: ServerPlayerId) {
+        let change = self.chunk_tracking.remove_player(player_id);
+        if !change.aggregate_changed {
+            return;
+        }
+        let events = self
+            .scheduler
+            .apply_player_ticket_positions(self.chunk_tracking.aggregate_player_ticket_positions())
+            .expect("failed to reconcile chunk tracking after dedicated player disconnect");
+        self.route_scheduler_events(events);
+    }
+}
+
+impl CommandTarget {
+    const fn player_id(self) -> ServerPlayerId {
+        match self {
+            CommandTarget::Local => ServerPlayerId::LOCAL,
+            CommandTarget::Dedicated(player_id) => player_id,
+        }
+    }
 }
 
 fn unknown_player_error(player_id: ServerPlayerId) -> ChunkStoreError {
@@ -680,24 +749,6 @@ fn raw_block_id_from_block_state(block_state: BlockStateId) -> Option<RawBlockId
     RawBlockId::try_from(block_state.0).ok()
 }
 
-fn server_update_from_scheduler_event(event: ChunkSchedulerEvent) -> Option<ServerUpdate> {
-    match event {
-        ChunkSchedulerEvent::SnapshotReady(snapshot) => Some(ServerUpdate::ChunkSnapshot(snapshot)),
-        ChunkSchedulerEvent::Unloaded { pos } => Some(ServerUpdate::ChunkUnload { pos }),
-        ChunkSchedulerEvent::SectionBlockUpdates {
-            pos,
-            section_y,
-            updates,
-        } => Some(ServerUpdate::SectionBlockUpdates {
-            pos,
-            section_y,
-            updates,
-        }),
-        ChunkSchedulerEvent::StatusChanged { .. }
-        | ChunkSchedulerEvent::FluidTickScheduled { .. } => None,
-    }
-}
-
 fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {
     chunks.iter().fold(0, |count, _pos| count + 1)
 }
@@ -705,6 +756,9 @@ fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+
+    use crate::ChunkHolder;
     use mclone_core::{BlockHitResult, BlockStateId, Direction, Vec3d};
     use mclone_protocol::{AcceptTeleportCommand, PlayerPositionRelativeFlags, ServerUpdate};
     use mclone_worldgen::block::{DIRT, GRASS, SNOW, STONE, has_fluid, material_blocks_motion};
@@ -756,6 +810,219 @@ mod tests {
                 .expect("accept initial player position");
             assert!(ack_updates.is_empty());
         }
+    }
+
+    fn set_dedicated_chunk_view_and_poll(
+        server: &mut IntegratedServer,
+        player_id: ServerPlayerId,
+        center: ChunkPos,
+        radius: u32,
+    ) -> Vec<ServerUpdate> {
+        let mut updates = server
+            .try_handle_command_for_player(
+                player_id,
+                ClientCommand::SetChunkView(ChunkView {
+                    center,
+                    render_distance: radius,
+                    chunk_tracking_radius: radius,
+                }),
+            )
+            .expect("set dedicated chunk view");
+        accept_dedicated_player_position_updates(server, player_id, &updates);
+        for _ in 0..60_000 {
+            let polled = server.try_poll_for_player(player_id).expect("poll player");
+            accept_dedicated_player_position_updates(server, player_id, &polled);
+            updates.extend(polled);
+            if server.pending_job_count() == 0 {
+                return updates;
+            }
+            if server.pending_publication_count() == 0 {
+                server.wait_for_worldgen_completion(Duration::from_secs(1));
+            }
+        }
+        panic!("timed out loading dedicated player chunk view");
+    }
+
+    fn accept_dedicated_player_position_updates(
+        server: &mut IntegratedServer,
+        player_id: ServerPlayerId,
+        updates: &[ServerUpdate],
+    ) {
+        for update in updates {
+            let ServerUpdate::PlayerPosition(update) = update else {
+                continue;
+            };
+            let ack_updates = server
+                .try_handle_command_for_player(
+                    player_id,
+                    ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                        id: update.teleport_id,
+                    }),
+                )
+                .expect("accept dedicated player position");
+            assert!(ack_updates.is_empty());
+        }
+    }
+
+    fn snapshot_positions(updates: &[ServerUpdate]) -> BTreeSet<ChunkPos> {
+        updates
+            .iter()
+            .filter_map(|update| match update {
+                ServerUpdate::ChunkSnapshot(snapshot) => Some(snapshot.pos),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn has_chunk_unload(updates: &[ServerUpdate], pos: ChunkPos) -> bool {
+        updates
+            .iter()
+            .any(|update| matches!(update, ServerUpdate::ChunkUnload { pos: unloaded } if *unloaded == pos))
+    }
+
+    fn has_section_block_updates(updates: &[ServerUpdate]) -> bool {
+        updates
+            .iter()
+            .any(|update| matches!(update, ServerUpdate::SectionBlockUpdates { .. }))
+    }
+
+    #[test]
+    fn dedicated_player_views_keep_disjoint_ticket_sets() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+
+        let updates_a =
+            set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+        let updates_b =
+            set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(4, 0), 0);
+
+        let snapshots_a = snapshot_positions(&updates_a);
+        let snapshots_b = snapshot_positions(&updates_b);
+        assert!(snapshots_a.contains(&ChunkPos::new(0, 0)));
+        assert!(!snapshots_a.contains(&ChunkPos::new(4, 0)));
+        assert!(snapshots_b.contains(&ChunkPos::new(4, 0)));
+        assert!(!snapshots_b.contains(&ChunkPos::new(0, 0)));
+        assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(0, 0)), 1);
+        assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(4, 0)), 1);
+    }
+
+    #[test]
+    fn overlapping_player_views_unload_only_for_player_leaving_chunk() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+        set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 0);
+
+        let updates_a =
+            set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(1, 0), 0);
+        let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
+
+        assert!(has_chunk_unload(&updates_a, ChunkPos::new(0, 0)));
+        assert!(!has_chunk_unload(&updates_b, ChunkPos::new(0, 0)));
+        assert!(
+            server
+                .scheduler()
+                .holder(ChunkPos::new(0, 0))
+                .is_some_and(ChunkHolder::is_client_visible)
+        );
+        assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(0, 0)), 1);
+    }
+
+    #[test]
+    fn smaller_player_view_receives_fewer_snapshots_than_larger_view() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+
+        let updates_a =
+            set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+        let updates_b =
+            set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 1);
+
+        let snapshots_a = snapshot_positions(&updates_a);
+        let snapshots_b = snapshot_positions(&updates_b);
+        assert_eq!(snapshots_a.len(), 1);
+        assert_eq!(snapshots_b.len(), 9);
+        assert!(snapshots_b.len() > snapshots_a.len());
+    }
+
+    #[test]
+    fn block_delta_routing_sends_only_to_players_tracking_changed_chunk() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+        set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(2, 0), 0);
+        server
+            .try_handle_command_for_player(
+                player_a,
+                ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                    position: Vec3d::new(8.5, 80.0, 8.5),
+                    y_rot_degrees: 0.0,
+                    x_rot_degrees: 0.0,
+                    on_ground: true,
+                }),
+            )
+            .expect("move player a");
+        let pos = BlockPos::new(8, 80, 8);
+        assert!(server.scheduler_mut().set_block_at_world(pos, DIRT));
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates_a = server
+            .try_handle_command_for_player(
+                player_a,
+                ClientCommand::PlayerAction(PlayerActionCommand {
+                    pos,
+                    direction: Direction::Up,
+                    kind: PlayerActionKind::DebugInstantBreak,
+                }),
+            )
+            .expect("break block");
+        let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
+
+        assert!(has_section_block_updates(&updates_a));
+        assert!(!has_section_block_updates(&updates_b));
+    }
+
+    #[test]
+    fn disconnect_removes_player_chunk_ticket_contribution() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        server
+            .try_handle_command_for_player(
+                player_a,
+                ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(0, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                }),
+            )
+            .expect("set view a");
+        server
+            .try_handle_command_for_player(
+                player_b,
+                ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(4, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                }),
+            )
+            .expect("set view b");
+        assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(0, 0)), 1);
+        assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(4, 0)), 1);
+
+        assert!(server.remove_dedicated_player(player_a));
+
+        assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(0, 0)), 0);
+        assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(4, 0)), 1);
     }
 
     fn sync_player(server: &mut IntegratedServer, position: Vec3d) {

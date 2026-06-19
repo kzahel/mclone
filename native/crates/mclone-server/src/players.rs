@@ -12,8 +12,15 @@ const FIRST_DEDICATED_PLAYER_ID: u64 = 1;
 pub struct ServerPlayerId(u64);
 
 impl ServerPlayerId {
+    pub(crate) const LOCAL: Self = Self(0);
+
     pub const fn as_u64(self) -> u64 {
         self.0
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn from_raw_for_tests(raw: u64) -> Self {
+        Self(raw)
     }
 }
 

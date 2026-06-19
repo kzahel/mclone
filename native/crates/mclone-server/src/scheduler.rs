@@ -40,6 +40,7 @@ use crate::light_status::{
     PendingLightStatus, PendingLightStatusBatch, hydrate_loaded_light_snapshot,
 };
 use crate::persistence::{ChunkSnapshotStore, ChunkStoreResult, NullChunkSnapshotStore};
+use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
     ChunkSchedulerTickReport, ChunkSchedulerTickTiming, simulation_timing_elapsed_us,
     simulation_timing_start,
@@ -394,7 +395,15 @@ impl ChunkScheduler {
         &mut self,
         view: ChunkView,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        self.distance_manager.set_player_view(view);
+        self.apply_player_ticket_positions(chunk_positions_for_view(&view))
+    }
+
+    pub(crate) fn apply_player_ticket_positions(
+        &mut self,
+        positions: BTreeSet<ChunkPos>,
+    ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        self.distance_manager
+            .set_aggregate_player_ticket_positions(positions);
         self.reconcile_ticketed_holders()
     }
 
@@ -505,6 +514,16 @@ impl ChunkScheduler {
 
     pub fn holder(&self, pos: ChunkPos) -> Option<&ChunkHolder> {
         self.holders.get(&pos)
+    }
+
+    pub(crate) fn client_visible_snapshot(&self, pos: ChunkPos) -> Option<ChunkSnapshot> {
+        let holder = self.holders.get(&pos)?;
+        if !holder.client_visible {
+            return None;
+        }
+        let snapshot = holder.published_snapshot.as_ref()?;
+        self.snapshot_is_client_ready(snapshot)
+            .then(|| snapshot.clone())
     }
 
     pub fn holder_count(&self) -> usize {
