@@ -182,6 +182,7 @@ impl IntegratedServer {
 
         let simulation_tick = self.simulation_tick.saturating_add(1);
         self.simulation_tick = simulation_tick;
+        self.player.mark_tick_boundary();
 
         // Advance the day/night clock one tick (Java `ServerLevel.tickTime` with
         // `doDaylightCycle` on). Coupled to the simulation tick cadence, which is
@@ -446,7 +447,7 @@ mod tests {
 
     fn sync_player(server: &mut IntegratedServer, position: Vec3d) {
         let updates = server
-            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand {
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
                 position,
                 y_rot_degrees: 0.0,
                 x_rot_degrees: 0.0,
@@ -498,7 +499,7 @@ mod tests {
         let mut server = IntegratedServer::new(0);
 
         let updates = server
-            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand {
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
                 position: Vec3d::new(1.25, 63.0, -4.5),
                 y_rot_degrees: 181.0,
                 x_rot_degrees: -181.0,
@@ -511,6 +512,44 @@ mod tests {
         assert_eq!(server.player.y_rot_degrees(), -179.0);
         assert_eq!(server.player.x_rot_degrees(), 179.0);
         assert!(server.player.on_ground());
+    }
+
+    #[test]
+    fn simulation_tick_records_java_shaped_movement_packet_boundary() {
+        let mut server = IntegratedServer::new(0);
+
+        server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(1.0, 64.0, 1.0),
+                on_ground: true,
+            }))
+            .expect("move player");
+        server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+                y_rot_degrees: 90.0,
+                x_rot_degrees: 10.0,
+                on_ground: false,
+            }))
+            .expect("rotate player");
+
+        assert_eq!(server.player.position(), Vec3d::new(1.0, 64.0, 1.0));
+        assert_eq!(server.player.received_move_packet_count(), 2);
+        assert_eq!(server.player.known_move_packet_count(), 0);
+
+        server
+            .try_simulation_tick_report()
+            .expect("simulation tick");
+
+        assert_eq!(server.player.received_move_packet_count(), 2);
+        assert_eq!(server.player.known_move_packet_count(), 2);
+        assert_eq!(
+            server.player.first_good_position(),
+            Vec3d::new(1.0, 64.0, 1.0)
+        );
+        assert_eq!(
+            server.player.last_good_position(),
+            Vec3d::new(1.0, 64.0, 1.0)
+        );
     }
 
     #[test]

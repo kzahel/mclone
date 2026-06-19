@@ -320,7 +320,7 @@ impl LocalPlayerController {
     }
 
     pub fn move_player_command(&self) -> ClientCommand {
-        ClientCommand::MovePlayer(MovePlayerCommand {
+        ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
             position: self.pose.position,
             y_rot_degrees: self.pose.y_rot_degrees as f32,
             x_rot_degrees: self.pose.x_rot_degrees as f32,
@@ -963,7 +963,7 @@ mod tests {
 
         assert_eq!(
             controller.move_player_command(),
-            ClientCommand::MovePlayer(MovePlayerCommand {
+            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
                 position: Vec3d::new(1.25, 63.0, -4.5),
                 y_rot_degrees: -181.5,
                 x_rot_degrees: 45.25,

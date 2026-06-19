@@ -431,8 +431,10 @@ entire Java survival stack.
 
 ## Protocol Shape
 
-Do not overfit the first protocol to final Java packets, but keep names and
-fields close enough that later parity is straightforward.
+Movement networking and authority now have their own tactical in
+[`056-native-player-movement-networking.md`](056-native-player-movement-networking.md).
+This interaction slice still owns break/place command shape; movement sync is
+kept here only as the server-owned player-state input for reach validation.
 
 Recommended first shape:
 
@@ -445,11 +447,25 @@ pub enum ClientCommand {
     UseItemOn(UseItemOnCommand),
 }
 
-pub struct MovePlayerCommand {
-    pub position: Vec3d,
-    pub y_rot_degrees: f32,
-    pub x_rot_degrees: f32,
-    pub on_ground: bool,
+pub enum MovePlayerCommand {
+    Pos {
+        position: Vec3d,
+        on_ground: bool,
+    },
+    PosRot {
+        position: Vec3d,
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
+        on_ground: bool,
+    },
+    Rot {
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
+        on_ground: bool,
+    },
+    StatusOnly {
+        on_ground: bool,
+    },
 }
 
 pub struct SetCarriedItemCommand {

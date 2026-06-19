@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
@@ -39,11 +39,65 @@ pub enum ClientCommand {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MovePlayerCommand {
-    pub position: Vec3d,
-    pub y_rot_degrees: f32,
-    pub x_rot_degrees: f32,
-    pub on_ground: bool,
+pub enum MovePlayerCommand {
+    Pos {
+        position: Vec3d,
+        on_ground: bool,
+    },
+    PosRot {
+        position: Vec3d,
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
+        on_ground: bool,
+    },
+    Rot {
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
+        on_ground: bool,
+    },
+    StatusOnly {
+        on_ground: bool,
+    },
+}
+
+impl MovePlayerCommand {
+    pub fn position_or(self, fallback: Vec3d) -> Vec3d {
+        match self {
+            Self::Pos { position, .. } | Self::PosRot { position, .. } => position,
+            Self::Rot { .. } | Self::StatusOnly { .. } => fallback,
+        }
+    }
+
+    pub fn y_rot_degrees_or(self, fallback: f32) -> f32 {
+        match self {
+            Self::PosRot { y_rot_degrees, .. } | Self::Rot { y_rot_degrees, .. } => y_rot_degrees,
+            Self::Pos { .. } | Self::StatusOnly { .. } => fallback,
+        }
+    }
+
+    pub fn x_rot_degrees_or(self, fallback: f32) -> f32 {
+        match self {
+            Self::PosRot { x_rot_degrees, .. } | Self::Rot { x_rot_degrees, .. } => x_rot_degrees,
+            Self::Pos { .. } | Self::StatusOnly { .. } => fallback,
+        }
+    }
+
+    pub const fn on_ground(self) -> bool {
+        match self {
+            Self::Pos { on_ground, .. }
+            | Self::PosRot { on_ground, .. }
+            | Self::Rot { on_ground, .. }
+            | Self::StatusOnly { on_ground } => on_ground,
+        }
+    }
+
+    pub const fn has_position(self) -> bool {
+        matches!(self, Self::Pos { .. } | Self::PosRot { .. })
+    }
+
+    pub const fn has_rotation(self) -> bool {
+        matches!(self, Self::PosRot { .. } | Self::Rot { .. })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -376,10 +430,42 @@ impl ByteWriter {
     }
 
     fn write_move_player(&mut self, command: &MovePlayerCommand) {
-        self.write_vec3d(command.position);
-        self.write_f32(command.y_rot_degrees);
-        self.write_f32(command.x_rot_degrees);
-        self.write_bool(command.on_ground);
+        match *command {
+            MovePlayerCommand::Pos {
+                position,
+                on_ground,
+            } => {
+                self.write_u8(0);
+                self.write_vec3d(position);
+                self.write_bool(on_ground);
+            }
+            MovePlayerCommand::PosRot {
+                position,
+                y_rot_degrees,
+                x_rot_degrees,
+                on_ground,
+            } => {
+                self.write_u8(1);
+                self.write_vec3d(position);
+                self.write_f32(y_rot_degrees);
+                self.write_f32(x_rot_degrees);
+                self.write_bool(on_ground);
+            }
+            MovePlayerCommand::Rot {
+                y_rot_degrees,
+                x_rot_degrees,
+                on_ground,
+            } => {
+                self.write_u8(2);
+                self.write_f32(y_rot_degrees);
+                self.write_f32(x_rot_degrees);
+                self.write_bool(on_ground);
+            }
+            MovePlayerCommand::StatusOnly { on_ground } => {
+                self.write_u8(3);
+                self.write_bool(on_ground);
+            }
+        }
     }
 
     fn write_set_carried_item(&mut self, command: &SetCarriedItemCommand) {
@@ -596,7 +682,39 @@ impl<'a> ByteReader<'a> {
     }
 
     fn read_move_player(&mut self) -> ProtocolCodecResult<MovePlayerCommand> {
-        let position = self.read_vec3d()?;
+        match self.read_u8()? {
+            0 => Ok(MovePlayerCommand::Pos {
+                position: self.read_vec3d()?,
+                on_ground: self.read_bool()?,
+            }),
+            1 => {
+                let position = self.read_vec3d()?;
+                let (y_rot_degrees, x_rot_degrees) = self.read_move_player_rotation()?;
+                Ok(MovePlayerCommand::PosRot {
+                    position,
+                    y_rot_degrees,
+                    x_rot_degrees,
+                    on_ground: self.read_bool()?,
+                })
+            }
+            2 => {
+                let (y_rot_degrees, x_rot_degrees) = self.read_move_player_rotation()?;
+                Ok(MovePlayerCommand::Rot {
+                    y_rot_degrees,
+                    x_rot_degrees,
+                    on_ground: self.read_bool()?,
+                })
+            }
+            3 => Ok(MovePlayerCommand::StatusOnly {
+                on_ground: self.read_bool()?,
+            }),
+            _ => Err(ProtocolCodecError::InvalidData(
+                "unknown move player packet variant",
+            )),
+        }
+    }
+
+    fn read_move_player_rotation(&mut self) -> ProtocolCodecResult<(f32, f32)> {
         let y_rot_degrees = self.read_f32()?;
         let x_rot_degrees = self.read_f32()?;
         if !y_rot_degrees.is_finite() || !x_rot_degrees.is_finite() {
@@ -604,12 +722,7 @@ impl<'a> ByteReader<'a> {
                 "move player rotation contains non-finite value",
             ));
         }
-        Ok(MovePlayerCommand {
-            position,
-            y_rot_degrees,
-            x_rot_degrees,
-            on_ground: self.read_bool()?,
-        })
+        Ok((y_rot_degrees, x_rot_degrees))
     }
 
     fn read_set_carried_item(&mut self) -> ProtocolCodecResult<SetCarriedItemCommand> {
@@ -818,16 +931,28 @@ mod tests {
 
     #[test]
     fn client_command_codec_round_trips_move_player() {
-        let command = ClientCommand::MovePlayer(MovePlayerCommand {
-            position: Vec3d::new(-1.25, 63.0, 12.5),
-            y_rot_degrees: -181.5,
-            x_rot_degrees: 45.25,
-            on_ground: true,
-        });
+        for command in [
+            ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(-1.25, 63.0, 12.5),
+                on_ground: true,
+            }),
+            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                position: Vec3d::new(-1.25, 63.0, 12.5),
+                y_rot_degrees: -181.5,
+                x_rot_degrees: 45.25,
+                on_ground: true,
+            }),
+            ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+                y_rot_degrees: -181.5,
+                x_rot_degrees: 45.25,
+                on_ground: false,
+            }),
+            ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly { on_ground: true }),
+        ] {
+            let bytes = encode_client_command(&command).unwrap();
 
-        let bytes = encode_client_command(&command).unwrap();
-
-        assert_eq!(decode_client_command(&bytes).unwrap(), command);
+            assert_eq!(decode_client_command(&bytes).unwrap(), command);
+        }
     }
 
     #[test]

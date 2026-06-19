@@ -203,7 +203,7 @@ fn apply_scripted_interaction(
     );
     let player_feet_position =
         eye_position.add(Vec3d::new(0.0, -LOCAL_PLAYER_STANDING_EYE_HEIGHT, 0.0));
-    runtime.send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand {
+    runtime.send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
         position: player_feet_position,
         y_rot_degrees: 0.0,
         x_rot_degrees: 90.0,
