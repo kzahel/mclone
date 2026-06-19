@@ -9,12 +9,14 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
+pub const HOTBAR_SLOT_COUNT: u8 = 9;
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
 const CLIENT_COMMAND_PLAYER_ACTION: u8 = 2;
 const CLIENT_COMMAND_USE_ITEM_ON: u8 = 3;
 const CLIENT_COMMAND_MOVE_PLAYER: u8 = 4;
+const CLIENT_COMMAND_SET_CARRIED_ITEM: u8 = 5;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -31,6 +33,7 @@ pub struct ChunkView {
 pub enum ClientCommand {
     SetChunkView(ChunkView),
     MovePlayer(MovePlayerCommand),
+    SetCarriedItem(SetCarriedItemCommand),
     PlayerAction(PlayerActionCommand),
     UseItemOn(UseItemOnCommand),
 }
@@ -41,6 +44,11 @@ pub struct MovePlayerCommand {
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
     pub on_ground: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SetCarriedItemCommand {
+    pub slot: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -60,13 +68,14 @@ pub struct PlayerActionCommand {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UseItemOnCommand {
+    pub hand: InteractionHand,
     pub hit: BlockHitResult,
-    pub action: UseItemOnKind,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum UseItemOnKind {
-    DebugPlaceBlock { block_state: BlockStateId },
+pub enum InteractionHand {
+    MainHand,
+    OffHand,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,8 +114,8 @@ pub enum ProtocolCodecError {
     UnknownServerUpdateTag(u8),
     UnknownChunkStatus(u8),
     UnknownDirection(u8),
+    UnknownInteractionHand(u8),
     UnknownPlayerActionKind(u8),
-    UnknownUseItemOnKind(u8),
     LengthOverflow { field: &'static str, len: usize },
     InvalidData(&'static str),
 }
@@ -133,11 +142,11 @@ impl fmt::Display for ProtocolCodecError {
             Self::UnknownDirection(direction) => {
                 write!(f, "unknown direction tag {direction}")
             }
+            Self::UnknownInteractionHand(hand) => {
+                write!(f, "unknown interaction hand tag {hand}")
+            }
             Self::UnknownPlayerActionKind(kind) => {
                 write!(f, "unknown player action kind tag {kind}")
-            }
-            Self::UnknownUseItemOnKind(kind) => {
-                write!(f, "unknown use-item-on kind tag {kind}")
             }
             Self::LengthOverflow { field, len } => {
                 write!(f, "{field} length {len} does not fit in u32")
@@ -161,6 +170,10 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
         ClientCommand::MovePlayer(command) => {
             writer.write_u8(CLIENT_COMMAND_MOVE_PLAYER);
             writer.write_move_player(command);
+        }
+        ClientCommand::SetCarriedItem(command) => {
+            writer.write_u8(CLIENT_COMMAND_SET_CARRIED_ITEM);
+            writer.write_set_carried_item(command);
         }
         ClientCommand::PlayerAction(command) => {
             writer.write_u8(CLIENT_COMMAND_PLAYER_ACTION);
@@ -189,6 +202,9 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
             })
         }
         CLIENT_COMMAND_MOVE_PLAYER => ClientCommand::MovePlayer(reader.read_move_player()?),
+        CLIENT_COMMAND_SET_CARRIED_ITEM => {
+            ClientCommand::SetCarriedItem(reader.read_set_carried_item()?)
+        }
         CLIENT_COMMAND_PLAYER_ACTION => ClientCommand::PlayerAction(reader.read_player_action()?),
         CLIENT_COMMAND_USE_ITEM_ON => ClientCommand::UseItemOn(reader.read_use_item_on()?),
         _ => return Err(ProtocolCodecError::UnknownClientCommandTag(tag)),
@@ -366,6 +382,10 @@ impl ByteWriter {
         self.write_bool(command.on_ground);
     }
 
+    fn write_set_carried_item(&mut self, command: &SetCarriedItemCommand) {
+        self.write_u8(command.slot);
+    }
+
     fn write_player_action(&mut self, command: &PlayerActionCommand) {
         self.write_block_pos(command.pos);
         self.write_direction(command.direction);
@@ -378,13 +398,15 @@ impl ByteWriter {
     }
 
     fn write_use_item_on(&mut self, command: &UseItemOnCommand) {
+        self.write_interaction_hand(command.hand);
         self.write_block_hit_result(command.hit);
-        match command.action {
-            UseItemOnKind::DebugPlaceBlock { block_state } => {
-                self.write_u8(0);
-                self.write_u32(block_state.0);
-            }
-        }
+    }
+
+    fn write_interaction_hand(&mut self, hand: InteractionHand) {
+        self.write_u8(match hand {
+            InteractionHand::MainHand => 0,
+            InteractionHand::OffHand => 1,
+        });
     }
 
     fn write_status(&mut self, status: ChunkStatus) {
@@ -590,6 +612,12 @@ impl<'a> ByteReader<'a> {
         })
     }
 
+    fn read_set_carried_item(&mut self) -> ProtocolCodecResult<SetCarriedItemCommand> {
+        Ok(SetCarriedItemCommand {
+            slot: self.read_u8()?,
+        })
+    }
+
     fn read_player_action(&mut self) -> ProtocolCodecResult<PlayerActionCommand> {
         let pos = self.read_block_pos()?;
         let direction = self.read_direction()?;
@@ -608,14 +636,18 @@ impl<'a> ByteReader<'a> {
     }
 
     fn read_use_item_on(&mut self) -> ProtocolCodecResult<UseItemOnCommand> {
+        let hand = self.read_interaction_hand()?;
         let hit = self.read_block_hit_result()?;
-        let action = match self.read_u8()? {
-            0 => UseItemOnKind::DebugPlaceBlock {
-                block_state: BlockStateId(self.read_u32()?),
-            },
-            kind => return Err(ProtocolCodecError::UnknownUseItemOnKind(kind)),
-        };
-        Ok(UseItemOnCommand { hit, action })
+        Ok(UseItemOnCommand { hand, hit })
+    }
+
+    fn read_interaction_hand(&mut self) -> ProtocolCodecResult<InteractionHand> {
+        let hand = self.read_u8()?;
+        match hand {
+            0 => Ok(InteractionHand::MainHand),
+            1 => Ok(InteractionHand::OffHand),
+            hand => Err(ProtocolCodecError::UnknownInteractionHand(hand)),
+        }
     }
 
     fn read_status(&mut self) -> ProtocolCodecResult<ChunkStatus> {
@@ -799,6 +831,15 @@ mod tests {
     }
 
     #[test]
+    fn client_command_codec_round_trips_set_carried_item() {
+        let command = ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot: 7 });
+
+        let bytes = encode_client_command(&command).unwrap();
+
+        assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
     fn client_command_codec_round_trips_player_action() {
         let command = ClientCommand::PlayerAction(PlayerActionCommand {
             pos: BlockPos::new(-1, 64, 12),
@@ -814,15 +855,13 @@ mod tests {
     #[test]
     fn client_command_codec_round_trips_use_item_on() {
         let command = ClientCommand::UseItemOn(UseItemOnCommand {
+            hand: InteractionHand::MainHand,
             hit: BlockHitResult::new(
                 Vec3d::new(1.25, 64.0, -3.5),
                 Direction::Up,
                 BlockPos::new(1, 63, -4),
                 false,
             ),
-            action: UseItemOnKind::DebugPlaceBlock {
-                block_state: BlockStateId(42),
-            },
         });
 
         let bytes = encode_client_command(&command).unwrap();

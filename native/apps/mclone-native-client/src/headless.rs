@@ -218,7 +218,7 @@ fn apply_scripted_interaction(
         .context("scripted interaction did not produce break command")?;
     let break_changed = runtime.send_gameplay_command(break_command)?;
     let place_command = interaction
-        .debug_place_block_command(hit)
+        .use_item_on_command(hit)
         .context("scripted interaction did not produce place command")?;
     let place_changed = runtime.send_gameplay_command(place_command)?;
     if !break_changed || !place_changed {

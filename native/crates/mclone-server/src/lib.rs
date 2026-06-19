@@ -7,6 +7,7 @@ mod fluid;
 mod game_mode;
 mod holder;
 mod integrated;
+mod inventory;
 mod level_light_bridge;
 mod light_mailbox;
 mod light_status;

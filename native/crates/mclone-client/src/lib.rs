@@ -5,14 +5,14 @@ use std::collections::BTreeMap;
 mod block_clip;
 mod block_shapes;
 mod interaction;
+mod inventory;
 mod player;
 
 use mclone_core::{CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
 use mclone_protocol::{ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate};
 
-pub use interaction::{
-    CREATIVE_PICK_RANGE, ClientInteractionController, DEFAULT_DEBUG_PLACE_BLOCK,
-};
+pub use interaction::{CREATIVE_PICK_RANGE, ClientInteractionController};
+pub use inventory::ClientInventory;
 pub use player::{
     CollisionMovementResult, LOCAL_PLAYER_AIR_SPEED, LOCAL_PLAYER_BASE_MOVEMENT_SPEED,
     LOCAL_PLAYER_GRAVITY, LOCAL_PLAYER_JUMP_POWER, LOCAL_PLAYER_STANDING_EYE_HEIGHT,

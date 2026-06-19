@@ -691,8 +691,18 @@ impl ChunkApp {
             .context("failed to sync player pose to server")
     }
 
+    fn sync_carried_item(&mut self) -> Result<bool> {
+        let Some(command) = self.interaction.ensure_has_sent_carried_item() else {
+            return Ok(false);
+        };
+        self.runtime
+            .send_gameplay_command(command)
+            .context("failed to sync carried item to server")
+    }
+
     fn handle_world_mouse_pressed(&mut self, button: MouseButton) -> Result<()> {
         self.sync_server_player_pose()?;
+        self.sync_carried_item()?;
         let pose = self.player.pose();
         let hit = self.interaction.pick_block(
             &self.runtime.client,
@@ -701,7 +711,7 @@ impl ChunkApp {
         );
         let command = match button {
             MouseButton::Left => self.interaction.debug_instant_break_command(hit),
-            MouseButton::Right => self.interaction.debug_place_block_command(hit),
+            MouseButton::Right => self.interaction.use_item_on_command(hit),
             _ => None,
         };
         let Some(command) = command else {
@@ -1016,6 +1026,16 @@ impl ApplicationHandler for ChunkApp {
                         self.schedule_next_redraw(event_loop);
                         return;
                     }
+                    if event.state == ElementState::Pressed
+                        && !event.repeat
+                        && let Some(slot) = hotbar_slot_from_key_code(key_code)
+                    {
+                        if self.interaction.select_hotbar_slot(slot) {
+                            log::info!("selected hotbar slot {}", slot + 1);
+                        }
+                        self.schedule_next_redraw(event_loop);
+                        return;
+                    }
                     if let Some(input_key) = player_input_key_from_key_code(key_code) {
                         self.player
                             .set_key(input_key, event.state == ElementState::Pressed);
@@ -1249,6 +1269,21 @@ fn player_input_key_from_key_code(key_code: KeyCode) -> Option<PlayerInputKey> {
     }
 }
 
+fn hotbar_slot_from_key_code(key_code: KeyCode) -> Option<u8> {
+    match key_code {
+        KeyCode::Digit1 => Some(0),
+        KeyCode::Digit2 => Some(1),
+        KeyCode::Digit3 => Some(2),
+        KeyCode::Digit4 => Some(3),
+        KeyCode::Digit5 => Some(4),
+        KeyCode::Digit6 => Some(5),
+        KeyCode::Digit7 => Some(6),
+        KeyCode::Digit8 => Some(7),
+        KeyCode::Digit9 => Some(8),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1305,6 +1340,15 @@ mod tests {
         );
         assert_eq!(player_input_key_from_key_code(NO_CLIP_TOGGLE_KEY), None);
         assert_eq!(player_input_key_from_key_code(KeyCode::KeyO), None);
+        assert_eq!(player_input_key_from_key_code(KeyCode::Digit1), None);
+    }
+
+    #[test]
+    fn native_number_keys_map_to_hotbar_slots() {
+        assert_eq!(hotbar_slot_from_key_code(KeyCode::Digit1), Some(0));
+        assert_eq!(hotbar_slot_from_key_code(KeyCode::Digit5), Some(4));
+        assert_eq!(hotbar_slot_from_key_code(KeyCode::Digit9), Some(8));
+        assert_eq!(hotbar_slot_from_key_code(KeyCode::KeyW), None);
     }
 
     #[test]

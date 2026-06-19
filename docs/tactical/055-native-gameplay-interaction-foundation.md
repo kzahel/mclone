@@ -64,9 +64,12 @@ placement rules.
   trust position carried by block action commands.
 - 2026-06-19: Added a server-side `UseOnContext`/`BlockPlaceContext` placement
   lane for debug block items. Clicked-vs-relative target choice and the current
-  terrain-MVP replaceability facts now live outside `game_mode`, while debug
-  placement still uses the selected block as the held item source until
-  inventory exists.
+  terrain-MVP replaceability facts now live outside `game_mode`.
+- 2026-06-19: Added the first Java-shaped selected hotbar lane. Native number
+  keys update a client selected slot, client interaction emits
+  `SetCarriedItem` on the next carried-item sync when the slot changed,
+  `UseItemOn` now carries only hand and hit result, and the server resolves
+  placement from its own debug hotbar.
 
 ## Current Native State
 
@@ -87,8 +90,11 @@ Native code already has several useful pieces:
     the client gameplay controller owns the actual movement calculation
   - syncs the local player pose to the server after movement and immediately
     before mouse interactions
-  - left/right mouse buttons request mouse lock first, then send debug
-    break/place commands while the world is active and locked
+  - maps number keys into selected hotbar slots on the client interaction
+    controller
+  - left/right mouse buttons request mouse lock first, sync carried-item
+    selection when needed, then send debug break or held-item use commands while
+    the world is active and locked
 - `native/apps/mclone-native-client/src/camera.rs`
   - owns `SpectatorCamera`, look math, speed adjustment, chunk-interest center,
     and conversion to `ChunkCamera`
@@ -108,6 +114,11 @@ Native code already has several useful pieces:
     and current terrain-MVP block shape modules
   - exposes a loaded-snapshot block lookup used by raycast and collision;
     unloaded chunks are currently treated as empty for local collision
+- `native/crates/mclone-client/src/inventory.rs`
+  - owns the first client selected-hotbar state and Java-shaped carried-item
+    sync guard
+  - emits `SetCarriedItem` only when the selected hotbar slot differs from the
+    last slot sent to the server
 - `native/crates/mclone-client/src/block_shapes.rs`
   - maps current generated terrain `BlockStateId`s to Java-shaped outline and
     collision boxes without depending on renderer, assets, server, or `winit`
@@ -130,13 +141,22 @@ Native code already has several useful pieces:
   - gathers loaded block collision boxes through `block_shapes.rs`; exact
     multi-box and fully registry-backed shapes are still later parity work
 - `native/crates/mclone-protocol/src/lib.rs`
-  - has chunk-view, move-player, player-action, and use-item-on client commands
+  - has chunk-view, move-player, set-carried-item, player-action, and
+    use-item-on client commands
+  - keeps `UseItemOn` Java-shaped as hand plus block hit result instead of
+    carrying a client-chosen block id
   - already has `ServerUpdate::SectionBlockUpdates`
 - `native/crates/mclone-server/src/player.rs`
   - owns the first server-side local player state: feet position, yaw, pitch,
     and `onGround`
   - applies the narrow `ServerboundMovePlayerPacket.PosRot`-style command shape
     with Java horizontal/vertical clamps and wrapped rotations
+- `native/crates/mclone-server/src/inventory.rs`
+  - owns the first server-side selected hotbar state and debug hotbar block
+    source
+  - applies `SetCarriedItem` only for Java-valid hotbar slots `0..9`
+  - exposes the currently held debug block state to the placement lane until a
+    real item stack and block/item registry exist
 - `native/crates/mclone-server/src/game_mode.rs`
   - owns the first server-side interaction validation lane for debug creative
     gameplay
@@ -148,8 +168,8 @@ Native code already has several useful pieces:
     `BlockItem.place` decision flow for clicked-vs-relative placement
   - carries the current limited replaceable-block facts for air, fluids,
     one-layer snow, simple plants, large ferns, and glow lichen
-  - rejects air/cave-air debug block items before placement, matching the
-    native selected-block source until inventory and item stacks exist
+  - rejects air/cave-air debug block items before placement after the server
+    hotbar has resolved the held block
 - `native/crates/mclone-server/src/integrated.rs`
   - routes client commands into `IntegratedServer`
   - handles chunk-view plus debug break/place commands through the server
@@ -187,6 +207,7 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/Entity.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/LivingEntity.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/entity/player/Player.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/entity/player/Inventory.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/client/renderer/GameRenderer.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/client/Minecraft.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/client/multiplayer/MultiPlayerGameMode.java`
@@ -208,6 +229,8 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/MultifaceBlock.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/server/level/ServerPlayerGameMode.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/network/protocol/game/ServerboundMovePlayerPacket.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/network/protocol/game/ServerboundSetCarriedItemPacket.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/network/protocol/game/ServerboundUseItemOnPacket.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/server/network/ServerGamePacketListenerImpl.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/item/context/UseOnContext.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/item/context/BlockPlaceContext.java`
@@ -253,11 +276,22 @@ Key facts from the reference:
   `noCollission`.
 - `Minecraft.handleKeybinds` turns key-use/key-attack state into
   `startAttack`, `continueAttack`, `startUseItem`, and `pickBlock`.
+- `Minecraft.handleKeybinds` maps number keys to `player.getInventory().selected`
+  hotbar slots `0..8` when no creative hotbar save/load modifier is active.
 - `MultiPlayerGameMode` owns client-side interaction state such as destroy
   progress, destroy delay, pick range, and use-item-on behavior.
+- `MultiPlayerGameMode.ensureHasSentCarriedItem` sends
+  `ServerboundSetCarriedItemPacket` only when `Inventory.selected` differs from
+  the last carried index sent to the server.
+- `Inventory.getSelected` returns the selected hotbar item only when
+  `selected` is a valid `0..9` hotbar slot; otherwise it returns empty.
 - `ServerboundMovePlayerPacket` has position, rotation, and status-only variants
   with `hasPos`, `hasRot`, and `onGround` flags. The current native command uses
   the `PosRot` subset only.
+- `ServerboundSetCarriedItemPacket` carries only a slot number. The server
+  accepts slots `0..9` and ignores invalid values after logging.
+- `ServerboundUseItemOnPacket` carries `InteractionHand` plus
+  `BlockHitResult`; it does not carry the block/item being placed.
 - `ServerGamePacketListenerImpl.handleMovePlayer` rejects invalid movement
   values, clamps horizontal coordinates to +/-30,000,000 and vertical
   coordinates to +/-20,000,000, wraps rotations, and then applies much more
@@ -268,7 +302,7 @@ Key facts from the reference:
   squared reach `36.0` and positions at or above max build height.
 - `ServerGamePacketListenerImpl.handleUseItemOn` rejects clicked positions at or
   above max build height and block-center distance squared `>= 64.0` before
-  routing to game mode.
+  routing to game mode with the server player's item in the requested hand.
 - Real placement is item-shaped:
   `useItemOn -> UseOnContext -> BlockPlaceContext -> BlockItem.place`.
   `BlockPlaceContext` chooses the clicked block when the clicked block can be
@@ -277,8 +311,8 @@ Key facts from the reference:
   Mclone's first placement slice can use a debug creative block, but the target
   architecture should keep that later item path obvious.
 - `UseOnContext` carries the hit result plus player, hand, level, and item
-  stack accessors. Native currently keeps only the hit result and debug block
-  item because player/hand/level/inventory are not real yet.
+  stack accessors. Native currently keeps the hit result and server-resolved
+  debug block item; player, level, and full item stacks are still future work.
 - `BlockBehaviour.canBeReplaced` defaults to material replaceability and avoids
   replacing a block with the same item. Native mirrors that shape with a narrow
   terrain-MVP replaceability table until the real block/item registry exists.
@@ -313,16 +347,19 @@ Recommended module ownership:
     primitives that do not depend on assets, renderer, server, or `winit`
 - `mclone-client`
   - Java-shaped client interaction controller state, current hit result, destroy
-    progress/delay, pick range, and command construction
+    progress/delay, pick range, selected hotbar slot, carried-item sync guard,
+    and command construction
   - client-world block lookup over loaded `ChunkSnapshot`s
 - `mclone-protocol`
-  - client action commands and codecs
+  - client movement, carried-item, player-action, and use-item-on commands plus
+    codecs
   - server acknowledgement/update types only as needed
 - `mclone-server`
   - authoritative command validation and mutation through scheduler-owned world
     storage
   - early debug creative break/place methods split between a small server
-    game-mode validation module and an item-shaped placement module
+    game-mode validation module, selected-hotbar module, and item-shaped
+    placement module
 - `mclone-native-client`
   - `winit` input adapter, cursor lock, UI gating, and temporary HUD/debug
     display of the current hit result
@@ -355,20 +392,22 @@ entire Java survival stack.
 3. Client interaction controller
    - add a small Java-shaped controller mirroring the role of
      `MultiPlayerGameMode`
-   - store pick range, current hit result, destroy state, and selected debug
-     placement block
+   - store pick range, current hit result, destroy state, selected hotbar slot,
+     and carried-item sync state
    - on left-click, send a break command for the hit block
-   - on right-click, send a debug creative place command for the block adjacent
-     to the hit face
+   - on right-click, sync carried-item selection if needed, then send a
+     hand-plus-hit use-item-on command
    - do not mutate client chunks directly
 
 4. Protocol and server commands
    - add client commands for basic break/place requests
    - carry enough context to validate on the server: target block position,
-     clicked face for placement, and the requested block state/raw block for the
-     debug placement path
+     clicked face for placement, selected hotbar slot updates, and use-item-on
+     hand/hit data
    - add a first move-player command so server interaction validation can use
      server-owned player state instead of trusting block action payloads
+   - server resolves held placement blocks from its own debug hotbar rather than
+     trusting a block id in the use-item-on command
    - integrated and dedicated server paths should both accept the commands
    - server applies changes with `ChunkScheduler::set_block_at_world`
    - server drains/returns the resulting `SectionBlockUpdates`
@@ -401,6 +440,7 @@ Recommended first shape:
 pub enum ClientCommand {
     SetChunkView(ChunkView),
     MovePlayer(MovePlayerCommand),
+    SetCarriedItem(SetCarriedItemCommand),
     PlayerAction(PlayerActionCommand),
     UseItemOn(UseItemOnCommand),
 }
@@ -410,6 +450,10 @@ pub struct MovePlayerCommand {
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
     pub on_ground: bool,
+}
+
+pub struct SetCarriedItemCommand {
+    pub slot: u8,
 }
 
 pub enum PlayerActionKind {
@@ -426,24 +470,23 @@ pub struct PlayerActionCommand {
 }
 
 pub struct UseItemOnCommand {
+    pub hand: InteractionHand,
     pub hit: BlockHitResult,
-    pub action: UseItemOnKind,
 }
 
-pub enum UseItemOnKind {
-    DebugPlaceBlock { block_state: BlockStateId },
+pub enum InteractionHand {
+    MainHand,
+    OffHand,
 }
 ```
 
-For the first playable slice, `DebugInstantBreak` and `DebugPlaceBlock` are
-acceptable. Preserve the `Start`/`Stop`/`Abort` enum space because real destroy
-progress follows Java's `ServerboundPlayerActionPacket` flow.
+For the first playable slice, `DebugInstantBreak` is acceptable. Preserve the
+`Start`/`Stop`/`Abort` enum space because real destroy progress follows Java's
+`ServerboundPlayerActionPacket` flow.
 
-Open question for implementation: whether the debug placement command should
-carry `BlockStateId` or `RawBlockId`. `BlockStateId` is protocol/core-friendly,
-but the current server mutation primitive takes `RawBlockId`. If conversion is
-kept as the terrain-MVP identity mapping, document it and keep it local to the
-server command handler.
+Placement should stay server-held-item-shaped: `UseItemOn` carries hand and hit
+only, while the server maps its selected debug hotbar slot to the current
+terrain-MVP block state and then to `RawBlockId` locally.
 
 ## Raycast Scope
 
@@ -497,19 +540,20 @@ Later parity:
 First slice:
 
 - left click: debug instant break of the picked block to air
-- right click: debug creative place of a selected terrain-MVP block using
-  Java-shaped `UseOnContext`/`BlockPlaceContext` clicked-block replacement
-  first, otherwise the picked face-relative target
+- right click: debug creative use of the selected server hotbar block using
+  Java-shaped carried-item sync, `UseOnContext`/`BlockPlaceContext`
+  clicked-block replacement first, otherwise the picked face-relative target
 - server rejects unloaded chunks, out-of-height positions, air break no-ops, and
-  air/cave-air or same-state placements by returning no mutation
+  empty selected hotbar, air/cave-air, or same-state placements by returning no
+  mutation
 - server uses Java-shaped reach checks against server-owned local player state
 - server uses existing section block delta publication
 - renderer rebuilds through existing dirty section flow
 
 Out of scope:
 
-- inventory
-- item stacks
+- full inventory
+- item stacks beyond the temporary debug hotbar block source
 - tools and destroy speed
 - drops
 - block entities
@@ -563,7 +607,7 @@ Likely order after the first playable block-interaction pass:
 2. Non-cubic outline/collision shape facts shared by raycast and movement.
 3. Held-dig destroy progress with `StartDestroyBlock`, `StopDestroyBlock`, and
    `AbortDestroyBlock`.
-4. Basic inventory/selected hotbar block source, replacing debug placement.
+4. Real item stacks and visible hotbar UI over the current selected-slot lane.
 5. Dedicated streaming transport upgrade if request/response commands become a
    visible interaction bottleneck.
 6. Entity picking once entities exist.
@@ -589,3 +633,7 @@ Likely order after the first playable block-interaction pass:
   native `UseOnContext`, `BlockPlaceContext`, and `DebugBlockItem` types. This
   keeps placement item-shaped while inventory, block survival, unobstructed
   entity checks, and full block-specific placement state remain future work.
+- 2026-06-19: Added Java-shaped selected-hotbar sync. `UseItemOn` no longer
+  carries a block id; the client sends `SetCarriedItem` for selected slot
+  changes and the server resolves placement from its own debug hotbar before
+  entering the `UseOnContext`/`BlockPlaceContext` path.

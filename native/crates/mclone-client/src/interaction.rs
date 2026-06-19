@@ -3,25 +3,24 @@ use mclone_core::{
     block_to_section_coord, chunk_section_index, local_block_coord, local_section_block_coord,
 };
 use mclone_protocol::{
-    ClientCommand, PlayerActionCommand, PlayerActionKind, UseItemOnCommand, UseItemOnKind,
+    ClientCommand, InteractionHand, PlayerActionCommand, PlayerActionKind, UseItemOnCommand,
 };
 
-use crate::{ClientRuntime, block_shapes::clip_block_outline};
+use crate::{ClientInventory, ClientRuntime, block_shapes::clip_block_outline};
 
 pub const CREATIVE_PICK_RANGE: f64 = 5.0;
-pub const DEFAULT_DEBUG_PLACE_BLOCK: BlockStateId = BlockStateId(1);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClientInteractionController {
     pick_range: f64,
-    selected_debug_block: BlockStateId,
+    inventory: ClientInventory,
 }
 
 impl Default for ClientInteractionController {
     fn default() -> Self {
         Self {
             pick_range: CREATIVE_PICK_RANGE,
-            selected_debug_block: DEFAULT_DEBUG_PLACE_BLOCK,
+            inventory: ClientInventory::new(),
         }
     }
 }
@@ -35,12 +34,16 @@ impl ClientInteractionController {
         self.pick_range
     }
 
-    pub const fn selected_debug_block(&self) -> BlockStateId {
-        self.selected_debug_block
+    pub const fn selected_hotbar_slot(&self) -> u8 {
+        self.inventory.selected_hotbar_slot()
     }
 
-    pub fn set_selected_debug_block(&mut self, block_state: BlockStateId) {
-        self.selected_debug_block = block_state;
+    pub fn select_hotbar_slot(&mut self, slot: u8) -> bool {
+        self.inventory.select_hotbar_slot(slot)
+    }
+
+    pub fn ensure_has_sent_carried_item(&mut self) -> Option<ClientCommand> {
+        self.inventory.ensure_has_sent_carried_item()
     }
 
     pub fn pick_block(
@@ -62,13 +65,11 @@ impl ClientInteractionController {
         ))
     }
 
-    pub fn debug_place_block_command(&self, hit: BlockHitResult) -> Option<ClientCommand> {
+    pub fn use_item_on_command(&self, hit: BlockHitResult) -> Option<ClientCommand> {
         (hit.hit_type() == HitResultType::Block).then_some(ClientCommand::UseItemOn(
             UseItemOnCommand {
+                hand: InteractionHand::MainHand,
                 hit,
-                action: UseItemOnKind::DebugPlaceBlock {
-                    block_state: self.selected_debug_block,
-                },
             },
         ))
     }
@@ -338,8 +339,32 @@ mod tests {
                 ..
             }))
         ));
-        assert!(controller.debug_place_block_command(block_hit).is_some());
+        assert!(matches!(
+            controller.use_item_on_command(block_hit),
+            Some(ClientCommand::UseItemOn(UseItemOnCommand {
+                hand: InteractionHand::MainHand,
+                ..
+            }))
+        ));
         assert_eq!(controller.debug_instant_break_command(miss), None);
-        assert_eq!(controller.debug_place_block_command(miss), None);
+        assert_eq!(controller.use_item_on_command(miss), None);
+    }
+
+    #[test]
+    fn interaction_controller_tracks_selected_hotbar_slot_and_syncs_when_changed() {
+        let mut controller = ClientInteractionController::new();
+
+        assert_eq!(controller.selected_hotbar_slot(), 0);
+        assert_eq!(controller.ensure_has_sent_carried_item(), None);
+        assert!(controller.select_hotbar_slot(3));
+        assert_eq!(controller.selected_hotbar_slot(), 3);
+        assert_eq!(
+            controller.ensure_has_sent_carried_item(),
+            Some(ClientCommand::SetCarriedItem(
+                mclone_protocol::SetCarriedItemCommand { slot: 3 }
+            ))
+        );
+        assert_eq!(controller.ensure_has_sent_carried_item(), None);
+        assert!(!controller.select_hotbar_slot(mclone_protocol::HOTBAR_SLOT_COUNT));
     }
 }
