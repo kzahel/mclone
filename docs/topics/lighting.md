@@ -100,6 +100,10 @@ Landed pieces:
   exact layer first, then the next sky layer above, then full sky above data.
 - The chunk shader decodes packed sky/block values through a first Java
   `LightTexture` lightmap port, with a native/headless fullbright toggle.
+- Textured meshing has a first Java-shaped
+  `ModelBlockRenderer.AmbientOcclusionFace` port for full cube faces: side and
+  corner neighbor sampling, per-vertex brightness, packed-light blending, model
+  `ambientocclusion` metadata, and flat fallback for non-AO cases.
 
 Known gaps:
 
@@ -128,8 +132,10 @@ Known gaps:
   clear-weather sky-darken curve, but does not yet allocate the exact 16x16 GPU
   lightmap texture or port torch flicker, gamma, night vision, conduit power,
   boss-world darkening, rain, or thunder effects.
-- Solid block ambient occlusion and packed-light blending from
-  `ModelBlockRenderer.AmbientOcclusionFace` are not ported.
+- Model AO currently covers full cube faces only. Java's non-cubic
+  `calculateShape(...)` shape-weight branch for partial boxes is not ported,
+  and native still derives only limited terrain-MVP render facts for AO
+  neighbor checks.
 - Liquid light sampling is not ported.
 
 ## Latest Visual Probe
@@ -260,6 +266,19 @@ and `26` drawn sections. The daytime image is intentionally close to the prior
 fixed daylight capture because Java full sky is nearly white. The night capture
 visibly darkens terrain through the Java sky-darken/lightmap path while keeping
 the same packed light payloads.
+
+On 2026-06-19, after adding the first Java `AmbientOcclusionFace` mesh-side port
+for full cube faces, a native daylight full-frame capture for seed `12345`,
+chunk `(0,0)`, render distance `2`, `960x540`, server lighting enabled, and
+shader fullbright disabled produced:
+
+```text
+/tmp/mclone-light-ao-day.png
+```
+
+It was inspected and rendered nonblank terrain with `166` cached sections and
+`26` drawn sections. Daylight terrain now has visible per-face/corner shading
+from mesh-side AO while still using the Java `LightTexture` shader curve.
 
 On 2026-06-19, after moving initial lighting to the retained worker-owned light
 world, a native full-frame capture for seed `12345`, chunk `(0,0)`, render
@@ -862,7 +881,7 @@ Scope:
 
 ### P8: Rendering Parity
 
-Status: next recommended visual parity slice.
+Status: active, first full-cube AO pass complete.
 
 Improve visual parity after stored light is correct.
 
@@ -873,8 +892,9 @@ Scope:
 - First Java `LightTexture` lightmap behavior is in `mclone-render`; next,
   decide whether exact dynamic 16x16 GPU texture allocation is needed or whether
   the procedural shader curve remains sufficient.
-- Port `ModelBlockRenderer.AmbientOcclusionFace` sampling/blending into
-  `mclone-mesh`.
+- First Java `ModelBlockRenderer.AmbientOcclusionFace` sampling/blending is in
+  `mclone-mesh` for full cube faces; next port `calculateShape(...)` and the
+  non-cubic `SizeInfo` weighting branch for partial boxes.
 - Port liquid light sampling from `LiquidBlockRenderer`.
 - Keep lightmap, model-face AO, and mesh data plumbing split into separate
   modules instead of growing `mclone-mesh/src/builder.rs` into a renderer
@@ -903,6 +923,7 @@ Primary native lighting docs:
 - [`../tactical/049-native-sky-source-section-ownership.md`](../tactical/049-native-sky-source-section-ownership.md)
 - [`../tactical/050-native-leaf-sky-render-parity.md`](../tactical/050-native-leaf-sky-render-parity.md)
 - [`../tactical/051-native-light-texture-render-parity.md`](../tactical/051-native-light-texture-render-parity.md)
+- [`../tactical/052-native-model-ao-render-parity.md`](../tactical/052-native-model-ao-render-parity.md)
 
 Legacy/reference-only lighting docs:
 

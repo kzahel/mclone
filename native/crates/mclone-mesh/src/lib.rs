@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod ambient_occlusion;
 mod builder;
 mod catalog;
 mod data;
@@ -317,6 +318,12 @@ mod tests {
     }
 
     fn stone_textured_catalog() -> TexturedMeshCatalog {
+        stone_textured_catalog_with_ambient_occlusion(true)
+    }
+
+    fn stone_textured_catalog_with_ambient_occlusion(
+        ambient_occlusion: bool,
+    ) -> TexturedMeshCatalog {
         let mut registry = BlockStateRegistry::new();
         registry
             .register(BlockStateRecord::new(
@@ -369,7 +376,13 @@ mod tests {
         );
         source.insert_text(
             AssetPath::new("assets/minecraft/models/block/stone.json"),
-            r##"{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/stone"}}"##,
+            if ambient_occlusion {
+                r##"{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/stone"}}"##
+                    .to_owned()
+            } else {
+                r##"{"ambientocclusion":false,"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/stone"}}"##
+                    .to_owned()
+            },
         );
         source.insert(
             AssetPath::new("assets/minecraft/textures/block/stone.png"),
@@ -411,9 +424,9 @@ mod tests {
     #[test]
     fn textured_mesh_samples_packed_light_from_face_neighbor() {
         let catalog = stone_textured_catalog();
-        let blocks = textured_chunk_blocks(16, &[(0, 0, 0, BlockStateId(1))]);
+        let blocks = textured_chunk_blocks(16, &[(8, 0, 8, BlockStateId(1))]);
         let mut sky = DataLayer::new();
-        sky.set(0, 1, 0, 15);
+        sky.set(8, 1, 8, 15);
         let light_sections = [PackedLightSection::new(0, sky.into_bytes(), None)];
         let input =
             TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks).with_light_sections(&light_sections);
@@ -436,7 +449,7 @@ mod tests {
     #[test]
     fn textured_mesh_treats_missing_sky_section_above_data_as_open_sky() {
         let catalog = stone_textured_catalog();
-        let blocks = textured_chunk_blocks(32, &[(0, 15, 0, BlockStateId(1))]);
+        let blocks = textured_chunk_blocks(32, &[(8, 15, 8, BlockStateId(1))]);
         let mut sky = DataLayer::new();
         sky.get_data();
         let light_sections = [PackedLightSection::new(0, sky.into_bytes(), None)];
@@ -455,9 +468,9 @@ mod tests {
     #[test]
     fn textured_mesh_climbs_to_next_sky_layer_for_missing_sections() {
         let catalog = stone_textured_catalog();
-        let blocks = textured_chunk_blocks(48, &[(0, 15, 0, BlockStateId(1))]);
+        let blocks = textured_chunk_blocks(48, &[(8, 15, 8, BlockStateId(1))]);
         let mut sky = DataLayer::new();
-        sky.set(0, 0, 0, 4);
+        sky.set(8, 0, 8, 4);
         let light_sections = [PackedLightSection::new(2, sky.into_bytes(), None)];
         let input =
             TexturedChunkMeshInput::new(0, 0, 0, 48, &blocks).with_light_sections(&light_sections);
@@ -485,6 +498,80 @@ mod tests {
             mesh.vertices
                 .iter()
                 .all(|vertex| vertex.packed_light == FULL_BRIGHT)
+        );
+    }
+
+    #[test]
+    fn textured_mesh_applies_ambient_occlusion_on_full_cube_faces() {
+        let catalog = stone_textured_catalog();
+        let blocks = textured_chunk_blocks(
+            16,
+            &[(0, 0, 0, BlockStateId(1)), (1, 1, 0, BlockStateId(1))],
+        );
+
+        let mesh = build_textured_visible_chunk_mesh(
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+            &catalog,
+        )
+        .unwrap();
+        let top_face = mesh
+            .vertices
+            .chunks_exact(4)
+            .find(|face| {
+                face.iter().all(|vertex| {
+                    (vertex.position[1] - 1.0).abs() < 0.0001
+                        && (0.0..=1.0).contains(&vertex.position[0])
+                        && (0.0..=1.0).contains(&vertex.position[2])
+                })
+            })
+            .expect("top face for origin block should be emitted");
+        let west_brightness = top_face
+            .iter()
+            .filter(|vertex| (vertex.position[0] - 0.0).abs() < 0.0001)
+            .map(|vertex| vertex.color[0])
+            .sum::<f32>();
+        let east_brightness = top_face
+            .iter()
+            .filter(|vertex| (vertex.position[0] - 1.0).abs() < 0.0001)
+            .map(|vertex| vertex.color[0])
+            .sum::<f32>();
+
+        assert!(
+            east_brightness < west_brightness,
+            "east vertices beside the occluder should be darker"
+        );
+    }
+
+    #[test]
+    fn textured_mesh_respects_model_ambient_occlusion_flag() {
+        let catalog = stone_textured_catalog_with_ambient_occlusion(false);
+        let blocks = textured_chunk_blocks(
+            16,
+            &[(0, 0, 0, BlockStateId(1)), (1, 1, 0, BlockStateId(1))],
+        );
+
+        let mesh = build_textured_visible_chunk_mesh(
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+            &catalog,
+        )
+        .unwrap();
+        let top_face = mesh
+            .vertices
+            .chunks_exact(4)
+            .find(|face| {
+                face.iter().all(|vertex| {
+                    (vertex.position[1] - 1.0).abs() < 0.0001
+                        && (0.0..=1.0).contains(&vertex.position[0])
+                        && (0.0..=1.0).contains(&vertex.position[2])
+                })
+            })
+            .expect("top face for origin block should be emitted");
+
+        assert!(
+            top_face
+                .iter()
+                .all(|vertex| (vertex.color[0] - top_face[0].color[0]).abs() < 0.0001),
+            "ambientocclusion=false should keep flat face brightness"
         );
     }
 

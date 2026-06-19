@@ -62,3 +62,4 @@ For durable subsystem progress indexes, see [`../topics/`](../topics/README.md).
 | [`049-native-sky-source-section-ownership.md`](049-native-sky-source-section-ownership.md) | completed first pass | Java-shaped sky source-section add/remove queues in storage and retained-world source-scan removal. |
 | [`050-native-leaf-sky-render-parity.md`](050-native-leaf-sky-render-parity.md) | completed first pass | Java leaf opacity and mesh sky-light reads across omitted all-air sky sections, fixing dark canopy tops. |
 | [`051-native-light-texture-render-parity.md`](051-native-light-texture-render-parity.md) | completed first pass | Java `LightTexture` brightness ramp and clear-weather sky-darken curve in the textured chunk shader. |
+| [`052-native-model-ao-render-parity.md`](052-native-model-ao-render-parity.md) | completed first pass | Java `ModelBlockRenderer.AmbientOcclusionFace` side/corner sampling and packed-light blending for full cube faces. |

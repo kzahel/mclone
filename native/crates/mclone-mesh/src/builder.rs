@@ -9,6 +9,9 @@ use mclone_core::{
 };
 use mclone_light::{FULL_BRIGHT, pack_light};
 
+use crate::ambient_occlusion::{
+    AmbientOcclusionFace, AmbientOcclusionSampler, BlockPos, calculate_cubic_ambient_occlusion_face,
+};
 use crate::catalog::{TexturedBlockFace, TexturedMeshCatalog, TexturedMeshError};
 use crate::data::{
     ChunkVertex, RenderSectionKey, TexturedChunkVertex, TexturedRenderSectionBuildReport,
@@ -361,6 +364,7 @@ fn add_textured_chunk_range_to_mesh(
 ) -> Result<(), TexturedMeshError> {
     let world_origin_x = chunk_min_block_coord(input.chunk_x);
     let world_origin_z = chunk_min_block_coord(input.chunk_z);
+    let ao_sampler = TexturedAmbientOcclusionSampler { area, catalog };
 
     for local_y in local_y_start..local_y_end {
         for local_z in 0..CHUNK_WIDTH {
@@ -401,7 +405,21 @@ fn add_textured_chunk_range_to_mesh(
                         world_y + sample_offset[1],
                         world_z + sample_offset[2],
                     );
-                    add_textured_face(mesh, world_x, world_y, world_z, face, packed_light);
+                    let lighting = if block_model.ambient_occlusion
+                        && block_model.light_emission == 0
+                        && face.is_full_cube_side()
+                    {
+                        calculate_cubic_ambient_occlusion_face(
+                            &ao_sampler,
+                            BlockPos::new(world_x, world_y, world_z),
+                            face.direction,
+                            true,
+                            face.shade,
+                        )
+                    } else {
+                        AmbientOcclusionFace::flat(face.direction, face.shade, packed_light)
+                    };
+                    add_textured_face(mesh, world_x, world_y, world_z, face, lighting);
                 }
             }
         }
@@ -523,10 +541,9 @@ fn add_textured_face(
     world_y: i32,
     world_z: i32,
     face: &TexturedBlockFace,
-    packed_light: u32,
+    lighting: AmbientOcclusionFace,
 ) {
     let base_index = mesh.vertices.len() as u32;
-    let color = textured_face_color(face);
     let corners = textured_face_corners(face);
     let uvs = textured_face_uvs(face);
     for index in 0..4 {
@@ -538,8 +555,8 @@ fn add_textured_face(
                 world_z as f32 + corner[2],
             ],
             uv: uvs[index],
-            color,
-            packed_light,
+            color: textured_face_color(face, lighting.brightness[index]),
+            packed_light: lighting.lightmap[index],
         });
     }
     mesh.indices.extend_from_slice(&[
@@ -618,14 +635,14 @@ fn textured_face_uvs(face: &TexturedBlockFace) -> [[f32; 2]; 4] {
     })
 }
 
-fn textured_face_color(face: &TexturedBlockFace) -> [f32; 4] {
-    let shade = if face.shade {
-        face_shade(face.direction)
-    } else {
-        1.0
-    };
+fn textured_face_color(face: &TexturedBlockFace, brightness: f32) -> [f32; 4] {
     let tint = block_tint(face.tintindex);
-    [tint[0] * shade, tint[1] * shade, tint[2] * shade, 1.0]
+    [
+        tint[0] * brightness,
+        tint[1] * brightness,
+        tint[2] * brightness,
+        1.0,
+    ]
 }
 
 fn block_tint(tintindex: i32) -> [f32; 3] {
@@ -633,16 +650,6 @@ fn block_tint(tintindex: i32) -> [f32; 3] {
         [0.46, 0.70, 0.27]
     } else {
         [1.0, 1.0, 1.0]
-    }
-}
-
-fn face_shade(direction: ModelFaceDirection) -> f32 {
-    match direction {
-        ModelFaceDirection::Up => 1.0,
-        ModelFaceDirection::Down => 0.5,
-        ModelFaceDirection::East | ModelFaceDirection::West => 0.86,
-        ModelFaceDirection::South => 0.78,
-        ModelFaceDirection::North => 0.72,
     }
 }
 
@@ -764,6 +771,40 @@ fn packed_light_at_world_or_fullbright(
         .find(|input| input.chunk_x == chunk_x && input.chunk_z == chunk_z)
         .map(|input| input.packed_light_at_or_fullbright(local_x, y, local_z))
         .unwrap_or(FULL_BRIGHT)
+}
+
+struct TexturedAmbientOcclusionSampler<'a> {
+    area: &'a [TexturedChunkMeshInput<'a>],
+    catalog: &'a TexturedMeshCatalog,
+}
+
+impl AmbientOcclusionSampler for TexturedAmbientOcclusionSampler<'_> {
+    fn light_color(&self, pos: BlockPos) -> u32 {
+        packed_light_at_world_or_fullbright(self.area, pos.x, pos.y, pos.z)
+    }
+
+    fn shade_brightness(&self, pos: BlockPos) -> f32 {
+        self.catalog
+            .shade_brightness(self.block_state_at_or_air(pos))
+    }
+
+    fn light_block(&self, pos: BlockPos) -> u8 {
+        self.catalog.light_block(self.block_state_at_or_air(pos))
+    }
+
+    fn view_blocking(&self, pos: BlockPos) -> bool {
+        self.catalog.view_blocking(self.block_state_at_or_air(pos))
+    }
+
+    fn solid_render(&self, pos: BlockPos) -> bool {
+        self.catalog.solid_render(self.block_state_at_or_air(pos))
+    }
+}
+
+impl TexturedAmbientOcclusionSampler<'_> {
+    fn block_state_at_or_air(&self, pos: BlockPos) -> BlockStateId {
+        block_state_at_world_or_air(self.area, pos.x, pos.y, pos.z)
+    }
 }
 
 pub(crate) fn data_layer_value(layer: &[u8], index: usize) -> u8 {

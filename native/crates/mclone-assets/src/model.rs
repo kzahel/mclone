@@ -112,7 +112,7 @@ pub struct BlockModel {
     pub parent: Option<ResourceLocation>,
     pub textures: BTreeMap<String, TextureReference>,
     pub elements: Vec<BlockModelElement>,
-    pub ambient_occlusion: bool,
+    pub ambient_occlusion: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -120,6 +120,7 @@ pub struct BakedBlockModel {
     pub location: ResourceLocation,
     pub particle: Option<TextureMaterial>,
     pub faces: Vec<BakedBlockModelFace>,
+    pub ambient_occlusion: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -177,7 +178,7 @@ impl BlockModel {
             parent,
             textures,
             elements,
-            ambient_occlusion: raw.ambient_occlusion.unwrap_or(true),
+            ambient_occlusion: raw.ambient_occlusion,
         })
     }
 }
@@ -311,6 +312,7 @@ impl BlockModelLibrary {
             location: location.clone(),
             particle,
             faces,
+            ambient_occlusion: self.effective_ambient_occlusion(location)?,
         })
     }
 
@@ -402,6 +404,18 @@ impl BlockModelLibrary {
             self.find_texture_entry(parent, slot)
         } else {
             Ok(None)
+        }
+    }
+
+    fn effective_ambient_occlusion(&self, location: &ResourceLocation) -> AssetResult<bool> {
+        let model = self.require_model(location)?;
+        if let Some(ambient_occlusion) = model.ambient_occlusion {
+            return Ok(ambient_occlusion);
+        }
+        if let Some(parent) = &model.parent {
+            self.effective_ambient_occlusion(parent)
+        } else {
+            Ok(true)
         }
     }
 
@@ -548,6 +562,7 @@ mod tests {
 
         let baked = library.bake_model(&stone).unwrap();
         assert_eq!(baked.faces.len(), 6);
+        assert!(baked.ambient_occlusion);
         assert_eq!(
             baked.particle,
             Some(TextureMaterial::blocks(
@@ -561,6 +576,31 @@ mod tests {
                 )
                 && face.uv == [0.0, 0.0, 16.0, 16.0]
         }));
+    }
+
+    #[test]
+    fn baked_model_inherits_parent_ambient_occlusion() {
+        let mut source = model_source_with_cube_and_stone();
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/cube_all.json"),
+            r##"{
+              "ambientocclusion":false,
+              "parent":"minecraft:block/cube",
+              "textures":{
+                "particle":"#all",
+                "down":"#all",
+                "up":"#all",
+                "north":"#all",
+                "east":"#all",
+                "south":"#all",
+                "west":"#all"
+              }
+            }"##,
+        );
+        let stone = ResourceLocation::parse("minecraft:block/stone").unwrap();
+        let library = BlockModelLibrary::load_model_tree(&source, [stone.clone()]).unwrap();
+
+        assert!(!library.bake_model(&stone).unwrap().ambient_occlusion);
     }
 
     #[test]
