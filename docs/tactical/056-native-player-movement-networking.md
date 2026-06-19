@@ -42,6 +42,9 @@ Important reference facts:
   `awaitingTeleport`, and `awaitingTeleportTime`
 - each server listener tick calls `resetPosition()` and then copies
   `receivedMovePacketCount` into `knownMovePacketCount`
+- `ServerConnectionListener` owns the server-side connection list and ticks each
+  `Connection`; `Connection.tick()` delegates to `ServerGamePacketListenerImpl`
+  when the connection has reached gameplay state
 - `handleMovePlayer` rejects non-finite values, clamps world bounds, wraps
   rotation, handles pending teleports, detects excessive packet burst /
   too-fast movement, moves the server player, detects impossible movement, and
@@ -92,6 +95,11 @@ complexity.
   transport can now read multiple client command frames per connection, and the
   dedicated server stages per-connection movement packets before flushing them
   in order to the shared server movement state.
+- 2026-06-19: Split dedicated session handling out of the app entry point and
+  made dedicated TCP sessions persistent. Each client command frame now receives
+  its own update batch on the same connection, movement is staged/flushed at the
+  session boundary, and the session tick marks Java-shaped movement counters
+  after advancing the shared server simulation.
 
 ## Native Direction
 
@@ -111,7 +119,9 @@ Keep the first native implementation boring, reference-shaped, and permissive:
 - dedicated and integrated server paths should share the same movement state and
   validation code
 - dedicated transport keeps movement buffering at the connection boundary so
-  future persistent sessions can preserve Java-shaped packet counters
+  persistent sessions can preserve Java-shaped packet counters
+- keep dedicated app modules focused: CLI/listener orchestration in `main`,
+  per-connection command/tick/update flow in a session module
 
 Do not introduce a giant movement manager file. Keep the shape modular:
 
@@ -172,12 +182,13 @@ This slice intentionally does not yet implement, and now defers:
 
 ## Near-Term Follow-Ups
 
-1. Add persistent dedicated sessions instead of one request/response per TCP
-   connection, then wire the connection movement tick boundary into the server
-   tick loop.
-2. Add remote-player state publication once the dedicated path has multiple
+1. Move the native remote client from per-command reconnects to a reusable
+   native TCP session that reads one update batch per command.
+2. Add multi-connection dedicated accept/concurrency; the current dedicated
+   listener still serves one persistent session at a time.
+3. Add remote-player state publication once the dedicated path has multiple
    connected clients worth visualizing.
-3. Revisit the FPS-style authority option only after the Java-shaped path is
+4. Revisit the FPS-style authority option only after the Java-shaped path is
    usable and measured.
 
 ## Deferred Authority Hardening

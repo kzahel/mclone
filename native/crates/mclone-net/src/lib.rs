@@ -8,7 +8,7 @@ use mclone_protocol::{ClientCommand, ServerUpdate};
 pub use native_tcp::{
     NativeTransportError, NativeTransportResult, read_client_command_frame,
     read_client_command_frames, read_server_update_batch, request_server_updates,
-    write_client_command_frame, write_server_update_batch,
+    try_read_client_command_frame, write_client_command_frame, write_server_update_batch,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,12 +129,21 @@ mod native_tcp {
         Ok(decode_client_command(&payload)?)
     }
 
+    pub fn try_read_client_command_frame(
+        reader: &mut impl Read,
+    ) -> NativeTransportResult<Option<ClientCommand>> {
+        let Some(payload) = try_read_frame(reader, "client command")? else {
+            return Ok(None);
+        };
+        Ok(Some(decode_client_command(&payload)?))
+    }
+
     pub fn read_client_command_frames(
         reader: &mut impl Read,
     ) -> NativeTransportResult<Vec<ClientCommand>> {
         let mut commands = Vec::new();
-        while let Some(payload) = try_read_frame(reader, "client command")? {
-            commands.push(decode_client_command(&payload)?);
+        while let Some(command) = try_read_client_command_frame(reader)? {
+            commands.push(command);
         }
         Ok(commands)
     }
@@ -328,6 +337,25 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_command_frame_optional_read_distinguishes_clean_eof() {
+        let command = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(-2, 4),
+            render_distance: 2,
+            chunk_tracking_radius: 2,
+        });
+        let mut bytes = Vec::new();
+        write_client_command_frame(&mut bytes, &command).unwrap();
+        let mut cursor = std::io::Cursor::new(bytes);
+
+        assert_eq!(
+            try_read_client_command_frame(&mut cursor).unwrap(),
+            Some(command)
+        );
+        assert_eq!(try_read_client_command_frame(&mut cursor).unwrap(), None);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
