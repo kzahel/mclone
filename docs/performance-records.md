@@ -61,6 +61,49 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-19 - Sky Empty-Section Light Setup
+
+Commit reported by native benchmark JSON: `81b50f1`.
+
+Note: `git_dirty=true` because this was captured while implementing tactical
+`048` after `81b50f1`. Treat the result as the measured state for tactical
+`048`, not as the clean historical state of `81b50f1`.
+
+Radius-5 lighting-enabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 5 --steps 1 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --enable-lighting
+```
+
+Summary:
+
+| Lane | Total elapsed | Light compute | `run_updates` | Block graph | Sky graph |
+|---|---:|---:|---:|---:|---:|
+| P6.8 mixed hash baseline | `6,733.051 ms` | `5,236.809 ms` | `5,185.626 ms` | `32.612 ms` | `5,152.656 ms` |
+| P6.9 empty-section setup | `1,931.110 ms` | `485.407 ms` | `415.744 ms` | `29.855 ms` | `385.856 ms` |
+
+Graph counters:
+
+| Metric | P6.8 baseline | P6.9 empty-section setup |
+|---|---:|---:|
+| run-update iterations | `614` | `52` |
+| block run-update calls | `614` | `52` |
+| sky run-update calls | `614` | `52` |
+| block processed nodes | `52,348` | `52,348` |
+| sky processed nodes | `10,002,274` | `794,466` |
+| max block queue before | `27,663` | `27,663` |
+| max sky queue before | `57,600` | `60,461` |
+| final block queue after | `0` | `0` |
+| final sky queue after | `0` | `0` |
+
+Interpretation: the previous native setup marked every vertical section as
+non-empty light storage, while Java `lightChunk(...)` only activates non-empty
+sections. Passing real section-empty flags and seeding sky from the highest
+non-empty section cuts repeated sky graph work by about `92%` on this lane.
+The remaining performance issue is no longer the graph drain itself; the next
+performance-facing desktop issue is startup presentation while the first scene
+warms.
+
 ### 2026-06-19 - Light Graph Drain Instrumentation And Mixed Hash Map
 
 Commit reported by native benchmark JSON: `4f7bc5e`.

@@ -15,10 +15,10 @@ use mclone_core::{
     chunk_block_index, local_block_coord,
 };
 use mclone_light::{
-    BlockLightWorld, BlockPosKey, LevelLightEngine, SkyLightWorld, block_pos_as_long,
-    block_pos_get_x, block_pos_get_y, block_pos_get_z, section_as_long,
+    BlockLightWorld, BlockPosKey, LevelLightEngine, SectionPosKey, SkyLightWorld,
+    block_pos_as_long, block_pos_get_x, block_pos_get_y, block_pos_get_z, section_as_long,
 };
-use mclone_worldgen::block::{RawBlockId, block_light_emission, block_light_opacity};
+use mclone_worldgen::block::{RawBlockId, block_light_emission, block_light_opacity, is_air_like};
 
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
@@ -67,7 +67,7 @@ impl RetainedInitialLightState {
         timing.world_init_us = start.elapsed().as_micros();
 
         let start = Instant::now();
-        let active_sections = self.world.borrow().active_sections_for(&changed_chunks);
+        let active_sections = self.world.borrow().section_statuses_for(&changed_chunks);
         timing.active_sections_us = start.elapsed().as_micros();
         let start = Instant::now();
         let sky_sources = self.world.borrow().sky_source_blocks_for(&changed_chunks);
@@ -80,9 +80,12 @@ impl RetainedInitialLightState {
         timing.block_source_scan_us = start.elapsed().as_micros();
 
         let start = Instant::now();
-        for section in active_sections {
-            self.engine.update_section_status(section, false);
-            self.engine.enable_light_sources(section, true);
+        for (section, is_empty) in active_sections {
+            self.engine.update_section_status(section, is_empty);
+        }
+        for chunk_pos in &changed_chunks {
+            self.engine
+                .enable_light_sources(section_as_long(chunk_pos.x, 0, chunk_pos.z), true);
         }
         timing.section_setup_us = start.elapsed().as_micros();
         let start = Instant::now();
@@ -262,15 +265,23 @@ impl RetainedLightWorld {
         true
     }
 
-    fn active_sections_for(&self, chunks: &[ChunkPos]) -> Vec<i64> {
+    fn section_statuses_for(&self, chunks: &[ChunkPos]) -> Vec<(SectionPosKey, bool)> {
         self.assert_configured();
         let min_section_y = block_to_section_coord(self.min_y);
         let section_count = self.height / SECTION_HEIGHT;
         chunks
             .iter()
-            .flat_map(|chunk_pos| {
+            .filter_map(|chunk_pos| {
+                self.chunks
+                    .get(chunk_pos)
+                    .map(|blocks| (*chunk_pos, blocks.as_slice()))
+            })
+            .flat_map(|(chunk_pos, blocks)| {
                 (0..section_count).map(move |section_offset| {
-                    section_as_long(chunk_pos.x, min_section_y + section_offset, chunk_pos.z)
+                    (
+                        section_as_long(chunk_pos.x, min_section_y + section_offset, chunk_pos.z),
+                        section_is_empty(blocks, section_offset),
+                    )
                 })
             })
             .collect()
@@ -278,12 +289,19 @@ impl RetainedLightWorld {
 
     fn sky_source_blocks_for(&self, chunks: &[ChunkPos]) -> Vec<BlockPosKey> {
         self.assert_configured();
-        let top_local_y = self.height - 1;
+        let section_count = self.height / SECTION_HEIGHT;
         let mut sources = Vec::new();
         for chunk_pos in chunks {
             let Some(blocks) = self.chunks.get(chunk_pos) else {
                 continue;
             };
+            let Some(top_section_offset) = (0..section_count)
+                .rev()
+                .find(|section_offset| !section_is_empty(blocks, *section_offset))
+            else {
+                continue;
+            };
+            let top_local_y = top_section_offset * SECTION_HEIGHT + (SECTION_HEIGHT - 1);
             for local_z in 0..CHUNK_WIDTH {
                 for local_x in 0..CHUNK_WIDTH {
                     let block = blocks[chunk_block_index(local_x, top_local_y, local_z)];
@@ -350,6 +368,17 @@ impl RetainedLightWorld {
     }
 }
 
+fn section_is_empty(blocks: &[RawBlockId], section_offset: i32) -> bool {
+    let base_y = section_offset * SECTION_HEIGHT;
+    (0..SECTION_HEIGHT).all(|dy| {
+        (0..CHUNK_WIDTH).all(|local_z| {
+            (0..CHUNK_WIDTH).all(|local_x| {
+                is_air_like(blocks[chunk_block_index(local_x, base_y + dy, local_z)])
+            })
+        })
+    })
+}
+
 impl BlockLightWorld for SharedRetainedLightWorld {
     fn light_emission(&self, pos: BlockPosKey) -> u8 {
         self.borrow().block_at(pos).map_or(0, block_light_emission)
@@ -363,5 +392,47 @@ impl BlockLightWorld for SharedRetainedLightWorld {
 impl SkyLightWorld for SharedRetainedLightWorld {
     fn light_opacity(&self, pos: BlockPosKey) -> Option<u8> {
         self.borrow().block_at(pos).map(block_light_opacity)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mclone_worldgen::block::{AIR, STONE};
+
+    #[test]
+    fn retained_light_world_marks_air_sections_empty() {
+        let mut world = RetainedLightWorld::default();
+        world.configure(0, SECTION_HEIGHT * 2);
+        let chunk_pos = ChunkPos::new(0, 0);
+        let mut blocks = vec![AIR; (CHUNK_WIDTH * SECTION_HEIGHT * 2 * CHUNK_WIDTH) as usize];
+        blocks[chunk_block_index(1, 1, 1)] = STONE;
+        assert!(world.upsert_chunk(chunk_pos, &blocks));
+
+        let statuses = world.section_statuses_for(&[chunk_pos]);
+
+        assert_eq!(
+            statuses,
+            vec![
+                (section_as_long(0, 0, 0), false),
+                (section_as_long(0, 1, 0), true),
+            ]
+        );
+    }
+
+    #[test]
+    fn retained_light_world_seeds_sky_from_top_non_empty_section() {
+        let mut world = RetainedLightWorld::default();
+        world.configure(0, SECTION_HEIGHT * 2);
+        let chunk_pos = ChunkPos::new(0, 0);
+        let mut blocks = vec![AIR; (CHUNK_WIDTH * SECTION_HEIGHT * 2 * CHUNK_WIDTH) as usize];
+        blocks[chunk_block_index(1, 1, 1)] = STONE;
+        assert!(world.upsert_chunk(chunk_pos, &blocks));
+
+        let sources = world.sky_source_blocks_for(&[chunk_pos]);
+
+        assert_eq!(sources.len(), (CHUNK_WIDTH * CHUNK_WIDTH) as usize);
+        assert!(sources.contains(&block_pos_as_long(0, 15, 0)));
+        assert!(!sources.contains(&block_pos_as_long(0, 31, 0)));
     }
 }

@@ -153,6 +153,36 @@ node counts are unchanged and existing solver tests still pass. The next
 throughput work should reduce the sky graph's duplicate processed-node count,
 not tune block light or scheduler publication.
 
+On 2026-06-19, after changing retained initial light setup to pass real
+section-empty flags and seed sky from the highest non-empty section instead of
+the build-limit top row, the radius-5 cold startup benchmark improved again:
+
+| Metric | P6.8 mixed hash | P6.9 empty-section setup |
+|---|---:|---:|
+| radius-5 total elapsed | `6,733.051 ms` | `1,931.110 ms` |
+| light-status compute | `5,236.809 ms` | `485.407 ms` |
+| `LevelLightEngine.run_all_updates` | `5,185.626 ms` | `415.744 ms` |
+| block graph drain | `32.612 ms` | `29.855 ms` |
+| sky graph drain | `5,152.656 ms` | `385.856 ms` |
+| block processed nodes | `52,348` | `52,348` |
+| sky processed nodes | `10,002,274` | `794,466` |
+| run-update iterations | `614` | `52` |
+
+The capture for this slice is:
+
+```text
+/tmp/mclone-light-sky-empty-sections.png
+```
+
+It was inspected and rendered nonblank terrain with `166` cached sections and
+`26` drawn sections. Tree canopy shadows are visibly stronger than the prior
+all-sections-active setup.
+
+Interpretation: the large startup regression is now mostly removed. The next
+lighting parity work should move manual sky-source seeding into a Java-shaped
+`SkyLightSectionStorage` source-section queue and port the remaining
+skip-through-empty-section sky propagation behavior.
+
 On 2026-06-19, after moving initial lighting to the retained worker-owned light
 world, a native full-frame capture for seed `12345`, chunk `(0,0)`, render
 distance `2`, `960x540`, with server lighting enabled and shader fullbright
@@ -670,24 +700,50 @@ startup light is affordable.
 
 ### P6.9: Sky Graph Duplicate-Work Reduction
 
+Status: completed first pass in
+[`048-native-sky-empty-section-light-setup.md`](../tactical/048-native-sky-empty-section-light-setup.md).
+
+The latest metrics showed sky propagation was still the cold-start limiter:
+roughly `10M` sky graph nodes were processed for a max sky queue size of
+`57,600`. This slice compared native sky source/section activation against Java
+and removed the largest redundant queue source.
+
+Landed:
+
+- Retained light setup now computes section emptiness from raw blocks and calls
+  `LevelLightEngine.update_section_status(section, is_empty)`.
+- Sky sources are enabled once per chunk column.
+- Manual sky source seeds now use the top block row of the highest non-empty
+  section instead of the build-limit top row.
+- The test-only light bridge mirrors the retained setup and focused tests cover
+  empty-section classification/source height.
+
+Measured result on 2026-06-19:
+
+- radius-5 `LevelLightEngine.run_all_updates` dropped from `5,185.626 ms` to
+  `415.744 ms`
+- sky graph drain dropped from `5,152.656 ms` to `385.856 ms`
+- sky graph processed nodes dropped from `10,002,274` to `794,466`
+- block graph processed nodes stayed unchanged at `52,348`
+
+### P6.10: Java Sky Source-Section Ownership
+
 Status: next recommended.
 
-The latest metrics show sky propagation is still the cold-start limiter:
-roughly `10M` sky graph nodes are processed for a max sky queue size of
-`57,600`. The next slice should compare native sky source/section activation
-against Java `SkyLightEngine` and reduce redundant queued work without changing
-Java-visible light values.
+The retained setup still manually scans top non-empty section rows and calls
+`check_sky_source`. Java owns this inside `SkyLightSectionStorage` through
+source-section add/remove queues, and `SkyLightEngine.checkNeighborsAfterUpdate`
+has special skip-through-empty-section behavior. Porting those pieces should
+improve parity and make future live section/block updates less ad hoc.
 
 Initial scope:
 
-- Inspect sky-source enqueue and section-activation paths against the Java
-  `SkyLightEngine` / `LayerLightSectionStorage` shape.
-- Explain the repeated sky node processing in terms of queue churn, not just
-  elapsed time.
-- Preserve the current per-layer graph metrics so every attempted optimization
-  can be rejected if it changes node counts or worsens elapsed time.
-- Keep the fix in `mclone_light` and retained light-world setup rather than
-  scheduler orchestration.
+- Port `SkyLightSectionStorage` source-section sets and add/remove queues.
+- Move initial sky source seeding out of retained setup and into storage
+  inconsistencies, following Java's `enableLightSources` / `markNewInconsistencies`.
+- Port the Java sky neighbor update behavior that skips down through missing
+  vertical light-storage sections.
+- Preserve the P6.8 graph metrics and radius-5 benchmark as acceptance checks.
 
 ### P7: Live Deltas And Render Dirtying
 
@@ -734,6 +790,7 @@ Primary native lighting docs:
 - [`../tactical/045-native-shared-initial-light-batch.md`](../tactical/045-native-shared-initial-light-batch.md)
 - [`../tactical/046-native-retained-initial-light-world.md`](../tactical/046-native-retained-initial-light-world.md)
 - [`../tactical/047-native-light-graph-drain-instrumentation.md`](../tactical/047-native-light-graph-drain-instrumentation.md)
+- [`../tactical/048-native-sky-empty-section-light-setup.md`](../tactical/048-native-sky-empty-section-light-setup.md)
 
 Legacy/reference-only lighting docs:
 

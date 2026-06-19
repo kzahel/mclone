@@ -14,7 +14,7 @@ use mclone_light::{
     block_pos_get_x, block_pos_get_y, block_pos_get_z, section_as_long,
 };
 #[cfg(test)]
-use mclone_worldgen::block::{RawBlockId, block_light_emission, block_light_opacity};
+use mclone_worldgen::block::{RawBlockId, block_light_emission, block_light_opacity, is_air_like};
 
 #[cfg(test)]
 pub(crate) fn graph_level_light_sections_for_chunk<'a>(
@@ -120,8 +120,9 @@ pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
     let start = Instant::now();
     let world = RawChunkLightWorld::new(targets.iter().copied(), min_y, height, chunks);
     timing.world_init_us = start.elapsed().as_micros();
+    let chunk_positions = world.chunk_positions().collect::<Vec<_>>();
     let start = Instant::now();
-    let active_sections = world.active_sections();
+    let active_sections = world.section_statuses();
     timing.active_sections_us = start.elapsed().as_micros();
     let start = Instant::now();
     let sky_sources = world.sky_source_blocks();
@@ -134,9 +135,11 @@ pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
     timing.engine_init_us = start.elapsed().as_micros();
 
     let start = Instant::now();
-    for section in active_sections {
-        engine.update_section_status(section, false);
-        engine.enable_light_sources(section, true);
+    for (section, is_empty) in active_sections {
+        engine.update_section_status(section, is_empty);
+    }
+    for chunk_pos in chunk_positions {
+        engine.enable_light_sources(section_as_long(chunk_pos.x, 0, chunk_pos.z), true);
     }
     timing.section_setup_us = start.elapsed().as_micros();
     let start = Instant::now();
@@ -252,23 +255,37 @@ impl<'a> RawChunkLightWorld<'a> {
         }
     }
 
-    fn active_sections(&self) -> Vec<i64> {
+    fn chunk_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
+        self.chunks.keys().copied()
+    }
+
+    fn section_statuses(&self) -> Vec<(i64, bool)> {
         let min_section_y = block_to_section_coord(self.min_y);
         let section_count = self.height / SECTION_HEIGHT;
         self.chunks
-            .keys()
-            .flat_map(|chunk_pos| {
+            .iter()
+            .flat_map(|(chunk_pos, blocks)| {
                 (0..section_count).map(move |section_offset| {
-                    section_as_long(chunk_pos.x, min_section_y + section_offset, chunk_pos.z)
+                    (
+                        section_as_long(chunk_pos.x, min_section_y + section_offset, chunk_pos.z),
+                        section_is_empty(blocks, section_offset),
+                    )
                 })
             })
             .collect()
     }
 
     fn sky_source_blocks(&self) -> Vec<BlockPosKey> {
-        let top_local_y = self.height - 1;
+        let section_count = self.height / SECTION_HEIGHT;
         let mut sources = Vec::new();
         for (&chunk_pos, blocks) in &self.chunks {
+            let Some(top_section_offset) = (0..section_count)
+                .rev()
+                .find(|section_offset| !section_is_empty(blocks, *section_offset))
+            else {
+                continue;
+            };
+            let top_local_y = top_section_offset * SECTION_HEIGHT + (SECTION_HEIGHT - 1);
             for local_z in 0..CHUNK_WIDTH {
                 for local_x in 0..CHUNK_WIDTH {
                     let block = blocks[chunk_block_index(local_x, top_local_y, local_z)];
@@ -322,6 +339,18 @@ impl<'a> RawChunkLightWorld<'a> {
         let blocks = self.chunks.get(&chunk_pos)?;
         Some(blocks[chunk_block_index(local_block_coord(x), y - self.min_y, local_block_coord(z))])
     }
+}
+
+#[cfg(test)]
+fn section_is_empty(blocks: &[RawBlockId], section_offset: i32) -> bool {
+    let base_y = section_offset * SECTION_HEIGHT;
+    (0..SECTION_HEIGHT).all(|dy| {
+        (0..CHUNK_WIDTH).all(|local_z| {
+            (0..CHUNK_WIDTH).all(|local_x| {
+                is_air_like(blocks[chunk_block_index(local_x, base_y + dy, local_z)])
+            })
+        })
+    })
 }
 
 #[cfg(test)]

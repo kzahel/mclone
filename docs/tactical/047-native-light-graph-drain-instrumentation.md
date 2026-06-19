@@ -117,8 +117,9 @@ It was inspected and rendered nonblank terrain with `166` cached sections and
 
 ## Next
 
-The next likely lighting throughput slice is sky graph duplicate-work
-reduction:
+The next likely lighting throughput slice was sky graph duplicate-work
+reduction, now tracked by
+[`048-native-sky-empty-section-light-setup.md`](048-native-sky-empty-section-light-setup.md):
 
 - inspect sky-source enqueue and section-activation patterns against Java
   `SkyLightEngine`
