@@ -6,7 +6,7 @@ use mclone_protocol::{
     ClientCommand, PlayerActionCommand, PlayerActionKind, UseItemOnCommand, UseItemOnKind,
 };
 
-use crate::ClientRuntime;
+use crate::{ClientRuntime, block_shapes::clip_block_outline};
 
 pub const CREATIVE_PICK_RANGE: f64 = 5.0;
 pub const DEFAULT_DEBUG_PLACE_BLOCK: BlockStateId = BlockStateId(1);
@@ -153,10 +153,7 @@ impl ClientRuntime {
 
     fn clip_block_at(&self, from: Vec3d, to: Vec3d, pos: BlockPos) -> Option<BlockHitResult> {
         let state = self.block_state_at_block_pos(pos)?;
-        if state == AIR_BLOCK_STATE_ID {
-            return None;
-        }
-        clip_unit_block(from, to, pos)
+        clip_block_outline(state, from, to, pos)
     }
 }
 
@@ -197,105 +194,6 @@ fn t_delta(delta: f64) -> f64 {
     } else {
         1.0 / delta.abs()
     }
-}
-
-fn clip_unit_block(from: Vec3d, to: Vec3d, pos: BlockPos) -> Option<BlockHitResult> {
-    let delta = to.subtract(from);
-    if delta.length_sqr() < 1.0e-7 {
-        return None;
-    }
-    if contains_unit_block(pos, from) {
-        return Some(BlockHitResult::new(
-            from.add(delta.scale(0.001)),
-            Direction::nearest(delta.x, delta.y, delta.z).opposite(),
-            pos,
-            true,
-        ));
-    }
-
-    let min = Vec3d::new(pos.x as f64, pos.y as f64, pos.z as f64);
-    let max = Vec3d::new(min.x + 1.0, min.y + 1.0, min.z + 1.0);
-    let mut t_min = 0.0;
-    let mut t_max = 1.0;
-    let mut face = None;
-
-    if !clip_axis(
-        from.x,
-        delta.x,
-        min.x,
-        max.x,
-        Direction::West,
-        Direction::East,
-        &mut t_min,
-        &mut t_max,
-        &mut face,
-    ) || !clip_axis(
-        from.y,
-        delta.y,
-        min.y,
-        max.y,
-        Direction::Down,
-        Direction::Up,
-        &mut t_min,
-        &mut t_max,
-        &mut face,
-    ) || !clip_axis(
-        from.z,
-        delta.z,
-        min.z,
-        max.z,
-        Direction::North,
-        Direction::South,
-        &mut t_min,
-        &mut t_max,
-        &mut face,
-    ) {
-        return None;
-    }
-
-    face.map(|direction| BlockHitResult::new(from.add(delta.scale(t_min)), direction, pos, false))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn clip_axis(
-    origin: f64,
-    delta: f64,
-    min: f64,
-    max: f64,
-    low_face: Direction,
-    high_face: Direction,
-    t_min: &mut f64,
-    t_max: &mut f64,
-    face: &mut Option<Direction>,
-) -> bool {
-    const EPSILON: f64 = 1.0e-7;
-    if delta.abs() < EPSILON {
-        return origin >= min && origin <= max;
-    }
-
-    let inv = 1.0 / delta;
-    let mut near = (min - origin) * inv;
-    let mut far = (max - origin) * inv;
-    let mut near_face = low_face;
-    if near > far {
-        std::mem::swap(&mut near, &mut far);
-        near_face = high_face;
-    }
-    if near > *t_min {
-        *t_min = near;
-        *face = Some(near_face);
-    }
-    *t_max = t_max.min(far);
-    *t_min <= *t_max && *t_max >= 0.0 && *t_min <= 1.0
-}
-
-fn contains_unit_block(pos: BlockPos, point: Vec3d) -> bool {
-    point.x >= pos.x as f64
-        && point.x < pos.x as f64 + 1.0
-        && point.y >= pos.y as f64
-        && point.y < pos.y as f64 + 1.0
-        && point.z >= pos.z as f64
-        && point.z < pos.z as f64 + 1.0
 }
 
 #[cfg(test)]
@@ -357,6 +255,47 @@ mod tests {
         assert_eq!(hit.block_pos, BlockPos::new(4, 2, 1));
         assert_eq!(hit.direction, Direction::West);
         assert!(!hit.inside);
+    }
+
+    #[test]
+    fn raycast_uses_java_outline_shape_height() {
+        let client = client_with_blocks(&[(BlockPos::new(4, 2, 1), BlockStateId(8))]);
+
+        let low_hit = client.clip_blocks(Vec3d::new(1.5, 2.05, 1.5), Vec3d::new(8.0, 2.05, 1.5));
+        let high_hit = client.clip_blocks(Vec3d::new(1.5, 2.2, 1.5), Vec3d::new(8.0, 2.2, 1.5));
+
+        assert_eq!(low_hit.hit_type(), HitResultType::Block);
+        assert_eq!(low_hit.block_pos, BlockPos::new(4, 2, 1));
+        assert_eq!(low_hit.direction, Direction::West);
+        assert_eq!(high_hit.hit_type(), HitResultType::Miss);
+    }
+
+    #[test]
+    fn raycast_skips_empty_outline_blocks() {
+        let client = client_with_blocks(&[
+            (BlockPos::new(4, 2, 1), BlockStateId(2)),
+            (BlockPos::new(6, 2, 1), BlockStateId(7)),
+        ]);
+
+        let hit = client.clip_blocks(Vec3d::new(1.5, 2.5, 1.5), Vec3d::new(8.0, 2.5, 1.5));
+
+        assert_eq!(hit.hit_type(), HitResultType::Block);
+        assert_eq!(hit.block_pos, BlockPos::new(6, 2, 1));
+        assert_eq!(hit.direction, Direction::West);
+    }
+
+    #[test]
+    fn raycast_hits_java_plant_outline_box() {
+        let client = client_with_blocks(&[(BlockPos::new(4, 2, 1), BlockStateId(43))]);
+
+        let hit = client.clip_blocks(Vec3d::new(1.5, 2.5, 1.5), Vec3d::new(8.0, 2.5, 1.5));
+
+        assert_eq!(hit.hit_type(), HitResultType::Block);
+        assert_eq!(hit.block_pos, BlockPos::new(4, 2, 1));
+        assert_eq!(hit.direction, Direction::West);
+        assert!((hit.location.x - 4.125).abs() < 1.0e-12);
+        assert!((hit.location.y - 2.5).abs() < 1.0e-12);
+        assert!((hit.location.z - 1.5).abs() < 1.0e-12);
     }
 
     #[test]

@@ -49,6 +49,11 @@ placement rules.
   default. `LocalPlayerController` now carries Java-style `deltaMovement`,
   applies first-pass walking input, sprint, jump, gravity, and drag constants,
   and keeps no-clip behind an explicit native debug toggle.
+- 2026-06-19: Added a client-owned block shape fact module for the current
+  terrain-MVP `BlockStateId` lane. Raycast now clips against Java outline
+  shapes for snow and simple plants instead of treating every non-air block as
+  a full cube, and player collision now uses Java empty collision facts for
+  fluids, one-layer snow, plants, large ferns, and glow lichen.
 
 ## Current Native State
 
@@ -84,19 +89,29 @@ Native code already has several useful pieces:
 - `native/crates/mclone-client/src/lib.rs`
   - stores authoritative client chunk snapshots
   - applies section block deltas to loaded snapshots and ignores unknown chunks
-  - owns the first client interaction, local player input, and local player pose
-    controller modules
-  - exposes a loaded-snapshot block lookup used by raycast and the first
-    collision clipper; unloaded chunks are currently treated as empty for local
-    collision
+  - owns the first client interaction, local player input, local player pose,
+    and current terrain-MVP block shape modules
+  - exposes a loaded-snapshot block lookup used by raycast and collision;
+    unloaded chunks are currently treated as empty for local collision
+- `native/crates/mclone-client/src/block_shapes.rs`
+  - maps current generated terrain `BlockStateId`s to Java-shaped outline and
+    collision boxes without depending on renderer, assets, server, or `winit`
+  - keeps the current limited terrain id table small until gameplay can consume
+    the full block-state registry
+  - implements one-layer snow outline/collision, simple plant outline boxes,
+    flower X/Z selection offset, empty block-fluid outline for `Fluid.NONE`
+    picking, and Java `noCollission` collision emptiness
+- `native/crates/mclone-client/src/block_clip.rs`
+  - owns the reusable ray-vs-AABB clipping helper used by outline shapes,
+    including inside-shape hits and face selection
 - `native/crates/mclone-client/src/player.rs`
   - mirrors Java `Input` impulses, local player `position`/`yRot`/`xRot`, eye
     position, standing dimensions, `deltaMovement`, and collision flags
   - provides no-clip movement for debug mode plus the first collision-backed
     walking tick with Java-derived speed, jump, gravity, friction, and drag
     constants
-  - still collides against full-cube AABBs for every non-air loaded snapshot
-    block; exact block collision shapes are a later parity dependency
+  - gathers loaded block collision boxes through `block_shapes.rs`; exact
+    multi-box and fully registry-backed shapes are still later parity work
 - `native/crates/mclone-protocol/src/lib.rs`
   - has chunk-view plus player-action/use-item-on client commands
   - already has `ServerUpdate::SectionBlockUpdates`
@@ -140,6 +155,16 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/world/phys/BlockHitResult.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/phys/shapes/VoxelShape.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/phys/AABB.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/state/BlockBehaviour.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/Block.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/Blocks.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/SnowLayerBlock.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/TallGrassBlock.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/FlowerBlock.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/DeadBushBlock.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/DoublePlantBlock.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/LiquidBlock.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/MultifaceBlock.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/server/level/ServerPlayerGameMode.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/item/context/UseOnContext.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/item/context/BlockPlaceContext.java`
@@ -166,9 +191,23 @@ Key facts from the reference:
 - `BlockGetter.clip` uses DDA block traversal, compares block and fluid shape
   hits, and returns `BlockHitResult` or a miss.
 - `VoxelShape.clip` handles start-inside-shape and exact face direction. For the
-  current terrain-MVP block set, a full-cube shape is enough for the first
-  block-pick slice, but the API should not preclude future outline/collision
-  shape parity.
+  current terrain-MVP block set, the native shape lane covers full cubes,
+  one-layer snow, simple plants, flowers, and empty fluid/block-air outlines;
+  the API still needs future multi-box and registry-backed shape parity.
+- `BlockBehaviour.getShape` defaults to `Shapes.block()`.
+  `getCollisionShape` returns that outline shape only when the block has
+  collision; `Properties.noCollission()` makes collision empty and disables
+  occlusion.
+- `Entity.pick` uses `ClipContext.Block.OUTLINE` with `Fluid.NONE`, so liquid
+  blocks contribute no block outline hit in the current normal crosshair path.
+- `SnowLayerBlock` defaults to `layers=1`: outline is a 2/16 block-high slab,
+  but collision is `SHAPE_BY_LAYER[layers - 1]`, which is empty for one layer.
+- `TallGrassBlock` and `DeadBushBlock` use a 2..14 by 0..13 by 2..14 outline
+  box; `FlowerBlock` uses a 5..11 by 0..10 by 5..11 outline box plus the Java
+  X/Z block offset.
+- `DoublePlantBlock` does not override `getShape`, so current large fern states
+  use the default full-cube outline while retaining empty collision via
+  `noCollission`.
 - `Minecraft.handleKeybinds` turns key-use/key-attack state into
   `startAttack`, `continueAttack`, `startUseItem`, and `pickBlock`.
 - `MultiPlayerGameMode` owns client-side interaction state such as destroy
@@ -241,8 +280,8 @@ entire Java survival stack.
 2. Client block lookup and raycast
    - expose a client-world block lookup from loaded snapshots
    - add a first `ClipContext`/`BlockHitResult` path using Java DDA traversal
-   - begin with full-cube outline shape for non-air terrain-MVP blocks and empty
-     shape for air-like blocks
+   - use `block_shapes.rs` for terrain-MVP outline and collision facts instead
+     of hard-coding non-air blocks as full cubes in raycast or movement
    - keep the function signature shape-compatible with future
      outline/collision/fluid shape selection
 

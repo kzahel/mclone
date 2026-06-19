@@ -1,6 +1,6 @@
-use mclone_core::{AIR_BLOCK_STATE_ID, Aabb, BlockPos, ChunkPos, Vec3d};
+use mclone_core::{Aabb, BlockPos, ChunkPos, Vec3d};
 
-use crate::ClientRuntime;
+use crate::{ClientRuntime, block_shapes::block_collision_aabb};
 
 pub const NO_CLIP_BOOST_MULTIPLIER: f64 = 3.0;
 pub const MOVING_SLOW_FACTOR: f32 = 0.3;
@@ -543,12 +543,10 @@ fn solid_block_aabbs_in(client: &ClientRuntime, area: Aabb) -> Vec<Aabb> {
                 let Some(block_state) = client.block_state_at_block_pos(pos) else {
                     continue;
                 };
-                if block_state == AIR_BLOCK_STATE_ID {
-                    continue;
-                }
-                let block_box = Aabb::unit_block(pos);
-                if block_box.intersects(area) {
-                    solids.push(block_box);
+                if let Some(block_box) = block_collision_aabb(block_state, pos) {
+                    if block_box.intersects(area) {
+                        solids.push(block_box);
+                    }
                 }
             }
         }
@@ -1060,6 +1058,37 @@ mod tests {
         assert!(!result.vertical_collision);
         assert!(!result.on_ground);
         assert_eq!(controller.pose().position, Vec3d::new(2.5, -1.0, 1.5));
+    }
+
+    #[test]
+    fn colliding_movement_ignores_java_empty_collision_blocks() {
+        for state in [
+            BlockStateId(2),
+            BlockStateId(8),
+            BlockStateId(9),
+            BlockStateId(43),
+            BlockStateId(44),
+            BlockStateId(45),
+            BlockStateId(50),
+            BlockStateId(51),
+            BlockStateId(68),
+            BlockStateId(69),
+            BlockStateId(70),
+        ] {
+            let client = client_with_blocks(&[(BlockPos::new(1, 0, 0), state)]);
+            let mut controller = LocalPlayerController::new();
+            controller.set_pose(LocalPlayerPose {
+                position: Vec3d::new(0.5, 0.0, 0.5),
+                ..Default::default()
+            });
+
+            let result = controller.move_colliding(&client, Vec3d::new(2.0, 0.0, 0.0));
+
+            assert_eq!(result.traveled, Vec3d::new(2.0, 0.0, 0.0), "{state:?}");
+            assert!(!result.horizontal_collision, "{state:?}");
+            assert!(!result.vertical_collision, "{state:?}");
+            assert_eq!(controller.pose().position, Vec3d::new(2.5, 0.0, 0.5));
+        }
     }
 
     #[test]

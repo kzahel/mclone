@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+mod block_clip;
+mod block_shapes;
 mod interaction;
 mod player;
 
