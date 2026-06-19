@@ -10,7 +10,7 @@ use mclone_core::{
     local_section_block_coord,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
-use mclone_net::{LocalTransport, request_server_updates};
+use mclone_net::LocalTransport;
 use mclone_protocol::{
     ChunkView, ClientCommand, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
 };
@@ -19,6 +19,7 @@ use mclone_server::IntegratedServer;
 use crate::MIN_RENDER_DISTANCE;
 use crate::cli::SceneOptions;
 use crate::frame_pacing::{elapsed_ms, micros_to_ms};
+use crate::remote_session::RemoteServerSession;
 use crate::render_cache::{
     CachedTexturedRenderSections, RenderSectionCacheUpdate, RenderSectionCompileRequest,
     RenderSectionCompileWorker, SceneTexturedSections, TexturedMeshAssets,
@@ -94,8 +95,8 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
     ));
 
     if let Some(remote_addr) = &scene.remote_addr {
-        let updates = request_server_updates(remote_addr.as_str(), &command)
-            .with_context(|| format!("failed to request chunk updates from {remote_addr}"))?;
+        let mut session = RemoteServerSession::connect(remote_addr.as_str())?;
+        let updates = session.send_command(command)?;
         client.apply_updates(updates);
     } else {
         let mut server = IntegratedServer::new(scene.seed);
@@ -121,7 +122,7 @@ pub(crate) struct WindowSceneRuntime {
     pub(crate) client: ClientRuntime,
     server: Option<IntegratedServer>,
     transport: LocalTransport,
-    remote_addr: Option<String>,
+    remote_session: Option<RemoteServerSession>,
     pub(crate) render_distance: u32,
     pub(crate) chunk_tracking_radius: u32,
     pub(crate) interest_center: ChunkPos,
@@ -240,7 +241,12 @@ impl WindowSceneRuntime {
         let chunk_tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
         let mesh_assets = load_textured_mesh_assets()?;
         let render_compile_worker = RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
-        let server = if scene.remote_addr.is_none() {
+        let remote_session = scene
+            .remote_addr
+            .as_deref()
+            .map(RemoteServerSession::connect)
+            .transpose()?;
+        let server = if remote_session.is_none() {
             let mut server = IntegratedServer::new(scene.seed);
             server.set_lighting_enabled(scene.lighting_enabled);
             Some(server)
@@ -251,7 +257,7 @@ impl WindowSceneRuntime {
             client,
             server,
             transport: LocalTransport::new(),
-            remote_addr: scene.remote_addr.clone(),
+            remote_session,
             render_distance,
             chunk_tracking_radius,
             interest_center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
@@ -349,9 +355,8 @@ impl WindowSceneRuntime {
     }
 
     fn dispatch_client_command(&mut self, command: ClientCommand) -> Result<bool> {
-        if let Some(remote_addr) = &self.remote_addr {
-            let updates = request_server_updates(remote_addr.as_str(), &command)
-                .with_context(|| format!("failed to request chunk updates from {remote_addr}"))?;
+        if let Some(remote_session) = &mut self.remote_session {
+            let updates = remote_session.send_command(command)?;
             let changed = !updates.is_empty();
             self.apply_server_updates(updates);
             return Ok(changed);
@@ -1954,6 +1959,61 @@ mod tests {
                 .chunk_snapshot(ChunkPos::new(scene.chunk_x, scene.chunk_z))
                 .is_some()
         );
+    }
+
+    #[test]
+    fn window_runtime_reuses_remote_session_for_interest_updates() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(
+                mclone_net::read_client_command_frame(&mut stream).unwrap(),
+                ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(0, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                })
+            );
+            mclone_net::write_server_update_batch(
+                &mut stream,
+                &[ServerUpdate::TimeUpdate { day_time: 1 }],
+            )
+            .unwrap();
+            assert_eq!(
+                mclone_net::read_client_command_frame(&mut stream).unwrap(),
+                ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(1, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                })
+            );
+            mclone_net::write_server_update_batch(
+                &mut stream,
+                &[ServerUpdate::TimeUpdate { day_time: 2 }],
+            )
+            .unwrap();
+            assert!(
+                mclone_net::try_read_client_command_frame(&mut stream)
+                    .unwrap()
+                    .is_none()
+            );
+        });
+
+        {
+            let scene = SceneOptions {
+                render_distance: 0,
+                remote_addr: Some(addr.to_string()),
+                ..SceneOptions::default()
+            };
+            let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
+            assert!(runtime.set_interest_center(ChunkPos::new(1, 0)).unwrap());
+        }
+        server.join().unwrap();
     }
 
     #[test]

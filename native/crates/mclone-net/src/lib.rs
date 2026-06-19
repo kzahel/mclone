@@ -6,7 +6,7 @@ use mclone_protocol::{ClientCommand, ServerUpdate};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_tcp::{
-    NativeTransportError, NativeTransportResult, read_client_command_frame,
+    NativeClientSession, NativeTransportError, NativeTransportResult, read_client_command_frame,
     read_client_command_frames, read_server_update_batch, request_server_updates,
     try_read_client_command_frame, write_client_command_frame, write_server_update_batch,
 };
@@ -114,6 +114,28 @@ mod native_tcp {
         }
     }
 
+    #[derive(Debug)]
+    pub struct NativeClientSession {
+        stream: TcpStream,
+    }
+
+    impl NativeClientSession {
+        pub fn connect(addr: impl ToSocketAddrs) -> NativeTransportResult<Self> {
+            Ok(Self {
+                stream: TcpStream::connect(addr)?,
+            })
+        }
+
+        pub fn send_command(
+            &mut self,
+            command: &ClientCommand,
+        ) -> NativeTransportResult<Vec<ServerUpdate>> {
+            write_client_command_frame(&mut self.stream, command)?;
+            self.stream.flush()?;
+            read_server_update_batch(&mut self.stream)
+        }
+    }
+
     pub fn write_client_command_frame(
         writer: &mut impl Write,
         command: &ClientCommand,
@@ -180,10 +202,10 @@ mod native_tcp {
         addr: impl ToSocketAddrs,
         command: &ClientCommand,
     ) -> NativeTransportResult<Vec<ServerUpdate>> {
-        let mut stream = TcpStream::connect(addr)?;
-        write_client_command_frame(&mut stream, command)?;
-        stream.shutdown(Shutdown::Write)?;
-        read_server_update_batch(&mut stream)
+        let mut session = NativeClientSession::connect(addr)?;
+        let updates = session.send_command(command)?;
+        session.stream.shutdown(Shutdown::Write)?;
+        Ok(updates)
     }
 
     fn write_frame(
@@ -408,5 +430,57 @@ mod tests {
         server.join().unwrap();
 
         assert_eq!(updates, expected_updates);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_client_session_reuses_one_connection() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let first_command = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        });
+        let second_command = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(1, -1),
+            render_distance: 1,
+            chunk_tracking_radius: 1,
+        });
+        let first_server_command = first_command.clone();
+        let second_server_command = second_command.clone();
+        let first_updates = vec![ServerUpdate::TimeUpdate { day_time: 1 }];
+        let second_updates = vec![ServerUpdate::TimeUpdate { day_time: 2 }];
+        let first_server_updates = first_updates.clone();
+        let second_server_updates = second_updates.clone();
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(
+                read_client_command_frame(&mut stream).unwrap(),
+                first_server_command
+            );
+            write_server_update_batch(&mut stream, &first_server_updates).unwrap();
+            assert_eq!(
+                read_client_command_frame(&mut stream).unwrap(),
+                second_server_command
+            );
+            write_server_update_batch(&mut stream, &second_server_updates).unwrap();
+            assert!(
+                try_read_client_command_frame(&mut stream)
+                    .unwrap()
+                    .is_none()
+            );
+        });
+
+        {
+            let mut session = NativeClientSession::connect(addr).unwrap();
+            assert_eq!(session.send_command(&first_command).unwrap(), first_updates);
+            assert_eq!(
+                session.send_command(&second_command).unwrap(),
+                second_updates
+            );
+        }
+        server.join().unwrap();
     }
 }

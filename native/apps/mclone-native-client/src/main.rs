@@ -9,6 +9,7 @@ mod cli;
 mod frame_pacing;
 mod headless;
 mod perf;
+mod remote_session;
 mod render_cache;
 mod scene_runtime;
 mod ui;

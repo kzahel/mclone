@@ -29,6 +29,8 @@ Read these Java 1.17.1 files before changing this lane:
 
 - `reference/minecraft-1.17.1/src/net/minecraft/network/protocol/game/ServerboundMovePlayerPacket.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/server/network/ServerGamePacketListenerImpl.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/network/Connection.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/client/multiplayer/ClientPacketListener.java`
 
 Important reference facts:
 
@@ -45,6 +47,9 @@ Important reference facts:
 - `ServerConnectionListener` owns the server-side connection list and ticks each
   `Connection`; `Connection.tick()` delegates to `ServerGamePacketListenerImpl`
   when the connection has reached gameplay state
+- client gameplay packets are sent through `ClientPacketListener.send(...)`,
+  which delegates to the long-lived `Connection` rather than reconnecting per
+  packet
 - `handleMovePlayer` rejects non-finite values, clamps world bounds, wraps
   rotation, handles pending teleports, detects excessive packet burst /
   too-fast movement, moves the server player, detects impossible movement, and
@@ -100,6 +105,11 @@ complexity.
   its own update batch on the same connection, movement is staged/flushed at the
   session boundary, and the session tick marks Java-shaped movement counters
   after advancing the shared server simulation.
+- 2026-06-19: Moved the native remote client onto a reusable TCP client
+  session. `mclone-net` owns the low-level persistent native client session,
+  the native app owns a focused remote-session wrapper for address/context
+  handling, and `WindowSceneRuntime` stores the session instead of reconnecting
+  for every gameplay command.
 
 ## Native Direction
 
@@ -122,6 +132,9 @@ Keep the first native implementation boring, reference-shaped, and permissive:
   persistent sessions can preserve Java-shaped packet counters
 - keep dedicated app modules focused: CLI/listener orchestration in `main`,
   per-connection command/tick/update flow in a session module
+- keep native client remote transport focused: the scene runtime owns a
+  long-lived remote session, while the remote-session module delegates framed
+  command writes and update-batch reads to `mclone-net`
 
 Do not introduce a giant movement manager file. Keep the shape modular:
 
@@ -182,13 +195,11 @@ This slice intentionally does not yet implement, and now defers:
 
 ## Near-Term Follow-Ups
 
-1. Move the native remote client from per-command reconnects to a reusable
-   native TCP session that reads one update batch per command.
-2. Add multi-connection dedicated accept/concurrency; the current dedicated
+1. Add multi-connection dedicated accept/concurrency; the current dedicated
    listener still serves one persistent session at a time.
-3. Add remote-player state publication once the dedicated path has multiple
+2. Add remote-player state publication once the dedicated path has multiple
    connected clients worth visualizing.
-4. Revisit the FPS-style authority option only after the Java-shaped path is
+3. Revisit the FPS-style authority option only after the Java-shaped path is
    usable and measured.
 
 ## Deferred Authority Hardening
