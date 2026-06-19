@@ -9,12 +9,13 @@ use std::time::Duration;
 
 use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos};
 use mclone_protocol::{
-    ChunkView, ClientCommand, PlayerActionCommand, PlayerActionKind, ServerUpdate,
-    UseItemOnCommand, UseItemOnKind,
+    ChunkView, ClientCommand, MovePlayerCommand, PlayerActionCommand, PlayerActionKind,
+    ServerUpdate, UseItemOnCommand, UseItemOnKind,
 };
 use mclone_worldgen::block::RawBlockId;
 
 use crate::game_mode::ServerInteractionContext;
+use crate::player::ServerPlayerState;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
     ChunkScheduler, ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreResult, FluidKind,
@@ -30,6 +31,7 @@ pub struct IntegratedServer {
     simulation_tick: u64,
     day_time: u64,
     day_time_frozen: bool,
+    player: ServerPlayerState,
 }
 
 /// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
@@ -48,6 +50,7 @@ impl IntegratedServer {
             simulation_tick: 0,
             day_time: INITIAL_DAY_TIME,
             day_time_frozen: false,
+            player: ServerPlayerState::default(),
         }
     }
 
@@ -103,6 +106,7 @@ impl IntegratedServer {
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         match command {
             ClientCommand::SetChunkView(view) => self.set_chunk_view(view),
+            ClientCommand::MovePlayer(command) => Ok(self.handle_move_player(command)),
             ClientCommand::PlayerAction(command) => Ok(self.handle_player_action(command)),
             ClientCommand::UseItemOn(command) => Ok(self.handle_use_item_on(command)),
         }
@@ -285,9 +289,14 @@ impl IntegratedServer {
         Ok(self.apply_scheduler_events(events))
     }
 
+    fn handle_move_player(&mut self, command: MovePlayerCommand) -> Vec<ServerUpdate> {
+        self.player.apply_move_player(command);
+        Vec::new()
+    }
+
     fn handle_player_action(&mut self, command: PlayerActionCommand) -> Vec<ServerUpdate> {
         if command.kind == PlayerActionKind::DebugInstantBreak {
-            let context = ServerInteractionContext::debug_creative(command.actor_feet_position);
+            let context = ServerInteractionContext::debug_creative(self.player.position());
             if context.may_break_block(command.pos) {
                 self.set_block_debug(command.pos, AIR_BLOCK_STATE_ID);
             }
@@ -312,7 +321,7 @@ impl IntegratedServer {
         block_state: BlockStateId,
     ) -> Option<BlockPos> {
         let block_id = raw_block_id_from_block_state(block_state)?;
-        let context = ServerInteractionContext::debug_creative(command.actor_feet_position);
+        let context = ServerInteractionContext::debug_creative(self.player.position());
         let clicked_block = self.scheduler.block_at_world(command.hit.block_pos)?;
         let relative_pos = command.hit.block_pos.relative(command.hit.direction);
         let relative_block = self.scheduler.block_at_world(relative_pos);
@@ -419,6 +428,18 @@ mod tests {
         panic!("timed out loading center chunk");
     }
 
+    fn sync_player(server: &mut IntegratedServer, position: Vec3d) {
+        let updates = server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand {
+                position,
+                y_rot_degrees: 0.0,
+                x_rot_degrees: 0.0,
+                on_ground: true,
+            }))
+            .expect("move player");
+        assert!(updates.is_empty());
+    }
+
     #[test]
     fn day_time_advances_each_tick_by_default() {
         let mut server = IntegratedServer::new(0);
@@ -441,16 +462,36 @@ mod tests {
     }
 
     #[test]
+    fn move_player_command_updates_server_player_state_without_world_updates() {
+        let mut server = IntegratedServer::new(0);
+
+        let updates = server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand {
+                position: Vec3d::new(1.25, 63.0, -4.5),
+                y_rot_degrees: 181.0,
+                x_rot_degrees: -181.0,
+                on_ground: true,
+            }))
+            .expect("move player");
+
+        assert!(updates.is_empty());
+        assert_eq!(server.player.position(), Vec3d::new(1.25, 63.0, -4.5));
+        assert_eq!(server.player.y_rot_degrees(), -179.0);
+        assert_eq!(server.player.x_rot_degrees(), 179.0);
+        assert!(server.player.on_ground());
+    }
+
+    #[test]
     fn debug_break_command_mutates_block_and_returns_section_delta() {
         let mut server = IntegratedServer::new(0);
         load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
         let pos = BlockPos::new(8, 80, 8);
         assert!(server.scheduler_mut().set_block_at_world(pos, STONE));
         server.scheduler_mut().drain_pending_block_delta_events();
 
         let updates = server
             .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
-                actor_feet_position: Vec3d::new(8.5, 80.0, 8.5),
                 pos,
                 direction: Direction::Up,
                 kind: PlayerActionKind::DebugInstantBreak,
@@ -472,6 +513,7 @@ mod tests {
     fn debug_place_command_places_adjacent_to_hit_face() {
         let mut server = IntegratedServer::new(0);
         load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
         let clicked = BlockPos::new(8, 80, 8);
         let target = clicked.relative(Direction::Up);
         assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
@@ -479,7 +521,6 @@ mod tests {
 
         let updates = server
             .try_handle_command(ClientCommand::UseItemOn(UseItemOnCommand {
-                actor_feet_position: Vec3d::new(8.5, 80.0, 8.5),
                 hit: BlockHitResult::new(Vec3d::new(8.5, 81.0, 8.5), Direction::Up, clicked, false),
                 action: UseItemOnKind::DebugPlaceBlock {
                     block_state: generated_block_state_id(DIRT),
@@ -502,6 +543,7 @@ mod tests {
     fn debug_place_command_replaces_clicked_replaceable_block() {
         let mut server = IntegratedServer::new(0);
         load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
         let clicked = BlockPos::new(8, 80, 8);
         let adjacent = clicked.relative(Direction::Up);
         assert!(server.scheduler_mut().set_block_at_world(clicked, GRASS));
@@ -510,7 +552,6 @@ mod tests {
 
         let updates = server
             .try_handle_command(ClientCommand::UseItemOn(UseItemOnCommand {
-                actor_feet_position: Vec3d::new(8.5, 80.0, 8.5),
                 hit: BlockHitResult::new(Vec3d::new(8.5, 81.0, 8.5), Direction::Up, clicked, false),
                 action: UseItemOnKind::DebugPlaceBlock {
                     block_state: generated_block_state_id(DIRT),
@@ -534,6 +575,7 @@ mod tests {
     fn debug_place_command_does_not_overwrite_solid_relative_target() {
         let mut server = IntegratedServer::new(0);
         load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
         let clicked = BlockPos::new(8, 80, 8);
         let target = clicked.relative(Direction::Up);
         assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
@@ -542,7 +584,6 @@ mod tests {
 
         let updates = server
             .try_handle_command(ClientCommand::UseItemOn(UseItemOnCommand {
-                actor_feet_position: Vec3d::new(8.5, 80.0, 8.5),
                 hit: BlockHitResult::new(Vec3d::new(8.5, 81.0, 8.5), Direction::Up, clicked, false),
                 action: UseItemOnKind::DebugPlaceBlock {
                     block_state: generated_block_state_id(DIRT),
@@ -556,9 +597,10 @@ mod tests {
     }
 
     #[test]
-    fn debug_interaction_commands_reject_far_actor_positions() {
+    fn debug_interaction_commands_reject_far_server_player_positions() {
         let mut server = IntegratedServer::new(0);
         load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(100.0, 80.0, 100.0));
         let clicked = BlockPos::new(8, 80, 8);
         let target = clicked.relative(Direction::Up);
         assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
@@ -566,7 +608,6 @@ mod tests {
 
         let break_updates = server
             .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
-                actor_feet_position: Vec3d::new(100.0, 80.0, 100.0),
                 pos: clicked,
                 direction: Direction::Up,
                 kind: PlayerActionKind::DebugInstantBreak,
@@ -574,7 +615,6 @@ mod tests {
             .expect("break command");
         let place_updates = server
             .try_handle_command(ClientCommand::UseItemOn(UseItemOnCommand {
-                actor_feet_position: Vec3d::new(100.0, 80.0, 100.0),
                 hit: BlockHitResult::new(Vec3d::new(8.5, 81.0, 8.5), Direction::Up, clicked, false),
                 action: UseItemOnKind::DebugPlaceBlock {
                     block_state: generated_block_state_id(DIRT),
@@ -592,13 +632,13 @@ mod tests {
     fn debug_place_command_replaces_one_layer_snow_in_place() {
         let mut server = IntegratedServer::new(0);
         load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
         let clicked = BlockPos::new(8, 80, 8);
         assert!(server.scheduler_mut().set_block_at_world(clicked, SNOW));
         server.scheduler_mut().drain_pending_block_delta_events();
 
         server
             .try_handle_command(ClientCommand::UseItemOn(UseItemOnCommand {
-                actor_feet_position: Vec3d::new(8.5, 80.0, 8.5),
                 hit: BlockHitResult::new(
                     Vec3d::new(8.5, 80.125, 8.5),
                     Direction::North,

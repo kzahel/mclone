@@ -11,30 +11,30 @@ const JAVA_USE_ITEM_ON_REACH_SQR: f64 = 64.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ServerInteractionContext {
-    actor_feet_position: Vec3d,
+    player_feet_position: Vec3d,
     max_build_height: i32,
 }
 
 impl ServerInteractionContext {
-    pub(crate) const fn new(actor_feet_position: Vec3d, max_build_height: i32) -> Self {
+    pub(crate) const fn new(player_feet_position: Vec3d, max_build_height: i32) -> Self {
         Self {
-            actor_feet_position,
+            player_feet_position,
             max_build_height,
         }
     }
 
-    pub(crate) const fn debug_creative(actor_feet_position: Vec3d) -> Self {
-        Self::new(actor_feet_position, JAVA_OVERWORLD_MAX_BUILD_HEIGHT)
+    pub(crate) const fn debug_creative(player_feet_position: Vec3d) -> Self {
+        Self::new(player_feet_position, JAVA_OVERWORLD_MAX_BUILD_HEIGHT)
     }
 
     pub(crate) fn may_break_block(self, pos: BlockPos) -> bool {
-        self.actor_feet_position.is_finite()
+        self.player_feet_position.is_finite()
             && pos.y < self.max_build_height
             && self.block_break_distance_sqr(pos) <= JAVA_BLOCK_BREAK_REACH_SQR
     }
 
     pub(crate) fn may_use_item_on(self, hit: BlockHitResult) -> bool {
-        self.actor_feet_position.is_finite()
+        self.player_feet_position.is_finite()
             && hit.hit_type() == HitResultType::Block
             && hit.block_pos.y < self.max_build_height
             && self.distance_to_block_center_sqr(hit.block_pos) < JAVA_USE_ITEM_ON_REACH_SQR
@@ -75,16 +75,16 @@ impl ServerInteractionContext {
     }
 
     fn block_break_distance_sqr(self, pos: BlockPos) -> f64 {
-        let dx = self.actor_feet_position.x - (pos.x as f64 + 0.5);
-        let dy = self.actor_feet_position.y - (pos.y as f64 + 0.5) + 1.5;
-        let dz = self.actor_feet_position.z - (pos.z as f64 + 0.5);
+        let dx = self.player_feet_position.x - (pos.x as f64 + 0.5);
+        let dy = self.player_feet_position.y - (pos.y as f64 + 0.5) + 1.5;
+        let dz = self.player_feet_position.z - (pos.z as f64 + 0.5);
         dx * dx + dy * dy + dz * dz
     }
 
     fn distance_to_block_center_sqr(self, pos: BlockPos) -> f64 {
-        let dx = self.actor_feet_position.x - (pos.x as f64 + 0.5);
-        let dy = self.actor_feet_position.y - (pos.y as f64 + 0.5);
-        let dz = self.actor_feet_position.z - (pos.z as f64 + 0.5);
+        let dx = self.player_feet_position.x - (pos.x as f64 + 0.5);
+        let dy = self.player_feet_position.y - (pos.y as f64 + 0.5);
+        let dz = self.player_feet_position.z - (pos.z as f64 + 0.5);
         dx * dx + dy * dy + dz * dz
     }
 }

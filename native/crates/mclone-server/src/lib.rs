@@ -13,6 +13,7 @@ mod light_status;
 mod light_world;
 mod lighting_seed;
 mod persistence;
+mod player;
 mod scheduler;
 #[cfg(test)]
 mod sky_light_bridge;

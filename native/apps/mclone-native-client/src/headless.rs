@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use mclone_client::{ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT};
 use mclone_core::{HitResultType, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
+use mclone_protocol::{ClientCommand, MovePlayerCommand};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
     TexturedSectionUploadReport,
@@ -200,18 +201,24 @@ fn apply_scripted_interaction(
         surface_y as f64 + 3.0,
         target_z as f64 + 0.5,
     );
-    let actor_feet_position =
+    let player_feet_position =
         eye_position.add(Vec3d::new(0.0, -LOCAL_PLAYER_STANDING_EYE_HEIGHT, 0.0));
+    runtime.send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand {
+        position: player_feet_position,
+        y_rot_degrees: 0.0,
+        x_rot_degrees: 90.0,
+        on_ground: false,
+    }))?;
     let hit = interaction.pick_block(&runtime.client, eye_position, Vec3d::new(0.0, -1.0, 0.0));
     if hit.hit_type() != HitResultType::Block {
         bail!("scripted interaction ray missed target column");
     }
     let break_command = interaction
-        .debug_instant_break_command(hit, actor_feet_position)
+        .debug_instant_break_command(hit)
         .context("scripted interaction did not produce break command")?;
     let break_changed = runtime.send_gameplay_command(break_command)?;
     let place_command = interaction
-        .debug_place_block_command(hit, actor_feet_position)
+        .debug_place_block_command(hit)
         .context("scripted interaction did not produce place command")?;
     let place_changed = runtime.send_gameplay_command(place_command)?;
     if !break_changed || !place_changed {

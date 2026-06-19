@@ -352,6 +352,7 @@ impl ChunkApp {
                     .is_some()
                 {
                     sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+                    self.sync_server_player_pose()?;
                     self.update_interest_from_spectator()?;
                 }
             }
@@ -370,6 +371,7 @@ impl ChunkApp {
                     .is_some()
                 {
                     sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+                    self.sync_server_player_pose()?;
                     self.update_interest_from_spectator()?;
                 }
             }
@@ -519,6 +521,9 @@ impl ChunkApp {
             );
         }
         sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+        if let Err(err) = self.sync_server_player_pose() {
+            log::warn!("failed to sync initial player pose to server: {err:#}");
+        }
         log::info!(
             "placed player above loaded surface column ({world_x}, {world_z}) y={} -> feet_y={:.1} eye_y={:.1}",
             surface_y,
@@ -680,7 +685,14 @@ impl ChunkApp {
         }
     }
 
+    fn sync_server_player_pose(&mut self) -> Result<bool> {
+        self.runtime
+            .send_gameplay_command(self.player.move_player_command())
+            .context("failed to sync player pose to server")
+    }
+
     fn handle_world_mouse_pressed(&mut self, button: MouseButton) -> Result<()> {
+        self.sync_server_player_pose()?;
         let pose = self.player.pose();
         let hit = self.interaction.pick_block(
             &self.runtime.client,
@@ -688,12 +700,8 @@ impl ChunkApp {
             pose.view_vector(),
         );
         let command = match button {
-            MouseButton::Left => self
-                .interaction
-                .debug_instant_break_command(hit, pose.position),
-            MouseButton::Right => self
-                .interaction
-                .debug_place_block_command(hit, pose.position),
+            MouseButton::Left => self.interaction.debug_instant_break_command(hit),
+            MouseButton::Right => self.interaction.debug_place_block_command(hit),
             _ => None,
         };
         let Some(command) = command else {

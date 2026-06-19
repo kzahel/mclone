@@ -52,14 +52,9 @@ impl ClientInteractionController {
         client.pick_block(eye_position, view_vector, self.pick_range)
     }
 
-    pub fn debug_instant_break_command(
-        &self,
-        hit: BlockHitResult,
-        actor_feet_position: Vec3d,
-    ) -> Option<ClientCommand> {
+    pub fn debug_instant_break_command(&self, hit: BlockHitResult) -> Option<ClientCommand> {
         (hit.hit_type() == HitResultType::Block).then_some(ClientCommand::PlayerAction(
             PlayerActionCommand {
-                actor_feet_position,
                 pos: hit.block_pos,
                 direction: hit.direction,
                 kind: PlayerActionKind::DebugInstantBreak,
@@ -67,14 +62,9 @@ impl ClientInteractionController {
         ))
     }
 
-    pub fn debug_place_block_command(
-        &self,
-        hit: BlockHitResult,
-        actor_feet_position: Vec3d,
-    ) -> Option<ClientCommand> {
+    pub fn debug_place_block_command(&self, hit: BlockHitResult) -> Option<ClientCommand> {
         (hit.hit_type() == HitResultType::Block).then_some(ClientCommand::UseItemOn(
             UseItemOnCommand {
-                actor_feet_position,
                 hit,
                 action: UseItemOnKind::DebugPlaceBlock {
                     block_state: self.selected_debug_block,
@@ -342,24 +332,14 @@ mod tests {
         let miss = BlockHitResult::miss(Vec3d::ZERO, Direction::North, BlockPos::ZERO);
 
         assert!(matches!(
-            controller.debug_instant_break_command(block_hit, Vec3d::new(1.5, 2.0, 3.5)),
+            controller.debug_instant_break_command(block_hit),
             Some(ClientCommand::PlayerAction(PlayerActionCommand {
                 kind: PlayerActionKind::DebugInstantBreak,
                 ..
             }))
         ));
-        assert!(
-            controller
-                .debug_place_block_command(block_hit, Vec3d::new(1.5, 2.0, 3.5))
-                .is_some()
-        );
-        assert_eq!(
-            controller.debug_instant_break_command(miss, Vec3d::ZERO),
-            None
-        );
-        assert_eq!(
-            controller.debug_place_block_command(miss, Vec3d::ZERO),
-            None
-        );
+        assert!(controller.debug_place_block_command(block_hit).is_some());
+        assert_eq!(controller.debug_instant_break_command(miss), None);
+        assert_eq!(controller.debug_place_block_command(miss), None);
     }
 }

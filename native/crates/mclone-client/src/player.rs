@@ -1,4 +1,5 @@
 use mclone_core::{Aabb, BlockPos, ChunkPos, Vec3d};
+use mclone_protocol::{ClientCommand, MovePlayerCommand};
 
 use crate::{ClientRuntime, block_shapes::block_collision_aabb};
 
@@ -316,6 +317,15 @@ impl LocalPlayerController {
 
     pub fn set_pose(&mut self, pose: LocalPlayerPose) {
         self.pose = pose;
+    }
+
+    pub fn move_player_command(&self) -> ClientCommand {
+        ClientCommand::MovePlayer(MovePlayerCommand {
+            position: self.pose.position,
+            y_rot_degrees: self.pose.y_rot_degrees as f32,
+            x_rot_degrees: self.pose.x_rot_degrees as f32,
+            on_ground: self.on_ground,
+        })
     }
 
     pub fn set_delta_movement(&mut self, delta_movement: Vec3d) {
@@ -939,6 +949,27 @@ mod tests {
         assert_eq!(pose.block_position(), BlockPos::new(17, 68, -1));
         assert_eq!(pose.eye_block_position(), BlockPos::new(17, 70, -1));
         assert_eq!(pose.chunk_pos(), ChunkPos::new(1, -1));
+    }
+
+    #[test]
+    fn controller_builds_java_shaped_move_player_command() {
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(1.25, 63.0, -4.5),
+            y_rot_degrees: -181.5,
+            x_rot_degrees: 45.25,
+            eye_height: LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        });
+
+        assert_eq!(
+            controller.move_player_command(),
+            ClientCommand::MovePlayer(MovePlayerCommand {
+                position: Vec3d::new(1.25, 63.0, -4.5),
+                y_rot_degrees: -181.5,
+                x_rot_degrees: 45.25,
+                on_ground: false,
+            })
+        );
     }
 
     #[test]

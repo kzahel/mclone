@@ -55,10 +55,13 @@ placement rules.
   a full cube, and player collision now uses Java empty collision facts for
   fluids, one-layer snow, plants, large ferns, and glow lichen.
 - 2026-06-19: Added a small server `game_mode` lane for debug creative
-  interactions. Break/place commands now carry a provisional actor feet
-  position, validate Java-shaped reach and max-build-height bounds on the
-  server, and use `BlockPlaceContext`-style clicked-vs-relative replacement
-  before mutating chunks.
+  interactions. Break/place commands validate Java-shaped reach and
+  max-build-height bounds on the server and use `BlockPlaceContext`-style
+  clicked-vs-relative replacement before mutating chunks.
+- 2026-06-19: Added a first Java-shaped movement-sync command and server-owned
+  local player state. Native window/headless paths sync player feet position,
+  yaw, pitch, and `onGround` before interactions; server reach checks no longer
+  trust position carried by block action commands.
 
 ## Current Native State
 
@@ -77,6 +80,8 @@ Native code already has several useful pieces:
     is enabled
   - owns the native-only movement-mode toggle; no-clip remains a debug mode and
     the client gameplay controller owns the actual movement calculation
+  - syncs the local player pose to the server after movement and immediately
+    before mouse interactions
   - left/right mouse buttons request mouse lock first, then send debug
     break/place commands while the world is active and locked
 - `native/apps/mclone-native-client/src/camera.rs`
@@ -115,14 +120,18 @@ Native code already has several useful pieces:
   - provides no-clip movement for debug mode plus the first collision-backed
     walking tick with Java-derived speed, jump, gravity, friction, and drag
     constants
+  - builds a Java-shaped move-player command carrying feet position, rotation,
+    and `onGround`
   - gathers loaded block collision boxes through `block_shapes.rs`; exact
     multi-box and fully registry-backed shapes are still later parity work
 - `native/crates/mclone-protocol/src/lib.rs`
-  - has chunk-view plus player-action/use-item-on client commands
+  - has chunk-view, move-player, player-action, and use-item-on client commands
   - already has `ServerUpdate::SectionBlockUpdates`
-  - player action and use-item-on commands currently carry a provisional actor
-    feet position so the server can apply Java-shaped reach validation before a
-    server-owned player entity/movement state exists
+- `native/crates/mclone-server/src/player.rs`
+  - owns the first server-side local player state: feet position, yaw, pitch,
+    and `onGround`
+  - applies the narrow `ServerboundMovePlayerPacket.PosRot`-style command shape
+    with Java horizontal/vertical clamps and wrapped rotations
 - `native/crates/mclone-server/src/game_mode.rs`
   - owns the first server-side interaction validation lane for debug creative
     gameplay
@@ -152,10 +161,10 @@ Important constraint: the section-delta path from
 is already the permanent runtime mutation publication path. Gameplay should
 reuse it rather than mutating meshes or client snapshots directly.
 
-Temporary protocol constraint: command-carried actor feet position is only for
-this local debug slice. Java validates against server-owned player state; the
-native path should switch to that shape once player movement packets/entities
-exist.
+Movement-sync constraint: the current native move command updates a single
+server-owned local player state but does not yet run authoritative server
+collision, speed checks, teleport acknowledgements, or reconciliation. Those
+remain later movement-authority work.
 
 ## Java 1.17.1 Reference Shape
 
@@ -187,6 +196,7 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/LiquidBlock.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/MultifaceBlock.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/server/level/ServerPlayerGameMode.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/network/protocol/game/ServerboundMovePlayerPacket.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/server/network/ServerGamePacketListenerImpl.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/item/context/UseOnContext.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/item/context/BlockPlaceContext.java`
@@ -234,6 +244,13 @@ Key facts from the reference:
   `startAttack`, `continueAttack`, `startUseItem`, and `pickBlock`.
 - `MultiPlayerGameMode` owns client-side interaction state such as destroy
   progress, destroy delay, pick range, and use-item-on behavior.
+- `ServerboundMovePlayerPacket` has position, rotation, and status-only variants
+  with `hasPos`, `hasRot`, and `onGround` flags. The current native command uses
+  the `PosRot` subset only.
+- `ServerGamePacketListenerImpl.handleMovePlayer` rejects invalid movement
+  values, clamps horizontal coordinates to +/-30,000,000 and vertical
+  coordinates to +/-20,000,000, wraps rotations, and then applies much more
+  authority logic than this slice ports.
 - `ServerPlayerGameMode` validates distance/reach/world bounds and applies
   authoritative block break and item-use-on behavior.
 - `ServerPlayerGameMode.handleBlockBreakAction` rejects block breaks outside
@@ -330,9 +347,8 @@ entire Java survival stack.
    - carry enough context to validate on the server: target block position,
      clicked face for placement, and the requested block state/raw block for the
      debug placement path
-   - until server-owned player state exists, carry actor feet position only as a
-     provisional debug validation input; replace this with server player state
-     when movement synchronization lands
+   - add a first move-player command so server interaction validation can use
+     server-owned player state instead of trusting block action payloads
    - integrated and dedicated server paths should both accept the commands
    - server applies changes with `ChunkScheduler::set_block_at_world`
    - server drains/returns the resulting `SectionBlockUpdates`
@@ -364,8 +380,16 @@ Recommended first shape:
 ```rust
 pub enum ClientCommand {
     SetChunkView(ChunkView),
+    MovePlayer(MovePlayerCommand),
     PlayerAction(PlayerActionCommand),
     UseItemOn(UseItemOnCommand),
+}
+
+pub struct MovePlayerCommand {
+    pub position: Vec3d,
+    pub y_rot_degrees: f32,
+    pub x_rot_degrees: f32,
+    pub on_ground: bool,
 }
 
 pub enum PlayerActionKind {
@@ -376,14 +400,12 @@ pub enum PlayerActionKind {
 }
 
 pub struct PlayerActionCommand {
-    pub actor_feet_position: Vec3d,
     pub pos: BlockPos,
     pub direction: Direction,
     pub kind: PlayerActionKind,
 }
 
 pub struct UseItemOnCommand {
-    pub actor_feet_position: Vec3d,
     pub hit: BlockHitResult,
     pub action: UseItemOnKind,
 }
@@ -460,8 +482,7 @@ First slice:
   face-relative target
 - server rejects unloaded chunks, out-of-height positions, air break no-ops, and
   air/cave-air or same-state placements by returning no mutation
-- server uses Java-shaped reach checks for the debug actor position until
-  server-owned player state exists
+- server uses Java-shaped reach checks against server-owned local player state
 - server uses existing section block delta publication
 - renderer rebuilds through existing dirty section flow
 
@@ -538,7 +559,9 @@ Likely order after the first playable block-interaction pass:
   mouse wheel adjusts no-clip speed. Movement still treats every non-air block
   as a full cube, so foliage/snow/slabs/liquids need shared shape facts before
   this can be called vanilla movement parity.
-- 2026-06-19: Server debug interaction commands now validate actor reach,
+- 2026-06-19: Server debug interaction commands now validate player reach,
   max-build-height, and replacement target selection through a focused
-  `game_mode` module before mutating world storage. The actor position is still
-  carried by the command as a temporary stand-in for server-owned player state.
+  `game_mode` module before mutating world storage.
+- 2026-06-19: Added `MovePlayer` protocol and `mclone-server::player` state so
+  debug interaction validation reads the server-owned local player position.
+  This is still a sync-and-validate slice, not authoritative server movement.

@@ -9,11 +9,12 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
 const CLIENT_COMMAND_PLAYER_ACTION: u8 = 2;
 const CLIENT_COMMAND_USE_ITEM_ON: u8 = 3;
+const CLIENT_COMMAND_MOVE_PLAYER: u8 = 4;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -29,8 +30,17 @@ pub struct ChunkView {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientCommand {
     SetChunkView(ChunkView),
+    MovePlayer(MovePlayerCommand),
     PlayerAction(PlayerActionCommand),
     UseItemOn(UseItemOnCommand),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MovePlayerCommand {
+    pub position: Vec3d,
+    pub y_rot_degrees: f32,
+    pub x_rot_degrees: f32,
+    pub on_ground: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,9 +51,8 @@ pub enum PlayerActionKind {
     DebugInstantBreak,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PlayerActionCommand {
-    pub actor_feet_position: Vec3d,
     pub pos: BlockPos,
     pub direction: Direction,
     pub kind: PlayerActionKind,
@@ -51,7 +60,6 @@ pub struct PlayerActionCommand {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UseItemOnCommand {
-    pub actor_feet_position: Vec3d,
     pub hit: BlockHitResult,
     pub action: UseItemOnKind,
 }
@@ -150,6 +158,10 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
             writer.write_u32(view.render_distance);
             writer.write_u32(view.chunk_tracking_radius);
         }
+        ClientCommand::MovePlayer(command) => {
+            writer.write_u8(CLIENT_COMMAND_MOVE_PLAYER);
+            writer.write_move_player(command);
+        }
         ClientCommand::PlayerAction(command) => {
             writer.write_u8(CLIENT_COMMAND_PLAYER_ACTION);
             writer.write_player_action(command);
@@ -176,6 +188,7 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
                 chunk_tracking_radius,
             })
         }
+        CLIENT_COMMAND_MOVE_PLAYER => ClientCommand::MovePlayer(reader.read_move_player()?),
         CLIENT_COMMAND_PLAYER_ACTION => ClientCommand::PlayerAction(reader.read_player_action()?),
         CLIENT_COMMAND_USE_ITEM_ON => ClientCommand::UseItemOn(reader.read_use_item_on()?),
         _ => return Err(ProtocolCodecError::UnknownClientCommandTag(tag)),
@@ -306,6 +319,10 @@ impl ByteWriter {
         self.bytes.extend_from_slice(&value.to_le_bytes());
     }
 
+    fn write_f32(&mut self, value: f32) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
     fn write_len(&mut self, field: &'static str, len: usize) -> ProtocolCodecResult<()> {
         let len =
             u32::try_from(len).map_err(|_| ProtocolCodecError::LengthOverflow { field, len })?;
@@ -342,8 +359,14 @@ impl ByteWriter {
         self.write_bool(hit.inside);
     }
 
+    fn write_move_player(&mut self, command: &MovePlayerCommand) {
+        self.write_vec3d(command.position);
+        self.write_f32(command.y_rot_degrees);
+        self.write_f32(command.x_rot_degrees);
+        self.write_bool(command.on_ground);
+    }
+
     fn write_player_action(&mut self, command: &PlayerActionCommand) {
-        self.write_vec3d(command.actor_feet_position);
         self.write_block_pos(command.pos);
         self.write_direction(command.direction);
         self.write_u8(match command.kind {
@@ -355,7 +378,6 @@ impl ByteWriter {
     }
 
     fn write_use_item_on(&mut self, command: &UseItemOnCommand) {
-        self.write_vec3d(command.actor_feet_position);
         self.write_block_hit_result(command.hit);
         match command.action {
             UseItemOnKind::DebugPlaceBlock { block_state } => {
@@ -503,6 +525,10 @@ impl<'a> ByteReader<'a> {
         Ok(f64::from_le_bytes(self.read_exact::<8>()?))
     }
 
+    fn read_f32(&mut self) -> ProtocolCodecResult<f32> {
+        Ok(f32::from_le_bytes(self.read_exact::<4>()?))
+    }
+
     fn read_len(&mut self) -> ProtocolCodecResult<usize> {
         Ok(self.read_u32()? as usize)
     }
@@ -547,8 +573,24 @@ impl<'a> ByteReader<'a> {
         })
     }
 
+    fn read_move_player(&mut self) -> ProtocolCodecResult<MovePlayerCommand> {
+        let position = self.read_vec3d()?;
+        let y_rot_degrees = self.read_f32()?;
+        let x_rot_degrees = self.read_f32()?;
+        if !y_rot_degrees.is_finite() || !x_rot_degrees.is_finite() {
+            return Err(ProtocolCodecError::InvalidData(
+                "move player rotation contains non-finite value",
+            ));
+        }
+        Ok(MovePlayerCommand {
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            on_ground: self.read_bool()?,
+        })
+    }
+
     fn read_player_action(&mut self) -> ProtocolCodecResult<PlayerActionCommand> {
-        let actor_feet_position = self.read_vec3d()?;
         let pos = self.read_block_pos()?;
         let direction = self.read_direction()?;
         let kind = match self.read_u8()? {
@@ -559,7 +601,6 @@ impl<'a> ByteReader<'a> {
             kind => return Err(ProtocolCodecError::UnknownPlayerActionKind(kind)),
         };
         Ok(PlayerActionCommand {
-            actor_feet_position,
             pos,
             direction,
             kind,
@@ -567,7 +608,6 @@ impl<'a> ByteReader<'a> {
     }
 
     fn read_use_item_on(&mut self) -> ProtocolCodecResult<UseItemOnCommand> {
-        let actor_feet_position = self.read_vec3d()?;
         let hit = self.read_block_hit_result()?;
         let action = match self.read_u8()? {
             0 => UseItemOnKind::DebugPlaceBlock {
@@ -575,11 +615,7 @@ impl<'a> ByteReader<'a> {
             },
             kind => return Err(ProtocolCodecError::UnknownUseItemOnKind(kind)),
         };
-        Ok(UseItemOnCommand {
-            actor_feet_position,
-            hit,
-            action,
-        })
+        Ok(UseItemOnCommand { hit, action })
     }
 
     fn read_status(&mut self) -> ProtocolCodecResult<ChunkStatus> {
@@ -749,9 +785,22 @@ mod tests {
     }
 
     #[test]
+    fn client_command_codec_round_trips_move_player() {
+        let command = ClientCommand::MovePlayer(MovePlayerCommand {
+            position: Vec3d::new(-1.25, 63.0, 12.5),
+            y_rot_degrees: -181.5,
+            x_rot_degrees: 45.25,
+            on_ground: true,
+        });
+
+        let bytes = encode_client_command(&command).unwrap();
+
+        assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
     fn client_command_codec_round_trips_player_action() {
         let command = ClientCommand::PlayerAction(PlayerActionCommand {
-            actor_feet_position: Vec3d::new(-1.0, 62.0, 12.0),
             pos: BlockPos::new(-1, 64, 12),
             direction: Direction::North,
             kind: PlayerActionKind::DebugInstantBreak,
@@ -765,7 +814,6 @@ mod tests {
     #[test]
     fn client_command_codec_round_trips_use_item_on() {
         let command = ClientCommand::UseItemOn(UseItemOnCommand {
-            actor_feet_position: Vec3d::new(1.25, 62.0, -3.5),
             hit: BlockHitResult::new(
                 Vec3d::new(1.25, 64.0, -3.5),
                 Direction::Up,
