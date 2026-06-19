@@ -15,6 +15,7 @@ use mclone_protocol::{
 use mclone_worldgen::block::RawBlockId;
 
 use crate::game_mode::ServerInteractionContext;
+use crate::placement::DebugBlockItem;
 use crate::player::ServerPlayerState;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
@@ -322,10 +323,15 @@ impl IntegratedServer {
     ) -> Option<BlockPos> {
         let block_id = raw_block_id_from_block_state(block_state)?;
         let context = ServerInteractionContext::debug_creative(self.player.position());
+        if !context.may_use_item_on(command.hit) {
+            return None;
+        }
+        let block_item = DebugBlockItem::new(block_id)?;
         let clicked_block = self.scheduler.block_at_world(command.hit.block_pos)?;
         let relative_pos = command.hit.block_pos.relative(command.hit.direction);
         let relative_block = self.scheduler.block_at_world(relative_pos);
-        context.debug_place_target(command.hit, clicked_block, relative_block, block_id)
+        let placement = block_item.use_on(command.hit, clicked_block, relative_block)?;
+        context.may_place_at(placement.pos).then_some(placement.pos)
     }
 
     fn set_block_debug(&mut self, pos: BlockPos, block_state: BlockStateId) -> bool {
@@ -593,6 +599,28 @@ mod tests {
 
         assert_eq!(server.scheduler().block_at_world(clicked), Some(STONE));
         assert_eq!(server.scheduler().block_at_world(target), Some(STONE));
+        assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn debug_place_command_rejects_air_block_items() {
+        let mut server = IntegratedServer::new(0);
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
+        let clicked = BlockPos::new(8, 80, 8);
+        assert!(server.scheduler_mut().set_block_at_world(clicked, GRASS));
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        let updates = server
+            .try_handle_command(ClientCommand::UseItemOn(UseItemOnCommand {
+                hit: BlockHitResult::new(Vec3d::new(8.5, 81.0, 8.5), Direction::Up, clicked, false),
+                action: UseItemOnKind::DebugPlaceBlock {
+                    block_state: AIR_BLOCK_STATE_ID,
+                },
+            }))
+            .expect("place command");
+
+        assert_eq!(server.scheduler().block_at_world(clicked), Some(GRASS));
         assert!(updates.is_empty());
     }
 

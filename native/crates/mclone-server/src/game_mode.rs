@@ -1,8 +1,4 @@
-use mclone_core::{BlockHitResult, BlockPos, Direction, HitResultType, Vec3d};
-use mclone_worldgen::block::{
-    AIR, CAVE_AIR, DANDELION, DEAD_BUSH, FERN, GLOW_LICHEN, GRASS, LARGE_FERN_LOWER,
-    LARGE_FERN_UPPER, POPPY, RawBlockId, SNOW, has_fluid,
-};
+use mclone_core::{BlockHitResult, BlockPos, HitResultType, Vec3d};
 
 pub(crate) const JAVA_OVERWORLD_MAX_BUILD_HEIGHT: i32 = 256;
 
@@ -40,38 +36,8 @@ impl ServerInteractionContext {
             && self.distance_to_block_center_sqr(hit.block_pos) < JAVA_USE_ITEM_ON_REACH_SQR
     }
 
-    pub(crate) fn debug_place_target(
-        self,
-        hit: BlockHitResult,
-        clicked_block: RawBlockId,
-        relative_block: Option<RawBlockId>,
-        placing_block: RawBlockId,
-    ) -> Option<BlockPos> {
-        if !self.may_use_item_on(hit) {
-            return None;
-        }
-        if matches!(placing_block, AIR | CAVE_AIR) {
-            return None;
-        }
-
-        let replace_clicked =
-            can_replace_for_debug_place(clicked_block, placing_block, hit.direction, true);
-        let target = if replace_clicked {
-            hit.block_pos
-        } else {
-            hit.block_pos.relative(hit.direction)
-        };
-        if target.y >= self.max_build_height {
-            return None;
-        }
-
-        let target_block = if replace_clicked {
-            clicked_block
-        } else {
-            relative_block?
-        };
-        can_replace_for_debug_place(target_block, placing_block, hit.direction, replace_clicked)
-            .then_some(target)
+    pub(crate) fn may_place_at(self, pos: BlockPos) -> bool {
+        pos.y < self.max_build_height
     }
 
     fn block_break_distance_sqr(self, pos: BlockPos) -> f64 {
@@ -89,28 +55,10 @@ impl ServerInteractionContext {
     }
 }
 
-fn can_replace_for_debug_place(
-    existing: RawBlockId,
-    placing: RawBlockId,
-    clicked_face: Direction,
-    replacing_clicked: bool,
-) -> bool {
-    match existing {
-        SNOW if placing == SNOW => !replacing_clicked || clicked_face == Direction::Up,
-        _ if existing == placing => false,
-        AIR | CAVE_AIR => true,
-        SNOW => true,
-        GRASS | FERN | DANDELION | POPPY | DEAD_BUSH | LARGE_FERN_LOWER | LARGE_FERN_UPPER
-        | GLOW_LICHEN => true,
-        id if has_fluid(id) => true,
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_worldgen::block::{DIRT, STONE, WATER};
+    use mclone_core::Direction;
 
     fn block_hit(pos: BlockPos, direction: Direction) -> BlockHitResult {
         BlockHitResult::new(
@@ -143,59 +91,10 @@ mod tests {
     }
 
     #[test]
-    fn block_place_context_replaces_replaceable_clicked_blocks() {
+    fn place_target_validation_uses_max_build_height() {
         let context = ServerInteractionContext::debug_creative(Vec3d::new(0.5, 80.0, 0.5));
-        let clicked = BlockPos::new(0, 80, 0);
 
-        assert_eq!(
-            context.debug_place_target(block_hit(clicked, Direction::Up), GRASS, Some(AIR), DIRT),
-            Some(clicked)
-        );
-        assert_eq!(
-            context.debug_place_target(block_hit(clicked, Direction::Up), WATER, Some(AIR), DIRT),
-            Some(clicked)
-        );
-        assert_eq!(
-            context.debug_place_target(block_hit(clicked, Direction::North), SNOW, Some(AIR), DIRT),
-            Some(clicked)
-        );
-        assert_eq!(
-            context.debug_place_target(block_hit(clicked, Direction::Up), SNOW, Some(AIR), SNOW),
-            Some(clicked)
-        );
-        assert_eq!(
-            context.debug_place_target(block_hit(clicked, Direction::North), SNOW, Some(AIR), SNOW),
-            Some(BlockPos::new(0, 80, -1))
-        );
-        assert_eq!(
-            context.debug_place_target(block_hit(clicked, Direction::Up), GRASS, Some(AIR), AIR),
-            None
-        );
-    }
-
-    #[test]
-    fn block_place_context_uses_relative_pos_for_solid_clicked_blocks() {
-        let context = ServerInteractionContext::debug_creative(Vec3d::new(0.5, 80.0, 0.5));
-        let clicked = BlockPos::new(0, 80, 0);
-
-        assert_eq!(
-            context.debug_place_target(block_hit(clicked, Direction::Up), STONE, Some(AIR), DIRT),
-            Some(BlockPos::new(0, 81, 0))
-        );
-        assert_eq!(
-            context.debug_place_target(block_hit(clicked, Direction::Up), STONE, Some(STONE), DIRT),
-            None
-        );
-    }
-
-    #[test]
-    fn block_place_context_rejects_too_high_relative_targets() {
-        let context = ServerInteractionContext::debug_creative(Vec3d::new(0.5, 254.0, 0.5));
-        let clicked = BlockPos::new(0, JAVA_OVERWORLD_MAX_BUILD_HEIGHT - 1, 0);
-
-        assert_eq!(
-            context.debug_place_target(block_hit(clicked, Direction::Up), STONE, Some(AIR), DIRT),
-            None
-        );
+        assert!(context.may_place_at(BlockPos::new(0, JAVA_OVERWORLD_MAX_BUILD_HEIGHT - 1, 0)));
+        assert!(!context.may_place_at(BlockPos::new(0, JAVA_OVERWORLD_MAX_BUILD_HEIGHT, 0)));
     }
 }

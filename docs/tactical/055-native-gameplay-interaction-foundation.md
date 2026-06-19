@@ -62,6 +62,11 @@ placement rules.
   local player state. Native window/headless paths sync player feet position,
   yaw, pitch, and `onGround` before interactions; server reach checks no longer
   trust position carried by block action commands.
+- 2026-06-19: Added a server-side `UseOnContext`/`BlockPlaceContext` placement
+  lane for debug block items. Clicked-vs-relative target choice and the current
+  terrain-MVP replaceability facts now live outside `game_mode`, while debug
+  placement still uses the selected block as the held item source until
+  inventory exists.
 
 ## Current Native State
 
@@ -137,13 +142,19 @@ Native code already has several useful pieces:
     gameplay
   - mirrors Java's break/use reach and overworld max-build-height checks for
     the terrain-MVP path
-  - centralizes `BlockPlaceContext`-style placement target selection and the
-    current limited replaceable-block facts for air, fluids, one-layer snow,
-    simple plants, large ferns, and glow lichen
+- `native/crates/mclone-server/src/placement.rs`
+  - owns the first item-shaped placement lane for debug creative block items
+  - mirrors Java `UseOnContext`, `BlockPlaceContext`, and the early
+    `BlockItem.place` decision flow for clicked-vs-relative placement
+  - carries the current limited replaceable-block facts for air, fluids,
+    one-layer snow, simple plants, large ferns, and glow lichen
+  - rejects air/cave-air debug block items before placement, matching the
+    native selected-block source until inventory and item stacks exist
 - `native/crates/mclone-server/src/integrated.rs`
   - routes client commands into `IntegratedServer`
   - handles chunk-view plus debug break/place commands through the server
-    game-mode validation lane before using scheduler-owned mutation APIs
+    game-mode validation and placement lanes before using scheduler-owned
+    mutation APIs
 - `native/crates/mclone-server/src/scheduler.rs`
   - already has `block_at_world` and `set_block_at_world`
   - `set_block_at_world` mutates live chunk storage, patches the published
@@ -265,6 +276,15 @@ Key facts from the reference:
   the target can be placed and is unobstructed before mutating the level.
   Mclone's first placement slice can use a debug creative block, but the target
   architecture should keep that later item path obvious.
+- `UseOnContext` carries the hit result plus player, hand, level, and item
+  stack accessors. Native currently keeps only the hit result and debug block
+  item because player/hand/level/inventory are not real yet.
+- `BlockBehaviour.canBeReplaced` defaults to material replaceability and avoids
+  replacing a block with the same item. Native mirrors that shape with a narrow
+  terrain-MVP replaceability table until the real block/item registry exists.
+- `SnowLayerBlock.canBeReplaced` is special: a snow item can target the clicked
+  snow block only from the up face; from side faces it places in the relative
+  block unless the relative block is replaceable.
 
 ## Target Native Shape
 
@@ -301,8 +321,8 @@ Recommended module ownership:
 - `mclone-server`
   - authoritative command validation and mutation through scheduler-owned world
     storage
-  - early debug creative break/place methods on `IntegratedServer` or a small
-    server game-mode module
+  - early debug creative break/place methods split between a small server
+    game-mode validation module and an item-shaped placement module
 - `mclone-native-client`
   - `winit` input adapter, cursor lock, UI gating, and temporary HUD/debug
     display of the current hit result
@@ -478,8 +498,8 @@ First slice:
 
 - left click: debug instant break of the picked block to air
 - right click: debug creative place of a selected terrain-MVP block using
-  Java-shaped clicked-block replacement first, otherwise the picked
-  face-relative target
+  Java-shaped `UseOnContext`/`BlockPlaceContext` clicked-block replacement
+  first, otherwise the picked face-relative target
 - server rejects unloaded chunks, out-of-height positions, air break no-ops, and
   air/cave-air or same-state placements by returning no mutation
 - server uses Java-shaped reach checks against server-owned local player state
@@ -565,3 +585,7 @@ Likely order after the first playable block-interaction pass:
 - 2026-06-19: Added `MovePlayer` protocol and `mclone-server::player` state so
   debug interaction validation reads the server-owned local player position.
   This is still a sync-and-validate slice, not authoritative server movement.
+- 2026-06-19: Split debug block placement into `mclone-server::placement` with
+  native `UseOnContext`, `BlockPlaceContext`, and `DebugBlockItem` types. This
+  keeps placement item-shaped while inventory, block survival, unobstructed
+  entity checks, and full block-specific placement state remain future work.

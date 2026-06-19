@@ -13,6 +13,7 @@ mod light_status;
 mod light_world;
 mod lighting_seed;
 mod persistence;
+mod placement;
 mod player;
 mod scheduler;
 #[cfg(test)]
