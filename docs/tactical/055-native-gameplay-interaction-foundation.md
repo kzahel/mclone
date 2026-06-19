@@ -39,11 +39,21 @@ placement rules.
   `yRot`, `xRot`, eye height, eye position, and view-vector semantics. The
   native window app now syncs its render camera from that pose for movement,
   look, and block picking.
+- 2026-06-19: Added shared `Aabb` primitives and a client-side local player
+  collision clipping lane. `LocalPlayerPose` now exposes the Java standing
+  player bounding box, and `LocalPlayerController::move_colliding` resolves
+  movement against loaded full-cube block snapshots with Java-style Y then X/Z
+  clipping order while tracking horizontal collision, vertical collision, and
+  `on_ground`.
 
 ## Current Native State
 
 Native code already has several useful pieces:
 
+- `native/crates/mclone-core/src/pos.rs`
+  - owns Java-shaped block position, direction, hit-result, vector, and AABB
+    primitives that are independent of renderer, server, assets, and platform
+    code
 - `native/apps/mclone-native-client/src/app.rs`
   - owns `winit` window/input events, cursor lock, UI gating, redraw cadence,
     runtime polling, and render upload
@@ -70,6 +80,15 @@ Native code already has several useful pieces:
   - applies section block deltas to loaded snapshots and ignores unknown chunks
   - owns the first client interaction, local player input, and local player pose
     controller modules
+  - exposes a loaded-snapshot block lookup used by raycast and the first
+    collision clipper; unloaded chunks are currently treated as empty for local
+    collision
+- `native/crates/mclone-client/src/player.rs`
+  - mirrors Java `Input` impulses, local player `position`/`yRot`/`xRot`, eye
+    position, and standing dimensions
+  - keeps no-clip movement as the currently wired desktop debug movement mode
+  - provides the first collision resolver against full-cube block AABBs for
+    future gravity/walk physics wiring
 - `native/crates/mclone-protocol/src/lib.rs`
   - has chunk-view plus player-action/use-item-on client commands
   - already has `ServerUpdate::SectionBlockUpdates`
@@ -127,6 +146,9 @@ Key facts from the reference:
 - `Entity.move`, `LivingEntity.travel`, and `Player.travel` are the real
   collision/friction/gravity movement stack. A basic creative/no-clip first
   slice should not pretend to be this full stack.
+- `Entity.move` resolves requested movement by clipping against collision shapes
+  on Y first, then resolving X/Z in the order selected by the relative
+  horizontal movement magnitudes.
 - `GameRenderer.pick` computes `Minecraft.hitResult` from the camera entity.
   It block-picks via `Entity.pick` and then optionally entity-picks closer
   targets.
@@ -332,12 +354,14 @@ First slice:
   so future movement code consumes input facts rather than `winit` keys
 - keep movement and camera position as the player/camera state feeding pick
   origin and chunk interest
-- do not attempt full collision-backed survival movement yet
+- add shared AABB and loaded-snapshot full-cube collision clipping, but do not
+  wire it as the default desktop movement mode yet
 
 Later parity:
 
-- `Entity` AABB, pose, eye height, on-ground, velocity, and collision flags
-- `Entity.move` collision resolution against block collision shapes
+- server/client entity ownership for AABB, pose, eye height, velocity, and
+  collision flags
+- `Entity.move` collision resolution against block-specific collision shapes
 - `LivingEntity.travel` gravity, friction, fluids, ladders, jump, and sprint
 - `Player.travel` creative flying, swimming adjustments, stats, and abilities
 - server-authoritative player movement and reconciliation
@@ -374,7 +398,8 @@ Required tests for the first slice:
   including negative coordinates and starting inside a block
 - `mclone-protocol`: roundtrip for new action commands
 - `mclone-client`: raycast against loaded snapshots, miss behavior, and ignored
-  unloaded chunks
+  unloaded chunks; local player input/pose semantics; full-cube collision wall,
+  landing, sliding, and unloaded-space behavior
 - `mclone-server`: break/place commands mutate live chunks through
   `set_block_at_world` and emit section deltas
 - `mclone-native-client`: scripted interaction dirtying render sections
@@ -406,11 +431,12 @@ must show the broken/placed block result, not only a nonblank world.
 Likely order after the first playable block-interaction pass:
 
 1. Crosshair block outline and hit-result debug/HUD plumbing.
-2. Held-dig destroy progress with `StartDestroyBlock`, `StopDestroyBlock`, and
+2. Wire collision-backed creative walking with gravity/jump while preserving a
+   no-clip debug toggle.
+3. Held-dig destroy progress with `StartDestroyBlock`, `StopDestroyBlock`, and
    `AbortDestroyBlock`.
-3. Basic inventory/selected hotbar block source, replacing debug placement.
-4. Non-cubic outline/collision shape facts shared by raycast and movement.
-5. Collision-backed creative/survival movement using player AABB.
+4. Basic inventory/selected hotbar block source, replacing debug placement.
+5. Non-cubic outline/collision shape facts shared by raycast and movement.
 6. Dedicated streaming transport upgrade if request/response commands become a
    visible interaction bottleneck.
 7. Entity picking once entities exist.
@@ -419,3 +445,8 @@ Likely order after the first playable block-interaction pass:
 
 - Created: parent tactical grounded in current native client/server/protocol
   state and Java 1.17.1 interaction/movement references.
+- 2026-06-19: Current code has debug break/place and Java-shaped local
+  input/pose wired into native desktop no-clip movement. Collision clipping now
+  exists as a tested client primitive over loaded full-cube block snapshots; the
+  next movement slice should integrate gravity/jump/walk controls and decide
+  how no-clip is toggled.

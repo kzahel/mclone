@@ -14,7 +14,7 @@ pub use chunk::{
     chunk_section_index, local_block_coord, local_section_block_coord,
 };
 pub use pos::{
-    BlockHitResult, BlockPos, Direction, HitResultType, Vec3d, block_pos_to_chunk_coord,
+    Aabb, BlockHitResult, BlockPos, Direction, HitResultType, Vec3d, block_pos_to_chunk_coord,
 };
 
 pub const TARGET_MINECRAFT_VERSION: &str = "1.17.1";

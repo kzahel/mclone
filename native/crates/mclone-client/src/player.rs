@@ -1,9 +1,14 @@
-use mclone_core::{BlockPos, ChunkPos, Vec3d};
+use mclone_core::{AIR_BLOCK_STATE_ID, Aabb, BlockPos, ChunkPos, Vec3d};
+
+use crate::ClientRuntime;
 
 pub const NO_CLIP_BOOST_MULTIPLIER: f64 = 3.0;
 pub const MOVING_SLOW_FACTOR: f32 = 0.3;
 pub const LOCAL_PLAYER_STANDING_EYE_HEIGHT: f64 = 1.62;
+pub const LOCAL_PLAYER_STANDING_WIDTH: f64 = 0.6;
+pub const LOCAL_PLAYER_STANDING_HEIGHT: f64 = 1.8;
 pub const LOCAL_PLAYER_X_ROT_LIMIT_DEGREES: f64 = 90.0;
+const COLLISION_EPSILON: f64 = 1.0e-7;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlayerInputKey {
@@ -206,6 +211,17 @@ impl LocalPlayerPose {
         )
     }
 
+    pub fn bounding_box(self) -> Aabb {
+        Aabb::new(
+            self.position.x - LOCAL_PLAYER_STANDING_WIDTH / 2.0,
+            self.position.y,
+            self.position.z - LOCAL_PLAYER_STANDING_WIDTH / 2.0,
+            self.position.x + LOCAL_PLAYER_STANDING_WIDTH / 2.0,
+            self.position.y + LOCAL_PLAYER_STANDING_HEIGHT,
+            self.position.z + LOCAL_PLAYER_STANDING_WIDTH / 2.0,
+        )
+    }
+
     pub fn block_position(self) -> BlockPos {
         BlockPos::containing(self.position)
     }
@@ -241,6 +257,9 @@ pub struct LocalPlayerController {
     pose: LocalPlayerPose,
     keys: PlayerInputKeys,
     input: PlayerInput,
+    horizontal_collision: bool,
+    vertical_collision: bool,
+    on_ground: bool,
 }
 
 impl LocalPlayerController {
@@ -258,6 +277,18 @@ impl LocalPlayerController {
 
     pub const fn pose(&self) -> LocalPlayerPose {
         self.pose
+    }
+
+    pub const fn horizontal_collision(&self) -> bool {
+        self.horizontal_collision
+    }
+
+    pub const fn vertical_collision(&self) -> bool {
+        self.vertical_collision
+    }
+
+    pub const fn on_ground(&self) -> bool {
+        self.on_ground
     }
 
     pub fn set_pose(&mut self, pose: LocalPlayerPose) {
@@ -296,7 +327,190 @@ impl LocalPlayerController {
         };
         let displacement = no_clip_displacement(input, step)?;
         self.pose.move_by(displacement);
+        self.horizontal_collision = false;
+        self.vertical_collision = false;
+        self.on_ground = false;
         Some(displacement)
+    }
+
+    pub fn move_colliding(
+        &mut self,
+        client: &ClientRuntime,
+        requested: Vec3d,
+    ) -> CollisionMovementResult {
+        let traveled = collide_movement(client, self.pose.bounding_box(), requested);
+        if traveled.length_sqr() > COLLISION_EPSILON * COLLISION_EPSILON {
+            self.pose.move_by(traveled);
+        }
+
+        self.horizontal_collision =
+            !nearly_equal(requested.x, traveled.x) || !nearly_equal(requested.z, traveled.z);
+        self.vertical_collision = !nearly_equal(requested.y, traveled.y);
+        self.on_ground = self.vertical_collision && requested.y < 0.0;
+
+        CollisionMovementResult {
+            requested,
+            traveled,
+            horizontal_collision: self.horizontal_collision,
+            vertical_collision: self.vertical_collision,
+            on_ground: self.on_ground,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CollisionMovementResult {
+    pub requested: Vec3d,
+    pub traveled: Vec3d,
+    pub horizontal_collision: bool,
+    pub vertical_collision: bool,
+    pub on_ground: bool,
+}
+
+pub fn collide_movement(client: &ClientRuntime, bounding_box: Aabb, movement: Vec3d) -> Vec3d {
+    if !bounding_box.is_finite() || !movement.is_finite() || movement.length_sqr() == 0.0 {
+        return Vec3d::ZERO;
+    }
+
+    let solid_blocks = solid_block_aabbs_in(client, bounding_box.expand_towards(movement));
+    collide_with_aabbs(bounding_box, movement, &solid_blocks)
+}
+
+fn collide_with_aabbs(mut bounding_box: Aabb, movement: Vec3d, solids: &[Aabb]) -> Vec3d {
+    let mut x = movement.x;
+    let mut y = movement.y;
+    let mut z = movement.z;
+
+    if y != 0.0 {
+        y = clip_axis(Axis::Y, bounding_box, solids, y);
+        if y != 0.0 {
+            bounding_box = bounding_box.move_by(Vec3d::new(0.0, y, 0.0));
+        }
+    }
+
+    let z_first = x.abs() < z.abs();
+    if z_first && z != 0.0 {
+        z = clip_axis(Axis::Z, bounding_box, solids, z);
+        if z != 0.0 {
+            bounding_box = bounding_box.move_by(Vec3d::new(0.0, 0.0, z));
+        }
+    }
+
+    if x != 0.0 {
+        x = clip_axis(Axis::X, bounding_box, solids, x);
+        if !z_first && x != 0.0 {
+            bounding_box = bounding_box.move_by(Vec3d::new(x, 0.0, 0.0));
+        }
+    }
+
+    if !z_first && z != 0.0 {
+        z = clip_axis(Axis::Z, bounding_box, solids, z);
+    }
+
+    Vec3d::new(x, y, z)
+}
+
+fn solid_block_aabbs_in(client: &ClientRuntime, area: Aabb) -> Vec<Aabb> {
+    if !area.is_finite() {
+        return Vec::new();
+    }
+
+    let min_x = area.min_x.floor() as i32;
+    let min_y = area.min_y.floor() as i32;
+    let min_z = area.min_z.floor() as i32;
+    let max_x = area.max_x.floor() as i32;
+    let max_y = area.max_y.floor() as i32;
+    let max_z = area.max_z.floor() as i32;
+    let mut solids = Vec::new();
+    for y in min_y..=max_y {
+        for z in min_z..=max_z {
+            for x in min_x..=max_x {
+                let pos = BlockPos::new(x, y, z);
+                let Some(block_state) = client.block_state_at_block_pos(pos) else {
+                    continue;
+                };
+                if block_state == AIR_BLOCK_STATE_ID {
+                    continue;
+                }
+                let block_box = Aabb::unit_block(pos);
+                if block_box.intersects(area) {
+                    solids.push(block_box);
+                }
+            }
+        }
+    }
+    solids
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+fn clip_axis(axis: Axis, bounding_box: Aabb, solids: &[Aabb], mut delta: f64) -> f64 {
+    if delta.abs() < COLLISION_EPSILON {
+        return 0.0;
+    }
+
+    for solid in solids {
+        if !overlaps_other_axes(axis, bounding_box, *solid) {
+            continue;
+        }
+        if delta > 0.0 {
+            let distance = min_axis(axis, *solid) - max_axis(axis, bounding_box);
+            if distance >= -COLLISION_EPSILON && distance < delta {
+                delta = distance.max(0.0);
+            }
+        } else {
+            let distance = max_axis(axis, *solid) - min_axis(axis, bounding_box);
+            if distance <= COLLISION_EPSILON && distance > delta {
+                delta = distance.min(0.0);
+            }
+        }
+    }
+    delta
+}
+
+fn overlaps_other_axes(axis: Axis, a: Aabb, b: Aabb) -> bool {
+    match axis {
+        Axis::X => {
+            ranges_overlap(a.min_y, a.max_y, b.min_y, b.max_y)
+                && ranges_overlap(a.min_z, a.max_z, b.min_z, b.max_z)
+        }
+        Axis::Y => {
+            ranges_overlap(a.min_x, a.max_x, b.min_x, b.max_x)
+                && ranges_overlap(a.min_z, a.max_z, b.min_z, b.max_z)
+        }
+        Axis::Z => {
+            ranges_overlap(a.min_x, a.max_x, b.min_x, b.max_x)
+                && ranges_overlap(a.min_y, a.max_y, b.min_y, b.max_y)
+        }
+    }
+}
+
+fn ranges_overlap(a_min: f64, a_max: f64, b_min: f64, b_max: f64) -> bool {
+    a_min < b_max && a_max > b_min
+}
+
+fn nearly_equal(a: f64, b: f64) -> bool {
+    (a - b).abs() < COLLISION_EPSILON
+}
+
+fn min_axis(axis: Axis, aabb: Aabb) -> f64 {
+    match axis {
+        Axis::X => aabb.min_x,
+        Axis::Y => aabb.min_y,
+        Axis::Z => aabb.min_z,
+    }
+}
+
+fn max_axis(axis: Axis, aabb: Aabb) -> f64 {
+    match axis {
+        Axis::X => aabb.max_x,
+        Axis::Y => aabb.max_y,
+        Axis::Z => aabb.max_z,
     }
 }
 
@@ -386,6 +600,39 @@ fn normalize_or_zero(value: Vec3d) -> Vec3d {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_core::{
+        AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkSnapshot,
+        ChunkStatus, SECTION_HEIGHT, chunk_section_index,
+    };
+    use mclone_protocol::ServerUpdate;
+
+    fn assert_approx_eq(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1.0e-9,
+            "expected {actual} to be approximately {expected}"
+        );
+    }
+
+    fn client_with_blocks(blocks: &[(BlockPos, BlockStateId)]) -> ClientRuntime {
+        let mut section_blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        for (pos, state) in blocks {
+            assert_eq!(pos.chunk_pos(), ChunkPos::new(0, 0));
+            assert!((0..SECTION_HEIGHT).contains(&pos.y));
+            let index = chunk_section_index(pos.x, pos.y, pos.z);
+            section_blocks[index] = *state;
+        }
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Full,
+            ChunkRevision(1),
+            0,
+            SECTION_HEIGHT,
+            &section_blocks,
+        );
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(snapshot));
+        client
+    }
 
     #[test]
     fn input_tick_matches_java_keyboard_impulses() {
@@ -544,6 +791,97 @@ mod tests {
 
         assert_eq!(pose.y_rot_degrees, -45.0);
         assert_eq!(pose.x_rot_degrees, LOCAL_PLAYER_X_ROT_LIMIT_DEGREES);
+    }
+
+    #[test]
+    fn local_player_pose_bounding_box_uses_java_standing_dimensions() {
+        let pose = LocalPlayerPose {
+            position: Vec3d::new(0.5, 2.0, 0.5),
+            ..Default::default()
+        };
+
+        assert_eq!(pose.bounding_box(), Aabb::new(0.2, 2.0, 0.2, 0.8, 3.8, 0.8));
+    }
+
+    #[test]
+    fn colliding_movement_stops_at_full_block_wall() {
+        let client = client_with_blocks(&[(BlockPos::new(1, 0, 0), BlockStateId(7))]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 0.0, 0.5),
+            ..Default::default()
+        });
+
+        let result = controller.move_colliding(&client, Vec3d::new(2.0, 0.0, 0.0));
+
+        assert_approx_eq(result.traveled.x, 0.2);
+        assert_approx_eq(result.traveled.y, 0.0);
+        assert_approx_eq(result.traveled.z, 0.0);
+        assert!(result.horizontal_collision);
+        assert!(!result.vertical_collision);
+        assert!(!result.on_ground);
+        assert!(controller.horizontal_collision());
+        assert!(!controller.vertical_collision());
+        assert!(!controller.on_ground());
+        assert_approx_eq(controller.pose().position.x, 0.7);
+    }
+
+    #[test]
+    fn colliding_movement_lands_on_full_block() {
+        let client = client_with_blocks(&[(BlockPos::new(0, 0, 0), BlockStateId(7))]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 2.0, 0.5),
+            ..Default::default()
+        });
+
+        let result = controller.move_colliding(&client, Vec3d::new(0.0, -3.0, 0.0));
+
+        assert_approx_eq(result.traveled.x, 0.0);
+        assert_approx_eq(result.traveled.y, -1.0);
+        assert_approx_eq(result.traveled.z, 0.0);
+        assert!(!result.horizontal_collision);
+        assert!(result.vertical_collision);
+        assert!(result.on_ground);
+        assert!(controller.on_ground());
+        assert_approx_eq(controller.pose().position.y, 1.0);
+    }
+
+    #[test]
+    fn colliding_movement_slides_along_wall() {
+        let client = client_with_blocks(&[(BlockPos::new(1, 0, 0), BlockStateId(7))]);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 0.0, 0.5),
+            ..Default::default()
+        });
+
+        let result = controller.move_colliding(&client, Vec3d::new(2.0, 0.0, 1.0));
+
+        assert_approx_eq(result.traveled.x, 0.2);
+        assert_approx_eq(result.traveled.y, 0.0);
+        assert_approx_eq(result.traveled.z, 1.0);
+        assert!(result.horizontal_collision);
+        assert!(!result.vertical_collision);
+        assert_eq!(controller.pose().position, Vec3d::new(0.7, 0.0, 1.5));
+    }
+
+    #[test]
+    fn colliding_movement_ignores_air_and_unloaded_blocks() {
+        let client = ClientRuntime::local_integrated();
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(0.5, 0.0, 0.5),
+            ..Default::default()
+        });
+
+        let result = controller.move_colliding(&client, Vec3d::new(2.0, -1.0, 1.0));
+
+        assert_eq!(result.traveled, Vec3d::new(2.0, -1.0, 1.0));
+        assert!(!result.horizontal_collision);
+        assert!(!result.vertical_collision);
+        assert!(!result.on_ground);
+        assert_eq!(controller.pose().position, Vec3d::new(2.5, -1.0, 1.5));
     }
 
     #[test]

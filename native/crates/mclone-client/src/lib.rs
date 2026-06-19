@@ -12,9 +12,10 @@ pub use interaction::{
     CREATIVE_PICK_RANGE, ClientInteractionController, DEFAULT_DEBUG_PLACE_BLOCK,
 };
 pub use player::{
-    LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_X_ROT_LIMIT_DEGREES, LocalPlayerController,
+    CollisionMovementResult, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_STANDING_HEIGHT,
+    LOCAL_PLAYER_STANDING_WIDTH, LOCAL_PLAYER_X_ROT_LIMIT_DEGREES, LocalPlayerController,
     LocalPlayerPose, MOVING_SLOW_FACTOR, NO_CLIP_BOOST_MULTIPLIER, NoClipMovementStep, PlayerInput,
-    PlayerInputKey, PlayerInputKeys, no_clip_displacement, view_vector,
+    PlayerInputKey, PlayerInputKeys, collide_movement, no_clip_displacement, view_vector,
     view_vector_from_rot_degrees,
 };
 

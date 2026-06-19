@@ -154,6 +154,115 @@ impl Vec3d {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Aabb {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub min_z: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+    pub max_z: f64,
+}
+
+impl Aabb {
+    pub fn new(min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: f64) -> Self {
+        Self {
+            min_x: min_x.min(max_x),
+            min_y: min_y.min(max_y),
+            min_z: min_z.min(max_z),
+            max_x: min_x.max(max_x),
+            max_y: min_y.max(max_y),
+            max_z: min_z.max(max_z),
+        }
+    }
+
+    pub fn unit_block(pos: BlockPos) -> Self {
+        Self::new(
+            pos.x as f64,
+            pos.y as f64,
+            pos.z as f64,
+            pos.x as f64 + 1.0,
+            pos.y as f64 + 1.0,
+            pos.z as f64 + 1.0,
+        )
+    }
+
+    pub fn of_size(center: Vec3d, width: f64, height: f64, depth: f64) -> Self {
+        Self::new(
+            center.x - width / 2.0,
+            center.y - height / 2.0,
+            center.z - depth / 2.0,
+            center.x + width / 2.0,
+            center.y + height / 2.0,
+            center.z + depth / 2.0,
+        )
+    }
+
+    pub fn move_by(self, delta: Vec3d) -> Self {
+        Self::new(
+            self.min_x + delta.x,
+            self.min_y + delta.y,
+            self.min_z + delta.z,
+            self.max_x + delta.x,
+            self.max_y + delta.y,
+            self.max_z + delta.z,
+        )
+    }
+
+    pub fn expand_towards(self, delta: Vec3d) -> Self {
+        Self::new(
+            if delta.x < 0.0 {
+                self.min_x + delta.x
+            } else {
+                self.min_x
+            },
+            if delta.y < 0.0 {
+                self.min_y + delta.y
+            } else {
+                self.min_y
+            },
+            if delta.z < 0.0 {
+                self.min_z + delta.z
+            } else {
+                self.min_z
+            },
+            if delta.x > 0.0 {
+                self.max_x + delta.x
+            } else {
+                self.max_x
+            },
+            if delta.y > 0.0 {
+                self.max_y + delta.y
+            } else {
+                self.max_y
+            },
+            if delta.z > 0.0 {
+                self.max_z + delta.z
+            } else {
+                self.max_z
+            },
+        )
+    }
+
+    pub fn intersects(self, other: Self) -> bool {
+        self.min_x < other.max_x
+            && self.max_x > other.min_x
+            && self.min_y < other.max_y
+            && self.max_y > other.min_y
+            && self.min_z < other.max_z
+            && self.max_z > other.min_z
+    }
+
+    pub fn is_finite(self) -> bool {
+        self.min_x.is_finite()
+            && self.min_y.is_finite()
+            && self.min_z.is_finite()
+            && self.max_x.is_finite()
+            && self.max_y.is_finite()
+            && self.max_z.is_finite()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HitResultType {
     Miss,
@@ -247,5 +356,26 @@ mod tests {
         assert_eq!(Direction::nearest(0.2, 0.1, 0.7), Direction::South);
         assert_eq!(Direction::nearest(-0.7, 0.1, 0.2), Direction::West);
         assert_eq!(Direction::nearest(0.7, 0.1, 0.2), Direction::East);
+    }
+
+    #[test]
+    fn aabb_normalizes_bounds_and_uses_strict_intersection() {
+        let a = Aabb::new(1.0, 2.0, 3.0, -1.0, -2.0, -3.0);
+        assert_eq!(a.min_x, -1.0);
+        assert_eq!(a.max_x, 1.0);
+
+        let touching = Aabb::new(1.0, -2.0, -3.0, 2.0, 2.0, 3.0);
+        assert!(!a.intersects(touching));
+
+        let overlapping = Aabb::new(0.999, -2.0, -3.0, 2.0, 2.0, 3.0);
+        assert!(a.intersects(overlapping));
+    }
+
+    #[test]
+    fn aabb_expand_towards_matches_signed_java_behavior() {
+        let aabb =
+            Aabb::unit_block(BlockPos::new(1, 2, 3)).expand_towards(Vec3d::new(-2.0, 0.5, 4.0));
+
+        assert_eq!(aabb, Aabb::new(-1.0, 2.0, 3.0, 2.0, 3.5, 8.0));
     }
 }
