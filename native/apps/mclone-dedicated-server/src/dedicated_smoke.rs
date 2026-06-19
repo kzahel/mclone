@@ -6,13 +6,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockPos, ChunkPos, ChunkSnapshot, Direction, SECTION_HEIGHT, Vec3d,
-    block_to_section_coord, chunk_section_index, local_block_coord, local_section_block_coord,
+    AIR_BLOCK_STATE_ID, BlockHitResult, BlockPos, BlockStateId, ChunkPos, ChunkSnapshot, Direction,
+    SECTION_HEIGHT, Vec3d, block_to_section_coord, chunk_section_index, local_block_coord,
+    local_section_block_coord,
 };
 use mclone_net::NativeClientSession;
 use mclone_protocol::{
-    AcceptTeleportCommand, ChunkView, ClientCommand, MovePlayerCommand, PlayerActionCommand,
-    PlayerActionKind, ServerUpdate, SetCarriedItemCommand,
+    AcceptTeleportCommand, ChunkView, ClientCommand, InteractionHand, MovePlayerCommand,
+    PlayerActionCommand, PlayerActionKind, ServerUpdate, SetCarriedItemCommand, UseItemOnCommand,
 };
 use mclone_server::{IntegratedServer, PlayerChunkTrackingDiagnostics};
 
@@ -22,6 +23,7 @@ use crate::session::DedicatedSession;
 const CLIENT_COUNT: usize = 2;
 const EVENT_TIMEOUT: Duration = Duration::from_secs(30);
 const CLIENT_REPORT_TIMEOUT: Duration = Duration::from_secs(30);
+const DIRT_BLOCK_STATE_ID: BlockStateId = BlockStateId(5);
 
 #[derive(Debug)]
 enum SmokeClientControl {
@@ -40,6 +42,12 @@ struct PhaseReport {
     name: &'static str,
     diagnostics: PlayerChunkTrackingDiagnostics,
     client_reports: Vec<SmokeClientReport>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PlacementTarget {
+    clicked: BlockPos,
+    placed: BlockPos,
 }
 
 pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
@@ -126,6 +134,11 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
         ChunkPos::new(1, 0),
         2,
     )?;
+    let placement_target = placement_target_from_snapshot(
+        client_report(&phase_two_reports, 0)?,
+        ChunkPos::new(1, 0),
+        &break_targets,
+    )?;
     phases.push(PhaseReport {
         name: "one_client_moves_view",
         diagnostics: phase_two_diagnostics,
@@ -211,6 +224,114 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
         name: "overlapping_block_delta",
         diagnostics: overlap_poll_diagnostics,
         client_reports: overlap_reports,
+    });
+
+    send_client_command(
+        &controls,
+        0,
+        move_near_block_command(placement_target.clicked),
+    )?;
+    let place_move_diagnostics = smoke_server.process_commands(1)?;
+    let place_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    assert_actor_move_phase(&place_move_diagnostics, &place_move_reports, 1)?;
+    phases.push(PhaseReport {
+        name: "actor_moves_for_place",
+        diagnostics: place_move_diagnostics,
+        client_reports: place_move_reports,
+    });
+
+    send_client_command(&controls, 0, poll_command(8))?;
+    let empty_slot_diagnostics = smoke_server.process_commands(1)?;
+    let empty_slot_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    assert_no_delta_phase(&empty_slot_diagnostics, &empty_slot_reports, 1)?;
+    phases.push(PhaseReport {
+        name: "actor_selects_empty_slot",
+        diagnostics: empty_slot_diagnostics,
+        client_reports: empty_slot_reports,
+    });
+
+    send_client_command(&controls, 0, use_item_on_command(placement_target.clicked))?;
+    let _empty_place_diagnostics = smoke_server.process_commands(1)?;
+    let actor_empty_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    send_client_command(&controls, 1, poll_command(4))?;
+    let empty_place_poll_diagnostics = smoke_server.process_commands(1)?;
+    let observer_empty_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    let empty_place_reports =
+        merge_phase_reports(actor_empty_place_reports, observer_empty_place_reports);
+    assert_no_delta_phase(&empty_place_poll_diagnostics, &empty_place_reports, 1)?;
+    phases.push(PhaseReport {
+        name: "empty_slot_place_rejected",
+        diagnostics: empty_place_poll_diagnostics,
+        client_reports: empty_place_reports,
+    });
+
+    send_phase_commands(
+        &controls,
+        vec![
+            ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot: 1 }),
+            ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot: 8 }),
+        ],
+    )?;
+    let selected_slot_diagnostics = smoke_server.process_commands(CLIENT_COUNT)?;
+    let selected_slot_reports = wait_for_client_reports(&result_rx)?;
+    assert_no_delta_phase(&selected_slot_diagnostics, &selected_slot_reports, 1)?;
+    phases.push(PhaseReport {
+        name: "per_player_selected_slots",
+        diagnostics: selected_slot_diagnostics,
+        client_reports: selected_slot_reports,
+    });
+
+    send_client_command(&controls, 0, move_far_from_block_command())?;
+    let far_move_diagnostics = smoke_server.process_commands(1)?;
+    let far_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    assert_actor_move_phase(&far_move_diagnostics, &far_move_reports, 1)?;
+    phases.push(PhaseReport {
+        name: "actor_moves_out_of_reach",
+        diagnostics: far_move_diagnostics,
+        client_reports: far_move_reports,
+    });
+
+    send_client_command(&controls, 0, use_item_on_command(placement_target.clicked))?;
+    let _far_place_diagnostics = smoke_server.process_commands(1)?;
+    let actor_far_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    send_client_command(&controls, 1, poll_command(4))?;
+    let far_place_poll_diagnostics = smoke_server.process_commands(1)?;
+    let observer_far_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    let far_place_reports =
+        merge_phase_reports(actor_far_place_reports, observer_far_place_reports);
+    assert_no_delta_phase(&far_place_poll_diagnostics, &far_place_reports, 1)?;
+    phases.push(PhaseReport {
+        name: "far_place_rejected",
+        diagnostics: far_place_poll_diagnostics,
+        client_reports: far_place_reports,
+    });
+
+    send_client_command(
+        &controls,
+        0,
+        move_near_block_command(placement_target.clicked),
+    )?;
+    let near_place_move_diagnostics = smoke_server.process_commands(1)?;
+    let near_place_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    assert_actor_move_phase(&near_place_move_diagnostics, &near_place_move_reports, 1)?;
+    phases.push(PhaseReport {
+        name: "actor_returns_for_place",
+        diagnostics: near_place_move_diagnostics,
+        client_reports: near_place_move_reports,
+    });
+
+    send_client_command(&controls, 0, use_item_on_command(placement_target.clicked))?;
+    let _place_diagnostics = smoke_server.process_commands(1)?;
+    let actor_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    send_client_command(&controls, 1, poll_command(4))?;
+    let place_poll_diagnostics = smoke_server.process_commands(1)?;
+    let observer_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    let place_reports = merge_phase_reports(actor_place_reports, observer_place_reports);
+    assert_place_block_delta_phase(&place_poll_diagnostics, &place_reports, placement_target)?;
+    phases.push(PhaseReport {
+        name: "overlapping_place_delta",
+        diagnostics: place_poll_diagnostics,
+        client_reports: place_reports,
     });
 
     for control in controls {
@@ -583,6 +704,46 @@ fn assert_overlapping_block_delta_phase(
     Ok(())
 }
 
+fn assert_no_delta_phase(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    reports: &[SmokeClientReport],
+    expected_aggregate_chunks: usize,
+) -> Result<()> {
+    assert_tracking_diagnostics(diagnostics, expected_aggregate_chunks, 2)?;
+    for report in reports {
+        if has_any_section_block_updates(&report.updates) {
+            bail!(
+                "smoke client {} received unexpected block deltas",
+                report.index
+            );
+        }
+    }
+    Ok(())
+}
+
+fn assert_place_block_delta_phase(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    reports: &[SmokeClientReport],
+    target: PlacementTarget,
+) -> Result<()> {
+    assert_tracking_diagnostics(diagnostics, 1, 2)?;
+    let actor = client_report(reports, 0)?;
+    let observer = client_report(reports, 1)?;
+    if !has_block_delta_for_block(&actor.updates, target.placed, DIRT_BLOCK_STATE_ID) {
+        bail!(
+            "actor did not receive DIRT placement delta at {:?}",
+            target.placed
+        );
+    }
+    if !has_block_delta_for_block(&observer.updates, target.placed, DIRT_BLOCK_STATE_ID) {
+        bail!(
+            "observer did not receive DIRT placement delta at {:?}",
+            target.placed
+        );
+    }
+    Ok(())
+}
+
 fn assert_tracking_diagnostics(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     expected_aggregate_chunks: usize,
@@ -695,6 +856,45 @@ fn break_targets_from_snapshot(
     Ok(targets)
 }
 
+fn placement_target_from_snapshot(
+    report: &SmokeClientReport,
+    pos: ChunkPos,
+    excluded: &[BlockPos],
+) -> Result<PlacementTarget> {
+    let snapshot = report
+        .updates
+        .iter()
+        .find_map(|update| match update {
+            ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos == pos => Some(snapshot),
+            _ => None,
+        })
+        .with_context(|| format!("client {} missing snapshot for {pos:?}", report.index))?;
+
+    for y in (snapshot.min_y..snapshot.min_y + snapshot.height - 1).rev() {
+        for local_z in 0..16 {
+            for local_x in 0..16 {
+                let clicked = BlockPos::new(
+                    snapshot.pos.min_block_x() + local_x,
+                    y,
+                    snapshot.pos.min_block_z() + local_z,
+                );
+                if excluded.contains(&clicked) {
+                    continue;
+                }
+                let placed = clicked.relative(Direction::Up);
+                if snapshot_block_state(snapshot, clicked) != AIR_BLOCK_STATE_ID
+                    && snapshot_block_state(snapshot, placed) == AIR_BLOCK_STATE_ID
+                    && !excluded.contains(&placed)
+                {
+                    return Ok(PlacementTarget { clicked, placed });
+                }
+            }
+        }
+    }
+
+    bail!("snapshot for {pos:?} did not contain a solid block with air above")
+}
+
 fn non_air_blocks(snapshot: &ChunkSnapshot, count: usize) -> Vec<BlockPos> {
     let mut targets = Vec::new();
     for section in &snapshot.sections {
@@ -721,9 +921,40 @@ fn non_air_blocks(snapshot: &ChunkSnapshot, count: usize) -> Vec<BlockPos> {
     targets
 }
 
+fn snapshot_block_state(snapshot: &ChunkSnapshot, pos: BlockPos) -> BlockStateId {
+    if pos.chunk_pos() != snapshot.pos
+        || pos.y < snapshot.min_y
+        || pos.y >= snapshot.min_y + snapshot.height
+    {
+        return AIR_BLOCK_STATE_ID;
+    }
+    let section_y = block_to_section_coord(pos.y);
+    let Some(section) = snapshot
+        .sections
+        .iter()
+        .find(|section| section.section_y == section_y)
+    else {
+        return AIR_BLOCK_STATE_ID;
+    };
+    let local_x = local_block_coord(pos.x);
+    let local_y = local_section_block_coord(pos.y);
+    let local_z = local_block_coord(pos.z);
+    let blocks = section.unpack_block_state_ids();
+    blocks[chunk_section_index(local_x, local_y, local_z)]
+}
+
 fn move_near_block_command(pos: BlockPos) -> ClientCommand {
     ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
         position: Vec3d::new(pos.x as f64 + 0.5, pos.y as f64, pos.z as f64 + 0.5),
+        y_rot_degrees: 0.0,
+        x_rot_degrees: 0.0,
+        on_ground: true,
+    })
+}
+
+fn move_far_from_block_command() -> ClientCommand {
+    ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        position: Vec3d::new(2048.0, 128.0, 2048.0),
         y_rot_degrees: 0.0,
         x_rot_degrees: 0.0,
         on_ground: true,
@@ -735,6 +966,22 @@ fn break_block_command(pos: BlockPos) -> ClientCommand {
         pos,
         direction: Direction::Up,
         kind: PlayerActionKind::DebugInstantBreak,
+    })
+}
+
+fn use_item_on_command(clicked: BlockPos) -> ClientCommand {
+    ClientCommand::UseItemOn(UseItemOnCommand {
+        hand: InteractionHand::MainHand,
+        hit: BlockHitResult::new(
+            Vec3d::new(
+                clicked.x as f64 + 0.5,
+                clicked.y as f64 + 1.0,
+                clicked.z as f64 + 0.5,
+            ),
+            Direction::Up,
+            clicked,
+            false,
+        ),
     })
 }
 
@@ -767,6 +1014,14 @@ fn has_any_section_block_updates(updates: &[ServerUpdate]) -> bool {
 }
 
 fn has_air_delta_for_block(updates: &[ServerUpdate], pos: BlockPos) -> bool {
+    has_block_delta_for_block(updates, pos, AIR_BLOCK_STATE_ID)
+}
+
+fn has_block_delta_for_block(
+    updates: &[ServerUpdate],
+    pos: BlockPos,
+    block_state: BlockStateId,
+) -> bool {
     let chunk_pos = pos.chunk_pos();
     let section_y = block_to_section_coord(pos.y);
     let local_x = local_block_coord(pos.x) as u8;
@@ -782,7 +1037,7 @@ fn has_air_delta_for_block(updates: &[ServerUpdate], pos: BlockPos) -> bool {
             update.local_x == local_x
                 && update.local_y == local_y
                 && update.local_z == local_z
-                && update.block_state == AIR_BLOCK_STATE_ID
+                && update.block_state == block_state
         }),
         _ => false,
     })
