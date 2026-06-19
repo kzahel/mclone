@@ -97,6 +97,12 @@ impl ServerPlayerList {
         self.players.values_mut()
     }
 
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (ServerPlayerId, &ServerPlayerEntry)> {
+        self.players
+            .iter()
+            .map(|(player_id, entry)| (*player_id, entry))
+    }
+
     pub(crate) fn position(&self, id: ServerPlayerId) -> Option<Vec3d> {
         self.players.get(&id).map(|entry| entry.state.position())
     }

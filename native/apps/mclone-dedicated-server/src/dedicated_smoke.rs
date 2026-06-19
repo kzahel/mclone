@@ -13,7 +13,8 @@ use mclone_core::{
 use mclone_net::NativeClientSession;
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, InteractionHand, MovePlayerCommand,
-    PlayerActionCommand, PlayerActionKind, ServerUpdate, SetCarriedItemCommand, UseItemOnCommand,
+    PlayerActionCommand, PlayerActionKind, RemotePlayerId, ServerUpdate, SetCarriedItemCommand,
+    UseItemOnCommand,
 };
 use mclone_server::{IntegratedServer, PlayerChunkTrackingDiagnostics};
 
@@ -153,7 +154,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     )?;
     let actor_move_diagnostics = smoke_server.process_commands(1)?;
     let actor_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_actor_move_phase(&actor_move_diagnostics, &actor_move_reports, 2)?;
+    assert_actor_move_phase(&actor_move_diagnostics, &actor_move_reports, 2, 0)?;
     phases.push(PhaseReport {
         name: "actor_moves_for_non_overlapping_delta",
         diagnostics: actor_move_diagnostics,
@@ -189,7 +190,8 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     )?;
     let overlap_setup_diagnostics = smoke_server.process_commands(1)?;
     let overlap_setup_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_overlap_setup_phase(&overlap_setup_diagnostics, &overlap_setup_reports)?;
+    let actor_remote_id =
+        assert_overlap_setup_phase(&overlap_setup_diagnostics, &overlap_setup_reports)?;
     phases.push(PhaseReport {
         name: "observer_overlaps_actor_chunk",
         diagnostics: overlap_setup_diagnostics,
@@ -200,7 +202,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, move_near_block_command(overlapping_target))?;
     let overlap_move_diagnostics = smoke_server.process_commands(1)?;
     let overlap_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_actor_move_phase(&overlap_move_diagnostics, &overlap_move_reports, 1)?;
+    assert_actor_move_phase(&overlap_move_diagnostics, &overlap_move_reports, 1, 1)?;
     phases.push(PhaseReport {
         name: "actor_moves_for_overlapping_delta",
         diagnostics: overlap_move_diagnostics,
@@ -219,6 +221,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
         &overlap_poll_diagnostics,
         &overlap_reports,
         overlapping_target,
+        actor_remote_id,
     )?;
     phases.push(PhaseReport {
         name: "overlapping_block_delta",
@@ -233,7 +236,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     )?;
     let place_move_diagnostics = smoke_server.process_commands(1)?;
     let place_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_actor_move_phase(&place_move_diagnostics, &place_move_reports, 1)?;
+    assert_actor_move_phase(&place_move_diagnostics, &place_move_reports, 1, 1)?;
     phases.push(PhaseReport {
         name: "actor_moves_for_place",
         diagnostics: place_move_diagnostics,
@@ -243,7 +246,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, poll_command(8))?;
     let empty_slot_diagnostics = smoke_server.process_commands(1)?;
     let empty_slot_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_no_delta_phase(&empty_slot_diagnostics, &empty_slot_reports, 1)?;
+    assert_no_delta_phase_with_outbound(&empty_slot_diagnostics, &empty_slot_reports, 1, 1)?;
     phases.push(PhaseReport {
         name: "actor_selects_empty_slot",
         diagnostics: empty_slot_diagnostics,
@@ -284,7 +287,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, move_far_from_block_command())?;
     let far_move_diagnostics = smoke_server.process_commands(1)?;
     let far_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_actor_move_phase(&far_move_diagnostics, &far_move_reports, 1)?;
+    assert_actor_move_phase(&far_move_diagnostics, &far_move_reports, 1, 1)?;
     phases.push(PhaseReport {
         name: "actor_moves_out_of_reach",
         diagnostics: far_move_diagnostics,
@@ -300,6 +303,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     let far_place_reports =
         merge_phase_reports(actor_far_place_reports, observer_far_place_reports);
     assert_no_delta_phase(&far_place_poll_diagnostics, &far_place_reports, 1)?;
+    assert_remote_player_removed_phase(&far_place_reports, actor_remote_id)?;
     phases.push(PhaseReport {
         name: "far_place_rejected",
         diagnostics: far_place_poll_diagnostics,
@@ -313,7 +317,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     )?;
     let near_place_move_diagnostics = smoke_server.process_commands(1)?;
     let near_place_move_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_actor_move_phase(&near_place_move_diagnostics, &near_place_move_reports, 1)?;
+    assert_actor_move_phase(&near_place_move_diagnostics, &near_place_move_reports, 1, 1)?;
     phases.push(PhaseReport {
         name: "actor_returns_for_place",
         diagnostics: near_place_move_diagnostics,
@@ -327,7 +331,12 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     let place_poll_diagnostics = smoke_server.process_commands(1)?;
     let observer_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
     let place_reports = merge_phase_reports(actor_place_reports, observer_place_reports);
-    assert_place_block_delta_phase(&place_poll_diagnostics, &place_reports, placement_target)?;
+    assert_place_block_delta_phase(
+        &place_poll_diagnostics,
+        &place_reports,
+        placement_target,
+        actor_remote_id,
+    )?;
     phases.push(PhaseReport {
         name: "overlapping_place_delta",
         diagnostics: place_poll_diagnostics,
@@ -646,8 +655,14 @@ fn assert_actor_move_phase(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     reports: &[SmokeClientReport],
     expected_aggregate_chunks: usize,
+    expected_outbound_queue_depth: usize,
 ) -> Result<()> {
-    assert_tracking_diagnostics(diagnostics, expected_aggregate_chunks, 2)?;
+    assert_tracking_diagnostics_with_outbound(
+        diagnostics,
+        expected_aggregate_chunks,
+        2,
+        expected_outbound_queue_depth,
+    )?;
     let actor = client_report(reports, 0)?;
     if has_any_section_block_updates(&actor.updates) {
         bail!("actor movement phase unexpectedly produced block deltas");
@@ -675,7 +690,7 @@ fn assert_non_overlapping_block_delta_phase(
 fn assert_overlap_setup_phase(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     reports: &[SmokeClientReport],
-) -> Result<()> {
+) -> Result<RemotePlayerId> {
     assert_tracking_diagnostics(diagnostics, 1, 2)?;
     let observer = client_report(reports, 1)?;
     if !has_snapshot(&observer.updates, ChunkPos::new(1, 0)) {
@@ -684,13 +699,21 @@ fn assert_overlap_setup_phase(
     if !has_unload(&observer.updates, ChunkPos::new(4, 0)) {
         bail!("observer did not receive unload for previous chunk when overlapping actor");
     }
-    Ok(())
+    let remote_adds = remote_player_adds(&observer.updates);
+    if remote_adds.len() != 1 {
+        bail!(
+            "observer expected one remote player add when entering actor chunk, got {}",
+            remote_adds.len()
+        );
+    }
+    Ok(remote_adds[0])
 }
 
 fn assert_overlapping_block_delta_phase(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     reports: &[SmokeClientReport],
     target: BlockPos,
+    actor_remote_id: RemotePlayerId,
 ) -> Result<()> {
     assert_tracking_diagnostics(diagnostics, 1, 2)?;
     let actor = client_report(reports, 0)?;
@@ -701,6 +724,9 @@ fn assert_overlapping_block_delta_phase(
     if !has_air_delta_for_block(&observer.updates, target) {
         bail!("overlapping observer did not receive actor block delta at {target:?}");
     }
+    if !has_remote_player_update(&observer.updates, actor_remote_id) {
+        bail!("overlapping observer did not receive actor remote movement update");
+    }
     Ok(())
 }
 
@@ -709,7 +735,21 @@ fn assert_no_delta_phase(
     reports: &[SmokeClientReport],
     expected_aggregate_chunks: usize,
 ) -> Result<()> {
-    assert_tracking_diagnostics(diagnostics, expected_aggregate_chunks, 2)?;
+    assert_no_delta_phase_with_outbound(diagnostics, reports, expected_aggregate_chunks, 0)
+}
+
+fn assert_no_delta_phase_with_outbound(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    reports: &[SmokeClientReport],
+    expected_aggregate_chunks: usize,
+    expected_outbound_queue_depth: usize,
+) -> Result<()> {
+    assert_tracking_diagnostics_with_outbound(
+        diagnostics,
+        expected_aggregate_chunks,
+        2,
+        expected_outbound_queue_depth,
+    )?;
     for report in reports {
         if has_any_section_block_updates(&report.updates) {
             bail!(
@@ -725,6 +765,7 @@ fn assert_place_block_delta_phase(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     reports: &[SmokeClientReport],
     target: PlacementTarget,
+    actor_remote_id: RemotePlayerId,
 ) -> Result<()> {
     assert_tracking_diagnostics(diagnostics, 1, 2)?;
     let actor = client_report(reports, 0)?;
@@ -741,6 +782,20 @@ fn assert_place_block_delta_phase(
             target.placed
         );
     }
+    if !has_remote_player_add(&observer.updates, actor_remote_id) {
+        bail!("observer did not receive actor remote add after actor returned to tracked chunk");
+    }
+    Ok(())
+}
+
+fn assert_remote_player_removed_phase(
+    reports: &[SmokeClientReport],
+    actor_remote_id: RemotePlayerId,
+) -> Result<()> {
+    let observer = client_report(reports, 1)?;
+    if !has_remote_player_remove(&observer.updates, actor_remote_id) {
+        bail!("observer did not receive actor remote remove after actor left tracked chunk");
+    }
     Ok(())
 }
 
@@ -748,6 +803,20 @@ fn assert_tracking_diagnostics(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     expected_aggregate_chunks: usize,
     expected_total_visible_chunks: usize,
+) -> Result<()> {
+    assert_tracking_diagnostics_with_outbound(
+        diagnostics,
+        expected_aggregate_chunks,
+        expected_total_visible_chunks,
+        0,
+    )
+}
+
+fn assert_tracking_diagnostics_with_outbound(
+    diagnostics: &PlayerChunkTrackingDiagnostics,
+    expected_aggregate_chunks: usize,
+    expected_total_visible_chunks: usize,
+    expected_outbound_queue_depth: usize,
 ) -> Result<()> {
     if diagnostics.player_count < CLIENT_COUNT {
         bail!(
@@ -775,9 +844,9 @@ fn assert_tracking_diagnostics(
             diagnostics.total_player_visible_chunks
         );
     }
-    if diagnostics.total_outbound_queue_depth != 0 {
+    if diagnostics.total_outbound_queue_depth != expected_outbound_queue_depth {
         bail!(
-            "expected empty outbound queues after smoke command drain, got {}",
+            "expected total outbound queue depth {expected_outbound_queue_depth}, got {}",
             diagnostics.total_outbound_queue_depth
         );
     }
@@ -1013,6 +1082,34 @@ fn has_any_section_block_updates(updates: &[ServerUpdate]) -> bool {
         .any(|update| matches!(update, ServerUpdate::SectionBlockUpdates { .. }))
 }
 
+fn remote_player_adds(updates: &[ServerUpdate]) -> Vec<RemotePlayerId> {
+    updates
+        .iter()
+        .filter_map(|update| match update {
+            ServerUpdate::RemotePlayerAdd(update) => Some(update.id),
+            _ => None,
+        })
+        .collect()
+}
+
+fn has_remote_player_add(updates: &[ServerUpdate], id: RemotePlayerId) -> bool {
+    updates
+        .iter()
+        .any(|update| matches!(update, ServerUpdate::RemotePlayerAdd(update) if update.id == id))
+}
+
+fn has_remote_player_update(updates: &[ServerUpdate], id: RemotePlayerId) -> bool {
+    updates
+        .iter()
+        .any(|update| matches!(update, ServerUpdate::RemotePlayerUpdate(update) if update.id == id))
+}
+
+fn has_remote_player_remove(updates: &[ServerUpdate], id: RemotePlayerId) -> bool {
+    updates
+        .iter()
+        .any(|update| matches!(update, ServerUpdate::RemotePlayerRemove { id: removed } if *removed == id))
+}
+
 fn has_air_delta_for_block(updates: &[ServerUpdate], pos: BlockPos) -> bool {
     has_block_delta_for_block(updates, pos, AIR_BLOCK_STATE_ID)
 }
@@ -1067,6 +1164,27 @@ fn block_delta_count(updates: &[ServerUpdate]) -> usize {
         .sum()
 }
 
+fn remote_player_add_count(updates: &[ServerUpdate]) -> usize {
+    updates
+        .iter()
+        .filter(|update| matches!(update, ServerUpdate::RemotePlayerAdd(_)))
+        .count()
+}
+
+fn remote_player_update_count(updates: &[ServerUpdate]) -> usize {
+    updates
+        .iter()
+        .filter(|update| matches!(update, ServerUpdate::RemotePlayerUpdate(_)))
+        .count()
+}
+
+fn remote_player_remove_count(updates: &[ServerUpdate]) -> usize {
+    updates
+        .iter()
+        .filter(|update| matches!(update, ServerUpdate::RemotePlayerRemove { .. }))
+        .count()
+}
+
 fn print_smoke_report(seed: i64, phases: &[PhaseReport]) {
     let recorded_unix_seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1107,8 +1225,20 @@ fn print_smoke_report(seed: i64, phases: &[PhaseReport]) {
                 unload_count(&report.updates)
             );
             println!(
-                "          \"block_delta_count\": {}",
+                "          \"block_delta_count\": {},",
                 block_delta_count(&report.updates)
+            );
+            println!(
+                "          \"remote_player_add_count\": {},",
+                remote_player_add_count(&report.updates)
+            );
+            println!(
+                "          \"remote_player_update_count\": {},",
+                remote_player_update_count(&report.updates)
+            );
+            println!(
+                "          \"remote_player_remove_count\": {}",
+                remote_player_remove_count(&report.updates)
             );
             println!("        }}{client_comma}");
         }

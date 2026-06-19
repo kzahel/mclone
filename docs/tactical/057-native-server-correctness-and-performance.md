@@ -215,24 +215,24 @@ Landed:
    - per-player selected-slot state remains independent across clients
    - far-away `UseItemOn` commands are rejected by server reach checks
    - valid DIRT placement fans out to both clients tracking the chunk
+6. Dedicated clients receive remote-player lifecycle updates:
+   - tracked players are added when an observer enters their chunk view
+   - movement publishes position/rotation/on-ground updates to observers
+   - leaving an observer's tracked chunks or disconnecting removes the remote
+     player from that observer
 
 Next correctness steps, before more optimization work:
 
-1. Add remote-player state publication once dedicated clients have independent
-   chunk views and gameplay commands:
-   - publish enough remote player position/state for clients to observe each
-     other
-   - keep this separate from FPS-style prediction/reconciliation
-2. Harden the dedicated protocol/connection edge:
+1. Harden the dedicated protocol/connection edge:
    - version mismatch behavior
    - clearer disconnect/error reporting
    - reconnect/resync behavior when the client cache is stale
-3. Split or rename scheduler-facing modules only where these correctness slices
+2. Split or rename scheduler-facing modules only where these correctness slices
    expose a real boundary. Likely candidates are `player_chunk_tracking.rs` and
-   an update fan-out/outbox module.
-4. Defer release-mode server movement/view-distance perf, publication clone
+   a future general entity/update fan-out module.
+3. Defer release-mode server movement/view-distance perf, publication clone
    reduction, and per-recipient publication budgets until the multi-player
    semantics above are protected by TCP smokes.
-5. Consider a Java-shaped `server_level.rs` / `server_chunk_cache.rs` split only
+4. Consider a Java-shaped `server_level.rs` / `server_chunk_cache.rs` split only
    after chunk tracking and update routing make the current `IntegratedServer`
    responsibilities clearly too broad.

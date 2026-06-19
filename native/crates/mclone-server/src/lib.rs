@@ -18,6 +18,7 @@ mod placement;
 mod player;
 mod player_chunk_tracking;
 mod players;
+mod remote_players;
 mod scheduler;
 #[cfg(test)]
 mod sky_light_bridge;

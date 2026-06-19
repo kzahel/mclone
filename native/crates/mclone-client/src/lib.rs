@@ -10,7 +10,8 @@ mod player;
 
 use mclone_core::{CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
 use mclone_protocol::{
-    ChunkView, ClientCommand, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
+    ChunkView, ClientCommand, PlayerPositionUpdate, RemotePlayerId, RemotePlayerUpdate,
+    SectionBlockUpdate, ServerUpdate,
 };
 
 pub use interaction::{CREATIVE_PICK_RANGE, ClientInteractionController};
@@ -38,6 +39,7 @@ pub struct ClientRuntime {
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
     day_time: u64,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
+    remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
 }
 
 impl ClientRuntime {
@@ -48,6 +50,7 @@ impl ClientRuntime {
             chunks: BTreeMap::new(),
             day_time: 0,
             player_position_updates: VecDeque::new(),
+            remote_players: BTreeMap::new(),
         }
     }
 
@@ -89,6 +92,12 @@ impl ClientRuntime {
             ServerUpdate::PlayerPosition(update) => {
                 self.player_position_updates.push_back(update);
             }
+            ServerUpdate::RemotePlayerAdd(update) | ServerUpdate::RemotePlayerUpdate(update) => {
+                self.remote_players.insert(update.id, update);
+            }
+            ServerUpdate::RemotePlayerRemove { id } => {
+                self.remote_players.remove(&id);
+            }
         }
     }
 
@@ -108,6 +117,14 @@ impl ClientRuntime {
 
     pub fn loaded_chunk_count(&self) -> usize {
         self.chunks.len()
+    }
+
+    pub fn remote_player(&self, id: RemotePlayerId) -> Option<&RemotePlayerUpdate> {
+        self.remote_players.get(&id)
+    }
+
+    pub fn remote_player_count(&self) -> usize {
+        self.remote_players.len()
     }
 
     pub fn drain_player_position_updates(
@@ -250,6 +267,38 @@ mod tests {
             runtime.drain_player_position_updates().collect::<Vec<_>>(),
             Vec::<PlayerPositionUpdate>::new()
         );
+    }
+
+    #[test]
+    fn client_runtime_tracks_remote_player_lifecycle() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let id = RemotePlayerId(7);
+        let initial = RemotePlayerUpdate {
+            id,
+            position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 45.0,
+            x_rot_degrees: 5.0,
+            on_ground: true,
+        };
+        let moved = RemotePlayerUpdate {
+            id,
+            position: mclone_core::Vec3d::new(3.0, 65.0, 4.0),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: -10.0,
+            on_ground: false,
+        };
+
+        runtime.apply_update(ServerUpdate::RemotePlayerAdd(initial));
+        assert_eq!(runtime.remote_player_count(), 1);
+        assert_eq!(runtime.remote_player(id), Some(&initial));
+
+        runtime.apply_update(ServerUpdate::RemotePlayerUpdate(moved));
+        assert_eq!(runtime.remote_player_count(), 1);
+        assert_eq!(runtime.remote_player(id), Some(&moved));
+
+        runtime.apply_update(ServerUpdate::RemotePlayerRemove { id });
+        assert_eq!(runtime.remote_player_count(), 0);
+        assert_eq!(runtime.remote_player(id), None);
     }
 
     #[test]

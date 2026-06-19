@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 9;
+pub const PROTOCOL_VERSION: u32 = 10;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
@@ -23,6 +23,9 @@ const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
 const SERVER_UPDATE_TIME: u8 = 4;
 const SERVER_UPDATE_PLAYER_POSITION: u8 = 5;
+const SERVER_UPDATE_REMOTE_PLAYER_ADD: u8 = 6;
+const SERVER_UPDATE_REMOTE_PLAYER_UPDATE: u8 = 7;
+const SERVER_UPDATE_REMOTE_PLAYER_REMOVE: u8 = 8;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkView {
@@ -157,6 +160,23 @@ pub enum ServerUpdate {
         day_time: u64,
     },
     PlayerPosition(PlayerPositionUpdate),
+    RemotePlayerAdd(RemotePlayerUpdate),
+    RemotePlayerUpdate(RemotePlayerUpdate),
+    RemotePlayerRemove {
+        id: RemotePlayerId,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct RemotePlayerId(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RemotePlayerUpdate {
+    pub id: RemotePlayerId,
+    pub position: Vec3d,
+    pub y_rot_degrees: f32,
+    pub x_rot_degrees: f32,
+    pub on_ground: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -380,6 +400,20 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             writer.write_u8(SERVER_UPDATE_PLAYER_POSITION);
             writer.write_player_position_update(update);
         }
+        ServerUpdate::RemotePlayerAdd(update) => {
+            validate_remote_player_update(update)?;
+            writer.write_u8(SERVER_UPDATE_REMOTE_PLAYER_ADD);
+            writer.write_remote_player_update(update);
+        }
+        ServerUpdate::RemotePlayerUpdate(update) => {
+            validate_remote_player_update(update)?;
+            writer.write_u8(SERVER_UPDATE_REMOTE_PLAYER_UPDATE);
+            writer.write_remote_player_update(update);
+        }
+        ServerUpdate::RemotePlayerRemove { id } => {
+            writer.write_u8(SERVER_UPDATE_REMOTE_PLAYER_REMOVE);
+            writer.write_remote_player_id(*id);
+        }
     }
     Ok(writer.into_inner())
 }
@@ -415,6 +449,15 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
         SERVER_UPDATE_PLAYER_POSITION => {
             ServerUpdate::PlayerPosition(reader.read_player_position_update()?)
         }
+        SERVER_UPDATE_REMOTE_PLAYER_ADD => {
+            ServerUpdate::RemotePlayerAdd(reader.read_remote_player_update()?)
+        }
+        SERVER_UPDATE_REMOTE_PLAYER_UPDATE => {
+            ServerUpdate::RemotePlayerUpdate(reader.read_remote_player_update()?)
+        }
+        SERVER_UPDATE_REMOTE_PLAYER_REMOVE => ServerUpdate::RemotePlayerRemove {
+            id: reader.read_remote_player_id()?,
+        },
         _ => return Err(ProtocolCodecError::UnknownServerUpdateTag(tag)),
     };
     reader.finish()?;
@@ -441,6 +484,18 @@ fn validate_player_position_update(update: &PlayerPositionUpdate) -> ProtocolCod
     {
         return Err(ProtocolCodecError::InvalidData(
             "player position update contains non-finite value",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_remote_player_update(update: &RemotePlayerUpdate) -> ProtocolCodecResult<()> {
+    if !update.position.is_finite()
+        || !update.y_rot_degrees.is_finite()
+        || !update.x_rot_degrees.is_finite()
+    {
+        return Err(ProtocolCodecError::InvalidData(
+            "remote player update contains non-finite value",
         ));
     }
     Ok(())
@@ -656,6 +711,18 @@ impl ByteWriter {
         self.write_u8(update.relative.bits());
         self.write_u32(update.teleport_id);
         self.write_bool(update.dismount_vehicle);
+    }
+
+    fn write_remote_player_id(&mut self, id: RemotePlayerId) {
+        self.write_u64(id.0);
+    }
+
+    fn write_remote_player_update(&mut self, update: &RemotePlayerUpdate) {
+        self.write_remote_player_id(update.id);
+        self.write_vec3d(update.position);
+        self.write_f32(update.y_rot_degrees);
+        self.write_f32(update.x_rot_degrees);
+        self.write_bool(update.on_ground);
     }
 
     fn write_optional_light_layer(
@@ -976,6 +1043,29 @@ impl<'a> ByteReader<'a> {
         })
     }
 
+    fn read_remote_player_id(&mut self) -> ProtocolCodecResult<RemotePlayerId> {
+        Ok(RemotePlayerId(self.read_u64()?))
+    }
+
+    fn read_remote_player_update(&mut self) -> ProtocolCodecResult<RemotePlayerUpdate> {
+        let id = self.read_remote_player_id()?;
+        let position = self.read_vec3d()?;
+        let y_rot_degrees = self.read_f32()?;
+        let x_rot_degrees = self.read_f32()?;
+        if !y_rot_degrees.is_finite() || !x_rot_degrees.is_finite() {
+            return Err(ProtocolCodecError::InvalidData(
+                "remote player update rotation contains non-finite value",
+            ));
+        }
+        Ok(RemotePlayerUpdate {
+            id,
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            on_ground: self.read_bool()?,
+        })
+    }
+
     fn read_optional_light_layer(&mut self) -> ProtocolCodecResult<Option<Vec<u8>>> {
         if !self.read_bool()? {
             return Ok(None);
@@ -1200,6 +1290,45 @@ mod tests {
         let bytes = encode_server_update(&update).unwrap();
 
         assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn server_update_codec_round_trips_remote_player_updates() {
+        let update = RemotePlayerUpdate {
+            id: RemotePlayerId(42),
+            position: Vec3d::new(12.5, 70.0, -3.25),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: -15.0,
+            on_ground: true,
+        };
+
+        for server_update in [
+            ServerUpdate::RemotePlayerAdd(update),
+            ServerUpdate::RemotePlayerUpdate(update),
+            ServerUpdate::RemotePlayerRemove { id: update.id },
+        ] {
+            let bytes = encode_server_update(&server_update).unwrap();
+
+            assert_eq!(decode_server_update(&bytes).unwrap(), server_update);
+        }
+    }
+
+    #[test]
+    fn remote_player_update_codec_rejects_non_finite_values() {
+        let update = ServerUpdate::RemotePlayerUpdate(RemotePlayerUpdate {
+            id: RemotePlayerId(42),
+            position: Vec3d::new(f64::NAN, 70.0, -3.25),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: -15.0,
+            on_ground: true,
+        });
+
+        assert_eq!(
+            encode_server_update(&update),
+            Err(ProtocolCodecError::InvalidData(
+                "remote player update contains non-finite value"
+            ))
+        );
     }
 
     #[test]

@@ -181,17 +181,14 @@ impl ServerPlayerState {
         self.position
     }
 
-    #[cfg(test)]
     pub(crate) const fn y_rot_degrees(self) -> f32 {
         self.y_rot_degrees
     }
 
-    #[cfg(test)]
     pub(crate) const fn x_rot_degrees(self) -> f32 {
         self.x_rot_degrees
     }
 
-    #[cfg(test)]
     pub(crate) const fn on_ground(self) -> bool {
         self.on_ground
     }
@@ -221,7 +218,6 @@ impl ServerPlayerState {
         self.awaiting_teleport
     }
 
-    #[cfg(test)]
     pub(crate) const fn has_accepted_position(self) -> bool {
         self.has_accepted_position
     }

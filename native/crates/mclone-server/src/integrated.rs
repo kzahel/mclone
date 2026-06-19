@@ -20,6 +20,7 @@ use crate::placement::DebugBlockItem;
 use crate::player::{MovePlayerApplyResult, ServerPlayerState};
 use crate::player_chunk_tracking::{PlayerChunkTracking, PlayerChunkTrackingPolicy};
 use crate::players::{ServerPlayerId, ServerPlayerList};
+use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemotePlayerUpdate};
 use crate::spawn::find_safe_surface_spawn;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
@@ -42,6 +43,7 @@ pub struct IntegratedServer {
     inventory: ServerInventory,
     dedicated_players: ServerPlayerList,
     chunk_tracking: PlayerChunkTracking,
+    remote_players: RemotePlayerTracking,
 }
 
 /// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
@@ -73,6 +75,7 @@ impl IntegratedServer {
             inventory: ServerInventory::default(),
             dedicated_players: ServerPlayerList::default(),
             chunk_tracking,
+            remote_players: RemotePlayerTracking::default(),
         }
     }
 
@@ -120,6 +123,7 @@ impl IntegratedServer {
     pub fn add_dedicated_player(&mut self) -> ServerPlayerId {
         let player_id = self.dedicated_players.add();
         self.chunk_tracking.add_player(player_id);
+        self.remote_players.add_player(player_id);
         player_id
     }
 
@@ -127,6 +131,8 @@ impl IntegratedServer {
         if self.dedicated_players.remove(player_id).is_none() {
             return false;
         }
+        let routes = self.remote_players.remove_player(player_id);
+        self.route_remote_player_updates(routes);
         self.remove_player_chunk_tracking(player_id);
         true
     }
@@ -434,7 +440,8 @@ impl IntegratedServer {
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let simulation_tick = self.simulation_tick;
         let player = self.player_mut_for_target(target)?;
-        let updates = match player.apply_move_player(command) {
+        let result = player.apply_move_player(command);
+        let updates = match result {
             MovePlayerApplyResult::Accepted | MovePlayerApplyResult::RejectedInvalid => Vec::new(),
             MovePlayerApplyResult::AwaitingTeleport => player
                 .resend_pending_correction_update(simulation_tick)
@@ -442,6 +449,9 @@ impl IntegratedServer {
                 .into_iter()
                 .collect(),
         };
+        if result == MovePlayerApplyResult::Accepted {
+            self.reconcile_remote_player_subject(target.player_id(), true);
+        }
         Ok(updates)
     }
 
@@ -450,7 +460,9 @@ impl IntegratedServer {
         target: CommandTarget,
         id: u32,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        self.player_mut_for_target(target)?.accept_teleport(id);
+        if self.player_mut_for_target(target)?.accept_teleport(id) {
+            self.reconcile_remote_player_subject(target.player_id(), true);
+        }
         Ok(Vec::new())
     }
 
@@ -550,6 +562,7 @@ impl IntegratedServer {
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         self.ensure_target_exists(target)?;
         self.route_scheduler_events(events);
+        self.reconcile_remote_players_for_target_observer(target);
         let mut updates = self.drain_chunk_updates_for_target(target)?;
         if let Some(update) = self.initial_spawn_update_for_target(target)? {
             updates.push(ServerUpdate::PlayerPosition(update));
@@ -582,6 +595,75 @@ impl IntegratedServer {
                 ChunkSchedulerEvent::StatusChanged { .. } => {}
             }
         }
+    }
+
+    fn route_remote_player_updates(&mut self, routes: Vec<RoutedRemotePlayerUpdate>) {
+        for route in routes {
+            self.chunk_tracking
+                .queue_update_for_player(route.recipient, route.update);
+        }
+    }
+
+    fn reconcile_remote_players_for_target_observer(&mut self, target: CommandTarget) {
+        let Some(observer) = target.dedicated_player_id() else {
+            return;
+        };
+        let states = self.remote_player_states();
+        let chunk_tracking = &self.chunk_tracking;
+        let routes = self
+            .remote_players
+            .reconcile_observer(observer, &states, |player_id, pos| {
+                chunk_tracking.player_tracks_chunk(player_id, pos)
+            });
+        self.route_remote_player_updates(routes);
+    }
+
+    fn reconcile_remote_player_subject(
+        &mut self,
+        subject: ServerPlayerId,
+        emit_existing_updates: bool,
+    ) {
+        if !self.dedicated_players.contains(subject) {
+            return;
+        }
+        let Some(state) = self.remote_player_state(subject) else {
+            return;
+        };
+        let observers = self
+            .dedicated_players
+            .iter()
+            .map(|(player_id, _)| player_id)
+            .collect::<Vec<_>>();
+        let chunk_tracking = &self.chunk_tracking;
+        let routes = self.remote_players.reconcile_subject(
+            state,
+            observers,
+            |player_id, pos| chunk_tracking.player_tracks_chunk(player_id, pos),
+            emit_existing_updates,
+        );
+        self.route_remote_player_updates(routes);
+    }
+
+    fn remote_player_states(&self) -> Vec<RemotePlayerState> {
+        self.dedicated_players
+            .iter()
+            .map(|(player_id, _)| {
+                self.remote_player_state(player_id)
+                    .expect("iterated dedicated player must have state")
+            })
+            .collect()
+    }
+
+    fn remote_player_state(&self, player_id: ServerPlayerId) -> Option<RemotePlayerState> {
+        let player = self.dedicated_players.get(player_id)?;
+        Some(RemotePlayerState {
+            player_id,
+            position: player.state.position(),
+            y_rot_degrees: player.state.y_rot_degrees(),
+            x_rot_degrees: player.state.x_rot_degrees(),
+            on_ground: player.state.on_ground(),
+            publishable: player.state.has_accepted_position(),
+        })
     }
 
     fn drain_chunk_updates_for_target(
@@ -748,6 +830,13 @@ impl CommandTarget {
             CommandTarget::Dedicated(player_id) => player_id,
         }
     }
+
+    const fn dedicated_player_id(self) -> Option<ServerPlayerId> {
+        match self {
+            CommandTarget::Local => None,
+            CommandTarget::Dedicated(player_id) => Some(player_id),
+        }
+    }
 }
 
 fn unknown_player_error(player_id: ServerPlayerId) -> ChunkStoreError {
@@ -769,7 +858,10 @@ mod tests {
 
     use crate::ChunkHolder;
     use mclone_core::{BlockHitResult, BlockStateId, Direction, Vec3d};
-    use mclone_protocol::{AcceptTeleportCommand, PlayerPositionRelativeFlags, ServerUpdate};
+    use mclone_protocol::{
+        AcceptTeleportCommand, PlayerPositionRelativeFlags, RemotePlayerId, RemotePlayerUpdate,
+        ServerUpdate,
+    };
     use mclone_worldgen::block::{DIRT, GRASS, SNOW, STONE, has_fluid, material_blocks_motion};
 
     fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
@@ -895,6 +987,44 @@ mod tests {
             .any(|update| matches!(update, ServerUpdate::SectionBlockUpdates { .. }))
     }
 
+    fn remote_player_add(
+        updates: &[ServerUpdate],
+        player_id: ServerPlayerId,
+    ) -> Option<RemotePlayerUpdate> {
+        updates.iter().find_map(|update| match update {
+            ServerUpdate::RemotePlayerAdd(update)
+                if update.id == RemotePlayerId(player_id.as_u64()) =>
+            {
+                Some(*update)
+            }
+            _ => None,
+        })
+    }
+
+    fn remote_player_update(
+        updates: &[ServerUpdate],
+        player_id: ServerPlayerId,
+    ) -> Option<RemotePlayerUpdate> {
+        updates.iter().find_map(|update| match update {
+            ServerUpdate::RemotePlayerUpdate(update)
+                if update.id == RemotePlayerId(player_id.as_u64()) =>
+            {
+                Some(*update)
+            }
+            _ => None,
+        })
+    }
+
+    fn has_remote_player_remove(updates: &[ServerUpdate], player_id: ServerPlayerId) -> bool {
+        updates.iter().any(|update| {
+            matches!(
+                update,
+                ServerUpdate::RemotePlayerRemove { id }
+                    if *id == RemotePlayerId(player_id.as_u64())
+            )
+        })
+    }
+
     #[test]
     fn dedicated_player_views_keep_disjoint_ticket_sets() {
         let mut server = IntegratedServer::new(12_345);
@@ -1000,6 +1130,114 @@ mod tests {
     }
 
     #[test]
+    fn dedicated_players_publish_remote_state_when_visible() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+        server
+            .try_handle_command_for_player(
+                player_a,
+                ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                    position: Vec3d::new(8.5, 80.0, 8.5),
+                    y_rot_degrees: 0.0,
+                    x_rot_degrees: 0.0,
+                    on_ground: true,
+                }),
+            )
+            .expect("move player a into tracked chunk");
+        let updates_b =
+            set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 0);
+
+        let add_a =
+            remote_player_add(&updates_b, player_a).expect("player b should receive player a add");
+        assert_eq!(add_a.id, RemotePlayerId(player_a.as_u64()));
+
+        let updates_a = server.try_poll_for_player(player_a).expect("poll player a");
+        let add_b = remote_player_add(&updates_a, player_b)
+            .expect("player a should receive player b add after b accepts spawn");
+        assert_eq!(add_b.id, RemotePlayerId(player_b.as_u64()));
+
+        let moved = Vec3d::new(9.5, 80.0, 8.5);
+        server
+            .try_handle_command_for_player(
+                player_a,
+                ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                    position: moved,
+                    y_rot_degrees: 90.0,
+                    x_rot_degrees: -15.0,
+                    on_ground: true,
+                }),
+            )
+            .expect("move player a");
+
+        let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
+        let moved_a = remote_player_update(&updates_b, player_a)
+            .expect("player b should receive player a movement update");
+        assert_eq!(moved_a.position, moved);
+        assert_eq!(moved_a.y_rot_degrees, 90.0);
+        assert_eq!(moved_a.x_rot_degrees, -15.0);
+        assert!(moved_a.on_ground);
+    }
+
+    #[test]
+    fn dedicated_remote_players_are_removed_when_the_observer_view_stops_tracking_them() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+        server
+            .try_handle_command_for_player(
+                player_a,
+                ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                    position: Vec3d::new(8.5, 80.0, 8.5),
+                    y_rot_degrees: 0.0,
+                    x_rot_degrees: 0.0,
+                    on_ground: true,
+                }),
+            )
+            .expect("move player a into tracked chunk");
+        let updates_b =
+            set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 0);
+        assert!(remote_player_add(&updates_b, player_a).is_some());
+
+        let updates_b =
+            set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(4, 0), 0);
+
+        assert!(has_remote_player_remove(&updates_b, player_a));
+    }
+
+    #[test]
+    fn dedicated_remote_players_are_removed_on_disconnect() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
+        server
+            .try_handle_command_for_player(
+                player_a,
+                ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                    position: Vec3d::new(8.5, 80.0, 8.5),
+                    y_rot_degrees: 0.0,
+                    x_rot_degrees: 0.0,
+                    on_ground: true,
+                }),
+            )
+            .expect("move player a into tracked chunk");
+        let updates_b =
+            set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 0);
+        assert!(remote_player_add(&updates_b, player_a).is_some());
+
+        assert!(server.remove_dedicated_player(player_a));
+        let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
+
+        assert!(has_remote_player_remove(&updates_b, player_a));
+    }
+
+    #[test]
     fn chunk_tracking_diagnostics_reports_outbound_queue_depth() {
         let mut server = IntegratedServer::new(12_345);
         server.set_lighting_enabled(false);
@@ -1037,19 +1275,23 @@ mod tests {
         let diagnostics = server.chunk_tracking_diagnostics();
         assert_eq!(diagnostics.aggregate_player_ticket_chunks, 1);
         assert_eq!(diagnostics.total_player_visible_chunks, 2);
-        assert_eq!(diagnostics.total_outbound_queue_depth, 1);
-        assert_eq!(diagnostics.max_outbound_queue_depth, 1);
+        assert_eq!(diagnostics.total_outbound_queue_depth, 2);
+        assert_eq!(diagnostics.max_outbound_queue_depth, 2);
         assert_eq!(
             diagnostics
                 .players
                 .iter()
                 .find(|player| player.player_id == player_b)
                 .map(|player| player.outbound_queue_depth),
-            Some(1)
+            Some(2)
         );
 
         let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
         assert!(has_section_block_updates(&updates_b));
+        assert!(
+            remote_player_add(&updates_b, player_a).is_some()
+                || remote_player_update(&updates_b, player_a).is_some()
+        );
         assert_eq!(
             server
                 .chunk_tracking_diagnostics()

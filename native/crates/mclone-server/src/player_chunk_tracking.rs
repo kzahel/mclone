@@ -218,7 +218,6 @@ impl PlayerChunkTracking {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn player_tracks_chunk(&self, player_id: ServerPlayerId, pos: ChunkPos) -> bool {
         self.players
             .get(&player_id)
@@ -281,7 +280,11 @@ impl PlayerChunkTracking {
             .collect()
     }
 
-    fn queue_update_for_player(&mut self, player_id: ServerPlayerId, update: ServerUpdate) {
+    pub(crate) fn queue_update_for_player(
+        &mut self,
+        player_id: ServerPlayerId,
+        update: ServerUpdate,
+    ) {
         if self.players.contains_key(&player_id) {
             self.pending_updates
                 .entry(player_id)

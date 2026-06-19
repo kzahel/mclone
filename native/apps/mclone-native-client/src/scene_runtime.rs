@@ -467,9 +467,15 @@ impl WindowSceneRuntime {
         // Time updates arrive every tick and animate the sky, but they do not
         // dirty any chunk geometry; the renderer reads time-of-day each frame, so
         // they must not by themselves force a section re-upload.
-        let changed = updates
-            .iter()
-            .any(|update| !matches!(update, ServerUpdate::TimeUpdate { .. }));
+        let changed = updates.iter().any(|update| {
+            !matches!(
+                update,
+                ServerUpdate::TimeUpdate { .. }
+                    | ServerUpdate::RemotePlayerAdd(_)
+                    | ServerUpdate::RemotePlayerUpdate(_)
+                    | ServerUpdate::RemotePlayerRemove { .. }
+            )
+        });
         let update_count = updates.len();
         let mut snapshot_updates = 0;
         let mut section_block_updates = 0;
@@ -495,6 +501,9 @@ impl WindowSceneRuntime {
                 }
                 ServerUpdate::TimeUpdate { .. } => {}
                 ServerUpdate::PlayerPosition(_) => {}
+                ServerUpdate::RemotePlayerAdd(_)
+                | ServerUpdate::RemotePlayerUpdate(_)
+                | ServerUpdate::RemotePlayerRemove { .. } => {}
             }
         }
         let dirty_mark_ms = elapsed_ms(dirty_mark_start.elapsed());
