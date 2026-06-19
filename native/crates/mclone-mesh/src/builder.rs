@@ -7,13 +7,16 @@ use mclone_core::{
     chunk_block_index, chunk_min_block_coord, chunk_section_index, local_block_coord,
     local_section_block_coord,
 };
-use mclone_light::{FULL_BRIGHT, pack_light};
+use mclone_light::{FULL_BRIGHT, pack_light, packed_block_light, packed_sky_light};
 
 use crate::ambient_occlusion::{
     AmbientOcclusionFace, AmbientOcclusionSampler, AmbientOcclusionShape, BlockPos,
     calculate_ambient_occlusion_face, calculate_ambient_occlusion_shape,
 };
-use crate::catalog::{TexturedBlockFace, TexturedMeshCatalog, TexturedMeshError};
+use crate::catalog::{
+    TexturedBlockFace, TexturedFluidKind, TexturedFluidModel, TexturedMeshCatalog,
+    TexturedMeshError,
+};
 use crate::data::{
     ChunkVertex, RenderSectionKey, TexturedChunkVertex, TexturedRenderSectionBuildReport,
     TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibilityGraphBuildStats,
@@ -378,13 +381,19 @@ fn add_textured_chunk_range_to_mesh(
                 let Some(block_model) = catalog.get(state_id) else {
                     return Err(TexturedMeshError::MissingBlockModel(state_id));
                 };
-                if block_model.faces.is_empty() {
-                    continue;
-                }
-
                 let world_x = world_origin_x + local_x;
                 let world_y = input.min_y + local_y;
                 let world_z = world_origin_z + local_z;
+
+                if let Some(fluid) = block_model.fluid {
+                    add_textured_liquid_block_to_mesh(
+                        mesh, area, catalog, world_x, world_y, world_z, fluid,
+                    );
+                    continue;
+                }
+                if block_model.faces.is_empty() {
+                    continue;
+                }
 
                 for face in &block_model.faces {
                     if let Some(cullface) = face.cullface {
@@ -568,6 +577,345 @@ fn add_textured_face(
         base_index + 2,
         base_index + 3,
     ]);
+}
+
+const MAX_FLUID_HEIGHT: f32 = 8.0 / 9.0;
+const LIQUID_EPSILON: f32 = 0.001;
+
+fn add_textured_liquid_block_to_mesh(
+    mesh: &mut TexturedVisibleChunkMesh,
+    area: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    fluid: TexturedFluidModel,
+) {
+    let render_top = !same_fluid_at(area, catalog, world_x, world_y + 1, world_z, fluid.kind)
+        && !liquid_face_occluded(area, catalog, world_x, world_y + 1, world_z);
+    let render_bottom = !same_fluid_at(area, catalog, world_x, world_y - 1, world_z, fluid.kind)
+        && !liquid_face_occluded(area, catalog, world_x, world_y - 1, world_z);
+    let render_north = !same_fluid_at(area, catalog, world_x, world_y, world_z - 1, fluid.kind)
+        && !liquid_face_occluded(area, catalog, world_x, world_y, world_z - 1);
+    let render_south = !same_fluid_at(area, catalog, world_x, world_y, world_z + 1, fluid.kind)
+        && !liquid_face_occluded(area, catalog, world_x, world_y, world_z + 1);
+    let render_west = !same_fluid_at(area, catalog, world_x - 1, world_y, world_z, fluid.kind)
+        && !liquid_face_occluded(area, catalog, world_x - 1, world_y, world_z);
+    let render_east = !same_fluid_at(area, catalog, world_x + 1, world_y, world_z, fluid.kind)
+        && !liquid_face_occluded(area, catalog, world_x + 1, world_y, world_z);
+
+    if !render_top
+        && !render_bottom
+        && !render_north
+        && !render_south
+        && !render_west
+        && !render_east
+    {
+        return;
+    }
+
+    let mut h00 = fluid_height_at(area, catalog, world_x, world_y, world_z, fluid.kind);
+    let mut h01 = fluid_height_at(area, catalog, world_x, world_y, world_z + 1, fluid.kind);
+    let mut h11 = fluid_height_at(area, catalog, world_x + 1, world_y, world_z + 1, fluid.kind);
+    let mut h10 = fluid_height_at(area, catalog, world_x + 1, world_y, world_z, fluid.kind);
+    let bottom_y = if render_bottom { LIQUID_EPSILON } else { 0.0 };
+
+    if render_top {
+        h00 = (h00 - LIQUID_EPSILON).max(0.0);
+        h01 = (h01 - LIQUID_EPSILON).max(0.0);
+        h11 = (h11 - LIQUID_EPSILON).max(0.0);
+        h10 = (h10 - LIQUID_EPSILON).max(0.0);
+        add_textured_liquid_quad(
+            mesh,
+            world_x,
+            world_y,
+            world_z,
+            [
+                [0.0, h00, 0.0],
+                [0.0, h01, 1.0],
+                [1.0, h11, 1.0],
+                [1.0, h10, 0.0],
+            ],
+            [
+                fluid.still.map(0.0, 0.0),
+                fluid.still.map(0.0, 16.0),
+                fluid.still.map(16.0, 16.0),
+                fluid.still.map(16.0, 0.0),
+            ],
+            liquid_color(fluid.kind, 1.0),
+            liquid_packed_light(area, world_x, world_y, world_z),
+        );
+    }
+
+    if render_bottom {
+        add_textured_liquid_quad(
+            mesh,
+            world_x,
+            world_y,
+            world_z,
+            [
+                [0.0, bottom_y, 1.0],
+                [0.0, bottom_y, 0.0],
+                [1.0, bottom_y, 0.0],
+                [1.0, bottom_y, 1.0],
+            ],
+            [
+                fluid.still.map(0.0, 16.0),
+                fluid.still.map(0.0, 0.0),
+                fluid.still.map(16.0, 0.0),
+                fluid.still.map(16.0, 16.0),
+            ],
+            liquid_color(fluid.kind, 0.5),
+            liquid_packed_light(area, world_x, world_y - 1, world_z),
+        );
+    }
+
+    let side_light = liquid_packed_light(area, world_x, world_y, world_z);
+    if render_north {
+        add_textured_liquid_quad(
+            mesh,
+            world_x,
+            world_y,
+            world_z,
+            [
+                [1.0, h10, LIQUID_EPSILON],
+                [1.0, bottom_y, LIQUID_EPSILON],
+                [0.0, bottom_y, LIQUID_EPSILON],
+                [0.0, h00, LIQUID_EPSILON],
+            ],
+            [
+                fluid.flow.map(8.0, liquid_side_v(h10)),
+                fluid.flow.map(8.0, 8.0),
+                fluid.flow.map(0.0, 8.0),
+                fluid.flow.map(0.0, liquid_side_v(h00)),
+            ],
+            liquid_color(fluid.kind, 0.72),
+            side_light,
+        );
+    }
+    if render_south {
+        add_textured_liquid_quad(
+            mesh,
+            world_x,
+            world_y,
+            world_z,
+            [
+                [0.0, h01, 1.0 - LIQUID_EPSILON],
+                [0.0, bottom_y, 1.0 - LIQUID_EPSILON],
+                [1.0, bottom_y, 1.0 - LIQUID_EPSILON],
+                [1.0, h11, 1.0 - LIQUID_EPSILON],
+            ],
+            [
+                fluid.flow.map(0.0, liquid_side_v(h01)),
+                fluid.flow.map(0.0, 8.0),
+                fluid.flow.map(8.0, 8.0),
+                fluid.flow.map(8.0, liquid_side_v(h11)),
+            ],
+            liquid_color(fluid.kind, 0.78),
+            side_light,
+        );
+    }
+    if render_west {
+        add_textured_liquid_quad(
+            mesh,
+            world_x,
+            world_y,
+            world_z,
+            [
+                [LIQUID_EPSILON, h00, 0.0],
+                [LIQUID_EPSILON, bottom_y, 0.0],
+                [LIQUID_EPSILON, bottom_y, 1.0],
+                [LIQUID_EPSILON, h01, 1.0],
+            ],
+            [
+                fluid.flow.map(8.0, liquid_side_v(h00)),
+                fluid.flow.map(8.0, 8.0),
+                fluid.flow.map(0.0, 8.0),
+                fluid.flow.map(0.0, liquid_side_v(h01)),
+            ],
+            liquid_color(fluid.kind, 0.86),
+            side_light,
+        );
+    }
+    if render_east {
+        add_textured_liquid_quad(
+            mesh,
+            world_x,
+            world_y,
+            world_z,
+            [
+                [1.0 - LIQUID_EPSILON, h11, 1.0],
+                [1.0 - LIQUID_EPSILON, bottom_y, 1.0],
+                [1.0 - LIQUID_EPSILON, bottom_y, 0.0],
+                [1.0 - LIQUID_EPSILON, h10, 0.0],
+            ],
+            [
+                fluid.flow.map(8.0, liquid_side_v(h11)),
+                fluid.flow.map(8.0, 8.0),
+                fluid.flow.map(0.0, 8.0),
+                fluid.flow.map(0.0, liquid_side_v(h10)),
+            ],
+            liquid_color(fluid.kind, 0.86),
+            side_light,
+        );
+    }
+}
+
+fn add_textured_liquid_quad(
+    mesh: &mut TexturedVisibleChunkMesh,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    corners: [[f32; 3]; 4],
+    uvs: [[f32; 2]; 4],
+    color: [f32; 4],
+    packed_light: u32,
+) {
+    let base_index = mesh.vertices.len() as u32;
+    for index in 0..4 {
+        let corner = corners[index];
+        mesh.vertices.push(TexturedChunkVertex {
+            position: [
+                world_x as f32 + corner[0],
+                world_y as f32 + corner[1],
+                world_z as f32 + corner[2],
+            ],
+            uv: uvs[index],
+            color,
+            packed_light,
+        });
+    }
+    mesh.indices.extend_from_slice(&[
+        base_index,
+        base_index + 1,
+        base_index + 2,
+        base_index,
+        base_index + 2,
+        base_index + 3,
+    ]);
+}
+
+fn same_fluid_at(
+    area: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    kind: TexturedFluidKind,
+) -> bool {
+    fluid_at_world(area, catalog, world_x, world_y, world_z).is_some_and(|fluid| fluid.kind == kind)
+}
+
+fn fluid_at_world(
+    area: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+) -> Option<TexturedFluidModel> {
+    let state_id = block_state_at_world_or_air(area, world_x, world_y, world_z);
+    catalog.fluid(state_id)
+}
+
+fn liquid_face_occluded(
+    area: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+) -> bool {
+    let state_id = block_state_at_world_or_air(area, world_x, world_y, world_z);
+    catalog.occludes(state_id)
+}
+
+fn fluid_height_at(
+    area: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    kind: TexturedFluidKind,
+) -> f32 {
+    let mut count = 0;
+    let mut height = 0.0;
+    for sample in 0..4 {
+        let sample_x = world_x - (sample & 1);
+        let sample_z = world_z - ((sample >> 1) & 1);
+        if same_fluid_at(area, catalog, sample_x, world_y + 1, sample_z, kind) {
+            return 1.0;
+        }
+
+        let state_id = block_state_at_world_or_air(area, sample_x, world_y, sample_z);
+        if let Some(sample_fluid) = catalog.fluid(state_id).filter(|fluid| fluid.kind == kind) {
+            let sample_height = fluid_own_height(sample_fluid);
+            if sample_height >= 0.8 {
+                height += sample_height * 10.0;
+                count += 10;
+            } else {
+                height += sample_height;
+                count += 1;
+            }
+        } else if !liquid_height_sample_is_solid(catalog, state_id) {
+            count += 1;
+        }
+    }
+
+    if count == 0 {
+        0.0
+    } else {
+        height / count as f32
+    }
+}
+
+fn fluid_own_height(fluid: TexturedFluidModel) -> f32 {
+    if fluid.level == 0 {
+        MAX_FLUID_HEIGHT
+    } else {
+        fluid.level.min(8) as f32 / 9.0
+    }
+}
+
+fn liquid_height_sample_is_solid(catalog: &TexturedMeshCatalog, state_id: BlockStateId) -> bool {
+    catalog
+        .get(state_id)
+        .map(|model| model.collision_shape_full_block)
+        .unwrap_or(false)
+}
+
+fn liquid_side_v(height: f32) -> f32 {
+    (1.0 - height.clamp(0.0, 1.0)) * 8.0
+}
+
+fn liquid_color(kind: TexturedFluidKind, shade: f32) -> [f32; 4] {
+    let color = match kind {
+        TexturedFluidKind::Water => [
+            0x3f as f32 / 255.0,
+            0x76 as f32 / 255.0,
+            0xe4 as f32 / 255.0,
+            0.72,
+        ],
+        TexturedFluidKind::Lava => [1.0, 1.0, 1.0, 1.0],
+    };
+    [
+        color[0] * shade,
+        color[1] * shade,
+        color[2] * shade,
+        color[3],
+    ]
+}
+
+fn liquid_packed_light(
+    area: &[TexturedChunkMeshInput<'_>],
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+) -> u32 {
+    let current = packed_light_at_world_or_fullbright(area, world_x, world_y, world_z);
+    let above = packed_light_at_world_or_fullbright(area, world_x, world_y + 1, world_z);
+    pack_light(
+        packed_block_light(current).max(packed_block_light(above)),
+        packed_sky_light(current).max(packed_sky_light(above)),
+    )
 }
 
 fn textured_face_corners(face: &TexturedBlockFace) -> [[f32; 3]; 4] {

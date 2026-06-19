@@ -18,7 +18,8 @@ pub use builder::{
     build_textured_visible_chunk_mesh, build_visible_chunk_area_mesh, build_visible_chunk_mesh,
 };
 pub use catalog::{
-    AtlasSpriteUv, TexturedBlockFace, TexturedBlockModel, TexturedMeshCatalog, TexturedMeshError,
+    AtlasSpriteUv, TexturedBlockFace, TexturedBlockModel, TexturedFluidKind, TexturedFluidModel,
+    TexturedMeshCatalog, TexturedMeshError,
 };
 pub use data::{
     ChunkVertex, RenderSectionKey, SectionMeshStats, TexturedChunkVertex,
@@ -39,7 +40,7 @@ mod tests {
     use crate::builder::{block_at_world_or_air, data_layer_value};
     use mclone_assets::{
         AssetPath, BlockModelLibrary, BlockStateAssetIndex, BlockStateRecord, BlockStateRegistry,
-        MemoryAssetSource, ResourceLocation, TextureAtlasPlan,
+        MemoryAssetSource, ResourceLocation, TextureAtlasPlan, TextureMaterial,
     };
     use mclone_core::{
         AIR_BLOCK_STATE_ID, LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, chunk_block_index,
@@ -586,6 +587,73 @@ mod tests {
         TexturedMeshCatalog::from_assets(&registry, &index, &library, &atlas).unwrap()
     }
 
+    fn liquid_textured_catalog() -> TexturedMeshCatalog {
+        let mut registry = BlockStateRegistry::new();
+        for (id, block, properties) in [
+            (BlockStateId(2), "minecraft:water", [("level", "0")]),
+            (BlockStateId(9), "minecraft:lava", [("level", "0")]),
+            (BlockStateId(72), "minecraft:water", [("level", "1")]),
+        ] {
+            registry
+                .register(BlockStateRecord::new(
+                    id,
+                    ResourceLocation::parse(block).unwrap(),
+                    properties,
+                ))
+                .unwrap();
+        }
+
+        let mut source = MemoryAssetSource::new();
+        source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/water.json"),
+            r#"{"variants":{"":{"model":"minecraft:block/water"}}}"#,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/lava.json"),
+            r#"{"variants":{"":{"model":"minecraft:block/lava"}}}"#,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/block.json"),
+            "{}",
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/water.json"),
+            r##"{"parent":"minecraft:block/block","textures":{"particle":"minecraft:block/water_still"}}"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/lava.json"),
+            r##"{"parent":"minecraft:block/block","textures":{"particle":"minecraft:block/lava_still"}}"##,
+        );
+        for texture in ["water_still", "water_flow", "lava_still", "lava_flow"] {
+            source.insert(
+                AssetPath::new(format!("assets/minecraft/textures/block/{texture}.png")),
+                png_header(16, 16),
+            );
+        }
+
+        let index = BlockStateAssetIndex::load_namespace(&source, "minecraft").unwrap();
+        let library = BlockModelLibrary::load_for_blockstates(&source, &index).unwrap();
+        let mut materials = library
+            .collect_materials_for_models(
+                index
+                    .assets()
+                    .flat_map(|asset| asset.model_refs.iter().cloned()),
+            )
+            .unwrap();
+        for texture in [
+            "minecraft:block/water_still",
+            "minecraft:block/water_flow",
+            "minecraft:block/lava_still",
+            "minecraft:block/lava_flow",
+        ] {
+            materials.insert(TextureMaterial::blocks(
+                ResourceLocation::parse(texture).unwrap(),
+            ));
+        }
+        let atlas = TextureAtlasPlan::build(&source, materials).unwrap();
+        TexturedMeshCatalog::from_assets(&registry, &index, &library, &atlas).unwrap()
+    }
+
     #[test]
     fn textured_single_block_uses_baked_model_faces_and_atlas_uvs() {
         let catalog = stone_textured_catalog();
@@ -621,6 +689,73 @@ mod tests {
         assert!(!leaves.view_blocking);
         assert!(!leaves.solid_render);
         assert!(leaves.collision_shape_full_block);
+    }
+
+    #[test]
+    fn catalog_builds_fluid_models_from_level_states() {
+        let catalog = liquid_textured_catalog();
+        let source = catalog.get(BlockStateId(2)).unwrap().fluid.unwrap();
+        let flowing = catalog.get(BlockStateId(72)).unwrap().fluid.unwrap();
+        let lava = catalog.get(BlockStateId(9)).unwrap().fluid.unwrap();
+
+        assert_eq!(source.kind, TexturedFluidKind::Water);
+        assert_eq!(source.level, 0);
+        assert_eq!(flowing.kind, TexturedFluidKind::Water);
+        assert_eq!(flowing.level, 1);
+        assert_eq!(lava.kind, TexturedFluidKind::Lava);
+        assert_eq!(lava.level, 0);
+    }
+
+    #[test]
+    fn textured_liquid_source_emits_exposed_surface_faces() {
+        let catalog = liquid_textured_catalog();
+        let blocks = textured_chunk_blocks(16, &[(0, 0, 0, BlockStateId(2))]);
+        let mesh = build_textured_visible_chunk_mesh(
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+            &catalog,
+        )
+        .unwrap();
+
+        assert_eq!(mesh.stats().face_count(), 6);
+        assert!(mesh.vertices.iter().any(|vertex| vertex.color[3] < 1.0));
+        assert!(mesh.vertices.iter().all(
+            |vertex| (0.0..=1.0).contains(&vertex.uv[0]) && (0.0..=1.0).contains(&vertex.uv[1])
+        ));
+    }
+
+    #[test]
+    fn textured_liquid_culls_internal_same_fluid_faces() {
+        let catalog = liquid_textured_catalog();
+        let blocks = textured_chunk_blocks(
+            16,
+            &[(0, 0, 0, BlockStateId(2)), (1, 0, 0, BlockStateId(2))],
+        );
+        let mesh = build_textured_visible_chunk_mesh(
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+            &catalog,
+        )
+        .unwrap();
+
+        assert_eq!(mesh.stats().face_count(), 10);
+    }
+
+    #[test]
+    fn flowing_liquid_level_lowers_surface_height() {
+        let catalog = liquid_textured_catalog();
+        let blocks = textured_chunk_blocks(16, &[(0, 0, 0, BlockStateId(72))]);
+        let mesh = build_textured_visible_chunk_mesh(
+            TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+            &catalog,
+        )
+        .unwrap();
+        let max_y = mesh
+            .vertices
+            .iter()
+            .map(|vertex| vertex.position[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        assert!(max_y > 0.0);
+        assert!(max_y < 0.2, "level=1 surface should be low, got y={max_y}");
     }
 
     #[test]

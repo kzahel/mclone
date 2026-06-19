@@ -6,7 +6,7 @@ use std::thread;
 use anyhow::{Context, Result, bail};
 use mclone_assets::{
     AssetSource, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
-    FilesystemAssetSource, TextureAtlasPlan,
+    FilesystemAssetSource, ResourceLocation, TextureAtlasPlan, TextureMaterial,
 };
 use mclone_client::ClientRuntime;
 use mclone_core::{
@@ -386,9 +386,10 @@ pub(crate) fn load_textured_mesh_assets() -> Result<TexturedMeshAssets> {
     let selected_model_refs = selected_model_refs(&registry, &blockstates)?;
     let models = BlockModelLibrary::load_model_tree(&source, selected_model_refs.iter().cloned())
         .context("failed to load vanilla block model tree")?;
-    let materials = models
+    let mut materials = models
         .collect_materials_for_models(selected_model_refs.iter().cloned())
         .context("failed to collect selected block model materials")?;
+    insert_fluid_materials(&mut materials);
     let atlas_plan = TextureAtlasPlan::build(&source, materials)
         .context("failed to plan block texture atlas")?;
     let atlas = stitch_texture_atlas(&source, &atlas_plan)?;
@@ -396,6 +397,19 @@ pub(crate) fn load_textured_mesh_assets() -> Result<TexturedMeshAssets> {
         .context("failed to build textured mesh catalog")?;
 
     Ok(TexturedMeshAssets { catalog, atlas })
+}
+
+fn insert_fluid_materials(materials: &mut BTreeSet<TextureMaterial>) {
+    for texture in [
+        "minecraft:block/water_still",
+        "minecraft:block/water_flow",
+        "minecraft:block/lava_still",
+        "minecraft:block/lava_flow",
+    ] {
+        materials.insert(TextureMaterial::blocks(
+            ResourceLocation::parse(texture).expect("fluid texture locations are valid"),
+        ));
+    }
 }
 
 fn selected_model_refs(

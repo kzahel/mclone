@@ -74,6 +74,7 @@ impl TexturedBlockFace {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TexturedBlockModel {
     pub faces: Vec<TexturedBlockFace>,
+    pub fluid: Option<TexturedFluidModel>,
     pub occludes: bool,
     pub ambient_occlusion: bool,
     pub light_emission: u8,
@@ -82,6 +83,20 @@ pub struct TexturedBlockModel {
     pub solid_render: bool,
     pub collision_shape_full_block: bool,
     pub shade_brightness: f32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TexturedFluidKind {
+    Water,
+    Lava,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TexturedFluidModel {
+    pub kind: TexturedFluidKind,
+    pub level: u8,
+    pub still: AtlasSpriteUv,
+    pub flow: AtlasSpriteUv,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -131,12 +146,14 @@ impl TexturedMeshCatalog {
                 .iter()
                 .map(|face| TexturedBlockFace::from_baked(face, atlas))
                 .collect::<Result<Vec<_>, _>>()?;
+            let fluid = textured_fluid_model(record, atlas)?;
             let full_cube_occluder = full_cube_occluder(&faces);
             let facts = block_render_facts(record, full_cube_occluder);
             blocks.insert(
                 record.id,
                 TexturedBlockModel {
                     faces,
+                    fluid,
                     occludes: facts.occludes,
                     ambient_occlusion: baked.ambient_occlusion,
                     light_emission: facts.light_emission,
@@ -190,11 +207,19 @@ impl TexturedMeshCatalog {
             .map(|model| model.shade_brightness)
             .unwrap_or(1.0)
     }
+
+    pub(crate) fn fluid(&self, state_id: BlockStateId) -> Option<TexturedFluidModel> {
+        self.blocks.get(&state_id).and_then(|model| model.fluid)
+    }
 }
 
 #[derive(Debug)]
 pub enum TexturedMeshError {
     Asset(AssetError),
+    InvalidFluidLevel {
+        state: String,
+        level: String,
+    },
     MissingBlockStateAsset(ResourceLocation),
     MissingBlockStateVariant {
         block: ResourceLocation,
@@ -208,6 +233,9 @@ impl fmt::Display for TexturedMeshError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Asset(error) => write!(f, "{error}"),
+            Self::InvalidFluidLevel { state, level } => {
+                write!(f, "invalid fluid level `{level}` for {state}")
+            }
             Self::MissingBlockStateAsset(block) => {
                 write!(f, "missing blockstate asset for {block}")
             }
@@ -255,6 +283,78 @@ fn full_cube_occluder(faces: &[TexturedBlockFace]) -> bool {
         }
     }
     covered.len() == 6
+}
+
+fn textured_fluid_model(
+    record: &mclone_assets::BlockStateRecord,
+    atlas: &TextureAtlasPlan,
+) -> Result<Option<TexturedFluidModel>, TexturedMeshError> {
+    let Some(kind) = textured_fluid_kind(record) else {
+        return Ok(None);
+    };
+    let level = record
+        .properties
+        .get("level")
+        .map(String::as_str)
+        .unwrap_or("0");
+    let level = level
+        .parse::<u8>()
+        .ok()
+        .filter(|level| *level <= 8)
+        .ok_or_else(|| TexturedMeshError::InvalidFluidLevel {
+            state: record.canonical_key(),
+            level: level.to_owned(),
+        })?;
+    Ok(Some(TexturedFluidModel {
+        kind,
+        level,
+        still: fluid_sprite(kind, FluidSpriteRole::Still, atlas)?,
+        flow: fluid_sprite(kind, FluidSpriteRole::Flow, atlas)?,
+    }))
+}
+
+fn textured_fluid_kind(record: &mclone_assets::BlockStateRecord) -> Option<TexturedFluidKind> {
+    if record.block.namespace() != "minecraft" {
+        return None;
+    }
+    match record.block.path() {
+        "water" => Some(TexturedFluidKind::Water),
+        "lava" => Some(TexturedFluidKind::Lava),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum FluidSpriteRole {
+    Still,
+    Flow,
+}
+
+fn fluid_sprite(
+    kind: TexturedFluidKind,
+    role: FluidSpriteRole,
+    atlas: &TextureAtlasPlan,
+) -> Result<AtlasSpriteUv, TexturedMeshError> {
+    let material = TextureMaterial::blocks(fluid_sprite_location(kind, role));
+    let sprite = atlas
+        .sprite(&material)
+        .ok_or_else(|| TexturedMeshError::MissingSprite(material.clone()))?;
+    Ok(AtlasSpriteUv {
+        u0: sprite.u0,
+        v0: sprite.v0,
+        u1: sprite.u1,
+        v1: sprite.v1,
+    })
+}
+
+fn fluid_sprite_location(kind: TexturedFluidKind, role: FluidSpriteRole) -> ResourceLocation {
+    let path = match (kind, role) {
+        (TexturedFluidKind::Water, FluidSpriteRole::Still) => "minecraft:block/water_still",
+        (TexturedFluidKind::Water, FluidSpriteRole::Flow) => "minecraft:block/water_flow",
+        (TexturedFluidKind::Lava, FluidSpriteRole::Still) => "minecraft:block/lava_still",
+        (TexturedFluidKind::Lava, FluidSpriteRole::Flow) => "minecraft:block/lava_flow",
+    };
+    ResourceLocation::parse(path).expect("fluid sprite locations are valid")
 }
 
 fn face_is_full_cube_side(face: &TexturedBlockFace) -> bool {
