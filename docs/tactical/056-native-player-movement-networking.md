@@ -88,6 +88,10 @@ complexity.
   sync now chooses `PosRot`, `Pos`, `Rot`, `StatusOnly`, or no packet using the
   reference position delta, rotation delta, on-ground, and 20-call reminder
   shape; post-correction acknowledgement still forces an explicit `PosRot`.
+- 2026-06-19: Started Java-shaped dedicated movement ingestion. The native TCP
+  transport can now read multiple client command frames per connection, and the
+  dedicated server stages per-connection movement packets before flushing them
+  in order to the shared server movement state.
 
 ## Native Direction
 
@@ -106,6 +110,8 @@ Keep the first native implementation boring, reference-shaped, and permissive:
   position embedded in block action payloads
 - dedicated and integrated server paths should share the same movement state and
   validation code
+- dedicated transport keeps movement buffering at the connection boundary so
+  future persistent sessions can preserve Java-shaped packet counters
 
 Do not introduce a giant movement manager file. Keep the shape modular:
 
@@ -166,8 +172,9 @@ This slice intentionally does not yet implement, and now defers:
 
 ## Near-Term Follow-Ups
 
-1. Move dedicated transport ingestion toward per-connection movement buffering
-   that preserves Java-shaped packet counters.
+1. Add persistent dedicated sessions instead of one request/response per TCP
+   connection, then wire the connection movement tick boundary into the server
+   tick loop.
 2. Add remote-player state publication once the dedicated path has multiple
    connected clients worth visualizing.
 3. Revisit the FPS-style authority option only after the Java-shaped path is

@@ -1,10 +1,11 @@
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use mclone_net::{read_client_command_frame, write_server_update_batch};
-use mclone_protocol::PROTOCOL_VERSION;
+use mclone_net::{read_client_command_frames, write_server_update_batch};
+use mclone_protocol::{ClientCommand, MovePlayerCommand, PROTOCOL_VERSION, ServerUpdate};
 use mclone_server::IntegratedServer;
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:25565";
@@ -72,7 +73,7 @@ fn print_help() {
         "mclone-dedicated-server\n\n\
          Usage:\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--serve-once]\n\n\
-         The server accepts one native TCP request per connection. --serve-once is intended for loopback smokes and exits after the first connection."
+         The server accepts one or more native TCP request frames per connection. --serve-once is intended for loopback smokes and exits after the first connection."
     );
 }
 
@@ -118,10 +119,25 @@ fn serve_connection(
     stream: &mut (impl Read + Write),
     server: &mut IntegratedServer,
 ) -> Result<usize> {
-    let command = read_client_command_frame(stream).context("failed to read client command")?;
-    let mut updates = server
-        .try_handle_command(command)
-        .context("failed to apply client command")?;
+    let commands = read_client_command_frames(stream).context("failed to read client commands")?;
+    if commands.is_empty() {
+        bail!("connection closed without client command");
+    }
+
+    let mut connection = DedicatedConnectionState::default();
+    let mut updates = Vec::new();
+    for command in commands {
+        updates.extend(
+            connection
+                .handle_command(server, command)
+                .context("failed to apply client command")?,
+        );
+    }
+    updates.extend(
+        connection
+            .flush_movement(server)
+            .context("failed to flush movement commands")?,
+    );
     updates.extend(wait_for_server_jobs(server)?);
     server
         .save_dirty_chunks()
@@ -131,9 +147,63 @@ fn serve_connection(
     Ok(update_count)
 }
 
-fn wait_for_server_jobs(
-    server: &mut IntegratedServer,
-) -> Result<Vec<mclone_protocol::ServerUpdate>> {
+#[derive(Debug, Default)]
+struct DedicatedConnectionState {
+    pending_movement: VecDeque<MovePlayerCommand>,
+    received_move_packet_count: u32,
+    known_move_packet_count: u32,
+}
+
+impl DedicatedConnectionState {
+    fn handle_command(
+        &mut self,
+        server: &mut IntegratedServer,
+        command: ClientCommand,
+    ) -> Result<Vec<ServerUpdate>> {
+        match command {
+            ClientCommand::MovePlayer(command) => {
+                self.stage_movement(command);
+                Ok(Vec::new())
+            }
+            command => {
+                let mut updates = self.flush_movement(server)?;
+                updates.extend(server.try_handle_command(command)?);
+                Ok(updates)
+            }
+        }
+    }
+
+    fn stage_movement(&mut self, command: MovePlayerCommand) {
+        self.received_move_packet_count = self.received_move_packet_count.saturating_add(1);
+        self.pending_movement.push_back(command);
+    }
+
+    fn flush_movement(&mut self, server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
+        let mut updates = Vec::new();
+        while let Some(command) = self.pending_movement.pop_front() {
+            updates.extend(server.try_handle_command(ClientCommand::MovePlayer(command))?);
+        }
+        Ok(updates)
+    }
+
+    fn mark_tick_boundary(&mut self) {
+        self.known_move_packet_count = self.received_move_packet_count;
+    }
+
+    fn buffered_move_packet_count(&self) -> usize {
+        self.pending_movement.len()
+    }
+
+    const fn received_move_packet_count(&self) -> u32 {
+        self.received_move_packet_count
+    }
+
+    const fn known_move_packet_count(&self) -> u32 {
+        self.known_move_packet_count
+    }
+}
+
+fn wait_for_server_jobs(server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut updates = Vec::new();
 
@@ -158,9 +228,9 @@ fn wait_for_server_jobs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_core::ChunkPos;
+    use mclone_core::{ChunkPos, Vec3d};
     use mclone_net::{read_server_update_batch, write_client_command_frame};
-    use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
+    use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate, SetCarriedItemCommand};
 
     #[test]
     fn cli_defaults_to_localhost_server() {
@@ -217,5 +287,72 @@ mod tests {
                 .iter()
                 .any(|update| matches!(update, ServerUpdate::PlayerPosition(_)))
         );
+    }
+
+    #[test]
+    fn dedicated_connection_buffers_movement_until_flush_or_ordered_command() {
+        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        let mut connection = DedicatedConnectionState::default();
+
+        let updates = connection
+            .handle_command(
+                &mut server,
+                ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                    position: Vec3d::new(1.0, 64.0, 1.0),
+                    on_ground: true,
+                }),
+            )
+            .unwrap();
+
+        assert!(updates.is_empty());
+        assert_eq!(connection.buffered_move_packet_count(), 1);
+        assert_eq!(connection.received_move_packet_count(), 1);
+        assert_eq!(connection.known_move_packet_count(), 0);
+
+        connection.mark_tick_boundary();
+        assert_eq!(connection.known_move_packet_count(), 1);
+
+        let updates = connection
+            .handle_command(
+                &mut server,
+                ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot: 1 }),
+            )
+            .unwrap();
+
+        assert!(updates.is_empty());
+        assert_eq!(connection.buffered_move_packet_count(), 0);
+        assert_eq!(connection.received_move_packet_count(), 1);
+        assert_eq!(connection.known_move_packet_count(), 1);
+    }
+
+    #[test]
+    fn serve_connection_accepts_multiple_client_command_frames() {
+        let mut request = Vec::new();
+        write_client_command_frame(
+            &mut request,
+            &ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(1.0, 64.0, 1.0),
+                on_ground: true,
+            }),
+        )
+        .unwrap();
+        write_client_command_frame(
+            &mut request,
+            &ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+                y_rot_degrees: 90.0,
+                x_rot_degrees: 15.0,
+                on_ground: true,
+            }),
+        )
+        .unwrap();
+        let request_len = request.len();
+        let mut stream = std::io::Cursor::new(request);
+        let mut server = IntegratedServer::new(DEFAULT_SEED);
+
+        assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 0);
+
+        let response = stream.into_inner().split_off(request_len);
+        let updates = read_server_update_batch(&mut std::io::Cursor::new(response)).unwrap();
+        assert!(updates.is_empty());
     }
 }

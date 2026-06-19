@@ -7,8 +7,8 @@ use mclone_protocol::{ClientCommand, ServerUpdate};
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_tcp::{
     NativeTransportError, NativeTransportResult, read_client_command_frame,
-    read_server_update_batch, request_server_updates, write_client_command_frame,
-    write_server_update_batch,
+    read_client_command_frames, read_server_update_batch, request_server_updates,
+    write_client_command_frame, write_server_update_batch,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,6 +129,16 @@ mod native_tcp {
         Ok(decode_client_command(&payload)?)
     }
 
+    pub fn read_client_command_frames(
+        reader: &mut impl Read,
+    ) -> NativeTransportResult<Vec<ClientCommand>> {
+        let mut commands = Vec::new();
+        while let Some(payload) = try_read_frame(reader, "client command")? {
+            commands.push(decode_client_command(&payload)?);
+        }
+        Ok(commands)
+    }
+
     pub fn write_server_update_batch(
         writer: &mut impl Write,
         updates: &[ServerUpdate],
@@ -187,6 +197,22 @@ mod native_tcp {
         Ok(payload)
     }
 
+    fn try_read_frame(
+        reader: &mut impl Read,
+        field: &'static str,
+    ) -> NativeTransportResult<Option<Vec<u8>>> {
+        let Some(len) = try_read_u32(reader)? else {
+            return Ok(None);
+        };
+        let len = len as usize;
+        if len > MAX_FRAME_BYTES {
+            return Err(NativeTransportError::FrameTooLarge { field, len });
+        }
+        let mut payload = vec![0; len];
+        reader.read_exact(&mut payload)?;
+        Ok(Some(payload))
+    }
+
     fn checked_u32_len(field: &'static str, len: usize) -> NativeTransportResult<u32> {
         let len_u32 =
             u32::try_from(len).map_err(|_| NativeTransportError::FrameTooLarge { field, len })?;
@@ -204,6 +230,22 @@ mod native_tcp {
         let mut bytes = [0; 4];
         reader.read_exact(&mut bytes)?;
         Ok(u32::from_le_bytes(bytes))
+    }
+
+    fn try_read_u32(reader: &mut impl Read) -> std::io::Result<Option<u32>> {
+        let mut bytes = [0; 4];
+        let mut read = 0;
+        while read < bytes.len() {
+            let n = reader.read(&mut bytes[read..])?;
+            if n == 0 {
+                if read == 0 {
+                    return Ok(None);
+                }
+                return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
+            }
+            read += n;
+        }
+        Ok(Some(u32::from_le_bytes(bytes)))
     }
 }
 
@@ -254,6 +296,37 @@ mod tests {
         assert_eq!(
             read_client_command_frame(&mut std::io::Cursor::new(bytes)).unwrap(),
             command
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_command_frames_read_until_clean_eof() {
+        let commands = vec![
+            ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(-2, 4),
+                render_distance: 2,
+                chunk_tracking_radius: 2,
+            }),
+            ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(5, -7),
+                render_distance: 0,
+                chunk_tracking_radius: 1,
+            }),
+        ];
+        let mut bytes = Vec::new();
+        for command in &commands {
+            write_client_command_frame(&mut bytes, command).unwrap();
+        }
+
+        assert_eq!(
+            read_client_command_frames(&mut std::io::Cursor::new(bytes)).unwrap(),
+            commands
+        );
+        assert!(
+            read_client_command_frames(&mut std::io::Cursor::new(Vec::new()))
+                .unwrap()
+                .is_empty()
         );
     }
 
