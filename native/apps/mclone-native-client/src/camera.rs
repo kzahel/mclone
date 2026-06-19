@@ -8,7 +8,6 @@ pub(crate) const SPECTATOR_BASE_SPEED: f32 = 32.0;
 pub(crate) const SPECTATOR_MIN_SPEED: f32 = 2.0;
 pub(crate) const SPECTATOR_MAX_SPEED: f32 = 256.0;
 pub(crate) const SPECTATOR_MOUSE_SENSITIVITY: f32 = 0.0035;
-pub(crate) const SPECTATOR_PITCH_LIMIT: f32 = 1.52;
 pub(crate) const SPECTATOR_SURFACE_CLEARANCE: f32 = 8.0;
 pub(crate) const SPECTATOR_SURFACE_PITCH: f32 = -0.45;
 
@@ -61,16 +60,6 @@ impl SpectatorCamera {
     pub(crate) fn place_above_surface(&mut self, surface_y: i32) {
         self.position.y = surface_y as f32 + SPECTATOR_SURFACE_CLEARANCE;
         self.pitch = SPECTATOR_SURFACE_PITCH;
-    }
-
-    pub(crate) fn look(&mut self, yaw_delta: f32, pitch_delta: f32) {
-        if yaw_delta.is_finite() {
-            self.yaw += yaw_delta;
-        }
-        if pitch_delta.is_finite() {
-            self.pitch =
-                (self.pitch + pitch_delta).clamp(-SPECTATOR_PITCH_LIMIT, SPECTATOR_PITCH_LIMIT);
-        }
     }
 
     pub(crate) fn adjust_speed(&mut self, wheel_amount: f32) {
@@ -136,14 +125,5 @@ mod tests {
 
         assert_eq!(spectator.position.y, 101.0);
         assert_eq!(spectator.pitch, SPECTATOR_SURFACE_PITCH);
-    }
-
-    #[test]
-    fn spectator_pitch_is_clamped() {
-        let mut spectator = SpectatorCamera::spawn_for_scene(&SceneOptions::default());
-        spectator.look(0.0, 100.0);
-        assert_eq!(spectator.pitch, SPECTATOR_PITCH_LIMIT);
-        spectator.look(0.0, -200.0);
-        assert_eq!(spectator.pitch, -SPECTATOR_PITCH_LIMIT);
     }
 }

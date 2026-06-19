@@ -3,7 +3,8 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use mclone_client::{
-    ClientInteractionController, LocalPlayerController, NoClipMovementStep, PlayerInputKey,
+    ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LocalPlayerController,
+    LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
 };
 use mclone_core::Vec3d;
 use mclone_mesh::quad_face_count_from_indices;
@@ -231,10 +232,12 @@ impl ChunkApp {
         render_options: TexturedSectionRenderOptions,
         render_distance: i32,
     ) -> Self {
+        let mut player = LocalPlayerController::new();
+        player.set_pose(local_player_pose_from_spectator(&spectator));
         Self {
             runtime,
             spectator,
-            player: LocalPlayerController::new(),
+            player,
             interaction: ClientInteractionController::new(),
             render_options,
             frame_pacing: FramePacing::default(),
@@ -305,13 +308,20 @@ impl ChunkApp {
             return Ok(());
         }
 
-        if let Some(displacement) = self.player.tick_no_clip_movement(NoClipMovementStep {
-            yaw_radians: self.spectator.yaw as f64,
-            pitch_radians: self.spectator.pitch as f64,
-            speed_blocks_per_second: self.spectator.speed as f64,
-            dt_seconds: movement_dt as f64,
-        }) {
-            self.spectator.position += glam_vec3_from_vec3d(displacement);
+        let pose = self.player.pose();
+        if self
+            .player
+            .tick_no_clip_movement(NoClipMovementStep {
+                yaw_radians: pose.native_yaw_radians(),
+                pitch_radians: pose.native_pitch_radians(),
+                speed_blocks_per_second: self.spectator.speed as f64,
+                dt_seconds: movement_dt as f64,
+                descending: false,
+                sprinting: false,
+            })
+            .is_some()
+        {
+            sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
             self.update_interest_from_spectator()?;
         }
         Ok(())
@@ -435,6 +445,9 @@ impl ChunkApp {
             return;
         };
         self.spectator.place_above_surface(surface_y);
+        self.player
+            .set_pose(local_player_pose_from_spectator(&self.spectator));
+        sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
         log::info!(
             "placed spectator above loaded surface column ({world_x}, {world_z}) y={} -> eye_y={:.1}",
             surface_y,
@@ -594,10 +607,11 @@ impl ChunkApp {
     }
 
     fn handle_world_mouse_pressed(&mut self, button: MouseButton) -> Result<()> {
+        let pose = self.player.pose();
         let hit = self.interaction.pick_block(
             &self.runtime.client,
-            vec3d_from_glam(self.spectator.position),
-            vec3d_from_glam(self.spectator.forward()),
+            pose.eye_position(),
+            pose.view_vector(),
         );
         let command = match button {
             MouseButton::Left => self.interaction.debug_instant_break_command(hit),
@@ -640,6 +654,21 @@ fn vec3d_from_glam(value: glam::Vec3) -> Vec3d {
 
 fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
     glam::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
+}
+
+fn local_player_pose_from_spectator(spectator: &SpectatorCamera) -> LocalPlayerPose {
+    LocalPlayerPose::from_eye_position(
+        vec3d_from_glam(spectator.position),
+        -(spectator.yaw as f64).to_degrees(),
+        -(spectator.pitch as f64).to_degrees(),
+        LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    )
+}
+
+fn sync_spectator_from_player_pose(spectator: &mut SpectatorCamera, pose: LocalPlayerPose) {
+    spectator.position = glam_vec3_from_vec3d(pose.eye_position());
+    spectator.yaw = pose.native_yaw_radians() as f32;
+    spectator.pitch = pose.native_pitch_radians() as f32;
 }
 
 pub(crate) fn record_render_section_update_stats(
@@ -959,10 +988,11 @@ impl ApplicationHandler for ChunkApp {
                     if let Some(previous) = self.last_cursor {
                         let dx = (cursor.0 - previous.0) as f32;
                         let dy = (cursor.1 - previous.1) as f32;
-                        self.spectator.look(
-                            -dx * SPECTATOR_MOUSE_SENSITIVITY,
-                            -dy * SPECTATOR_MOUSE_SENSITIVITY,
+                        self.player.turn_native_radians(
+                            (-dx * SPECTATOR_MOUSE_SENSITIVITY) as f64,
+                            (-dy * SPECTATOR_MOUSE_SENSITIVITY) as f64,
                         );
+                        sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
                         self.schedule_next_redraw(event_loop);
                     }
                 }
@@ -1097,10 +1127,11 @@ impl ApplicationHandler for ChunkApp {
         if let DeviceEvent::MouseMotion { delta } = event {
             let dx = delta.0 as f32;
             let dy = delta.1 as f32;
-            self.spectator.look(
-                -dx * SPECTATOR_MOUSE_SENSITIVITY,
-                -dy * SPECTATOR_MOUSE_SENSITIVITY,
+            self.player.turn_native_radians(
+                (-dx * SPECTATOR_MOUSE_SENSITIVITY) as f64,
+                (-dy * SPECTATOR_MOUSE_SENSITIVITY) as f64,
             );
+            sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
             self.schedule_next_redraw(event_loop);
         }
     }
@@ -1118,7 +1149,8 @@ fn player_input_key_from_key_code(key_code: KeyCode) -> Option<PlayerInputKey> {
         KeyCode::KeyD => Some(PlayerInputKey::Right),
         KeyCode::Space => Some(PlayerInputKey::Jump),
         KeyCode::KeyX => Some(PlayerInputKey::Descend),
-        KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(PlayerInputKey::Boost),
+        KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(PlayerInputKey::Shift),
+        KeyCode::ControlLeft | KeyCode::ControlRight => Some(PlayerInputKey::Sprint),
         _ => None,
     }
 }
@@ -1171,7 +1203,11 @@ mod tests {
         );
         assert_eq!(
             player_input_key_from_key_code(KeyCode::ShiftLeft),
-            Some(PlayerInputKey::Boost)
+            Some(PlayerInputKey::Shift)
+        );
+        assert_eq!(
+            player_input_key_from_key_code(KeyCode::ControlLeft),
+            Some(PlayerInputKey::Sprint)
         );
         assert_eq!(player_input_key_from_key_code(KeyCode::KeyO), None);
     }

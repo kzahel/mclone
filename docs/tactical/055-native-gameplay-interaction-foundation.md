@@ -33,7 +33,12 @@ placement rules.
 - 2026-06-19: Added a platform-neutral local player input/controller layer in
   `mclone-client`. The native app now maps `winit` keys into Java-shaped input
   impulses and no-clip movement displacement instead of storing raw key state as
-  gameplay state.
+  gameplay state. `PlayerInput` mirrors Java `Input`; extra no-clip descend and
+  sprint controls stay outside that struct.
+- 2026-06-19: Added client-owned local player pose with Java-style position,
+  `yRot`, `xRot`, eye height, eye position, and view-vector semantics. The
+  native window app now syncs its render camera from that pose for movement,
+  look, and block picking.
 
 ## Current Native State
 
@@ -42,14 +47,17 @@ Native code already has several useful pieces:
 - `native/apps/mclone-native-client/src/app.rs`
   - owns `winit` window/input events, cursor lock, UI gating, redraw cadence,
     runtime polling, and render upload
-  - maps `WASD`, `Space`, `X`, and `Shift` into platform-neutral player input
-    keys before the client controller produces no-clip movement displacement
+  - maps `WASD`, `Space`, `Shift`, `X`, and `Ctrl` into platform-neutral player
+    input keys before the client controller produces no-clip movement
+    displacement; `Shift` feeds Java-shaped shift/sneak state while `Ctrl`
+    remains the temporary no-clip speed boost
   - left/right mouse buttons request mouse lock first, then send debug
     break/place commands while the world is active and locked
 - `native/apps/mclone-native-client/src/camera.rs`
   - owns `SpectatorCamera`, look math, speed adjustment, chunk-interest center,
     and conversion to `ChunkCamera`
-  - this is camera/app scaffolding, not a player entity or Java movement model
+  - this is now a native render-camera adapter over client-owned player pose,
+    not the gameplay movement owner
 - `native/apps/mclone-native-client/src/scene_runtime.rs`
   - owns local/remote client-server exchange, client snapshot application,
     section render dirtying, render compile queue, and helper block lookups
@@ -60,7 +68,8 @@ Native code already has several useful pieces:
 - `native/crates/mclone-client/src/lib.rs`
   - stores authoritative client chunk snapshots
   - applies section block deltas to loaded snapshots and ignores unknown chunks
-  - owns the first client interaction and local player controller modules
+  - owns the first client interaction, local player input, and local player pose
+    controller modules
 - `native/crates/mclone-protocol/src/lib.rs`
   - has chunk-view plus player-action/use-item-on client commands
   - already has `ServerUpdate::SectionBlockUpdates`

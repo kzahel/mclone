@@ -1,7 +1,9 @@
-use mclone_core::Vec3d;
+use mclone_core::{BlockPos, ChunkPos, Vec3d};
 
 pub const NO_CLIP_BOOST_MULTIPLIER: f64 = 3.0;
 pub const MOVING_SLOW_FACTOR: f32 = 0.3;
+pub const LOCAL_PLAYER_STANDING_EYE_HEIGHT: f64 = 1.62;
+pub const LOCAL_PLAYER_X_ROT_LIMIT_DEGREES: f64 = 90.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlayerInputKey {
@@ -10,8 +12,9 @@ pub enum PlayerInputKey {
     Left,
     Right,
     Jump,
+    Shift,
     Descend,
-    Boost,
+    Sprint,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -21,8 +24,9 @@ pub struct PlayerInputKeys {
     pub left: bool,
     pub right: bool,
     pub jump: bool,
+    pub shift: bool,
     pub descend: bool,
-    pub boost: bool,
+    pub sprint: bool,
 }
 
 impl PlayerInputKeys {
@@ -33,8 +37,9 @@ impl PlayerInputKeys {
             PlayerInputKey::Left => self.left = down,
             PlayerInputKey::Right => self.right = down,
             PlayerInputKey::Jump => self.jump = down,
+            PlayerInputKey::Shift => self.shift = down,
             PlayerInputKey::Descend => self.descend = down,
-            PlayerInputKey::Boost => self.boost = down,
+            PlayerInputKey::Sprint => self.sprint = down,
         }
     }
 
@@ -45,8 +50,9 @@ impl PlayerInputKeys {
             PlayerInputKey::Left => self.left,
             PlayerInputKey::Right => self.right,
             PlayerInputKey::Jump => self.jump,
+            PlayerInputKey::Shift => self.shift,
             PlayerInputKey::Descend => self.descend,
-            PlayerInputKey::Boost => self.boost,
+            PlayerInputKey::Sprint => self.sprint,
         }
     }
 
@@ -65,8 +71,6 @@ pub struct PlayerInput {
     pub right: bool,
     pub jumping: bool,
     pub shift_key_down: bool,
-    pub descending: bool,
-    pub boosting: bool,
 }
 
 impl PlayerInput {
@@ -78,9 +82,7 @@ impl PlayerInput {
         self.forward_impulse = axis(self.up, self.down);
         self.left_impulse = axis(self.left, self.right);
         self.jumping = keys.jump;
-        self.shift_key_down = keys.boost;
-        self.descending = keys.descend;
-        self.boosting = keys.boost;
+        self.shift_key_down = keys.shift;
         if moving_slowly {
             self.left_impulse *= MOVING_SLOW_FACTOR;
             self.forward_impulse *= MOVING_SLOW_FACTOR;
@@ -95,10 +97,6 @@ impl PlayerInput {
         self.forward_impulse > 1.0e-5
     }
 
-    fn vertical_axis(self) -> f64 {
-        axis(self.jumping, self.descending) as f64
-    }
-
     fn right_axis(self) -> f64 {
         -self.left_impulse as f64
     }
@@ -110,10 +108,137 @@ pub struct NoClipMovementStep {
     pub pitch_radians: f64,
     pub speed_blocks_per_second: f64,
     pub dt_seconds: f64,
+    pub descending: bool,
+    pub sprinting: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LocalPlayerPose {
+    pub position: Vec3d,
+    pub y_rot_degrees: f64,
+    pub x_rot_degrees: f64,
+    pub eye_height: f64,
+}
+
+impl Default for LocalPlayerPose {
+    fn default() -> Self {
+        Self {
+            position: Vec3d::ZERO,
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            eye_height: LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        }
+    }
+}
+
+impl LocalPlayerPose {
+    pub fn from_eye_position(
+        eye_position: Vec3d,
+        y_rot_degrees: f64,
+        x_rot_degrees: f64,
+        eye_height: f64,
+    ) -> Self {
+        let mut pose = Self {
+            position: Vec3d::new(
+                eye_position.x,
+                eye_position.y - eye_height.max(0.0),
+                eye_position.z,
+            ),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            eye_height: eye_height.max(0.0),
+        };
+        pose.set_rot(y_rot_degrees, x_rot_degrees);
+        pose
+    }
+
+    pub fn set_position(&mut self, position: Vec3d) {
+        if position.is_finite() {
+            self.position = position;
+        }
+    }
+
+    pub fn set_eye_position(&mut self, eye_position: Vec3d) {
+        self.set_position(Vec3d::new(
+            eye_position.x,
+            eye_position.y - self.eye_height,
+            eye_position.z,
+        ));
+    }
+
+    pub fn move_by(&mut self, displacement: Vec3d) {
+        self.set_position(self.position.add(displacement));
+    }
+
+    pub fn set_rot(&mut self, y_rot_degrees: f64, x_rot_degrees: f64) {
+        if y_rot_degrees.is_finite() {
+            self.y_rot_degrees = y_rot_degrees % 360.0;
+        }
+        if x_rot_degrees.is_finite() {
+            self.x_rot_degrees = x_rot_degrees % 360.0;
+        }
+    }
+
+    pub fn turn_degrees(&mut self, y_delta_degrees: f64, x_delta_degrees: f64) {
+        if y_delta_degrees.is_finite() {
+            self.y_rot_degrees = (self.y_rot_degrees + y_delta_degrees) % 360.0;
+        }
+        if x_delta_degrees.is_finite() {
+            self.x_rot_degrees = (self.x_rot_degrees + x_delta_degrees).clamp(
+                -LOCAL_PLAYER_X_ROT_LIMIT_DEGREES,
+                LOCAL_PLAYER_X_ROT_LIMIT_DEGREES,
+            );
+        }
+    }
+
+    pub fn turn_native_radians(&mut self, yaw_delta_radians: f64, pitch_delta_radians: f64) {
+        self.turn_degrees(
+            -yaw_delta_radians.to_degrees(),
+            -pitch_delta_radians.to_degrees(),
+        );
+    }
+
+    pub fn eye_position(self) -> Vec3d {
+        Vec3d::new(
+            self.position.x,
+            self.position.y + self.eye_height,
+            self.position.z,
+        )
+    }
+
+    pub fn block_position(self) -> BlockPos {
+        BlockPos::containing(self.position)
+    }
+
+    pub fn eye_block_position(self) -> BlockPos {
+        BlockPos::containing(self.eye_position())
+    }
+
+    pub fn chunk_pos(self) -> ChunkPos {
+        self.block_position().chunk_pos()
+    }
+
+    pub fn block_column(self) -> (i32, i32) {
+        let block = self.block_position();
+        (block.x, block.z)
+    }
+
+    pub fn view_vector(self) -> Vec3d {
+        view_vector_from_rot_degrees(self.x_rot_degrees, self.y_rot_degrees)
+    }
+
+    pub fn native_yaw_radians(self) -> f64 {
+        -self.y_rot_degrees.to_radians()
+    }
+
+    pub fn native_pitch_radians(self) -> f64 {
+        -self.x_rot_degrees.to_radians()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LocalPlayerController {
+    pose: LocalPlayerPose,
     keys: PlayerInputKeys,
     input: PlayerInput,
 }
@@ -129,6 +254,23 @@ impl LocalPlayerController {
 
     pub const fn input(&self) -> PlayerInput {
         self.input
+    }
+
+    pub const fn pose(&self) -> LocalPlayerPose {
+        self.pose
+    }
+
+    pub fn set_pose(&mut self, pose: LocalPlayerPose) {
+        self.pose = pose;
+    }
+
+    pub fn set_eye_position(&mut self, eye_position: Vec3d) {
+        self.pose.set_eye_position(eye_position);
+    }
+
+    pub fn turn_native_radians(&mut self, yaw_delta_radians: f64, pitch_delta_radians: f64) {
+        self.pose
+            .turn_native_radians(yaw_delta_radians, pitch_delta_radians);
     }
 
     pub fn set_key(&mut self, key: PlayerInputKey, down: bool) {
@@ -147,7 +289,14 @@ impl LocalPlayerController {
 
     pub fn tick_no_clip_movement(&mut self, step: NoClipMovementStep) -> Option<Vec3d> {
         let input = self.tick_input(false);
-        no_clip_displacement(input, step)
+        let step = NoClipMovementStep {
+            descending: self.keys.descend,
+            sprinting: self.keys.sprint,
+            ..step
+        };
+        let displacement = no_clip_displacement(input, step)?;
+        self.pose.move_by(displacement);
+        Some(displacement)
     }
 }
 
@@ -166,14 +315,18 @@ pub fn no_clip_displacement(input: PlayerInput, step: NoClipMovementStep) -> Opt
     let right = normalize_or_zero(cross(forward, Vec3d::new(0.0, 1.0, 0.0)));
     let direction = right
         .scale(input.right_axis())
-        .add(Vec3d::new(0.0, input.vertical_axis(), 0.0))
+        .add(Vec3d::new(
+            0.0,
+            axis(input.jumping, step.descending) as f64,
+            0.0,
+        ))
         .add(forward.scale(input.forward_impulse as f64));
     let direction = normalize_or_zero(direction);
     if direction == Vec3d::ZERO {
         return None;
     }
 
-    let boost = if input.boosting {
+    let boost = if step.sprinting {
         NO_CLIP_BOOST_MULTIPLIER
     } else {
         1.0
@@ -192,6 +345,19 @@ pub fn view_vector(yaw_radians: f64, pitch_radians: f64) -> Vec3d {
         pitch_sin,
         yaw_cos * pitch_cos,
     ))
+}
+
+pub fn view_vector_from_rot_degrees(x_rot_degrees: f64, y_rot_degrees: f64) -> Vec3d {
+    if !x_rot_degrees.is_finite() || !y_rot_degrees.is_finite() {
+        return Vec3d::ZERO;
+    }
+    let x_rot = x_rot_degrees.to_radians();
+    let y_rot = -y_rot_degrees.to_radians();
+    let y_cos = y_rot.cos();
+    let y_sin = y_rot.sin();
+    let x_cos = x_rot.cos();
+    let x_sin = x_rot.sin();
+    normalize_or_zero(Vec3d::new(y_sin * x_cos, -x_sin, y_cos * x_cos))
 }
 
 fn axis(positive: bool, negative: bool) -> f32 {
@@ -248,12 +414,14 @@ mod tests {
         let mut keys = PlayerInputKeys::default();
         keys.set(PlayerInputKey::Forward, true);
         keys.set(PlayerInputKey::Jump, true);
+        keys.set(PlayerInputKey::Shift, true);
         let mut input = PlayerInput::default();
 
         input.tick(keys, true);
 
         assert_eq!(input.forward_impulse, MOVING_SLOW_FACTOR);
         assert!(input.jumping);
+        assert!(input.shift_key_down);
     }
 
     #[test]
@@ -270,6 +438,8 @@ mod tests {
                 pitch_radians: 0.0,
                 speed_blocks_per_second: 10.0,
                 dt_seconds: 0.5,
+                descending: false,
+                sprinting: false,
             },
         )
         .expect("movement");
@@ -282,7 +452,6 @@ mod tests {
         let mut keys = PlayerInputKeys::default();
         keys.set(PlayerInputKey::Forward, true);
         keys.set(PlayerInputKey::Jump, true);
-        keys.set(PlayerInputKey::Boost, true);
         let mut input = PlayerInput::default();
         input.tick(keys, false);
 
@@ -293,6 +462,8 @@ mod tests {
                 pitch_radians: 0.0,
                 speed_blocks_per_second: 2.0,
                 dt_seconds: 1.0,
+                descending: false,
+                sprinting: true,
             },
         )
         .expect("movement");
@@ -315,6 +486,67 @@ mod tests {
     }
 
     #[test]
+    fn controller_applies_no_clip_only_descend_and_sprint_keys() {
+        let mut controller = LocalPlayerController::new();
+        controller.set_key(PlayerInputKey::Descend, true);
+        controller.set_key(PlayerInputKey::Sprint, true);
+
+        let displacement = controller
+            .tick_no_clip_movement(NoClipMovementStep {
+                yaw_radians: 0.0,
+                pitch_radians: 0.0,
+                speed_blocks_per_second: 2.0,
+                dt_seconds: 1.0,
+                descending: false,
+                sprinting: false,
+            })
+            .expect("movement");
+
+        assert_eq!(displacement, Vec3d::new(0.0, -6.0, 0.0));
+        assert!(!controller.input().shift_key_down);
+    }
+
+    #[test]
+    fn local_player_pose_tracks_eye_position_and_chunk_from_feet() {
+        let pose =
+            LocalPlayerPose::from_eye_position(Vec3d::new(17.5, 70.0, -0.25), 0.0, 0.0, 1.62);
+
+        assert_eq!(pose.position, Vec3d::new(17.5, 68.38, -0.25));
+        assert_eq!(pose.eye_position(), Vec3d::new(17.5, 70.0, -0.25));
+        assert_eq!(pose.block_position(), BlockPos::new(17, 68, -1));
+        assert_eq!(pose.eye_block_position(), BlockPos::new(17, 70, -1));
+        assert_eq!(pose.chunk_pos(), ChunkPos::new(1, -1));
+    }
+
+    #[test]
+    fn local_player_pose_uses_java_view_vector_signs() {
+        assert_eq!(
+            view_vector_from_rot_degrees(0.0, 0.0),
+            Vec3d::new(0.0, 0.0, 1.0)
+        );
+
+        let east = view_vector_from_rot_degrees(0.0, -90.0);
+        assert!((east.x - 1.0).abs() < 1.0e-12);
+        assert!(east.y.abs() < 1.0e-12);
+        assert!(east.z.abs() < 1.0e-12);
+
+        let down = view_vector_from_rot_degrees(90.0, 0.0);
+        assert!(down.x.abs() < 1.0e-12);
+        assert!((down.y + 1.0).abs() < 1.0e-12);
+        assert!(down.z.abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn local_player_pose_turn_clamps_x_rot_like_entity_turn() {
+        let mut pose = LocalPlayerPose::default();
+
+        pose.turn_degrees(-45.0, 180.0);
+
+        assert_eq!(pose.y_rot_degrees, -45.0);
+        assert_eq!(pose.x_rot_degrees, LOCAL_PLAYER_X_ROT_LIMIT_DEGREES);
+    }
+
+    #[test]
     fn no_clip_movement_rejects_non_finite_step_inputs() {
         let mut keys = PlayerInputKeys::default();
         keys.set(PlayerInputKey::Forward, true);
@@ -329,6 +561,8 @@ mod tests {
                     pitch_radians: 0.0,
                     speed_blocks_per_second: 1.0,
                     dt_seconds: 1.0,
+                    descending: false,
+                    sprinting: false,
                 },
             ),
             None
