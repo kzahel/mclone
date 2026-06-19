@@ -3,12 +3,17 @@
 use std::collections::BTreeMap;
 
 mod interaction;
+mod player;
 
 use mclone_core::{CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
 use mclone_protocol::{ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate};
 
 pub use interaction::{
     CREATIVE_PICK_RANGE, ClientInteractionController, DEFAULT_DEBUG_PLACE_BLOCK,
+};
+pub use player::{
+    LocalPlayerController, MOVING_SLOW_FACTOR, NO_CLIP_BOOST_MULTIPLIER, NoClipMovementStep,
+    PlayerInput, PlayerInputKey, PlayerInputKeys, no_clip_displacement, view_vector,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -2,7 +2,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use mclone_client::ClientInteractionController;
+use mclone_client::{
+    ClientInteractionController, LocalPlayerController, NoClipMovementStep, PlayerInputKey,
+};
 use mclone_core::Vec3d;
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
@@ -201,6 +203,7 @@ pub(crate) fn render_full_frame(
 struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
+    player: LocalPlayerController,
     interaction: ClientInteractionController,
     render_options: TexturedSectionRenderOptions,
     frame_pacing: FramePacing,
@@ -211,7 +214,6 @@ struct ChunkApp {
     sky: Option<SkyRenderer>,
     draw: Option<TexturedSectionDrawResources>,
     gui: Option<GuiRenderer>,
-    pressed_keys: std::collections::HashSet<KeyCode>,
     mouse_locked: bool,
     mouse_lock_requested: bool,
     last_cursor: Option<(f64, f64)>,
@@ -232,6 +234,7 @@ impl ChunkApp {
         Self {
             runtime,
             spectator,
+            player: LocalPlayerController::new(),
             interaction: ClientInteractionController::new(),
             render_options,
             frame_pacing: FramePacing::default(),
@@ -242,7 +245,6 @@ impl ChunkApp {
             sky: None,
             draw: None,
             gui: None,
-            pressed_keys: std::collections::HashSet::new(),
             mouse_locked: false,
             mouse_lock_requested: false,
             last_cursor: None,
@@ -303,15 +305,13 @@ impl ChunkApp {
             return Ok(());
         }
 
-        let right = key_axis(&self.pressed_keys, KeyCode::KeyD, KeyCode::KeyA);
-        let up = vertical_axis(&self.pressed_keys);
-        let forward = key_axis(&self.pressed_keys, KeyCode::KeyW, KeyCode::KeyS);
-        let boosted = self.pressed_keys.contains(&KeyCode::ShiftLeft)
-            || self.pressed_keys.contains(&KeyCode::ShiftRight);
-        if self
-            .spectator
-            .move_local(right, up, forward, boosted, movement_dt)
-        {
+        if let Some(displacement) = self.player.tick_no_clip_movement(NoClipMovementStep {
+            yaw_radians: self.spectator.yaw as f64,
+            pitch_radians: self.spectator.pitch as f64,
+            speed_blocks_per_second: self.spectator.speed as f64,
+            dt_seconds: movement_dt as f64,
+        }) {
+            self.spectator.position += glam_vec3_from_vec3d(displacement);
             self.update_interest_from_spectator()?;
         }
         Ok(())
@@ -411,7 +411,7 @@ impl ChunkApp {
         if should_arm_mouse_lock {
             self.mouse_lock_requested = true;
         }
-        self.pressed_keys.clear();
+        self.player.clear_keys();
         if !preserve_pointer_state {
             self.last_cursor = None;
         }
@@ -638,6 +638,10 @@ fn vec3d_from_glam(value: glam::Vec3) -> Vec3d {
     Vec3d::new(value.x as f64, value.y as f64, value.z as f64)
 }
 
+fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
+    glam::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
+}
+
 pub(crate) fn record_render_section_update_stats(
     render_stats: &mut RenderStreamStats,
     section_update: &RenderSectionCacheUpdate,
@@ -849,7 +853,7 @@ impl ApplicationHandler for ChunkApp {
                     {
                         self.mouse_lock_requested = false;
                         self.ui.open_pause();
-                        self.pressed_keys.clear();
+                        self.player.clear_keys();
                         self.last_cursor = None;
                         self.sync_mouse_lock();
                         self.schedule_next_redraw(event_loop);
@@ -889,13 +893,9 @@ impl ApplicationHandler for ChunkApp {
                         self.schedule_next_redraw(event_loop);
                         return;
                     }
-                    match event.state {
-                        ElementState::Pressed => {
-                            self.pressed_keys.insert(key_code);
-                        }
-                        ElementState::Released => {
-                            self.pressed_keys.remove(&key_code);
-                        }
+                    if let Some(input_key) = player_input_key_from_key_code(key_code) {
+                        self.player
+                            .set_key(input_key, event.state == ElementState::Pressed);
                     }
                     self.schedule_next_redraw(event_loop);
                 }
@@ -982,7 +982,7 @@ impl ApplicationHandler for ChunkApp {
             }
             WindowEvent::Focused(false) => {
                 self.mouse_lock_requested = false;
-                self.pressed_keys.clear();
+                self.player.clear_keys();
                 self.last_cursor = None;
                 self.ui.clear_input();
                 self.set_mouse_lock(false);
@@ -1110,18 +1110,17 @@ impl ApplicationHandler for ChunkApp {
     }
 }
 
-fn key_axis(
-    keys: &std::collections::HashSet<KeyCode>,
-    positive: KeyCode,
-    negative: KeyCode,
-) -> f32 {
-    let positive = keys.contains(&positive) as i32;
-    let negative = keys.contains(&negative) as i32;
-    (positive - negative) as f32
-}
-
-fn vertical_axis(keys: &std::collections::HashSet<KeyCode>) -> f32 {
-    key_axis(keys, KeyCode::Space, KeyCode::KeyX)
+fn player_input_key_from_key_code(key_code: KeyCode) -> Option<PlayerInputKey> {
+    match key_code {
+        KeyCode::KeyW => Some(PlayerInputKey::Forward),
+        KeyCode::KeyS => Some(PlayerInputKey::Backward),
+        KeyCode::KeyA => Some(PlayerInputKey::Left),
+        KeyCode::KeyD => Some(PlayerInputKey::Right),
+        KeyCode::Space => Some(PlayerInputKey::Jump),
+        KeyCode::KeyX => Some(PlayerInputKey::Descend),
+        KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(PlayerInputKey::Boost),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -1145,16 +1144,35 @@ mod tests {
     }
 
     #[test]
-    fn vertical_axis_uses_space_for_up_and_x_for_down() {
-        let mut keys = std::collections::HashSet::new();
-
-        keys.insert(KeyCode::Space);
-        assert_eq!(vertical_axis(&keys), 1.0);
-
-        keys.insert(KeyCode::KeyX);
-        assert_eq!(vertical_axis(&keys), 0.0);
-
-        keys.remove(&KeyCode::Space);
-        assert_eq!(vertical_axis(&keys), -1.0);
+    fn native_keys_map_to_platform_neutral_player_input() {
+        assert_eq!(
+            player_input_key_from_key_code(KeyCode::KeyW),
+            Some(PlayerInputKey::Forward)
+        );
+        assert_eq!(
+            player_input_key_from_key_code(KeyCode::KeyS),
+            Some(PlayerInputKey::Backward)
+        );
+        assert_eq!(
+            player_input_key_from_key_code(KeyCode::KeyA),
+            Some(PlayerInputKey::Left)
+        );
+        assert_eq!(
+            player_input_key_from_key_code(KeyCode::KeyD),
+            Some(PlayerInputKey::Right)
+        );
+        assert_eq!(
+            player_input_key_from_key_code(KeyCode::Space),
+            Some(PlayerInputKey::Jump)
+        );
+        assert_eq!(
+            player_input_key_from_key_code(KeyCode::KeyX),
+            Some(PlayerInputKey::Descend)
+        );
+        assert_eq!(
+            player_input_key_from_key_code(KeyCode::ShiftLeft),
+            Some(PlayerInputKey::Boost)
+        );
+        assert_eq!(player_input_key_from_key_code(KeyCode::KeyO), None);
     }
 }

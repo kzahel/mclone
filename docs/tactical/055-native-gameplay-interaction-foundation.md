@@ -1,6 +1,6 @@
 # 055: Native Gameplay Interaction Foundation
 
-Status: proposed parent.
+Status: in progress.
 
 ## Purpose
 
@@ -24,6 +24,17 @@ first real gameplay loop, while leaving room for survival movement, inventory,
 items, multiplayer acknowledgements, entities, block entities, and block-specific
 placement rules.
 
+## Progress
+
+- 2026-06-19: Added shared block-position/direction/hit-result primitives,
+  client-side full-cube block raycast, debug break/place protocol commands,
+  integrated-server authoritative mutation through section block deltas, native
+  mouse-click wiring, and scripted headless interaction capture.
+- 2026-06-19: Added a platform-neutral local player input/controller layer in
+  `mclone-client`. The native app now maps `winit` keys into Java-shaped input
+  impulses and no-clip movement displacement instead of storing raw key state as
+  gameplay state.
+
 ## Current Native State
 
 Native code already has several useful pieces:
@@ -31,9 +42,10 @@ Native code already has several useful pieces:
 - `native/apps/mclone-native-client/src/app.rs`
   - owns `winit` window/input events, cursor lock, UI gating, redraw cadence,
     runtime polling, and render upload
-  - maps `WASD`, `Space`, `X`, and `Shift` directly into
-    `SpectatorCamera::move_local`
-  - mouse buttons currently only request mouse lock when the world is active
+  - maps `WASD`, `Space`, `X`, and `Shift` into platform-neutral player input
+    keys before the client controller produces no-clip movement displacement
+  - left/right mouse buttons request mouse lock first, then send debug
+    break/place commands while the world is active and locked
 - `native/apps/mclone-native-client/src/camera.rs`
   - owns `SpectatorCamera`, look math, speed adjustment, chunk-interest center,
     and conversion to `ChunkCamera`
@@ -48,12 +60,14 @@ Native code already has several useful pieces:
 - `native/crates/mclone-client/src/lib.rs`
   - stores authoritative client chunk snapshots
   - applies section block deltas to loaded snapshots and ignores unknown chunks
+  - owns the first client interaction and local player controller modules
 - `native/crates/mclone-protocol/src/lib.rs`
-  - currently only has `ClientCommand::SetChunkView`
+  - has chunk-view plus player-action/use-item-on client commands
   - already has `ServerUpdate::SectionBlockUpdates`
 - `native/crates/mclone-server/src/integrated.rs`
   - routes client commands into `IntegratedServer`
-  - currently handles only chunk-view commands
+  - handles chunk-view plus debug break/place commands through scheduler-owned
+    mutation APIs
 - `native/crates/mclone-server/src/scheduler.rs`
   - already has `block_at_world` and `set_block_at_world`
   - `set_block_at_world` mutates live chunk storage, patches the published
@@ -61,9 +75,7 @@ Native code already has several useful pieces:
     section block deltas for visible chunks
   - this is the right first authoritative mutation primitive for break/place
 - `native/crates/mclone-server/src/types.rs`
-  - has server-local `WorldBlockPos`
-  - this should not remain the only world block position type once protocol and
-    client interaction need the same concept
+  - aliases `WorldBlockPos` to shared `mclone_core::BlockPos`
 - `native/crates/mclone-worldgen/src/block.rs`
   - has the terrain-MVP `RawBlockId` set and `generated_block_state_id`
   - it is not yet a full vanilla block-state/item registry

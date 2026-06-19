@@ -81,29 +81,6 @@ impl SpectatorCamera {
         self.speed = (self.speed * multiplier).clamp(SPECTATOR_MIN_SPEED, SPECTATOR_MAX_SPEED);
     }
 
-    pub(crate) fn move_local(
-        &mut self,
-        right_axis: f32,
-        up_axis: f32,
-        forward_axis: f32,
-        boosted: bool,
-        dt: f32,
-    ) -> bool {
-        if dt <= 0.0 {
-            return false;
-        }
-
-        let forward = self.forward();
-        let right = forward.cross(Vec3::Y).normalize_or_zero();
-        let direction = right * right_axis + Vec3::Y * up_axis + forward * forward_axis;
-        let Some(direction) = direction.try_normalize() else {
-            return false;
-        };
-        let boost = if boosted { 3.0 } else { 1.0 };
-        self.position += direction * self.speed * boost * dt;
-        true
-    }
-
     pub(crate) fn forward(&self) -> Vec3 {
         let (yaw_sin, yaw_cos) = self.yaw.sin_cos();
         let (pitch_sin, pitch_cos) = self.pitch.sin_cos();
