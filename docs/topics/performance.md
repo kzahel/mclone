@@ -11,17 +11,17 @@ invalidates an older recommendation, or establishes a new baseline.
 
 ## Current Baseline
 
-Current validated slice: native non-cubic model AO render parity after
-`LightTexture` render parity. The movement-frame probe remains under budget,
-cold startup lighting is no longer dominated by the sky graph drain, the dark
-foliage-top render bug is fixed, the textured chunk shader uses Java's default
-lightmap curve, and model faces now get Java-shaped mesh-side AO including
-non-cubic shape weighting.
+Current validated slice: native block render-facts parity after non-cubic model
+AO render parity. The movement-frame probe remains under budget, cold startup
+lighting is no longer dominated by the sky graph drain, the dark foliage-top
+render bug is fixed, the textured chunk shader uses Java's default lightmap
+curve, and model faces now get Java-shaped mesh-side AO including non-cubic
+shape weighting plus current-block `BlockStateBase.Cache` render facts.
 
 Latest 120 Hz release movement-frame probe was captured during that slice at:
 
 ```text
-/tmp/mclone-movement-frame-probe-release-render-compile-revisions.json
+/tmp/mclone-render-facts-movement-frame-release.json
 ```
 
 Summary:
@@ -33,29 +33,32 @@ Summary:
 | frames | `240` |
 | movement speed | `32 blocks/sec` |
 | over-budget frames | `0 / 240` |
-| p95 frame | `3.010 ms` |
-| p99 frame | `4.156 ms` |
-| max frame | `7.234 ms` |
-| max `poll_ms` | `1.453 ms` |
-| max `remesh_ms` | `0.130 ms` |
-| max `upload_ms` | `0.400 ms` |
-| max pending render chunks | `9` |
-| submitted compile sections | `107` |
-| completed compile sections | `107` |
-| stale compile sections | `0` |
-| max pending compile jobs | `1` |
-| max in-flight sections | `16` |
-| total fluid mutated blocks | `299` |
-| total snapshot updates | `5` |
-| total section block updates | `102` |
+| p95 frame | `4.128 ms` |
+| p99 frame | `5.889 ms` |
+| max frame | `8.250 ms` |
+| initial face count | `121,222` |
+| initial index count | `727,332` |
+| average headless frame | `2.887 ms` |
 
-Interpretation: the movement-shaped headless probe remains under budget, and
-the Java-shaped per-section revision slice removed stale compile output from
-the normal walking lane (`30` stale sections before, `0` after). Runtime
-polling, render-section submission/drain bookkeeping, and GPU upload remain
-comfortably below 120 Hz budget. Fast stress-orbit streaming can still stale
-active worker tasks when chunks unload before a compile finishes, but queued
-backlog is now coalesced.
+Release timedemo from the same slice:
+
+| Metric | Value |
+|---|---:|
+| frames | `240` |
+| scene build | `1,491.873 ms` |
+| section count | `1,296` |
+| face count | `405,407` |
+| index count | `2,432,442` |
+| average frame | `2.739 ms` |
+| max frame | `13.450 ms` |
+| average drawn sections | `90.167` |
+| max drawn sections | `125` |
+
+Interpretation: Java `canOcclude=false` for leaves/glass-style blocks raises
+mesh face pressure because leaves no longer cull adjacent hidden solid faces.
+The release movement-frame lane remains within 120 Hz budget, and timedemo
+stays in the existing renderer envelope. Treat the higher face count as the new
+baseline for Java-style leaf non-occlusion.
 
 For durable historical trends, use [`../performance-records.md`](../performance-records.md).
 
@@ -64,7 +67,7 @@ For durable historical trends, use [`../performance-records.md`](../performance-
 | Priority | Work | Java-shaped | Tactical | Status | Why It Matters |
 |---|---|---:|---|---|---|
 | P0 | Startup loading/progress presentation | Native policy | [`027`](../tactical/027-mclone-ui-foundation.md), [`028`](../tactical/028-headless-window-frame-unification.md), [`044`](../tactical/044-native-light-status-worker-and-disable-flag.md) | next recommended for desktop feel | Radius-5 lighting-enabled startup dropped to `1,931.110 ms`, but the desktop window path still waits for the first light-ready scene. Even with faster lighting, presenting progress or a partial scene will make regressions diagnosable instead of looking like a frozen app. |
-| P1 | Java block-state render facts and liquid lighting | Yes | [`053`](../tactical/053-native-non-cubic-ao-render-parity.md), [`lighting topic`](lighting.md) | next recommended for visual lighting parity | Stored sky/block values reach the renderer, the shader uses Java's default lightmap curve, and mesh-side AO now includes non-cubic shape weighting. AO neighbor checks still use limited terrain-MVP render facts, and liquid light sampling from `LiquidBlockRenderer` is not ported yet. |
+| P1 | Liquid renderer light sampling | Yes | [`054`](../tactical/054-native-block-render-facts-parity.md), [`lighting topic`](lighting.md) | next recommended for visual lighting parity | Stored sky/block values reach the renderer, the shader uses Java's default lightmap curve, mesh-side AO includes non-cubic shape weighting, and current terrain-MVP AO facts now follow Java `BlockStateBase.Cache` behavior. Liquid light sampling from `LiquidBlockRenderer` is still not ported. |
 | P2 | Sky neighbor skip-through propagation | Yes | [`049`](../tactical/049-native-sky-source-section-ownership.md), [`lighting topic`](lighting.md) | pending solver parity | Source-section ownership now lives in `SkyLightSectionStorage`, but native still lacks Java `SkyLightEngine.checkNeighborsAfterUpdate(...)` behavior for vertical gaps in light-storage sections. This remains important before live deltas, but it is no longer the current foliage-top visual blocker. |
 | P3 | Live light deltas and light-section dirtying | Yes | [`lighting topic`](lighting.md), [`026`](../tactical/026-lighting-pipeline.md), [`031`](../tactical/031-native-section-block-delta-updates.md) | pending larger subsystem | Section block deltas currently leave light payloads unchanged. Correct live lighting needs Java-shaped light propagation/deltas and render dirtying by changed light sections. |
 | P4 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful for stress-orbit streaming, but current radius-5 evidence no longer puts render compile cancellation ahead of startup presentation or lighting parity. |
@@ -143,6 +146,8 @@ Use these local sources when implementing or reviewing performance work:
   [`052`](../tactical/052-native-model-ao-render-parity.md)
 - Non-cubic AO render parity:
   [`053`](../tactical/053-native-non-cubic-ao-render-parity.md)
+- Block render-facts parity:
+  [`054`](../tactical/054-native-block-render-facts-parity.md)
 
 ## Tactical Index
 

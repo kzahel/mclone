@@ -61,6 +61,83 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-19 - Block Render Facts Parity
+
+Commit reported by native benchmark JSON: `1cdc9ed`.
+
+Note: `git_dirty=true` because this was captured while implementing tactical
+`054` after `1cdc9ed`. Treat the result as the measured state for tactical
+`054`, not as the clean historical state of `1cdc9ed`.
+
+Radius-5 lighting-enabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 5 --steps 1 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --enable-lighting
+```
+
+Summary:
+
+| Metric | Value |
+|---|---:|
+| total elapsed | `1,947.392 ms` |
+| light-status compute | `456.666 ms` |
+| `LevelLightEngine.run_all_updates` | `403.441 ms` |
+| block graph drain | `30.506 ms` |
+| sky graph drain | `372.905 ms` |
+| block processed nodes | `52,348` |
+| sky processed nodes | `794,963` |
+| run-update iterations | `52` |
+
+Release movement-frame command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --movement-frame-probe --frame-budget-frames 240 --target-hz 120 --path-radius 4
+```
+
+Movement-frame probe, mode `movement_walk`, target `120 Hz`, `240` frames,
+speed `32 blocks/sec`:
+
+| Metric | Value |
+|---|---:|
+| over-budget frames | `0 / 240` |
+| p95 frame | `4.128 ms` |
+| p99 frame | `5.889 ms` |
+| max frame | `8.250 ms` |
+| initial face count | `121,222` |
+| initial index count | `727,332` |
+| average headless frame | `2.887 ms` |
+
+Release timedemo command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --timedemo --timedemo-frames 240
+```
+
+Timedemo, seed `12345`, render distance `2`, loaded render distance `4`,
+`240` frames:
+
+| Metric | Value |
+|---|---:|
+| scene build | `1,491.873 ms` |
+| section count | `1,296` |
+| face count | `405,407` |
+| index count | `2,432,442` |
+| visibility graph total | `19.404 ms` |
+| render setup | `34.773 ms` |
+| average frame | `2.739 ms` |
+| max frame | `13.450 ms` |
+| average drawn sections | `90.167` |
+| max drawn sections | `125` |
+| average drawn indices | `720,072.250` |
+| max drawn indices | `986,070` |
+
+Observation: moving AO/culling facts to Java `BlockStateBase.Cache` semantics
+does not affect the server light graph counters. It does intentionally raise
+render face pressure because full-cube leaves no longer act like opaque face
+cullers, but the release movement-frame probe remains within the 120 Hz budget
+and timedemo remains in the existing renderer envelope. This is the new render
+baseline for Java-style leaf non-occlusion.
+
 ### 2026-06-19 - Leaf Sky Render Parity
 
 Commit reported by native benchmark JSON: `451dedd`.

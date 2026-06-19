@@ -105,6 +105,12 @@ Landed pieces:
   sampling, Java `calculateShape(...)` flags, non-cubic `SizeInfo` weighting,
   per-vertex brightness, packed-light blending, model `ambientocclusion`
   metadata, and flat fallback for non-AO cases.
+- Textured mesh catalog render facts are now split into
+  `mclone-mesh/src/render_facts.rs` and follow Java
+  `BlockStateBase.Cache` semantics for the current terrain-MVP block set:
+  `canOcclude`, `solidRender`, `getLightBlock`, `isViewBlocking`,
+  `isCollisionShapeFullBlock`, shade brightness, and light emission. Full-cube
+  leaves/glass-style blocks no longer act as opaque culling neighbors.
 
 Known gaps:
 
@@ -133,9 +139,10 @@ Known gaps:
   clear-weather sky-darken curve, but does not yet allocate the exact 16x16 GPU
   lightmap texture or port torch flicker, gamma, night vision, conduit power,
   boss-world darkening, rain, or thunder effects.
-- Model AO now has Java's non-cubic shape-weight branch, but native still
-  derives only limited terrain-MVP render facts for AO neighbor checks rather
-  than full vanilla `BlockState` render/light facts.
+- Model AO now has Java's non-cubic shape-weight branch and current-block
+  Java-shaped render facts, but native still lacks a full generated vanilla
+  block-state facts source and exact voxel-shape tables for future block
+  families.
 - Liquid light sampling is not ported.
 
 ## Latest Visual Probe
@@ -292,6 +299,33 @@ enabled, and shader fullbright disabled produced:
 It was inspected and rendered nonblank terrain with `166` cached sections and
 `26` drawn sections. The scene remains visually stable after switching AO to
 the shape-aware path.
+
+On 2026-06-19, after moving AO/culling facts into Java
+`BlockStateBase.Cache`-style `mclone-mesh/src/render_facts.rs`, a native
+daylight full-frame capture for seed `12345`, chunk `(0,0)`, render distance
+`2`, `960x540`, server lighting enabled, and shader fullbright disabled
+produced:
+
+```text
+/tmp/mclone-render-facts-day.png
+```
+
+It was inspected and rendered nonblank terrain with `166` cached sections and
+`26` drawn sections. Full-cube leaf models now use Java `noOcclusion()`
+behavior for culling, so render face pressure rises, but the scene remains
+stable and canopy tops remain visibly lit.
+
+Performance from the same slice:
+
+| Metric | Value |
+|---|---:|
+| radius-5 lighting-enabled total | `1,947.392 ms` |
+| radius-5 light-status compute | `456.666 ms` |
+| radius-5 `LevelLightEngine.run_all_updates` | `403.441 ms` |
+| release movement-frame over budget | `0 / 240` |
+| release movement-frame p95 / p99 / max | `4.128 / 5.889 / 8.250 ms` |
+| release timedemo average / max frame | `2.739 / 13.450 ms` |
+| release timedemo face count | `405,407` |
 
 On 2026-06-19, after moving initial lighting to the retained worker-owned light
 world, a native full-frame capture for seed `12345`, chunk `(0,0)`, render
@@ -894,7 +928,7 @@ Scope:
 
 ### P8: Rendering Parity
 
-Status: active, first non-cubic AO pass complete.
+Status: active, first terrain-MVP block render facts pass complete.
 
 Improve visual parity after stored light is correct.
 
@@ -906,10 +940,12 @@ Scope:
   decide whether exact dynamic 16x16 GPU texture allocation is needed or whether
   the procedural shader curve remains sufficient.
 - First Java `ModelBlockRenderer.AmbientOcclusionFace` sampling/blending is in
-  `mclone-mesh`, including `calculateShape(...)` and the non-cubic `SizeInfo`
-  weighting branch for partial boxes.
-- Replace terrain-MVP AO render facts with fuller Java `BlockState` render and
-  light facts where visual parity needs them.
+  `mclone-mesh`, including `calculateShape(...)`, the non-cubic `SizeInfo`
+  weighting branch for partial boxes, and current terrain-MVP
+  `BlockStateBase.Cache`-style render facts.
+- Replace the hand-maintained current-block render-facts bridge with full
+  generated vanilla block-state facts when the native registry grows beyond the
+  terrain-MVP surface.
 - Port liquid light sampling from `LiquidBlockRenderer`.
 - Keep lightmap, model-face AO, and mesh data plumbing split into separate
   modules instead of growing `mclone-mesh/src/builder.rs` into a renderer
@@ -940,6 +976,7 @@ Primary native lighting docs:
 - [`../tactical/051-native-light-texture-render-parity.md`](../tactical/051-native-light-texture-render-parity.md)
 - [`../tactical/052-native-model-ao-render-parity.md`](../tactical/052-native-model-ao-render-parity.md)
 - [`../tactical/053-native-non-cubic-ao-render-parity.md`](../tactical/053-native-non-cubic-ao-render-parity.md)
+- [`../tactical/054-native-block-render-facts-parity.md`](../tactical/054-native-block-render-facts-parity.md)
 
 Legacy/reference-only lighting docs:
 

@@ -4,6 +4,7 @@ mod ambient_occlusion;
 mod builder;
 mod catalog;
 mod data;
+mod render_facts;
 mod visibility;
 
 use mclone_core::BlockStateId;
@@ -402,6 +403,94 @@ mod tests {
         TexturedMeshCatalog::from_assets(&registry, &index, &library, &atlas).unwrap()
     }
 
+    fn stone_and_leaves_textured_catalog() -> TexturedMeshCatalog {
+        let mut registry = BlockStateRegistry::new();
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(1),
+                ResourceLocation::parse("minecraft:stone").unwrap(),
+                [] as [(&str, &str); 0],
+            ))
+            .unwrap();
+        registry
+            .register(BlockStateRecord::new(
+                BlockStateId(2),
+                ResourceLocation::parse("minecraft:oak_leaves").unwrap(),
+                [] as [(&str, &str); 0],
+            ))
+            .unwrap();
+        let mut source = MemoryAssetSource::new();
+        source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/stone.json"),
+            r#"{"variants":{"":{"model":"minecraft:block/stone"}}}"#,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/oak_leaves.json"),
+            r#"{"variants":{"":{"model":"minecraft:block/oak_leaves"}}}"#,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/block.json"),
+            "{}",
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/cube.json"),
+            r##"{
+              "parent":"minecraft:block/block",
+              "elements":[{
+                "from":[0,0,0],
+                "to":[16,16,16],
+                "faces":{
+                  "down":{"texture":"#down","cullface":"down"},
+                  "up":{"texture":"#up","cullface":"up"},
+                  "north":{"texture":"#north","cullface":"north"},
+                  "south":{"texture":"#south","cullface":"south"},
+                  "west":{"texture":"#west","cullface":"west"},
+                  "east":{"texture":"#east","cullface":"east"}
+                }
+              }]
+            }"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/cube_all.json"),
+            r##"{
+              "parent":"minecraft:block/cube",
+              "textures":{
+                "particle":"#all",
+                "down":"#all",
+                "up":"#all",
+                "north":"#all",
+                "east":"#all",
+                "south":"#all",
+                "west":"#all"
+              }
+            }"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/stone.json"),
+            r##"{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/stone"}}"##,
+        );
+        source.insert_text(
+            AssetPath::new("assets/minecraft/models/block/oak_leaves.json"),
+            r##"{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/stone"}}"##,
+        );
+        source.insert(
+            AssetPath::new("assets/minecraft/textures/block/stone.png"),
+            png_header(16, 16),
+        );
+
+        let index = BlockStateAssetIndex::load_namespace(&source, "minecraft").unwrap();
+        let library = BlockModelLibrary::load_for_blockstates(&source, &index).unwrap();
+        let materials = library
+            .collect_materials_for_models(
+                index
+                    .assets()
+                    .flat_map(|asset| asset.model_refs.iter().cloned()),
+            )
+            .unwrap();
+        let atlas = TextureAtlasPlan::build(&source, materials).unwrap();
+        TexturedMeshCatalog::from_assets(&registry, &index, &library, &atlas).unwrap()
+    }
+
     fn partial_and_stone_textured_catalog() -> TexturedMeshCatalog {
         let mut registry = BlockStateRegistry::new();
         registry
@@ -514,6 +603,24 @@ mod tests {
         assert!(mesh.vertices.iter().all(
             |vertex| (0.0..=1.0).contains(&vertex.uv[0]) && (0.0..=1.0).contains(&vertex.uv[1])
         ));
+    }
+
+    #[test]
+    fn catalog_applies_java_render_facts_to_full_cube_leaves() {
+        let catalog = stone_and_leaves_textured_catalog();
+        let stone = catalog.get(BlockStateId(1)).unwrap();
+        let leaves = catalog.get(BlockStateId(2)).unwrap();
+
+        assert!(stone.occludes);
+        assert_eq!(stone.light_block, 15);
+        assert!(stone.view_blocking);
+        assert!(stone.solid_render);
+
+        assert!(!leaves.occludes);
+        assert_eq!(leaves.light_block, 1);
+        assert!(!leaves.view_blocking);
+        assert!(!leaves.solid_render);
+        assert!(leaves.collision_shape_full_block);
     }
 
     #[test]
