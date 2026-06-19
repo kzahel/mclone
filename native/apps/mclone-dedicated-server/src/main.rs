@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn serve_connection_returns_chunk_snapshot_update() {
+    fn serve_connection_returns_chunk_snapshot_and_spawn_updates() {
         let mut request = Vec::new();
         write_client_command_frame(
             &mut request,
@@ -202,11 +202,20 @@ mod tests {
         let mut stream = std::io::Cursor::new(request);
         let mut server = IntegratedServer::new(DEFAULT_SEED);
 
-        assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 1);
+        assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 2);
 
         let response = stream.into_inner().split_off(request_len);
         let updates = read_server_update_batch(&mut std::io::Cursor::new(response)).unwrap();
-        assert_eq!(updates.len(), 1);
-        assert!(matches!(updates[0], ServerUpdate::ChunkSnapshot(_)));
+        assert_eq!(updates.len(), 2);
+        assert!(
+            updates
+                .iter()
+                .any(|update| matches!(update, ServerUpdate::ChunkSnapshot(_)))
+        );
+        assert!(
+            updates
+                .iter()
+                .any(|update| matches!(update, ServerUpdate::PlayerPosition(_)))
+        );
     }
 }

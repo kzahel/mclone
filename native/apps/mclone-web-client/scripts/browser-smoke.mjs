@@ -145,7 +145,7 @@ function assertSmokeResult(result, pageErrors) {
   }
   if (
     result.wasm.report.commandCount !== 2
-    || result.wasm.report.updateCount !== 3
+    || result.wasm.report.updateCount !== 4
     || !result.wasm.report.protocolCodecRoundtrip
   ) {
     throw new Error(`unexpected runtime message counts:\n${JSON.stringify(result.wasm.report, null, 2)}`);

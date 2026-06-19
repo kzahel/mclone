@@ -842,7 +842,15 @@ impl ApplicationHandler for ChunkApp {
                     return;
                 }
             };
-        self.place_spectator_above_loaded_surface();
+        match self.apply_pending_player_position_updates() {
+            Ok(true) => {}
+            Ok(false) => self.place_spectator_above_loaded_surface(),
+            Err(err) => {
+                log::error!("failed to apply initial server player position: {err:#}");
+                event_loop.exit();
+                return;
+            }
+        }
         log::info!(
             "initial light-ready chunks loaded in {} polls poll_ms={:.3} elapsed_ms={:.3} loaded={}",
             initial_poll_count,

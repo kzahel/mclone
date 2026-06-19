@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use mclone_client::{ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT};
 use mclone_core::{HitResultType, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
-use mclone_protocol::{ClientCommand, MovePlayerCommand};
+use mclone_protocol::{AcceptTeleportCommand, ClientCommand, MovePlayerCommand};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
     TexturedSectionUploadReport,
@@ -69,6 +69,7 @@ pub(crate) fn run_headless_screenshot(
 ) -> Result<HeadlessScreenshotReport> {
     let mut runtime = WindowSceneRuntime::new(&options.scene)?;
     poll_window_runtime_until_idle(&mut runtime)?;
+    let initial_player_position = ack_pending_player_position_updates(&mut runtime)?;
     if let Some(day_time) = options.scene.day_time_override {
         runtime.force_day_time(day_time);
     }
@@ -78,7 +79,7 @@ pub(crate) fn run_headless_screenshot(
         spectator.place_above_surface(surface_y);
     }
     if options.scripted_interaction {
-        apply_scripted_interaction(&mut runtime, &mut spectator)?;
+        apply_scripted_interaction(&mut runtime, &mut spectator, initial_player_position)?;
     }
     let section_update = runtime.sync_all_render_sections(spectator.position)?;
     let sections = runtime.cached_sections();
@@ -183,9 +184,23 @@ pub(crate) fn run_headless_screenshot(
     })
 }
 
+fn ack_pending_player_position_updates(runtime: &mut WindowSceneRuntime) -> Result<Option<Vec3d>> {
+    let mut last_position = None;
+    for update in runtime.drain_player_position_updates() {
+        last_position = Some(update.position);
+        runtime
+            .send_gameplay_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                id: update.teleport_id,
+            }))
+            .context("failed to acknowledge initial player position")?;
+    }
+    Ok(last_position)
+}
+
 fn apply_scripted_interaction(
     runtime: &mut WindowSceneRuntime,
     spectator: &mut SpectatorCamera,
+    initial_player_position: Option<Vec3d>,
 ) -> Result<()> {
     let (base_x, base_z) = spectator.block_column();
     let target_x = base_x;
@@ -203,12 +218,11 @@ fn apply_scripted_interaction(
     );
     let player_feet_position =
         eye_position.add(Vec3d::new(0.0, -LOCAL_PLAYER_STANDING_EYE_HEIGHT, 0.0));
-    runtime.send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-        position: player_feet_position,
-        y_rot_degrees: 0.0,
-        x_rot_degrees: 90.0,
-        on_ground: false,
-    }))?;
+    sync_scripted_player_position(
+        runtime,
+        initial_player_position.unwrap_or(player_feet_position),
+        player_feet_position,
+    )?;
     let hit = interaction.pick_block(&runtime.client, eye_position, Vec3d::new(0.0, -1.0, 0.0));
     if hit.hit_type() != HitResultType::Block {
         bail!("scripted interaction ray missed target column");
@@ -234,6 +248,37 @@ fn apply_scripted_interaction(
     );
     spectator.yaw = 0.0;
     spectator.pitch = -0.7;
+    Ok(())
+}
+
+fn sync_scripted_player_position(
+    runtime: &mut WindowSceneRuntime,
+    mut current: Vec3d,
+    target: Vec3d,
+) -> Result<()> {
+    for _ in 0..64 {
+        let delta = target.subtract(current);
+        if delta.length_sqr() <= 64.0 {
+            send_scripted_player_move(runtime, target)?;
+            return Ok(());
+        }
+        let length = delta.length_sqr().sqrt();
+        current = current.add(delta.scale(8.0 / length));
+        send_scripted_player_move(runtime, current)?;
+        runtime.poll()?;
+    }
+    bail!("timed out moving scripted player to interaction target");
+}
+
+fn send_scripted_player_move(runtime: &mut WindowSceneRuntime, position: Vec3d) -> Result<()> {
+    runtime
+        .send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            position,
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 90.0,
+            on_ground: false,
+        }))
+        .context("failed to sync scripted player position")?;
     Ok(())
 }
 

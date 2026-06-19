@@ -137,6 +137,26 @@ impl ServerPlayerState {
         }
     }
 
+    pub(crate) fn initial_position_update(
+        &mut self,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
+        tick: u64,
+    ) -> PlayerPositionUpdate {
+        self.position = Vec3d::new(
+            clamp_horizontal(position.x),
+            clamp_vertical(position.y),
+            clamp_horizontal(position.z),
+        );
+        self.y_rot_degrees = wrap_degrees(y_rot_degrees);
+        self.x_rot_degrees = wrap_degrees(x_rot_degrees);
+        self.on_ground = false;
+        self.first_good_position = self.position;
+        self.last_good_position = self.position;
+        self.correction_update(tick)
+    }
+
     pub(crate) fn resend_pending_correction_update(
         &mut self,
         tick: u64,
@@ -168,6 +188,10 @@ impl ServerPlayerState {
         self.first_good_position = self.position;
         self.last_good_position = self.position;
         self.known_move_packet_count = self.received_move_packet_count;
+    }
+
+    pub(crate) const fn needs_initial_position_sync(self) -> bool {
+        !self.has_accepted_position && self.awaiting_teleport.is_none()
     }
 
     fn next_teleport_id(&mut self) -> u32 {

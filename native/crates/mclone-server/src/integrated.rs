@@ -18,6 +18,7 @@ use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
 use crate::placement::DebugBlockItem;
 use crate::player::{MovePlayerApplyResult, ServerPlayerState};
+use crate::spawn::find_safe_surface_spawn;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
     ChunkScheduler, ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreResult, FluidKind,
@@ -33,6 +34,7 @@ pub struct IntegratedServer {
     simulation_tick: u64,
     day_time: u64,
     day_time_frozen: bool,
+    initial_spawn_center: Option<ChunkPos>,
     player: ServerPlayerState,
     inventory: ServerInventory,
 }
@@ -53,6 +55,7 @@ impl IntegratedServer {
             simulation_tick: 0,
             day_time: INITIAL_DAY_TIME,
             day_time_frozen: false,
+            initial_spawn_center: None,
             player: ServerPlayerState::default(),
             inventory: ServerInventory::default(),
         }
@@ -292,6 +295,9 @@ impl IntegratedServer {
     }
 
     fn set_chunk_view(&mut self, view: ChunkView) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if self.initial_spawn_center.is_none() && self.player.needs_initial_position_sync() {
+            self.initial_spawn_center = Some(view.center);
+        }
         let events = self.scheduler.apply_interest(view)?;
         Ok(self.apply_scheduler_events(events))
     }
@@ -393,7 +399,22 @@ impl IntegratedServer {
                 }
             }
         }
+        if let Some(update) = self.initial_spawn_update() {
+            updates.push(ServerUpdate::PlayerPosition(update));
+        }
         updates
+    }
+
+    fn initial_spawn_update(&mut self) -> Option<mclone_protocol::PlayerPositionUpdate> {
+        if !self.player.needs_initial_position_sync() {
+            return None;
+        }
+        let center = self.initial_spawn_center?;
+        let position = find_safe_surface_spawn(center, |pos| self.scheduler.block_at_world(pos))?;
+        Some(
+            self.player
+                .initial_position_update(position, 0.0, 0.0, self.simulation_tick),
+        )
     }
 }
 
@@ -428,7 +449,7 @@ mod tests {
     use super::*;
     use mclone_core::{BlockHitResult, BlockStateId, Direction, Vec3d};
     use mclone_protocol::{AcceptTeleportCommand, PlayerPositionRelativeFlags, ServerUpdate};
-    use mclone_worldgen::block::{DIRT, GRASS, SNOW, STONE};
+    use mclone_worldgen::block::{DIRT, GRASS, SNOW, STONE, has_fluid, material_blocks_motion};
 
     fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
         report
@@ -444,15 +465,17 @@ mod tests {
 
     fn load_center_chunk(server: &mut IntegratedServer) {
         server.set_lighting_enabled(false);
-        server
+        let updates = server
             .try_handle_command(ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(0, 0),
                 render_distance: 0,
                 chunk_tracking_radius: 0,
             }))
             .expect("set chunk view");
+        accept_player_position_updates(server, &updates);
         for _ in 0..60_000 {
-            server.try_poll().expect("poll");
+            let updates = server.try_poll().expect("poll");
+            accept_player_position_updates(server, &updates);
             if server.pending_job_count() == 0 {
                 return;
             }
@@ -463,7 +486,39 @@ mod tests {
         panic!("timed out loading center chunk");
     }
 
+    fn accept_player_position_updates(server: &mut IntegratedServer, updates: &[ServerUpdate]) {
+        for update in updates {
+            let ServerUpdate::PlayerPosition(update) = update else {
+                continue;
+            };
+            let ack_updates = server
+                .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                    id: update.teleport_id,
+                }))
+                .expect("accept initial player position");
+            assert!(ack_updates.is_empty());
+        }
+    }
+
     fn sync_player(server: &mut IntegratedServer, position: Vec3d) {
+        let mut current = server.player.position();
+        for _ in 0..64 {
+            let delta = position.subtract(current);
+            if delta.length_sqr() <= 64.0 {
+                send_player_move(server, position);
+                return;
+            }
+            let length = delta.length_sqr().sqrt();
+            current = current.add(delta.scale(8.0 / length));
+            send_player_move(server, current);
+            server
+                .try_simulation_tick_report()
+                .expect("movement helper tick");
+        }
+        panic!("timed out walking test player to {position:?}");
+    }
+
+    fn send_player_move(server: &mut IntegratedServer, position: Vec3d) {
         let updates = server
             .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
                 position,
@@ -510,6 +565,90 @@ mod tests {
             assert_eq!(server.day_time(), 23000);
             assert_eq!(last_time_update(&report), 23000);
         }
+    }
+
+    #[test]
+    fn first_chunk_view_sends_safe_surface_spawn_position() {
+        let mut server = IntegratedServer::new(12345);
+        server.set_lighting_enabled(false);
+        let updates = server
+            .try_handle_command(ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }))
+            .expect("set chunk view");
+        assert!(
+            updates
+                .iter()
+                .all(|update| !matches!(update, ServerUpdate::PlayerPosition(_)))
+        );
+
+        let mut spawn = None;
+        for _ in 0..60_000 {
+            let updates = server.try_poll().expect("poll");
+            spawn = spawn.or_else(|| {
+                updates.iter().find_map(|update| match update {
+                    ServerUpdate::PlayerPosition(update) => Some(*update),
+                    _ => None,
+                })
+            });
+            if spawn.is_some() {
+                break;
+            }
+            if server.pending_job_count() > 0 && server.pending_publication_count() == 0 {
+                server.wait_for_worldgen_completion(Duration::from_secs(1));
+            }
+        }
+        let spawn = spawn.expect("initial spawn position update");
+
+        assert_eq!(spawn.relative, PlayerPositionRelativeFlags::ABSOLUTE);
+        assert_eq!(spawn.teleport_id, 1);
+        assert_eq!(spawn.y_rot_degrees, 0.0);
+        assert_eq!(spawn.x_rot_degrees, 0.0);
+        assert_eq!(spawn.position.x - spawn.position.x.floor(), 0.5);
+        assert_eq!(spawn.position.z - spawn.position.z.floor(), 0.5);
+
+        let feet = BlockPos::new(
+            spawn.position.x.floor() as i32,
+            spawn.position.y as i32,
+            spawn.position.z.floor() as i32,
+        );
+        let floor = feet.below();
+        let floor_block = server
+            .scheduler()
+            .block_at_world(floor)
+            .expect("spawn floor block");
+        let feet_block = server
+            .scheduler()
+            .block_at_world(feet)
+            .expect("spawn feet block");
+        let head_block = server
+            .scheduler()
+            .block_at_world(feet.offset(0, 1, 0))
+            .expect("spawn head block");
+        assert!(material_blocks_motion(floor_block));
+        assert!(!has_fluid(floor_block));
+        assert!(!material_blocks_motion(feet_block));
+        assert!(!has_fluid(feet_block));
+        assert!(!material_blocks_motion(head_block));
+        assert!(!has_fluid(head_block));
+
+        assert_eq!(
+            server
+                .player
+                .awaiting_teleport()
+                .map(|awaiting| awaiting.id),
+            Some(spawn.teleport_id)
+        );
+        let updates = server
+            .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                id: spawn.teleport_id,
+            }))
+            .expect("accept spawn");
+        assert!(updates.is_empty());
+        assert_eq!(server.player.awaiting_teleport(), None);
+        assert_eq!(server.player.position(), spawn.position);
     }
 
     #[test]

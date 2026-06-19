@@ -19,6 +19,7 @@ mod player;
 mod scheduler;
 #[cfg(test)]
 mod sky_light_bridge;
+mod spawn;
 mod timing;
 mod types;
 mod worldgen_mailbox;
@@ -67,7 +68,7 @@ use mclone_core::{
 #[cfg(test)]
 use mclone_light::LightLayer;
 #[cfg(test)]
-use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
+use mclone_protocol::{AcceptTeleportCommand, ChunkView, ClientCommand, ServerUpdate};
 #[cfg(test)]
 use mclone_worldgen::block::{LAVA, WATER, generated_block_state_id};
 #[cfg(test)]
@@ -684,6 +685,7 @@ mod tests {
     ) -> Vec<ServerUpdate> {
         let mut updates = server.handle_command(command);
         updates.extend(poll_server_until_idle(server));
+        accept_and_remove_player_position_updates(server, &mut updates);
         updates
     }
 
@@ -693,7 +695,38 @@ mod tests {
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let mut updates = server.try_handle_command(command)?;
         updates.extend(try_poll_server_until_idle(server)?);
+        try_accept_and_remove_player_position_updates(server, &mut updates)?;
         Ok(updates)
+    }
+
+    fn accept_and_remove_player_position_updates(
+        server: &mut IntegratedServer,
+        updates: &mut Vec<ServerUpdate>,
+    ) {
+        try_accept_and_remove_player_position_updates(server, updates)
+            .expect("failed to accept player position updates");
+    }
+
+    fn try_accept_and_remove_player_position_updates(
+        server: &mut IntegratedServer,
+        updates: &mut Vec<ServerUpdate>,
+    ) -> ChunkStoreResult<()> {
+        let mut index = 0;
+        while index < updates.len() {
+            let teleport_id = match &updates[index] {
+                ServerUpdate::PlayerPosition(update) => update.teleport_id,
+                _ => {
+                    index += 1;
+                    continue;
+                }
+            };
+            let ack_updates = server.try_handle_command(ClientCommand::AcceptTeleport(
+                AcceptTeleportCommand { id: teleport_id },
+            ))?;
+            assert!(ack_updates.is_empty());
+            updates.remove(index);
+        }
+        Ok(())
     }
 
     fn poll_server_until_idle(server: &mut IntegratedServer) -> Vec<ServerUpdate> {

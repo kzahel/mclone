@@ -76,6 +76,10 @@ complexity.
   movement packet arrives while a correction remains unacked for more than 20
   simulation ticks, the server reissues the correction with a fresh teleport id;
   exactly 20 ticks is still below the resend threshold.
+- 2026-06-19: Added initial server-issued spawn position sync. The integrated
+  server chooses a safe surface-ish spawn near the first requested chunk view,
+  sends it as an absolute player-position update, and the native client applies
+  and acknowledges it before normal movement sync.
 
 ## Native Direction
 
@@ -140,6 +144,8 @@ Implement the Java packet/state skeleton without full correction yet:
   clears the awaiting correction only after the matching teleport ack
 - server resends stale pending corrections on subsequent movement packets after
   Java's `> 20` tick threshold
+- server sends the first spawn position instead of bootstrapping from the first
+  movement packet
 
 This slice intentionally does not yet implement, and now defers:
 
@@ -151,15 +157,13 @@ This slice intentionally does not yet implement, and now defers:
 
 ## Near-Term Follow-Ups
 
-1. Add a real spawn/login position sync so the server no longer relies on the
-   first movement packet to bootstrap player position.
-2. Make the native client choose `Pos`, `Rot`, `PosRot`, or `StatusOnly` based
+1. Make the native client choose `Pos`, `Rot`, `PosRot`, or `StatusOnly` based
    on changed fields instead of always sending `PosRot`.
-3. Move dedicated transport ingestion toward per-connection movement buffering
+2. Move dedicated transport ingestion toward per-connection movement buffering
    that preserves Java-shaped packet counters.
-4. Add remote-player state publication once the dedicated path has multiple
+3. Add remote-player state publication once the dedicated path has multiple
    connected clients worth visualizing.
-5. Revisit the FPS-style authority option only after the Java-shaped path is
+4. Revisit the FPS-style authority option only after the Java-shaped path is
    usable and measured.
 
 ## Deferred Authority Hardening
