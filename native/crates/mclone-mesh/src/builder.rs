@@ -139,24 +139,49 @@ impl<'a> TexturedChunkMeshInput<'a> {
             return FULL_BRIGHT;
         }
 
+        let index = chunk_section_index(local_x, local_section_block_coord(y), local_z);
         let section_y = block_to_section_coord(y);
-        let Some(section) = self
-            .light_sections
+        let sky = self.sky_light_at(section_y, index);
+        let block = self.block_light_at(section_y, index);
+        pack_light(block, sky)
+    }
+
+    fn block_light_at(&self, section_y: i32, index: usize) -> u8 {
+        self.light_sections
             .iter()
             .find(|section| section.section_y == section_y)
-        else {
-            return pack_light(0, 0);
-        };
-        let index = chunk_section_index(local_x, local_section_block_coord(y), local_z);
-        let sky = section
-            .sky
-            .as_deref()
-            .map_or(0, |layer| data_layer_value(layer, index));
-        let block = section
-            .block
-            .as_deref()
-            .map_or(0, |layer| data_layer_value(layer, index));
-        pack_light(block, sky)
+            .and_then(|section| section.block.as_deref())
+            .map_or(0, |layer| data_layer_value(layer, index))
+    }
+
+    fn sky_light_at(&self, section_y: i32, index: usize) -> u8 {
+        let mut next_sky_layer = None;
+        for section in self.light_sections {
+            if section.section_y < section_y {
+                continue;
+            }
+            let Some(layer) = section.sky.as_deref() else {
+                continue;
+            };
+            if section.section_y == section_y {
+                return data_layer_value(layer, index);
+            }
+            if next_sky_layer.is_none_or(|(next_section_y, _)| section.section_y < next_section_y) {
+                next_sky_layer = Some((section.section_y, layer));
+            }
+        }
+
+        if self
+            .light_sections
+            .iter()
+            .any(|section| section.sky.is_some())
+        {
+            next_sky_layer
+                .map(|(_, layer)| data_layer_value(layer, index))
+                .unwrap_or(15)
+        } else {
+            0
+        }
     }
 }
 

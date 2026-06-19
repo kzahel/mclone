@@ -61,6 +61,44 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-19 - Leaf Sky Render Parity
+
+Commit reported by native benchmark JSON: `451dedd`.
+
+Note: `git_dirty=true` because this was captured while implementing tactical
+`050` after `451dedd`. Treat the result as the measured state for tactical
+`050`, not as the clean historical state of `451dedd`.
+
+Radius-5 lighting-enabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 5 --steps 1 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --enable-lighting
+```
+
+Summary:
+
+| Lane | Total elapsed | Light compute | `run_updates` | Block graph | Sky graph |
+|---|---:|---:|---:|---:|---:|
+| P6.10 source storage | `1,927.655 ms` | `455.894 ms` | `402.035 ms` | `30.788 ms` | `371.212 ms` |
+| P6.11 leaf/sky render parity | `1,945.648 ms` | `460.263 ms` | `405.848 ms` | `30.681 ms` | `375.135 ms` |
+
+Graph counters:
+
+| Metric | P6.10 source storage | P6.11 leaf/sky render parity |
+|---|---:|---:|
+| run-update iterations | `52` | `52` |
+| block processed nodes | `52,348` | `52,348` |
+| sky processed nodes | `794,466` | `794,963` |
+| max block queue before | `27,663` | `27,663` |
+| max sky queue before | `60,450` | `60,450` |
+
+Interpretation: matching Java leaf opacity and Java sky-storage reads across
+omitted all-air sky sections fixes the dark canopy-top render bug without
+materially changing startup performance. The small sky-node increase is
+expected because leaves now attenuate sky by one level instead of blocking it
+completely. The next visible parity bottleneck is render-side Java lightmap/AO
+rather than more cold-start graph tuning.
+
 ### 2026-06-19 - Sky Source-Section Ownership
 
 Commit reported by native benchmark JSON: `e9cc842`.

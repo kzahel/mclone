@@ -166,7 +166,9 @@ pub const fn material_blocks_motion(block_id: RawBlockId) -> bool {
 }
 
 pub const fn block_light_opacity(block_id: RawBlockId) -> u8 {
-    if material_blocks_motion(block_id) {
+    if is_leaves(block_id) {
+        1
+    } else if material_blocks_motion(block_id) {
         15
     } else {
         0
@@ -346,8 +348,11 @@ mod tests {
     }
 
     #[test]
-    fn block_light_opacity_tracks_current_motion_blocking_shape_gap() {
+    fn block_light_opacity_tracks_current_block_facts() {
         assert_eq!(block_light_opacity(STONE), 15);
+        assert_eq!(block_light_opacity(OAK_LEAVES), 1);
+        assert_eq!(block_light_opacity(BIRCH_LEAVES), 1);
+        assert_eq!(block_light_opacity(SPRUCE_LEAVES), 1);
         assert_eq!(block_light_opacity(AIR), 0);
         assert_eq!(block_light_opacity(CAVE_AIR), 0);
         assert_eq!(block_light_opacity(WATER), 0);

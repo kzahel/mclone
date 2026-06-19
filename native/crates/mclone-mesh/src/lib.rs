@@ -434,6 +434,44 @@ mod tests {
     }
 
     #[test]
+    fn textured_mesh_treats_missing_sky_section_above_data_as_open_sky() {
+        let catalog = stone_textured_catalog();
+        let blocks = textured_chunk_blocks(32, &[(0, 15, 0, BlockStateId(1))]);
+        let mut sky = DataLayer::new();
+        sky.get_data();
+        let light_sections = [PackedLightSection::new(0, sky.into_bytes(), None)];
+        let input =
+            TexturedChunkMeshInput::new(0, 0, 0, 32, &blocks).with_light_sections(&light_sections);
+
+        let mesh = build_textured_visible_chunk_mesh(input, &catalog).unwrap();
+
+        let top_face_light = pack_light(0, 15);
+        assert!(mesh.vertices.chunks_exact(4).any(|face| {
+            face.iter()
+                .all(|vertex| vertex.packed_light == top_face_light)
+        }));
+    }
+
+    #[test]
+    fn textured_mesh_climbs_to_next_sky_layer_for_missing_sections() {
+        let catalog = stone_textured_catalog();
+        let blocks = textured_chunk_blocks(48, &[(0, 15, 0, BlockStateId(1))]);
+        let mut sky = DataLayer::new();
+        sky.set(0, 0, 0, 4);
+        let light_sections = [PackedLightSection::new(2, sky.into_bytes(), None)];
+        let input =
+            TexturedChunkMeshInput::new(0, 0, 0, 48, &blocks).with_light_sections(&light_sections);
+
+        let mesh = build_textured_visible_chunk_mesh(input, &catalog).unwrap();
+
+        let top_face_light = pack_light(0, 4);
+        assert!(mesh.vertices.chunks_exact(4).any(|face| {
+            face.iter()
+                .all(|vertex| vertex.packed_light == top_face_light)
+        }));
+    }
+
+    #[test]
     fn textured_mesh_uses_fullbright_without_light_payload() {
         let catalog = stone_textured_catalog();
         let blocks = textured_chunk_blocks(16, &[(0, 0, 0, BlockStateId(1))]);

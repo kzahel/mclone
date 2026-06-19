@@ -90,9 +90,14 @@ Landed pieces:
   of merged by the provisional seed module.
 - Current generated-block emission facts cover lava, magma block, and glow
   lichen.
+- Current generated-block opacity facts now special-case generated oak, birch,
+  and spruce leaves to match `LeavesBlock.getLightBlock(...) == 1`.
 - Textured mesh vertices carry Java-packed light.
 - Textured meshing samples the face-adjacent block for flat solid faces, matching
   the shape of `ModelBlockRenderer.tesselateWithoutAO`.
+- Textured meshing now reads packed sky light across omitted all-air sky
+  sections using Java `SkyLightSectionStorage.getLightValue(...)` semantics:
+  exact layer first, then the next sky layer above, then full sky above data.
 - The chunk shader decodes packed sky/block values and applies a simple
   brightness factor, with a native/headless fullbright toggle.
 
@@ -109,8 +114,9 @@ Known gaps:
   light hydration uses a temporary engine rather than long-lived world solver
   state.
 - Runtime block light feeds generated block facts into `BlockLightEngine`, but
-  it still uses the current reduced generated-block metadata rather than full
-  vanilla `BlockState.getLightBlock(...)` tables.
+  it still uses reduced generated-block metadata beyond the current leaf
+  opacity special case rather than full vanilla `BlockState.getLightBlock(...)`
+  tables.
 - Light sections are attached to chunk snapshots, but native does not yet model
   Java's padded light-section lifecycle as solver-owned storage.
 - Provisional opacity is coarse (`material_blocks_motion`) and does not use
@@ -209,6 +215,32 @@ It was inspected and rendered nonblank terrain with `166` cached sections and
 Interpretation: this was primarily a Java-shaped ownership improvement. The
 next sky parity gap is `SkyLightEngine.checkNeighborsAfterUpdate(...)`
 skip-through behavior across missing vertical light-storage sections.
+
+On 2026-06-19, after matching Java leaf opacity and teaching the mesh packed
+sky-light sampler to read across omitted all-air sky sections, the dark foliage
+top visual bug was fixed without materially changing startup perf:
+
+| Metric | P6.10 source storage | P6.11 leaf/sky render parity |
+|---|---:|---:|
+| radius-5 total elapsed | `1,927.655 ms` | `1,945.648 ms` |
+| light-status compute | `455.894 ms` | `460.263 ms` |
+| `LevelLightEngine.run_all_updates` | `402.035 ms` | `405.848 ms` |
+| block graph drain | `30.788 ms` | `30.681 ms` |
+| sky graph drain | `371.212 ms` | `375.135 ms` |
+| block processed nodes | `52,348` | `52,348` |
+| sky processed nodes | `794,466` | `794,963` |
+
+The validated captures for this slice are:
+
+```text
+/tmp/mclone-light-leaf-sky-sampler-lit.png
+/tmp/mclone-light-leaf-sky-sampler-fullbright.png
+```
+
+Both were inspected and rendered nonblank terrain with `166` cached sections
+and `26` drawn sections. The lit image no longer has near-black canopy-top
+patches; open-sky surfaces still look close to fullbright because Java
+`LightTexture` and block-model ambient occlusion are not ported yet.
 
 On 2026-06-19, after moving initial lighting to the retained worker-owned light
 world, a native full-frame capture for seed `12345`, chunk `(0,0)`, render
@@ -778,9 +810,9 @@ Remaining parity gap: native still uses the current reduced source-row edge
 behavior rather than Java's full source-section fill/horizontal-boundary path
 for `LIGHT_ONLY` source sections.
 
-### P6.11: Sky Neighbor Skip-Through Propagation
+### P6.12: Sky Neighbor Skip-Through Propagation
 
-Status: next recommended.
+Status: pending solver parity.
 
 Port the remaining Java `SkyLightEngine.checkNeighborsAfterUpdate(...)`
 behavior for vertical gaps in light-storage sections.
@@ -793,7 +825,8 @@ Initial scope:
   node choice.
 - Add synthetic fixtures for a vertical empty-section gap and side spread across
   that gap.
-- Preserve the P6.8 graph metrics and radius-5 benchmark as acceptance checks.
+- Preserve the current radius-5 graph metrics and screenshot benchmark as
+  acceptance checks.
 
 ### P7: Live Deltas And Render Dirtying
 
@@ -811,15 +844,22 @@ Scope:
 
 ### P8: Rendering Parity
 
+Status: next recommended visual parity slice.
+
 Improve visual parity after stored light is correct.
 
 Scope:
 
+- Read Java `BlockModelRenderer`, `ModelBlockRenderer`, and `LightTexture`
+  before porting.
 - Port Java `LightTexture` 16x16 lightmap behavior into `mclone-render`.
 - Replace the simple shader `max(block, sky) / 15` factor with lightmap sampling.
 - Port `ModelBlockRenderer.AmbientOcclusionFace` sampling/blending into
   `mclone-mesh`.
 - Port liquid light sampling from `LiquidBlockRenderer`.
+- Keep lightmap, model-face AO, and mesh data plumbing split into separate
+  modules instead of growing `mclone-mesh/src/builder.rs` into a renderer
+  catch-all.
 
 ## Tactical Index
 
@@ -842,6 +882,7 @@ Primary native lighting docs:
 - [`../tactical/047-native-light-graph-drain-instrumentation.md`](../tactical/047-native-light-graph-drain-instrumentation.md)
 - [`../tactical/048-native-sky-empty-section-light-setup.md`](../tactical/048-native-sky-empty-section-light-setup.md)
 - [`../tactical/049-native-sky-source-section-ownership.md`](../tactical/049-native-sky-source-section-ownership.md)
+- [`../tactical/050-native-leaf-sky-render-parity.md`](../tactical/050-native-leaf-sky-render-parity.md)
 
 Legacy/reference-only lighting docs:
 
