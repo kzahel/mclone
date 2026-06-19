@@ -1,10 +1,11 @@
 use mclone_core::Vec3d;
-use mclone_protocol::MovePlayerCommand;
+use mclone_protocol::{MovePlayerCommand, PlayerPositionRelativeFlags, PlayerPositionUpdate};
 
 const JAVA_HORIZONTAL_MOVE_BOUND: f64 = 3.0e7;
 const JAVA_VERTICAL_MOVE_BOUND: f64 = 2.0e7;
 const JAVA_TOO_FAST_MOVE_THRESHOLD: f64 = 100.0;
 const JAVA_MOVE_PACKET_BURST_LIMIT: u32 = 5;
+const JAVA_MAX_TELEPORT_ID: u32 = i32::MAX as u32;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ServerPlayerState {
@@ -17,6 +18,7 @@ pub(crate) struct ServerPlayerState {
     received_move_packet_count: u32,
     known_move_packet_count: u32,
     awaiting_teleport: Option<AwaitingTeleport>,
+    teleport_id_counter: u32,
     has_accepted_position: bool,
 }
 
@@ -31,6 +33,7 @@ pub(crate) struct AwaitingTeleport {
 pub(crate) enum MovePlayerApplyResult {
     Accepted,
     RejectedInvalid,
+    AwaitingTeleport,
     RejectedTooFast {
         attempted_position: Vec3d,
         first_good_position: Vec3d,
@@ -60,6 +63,7 @@ impl Default for ServerPlayerState {
             received_move_packet_count: 0,
             known_move_packet_count: 0,
             awaiting_teleport: None,
+            teleport_id_counter: 0,
             has_accepted_position: false,
         }
     }
@@ -75,6 +79,9 @@ impl ServerPlayerState {
         let x_rot_degrees = command.x_rot_degrees_or(self.x_rot_degrees);
         if !position.is_finite() || !y_rot_degrees.is_finite() || !x_rot_degrees.is_finite() {
             return MovePlayerApplyResult::RejectedInvalid;
+        }
+        if self.awaiting_teleport.is_some() {
+            return MovePlayerApplyResult::AwaitingTeleport;
         }
 
         let position = Vec3d::new(
@@ -113,10 +120,50 @@ impl ServerPlayerState {
         MovePlayerApplyResult::Accepted
     }
 
+    pub(crate) fn correction_update(&mut self, tick: u64) -> PlayerPositionUpdate {
+        let id = self.next_teleport_id();
+        self.awaiting_teleport = Some(AwaitingTeleport {
+            id,
+            tick,
+            position: self.position,
+        });
+        PlayerPositionUpdate {
+            position: self.position,
+            y_rot_degrees: self.y_rot_degrees,
+            x_rot_degrees: self.x_rot_degrees,
+            relative: PlayerPositionRelativeFlags::ABSOLUTE,
+            teleport_id: id,
+            dismount_vehicle: false,
+        }
+    }
+
+    pub(crate) fn accept_teleport(&mut self, id: u32) -> bool {
+        let Some(awaiting) = self.awaiting_teleport else {
+            return false;
+        };
+        if awaiting.id != id {
+            return false;
+        }
+        self.position = awaiting.position;
+        self.last_good_position = awaiting.position;
+        self.has_accepted_position = true;
+        self.awaiting_teleport = None;
+        true
+    }
+
     pub(crate) fn mark_tick_boundary(&mut self) {
         self.first_good_position = self.position;
         self.last_good_position = self.position;
         self.known_move_packet_count = self.received_move_packet_count;
+    }
+
+    fn next_teleport_id(&mut self) -> u32 {
+        let mut id = self.teleport_id_counter.saturating_add(1);
+        if id == JAVA_MAX_TELEPORT_ID {
+            id = 0;
+        }
+        self.teleport_id_counter = id;
+        id
     }
 
     fn effective_packet_count_since_tick(self) -> u32 {
@@ -435,6 +482,62 @@ mod tests {
         assert_eq!(player.last_good_position(), previous.last_good_position());
         assert_eq!(player.received_move_packet_count(), 2);
         assert_eq!(player.known_move_packet_count(), 1);
+    }
+
+    #[test]
+    fn correction_update_tracks_awaiting_teleport_and_ack() {
+        let mut player = ServerPlayerState::default();
+        assert!(
+            player
+                .apply_move_player(MovePlayerCommand::PosRot {
+                    position: Vec3d::new(1.0, 64.0, 2.0),
+                    y_rot_degrees: 90.0,
+                    x_rot_degrees: 10.0,
+                    on_ground: true,
+                })
+                .is_accepted()
+        );
+
+        let update = player.correction_update(7);
+
+        assert_eq!(
+            update,
+            PlayerPositionUpdate {
+                position: Vec3d::new(1.0, 64.0, 2.0),
+                y_rot_degrees: 90.0,
+                x_rot_degrees: 10.0,
+                relative: PlayerPositionRelativeFlags::ABSOLUTE,
+                teleport_id: 1,
+                dismount_vehicle: false,
+            }
+        );
+        assert_eq!(
+            player.awaiting_teleport(),
+            Some(AwaitingTeleport {
+                id: 1,
+                tick: 7,
+                position: Vec3d::new(1.0, 64.0, 2.0),
+            })
+        );
+
+        assert_eq!(
+            player.apply_move_player(MovePlayerCommand::Pos {
+                position: Vec3d::new(2.0, 64.0, 2.0),
+                on_ground: true,
+            }),
+            MovePlayerApplyResult::AwaitingTeleport
+        );
+        assert_eq!(player.position(), Vec3d::new(1.0, 64.0, 2.0));
+        assert_eq!(player.received_move_packet_count(), 1);
+
+        assert!(!player.accept_teleport(2));
+        assert_eq!(
+            player.awaiting_teleport().map(|awaiting| awaiting.id),
+            Some(1)
+        );
+        assert!(player.accept_teleport(1));
+        assert_eq!(player.awaiting_teleport(), None);
+        assert_eq!(player.last_good_position(), Vec3d::new(1.0, 64.0, 2.0));
     }
 
     #[test]

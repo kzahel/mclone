@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
@@ -17,10 +17,12 @@ const CLIENT_COMMAND_PLAYER_ACTION: u8 = 2;
 const CLIENT_COMMAND_USE_ITEM_ON: u8 = 3;
 const CLIENT_COMMAND_MOVE_PLAYER: u8 = 4;
 const CLIENT_COMMAND_SET_CARRIED_ITEM: u8 = 5;
+const CLIENT_COMMAND_ACCEPT_TELEPORT: u8 = 6;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
 const SERVER_UPDATE_TIME: u8 = 4;
+const SERVER_UPDATE_PLAYER_POSITION: u8 = 5;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkView {
@@ -33,6 +35,7 @@ pub struct ChunkView {
 pub enum ClientCommand {
     SetChunkView(ChunkView),
     MovePlayer(MovePlayerCommand),
+    AcceptTeleport(AcceptTeleportCommand),
     SetCarriedItem(SetCarriedItemCommand),
     PlayerAction(PlayerActionCommand),
     UseItemOn(UseItemOnCommand),
@@ -101,6 +104,11 @@ impl MovePlayerCommand {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AcceptTeleportCommand {
+    pub id: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SetCarriedItemCommand {
     pub slot: u8,
 }
@@ -132,7 +140,7 @@ pub enum InteractionHand {
     OffHand,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ServerUpdate {
     ChunkSnapshot(ChunkSnapshot),
     ChunkUnload {
@@ -148,6 +156,65 @@ pub enum ServerUpdate {
     TimeUpdate {
         day_time: u64,
     },
+    PlayerPosition(PlayerPositionUpdate),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlayerPositionUpdate {
+    pub position: Vec3d,
+    pub y_rot_degrees: f32,
+    pub x_rot_degrees: f32,
+    pub relative: PlayerPositionRelativeFlags,
+    pub teleport_id: u32,
+    pub dismount_vehicle: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PlayerPositionRelativeFlags {
+    pub x: bool,
+    pub y: bool,
+    pub z: bool,
+    pub y_rot: bool,
+    pub x_rot: bool,
+}
+
+impl PlayerPositionRelativeFlags {
+    const X_MASK: u8 = 1 << 0;
+    const Y_MASK: u8 = 1 << 1;
+    const Z_MASK: u8 = 1 << 2;
+    const Y_ROT_MASK: u8 = 1 << 3;
+    const X_ROT_MASK: u8 = 1 << 4;
+    const VALID_MASK: u8 =
+        Self::X_MASK | Self::Y_MASK | Self::Z_MASK | Self::Y_ROT_MASK | Self::X_ROT_MASK;
+
+    pub const ABSOLUTE: Self = Self {
+        x: false,
+        y: false,
+        z: false,
+        y_rot: false,
+        x_rot: false,
+    };
+
+    pub const fn bits(self) -> u8 {
+        (if self.x { Self::X_MASK } else { 0 })
+            | (if self.y { Self::Y_MASK } else { 0 })
+            | (if self.z { Self::Z_MASK } else { 0 })
+            | (if self.y_rot { Self::Y_ROT_MASK } else { 0 })
+            | (if self.x_rot { Self::X_ROT_MASK } else { 0 })
+    }
+
+    pub fn from_bits(bits: u8) -> Option<Self> {
+        if bits & !Self::VALID_MASK != 0 {
+            return None;
+        }
+        Some(Self {
+            x: bits & Self::X_MASK != 0,
+            y: bits & Self::Y_MASK != 0,
+            z: bits & Self::Z_MASK != 0,
+            y_rot: bits & Self::Y_ROT_MASK != 0,
+            x_rot: bits & Self::X_ROT_MASK != 0,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -225,6 +292,10 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
             writer.write_u8(CLIENT_COMMAND_MOVE_PLAYER);
             writer.write_move_player(command);
         }
+        ClientCommand::AcceptTeleport(command) => {
+            writer.write_u8(CLIENT_COMMAND_ACCEPT_TELEPORT);
+            writer.write_accept_teleport(command);
+        }
         ClientCommand::SetCarriedItem(command) => {
             writer.write_u8(CLIENT_COMMAND_SET_CARRIED_ITEM);
             writer.write_set_carried_item(command);
@@ -256,6 +327,9 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
             })
         }
         CLIENT_COMMAND_MOVE_PLAYER => ClientCommand::MovePlayer(reader.read_move_player()?),
+        CLIENT_COMMAND_ACCEPT_TELEPORT => {
+            ClientCommand::AcceptTeleport(reader.read_accept_teleport()?)
+        }
         CLIENT_COMMAND_SET_CARRIED_ITEM => {
             ClientCommand::SetCarriedItem(reader.read_set_carried_item()?)
         }
@@ -301,6 +375,11 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             writer.write_u8(SERVER_UPDATE_TIME);
             writer.write_u64(*day_time);
         }
+        ServerUpdate::PlayerPosition(update) => {
+            validate_player_position_update(update)?;
+            writer.write_u8(SERVER_UPDATE_PLAYER_POSITION);
+            writer.write_player_position_update(update);
+        }
     }
     Ok(writer.into_inner())
 }
@@ -333,6 +412,9 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
         SERVER_UPDATE_TIME => ServerUpdate::TimeUpdate {
             day_time: reader.read_u64()?,
         },
+        SERVER_UPDATE_PLAYER_POSITION => {
+            ServerUpdate::PlayerPosition(reader.read_player_position_update()?)
+        }
         _ => return Err(ProtocolCodecError::UnknownServerUpdateTag(tag)),
     };
     reader.finish()?;
@@ -348,6 +430,18 @@ fn validate_section_block_update(update: &SectionBlockUpdate) -> ProtocolCodecRe
     }
     if update.local_z as i32 >= CHUNK_WIDTH {
         return Err(ProtocolCodecError::InvalidData("section update local_z"));
+    }
+    Ok(())
+}
+
+fn validate_player_position_update(update: &PlayerPositionUpdate) -> ProtocolCodecResult<()> {
+    if !update.position.is_finite()
+        || !update.y_rot_degrees.is_finite()
+        || !update.x_rot_degrees.is_finite()
+    {
+        return Err(ProtocolCodecError::InvalidData(
+            "player position update contains non-finite value",
+        ));
     }
     Ok(())
 }
@@ -468,6 +562,10 @@ impl ByteWriter {
         }
     }
 
+    fn write_accept_teleport(&mut self, command: &AcceptTeleportCommand) {
+        self.write_u32(command.id);
+    }
+
     fn write_set_carried_item(&mut self, command: &SetCarriedItemCommand) {
         self.write_u8(command.slot);
     }
@@ -549,6 +647,15 @@ impl ByteWriter {
         self.write_u8(update.local_y);
         self.write_u8(update.local_z);
         self.write_u32(update.block_state.0);
+    }
+
+    fn write_player_position_update(&mut self, update: &PlayerPositionUpdate) {
+        self.write_vec3d(update.position);
+        self.write_f32(update.y_rot_degrees);
+        self.write_f32(update.x_rot_degrees);
+        self.write_u8(update.relative.bits());
+        self.write_u32(update.teleport_id);
+        self.write_bool(update.dismount_vehicle);
     }
 
     fn write_optional_light_layer(
@@ -725,6 +832,12 @@ impl<'a> ByteReader<'a> {
         Ok((y_rot_degrees, x_rot_degrees))
     }
 
+    fn read_accept_teleport(&mut self) -> ProtocolCodecResult<AcceptTeleportCommand> {
+        Ok(AcceptTeleportCommand {
+            id: self.read_u32()?,
+        })
+    }
+
     fn read_set_carried_item(&mut self) -> ProtocolCodecResult<SetCarriedItemCommand> {
         Ok(SetCarriedItemCommand {
             slot: self.read_u8()?,
@@ -839,6 +952,28 @@ impl<'a> ByteReader<'a> {
         };
         validate_section_block_update(&update)?;
         Ok(update)
+    }
+
+    fn read_player_position_update(&mut self) -> ProtocolCodecResult<PlayerPositionUpdate> {
+        let position = self.read_vec3d()?;
+        let y_rot_degrees = self.read_f32()?;
+        let x_rot_degrees = self.read_f32()?;
+        if !y_rot_degrees.is_finite() || !x_rot_degrees.is_finite() {
+            return Err(ProtocolCodecError::InvalidData(
+                "player position update rotation contains non-finite value",
+            ));
+        }
+        let relative = PlayerPositionRelativeFlags::from_bits(self.read_u8()?).ok_or(
+            ProtocolCodecError::InvalidData("unknown player position relative flag"),
+        )?;
+        Ok(PlayerPositionUpdate {
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            relative,
+            teleport_id: self.read_u32()?,
+            dismount_vehicle: self.read_bool()?,
+        })
     }
 
     fn read_optional_light_layer(&mut self) -> ProtocolCodecResult<Option<Vec<u8>>> {
@@ -956,6 +1091,15 @@ mod tests {
     }
 
     #[test]
+    fn client_command_codec_round_trips_accept_teleport() {
+        let command = ClientCommand::AcceptTeleport(AcceptTeleportCommand { id: 37 });
+
+        let bytes = encode_client_command(&command).unwrap();
+
+        assert_eq!(decode_client_command(&bytes).unwrap(), command);
+    }
+
+    #[test]
     fn client_command_codec_round_trips_set_carried_item() {
         let command = ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot: 7 });
 
@@ -1034,6 +1178,46 @@ mod tests {
         let bytes = encode_server_update(&update).unwrap();
 
         assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn server_update_codec_round_trips_player_position() {
+        let update = ServerUpdate::PlayerPosition(PlayerPositionUpdate {
+            position: Vec3d::new(1.25, 63.0, -4.5),
+            y_rot_degrees: 181.0,
+            x_rot_degrees: -45.0,
+            relative: PlayerPositionRelativeFlags {
+                x: true,
+                y: false,
+                z: true,
+                y_rot: true,
+                x_rot: false,
+            },
+            teleport_id: 42,
+            dismount_vehicle: true,
+        });
+
+        let bytes = encode_server_update(&update).unwrap();
+
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn player_position_relative_flags_match_java_bit_layout() {
+        let flags = PlayerPositionRelativeFlags {
+            x: true,
+            y: true,
+            z: false,
+            y_rot: true,
+            x_rot: true,
+        };
+
+        assert_eq!(flags.bits(), 0b0001_1011);
+        assert_eq!(
+            PlayerPositionRelativeFlags::from_bits(flags.bits()),
+            Some(flags)
+        );
+        assert_eq!(PlayerPositionRelativeFlags::from_bits(0b0010_0000), None);
     }
 
     #[test]

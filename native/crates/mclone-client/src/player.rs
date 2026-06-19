@@ -1,5 +1,7 @@
 use mclone_core::{Aabb, BlockPos, ChunkPos, Vec3d};
-use mclone_protocol::{ClientCommand, MovePlayerCommand};
+use mclone_protocol::{
+    AcceptTeleportCommand, ClientCommand, MovePlayerCommand, PlayerPositionUpdate,
+};
 
 use crate::{ClientRuntime, block_shapes::block_collision_aabb};
 
@@ -325,6 +327,44 @@ impl LocalPlayerController {
             y_rot_degrees: self.pose.y_rot_degrees as f32,
             x_rot_degrees: self.pose.x_rot_degrees as f32,
             on_ground: self.on_ground,
+        })
+    }
+
+    pub fn apply_player_position_update(&mut self, update: PlayerPositionUpdate) -> ClientCommand {
+        let pose = self.pose;
+        let position = Vec3d::new(
+            if update.relative.x {
+                pose.position.x + update.position.x
+            } else {
+                update.position.x
+            },
+            if update.relative.y {
+                pose.position.y + update.position.y
+            } else {
+                update.position.y
+            },
+            if update.relative.z {
+                pose.position.z + update.position.z
+            } else {
+                update.position.z
+            },
+        );
+        let y_rot_degrees = if update.relative.y_rot {
+            pose.y_rot_degrees + f64::from(update.y_rot_degrees)
+        } else {
+            f64::from(update.y_rot_degrees)
+        };
+        let x_rot_degrees = if update.relative.x_rot {
+            pose.x_rot_degrees + f64::from(update.x_rot_degrees)
+        } else {
+            f64::from(update.x_rot_degrees)
+        };
+        self.pose.set_position(position);
+        self.pose.set_rot(y_rot_degrees, x_rot_degrees);
+        self.clear_delta_movement();
+        self.on_ground = false;
+        ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+            id: update.teleport_id,
         })
     }
 
@@ -772,7 +812,7 @@ mod tests {
         AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkSnapshot,
         ChunkStatus, SECTION_HEIGHT, chunk_section_index,
     };
-    use mclone_protocol::ServerUpdate;
+    use mclone_protocol::{PlayerPositionRelativeFlags, ServerUpdate};
 
     fn assert_approx_eq(actual: f64, expected: f64) {
         assert!(
@@ -970,6 +1010,68 @@ mod tests {
                 on_ground: false,
             })
         );
+    }
+
+    #[test]
+    fn controller_applies_player_position_update_and_builds_teleport_ack() {
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(1.0, 2.0, 3.0),
+            y_rot_degrees: 10.0,
+            x_rot_degrees: -20.0,
+            eye_height: LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        });
+        controller.set_delta_movement(Vec3d::new(1.0, 0.5, -1.0));
+        controller.on_ground = true;
+
+        let ack = controller.apply_player_position_update(PlayerPositionUpdate {
+            position: Vec3d::new(4.0, 5.0, 6.0),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: 30.0,
+            relative: PlayerPositionRelativeFlags::ABSOLUTE,
+            teleport_id: 12,
+            dismount_vehicle: false,
+        });
+
+        assert_eq!(
+            ack,
+            ClientCommand::AcceptTeleport(AcceptTeleportCommand { id: 12 })
+        );
+        assert_eq!(controller.pose().position, Vec3d::new(4.0, 5.0, 6.0));
+        assert_eq!(controller.pose().y_rot_degrees, 90.0);
+        assert_eq!(controller.pose().x_rot_degrees, 30.0);
+        assert_eq!(controller.delta_movement(), Vec3d::ZERO);
+        assert!(!controller.on_ground());
+    }
+
+    #[test]
+    fn controller_applies_relative_player_position_update() {
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(1.0, 2.0, 3.0),
+            y_rot_degrees: 10.0,
+            x_rot_degrees: -20.0,
+            eye_height: LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        });
+
+        controller.apply_player_position_update(PlayerPositionUpdate {
+            position: Vec3d::new(4.0, 5.0, 6.0),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: 30.0,
+            relative: PlayerPositionRelativeFlags {
+                x: true,
+                y: false,
+                z: true,
+                y_rot: true,
+                x_rot: false,
+            },
+            teleport_id: 13,
+            dismount_vehicle: false,
+        });
+
+        assert_eq!(controller.pose().position, Vec3d::new(5.0, 5.0, 9.0));
+        assert_eq!(controller.pose().y_rot_degrees, 100.0);
+        assert_eq!(controller.pose().x_rot_degrees, 30.0);
     }
 
     #[test]

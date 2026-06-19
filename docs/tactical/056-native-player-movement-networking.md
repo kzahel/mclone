@@ -60,6 +60,11 @@ rate; the server validates and corrects the proposed movement stream.
   is not implemented yet, then applies Java's packet-count-scaled movement
   delta threshold and rejects excessive position deltas without mutating pose.
   Server velocity is still treated as zero until velocity becomes server-owned.
+- 2026-06-19: Added the first correction/teleport acknowledgement path. Too-fast
+  native movement now emits a Java-shaped absolute `PlayerPosition` correction,
+  the server records an awaiting teleport id, normal movement is ignored until a
+  matching `AcceptTeleport` command arrives, and the native window client applies
+  the correction, sends the ack, then sends a post-correction `PosRot`.
 
 ## Native Direction
 
@@ -119,11 +124,13 @@ Implement the Java packet/state skeleton without full correction yet:
   `last_good_position`, and `known_move_packet_count`
 - server rejects too-fast positional movement using the Java
   packet-count-scaled threshold, while treating native server velocity as zero
+- server returns an absolute player-position correction for rejected movement and
+  clears the awaiting correction only after the matching teleport ack
 
 This slice intentionally does not yet implement:
 
 - wrong-movement / collision rollback
-- teleport correction packets and teleport ack handling
+- correction resend after a delayed/missing teleport ack
 - movement packet suppression or optimal `Pos`/`Rot`/`StatusOnly` emission
 - remote-player interpolation
 - FPS-style prediction/reconciliation
@@ -134,7 +141,8 @@ This slice intentionally does not yet implement:
    Java-equivalent `deltaMovement.lengthSqr()` instead of assuming zero.
 2. Add server collision sanity once server-side entity collision facts are
    available.
-3. Add correction protocol messages and teleport acknowledgement state.
+3. Add Java's correction resend behavior when a client leaves
+   `awaitingPositionFromClient` pending for more than 20 ticks.
 4. Make the native client choose `Pos`, `Rot`, `PosRot`, or `StatusOnly` based
    on changed fields instead of always sending `PosRot`.
 5. Move dedicated transport ingestion toward per-connection movement buffering

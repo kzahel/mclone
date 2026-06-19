@@ -62,7 +62,7 @@ pub struct ServerTickTiming {
     pub scheduler_apply_events_us: u128,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ServerTickReport {
     pub ticket_tick: u64,
     pub block_ticking_chunks: Vec<ChunkPos>,
@@ -73,7 +73,7 @@ pub struct ServerTickReport {
     pub timing: ServerTickTiming,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ServerSimulationTickReport {
     pub simulation_tick: u64,
     pub chunk_tick: u64,

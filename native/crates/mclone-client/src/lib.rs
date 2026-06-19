@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 mod block_clip;
 mod block_shapes;
@@ -9,7 +9,9 @@ mod inventory;
 mod player;
 
 use mclone_core::{CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
-use mclone_protocol::{ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate};
+use mclone_protocol::{
+    ChunkView, ClientCommand, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
+};
 
 pub use interaction::{CREATIVE_PICK_RANGE, ClientInteractionController};
 pub use inventory::ClientInventory;
@@ -35,6 +37,7 @@ pub struct ClientRuntime {
     chunk_view: Option<ChunkView>,
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
     day_time: u64,
+    player_position_updates: VecDeque<PlayerPositionUpdate>,
 }
 
 impl ClientRuntime {
@@ -44,6 +47,7 @@ impl ClientRuntime {
             chunk_view: None,
             chunks: BTreeMap::new(),
             day_time: 0,
+            player_position_updates: VecDeque::new(),
         }
     }
 
@@ -82,6 +86,9 @@ impl ClientRuntime {
             ServerUpdate::TimeUpdate { day_time } => {
                 self.day_time = day_time;
             }
+            ServerUpdate::PlayerPosition(update) => {
+                self.player_position_updates.push_back(update);
+            }
         }
     }
 
@@ -101,6 +108,12 @@ impl ClientRuntime {
 
     pub fn loaded_chunk_count(&self) -> usize {
         self.chunks.len()
+    }
+
+    pub fn drain_player_position_updates(
+        &mut self,
+    ) -> impl Iterator<Item = PlayerPositionUpdate> + '_ {
+        self.player_position_updates.drain(..)
     }
 
     /// Latest authoritative world day-time (ticks) from the server.
@@ -213,6 +226,30 @@ mod tests {
         // dayTime 6000 is noon, which the smoothed curve maps to phase ~0.0.
         assert!(runtime.time_of_day().abs() < 1e-4);
         assert!(runtime.sun_angle().abs() < 1e-3);
+    }
+
+    #[test]
+    fn client_runtime_queues_player_position_updates_for_controller_ack() {
+        let mut runtime = ClientRuntime::local_integrated();
+        let update = PlayerPositionUpdate {
+            position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: 10.0,
+            relative: mclone_protocol::PlayerPositionRelativeFlags::ABSOLUTE,
+            teleport_id: 7,
+            dismount_vehicle: false,
+        };
+
+        runtime.apply_update(ServerUpdate::PlayerPosition(update));
+
+        assert_eq!(
+            runtime.drain_player_position_updates().collect::<Vec<_>>(),
+            vec![update]
+        );
+        assert_eq!(
+            runtime.drain_player_position_updates().collect::<Vec<_>>(),
+            Vec::<PlayerPositionUpdate>::new()
+        );
     }
 
     #[test]

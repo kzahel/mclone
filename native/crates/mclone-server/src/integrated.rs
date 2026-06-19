@@ -17,7 +17,7 @@ use mclone_worldgen::block::RawBlockId;
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
 use crate::placement::DebugBlockItem;
-use crate::player::ServerPlayerState;
+use crate::player::{MovePlayerApplyResult, ServerPlayerState};
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
     ChunkScheduler, ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreResult, FluidKind,
@@ -111,6 +111,7 @@ impl IntegratedServer {
         match command {
             ClientCommand::SetChunkView(view) => self.set_chunk_view(view),
             ClientCommand::MovePlayer(command) => Ok(self.handle_move_player(command)),
+            ClientCommand::AcceptTeleport(command) => Ok(self.handle_accept_teleport(command.id)),
             ClientCommand::SetCarriedItem(command) => Ok(self.handle_set_carried_item(command)),
             ClientCommand::PlayerAction(command) => Ok(self.handle_player_action(command)),
             ClientCommand::UseItemOn(command) => Ok(self.handle_use_item_on(command)),
@@ -296,7 +297,20 @@ impl IntegratedServer {
     }
 
     fn handle_move_player(&mut self, command: MovePlayerCommand) -> Vec<ServerUpdate> {
-        self.player.apply_move_player(command);
+        match self.player.apply_move_player(command) {
+            MovePlayerApplyResult::Accepted
+            | MovePlayerApplyResult::RejectedInvalid
+            | MovePlayerApplyResult::AwaitingTeleport => Vec::new(),
+            MovePlayerApplyResult::RejectedTooFast { .. } => {
+                vec![ServerUpdate::PlayerPosition(
+                    self.player.correction_update(self.simulation_tick),
+                )]
+            }
+        }
+    }
+
+    fn handle_accept_teleport(&mut self, id: u32) -> Vec<ServerUpdate> {
+        self.player.accept_teleport(id);
         Vec::new()
     }
 
@@ -409,7 +423,7 @@ fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {
 mod tests {
     use super::*;
     use mclone_core::{BlockHitResult, BlockStateId, Direction, Vec3d};
-    use mclone_protocol::ServerUpdate;
+    use mclone_protocol::{AcceptTeleportCommand, PlayerPositionRelativeFlags, ServerUpdate};
     use mclone_worldgen::block::{DIRT, GRASS, SNOW, STONE};
 
     fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
@@ -550,6 +564,73 @@ mod tests {
             server.player.last_good_position(),
             Vec3d::new(1.0, 64.0, 1.0)
         );
+    }
+
+    #[test]
+    fn too_fast_move_returns_player_position_correction_until_ack() {
+        let mut server = IntegratedServer::new(0);
+
+        server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                position: Vec3d::new(0.0, 64.0, 0.0),
+                y_rot_degrees: 45.0,
+                x_rot_degrees: 10.0,
+                on_ground: true,
+            }))
+            .expect("initial move");
+        server.try_simulation_tick_report().expect("tick boundary");
+
+        let updates = server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                position: Vec3d::new(11.0, 64.0, 0.0),
+                y_rot_degrees: 90.0,
+                x_rot_degrees: -20.0,
+                on_ground: false,
+            }))
+            .expect("too fast move");
+
+        assert_eq!(updates.len(), 1);
+        let update = match &updates[0] {
+            ServerUpdate::PlayerPosition(update) => *update,
+            _ => panic!("too-fast movement should return a player position correction"),
+        };
+        assert_eq!(update.position, Vec3d::new(0.0, 64.0, 0.0));
+        assert_eq!(update.y_rot_degrees, 45.0);
+        assert_eq!(update.x_rot_degrees, 10.0);
+        assert_eq!(update.relative, PlayerPositionRelativeFlags::ABSOLUTE);
+        assert_eq!(update.teleport_id, 1);
+        assert_eq!(
+            server
+                .player
+                .awaiting_teleport()
+                .map(|awaiting| awaiting.id),
+            Some(1)
+        );
+
+        let updates = server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(1.0, 64.0, 0.0),
+                on_ground: true,
+            }))
+            .expect("move while awaiting teleport");
+        assert!(updates.is_empty());
+        assert_eq!(server.player.position(), Vec3d::new(0.0, 64.0, 0.0));
+
+        server
+            .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                id: update.teleport_id,
+            }))
+            .expect("accept teleport");
+        assert_eq!(server.player.awaiting_teleport(), None);
+
+        let updates = server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(1.0, 64.0, 0.0),
+                on_ground: true,
+            }))
+            .expect("move after ack");
+        assert!(updates.is_empty());
+        assert_eq!(server.player.position(), Vec3d::new(1.0, 64.0, 0.0));
     }
 
     #[test]

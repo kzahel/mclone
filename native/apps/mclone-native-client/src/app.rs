@@ -573,7 +573,7 @@ impl ChunkApp {
         }
     }
 
-    fn update_interest_from_spectator(&mut self) -> Result<()> {
+    fn update_interest_from_spectator(&mut self) -> Result<bool> {
         let center = self.spectator.chunk_pos();
         if self.runtime.set_interest_center(center)? {
             log::info!(
@@ -584,13 +584,15 @@ impl ChunkApp {
                 self.spectator.position.y,
                 self.spectator.position.z
             );
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     fn poll_runtime_and_upload(&mut self) -> Result<()> {
         let poll_start = Instant::now();
-        let changed = self.runtime.poll()?;
+        let mut changed = self.runtime.poll()?;
+        changed |= self.apply_pending_player_position_updates()?;
         self.frame_timing
             .record_runtime_poll(elapsed_ms(poll_start.elapsed()));
         if !changed
@@ -686,9 +688,37 @@ impl ChunkApp {
     }
 
     fn sync_server_player_pose(&mut self) -> Result<bool> {
-        self.runtime
+        let changed = self
+            .runtime
             .send_gameplay_command(self.player.move_player_command())
-            .context("failed to sync player pose to server")
+            .context("failed to sync player pose to server")?;
+        Ok(changed || self.apply_pending_player_position_updates()?)
+    }
+
+    fn apply_pending_player_position_updates(&mut self) -> Result<bool> {
+        let mut changed = false;
+        for update in self.runtime.drain_player_position_updates() {
+            let ack = self.player.apply_player_position_update(update);
+            sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+            self.runtime
+                .send_gameplay_command(ack)
+                .context("failed to acknowledge player position correction")?;
+            self.runtime
+                .send_gameplay_command(self.player.move_player_command())
+                .context("failed to sync corrected player pose to server")?;
+            log::warn!(
+                "accepted server player position correction id={} feet=({:.2}, {:.2}, {:.2})",
+                update.teleport_id,
+                self.player.pose().position.x,
+                self.player.pose().position.y,
+                self.player.pose().position.z
+            );
+            changed = true;
+        }
+        if changed {
+            changed |= self.update_interest_from_spectator()?;
+        }
+        Ok(changed)
     }
 
     fn sync_carried_item(&mut self) -> Result<bool> {

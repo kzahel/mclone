@@ -11,7 +11,9 @@ use mclone_core::{
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_net::{LocalTransport, request_server_updates};
-use mclone_protocol::{ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate};
+use mclone_protocol::{
+    ChunkView, ClientCommand, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
+};
 use mclone_server::IntegratedServer;
 
 use crate::MIN_RENDER_DISTANCE;
@@ -342,6 +344,10 @@ impl WindowSceneRuntime {
         self.dispatch_client_command(command)
     }
 
+    pub(crate) fn drain_player_position_updates(&mut self) -> Vec<PlayerPositionUpdate> {
+        self.client.drain_player_position_updates().collect()
+    }
+
     fn dispatch_client_command(&mut self, command: ClientCommand) -> Result<bool> {
         if let Some(remote_addr) = &self.remote_addr {
             let updates = request_server_updates(remote_addr.as_str(), &command)
@@ -477,6 +483,7 @@ impl WindowSceneRuntime {
                     self.mark_render_section_updates_dirty(*pos, *section_y, updates);
                 }
                 ServerUpdate::TimeUpdate { .. } => {}
+                ServerUpdate::PlayerPosition(_) => {}
             }
         }
         let dirty_mark_ms = elapsed_ms(dirty_mark_start.elapsed());
