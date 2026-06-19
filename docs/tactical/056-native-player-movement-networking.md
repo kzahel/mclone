@@ -1,6 +1,6 @@
 # 056: Native Player Movement Networking
 
-Status: active.
+Status: active; deeper server authority hardening deferred.
 
 ## Purpose
 
@@ -8,13 +8,14 @@ Promote player movement networking, prediction, server validation, and later
 reconciliation into its own native tactical so gameplay interaction work can stay
 focused on block actions.
 
-The current direction is to stay mostly Minecraft Java 1.17.1 shaped:
+The current direction is to stay mostly Minecraft Java 1.17.1 shaped, but keep
+the near-term server posture permissive:
 
 - the client simulates responsive local movement and sends proposed position /
   rotation / on-ground facts
-- the server accepts movement packets in a permissive validation lane, clamps
-  obviously invalid values, and can later correct the player by teleporting them
-  back
+- the server trusts client movement for gameplay bring-up, clamps obviously
+  invalid values, and keeps the correction/ack packet shape available as a
+  protocol scaffold
 - chunk, fluid, block, and entity simulation can remain lower-frequency fixed
   ticks while movement packets are ingested between ticks
 - an FPS-style model with input commands, higher-frequency authoritative
@@ -50,6 +51,12 @@ This is permissive compared with an input-only FPS server authority model. The
 client is not blocked waiting for the server to compute heading at the tick
 rate; the server validates and corrects the proposed movement stream.
 
+For the current native gameplay bring-up, do not spend more time deepening the
+server-authoritative side of this lane. Velocity-aware validation, collision
+rollback, wrong-movement rollback, and prediction/reconciliation are deferred
+until multiplayer correctness or anti-cheat pressure makes them worth the
+complexity.
+
 ## Progress
 
 - 2026-06-19: Added the Java-shaped movement packet family, client `PosRot`
@@ -72,7 +79,7 @@ rate; the server validates and corrects the proposed movement stream.
 
 ## Native Direction
 
-Keep the first native implementation boring and reference-shaped:
+Keep the first native implementation boring, reference-shaped, and permissive:
 
 - protocol carries the same four movement packet variants
 - client movement remains local and responsive
@@ -80,8 +87,9 @@ Keep the first native implementation boring and reference-shaped:
   packet suppression / variant selection
 - server stores player position, rotation, `on_ground`, packet counters, and
   first/last good positions
-- server command handling remains no-output for valid movement; later correction
-  packets should be explicit protocol messages
+- server command handling remains no-output for valid movement; correction
+  packets are retained as explicit protocol messages but should not become the
+  main gameplay focus yet
 - server reach checks for block interaction use server-owned player state, never
   position embedded in block action payloads
 - dedicated and integrated server paths should share the same movement state and
@@ -133,25 +141,35 @@ Implement the Java packet/state skeleton without full correction yet:
 - server resends stale pending corrections on subsequent movement packets after
   Java's `> 20` tick threshold
 
-This slice intentionally does not yet implement:
+This slice intentionally does not yet implement, and now defers:
 
 - wrong-movement / collision rollback
+- server-owned velocity in movement validation
 - movement packet suppression or optimal `Pos`/`Rot`/`StatusOnly` emission
 - remote-player interpolation
 - FPS-style prediction/reconciliation
 
-## Follow-Ups
+## Near-Term Follow-Ups
 
-1. Add server-owned velocity facts so too-fast validation can subtract the
-   Java-equivalent `deltaMovement.lengthSqr()` instead of assuming zero.
-2. Add server collision sanity once server-side entity collision facts are
-   available.
-3. Make the native client choose `Pos`, `Rot`, `PosRot`, or `StatusOnly` based
+1. Add a real spawn/login position sync so the server no longer relies on the
+   first movement packet to bootstrap player position.
+2. Make the native client choose `Pos`, `Rot`, `PosRot`, or `StatusOnly` based
    on changed fields instead of always sending `PosRot`.
-4. Move dedicated transport ingestion toward per-connection movement buffering
+3. Move dedicated transport ingestion toward per-connection movement buffering
    that preserves Java-shaped packet counters.
+4. Add remote-player state publication once the dedicated path has multiple
+   connected clients worth visualizing.
 5. Revisit the FPS-style authority option only after the Java-shaped path is
    usable and measured.
+
+## Deferred Authority Hardening
+
+- Add server-owned velocity facts so too-fast validation can subtract the
+  Java-equivalent `deltaMovement.lengthSqr()` instead of assuming zero.
+- Add server collision sanity and wrong-movement rollback once server-side
+  entity collision facts are worth owning.
+- Tighten correction/reconciliation semantics only if multiplayer behavior or a
+  future competitive mode needs it.
 
 ## Validation
 
