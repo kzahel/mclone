@@ -1,15 +1,21 @@
+mod connection;
 mod session;
 
+use std::collections::BTreeMap;
 use std::net::TcpListener;
 
 use anyhow::{Context, Result, bail};
 use mclone_protocol::PROTOCOL_VERSION;
 use mclone_server::IntegratedServer;
 
-use crate::session::handle_connection;
+use crate::connection::{DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent};
+use crate::session::DedicatedSession;
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:25565";
 const DEFAULT_SEED: i64 = 12345;
+
+#[cfg(test)]
+static DEDICATED_NETWORK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -73,7 +79,7 @@ fn print_help() {
         "mclone-dedicated-server\n\n\
          Usage:\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--serve-once]\n\n\
-         The server accepts a persistent native TCP command stream per connection. --serve-once is intended for loopback smokes and exits after the first connection closes."
+         The server accepts persistent native TCP command streams from multiple clients. --serve-once is intended for loopback smokes and exits after the first connection closes."
     );
 }
 
@@ -88,25 +94,113 @@ fn run_server(cli: Cli) -> Result<()> {
         cli.seed, PROTOCOL_VERSION
     );
 
-    let mut server = IntegratedServer::new(cli.seed);
-    loop {
-        let (stream, peer_addr) = listener
-            .accept()
-            .context("failed to accept dedicated server connection")?;
-        match handle_connection(stream, &mut server) {
-            Ok(update_count) => {
-                log::info!("served {peer_addr} with {update_count} updates");
-            }
-            Err(err) if cli.serve_once => {
-                return Err(err).with_context(|| format!("failed to serve {peer_addr}"));
-            }
-            Err(err) => {
-                log::warn!("failed to serve {peer_addr}: {err:#}");
-            }
-        }
+    let mode = if cli.serve_once {
+        ServerRunMode::ServeOnce
+    } else {
+        ServerRunMode::Forever
+    };
+    run_server_loop(listener, cli.seed, mode)
+}
 
-        if cli.serve_once {
-            return Ok(());
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ServerRunMode {
+    Forever,
+    ServeOnce,
+    #[cfg(test)]
+    UntilDisconnects(usize),
+}
+
+fn run_server_loop(listener: TcpListener, seed: i64, mode: ServerRunMode) -> Result<()> {
+    let network = DedicatedNetwork::start(listener)?;
+    let mut server = IntegratedServer::new(seed);
+    let mut sessions = BTreeMap::<DedicatedConnectionId, DedicatedSession>::new();
+    let mut completed_connections = 0_usize;
+
+    loop {
+        match network.recv()? {
+            DedicatedNetworkEvent::Connected { id, peer_addr } => {
+                sessions.insert(id, DedicatedSession::default());
+                log::info!("accepted dedicated client {id} from {peer_addr}");
+            }
+            DedicatedNetworkEvent::Command {
+                id,
+                peer_addr,
+                command,
+                response,
+            } => {
+                let Some(session) = sessions.get_mut(&id) else {
+                    let message = format!("received command for disconnected client {id}");
+                    let _ = response.send(Err(message.clone()));
+                    log::warn!("{message}");
+                    continue;
+                };
+                match session.handle_client_command(&mut server, command) {
+                    Ok(updates) => {
+                        let update_count = updates.len();
+                        if response.send(Ok(updates)).is_err() {
+                            sessions.remove(&id);
+                            log::warn!(
+                                "dedicated client {id} {peer_addr} disconnected before receiving {update_count} updates"
+                            );
+                        } else {
+                            log::debug!(
+                                "served dedicated client {id} {peer_addr} with {update_count} updates"
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        let message = format!("{err:#}");
+                        let _ = response.send(Err(message.clone()));
+                        sessions.remove(&id);
+                        if mode == ServerRunMode::ServeOnce {
+                            return Err(err)
+                                .with_context(|| format!("failed to serve {id} {peer_addr}"));
+                        }
+                        log::warn!("failed to serve dedicated client {id} {peer_addr}: {message}");
+                    }
+                }
+            }
+            DedicatedNetworkEvent::Disconnected {
+                id,
+                peer_addr,
+                command_count,
+                reason,
+            } => {
+                sessions.remove(&id);
+                if command_count > 0 {
+                    completed_connections += 1;
+                }
+                if let Some(reason) = reason {
+                    log::warn!(
+                        "dedicated client {id} {peer_addr} disconnected after {command_count} commands: {reason}"
+                    );
+                } else {
+                    log::info!(
+                        "dedicated client {id} {peer_addr} disconnected after {command_count} commands"
+                    );
+                }
+                match mode {
+                    ServerRunMode::Forever => {}
+                    ServerRunMode::ServeOnce => {
+                        if command_count == 0 {
+                            bail!("connection {id} {peer_addr} closed without client command");
+                        }
+                        return Ok(());
+                    }
+                    #[cfg(test)]
+                    ServerRunMode::UntilDisconnects(target) => {
+                        if completed_connections >= target {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            DedicatedNetworkEvent::AcceptFailed { message } => {
+                if mode == ServerRunMode::ServeOnce {
+                    bail!(message);
+                }
+                log::warn!("{message}");
+            }
         }
     }
 }
@@ -114,6 +208,9 @@ fn run_server(cli: Cli) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_core::ChunkPos;
+    use mclone_net::NativeClientSession;
+    use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
 
     #[test]
     fn cli_defaults_to_localhost_server() {
@@ -136,6 +233,52 @@ mod tests {
                 seed: -7,
                 serve_once: true,
             }
+        );
+    }
+
+    #[test]
+    fn server_loop_serves_multiple_persistent_clients() {
+        let _guard = DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            run_server_loop(listener, DEFAULT_SEED, ServerRunMode::UntilDisconnects(2)).unwrap();
+        });
+
+        let client_a = std::thread::spawn(move || {
+            let mut session = NativeClientSession::connect(addr).unwrap();
+            session
+                .send_command(&ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(0, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                }))
+                .unwrap()
+        });
+        let client_b = std::thread::spawn(move || {
+            let mut session = NativeClientSession::connect(addr).unwrap();
+            session
+                .send_command(&ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(1, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                }))
+                .unwrap()
+        });
+
+        let updates_a = client_a.join().unwrap();
+        let updates_b = client_b.join().unwrap();
+        server.join().unwrap();
+
+        assert!(
+            updates_a
+                .iter()
+                .any(|update| matches!(update, ServerUpdate::TimeUpdate { .. }))
+        );
+        assert!(
+            updates_b
+                .iter()
+                .any(|update| matches!(update, ServerUpdate::TimeUpdate { .. }))
         );
     }
 }

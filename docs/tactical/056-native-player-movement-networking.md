@@ -47,6 +47,12 @@ Important reference facts:
 - `ServerConnectionListener` owns the server-side connection list and ticks each
   `Connection`; `Connection.tick()` delegates to `ServerGamePacketListenerImpl`
   when the connection has reached gameplay state
+- the Java server listener uses Netty NIO/epoll event-loop groups for socket IO,
+  sets `TCP_NODELAY`, adds each accepted `Connection` to a synchronized
+  connection list, and lets the server tick thread walk that list
+- `Connection.send(...)` flushes queued packets when connected, otherwise
+  enqueues them; actual channel writes are scheduled back onto the Netty event
+  loop when needed
 - client gameplay packets are sent through `ClientPacketListener.send(...)`,
   which delegates to the long-lived `Connection` rather than reconnecting per
   packet
@@ -110,6 +116,12 @@ complexity.
   the native app owns a focused remote-session wrapper for address/context
   handling, and `WindowSceneRuntime` stores the session instead of reconnecting
   for every gameplay command.
+- 2026-06-19: Split dedicated socket IO from dedicated gameplay sessions and
+  added multi-client accept. Native dedicated now has an accept/connection IO
+  module that can keep multiple persistent TCP clients blocked on sockets while
+  the server thread serializes command handling through one `IntegratedServer`,
+  keeping the shape close to Java's IO-event-loop plus server-ticked connection
+  list without adding an async runtime yet.
 
 ## Native Direction
 
@@ -132,6 +144,13 @@ Keep the first native implementation boring, reference-shaped, and permissive:
   persistent sessions can preserve Java-shaped packet counters
 - keep dedicated app modules focused: CLI/listener orchestration in `main`,
   per-connection command/tick/update flow in a session module
+- keep dedicated network IO separate from gameplay sessions: socket accept/read
+  and write-back workers live in a connection module, while the main server loop
+  owns `IntegratedServer` mutation and one `DedicatedSession` per connection
+- the current native dedicated transport uses one blocking IO worker per client
+  and has no intentionally low hard cap; the bring-up target is to tolerate at
+  least 32 connected clients, while automated unit coverage keeps the concurrent
+  socket sample smaller to avoid brittle stress in the test harness
 - keep native client remote transport focused: the scene runtime owns a
   long-lived remote session, while the remote-session module delegates framed
   command writes and update-batch reads to `mclone-net`
@@ -195,10 +214,10 @@ This slice intentionally does not yet implement, and now defers:
 
 ## Near-Term Follow-Ups
 
-1. Add multi-connection dedicated accept/concurrency; the current dedicated
-   listener still serves one persistent session at a time.
-2. Add remote-player state publication once the dedicated path has multiple
+1. Add remote-player state publication once the dedicated path has multiple
    connected clients worth visualizing.
+2. Add player/session identities so dedicated movement state is not still a
+   shared single-player server player behind multiple connections.
 3. Revisit the FPS-style authority option only after the Java-shaped path is
    usable and measured.
 

@@ -1,19 +1,11 @@
 use std::collections::VecDeque;
 use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use mclone_net::{try_read_client_command_frame, write_server_update_batch};
 use mclone_protocol::{ClientCommand, MovePlayerCommand, ServerUpdate};
 use mclone_server::IntegratedServer;
-
-pub(crate) fn handle_connection(
-    mut stream: TcpStream,
-    server: &mut IntegratedServer,
-) -> Result<usize> {
-    serve_connection(&mut stream, server)
-}
 
 pub(crate) fn serve_connection(
     stream: &mut (impl Read + Write),
@@ -23,7 +15,7 @@ pub(crate) fn serve_connection(
 }
 
 #[derive(Debug, Default)]
-struct DedicatedSession {
+pub(crate) struct DedicatedSession {
     connection: DedicatedConnectionState,
 }
 
@@ -53,7 +45,7 @@ impl DedicatedSession {
         Ok(update_count)
     }
 
-    fn handle_client_command(
+    pub(crate) fn handle_client_command(
         &mut self,
         server: &mut IntegratedServer,
         command: ClientCommand,
