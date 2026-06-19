@@ -298,9 +298,13 @@ impl IntegratedServer {
 
     fn handle_move_player(&mut self, command: MovePlayerCommand) -> Vec<ServerUpdate> {
         match self.player.apply_move_player(command) {
-            MovePlayerApplyResult::Accepted
-            | MovePlayerApplyResult::RejectedInvalid
-            | MovePlayerApplyResult::AwaitingTeleport => Vec::new(),
+            MovePlayerApplyResult::Accepted | MovePlayerApplyResult::RejectedInvalid => Vec::new(),
+            MovePlayerApplyResult::AwaitingTeleport => self
+                .player
+                .resend_pending_correction_update(self.simulation_tick)
+                .map(ServerUpdate::PlayerPosition)
+                .into_iter()
+                .collect(),
             MovePlayerApplyResult::RejectedTooFast { .. } => {
                 vec![ServerUpdate::PlayerPosition(
                     self.player.correction_update(self.simulation_tick),
@@ -616,11 +620,61 @@ mod tests {
         assert!(updates.is_empty());
         assert_eq!(server.player.position(), Vec3d::new(0.0, 64.0, 0.0));
 
+        for _ in 0..20 {
+            server
+                .try_simulation_tick_report()
+                .expect("pending teleport tick");
+        }
+        let updates = server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(1.0, 64.0, 0.0),
+                on_ground: true,
+            }))
+            .expect("move while awaiting teleport at threshold");
+        assert!(updates.is_empty());
+
+        server
+            .try_simulation_tick_report()
+            .expect("pending teleport resend tick");
+        let updates = server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(1.0, 64.0, 0.0),
+                on_ground: true,
+            }))
+            .expect("move while awaiting stale teleport");
+        assert_eq!(updates.len(), 1);
+        let resend = match &updates[0] {
+            ServerUpdate::PlayerPosition(update) => *update,
+            _ => panic!("stale pending teleport should resend a player position correction"),
+        };
+        assert_eq!(resend.position, Vec3d::new(0.0, 64.0, 0.0));
+        assert_eq!(resend.teleport_id, 2);
+        assert_eq!(
+            server
+                .player
+                .awaiting_teleport()
+                .map(|awaiting| awaiting.id),
+            Some(2)
+        );
+
         server
             .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
                 id: update.teleport_id,
             }))
-            .expect("accept teleport");
+            .expect("accept stale teleport");
+        assert_eq!(
+            server
+                .player
+                .awaiting_teleport()
+                .map(|awaiting| awaiting.id),
+            Some(2)
+        );
+
+        server
+            .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                id: resend.teleport_id,
+            }))
+            .expect("accept resent teleport");
         assert_eq!(server.player.awaiting_teleport(), None);
 
         let updates = server

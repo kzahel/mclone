@@ -137,6 +137,19 @@ impl ServerPlayerState {
         }
     }
 
+    pub(crate) fn resend_pending_correction_update(
+        &mut self,
+        tick: u64,
+    ) -> Option<PlayerPositionUpdate> {
+        let awaiting = self.awaiting_teleport?;
+        if tick.saturating_sub(awaiting.tick) <= 20 {
+            return None;
+        }
+
+        self.position = awaiting.position;
+        Some(self.correction_update(tick))
+    }
+
     pub(crate) fn accept_teleport(&mut self, id: u32) -> bool {
         let Some(awaiting) = self.awaiting_teleport else {
             return false;
@@ -538,6 +551,52 @@ mod tests {
         assert!(player.accept_teleport(1));
         assert_eq!(player.awaiting_teleport(), None);
         assert_eq!(player.last_good_position(), Vec3d::new(1.0, 64.0, 2.0));
+    }
+
+    #[test]
+    fn pending_correction_resends_after_java_twenty_tick_threshold() {
+        let mut player = ServerPlayerState::default();
+        assert!(
+            player
+                .apply_move_player(MovePlayerCommand::PosRot {
+                    position: Vec3d::new(1.0, 64.0, 2.0),
+                    y_rot_degrees: 90.0,
+                    x_rot_degrees: 10.0,
+                    on_ground: true,
+                })
+                .is_accepted()
+        );
+
+        let first = player.correction_update(7);
+        assert_eq!(first.teleport_id, 1);
+        assert_eq!(player.resend_pending_correction_update(27), None);
+
+        let second = player
+            .resend_pending_correction_update(28)
+            .expect("pending correction should resend after more than 20 ticks");
+
+        assert_eq!(
+            second,
+            PlayerPositionUpdate {
+                position: Vec3d::new(1.0, 64.0, 2.0),
+                y_rot_degrees: 90.0,
+                x_rot_degrees: 10.0,
+                relative: PlayerPositionRelativeFlags::ABSOLUTE,
+                teleport_id: 2,
+                dismount_vehicle: false,
+            }
+        );
+        assert_eq!(
+            player.awaiting_teleport(),
+            Some(AwaitingTeleport {
+                id: 2,
+                tick: 28,
+                position: Vec3d::new(1.0, 64.0, 2.0),
+            })
+        );
+        assert!(!player.accept_teleport(first.teleport_id));
+        assert!(player.accept_teleport(second.teleport_id));
+        assert_eq!(player.awaiting_teleport(), None);
     }
 
     #[test]

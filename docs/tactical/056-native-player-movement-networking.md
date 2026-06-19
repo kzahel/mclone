@@ -65,6 +65,10 @@ rate; the server validates and corrects the proposed movement stream.
   the server records an awaiting teleport id, normal movement is ignored until a
   matching `AcceptTeleport` command arrives, and the native window client applies
   the correction, sends the ack, then sends a post-correction `PosRot`.
+- 2026-06-19: Added Java-shaped pending correction resend behavior. If another
+  movement packet arrives while a correction remains unacked for more than 20
+  simulation ticks, the server reissues the correction with a fresh teleport id;
+  exactly 20 ticks is still below the resend threshold.
 
 ## Native Direction
 
@@ -126,11 +130,12 @@ Implement the Java packet/state skeleton without full correction yet:
   packet-count-scaled threshold, while treating native server velocity as zero
 - server returns an absolute player-position correction for rejected movement and
   clears the awaiting correction only after the matching teleport ack
+- server resends stale pending corrections on subsequent movement packets after
+  Java's `> 20` tick threshold
 
 This slice intentionally does not yet implement:
 
 - wrong-movement / collision rollback
-- correction resend after a delayed/missing teleport ack
 - movement packet suppression or optimal `Pos`/`Rot`/`StatusOnly` emission
 - remote-player interpolation
 - FPS-style prediction/reconciliation
@@ -141,13 +146,11 @@ This slice intentionally does not yet implement:
    Java-equivalent `deltaMovement.lengthSqr()` instead of assuming zero.
 2. Add server collision sanity once server-side entity collision facts are
    available.
-3. Add Java's correction resend behavior when a client leaves
-   `awaitingPositionFromClient` pending for more than 20 ticks.
-4. Make the native client choose `Pos`, `Rot`, `PosRot`, or `StatusOnly` based
+3. Make the native client choose `Pos`, `Rot`, `PosRot`, or `StatusOnly` based
    on changed fields instead of always sending `PosRot`.
-5. Move dedicated transport ingestion toward per-connection movement buffering
+4. Move dedicated transport ingestion toward per-connection movement buffering
    that preserves Java-shaped packet counters.
-6. Revisit the FPS-style authority option only after the Java-shaped path is
+5. Revisit the FPS-style authority option only after the Java-shaped path is
    usable and measured.
 
 ## Validation
