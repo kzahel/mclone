@@ -1,7 +1,7 @@
 use crate::{
     BlockPosKey, DataLayer, Direction, DynamicGraphCallbacks, DynamicGraphMinFixedPoint,
-    NeighborCheck, SectionPosKey, SkyLightSectionStorage, block_pos_get_x, block_pos_get_y,
-    block_pos_get_z, block_pos_offset, block_to_section_key, section_relative,
+    DynamicGraphRunReport, NeighborCheck, SectionPosKey, SkyLightSectionStorage, block_pos_get_x,
+    block_pos_get_y, block_pos_get_z, block_pos_offset, block_to_section_key, section_relative,
 };
 
 pub trait SkyLightWorld {
@@ -106,12 +106,16 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
     }
 
     pub fn run_updates(&mut self, budget: usize) -> usize {
+        self.run_updates_report(budget).0
+    }
+
+    pub fn run_updates_report(&mut self, budget: usize) -> (usize, DynamicGraphRunReport) {
         let remaining = {
             let mut delegate = SkyLightGraphDelegate {
                 storage: &mut self.storage,
                 world: &self.world,
             };
-            self.graph.run_updates(&mut delegate, budget)
+            self.graph.run_updates_report(&mut delegate, budget)
         };
         self.storage.swap_section_map();
         remaining
@@ -119,6 +123,10 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
 
     pub fn has_work(&self) -> bool {
         self.graph.has_work()
+    }
+
+    pub fn queue_size(&self) -> usize {
+        self.graph.queue_size()
     }
 
     pub fn run_all_updates(&mut self) {

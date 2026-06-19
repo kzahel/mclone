@@ -1398,6 +1398,50 @@ mod tests {
                     .scheduler()
                     .metrics()
                     .total_light_status_run_updates_us,
+                total_light_status_run_update_iterations: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_run_update_iterations,
+                total_light_status_block_run_update_calls: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_block_run_update_calls,
+                total_light_status_sky_run_update_calls: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_sky_run_update_calls,
+                total_light_status_block_run_update_processed_nodes: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_block_run_update_processed_nodes,
+                total_light_status_sky_run_update_processed_nodes: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_sky_run_update_processed_nodes,
+                max_light_status_block_run_update_queue_before: server
+                    .scheduler()
+                    .metrics()
+                    .max_light_status_block_run_update_queue_before,
+                max_light_status_sky_run_update_queue_before: server
+                    .scheduler()
+                    .metrics()
+                    .max_light_status_sky_run_update_queue_before,
+                final_light_status_block_run_update_queue_after: server
+                    .scheduler()
+                    .metrics()
+                    .final_light_status_block_run_update_queue_after,
+                final_light_status_sky_run_update_queue_after: server
+                    .scheduler()
+                    .metrics()
+                    .final_light_status_sky_run_update_queue_after,
+                total_light_status_block_run_updates_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_block_run_updates_us,
+                total_light_status_sky_run_updates_us: server
+                    .scheduler()
+                    .metrics()
+                    .total_light_status_sky_run_updates_us,
                 total_light_status_collect_sections_us: server
                     .scheduler()
                     .metrics()

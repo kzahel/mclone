@@ -112,8 +112,9 @@ Radius-3 two-step perf result:
 
 ## Next
 
-The next likely lighting throughput slice is graph-drain instrumentation and
-optimization:
+The next likely lighting throughput slice was graph-drain instrumentation and
+optimization, now tracked by
+[`047-native-light-graph-drain-instrumentation.md`](047-native-light-graph-drain-instrumentation.md):
 
 - expose block/sky queue sizes before and after `run_updates`
 - count processed graph nodes per layer

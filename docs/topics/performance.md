@@ -11,10 +11,10 @@ invalidates an older recommendation, or establishes a new baseline.
 
 ## Current Baseline
 
-Current validated slice: native retained initial light world after the shared
-initial light batch. The movement-frame probe remains under budget, but cold
-startup generation with lighting enabled is still dominated by the light graph
-propagation drain.
+Current validated slice: native light graph drain instrumentation and mixed
+integer-key graph map optimization after the retained initial light world. The
+movement-frame probe remains under budget, but cold startup generation with
+lighting enabled is still dominated by sky-light graph propagation.
 
 Latest 120 Hz release movement-frame probe was captured during that slice at:
 
@@ -61,7 +61,7 @@ For durable historical trends, use [`../performance-records.md`](../performance-
 
 | Priority | Work | Java-shaped | Tactical | Status | Why It Matters |
 |---|---|---:|---|---|---|
-| P0 | Instrument and reduce light graph drain cost | Yes | [`046`](../tactical/046-native-retained-initial-light-world.md), [`lighting topic`](lighting.md) | next recommended | Retained light state makes subsequent movement batches cheaper (`~424 ms` incremental light compute in the radius-3 second step), but cold radius-5 startup still spends `~9.30s` inside one `LevelLightEngine.run_all_updates` drain. The next work should expose block/sky queue sizes, processed node counts, and per-layer drain time, then remove duplicate graph work. |
+| P0 | Reduce sky graph duplicate work | Yes | [`047`](../tactical/047-native-light-graph-drain-instrumentation.md), [`lighting topic`](lighting.md) | next recommended | Per-layer graph metrics show block light is cheap (`52,348` nodes / `32.612 ms`) while sky light still dominates (`10,002,274` nodes / `5,152.656 ms`) after the mixed-hash graph map win. The next work should explain and reduce sky queue churn against Java `SkyLightEngine`. |
 | P1 | Startup loading/progress presentation | Native policy | [`027`](../tactical/027-mclone-ui-foundation.md), [`028`](../tactical/028-headless-window-frame-unification.md), [`044`](../tactical/044-native-light-status-worker-and-disable-flag.md) | needed after P0 or in parallel | The current window path waits for the initial light-ready scene before opening. That prevents blue-sky-only first frames but makes any light-generation regression look like a frozen app. |
 | P2 | Live light deltas and light-section dirtying | Yes | [`lighting topic`](lighting.md), [`026`](../tactical/026-lighting-pipeline.md), [`031`](../tactical/031-native-section-block-delta-updates.md) | pending larger subsystem | Section block deltas currently leave light payloads unchanged. Correct live lighting needs Java-shaped light propagation/deltas and render dirtying by changed light sections, but initial light throughput should be fixed first. |
 | P3 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful, but radius-5 evidence says lighting is the active desktop blocker. |
@@ -126,6 +126,8 @@ Use these local sources when implementing or reviewing performance work:
   [`045`](../tactical/045-native-shared-initial-light-batch.md)
 - Retained initial light world:
   [`046`](../tactical/046-native-retained-initial-light-world.md)
+- Light graph drain instrumentation and mixed graph map optimization:
+  [`047`](../tactical/047-native-light-graph-drain-instrumentation.md)
 
 ## Tactical Index
 
@@ -150,6 +152,7 @@ Related subsystem tacticals:
 - [`044-native-light-status-worker-and-disable-flag.md`](../tactical/044-native-light-status-worker-and-disable-flag.md)
 - [`045-native-shared-initial-light-batch.md`](../tactical/045-native-shared-initial-light-batch.md)
 - [`046-native-retained-initial-light-world.md`](../tactical/046-native-retained-initial-light-world.md)
+- [`047-native-light-graph-drain-instrumentation.md`](../tactical/047-native-light-graph-drain-instrumentation.md)
 
 ## Validation Lanes
 

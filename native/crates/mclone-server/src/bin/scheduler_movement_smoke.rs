@@ -595,8 +595,54 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
         micros_to_ms(metrics.total_light_status_run_updates_us)
     );
     println!(
+        "{indent}    \"block_run_updates\": {:.3},",
+        micros_to_ms(metrics.total_light_status_block_run_updates_us)
+    );
+    println!(
+        "{indent}    \"sky_run_updates\": {:.3},",
+        micros_to_ms(metrics.total_light_status_sky_run_updates_us)
+    );
+    println!(
         "{indent}    \"collect_sections\": {:.3}",
         micros_to_ms(metrics.total_light_status_collect_sections_us)
+    );
+    println!("{indent}  }},");
+    println!("{indent}  \"light_status_graph\": {{");
+    println!(
+        "{indent}    \"run_update_iterations\": {},",
+        metrics.total_light_status_run_update_iterations
+    );
+    println!(
+        "{indent}    \"block_run_update_calls\": {},",
+        metrics.total_light_status_block_run_update_calls
+    );
+    println!(
+        "{indent}    \"sky_run_update_calls\": {},",
+        metrics.total_light_status_sky_run_update_calls
+    );
+    println!(
+        "{indent}    \"block_processed_nodes\": {},",
+        metrics.total_light_status_block_run_update_processed_nodes
+    );
+    println!(
+        "{indent}    \"sky_processed_nodes\": {},",
+        metrics.total_light_status_sky_run_update_processed_nodes
+    );
+    println!(
+        "{indent}    \"max_block_queue_before\": {},",
+        metrics.max_light_status_block_run_update_queue_before
+    );
+    println!(
+        "{indent}    \"max_sky_queue_before\": {},",
+        metrics.max_light_status_sky_run_update_queue_before
+    );
+    println!(
+        "{indent}    \"final_block_queue_after\": {},",
+        metrics.final_light_status_block_run_update_queue_after
+    );
+    println!(
+        "{indent}    \"final_sky_queue_after\": {}",
+        metrics.final_light_status_sky_run_update_queue_after
     );
     println!("{indent}  }}");
     let suffix = if trailing_comma { "," } else { "" };

@@ -100,6 +100,17 @@ pub struct ChunkSchedulerMetrics {
     pub total_light_status_sky_source_enqueue_us: u128,
     pub total_light_status_block_source_enqueue_us: u128,
     pub total_light_status_run_updates_us: u128,
+    pub total_light_status_run_update_iterations: usize,
+    pub total_light_status_block_run_update_calls: usize,
+    pub total_light_status_sky_run_update_calls: usize,
+    pub total_light_status_block_run_update_processed_nodes: usize,
+    pub total_light_status_sky_run_update_processed_nodes: usize,
+    pub max_light_status_block_run_update_queue_before: usize,
+    pub max_light_status_sky_run_update_queue_before: usize,
+    pub final_light_status_block_run_update_queue_after: usize,
+    pub final_light_status_sky_run_update_queue_after: usize,
+    pub total_light_status_block_run_updates_us: u128,
+    pub total_light_status_sky_run_updates_us: u128,
     pub total_light_status_collect_sections_us: u128,
 }
 
@@ -705,6 +716,33 @@ impl ChunkScheduler {
                 .light_status_timing
                 .block_source_enqueue_us,
             total_light_status_run_updates_us: self.light_status_timing.run_updates_us,
+            total_light_status_run_update_iterations: self
+                .light_status_timing
+                .run_update_iterations,
+            total_light_status_block_run_update_calls: self
+                .light_status_timing
+                .block_run_update_calls,
+            total_light_status_sky_run_update_calls: self.light_status_timing.sky_run_update_calls,
+            total_light_status_block_run_update_processed_nodes: self
+                .light_status_timing
+                .block_run_update_processed_nodes,
+            total_light_status_sky_run_update_processed_nodes: self
+                .light_status_timing
+                .sky_run_update_processed_nodes,
+            max_light_status_block_run_update_queue_before: self
+                .light_status_timing
+                .max_block_run_update_queue_before,
+            max_light_status_sky_run_update_queue_before: self
+                .light_status_timing
+                .max_sky_run_update_queue_before,
+            final_light_status_block_run_update_queue_after: self
+                .light_status_timing
+                .final_block_run_update_queue_after,
+            final_light_status_sky_run_update_queue_after: self
+                .light_status_timing
+                .final_sky_run_update_queue_after,
+            total_light_status_block_run_updates_us: self.light_status_timing.block_run_updates_us,
+            total_light_status_sky_run_updates_us: self.light_status_timing.sky_run_updates_us,
             total_light_status_collect_sections_us: self.light_status_timing.collect_sections_us,
         }
     }

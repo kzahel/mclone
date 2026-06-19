@@ -1,7 +1,8 @@
 use crate::{
     BlockLightSectionStorage, BlockPosKey, DataLayer, Direction, DynamicGraphCallbacks,
-    DynamicGraphMinFixedPoint, NeighborCheck, SectionPosKey, block_pos_get_x, block_pos_get_y,
-    block_pos_get_z, block_pos_offset, block_to_section_key, section_relative,
+    DynamicGraphMinFixedPoint, DynamicGraphRunReport, NeighborCheck, SectionPosKey,
+    block_pos_get_x, block_pos_get_y, block_pos_get_z, block_pos_offset, block_to_section_key,
+    section_relative,
 };
 
 pub trait BlockLightWorld {
@@ -112,12 +113,16 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
     }
 
     pub fn run_updates(&mut self, budget: usize) -> usize {
+        self.run_updates_report(budget).0
+    }
+
+    pub fn run_updates_report(&mut self, budget: usize) -> (usize, DynamicGraphRunReport) {
         let remaining = {
             let mut delegate = BlockLightGraphDelegate {
                 storage: &mut self.storage,
                 world: &self.world,
             };
-            self.graph.run_updates(&mut delegate, budget)
+            self.graph.run_updates_report(&mut delegate, budget)
         };
         self.storage.swap_section_map();
         remaining
@@ -125,6 +130,10 @@ impl<W: BlockLightWorld> BlockLightEngine<W> {
 
     pub fn has_work(&self) -> bool {
         self.graph.has_work()
+    }
+
+    pub fn queue_size(&self) -> usize {
+        self.graph.queue_size()
     }
 
     pub fn run_all_updates(&mut self) {

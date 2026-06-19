@@ -1,6 +1,51 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{BuildHasherDefault, Hasher};
+
+#[cfg(test)]
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const NO_COMPUTED_LEVEL: u8 = 255;
+
+type GraphHashBuilder = BuildHasherDefault<GraphKeyHasher>;
+type GraphHashMap<V> = HashMap<i64, V, GraphHashBuilder>;
+type GraphHashSet = HashSet<i64, GraphHashBuilder>;
+
+#[derive(Clone, Default)]
+struct GraphKeyHasher {
+    hash: u64,
+}
+
+impl Hasher for GraphKeyHasher {
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        self.hash = mix_hash(hash);
+    }
+
+    fn write_i64(&mut self, value: i64) {
+        self.hash = mix_hash(value as u64);
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.hash = mix_hash(value);
+    }
+}
+
+fn mix_hash(value: u64) -> u64 {
+    // Packed block positions cluster badly with identity hashing; Java's
+    // fastutil primitive long maps also mix the key before probing.
+    let mut hash = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    hash = (hash ^ (hash >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    hash = (hash ^ (hash >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    hash ^ (hash >> 31)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NeighborCheck {
@@ -8,6 +53,14 @@ pub struct NeighborCheck {
     pub target: i64,
     pub level: u8,
     pub is_decrease: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DynamicGraphRunReport {
+    pub budget: usize,
+    pub processed_nodes: usize,
+    pub queue_before: usize,
+    pub queue_after: usize,
 }
 
 pub trait DynamicGraphCallbacks {
@@ -28,7 +81,7 @@ pub trait DynamicGraphCallbacks {
 pub struct DynamicGraphMinFixedPoint {
     level_count: u8,
     queues: Vec<LevelQueue>,
-    computed_levels: BTreeMap<i64, u8>,
+    computed_levels: GraphHashMap<u8>,
     first_queued_level: u8,
     has_work: bool,
 }
@@ -36,7 +89,7 @@ pub struct DynamicGraphMinFixedPoint {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct LevelQueue {
     order: VecDeque<i64>,
-    members: BTreeSet<i64>,
+    members: GraphHashSet,
 }
 
 impl LevelQueue {
@@ -73,7 +126,7 @@ impl DynamicGraphMinFixedPoint {
         Self {
             level_count,
             queues: (0..level_count).map(|_| LevelQueue::default()).collect(),
-            computed_levels: BTreeMap::new(),
+            computed_levels: GraphHashMap::default(),
             first_queued_level: level_count,
             has_work: false,
         }
@@ -192,12 +245,31 @@ impl DynamicGraphMinFixedPoint {
     pub fn run_updates(
         &mut self,
         callbacks: &mut impl DynamicGraphCallbacks,
-        mut budget: usize,
+        budget: usize,
     ) -> usize {
+        self.run_updates_report(callbacks, budget).0
+    }
+
+    pub fn run_updates_report(
+        &mut self,
+        callbacks: &mut impl DynamicGraphCallbacks,
+        mut budget: usize,
+    ) -> (usize, DynamicGraphRunReport) {
+        let original_budget = budget;
+        let queue_before = self.queue_size();
         if self.first_queued_level >= self.level_count {
-            return budget;
+            return (
+                budget,
+                DynamicGraphRunReport {
+                    budget: original_budget,
+                    processed_nodes: 0,
+                    queue_before,
+                    queue_after: queue_before,
+                },
+            );
         }
 
+        let mut processed_nodes = 0;
         while self.first_queued_level < self.level_count && budget > 0 {
             budget -= 1;
             let queue_index = self.first_queued_level as usize;
@@ -205,6 +277,7 @@ impl DynamicGraphMinFixedPoint {
                 self.check_first_queued_level(self.level_count);
                 continue;
             };
+            processed_nodes += 1;
             let current_level = clamp_level(callbacks.get_level(node), self.level_count);
             if self.queues[queue_index].is_empty() {
                 self.check_first_queued_level(self.level_count);
@@ -245,7 +318,15 @@ impl DynamicGraphMinFixedPoint {
         }
 
         self.has_work = self.first_queued_level < self.level_count;
-        budget
+        (
+            budget,
+            DynamicGraphRunReport {
+                budget: original_budget,
+                processed_nodes,
+                queue_before,
+                queue_after: self.queue_size(),
+            },
+        )
     }
 
     pub fn has_work(&self) -> bool {

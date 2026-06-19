@@ -38,6 +38,17 @@ pub(crate) struct LevelLightComputationTiming {
     pub(crate) sky_source_enqueue_us: u128,
     pub(crate) block_source_enqueue_us: u128,
     pub(crate) run_updates_us: u128,
+    pub(crate) run_update_iterations: usize,
+    pub(crate) block_run_update_calls: usize,
+    pub(crate) sky_run_update_calls: usize,
+    pub(crate) block_run_update_processed_nodes: usize,
+    pub(crate) sky_run_update_processed_nodes: usize,
+    pub(crate) max_block_run_update_queue_before: usize,
+    pub(crate) max_sky_run_update_queue_before: usize,
+    pub(crate) final_block_run_update_queue_after: usize,
+    pub(crate) final_sky_run_update_queue_after: usize,
+    pub(crate) block_run_updates_us: u128,
+    pub(crate) sky_run_updates_us: u128,
     pub(crate) collect_sections_us: u128,
 }
 
@@ -53,6 +64,25 @@ impl LevelLightComputationTiming {
         self.sky_source_enqueue_us += other.sky_source_enqueue_us;
         self.block_source_enqueue_us += other.block_source_enqueue_us;
         self.run_updates_us += other.run_updates_us;
+        self.run_update_iterations += other.run_update_iterations;
+        self.block_run_update_calls += other.block_run_update_calls;
+        self.sky_run_update_calls += other.sky_run_update_calls;
+        self.block_run_update_processed_nodes += other.block_run_update_processed_nodes;
+        self.sky_run_update_processed_nodes += other.sky_run_update_processed_nodes;
+        self.max_block_run_update_queue_before = self
+            .max_block_run_update_queue_before
+            .max(other.max_block_run_update_queue_before);
+        self.max_sky_run_update_queue_before = self
+            .max_sky_run_update_queue_before
+            .max(other.max_sky_run_update_queue_before);
+        if other.block_run_update_calls > 0 {
+            self.final_block_run_update_queue_after = other.final_block_run_update_queue_after;
+        }
+        if other.sky_run_update_calls > 0 {
+            self.final_sky_run_update_queue_after = other.final_sky_run_update_queue_after;
+        }
+        self.block_run_updates_us += other.block_run_updates_us;
+        self.sky_run_updates_us += other.sky_run_updates_us;
         self.collect_sections_us += other.collect_sections_us;
     }
 }
@@ -120,8 +150,19 @@ pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
     }
     timing.block_source_enqueue_us = start.elapsed().as_micros();
     let start = Instant::now();
-    engine.run_all_updates();
+    let run_report = engine.run_all_updates_report();
     timing.run_updates_us = start.elapsed().as_micros();
+    timing.run_update_iterations = run_report.iterations;
+    timing.block_run_update_calls = run_report.block.calls;
+    timing.sky_run_update_calls = run_report.sky.calls;
+    timing.block_run_update_processed_nodes = run_report.block.processed_nodes;
+    timing.sky_run_update_processed_nodes = run_report.sky.processed_nodes;
+    timing.max_block_run_update_queue_before = run_report.block.queue_before;
+    timing.max_sky_run_update_queue_before = run_report.sky.queue_before;
+    timing.final_block_run_update_queue_after = run_report.block.queue_after;
+    timing.final_sky_run_update_queue_after = run_report.sky.queue_after;
+    timing.block_run_updates_us = run_report.block.run_updates_us;
+    timing.sky_run_updates_us = run_report.sky.run_updates_us;
 
     let start = Instant::now();
     let min_section_y = block_to_section_coord(min_y);

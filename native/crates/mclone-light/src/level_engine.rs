@@ -1,10 +1,54 @@
+use std::time::Instant;
+
 use crate::{
-    BlockLightEngine, BlockLightWorld, BlockPosKey, DataLayer, LightLayer, SectionPosKey,
-    SkyLightEngine, SkyLightWorld,
+    BlockLightEngine, BlockLightWorld, BlockPosKey, DataLayer, DynamicGraphRunReport, LightLayer,
+    SectionPosKey, SkyLightEngine, SkyLightWorld,
 };
 
 pub const MAX_SOURCE_LEVEL: u8 = 15;
 pub const LIGHT_SECTION_PADDING: i32 = 1;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LightLayerRunReport {
+    pub calls: usize,
+    pub processed_nodes: usize,
+    pub queue_before: usize,
+    pub queue_after: usize,
+    pub run_updates_us: u128,
+}
+
+impl LightLayerRunReport {
+    fn record_call(&mut self, graph: DynamicGraphRunReport, run_updates_us: u128) {
+        self.queue_before = self.queue_before.max(graph.queue_before);
+        self.calls += 1;
+        self.processed_nodes += graph.processed_nodes;
+        self.queue_after = graph.queue_after;
+        self.run_updates_us += run_updates_us;
+    }
+
+    fn add_assign(&mut self, other: Self) {
+        self.queue_before = self.queue_before.max(other.queue_before);
+        self.calls += other.calls;
+        self.processed_nodes += other.processed_nodes;
+        self.queue_after = other.queue_after;
+        self.run_updates_us += other.run_updates_us;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LevelLightRunReport {
+    pub iterations: usize,
+    pub block: LightLayerRunReport,
+    pub sky: LightLayerRunReport,
+}
+
+impl LevelLightRunReport {
+    fn add_assign(&mut self, other: Self) {
+        self.iterations += other.iterations;
+        self.block.add_assign(other.block);
+        self.sky.add_assign(other.sky);
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LevelLightEngine<B, S> {
@@ -92,27 +136,55 @@ impl<B: BlockLightWorld, S: SkyLightWorld> LevelLightEngine<B, S> {
     }
 
     pub fn run_updates(&mut self, budget: usize) -> usize {
+        self.run_updates_report(budget).0
+    }
+
+    pub fn run_updates_report(&mut self, budget: usize) -> (usize, LevelLightRunReport) {
+        let mut report = LevelLightRunReport::default();
         if budget == 0 {
-            return 0;
+            return (0, report);
         }
+        report.iterations = 1;
         let block_budget = budget / 2;
-        let remaining_block_budget = self.block_engine.run_updates(block_budget);
+        let start = Instant::now();
+        let (remaining_block_budget, block_report) =
+            self.block_engine.run_updates_report(block_budget);
+        report
+            .block
+            .record_call(block_report, start.elapsed().as_micros());
         let sky_budget = budget - block_budget + remaining_block_budget;
-        let remaining_sky_budget = self.sky_engine.run_updates(sky_budget);
+        let start = Instant::now();
+        let (remaining_sky_budget, sky_report) = self.sky_engine.run_updates_report(sky_budget);
+        report
+            .sky
+            .record_call(sky_report, start.elapsed().as_micros());
         if remaining_block_budget == 0 && remaining_sky_budget > 0 {
-            self.block_engine.run_updates(remaining_sky_budget)
+            let start = Instant::now();
+            let (remaining, block_report) =
+                self.block_engine.run_updates_report(remaining_sky_budget);
+            report
+                .block
+                .record_call(block_report, start.elapsed().as_micros());
+            (remaining, report)
         } else {
-            remaining_sky_budget
+            (remaining_sky_budget, report)
         }
     }
 
     pub fn run_all_updates(&mut self) {
+        self.run_all_updates_report();
+    }
+
+    pub fn run_all_updates_report(&mut self) -> LevelLightRunReport {
+        let mut report = LevelLightRunReport::default();
         while self.has_light_work() {
-            let remaining = self.run_updates(16_384);
+            let (remaining, step_report) = self.run_updates_report(16_384);
+            report.add_assign(step_report);
             if remaining > 0 {
                 break;
             }
         }
+        report
     }
 
     pub fn get_raw_brightness(&self, pos: BlockPosKey, sky_darken: u8) -> u8 {

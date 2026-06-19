@@ -35,6 +35,10 @@ Landed pieces:
 - `mclone_light` has a reusable `DynamicGraphMinFixedPoint` port with
   Java-style per-level queues, pending computed levels, and brighten/darken
   repair behavior.
+- `DynamicGraphMinFixedPoint` now reports per-run queue and processed-node
+  metrics and uses mixed integer-key hash maps/sets for the packed long graph
+  keys, matching Java fastutil's primitive-map performance intent more closely
+  than tree-backed collections.
 - `mclone_light` has a first `BlockLightEngine` foundation over
   `LayerLightSectionStorage`, using Java's inverted internal levels, the source
   node shape, six-direction propagation, opacity attenuation, and synthetic
@@ -120,6 +124,34 @@ Known gaps:
 - Liquid light sampling is not ported.
 
 ## Latest Visual Probe
+
+On 2026-06-19, after adding graph-drain instrumentation and switching the graph
+queues/maps to mixed integer-key hash collections, the retained radius-5 cold
+startup benchmark showed the remaining bottleneck is still sky graph work:
+
+| Metric | Instrumented baseline | Mixed hash kept |
+|---|---:|---:|
+| radius-5 total elapsed | `10,614.161 ms` | `6,733.051 ms` |
+| light-status compute | `9,173.467 ms` | `5,236.809 ms` |
+| `LevelLightEngine.run_all_updates` | `9,115.460 ms` | `5,185.626 ms` |
+| block graph drain | `48.058 ms` | `32.612 ms` |
+| sky graph drain | `9,067.052 ms` | `5,152.656 ms` |
+| block processed nodes | `52,348` | `52,348` |
+| sky processed nodes | `10,002,274` | `10,002,274` |
+
+The capture for the kept version is:
+
+```text
+/tmp/mclone-light-graph-drain.png
+```
+
+It was inspected and rendered nonblank terrain with `166` cached sections and
+`26` drawn sections.
+
+Interpretation: the collection change is a safe first throughput win because
+node counts are unchanged and existing solver tests still pass. The next
+throughput work should reduce the sky graph's duplicate processed-node count,
+not tune block light or scheduler publication.
 
 On 2026-06-19, after moving initial lighting to the retained worker-owned light
 world, a native full-frame capture for seed `12345`, chunk `(0,0)`, render
@@ -609,25 +641,53 @@ ticket release, retained-state unload policy, loaded-neighbor stitching, or live
 
 ### P6.8: Graph Drain Instrumentation And Optimization
 
-Status: next recommended.
+Status: completed first pass in
+[`047-native-light-graph-drain-instrumentation.md`](../tactical/047-native-light-graph-drain-instrumentation.md).
 
-Make the remaining `LevelLightEngine.run_all_updates` cost concrete and then
-reduce it.
+Make the remaining `LevelLightEngine.run_all_updates` cost concrete and apply a
+first safe graph-drain optimization.
 
-Initial scope:
+Landed:
 
-- Expose block/sky graph queue sizes before and after each drain.
-- Count processed graph nodes per layer and report per-layer drain time.
-- Check for duplicate queued work from section activation, sky-source checks,
-  and block-emission source checks.
-- Keep the instrumentation in `mclone_light` / `light_world.rs`; do not push
-  graph internals into `scheduler.rs`.
-- Compare radius-5 cold startup and multi-step movement again after each
-  optimization.
+- `DynamicGraphRunReport`, `LightLayerRunReport`, and `LevelLightRunReport`
+  expose block/sky queue sizes, processed nodes, call counts, and drain time.
+- `scheduler_movement_smoke` JSON reports `light_status_graph` and per-layer
+  `run_updates` timing.
+- Graph pending-level maps and queue-members sets now use mixed integer-key
+  hash collections instead of tree collections.
+
+Measured result on 2026-06-19:
+
+- radius-5 `LevelLightEngine.run_all_updates` dropped from `9,115.460 ms` to
+  `5,185.626 ms`
+- sky graph drain dropped from `9,067.052 ms` to `5,152.656 ms`
+- graph work count stayed unchanged: `52,348` block nodes and `10,002,274` sky
+  nodes
 
 Out of scope for the first pass: live block-change propagation, light ticket
 release policy, and render light-delta packets. Those belong after initial
 startup light is affordable.
+
+### P6.9: Sky Graph Duplicate-Work Reduction
+
+Status: next recommended.
+
+The latest metrics show sky propagation is still the cold-start limiter:
+roughly `10M` sky graph nodes are processed for a max sky queue size of
+`57,600`. The next slice should compare native sky source/section activation
+against Java `SkyLightEngine` and reduce redundant queued work without changing
+Java-visible light values.
+
+Initial scope:
+
+- Inspect sky-source enqueue and section-activation paths against the Java
+  `SkyLightEngine` / `LayerLightSectionStorage` shape.
+- Explain the repeated sky node processing in terms of queue churn, not just
+  elapsed time.
+- Preserve the current per-layer graph metrics so every attempted optimization
+  can be rejected if it changes node counts or worsens elapsed time.
+- Keep the fix in `mclone_light` and retained light-world setup rather than
+  scheduler orchestration.
 
 ### P7: Live Deltas And Render Dirtying
 
@@ -673,6 +733,7 @@ Primary native lighting docs:
 - [`../tactical/044-native-light-status-worker-and-disable-flag.md`](../tactical/044-native-light-status-worker-and-disable-flag.md)
 - [`../tactical/045-native-shared-initial-light-batch.md`](../tactical/045-native-shared-initial-light-batch.md)
 - [`../tactical/046-native-retained-initial-light-world.md`](../tactical/046-native-retained-initial-light-world.md)
+- [`../tactical/047-native-light-graph-drain-instrumentation.md`](../tactical/047-native-light-graph-drain-instrumentation.md)
 
 Legacy/reference-only lighting docs:
 

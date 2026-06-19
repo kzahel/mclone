@@ -19,10 +19,15 @@ pub use block_storage::BlockLightSectionStorage;
 pub use data_layer::{
     DATA_LAYER_SIZE, DATA_LAYER_VALUE_COUNT, DataLayer, DataLayerError, data_layer_index,
 };
-pub use dynamic_graph::{DynamicGraphCallbacks, DynamicGraphMinFixedPoint, NeighborCheck};
+pub use dynamic_graph::{
+    DynamicGraphCallbacks, DynamicGraphMinFixedPoint, DynamicGraphRunReport, NeighborCheck,
+};
 pub use key::LightChunkKey;
 pub use layer::LightLayer;
-pub use level_engine::{LIGHT_SECTION_PADDING, LevelLightEngine, MAX_SOURCE_LEVEL};
+pub use level_engine::{
+    LIGHT_SECTION_PADDING, LevelLightEngine, LevelLightRunReport, LightLayerRunReport,
+    MAX_SOURCE_LEVEL,
+};
 pub use packed::{
     FULL_BLOCK, FULL_BRIGHT, FULL_SKY, pack_light, packed_block_light, packed_light_section_layer,
     packed_sky_light,

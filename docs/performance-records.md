@@ -61,6 +61,51 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-19 - Light Graph Drain Instrumentation And Mixed Hash Map
+
+Commit reported by native benchmark JSON: `4f7bc5e`.
+
+Note: `git_dirty=true` because this was captured while implementing tactical
+`047` after `4f7bc5e`. Treat the result as the measured state for tactical
+`047`, not as the clean historical state of `4f7bc5e`.
+
+Radius-5 lighting-enabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 5 --steps 1 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --enable-lighting
+```
+
+Summary:
+
+| Lane | Total elapsed | Light compute | `run_updates` | Block graph | Sky graph |
+|---|---:|---:|---:|---:|---:|
+| Instrumented baseline | `10,614.161 ms` | `9,173.467 ms` | `9,115.460 ms` | `48.058 ms` | `9,067.052 ms` |
+| Raw identity hash rejected | `35,665.194 ms` | `34,206.109 ms` | `33,919.280 ms` | `189.468 ms` | `33,729.449 ms` |
+| Mixed hash kept | `6,733.051 ms` | `5,236.809 ms` | `5,185.626 ms` | `32.612 ms` | `5,152.656 ms` |
+
+Mixed-hash graph counters:
+
+| Metric | Value |
+|---|---:|
+| run-update iterations | `614` |
+| block run-update calls | `614` |
+| sky run-update calls | `614` |
+| block processed nodes | `52,348` |
+| sky processed nodes | `10,002,274` |
+| max block queue before | `27,663` |
+| max sky queue before | `57,600` |
+| final block queue after | `0` |
+| final sky queue after | `0` |
+
+Interpretation: the first graph-drain instrumentation split proves sky light is
+the remaining cold-start blocker. Switching the graph's pending maps and queue
+member sets from tree collections to mixed integer-key hash collections cuts
+the radius-5 `run_updates` drain from `9.12s` to `5.09s` without changing graph
+node counts. A raw identity hash was rejected because packed block-position
+keys clustered and regressed the same workload badly. The next optimization
+target is reducing redundant sky graph work, not block light or scheduler
+publication.
+
 ### 2026-06-19 - Retained Initial Light World First Pass
 
 Commit reported by native benchmark JSON: `fce2425`.

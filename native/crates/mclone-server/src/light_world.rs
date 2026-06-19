@@ -96,8 +96,19 @@ impl RetainedInitialLightState {
         }
         timing.block_source_enqueue_us = start.elapsed().as_micros();
         let start = Instant::now();
-        self.engine.run_all_updates();
+        let run_report = self.engine.run_all_updates_report();
         timing.run_updates_us = start.elapsed().as_micros();
+        timing.run_update_iterations = run_report.iterations;
+        timing.block_run_update_calls = run_report.block.calls;
+        timing.sky_run_update_calls = run_report.sky.calls;
+        timing.block_run_update_processed_nodes = run_report.block.processed_nodes;
+        timing.sky_run_update_processed_nodes = run_report.sky.processed_nodes;
+        timing.max_block_run_update_queue_before = run_report.block.queue_before;
+        timing.max_sky_run_update_queue_before = run_report.sky.queue_before;
+        timing.final_block_run_update_queue_after = run_report.block.queue_after;
+        timing.final_sky_run_update_queue_after = run_report.sky.queue_after;
+        timing.block_run_updates_us = run_report.block.run_updates_us;
+        timing.sky_run_updates_us = run_report.sky.run_updates_us;
 
         let start = Instant::now();
         let min_section_y = block_to_section_coord(min_y);
