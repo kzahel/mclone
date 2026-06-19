@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
 const CLIENT_COMMAND_PLAYER_ACTION: u8 = 2;
@@ -41,8 +41,9 @@ pub enum PlayerActionKind {
     DebugInstantBreak,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlayerActionCommand {
+    pub actor_feet_position: Vec3d,
     pub pos: BlockPos,
     pub direction: Direction,
     pub kind: PlayerActionKind,
@@ -50,6 +51,7 @@ pub struct PlayerActionCommand {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UseItemOnCommand {
+    pub actor_feet_position: Vec3d,
     pub hit: BlockHitResult,
     pub action: UseItemOnKind,
 }
@@ -341,6 +343,7 @@ impl ByteWriter {
     }
 
     fn write_player_action(&mut self, command: &PlayerActionCommand) {
+        self.write_vec3d(command.actor_feet_position);
         self.write_block_pos(command.pos);
         self.write_direction(command.direction);
         self.write_u8(match command.kind {
@@ -352,6 +355,7 @@ impl ByteWriter {
     }
 
     fn write_use_item_on(&mut self, command: &UseItemOnCommand) {
+        self.write_vec3d(command.actor_feet_position);
         self.write_block_hit_result(command.hit);
         match command.action {
             UseItemOnKind::DebugPlaceBlock { block_state } => {
@@ -544,6 +548,7 @@ impl<'a> ByteReader<'a> {
     }
 
     fn read_player_action(&mut self) -> ProtocolCodecResult<PlayerActionCommand> {
+        let actor_feet_position = self.read_vec3d()?;
         let pos = self.read_block_pos()?;
         let direction = self.read_direction()?;
         let kind = match self.read_u8()? {
@@ -554,6 +559,7 @@ impl<'a> ByteReader<'a> {
             kind => return Err(ProtocolCodecError::UnknownPlayerActionKind(kind)),
         };
         Ok(PlayerActionCommand {
+            actor_feet_position,
             pos,
             direction,
             kind,
@@ -561,6 +567,7 @@ impl<'a> ByteReader<'a> {
     }
 
     fn read_use_item_on(&mut self) -> ProtocolCodecResult<UseItemOnCommand> {
+        let actor_feet_position = self.read_vec3d()?;
         let hit = self.read_block_hit_result()?;
         let action = match self.read_u8()? {
             0 => UseItemOnKind::DebugPlaceBlock {
@@ -568,7 +575,11 @@ impl<'a> ByteReader<'a> {
             },
             kind => return Err(ProtocolCodecError::UnknownUseItemOnKind(kind)),
         };
-        Ok(UseItemOnCommand { hit, action })
+        Ok(UseItemOnCommand {
+            actor_feet_position,
+            hit,
+            action,
+        })
     }
 
     fn read_status(&mut self) -> ProtocolCodecResult<ChunkStatus> {
@@ -740,6 +751,7 @@ mod tests {
     #[test]
     fn client_command_codec_round_trips_player_action() {
         let command = ClientCommand::PlayerAction(PlayerActionCommand {
+            actor_feet_position: Vec3d::new(-1.0, 62.0, 12.0),
             pos: BlockPos::new(-1, 64, 12),
             direction: Direction::North,
             kind: PlayerActionKind::DebugInstantBreak,
@@ -753,6 +765,7 @@ mod tests {
     #[test]
     fn client_command_codec_round_trips_use_item_on() {
         let command = ClientCommand::UseItemOn(UseItemOnCommand {
+            actor_feet_position: Vec3d::new(1.25, 62.0, -3.5),
             hit: BlockHitResult::new(
                 Vec3d::new(1.25, 64.0, -3.5),
                 Direction::Up,

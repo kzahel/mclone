@@ -54,6 +54,11 @@ placement rules.
   shapes for snow and simple plants instead of treating every non-air block as
   a full cube, and player collision now uses Java empty collision facts for
   fluids, one-layer snow, plants, large ferns, and glow lichen.
+- 2026-06-19: Added a small server `game_mode` lane for debug creative
+  interactions. Break/place commands now carry a provisional actor feet
+  position, validate Java-shaped reach and max-build-height bounds on the
+  server, and use `BlockPlaceContext`-style clicked-vs-relative replacement
+  before mutating chunks.
 
 ## Current Native State
 
@@ -115,10 +120,21 @@ Native code already has several useful pieces:
 - `native/crates/mclone-protocol/src/lib.rs`
   - has chunk-view plus player-action/use-item-on client commands
   - already has `ServerUpdate::SectionBlockUpdates`
+  - player action and use-item-on commands currently carry a provisional actor
+    feet position so the server can apply Java-shaped reach validation before a
+    server-owned player entity/movement state exists
+- `native/crates/mclone-server/src/game_mode.rs`
+  - owns the first server-side interaction validation lane for debug creative
+    gameplay
+  - mirrors Java's break/use reach and overworld max-build-height checks for
+    the terrain-MVP path
+  - centralizes `BlockPlaceContext`-style placement target selection and the
+    current limited replaceable-block facts for air, fluids, one-layer snow,
+    simple plants, large ferns, and glow lichen
 - `native/crates/mclone-server/src/integrated.rs`
   - routes client commands into `IntegratedServer`
-  - handles chunk-view plus debug break/place commands through scheduler-owned
-    mutation APIs
+  - handles chunk-view plus debug break/place commands through the server
+    game-mode validation lane before using scheduler-owned mutation APIs
 - `native/crates/mclone-server/src/scheduler.rs`
   - already has `block_at_world` and `set_block_at_world`
   - `set_block_at_world` mutates live chunk storage, patches the published
@@ -135,6 +151,11 @@ Important constraint: the section-delta path from
 [`031-native-section-block-delta-updates.md`](031-native-section-block-delta-updates.md)
 is already the permanent runtime mutation publication path. Gameplay should
 reuse it rather than mutating meshes or client snapshots directly.
+
+Temporary protocol constraint: command-carried actor feet position is only for
+this local debug slice. Java validates against server-owned player state; the
+native path should switch to that shape once player movement packets/entities
+exist.
 
 ## Java 1.17.1 Reference Shape
 
@@ -166,6 +187,7 @@ Read before implementation:
 - `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/LiquidBlock.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/level/block/MultifaceBlock.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/server/level/ServerPlayerGameMode.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/server/network/ServerGamePacketListenerImpl.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/item/context/UseOnContext.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/item/context/BlockPlaceContext.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/world/item/BlockItem.java`
@@ -214,8 +236,16 @@ Key facts from the reference:
   progress, destroy delay, pick range, and use-item-on behavior.
 - `ServerPlayerGameMode` validates distance/reach/world bounds and applies
   authoritative block break and item-use-on behavior.
+- `ServerPlayerGameMode.handleBlockBreakAction` rejects block breaks outside
+  squared reach `36.0` and positions at or above max build height.
+- `ServerGamePacketListenerImpl.handleUseItemOn` rejects clicked positions at or
+  above max build height and block-center distance squared `>= 64.0` before
+  routing to game mode.
 - Real placement is item-shaped:
   `useItemOn -> UseOnContext -> BlockPlaceContext -> BlockItem.place`.
+  `BlockPlaceContext` chooses the clicked block when the clicked block can be
+  replaced, otherwise the face-relative block. `BlockItem.place` then checks
+  the target can be placed and is unobstructed before mutating the level.
   Mclone's first placement slice can use a debug creative block, but the target
   architecture should keep that later item path obvious.
 
@@ -300,6 +330,9 @@ entire Java survival stack.
    - carry enough context to validate on the server: target block position,
      clicked face for placement, and the requested block state/raw block for the
      debug placement path
+   - until server-owned player state exists, carry actor feet position only as a
+     provisional debug validation input; replace this with server player state
+     when movement synchronization lands
    - integrated and dedicated server paths should both accept the commands
    - server applies changes with `ChunkScheduler::set_block_at_world`
    - server drains/returns the resulting `SectionBlockUpdates`
@@ -343,12 +376,14 @@ pub enum PlayerActionKind {
 }
 
 pub struct PlayerActionCommand {
+    pub actor_feet_position: Vec3d,
     pub pos: BlockPos,
     pub direction: Direction,
     pub kind: PlayerActionKind,
 }
 
 pub struct UseItemOnCommand {
+    pub actor_feet_position: Vec3d,
     pub hit: BlockHitResult,
     pub action: UseItemOnKind,
 }
@@ -420,10 +455,13 @@ Later parity:
 First slice:
 
 - left click: debug instant break of the picked block to air
-- right click: debug creative place of a selected terrain-MVP block adjacent to
-  the picked face
+- right click: debug creative place of a selected terrain-MVP block using
+  Java-shaped clicked-block replacement first, otherwise the picked
+  face-relative target
 - server rejects unloaded chunks, out-of-height positions, air break no-ops, and
-  same-state placements by returning no mutation
+  air/cave-air or same-state placements by returning no mutation
+- server uses Java-shaped reach checks for the debug actor position until
+  server-owned player state exists
 - server uses existing section block delta publication
 - renderer rebuilds through existing dirty section flow
 
@@ -500,3 +538,7 @@ Likely order after the first playable block-interaction pass:
   mouse wheel adjusts no-clip speed. Movement still treats every non-air block
   as a full cube, so foliage/snow/slabs/liquids need shared shape facts before
   this can be called vanilla movement parity.
+- 2026-06-19: Server debug interaction commands now validate actor reach,
+  max-build-height, and replacement target selection through a focused
+  `game_mode` module before mutating world storage. The actor position is still
+  carried by the command as a temporary stand-in for server-owned player state.

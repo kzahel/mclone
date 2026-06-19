@@ -4,6 +4,7 @@
 mod block_light_bridge;
 mod distance_manager;
 mod fluid;
+mod game_mode;
 mod holder;
 mod integrated;
 mod level_light_bridge;

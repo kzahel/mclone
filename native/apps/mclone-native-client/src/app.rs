@@ -688,8 +688,12 @@ impl ChunkApp {
             pose.view_vector(),
         );
         let command = match button {
-            MouseButton::Left => self.interaction.debug_instant_break_command(hit),
-            MouseButton::Right => self.interaction.debug_place_block_command(hit),
+            MouseButton::Left => self
+                .interaction
+                .debug_instant_break_command(hit, pose.position),
+            MouseButton::Right => self
+                .interaction
+                .debug_place_block_command(hit, pose.position),
             _ => None,
         };
         let Some(command) = command else {
