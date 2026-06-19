@@ -106,7 +106,9 @@ blue-sky-only failure.
 
 ## Next
 
-The next likely lighting parity slice is Java sky source-section ownership:
+The next likely lighting parity slice was Java sky source-section ownership,
+now tracked by
+[`049-native-sky-source-section-ownership.md`](049-native-sky-source-section-ownership.md):
 
 - port `SkyLightSectionStorage` source-section sets and add/remove queues
 - move manual sky-source seeding out of the retained setup and into sky storage

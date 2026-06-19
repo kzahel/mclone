@@ -70,9 +70,6 @@ impl RetainedInitialLightState {
         let active_sections = self.world.borrow().section_statuses_for(&changed_chunks);
         timing.active_sections_us = start.elapsed().as_micros();
         let start = Instant::now();
-        let sky_sources = self.world.borrow().sky_source_blocks_for(&changed_chunks);
-        timing.sky_source_scan_us = start.elapsed().as_micros();
-        let start = Instant::now();
         let block_sources = self
             .world
             .borrow()
@@ -88,11 +85,8 @@ impl RetainedInitialLightState {
                 .enable_light_sources(section_as_long(chunk_pos.x, 0, chunk_pos.z), true);
         }
         timing.section_setup_us = start.elapsed().as_micros();
-        let start = Instant::now();
-        for source in sky_sources {
-            self.engine.check_sky_source(source);
-        }
-        timing.sky_source_enqueue_us = start.elapsed().as_micros();
+        timing.sky_source_scan_us = 0;
+        timing.sky_source_enqueue_us = 0;
         let start = Instant::now();
         for (source, emission) in block_sources {
             self.engine.on_block_emission_increase(source, emission);
@@ -287,37 +281,6 @@ impl RetainedLightWorld {
             .collect()
     }
 
-    fn sky_source_blocks_for(&self, chunks: &[ChunkPos]) -> Vec<BlockPosKey> {
-        self.assert_configured();
-        let section_count = self.height / SECTION_HEIGHT;
-        let mut sources = Vec::new();
-        for chunk_pos in chunks {
-            let Some(blocks) = self.chunks.get(chunk_pos) else {
-                continue;
-            };
-            let Some(top_section_offset) = (0..section_count)
-                .rev()
-                .find(|section_offset| !section_is_empty(blocks, *section_offset))
-            else {
-                continue;
-            };
-            let top_local_y = top_section_offset * SECTION_HEIGHT + (SECTION_HEIGHT - 1);
-            for local_z in 0..CHUNK_WIDTH {
-                for local_x in 0..CHUNK_WIDTH {
-                    let block = blocks[chunk_block_index(local_x, top_local_y, local_z)];
-                    if block_light_opacity(block) < 15 {
-                        sources.push(block_pos_as_long(
-                            chunk_pos.min_block_x() + local_x,
-                            self.min_y + top_local_y,
-                            chunk_pos.min_block_z() + local_z,
-                        ));
-                    }
-                }
-            }
-        }
-        sources
-    }
-
     fn block_emission_sources_for(&self, chunks: &[ChunkPos]) -> Vec<(BlockPosKey, u8)> {
         self.assert_configured();
         let mut sources = Vec::new();
@@ -418,21 +381,5 @@ mod tests {
                 (section_as_long(0, 1, 0), true),
             ]
         );
-    }
-
-    #[test]
-    fn retained_light_world_seeds_sky_from_top_non_empty_section() {
-        let mut world = RetainedLightWorld::default();
-        world.configure(0, SECTION_HEIGHT * 2);
-        let chunk_pos = ChunkPos::new(0, 0);
-        let mut blocks = vec![AIR; (CHUNK_WIDTH * SECTION_HEIGHT * 2 * CHUNK_WIDTH) as usize];
-        blocks[chunk_block_index(1, 1, 1)] = STONE;
-        assert!(world.upsert_chunk(chunk_pos, &blocks));
-
-        let sources = world.sky_source_blocks_for(&[chunk_pos]);
-
-        assert_eq!(sources.len(), (CHUNK_WIDTH * CHUNK_WIDTH) as usize);
-        assert!(sources.contains(&block_pos_as_long(0, 15, 0)));
-        assert!(!sources.contains(&block_pos_as_long(0, 31, 0)));
     }
 }

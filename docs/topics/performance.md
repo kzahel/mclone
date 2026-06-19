@@ -11,9 +11,9 @@ invalidates an older recommendation, or establishes a new baseline.
 
 ## Current Baseline
 
-Current validated slice: native empty-section light setup after graph-drain
-instrumentation. The movement-frame probe remains under budget, and cold
-startup lighting is no longer dominated by the sky graph drain.
+Current validated slice: native sky source-section ownership after
+empty-section light setup. The movement-frame probe remains under budget, and
+cold startup lighting is no longer dominated by the sky graph drain.
 
 Latest 120 Hz release movement-frame probe was captured during that slice at:
 
@@ -61,7 +61,7 @@ For durable historical trends, use [`../performance-records.md`](../performance-
 | Priority | Work | Java-shaped | Tactical | Status | Why It Matters |
 |---|---|---:|---|---|---|
 | P0 | Startup loading/progress presentation | Native policy | [`027`](../tactical/027-mclone-ui-foundation.md), [`028`](../tactical/028-headless-window-frame-unification.md), [`044`](../tactical/044-native-light-status-worker-and-disable-flag.md) | next recommended for desktop feel | Radius-5 lighting-enabled startup dropped to `1,931.110 ms`, but the desktop window path still waits for the first light-ready scene. Even with faster lighting, presenting progress or a partial scene will make regressions diagnosable instead of looking like a frozen app. |
-| P1 | Java sky source-section ownership | Yes | [`048`](../tactical/048-native-sky-empty-section-light-setup.md), [`lighting topic`](lighting.md) | next recommended for lighting parity | Empty-section setup reduced sky graph work from `10,002,274` nodes to `794,466`, but manual sky-source scanning still lives in retained setup. Java owns source sections inside `SkyLightSectionStorage`, and porting that shape will make live updates less ad hoc. |
+| P1 | Sky neighbor skip-through propagation | Yes | [`049`](../tactical/049-native-sky-source-section-ownership.md), [`lighting topic`](lighting.md) | next recommended for lighting parity | Source-section ownership now lives in `SkyLightSectionStorage`, but native still lacks Java `SkyLightEngine.checkNeighborsAfterUpdate(...)` behavior for vertical gaps in light-storage sections. Porting that keeps sky parity moving before live deltas. |
 | P2 | Live light deltas and light-section dirtying | Yes | [`lighting topic`](lighting.md), [`026`](../tactical/026-lighting-pipeline.md), [`031`](../tactical/031-native-section-block-delta-updates.md) | pending larger subsystem | Section block deltas currently leave light payloads unchanged. Correct live lighting needs Java-shaped light propagation/deltas and render dirtying by changed light sections, but initial light throughput should be fixed first. |
 | P3 | Cancellable render compile tasks | Yes | [`034`](../tactical/034-native-render-compile-revisions-and-priority.md), [`033`](../tactical/033-native-async-render-section-compile-queue.md) | deferred | Native now avoids stale queued backlog and accepts unchanged sections. This remains useful for stress-orbit streaming, but current radius-5 evidence no longer puts render compile cancellation ahead of startup presentation or lighting parity. |
 | P4 | GPU upload budgeting and buffer reuse | Broadly | [`024`](../tactical/024-render-section-dirty-cache-and-upload-diffs.md), [`030`](../tactical/030-native-streaming-publish-and-render-budget.md) | conditional | Native uploads changed sections incrementally, and movement probes show upload cost is small. Do this when probes show upload/allocation cost is material again. |
@@ -129,6 +129,8 @@ Use these local sources when implementing or reviewing performance work:
   [`047`](../tactical/047-native-light-graph-drain-instrumentation.md)
 - Empty-section light setup:
   [`048`](../tactical/048-native-sky-empty-section-light-setup.md)
+- Sky source-section ownership:
+  [`049`](../tactical/049-native-sky-source-section-ownership.md)
 
 ## Tactical Index
 
@@ -155,6 +157,7 @@ Related subsystem tacticals:
 - [`046-native-retained-initial-light-world.md`](../tactical/046-native-retained-initial-light-world.md)
 - [`047-native-light-graph-drain-instrumentation.md`](../tactical/047-native-light-graph-drain-instrumentation.md)
 - [`048-native-sky-empty-section-light-setup.md`](../tactical/048-native-sky-empty-section-light-setup.md)
+- [`049-native-sky-source-section-ownership.md`](../tactical/049-native-sky-source-section-ownership.md)
 
 ## Validation Lanes
 

@@ -1,7 +1,8 @@
 use crate::{
     BlockPosKey, DataLayer, Direction, DynamicGraphCallbacks, DynamicGraphMinFixedPoint,
-    DynamicGraphRunReport, NeighborCheck, SectionPosKey, SkyLightSectionStorage, block_pos_get_x,
-    block_pos_get_y, block_pos_get_z, block_pos_offset, block_to_section_key, section_relative,
+    DynamicGraphRunReport, NeighborCheck, SectionPosKey, SkyLightSectionStorage,
+    SkySourceUpdateKind, block_pos_as_long, block_pos_get_x, block_pos_get_y, block_pos_get_z,
+    block_pos_offset, block_to_section_key, section_relative, section_x, section_y, section_z,
 };
 
 pub trait SkyLightWorld {
@@ -110,6 +111,7 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
     }
 
     pub fn run_updates_report(&mut self, budget: usize) -> (usize, DynamicGraphRunReport) {
+        self.apply_source_updates();
         let remaining = {
             let mut delegate = SkyLightGraphDelegate {
                 storage: &mut self.storage,
@@ -122,7 +124,7 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
     }
 
     pub fn has_work(&self) -> bool {
-        self.graph.has_work()
+        self.graph.has_work() || self.storage.has_source_inconsistencies()
     }
 
     pub fn queue_size(&self) -> usize {
@@ -130,7 +132,7 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
     }
 
     pub fn run_all_updates(&mut self) {
-        while self.graph.has_work() {
+        while self.has_work() {
             let remaining = self.run_updates(16_384);
             if remaining > 0 {
                 break;
@@ -148,6 +150,39 @@ impl<W: SkyLightWorld> SkyLightEngine<W> {
                     section_relative(block_pos_get_z(pos)),
                 )
             })
+    }
+
+    fn apply_source_updates(&mut self) {
+        let updates = self.storage.drain_source_updates();
+        if updates.is_empty() {
+            return;
+        }
+
+        let mut delegate = SkyLightGraphDelegate {
+            storage: &mut self.storage,
+            world: &self.world,
+        };
+        for update in updates {
+            let min_x = section_x(update.section) * 16;
+            let y = section_y(update.section) * 16 + 15;
+            let min_z = section_z(update.section) * 16;
+            for local_z in 0..16 {
+                for local_x in 0..16 {
+                    let pos = block_pos_as_long(min_x + local_x, y, min_z + local_z);
+                    match update.kind {
+                        SkySourceUpdateKind::Add => {
+                            if delegate.opacity(pos) < 15 {
+                                self.graph.check_edge(&mut delegate, i64::MAX, pos, 0, true);
+                            }
+                        }
+                        SkySourceUpdateKind::Remove => {
+                            self.graph
+                                .check_edge(&mut delegate, i64::MAX, pos, 15, false);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

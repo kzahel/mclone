@@ -183,6 +183,33 @@ lighting parity work should move manual sky-source seeding into a Java-shaped
 `SkyLightSectionStorage` source-section queue and port the remaining
 skip-through-empty-section sky propagation behavior.
 
+On 2026-06-19, after moving sky source-section ownership into
+`SkyLightSectionStorage`, the radius-5 performance result stayed stable while
+manual retained-world sky source scanning disappeared:
+
+| Metric | P6.9 empty-section setup | P6.10 source storage |
+|---|---:|---:|
+| radius-5 total elapsed | `1,931.110 ms` | `1,927.655 ms` |
+| light-status compute | `485.407 ms` | `455.894 ms` |
+| `LevelLightEngine.run_all_updates` | `415.744 ms` | `402.035 ms` |
+| sky source scan | `14.736 ms` | `0.000 ms` |
+| sky source enqueue | `3.872 ms` | `0.000 ms` |
+| sky graph drain | `385.856 ms` | `371.212 ms` |
+| sky processed nodes | `794,466` | `794,466` |
+
+The capture for this slice is:
+
+```text
+/tmp/mclone-light-sky-source-storage.png
+```
+
+It was inspected and rendered nonblank terrain with `166` cached sections and
+`26` drawn sections.
+
+Interpretation: this was primarily a Java-shaped ownership improvement. The
+next sky parity gap is `SkyLightEngine.checkNeighborsAfterUpdate(...)`
+skip-through behavior across missing vertical light-storage sections.
+
 On 2026-06-19, after moving initial lighting to the retained worker-owned light
 world, a native full-frame capture for seed `12345`, chunk `(0,0)`, render
 distance `2`, `960x540`, with server lighting enabled and shader fullbright
@@ -728,7 +755,8 @@ Measured result on 2026-06-19:
 
 ### P6.10: Java Sky Source-Section Ownership
 
-Status: next recommended.
+Status: completed first pass in
+[`049-native-sky-source-section-ownership.md`](../tactical/049-native-sky-source-section-ownership.md).
 
 The retained setup still manually scans top non-empty section rows and calls
 `check_sky_source`. Java owns this inside `SkyLightSectionStorage` through
@@ -736,13 +764,35 @@ source-section add/remove queues, and `SkyLightEngine.checkNeighborsAfterUpdate`
 has special skip-through-empty-section behavior. Porting those pieces should
 improve parity and make future live section/block updates less ad hoc.
 
+Landed:
+
+- `SkyLightSectionStorage` owns source-section sets and add/remove queues.
+- `SkyLightEngine` drains source-section updates into graph source edges before
+  propagation and treats source queues as light work.
+- Retained light setup and the test-only light bridge no longer manually scan
+  sky source rows.
+- Radius-5 sky processed nodes stayed at `794,466`, and manual sky source scan
+  timing went to `0.000 ms`.
+
+Remaining parity gap: native still uses the current reduced source-row edge
+behavior rather than Java's full source-section fill/horizontal-boundary path
+for `LIGHT_ONLY` source sections.
+
+### P6.11: Sky Neighbor Skip-Through Propagation
+
+Status: next recommended.
+
+Port the remaining Java `SkyLightEngine.checkNeighborsAfterUpdate(...)`
+behavior for vertical gaps in light-storage sections.
+
 Initial scope:
 
-- Port `SkyLightSectionStorage` source-section sets and add/remove queues.
-- Move initial sky source seeding out of retained setup and into storage
-  inconsistencies, following Java's `enableLightSources` / `markNewInconsistencies`.
-- Port the Java sky neighbor update behavior that skips down through missing
-  vertical light-storage sections.
+- When a sky update reaches local Y `0`, skip downward through missing storage
+  sections while `SkyLightSectionStorage.hasSectionsBelow(...)` is true.
+- Check the skipped-down block and horizontal side neighbors using Java's source
+  node choice.
+- Add synthetic fixtures for a vertical empty-section gap and side spread across
+  that gap.
 - Preserve the P6.8 graph metrics and radius-5 benchmark as acceptance checks.
 
 ### P7: Live Deltas And Render Dirtying
@@ -791,6 +841,7 @@ Primary native lighting docs:
 - [`../tactical/046-native-retained-initial-light-world.md`](../tactical/046-native-retained-initial-light-world.md)
 - [`../tactical/047-native-light-graph-drain-instrumentation.md`](../tactical/047-native-light-graph-drain-instrumentation.md)
 - [`../tactical/048-native-sky-empty-section-light-setup.md`](../tactical/048-native-sky-empty-section-light-setup.md)
+- [`../tactical/049-native-sky-source-section-ownership.md`](../tactical/049-native-sky-source-section-ownership.md)
 
 Legacy/reference-only lighting docs:
 

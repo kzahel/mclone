@@ -125,9 +125,6 @@ pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
     let active_sections = world.section_statuses();
     timing.active_sections_us = start.elapsed().as_micros();
     let start = Instant::now();
-    let sky_sources = world.sky_source_blocks();
-    timing.sky_source_scan_us = start.elapsed().as_micros();
-    let start = Instant::now();
     let block_sources = world.block_emission_sources();
     timing.block_source_scan_us = start.elapsed().as_micros();
     let start = Instant::now();
@@ -142,11 +139,8 @@ pub(crate) fn graph_level_light_sections_for_chunks_timed<'a>(
         engine.enable_light_sources(section_as_long(chunk_pos.x, 0, chunk_pos.z), true);
     }
     timing.section_setup_us = start.elapsed().as_micros();
-    let start = Instant::now();
-    for source in sky_sources {
-        engine.check_sky_source(source);
-    }
-    timing.sky_source_enqueue_us = start.elapsed().as_micros();
+    timing.sky_source_scan_us = 0;
+    timing.sky_source_enqueue_us = 0;
     let start = Instant::now();
     for (source, emission) in block_sources {
         engine.on_block_emission_increase(source, emission);
@@ -273,33 +267,6 @@ impl<'a> RawChunkLightWorld<'a> {
                 })
             })
             .collect()
-    }
-
-    fn sky_source_blocks(&self) -> Vec<BlockPosKey> {
-        let section_count = self.height / SECTION_HEIGHT;
-        let mut sources = Vec::new();
-        for (&chunk_pos, blocks) in &self.chunks {
-            let Some(top_section_offset) = (0..section_count)
-                .rev()
-                .find(|section_offset| !section_is_empty(blocks, *section_offset))
-            else {
-                continue;
-            };
-            let top_local_y = top_section_offset * SECTION_HEIGHT + (SECTION_HEIGHT - 1);
-            for local_z in 0..CHUNK_WIDTH {
-                for local_x in 0..CHUNK_WIDTH {
-                    let block = blocks[chunk_block_index(local_x, top_local_y, local_z)];
-                    if block_light_opacity(block) < 15 {
-                        sources.push(block_pos_as_long(
-                            chunk_pos.min_block_x() + local_x,
-                            self.min_y + top_local_y,
-                            chunk_pos.min_block_z() + local_z,
-                        ));
-                    }
-                }
-            }
-        }
-        sources
     }
 
     fn block_emission_sources(&self) -> Vec<(BlockPosKey, u8)> {

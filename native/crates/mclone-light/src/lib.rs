@@ -43,5 +43,5 @@ pub use section_storage::{
     SectionEdgeUpdate, SectionLevelChange,
 };
 pub use sky_engine::{SkyLightEngine, SkyLightWorld};
-pub use sky_storage::SkyLightSectionStorage;
+pub use sky_storage::{SkyLightSectionStorage, SkySourceUpdate, SkySourceUpdateKind};
 pub use storage_map::{BlockDataLayerStorageMap, DataLayerStorageMap, SkyDataLayerStorageMap};

@@ -61,6 +61,43 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-06-19 - Sky Source-Section Ownership
+
+Commit reported by native benchmark JSON: `e9cc842`.
+
+Note: `git_dirty=true` because this was captured while implementing tactical
+`049` after `e9cc842`. Treat the result as the measured state for tactical
+`049`, not as the clean historical state of `e9cc842`.
+
+Radius-5 lighting-enabled command:
+
+```bash
+cargo run --release --quiet --manifest-path native/Cargo.toml -p mclone-server --bin scheduler_movement_smoke -- --radius 5 --steps 1 --poll-mode sleep --poll-sleep-ms 1 --max-polls 300000 --enable-lighting
+```
+
+Summary:
+
+| Lane | Total elapsed | Light compute | `run_updates` | Block graph | Sky graph |
+|---|---:|---:|---:|---:|---:|
+| P6.9 empty-section setup | `1,931.110 ms` | `485.407 ms` | `415.744 ms` | `29.855 ms` | `385.856 ms` |
+| P6.10 source storage | `1,927.655 ms` | `455.894 ms` | `402.035 ms` | `30.788 ms` | `371.212 ms` |
+
+Graph counters:
+
+| Metric | P6.9 empty-section setup | P6.10 source storage |
+|---|---:|---:|
+| run-update iterations | `52` | `52` |
+| block processed nodes | `52,348` | `52,348` |
+| sky processed nodes | `794,466` | `794,466` |
+| max block queue before | `27,663` | `27,663` |
+| max sky queue before | `60,461` | `60,450` |
+
+Interpretation: moving source-section ownership into `SkyLightSectionStorage`
+keeps the P6.9 graph-node reduction intact while removing retained-world manual
+sky source scanning (`14.736 ms`) and enqueue timing (`3.872 ms`). This is
+primarily a parity/module-boundary improvement; startup presentation is now the
+larger desktop-feel issue than light graph drain cost.
+
 ### 2026-06-19 - Sky Empty-Section Light Setup
 
 Commit reported by native benchmark JSON: `81b50f1`.
