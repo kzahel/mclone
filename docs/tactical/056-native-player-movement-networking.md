@@ -50,6 +50,17 @@ This is permissive compared with an input-only FPS server authority model. The
 client is not blocked waiting for the server to compute heading at the tick
 rate; the server validates and corrects the proposed movement stream.
 
+## Progress
+
+- 2026-06-19: Added the Java-shaped movement packet family, client `PosRot`
+  sync, server finite/clamp/wrap handling, movement packet counters, and
+  first/last good tick-boundary bookkeeping.
+- 2026-06-19: Added the first too-fast movement validation skeleton. The native
+  server bootstraps the first positional sync because spawn/login position sync
+  is not implemented yet, then applies Java's packet-count-scaled movement
+  delta threshold and rejects excessive position deltas without mutating pose.
+  Server velocity is still treated as zero until velocity becomes server-owned.
+
 ## Native Direction
 
 Keep the first native implementation boring and reference-shaped:
@@ -106,10 +117,11 @@ Implement the Java packet/state skeleton without full correction yet:
 - server increments `received_move_packet_count` on accepted movement
 - integrated simulation ticks record `first_good_position`,
   `last_good_position`, and `known_move_packet_count`
+- server rejects too-fast positional movement using the Java
+  packet-count-scaled threshold, while treating native server velocity as zero
 
 This slice intentionally does not yet implement:
 
-- too-fast movement validation
 - wrong-movement / collision rollback
 - teleport correction packets and teleport ack handling
 - movement packet suppression or optimal `Pos`/`Rot`/`StatusOnly` emission
@@ -118,8 +130,8 @@ This slice intentionally does not yet implement:
 
 ## Follow-Ups
 
-1. Add Java-shaped too-fast validation from `handleMovePlayer`, using packet
-   count delta, movement delta, and velocity delta.
+1. Add server-owned velocity facts so too-fast validation can subtract the
+   Java-equivalent `deltaMovement.lengthSqr()` instead of assuming zero.
 2. Add server collision sanity once server-side entity collision facts are
    available.
 3. Add correction protocol messages and teleport acknowledgement state.
