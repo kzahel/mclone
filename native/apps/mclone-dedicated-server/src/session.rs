@@ -5,21 +5,36 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use mclone_net::{try_read_client_command_frame, write_server_update_batch};
 use mclone_protocol::{ClientCommand, MovePlayerCommand, ServerUpdate};
-use mclone_server::IntegratedServer;
+use mclone_server::{IntegratedServer, ServerPlayerId};
 
 pub(crate) fn serve_connection(
     stream: &mut (impl Read + Write),
     server: &mut IntegratedServer,
 ) -> Result<usize> {
-    DedicatedSession::default().serve(stream, server)
+    let player_id = server.add_dedicated_player();
+    let result = DedicatedSession::new(player_id).serve(stream, server);
+    server.remove_dedicated_player(player_id);
+    result
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct DedicatedSession {
+    player_id: ServerPlayerId,
     connection: DedicatedConnectionState,
 }
 
 impl DedicatedSession {
+    pub(crate) fn new(player_id: ServerPlayerId) -> Self {
+        Self {
+            player_id,
+            connection: DedicatedConnectionState::default(),
+        }
+    }
+
+    pub(crate) const fn player_id(&self) -> ServerPlayerId {
+        self.player_id
+    }
+
     fn serve(
         &mut self,
         stream: &mut (impl Read + Write),
@@ -50,9 +65,11 @@ impl DedicatedSession {
         server: &mut IntegratedServer,
         command: ClientCommand,
     ) -> Result<Vec<ServerUpdate>> {
-        let mut updates = self.connection.handle_command(server, command)?;
-        updates.extend(self.connection.flush_movement(server)?);
-        updates.extend(wait_for_server_jobs(server)?);
+        let mut updates = self
+            .connection
+            .handle_command(server, self.player_id, command)?;
+        updates.extend(self.connection.flush_movement(server, self.player_id)?);
+        updates.extend(wait_for_server_jobs(server, self.player_id)?);
         updates.extend(self.tick(server)?);
         server
             .save_dirty_chunks()
@@ -62,7 +79,7 @@ impl DedicatedSession {
 
     fn tick(&mut self, server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
         let updates = server
-            .try_simulation_tick_report()
+            .try_simulation_tick_report_for_player(self.player_id)
             .context("failed to tick dedicated server session")?
             .updates;
         self.connection.mark_tick_boundary();
@@ -81,6 +98,7 @@ impl DedicatedConnectionState {
     fn handle_command(
         &mut self,
         server: &mut IntegratedServer,
+        player_id: ServerPlayerId,
         command: ClientCommand,
     ) -> Result<Vec<ServerUpdate>> {
         match command {
@@ -89,8 +107,8 @@ impl DedicatedConnectionState {
                 Ok(Vec::new())
             }
             command => {
-                let mut updates = self.flush_movement(server)?;
-                updates.extend(server.try_handle_command(command)?);
+                let mut updates = self.flush_movement(server, player_id)?;
+                updates.extend(server.try_handle_command_for_player(player_id, command)?);
                 Ok(updates)
             }
         }
@@ -101,10 +119,17 @@ impl DedicatedConnectionState {
         self.pending_movement.push_back(command);
     }
 
-    fn flush_movement(&mut self, server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
+    fn flush_movement(
+        &mut self,
+        server: &mut IntegratedServer,
+        player_id: ServerPlayerId,
+    ) -> Result<Vec<ServerUpdate>> {
         let mut updates = Vec::new();
         while let Some(command) = self.pending_movement.pop_front() {
-            updates.extend(server.try_handle_command(ClientCommand::MovePlayer(command))?);
+            updates.extend(
+                server
+                    .try_handle_command_for_player(player_id, ClientCommand::MovePlayer(command))?,
+            );
         }
         Ok(updates)
     }
@@ -126,14 +151,17 @@ impl DedicatedConnectionState {
     }
 }
 
-fn wait_for_server_jobs(server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
+fn wait_for_server_jobs(
+    server: &mut IntegratedServer,
+    player_id: ServerPlayerId,
+) -> Result<Vec<ServerUpdate>> {
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut updates = Vec::new();
 
     loop {
         updates.extend(
             server
-                .try_poll()
+                .try_poll_for_player(player_id)
                 .context("failed to poll dedicated server worldgen jobs")?,
         );
         if server.pending_job_count() == 0 {
@@ -236,11 +264,13 @@ mod tests {
     #[test]
     fn dedicated_connection_buffers_movement_until_flush_or_ordered_command() {
         let mut server = IntegratedServer::new(DEFAULT_SEED);
+        let player_id = server.add_dedicated_player();
         let mut connection = DedicatedConnectionState::default();
 
         let updates = connection
             .handle_command(
                 &mut server,
+                player_id,
                 ClientCommand::MovePlayer(MovePlayerCommand::Pos {
                     position: Vec3d::new(1.0, 64.0, 1.0),
                     on_ground: true,
@@ -256,6 +286,7 @@ mod tests {
         let updates = connection
             .handle_command(
                 &mut server,
+                player_id,
                 ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot: 1 }),
             )
             .unwrap();
@@ -269,12 +300,14 @@ mod tests {
     #[test]
     fn dedicated_session_tick_marks_connection_movement_boundary() {
         let mut server = IntegratedServer::new(DEFAULT_SEED);
-        let mut session = DedicatedSession::default();
+        let player_id = server.add_dedicated_player();
+        let mut session = DedicatedSession::new(player_id);
 
         session
             .connection
             .handle_command(
                 &mut server,
+                player_id,
                 ClientCommand::MovePlayer(MovePlayerCommand::Pos {
                     position: Vec3d::new(1.0, 64.0, 1.0),
                     on_ground: true,
@@ -289,6 +322,43 @@ mod tests {
 
         assert_eq!(session.connection.received_move_packet_count(), 1);
         assert_eq!(session.connection.known_move_packet_count(), 1);
+    }
+
+    #[test]
+    fn dedicated_sessions_route_movement_to_assigned_server_players() {
+        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        let mut session_a = DedicatedSession::new(player_a);
+        let mut session_b = DedicatedSession::new(player_b);
+
+        session_a
+            .handle_client_command(
+                &mut server,
+                ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                    position: Vec3d::new(1.0, 64.0, 1.0),
+                    on_ground: true,
+                }),
+            )
+            .unwrap();
+        session_b
+            .handle_client_command(
+                &mut server,
+                ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                    position: Vec3d::new(-2.0, 70.0, 3.0),
+                    on_ground: false,
+                }),
+            )
+            .unwrap();
+
+        assert_eq!(
+            server.dedicated_player_position(player_a),
+            Some(Vec3d::new(1.0, 64.0, 1.0))
+        );
+        assert_eq!(
+            server.dedicated_player_position(player_b),
+            Some(Vec3d::new(-2.0, 70.0, 3.0))
+        );
     }
 
     #[test]

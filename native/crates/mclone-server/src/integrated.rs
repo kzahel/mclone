@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos};
+use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, Vec3d};
 use mclone_protocol::{
     ChunkView, ClientCommand, InteractionHand, MovePlayerCommand, PlayerActionCommand,
     PlayerActionKind, ServerUpdate, SetCarriedItemCommand, UseItemOnCommand,
@@ -18,12 +18,13 @@ use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
 use crate::placement::DebugBlockItem;
 use crate::player::{MovePlayerApplyResult, ServerPlayerState};
+use crate::players::{ServerPlayerId, ServerPlayerList};
 use crate::spawn::find_safe_surface_spawn;
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
-    ChunkScheduler, ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreResult, FluidKind,
-    FluidTickList, NullChunkSnapshotStore, ServerSimulationTickReport, ServerSimulationTickTiming,
-    ServerTickReport, ServerTickTiming, WorldBlockPos,
+    ChunkScheduler, ChunkSchedulerEvent, ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult,
+    FluidKind, FluidTickList, NullChunkSnapshotStore, ServerSimulationTickReport,
+    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos,
 };
 
 #[derive(Debug)]
@@ -37,10 +38,17 @@ pub struct IntegratedServer {
     initial_spawn_center: Option<ChunkPos>,
     player: ServerPlayerState,
     inventory: ServerInventory,
+    dedicated_players: ServerPlayerList,
 }
 
 /// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
 const INITIAL_DAY_TIME: u64 = 1000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CommandTarget {
+    Local,
+    Dedicated(ServerPlayerId),
+}
 
 impl IntegratedServer {
     pub fn new(seed: i64) -> Self {
@@ -58,6 +66,7 @@ impl IntegratedServer {
             initial_spawn_center: None,
             player: ServerPlayerState::default(),
             inventory: ServerInventory::default(),
+            dedicated_players: ServerPlayerList::default(),
         }
     }
 
@@ -102,6 +111,22 @@ impl IntegratedServer {
         self.scheduler.set_lighting_enabled(enabled);
     }
 
+    pub fn add_dedicated_player(&mut self) -> ServerPlayerId {
+        self.dedicated_players.add()
+    }
+
+    pub fn remove_dedicated_player(&mut self, player_id: ServerPlayerId) -> bool {
+        self.dedicated_players.remove(player_id).is_some()
+    }
+
+    pub fn dedicated_player_count(&self) -> usize {
+        self.dedicated_players.len()
+    }
+
+    pub fn dedicated_player_position(&self, player_id: ServerPlayerId) -> Option<Vec3d> {
+        self.dedicated_players.position(player_id)
+    }
+
     pub fn handle_command(&mut self, command: ClientCommand) -> Vec<ServerUpdate> {
         self.try_handle_command(command)
             .expect("integrated server command failed")
@@ -111,13 +136,39 @@ impl IntegratedServer {
         &mut self,
         command: ClientCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.try_handle_command_for_target(CommandTarget::Local, command)
+    }
+
+    pub fn try_handle_command_for_player(
+        &mut self,
+        player_id: ServerPlayerId,
+        command: ClientCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.try_handle_command_for_target(CommandTarget::Dedicated(player_id), command)
+    }
+
+    fn try_handle_command_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: ClientCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         match command {
-            ClientCommand::SetChunkView(view) => self.set_chunk_view(view),
-            ClientCommand::MovePlayer(command) => Ok(self.handle_move_player(command)),
-            ClientCommand::AcceptTeleport(command) => Ok(self.handle_accept_teleport(command.id)),
-            ClientCommand::SetCarriedItem(command) => Ok(self.handle_set_carried_item(command)),
-            ClientCommand::PlayerAction(command) => Ok(self.handle_player_action(command)),
-            ClientCommand::UseItemOn(command) => Ok(self.handle_use_item_on(command)),
+            ClientCommand::SetChunkView(view) => self.set_chunk_view_for_target(target, view),
+            ClientCommand::MovePlayer(command) => {
+                self.handle_move_player_for_target(target, command)
+            }
+            ClientCommand::AcceptTeleport(command) => {
+                self.handle_accept_teleport_for_target(target, command.id)
+            }
+            ClientCommand::SetCarriedItem(command) => {
+                self.handle_set_carried_item_for_target(target, command)
+            }
+            ClientCommand::PlayerAction(command) => {
+                self.handle_player_action_for_target(target, command)
+            }
+            ClientCommand::UseItemOn(command) => {
+                self.handle_use_item_on_for_target(target, command)
+            }
         }
     }
 
@@ -126,8 +177,23 @@ impl IntegratedServer {
     }
 
     pub fn try_poll(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.try_poll_for_target(CommandTarget::Local)
+    }
+
+    pub fn try_poll_for_player(
+        &mut self,
+        player_id: ServerPlayerId,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.try_poll_for_target(CommandTarget::Dedicated(player_id))
+    }
+
+    fn try_poll_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.ensure_target_exists(target)?;
         let events = self.scheduler.poll()?;
-        Ok(self.apply_scheduler_events(events))
+        self.apply_scheduler_events_for_target(target, events)
     }
 
     pub fn tick(&mut self) -> Vec<ServerUpdate> {
@@ -144,13 +210,21 @@ impl IntegratedServer {
     }
 
     pub fn try_tick_report(&mut self) -> ChunkStoreResult<ServerTickReport> {
+        self.try_tick_report_for_target(CommandTarget::Local)
+    }
+
+    fn try_tick_report_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<ServerTickReport> {
+        self.ensure_target_exists(target)?;
         let total_start = simulation_timing_start();
         let scheduler_start = simulation_timing_start();
         let report = self.scheduler.tick_report()?;
         let scheduler_report_us = simulation_timing_elapsed_us(scheduler_start);
         let scheduler_event_count = report.events.len();
         let scheduler_apply_start = simulation_timing_start();
-        let updates = self.apply_scheduler_events(report.events);
+        let updates = self.apply_scheduler_events_for_target(target, report.events)?;
         let scheduler_apply_events_us = simulation_timing_elapsed_us(scheduler_apply_start);
         let scheduler_timing = report.timing;
         Ok(ServerTickReport {
@@ -178,15 +252,29 @@ impl IntegratedServer {
     }
 
     pub fn try_simulation_tick_report(&mut self) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.try_simulation_tick_report_for_target(CommandTarget::Local)
+    }
+
+    pub fn try_simulation_tick_report_for_player(
+        &mut self,
+        player_id: ServerPlayerId,
+    ) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.try_simulation_tick_report_for_target(CommandTarget::Dedicated(player_id))
+    }
+
+    fn try_simulation_tick_report_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<ServerSimulationTickReport> {
         let total_start = simulation_timing_start();
         let scheduler_start = simulation_timing_start();
-        let tick_report = self.try_tick_report()?;
+        let tick_report = self.try_tick_report_for_target(target)?;
         let scheduler_tick_us = simulation_timing_elapsed_us(scheduler_start);
         let tick_timing = tick_report.timing;
 
         let simulation_tick = self.simulation_tick.saturating_add(1);
         self.simulation_tick = simulation_tick;
-        self.player.mark_tick_boundary();
+        self.mark_player_tick_boundaries();
 
         // Advance the day/night clock one tick (Java `ServerLevel.tickTime` with
         // `doDaylightCycle` on). Coupled to the simulation tick cadence, which is
@@ -294,74 +382,116 @@ impl IntegratedServer {
         self.scheduler.save_dirty_chunks()
     }
 
-    fn set_chunk_view(&mut self, view: ChunkView) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        if self.initial_spawn_center.is_none() && self.player.needs_initial_position_sync() {
-            self.initial_spawn_center = Some(view.center);
-        }
+    fn set_chunk_view_for_target(
+        &mut self,
+        target: CommandTarget,
+        view: ChunkView,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.ensure_target_exists(target)?;
+        self.set_initial_spawn_center_for_target(target, view.center)?;
         let events = self.scheduler.apply_interest(view)?;
-        Ok(self.apply_scheduler_events(events))
+        self.apply_scheduler_events_for_target(target, events)
     }
 
-    fn handle_move_player(&mut self, command: MovePlayerCommand) -> Vec<ServerUpdate> {
-        match self.player.apply_move_player(command) {
+    fn handle_move_player_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: MovePlayerCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        let simulation_tick = self.simulation_tick;
+        let player = self.player_mut_for_target(target)?;
+        let updates = match player.apply_move_player(command) {
             MovePlayerApplyResult::Accepted | MovePlayerApplyResult::RejectedInvalid => Vec::new(),
-            MovePlayerApplyResult::AwaitingTeleport => self
-                .player
-                .resend_pending_correction_update(self.simulation_tick)
+            MovePlayerApplyResult::AwaitingTeleport => player
+                .resend_pending_correction_update(simulation_tick)
                 .map(ServerUpdate::PlayerPosition)
                 .into_iter()
                 .collect(),
-        }
+        };
+        Ok(updates)
     }
 
-    fn handle_accept_teleport(&mut self, id: u32) -> Vec<ServerUpdate> {
-        self.player.accept_teleport(id);
-        Vec::new()
+    fn handle_accept_teleport_for_target(
+        &mut self,
+        target: CommandTarget,
+        id: u32,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.player_mut_for_target(target)?.accept_teleport(id);
+        Ok(Vec::new())
     }
 
-    fn handle_set_carried_item(&mut self, command: SetCarriedItemCommand) -> Vec<ServerUpdate> {
-        self.inventory.apply_set_carried_item(command);
-        Vec::new()
+    fn handle_set_carried_item_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: SetCarriedItemCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.inventory_mut_for_target(target)?
+            .apply_set_carried_item(command);
+        Ok(Vec::new())
     }
 
-    fn handle_player_action(&mut self, command: PlayerActionCommand) -> Vec<ServerUpdate> {
+    fn handle_player_action_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: PlayerActionCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         if command.kind == PlayerActionKind::DebugInstantBreak {
-            let context = ServerInteractionContext::debug_creative(self.player.position());
+            let player_position = self.player_for_target(target)?.position();
+            let context = ServerInteractionContext::debug_creative(player_position);
             if context.may_break_block(command.pos) {
                 self.set_block_debug(command.pos, AIR_BLOCK_STATE_ID);
             }
         }
-        self.drain_pending_block_delta_updates()
+        Ok(self.drain_pending_block_delta_updates())
     }
 
-    fn handle_use_item_on(&mut self, command: UseItemOnCommand) -> Vec<ServerUpdate> {
-        if let Some((target, block_state)) = self.held_item_place_target(command) {
+    fn handle_use_item_on_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: UseItemOnCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if let Some((target, block_state)) =
+            self.held_item_place_target_for_target(target, command)?
+        {
             self.set_block_debug(target, block_state);
         }
-        self.drain_pending_block_delta_updates()
+        Ok(self.drain_pending_block_delta_updates())
     }
 
-    fn held_item_place_target(
+    fn held_item_place_target_for_target(
         &self,
+        target: CommandTarget,
         command: UseItemOnCommand,
-    ) -> Option<(BlockPos, BlockStateId)> {
+    ) -> ChunkStoreResult<Option<(BlockPos, BlockStateId)>> {
         if command.hand != InteractionHand::MainHand {
-            return None;
+            return Ok(None);
         }
-        let block_state = self.inventory.selected_block_state()?;
-        let block_id = raw_block_id_from_block_state(block_state)?;
-        let context = ServerInteractionContext::debug_creative(self.player.position());
+        let block_state = match self.inventory_for_target(target)?.selected_block_state() {
+            Some(block_state) => block_state,
+            None => return Ok(None),
+        };
+        let Some(block_id) = raw_block_id_from_block_state(block_state) else {
+            return Ok(None);
+        };
+        let player_position = self.player_for_target(target)?.position();
+        let context = ServerInteractionContext::debug_creative(player_position);
         if !context.may_use_item_on(command.hit) {
-            return None;
+            return Ok(None);
         }
-        let block_item = DebugBlockItem::new(block_id)?;
-        let clicked_block = self.scheduler.block_at_world(command.hit.block_pos)?;
+        let Some(block_item) = DebugBlockItem::new(block_id) else {
+            return Ok(None);
+        };
+        let Some(clicked_block) = self.scheduler.block_at_world(command.hit.block_pos) else {
+            return Ok(None);
+        };
         let relative_pos = command.hit.block_pos.relative(command.hit.direction);
         let relative_block = self.scheduler.block_at_world(relative_pos);
-        let placement = block_item.use_on(command.hit, clicked_block, relative_block)?;
-        context
+        let Some(placement) = block_item.use_on(command.hit, clicked_block, relative_block) else {
+            return Ok(None);
+        };
+        Ok(context
             .may_place_at(placement.pos)
-            .then_some((placement.pos, block_state))
+            .then_some((placement.pos, block_state)))
     }
 
     fn set_block_debug(&mut self, pos: BlockPos, block_state: BlockStateId) -> bool {
@@ -379,7 +509,12 @@ impl IntegratedServer {
             .collect()
     }
 
-    fn apply_scheduler_events(&mut self, events: Vec<ChunkSchedulerEvent>) -> Vec<ServerUpdate> {
+    fn apply_scheduler_events_for_target(
+        &mut self,
+        target: CommandTarget,
+        events: Vec<ChunkSchedulerEvent>,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.ensure_target_exists(target)?;
         let mut updates = Vec::new();
         for event in events {
             match event {
@@ -394,23 +529,151 @@ impl IntegratedServer {
                 }
             }
         }
-        if let Some(update) = self.initial_spawn_update() {
+        if let Some(update) = self.initial_spawn_update_for_target(target)? {
             updates.push(ServerUpdate::PlayerPosition(update));
         }
-        updates
+        Ok(updates)
     }
 
-    fn initial_spawn_update(&mut self) -> Option<mclone_protocol::PlayerPositionUpdate> {
-        if !self.player.needs_initial_position_sync() {
-            return None;
+    fn initial_spawn_update_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Option<mclone_protocol::PlayerPositionUpdate>> {
+        let player = self.player_for_target(target)?;
+        if !player.needs_initial_position_sync() {
+            return Ok(None);
         }
-        let center = self.initial_spawn_center?;
-        let position = find_safe_surface_spawn(center, |pos| self.scheduler.block_at_world(pos))?;
-        Some(
-            self.player
-                .initial_position_update(position, 0.0, 0.0, self.simulation_tick),
-        )
+        let Some(center) = self.initial_spawn_center_for_target(target)? else {
+            return Ok(None);
+        };
+        let Some(position) =
+            find_safe_surface_spawn(center, |pos| self.scheduler.block_at_world(pos))
+        else {
+            return Ok(None);
+        };
+        let simulation_tick = self.simulation_tick;
+        Ok(Some(
+            self.player_mut_for_target(target)?.initial_position_update(
+                position,
+                0.0,
+                0.0,
+                simulation_tick,
+            ),
+        ))
     }
+
+    fn set_initial_spawn_center_for_target(
+        &mut self,
+        target: CommandTarget,
+        center: ChunkPos,
+    ) -> ChunkStoreResult<()> {
+        match target {
+            CommandTarget::Local => {
+                if self.initial_spawn_center.is_none() && self.player.needs_initial_position_sync()
+                {
+                    self.initial_spawn_center = Some(center);
+                }
+                Ok(())
+            }
+            CommandTarget::Dedicated(player_id) => {
+                let player = self
+                    .dedicated_players
+                    .get_mut(player_id)
+                    .ok_or_else(|| unknown_player_error(player_id))?;
+                if player.initial_spawn_center.is_none()
+                    && player.state.needs_initial_position_sync()
+                {
+                    player.initial_spawn_center = Some(center);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn initial_spawn_center_for_target(
+        &self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Option<ChunkPos>> {
+        match target {
+            CommandTarget::Local => Ok(self.initial_spawn_center),
+            CommandTarget::Dedicated(player_id) => self
+                .dedicated_players
+                .get(player_id)
+                .map(|player| player.initial_spawn_center)
+                .ok_or_else(|| unknown_player_error(player_id)),
+        }
+    }
+
+    fn player_for_target(&self, target: CommandTarget) -> ChunkStoreResult<&ServerPlayerState> {
+        match target {
+            CommandTarget::Local => Ok(&self.player),
+            CommandTarget::Dedicated(player_id) => self
+                .dedicated_players
+                .get(player_id)
+                .map(|player| &player.state)
+                .ok_or_else(|| unknown_player_error(player_id)),
+        }
+    }
+
+    fn player_mut_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<&mut ServerPlayerState> {
+        match target {
+            CommandTarget::Local => Ok(&mut self.player),
+            CommandTarget::Dedicated(player_id) => self
+                .dedicated_players
+                .get_mut(player_id)
+                .map(|player| &mut player.state)
+                .ok_or_else(|| unknown_player_error(player_id)),
+        }
+    }
+
+    fn inventory_for_target(&self, target: CommandTarget) -> ChunkStoreResult<&ServerInventory> {
+        match target {
+            CommandTarget::Local => Ok(&self.inventory),
+            CommandTarget::Dedicated(player_id) => self
+                .dedicated_players
+                .get(player_id)
+                .map(|player| &player.inventory)
+                .ok_or_else(|| unknown_player_error(player_id)),
+        }
+    }
+
+    fn inventory_mut_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<&mut ServerInventory> {
+        match target {
+            CommandTarget::Local => Ok(&mut self.inventory),
+            CommandTarget::Dedicated(player_id) => self
+                .dedicated_players
+                .get_mut(player_id)
+                .map(|player| &mut player.inventory)
+                .ok_or_else(|| unknown_player_error(player_id)),
+        }
+    }
+
+    fn ensure_target_exists(&self, target: CommandTarget) -> ChunkStoreResult<()> {
+        match target {
+            CommandTarget::Local => Ok(()),
+            CommandTarget::Dedicated(player_id) if self.dedicated_players.contains(player_id) => {
+                Ok(())
+            }
+            CommandTarget::Dedicated(player_id) => Err(unknown_player_error(player_id)),
+        }
+    }
+
+    fn mark_player_tick_boundaries(&mut self) {
+        self.player.mark_tick_boundary();
+        for player in self.dedicated_players.values_mut() {
+            player.state.mark_tick_boundary();
+        }
+    }
+}
+
+fn unknown_player_error(player_id: ServerPlayerId) -> ChunkStoreError {
+    ChunkStoreError::InvalidData(format!("unknown server player {player_id}"))
 }
 
 fn raw_block_id_from_block_state(block_state: BlockStateId) -> Option<RawBlockId> {

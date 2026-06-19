@@ -16,6 +16,7 @@ mod lighting_seed;
 mod persistence;
 mod placement;
 mod player;
+mod players;
 mod scheduler;
 #[cfg(test)]
 mod sky_light_bridge;
@@ -36,6 +37,7 @@ pub use integrated::IntegratedServer;
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
 };
+pub use players::ServerPlayerId;
 pub(crate) use scheduler::FluidTickList;
 pub use scheduler::{
     ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics, ChunkStatusJob,

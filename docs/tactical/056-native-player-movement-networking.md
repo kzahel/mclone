@@ -31,6 +31,8 @@ Read these Java 1.17.1 files before changing this lane:
 - `reference/minecraft-1.17.1/src/net/minecraft/server/network/ServerGamePacketListenerImpl.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/network/Connection.java`
 - `reference/minecraft-1.17.1/src/net/minecraft/client/multiplayer/ClientPacketListener.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/server/players/PlayerList.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/server/level/ServerPlayer.java`
 
 Important reference facts:
 
@@ -56,6 +58,11 @@ Important reference facts:
 - client gameplay packets are sent through `ClientPacketListener.send(...)`,
   which delegates to the long-lived `Connection` rather than reconnecting per
   packet
+- `PlayerList` owns the connected `ServerPlayer` collection and a UUID lookup
+  map; `placeNewPlayer(...)` creates the per-connection
+  `ServerGamePacketListenerImpl`, then adds the player to those collections
+- each `ServerGamePacketListenerImpl` stores the `Connection`, `MinecraftServer`,
+  and the specific `ServerPlayer` for that gameplay connection
 - `handleMovePlayer` rejects non-finite values, clamps world bounds, wraps
   rotation, handles pending teleports, detects excessive packet burst /
   too-fast movement, moves the server player, detects impossible movement, and
@@ -122,6 +129,12 @@ complexity.
   the server thread serializes command handling through one `IntegratedServer`,
   keeping the shape close to Java's IO-event-loop plus server-ticked connection
   list without adding an async runtime yet.
+- 2026-06-19: Added dedicated server player identities. `mclone-server` now has a
+  small server player id/list module, `IntegratedServer` can route commands,
+  poll, and simulation ticks to a specific dedicated player, and each dedicated
+  session registers/removes one server player on connection lifecycle. Movement,
+  teleport ack, hotbar selection, reach checks, and spawn sync no longer share a
+  single dedicated player state across connections.
 
 ## Native Direction
 
@@ -147,6 +160,9 @@ Keep the first native implementation boring, reference-shaped, and permissive:
 - keep dedicated network IO separate from gameplay sessions: socket accept/read
   and write-back workers live in a connection module, while the main server loop
   owns `IntegratedServer` mutation and one `DedicatedSession` per connection
+- keep server player identity separate from socket identity: dedicated sessions
+  own the assigned `ServerPlayerId`, while the server player list owns per-player
+  movement, inventory, and pending spawn sync state
 - the current native dedicated transport uses one blocking IO worker per client
   and has no intentionally low hard cap; the bring-up target is to tolerate at
   least 32 connected clients, while automated unit coverage keeps the concurrent
@@ -211,13 +227,17 @@ This slice intentionally does not yet implement, and now defers:
 - active too-fast movement correction
 - remote-player interpolation
 - FPS-style prediction/reconciliation
+- per-player chunk-interest aggregation and per-recipient update fan-out; the
+  current dedicated path has separate player state but still drives one shared
+  scheduler interest/publication stream
 
 ## Near-Term Follow-Ups
 
-1. Add remote-player state publication once the dedicated path has multiple
+1. Add per-player chunk-interest aggregation and update routing so multiple
+   dedicated players can independently stream chunks without relying on one
+   shared scheduler interest.
+2. Add remote-player state publication once the dedicated path has multiple
    connected clients worth visualizing.
-2. Add player/session identities so dedicated movement state is not still a
-   shared single-player server player behind multiple connections.
 3. Revisit the FPS-style authority option only after the Java-shaped path is
    usable and measured.
 

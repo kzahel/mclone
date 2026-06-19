@@ -119,7 +119,8 @@ fn run_server_loop(listener: TcpListener, seed: i64, mode: ServerRunMode) -> Res
     loop {
         match network.recv()? {
             DedicatedNetworkEvent::Connected { id, peer_addr } => {
-                sessions.insert(id, DedicatedSession::default());
+                let player_id = server.add_dedicated_player();
+                sessions.insert(id, DedicatedSession::new(player_id));
                 log::info!("accepted dedicated client {id} from {peer_addr}");
             }
             DedicatedNetworkEvent::Command {
@@ -138,7 +139,7 @@ fn run_server_loop(listener: TcpListener, seed: i64, mode: ServerRunMode) -> Res
                     Ok(updates) => {
                         let update_count = updates.len();
                         if response.send(Ok(updates)).is_err() {
-                            sessions.remove(&id);
+                            remove_session_player(&mut server, &mut sessions, id);
                             log::warn!(
                                 "dedicated client {id} {peer_addr} disconnected before receiving {update_count} updates"
                             );
@@ -151,7 +152,7 @@ fn run_server_loop(listener: TcpListener, seed: i64, mode: ServerRunMode) -> Res
                     Err(err) => {
                         let message = format!("{err:#}");
                         let _ = response.send(Err(message.clone()));
-                        sessions.remove(&id);
+                        remove_session_player(&mut server, &mut sessions, id);
                         if mode == ServerRunMode::ServeOnce {
                             return Err(err)
                                 .with_context(|| format!("failed to serve {id} {peer_addr}"));
@@ -166,7 +167,7 @@ fn run_server_loop(listener: TcpListener, seed: i64, mode: ServerRunMode) -> Res
                 command_count,
                 reason,
             } => {
-                sessions.remove(&id);
+                remove_session_player(&mut server, &mut sessions, id);
                 if command_count > 0 {
                     completed_connections += 1;
                 }
@@ -203,6 +204,17 @@ fn run_server_loop(listener: TcpListener, seed: i64, mode: ServerRunMode) -> Res
             }
         }
     }
+}
+
+fn remove_session_player(
+    server: &mut IntegratedServer,
+    sessions: &mut BTreeMap<DedicatedConnectionId, DedicatedSession>,
+    connection_id: DedicatedConnectionId,
+) {
+    let Some(session) = sessions.remove(&connection_id) else {
+        return;
+    };
+    server.remove_dedicated_player(session.player_id());
 }
 
 #[cfg(test)]
