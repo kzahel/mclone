@@ -10,6 +10,8 @@ const ACTOR_VERTEX_BYTE_LEN: usize = ACTOR_VERTEX_FLOAT_COUNT * std::mem::size_o
 const ACTOR_VERTEX_BYTE_SIZE: wgpu::BufferAddress = ACTOR_VERTEX_BYTE_LEN as wgpu::BufferAddress;
 const UNIFORM_BYTE_LEN: usize = 16 * std::mem::size_of::<f32>();
 const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferAddress;
+const MODEL_PIXEL_SCALE: f32 = 1.0 / 16.0;
+const MODEL_FEET_Y_PIXELS: f32 = 24.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ActorInstance {
@@ -27,6 +29,7 @@ pub struct ActorInstance {
 pub enum ActorInstanceShape {
     Humanoid,
     QuadrupedPlaceholder,
+    CowModel,
 }
 
 impl ActorInstance {
@@ -56,6 +59,18 @@ impl ActorInstance {
             height,
             body_color: [0.33, 0.19, 0.10, 1.0],
             accent_color: [0.92, 0.86, 0.74, 1.0],
+        }
+    }
+
+    pub fn cow_model(feet_position: Vec3, y_rot_degrees: f32, width: f32, height: f32) -> Self {
+        Self {
+            feet_position,
+            yaw_radians: -y_rot_degrees.to_radians(),
+            shape: ActorInstanceShape::CowModel,
+            width,
+            height,
+            body_color: [0.28, 0.17, 0.10, 1.0],
+            accent_color: [0.90, 0.86, 0.72, 1.0],
         }
     }
 
@@ -297,6 +312,7 @@ fn append_actor(mesh: &mut ActorMesh, actor: ActorInstance) {
     match actor.shape {
         ActorInstanceShape::Humanoid => append_humanoid_placeholder(mesh, actor),
         ActorInstanceShape::QuadrupedPlaceholder => append_quadruped_placeholder(mesh, actor),
+        ActorInstanceShape::CowModel => append_cow_model(mesh, actor),
     }
 }
 
@@ -407,6 +423,229 @@ fn append_quadruped_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ActorModelPart {
+    offset_pixels: [f32; 3],
+    rotation_radians: [f32; 3],
+    cuboids: &'static [ActorModelCuboid],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ActorModelCuboid {
+    texture_offset: [u16; 2],
+    origin_pixels: [f32; 3],
+    size_pixels: [f32; 3],
+}
+
+const COW_HEAD_CUBOIDS: &[ActorModelCuboid] = &[
+    ActorModelCuboid {
+        texture_offset: [0, 0],
+        origin_pixels: [-4.0, -4.0, -6.0],
+        size_pixels: [8.0, 8.0, 6.0],
+    },
+    ActorModelCuboid {
+        texture_offset: [22, 0],
+        origin_pixels: [-5.0, -5.0, -4.0],
+        size_pixels: [1.0, 3.0, 1.0],
+    },
+    ActorModelCuboid {
+        texture_offset: [22, 0],
+        origin_pixels: [4.0, -5.0, -4.0],
+        size_pixels: [1.0, 3.0, 1.0],
+    },
+];
+
+const COW_BODY_CUBOIDS: &[ActorModelCuboid] = &[
+    ActorModelCuboid {
+        texture_offset: [18, 4],
+        origin_pixels: [-6.0, -10.0, -7.0],
+        size_pixels: [12.0, 18.0, 10.0],
+    },
+    ActorModelCuboid {
+        texture_offset: [52, 0],
+        origin_pixels: [-2.0, 2.0, -8.0],
+        size_pixels: [4.0, 6.0, 1.0],
+    },
+];
+
+const COW_LEG_CUBOIDS: &[ActorModelCuboid] = &[ActorModelCuboid {
+    texture_offset: [0, 16],
+    origin_pixels: [-2.0, 0.0, -2.0],
+    size_pixels: [4.0, 12.0, 4.0],
+}];
+
+const COW_MODEL_PARTS: &[ActorModelPart] = &[
+    ActorModelPart {
+        offset_pixels: [0.0, 4.0, -8.0],
+        rotation_radians: [0.0, 0.0, 0.0],
+        cuboids: COW_HEAD_CUBOIDS,
+    },
+    ActorModelPart {
+        offset_pixels: [0.0, 5.0, 2.0],
+        rotation_radians: [std::f32::consts::FRAC_PI_2, 0.0, 0.0],
+        cuboids: COW_BODY_CUBOIDS,
+    },
+    ActorModelPart {
+        offset_pixels: [-4.0, 12.0, 7.0],
+        rotation_radians: [0.0, 0.0, 0.0],
+        cuboids: COW_LEG_CUBOIDS,
+    },
+    ActorModelPart {
+        offset_pixels: [4.0, 12.0, 7.0],
+        rotation_radians: [0.0, 0.0, 0.0],
+        cuboids: COW_LEG_CUBOIDS,
+    },
+    ActorModelPart {
+        offset_pixels: [-4.0, 12.0, -6.0],
+        rotation_radians: [0.0, 0.0, 0.0],
+        cuboids: COW_LEG_CUBOIDS,
+    },
+    ActorModelPart {
+        offset_pixels: [4.0, 12.0, -6.0],
+        rotation_radians: [0.0, 0.0, 0.0],
+        cuboids: COW_LEG_CUBOIDS,
+    },
+];
+
+fn append_cow_model(mesh: &mut ActorMesh, actor: ActorInstance) {
+    for part in COW_MODEL_PARTS {
+        for cuboid in part.cuboids {
+            append_model_cuboid(mesh, actor, part, cuboid, cow_cuboid_face_colors(*cuboid));
+        }
+    }
+}
+
+fn append_model_cuboid(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    part: &ActorModelPart,
+    cuboid: &ActorModelCuboid,
+    face_colors: [[f32; 4]; 6],
+) {
+    let origin = Vec3::from_array(cuboid.origin_pixels);
+    let size = Vec3::from_array(cuboid.size_pixels);
+    let max = origin + size;
+    let corners = [
+        Vec3::new(origin.x, origin.y, origin.z),
+        Vec3::new(max.x, origin.y, origin.z),
+        Vec3::new(max.x, max.y, origin.z),
+        Vec3::new(origin.x, max.y, origin.z),
+        Vec3::new(origin.x, origin.y, max.z),
+        Vec3::new(max.x, origin.y, max.z),
+        Vec3::new(max.x, max.y, max.z),
+        Vec3::new(origin.x, max.y, max.z),
+    ];
+    append_transformed_box(mesh, face_colors, |corner_index| {
+        let model_position = transform_model_part_point(corners[corner_index], part);
+        actor_world_position(actor, model_pixels_to_actor_local(model_position))
+    });
+}
+
+fn append_transformed_box(
+    mesh: &mut ActorMesh,
+    face_colors: [[f32; 4]; 6],
+    mut world_corner: impl FnMut(usize) -> Vec3,
+) {
+    let faces = [
+        [0, 3, 2, 1],
+        [4, 5, 6, 7],
+        [0, 4, 7, 3],
+        [1, 2, 6, 5],
+        [0, 1, 5, 4],
+        [3, 7, 6, 2],
+    ];
+
+    for (face_index, face) in faces.into_iter().enumerate() {
+        let base = mesh.vertices.len() as u32;
+        for corner_index in face {
+            mesh.vertices.push(ActorVertex {
+                position: world_corner(corner_index).to_array(),
+                color: face_colors[face_index],
+            });
+        }
+        mesh.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+}
+
+fn transform_model_part_point(point_pixels: Vec3, part: &ActorModelPart) -> Vec3 {
+    rotate_model_point(point_pixels, part.rotation_radians) + Vec3::from_array(part.offset_pixels)
+}
+
+fn rotate_model_point(point: Vec3, rotation_radians: [f32; 3]) -> Vec3 {
+    let [x_rot, y_rot, z_rot] = rotation_radians;
+    let mut rotated = point;
+    if z_rot != 0.0 {
+        let (sin, cos) = z_rot.sin_cos();
+        rotated = Vec3::new(
+            rotated.x * cos - rotated.y * sin,
+            rotated.x * sin + rotated.y * cos,
+            rotated.z,
+        );
+    }
+    if y_rot != 0.0 {
+        let (sin, cos) = y_rot.sin_cos();
+        rotated = Vec3::new(
+            rotated.x * cos + rotated.z * sin,
+            rotated.y,
+            -rotated.x * sin + rotated.z * cos,
+        );
+    }
+    if x_rot != 0.0 {
+        let (sin, cos) = x_rot.sin_cos();
+        rotated = Vec3::new(
+            rotated.x,
+            rotated.y * cos - rotated.z * sin,
+            rotated.y * sin + rotated.z * cos,
+        );
+    }
+    rotated
+}
+
+fn model_pixels_to_actor_local(model_position: Vec3) -> Vec3 {
+    Vec3::new(
+        model_position.x * MODEL_PIXEL_SCALE,
+        (MODEL_FEET_Y_PIXELS - model_position.y) * MODEL_PIXEL_SCALE,
+        -model_position.z * MODEL_PIXEL_SCALE,
+    )
+}
+
+fn cow_cuboid_face_colors(cuboid: ActorModelCuboid) -> [[f32; 4]; 6] {
+    match cuboid.texture_offset {
+        [0, 0] => shaded_faces([0.74, 0.68, 0.54, 1.0]),
+        [18, 4] => [
+            [0.20, 0.12, 0.07, 1.0],
+            [0.70, 0.66, 0.54, 1.0],
+            [0.26, 0.15, 0.08, 1.0],
+            [0.78, 0.74, 0.62, 1.0],
+            [0.18, 0.10, 0.06, 1.0],
+            [0.48, 0.35, 0.23, 1.0],
+        ],
+        [22, 0] => shaded_faces([0.86, 0.82, 0.62, 1.0]),
+        [52, 0] => shaded_faces([0.88, 0.56, 0.58, 1.0]),
+        [0, 16] => [
+            [0.16, 0.09, 0.05, 1.0],
+            [0.28, 0.17, 0.10, 1.0],
+            [0.21, 0.12, 0.07, 1.0],
+            [0.74, 0.70, 0.60, 1.0],
+            [0.16, 0.09, 0.05, 1.0],
+            [0.36, 0.22, 0.13, 1.0],
+        ],
+        _ => shaded_faces([0.35, 0.25, 0.18, 1.0]),
+    }
+}
+
+fn shaded_faces(color: [f32; 4]) -> [[f32; 4]; 6] {
+    [
+        scale_color(color, 0.58),
+        scale_color(color, 0.90),
+        scale_color(color, 0.72),
+        scale_color(color, 0.82),
+        scale_color(color, 0.66),
+        scale_color(color, 1.08),
+    ]
+}
+
 fn append_box(
     mesh: &mut ActorMesh,
     actor: ActorInstance,
@@ -424,26 +663,9 @@ fn append_box(
         Vec3::new(max.x, max.y, max.z),
         Vec3::new(min.x, max.y, max.z),
     ];
-    let faces = [
-        [0, 3, 2, 1],
-        [4, 5, 6, 7],
-        [0, 4, 7, 3],
-        [1, 2, 6, 5],
-        [0, 1, 5, 4],
-        [3, 7, 6, 2],
-    ];
-
-    for (face_index, face) in faces.into_iter().enumerate() {
-        let base = mesh.vertices.len() as u32;
-        for corner_index in face {
-            mesh.vertices.push(ActorVertex {
-                position: actor_world_position(actor, corners[corner_index]).to_array(),
-                color: face_colors[face_index],
-            });
-        }
-        mesh.indices
-            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    }
+    append_transformed_box(mesh, face_colors, |corner_index| {
+        actor_world_position(actor, corners[corner_index])
+    });
 }
 
 fn actor_world_position(actor: ActorInstance, local: Vec3) -> Vec3 {
@@ -519,6 +741,35 @@ mod tests {
     }
 
     #[test]
+    fn cow_model_uses_vanilla_cuboid_parts() {
+        assert_eq!(COW_MODEL_PARTS.len(), 6);
+        assert_eq!(COW_HEAD_CUBOIDS.len(), 3);
+        assert_eq!(COW_BODY_CUBOIDS.len(), 2);
+        assert_eq!(COW_LEG_CUBOIDS.len(), 1);
+        assert_eq!(COW_MODEL_PARTS[0].offset_pixels, [0.0, 4.0, -8.0]);
+        assert_eq!(
+            COW_MODEL_PARTS[1].rotation_radians,
+            [std::f32::consts::FRAC_PI_2, 0.0, 0.0]
+        );
+        assert_eq!(COW_BODY_CUBOIDS[0].texture_offset, [18, 4]);
+        assert_eq!(COW_BODY_CUBOIDS[1].texture_offset, [52, 0]);
+    }
+
+    #[test]
+    fn actor_mesh_emits_cow_model_at_feet_position() {
+        let mesh = actor_mesh(&[ActorInstance::cow_model(Vec3::ZERO, 0.0, 0.9, 1.4)]);
+
+        assert_eq!(mesh.vertices.len(), 9 * 6 * 4);
+        assert_eq!(mesh.indices.len(), 9 * 6 * 6);
+
+        let bounds = mesh_bounds(&mesh);
+        assert!((bounds.min.y - 0.0).abs() < 1.0e-6);
+        assert!((bounds.max.y - 25.0 / 16.0).abs() < 1.0e-6);
+        assert!(bounds.max.z > 0.85);
+        assert!(bounds.min.z < -0.60);
+    }
+
+    #[test]
     fn remote_player_yaw_uses_java_sign_convention() {
         let actor = ActorInstance::remote_player(Vec3::ZERO, -90.0);
         let forward = actor_world_position(actor, Vec3::new(0.0, 0.0, 1.0));
@@ -534,5 +785,22 @@ mod tests {
         let world = actor_world_position(actor, Vec3::new(0.0, 1.8, 0.0));
 
         assert_eq!(world, Vec3::new(10.0, 65.8, -4.0));
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct Bounds {
+        min: Vec3,
+        max: Vec3,
+    }
+
+    fn mesh_bounds(mesh: &ActorMesh) -> Bounds {
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+        for vertex in &mesh.vertices {
+            let position = Vec3::from_array(vertex.position);
+            min = min.min(position);
+            max = max.max(position);
+        }
+        Bounds { min, max }
     }
 }

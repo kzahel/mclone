@@ -833,7 +833,7 @@ pub(crate) fn actor_instances_from_presentations(
                 glam_vec3_from_vec3d(actor.feet_position),
                 actor.y_rot_degrees,
             ),
-            ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_placeholder(
+            ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_model(
                 glam_vec3_from_vec3d(actor.feet_position),
                 actor.y_rot_degrees,
                 actor.width,
@@ -1477,7 +1477,7 @@ mod tests {
         assert_eq!(entity_actors.len(), 1);
         assert_eq!(
             entity_actors[0].shape,
-            mclone_render::entity::ActorInstanceShape::QuadrupedPlaceholder
+            mclone_render::entity::ActorInstanceShape::CowModel
         );
         assert_eq!(entity_actors[0].width, 0.9);
         assert_eq!(entity_actors[0].height, 1.4);
