@@ -21,11 +21,11 @@ use mclone_render::chunk::{
 use mclone_render_session::{
     PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
     RenderSectionCompileAcceptanceReport, RenderSectionCompileRequestInfo,
-    RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionDirtyWork,
-    RenderSectionNeighborReadiness, RenderSectionReadyPlan, RenderSectionSession,
-    RenderSectionViewSync, build_client_textured_sections,
-    decode_textured_render_section_build_report, encode_textured_render_section_build_report,
-    render_section_chunk_pos, render_section_keys_for_snapshot, snapshot_contains_render_section,
+    RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionNeighborReadiness,
+    RenderSectionReadyPlan, RenderSectionRemovalMode, RenderSectionSession, RenderSectionViewSync,
+    build_client_textured_sections, decode_textured_render_section_build_report,
+    encode_textured_render_section_build_report, render_section_chunk_pos,
+    render_section_keys_for_snapshot, snapshot_contains_render_section,
     summarize_textured_render_section_build_report,
 };
 
@@ -804,16 +804,21 @@ impl WebChunkRenderSession {
     ) -> Result<WebChunkRenderPlan, String> {
         let sync = self.prepare_chunk_view(center, radius_chunks)?;
         self.mark_render_sync_dirty(&sync);
-        let dirty_work = self.classify_render_dirty_work();
-        let sorted_loaded_dirty_chunks =
-            sort_chunk_positions_by_coordinate(dirty_work.loaded_dirty_chunks.iter().copied());
-        let sorted_dirty_section_chunks =
-            sort_dirty_section_chunks_by_coordinate(&dirty_work.loaded_dirty_sections_by_chunk);
         let client = self.runtime.client();
-        let sync_plan = self.render_session.prepare_sync_plan(
-            dirty_work,
-            sorted_loaded_dirty_chunks,
-            sorted_dirty_section_chunks,
+        let sync_update = self.render_session.prepare_sync_update(
+            |pos| client.chunk_snapshot(pos).is_some(),
+            |key| {
+                let pos = render_section_chunk_pos(key);
+                client
+                    .chunk_snapshot(pos)
+                    .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+            },
+            |dirty_work| {
+                sort_chunk_positions_by_coordinate(dirty_work.loaded_dirty_chunks.iter().copied())
+            },
+            |dirty_work| {
+                sort_dirty_section_chunks_by_coordinate(&dirty_work.loaded_dirty_sections_by_chunk)
+            },
             usize::MAX,
             |pos| {
                 client
@@ -822,12 +827,13 @@ impl WebChunkRenderSession {
                     .unwrap_or_default()
             },
             |_key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+            RenderSectionRemovalMode::Defer,
         );
         Ok(WebChunkRenderPlan {
             sync,
-            ready_plan: sync_plan.ready_plan,
-            removal_chunks: sync_plan.dirty_work.removal_dirty_chunks,
-            removal_sections: sync_plan.dirty_work.removal_dirty_sections,
+            ready_plan: sync_update.sync_plan.ready_plan,
+            removal_chunks: sync_update.sync_plan.dirty_work.removal_dirty_chunks,
+            removal_sections: sync_update.sync_plan.dirty_work.removal_dirty_sections,
         })
     }
 
@@ -875,21 +881,6 @@ impl WebChunkRenderSession {
             self.render_session
                 .mark_chunk_dirty_with_loaded_sections(pos, loaded_keys);
         }
-    }
-
-    fn classify_render_dirty_work(&self) -> RenderSectionDirtyWork {
-        self.render_session.classify_dirty_work(
-            |pos| self.runtime.client().chunk_snapshot(pos).is_some(),
-            |pos| self.render_session.contains_chunk(pos),
-            |key| {
-                let pos = render_section_chunk_pos(key);
-                self.runtime
-                    .client()
-                    .chunk_snapshot(pos)
-                    .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-            },
-            |key| self.render_session.contains_section(key),
-        )
     }
 
     fn render_chunk_report_with_section_report(

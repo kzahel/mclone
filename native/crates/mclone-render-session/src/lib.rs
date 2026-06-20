@@ -496,6 +496,18 @@ impl RenderSectionSyncPlan {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RenderSectionRemovalMode {
+    ApplyImmediately,
+    Defer,
+}
+
+#[derive(Clone, Debug)]
+pub struct RenderSectionSyncUpdate {
+    pub sync_plan: RenderSectionSyncPlan,
+    pub cache_update: RenderSectionCacheUpdate,
+}
+
 pub fn prepare_render_section_sync_plan(
     dirty: &mut RenderSectionDirtyState,
     dirty_work: RenderSectionDirtyWork,
@@ -668,6 +680,47 @@ impl RenderSectionSession {
             section_is_loaded,
             section_is_cached,
         )
+    }
+
+    pub fn prepare_sync_update(
+        &mut self,
+        chunk_is_loaded: impl FnMut(ChunkPos) -> bool,
+        section_is_loaded: impl FnMut(RenderSectionKey) -> bool,
+        order_loaded_dirty_chunks: impl FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
+        order_dirty_section_chunks: impl FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
+        chunk_budget: usize,
+        section_keys_for_chunk: impl FnMut(ChunkPos) -> Vec<RenderSectionKey>,
+        section_readiness: impl FnMut(RenderSectionKey) -> RenderSectionNeighborReadiness,
+        removal_mode: RenderSectionRemovalMode,
+    ) -> RenderSectionSyncUpdate {
+        let dirty_work = classify_render_section_dirty_work(
+            &self.dirty,
+            chunk_is_loaded,
+            |pos| self.cache.contains_chunk(pos),
+            section_is_loaded,
+            |key| self.cache.contains_section(key),
+        );
+        let sorted_loaded_dirty_chunks = order_loaded_dirty_chunks(&dirty_work);
+        let sorted_dirty_section_chunks = order_dirty_section_chunks(&dirty_work);
+        let sync_plan = self.prepare_sync_plan(
+            dirty_work,
+            sorted_loaded_dirty_chunks,
+            sorted_dirty_section_chunks,
+            chunk_budget,
+            section_keys_for_chunk,
+            section_readiness,
+        );
+        let mut cache_update = RenderSectionCacheUpdate::default();
+        if removal_mode == RenderSectionRemovalMode::ApplyImmediately && sync_plan.has_removals() {
+            cache_update.merge(self.apply_removals(
+                &sync_plan.dirty_work.removal_dirty_chunks,
+                &sync_plan.dirty_work.removal_dirty_sections,
+            ));
+        }
+        RenderSectionSyncUpdate {
+            sync_plan,
+            cache_update,
+        }
     }
 
     pub fn prepare_sync_plan(
@@ -1646,6 +1699,104 @@ mod tests {
         assert_eq!(plan.ready_plan.ready_section_keys, BTreeSet::from([ready]));
         assert!(!plan.has_removals());
         assert_eq!(plan.ready_update(1).submitted_compile_section_count, 1);
+    }
+
+    #[test]
+    fn render_section_sync_update_applies_removals_for_native_style_sync() {
+        let loaded_chunk = ChunkPos::new(0, 0);
+        let removal_chunk = ChunkPos::new(1, 0);
+        let ready = RenderSectionKey::new(0, 4, 0);
+        let cached = RenderSectionKey::new(1, 4, 0);
+        let mut session = RenderSectionSession::default();
+        session.apply_finished_compile_report(
+            &BTreeSet::from([cached]),
+            TexturedRenderSectionBuildReport {
+                sections: vec![TexturedRenderSectionMesh {
+                    key: cached,
+                    mesh: TexturedVisibleChunkMesh::default(),
+                    visibility: VisibilitySet::all_visible(),
+                }],
+                visibility_graph: VisibilityGraphBuildStats::default(),
+            },
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
+        session.mark_chunk_dirty(loaded_chunk, [ready]);
+        session.mark_chunk_dirty(removal_chunk, [cached]);
+
+        let update = session.prepare_sync_update(
+            |pos| pos == loaded_chunk,
+            |key| key == ready,
+            |dirty_work| dirty_work.loaded_dirty_chunks.iter().copied().collect(),
+            |dirty_work| {
+                dirty_work
+                    .loaded_dirty_sections_by_chunk
+                    .keys()
+                    .copied()
+                    .collect()
+            },
+            1,
+            |_| vec![ready],
+            |_| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+            RenderSectionRemovalMode::ApplyImmediately,
+        );
+
+        assert_eq!(update.cache_update.removed_section_count(), 1);
+        assert!(!session.contains_section(cached));
+        assert_eq!(
+            update.sync_plan.ready_plan.ready_section_keys,
+            BTreeSet::from([ready])
+        );
+        assert!(!session.dirty().dirty_chunks.contains(&removal_chunk));
+    }
+
+    #[test]
+    fn render_section_sync_update_can_defer_removals_for_combined_web_uploads() {
+        let loaded_chunk = ChunkPos::new(0, 0);
+        let removal_chunk = ChunkPos::new(1, 0);
+        let ready = RenderSectionKey::new(0, 4, 0);
+        let cached = RenderSectionKey::new(1, 4, 0);
+        let mut session = RenderSectionSession::default();
+        session.apply_finished_compile_report(
+            &BTreeSet::from([cached]),
+            TexturedRenderSectionBuildReport {
+                sections: vec![TexturedRenderSectionMesh {
+                    key: cached,
+                    mesh: TexturedVisibleChunkMesh::default(),
+                    visibility: VisibilitySet::all_visible(),
+                }],
+                visibility_graph: VisibilityGraphBuildStats::default(),
+            },
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
+        session.mark_chunk_dirty(loaded_chunk, [ready]);
+        session.mark_chunk_dirty(removal_chunk, [cached]);
+
+        let update = session.prepare_sync_update(
+            |pos| pos == loaded_chunk,
+            |key| key == ready,
+            |dirty_work| dirty_work.loaded_dirty_chunks.iter().copied().collect(),
+            |dirty_work| {
+                dirty_work
+                    .loaded_dirty_sections_by_chunk
+                    .keys()
+                    .copied()
+                    .collect()
+            },
+            1,
+            |_| vec![ready],
+            |_| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+            RenderSectionRemovalMode::Defer,
+        );
+
+        assert_eq!(update.cache_update.removed_section_count(), 0);
+        assert!(session.contains_section(cached));
+        assert_eq!(
+            update.sync_plan.dirty_work.removal_dirty_chunks,
+            BTreeSet::from([removal_chunk])
+        );
+        assert!(session.dirty().dirty_chunks.contains(&removal_chunk));
     }
 
     #[test]

@@ -27,9 +27,9 @@ use crate::render_cache::{
 };
 use mclone_render_session::{
     RenderSectionCacheUpdate, RenderSectionCompiler, RenderSectionNeighborReadiness,
-    RenderSectionReadyPlan, RenderSectionSession, build_client_textured_sections,
-    render_dirty_chunk_neighborhood, render_section_chunk_pos, render_section_keys_for_snapshot,
-    snapshot_contains_render_section,
+    RenderSectionReadyPlan, RenderSectionRemovalMode, RenderSectionSession,
+    build_client_textured_sections, render_dirty_chunk_neighborhood, render_section_chunk_pos,
+    render_section_keys_for_snapshot, snapshot_contains_render_section,
 };
 
 const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
@@ -698,52 +698,45 @@ impl WindowSceneRuntime {
             return Ok(report);
         }
 
-        let dirty_work = self.render_session.classify_dirty_work(
-            |pos| self.client.chunk_snapshot(pos).is_some(),
-            |pos| self.render_session.contains_chunk(pos),
+        let client = &self.client;
+        let sync_update = self.render_session.prepare_sync_update(
+            |pos| client.chunk_snapshot(pos).is_some(),
             |key| {
                 let pos = render_section_chunk_pos(key);
-                self.client
+                client
                     .chunk_snapshot(pos)
                     .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
             },
-            |key| self.render_session.contains_section(key),
-        );
-        let sorted_loaded_dirty_chunks = sort_chunk_positions_by_distance(
-            dirty_work.loaded_dirty_chunks.iter().copied(),
-            camera_position,
-        );
-        let sorted_dirty_section_chunks = sort_dirty_section_chunks_by_distance(
-            &dirty_work.loaded_dirty_sections_by_chunk,
-            camera_position,
-        );
-        let sync_plan = self.render_session.prepare_sync_plan(
-            dirty_work,
-            sorted_loaded_dirty_chunks,
-            sorted_dirty_section_chunks,
+            |dirty_work| {
+                sort_chunk_positions_by_distance(
+                    dirty_work.loaded_dirty_chunks.iter().copied(),
+                    camera_position,
+                )
+            },
+            |dirty_work| {
+                sort_dirty_section_chunks_by_distance(
+                    &dirty_work.loaded_dirty_sections_by_chunk,
+                    camera_position,
+                )
+            },
             chunk_budget,
             |pos| {
-                self.client
+                client
                     .chunk_snapshot(pos)
                     .map(render_section_keys_for_snapshot)
                     .unwrap_or_default()
             },
-            |key| render_section_neighbor_readiness(&self.client, key, camera_position),
+            |key| render_section_neighbor_readiness(client, key, camera_position),
+            RenderSectionRemovalMode::ApplyImmediately,
         );
-
-        if sync_plan.has_removals() {
-            let removal_update = self.render_session.apply_removals(
-                &sync_plan.dirty_work.removal_dirty_chunks,
-                &sync_plan.dirty_work.removal_dirty_sections,
-            );
-            report.merge(removal_update);
-        }
+        report.merge(sync_update.cache_update);
 
         if chunk_budget == 0 || self.render_compile_worker.pending_job_count() > 0 {
             report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
             return Ok(report);
         }
 
+        let sync_plan = sync_update.sync_plan;
         if sync_plan.ready_plan.ready_section_keys.is_empty() {
             self.render_session.apply_ready_plan(&sync_plan.ready_plan);
             report.merge(sync_plan.ready_update(0));

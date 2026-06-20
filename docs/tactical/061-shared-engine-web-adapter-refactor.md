@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active shared render-section helper APIs landed.
+Status: active shared render-section sync/update helper landed.
 
 ## Purpose
 
@@ -422,6 +422,18 @@ Browser worker payload result:
   and inflight sections, stale requeue only keeps loaded/cached sections, and a
   failed platform submit leaves ready work dirty rather than marking it
   inflight.
+- Added `RenderSectionRemovalMode` and `RenderSectionSyncUpdate` so the shared
+  session can run the common dirty-work classification, adapter ordering,
+  sync-plan preparation, removal handling, and ready-plan reporting sequence.
+- Updated desktop `WindowSceneRuntime::sync_render_sections_with_budget` to use
+  `RenderSectionSession::prepare_sync_update` while keeping native
+  distance-based ordering, camera-neighbor readiness, pending native worker
+  gating, and native thread submission in the desktop adapter.
+- Updated web `WebChunkRenderSession::prepare_chunk_render_plan` to use the
+  same helper while keeping coordinate ordering, browser worker request
+  submission, and deferred removal upload in the web adapter.
+- Added shared tests for native-style immediate removal application and
+  web-style deferred removals for combined rebuild/remove GPU uploads.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
@@ -552,16 +564,16 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should extract a small shared render-section sync/update helper
-around `RenderSectionSession`:
+The next slice should move completed-compile draining and final update assembly
+behind the same shared session surface:
 
-1. Move the common classify -> order -> prepare-plan -> apply-removals ->
-   submit-ready-report sequence behind a shared helper that takes adapter
-   callbacks for loaded-section lookup, loaded/cached predicates, ordering,
-   readiness, pending-compiler gating, and platform submit.
-2. Keep desktop distance ordering and neighbor readiness as native callbacks;
-   keep web coordinate ordering and browser worker submission as web callbacks.
-3. Return a shared `RenderSectionCacheUpdate`/pending-job report that adapters
-   can pass directly to GPU upload/presentation code.
+1. Add a shared helper for drain-finish-merge of completed
+   `RenderSectionCompileResult`s, including stale requeue, accepted report
+   application, and pending-job count reporting.
+2. Keep completed-result sources platform-owned: desktop drains the native
+   worker, and web finishes browser worker packed payloads through its JS/Rust
+   request boundary.
+3. Reduce desktop/web code to compiler transport plus GPU upload/presentation
+   after the shared helper returns `RenderSectionCacheUpdate`.
 4. Preserve the Playwright worker/canvas smoke plus native movement/timedemo
    screenshots as the compatibility gates.
