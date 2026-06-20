@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active shared prepared-sync submission helper landed.
+Status: active first `EngineRenderSession` shell landed.
 
 ## Purpose
 
@@ -495,6 +495,34 @@ Acceptance:
 - headless captures and movement/timedemo smokes still use the shared session
 - WASM generated-chunk smoke no longer has local dirty-section policy
 
+First `EngineRenderSession` shell result:
+
+- Added `EngineRenderSession` in `mclone-render-session` as the shared owner for
+  `ClientRuntime` plus `RenderSectionSession`.
+- The shell now owns common client-backed render-session operations:
+  - dirtying changed chunk neighborhoods from loaded client snapshots
+  - clearing the client replica for resync while preserving render invalidation
+  - initial render-cache dirty seeding from loaded chunks
+  - loaded-view sync dirty/removal marking
+  - completed compile result draining/filtering
+  - sync-update preparation
+  - prepared sync-plan submission
+  - compile-result finish/cache merge/removal handling
+  - cached CPU section reads
+- Updated `WebRuntime` to own the shared shell, and removed the separate
+  `RenderSectionSession` from `WebChunkRenderSession`.
+- Updated desktop `WindowSceneRuntime` to own the shared shell and route render
+  dirtying, initial cache seeding, sync preparation, compile drain, compile
+  submission, compile finish, and cached-section reads through it.
+- Kept platform-owned boundaries intact:
+  - desktop still owns local/remote transport, integrated-server polling, native
+    threaded compile worker, `winit`, and GPU upload/presentation
+  - web still owns browser fetch/DOM/canvas, JS worker request transport, packed
+    worker payload decoding, and WebGPU upload/presentation
+- Added a shared `EngineRenderSession` test that hydrates a real
+  `ClientRuntime` snapshot, prepares ready render work through the shell, and
+  verifies the resulting compile request/inflight transition.
+
 ### 4. Add Browser App Loop Over Shared Session
 
 Only after the shared session exists, replace the two-shot WASM smoke shape with
@@ -606,16 +634,16 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should introduce the first narrow `EngineRenderSession` shell:
+The next slice should move client-update dirty classification into the shared
+engine shell while keeping transport in the adapters:
 
-1. Move ownership of `ClientRuntime` plus `RenderSectionSession` into a shared
-   struct that exposes client snapshot/read-only access and render-session
-   helpers without owning any platform transport, worker, or GPU state.
-2. Keep desktop local/remote polling and web `WebRuntime` request orchestration
-   in their adapters, but route dirty marking, initial render-cache seeding,
-   and render-section sync calls through the shared shell.
-3. Preserve adapter-supplied policies explicitly: desktop camera-distance
-   ordering and neighbor readiness, web coordinate ordering and deferred
-   removals.
-4. Preserve Playwright worker/canvas screenshots plus native
-   movement/timedemo/headless screenshots as the compatibility gates.
+1. Add a shared `EngineRenderSession` update-application/report helper for
+   `ServerUpdate` batches.
+2. Move section-block update dirty-key calculation out of desktop
+   `scene_runtime.rs` so snapshots, unloads, and block deltas all invalidate
+   render sections through the same shared policy.
+3. Keep adapter-specific timing/diagnostic fields in desktop and browser, but
+   make the changed/snapshot/unload/section-update counts come from the shared
+   report.
+4. Preserve desktop camera-neighbor readiness, web deferred-removal behavior,
+   native threaded compile workers, browser workers, and all screenshot gates.

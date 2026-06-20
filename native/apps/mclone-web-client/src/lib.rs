@@ -8,6 +8,7 @@ use mclone_protocol::{
     decode_client_command, decode_server_update, encode_client_command, encode_server_update,
 };
 use mclone_render::RenderBackend;
+use mclone_render_session::EngineRenderSession;
 use mclone_server::IntegratedServer;
 
 #[cfg(target_arch = "wasm32")]
@@ -79,7 +80,7 @@ impl WebSmokeReport {
 
 #[derive(Debug)]
 pub struct WebRuntime {
-    client: ClientRuntime,
+    engine: EngineRenderSession,
     host: WebLoopbackHost,
     command_count: usize,
     update_count: usize,
@@ -90,7 +91,7 @@ pub struct WebRuntime {
 impl WebRuntime {
     pub fn local_integrated(seed: i64) -> Self {
         Self {
-            client: ClientRuntime::local_integrated(),
+            engine: EngineRenderSession::new(ClientRuntime::local_integrated()),
             host: WebLoopbackHost::new(seed),
             command_count: 0,
             update_count: 0,
@@ -105,7 +106,7 @@ impl WebRuntime {
         render_distance: u32,
         chunk_tracking_radius: u32,
     ) -> ProtocolCodecResult<WebRuntimeStepReport> {
-        let command = self.client.set_chunk_view(ChunkView {
+        let command = self.engine.client_mut().set_chunk_view(ChunkView {
             center,
             render_distance,
             chunk_tracking_radius,
@@ -116,19 +117,27 @@ impl WebRuntime {
         self.update_count += exchange.update_count;
         self.protocol_codec_roundtrip &= exchange.protocol_codec_roundtrip;
         self.transport_drained &= exchange.transport_drained;
-        self.client.apply_updates(exchange.updates);
+        self.engine.client_mut().apply_updates(exchange.updates);
 
         Ok(WebRuntimeStepReport {
             command_count: exchange.command_count,
             update_count: exchange.update_count,
-            loaded_chunk_count: self.client.loaded_chunk_count(),
+            loaded_chunk_count: self.engine.client().loaded_chunk_count(),
             protocol_codec_roundtrip: exchange.protocol_codec_roundtrip,
             transport_drained: exchange.transport_drained,
         })
     }
 
     pub const fn client(&self) -> &ClientRuntime {
-        &self.client
+        self.engine.client()
+    }
+
+    pub const fn engine(&self) -> &EngineRenderSession {
+        &self.engine
+    }
+
+    pub const fn engine_mut(&mut self) -> &mut EngineRenderSession {
+        &mut self.engine
     }
 
     pub const fn command_count(&self) -> usize {

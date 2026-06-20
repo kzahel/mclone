@@ -1121,6 +1121,7 @@ dependencies = [
  "mclone-client",
  "mclone-core",
  "mclone-mesh",
+ "mclone-protocol",
 ]
 
 [[package]]

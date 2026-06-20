@@ -26,9 +26,10 @@ use crate::render_cache::{
     load_textured_mesh_assets,
 };
 use mclone_render_session::{
-    RenderSectionCacheUpdate, RenderSectionCompiler, RenderSectionNeighborReadiness,
-    RenderSectionRemovalMode, RenderSectionSession, build_client_textured_sections,
-    render_section_chunk_pos, render_section_keys_for_snapshot, snapshot_contains_render_section,
+    EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompiler,
+    RenderSectionNeighborReadiness, RenderSectionRemovalMode, RenderSectionSession,
+    build_client_textured_sections, render_section_chunk_pos, render_section_keys_for_snapshot,
+    snapshot_contains_render_section,
 };
 
 const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
@@ -124,7 +125,7 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
 
 #[derive(Debug)]
 pub(crate) struct WindowSceneRuntime {
-    pub(crate) client: ClientRuntime,
+    engine: EngineRenderSession,
     server: Option<IntegratedServer>,
     transport: LocalTransport,
     remote_session: Option<RemoteServerSession>,
@@ -133,7 +134,6 @@ pub(crate) struct WindowSceneRuntime {
     pub(crate) interest_center: ChunkPos,
     pub(crate) mesh_assets: TexturedMeshAssets,
     pub(crate) actor_textures: ActorTextureAssets,
-    render_session: RenderSectionSession,
     render_compile_worker: RenderSectionCompileWorker,
     last_tick: u64,
     last_simulation_tick: u64,
@@ -263,7 +263,7 @@ impl WindowSceneRuntime {
             None
         };
         let mut runtime = Self {
-            client,
+            engine: EngineRenderSession::new(client),
             server,
             transport: LocalTransport::new(),
             remote_session,
@@ -272,7 +272,6 @@ impl WindowSceneRuntime {
             interest_center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
             mesh_assets,
             actor_textures,
-            render_session: RenderSectionSession::default(),
             render_compile_worker,
             last_tick: 0,
             last_simulation_tick: 0,
@@ -311,6 +310,23 @@ impl WindowSceneRuntime {
         Ok(runtime)
     }
 
+    pub(crate) fn client(&self) -> &ClientRuntime {
+        self.engine.client()
+    }
+
+    fn client_mut(&mut self) -> &mut ClientRuntime {
+        self.engine.client_mut()
+    }
+
+    fn render_session(&self) -> &RenderSectionSession {
+        self.engine.render_session()
+    }
+
+    #[cfg(test)]
+    fn render_session_mut(&mut self) -> &mut RenderSectionSession {
+        self.engine.render_session_mut()
+    }
+
     pub(crate) fn set_interest_center(&mut self, center: ChunkPos) -> Result<bool> {
         self.set_chunk_view(center, self.render_distance, self.chunk_tracking_radius)
     }
@@ -329,7 +345,7 @@ impl WindowSceneRuntime {
         render_distance: u32,
         chunk_tracking_radius: u32,
     ) -> Result<bool> {
-        if self.client.chunk_view().is_some_and(|view| {
+        if self.client().chunk_view().is_some_and(|view| {
             view.center == center
                 && view.render_distance == render_distance
                 && view.chunk_tracking_radius == chunk_tracking_radius
@@ -343,7 +359,7 @@ impl WindowSceneRuntime {
         self.interest_center = center;
         self.render_distance = render_distance;
         self.chunk_tracking_radius = chunk_tracking_radius;
-        let command = self.client.set_chunk_view(ChunkView {
+        let command = self.client_mut().set_chunk_view(ChunkView {
             center,
             render_distance,
             chunk_tracking_radius,
@@ -357,7 +373,7 @@ impl WindowSceneRuntime {
     }
 
     pub(crate) fn drain_player_position_updates(&mut self) -> Vec<PlayerPositionUpdate> {
-        self.client.drain_player_position_updates().collect()
+        self.client_mut().drain_player_position_updates().collect()
     }
 
     fn dispatch_client_command(&mut self, command: ClientCommand) -> Result<bool> {
@@ -385,7 +401,7 @@ impl WindowSceneRuntime {
     }
 
     fn reconnect_remote_session_and_resync(&mut self, err: anyhow::Error) -> Result<bool> {
-        let Some(view) = self.client.chunk_view().cloned() else {
+        let Some(view) = self.client().chunk_view().cloned() else {
             bail!("remote server command failed before a chunk view was established: {err:#}");
         };
 
@@ -404,11 +420,7 @@ impl WindowSceneRuntime {
     }
 
     fn clear_remote_replica_for_resync(&mut self) {
-        let stale_chunks = self.client.loaded_chunk_positions().collect::<Vec<_>>();
-        self.client.clear_server_replica();
-        for pos in stale_chunks {
-            self.mark_render_chunk_dirty(pos);
-        }
+        self.engine.clear_client_replica_and_mark_render_dirty();
     }
 
     pub(crate) fn poll(&mut self) -> Result<bool> {
@@ -553,7 +565,7 @@ impl WindowSceneRuntime {
         }
         let dirty_mark_ms = elapsed_ms(dirty_mark_start.elapsed());
         let client_apply_start = Instant::now();
-        self.client.apply_updates(updates);
+        self.client_mut().apply_updates(updates);
         let client_apply_updates_ms = elapsed_ms(client_apply_start.elapsed());
         RuntimeUpdateApplyReport {
             changed,
@@ -568,14 +580,7 @@ impl WindowSceneRuntime {
     }
 
     fn mark_render_chunk_dirty(&mut self, pos: ChunkPos) {
-        let client = &self.client;
-        self.render_session
-            .mark_chunk_neighborhood_dirty_with_loaded_sections(pos, |dirty_pos| {
-                client
-                    .chunk_snapshot(dirty_pos)
-                    .map(render_section_keys_for_snapshot)
-                    .unwrap_or_default()
-            });
+        self.engine.mark_chunk_neighborhood_dirty(pos);
     }
 
     fn mark_render_section_updates_dirty(
@@ -586,7 +591,7 @@ impl WindowSceneRuntime {
     ) {
         for update in updates {
             for key in render_dirty_section_keys_for_block_update(pos, section_y, update) {
-                self.render_session.mark_section_dirty(key);
+                self.engine.mark_section_dirty(key);
             }
         }
     }
@@ -594,18 +599,8 @@ impl WindowSceneRuntime {
     fn drain_completed_render_compile_jobs(&mut self) -> Result<RenderSectionCacheUpdate> {
         let completed_results = self.render_compile_worker.try_recv_completed()?;
         let pending_compile_jobs = self.render_compile_worker.pending_job_count();
-        let client = &self.client;
-        self.render_session.drain_completed_compile_updates(
-            completed_results,
-            |_| 0,
-            pending_compile_jobs,
-            |key| {
-                let pos = render_section_chunk_pos(key);
-                client
-                    .chunk_snapshot(pos)
-                    .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-            },
-        )
+        self.engine
+            .drain_completed_compile_updates(completed_results, |_| 0, pending_compile_jobs)
     }
 
     pub(crate) fn sync_render_sections(
@@ -651,34 +646,14 @@ impl WindowSceneRuntime {
     ) -> Result<RenderSectionCacheUpdate> {
         let mut report = self.drain_completed_render_compile_jobs()?;
 
-        if self.render_session.cache_is_empty()
-            && self.client.loaded_chunk_count() > 0
-            && self.render_session.dirty_is_empty()
-        {
-            let loaded = self
-                .client
-                .chunk_snapshots()
-                .map(|snapshot| snapshot.pos)
-                .collect::<Vec<_>>();
-            for pos in loaded {
-                self.mark_render_chunk_dirty(pos);
-            }
-        }
+        self.engine.mark_loaded_chunks_dirty_when_cache_empty();
 
-        if self.render_session.dirty_work_is_empty() {
+        if self.render_session().dirty_work_is_empty() {
             report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
             return Ok(report);
         }
 
-        let client = &self.client;
-        let sync_update = self.render_session.prepare_sync_update(
-            |pos| client.chunk_snapshot(pos).is_some(),
-            |key| {
-                let pos = render_section_chunk_pos(key);
-                client
-                    .chunk_snapshot(pos)
-                    .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-            },
+        let sync_update = self.engine.prepare_sync_update(
             |dirty_work| {
                 sort_chunk_positions_by_distance(
                     dirty_work.loaded_dirty_chunks.iter().copied(),
@@ -692,13 +667,7 @@ impl WindowSceneRuntime {
                 )
             },
             chunk_budget,
-            |pos| {
-                client
-                    .chunk_snapshot(pos)
-                    .map(render_section_keys_for_snapshot)
-                    .unwrap_or_default()
-            },
-            |key| render_section_neighbor_readiness(client, key, camera_position),
+            |client, key| render_section_neighbor_readiness(client, key, camera_position),
             RenderSectionRemovalMode::ApplyImmediately,
         );
         report.merge(sync_update.cache_update);
@@ -709,9 +678,9 @@ impl WindowSceneRuntime {
         }
 
         let sync_plan = sync_update.sync_plan;
-        let snapshots = self.client.chunk_snapshots().cloned().collect();
+        let snapshots = self.client().chunk_snapshots().cloned().collect();
         let render_compile_worker = &mut self.render_compile_worker;
-        let submission_update = self.render_session.submit_prepared_sync_plan(
+        let submission_update = self.engine.submit_prepared_sync_plan(
             &sync_plan,
             snapshots,
             |_sync_plan, request| render_compile_worker.submit(request),
@@ -722,29 +691,29 @@ impl WindowSceneRuntime {
     }
 
     pub(crate) fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.render_session.sections()
+        self.engine.sections()
     }
 
     /// Sky clear color for the current day-time, driving the day/night gradient.
     pub(crate) fn sky_clear_color(&self) -> wgpu::Color {
-        mclone_render::sky::overworld_clear_color(self.client.time_of_day())
+        mclone_render::sky::overworld_clear_color(self.client().time_of_day())
     }
 
     /// Celestial phase in `[0, 1)` for the current day-time (noon = 0).
     pub(crate) fn time_of_day(&self) -> f32 {
-        self.client.time_of_day()
+        self.client().time_of_day()
     }
 
     /// Celestial rig rotation in radians for the current day-time.
     pub(crate) fn sun_angle(&self) -> f32 {
-        self.client.sun_angle()
+        self.client().sun_angle()
     }
 
     /// Force the client day/night clock to a specific `dayTime`. Debug-only hook
     /// for captures; the next server tick will overwrite it with authoritative
     /// time.
     pub(crate) fn force_day_time(&mut self, day_time: u64) {
-        self.client
+        self.client_mut()
             .apply_update(ServerUpdate::TimeUpdate { day_time });
     }
 
@@ -752,12 +721,12 @@ impl WindowSceneRuntime {
         &self,
         camera_position: Vec3,
     ) -> BTreeSet<RenderSectionKey> {
-        self.render_session
+        let client = self.client();
+        self.render_session()
             .section_keys()
             .filter(|key| {
                 self.render_section_within_render_distance(*key)
-                    && render_section_neighbor_readiness(&self.client, *key, camera_position)
-                        .is_ready()
+                    && render_section_neighbor_readiness(client, *key, camera_position).is_ready()
             })
             .collect()
     }
@@ -777,31 +746,31 @@ impl WindowSceneRuntime {
 
     pub(crate) fn pending_render_chunk_count(&self) -> usize {
         let mut pending = self
-            .render_session
+            .render_session()
             .dirty()
             .dirty_chunks
             .iter()
             .filter(|pos| {
-                self.client.chunk_snapshot(**pos).is_some()
-                    || self.render_session.contains_chunk(**pos)
+                self.client().chunk_snapshot(**pos).is_some()
+                    || self.render_session().contains_chunk(**pos)
             })
             .copied()
             .collect::<BTreeSet<_>>();
         pending.extend(
-            self.render_session
+            self.render_session()
                 .dirty()
                 .dirty_sections
                 .iter()
                 .copied()
                 .filter(|key| {
                     let pos = render_section_chunk_pos(*key);
-                    self.client.chunk_snapshot(pos).is_some()
-                        || self.render_session.contains_section(*key)
+                    self.client().chunk_snapshot(pos).is_some()
+                        || self.render_session().contains_section(*key)
                 })
                 .map(render_section_chunk_pos),
         );
         pending.extend(
-            self.render_session
+            self.render_session()
                 .dirty()
                 .inflight_sections
                 .iter()
@@ -812,50 +781,49 @@ impl WindowSceneRuntime {
     }
 
     fn has_ready_pending_render_work(&self, camera_position: Vec3) -> bool {
-        self.render_session
+        let client = self.client();
+        let render_session = self.render_session();
+        render_session
             .dirty()
             .dirty_chunks
             .iter()
             .copied()
             .any(|pos| {
-                if self.render_session.contains_chunk(pos)
-                    && self.client.chunk_snapshot(pos).is_none()
-                {
+                if render_session.contains_chunk(pos) && client.chunk_snapshot(pos).is_none() {
                     return true;
                 }
-                let Some(snapshot) = self.client.chunk_snapshot(pos) else {
+                let Some(snapshot) = client.chunk_snapshot(pos) else {
                     return false;
                 };
                 render_section_keys_for_snapshot(snapshot)
                     .into_iter()
                     .any(|key| {
-                        !self.render_session.dirty().inflight_sections.contains(&key)
-                            && render_section_neighbor_readiness(&self.client, key, camera_position)
+                        !render_session.dirty().inflight_sections.contains(&key)
+                            && render_section_neighbor_readiness(client, key, camera_position)
                                 .is_ready()
                     })
             })
             || self
-                .render_session
+                .render_session()
                 .dirty()
                 .dirty_sections
                 .iter()
                 .copied()
                 .any(|key| {
-                    if self.render_session.dirty().inflight_sections.contains(&key) {
+                    if render_session.dirty().inflight_sections.contains(&key) {
                         return false;
                     }
-                    if self.render_session.contains_section(key)
-                        && self
-                            .client
+                    if render_session.contains_section(key)
+                        && client
                             .chunk_snapshot(render_section_chunk_pos(key))
                             .is_none()
                     {
                         return true;
                     }
-                    self.client
+                    client
                         .chunk_snapshot(render_section_chunk_pos(key))
                         .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-                        && render_section_neighbor_readiness(&self.client, key, camera_position)
+                        && render_section_neighbor_readiness(client, key, camera_position)
                             .is_ready()
                 })
     }
@@ -889,7 +857,7 @@ impl WindowSceneRuntime {
         world_z: i32,
     ) -> Option<i32> {
         let pos = ChunkPos::from_block_coords(world_x, world_z);
-        let snapshot = self.client.chunk_snapshot(pos)?;
+        let snapshot = self.client().chunk_snapshot(pos)?;
         (snapshot.min_y..snapshot.min_y + snapshot.height)
             .rev()
             .find(|world_y| {
@@ -916,7 +884,7 @@ impl WindowSceneRuntime {
         world_z: i32,
     ) -> Option<mclone_core::BlockStateId> {
         let pos = ChunkPos::from_block_coords(world_x, world_z);
-        self.client
+        self.client()
             .chunk_snapshot(pos)
             .and_then(|snapshot| snapshot_block_state_at_world(snapshot, world_x, world_y, world_z))
     }
@@ -934,26 +902,26 @@ impl WindowSceneRuntime {
             interest_center: self.interest_center,
             render_distance: self.render_distance,
             chunk_tracking_radius: self.chunk_tracking_radius,
-            loaded_chunks: self.client.loaded_chunk_count(),
+            loaded_chunks: self.client().loaded_chunk_count(),
             pending_jobs: self.pending_job_count(),
             pending_publications: self.pending_publication_count(),
             pending_render_chunks: self.pending_render_chunk_count(),
             pending_render_compile_jobs: self.render_compile_worker.pending_job_count(),
-            inflight_render_sections: self.render_session.dirty().inflight_sections.len(),
+            inflight_render_sections: self.render_session().dirty().inflight_sections.len(),
             client_visible_chunks: scheduler_metrics
-                .map_or(self.client.loaded_chunk_count(), |metrics| {
+                .map_or(self.client().loaded_chunk_count(), |metrics| {
                     metrics.client_visible_chunks
                 }),
             active_ticket_chunks: scheduler_metrics
                 .map_or(0, |metrics| metrics.active_ticket_chunks),
             tracked_players: chunk_tracking
                 .as_ref()
-                .map_or(self.client.remote_player_count(), |diagnostics| {
+                .map_or(self.client().remote_player_count(), |diagnostics| {
                     diagnostics.player_count
                 }),
             player_visible_chunks: chunk_tracking
                 .as_ref()
-                .map_or(self.client.loaded_chunk_count(), |diagnostics| {
+                .map_or(self.client().loaded_chunk_count(), |diagnostics| {
                     diagnostics.total_player_visible_chunks
                 }),
             aggregate_player_ticket_chunks: chunk_tracking
@@ -964,7 +932,7 @@ impl WindowSceneRuntime {
                 .map_or(0, |diagnostics| diagnostics.total_outbound_queue_depth),
             max_player_visible_chunks: chunk_tracking
                 .as_ref()
-                .map_or(self.client.loaded_chunk_count(), |diagnostics| {
+                .map_or(self.client().loaded_chunk_count(), |diagnostics| {
                     diagnostics.max_player_visible_chunks
                 }),
             max_player_outbound_queue_depth: chunk_tracking
@@ -1383,7 +1351,7 @@ mod tests {
         assert_eq!(initial_stats.interest_center, initial_center);
         assert_eq!(initial_stats.loaded_chunks, 1);
         assert_eq!(initial_stats.pending_jobs, 0);
-        assert!(runtime.client.chunk_snapshot(initial_center).is_some());
+        assert!(runtime.client().chunk_snapshot(initial_center).is_some());
         assert!(
             runtime
                 .highest_non_air_block_y_at_world(8, 8)
@@ -1415,7 +1383,7 @@ mod tests {
         assert_eq!(next_center, ChunkPos::new(1, 0));
         assert!(runtime.set_interest_center(next_center).unwrap());
         assert_eq!(runtime.stats().interest_center, next_center);
-        assert!(runtime.client.chunk_snapshot(initial_center).is_none());
+        assert!(runtime.client().chunk_snapshot(initial_center).is_none());
 
         poll_window_runtime_until_idle(&mut runtime).unwrap();
 
@@ -1423,8 +1391,8 @@ mod tests {
         assert_eq!(moved_stats.interest_center, next_center);
         assert_eq!(moved_stats.loaded_chunks, 1);
         assert_eq!(moved_stats.pending_jobs, 0);
-        assert!(runtime.client.chunk_snapshot(initial_center).is_none());
-        assert!(runtime.client.chunk_snapshot(next_center).is_some());
+        assert!(runtime.client().chunk_snapshot(initial_center).is_none());
+        assert!(runtime.client().chunk_snapshot(next_center).is_some());
 
         let moved_update = runtime
             .sync_all_render_sections(spectator.position)
@@ -1466,7 +1434,7 @@ mod tests {
         assert!(runtime.cached_sections().is_empty());
 
         let deferred_key = *runtime
-            .render_session
+            .render_session()
             .dirty()
             .dirty_sections
             .iter()
@@ -1478,7 +1446,7 @@ mod tests {
         assert!(ready_update.rebuilt_section_count() > 0);
         assert!(
             !runtime
-                .render_session
+                .render_session()
                 .dirty()
                 .dirty_sections
                 .contains(&deferred_key)
@@ -1492,8 +1460,16 @@ mod tests {
         }
 
         let mut runtime = WindowSceneRuntime::new(&SceneOptions::default()).unwrap();
-        runtime.render_session.dirty_mut().dirty_chunks.clear();
-        runtime.render_session.dirty_mut().dirty_sections.clear();
+        runtime
+            .render_session_mut()
+            .dirty_mut()
+            .dirty_chunks
+            .clear();
+        runtime
+            .render_session_mut()
+            .dirty_mut()
+            .dirty_sections
+            .clear();
 
         runtime.apply_server_updates(vec![ServerUpdate::SectionBlockUpdates {
             pos: ChunkPos::new(0, 0),
@@ -1506,9 +1482,9 @@ mod tests {
             }],
         }]);
 
-        assert!(runtime.render_session.dirty().dirty_chunks.is_empty());
+        assert!(runtime.render_session().dirty().dirty_chunks.is_empty());
         assert_eq!(
-            runtime.render_session.dirty().dirty_sections,
+            runtime.render_session().dirty().dirty_sections,
             BTreeSet::from([RenderSectionKey::new(0, 7, 0)])
         );
     }
@@ -1554,7 +1530,7 @@ mod tests {
         let changed_key = RenderSectionKey::new(0, 5, 0);
         assert!(
             runtime
-                .render_session
+                .render_session()
                 .dirty()
                 .inflight_sections
                 .contains(&changed_key)
@@ -1603,9 +1579,9 @@ mod tests {
         assert!(runtime.set_render_distance(1).unwrap());
         assert_eq!(runtime.render_distance, 1);
         assert_eq!(runtime.chunk_tracking_radius, 1);
-        assert_eq!(runtime.client.chunk_view().unwrap().render_distance, 1);
+        assert_eq!(runtime.client().chunk_view().unwrap().render_distance, 1);
         assert_eq!(
-            runtime.client.chunk_view().unwrap().chunk_tracking_radius,
+            runtime.client().chunk_view().unwrap().chunk_tracking_radius,
             1
         );
         poll_window_runtime_until_idle(&mut runtime).unwrap();
@@ -1684,7 +1660,7 @@ mod tests {
         assert_eq!(runtime.render_distance, 2);
         assert_eq!(runtime.chunk_tracking_radius, 3);
         assert_eq!(runtime.stats().loaded_chunks, square_count(3).unwrap());
-        assert!(runtime.client.chunk_snapshots().any(|snapshot| {
+        assert!(runtime.client().chunk_snapshots().any(|snapshot| {
             chunk_distance_from_scene_center(&scene, snapshot.pos.x, snapshot.pos.z) == 3
         }));
 
@@ -1947,25 +1923,33 @@ mod tests {
                 ..SceneOptions::default()
             };
             let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
-            assert!(runtime.client.chunk_snapshot(initial_center).is_some());
-            runtime.render_session.dirty_mut().dirty_chunks.clear();
-            runtime.render_session.dirty_mut().dirty_sections.clear();
+            assert!(runtime.client().chunk_snapshot(initial_center).is_some());
+            runtime
+                .render_session_mut()
+                .dirty_mut()
+                .dirty_chunks
+                .clear();
+            runtime
+                .render_session_mut()
+                .dirty_mut()
+                .dirty_sections
+                .clear();
 
             assert!(runtime.set_interest_center(moved_center).unwrap());
 
-            assert_eq!(runtime.client.loaded_chunk_count(), 1);
-            assert!(runtime.client.chunk_snapshot(initial_center).is_none());
-            assert!(runtime.client.chunk_snapshot(moved_center).is_some());
+            assert_eq!(runtime.client().loaded_chunk_count(), 1);
+            assert!(runtime.client().chunk_snapshot(initial_center).is_none());
+            assert!(runtime.client().chunk_snapshot(moved_center).is_some());
             assert!(
                 runtime
-                    .render_session
+                    .render_session()
                     .dirty()
                     .dirty_chunks
                     .contains(&initial_center)
             );
             assert!(
                 runtime
-                    .render_session
+                    .render_session()
                     .dirty()
                     .dirty_chunks
                     .contains(&moved_center)

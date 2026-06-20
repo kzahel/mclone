@@ -119,9 +119,9 @@ pub(crate) fn run_headless_screenshot(
     let sun_angle = runtime.sun_angle();
     let runtime_stats = runtime.stats();
     let actor_interpolation =
-        ActorInterpolationState::from_authoritative(runtime.client.actor_presentations());
+        ActorInterpolationState::from_authoritative(runtime.client().actor_presentations());
     let actor_instances =
-        actor_instances_from_presentations(&actor_interpolation.presentations(), &runtime.client);
+        actor_instances_from_presentations(&actor_interpolation.presentations(), runtime.client());
     let initial_upload = TexturedSectionUploadReport {
         uploaded_section_count: section_update.rebuilt_section_count(),
         removed_section_count: section_update.removed_section_count(),
@@ -206,8 +206,8 @@ pub(crate) fn run_headless_screenshot(
         index_count: summary.index_count,
         drawn_index_count: summary.drawn_index_count,
         gui_command_count: summary.gui_command_count,
-        remote_player_count: runtime.client.remote_player_count(),
-        entity_count: runtime.client.entity_count(),
+        remote_player_count: runtime.client().remote_player_count(),
+        entity_count: runtime.client().entity_count(),
         actor_count: summary.actor_count,
         drawn_actor_count: summary.drawn_actor_count,
     })
@@ -217,7 +217,8 @@ fn settle_remote_screenshot_session(
     runtime: &mut WindowSceneRuntime,
     remote_settle_ms: u64,
 ) -> Result<()> {
-    if remote_settle_ms == 0 || runtime.client.host() != mclone_client::ClientHost::RemoteDedicated
+    if remote_settle_ms == 0
+        || runtime.client().host() != mclone_client::ClientHost::RemoteDedicated
     {
         return Ok(());
     }
@@ -270,7 +271,7 @@ fn apply_scripted_interaction(
         initial_player_position.unwrap_or(player_feet_position),
         player_feet_position,
     )?;
-    let hit = interaction.pick_block(&runtime.client, eye_position, Vec3d::new(0.0, -1.0, 0.0));
+    let hit = interaction.pick_block(runtime.client(), eye_position, Vec3d::new(0.0, -1.0, 0.0));
     if hit.hit_type() != HitResultType::Block {
         bail!("scripted interaction ray missed target column");
     }
@@ -330,7 +331,7 @@ fn send_scripted_player_move(runtime: &mut WindowSceneRuntime, position: Vec3d) 
 }
 
 fn frame_first_actor_for_screenshot(runtime: &WindowSceneRuntime, spectator: &mut SpectatorCamera) {
-    let Some(actor) = runtime.client.actor_presentations().first().copied() else {
+    let Some(actor) = runtime.client().actor_presentations().first().copied() else {
         return;
     };
     let target = glam::Vec3::new(

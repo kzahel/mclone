@@ -1364,14 +1364,14 @@ pub(crate) fn run_frame_budget_probe(
             let sun_angle = state.runtime.sun_angle();
             state
                 .actor_interpolation
-                .reconcile_authoritative(state.runtime.client.actor_presentations());
+                .reconcile_authoritative(state.runtime.client().actor_presentations());
             state.actor_interpolation.step(
                 (1.0 / probe_options.target_hz.max(1.0)) as f32,
                 ActorInterpolationConfig::default(),
             );
             let actor_instances = actor_instances_from_presentations(
                 &state.actor_interpolation.presentations(),
-                &state.runtime.client,
+                state.runtime.client(),
             );
             state.draw.set_traversal_ready_sections(
                 &state

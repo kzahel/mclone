@@ -593,6 +593,209 @@ pub struct RenderSectionSession {
     dirty: RenderSectionDirtyState,
 }
 
+#[derive(Debug)]
+pub struct EngineRenderSession {
+    client: ClientRuntime,
+    render_session: RenderSectionSession,
+}
+
+impl EngineRenderSession {
+    pub fn new(client: ClientRuntime) -> Self {
+        Self {
+            client,
+            render_session: RenderSectionSession::default(),
+        }
+    }
+
+    pub const fn client(&self) -> &ClientRuntime {
+        &self.client
+    }
+
+    pub const fn client_mut(&mut self) -> &mut ClientRuntime {
+        &mut self.client
+    }
+
+    pub const fn render_session(&self) -> &RenderSectionSession {
+        &self.render_session
+    }
+
+    pub const fn render_session_mut(&mut self) -> &mut RenderSectionSession {
+        &mut self.render_session
+    }
+
+    pub fn mark_chunk_neighborhood_dirty(&mut self, pos: ChunkPos) -> usize {
+        let client = &self.client;
+        self.render_session
+            .mark_chunk_neighborhood_dirty_with_loaded_sections(pos, |dirty_pos| {
+                client
+                    .chunk_snapshot(dirty_pos)
+                    .map(render_section_keys_for_snapshot)
+                    .unwrap_or_default()
+            })
+    }
+
+    pub fn mark_section_dirty(&mut self, key: RenderSectionKey) {
+        self.render_session.mark_section_dirty(key);
+    }
+
+    pub fn clear_client_replica_and_mark_render_dirty(&mut self) -> Vec<ChunkPos> {
+        let stale_chunks = self.client.loaded_chunk_positions().collect::<Vec<_>>();
+        self.client.clear_server_replica();
+        for pos in stale_chunks.iter().copied() {
+            self.mark_chunk_neighborhood_dirty(pos);
+        }
+        stale_chunks
+    }
+
+    pub fn mark_loaded_chunks_dirty_when_cache_empty(&mut self) -> bool {
+        if !self.render_session.cache_is_empty()
+            || self.client.loaded_chunk_count() == 0
+            || !self.render_session.dirty_is_empty()
+        {
+            return false;
+        }
+        let loaded = self
+            .client
+            .chunk_snapshots()
+            .map(|snapshot| snapshot.pos)
+            .collect::<Vec<_>>();
+        for pos in loaded {
+            self.mark_chunk_neighborhood_dirty(pos);
+        }
+        true
+    }
+
+    pub fn apply_loaded_view_sync<I>(
+        &mut self,
+        previous_chunks: &BTreeSet<ChunkPos>,
+        current_loaded_chunks: BTreeSet<ChunkPos>,
+        loaded_section_keys_for_chunk: impl FnMut(ChunkPos) -> I,
+    ) -> RenderSectionViewSync
+    where
+        I: IntoIterator<Item = RenderSectionKey>,
+    {
+        self.render_session.apply_loaded_view_sync(
+            previous_chunks,
+            current_loaded_chunks,
+            loaded_section_keys_for_chunk,
+        )
+    }
+
+    pub fn apply_current_loaded_view_sync(
+        &mut self,
+        previous_chunks: &BTreeSet<ChunkPos>,
+    ) -> RenderSectionViewSync {
+        let current_loaded_chunks = self
+            .client
+            .loaded_chunk_positions()
+            .collect::<BTreeSet<_>>();
+        let client = &self.client;
+        self.render_session
+            .apply_loaded_view_sync(previous_chunks, current_loaded_chunks, |pos| {
+                client
+                    .chunk_snapshot(pos)
+                    .map(render_section_keys_for_snapshot)
+                    .unwrap_or_default()
+            })
+    }
+
+    pub fn drain_completed_compile_updates(
+        &mut self,
+        completed_results: impl IntoIterator<Item = RenderSectionCompileResult>,
+        request_id_for_result: impl FnMut(&RenderSectionCompileResult) -> u32,
+        pending_compile_jobs: usize,
+    ) -> Result<RenderSectionCacheUpdate> {
+        let client = &self.client;
+        self.render_session.drain_completed_compile_updates(
+            completed_results,
+            request_id_for_result,
+            pending_compile_jobs,
+            |key| {
+                let pos = render_section_chunk_pos(key);
+                client
+                    .chunk_snapshot(pos)
+                    .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+            },
+        )
+    }
+
+    pub fn prepare_sync_update(
+        &mut self,
+        order_loaded_dirty_chunks: impl FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
+        order_dirty_section_chunks: impl FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
+        chunk_budget: usize,
+        section_readiness: impl FnMut(
+            &ClientRuntime,
+            RenderSectionKey,
+        ) -> RenderSectionNeighborReadiness,
+        removal_mode: RenderSectionRemovalMode,
+    ) -> RenderSectionSyncUpdate {
+        let client = &self.client;
+        self.render_session.prepare_sync_update(
+            |pos| client.chunk_snapshot(pos).is_some(),
+            |key| {
+                let pos = render_section_chunk_pos(key);
+                client
+                    .chunk_snapshot(pos)
+                    .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+            },
+            order_loaded_dirty_chunks,
+            order_dirty_section_chunks,
+            chunk_budget,
+            |pos| {
+                client
+                    .chunk_snapshot(pos)
+                    .map(render_section_keys_for_snapshot)
+                    .unwrap_or_default()
+            },
+            {
+                let mut section_readiness = section_readiness;
+                move |key| section_readiness(client, key)
+            },
+            removal_mode,
+        )
+    }
+
+    pub fn submit_prepared_sync_plan<T, E>(
+        &mut self,
+        sync_plan: &RenderSectionSyncPlan,
+        snapshots: Vec<ChunkSnapshot>,
+        submit: impl FnOnce(
+            &RenderSectionSyncPlan,
+            RenderSectionCompileRequest,
+        ) -> std::result::Result<T, E>,
+    ) -> std::result::Result<RenderSectionReadyWorkSubmission<T>, E> {
+        self.render_session
+            .submit_prepared_sync_plan(sync_plan, snapshots, submit)
+    }
+
+    pub fn finish_compile_update(
+        &mut self,
+        completed: RenderSectionCompileResult,
+        request_id: u32,
+        removal_chunks: &BTreeSet<ChunkPos>,
+        removal_sections: &BTreeSet<RenderSectionKey>,
+    ) -> Result<RenderSectionFinishedCompileUpdate> {
+        let client = &self.client;
+        self.render_session.finish_compile_update(
+            completed,
+            request_id,
+            removal_chunks,
+            removal_sections,
+            |key| {
+                let pos = render_section_chunk_pos(key);
+                client
+                    .chunk_snapshot(pos)
+                    .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+            },
+        )
+    }
+
+    pub fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
+        self.render_session.sections()
+    }
+}
+
 impl RenderSectionSession {
     pub fn cache_is_empty(&self) -> bool {
         self.cache.is_empty()
@@ -1635,6 +1838,7 @@ mod tests {
         TexturedChunkVertex, TexturedRenderSectionBuildReport, TexturedVisibleChunkMesh,
         VisibilityGraphBuildStats, VisibilitySet,
     };
+    use mclone_protocol::ServerUpdate;
 
     use super::*;
 
@@ -1652,6 +1856,20 @@ mod tests {
                 .collect(),
             visibility_graph: VisibilityGraphBuildStats::default(),
         }
+    }
+
+    fn empty_test_snapshot(pos: ChunkPos, min_y: i32, height: i32) -> ChunkSnapshot {
+        let section_count =
+            usize::try_from(height / SECTION_HEIGHT).expect("test height must fit usize");
+        let block_state_ids = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME * section_count];
+        ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            min_y,
+            height,
+            &block_state_ids,
+        )
     }
 
     #[test]
@@ -1721,6 +1939,60 @@ mod tests {
         );
         assert_eq!(session.dirty().section_revision(center_key), 1);
         assert_eq!(session.dirty().section_revision(east_key), 1);
+    }
+
+    #[test]
+    fn engine_render_session_prepares_ready_work_from_client_snapshots() {
+        let chunk = ChunkPos::new(2, -1);
+        let key = RenderSectionKey::new(2, 0, -1);
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(empty_test_snapshot(
+            chunk,
+            0,
+            SECTION_HEIGHT,
+        )));
+        let mut engine = EngineRenderSession::new(client);
+
+        assert!(engine.mark_loaded_chunks_dirty_when_cache_empty());
+        assert_eq!(
+            engine.render_session().dirty().dirty_chunks,
+            BTreeSet::from(render_dirty_chunk_neighborhood(chunk))
+        );
+        assert_eq!(engine.render_session().dirty().section_revision(key), 1);
+
+        let sync_update = engine.prepare_sync_update(
+            |dirty_work| dirty_work.loaded_dirty_chunks.iter().copied().collect(),
+            |dirty_work| {
+                dirty_work
+                    .loaded_dirty_sections_by_chunk
+                    .keys()
+                    .copied()
+                    .collect()
+            },
+            usize::MAX,
+            |_client, _key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+            RenderSectionRemovalMode::Defer,
+        );
+        assert_eq!(
+            sync_update.sync_plan.ready_plan.ready_section_keys,
+            BTreeSet::from([key])
+        );
+
+        let snapshots = engine.client().chunk_snapshots().cloned().collect();
+        let submission = engine
+            .submit_prepared_sync_plan(&sync_update.sync_plan, snapshots, |_sync_plan, request| {
+                Ok::<_, std::convert::Infallible>(request)
+            })
+            .expect("ready work should submit")
+            .submission
+            .expect("loaded dirty section should produce a request");
+
+        assert_eq!(submission.output.target_sections, BTreeSet::from([key]));
+        assert_eq!(
+            engine.render_session().dirty().inflight_sections,
+            BTreeSet::from([key])
+        );
+        assert!(engine.render_session().dirty().dirty_chunks.is_empty());
     }
 
     #[test]

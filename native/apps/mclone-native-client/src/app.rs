@@ -373,7 +373,7 @@ impl ChunkApp {
                 if self
                     .player
                     .tick_walking_movement(
-                        &self.runtime.client,
+                        self.runtime.client(),
                         WalkingMovementStep {
                             y_rot_degrees: pose.y_rot_degrees,
                             dt_seconds: movement_dt as f64,
@@ -546,7 +546,7 @@ impl ChunkApp {
         ));
         if self.movement_mode == PlayerMovementMode::Walking {
             self.player.move_colliding(
-                &self.runtime.client,
+                self.runtime.client(),
                 Vec3d::new(0.0, -GROUND_PROBE_DISTANCE, 0.0),
             );
         }
@@ -667,7 +667,7 @@ impl ChunkApp {
         self.frame_timing.record_remesh_upload(remesh_ms, upload_ms);
         log::info!(
             "streamed chunks loaded={} sections={} faces={} indices={} rebuilt={} visgraph_count={} visgraph_total_ms={:.3} visgraph_worst_ms={:.6} uploaded={} uploaded_vertices={} uploaded_faces={} uploaded_indices={} removed={} remesh_ms={:.3} upload_ms={:.3}",
-            self.runtime.client.loaded_chunk_count(),
+            self.runtime.client().loaded_chunk_count(),
             section_count,
             face_count,
             index_count,
@@ -719,14 +719,14 @@ impl ChunkApp {
 
     fn interpolated_actor_instances(&mut self) -> Vec<ActorInstance> {
         self.actor_interpolation
-            .reconcile_authoritative(self.runtime.client.actor_presentations());
+            .reconcile_authoritative(self.runtime.client().actor_presentations());
         self.actor_interpolation.step(
             (self.render_stats.last_frame_ms * 0.001).min(0.1),
             ActorInterpolationConfig::default(),
         );
         actor_instances_from_presentations(
             &self.actor_interpolation.presentations(),
-            &self.runtime.client,
+            self.runtime.client(),
         )
     }
 
@@ -781,7 +781,7 @@ impl ChunkApp {
         self.sync_carried_item()?;
         let pose = self.player.pose();
         let hit = self.interaction.pick_block(
-            &self.runtime.client,
+            self.runtime.client(),
             pose.eye_position(),
             pose.view_vector(),
         );
@@ -954,7 +954,7 @@ impl ApplicationHandler for ChunkApp {
             initial_poll_count,
             initial_poll_ms,
             elapsed_ms(initial_poll_start.elapsed()),
-            self.runtime.client.loaded_chunk_count()
+            self.runtime.client().loaded_chunk_count()
         );
 
         let attrs = Window::default_attributes()

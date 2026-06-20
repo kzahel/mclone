@@ -22,11 +22,9 @@ use mclone_render_session::{
     PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
     RenderSectionCompileAcceptanceReport, RenderSectionCompileRequestInfo,
     RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionNeighborReadiness,
-    RenderSectionRemovalMode, RenderSectionSession, RenderSectionSyncPlan, RenderSectionViewSync,
+    RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync,
     build_client_textured_sections, decode_textured_render_section_build_report,
-    encode_textured_render_section_build_report, render_section_chunk_pos,
-    render_section_keys_for_snapshot, snapshot_contains_render_section,
-    summarize_textured_render_section_build_report,
+    encode_textured_render_section_build_report, summarize_textured_render_section_build_report,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -483,7 +481,6 @@ pub struct WebChunkRenderSession {
     runtime: WebRuntime,
     mesh_assets: WebTexturedMeshAssets,
     draw: Option<TexturedSectionDrawResources>,
-    render_session: RenderSectionSession,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
     asset_pack_parse_count: usize,
     terrain_asset_load_count: usize,
@@ -583,7 +580,6 @@ impl WebChunkRenderSession {
             runtime: WebRuntime::local_integrated(SMOKE_SEED),
             mesh_assets,
             draw: None,
-            render_session: RenderSectionSession::default(),
             loaded_chunk_positions: BTreeSet::new(),
             asset_pack_parse_count: 1,
             terrain_asset_load_count: 1,
@@ -623,7 +619,7 @@ impl WebChunkRenderSession {
                 .clone(),
         };
         let compile_requests = &mut self.compile_requests;
-        let submission = self.render_session.submit_prepared_sync_plan(
+        let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
             &render_plan.sync_plan,
             Vec::new(),
             |_sync_plan, request| {
@@ -704,7 +700,7 @@ impl WebChunkRenderSession {
             .dirty_work
             .removal_dirty_sections
             .clone();
-        let submission = self.render_session.submit_prepared_sync_plan(
+        let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
             &render_plan.sync_plan,
             Vec::new(),
             |_sync_plan, request| {
@@ -758,22 +754,10 @@ impl WebChunkRenderSession {
             })
             .unwrap_or_default();
         let has_removals = !removal_chunks.is_empty() || !removal_sections.is_empty();
-        let runtime = &self.runtime;
         let finished = self
-            .render_session
-            .finish_compile_update(
-                completed,
-                request_id,
-                &removal_chunks,
-                &removal_sections,
-                |key| {
-                    let pos = render_section_chunk_pos(key);
-                    runtime
-                        .client()
-                        .chunk_snapshot(pos)
-                        .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-                },
-            )
+            .runtime
+            .engine_mut()
+            .finish_compile_update(completed, request_id, &removal_chunks, &removal_sections)
             .map_err(|error| error.to_string())?;
         if finished.accepted_sections.is_empty() && !has_removals {
             return Err(format!(
@@ -818,15 +802,7 @@ impl WebChunkRenderSession {
         radius_chunks: u32,
     ) -> Result<WebChunkRenderPlan, String> {
         let sync = self.prepare_chunk_view(center, radius_chunks)?;
-        let client = self.runtime.client();
-        let sync_update = self.render_session.prepare_sync_update(
-            |pos| client.chunk_snapshot(pos).is_some(),
-            |key| {
-                let pos = render_section_chunk_pos(key);
-                client
-                    .chunk_snapshot(pos)
-                    .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-            },
+        let sync_update = self.runtime.engine_mut().prepare_sync_update(
             |dirty_work| {
                 sort_chunk_positions_by_coordinate(dirty_work.loaded_dirty_chunks.iter().copied())
             },
@@ -834,13 +810,7 @@ impl WebChunkRenderSession {
                 sort_dirty_section_chunks_by_coordinate(&dirty_work.loaded_dirty_sections_by_chunk)
             },
             usize::MAX,
-            |pos| {
-                client
-                    .chunk_snapshot(pos)
-                    .map(render_section_keys_for_snapshot)
-                    .unwrap_or_default()
-            },
-            |_key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+            |_client, _key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
             RenderSectionRemovalMode::Defer,
         );
         Ok(WebChunkRenderPlan {
@@ -866,22 +836,10 @@ impl WebChunkRenderSession {
                 center.x, center.z
             ));
         }
-        let current_loaded_chunks = self
+        Ok(self
             .runtime
-            .client()
-            .loaded_chunk_positions()
-            .collect::<BTreeSet<_>>();
-        let client = self.runtime.client();
-        Ok(self.render_session.apply_loaded_view_sync(
-            &previous_loaded_chunks,
-            current_loaded_chunks,
-            |pos| {
-                client
-                    .chunk_snapshot(pos)
-                    .map(render_section_keys_for_snapshot)
-                    .unwrap_or_default()
-            },
-        ))
+            .engine_mut()
+            .apply_current_loaded_view_sync(&previous_loaded_chunks))
     }
 
     fn render_chunk_report_with_cache_update(
@@ -895,7 +853,7 @@ impl WebChunkRenderSession {
         acceptance_report: RenderSectionCompileAcceptanceReport,
     ) -> Result<GeneratedChunkRenderReport, String> {
         self.mesh_build_count += 1;
-        let cached_sections = self.render_session.sections();
+        let cached_sections = self.runtime.engine().sections();
         if cached_sections.iter().all(|section| section.is_empty()) {
             return Err(format!(
                 "generated chunk view {},{} radius {} built no resident textured sections",
