@@ -812,7 +812,6 @@ impl WebChunkRenderSession {
         radius_chunks: u32,
     ) -> Result<WebChunkRenderPlan, String> {
         let sync = self.prepare_chunk_view(center, radius_chunks)?;
-        self.mark_render_sync_dirty(&sync);
         let client = self.runtime.client();
         let sync_update = self.render_session.prepare_sync_update(
             |pos| client.chunk_snapshot(pos).is_some(),
@@ -868,28 +867,17 @@ impl WebChunkRenderSession {
             .client()
             .loaded_chunk_positions()
             .collect::<BTreeSet<_>>();
-        Ok(RenderSectionViewSync::from_loaded_chunks(
+        let client = self.runtime.client();
+        Ok(self.render_session.apply_loaded_view_sync(
             &previous_loaded_chunks,
             current_loaded_chunks,
+            |pos| {
+                client
+                    .chunk_snapshot(pos)
+                    .map(render_section_keys_for_snapshot)
+                    .unwrap_or_default()
+            },
         ))
-    }
-
-    fn mark_render_sync_dirty(&mut self, sync: &RenderSectionViewSync) {
-        for pos in sync
-            .dirty_chunks
-            .iter()
-            .chain(sync.removal_chunks.iter())
-            .copied()
-        {
-            let loaded_keys = self
-                .runtime
-                .client()
-                .chunk_snapshot(pos)
-                .map(render_section_keys_for_snapshot)
-                .unwrap_or_default();
-            self.render_session
-                .mark_chunk_dirty_with_loaded_sections(pos, loaded_keys);
-        }
     }
 
     fn render_chunk_report_with_cache_update(

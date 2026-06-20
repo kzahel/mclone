@@ -28,8 +28,8 @@ use crate::render_cache::{
 use mclone_render_session::{
     RenderSectionCacheUpdate, RenderSectionCompiler, RenderSectionNeighborReadiness,
     RenderSectionReadyPlan, RenderSectionRemovalMode, RenderSectionSession,
-    build_client_textured_sections, render_dirty_chunk_neighborhood, render_section_chunk_pos,
-    render_section_keys_for_snapshot, snapshot_contains_render_section,
+    build_client_textured_sections, render_section_chunk_pos, render_section_keys_for_snapshot,
+    snapshot_contains_render_section,
 };
 
 const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
@@ -569,15 +569,14 @@ impl WindowSceneRuntime {
     }
 
     fn mark_render_chunk_dirty(&mut self, pos: ChunkPos) {
-        for dirty_pos in render_dirty_chunk_neighborhood(pos) {
-            let loaded_keys = self
-                .client
-                .chunk_snapshot(dirty_pos)
-                .map(render_section_keys_for_snapshot)
-                .unwrap_or_default();
-            self.render_session
-                .mark_chunk_dirty_with_loaded_sections(dirty_pos, loaded_keys);
-        }
+        let client = &self.client;
+        self.render_session
+            .mark_chunk_neighborhood_dirty_with_loaded_sections(pos, |dirty_pos| {
+                client
+                    .chunk_snapshot(dirty_pos)
+                    .map(render_section_keys_for_snapshot)
+                    .unwrap_or_default()
+            });
     }
 
     fn mark_render_section_updates_dirty(

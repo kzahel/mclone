@@ -625,6 +625,68 @@ impl RenderSectionSession {
         self.mark_chunk_dirty(pos, known_section_keys);
     }
 
+    pub fn mark_chunks_dirty_with_loaded_sections<I>(
+        &mut self,
+        chunks: impl IntoIterator<Item = ChunkPos>,
+        mut loaded_section_keys_for_chunk: impl FnMut(ChunkPos) -> I,
+    ) -> usize
+    where
+        I: IntoIterator<Item = RenderSectionKey>,
+    {
+        let chunks = chunks.into_iter().collect::<BTreeSet<_>>();
+        let marked_chunk_count = chunks.len();
+        for pos in chunks {
+            self.mark_chunk_dirty_with_loaded_sections(pos, loaded_section_keys_for_chunk(pos));
+        }
+        marked_chunk_count
+    }
+
+    pub fn mark_chunk_neighborhood_dirty_with_loaded_sections<I>(
+        &mut self,
+        pos: ChunkPos,
+        loaded_section_keys_for_chunk: impl FnMut(ChunkPos) -> I,
+    ) -> usize
+    where
+        I: IntoIterator<Item = RenderSectionKey>,
+    {
+        self.mark_chunks_dirty_with_loaded_sections(
+            render_dirty_chunk_neighborhood(pos),
+            loaded_section_keys_for_chunk,
+        )
+    }
+
+    pub fn mark_view_sync_dirty_with_loaded_sections<I>(
+        &mut self,
+        sync: &RenderSectionViewSync,
+        loaded_section_keys_for_chunk: impl FnMut(ChunkPos) -> I,
+    ) -> usize
+    where
+        I: IntoIterator<Item = RenderSectionKey>,
+    {
+        self.mark_chunks_dirty_with_loaded_sections(
+            sync.dirty_chunks
+                .iter()
+                .chain(sync.removal_chunks.iter())
+                .copied(),
+            loaded_section_keys_for_chunk,
+        )
+    }
+
+    pub fn apply_loaded_view_sync<I>(
+        &mut self,
+        previous_chunks: &BTreeSet<ChunkPos>,
+        current_loaded_chunks: BTreeSet<ChunkPos>,
+        loaded_section_keys_for_chunk: impl FnMut(ChunkPos) -> I,
+    ) -> RenderSectionViewSync
+    where
+        I: IntoIterator<Item = RenderSectionKey>,
+    {
+        let sync =
+            RenderSectionViewSync::from_loaded_chunks(previous_chunks, current_loaded_chunks);
+        self.mark_view_sync_dirty_with_loaded_sections(&sync, loaded_section_keys_for_chunk);
+        sync
+    }
+
     pub fn mark_section_dirty(&mut self, key: RenderSectionKey) {
         self.dirty.mark_section_dirty(key);
     }
@@ -1594,6 +1656,73 @@ mod tests {
             BTreeSet::from([ChunkPos::new(1, 0), ChunkPos::new(3, 0)])
         );
         assert_eq!(sync.removal_chunks, BTreeSet::from([ChunkPos::new(0, 0)]));
+    }
+
+    #[test]
+    fn render_section_session_marks_chunk_neighborhood_dirty_with_loaded_sections() {
+        let center = ChunkPos::new(5, -3);
+        let east = ChunkPos::new(6, -3);
+        let center_key = RenderSectionKey::new(5, 4, -3);
+        let east_key = RenderSectionKey::new(6, 4, -3);
+        let mut session = RenderSectionSession::default();
+
+        let marked = session.mark_chunk_neighborhood_dirty_with_loaded_sections(center, |pos| {
+            if pos == center {
+                vec![center_key]
+            } else if pos == east {
+                vec![east_key]
+            } else {
+                Vec::new()
+            }
+        });
+
+        assert_eq!(marked, 5);
+        assert_eq!(
+            session.dirty().dirty_chunks,
+            BTreeSet::from(render_dirty_chunk_neighborhood(center))
+        );
+        assert_eq!(session.dirty().section_revision(center_key), 1);
+        assert_eq!(session.dirty().section_revision(east_key), 1);
+    }
+
+    #[test]
+    fn render_section_session_applies_loaded_view_sync_dirty_marks() {
+        let removed_chunk = ChunkPos::new(0, 0);
+        let edge_chunk = ChunkPos::new(1, 0);
+        let retained_chunk = ChunkPos::new(2, 0);
+        let added_chunk = ChunkPos::new(3, 0);
+        let previous_chunks = BTreeSet::from([removed_chunk, edge_chunk, retained_chunk]);
+        let current_chunks = BTreeSet::from([edge_chunk, retained_chunk, added_chunk]);
+        let cached_removed_key = RenderSectionKey::new(0, 4, 0);
+        let edge_key = RenderSectionKey::new(1, 4, 0);
+        let added_key = RenderSectionKey::new(3, 4, 0);
+        let mut session = RenderSectionSession::default();
+        session.apply_finished_compile_report(
+            &BTreeSet::from([cached_removed_key]),
+            test_build_report([cached_removed_key]),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
+
+        let sync = session.apply_loaded_view_sync(&previous_chunks, current_chunks, |pos| {
+            if pos == edge_chunk {
+                vec![edge_key]
+            } else if pos == added_chunk {
+                vec![added_key]
+            } else {
+                Vec::new()
+            }
+        });
+
+        assert_eq!(sync.dirty_chunks, BTreeSet::from([edge_chunk, added_chunk]));
+        assert_eq!(sync.removal_chunks, BTreeSet::from([removed_chunk]));
+        assert_eq!(
+            session.dirty().dirty_chunks,
+            BTreeSet::from([removed_chunk, edge_chunk, added_chunk])
+        );
+        assert_eq!(session.dirty().section_revision(cached_removed_key), 1);
+        assert_eq!(session.dirty().section_revision(edge_key), 1);
+        assert_eq!(session.dirty().section_revision(added_key), 1);
     }
 
     #[test]

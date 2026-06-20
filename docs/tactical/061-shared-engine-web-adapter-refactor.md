@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active shared compile-finish update helper landed.
+Status: active shared loaded-view dirty marking helper landed.
 
 ## Purpose
 
@@ -448,6 +448,19 @@ Browser worker payload result:
   JS/Rust request IDs and packed report decoding in the browser adapter.
 - Added shared session tests covering accepted-plus-stale compile results and
   removal-only updates with no accepted sections.
+- Added shared dirty-mark helpers on `RenderSectionSession`:
+  - `mark_chunks_dirty_with_loaded_sections`
+  - `mark_chunk_neighborhood_dirty_with_loaded_sections`
+  - `mark_view_sync_dirty_with_loaded_sections`
+  - `apply_loaded_view_sync`
+- Updated desktop `WindowSceneRuntime` to use the shared neighborhood dirty
+  helper for chunk snapshots, unloads, remote resyncs, and initial render-cache
+  seeding while preserving the native changed-chunk-plus-neighbors policy.
+- Updated web `WebChunkRenderSession::prepare_chunk_view` to compute
+  previous/current loaded chunk sync and mark dirty/removal chunks through the
+  shared session helper, deleting the web-local `mark_render_sync_dirty` loop.
+- Added shared session tests for native-style neighborhood dirtying and
+  web-style loaded-view sync dirtying with cached removal sections.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
@@ -578,16 +591,16 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should move loaded-view sync and dirty marking closer to the
-shared session boundary:
+The next slice should collapse the remaining render-section work-preparation
+ceremony around the shared session:
 
-1. Add a shared helper that takes the previous/current loaded chunk set plus
-   adapter snapshot lookup and marks added, changed, removed, cached, dirty, and
-   inflight render-section keys consistently.
-2. Keep runtime ownership platform-specific: desktop still polls local/remote
-   transports and web still requests chunks through `WebRuntime`.
-3. Reduce desktop/web duplicated `RenderSectionViewSync` and
-   mark-render-sync-dirty code before extracting the larger
-   `EngineRenderSession`.
+1. Add a shared helper for "prepare sync update, apply empty ready plans, and
+   report ready/update counters" so desktop and web stop spelling out the same
+   ready-plan accounting around `prepare_sync_update`.
+2. Keep compile execution platform-specific: desktop still submits to the
+   native worker, while web still records JS/Rust request IDs and routes packed
+   worker payloads through the browser boundary.
+3. Keep adapter-supplied policies explicit: desktop distance ordering and
+   neighbor readiness, web coordinate ordering and deferred removals.
 4. Preserve Playwright worker/canvas screenshots plus native
    movement/timedemo/headless screenshots as the compatibility gates.
