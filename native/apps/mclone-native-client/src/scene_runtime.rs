@@ -27,7 +27,8 @@ use crate::render_cache::{
 };
 use mclone_render_session::{
     CachedTexturedRenderSections, RenderSectionCacheUpdate, RenderSectionCompileRequest,
-    RenderSectionCompiler, build_client_textured_sections,
+    RenderSectionCompiler, build_client_textured_sections, render_section_chunk_pos,
+    render_section_keys_for_snapshot, snapshot_contains_render_section,
 };
 
 const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
@@ -1281,24 +1282,6 @@ impl RenderNeighborReadiness {
     const fn is_near_exception(self) -> bool {
         matches!(self, Self::ReadyNearCamera)
     }
-}
-
-fn render_section_keys_for_snapshot(snapshot: &ChunkSnapshot) -> Vec<RenderSectionKey> {
-    let min_section_y = block_to_section_coord(snapshot.min_y);
-    let section_count = snapshot.height / SECTION_HEIGHT;
-    (0..section_count)
-        .map(|offset| RenderSectionKey::new(snapshot.pos.x, min_section_y + offset, snapshot.pos.z))
-        .collect()
-}
-
-fn snapshot_contains_render_section(snapshot: &ChunkSnapshot, key: RenderSectionKey) -> bool {
-    snapshot.pos == render_section_chunk_pos(key)
-        && key.section_y * SECTION_HEIGHT >= snapshot.min_y
-        && key.section_y * SECTION_HEIGHT < snapshot.min_y + snapshot.height
-}
-
-fn render_section_chunk_pos(key: RenderSectionKey) -> ChunkPos {
-    ChunkPos::new(key.chunk_x, key.chunk_z)
 }
 
 fn render_dirty_section_keys_for_block_update(

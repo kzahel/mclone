@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active Rust-owned browser compile lifecycle landed.
+Status: active shared render-session primitives landed.
 
 ## Purpose
 
@@ -333,6 +333,19 @@ Browser worker payload result:
 - The Playwright chunk smoke now asserts request/result ID matching,
   submitted/accepted/stale section counts, and zero pending jobs on both the JS
   worker client and Rust web session after the two-step render.
+- Extracted platform-neutral render-session primitives into
+  `mclone-render-session`:
+  - `RenderSectionViewSync`
+  - dirty chunk / removal chunk diff helpers
+  - snapshot-to-render-section-key helpers
+  - dirty-chunk target section selection
+  - `RenderSectionCompileRequestState`
+  - `RenderSectionCompileAcceptanceReport`
+- Updated the WASM web session to use those shared primitives for request IDs,
+  pending job counts, section revision snapshots, dirty target section
+  selection, and ready-key selection.
+- Updated the native desktop runtime to use the shared render-section key and
+  snapshot containment helpers, removing another local copy of that policy.
 
 ### 3. Extract Platform-Neutral Runtime Session
 

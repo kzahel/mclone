@@ -193,6 +193,164 @@ pub struct RenderSectionCompileResult {
     pub result: std::result::Result<TexturedRenderSectionBuildReport, String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderSectionViewSync {
+    pub current_loaded_chunks: BTreeSet<ChunkPos>,
+    pub dirty_chunks: BTreeSet<ChunkPos>,
+    pub removal_chunks: BTreeSet<ChunkPos>,
+}
+
+impl RenderSectionViewSync {
+    pub fn from_loaded_chunks(
+        previous_chunks: &BTreeSet<ChunkPos>,
+        current_loaded_chunks: BTreeSet<ChunkPos>,
+    ) -> Self {
+        let dirty_chunks = dirty_chunk_positions(previous_chunks, &current_loaded_chunks);
+        let removal_chunks = previous_chunks
+            .difference(&current_loaded_chunks)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        Self {
+            current_loaded_chunks,
+            dirty_chunks,
+            removal_chunks,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderSectionPendingCompileRequest<C> {
+    pub request_id: u32,
+    pub context: C,
+    pub target_sections: BTreeSet<RenderSectionKey>,
+    pub section_revisions: BTreeMap<RenderSectionKey, u64>,
+}
+
+impl<C> RenderSectionPendingCompileRequest<C> {
+    pub fn into_compile_result(
+        self,
+        result: std::result::Result<TexturedRenderSectionBuildReport, String>,
+    ) -> (C, RenderSectionCompileResult) {
+        (
+            self.context,
+            RenderSectionCompileResult {
+                target_sections: self.target_sections,
+                section_revisions: self.section_revisions,
+                result,
+            },
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RenderSectionCompileRequestInfo {
+    pub request_id: u32,
+    pub submitted_section_count: usize,
+    pub pending_compile_jobs: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RenderSectionCompileAcceptanceReport {
+    pub request_id: u32,
+    pub submitted_section_count: usize,
+    pub accepted_section_count: usize,
+    pub stale_section_count: usize,
+}
+
+impl RenderSectionCompileAcceptanceReport {
+    pub fn from_acceptance(request_id: u32, acceptance: &RenderSectionCompileAcceptance) -> Self {
+        Self {
+            request_id,
+            submitted_section_count: acceptance.accepted_section_count()
+                + acceptance.stale_section_count(),
+            accepted_section_count: acceptance.accepted_section_count(),
+            stale_section_count: acceptance.stale_section_count(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RenderSectionCompileRequestState<C> {
+    next_request_id: u32,
+    pending_requests: BTreeMap<u32, RenderSectionPendingCompileRequest<C>>,
+    section_revisions: BTreeMap<RenderSectionKey, u64>,
+}
+
+impl<C> Default for RenderSectionCompileRequestState<C> {
+    fn default() -> Self {
+        Self {
+            next_request_id: 1,
+            pending_requests: BTreeMap::new(),
+            section_revisions: BTreeMap::new(),
+        }
+    }
+}
+
+impl<C> RenderSectionCompileRequestState<C> {
+    pub fn pending_request_count(&self) -> usize {
+        self.pending_requests.len()
+    }
+
+    pub fn has_pending_requests(&self) -> bool {
+        !self.pending_requests.is_empty()
+    }
+
+    pub fn begin_request(
+        &mut self,
+        context: C,
+        target_sections: BTreeSet<RenderSectionKey>,
+    ) -> RenderSectionCompileRequestInfo {
+        let request_id = self.take_next_request_id();
+        self.bump_section_revisions(&target_sections);
+        let section_revisions = target_sections
+            .iter()
+            .map(|key| (*key, self.section_revision(*key)))
+            .collect::<BTreeMap<_, _>>();
+        let submitted_section_count = target_sections.len();
+        self.pending_requests.insert(
+            request_id,
+            RenderSectionPendingCompileRequest {
+                request_id,
+                context,
+                target_sections,
+                section_revisions,
+            },
+        );
+        RenderSectionCompileRequestInfo {
+            request_id,
+            submitted_section_count,
+            pending_compile_jobs: self.pending_request_count(),
+        }
+    }
+
+    pub fn remove_pending_request(
+        &mut self,
+        request_id: u32,
+    ) -> Option<RenderSectionPendingCompileRequest<C>> {
+        self.pending_requests.remove(&request_id)
+    }
+
+    pub fn bump_section_revisions(&mut self, keys: &BTreeSet<RenderSectionKey>) {
+        for key in keys {
+            let revision = self.section_revisions.entry(*key).or_default();
+            *revision = revision.wrapping_add(1);
+        }
+    }
+
+    pub fn section_revision(&self, key: RenderSectionKey) -> u64 {
+        self.section_revisions
+            .get(&key)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    fn take_next_request_id(&mut self) -> u32 {
+        let request_id = self.next_request_id;
+        self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
+        request_id
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PackedRenderSectionBuildReportSummary {
     pub section_count: usize,
@@ -363,6 +521,80 @@ impl RenderSectionCompileResult {
             stale_sections,
         }
     }
+}
+
+pub fn render_section_chunk_pos(key: RenderSectionKey) -> ChunkPos {
+    ChunkPos::new(key.chunk_x, key.chunk_z)
+}
+
+pub fn render_section_keys_for_snapshot(snapshot: &ChunkSnapshot) -> Vec<RenderSectionKey> {
+    let min_section_y = snapshot.min_y.div_euclid(SECTION_HEIGHT);
+    let section_count = snapshot.height / SECTION_HEIGHT;
+    (0..section_count)
+        .map(|offset| RenderSectionKey::new(snapshot.pos.x, min_section_y + offset, snapshot.pos.z))
+        .collect()
+}
+
+pub fn snapshot_contains_render_section(snapshot: &ChunkSnapshot, key: RenderSectionKey) -> bool {
+    snapshot.pos == render_section_chunk_pos(key)
+        && key.section_y * SECTION_HEIGHT >= snapshot.min_y
+        && key.section_y * SECTION_HEIGHT < snapshot.min_y + snapshot.height
+}
+
+pub fn ready_section_keys_for_report(
+    report: &TexturedRenderSectionBuildReport,
+    dirty_chunks: &BTreeSet<ChunkPos>,
+) -> BTreeSet<RenderSectionKey> {
+    report
+        .sections
+        .iter()
+        .map(|section| section.key)
+        .filter(|key| dirty_chunks.contains(&render_section_chunk_pos(*key)))
+        .collect()
+}
+
+pub fn target_section_keys_for_dirty_chunks<'a>(
+    snapshots: impl IntoIterator<Item = &'a ChunkSnapshot>,
+    dirty_chunks: &BTreeSet<ChunkPos>,
+) -> BTreeSet<RenderSectionKey> {
+    snapshots
+        .into_iter()
+        .filter(|snapshot| dirty_chunks.contains(&snapshot.pos))
+        .flat_map(render_section_keys_for_snapshot)
+        .collect()
+}
+
+pub fn dirty_chunk_positions(
+    previous_chunks: &BTreeSet<ChunkPos>,
+    current_chunks: &BTreeSet<ChunkPos>,
+) -> BTreeSet<ChunkPos> {
+    if previous_chunks.is_empty() {
+        return current_chunks.clone();
+    }
+    let added_chunks = current_chunks
+        .difference(previous_chunks)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let removed_chunks = previous_chunks
+        .difference(current_chunks)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    current_chunks
+        .iter()
+        .copied()
+        .filter(|pos| added_chunks.contains(pos) || has_removed_neighbor(*pos, &removed_chunks))
+        .collect()
+}
+
+fn has_removed_neighbor(pos: ChunkPos, removed_chunks: &BTreeSet<ChunkPos>) -> bool {
+    [
+        ChunkPos::new(pos.x - 1, pos.z),
+        ChunkPos::new(pos.x + 1, pos.z),
+        ChunkPos::new(pos.x, pos.z - 1),
+        ChunkPos::new(pos.x, pos.z + 1),
+    ]
+    .into_iter()
+    .any(|neighbor| removed_chunks.contains(&neighbor))
 }
 
 fn write_i32(out: &mut Vec<u8>, value: i32) {
@@ -571,6 +803,103 @@ mod tests {
         assert_eq!(mesh_blocks.blocks.len(), CHUNK_SECTION_VOLUME * 2);
         assert_eq!(mesh_blocks.blocks[0], AIR_BLOCK_STATE_ID);
         assert_eq!(mesh_blocks.blocks[CHUNK_SECTION_VOLUME], BlockStateId(1));
+    }
+
+    #[test]
+    fn render_section_view_sync_marks_added_chunks_and_removed_neighbors_dirty() {
+        let previous_chunks = BTreeSet::from([
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(2, 0),
+        ]);
+        let current_chunks = BTreeSet::from([
+            ChunkPos::new(1, 0),
+            ChunkPos::new(2, 0),
+            ChunkPos::new(3, 0),
+        ]);
+
+        let sync = RenderSectionViewSync::from_loaded_chunks(&previous_chunks, current_chunks);
+
+        assert_eq!(
+            sync.dirty_chunks,
+            BTreeSet::from([ChunkPos::new(1, 0), ChunkPos::new(3, 0)])
+        );
+        assert_eq!(sync.removal_chunks, BTreeSet::from([ChunkPos::new(0, 0)]));
+    }
+
+    #[test]
+    fn render_section_compile_request_state_tracks_pending_revisions_and_stale_results() {
+        let key = RenderSectionKey::new(0, 4, 0);
+        let mut state = RenderSectionCompileRequestState::default();
+
+        let first = state.begin_request("first", BTreeSet::from([key]));
+        assert_eq!(
+            first,
+            RenderSectionCompileRequestInfo {
+                request_id: 1,
+                submitted_section_count: 1,
+                pending_compile_jobs: 1,
+            }
+        );
+        assert_eq!(state.section_revision(key), 1);
+        let pending = state.remove_pending_request(first.request_id).unwrap();
+        assert_eq!(pending.context, "first");
+        let (_, completed) = pending.into_compile_result(Ok(TexturedRenderSectionBuildReport {
+            sections: Vec::new(),
+            visibility_graph: VisibilityGraphBuildStats::default(),
+        }));
+        let accepted = completed.partition_by_revision(|key| state.section_revision(key));
+        assert_eq!(accepted.accepted_sections, BTreeSet::from([key]));
+        assert!(accepted.stale_sections.is_empty());
+
+        let second = state.begin_request("second", BTreeSet::from([key]));
+        let pending = state.remove_pending_request(second.request_id).unwrap();
+        state.bump_section_revisions(&BTreeSet::from([key]));
+        let (_, completed) =
+            pending.into_compile_result(Ok(TexturedRenderSectionBuildReport::default()));
+        let stale = completed.partition_by_revision(|key| state.section_revision(key));
+        assert!(stale.accepted_sections.is_empty());
+        assert_eq!(stale.stale_sections, BTreeSet::from([key]));
+    }
+
+    #[test]
+    fn render_section_key_helpers_select_dirty_snapshot_sections() {
+        let blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME * 2];
+        let clean = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            32,
+            &blocks,
+        );
+        let dirty = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(1, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            -16,
+            32,
+            &blocks,
+        );
+
+        let keys =
+            target_section_keys_for_dirty_chunks([&clean, &dirty], &BTreeSet::from([dirty.pos]));
+
+        assert_eq!(
+            keys,
+            BTreeSet::from([
+                RenderSectionKey::new(1, -1, 0),
+                RenderSectionKey::new(1, 0, 0),
+            ])
+        );
+        assert!(snapshot_contains_render_section(
+            &dirty,
+            RenderSectionKey::new(1, -1, 0)
+        ));
+        assert_eq!(
+            render_section_chunk_pos(RenderSectionKey::new(1, 0, 0)),
+            dirty.pos
+        );
     }
 
     #[test]
