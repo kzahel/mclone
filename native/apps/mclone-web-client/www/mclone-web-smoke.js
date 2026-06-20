@@ -2,6 +2,7 @@ const WASM_URL = new URL("./mclone_web_client.wasm", import.meta.url);
 const BINDGEN_JS_URL = new URL("./pkg/mclone_web_client.js", import.meta.url);
 const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.url);
 const THREAD_WORKER_URL = new URL("./mclone-thread-smoke-worker.js", import.meta.url);
+const RENDER_COMPILER_WORKER_URL = new URL("./mclone-render-compiler-worker.js", import.meta.url);
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 
@@ -313,12 +314,14 @@ async function renderCanvas() {
     }
 
     const assetPack = await fetchAssetPack();
+    const renderCompiler = await probeRenderCompilerWorker(assetPack);
     const session = await module.mclone_web_create_chunk_render_session(canvas, assetPack);
     const firstReport = session.renderChunkReport(0, 0, 1);
     const report = session.renderChunkReport(1, 0, 1);
     return {
       ok: Boolean(
-        report.ok
+        renderCompiler.ok
+        && report.ok
         && report.rendered
         && report.configured
         && report.chunkLoaded
@@ -328,6 +331,7 @@ async function renderCanvas() {
       ),
       supported: true,
       status: report.ok ? "rendered" : "failed",
+      renderCompiler,
       firstReport,
       report,
     };
@@ -347,6 +351,52 @@ async function fetchAssetPack() {
     throw new Error(`failed to fetch ${ASSET_PACK_URL.pathname}: ${response.status} ${response.statusText}`);
   }
   return new Uint8Array(await response.arrayBuffer());
+}
+
+function probeRenderCompilerWorker(assetPack) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(RENDER_COMPILER_WORKER_URL.href, {
+      type: "module",
+      name: "mclone-render-compiler-smoke",
+    });
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      reject(new Error("timed out waiting for render compiler worker"));
+    }, 20_000);
+
+    worker.onmessage = (event) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      worker.terminate();
+      const data = event.data ?? {};
+      const packedByteLength = data.packed instanceof Uint8Array ? data.packed.byteLength : 0;
+      delete data.packed;
+      resolve({
+        ...data,
+        packedByteLength,
+      });
+    };
+    worker.onerror = (event) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      worker.terminate();
+      reject(new Error(event.message || "render compiler worker failed"));
+    };
+    worker.postMessage({
+      kind: "compile-render-sections",
+      bindgenJsUrl: BINDGEN_JS_URL.href,
+      bindgenWasmUrl: BINDGEN_WASM_URL.href,
+      assetPack: assetPack.slice(),
+      centerX: 0,
+      centerZ: 0,
+      radiusChunks: 1,
+    });
+  });
 }
 
 function decodeRuntimeReport(bits) {

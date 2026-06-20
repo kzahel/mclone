@@ -9,11 +9,14 @@ use mclone_core::{
     PackedLightSection, SECTION_HEIGHT,
 };
 use mclone_mesh::{
-    RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog,
-    TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, VisibilityGraphBuildStats,
+    RenderSectionKey, TexturedChunkMeshInput, TexturedChunkVertex, TexturedMeshCatalog,
+    TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, TexturedVisibleChunkMesh,
+    VisibilityGraphBuildStats, VisibilitySet,
     build_textured_render_sections_for_section_set_with_stats,
     build_textured_render_sections_with_stats, quad_face_count_from_indices,
 };
+
+const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR1\0";
 
 pub fn build_client_textured_sections(
     client: &ClientRuntime,
@@ -190,6 +193,131 @@ pub struct RenderSectionCompileResult {
     pub result: std::result::Result<TexturedRenderSectionBuildReport, String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PackedRenderSectionBuildReportSummary {
+    pub section_count: usize,
+    pub non_empty_section_count: usize,
+    pub vertex_count: u32,
+    pub index_count: u32,
+    pub visibility_graph_stats: VisibilityGraphBuildStats,
+}
+
+impl PackedRenderSectionBuildReportSummary {
+    pub fn face_count(self) -> u32 {
+        quad_face_count_from_indices(self.index_count)
+    }
+}
+
+pub fn summarize_textured_render_section_build_report(
+    report: &TexturedRenderSectionBuildReport,
+) -> PackedRenderSectionBuildReportSummary {
+    let mut summary = PackedRenderSectionBuildReportSummary {
+        section_count: report.sections.len(),
+        visibility_graph_stats: report.visibility_graph,
+        ..PackedRenderSectionBuildReportSummary::default()
+    };
+    for section in &report.sections {
+        if section.is_empty() {
+            continue;
+        }
+        let stats = section.stats();
+        summary.non_empty_section_count += 1;
+        summary.vertex_count += stats.vertex_count;
+        summary.index_count += stats.index_count;
+    }
+    summary
+}
+
+pub fn encode_textured_render_section_build_report(
+    report: &TexturedRenderSectionBuildReport,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(PACKED_BUILD_REPORT_MAGIC);
+    write_u64(&mut out, report.visibility_graph.build_count as u64);
+    write_f64(&mut out, report.visibility_graph.total_ms);
+    write_f64(&mut out, report.visibility_graph.worst_ms);
+    write_u32(&mut out, report.sections.len() as u32);
+    for section in &report.sections {
+        write_i32(&mut out, section.key.chunk_x);
+        write_i32(&mut out, section.key.section_y);
+        write_i32(&mut out, section.key.chunk_z);
+        write_u64(&mut out, section.visibility.bits());
+        write_u32(&mut out, section.mesh.vertices.len() as u32);
+        write_u32(&mut out, section.mesh.indices.len() as u32);
+        for vertex in &section.mesh.vertices {
+            for value in vertex.position {
+                write_f32(&mut out, value);
+            }
+            for value in vertex.uv {
+                write_f32(&mut out, value);
+            }
+            for value in vertex.color {
+                write_f32(&mut out, value);
+            }
+            write_u32(&mut out, vertex.packed_light);
+        }
+        for index in &section.mesh.indices {
+            write_u32(&mut out, *index);
+        }
+    }
+    out
+}
+
+pub fn decode_textured_render_section_build_report(
+    bytes: &[u8],
+) -> Result<TexturedRenderSectionBuildReport> {
+    let mut reader = PackedReportReader::new(bytes)?;
+    let build_count =
+        usize::try_from(reader.read_u64()?).context("visibility graph build count is too large")?;
+    let total_ms = reader.read_f64()?;
+    let worst_ms = reader.read_f64()?;
+    let section_count = reader.read_u32()? as usize;
+    let mut sections = Vec::with_capacity(section_count);
+    for _ in 0..section_count {
+        let key = RenderSectionKey::new(reader.read_i32()?, reader.read_i32()?, reader.read_i32()?);
+        let visibility = VisibilitySet::from_bits(reader.read_u64()?);
+        let vertex_count = reader.read_u32()? as usize;
+        let index_count = reader.read_u32()? as usize;
+        let mut vertices = Vec::with_capacity(vertex_count);
+        for _ in 0..vertex_count {
+            let position = [reader.read_f32()?, reader.read_f32()?, reader.read_f32()?];
+            let uv = [reader.read_f32()?, reader.read_f32()?];
+            let color = [
+                reader.read_f32()?,
+                reader.read_f32()?,
+                reader.read_f32()?,
+                reader.read_f32()?,
+            ];
+            let packed_light = reader.read_u32()?;
+            vertices.push(TexturedChunkVertex {
+                position,
+                uv,
+                color,
+                packed_light,
+            });
+        }
+        let mut indices = Vec::with_capacity(index_count);
+        for _ in 0..index_count {
+            indices.push(reader.read_u32()?);
+        }
+        sections.push(TexturedRenderSectionMesh {
+            key,
+            mesh: TexturedVisibleChunkMesh { vertices, indices },
+            visibility,
+        });
+    }
+    reader.finish()?;
+
+    Ok(TexturedRenderSectionBuildReport {
+        sections,
+        visibility_graph: VisibilityGraphBuildStats {
+            build_count,
+            total_ms,
+            worst_ms,
+        },
+    })
+}
+
 pub trait RenderSectionCompiler {
     fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()>;
 
@@ -234,6 +362,84 @@ impl RenderSectionCompileResult {
             accepted_sections,
             stale_sections,
         }
+    }
+}
+
+fn write_i32(out: &mut Vec<u8>, value: i32) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_u32(out: &mut Vec<u8>, value: u32) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_u64(out: &mut Vec<u8>, value: u64) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_f32(out: &mut Vec<u8>, value: f32) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_f64(out: &mut Vec<u8>, value: f64) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+struct PackedReportReader<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> PackedReportReader<'a> {
+    fn new(bytes: &'a [u8]) -> Result<Self> {
+        if !bytes.starts_with(PACKED_BUILD_REPORT_MAGIC) {
+            bail!("packed render section build report has invalid magic/version");
+        }
+        Ok(Self {
+            bytes,
+            offset: PACKED_BUILD_REPORT_MAGIC.len(),
+        })
+    }
+
+    fn finish(self) -> Result<()> {
+        if self.offset != self.bytes.len() {
+            bail!(
+                "packed render section build report has {} trailing bytes",
+                self.bytes.len() - self.offset
+            );
+        }
+        Ok(())
+    }
+
+    fn read_i32(&mut self) -> Result<i32> {
+        Ok(i32::from_le_bytes(self.read_array()?))
+    }
+
+    fn read_u32(&mut self) -> Result<u32> {
+        Ok(u32::from_le_bytes(self.read_array()?))
+    }
+
+    fn read_u64(&mut self) -> Result<u64> {
+        Ok(u64::from_le_bytes(self.read_array()?))
+    }
+
+    fn read_f32(&mut self) -> Result<f32> {
+        Ok(f32::from_le_bytes(self.read_array()?))
+    }
+
+    fn read_f64(&mut self) -> Result<f64> {
+        Ok(f64::from_le_bytes(self.read_array()?))
+    }
+
+    fn read_array<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let end = self.offset + N;
+        if end > self.bytes.len() {
+            bail!("packed render section build report ended unexpectedly");
+        }
+        let mut out = [0_u8; N];
+        out.copy_from_slice(&self.bytes[self.offset..end]);
+        self.offset = end;
+        Ok(out)
     }
 }
 
@@ -340,7 +546,10 @@ mod tests {
     use mclone_core::{
         AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus,
     };
-    use mclone_mesh::{TexturedRenderSectionBuildReport, TexturedVisibleChunkMesh, VisibilitySet};
+    use mclone_mesh::{
+        TexturedChunkVertex, TexturedRenderSectionBuildReport, TexturedVisibleChunkMesh,
+        VisibilityGraphBuildStats, VisibilitySet,
+    };
 
     use super::*;
 
@@ -424,5 +633,60 @@ mod tests {
             BTreeSet::from([unchanged, default_revision])
         );
         assert_eq!(acceptance.stale_sections, BTreeSet::from([changed]));
+    }
+
+    #[test]
+    fn packed_build_report_roundtrips_section_mesh_payload() {
+        let key = RenderSectionKey::new(-2, 5, 7);
+        let visibility = VisibilitySet::from_bits(0b101010);
+        let report = TexturedRenderSectionBuildReport {
+            sections: vec![TexturedRenderSectionMesh {
+                key,
+                mesh: TexturedVisibleChunkMesh {
+                    vertices: vec![
+                        TexturedChunkVertex {
+                            position: [1.0, 2.0, 3.0],
+                            uv: [0.25, 0.75],
+                            color: [1.0, 0.5, 0.25, 1.0],
+                            packed_light: 0x00f0_00f0,
+                        },
+                        TexturedChunkVertex {
+                            position: [4.0, 5.0, 6.0],
+                            uv: [0.5, 0.125],
+                            color: [0.25, 0.5, 1.0, 1.0],
+                            packed_light: 0x000f_000f,
+                        },
+                    ],
+                    indices: vec![0, 1, 0],
+                },
+                visibility,
+            }],
+            visibility_graph: VisibilityGraphBuildStats {
+                build_count: 1,
+                total_ms: 2.5,
+                worst_ms: 2.5,
+            },
+        };
+
+        let encoded = encode_textured_render_section_build_report(&report);
+        let decoded = decode_textured_render_section_build_report(&encoded).unwrap();
+
+        assert_eq!(decoded, report);
+        let summary = summarize_textured_render_section_build_report(&decoded);
+        assert_eq!(summary.section_count, 1);
+        assert_eq!(summary.non_empty_section_count, 1);
+        assert_eq!(summary.vertex_count, 2);
+        assert_eq!(summary.index_count, 3);
+    }
+
+    #[test]
+    fn packed_build_report_rejects_invalid_bytes() {
+        assert!(decode_textured_render_section_build_report(b"bad").is_err());
+
+        let report = TexturedRenderSectionBuildReport::default();
+        let mut encoded = encode_textured_render_section_build_report(&report);
+        encoded.push(1);
+
+        assert!(decode_textured_render_section_build_report(&encoded).is_err());
     }
 }

@@ -110,6 +110,11 @@ impl VisibilitySet {
         self.bits
     }
 
+    pub fn from_bits(bits: u64) -> Self {
+        let mask = (1_u64 << (Self::FACE_COUNT * Self::FACE_COUNT)) - 1;
+        Self { bits: bits & mask }
+    }
+
     fn set_one_way(&mut self, first: SectionFace, second: SectionFace, value: bool) {
         let bit = Self::pair_bit(first, second);
         if value {

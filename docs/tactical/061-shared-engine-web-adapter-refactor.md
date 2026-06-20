@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active compiler interface landed.
+Status: active browser worker payload landed.
 
 ## Purpose
 
@@ -364,6 +364,21 @@ First threading gate result:
   now require this threading gate by default; `native:web:thread-smoke` is the
   explicit named lane.
 
+Render compiler worker payload result:
+
+- Added a packed render-section build-report codec in `mclone-render-session`
+  for section keys, visibility bits, textured vertices, indices, and visibility
+  graph stats.
+- Added worker-callable WASM exports that compile generated chunk render
+  sections from packed asset bytes and return the packed payload plus a compact
+  summary decoder.
+- Added `mclone-render-compiler-worker.js`, a browser module worker that imports
+  the same wasm-bindgen bundle, runs the Rust section compiler off the page
+  thread, and transfers the packed payload back as an `ArrayBuffer`.
+- `native:web:chunk-smoke` now asserts that this worker compiles the radius-1
+  generated area into 144 section payloads before the main-thread WebGPU render
+  smoke runs. The main thread still owns GPU upload and presentation.
+
 ## Non-Goals
 
 - No Gradle, Android, or OpenXR scaffolding in this slice.
@@ -416,17 +431,16 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should make the browser render-section compiler a real worker
-consumer of the shared compile interface:
+The next slice should feed worker-compiled section payloads into the browser
+render session instead of only asserting them beside the current inline build:
 
-1. Define the browser worker payload shape for `RenderSectionCompileRequest` and
-   `RenderSectionCompileResult`, including typed-array transfer boundaries for
-   section meshes and visibility facts.
-2. Add a browser compiler adapter with the same submit/drain/pending lifecycle
-   as `RenderSectionCompiler`; do not add a separate WASM-only cache policy.
-3. Keep GPU upload and presentation on the main browser thread.
-4. Keep an inline compiler only as an explicit fallback/smoke path behind the
-   same adapter, not as the default.
-5. Validate `cargo check --manifest-path native/Cargo.toml -p mclone-web-client
-   --target wasm32-unknown-unknown`, `native:web:thread-smoke`, and
-   `native:web:chunk-smoke`.
+1. Decode the packed worker payload on the main WASM instance into
+   `TexturedRenderSectionBuildReport`.
+2. Apply that report through `CachedTexturedRenderSections::apply_build_report`
+   for the first generated-chunk browser render.
+3. Keep WebGPU resource creation, upload, and presentation on the main browser
+   thread.
+4. Preserve the inline compiler only as an explicit fallback/smoke path behind
+   the same worker-shaped adapter.
+5. Extend `native:web:chunk-smoke` so worker-compiled payload counts and
+   uploaded/drawn section counts are the same source of truth.

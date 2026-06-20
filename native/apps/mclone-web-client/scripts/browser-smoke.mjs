@@ -78,15 +78,22 @@ async function run() {
       { timeout: 20_000 },
     );
     const result = await page.evaluate(() => globalThis.__mcloneNativeReady);
-    await page.screenshot({ path: screenshotPath, fullPage: true });
+    let pageScreenshotCaptured = false;
+    try {
+      await page.screenshot({ path: screenshotPath, fullPage: false, timeout: 5_000 });
+      pageScreenshotCaptured = true;
+    } catch (error) {
+      console.warn(`page screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
     const canvas = page.locator("#mclone-canvas");
-    const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath });
+    const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
     const canvasPixels = analyzePng(canvasPng);
 
     assertSmokeResult(result, pageErrors, canvasPixels);
     console.log(JSON.stringify({
       url: baseUrl,
       screenshotPath,
+      pageScreenshotCaptured,
       canvasScreenshotPath,
       requireCanvas,
       requireChunk,
@@ -201,6 +208,12 @@ function resolveRequestPath(pathname) {
   if (pathname === "/mclone-web-smoke.js") {
     return join(wwwRoot, "mclone-web-smoke.js");
   }
+  if (pathname === "/mclone-render-compiler-worker.js") {
+    return join(wwwRoot, "mclone-render-compiler-worker.js");
+  }
+  if (pathname === "/mclone-thread-smoke-worker.js") {
+    return join(wwwRoot, "mclone-thread-smoke-worker.js");
+  }
   if (pathname === "/mclone_web_client.wasm") {
     return wasmPath;
   }
@@ -281,7 +294,12 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
     throw new Error(`unexpected canvas render size:\n${JSON.stringify(result.canvas.report, null, 2)}`);
   }
   if (requireChunk) {
-    assertChunkRenderResult(result.canvas.report, canvasPixels, result.canvas.firstReport);
+    assertChunkRenderResult(
+      result.canvas.report,
+      canvasPixels,
+      result.canvas.firstReport,
+      result.canvas.renderCompiler,
+    );
   } else if (canvasPixels.distinctColorCount < 1 || canvasPixels.clearColorPixelCount < 16) {
     throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
@@ -304,7 +322,8 @@ function assertThreadingResult(threading) {
   }
 }
 
-function assertChunkRenderResult(report, canvasPixels, firstReport) {
+function assertChunkRenderResult(report, canvasPixels, firstReport, renderCompiler) {
+  assertRenderCompilerWorkerResult(renderCompiler);
   if (!report.chunkLoaded || !report.meshBuilt) {
     throw new Error(`generated chunk did not load/build:\n${JSON.stringify(report, null, 2)}`);
   }
@@ -383,6 +402,31 @@ function assertChunkRenderResult(report, canvasPixels, firstReport) {
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+function assertRenderCompilerWorkerResult(renderCompiler) {
+  if (!renderCompiler?.ok) {
+    throw new Error(`render compiler worker failed:\n${JSON.stringify(renderCompiler, null, 2)}`);
+  }
+  const summary = renderCompiler.summary;
+  if (
+    renderCompiler.centerX !== 0
+    || renderCompiler.centerZ !== 0
+    || renderCompiler.radiusChunks !== 1
+    || !summary?.ok
+    || summary.byteLength <= 0
+    || summary.sectionCount !== 144
+    || summary.nonEmptySectionCount <= 1
+    || summary.vertexCount <= 0
+    || summary.indexCount <= 0
+    || summary.faceCount <= 0
+    || summary.visibilityGraphBuildCount !== 144
+  ) {
+    throw new Error(`render compiler worker did not return the expected section payload:\n${JSON.stringify(renderCompiler, null, 2)}`);
+  }
+  if (renderCompiler.packedByteLength !== summary.byteLength) {
+    throw new Error(`render compiler worker did not transfer the packed payload:\n${JSON.stringify(renderCompiler, null, 2)}`);
   }
 }
 

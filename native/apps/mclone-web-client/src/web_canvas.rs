@@ -20,6 +20,8 @@ use mclone_render::chunk::{
 };
 use mclone_render_session::{
     CachedTexturedRenderSections, RenderSectionCacheUpdate, build_client_textured_sections,
+    decode_textured_render_section_build_report, encode_textured_render_section_build_report,
+    summarize_textured_render_section_build_report,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -81,11 +83,99 @@ pub async fn mclone_web_create_chunk_render_session(
         .map_err(JsValue::from)
 }
 
+#[wasm_bindgen]
+pub fn mclone_web_compile_generated_chunk_sections(
+    asset_pack_bytes: js_sys::Uint8Array,
+    center_x: i32,
+    center_z: i32,
+    radius_chunks: u32,
+) -> Result<js_sys::Uint8Array, JsValue> {
+    let report = compile_generated_chunk_sections_from_pack(
+        asset_pack_bytes.to_vec(),
+        ChunkPos {
+            x: center_x,
+            z: center_z,
+        },
+        radius_chunks,
+    )
+    .map_err(JsValue::from)?;
+    let packed = encode_textured_render_section_build_report(&report);
+    Ok(js_sys::Uint8Array::from(packed.as_slice()))
+}
+
+#[wasm_bindgen]
+pub fn mclone_web_packed_compile_report_summary(
+    packed_report: js_sys::Uint8Array,
+) -> Result<JsValue, JsValue> {
+    let packed = packed_report.to_vec();
+    let report = decode_textured_render_section_build_report(&packed)
+        .map_err(|error| JsValue::from_str(&format!("{error:#}")))?;
+    packed_compile_report_summary_to_js(packed.len(), &report).map_err(JsValue::from)
+}
+
 #[wasm_bindgen(start)]
 pub fn start() {
     std::panic::set_hook(Box::new(|info| {
         web_sys::console::error_1(&JsValue::from_str(&info.to_string()));
     }));
+}
+
+fn compile_generated_chunk_sections_from_pack(
+    asset_pack_bytes: Vec<u8>,
+    center: ChunkPos,
+    radius_chunks: u32,
+) -> Result<mclone_mesh::TexturedRenderSectionBuildReport, String> {
+    let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
+    let mut runtime = WebRuntime::local_integrated(SMOKE_SEED);
+    runtime
+        .request_chunk_view(center, radius_chunks, radius_chunks)
+        .map_err(|error| {
+            format!("failed to load generated chunk through web compiler runtime: {error}")
+        })?;
+    if runtime.client().chunk_snapshot(center).is_none() {
+        return Err(format!(
+            "web compiler runtime did not publish generated chunk {},{}",
+            center.x, center.z
+        ));
+    }
+
+    build_client_textured_sections(runtime.client(), &mesh_assets.catalog)
+        .map_err(|error| format!("failed to compile generated textured render sections: {error:#}"))
+}
+
+fn packed_compile_report_summary_to_js(
+    byte_length: usize,
+    report: &mclone_mesh::TexturedRenderSectionBuildReport,
+) -> Result<JsValue, String> {
+    let summary = summarize_textured_render_section_build_report(report);
+    let object = js_sys::Object::new();
+    set_bool(&object, "ok", true)?;
+    set_number(&object, "byteLength", byte_length as f64)?;
+    set_number(&object, "sectionCount", summary.section_count as f64)?;
+    set_number(
+        &object,
+        "nonEmptySectionCount",
+        summary.non_empty_section_count as f64,
+    )?;
+    set_number(&object, "vertexCount", f64::from(summary.vertex_count))?;
+    set_number(&object, "indexCount", f64::from(summary.index_count))?;
+    set_number(&object, "faceCount", f64::from(summary.face_count()))?;
+    set_number(
+        &object,
+        "visibilityGraphBuildCount",
+        summary.visibility_graph_stats.build_count as f64,
+    )?;
+    set_number(
+        &object,
+        "visibilityGraphTotalMs",
+        summary.visibility_graph_stats.total_ms,
+    )?;
+    set_number(
+        &object,
+        "visibilityGraphWorstMs",
+        summary.visibility_graph_stats.worst_ms,
+    )?;
+    Ok(object.into())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
