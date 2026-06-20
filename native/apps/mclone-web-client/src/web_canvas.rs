@@ -25,8 +25,9 @@ use mclone_render_session::{
     RenderSectionDirtyWork, RenderSectionNeighborReadiness, RenderSectionReadyPlan,
     RenderSectionViewSync, build_client_textured_sections, classify_render_section_dirty_work,
     decode_textured_render_section_build_report, encode_textured_render_section_build_report,
-    plan_ready_render_sections, render_section_chunk_pos, render_section_keys_for_snapshot,
-    snapshot_contains_render_section, summarize_textured_render_section_build_report,
+    finish_render_section_compile_result, prepare_render_section_sync_plan,
+    render_section_chunk_pos, render_section_keys_for_snapshot, snapshot_contains_render_section,
+    summarize_textured_render_section_build_report,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -617,10 +618,15 @@ impl WebChunkRenderSession {
                 center.x, center.z, radius_chunks
             ));
         }
-        let request = self.render_dirty.build_compile_request(
-            render_plan.ready_plan.ready_section_keys.clone(),
-            Vec::new(),
-        );
+        let request = self
+            .render_dirty
+            .build_ready_plan_compile_request(&render_plan.ready_plan, Vec::new())
+            .ok_or_else(|| {
+                format!(
+                    "web render compile request for {},{} radius {} had no ready sections",
+                    center.x, center.z, radius_chunks
+                )
+            })?;
         let context = WebPendingCompileContext {
             center,
             radius_chunks,
@@ -632,8 +638,7 @@ impl WebChunkRenderSession {
             .compile_requests
             .begin_compile_request(context, request);
         self.render_dirty
-            .mark_compile_submitted(&render_plan.ready_plan.ready_section_keys);
-        self.render_dirty.apply_ready_plan(&render_plan.ready_plan);
+            .accept_ready_plan_compile_submission(&render_plan.ready_plan);
         self.compile_request_to_js_value(info, center, radius_chunks)
     }
 
@@ -697,13 +702,17 @@ impl WebChunkRenderSession {
                 center.x, center.z, radius_chunks
             ));
         }
-        let request = self.render_dirty.build_compile_request(
-            render_plan.ready_plan.ready_section_keys.clone(),
-            Vec::new(),
-        );
+        let request = self
+            .render_dirty
+            .build_ready_plan_compile_request(&render_plan.ready_plan, Vec::new())
+            .ok_or_else(|| {
+                format!(
+                    "generated chunk view {},{} radius {} had no ready render sections",
+                    center.x, center.z, radius_chunks
+                )
+            })?;
         self.render_dirty
-            .mark_compile_submitted(&request.target_sections);
-        self.render_dirty.apply_ready_plan(&render_plan.ready_plan);
+            .accept_ready_plan_compile_submission(&render_plan.ready_plan);
         let completed = RenderSectionCompileResult {
             target_sections: request.target_sections,
             section_revisions: request.section_revisions,
@@ -732,36 +741,32 @@ impl WebChunkRenderSession {
         compile_report: WebSectionCompileReport,
         request_id: u32,
     ) -> Result<GeneratedChunkRenderReport, String> {
-        let acceptance = self
-            .render_dirty
-            .accept_completed_compile_result(&completed);
-        if !acceptance.stale_sections.is_empty() {
-            self.requeue_stale_render_sections(acceptance.stale_sections.clone());
+        let finish =
+            finish_render_section_compile_result(&mut self.render_dirty, completed, request_id)
+                .map_err(|error| error.to_string())?;
+        if !finish.stale_sections.is_empty() {
+            self.requeue_stale_render_sections(finish.stale_sections.clone());
         }
-        if acceptance.accepted_sections.is_empty()
+        if finish.accepted_sections.is_empty()
             && removal_chunks.is_empty()
             && removal_sections.is_empty()
         {
             return Err(format!(
                 "web render compile request {request_id} had no accepted sections ({} stale)",
-                acceptance.stale_section_count()
+                finish.acceptance_report.stale_section_count
             ));
         }
-        let build_report = completed
-            .result
-            .map_err(|error| format!("web render compile request {request_id} failed: {error}"))?;
-        let acceptance_report =
-            RenderSectionCompileAcceptanceReport::from_acceptance(request_id, &acceptance);
+        let build_report = finish.build_report.unwrap_or_default();
         self.render_chunk_report_with_section_report(
             center,
             radius_chunks,
             sync,
             removal_chunks,
             removal_sections,
-            acceptance.accepted_sections,
+            finish.accepted_sections,
             build_report,
             compile_report,
-            acceptance_report,
+            finish.acceptance_report,
         )
     }
 
@@ -793,16 +798,30 @@ impl WebChunkRenderSession {
         let sync = self.prepare_chunk_view(center, radius_chunks)?;
         self.mark_render_sync_dirty(&sync);
         let dirty_work = self.classify_render_dirty_work();
-        self.render_dirty.discard_stale_dirty_work(
-            &dirty_work.stale_dirty_chunks,
-            &dirty_work.stale_dirty_sections,
+        let sorted_loaded_dirty_chunks =
+            sort_chunk_positions_by_coordinate(dirty_work.loaded_dirty_chunks.iter().copied());
+        let sorted_dirty_section_chunks =
+            sort_dirty_section_chunks_by_coordinate(&dirty_work.loaded_dirty_sections_by_chunk);
+        let client = self.runtime.client();
+        let sync_plan = prepare_render_section_sync_plan(
+            &mut self.render_dirty,
+            dirty_work,
+            sorted_loaded_dirty_chunks,
+            sorted_dirty_section_chunks,
+            usize::MAX,
+            |pos| {
+                client
+                    .chunk_snapshot(pos)
+                    .map(render_section_keys_for_snapshot)
+                    .unwrap_or_default()
+            },
+            |_key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
         );
-        let ready_plan = self.plan_ready_render_sections(&dirty_work);
         Ok(WebChunkRenderPlan {
             sync,
-            ready_plan,
-            removal_chunks: dirty_work.removal_dirty_chunks,
-            removal_sections: dirty_work.removal_dirty_sections,
+            ready_plan: sync_plan.ready_plan,
+            removal_chunks: sync_plan.dirty_work.removal_dirty_chunks,
+            removal_sections: sync_plan.dirty_work.removal_dirty_sections,
         })
     }
 
@@ -886,31 +905,6 @@ impl WebChunkRenderSession {
                     .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
             },
             |key| self.render_sections.contains_section(key),
-        )
-    }
-
-    fn plan_ready_render_sections(
-        &self,
-        dirty_work: &RenderSectionDirtyWork,
-    ) -> RenderSectionReadyPlan {
-        let sorted_loaded_dirty_chunks =
-            sort_chunk_positions_by_coordinate(dirty_work.loaded_dirty_chunks.iter().copied());
-        let sorted_dirty_section_chunks =
-            sort_dirty_section_chunks_by_coordinate(&dirty_work.loaded_dirty_sections_by_chunk);
-        plan_ready_render_sections(
-            sorted_loaded_dirty_chunks,
-            sorted_dirty_section_chunks,
-            &dirty_work.loaded_dirty_sections_by_chunk,
-            usize::MAX,
-            |pos| {
-                self.runtime
-                    .client()
-                    .chunk_snapshot(pos)
-                    .map(render_section_keys_for_snapshot)
-                    .unwrap_or_default()
-            },
-            &self.render_dirty.inflight_sections,
-            |_key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
         )
     }
 

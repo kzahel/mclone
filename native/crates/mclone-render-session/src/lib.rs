@@ -318,6 +318,22 @@ impl RenderSectionDirtyState {
         self.dirty_sections
             .extend(plan.deferred_section_keys.iter().copied());
     }
+
+    pub fn build_ready_plan_compile_request(
+        &self,
+        plan: &RenderSectionReadyPlan,
+        snapshots: Vec<ChunkSnapshot>,
+    ) -> Option<RenderSectionCompileRequest> {
+        if plan.ready_section_keys.is_empty() {
+            return None;
+        }
+        Some(self.build_compile_request(plan.ready_section_keys.clone(), snapshots))
+    }
+
+    pub fn accept_ready_plan_compile_submission(&mut self, plan: &RenderSectionReadyPlan) {
+        self.mark_compile_submitted(&plan.ready_section_keys);
+        self.apply_ready_plan(plan);
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -457,6 +473,86 @@ pub fn plan_ready_render_sections(
     }
 
     plan
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderSectionSyncPlan {
+    pub dirty_work: RenderSectionDirtyWork,
+    pub ready_plan: RenderSectionReadyPlan,
+}
+
+impl RenderSectionSyncPlan {
+    pub fn has_removals(&self) -> bool {
+        self.dirty_work.has_removals()
+    }
+
+    pub fn ready_update(&self, submitted_compile_section_count: usize) -> RenderSectionCacheUpdate {
+        RenderSectionCacheUpdate {
+            deferred_section_count: self.ready_plan.deferred_section_count,
+            near_exception_section_count: self.ready_plan.near_exception_section_count,
+            submitted_compile_section_count,
+            ..RenderSectionCacheUpdate::default()
+        }
+    }
+}
+
+pub fn prepare_render_section_sync_plan(
+    dirty: &mut RenderSectionDirtyState,
+    dirty_work: RenderSectionDirtyWork,
+    sorted_loaded_dirty_chunks: impl IntoIterator<Item = ChunkPos>,
+    sorted_dirty_section_chunks: impl IntoIterator<Item = ChunkPos>,
+    chunk_budget: usize,
+    section_keys_for_chunk: impl FnMut(ChunkPos) -> Vec<RenderSectionKey>,
+    section_readiness: impl FnMut(RenderSectionKey) -> RenderSectionNeighborReadiness,
+) -> RenderSectionSyncPlan {
+    dirty.discard_stale_dirty_work(
+        &dirty_work.stale_dirty_chunks,
+        &dirty_work.stale_dirty_sections,
+    );
+    let ready_plan = plan_ready_render_sections(
+        sorted_loaded_dirty_chunks,
+        sorted_dirty_section_chunks,
+        &dirty_work.loaded_dirty_sections_by_chunk,
+        chunk_budget,
+        section_keys_for_chunk,
+        &dirty.inflight_sections,
+        section_readiness,
+    );
+    RenderSectionSyncPlan {
+        dirty_work,
+        ready_plan,
+    }
+}
+
+#[derive(Debug)]
+pub struct RenderSectionCompileFinish {
+    pub acceptance_report: RenderSectionCompileAcceptanceReport,
+    pub accepted_sections: BTreeSet<RenderSectionKey>,
+    pub stale_sections: BTreeSet<RenderSectionKey>,
+    pub build_report: Option<TexturedRenderSectionBuildReport>,
+}
+
+pub fn finish_render_section_compile_result(
+    dirty: &mut RenderSectionDirtyState,
+    completed: RenderSectionCompileResult,
+    request_id: u32,
+) -> Result<RenderSectionCompileFinish> {
+    let acceptance = dirty.accept_completed_compile_result(&completed);
+    let acceptance_report =
+        RenderSectionCompileAcceptanceReport::from_acceptance(request_id, &acceptance);
+    let accepted_sections = acceptance.accepted_sections;
+    let stale_sections = acceptance.stale_sections;
+    let build_report = if accepted_sections.is_empty() {
+        None
+    } else {
+        Some(completed.result.map_err(anyhow::Error::msg)?)
+    };
+    Ok(RenderSectionCompileFinish {
+        acceptance_report,
+        accepted_sections,
+        stale_sections,
+        build_report,
+    })
 }
 
 fn plan_ready_render_section_key(
@@ -1293,6 +1389,78 @@ mod tests {
             dirty.dirty_sections,
             BTreeSet::from([deferred_from_chunk, inflight_from_chunk])
         );
+    }
+
+    #[test]
+    fn render_section_sync_plan_discards_stale_and_plans_ready_work() {
+        let loaded_chunk = ChunkPos::new(0, 0);
+        let stale_chunk = ChunkPos::new(1, 0);
+        let ready = RenderSectionKey::new(0, 4, 0);
+        let stale = RenderSectionKey::new(1, 4, 0);
+        let mut dirty = RenderSectionDirtyState {
+            dirty_chunks: BTreeSet::from([loaded_chunk, stale_chunk]),
+            dirty_sections: BTreeSet::from([stale]),
+            ..RenderSectionDirtyState::default()
+        };
+        let dirty_work = RenderSectionDirtyWork {
+            loaded_dirty_chunks: BTreeSet::from([loaded_chunk]),
+            stale_dirty_chunks: BTreeSet::from([stale_chunk]),
+            stale_dirty_sections: BTreeSet::from([stale]),
+            ..RenderSectionDirtyWork::default()
+        };
+
+        let plan = prepare_render_section_sync_plan(
+            &mut dirty,
+            dirty_work,
+            [loaded_chunk],
+            [],
+            1,
+            |_| vec![ready],
+            |_| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+        );
+
+        assert_eq!(dirty.dirty_chunks, BTreeSet::from([loaded_chunk]));
+        assert!(dirty.dirty_sections.is_empty());
+        assert_eq!(plan.ready_plan.ready_section_keys, BTreeSet::from([ready]));
+        assert!(!plan.has_removals());
+        assert_eq!(plan.ready_update(1).submitted_compile_section_count, 1);
+    }
+
+    #[test]
+    fn render_section_compile_finish_reports_accepted_and_stale_sections() {
+        let accepted = RenderSectionKey::new(0, 4, 0);
+        let stale = RenderSectionKey::new(0, 5, 0);
+        let mut dirty = RenderSectionDirtyState::default();
+        dirty.mark_section_dirty(accepted);
+        dirty.mark_section_dirty(stale);
+        let request = dirty.build_compile_request(BTreeSet::from([accepted, stale]), Vec::new());
+        dirty.mark_compile_submitted(&request.target_sections);
+        dirty.mark_section_dirty(stale);
+
+        let finish = finish_render_section_compile_result(
+            &mut dirty,
+            RenderSectionCompileResult {
+                target_sections: request.target_sections,
+                section_revisions: request.section_revisions,
+                result: Ok(TexturedRenderSectionBuildReport::default()),
+            },
+            7,
+        )
+        .unwrap();
+
+        assert_eq!(finish.accepted_sections, BTreeSet::from([accepted]));
+        assert_eq!(finish.stale_sections, BTreeSet::from([stale]));
+        assert!(finish.build_report.is_some());
+        assert_eq!(
+            finish.acceptance_report,
+            RenderSectionCompileAcceptanceReport {
+                request_id: 7,
+                submitted_section_count: 2,
+                accepted_section_count: 1,
+                stale_section_count: 1,
+            }
+        );
+        assert!(dirty.inflight_sections.is_empty());
     }
 
     #[test]

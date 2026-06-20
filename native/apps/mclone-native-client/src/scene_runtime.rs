@@ -27,8 +27,9 @@ use crate::render_cache::{
 };
 use mclone_render_session::{
     CachedTexturedRenderSections, RenderSectionCacheUpdate, RenderSectionCompiler,
-    RenderSectionDirtyState, RenderSectionNeighborReadiness, build_client_textured_sections,
-    classify_render_section_dirty_work, plan_ready_render_sections,
+    RenderSectionDirtyState, RenderSectionNeighborReadiness, RenderSectionReadyPlan,
+    build_client_textured_sections, classify_render_section_dirty_work,
+    finish_render_section_compile_result, prepare_render_section_sync_plan,
     render_dirty_chunk_neighborhood, render_section_chunk_pos, render_section_keys_for_snapshot,
     snapshot_contains_render_section,
 };
@@ -621,20 +622,17 @@ impl WindowSceneRuntime {
     fn drain_completed_render_compile_jobs(&mut self) -> Result<RenderSectionCacheUpdate> {
         let mut update = RenderSectionCacheUpdate::default();
         for completed in self.render_compile_worker.try_recv_completed()? {
-            let acceptance = self
-                .render_dirty
-                .accept_completed_compile_result(&completed);
-            if !acceptance.stale_sections.is_empty() {
-                update.stale_compile_section_count += acceptance.stale_section_count();
-                self.requeue_stale_render_sections(acceptance.stale_sections);
+            let finish =
+                finish_render_section_compile_result(&mut self.render_dirty, completed, 0)?;
+            if !finish.stale_sections.is_empty() {
+                update.stale_compile_section_count += finish.stale_sections.len();
+                self.requeue_stale_render_sections(finish.stale_sections);
             }
-            if acceptance.accepted_sections.is_empty() {
+            let Some(build_report) = finish.build_report else {
                 continue;
-            }
-
-            let build_report = completed.result.map_err(anyhow::Error::msg)?;
+            };
             let completed_update = self.render_sections.apply_build_report(
-                &acceptance.accepted_sections,
+                &finish.accepted_sections,
                 build_report,
                 &BTreeSet::new(),
                 &BTreeSet::new(),
@@ -658,21 +656,18 @@ impl WindowSceneRuntime {
         }
     }
 
-    fn submit_render_compile_job(
-        &mut self,
-        ready_section_keys: BTreeSet<RenderSectionKey>,
-    ) -> Result<usize> {
-        if ready_section_keys.is_empty() {
-            return Ok(0);
-        }
-        let submitted_count = ready_section_keys.len();
+    fn submit_render_compile_plan(&mut self, ready_plan: &RenderSectionReadyPlan) -> Result<usize> {
         let snapshots = self.client.chunk_snapshots().cloned().collect();
-        let request = self
+        let Some(request) = self
             .render_dirty
-            .build_compile_request(ready_section_keys.clone(), snapshots);
+            .build_ready_plan_compile_request(ready_plan, snapshots)
+        else {
+            return Ok(0);
+        };
+        let submitted_count = request.target_sections.len();
         self.render_compile_worker.submit(request)?;
         self.render_dirty
-            .mark_compile_submitted(&ready_section_keys);
+            .accept_ready_plan_compile_submission(ready_plan);
         Ok(submitted_count)
     }
 
@@ -753,28 +748,6 @@ impl WindowSceneRuntime {
             },
             |key| self.render_sections.contains_section(key),
         );
-        self.render_dirty.discard_stale_dirty_work(
-            &dirty_work.stale_dirty_chunks,
-            &dirty_work.stale_dirty_sections,
-        );
-
-        if dirty_work.has_removals() {
-            let removal_update = self.render_sections.remove_sections(
-                &dirty_work.removal_dirty_chunks,
-                &dirty_work.removal_dirty_sections,
-            );
-            report.merge(removal_update);
-            self.render_dirty.discard_removed_dirty_work(
-                &dirty_work.removal_dirty_chunks,
-                &dirty_work.removal_dirty_sections,
-            );
-        }
-
-        if chunk_budget == 0 || self.render_compile_worker.pending_job_count() > 0 {
-            report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
-            return Ok(report);
-        }
-
         let sorted_loaded_dirty_chunks = sort_chunk_positions_by_distance(
             dirty_work.loaded_dirty_chunks.iter().copied(),
             camera_position,
@@ -783,10 +756,11 @@ impl WindowSceneRuntime {
             &dirty_work.loaded_dirty_sections_by_chunk,
             camera_position,
         );
-        let ready_plan = plan_ready_render_sections(
+        let sync_plan = prepare_render_section_sync_plan(
+            &mut self.render_dirty,
+            dirty_work,
             sorted_loaded_dirty_chunks,
             sorted_dirty_section_chunks,
-            &dirty_work.loaded_dirty_sections_by_chunk,
             chunk_budget,
             |pos| {
                 self.client
@@ -794,31 +768,36 @@ impl WindowSceneRuntime {
                     .map(render_section_keys_for_snapshot)
                     .unwrap_or_default()
             },
-            &self.render_dirty.inflight_sections,
             |key| render_section_neighbor_readiness(&self.client, key, camera_position),
         );
 
-        if ready_plan.ready_section_keys.is_empty() {
-            self.render_dirty.apply_ready_plan(&ready_plan);
-            report.merge(RenderSectionCacheUpdate {
-                deferred_section_count: ready_plan.deferred_section_count,
-                near_exception_section_count: ready_plan.near_exception_section_count,
-                ..RenderSectionCacheUpdate::default()
-            });
+        if sync_plan.has_removals() {
+            let removal_update = self.render_sections.remove_sections(
+                &sync_plan.dirty_work.removal_dirty_chunks,
+                &sync_plan.dirty_work.removal_dirty_sections,
+            );
+            report.merge(removal_update);
+            self.render_dirty.discard_removed_dirty_work(
+                &sync_plan.dirty_work.removal_dirty_chunks,
+                &sync_plan.dirty_work.removal_dirty_sections,
+            );
+        }
+
+        if chunk_budget == 0 || self.render_compile_worker.pending_job_count() > 0 {
+            report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
+            return Ok(report);
+        }
+
+        if sync_plan.ready_plan.ready_section_keys.is_empty() {
+            self.render_dirty.apply_ready_plan(&sync_plan.ready_plan);
+            report.merge(sync_plan.ready_update(0));
             report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
             return Ok(report);
         }
 
         let submitted_compile_section_count =
-            self.submit_render_compile_job(ready_plan.ready_section_keys.clone())?;
-        report.merge(RenderSectionCacheUpdate {
-            deferred_section_count: ready_plan.deferred_section_count,
-            near_exception_section_count: ready_plan.near_exception_section_count,
-            submitted_compile_section_count,
-            ..RenderSectionCacheUpdate::default()
-        });
-
-        self.render_dirty.apply_ready_plan(&ready_plan);
+            self.submit_render_compile_plan(&sync_plan.ready_plan)?;
+        report.merge(sync_plan.ready_update(submitted_compile_section_count));
         report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
         Ok(report)
     }

@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active web session uses shared render planner.
+Status: active shared sync-plan orchestration landed.
 
 ## Purpose
 
@@ -384,6 +384,16 @@ Browser worker payload result:
   first worker request builds 144 sections, the second streamed request targets
   96 sections, uploads only changed sections, removes stale resident sections,
   and leaves both JS and Rust pending job counts at zero.
+- Extracted the next orchestration layer into `mclone-render-session`:
+  - `RenderSectionSyncPlan`
+  - `prepare_render_section_sync_plan`
+  - `finish_render_section_compile_result`
+  - ready-plan request build/submission helpers on `RenderSectionDirtyState`
+- Updated desktop and web to use the shared sync-plan preparation and compile
+  finish paths. Platform adapters still provide snapshot lookup, ordering,
+  readiness probes, compiler execution, and GPU upload/presentation.
+- Added shared tests for sync-plan stale cleanup/ready selection and
+  compile-finish accepted/stale reporting.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
@@ -514,16 +524,16 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should extract the next layer up from duplicated desktop/web
-session orchestration into a shared engine-session skeleton:
+The next slice should turn the shared sync-plan primitives into a small shared
+engine-session skeleton:
 
-1. Define a shared render-session sync method that owns the sequence
-   `mark dirty -> classify -> plan ready -> submit request -> finish accepted
-   result -> apply cache update`, while platform adapters provide compiler
-   submission, snapshot lookup, ordering, and readiness probes.
-2. Move the desktop `sync_render_sections_with_budget` and browser
-   `begin/finishChunkRenderCompileRequest` paths toward that shared method
-   instead of each spelling the sequence locally.
+1. Define a reusable session object or trait-backed helper that owns render
+   dirty state, CPU section cache, and the prepare/finish sequence while taking
+   platform callbacks for snapshot lookup, ordering, readiness, and compiler
+   submission.
+2. Move desktop `WindowSceneRuntime` and browser `WebChunkRenderSession` toward
+   that helper so their local code mostly becomes platform IO, worker
+   submission, and GPU upload/presentation.
 3. Keep desktop native threads and browser Web Workers as separate compiler
    adapters behind the same submit/drain lifecycle.
 4. Preserve the current Playwright worker/canvas smoke and native movement or
