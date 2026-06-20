@@ -8,6 +8,7 @@ members = [
   "crates/mclone-net",
   "crates/mclone-protocol",
   "crates/mclone-render",
+  "crates/mclone-render-session",
   "crates/mclone-server",
   "crates/mclone-ui",
   "crates/mclone-worldgen",
@@ -39,6 +40,7 @@ mclone-mesh = { path = "crates/mclone-mesh" }
 mclone-net = { path = "crates/mclone-net" }
 mclone-protocol = { path = "crates/mclone-protocol" }
 mclone-render = { path = "crates/mclone-render" }
+mclone-render-session = { path = "crates/mclone-render-session" }
 mclone-server = { path = "crates/mclone-server" }
 mclone-ui = { path = "crates/mclone-ui" }
 mclone-worldgen = { path = "crates/mclone-worldgen" }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -6,19 +6,14 @@ use std::thread;
 
 use anyhow::{Context, Result, bail};
 use mclone_assets::{AssetSourceChain, FilesystemAssetSource, PackedAssetSource};
-use mclone_client::ClientRuntime;
-use mclone_core::{
-    AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
-    PackedLightSection, SECTION_HEIGHT,
-};
 use mclone_mesh::{
-    RenderSectionKey, TextureAtlasImage as MeshTextureAtlasImage, TexturedChunkMeshInput,
-    TexturedMeshCatalog, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
-    VisibilityGraphBuildStats, build_textured_render_sections_for_section_set_with_stats,
-    build_textured_render_sections_with_stats, load_textured_terrain_assets,
-    quad_face_count_from_indices,
+    TextureAtlasImage as MeshTextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionMesh,
+    VisibilityGraphBuildStats, load_textured_terrain_assets,
 };
 use mclone_render::chunk::ChunkTextureAtlas;
+use mclone_render_session::{
+    RenderSectionCompileRequest, RenderSectionCompileResult, build_render_sections_from_snapshots,
+};
 
 const DEFAULT_REFERENCE_ASSET_VERSION: &str = "1.17.1";
 const DEFAULT_REFERENCE_PACK_FILE: &str = "extracted.zip";
@@ -72,122 +67,6 @@ impl From<MeshTextureAtlasImage> for TextureAtlasImage {
         }
     }
 }
-pub(crate) fn build_client_textured_sections(
-    client: &ClientRuntime,
-    catalog: &TexturedMeshCatalog,
-) -> Result<TexturedRenderSectionBuildReport> {
-    let chunks = mesh_chunks_from_client(client)?;
-    let inputs = textured_mesh_inputs(&chunks);
-    build_textured_render_sections_with_stats(&inputs, catalog)
-        .context("failed to build textured sections")
-}
-
-fn build_render_sections_from_snapshots(
-    snapshots: &[ChunkSnapshot],
-    catalog: &TexturedMeshCatalog,
-    target_sections: &BTreeSet<RenderSectionKey>,
-) -> Result<TexturedRenderSectionBuildReport> {
-    let chunks = snapshots
-        .iter()
-        .map(snapshot_mesh_block_state_ids)
-        .collect::<Result<Vec<_>>>()?;
-    let inputs = textured_mesh_inputs(&chunks);
-    build_textured_render_sections_for_section_set_with_stats(&inputs, catalog, target_sections)
-        .context("failed to build queued textured render sections")
-}
-
-fn mesh_chunks_from_client(client: &ClientRuntime) -> Result<Vec<MeshChunkBlocks>> {
-    client
-        .chunk_snapshots()
-        .map(snapshot_mesh_block_state_ids)
-        .collect::<Result<Vec<_>>>()
-}
-
-fn textured_mesh_inputs(chunks: &[MeshChunkBlocks]) -> Vec<TexturedChunkMeshInput<'_>> {
-    chunks
-        .iter()
-        .map(|chunk| {
-            TexturedChunkMeshInput::new(
-                chunk.chunk_x,
-                chunk.chunk_z,
-                chunk.min_y,
-                chunk.height,
-                &chunk.blocks,
-            )
-            .with_light_sections(&chunk.light_sections)
-        })
-        .collect()
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct CachedTexturedRenderSections {
-    sections: BTreeMap<RenderSectionKey, TexturedRenderSectionMesh>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub(crate) struct RenderSectionCacheUpdate {
-    pub(crate) rebuilt_sections: Vec<TexturedRenderSectionMesh>,
-    pub(crate) removed_section_keys: BTreeSet<RenderSectionKey>,
-    pub(crate) rebuilt_vertex_count: u32,
-    pub(crate) rebuilt_index_count: u32,
-    pub(crate) neighbor_ready_section_count: usize,
-    pub(crate) near_exception_section_count: usize,
-    pub(crate) deferred_section_count: usize,
-    pub(crate) submitted_compile_section_count: usize,
-    pub(crate) completed_compile_section_count: usize,
-    pub(crate) stale_compile_section_count: usize,
-    pub(crate) pending_compile_jobs: usize,
-    pub(crate) visibility_graph_stats: VisibilityGraphBuildStats,
-}
-
-impl RenderSectionCacheUpdate {
-    pub(crate) fn rebuilt_section_count(&self) -> usize {
-        self.rebuilt_sections.len()
-    }
-
-    pub(crate) fn removed_section_count(&self) -> usize {
-        self.removed_section_keys.len()
-    }
-
-    pub(crate) fn rebuilt_face_count(&self) -> u32 {
-        quad_face_count_from_indices(self.rebuilt_index_count)
-    }
-
-    pub(crate) fn merge(&mut self, other: Self) {
-        self.rebuilt_sections.extend(other.rebuilt_sections);
-        self.removed_section_keys.extend(other.removed_section_keys);
-        self.rebuilt_vertex_count += other.rebuilt_vertex_count;
-        self.rebuilt_index_count += other.rebuilt_index_count;
-        self.neighbor_ready_section_count += other.neighbor_ready_section_count;
-        self.near_exception_section_count += other.near_exception_section_count;
-        self.deferred_section_count += other.deferred_section_count;
-        self.submitted_compile_section_count += other.submitted_compile_section_count;
-        self.completed_compile_section_count += other.completed_compile_section_count;
-        self.stale_compile_section_count += other.stale_compile_section_count;
-        self.pending_compile_jobs = other.pending_compile_jobs;
-        self.visibility_graph_stats.build_count += other.visibility_graph_stats.build_count;
-        self.visibility_graph_stats.total_ms += other.visibility_graph_stats.total_ms;
-        self.visibility_graph_stats.worst_ms = self
-            .visibility_graph_stats
-            .worst_ms
-            .max(other.visibility_graph_stats.worst_ms);
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct RenderSectionCompileRequest {
-    pub(crate) target_sections: BTreeSet<RenderSectionKey>,
-    pub(crate) section_revisions: BTreeMap<RenderSectionKey, u64>,
-    pub(crate) snapshots: Vec<ChunkSnapshot>,
-}
-
-#[derive(Debug)]
-pub(crate) struct RenderSectionCompileResult {
-    pub(crate) target_sections: BTreeSet<RenderSectionKey>,
-    pub(crate) section_revisions: BTreeMap<RenderSectionKey, u64>,
-    pub(crate) result: std::result::Result<TexturedRenderSectionBuildReport, String>,
-}
-
 enum RenderSectionCompileCommand {
     Build(RenderSectionCompileRequest),
     Shutdown,
@@ -279,101 +158,6 @@ impl Drop for RenderSectionCompileWorker {
     }
 }
 
-impl CachedTexturedRenderSections {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.sections.is_empty()
-    }
-
-    pub(crate) fn contains_chunk(&self, pos: ChunkPos) -> bool {
-        self.sections
-            .keys()
-            .any(|key| key.chunk_x == pos.x && key.chunk_z == pos.z)
-    }
-
-    pub(crate) fn contains_section(&self, key: RenderSectionKey) -> bool {
-        self.sections.contains_key(&key)
-    }
-
-    pub(crate) fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.sections.values().cloned().collect()
-    }
-
-    pub(crate) fn section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {
-        self.sections.keys().copied()
-    }
-
-    pub(crate) fn apply_build_report(
-        &mut self,
-        ready_section_keys: &BTreeSet<RenderSectionKey>,
-        rebuilt_report: TexturedRenderSectionBuildReport,
-        removal_chunks: &BTreeSet<ChunkPos>,
-        removal_section_keys: &BTreeSet<RenderSectionKey>,
-    ) -> RenderSectionCacheUpdate {
-        let rebuilt_keys = rebuilt_report
-            .sections
-            .iter()
-            .map(|section| section.key)
-            .collect::<BTreeSet<_>>();
-        let rebuilt_sections = rebuilt_report
-            .sections
-            .into_iter()
-            .filter(|section| ready_section_keys.contains(&section.key))
-            .collect::<Vec<_>>();
-        let old_ready_keys = self
-            .sections
-            .keys()
-            .copied()
-            .filter(|key| ready_section_keys.contains(key))
-            .collect::<BTreeSet<_>>();
-        let removal_keys = self
-            .sections
-            .keys()
-            .copied()
-            .filter(|key| removal_chunks.contains(&ChunkPos::new(key.chunk_x, key.chunk_z)))
-            .collect::<BTreeSet<_>>();
-        let mut removed_section_keys = old_ready_keys
-            .difference(&rebuilt_keys)
-            .copied()
-            .collect::<BTreeSet<_>>();
-        removed_section_keys.extend(removal_keys);
-        removed_section_keys.extend(removal_section_keys.iter().copied());
-
-        for key in &removed_section_keys {
-            self.sections.remove(key);
-        }
-
-        let mut report = RenderSectionCacheUpdate {
-            rebuilt_sections,
-            removed_section_keys,
-            rebuilt_vertex_count: 0,
-            rebuilt_index_count: 0,
-            visibility_graph_stats: rebuilt_report.visibility_graph,
-            neighbor_ready_section_count: ready_section_keys.len(),
-            completed_compile_section_count: ready_section_keys.len(),
-            ..RenderSectionCacheUpdate::default()
-        };
-        for section in &report.rebuilt_sections {
-            let stats = section.stats();
-            report.rebuilt_vertex_count += stats.vertex_count;
-            report.rebuilt_index_count += stats.index_count;
-            self.sections.insert(section.key, section.clone());
-        }
-        report
-    }
-
-    pub(crate) fn remove_sections(
-        &mut self,
-        removal_chunks: &BTreeSet<ChunkPos>,
-        removal_section_keys: &BTreeSet<RenderSectionKey>,
-    ) -> RenderSectionCacheUpdate {
-        self.apply_build_report(
-            &BTreeSet::new(),
-            TexturedRenderSectionBuildReport::default(),
-            removal_chunks,
-            removal_section_keys,
-        )
-    }
-}
 #[derive(Clone, Debug)]
 pub(crate) struct TexturedMeshAssets {
     pub(crate) catalog: TexturedMeshCatalog,
@@ -580,63 +364,4 @@ fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct MeshChunkBlocks {
-    pub(crate) chunk_x: i32,
-    pub(crate) chunk_z: i32,
-    pub(crate) min_y: i32,
-    pub(crate) height: i32,
-    pub(crate) blocks: Vec<mclone_core::BlockStateId>,
-    pub(crate) light_sections: Vec<PackedLightSection>,
-}
-
-pub(crate) fn snapshot_mesh_block_state_ids(snapshot: &ChunkSnapshot) -> Result<MeshChunkBlocks> {
-    if snapshot.height <= 0 || snapshot.height % SECTION_HEIGHT != 0 {
-        bail!(
-            "chunk snapshot {:?} has invalid height {}",
-            snapshot.pos,
-            snapshot.height
-        );
-    }
-    let expected_len = snapshot.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
-    let mut blocks = vec![AIR_BLOCK_STATE_ID; expected_len];
-    let min_section_y = snapshot.min_y / SECTION_HEIGHT;
-    let section_count = snapshot.height / SECTION_HEIGHT;
-
-    for section in &snapshot.sections {
-        let section_offset = section.section_y - min_section_y;
-        if !(0..section_count).contains(&section_offset) {
-            bail!(
-                "chunk snapshot {:?} contains section {} outside {}..{}",
-                snapshot.pos,
-                section.section_y,
-                min_section_y,
-                min_section_y + section_count - 1
-            );
-        }
-        let unpacked = section.unpack_block_state_ids();
-        if unpacked.len() != CHUNK_SECTION_VOLUME {
-            bail!(
-                "chunk snapshot {:?} section {} unpacked to {} blocks",
-                snapshot.pos,
-                section.section_y,
-                unpacked.len()
-            );
-        }
-        let start = section_offset as usize * CHUNK_SECTION_VOLUME;
-        for (index, state_id) in unpacked.into_iter().enumerate() {
-            blocks[start + index] = state_id;
-        }
-    }
-
-    Ok(MeshChunkBlocks {
-        chunk_x: snapshot.pos.x,
-        chunk_z: snapshot.pos.z,
-        min_y: snapshot.min_y,
-        height: snapshot.height,
-        blocks,
-        light_sections: snapshot.light_sections.clone(),
-    })
 }

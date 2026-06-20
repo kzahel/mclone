@@ -26,8 +26,6 @@ use crate::cli::{
 };
 use crate::headless::{run_headless_screenshot, write_headless_chunk_scenarios};
 use crate::perf::{run_frame_budget_probe, run_movement_perf_smoke, run_timedemo};
-#[cfg(test)]
-use crate::render_cache::snapshot_mesh_block_state_ids;
 use crate::scene_runtime::build_scene_textured_sections;
 use crate::ui::render_static_title_ui;
 use anyhow::Result;
@@ -40,6 +38,8 @@ use mclone_render::headless::{
     HeadlessChunkOptions, HeadlessClearOptions, HeadlessUiOptions, write_headless_clear_png,
     write_headless_textured_sections_png_with_options, write_headless_ui_png,
 };
+#[cfg(test)]
+use mclone_render_session::snapshot_mesh_block_state_ids;
 
 const DEFAULT_SEED: i64 = 12345;
 const DEFAULT_CHUNK_X: i32 = 0;

@@ -1,0 +1,16 @@
+[package]
+name = "mclone-render-session"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+mclone-client.workspace = true
+mclone-core.workspace = true
+mclone-mesh.workspace = true
+
+[lib]
+name = "mclone_render_session"
+path = "src/lib.rs"

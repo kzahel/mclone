@@ -35,10 +35,10 @@ use crate::frame_pacing::{
     FramePacing, FramePacingMode, FramePacingUiState, FrameTimingStats, RedrawSchedule, elapsed_ms,
     next_capped_redraw_deadline, redraw_schedule,
 };
-use crate::render_cache::RenderSectionCacheUpdate;
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, NativeUi, NativeUiAction};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
+use mclone_render_session::RenderSectionCacheUpdate;
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const PLAYER_SURFACE_FEET_OFFSET: f64 = 1.0;

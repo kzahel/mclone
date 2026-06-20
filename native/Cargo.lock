@@ -1074,6 +1074,7 @@ dependencies = [
  "mclone-net",
  "mclone-protocol",
  "mclone-render",
+ "mclone-render-session",
  "mclone-server",
  "mclone-ui",
  "wgpu",
@@ -1113,6 +1114,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-render-session"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "mclone-client",
+ "mclone-core",
+ "mclone-mesh",
+]
+
+[[package]]
 name = "mclone-server"
 version = "0.0.0"
 dependencies = [
@@ -1139,6 +1150,7 @@ dependencies = [
  "mclone-net",
  "mclone-protocol",
  "mclone-render",
+ "mclone-render-session",
  "mclone-server",
  "wasm-bindgen",
  "wasm-bindgen-futures",

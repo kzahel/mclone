@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: proposed parent.
+Status: active first extraction landed.
 
 ## Purpose
 
@@ -248,6 +248,27 @@ Acceptance:
 - WASM smoke can call the shared section cache instead of its local mini cache
 - no `wgpu`, `winit`, `web_sys`, or filesystem assumptions in the extracted code
 
+First extraction result:
+
+- Added `native/crates/mclone-render-session`.
+- Moved shared snapshot-to-textured-section build helpers into that crate:
+  - `build_client_textured_sections`
+  - `build_render_sections_from_snapshots`
+  - `snapshot_mesh_block_state_ids`
+  - `MeshChunkBlocks`
+- Moved CPU render-section cache/update data into that crate:
+  - `CachedTexturedRenderSections`
+  - `RenderSectionCacheUpdate`
+  - `RenderSectionCompileRequest`
+  - `RenderSectionCompileResult`
+- Left desktop-only asset discovery and the native `std::thread` compile worker
+  in `mclone-native-client` for now.
+- Updated desktop to use the shared build/cache/update types with no intended
+  behavior change.
+- Updated WASM generated-chunk rendering to use the shared
+  `CachedTexturedRenderSections` merge/removal path instead of its local section
+  key bookkeeping.
+
 ### 2. Split Compile Policy From Cache Policy
 
 Move `RenderSectionCompileWorker` behind a compiler policy boundary.
@@ -357,15 +378,16 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-Start with the smallest safe extraction:
+The first extraction is landed. The next slice should split compile policy from
+cache policy:
 
-1. Move `CachedTexturedRenderSections`, `RenderSectionCacheUpdate`, and the
-   snapshot-to-render-section build helpers out of
-   `mclone-native-client/src/render_cache.rs`.
-2. Update desktop to call the extracted module with no behavior change.
-3. Update the WASM session to consume the extracted cache instead of its local
-   section key/update bookkeeping.
-4. Validate desktop tests plus `native:web:chunk-smoke`.
+1. Move the desktop `RenderSectionCompileWorker` shape behind a shared compiler
+   policy interface.
+2. Keep the current native `std::thread` worker as the desktop implementation.
+3. Add an inline synchronous implementation for WASM.
+4. Make both implementations return the same `RenderSectionCompileResult`
+   shape and use the same stale-result/revision handling.
+5. Validate desktop tests plus `native:web:chunk-smoke`.
 
-This gives immediate duplication reduction without requiring a full app-loop
+This removes the next duplication point without requiring the full app-loop
 refactor in the same patch.

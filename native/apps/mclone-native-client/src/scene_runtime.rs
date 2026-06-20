@@ -22,9 +22,12 @@ use crate::cli::SceneOptions;
 use crate::frame_pacing::{elapsed_ms, micros_to_ms};
 use crate::remote_session::RemoteServerSession;
 use crate::render_cache::{
-    CachedTexturedRenderSections, RenderSectionCacheUpdate, RenderSectionCompileRequest,
     RenderSectionCompileWorker, SceneTexturedSections, TexturedMeshAssets,
-    build_client_textured_sections, load_textured_mesh_assets,
+    load_textured_mesh_assets,
+};
+use mclone_render_session::{
+    CachedTexturedRenderSections, RenderSectionCacheUpdate, RenderSectionCompileRequest,
+    build_client_textured_sections,
 };
 
 const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;

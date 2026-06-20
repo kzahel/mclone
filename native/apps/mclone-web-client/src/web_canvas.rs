@@ -5,18 +5,21 @@ use std::collections::BTreeSet;
 
 use super::{SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime};
 use mclone_assets::PackedAssetSource;
+use mclone_core::ChunkPos;
+#[cfg(test)]
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
-    PackedLightSection, SECTION_HEIGHT, chunk_section_index,
+    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkSnapshot,
+    SECTION_HEIGHT, chunk_section_index,
 };
 use mclone_mesh::{
-    RenderSectionKey, TextureAtlasImage, TexturedChunkMeshInput, TexturedMeshCatalog,
-    TexturedRenderSectionMesh, build_textured_render_sections_with_stats,
-    load_textured_terrain_assets,
+    RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, load_textured_terrain_assets,
 };
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
     TexturedSectionDrawResources, TexturedSectionUploadReport,
+};
+use mclone_render_session::{
+    CachedTexturedRenderSections, RenderSectionCacheUpdate, build_client_textured_sections,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -277,7 +280,7 @@ pub struct WebChunkRenderSession {
     runtime: WebRuntime,
     mesh_assets: WebTexturedMeshAssets,
     draw: Option<TexturedSectionDrawResources>,
-    applied_section_keys: BTreeSet<RenderSectionKey>,
+    render_sections: CachedTexturedRenderSections,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
     asset_pack_parse_count: usize,
     terrain_asset_load_count: usize,
@@ -320,7 +323,7 @@ impl WebChunkRenderSession {
             runtime: WebRuntime::local_integrated(SMOKE_SEED),
             mesh_assets,
             draw: None,
-            applied_section_keys: BTreeSet::new(),
+            render_sections: CachedTexturedRenderSections::default(),
             loaded_chunk_positions: BTreeSet::new(),
             asset_pack_parse_count: 1,
             terrain_asset_load_count: 1,
@@ -348,26 +351,46 @@ impl WebChunkRenderSession {
                 center.x, center.z
             ));
         }
-        let section_build =
-            build_textured_sections_for_client(self.runtime.client(), &self.mesh_assets.catalog)?;
-        if section_build.resident_section_count == 0 {
-            return Err(format!(
-                "generated chunk view {},{} radius {} built no resident textured sections",
-                center.x, center.z, radius_chunks
-            ));
-        }
-        self.mesh_build_count += 1;
         let current_loaded_chunks = self
             .runtime
             .client()
             .loaded_chunk_positions()
             .collect::<BTreeSet<_>>();
         let dirty_chunks = dirty_chunk_positions(&previous_loaded_chunks, &current_loaded_chunks);
-        let upload_report = self.upload_sections(
-            &section_build.sections,
-            &section_build.section_keys,
-            &dirty_chunks,
-        )?;
+        let section_report =
+            build_client_textured_sections(self.runtime.client(), &self.mesh_assets.catalog)
+                .map_err(|error| {
+                    format!("failed to build generated textured render sections: {error:#}")
+                })?;
+        self.mesh_build_count += 1;
+        let current_section_keys = section_report
+            .sections
+            .iter()
+            .map(|section| section.key)
+            .collect::<BTreeSet<_>>();
+        let ready_section_keys = current_section_keys
+            .iter()
+            .copied()
+            .filter(|key| dirty_chunks.contains(&chunk_pos_for_section(*key)))
+            .collect::<BTreeSet<_>>();
+        let removal_chunks = previous_loaded_chunks
+            .difference(&current_loaded_chunks)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let cache_update = self.render_sections.apply_build_report(
+            &ready_section_keys,
+            section_report,
+            &removal_chunks,
+            &BTreeSet::new(),
+        );
+        let cached_sections = self.render_sections.sections();
+        if cached_sections.iter().all(|section| section.is_empty()) {
+            return Err(format!(
+                "generated chunk view {},{} radius {} built no resident textured sections",
+                center.x, center.z, radius_chunks
+            ));
+        }
+        let upload_report = self.upload_sections(&cache_update, &cached_sections)?;
 
         let frame = self
             .context
@@ -412,7 +435,7 @@ impl WebChunkRenderSession {
             command_count: self.runtime.command_count(),
             update_count: self.runtime.update_count(),
             loaded_chunk_count: self.runtime.client().loaded_chunk_count(),
-            loaded_section_key_count: section_build.section_keys.len(),
+            loaded_section_key_count: current_section_keys.len(),
             resident_section_count: render_stats.loaded_section_count,
             drawn_section_count: render_stats.drawn_section_count,
             frustum_section_count: render_stats.frustum_section_count,
@@ -420,7 +443,7 @@ impl WebChunkRenderSession {
             atlas_width: self.mesh_assets.atlas.width,
             atlas_height: self.mesh_assets.atlas.height,
             atlas_sprite_count: self.mesh_assets.atlas_sprite_count,
-            vertex_count: section_build.vertex_count,
+            vertex_count: section_vertex_count(&cached_sections),
             index_count: render_stats.loaded_index_count,
             face_count: render_stats.loaded_face_count(),
             drawn_index_count: render_stats.drawn_index_count,
@@ -441,32 +464,17 @@ impl WebChunkRenderSession {
 
     fn upload_sections(
         &mut self,
-        sections: &[TexturedRenderSectionMesh],
-        current_section_keys: &BTreeSet<RenderSectionKey>,
-        dirty_chunks: &BTreeSet<ChunkPos>,
+        update: &RenderSectionCacheUpdate,
+        cached_sections: &[mclone_mesh::TexturedRenderSectionMesh],
     ) -> Result<TexturedSectionUploadReport, String> {
         let first_upload = self.draw.is_none();
-        let rebuilt_sections = if first_upload {
-            sections.to_vec()
-        } else {
-            sections
-                .iter()
-                .filter(|section| dirty_chunks.contains(&chunk_pos_for_section(section.key)))
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        let removed_section_keys = self
-            .applied_section_keys
-            .difference(current_section_keys)
-            .copied()
-            .collect::<BTreeSet<_>>();
 
         let upload_report = if first_upload {
             let draw = TexturedSectionDrawResources::new(
                 &self.context.device,
                 &self.context.queue,
                 self.context.format,
-                sections,
+                cached_sections,
                 atlas_upload(&self.mesh_assets.atlas),
             )
             .map_err(|error| {
@@ -474,7 +482,7 @@ impl WebChunkRenderSession {
             })?;
             self.draw = Some(draw);
             self.atlas_upload_count += 1;
-            upload_report_for_sections(sections)
+            upload_report_for_sections(cached_sections)
         } else {
             let draw = self
                 .draw
@@ -482,17 +490,17 @@ impl WebChunkRenderSession {
                 .ok_or_else(|| "textured section resources were not initialized".to_owned())?;
             draw.apply_section_updates(
                 &self.context.device,
-                &rebuilt_sections,
-                &removed_section_keys,
+                &update.rebuilt_sections,
+                &update.removed_section_keys,
             )
             .map_err(|error| {
                 format!("failed to upload generated textured section mesh updates: {error:#}")
             })?
         };
-        if first_upload || !rebuilt_sections.is_empty() || !removed_section_keys.is_empty() {
+        if first_upload || update.rebuilt_section_count() > 0 || update.removed_section_count() > 0
+        {
             self.mesh_upload_count += 1;
         }
-        self.applied_section_keys = current_section_keys.clone();
         Ok(upload_report)
     }
 }
@@ -538,7 +546,7 @@ fn has_removed_neighbor(pos: ChunkPos, removed_chunks: &BTreeSet<ChunkPos>) -> b
 }
 
 fn upload_report_for_sections(
-    sections: &[TexturedRenderSectionMesh],
+    sections: &[mclone_mesh::TexturedRenderSectionMesh],
 ) -> TexturedSectionUploadReport {
     let mut report = TexturedSectionUploadReport::default();
     for section in sections {
@@ -553,80 +561,12 @@ fn upload_report_for_sections(
     report
 }
 
-#[derive(Clone, Debug)]
-struct WebSectionBuild {
-    sections: Vec<TexturedRenderSectionMesh>,
-    section_keys: BTreeSet<RenderSectionKey>,
-    resident_section_count: usize,
-    vertex_count: u32,
-}
-
-#[derive(Clone, Debug)]
-struct WebMeshChunkBlocks {
-    chunk_x: i32,
-    chunk_z: i32,
-    min_y: i32,
-    height: i32,
-    blocks: Vec<BlockStateId>,
-    light_sections: Vec<PackedLightSection>,
-}
-
-fn build_textured_sections_for_client(
-    client: &mclone_client::ClientRuntime,
-    catalog: &TexturedMeshCatalog,
-) -> Result<WebSectionBuild, String> {
-    let chunks = client
-        .chunk_snapshots()
-        .map(snapshot_mesh_chunk)
-        .collect::<Result<Vec<_>, _>>()?;
-    let inputs = textured_mesh_inputs(&chunks);
-    let report = build_textured_render_sections_with_stats(&inputs, catalog)
-        .map_err(|error| format!("failed to build generated textured render sections: {error}"))?;
-    let mut resident_section_count = 0;
-    let mut vertex_count = 0;
-    let mut section_keys = BTreeSet::new();
-    for section in &report.sections {
-        section_keys.insert(section.key);
-        if section.is_empty() {
-            continue;
-        }
-        resident_section_count += 1;
-        vertex_count += section.stats().vertex_count;
-    }
-    Ok(WebSectionBuild {
-        sections: report.sections,
-        section_keys,
-        resident_section_count,
-        vertex_count,
-    })
-}
-
-fn textured_mesh_inputs(chunks: &[WebMeshChunkBlocks]) -> Vec<TexturedChunkMeshInput<'_>> {
-    chunks
+fn section_vertex_count(sections: &[mclone_mesh::TexturedRenderSectionMesh]) -> u32 {
+    sections
         .iter()
-        .map(|chunk| {
-            TexturedChunkMeshInput::new(
-                chunk.chunk_x,
-                chunk.chunk_z,
-                chunk.min_y,
-                chunk.height,
-                &chunk.blocks,
-            )
-            .with_light_sections(&chunk.light_sections)
-        })
-        .collect()
-}
-
-fn snapshot_mesh_chunk(snapshot: &ChunkSnapshot) -> Result<WebMeshChunkBlocks, String> {
-    let blocks = snapshot_block_state_ids(snapshot)?;
-    Ok(WebMeshChunkBlocks {
-        chunk_x: snapshot.pos.x,
-        chunk_z: snapshot.pos.z,
-        min_y: snapshot.min_y,
-        height: snapshot.height,
-        blocks,
-        light_sections: snapshot.light_sections.clone(),
-    })
+        .filter(|section| !section.is_empty())
+        .map(|section| section.stats().vertex_count)
+        .sum()
 }
 
 #[derive(Clone, Debug)]
@@ -734,53 +674,7 @@ impl WebCanvasContext {
     }
 }
 
-fn snapshot_block_state_ids(snapshot: &ChunkSnapshot) -> Result<Vec<BlockStateId>, String> {
-    if snapshot.height <= 0 || snapshot.height % SECTION_HEIGHT != 0 {
-        return Err(format!(
-            "chunk snapshot {:?} has invalid height {}",
-            snapshot.pos, snapshot.height
-        ));
-    }
-    let expected_len = snapshot.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
-    let mut blocks = vec![AIR_BLOCK_STATE_ID; expected_len];
-    let min_section_y = snapshot.min_y / SECTION_HEIGHT;
-    let section_count = snapshot.height / SECTION_HEIGHT;
-
-    for section in &snapshot.sections {
-        let section_offset = section.section_y - min_section_y;
-        if !(0..section_count).contains(&section_offset) {
-            return Err(format!(
-                "chunk snapshot {:?} contains section {} outside {}..{}",
-                snapshot.pos,
-                section.section_y,
-                min_section_y,
-                min_section_y + section_count - 1
-            ));
-        }
-        let unpacked = section.unpack_block_state_ids();
-        if unpacked.len() != CHUNK_SECTION_VOLUME {
-            return Err(format!(
-                "chunk snapshot {:?} section {} unpacked to {} blocks",
-                snapshot.pos,
-                section.section_y,
-                unpacked.len()
-            ));
-        }
-        for local_y in 0..SECTION_HEIGHT {
-            for local_z in 0..CHUNK_WIDTH {
-                for local_x in 0..CHUNK_WIDTH {
-                    let section_index = chunk_section_index(local_x, local_y, local_z);
-                    let chunk_local_y = section_offset * SECTION_HEIGHT + local_y;
-                    let chunk_index = chunk_block_index(local_x, chunk_local_y, local_z);
-                    blocks[chunk_index] = unpacked[section_index];
-                }
-            }
-        }
-    }
-
-    Ok(blocks)
-}
-
+#[cfg(test)]
 fn chunk_block_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
     debug_assert!((0..CHUNK_WIDTH).contains(&local_x));
     debug_assert!(local_y >= 0);
