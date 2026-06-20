@@ -39,6 +39,9 @@ const requireChunk = process.argv.includes("--require-chunk")
 const requireCanvas = requireChunk
   || process.argv.includes("--require-canvas")
   || process.env.MCLONE_NATIVE_WEB_REQUIRE_CANVAS === "1";
+const requireThreading = process.argv.includes("--require-threading")
+  || (!process.argv.includes("--skip-threading")
+    && process.env.MCLONE_NATIVE_WEB_REQUIRE_THREADING !== "0");
 
 run().catch((error) => {
   console.error(error instanceof Error ? error.stack ?? error.message : String(error));
@@ -87,6 +90,7 @@ async function run() {
       canvasScreenshotPath,
       requireCanvas,
       requireChunk,
+      requireThreading,
       canvasPixels,
       result,
     }, null, 2));
@@ -171,11 +175,13 @@ async function startServer() {
       response.writeHead(200, {
         "Content-Type": contentType(path),
         "Cache-Control": "no-store",
+        ...crossOriginIsolationHeaders(),
       });
       response.end(bytes);
     } catch (error) {
       response.writeHead(error?.code === "ENOENT" ? 404 : 500, {
         "Content-Type": "text/plain; charset=utf-8",
+        ...crossOriginIsolationHeaders(),
       });
       response.end(error instanceof Error ? error.message : String(error));
     }
@@ -223,12 +229,23 @@ function contentType(path) {
   return "application/octet-stream";
 }
 
+function crossOriginIsolationHeaders() {
+  return {
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp",
+    "Cross-Origin-Resource-Policy": "same-origin",
+  };
+}
+
 function assertSmokeResult(result, pageErrors, canvasPixels) {
   if (pageErrors.length > 0) {
     throw new Error(`browser page errors:\n${pageErrors.join("\n")}`);
   }
   if (!result?.ok) {
     throw new Error(`native web smoke failed:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (requireThreading) {
+    assertThreadingResult(result.threading);
   }
   if (!result.wasm?.report?.ok) {
     throw new Error(`wasm runtime report failed:\n${JSON.stringify(result.wasm, null, 2)}`);
@@ -267,6 +284,23 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
     assertChunkRenderResult(result.canvas.report, canvasPixels, result.canvas.firstReport);
   } else if (canvasPixels.distinctColorCount < 1 || canvasPixels.clearColorPixelCount < 16) {
     throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+function assertThreadingResult(threading) {
+  if (!threading?.ok) {
+    throw new Error(`browser threading smoke failed:\n${JSON.stringify(threading, null, 2)}`);
+  }
+  if (
+    !threading.crossOriginIsolated
+    || !threading.sharedArrayBuffer
+    || !threading.wasmSharedMemory
+    || !threading.atomics
+    || !threading.workerRoundtrip
+    || threading.initialValue !== 7
+    || threading.finalValue !== 42
+  ) {
+    throw new Error(`browser threading prerequisites are incomplete:\n${JSON.stringify(threading, null, 2)}`);
   }
 }
 

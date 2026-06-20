@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active first extraction landed.
+Status: active web threading gate landed.
 
 ## Purpose
 
@@ -341,6 +341,18 @@ evaluate:
 - cancellation/stale result behavior
 - Playwright validation that CPU compile work does not block the frame path
 
+First threading gate result:
+
+- The native web smoke server now serves COOP/COEP/CORP headers so browser
+  smokes run cross-origin isolated.
+- The web smoke page validates that `SharedArrayBuffer`, shared
+  `WebAssembly.Memory`, `Atomics`, and a module `Worker` are available.
+- The smoke worker mutates shared Wasm memory through `Atomics`, and Playwright
+  fails the smoke if the main page does not observe the worker mutation.
+- `native:web:smoke`, `native:web:canvas-smoke`, and `native:web:chunk-smoke`
+  now require this threading gate by default; `native:web:thread-smoke` is the
+  explicit named lane.
+
 ## Non-Goals
 
 - No Gradle, Android, or OpenXR scaffolding in this slice.
@@ -359,6 +371,7 @@ set, usually including:
 ```text
 cargo test --manifest-path native/Cargo.toml -p mclone-web-client -p mclone-native-client -p mclone-render
 cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
+pnpm --silent native:web:thread-smoke
 pnpm --silent native:web:chunk-smoke
 ```
 
@@ -398,9 +411,9 @@ cache policy:
 1. Move the desktop `RenderSectionCompileWorker` shape behind a shared compiler
    policy interface.
 2. Keep the current native `std::thread` worker as the desktop implementation.
-3. Add a worker-backed browser/WASM implementation plan at the interface level,
-   including the `SharedArrayBuffer`/COOP/COEP requirements that must be met
-   before enabling it by default.
+3. Build on the now-required browser threading gate: use the same submit/drain
+   compiler interface for the browser worker path instead of adding a
+   web-only synchronous cache policy.
 4. Add an inline synchronous WASM implementation only as a fallback/smoke path
    behind the same interface.
 5. Make all implementations return the same `RenderSectionCompileResult`

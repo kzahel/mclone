@@ -1,6 +1,7 @@
 const WASM_URL = new URL("./mclone_web_client.wasm", import.meta.url);
 const BINDGEN_JS_URL = new URL("./pkg/mclone_web_client.js", import.meta.url);
 const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.url);
+const THREAD_WORKER_URL = new URL("./mclone-thread-smoke-worker.js", import.meta.url);
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 
@@ -13,6 +14,7 @@ ready.then(
 );
 
 async function boot() {
+  const threading = await probeThreading();
   const wasm = await loadRuntimeWasm();
   const webGpu = await probeWebGpu();
   const canvas = webGpu.supported
@@ -24,11 +26,139 @@ async function boot() {
         reason: webGpu.status,
       };
   return {
-    ok: wasm.ok && webGpu.ok && canvas.ok,
+    ok: threading.ok && wasm.ok && webGpu.ok && canvas.ok,
+    threading,
     wasm,
     webGpu,
     canvas,
   };
+}
+
+async function probeThreading() {
+  const report = {
+    ok: false,
+    crossOriginIsolated: Boolean(globalThis.crossOriginIsolated),
+    sharedArrayBuffer: typeof SharedArrayBuffer === "function",
+    wasmSharedMemory: false,
+    workerConstructor: typeof Worker === "function",
+    atomics: typeof Atomics === "object"
+      && typeof Atomics.add === "function"
+      && typeof Atomics.load === "function"
+      && typeof Atomics.store === "function",
+    workerRoundtrip: false,
+    initialValue: 0,
+    finalValue: 0,
+  };
+
+  if (!report.crossOriginIsolated) {
+    return {
+      ...report,
+      reason: "page is not cross-origin isolated; SharedArrayBuffer threading is disabled",
+    };
+  }
+  if (!report.sharedArrayBuffer) {
+    return {
+      ...report,
+      reason: "SharedArrayBuffer is not available",
+    };
+  }
+  if (!report.atomics) {
+    return {
+      ...report,
+      reason: "Atomics operations are not available",
+    };
+  }
+  if (!report.workerConstructor) {
+    return {
+      ...report,
+      reason: "Worker constructor is not available",
+    };
+  }
+
+  let memory;
+  try {
+    memory = new WebAssembly.Memory({
+      initial: 1,
+      maximum: 1,
+      shared: true,
+    });
+    report.wasmSharedMemory = memory.buffer instanceof SharedArrayBuffer;
+  } catch (error) {
+    return {
+      ...report,
+      reason: `failed to allocate shared WebAssembly.Memory: ${stringifyError(error)}`,
+    };
+  }
+  if (!report.wasmSharedMemory) {
+    return {
+      ...report,
+      reason: "WebAssembly.Memory did not produce a SharedArrayBuffer",
+    };
+  }
+
+  const view = new Int32Array(memory.buffer);
+  Atomics.store(view, 0, 7);
+  Atomics.store(view, 1, 0);
+  report.initialValue = Atomics.load(view, 0);
+
+  try {
+    const worker = await runThreadWorker(memory, 35);
+    report.workerRoundtrip = Boolean(
+      worker.ok
+      && worker.initialValue === 7
+      && worker.finalValue === 42
+      && Atomics.load(view, 0) === 42
+      && Atomics.load(view, 1) === 1
+    );
+    report.worker = worker;
+    report.finalValue = Atomics.load(view, 0);
+  } catch (error) {
+    return {
+      ...report,
+      reason: stringifyError(error),
+    };
+  }
+
+  return {
+    ...report,
+    ok: report.workerRoundtrip,
+  };
+}
+
+function runThreadWorker(memory, addend) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(THREAD_WORKER_URL.href, {
+      type: "module",
+      name: "mclone-thread-smoke",
+    });
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      reject(new Error("timed out waiting for thread smoke worker"));
+    }, 5_000);
+
+    worker.onmessage = (event) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      worker.terminate();
+      resolve(event.data);
+    };
+    worker.onerror = (event) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      worker.terminate();
+      reject(new Error(event.message || "thread smoke worker failed"));
+    };
+    worker.postMessage({
+      kind: "mclone-thread-smoke",
+      memory,
+      addend,
+    });
+  });
 }
 
 async function loadRuntimeWasm() {

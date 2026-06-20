@@ -50,6 +50,7 @@
     "native:perf:smoke": "pnpm native:worldgen:smoke && pnpm native:movement:smoke && pnpm native:timedemo:smoke",
     "native:web:build": "cargo build --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown",
     "native:web:smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs",
+    "native:web:thread-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-threading",
     "native:web:canvas-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas",
     "native:web:chunk-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas --require-chunk",
     "build": "vite build",
