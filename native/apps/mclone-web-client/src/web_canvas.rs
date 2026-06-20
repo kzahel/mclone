@@ -1,18 +1,22 @@
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+use std::collections::BTreeSet;
+
 use super::{SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime};
 use mclone_assets::PackedAssetSource;
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
-    SECTION_HEIGHT, chunk_section_index,
+    PackedLightSection, SECTION_HEIGHT, chunk_section_index,
 };
 use mclone_mesh::{
-    TextureAtlasImage, TexturedChunkMeshInput, TexturedMeshCatalog, TexturedVisibleChunkMesh,
-    build_textured_visible_chunk_mesh, load_textured_terrain_assets, quad_face_count_from_indices,
+    RenderSectionKey, TextureAtlasImage, TexturedChunkMeshInput, TexturedMeshCatalog,
+    TexturedRenderSectionMesh, build_textured_render_sections_with_stats,
+    load_textured_terrain_assets,
 };
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas, TexturedChunkDrawResources,
+    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
+    TexturedSectionDrawResources, TexturedSectionUploadReport,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -90,11 +94,16 @@ struct CanvasRenderReport {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GeneratedChunkRenderReport {
     center: ChunkPos,
+    radius_chunks: u32,
     width: u32,
     height: u32,
     command_count: usize,
     update_count: usize,
     loaded_chunk_count: usize,
+    loaded_section_key_count: usize,
+    resident_section_count: usize,
+    drawn_section_count: usize,
+    frustum_section_count: usize,
     asset_pack_file_count: usize,
     atlas_width: u32,
     atlas_height: u32,
@@ -102,6 +111,13 @@ struct GeneratedChunkRenderReport {
     vertex_count: u32,
     index_count: u32,
     face_count: u32,
+    drawn_index_count: u32,
+    drawn_face_count: u32,
+    uploaded_section_count: usize,
+    removed_section_count: usize,
+    uploaded_vertex_count: u32,
+    uploaded_index_count: u32,
+    uploaded_face_count: u32,
     asset_pack_parse_count: usize,
     terrain_asset_load_count: usize,
     atlas_upload_count: usize,
@@ -132,11 +148,32 @@ impl GeneratedChunkRenderReport {
         set_bool(&object, "textured", true)?;
         set_number(&object, "centerX", f64::from(self.center.x))?;
         set_number(&object, "centerZ", f64::from(self.center.z))?;
+        set_number(&object, "radiusChunks", f64::from(self.radius_chunks))?;
         set_number(&object, "width", f64::from(self.width))?;
         set_number(&object, "height", f64::from(self.height))?;
         set_number(&object, "commandCount", self.command_count as f64)?;
         set_number(&object, "updateCount", self.update_count as f64)?;
         set_number(&object, "loadedChunkCount", self.loaded_chunk_count as f64)?;
+        set_number(
+            &object,
+            "loadedSectionKeyCount",
+            self.loaded_section_key_count as f64,
+        )?;
+        set_number(
+            &object,
+            "residentSectionCount",
+            self.resident_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "drawnSectionCount",
+            self.drawn_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "frustumSectionCount",
+            self.frustum_section_count as f64,
+        )?;
         set_number(
             &object,
             "assetPackFileCount",
@@ -148,6 +185,37 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "vertexCount", f64::from(self.vertex_count))?;
         set_number(&object, "indexCount", f64::from(self.index_count))?;
         set_number(&object, "faceCount", f64::from(self.face_count))?;
+        set_number(
+            &object,
+            "drawnIndexCount",
+            f64::from(self.drawn_index_count),
+        )?;
+        set_number(&object, "drawnFaceCount", f64::from(self.drawn_face_count))?;
+        set_number(
+            &object,
+            "uploadedSectionCount",
+            self.uploaded_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "removedSectionCount",
+            self.removed_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "uploadedVertexCount",
+            f64::from(self.uploaded_vertex_count),
+        )?;
+        set_number(
+            &object,
+            "uploadedIndexCount",
+            f64::from(self.uploaded_index_count),
+        )?;
+        set_number(
+            &object,
+            "uploadedFaceCount",
+            f64::from(self.uploaded_face_count),
+        )?;
         set_number(
             &object,
             "assetPackParseCount",
@@ -208,7 +276,9 @@ pub struct WebChunkRenderSession {
     depth: ChunkDepthTarget,
     runtime: WebRuntime,
     mesh_assets: WebTexturedMeshAssets,
-    draw: Option<TexturedChunkDrawResources>,
+    draw: Option<TexturedSectionDrawResources>,
+    applied_section_keys: BTreeSet<RenderSectionKey>,
+    loaded_chunk_positions: BTreeSet<ChunkPos>,
     asset_pack_parse_count: usize,
     terrain_asset_load_count: usize,
     atlas_upload_count: usize,
@@ -250,6 +320,8 @@ impl WebChunkRenderSession {
             runtime: WebRuntime::local_integrated(SMOKE_SEED),
             mesh_assets,
             draw: None,
+            applied_section_keys: BTreeSet::new(),
+            loaded_chunk_positions: BTreeSet::new(),
             asset_pack_parse_count: 1,
             terrain_asset_load_count: 1,
             atlas_upload_count: 0,
@@ -264,32 +336,38 @@ impl WebChunkRenderSession {
         center: ChunkPos,
         radius_chunks: u32,
     ) -> Result<GeneratedChunkRenderReport, String> {
+        let previous_loaded_chunks = self.loaded_chunk_positions.clone();
         self.runtime
             .request_chunk_view(center, radius_chunks, radius_chunks)
             .map_err(|error| {
                 format!("failed to load generated chunk through web runtime: {error}")
             })?;
-        let snapshot = self
-            .runtime
-            .client()
-            .chunk_snapshot(center)
-            .ok_or_else(|| {
-                format!(
-                    "web runtime did not publish generated chunk {},{}",
-                    center.x, center.z
-                )
-            })?;
-        let mesh = build_textured_chunk_mesh(snapshot, &self.mesh_assets.catalog)?;
-        if mesh.is_empty() {
+        if self.runtime.client().chunk_snapshot(center).is_none() {
             return Err(format!(
-                "generated chunk {},{} built an empty textured mesh",
+                "web runtime did not publish generated chunk {},{}",
                 center.x, center.z
             ));
         }
+        let section_build =
+            build_textured_sections_for_client(self.runtime.client(), &self.mesh_assets.catalog)?;
+        if section_build.resident_section_count == 0 {
+            return Err(format!(
+                "generated chunk view {},{} radius {} built no resident textured sections",
+                center.x, center.z, radius_chunks
+            ));
+        }
         self.mesh_build_count += 1;
-        let stats = mesh.stats();
-
-        self.upload_mesh(&mesh)?;
+        let current_loaded_chunks = self
+            .runtime
+            .client()
+            .loaded_chunk_positions()
+            .collect::<BTreeSet<_>>();
+        let dirty_chunks = dirty_chunk_positions(&previous_loaded_chunks, &current_loaded_chunks);
+        let upload_report = self.upload_sections(
+            &section_build.sections,
+            &section_build.section_keys,
+            &dirty_chunks,
+        )?;
 
         let frame = self
             .context
@@ -307,37 +385,51 @@ impl WebChunkRenderSession {
             .draw
             .as_ref()
             .ok_or_else(|| "textured draw resources were not initialized".to_owned())?;
-        draw.render(
-            &self.context.queue,
-            &mut encoder,
-            ChunkRenderTarget::new(
-                &view,
-                &self.depth.view,
-                [self.context.width, self.context.height],
-                mclone_render::default_clear_color(),
-            ),
-            ChunkCamera::overview_for_chunk(center.x, center.z)
-                .render_view(self.context.width, self.context.height),
-        )
-        .map_err(|error| format!("failed to render generated chunk mesh: {error:#}"))?;
+        let render_stats = draw
+            .render(
+                &self.context.queue,
+                &mut encoder,
+                ChunkRenderTarget::new(
+                    &view,
+                    &self.depth.view,
+                    [self.context.width, self.context.height],
+                    mclone_render::default_clear_color(),
+                ),
+                ChunkCamera::overview_for_chunk_area(center.x, center.z, radius_chunks as i32)
+                    .render_view(self.context.width, self.context.height),
+            )
+            .map_err(|error| format!("failed to render generated section meshes: {error:#}"))?;
         self.context.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         self.render_count += 1;
+        self.loaded_chunk_positions = current_loaded_chunks;
 
         Ok(GeneratedChunkRenderReport {
             center,
+            radius_chunks,
             width: self.context.width,
             height: self.context.height,
             command_count: self.runtime.command_count(),
             update_count: self.runtime.update_count(),
             loaded_chunk_count: self.runtime.client().loaded_chunk_count(),
+            loaded_section_key_count: section_build.section_keys.len(),
+            resident_section_count: render_stats.loaded_section_count,
+            drawn_section_count: render_stats.drawn_section_count,
+            frustum_section_count: render_stats.frustum_section_count,
             asset_pack_file_count: self.mesh_assets.asset_pack_file_count,
             atlas_width: self.mesh_assets.atlas.width,
             atlas_height: self.mesh_assets.atlas.height,
             atlas_sprite_count: self.mesh_assets.atlas_sprite_count,
-            vertex_count: stats.vertex_count,
-            index_count: stats.index_count,
-            face_count: quad_face_count_from_indices(stats.index_count),
+            vertex_count: section_build.vertex_count,
+            index_count: render_stats.loaded_index_count,
+            face_count: render_stats.loaded_face_count(),
+            drawn_index_count: render_stats.drawn_index_count,
+            drawn_face_count: render_stats.drawn_face_count(),
+            uploaded_section_count: upload_report.uploaded_section_count,
+            removed_section_count: upload_report.removed_section_count,
+            uploaded_vertex_count: upload_report.uploaded_vertex_count,
+            uploaded_index_count: upload_report.uploaded_index_count,
+            uploaded_face_count: upload_report.uploaded_face_count(),
             asset_pack_parse_count: self.asset_pack_parse_count,
             terrain_asset_load_count: self.terrain_asset_load_count,
             atlas_upload_count: self.atlas_upload_count,
@@ -347,32 +439,194 @@ impl WebChunkRenderSession {
         })
     }
 
-    fn upload_mesh(&mut self, mesh: &TexturedVisibleChunkMesh) -> Result<(), String> {
-        match self.draw.as_mut() {
-            Some(draw) => {
-                draw.update_mesh(&self.context.device, mesh)
-                    .map_err(|error| {
-                        format!("failed to upload generated textured chunk mesh: {error:#}")
-                    })?;
-            }
-            None => {
-                let draw = TexturedChunkDrawResources::new(
-                    &self.context.device,
-                    &self.context.queue,
-                    self.context.format,
-                    mesh,
-                    atlas_upload(&self.mesh_assets.atlas),
-                )
-                .map_err(|error| {
-                    format!("failed to upload generated textured chunk mesh: {error:#}")
-                })?;
-                self.draw = Some(draw);
-                self.atlas_upload_count += 1;
-            }
+    fn upload_sections(
+        &mut self,
+        sections: &[TexturedRenderSectionMesh],
+        current_section_keys: &BTreeSet<RenderSectionKey>,
+        dirty_chunks: &BTreeSet<ChunkPos>,
+    ) -> Result<TexturedSectionUploadReport, String> {
+        let first_upload = self.draw.is_none();
+        let rebuilt_sections = if first_upload {
+            sections.to_vec()
+        } else {
+            sections
+                .iter()
+                .filter(|section| dirty_chunks.contains(&chunk_pos_for_section(section.key)))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let removed_section_keys = self
+            .applied_section_keys
+            .difference(current_section_keys)
+            .copied()
+            .collect::<BTreeSet<_>>();
+
+        let upload_report = if first_upload {
+            let draw = TexturedSectionDrawResources::new(
+                &self.context.device,
+                &self.context.queue,
+                self.context.format,
+                sections,
+                atlas_upload(&self.mesh_assets.atlas),
+            )
+            .map_err(|error| {
+                format!("failed to upload generated textured section meshes: {error:#}")
+            })?;
+            self.draw = Some(draw);
+            self.atlas_upload_count += 1;
+            upload_report_for_sections(sections)
+        } else {
+            let draw = self
+                .draw
+                .as_mut()
+                .ok_or_else(|| "textured section resources were not initialized".to_owned())?;
+            draw.apply_section_updates(
+                &self.context.device,
+                &rebuilt_sections,
+                &removed_section_keys,
+            )
+            .map_err(|error| {
+                format!("failed to upload generated textured section mesh updates: {error:#}")
+            })?
+        };
+        if first_upload || !rebuilt_sections.is_empty() || !removed_section_keys.is_empty() {
+            self.mesh_upload_count += 1;
         }
-        self.mesh_upload_count += 1;
-        Ok(())
+        self.applied_section_keys = current_section_keys.clone();
+        Ok(upload_report)
     }
+}
+
+fn chunk_pos_for_section(key: RenderSectionKey) -> ChunkPos {
+    ChunkPos {
+        x: key.chunk_x,
+        z: key.chunk_z,
+    }
+}
+
+fn dirty_chunk_positions(
+    previous_chunks: &BTreeSet<ChunkPos>,
+    current_chunks: &BTreeSet<ChunkPos>,
+) -> BTreeSet<ChunkPos> {
+    if previous_chunks.is_empty() {
+        return current_chunks.clone();
+    }
+    let added_chunks = current_chunks
+        .difference(previous_chunks)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let removed_chunks = previous_chunks
+        .difference(current_chunks)
+        .copied()
+        .collect::<BTreeSet<_>>();
+    current_chunks
+        .iter()
+        .copied()
+        .filter(|pos| added_chunks.contains(pos) || has_removed_neighbor(*pos, &removed_chunks))
+        .collect()
+}
+
+fn has_removed_neighbor(pos: ChunkPos, removed_chunks: &BTreeSet<ChunkPos>) -> bool {
+    [
+        ChunkPos::new(pos.x - 1, pos.z),
+        ChunkPos::new(pos.x + 1, pos.z),
+        ChunkPos::new(pos.x, pos.z - 1),
+        ChunkPos::new(pos.x, pos.z + 1),
+    ]
+    .into_iter()
+    .any(|neighbor| removed_chunks.contains(&neighbor))
+}
+
+fn upload_report_for_sections(
+    sections: &[TexturedRenderSectionMesh],
+) -> TexturedSectionUploadReport {
+    let mut report = TexturedSectionUploadReport::default();
+    for section in sections {
+        if section.is_empty() {
+            continue;
+        }
+        let stats = section.stats();
+        report.uploaded_section_count += 1;
+        report.uploaded_vertex_count += stats.vertex_count;
+        report.uploaded_index_count += stats.index_count;
+    }
+    report
+}
+
+#[derive(Clone, Debug)]
+struct WebSectionBuild {
+    sections: Vec<TexturedRenderSectionMesh>,
+    section_keys: BTreeSet<RenderSectionKey>,
+    resident_section_count: usize,
+    vertex_count: u32,
+}
+
+#[derive(Clone, Debug)]
+struct WebMeshChunkBlocks {
+    chunk_x: i32,
+    chunk_z: i32,
+    min_y: i32,
+    height: i32,
+    blocks: Vec<BlockStateId>,
+    light_sections: Vec<PackedLightSection>,
+}
+
+fn build_textured_sections_for_client(
+    client: &mclone_client::ClientRuntime,
+    catalog: &TexturedMeshCatalog,
+) -> Result<WebSectionBuild, String> {
+    let chunks = client
+        .chunk_snapshots()
+        .map(snapshot_mesh_chunk)
+        .collect::<Result<Vec<_>, _>>()?;
+    let inputs = textured_mesh_inputs(&chunks);
+    let report = build_textured_render_sections_with_stats(&inputs, catalog)
+        .map_err(|error| format!("failed to build generated textured render sections: {error}"))?;
+    let mut resident_section_count = 0;
+    let mut vertex_count = 0;
+    let mut section_keys = BTreeSet::new();
+    for section in &report.sections {
+        section_keys.insert(section.key);
+        if section.is_empty() {
+            continue;
+        }
+        resident_section_count += 1;
+        vertex_count += section.stats().vertex_count;
+    }
+    Ok(WebSectionBuild {
+        sections: report.sections,
+        section_keys,
+        resident_section_count,
+        vertex_count,
+    })
+}
+
+fn textured_mesh_inputs(chunks: &[WebMeshChunkBlocks]) -> Vec<TexturedChunkMeshInput<'_>> {
+    chunks
+        .iter()
+        .map(|chunk| {
+            TexturedChunkMeshInput::new(
+                chunk.chunk_x,
+                chunk.chunk_z,
+                chunk.min_y,
+                chunk.height,
+                &chunk.blocks,
+            )
+            .with_light_sections(&chunk.light_sections)
+        })
+        .collect()
+}
+
+fn snapshot_mesh_chunk(snapshot: &ChunkSnapshot) -> Result<WebMeshChunkBlocks, String> {
+    let blocks = snapshot_block_state_ids(snapshot)?;
+    Ok(WebMeshChunkBlocks {
+        chunk_x: snapshot.pos.x,
+        chunk_z: snapshot.pos.z,
+        min_y: snapshot.min_y,
+        height: snapshot.height,
+        blocks,
+        light_sections: snapshot.light_sections.clone(),
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -478,25 +732,6 @@ impl WebCanvasContext {
             height,
         })
     }
-}
-
-fn build_textured_chunk_mesh(
-    snapshot: &ChunkSnapshot,
-    catalog: &TexturedMeshCatalog,
-) -> Result<TexturedVisibleChunkMesh, String> {
-    let blocks = snapshot_block_state_ids(snapshot)?;
-    build_textured_visible_chunk_mesh(
-        TexturedChunkMeshInput::new(
-            snapshot.pos.x,
-            snapshot.pos.z,
-            snapshot.min_y,
-            snapshot.height,
-            &blocks,
-        )
-        .with_light_sections(&snapshot.light_sections),
-        catalog,
-    )
-    .map_err(|error| format!("failed to build generated textured chunk mesh: {error}"))
 }
 
 fn snapshot_block_state_ids(snapshot: &ChunkSnapshot) -> Result<Vec<BlockStateId>, String> {

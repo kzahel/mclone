@@ -286,8 +286,10 @@ function assertChunkRenderResult(report, canvasPixels, firstReport) {
   if (
     firstReport.centerX !== 0
     || firstReport.centerZ !== 0
+    || firstReport.radiusChunks !== 1
     || report.centerX !== 1
     || report.centerZ !== 0
+    || report.radiusChunks !== 1
   ) {
     throw new Error(`cached chunk session did not render the expected centers:\n${JSON.stringify({ firstReport, report }, null, 2)}`);
   }
@@ -302,6 +304,15 @@ function assertChunkRenderResult(report, canvasPixels, firstReport) {
     throw new Error(`first cached render did not initialize exactly one asset/atlas/mesh path:\n${JSON.stringify(firstReport, null, 2)}`);
   }
   if (
+    firstReport.loadedChunkCount !== 9
+    || firstReport.residentSectionCount <= 1
+    || firstReport.uploadedSectionCount !== firstReport.residentSectionCount
+    || firstReport.removedSectionCount !== 0
+    || firstReport.drawnSectionCount <= 0
+  ) {
+    throw new Error(`first section render did not upload the initial chunk view:\n${JSON.stringify(firstReport, null, 2)}`);
+  }
+  if (
     report.assetPackParseCount !== 1
     || report.terrainAssetLoadCount !== 1
     || report.atlasUploadCount !== 1
@@ -312,13 +323,28 @@ function assertChunkRenderResult(report, canvasPixels, firstReport) {
     throw new Error(`second cached render rebuilt non-mesh resources:\n${JSON.stringify(report, null, 2)}`);
   }
   if (
+    report.residentSectionCount <= 1
+    || report.drawnSectionCount <= 0
+    || report.uploadedSectionCount <= 0
+    || report.removedSectionCount <= 0
+    || report.uploadedSectionCount >= report.residentSectionCount
+  ) {
+    throw new Error(`second section render did not stream incremental section updates:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (
     report.commandCount !== 2
-    || report.updateCount !== 4
-    || report.loadedChunkCount !== 1
+    || report.updateCount <= firstReport.updateCount
+    || report.loadedChunkCount !== 9
   ) {
     throw new Error(`unexpected generated chunk runtime counts:\n${JSON.stringify(report, null, 2)}`);
   }
-  if (report.vertexCount <= 0 || report.indexCount <= 0 || report.faceCount <= 0) {
+  if (
+    report.vertexCount <= 0
+    || report.indexCount <= 0
+    || report.faceCount <= 0
+    || report.drawnIndexCount <= 0
+    || report.drawnFaceCount <= 0
+  ) {
     throw new Error(`generated chunk mesh was empty:\n${JSON.stringify(report, null, 2)}`);
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {

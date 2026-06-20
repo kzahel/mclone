@@ -184,8 +184,8 @@ async function renderCanvas() {
 
     const assetPack = await fetchAssetPack();
     const session = await module.mclone_web_create_chunk_render_session(canvas, assetPack);
-    const firstReport = session.renderChunkReport(0, 0, 0);
-    const report = session.renderChunkReport(1, 0, 0);
+    const firstReport = session.renderChunkReport(0, 0, 1);
+    const report = session.renderChunkReport(1, 0, 1);
     return {
       ok: Boolean(
         report.ok
