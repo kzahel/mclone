@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>mclone native web</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #080a0d;
+        color: #e7edf3;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        overflow: hidden;
+        background: #080a0d;
+      }
+
+      main {
+        display: grid;
+        grid-template-rows: minmax(0, 1fr) auto;
+        min-height: 100vh;
+      }
+
+      .viewport {
+        position: relative;
+        min-height: 0;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: #050607;
+      }
+
+      .hud {
+        position: absolute;
+        top: 16px;
+        left: 16px;
+        display: grid;
+        gap: 8px;
+        min-width: 220px;
+        padding: 12px;
+        border: 1px solid rgba(184, 198, 214, 0.22);
+        border-radius: 8px;
+        background: rgba(9, 13, 18, 0.84);
+        backdrop-filter: blur(10px);
+      }
+
+      .hud h1 {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.2;
+        font-weight: 700;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: auto auto;
+        gap: 4px 14px;
+        font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .stats dt {
+        color: #9aa8b6;
+      }
+
+      .stats dd {
+        margin: 0;
+        text-align: right;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(3, 40px);
+        grid-template-rows: repeat(2, 32px);
+        gap: 6px;
+        align-items: center;
+      }
+
+      button {
+        width: 40px;
+        height: 32px;
+        border: 1px solid #354151;
+        border-radius: 6px;
+        background: #151c25;
+        color: #e7edf3;
+        font-size: 16px;
+        line-height: 1;
+      }
+
+      button:hover,
+      button:focus-visible {
+        border-color: #6f8fbd;
+        outline: none;
+      }
+
+      .north {
+        grid-column: 2;
+      }
+
+      .west {
+        grid-column: 1;
+        grid-row: 2;
+      }
+
+      .south {
+        grid-column: 2;
+        grid-row: 2;
+      }
+
+      .east {
+        grid-column: 3;
+        grid-row: 2;
+      }
+
+      .status {
+        min-height: 34px;
+        padding: 10px 16px;
+        border-top: 1px solid #202a35;
+        background: #0d1218;
+        font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        color: #aeb9c5;
+      }
+
+      .status[data-ok="false"] {
+        color: #ffb4b4;
+      }
+
+      @media (max-width: 680px) {
+        .hud {
+          top: 10px;
+          left: 10px;
+          min-width: 190px;
+          padding: 10px;
+        }
+
+        .stats {
+          grid-template-columns: auto;
+        }
+
+        .stats dd {
+          text-align: left;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="viewport">
+        <canvas id="mclone-canvas" width="960" height="540" tabindex="0"></canvas>
+        <aside class="hud" aria-label="Runtime status">
+          <h1>mclone native web</h1>
+          <dl class="stats">
+            <dt>center</dt><dd id="center">0, 0</dd>
+            <dt>chunks</dt><dd id="chunks">0</dd>
+            <dt>sections</dt><dd id="sections">0</dd>
+            <dt>pending</dt><dd id="pending">0</dd>
+            <dt>frames</dt><dd id="frames">0</dd>
+          </dl>
+          <div class="controls" aria-label="Chunk navigation">
+            <button class="north" type="button" data-dx="0" data-dz="-1" aria-label="Move north">^</button>
+            <button class="west" type="button" data-dx="-1" data-dz="0" aria-label="Move west">&lt;</button>
+            <button class="south" type="button" data-dx="0" data-dz="1" aria-label="Move south">v</button>
+            <button class="east" type="button" data-dx="1" data-dz="0" aria-label="Move east">&gt;</button>
+          </div>
+        </aside>
+      </section>
+      <div id="status" class="status" data-ok="true">booting</div>
+    </main>
+    <script type="module" src="./mclone-web-app.js"></script>
+  </body>
+</html>

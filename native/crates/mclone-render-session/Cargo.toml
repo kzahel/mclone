@@ -10,8 +10,6 @@ anyhow.workspace = true
 mclone-client.workspace = true
 mclone-core.workspace = true
 mclone-mesh.workspace = true
-
-[dev-dependencies]
 mclone-protocol.workspace = true
 
 [lib]

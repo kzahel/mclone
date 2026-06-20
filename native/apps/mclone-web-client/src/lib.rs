@@ -8,7 +8,7 @@ use mclone_protocol::{
     decode_client_command, decode_server_update, encode_client_command, encode_server_update,
 };
 use mclone_render::RenderBackend;
-use mclone_render_session::EngineRenderSession;
+use mclone_render_session::{EngineRenderSession, EngineServerUpdateDirtyPolicy};
 use mclone_server::IntegratedServer;
 
 #[cfg(target_arch = "wasm32")]
@@ -117,11 +117,14 @@ impl WebRuntime {
         self.update_count += exchange.update_count;
         self.protocol_codec_roundtrip &= exchange.protocol_codec_roundtrip;
         self.transport_drained &= exchange.transport_drained;
-        self.engine.client_mut().apply_updates(exchange.updates);
+        let update_report = self.engine.apply_server_updates_with_dirty_policy(
+            exchange.updates,
+            EngineServerUpdateDirtyPolicy::SECTION_BLOCK_UPDATES_ONLY,
+        );
 
         Ok(WebRuntimeStepReport {
             command_count: exchange.command_count,
-            update_count: exchange.update_count,
+            update_count: update_report.updates,
             loaded_chunk_count: self.engine.client().loaded_chunk_count(),
             protocol_codec_roundtrip: exchange.protocol_codec_roundtrip,
             transport_drained: exchange.transport_drained,

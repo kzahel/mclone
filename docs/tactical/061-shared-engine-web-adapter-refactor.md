@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active first `EngineRenderSession` shell landed.
+Status: active; shared update dirtying and the first browser app loop landed.
 
 ## Purpose
 
@@ -523,6 +523,22 @@ First `EngineRenderSession` shell result:
   `ClientRuntime` snapshot, prepares ready render work through the shell, and
   verifies the resulting compile request/inflight transition.
 
+Shared update dirtying result:
+
+- Added `EngineServerUpdateReport` and `EngineServerUpdateDirtyPolicy` to
+  `mclone-render-session`.
+- Moved section-block dirty key calculation out of desktop
+  `scene_runtime.rs` into the shared engine session layer.
+- Desktop now uses the shared server-update classifier and dirty-marker while
+  preserving native timing fields and the native chunk-neighborhood dirtying
+  policy.
+- Web loopback now applies server updates through the shared helper with
+  `SECTION_BLOCK_UPDATES_ONLY`, so loaded-view sync still owns chunk add/remove
+  invalidation and block deltas share the same dirty-section policy as desktop.
+- Added shared tests for block-delta boundary dirtying, full update
+  application, and web-style snapshot dirtying that is intentionally delegated
+  to loaded-view sync.
+
 ### 4. Add Browser App Loop Over Shared Session
 
 Only after the shared session exists, replace the two-shot WASM smoke shape with
@@ -540,6 +556,23 @@ Acceptance:
 - Playwright can still run deterministic two-step validation
 - a manual browser page can move the camera and see streamed terrain update
 - counters come from the shared session, not web-only bookkeeping
+
+First browser app-loop result:
+
+- Added `native/apps/mclone-web-client/www/app.html` and
+  `mclone-web-app.js` as a minimal manual browser app over the Rust/WASM
+  session.
+- The page owns a persistent `WebChunkRenderSession`, fetches the packed
+  vanilla asset zip, submits browser worker compile jobs, uploads through
+  WebGPU, and keeps presenting through `requestAnimationFrame`.
+- Keyboard arrows/WASD and on-page buttons move the chunk center one chunk at a
+  time; this is a chunk-overview navigation loop, not first-person input yet.
+- Added `native:web:app-smoke`, which uses Playwright to boot `app.html`, press
+  `ArrowRight`, wait for center `(1, 0)` with zero pending compile jobs, assert
+  generated pixels in the canvas screenshot, and save page/canvas screenshots
+  under `/tmp`.
+- The current web app still has no pointer lock, mouse-look, player movement,
+  pause/options menus, inventory UI, or multiplayer/server selection UI.
 
 ### 5. Add Web Worker/Thread Policy
 
@@ -602,6 +635,7 @@ cargo test --manifest-path native/Cargo.toml -p mclone-web-client -p mclone-nati
 cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown
 pnpm --silent native:web:thread-smoke
 pnpm --silent native:web:chunk-smoke
+pnpm --silent native:web:app-smoke
 ```
 
 For rendered-output changes, inspect screenshots saved under `/tmp`, especially:
@@ -609,6 +643,8 @@ For rendered-output changes, inspect screenshots saved under `/tmp`, especially:
 ```text
 /tmp/mclone-native-web-canvas.png
 /tmp/mclone-native-web-smoke.png
+/tmp/mclone-native-web-app.png
+/tmp/mclone-native-web-app-canvas.png
 /tmp/mclone-native-debug.png
 ```
 
@@ -634,16 +670,19 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should move client-update dirty classification into the shared
-engine shell while keeping transport in the adapters:
+The next slice should replace chunk-step browser navigation with real
+platform-neutral browser view/input plumbing while keeping runtime and render
+policy shared:
 
-1. Add a shared `EngineRenderSession` update-application/report helper for
-   `ServerUpdate` batches.
-2. Move section-block update dirty-key calculation out of desktop
-   `scene_runtime.rs` so snapshots, unloads, and block deltas all invalidate
-   render sections through the same shared policy.
-3. Keep adapter-specific timing/diagnostic fields in desktop and browser, but
-   make the changed/snapshot/unload/section-update counts come from the shared
-   report.
-4. Preserve desktop camera-neighbor readiness, web deferred-removal behavior,
-   native threaded compile workers, browser workers, and all screenshot gates.
+1. Add a small shared frame/input boundary for camera pose, movement intent,
+   target size, and render-view updates that desktop and web can both feed.
+2. Move the web app from chunk-center stepping to first-person/no-clip movement
+   using keyboard input and pointer-lock mouse look in the browser adapter.
+3. Keep browser worker compile submission, shared dirty/session policy, and
+   WebGPU presentation unchanged; this is input/view integration, not a new web
+   renderer.
+4. Extend `native:web:app-smoke` to validate keyboard movement, pointer-lock
+   fallback behavior where headless browsers cannot grant lock, RAF progress,
+   zero pending compile jobs, and screenshots after movement.
+5. Leave menus/options/inventory as a later UI slice once browser movement and
+   camera parity are in place.

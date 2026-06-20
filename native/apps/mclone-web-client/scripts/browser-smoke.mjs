@@ -30,10 +30,12 @@ const bindgenOutDir = join(
   "debug",
   "mclone-web-client-bindgen",
 );
+const appLoop = process.argv.includes("--app-loop")
+  || process.env.MCLONE_NATIVE_WEB_APP_LOOP === "1";
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
-  ?? "/tmp/mclone-native-web-smoke.png";
+  ?? (appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
 const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
-  ?? "/tmp/mclone-native-web-canvas.png";
+  ?? (appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
 const requireChunk = process.argv.includes("--require-chunk")
   || process.env.MCLONE_NATIVE_WEB_REQUIRE_CHUNK === "1";
 const requireCanvas = requireChunk
@@ -66,10 +68,75 @@ async function run() {
     });
     const page = await browser.newPage();
     const pageErrors = [];
+    const pageLogs = [];
     page.on("pageerror", (error) => pageErrors.push(String(error)));
     page.on("console", (message) => {
+      pageLogs.push(`${message.type()}: ${message.text()}`);
       if (message.type() === "error") pageErrors.push(message.text());
     });
+
+    if (appLoop) {
+      await page.goto(`${baseUrl}/app.html`, { waitUntil: "load" });
+      await page.waitForFunction(
+        () => typeof globalThis.__mcloneWebApp !== "undefined",
+        undefined,
+        { timeout: 20_000 },
+      );
+      try {
+        await page.waitForFunction(
+          () => {
+            const app = globalThis.__mcloneWebApp;
+            return app?.ready === true || app?.state?.failed === true;
+          },
+          undefined,
+          { timeout: 60_000 },
+        );
+      } catch (error) {
+        const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+        const statusText = await page.locator("#status").textContent().catch(() => null);
+        throw new Error(`native web app did not finish booting: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}\nstatus=${statusText}\nlogs=${pageLogs.join("\n")}`);
+      }
+      const bootState = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+      if (!bootState?.ready || !bootState?.ok) {
+        throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
+      }
+      await page.keyboard.press("ArrowRight");
+      await page.waitForFunction(
+        () => {
+          const state = globalThis.__mcloneWebApp?.state;
+          return state?.ok === true
+            && state.centerX === 1
+            && state.centerZ === 0
+            && state.renderCount >= 2
+            && state.pendingCompileJobCount === 0;
+        },
+        undefined,
+        { timeout: 60_000 },
+      );
+      const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+      let pageScreenshotCaptured = false;
+      try {
+        await page.screenshot({ path: screenshotPath, fullPage: false, timeout: 5_000 });
+        pageScreenshotCaptured = true;
+      } catch (error) {
+        console.warn(`page screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const canvas = page.locator("#mclone-canvas");
+      const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
+      const canvasPixels = analyzePng(canvasPng);
+
+      assertAppLoopResult(result, pageErrors, canvasPixels);
+      console.log(JSON.stringify({
+        url: `${baseUrl}/app.html`,
+        screenshotPath,
+        pageScreenshotCaptured,
+        canvasScreenshotPath,
+        appLoop,
+        canvasPixels,
+        result,
+      }, null, 2));
+      return;
+    }
 
     await page.goto(baseUrl, { waitUntil: "load" });
     await page.waitForFunction(
@@ -307,6 +374,32 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
     );
   } else if (canvasPixels.distinctColorCount < 1 || canvasPixels.clearColorPixelCount < 16) {
     throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+function assertAppLoopResult(result, pageErrors, canvasPixels) {
+  if (pageErrors.length > 0) {
+    throw new Error(`browser app page errors:\n${pageErrors.join("\n")}`);
+  }
+  if (!result?.ok || !result.ready) {
+    throw new Error(`native web app loop failed:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (
+    result.centerX !== 1
+    || result.centerZ !== 0
+    || result.radiusChunks !== 1
+    || result.renderCount < 2
+    || result.loadedChunkCount !== 9
+    || result.residentSectionCount <= 1
+    || result.pendingCompileJobCount !== 0
+  ) {
+    throw new Error(`native web app loop did not move and render the expected chunk view:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (result.frameCount <= 0) {
+    throw new Error(`native web app requestAnimationFrame loop did not advance:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
+    throw new Error(`app canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 

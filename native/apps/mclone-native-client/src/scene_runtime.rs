@@ -5,15 +5,12 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, block_to_chunk_coord,
-    block_to_section_coord, chunk_block_coord, chunk_middle_block_coord, local_block_coord,
-    local_section_block_coord,
+    AIR_BLOCK_STATE_ID, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, block_to_section_coord,
+    chunk_middle_block_coord, local_block_coord, local_section_block_coord,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
 use mclone_net::LocalTransport;
-use mclone_protocol::{
-    ChunkView, ClientCommand, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
-};
+use mclone_protocol::{ChunkView, ClientCommand, PlayerPositionUpdate, ServerUpdate};
 use mclone_server::IntegratedServer;
 
 use crate::MIN_RENDER_DISTANCE;
@@ -515,84 +512,21 @@ impl WindowSceneRuntime {
         updates: Vec<ServerUpdate>,
     ) -> RuntimeUpdateApplyReport {
         let total_start = Instant::now();
-        // Time updates arrive every tick and animate the sky, but they do not
-        // dirty any chunk geometry; the renderer reads time-of-day each frame, so
-        // they must not by themselves force a section re-upload.
-        let changed = updates.iter().any(|update| {
-            !matches!(
-                update,
-                ServerUpdate::TimeUpdate { .. }
-                    | ServerUpdate::RemotePlayerAdd(_)
-                    | ServerUpdate::RemotePlayerUpdate(_)
-                    | ServerUpdate::RemotePlayerRemove { .. }
-                    | ServerUpdate::EntitySnapshot(_)
-                    | ServerUpdate::EntityUpdate(_)
-                    | ServerUpdate::EntityRemove { .. }
-            )
-        });
-        let update_count = updates.len();
-        let mut snapshot_updates = 0;
-        let mut section_block_updates = 0;
-        let mut unload_updates = 0;
         let dirty_mark_start = Instant::now();
-        for update in &updates {
-            match update {
-                ServerUpdate::ChunkSnapshot(snapshot) => {
-                    snapshot_updates += 1;
-                    self.mark_render_chunk_dirty(snapshot.pos);
-                }
-                ServerUpdate::ChunkUnload { pos } => {
-                    unload_updates += 1;
-                    self.mark_render_chunk_dirty(*pos);
-                }
-                ServerUpdate::SectionBlockUpdates {
-                    pos,
-                    section_y,
-                    updates,
-                } => {
-                    section_block_updates += 1;
-                    self.mark_render_section_updates_dirty(*pos, *section_y, updates);
-                }
-                ServerUpdate::TimeUpdate { .. } => {}
-                ServerUpdate::PlayerPosition(_) => {}
-                ServerUpdate::RemotePlayerAdd(_)
-                | ServerUpdate::RemotePlayerUpdate(_)
-                | ServerUpdate::RemotePlayerRemove { .. }
-                | ServerUpdate::EntitySnapshot(_)
-                | ServerUpdate::EntityUpdate(_)
-                | ServerUpdate::EntityRemove { .. } => {}
-            }
-        }
+        let update_report = self.engine.mark_server_update_render_dirty(&updates);
         let dirty_mark_ms = elapsed_ms(dirty_mark_start.elapsed());
         let client_apply_start = Instant::now();
         self.client_mut().apply_updates(updates);
         let client_apply_updates_ms = elapsed_ms(client_apply_start.elapsed());
         RuntimeUpdateApplyReport {
-            changed,
+            changed: update_report.changed,
             total_ms: elapsed_ms(total_start.elapsed()),
             dirty_mark_ms,
             client_apply_updates_ms,
-            updates: update_count,
-            snapshot_updates,
-            section_block_updates,
-            unload_updates,
-        }
-    }
-
-    fn mark_render_chunk_dirty(&mut self, pos: ChunkPos) {
-        self.engine.mark_chunk_neighborhood_dirty(pos);
-    }
-
-    fn mark_render_section_updates_dirty(
-        &mut self,
-        pos: ChunkPos,
-        section_y: i32,
-        updates: &[SectionBlockUpdate],
-    ) {
-        for update in updates {
-            for key in render_dirty_section_keys_for_block_update(pos, section_y, update) {
-                self.engine.mark_section_dirty(key);
-            }
+            updates: update_report.updates,
+            snapshot_updates: update_report.snapshot_updates,
+            section_block_updates: update_report.section_block_updates,
+            unload_updates: update_report.unload_updates,
         }
     }
 
@@ -1048,29 +982,6 @@ fn snapshot_block_state_at_world(
     )
 }
 
-fn render_dirty_section_keys_for_block_update(
-    pos: ChunkPos,
-    section_y: i32,
-    update: &SectionBlockUpdate,
-) -> BTreeSet<RenderSectionKey> {
-    let world_x = chunk_block_coord(pos.x, update.local_x as i32);
-    let world_y = section_y * SECTION_HEIGHT + update.local_y as i32;
-    let world_z = chunk_block_coord(pos.z, update.local_z as i32);
-    let mut keys = BTreeSet::new();
-    for z in world_z - 1..=world_z + 1 {
-        for x in world_x - 1..=world_x + 1 {
-            for y in world_y - 1..=world_y + 1 {
-                keys.insert(RenderSectionKey::new(
-                    block_to_chunk_coord(x),
-                    block_to_section_coord(y),
-                    block_to_chunk_coord(z),
-                ));
-            }
-        }
-    }
-    keys
-}
-
 fn render_section_neighbor_readiness(
     client: &ClientRuntime,
     key: RenderSectionKey,
@@ -1185,10 +1096,12 @@ mod tests {
     use crate::camera::SpectatorCamera;
     use crate::render_cache::extracted_asset_root;
     use mclone_core::{BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
+    use mclone_protocol::SectionBlockUpdate;
     use mclone_render::chunk::{
         ChunkCamera, TexturedSectionRenderOptions,
         textured_section_visibility_stats_with_options_and_ready_sections,
     };
+    use mclone_render_session::render_dirty_section_keys_for_block_update;
 
     #[test]
     fn snapshot_block_state_lookup_reads_loaded_sections_and_omitted_air() {

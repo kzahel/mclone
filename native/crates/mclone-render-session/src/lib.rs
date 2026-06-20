@@ -6,7 +6,8 @@ use anyhow::{Context, Result, bail};
 use mclone_client::ClientRuntime;
 use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
-    PackedLightSection, SECTION_HEIGHT,
+    PackedLightSection, SECTION_HEIGHT, block_to_chunk_coord, block_to_section_coord,
+    chunk_block_coord,
 };
 use mclone_mesh::{
     RenderSectionKey, TexturedChunkMeshInput, TexturedChunkVertex, TexturedMeshCatalog,
@@ -15,6 +16,7 @@ use mclone_mesh::{
     build_textured_render_sections_for_section_set_with_stats,
     build_textured_render_sections_with_stats, quad_face_count_from_indices,
 };
+use mclone_protocol::{SectionBlockUpdate, ServerUpdate};
 
 const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR1\0";
 
@@ -587,6 +589,95 @@ pub fn finish_render_section_compile_result(
     })
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct EngineServerUpdateReport {
+    pub changed: bool,
+    pub updates: usize,
+    pub snapshot_updates: usize,
+    pub section_block_updates: usize,
+    pub unload_updates: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EngineServerUpdateDirtyPolicy {
+    pub dirty_chunk_snapshots: bool,
+    pub dirty_chunk_unloads: bool,
+    pub dirty_section_block_updates: bool,
+}
+
+impl EngineServerUpdateDirtyPolicy {
+    pub const ALL: Self = Self {
+        dirty_chunk_snapshots: true,
+        dirty_chunk_unloads: true,
+        dirty_section_block_updates: true,
+    };
+
+    pub const SECTION_BLOCK_UPDATES_ONLY: Self = Self {
+        dirty_chunk_snapshots: false,
+        dirty_chunk_unloads: false,
+        dirty_section_block_updates: true,
+    };
+}
+
+impl EngineServerUpdateReport {
+    pub fn classify(updates: &[ServerUpdate]) -> Self {
+        let mut report = Self {
+            updates: updates.len(),
+            ..Self::default()
+        };
+        for update in updates {
+            match update {
+                ServerUpdate::ChunkSnapshot(_) => {
+                    report.changed = true;
+                    report.snapshot_updates += 1;
+                }
+                ServerUpdate::ChunkUnload { .. } => {
+                    report.changed = true;
+                    report.unload_updates += 1;
+                }
+                ServerUpdate::SectionBlockUpdates { .. } => {
+                    report.changed = true;
+                    report.section_block_updates += 1;
+                }
+                ServerUpdate::PlayerPosition(_) => {
+                    report.changed = true;
+                }
+                ServerUpdate::TimeUpdate { .. }
+                | ServerUpdate::RemotePlayerAdd(_)
+                | ServerUpdate::RemotePlayerUpdate(_)
+                | ServerUpdate::RemotePlayerRemove { .. }
+                | ServerUpdate::EntitySnapshot(_)
+                | ServerUpdate::EntityUpdate(_)
+                | ServerUpdate::EntityRemove { .. } => {}
+            }
+        }
+        report
+    }
+}
+
+pub fn render_dirty_section_keys_for_block_update(
+    pos: ChunkPos,
+    section_y: i32,
+    update: &SectionBlockUpdate,
+) -> BTreeSet<RenderSectionKey> {
+    let world_x = chunk_block_coord(pos.x, update.local_x as i32);
+    let world_y = section_y * SECTION_HEIGHT + update.local_y as i32;
+    let world_z = chunk_block_coord(pos.z, update.local_z as i32);
+    let mut keys = BTreeSet::new();
+    for z in world_z - 1..=world_z + 1 {
+        for x in world_x - 1..=world_x + 1 {
+            for y in world_y - 1..=world_y + 1 {
+                keys.insert(RenderSectionKey::new(
+                    block_to_chunk_coord(x),
+                    block_to_section_coord(y),
+                    block_to_chunk_coord(z),
+                ));
+            }
+        }
+    }
+    keys
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct RenderSectionSession {
     cache: CachedTexturedRenderSections,
@@ -636,6 +727,78 @@ impl EngineRenderSession {
 
     pub fn mark_section_dirty(&mut self, key: RenderSectionKey) {
         self.render_session.mark_section_dirty(key);
+    }
+
+    pub fn mark_server_update_render_dirty(
+        &mut self,
+        updates: &[ServerUpdate],
+    ) -> EngineServerUpdateReport {
+        self.mark_server_update_render_dirty_with_policy(
+            updates,
+            EngineServerUpdateDirtyPolicy::ALL,
+        )
+    }
+
+    pub fn mark_server_update_render_dirty_with_policy(
+        &mut self,
+        updates: &[ServerUpdate],
+        policy: EngineServerUpdateDirtyPolicy,
+    ) -> EngineServerUpdateReport {
+        let report = EngineServerUpdateReport::classify(updates);
+        for update in updates {
+            match update {
+                ServerUpdate::ChunkSnapshot(snapshot) => {
+                    if policy.dirty_chunk_snapshots {
+                        self.mark_chunk_neighborhood_dirty(snapshot.pos);
+                    }
+                }
+                ServerUpdate::ChunkUnload { pos } => {
+                    if policy.dirty_chunk_unloads {
+                        self.mark_chunk_neighborhood_dirty(*pos);
+                    }
+                }
+                ServerUpdate::SectionBlockUpdates {
+                    pos,
+                    section_y,
+                    updates,
+                } => {
+                    if policy.dirty_section_block_updates {
+                        for update in updates {
+                            for key in
+                                render_dirty_section_keys_for_block_update(*pos, *section_y, update)
+                            {
+                                self.mark_section_dirty(key);
+                            }
+                        }
+                    }
+                }
+                ServerUpdate::TimeUpdate { .. } => {}
+                ServerUpdate::PlayerPosition(_) => {}
+                ServerUpdate::RemotePlayerAdd(_)
+                | ServerUpdate::RemotePlayerUpdate(_)
+                | ServerUpdate::RemotePlayerRemove { .. }
+                | ServerUpdate::EntitySnapshot(_)
+                | ServerUpdate::EntityUpdate(_)
+                | ServerUpdate::EntityRemove { .. } => {}
+            }
+        }
+        report
+    }
+
+    pub fn apply_server_updates(&mut self, updates: Vec<ServerUpdate>) -> EngineServerUpdateReport {
+        let report = self.mark_server_update_render_dirty(&updates);
+        self.client.apply_updates(updates);
+        report
+    }
+
+    pub fn apply_server_updates_with_dirty_policy(
+        &mut self,
+        updates: Vec<ServerUpdate>,
+        policy: EngineServerUpdateDirtyPolicy,
+    ) -> EngineServerUpdateReport {
+        let report = self.mark_server_update_render_dirty_with_policy(&updates, policy);
+        self.client.apply_updates(updates);
+        report
     }
 
     pub fn clear_client_replica_and_mark_render_dirty(&mut self) -> Vec<ChunkPos> {
@@ -1838,7 +2001,7 @@ mod tests {
         TexturedChunkVertex, TexturedRenderSectionBuildReport, TexturedVisibleChunkMesh,
         VisibilityGraphBuildStats, VisibilitySet,
     };
-    use mclone_protocol::ServerUpdate;
+    use mclone_protocol::{SectionBlockUpdate, ServerUpdate};
 
     use super::*;
 
@@ -1942,6 +2105,34 @@ mod tests {
     }
 
     #[test]
+    fn block_delta_dirty_sections_cross_chunk_and_section_boundaries() {
+        let keys = render_dirty_section_keys_for_block_update(
+            ChunkPos::new(0, 0),
+            0,
+            &SectionBlockUpdate {
+                local_x: 0,
+                local_y: 0,
+                local_z: 15,
+                block_state: BlockStateId(42),
+            },
+        );
+
+        assert_eq!(
+            keys,
+            BTreeSet::from([
+                RenderSectionKey::new(-1, -1, 0),
+                RenderSectionKey::new(-1, -1, 1),
+                RenderSectionKey::new(-1, 0, 0),
+                RenderSectionKey::new(-1, 0, 1),
+                RenderSectionKey::new(0, -1, 0),
+                RenderSectionKey::new(0, -1, 1),
+                RenderSectionKey::new(0, 0, 0),
+                RenderSectionKey::new(0, 0, 1),
+            ])
+        );
+    }
+
+    #[test]
     fn engine_render_session_prepares_ready_work_from_client_snapshots() {
         let chunk = ChunkPos::new(2, -1);
         let key = RenderSectionKey::new(2, 0, -1);
@@ -1993,6 +2184,79 @@ mod tests {
             BTreeSet::from([key])
         );
         assert!(engine.render_session().dirty().dirty_chunks.is_empty());
+    }
+
+    #[test]
+    fn engine_render_session_applies_server_updates_and_marks_render_dirty() {
+        let chunk = ChunkPos::new(0, 0);
+        let key = RenderSectionKey::new(0, 7, 0);
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(empty_test_snapshot(
+            chunk,
+            0,
+            SECTION_HEIGHT * 16,
+        )));
+        let mut engine = EngineRenderSession::new(client);
+
+        let report = engine.apply_server_updates(vec![
+            ServerUpdate::TimeUpdate { day_time: 1 },
+            ServerUpdate::SectionBlockUpdates {
+                pos: chunk,
+                section_y: 7,
+                updates: vec![SectionBlockUpdate {
+                    local_x: 8,
+                    local_y: 8,
+                    local_z: 8,
+                    block_state: AIR_BLOCK_STATE_ID,
+                }],
+            },
+        ]);
+
+        assert_eq!(
+            report,
+            EngineServerUpdateReport {
+                changed: true,
+                updates: 2,
+                snapshot_updates: 0,
+                section_block_updates: 1,
+                unload_updates: 0,
+            }
+        );
+        assert_eq!(engine.client().day_time(), 1);
+        assert!(engine.render_session().dirty().dirty_chunks.is_empty());
+        assert_eq!(
+            engine.render_session().dirty().dirty_sections,
+            BTreeSet::from([key])
+        );
+    }
+
+    #[test]
+    fn engine_render_session_can_leave_snapshot_dirtying_to_view_sync_policy() {
+        let chunk = ChunkPos::new(3, 4);
+        let mut engine = EngineRenderSession::new(ClientRuntime::local_integrated());
+
+        let report = engine.apply_server_updates_with_dirty_policy(
+            vec![ServerUpdate::ChunkSnapshot(empty_test_snapshot(
+                chunk,
+                0,
+                SECTION_HEIGHT,
+            ))],
+            EngineServerUpdateDirtyPolicy::SECTION_BLOCK_UPDATES_ONLY,
+        );
+
+        assert_eq!(
+            report,
+            EngineServerUpdateReport {
+                changed: true,
+                updates: 1,
+                snapshot_updates: 1,
+                section_block_updates: 0,
+                unload_updates: 0,
+            }
+        );
+        assert!(engine.client().chunk_snapshot(chunk).is_some());
+        assert!(engine.render_session().dirty().dirty_chunks.is_empty());
+        assert!(engine.render_session().dirty().dirty_sections.is_empty());
     }
 
     #[test]
