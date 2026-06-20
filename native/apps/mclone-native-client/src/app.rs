@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use mclone_client::{
+    ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationKind,
     ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LocalPlayerController,
     LocalPlayerPose, NoClipMovementStep, PlayerInputKey, WalkingMovementStep,
 };
@@ -129,9 +130,9 @@ pub(crate) struct RenderStreamStats {
     pub(crate) last_remesh_ms: f64,
     pub(crate) last_upload_ms: f64,
     pub(crate) last_frame_ms: f32,
-    pub(crate) remote_actor_count: usize,
-    pub(crate) drawn_remote_actor_count: usize,
-    pub(crate) drawn_remote_actor_index_count: u32,
+    pub(crate) actor_count: usize,
+    pub(crate) drawn_actor_count: usize,
+    pub(crate) drawn_actor_index_count: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -141,8 +142,8 @@ pub(crate) struct FullFrameRenderSummary {
     pub(crate) index_count: u32,
     pub(crate) drawn_index_count: u32,
     pub(crate) gui_command_count: usize,
-    pub(crate) remote_actor_count: usize,
-    pub(crate) drawn_remote_actor_count: usize,
+    pub(crate) actor_count: usize,
+    pub(crate) drawn_actor_count: usize,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -154,7 +155,7 @@ pub(crate) fn render_full_frame(
     actors: &mut ActorDrawResources,
     gui: &mut GuiRenderer,
     camera: ChunkCamera,
-    remote_player_actors: &[ActorInstance],
+    actor_instances: &[ActorInstance],
     sky_clear_color: wgpu::Color,
     time_of_day: f32,
     sun_angle: f32,
@@ -205,16 +206,16 @@ pub(crate) fn render_full_frame(
             frame.encoder,
             frame.target.with_depth(&depth.view),
             render_view,
-            remote_player_actors,
+            actor_instances,
         )?;
     } else {
         render_stats.drawn_section_count = 0;
         render_stats.drawn_face_count = 0;
         render_stats.drawn_index_count = 0;
     }
-    render_stats.remote_actor_count = remote_player_actors.len();
-    render_stats.drawn_remote_actor_count = actor_stats.drawn_actor_count;
-    render_stats.drawn_remote_actor_index_count = actor_stats.index_count;
+    render_stats.actor_count = actor_instances.len();
+    render_stats.drawn_actor_count = actor_stats.drawn_actor_count;
+    render_stats.drawn_actor_index_count = actor_stats.index_count;
 
     let mut ui_draw = ui.render_draw_list(render_options, frame_pacing);
     if let Some(mut stats) = debug_stats {
@@ -245,8 +246,8 @@ pub(crate) fn render_full_frame(
         index_count: draw.index_count(),
         drawn_index_count: render_stats.drawn_index_count,
         gui_command_count,
-        remote_actor_count: remote_player_actors.len(),
-        drawn_remote_actor_count: actor_stats.drawn_actor_count,
+        actor_count: actor_instances.len(),
+        drawn_actor_count: actor_stats.drawn_actor_count,
     })
 }
 
@@ -255,6 +256,7 @@ struct ChunkApp {
     spectator: SpectatorCamera,
     player: LocalPlayerController,
     movement_mode: PlayerMovementMode,
+    actor_interpolation: ActorInterpolationState,
     interaction: ClientInteractionController,
     render_options: TexturedSectionRenderOptions,
     frame_pacing: FramePacing,
@@ -290,6 +292,7 @@ impl ChunkApp {
             spectator,
             player,
             movement_mode: PlayerMovementMode::default(),
+            actor_interpolation: ActorInterpolationState::new(),
             interaction: ClientInteractionController::new(),
             render_options,
             frame_pacing: FramePacing::default(),
@@ -711,6 +714,16 @@ impl ChunkApp {
         }
     }
 
+    fn interpolated_actor_instances(&mut self) -> Vec<ActorInstance> {
+        self.actor_interpolation
+            .reconcile_authoritative(self.runtime.client.actor_presentations());
+        self.actor_interpolation.step(
+            (self.render_stats.last_frame_ms * 0.001).min(0.1),
+            ActorInterpolationConfig::default(),
+        );
+        actor_instances_from_presentations(&self.actor_interpolation.presentations())
+    }
+
     fn sync_server_player_pose(&mut self) -> Result<bool> {
         let changed = if let Some(command) = self.player.next_move_player_command() {
             self.runtime
@@ -809,17 +822,16 @@ fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
     glam::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
 }
 
-pub(crate) fn remote_player_actor_instances(
-    client: &mclone_client::ClientRuntime,
+pub(crate) fn actor_instances_from_presentations(
+    presentations: &[ActorPresentation],
 ) -> Vec<ActorInstance> {
-    client
-        .remote_player_presentations()
-        .into_iter()
-        .map(|player| {
-            ActorInstance::remote_player(
-                glam_vec3_from_vec3d(player.feet_position),
-                player.y_rot_degrees,
-            )
+    presentations
+        .iter()
+        .map(|actor| match actor.kind {
+            ActorPresentationKind::RemotePlayer => ActorInstance::remote_player(
+                glam_vec3_from_vec3d(actor.feet_position),
+                actor.y_rot_degrees,
+            ),
         })
         .collect()
 }
@@ -1241,7 +1253,7 @@ impl ApplicationHandler for ChunkApp {
                 let sun_angle = self.runtime.sun_angle();
                 let render_options = self.effective_render_options();
                 let frame_pacing = self.frame_pacing.ui_state();
-                let remote_player_actors = remote_player_actor_instances(&self.runtime.client);
+                let actor_instances = self.interpolated_actor_instances();
                 let debug_stats = self
                     .debug_visible
                     .then(|| self.debug_pane_stats(render_options));
@@ -1280,7 +1292,7 @@ impl ApplicationHandler for ChunkApp {
                             actors,
                             gui,
                             camera,
-                            &remote_player_actors,
+                            &actor_instances,
                             sky_clear_color,
                             time_of_day,
                             sun_angle,
@@ -1399,9 +1411,10 @@ mod tests {
     }
 
     #[test]
-    fn remote_player_actor_instances_follow_client_presentations() {
+    fn actor_instances_follow_client_actor_presentations() {
         let integrated = mclone_client::ClientRuntime::local_integrated();
-        assert!(remote_player_actor_instances(&integrated).is_empty());
+        assert!(integrated.actor_presentations().is_empty());
+        assert!(actor_instances_from_presentations(&integrated.actor_presentations()).is_empty());
 
         let mut remote =
             mclone_client::ClientRuntime::new(mclone_client::ClientHost::RemoteDedicated);
@@ -1415,7 +1428,10 @@ mod tests {
             },
         ));
 
-        let actors = remote_player_actor_instances(&remote);
+        let mut interpolation =
+            ActorInterpolationState::from_authoritative(remote.actor_presentations());
+        interpolation.step(1.0, ActorInterpolationConfig::default());
+        let actors = actor_instances_from_presentations(&interpolation.presentations());
 
         assert_eq!(actors.len(), 1);
         assert_eq!(actors[0].feet_position, glam::Vec3::new(1.0, 64.0, 2.0));

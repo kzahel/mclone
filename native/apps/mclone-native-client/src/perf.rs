@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
+use mclone_client::{ActorInterpolationConfig, ActorInterpolationState};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_mesh::{VisibilityGraphBuildStats, quad_face_count_from_indices};
 use mclone_render::chunk::{
@@ -19,7 +20,7 @@ use mclone_render::target::RenderFrameContext;
 use mclone_ui::GuiScale;
 
 use crate::app::{
-    RenderStreamStats, record_render_section_update_stats, remote_player_actor_instances,
+    RenderStreamStats, actor_instances_from_presentations, record_render_section_update_stats,
     render_full_frame,
 };
 use crate::camera::{
@@ -499,6 +500,7 @@ impl FrameBudgetProbeFrameReport {
 
 struct FrameBudgetProbeState {
     runtime: WindowSceneRuntime,
+    actor_interpolation: ActorInterpolationState,
     depth: ChunkDepthTarget,
     sky: SkyRenderer,
     draw: TexturedSectionDrawResources,
@@ -1282,6 +1284,7 @@ pub(crate) fn run_frame_budget_probe(
             ui.set_scale(GuiScale::from_pixels(size[0], size[1]));
             Ok(FrameBudgetProbeState {
                 runtime,
+                actor_interpolation: ActorInterpolationState::new(),
                 depth,
                 sky,
                 draw,
@@ -1354,7 +1357,15 @@ pub(crate) fn run_frame_budget_probe(
             let sky_clear_color = state.runtime.sky_clear_color();
             let time_of_day = state.runtime.time_of_day();
             let sun_angle = state.runtime.sun_angle();
-            let remote_player_actors = remote_player_actor_instances(&state.runtime.client);
+            state
+                .actor_interpolation
+                .reconcile_authoritative(state.runtime.client.actor_presentations());
+            state.actor_interpolation.step(
+                (1.0 / probe_options.target_hz.max(1.0)) as f32,
+                ActorInterpolationConfig::default(),
+            );
+            let actor_instances =
+                actor_instances_from_presentations(&state.actor_interpolation.presentations());
             state.draw.set_traversal_ready_sections(
                 &state
                     .runtime
@@ -1369,7 +1380,7 @@ pub(crate) fn run_frame_budget_probe(
                 &mut state.actors,
                 &mut state.gui,
                 camera,
-                &remote_player_actors,
+                &actor_instances,
                 sky_clear_color,
                 time_of_day,
                 sun_angle,

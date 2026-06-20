@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use mclone_client::{ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT};
+use mclone_client::{
+    ActorInterpolationState, ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+};
 use mclone_core::{HitResultType, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_protocol::{AcceptTeleportCommand, ClientCommand, MovePlayerCommand};
@@ -20,7 +22,7 @@ use mclone_render::sky_render::SkyRenderer;
 use mclone_ui::GuiScale;
 
 use crate::app::{
-    RenderStreamStats, record_render_section_update_stats, remote_player_actor_instances,
+    RenderStreamStats, actor_instances_from_presentations, record_render_section_update_stats,
     render_full_frame,
 };
 use crate::camera::SpectatorCamera;
@@ -42,8 +44,8 @@ pub(crate) struct HeadlessScreenshotReport {
     pub(crate) drawn_index_count: u32,
     pub(crate) gui_command_count: usize,
     pub(crate) remote_player_count: usize,
-    pub(crate) remote_actor_count: usize,
-    pub(crate) drawn_remote_actor_count: usize,
+    pub(crate) actor_count: usize,
+    pub(crate) drawn_actor_count: usize,
 }
 pub(crate) fn write_headless_chunk_scenarios(
     directory: &Path,
@@ -90,7 +92,7 @@ pub(crate) fn run_headless_screenshot(
     if options.scripted_interaction {
         apply_scripted_interaction(&mut runtime, &mut spectator, initial_player_position)?;
     }
-    frame_first_remote_player_for_screenshot(&runtime, &mut spectator);
+    frame_first_actor_for_screenshot(&runtime, &mut spectator);
     let section_update = runtime.sync_all_render_sections(spectator.position)?;
     let sections = runtime.cached_sections();
     if sections.is_empty() {
@@ -115,7 +117,9 @@ pub(crate) fn run_headless_screenshot(
     let time_of_day = runtime.time_of_day();
     let sun_angle = runtime.sun_angle();
     let runtime_stats = runtime.stats();
-    let remote_player_actors = remote_player_actor_instances(&runtime.client);
+    let actor_interpolation =
+        ActorInterpolationState::from_authoritative(runtime.client.actor_presentations());
+    let actor_instances = actor_instances_from_presentations(&actor_interpolation.presentations());
     let initial_upload = TexturedSectionUploadReport {
         uploaded_section_count: section_update.rebuilt_section_count(),
         removed_section_count: section_update.removed_section_count(),
@@ -172,7 +176,7 @@ pub(crate) fn run_headless_screenshot(
                 &mut actors,
                 &mut gui,
                 camera,
-                &remote_player_actors,
+                &actor_instances,
                 sky_clear_color,
                 time_of_day,
                 sun_angle,
@@ -196,8 +200,8 @@ pub(crate) fn run_headless_screenshot(
         drawn_index_count: summary.drawn_index_count,
         gui_command_count: summary.gui_command_count,
         remote_player_count: runtime.client.remote_player_count(),
-        remote_actor_count: summary.remote_actor_count,
-        drawn_remote_actor_count: summary.drawn_remote_actor_count,
+        actor_count: summary.actor_count,
+        drawn_actor_count: summary.drawn_actor_count,
     })
 }
 
@@ -317,22 +321,14 @@ fn send_scripted_player_move(runtime: &mut WindowSceneRuntime, position: Vec3d) 
     Ok(())
 }
 
-fn frame_first_remote_player_for_screenshot(
-    runtime: &WindowSceneRuntime,
-    spectator: &mut SpectatorCamera,
-) {
-    let Some(remote) = runtime
-        .client
-        .remote_player_presentations()
-        .first()
-        .copied()
-    else {
+fn frame_first_actor_for_screenshot(runtime: &WindowSceneRuntime, spectator: &mut SpectatorCamera) {
+    let Some(actor) = runtime.client.actor_presentations().first().copied() else {
         return;
     };
     let target = glam::Vec3::new(
-        remote.feet_position.x as f32,
-        remote.feet_position.y as f32 + 1.0,
-        remote.feet_position.z as f32,
+        actor.feet_position.x as f32,
+        actor.feet_position.y as f32 + 1.0,
+        actor.feet_position.z as f32,
     );
     let eye = target + glam::Vec3::new(-2.2, 1.4, -4.8);
     aim_spectator_at(spectator, eye, target);

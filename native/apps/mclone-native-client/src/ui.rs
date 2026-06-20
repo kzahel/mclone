@@ -116,9 +116,9 @@ impl DebugPaneStats {
             ),
             format!(
                 "ACTOR R {}/{} I{}",
-                self.render.drawn_remote_actor_count,
-                self.render.remote_actor_count,
-                self.render.drawn_remote_actor_index_count
+                self.render.drawn_actor_count,
+                self.render.actor_count,
+                self.render.drawn_actor_index_count
             ),
             format!(
                 "MESH R{} U{} D{} SQ{} CQ{} X{} F {:.1}MS",
@@ -775,9 +775,9 @@ mod tests {
                 last_rebuilt_section_count: 2,
                 last_uploaded_section_count: 2,
                 last_frame_ms: 16.7,
-                remote_actor_count: 2,
-                drawn_remote_actor_count: 1,
-                drawn_remote_actor_index_count: 180,
+                actor_count: 2,
+                drawn_actor_count: 1,
+                drawn_actor_index_count: 180,
                 ..RenderStreamStats::default()
             },
             frame: FrameTimingStats {

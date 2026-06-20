@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
+mod actor;
 mod block_clip;
 mod block_shapes;
 mod interaction;
@@ -14,28 +15,10 @@ use mclone_protocol::{
     SectionBlockUpdate, ServerUpdate,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct RemotePlayerPresentation {
-    pub id: RemotePlayerId,
-    /// Authoritative feet position in world coordinates.
-    pub feet_position: mclone_core::Vec3d,
-    pub y_rot_degrees: f32,
-    pub x_rot_degrees: f32,
-    pub on_ground: bool,
-}
-
-impl From<RemotePlayerUpdate> for RemotePlayerPresentation {
-    fn from(update: RemotePlayerUpdate) -> Self {
-        Self {
-            id: update.id,
-            feet_position: update.position,
-            y_rot_degrees: update.y_rot_degrees,
-            x_rot_degrees: update.x_rot_degrees,
-            on_ground: update.on_ground,
-        }
-    }
-}
-
+pub use actor::{
+    ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationId,
+    ActorPresentationKind,
+};
 pub use interaction::{CREATIVE_PICK_RANGE, ClientInteractionController};
 pub use inventory::ClientInventory;
 pub use player::{
@@ -159,11 +142,11 @@ impl ClientRuntime {
         self.remote_players.len()
     }
 
-    pub fn remote_player_presentations(&self) -> Vec<RemotePlayerPresentation> {
+    pub fn actor_presentations(&self) -> Vec<ActorPresentation> {
         self.remote_players
             .values()
             .copied()
-            .map(RemotePlayerPresentation::from)
+            .map(ActorPresentation::remote_player)
             .collect()
     }
 
@@ -390,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_player_presentations_expose_render_facing_snapshot() {
+    fn actor_presentations_expose_remote_player_snapshot() {
         let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
         let update = RemotePlayerUpdate {
             id: RemotePlayerId(3),
@@ -403,9 +386,10 @@ mod tests {
         runtime.apply_update(ServerUpdate::RemotePlayerAdd(update));
 
         assert_eq!(
-            runtime.remote_player_presentations(),
-            vec![RemotePlayerPresentation {
-                id: update.id,
+            runtime.actor_presentations(),
+            vec![ActorPresentation {
+                id: ActorPresentationId::RemotePlayer(update.id),
+                kind: ActorPresentationKind::RemotePlayer,
                 feet_position: update.position,
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
@@ -415,7 +399,7 @@ mod tests {
 
         runtime.apply_update(ServerUpdate::RemotePlayerRemove { id: update.id });
 
-        assert!(runtime.remote_player_presentations().is_empty());
+        assert!(runtime.actor_presentations().is_empty());
     }
 
     #[test]
