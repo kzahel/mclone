@@ -193,6 +193,91 @@ pub struct RenderSectionCompileResult {
     pub result: std::result::Result<TexturedRenderSectionBuildReport, String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RenderSectionDirtyState {
+    pub dirty_chunks: BTreeSet<ChunkPos>,
+    pub dirty_sections: BTreeSet<RenderSectionKey>,
+    pub inflight_sections: BTreeSet<RenderSectionKey>,
+    section_revisions: BTreeMap<RenderSectionKey, u64>,
+}
+
+impl RenderSectionDirtyState {
+    pub fn is_empty(&self) -> bool {
+        self.dirty_chunks.is_empty()
+            && self.dirty_sections.is_empty()
+            && self.inflight_sections.is_empty()
+    }
+
+    pub fn dirty_work_is_empty(&self) -> bool {
+        self.dirty_chunks.is_empty() && self.dirty_sections.is_empty()
+    }
+
+    pub fn mark_chunk_dirty(
+        &mut self,
+        pos: ChunkPos,
+        known_section_keys: impl IntoIterator<Item = RenderSectionKey>,
+    ) {
+        for key in known_section_keys {
+            self.bump_section_revision(key);
+        }
+        self.dirty_chunks.insert(pos);
+    }
+
+    pub fn mark_section_dirty(&mut self, key: RenderSectionKey) {
+        self.bump_section_revision(key);
+        self.dirty_sections.insert(key);
+    }
+
+    pub fn bump_section_revision(&mut self, key: RenderSectionKey) {
+        let revision = self.section_revisions.entry(key).or_default();
+        *revision = revision.wrapping_add(1);
+    }
+
+    pub fn bump_section_revisions(&mut self, keys: impl IntoIterator<Item = RenderSectionKey>) {
+        for key in keys {
+            self.bump_section_revision(key);
+        }
+    }
+
+    pub fn section_revision(&self, key: RenderSectionKey) -> u64 {
+        self.section_revisions
+            .get(&key)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub fn build_compile_request(
+        &self,
+        target_sections: BTreeSet<RenderSectionKey>,
+        snapshots: Vec<ChunkSnapshot>,
+    ) -> RenderSectionCompileRequest {
+        let section_revisions = target_sections
+            .iter()
+            .map(|key| (*key, self.section_revision(*key)))
+            .collect();
+        RenderSectionCompileRequest {
+            target_sections,
+            section_revisions,
+            snapshots,
+        }
+    }
+
+    pub fn mark_compile_submitted(&mut self, target_sections: &BTreeSet<RenderSectionKey>) {
+        self.inflight_sections
+            .extend(target_sections.iter().copied());
+    }
+
+    pub fn accept_completed_compile_result(
+        &mut self,
+        completed: &RenderSectionCompileResult,
+    ) -> RenderSectionCompileAcceptance {
+        for key in &completed.target_sections {
+            self.inflight_sections.remove(key);
+        }
+        completed.partition_by_revision(|key| self.section_revision(key))
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderSectionViewSync {
     pub current_loaded_chunks: BTreeSet<ChunkPos>,
@@ -586,6 +671,16 @@ pub fn dirty_chunk_positions(
         .collect()
 }
 
+pub fn render_dirty_chunk_neighborhood(pos: ChunkPos) -> [ChunkPos; 5] {
+    [
+        pos,
+        ChunkPos::new(pos.x - 1, pos.z),
+        ChunkPos::new(pos.x + 1, pos.z),
+        ChunkPos::new(pos.x, pos.z - 1),
+        ChunkPos::new(pos.x, pos.z + 1),
+    ]
+}
+
 fn has_removed_neighbor(pos: ChunkPos, removed_chunks: &BTreeSet<ChunkPos>) -> bool {
     [
         ChunkPos::new(pos.x - 1, pos.z),
@@ -825,6 +920,48 @@ mod tests {
             BTreeSet::from([ChunkPos::new(1, 0), ChunkPos::new(3, 0)])
         );
         assert_eq!(sync.removal_chunks, BTreeSet::from([ChunkPos::new(0, 0)]));
+    }
+
+    #[test]
+    fn render_section_dirty_state_tracks_dirty_inflight_and_stale_revisions() {
+        let first = RenderSectionKey::new(0, 4, 0);
+        let second = RenderSectionKey::new(0, 5, 0);
+        let mut dirty = RenderSectionDirtyState::default();
+
+        dirty.mark_chunk_dirty(ChunkPos::new(0, 0), [first, second]);
+        assert_eq!(dirty.dirty_chunks, BTreeSet::from([ChunkPos::new(0, 0)]));
+        assert_eq!(dirty.section_revision(first), 1);
+        assert_eq!(dirty.section_revision(second), 1);
+
+        let request = dirty.build_compile_request(BTreeSet::from([first, second]), Vec::new());
+        dirty.mark_compile_submitted(&request.target_sections);
+        assert_eq!(dirty.inflight_sections, BTreeSet::from([first, second]));
+
+        dirty.mark_section_dirty(second);
+        let acceptance = dirty.accept_completed_compile_result(&RenderSectionCompileResult {
+            target_sections: request.target_sections,
+            section_revisions: request.section_revisions,
+            result: Ok(TexturedRenderSectionBuildReport::default()),
+        });
+
+        assert!(dirty.inflight_sections.is_empty());
+        assert_eq!(acceptance.accepted_sections, BTreeSet::from([first]));
+        assert_eq!(acceptance.stale_sections, BTreeSet::from([second]));
+        assert_eq!(dirty.dirty_sections, BTreeSet::from([second]));
+    }
+
+    #[test]
+    fn render_dirty_chunk_neighborhood_includes_cardinal_neighbors() {
+        assert_eq!(
+            render_dirty_chunk_neighborhood(ChunkPos::new(4, -2)),
+            [
+                ChunkPos::new(4, -2),
+                ChunkPos::new(3, -2),
+                ChunkPos::new(5, -2),
+                ChunkPos::new(4, -3),
+                ChunkPos::new(4, -1),
+            ]
+        );
     }
 
     #[test]

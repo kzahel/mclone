@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active shared render-session primitives landed.
+Status: active shared render dirty state landed.
 
 ## Purpose
 
@@ -346,6 +346,15 @@ Browser worker payload result:
   selection, and ready-key selection.
 - Updated the native desktop runtime to use the shared render-section key and
   snapshot containment helpers, removing another local copy of that policy.
+- Extracted `RenderSectionDirtyState` into `mclone-render-session` to own dirty
+  chunks, dirty sections, inflight sections, and render-section revision
+  snapshots.
+- Updated native desktop `WindowSceneRuntime` to delegate dirty marking,
+  section-block mutation dirtying, compile request construction, compile
+  submission tracking, completed result acceptance, and stale revision
+  partitioning to the shared dirty state.
+- Added shared dirty-state tests covering chunk-neighborhood invalidation,
+  inflight compile tracking, and stale compile result detection.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
