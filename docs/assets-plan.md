@@ -31,14 +31,15 @@ Runs automatically at the end of `decompile-mc.sh` (client builds), or standalon
 ./scripts/extract-assets.sh 1.17.1
 ./scripts/extract-assets.sh 1.17.1 --force         # re-extract
 ./scripts/extract-assets.sh 1.17.1 --out /tmp/mc   # alternate output dir
-pnpm assets:pack                                  # build extracted.zip + manifest for browser runtime
+pnpm assets:pack                                  # build extracted.zip + mclone-pack.json manifest
+pnpm assets:pack:check                            # verify the local pack against the checked lock
 ```
 
 Output lands at `reference/minecraft-<version>/extracted/`. The script is idempotent — it skips if `extracted/pack.mcmeta` already exists.
 
 Expected output size: ~30MB (mostly textures and structure NBTs). Full `assets/*` + `data/*` dump would be ~40MB; the filter skips the categories we don't need.
 
-For browser deployment, the loose extracted tree is packed into `reference/minecraft-1.17.1/extracted.zip` with a sibling `extracted.zip.json` manifest containing size, file count, and SHA-256. The runtime loads and verifies the zip once, then resolves vanilla resource paths out of the in-memory pack. This avoids issuing thousands of small HTTP requests for blockstate/model/texture metadata.
+For browser/native deployment, the loose extracted tree is packed into `reference/minecraft-1.17.1/extracted.zip`. The ZIP contains `mclone-pack.json` and has a sibling `extracted.zip.json` sidecar manifest with format version, file records, compression modes, and portable/raw payload fingerprints. `scripts/asset-locks/mclone-vanilla-1.17.1.lock.json` records the expected local source and pack fingerprints; refresh it with `pnpm assets:pack:write-lock` only after inspecting a rebuilt pack.
 
 ## Where to put extracted assets
 

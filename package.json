@@ -54,7 +54,9 @@
     "native:web:chunk-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas --require-chunk",
     "build": "vite build",
     "deploy": "bash ./scripts/deploy.sh",
-    "assets:pack": "node ./scripts/build-reference-asset-pack.mjs",
+    "assets:pack": "python3 ./scripts/build-reference-asset-pack.py",
+    "assets:pack:check": "python3 ./scripts/build-reference-asset-pack.py --check-lock",
+    "assets:pack:write-lock": "python3 ./scripts/build-reference-asset-pack.py --write-lock",
     "typecheck": "tsc --noEmit",
     "oracle:gen": "bash ./oracle/run.sh",
     "perf:d5": "MCLONE_RUN_D5=1 playwright test --config playwright.perf.config.ts --workers=1"

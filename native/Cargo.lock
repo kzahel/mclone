@@ -1007,6 +1007,8 @@ dependencies = [
 name = "mclone-assets"
 version = "0.0.0"
 dependencies = [
+ "crc32fast",
+ "flate2",
  "mclone-core",
  "serde",
  "serde_json",

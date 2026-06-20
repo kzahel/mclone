@@ -3,6 +3,7 @@
 mod atlas;
 mod block_registry;
 mod model;
+mod pack;
 mod resource;
 mod source;
 
@@ -17,8 +18,11 @@ pub use model::{
     BakedBlockModel, BakedBlockModelFace, BlockModel, BlockModelElement, BlockModelFace,
     BlockModelLibrary, ModelFaceDirection, TextureMaterial, TextureReference,
 };
+pub use pack::{
+    AssetPackManifest, DEFAULT_PACK_MANIFEST_PATH, PACK_FORMAT_VERSION, PackedAssetSource,
+};
 pub use resource::{AssetPath, ResourceLocation};
-pub use source::{AssetSource, MemoryAssetSource};
+pub use source::{AssetSource, AssetSourceChain, MemoryAssetSource};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::FilesystemAssetSource;
@@ -32,6 +36,7 @@ pub enum AssetError {
     InvalidBlockState(String),
     InvalidModel(String),
     InvalidTexture(String),
+    InvalidAssetPack(String),
     MissingAsset(AssetPath),
     Io(std::io::Error),
     Json {
@@ -50,6 +55,7 @@ impl fmt::Display for AssetError {
             Self::InvalidBlockState(message) => write!(f, "invalid block state: {message}"),
             Self::InvalidModel(message) => write!(f, "invalid model: {message}"),
             Self::InvalidTexture(message) => write!(f, "invalid texture: {message}"),
+            Self::InvalidAssetPack(message) => write!(f, "invalid asset pack: {message}"),
             Self::MissingAsset(path) => write!(f, "missing asset {}", path.as_str()),
             Self::Io(error) => write!(f, "{error}"),
             Self::Json { path, source } => {

@@ -52,6 +52,56 @@ impl AssetSource for MemoryAssetSource {
     }
 }
 
+#[derive(Default)]
+pub struct AssetSourceChain {
+    sources: Vec<Box<dyn AssetSource>>,
+}
+
+impl AssetSourceChain {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, source: impl AssetSource + 'static) {
+        self.sources.push(Box::new(source));
+    }
+
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+}
+
+impl std::fmt::Debug for AssetSourceChain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AssetSourceChain")
+            .field("source_count", &self.sources.len())
+            .finish()
+    }
+}
+
+impl AssetSource for AssetSourceChain {
+    fn read(&self, path: &AssetPath) -> AssetResult<Option<Vec<u8>>> {
+        for source in &self.sources {
+            if let Some(bytes) = source.read(path)? {
+                return Ok(Some(bytes));
+            }
+        }
+        Ok(None)
+    }
+
+    fn list(&self, prefix: &str, suffix: &str) -> AssetResult<Vec<AssetPath>> {
+        let mut paths = std::collections::BTreeSet::new();
+        for source in &self.sources {
+            paths.extend(source.list(prefix, suffix)?);
+        }
+        Ok(paths.into_iter().collect())
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug)]
 pub struct FilesystemAssetSource {
@@ -156,6 +206,48 @@ mod tests {
                 .map(|path| path.as_str().to_owned())
                 .collect::<Vec<_>>(),
             vec!["assets/minecraft/blockstates/stone.json"]
+        );
+    }
+
+    #[test]
+    fn source_chain_reads_first_available_asset_and_merges_lists() {
+        let mut first = MemoryAssetSource::new();
+        first.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/stone.json"),
+            "first",
+        );
+
+        let mut second = MemoryAssetSource::new();
+        second.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/dirt.json"),
+            "second",
+        );
+        second.insert_text(
+            AssetPath::new("assets/minecraft/blockstates/stone.json"),
+            "shadowed",
+        );
+
+        let mut source = AssetSourceChain::new();
+        source.push(first);
+        source.push(second);
+
+        assert_eq!(
+            source
+                .read(&AssetPath::new("assets/minecraft/blockstates/stone.json"))
+                .unwrap(),
+            Some(b"first".to_vec())
+        );
+        assert_eq!(
+            source
+                .list("assets/minecraft/blockstates/", ".json")
+                .unwrap()
+                .into_iter()
+                .map(|path| path.as_str().to_owned())
+                .collect::<Vec<_>>(),
+            vec![
+                "assets/minecraft/blockstates/dirt.json",
+                "assets/minecraft/blockstates/stone.json"
+            ]
         );
     }
 

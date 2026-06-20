@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail};
-use mclone_assets::{AssetPath, AssetSource, FilesystemAssetSource};
+use mclone_assets::{AssetPath, AssetSource};
 use mclone_render::entity::{ActorTextureAtlas, ActorTextureLayout, ActorTextureRegion};
 
-use crate::render_cache::extracted_asset_root;
+use crate::render_cache::load_asset_source;
 
 const COW_TEXTURE_PATH: &str = "assets/minecraft/textures/entity/cow/cow.png";
 const COW_TEXTURE_WIDTH: u32 = 64;
@@ -38,15 +38,7 @@ impl ActorTextureImage {
 }
 
 pub(crate) fn load_actor_texture_assets() -> Result<ActorTextureAssets> {
-    let root = extracted_asset_root();
-    if !root.exists() {
-        bail!(
-            "missing extracted Minecraft assets at {}; run ./scripts/decompile-mc.sh from the repository root",
-            root.display()
-        );
-    }
-
-    let source = FilesystemAssetSource::new(root);
+    let source = load_asset_source()?;
     let cow = read_rgba_texture(
         &source,
         &AssetPath::new(COW_TEXTURE_PATH),
@@ -134,6 +126,7 @@ struct RgbaTexture {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render_cache::extracted_asset_root;
 
     #[test]
     fn actor_texture_atlas_stitches_white_pixel_and_cow_region() {
