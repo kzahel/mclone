@@ -27,6 +27,7 @@ anyhow = "1"
 env_logger = "0.11"
 glam = "0.30"
 image = { version = "0.25", default-features = false, features = ["png"] }
+js-sys = "0.3.102"
 log = "0.4"
 mclone-assets = { path = "crates/mclone-assets" }
 mclone-client = { path = "crates/mclone-client" }
@@ -42,6 +43,9 @@ mclone-worldgen = { path = "crates/mclone-worldgen" }
 pollster = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+wasm-bindgen = "0.2.125"
+wasm-bindgen-futures = "0.4.75"
+web-sys = "0.3.102"
 wgpu = { version = "25", features = ["metal", "vulkan", "vulkan-portability"] }
 winit = "0.30"
 

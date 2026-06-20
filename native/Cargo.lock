@@ -1128,12 +1128,17 @@ version = "0.0.0"
 name = "mclone-web-client"
 version = "0.0.0"
 dependencies = [
+ "js-sys",
  "mclone-client",
  "mclone-core",
  "mclone-net",
  "mclone-protocol",
  "mclone-render",
  "mclone-server",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
 ]
 
 [[package]]

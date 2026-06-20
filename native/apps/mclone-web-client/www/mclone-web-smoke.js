@@ -1,4 +1,6 @@
 const WASM_URL = new URL("./mclone_web_client.wasm", import.meta.url);
+const BINDGEN_JS_URL = new URL("./pkg/mclone_web_client.js", import.meta.url);
+const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 
 const ready = boot();
@@ -12,10 +14,19 @@ ready.then(
 async function boot() {
   const wasm = await loadRuntimeWasm();
   const webGpu = await probeWebGpu();
+  const canvas = webGpu.supported
+    ? await renderCanvas()
+    : {
+        ok: true,
+        supported: false,
+        status: "webgpu-unavailable",
+        reason: webGpu.status,
+      };
   return {
-    ok: wasm.ok && webGpu.ok,
+    ok: wasm.ok && webGpu.ok && canvas.ok,
     wasm,
     webGpu,
+    canvas,
   };
 }
 
@@ -146,6 +157,48 @@ async function readAdapterInfo(adapter) {
   return adapter.info ?? {};
 }
 
+async function renderCanvas() {
+  const canvas = document.getElementById("mclone-canvas");
+  if (!(canvas instanceof HTMLCanvasElement)) {
+    return {
+      ok: false,
+      supported: true,
+      status: "canvas-missing",
+      reason: "missing canvas#mclone-canvas",
+    };
+  }
+
+  try {
+    const module = await import(BINDGEN_JS_URL.href);
+    await module.default(BINDGEN_WASM_URL.href);
+    if (typeof module.mclone_web_render_canvas_report !== "function") {
+      return {
+        ok: false,
+        supported: true,
+        status: "export-missing",
+        reason: "missing mclone_web_render_canvas_report export",
+        exports: Object.keys(module),
+      };
+    }
+
+    const bits = Number(await module.mclone_web_render_canvas_report(canvas)) >>> 0;
+    const report = decodeCanvasReport(bits);
+    return {
+      ok: report.ok && report.rendered && report.configured,
+      supported: true,
+      status: report.ok ? "rendered" : "failed",
+      report,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      supported: true,
+      status: "render-failed",
+      reason: stringifyError(error),
+    };
+  }
+}
+
 function decodeRuntimeReport(bits) {
   return {
     bits,
@@ -160,6 +213,17 @@ function decodeRuntimeReport(bits) {
     commandCount: (bits >>> 8) & 0xff,
     updateCount: (bits >>> 16) & 0xff,
     loadedChunkCount: (bits >>> 24) & 0xff,
+  };
+}
+
+function decodeCanvasReport(bits) {
+  return {
+    bits,
+    ok: (bits & 0x1) !== 0,
+    rendered: (bits & 0x2) !== 0,
+    configured: (bits & 0x4) !== 0,
+    width: (bits >>> 8) & 0x0fff,
+    height: (bits >>> 20) & 0x0fff,
   };
 }
 

@@ -10,6 +10,9 @@ use mclone_protocol::{
 use mclone_render::RenderBackend;
 use mclone_server::IntegratedServer;
 
+#[cfg(target_arch = "wasm32")]
+mod web_canvas;
+
 const SMOKE_SEED: i64 = 12_345;
 const SMOKE_INITIAL_CENTER: ChunkPos = ChunkPos { x: 0, z: 0 };
 const SMOKE_MOVED_CENTER: ChunkPos = ChunkPos { x: 1, z: 0 };

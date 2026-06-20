@@ -2,13 +2,16 @@ import { chromium } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
+import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, normalize, resolve, sep } from "node:path";
+import { inflateSync } from "node:zlib";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(scriptDir, "..");
 const nativeRoot = resolve(appRoot, "../..");
 const wwwRoot = join(appRoot, "www");
+const wasmBindgenVersion = "0.2.125";
 const wasmPath = join(
   nativeRoot,
   "target",
@@ -16,8 +19,21 @@ const wasmPath = join(
   "debug",
   "mclone_web_client.wasm",
 );
+const bindgenToolRoot = join(nativeRoot, "target", `wasm-bindgen-cli-${wasmBindgenVersion}`);
+const bindgenBin = join(bindgenToolRoot, "bin", process.platform === "win32" ? "wasm-bindgen.exe" : "wasm-bindgen");
+const bindgenOutDir = join(
+  nativeRoot,
+  "target",
+  "wasm32-unknown-unknown",
+  "debug",
+  "mclone-web-client-bindgen",
+);
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
   ?? "/tmp/mclone-native-web-smoke.png";
+const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
+  ?? "/tmp/mclone-native-web-canvas.png";
+const requireCanvas = process.argv.includes("--require-canvas")
+  || process.env.MCLONE_NATIVE_WEB_REQUIRE_CANVAS === "1";
 
 run().catch((error) => {
   console.error(error instanceof Error ? error.stack ?? error.message : String(error));
@@ -26,6 +42,7 @@ run().catch((error) => {
 
 async function run() {
   buildWasm();
+  buildBindgenBundle();
   const server = await startServer();
   let browser;
   try {
@@ -54,11 +71,17 @@ async function run() {
     );
     const result = await page.evaluate(() => globalThis.__mcloneNativeReady);
     await page.screenshot({ path: screenshotPath, fullPage: true });
+    const canvas = page.locator("#mclone-canvas");
+    const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath });
+    const canvasPixels = analyzePng(canvasPng);
 
-    assertSmokeResult(result, pageErrors);
+    assertSmokeResult(result, pageErrors, canvasPixels);
     console.log(JSON.stringify({
       url: baseUrl,
       screenshotPath,
+      canvasScreenshotPath,
+      requireCanvas,
+      canvasPixels,
       result,
     }, null, 2));
   } finally {
@@ -79,6 +102,57 @@ function buildWasm() {
   );
   if (result.status !== 0) {
     throw new Error(`cargo wasm build failed with status ${result.status ?? "unknown"}`);
+  }
+}
+
+function buildBindgenBundle() {
+  ensureWasmBindgenCli();
+  mkdirSync(bindgenOutDir, { recursive: true });
+  const result = spawnSync(
+    bindgenBin,
+    [
+      "--target",
+      "web",
+      "--out-dir",
+      bindgenOutDir,
+      "--out-name",
+      "mclone_web_client",
+      wasmPath,
+    ],
+    {
+      cwd: nativeRoot,
+      stdio: "inherit",
+      env: process.env,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(`wasm-bindgen failed with status ${result.status ?? "unknown"}`);
+  }
+}
+
+function ensureWasmBindgenCli() {
+  if (existsSync(bindgenBin)) return;
+
+  mkdirSync(bindgenToolRoot, { recursive: true });
+  const result = spawnSync(
+    "cargo",
+    [
+      "install",
+      "wasm-bindgen-cli",
+      "--version",
+      wasmBindgenVersion,
+      "--locked",
+      "--root",
+      bindgenToolRoot,
+    ],
+    {
+      cwd: nativeRoot,
+      stdio: "inherit",
+      env: process.env,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(`cargo install wasm-bindgen-cli failed with status ${result.status ?? "unknown"}`);
   }
 }
 
@@ -118,6 +192,12 @@ function resolveRequestPath(pathname) {
   if (pathname === "/mclone_web_client.wasm") {
     return wasmPath;
   }
+  if (pathname === "/pkg/mclone_web_client.js") {
+    return join(bindgenOutDir, "mclone_web_client.js");
+  }
+  if (pathname === "/pkg/mclone_web_client_bg.wasm") {
+    return join(bindgenOutDir, "mclone_web_client_bg.wasm");
+  }
 
   const resolved = resolve(wwwRoot, `.${normalize(pathname)}`);
   if (resolved !== wwwRoot && !resolved.startsWith(`${wwwRoot}${sep}`)) {
@@ -133,7 +213,7 @@ function contentType(path) {
   return "application/octet-stream";
 }
 
-function assertSmokeResult(result, pageErrors) {
+function assertSmokeResult(result, pageErrors, canvasPixels) {
   if (pageErrors.length > 0) {
     throw new Error(`browser page errors:\n${pageErrors.join("\n")}`);
   }
@@ -161,4 +241,165 @@ function assertSmokeResult(result, pageErrors) {
   if (!result.webGpu?.ok) {
     throw new Error(`WebGPU probe did not produce a stable result:\n${JSON.stringify(result.webGpu, null, 2)}`);
   }
+  if (!result.webGpu.supported) {
+    if (requireCanvas) {
+      throw new Error(`WebGPU is required for the canvas render smoke:\n${JSON.stringify(result.webGpu, null, 2)}`);
+    }
+    return;
+  }
+  if (!result.canvas?.ok || !result.canvas.report?.rendered || !result.canvas.report?.configured) {
+    throw new Error(`WebGPU canvas render failed:\n${JSON.stringify(result.canvas, null, 2)}`);
+  }
+  if (result.canvas.report.width !== 640 || result.canvas.report.height !== 360) {
+    throw new Error(`unexpected canvas render size:\n${JSON.stringify(result.canvas.report, null, 2)}`);
+  }
+  if (canvasPixels.distinctColorCount < 1 || canvasPixels.sampledNonBackgroundCount < 16) {
+    throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+function analyzePng(bytes) {
+  const png = decodePngRgba(bytes);
+  const expected = {
+    r: Math.round(0.035 * 255),
+    g: Math.round(0.04 * 255),
+    b: Math.round(0.05 * 255),
+  };
+  const colors = new Set();
+  let sampledNonBackgroundCount = 0;
+  const stepX = Math.max(1, Math.floor(png.width / 32));
+  const stepY = Math.max(1, Math.floor(png.height / 18));
+  for (let y = 0; y < png.height; y += stepY) {
+    for (let x = 0; x < png.width; x += stepX) {
+      const offset = (y * png.width + x) * 4;
+      const r = png.rgba[offset];
+      const g = png.rgba[offset + 1];
+      const b = png.rgba[offset + 2];
+      colors.add(`${r},${g},${b}`);
+      if (
+        Math.abs(r - expected.r) <= 3
+        && Math.abs(g - expected.g) <= 3
+        && Math.abs(b - expected.b) <= 3
+      ) {
+        sampledNonBackgroundCount += 1;
+      }
+    }
+  }
+  return {
+    width: png.width,
+    height: png.height,
+    distinctColorCount: colors.size,
+    sampledNonBackgroundCount,
+    expectedClearColor: expected,
+  };
+}
+
+function decodePngRgba(bytes) {
+  if (
+    bytes[0] !== 0x89
+    || bytes[1] !== 0x50
+    || bytes[2] !== 0x4e
+    || bytes[3] !== 0x47
+    || bytes[4] !== 0x0d
+    || bytes[5] !== 0x0a
+    || bytes[6] !== 0x1a
+    || bytes[7] !== 0x0a
+  ) {
+    throw new Error("canvas screenshot is not a PNG");
+  }
+
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let colorType = 0;
+  let bitDepth = 0;
+  const idat = [];
+  while (offset < bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    offset += 4;
+    const type = bytes.toString("ascii", offset, offset + 4);
+    offset += 4;
+    const data = bytes.subarray(offset, offset + length);
+    offset += length + 4;
+
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      if (bitDepth !== 8 || (colorType !== 2 && colorType !== 6)) {
+        throw new Error(`unsupported PNG format bitDepth=${bitDepth} colorType=${colorType}`);
+      }
+    } else if (type === "IDAT") {
+      idat.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+  }
+
+  if (width <= 0 || height <= 0 || idat.length === 0) {
+    throw new Error("invalid PNG screenshot data");
+  }
+
+  const compressed = Buffer.concat(idat);
+  const raw = inflateSync(compressed);
+  const bytesPerPixel = colorType === 6 ? 4 : 3;
+  const stride = width * bytesPerPixel;
+  const rgba = Buffer.alloc(width * height * 4);
+  const unfiltered = Buffer.alloc(height * stride);
+  let rawOffset = 0;
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[rawOffset];
+    rawOffset += 1;
+    for (let x = 0; x < stride; x += 1) {
+      const current = raw[rawOffset + x];
+      const left = x >= bytesPerPixel ? unfiltered[y * stride + x - bytesPerPixel] : 0;
+      const up = y > 0 ? unfiltered[(y - 1) * stride + x] : 0;
+      const upLeft = x >= bytesPerPixel && y > 0
+        ? unfiltered[(y - 1) * stride + x - bytesPerPixel]
+        : 0;
+      unfiltered[y * stride + x] = unfilterByte(filter, current, left, up, upLeft);
+    }
+    rawOffset += stride;
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const sourceOffset = y * stride + x * bytesPerPixel;
+      const targetOffset = (y * width + x) * 4;
+      rgba[targetOffset] = unfiltered[sourceOffset];
+      rgba[targetOffset + 1] = unfiltered[sourceOffset + 1];
+      rgba[targetOffset + 2] = unfiltered[sourceOffset + 2];
+      rgba[targetOffset + 3] = bytesPerPixel === 4 ? unfiltered[sourceOffset + 3] : 255;
+    }
+  }
+
+  return { width, height, rgba };
+}
+
+function unfilterByte(filter, current, left, up, upLeft) {
+  switch (filter) {
+    case 0:
+      return current;
+    case 1:
+      return (current + left) & 0xff;
+    case 2:
+      return (current + up) & 0xff;
+    case 3:
+      return (current + Math.floor((left + up) / 2)) & 0xff;
+    case 4:
+      return (current + paethPredictor(left, up, upLeft)) & 0xff;
+    default:
+      throw new Error(`unsupported PNG filter ${filter}`);
+  }
+}
+
+function paethPredictor(left, up, upLeft) {
+  const p = left + up - upLeft;
+  const pa = Math.abs(p - left);
+  const pb = Math.abs(p - up);
+  const pc = Math.abs(p - upLeft);
+  if (pa <= pb && pa <= pc) return left;
+  if (pb <= pc) return up;
+  return upLeft;
 }

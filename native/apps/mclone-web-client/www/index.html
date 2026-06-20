@@ -21,13 +21,24 @@
       }
 
       main {
-        width: min(760px, calc(100vw - 32px));
+        width: min(920px, calc(100vw - 32px));
       }
 
       h1 {
         margin: 0 0 16px;
         font-size: 18px;
         font-weight: 600;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        aspect-ratio: 16 / 9;
+        margin: 0 0 16px;
+        border: 1px solid #2b333c;
+        border-radius: 6px;
+        background: #050607;
       }
 
       pre {
@@ -45,6 +56,7 @@
   <body>
     <main>
       <h1>mclone native web smoke</h1>
+      <canvas id="mclone-canvas" width="640" height="360"></canvas>
       <pre id="status">booting</pre>
     </main>
     <script type="module" src="./mclone-web-smoke.js"></script>
