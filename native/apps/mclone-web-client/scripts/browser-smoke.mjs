@@ -264,13 +264,13 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
     throw new Error(`unexpected canvas render size:\n${JSON.stringify(result.canvas.report, null, 2)}`);
   }
   if (requireChunk) {
-    assertChunkRenderResult(result.canvas.report, canvasPixels);
+    assertChunkRenderResult(result.canvas.report, canvasPixels, result.canvas.firstReport);
   } else if (canvasPixels.distinctColorCount < 1 || canvasPixels.clearColorPixelCount < 16) {
     throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 
-function assertChunkRenderResult(report, canvasPixels) {
+function assertChunkRenderResult(report, canvasPixels, firstReport) {
   if (!report.chunkLoaded || !report.meshBuilt) {
     throw new Error(`generated chunk did not load/build:\n${JSON.stringify(report, null, 2)}`);
   }
@@ -280,9 +280,40 @@ function assertChunkRenderResult(report, canvasPixels) {
   if (report.assetPackFileCount < 1000 || report.atlasWidth <= 0 || report.atlasHeight <= 0 || report.atlasSpriteCount <= 0) {
     throw new Error(`packed texture atlas did not load expected asset data:\n${JSON.stringify(report, null, 2)}`);
   }
+  if (!firstReport?.ok) {
+    throw new Error(`cached chunk session did not produce the first render report:\n${JSON.stringify(firstReport, null, 2)}`);
+  }
   if (
-    report.commandCount !== 1
-    || report.updateCount < 1
+    firstReport.centerX !== 0
+    || firstReport.centerZ !== 0
+    || report.centerX !== 1
+    || report.centerZ !== 0
+  ) {
+    throw new Error(`cached chunk session did not render the expected centers:\n${JSON.stringify({ firstReport, report }, null, 2)}`);
+  }
+  if (
+    firstReport.assetPackParseCount !== 1
+    || firstReport.terrainAssetLoadCount !== 1
+    || firstReport.atlasUploadCount !== 1
+    || firstReport.meshBuildCount !== 1
+    || firstReport.meshUploadCount !== 1
+    || firstReport.renderCount !== 1
+  ) {
+    throw new Error(`first cached render did not initialize exactly one asset/atlas/mesh path:\n${JSON.stringify(firstReport, null, 2)}`);
+  }
+  if (
+    report.assetPackParseCount !== 1
+    || report.terrainAssetLoadCount !== 1
+    || report.atlasUploadCount !== 1
+    || report.meshBuildCount !== 2
+    || report.meshUploadCount !== 2
+    || report.renderCount !== 2
+  ) {
+    throw new Error(`second cached render rebuilt non-mesh resources:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (
+    report.commandCount !== 2
+    || report.updateCount !== 4
     || report.loadedChunkCount !== 1
   ) {
     throw new Error(`unexpected generated chunk runtime counts:\n${JSON.stringify(report, null, 2)}`);

@@ -4,7 +4,7 @@ use web_sys::HtmlCanvasElement;
 use super::{SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime};
 use mclone_assets::PackedAssetSource;
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkSnapshot,
+    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
     SECTION_HEIGHT, chunk_section_index,
 };
 use mclone_mesh::{
@@ -54,11 +54,24 @@ pub fn mclone_web_render_generated_chunk_report(
     asset_pack_bytes: js_sys::Uint8Array,
 ) -> js_sys::Promise {
     wasm_bindgen_futures::future_to_promise(async move {
-        let report = render_generated_chunk(canvas, asset_pack_bytes.to_vec())
+        let mut session = WebChunkRenderSession::new(canvas, asset_pack_bytes.to_vec())
             .await
+            .map_err(JsValue::from)?;
+        let report = session
+            .render_chunk_report_for_center(SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS)
             .map_err(JsValue::from)?;
         report.to_js_value().map_err(JsValue::from)
     })
+}
+
+#[wasm_bindgen]
+pub async fn mclone_web_create_chunk_render_session(
+    canvas: HtmlCanvasElement,
+    asset_pack_bytes: js_sys::Uint8Array,
+) -> Result<WebChunkRenderSession, JsValue> {
+    WebChunkRenderSession::new(canvas, asset_pack_bytes.to_vec())
+        .await
+        .map_err(JsValue::from)
 }
 
 #[wasm_bindgen(start)]
@@ -76,6 +89,7 @@ struct CanvasRenderReport {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GeneratedChunkRenderReport {
+    center: ChunkPos,
     width: u32,
     height: u32,
     command_count: usize,
@@ -88,6 +102,12 @@ struct GeneratedChunkRenderReport {
     vertex_count: u32,
     index_count: u32,
     face_count: u32,
+    asset_pack_parse_count: usize,
+    terrain_asset_load_count: usize,
+    atlas_upload_count: usize,
+    mesh_build_count: usize,
+    mesh_upload_count: usize,
+    render_count: usize,
 }
 
 impl CanvasRenderReport {
@@ -110,6 +130,8 @@ impl GeneratedChunkRenderReport {
         set_bool(&object, "meshBuilt", true)?;
         set_bool(&object, "assetPackLoaded", true)?;
         set_bool(&object, "textured", true)?;
+        set_number(&object, "centerX", f64::from(self.center.x))?;
+        set_number(&object, "centerZ", f64::from(self.center.z))?;
         set_number(&object, "width", f64::from(self.width))?;
         set_number(&object, "height", f64::from(self.height))?;
         set_number(&object, "commandCount", self.command_count as f64)?;
@@ -126,6 +148,20 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "vertexCount", f64::from(self.vertex_count))?;
         set_number(&object, "indexCount", f64::from(self.index_count))?;
         set_number(&object, "faceCount", f64::from(self.face_count))?;
+        set_number(
+            &object,
+            "assetPackParseCount",
+            self.asset_pack_parse_count as f64,
+        )?;
+        set_number(
+            &object,
+            "terrainAssetLoadCount",
+            self.terrain_asset_load_count as f64,
+        )?;
+        set_number(&object, "atlasUploadCount", self.atlas_upload_count as f64)?;
+        set_number(&object, "meshBuildCount", self.mesh_build_count as f64)?;
+        set_number(&object, "meshUploadCount", self.mesh_upload_count as f64)?;
+        set_number(&object, "renderCount", self.render_count as f64)?;
         Ok(object.into())
     }
 }
@@ -166,79 +202,177 @@ async fn render_canvas_clear(canvas: HtmlCanvasElement) -> Result<CanvasRenderRe
     })
 }
 
-async fn render_generated_chunk(
-    canvas: HtmlCanvasElement,
-    asset_pack_bytes: Vec<u8>,
-) -> Result<GeneratedChunkRenderReport, String> {
-    let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
-    let mut runtime = WebRuntime::local_integrated(SMOKE_SEED);
-    runtime
-        .request_chunk_view(
-            SMOKE_INITIAL_CENTER,
-            SMOKE_RADIUS_CHUNKS,
-            SMOKE_RADIUS_CHUNKS,
+#[wasm_bindgen]
+pub struct WebChunkRenderSession {
+    context: WebCanvasContext,
+    depth: ChunkDepthTarget,
+    runtime: WebRuntime,
+    mesh_assets: WebTexturedMeshAssets,
+    draw: Option<TexturedChunkDrawResources>,
+    asset_pack_parse_count: usize,
+    terrain_asset_load_count: usize,
+    atlas_upload_count: usize,
+    mesh_build_count: usize,
+    mesh_upload_count: usize,
+    render_count: usize,
+}
+
+#[wasm_bindgen]
+impl WebChunkRenderSession {
+    #[wasm_bindgen(js_name = renderChunkReport)]
+    pub fn render_chunk_report(
+        &mut self,
+        center_x: i32,
+        center_z: i32,
+        radius_chunks: u32,
+    ) -> Result<JsValue, JsValue> {
+        self.render_chunk_report_for_center(
+            ChunkPos {
+                x: center_x,
+                z: center_z,
+            },
+            radius_chunks,
         )
-        .map_err(|error| format!("failed to load generated chunk through web runtime: {error}"))?;
-    let snapshot = runtime
-        .client()
-        .chunk_snapshot(SMOKE_INITIAL_CENTER)
-        .ok_or_else(|| "web runtime did not publish the generated smoke chunk".to_owned())?;
-    let mesh = build_textured_chunk_mesh(snapshot, &mesh_assets.catalog)?;
-    if mesh.is_empty() {
-        return Err("generated smoke chunk built an empty textured mesh".to_owned());
+        .and_then(GeneratedChunkRenderReport::to_js_value)
+        .map_err(JsValue::from)
+    }
+}
+
+impl WebChunkRenderSession {
+    async fn new(canvas: HtmlCanvasElement, asset_pack_bytes: Vec<u8>) -> Result<Self, String> {
+        let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
+        let context = WebCanvasContext::new(canvas).await?;
+        let depth = ChunkDepthTarget::new(&context.device, context.width, context.height);
+
+        Ok(Self {
+            context,
+            depth,
+            runtime: WebRuntime::local_integrated(SMOKE_SEED),
+            mesh_assets,
+            draw: None,
+            asset_pack_parse_count: 1,
+            terrain_asset_load_count: 1,
+            atlas_upload_count: 0,
+            mesh_build_count: 0,
+            mesh_upload_count: 0,
+            render_count: 0,
+        })
     }
 
-    let stats = mesh.stats();
-    let context = WebCanvasContext::new(canvas).await?;
-    let frame = context
-        .surface
-        .get_current_texture()
-        .map_err(|error| format!("failed to acquire WebGPU canvas frame: {error}"))?;
-    let view = frame.texture.create_view(&Default::default());
-    let depth = ChunkDepthTarget::new(&context.device, context.width, context.height);
-    let draw = TexturedChunkDrawResources::new(
-        &context.device,
-        &context.queue,
-        context.format,
-        &mesh,
-        atlas_upload(&mesh_assets.atlas),
-    )
-    .map_err(|error| format!("failed to upload generated textured chunk mesh: {error:#}"))?;
-    let mut encoder = context
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("mclone_web_generated_textured_chunk_encoder"),
-        });
-    draw.render(
-        &context.queue,
-        &mut encoder,
-        ChunkRenderTarget::new(
-            &view,
-            &depth.view,
-            [context.width, context.height],
-            mclone_render::default_clear_color(),
-        ),
-        ChunkCamera::overview_for_chunk(SMOKE_INITIAL_CENTER.x, SMOKE_INITIAL_CENTER.z)
-            .render_view(context.width, context.height),
-    )
-    .map_err(|error| format!("failed to render generated chunk mesh: {error:#}"))?;
-    context.queue.submit(std::iter::once(encoder.finish()));
-    frame.present();
+    fn render_chunk_report_for_center(
+        &mut self,
+        center: ChunkPos,
+        radius_chunks: u32,
+    ) -> Result<GeneratedChunkRenderReport, String> {
+        self.runtime
+            .request_chunk_view(center, radius_chunks, radius_chunks)
+            .map_err(|error| {
+                format!("failed to load generated chunk through web runtime: {error}")
+            })?;
+        let snapshot = self
+            .runtime
+            .client()
+            .chunk_snapshot(center)
+            .ok_or_else(|| {
+                format!(
+                    "web runtime did not publish generated chunk {},{}",
+                    center.x, center.z
+                )
+            })?;
+        let mesh = build_textured_chunk_mesh(snapshot, &self.mesh_assets.catalog)?;
+        if mesh.is_empty() {
+            return Err(format!(
+                "generated chunk {},{} built an empty textured mesh",
+                center.x, center.z
+            ));
+        }
+        self.mesh_build_count += 1;
+        let stats = mesh.stats();
 
-    Ok(GeneratedChunkRenderReport {
-        width: context.width,
-        height: context.height,
-        command_count: runtime.command_count(),
-        update_count: runtime.update_count(),
-        loaded_chunk_count: runtime.client().loaded_chunk_count(),
-        asset_pack_file_count: mesh_assets.asset_pack_file_count,
-        atlas_width: mesh_assets.atlas.width,
-        atlas_height: mesh_assets.atlas.height,
-        atlas_sprite_count: mesh_assets.atlas_sprite_count,
-        vertex_count: stats.vertex_count,
-        index_count: stats.index_count,
-        face_count: quad_face_count_from_indices(stats.index_count),
-    })
+        self.upload_mesh(&mesh)?;
+
+        let frame = self
+            .context
+            .surface
+            .get_current_texture()
+            .map_err(|error| format!("failed to acquire WebGPU canvas frame: {error}"))?;
+        let view = frame.texture.create_view(&Default::default());
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("mclone_web_generated_textured_chunk_encoder"),
+                });
+        let draw = self
+            .draw
+            .as_ref()
+            .ok_or_else(|| "textured draw resources were not initialized".to_owned())?;
+        draw.render(
+            &self.context.queue,
+            &mut encoder,
+            ChunkRenderTarget::new(
+                &view,
+                &self.depth.view,
+                [self.context.width, self.context.height],
+                mclone_render::default_clear_color(),
+            ),
+            ChunkCamera::overview_for_chunk(center.x, center.z)
+                .render_view(self.context.width, self.context.height),
+        )
+        .map_err(|error| format!("failed to render generated chunk mesh: {error:#}"))?;
+        self.context.queue.submit(std::iter::once(encoder.finish()));
+        frame.present();
+        self.render_count += 1;
+
+        Ok(GeneratedChunkRenderReport {
+            center,
+            width: self.context.width,
+            height: self.context.height,
+            command_count: self.runtime.command_count(),
+            update_count: self.runtime.update_count(),
+            loaded_chunk_count: self.runtime.client().loaded_chunk_count(),
+            asset_pack_file_count: self.mesh_assets.asset_pack_file_count,
+            atlas_width: self.mesh_assets.atlas.width,
+            atlas_height: self.mesh_assets.atlas.height,
+            atlas_sprite_count: self.mesh_assets.atlas_sprite_count,
+            vertex_count: stats.vertex_count,
+            index_count: stats.index_count,
+            face_count: quad_face_count_from_indices(stats.index_count),
+            asset_pack_parse_count: self.asset_pack_parse_count,
+            terrain_asset_load_count: self.terrain_asset_load_count,
+            atlas_upload_count: self.atlas_upload_count,
+            mesh_build_count: self.mesh_build_count,
+            mesh_upload_count: self.mesh_upload_count,
+            render_count: self.render_count,
+        })
+    }
+
+    fn upload_mesh(&mut self, mesh: &TexturedVisibleChunkMesh) -> Result<(), String> {
+        match self.draw.as_mut() {
+            Some(draw) => {
+                draw.update_mesh(&self.context.device, mesh)
+                    .map_err(|error| {
+                        format!("failed to upload generated textured chunk mesh: {error:#}")
+                    })?;
+            }
+            None => {
+                let draw = TexturedChunkDrawResources::new(
+                    &self.context.device,
+                    &self.context.queue,
+                    self.context.format,
+                    mesh,
+                    atlas_upload(&self.mesh_assets.atlas),
+                )
+                .map_err(|error| {
+                    format!("failed to upload generated textured chunk mesh: {error:#}")
+                })?;
+                self.draw = Some(draw);
+                self.atlas_upload_count += 1;
+            }
+        }
+        self.mesh_upload_count += 1;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]

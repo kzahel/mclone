@@ -1271,6 +1271,16 @@ impl TexturedChunkDrawResources {
         self.mesh.index_count()
     }
 
+    pub fn update_mesh(
+        &mut self,
+        device: &wgpu::Device,
+        mesh: &TexturedVisibleChunkMesh,
+    ) -> Result<()> {
+        self.mesh = GpuTexturedChunkMesh::new(device, mesh)
+            .context("failed to upload textured chunk mesh")?;
+        Ok(())
+    }
+
     pub fn render(
         &self,
         queue: &wgpu::Queue,

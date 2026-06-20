@@ -172,18 +172,20 @@ async function renderCanvas() {
   try {
     const module = await import(BINDGEN_JS_URL.href);
     await module.default(BINDGEN_WASM_URL.href);
-    if (typeof module.mclone_web_render_generated_chunk_report !== "function") {
+    if (typeof module.mclone_web_create_chunk_render_session !== "function") {
       return {
         ok: false,
         supported: true,
         status: "export-missing",
-        reason: "missing mclone_web_render_generated_chunk_report export",
+        reason: "missing mclone_web_create_chunk_render_session export",
         exports: Object.keys(module),
       };
     }
 
     const assetPack = await fetchAssetPack();
-    const report = await module.mclone_web_render_generated_chunk_report(canvas, assetPack);
+    const session = await module.mclone_web_create_chunk_render_session(canvas, assetPack);
+    const firstReport = session.renderChunkReport(0, 0, 0);
+    const report = session.renderChunkReport(1, 0, 0);
     return {
       ok: Boolean(
         report.ok
@@ -196,6 +198,7 @@ async function renderCanvas() {
       ),
       supported: true,
       status: report.ok ? "rendered" : "failed",
+      firstReport,
       report,
     };
   } catch (error) {
