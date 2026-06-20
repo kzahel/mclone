@@ -32,7 +32,10 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
   ?? "/tmp/mclone-native-web-smoke.png";
 const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
   ?? "/tmp/mclone-native-web-canvas.png";
-const requireCanvas = process.argv.includes("--require-canvas")
+const requireChunk = process.argv.includes("--require-chunk")
+  || process.env.MCLONE_NATIVE_WEB_REQUIRE_CHUNK === "1";
+const requireCanvas = requireChunk
+  || process.argv.includes("--require-canvas")
   || process.env.MCLONE_NATIVE_WEB_REQUIRE_CANVAS === "1";
 
 run().catch((error) => {
@@ -81,6 +84,7 @@ async function run() {
       screenshotPath,
       canvasScreenshotPath,
       requireCanvas,
+      requireChunk,
       canvasPixels,
       result,
     }, null, 2));
@@ -253,8 +257,29 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
   if (result.canvas.report.width !== 640 || result.canvas.report.height !== 360) {
     throw new Error(`unexpected canvas render size:\n${JSON.stringify(result.canvas.report, null, 2)}`);
   }
-  if (canvasPixels.distinctColorCount < 1 || canvasPixels.sampledNonBackgroundCount < 16) {
+  if (requireChunk) {
+    assertChunkRenderResult(result.canvas.report, canvasPixels);
+  } else if (canvasPixels.distinctColorCount < 1 || canvasPixels.clearColorPixelCount < 16) {
     throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+function assertChunkRenderResult(report, canvasPixels) {
+  if (!report.chunkLoaded || !report.meshBuilt) {
+    throw new Error(`generated chunk did not load/build:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (
+    report.commandCount !== 1
+    || report.updateCount < 1
+    || report.loadedChunkCount !== 1
+  ) {
+    throw new Error(`unexpected generated chunk runtime counts:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (report.vertexCount <= 0 || report.indexCount <= 0 || report.faceCount <= 0) {
+    throw new Error(`generated chunk mesh was empty:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
+    throw new Error(`canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 
@@ -266,22 +291,29 @@ function analyzePng(bytes) {
     b: Math.round(0.05 * 255),
   };
   const colors = new Set();
-  let sampledNonBackgroundCount = 0;
-  const stepX = Math.max(1, Math.floor(png.width / 32));
-  const stepY = Math.max(1, Math.floor(png.height / 18));
-  for (let y = 0; y < png.height; y += stepY) {
-    for (let x = 0; x < png.width; x += stepX) {
+  const interiorColors = new Set();
+  let clearColorPixelCount = 0;
+  let nonClearInteriorPixelCount = 0;
+  const inset = 4;
+  for (let y = 0; y < png.height; y += 1) {
+    for (let x = 0; x < png.width; x += 1) {
       const offset = (y * png.width + x) * 4;
       const r = png.rgba[offset];
       const g = png.rgba[offset + 1];
       const b = png.rgba[offset + 2];
       colors.add(`${r},${g},${b}`);
-      if (
+      const isClear =
         Math.abs(r - expected.r) <= 3
         && Math.abs(g - expected.g) <= 3
-        && Math.abs(b - expected.b) <= 3
-      ) {
-        sampledNonBackgroundCount += 1;
+        && Math.abs(b - expected.b) <= 3;
+      if (isClear) {
+        clearColorPixelCount += 1;
+      }
+      if (x >= inset && x < png.width - inset && y >= inset && y < png.height - inset) {
+        interiorColors.add(`${r},${g},${b}`);
+        if (!isClear) {
+          nonClearInteriorPixelCount += 1;
+        }
       }
     }
   }
@@ -289,7 +321,9 @@ function analyzePng(bytes) {
     width: png.width,
     height: png.height,
     distinctColorCount: colors.size,
-    sampledNonBackgroundCount,
+    distinctInteriorColorCount: interiorColors.size,
+    clearColorPixelCount,
+    nonClearInteriorPixelCount,
     expectedClearColor: expected,
   };
 }

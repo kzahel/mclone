@@ -1131,6 +1131,7 @@ dependencies = [
  "js-sys",
  "mclone-client",
  "mclone-core",
+ "mclone-mesh",
  "mclone-net",
  "mclone-protocol",
  "mclone-render",

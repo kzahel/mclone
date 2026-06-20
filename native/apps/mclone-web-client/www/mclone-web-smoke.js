@@ -171,20 +171,19 @@ async function renderCanvas() {
   try {
     const module = await import(BINDGEN_JS_URL.href);
     await module.default(BINDGEN_WASM_URL.href);
-    if (typeof module.mclone_web_render_canvas_report !== "function") {
+    if (typeof module.mclone_web_render_generated_chunk_report !== "function") {
       return {
         ok: false,
         supported: true,
         status: "export-missing",
-        reason: "missing mclone_web_render_canvas_report export",
+        reason: "missing mclone_web_render_generated_chunk_report export",
         exports: Object.keys(module),
       };
     }
 
-    const bits = Number(await module.mclone_web_render_canvas_report(canvas)) >>> 0;
-    const report = decodeCanvasReport(bits);
+    const report = await module.mclone_web_render_generated_chunk_report(canvas);
     return {
-      ok: report.ok && report.rendered && report.configured,
+      ok: Boolean(report.ok && report.rendered && report.configured && report.chunkLoaded && report.meshBuilt),
       supported: true,
       status: report.ok ? "rendered" : "failed",
       report,
@@ -213,17 +212,6 @@ function decodeRuntimeReport(bits) {
     commandCount: (bits >>> 8) & 0xff,
     updateCount: (bits >>> 16) & 0xff,
     loadedChunkCount: (bits >>> 24) & 0xff,
-  };
-}
-
-function decodeCanvasReport(bits) {
-  return {
-    bits,
-    ok: (bits & 0x1) !== 0,
-    rendered: (bits & 0x2) !== 0,
-    configured: (bits & 0x4) !== 0,
-    width: (bits >>> 8) & 0x0fff,
-    height: (bits >>> 20) & 0x0fff,
   };
 }
 
