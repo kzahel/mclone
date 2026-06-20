@@ -29,8 +29,8 @@ pub use level_engine::{
     MAX_SOURCE_LEVEL,
 };
 pub use packed::{
-    FULL_BLOCK, FULL_BRIGHT, FULL_SKY, pack_light, packed_block_light, packed_light_section_layer,
-    packed_sky_light,
+    FULL_BLOCK, FULL_BRIGHT, FULL_SKY, pack_light, packed_block_light,
+    packed_light_at_local_block_or_fullbright, packed_light_section_layer, packed_sky_light,
 };
 pub use pos::{
     BlockPosKey, Direction, LightSectionRange, SectionPosKey, block_pos_as_long,

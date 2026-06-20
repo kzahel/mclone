@@ -10,8 +10,7 @@ mod inventory;
 mod player;
 
 use mclone_core::{
-    BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, block_to_section_coord,
-    chunk_section_index, local_block_coord, local_section_block_coord,
+    BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, local_block_coord,
 };
 use mclone_protocol::{
     ChunkView, ClientCommand, EntityId, EntitySnapshot, EntityUpdate, PlayerPositionUpdate,
@@ -259,67 +258,14 @@ impl ClientRuntime {
 }
 
 fn packed_light_from_snapshot_or_fullbright(snapshot: &ChunkSnapshot, pos: BlockPos) -> u32 {
-    if pos.y < snapshot.min_y || pos.y >= snapshot.min_y + snapshot.height {
-        return mclone_light::FULL_BRIGHT;
-    }
-    if snapshot.light_sections.is_empty() {
-        return mclone_light::FULL_BRIGHT;
-    }
-
-    let local_x = local_block_coord(pos.x);
-    let local_y = local_section_block_coord(pos.y);
-    let local_z = local_block_coord(pos.z);
-    let index = chunk_section_index(local_x, local_y, local_z);
-    let section_y = block_to_section_coord(pos.y);
-    mclone_light::pack_light(
-        block_light_at(snapshot, section_y, index),
-        sky_light_at(snapshot, section_y, index),
+    mclone_light::packed_light_at_local_block_or_fullbright(
+        &snapshot.light_sections,
+        snapshot.min_y,
+        snapshot.height,
+        local_block_coord(pos.x),
+        pos.y,
+        local_block_coord(pos.z),
     )
-}
-
-fn block_light_at(snapshot: &ChunkSnapshot, section_y: i32, index: usize) -> u8 {
-    snapshot
-        .light_sections
-        .iter()
-        .find(|section| section.section_y == section_y)
-        .and_then(|section| section.block.as_deref())
-        .map_or(0, |layer| data_layer_value(layer, index))
-}
-
-fn sky_light_at(snapshot: &ChunkSnapshot, section_y: i32, index: usize) -> u8 {
-    let mut next_sky_layer = None;
-    for section in &snapshot.light_sections {
-        if section.section_y < section_y {
-            continue;
-        }
-        let Some(layer) = section.sky.as_deref() else {
-            continue;
-        };
-        if section.section_y == section_y {
-            return data_layer_value(layer, index);
-        }
-        if next_sky_layer.is_none_or(|(next_section_y, _)| section.section_y < next_section_y) {
-            next_sky_layer = Some((section.section_y, layer));
-        }
-    }
-
-    if snapshot
-        .light_sections
-        .iter()
-        .any(|section| section.sky.is_some())
-    {
-        next_sky_layer
-            .map(|(_, layer)| data_layer_value(layer, index))
-            .unwrap_or(15)
-    } else {
-        0
-    }
-}
-
-fn data_layer_value(layer: &[u8], index: usize) -> u8 {
-    let byte = layer[index >> 1];
-    let shift = 4 * (index & 1);
-    (byte >> shift) & 15
 }
 
 #[cfg(test)]

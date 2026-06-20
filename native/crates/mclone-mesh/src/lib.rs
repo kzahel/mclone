@@ -37,14 +37,12 @@ pub const CAVE_AIR_BLOCK_STATE_ID: BlockStateId = BlockStateId(71);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builder::{block_at_world_or_air, data_layer_value};
+    use crate::builder::block_at_world_or_air;
     use mclone_assets::{
         AssetPath, BlockModelLibrary, BlockStateAssetIndex, BlockStateRecord, BlockStateRegistry,
         MemoryAssetSource, ResourceLocation, TextureAtlasPlan, TextureMaterial,
     };
-    use mclone_core::{
-        AIR_BLOCK_STATE_ID, LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, chunk_block_index,
-    };
+    use mclone_core::{AIR_BLOCK_STATE_ID, PackedLightSection, chunk_block_index};
     use mclone_light::{DataLayer, FULL_BRIGHT, pack_light};
     use std::collections::BTreeSet;
 
@@ -1056,15 +1054,6 @@ mod tests {
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].key, RenderSectionKey::new(1, 0, 0));
         assert_eq!(sections[0].stats().face_count(), 5 * 16 * 16);
-    }
-
-    #[test]
-    fn data_layer_value_uses_java_nibble_order() {
-        let mut bytes = vec![0; LIGHT_DATA_LAYER_BYTE_COUNT];
-        bytes[0] = 0xA3;
-
-        assert_eq!(data_layer_value(&bytes, 0), 3);
-        assert_eq!(data_layer_value(&bytes, 1), 10);
     }
 
     #[test]

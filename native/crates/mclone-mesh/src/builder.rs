@@ -4,10 +4,12 @@ use mclone_assets::ModelFaceDirection;
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_WIDTH, PackedLightSection,
     SECTION_HEIGHT as RENDER_SECTION_HEIGHT, block_to_chunk_coord, block_to_section_coord,
-    chunk_block_index, chunk_min_block_coord, chunk_section_index, local_block_coord,
-    local_section_block_coord,
+    chunk_block_index, chunk_min_block_coord, local_block_coord,
 };
-use mclone_light::{FULL_BRIGHT, pack_light, packed_block_light, packed_sky_light};
+use mclone_light::{
+    FULL_BRIGHT, pack_light, packed_block_light, packed_light_at_local_block_or_fullbright,
+    packed_sky_light,
+};
 
 use crate::ambient_occlusion::{
     AmbientOcclusionFace, AmbientOcclusionSampler, AmbientOcclusionShape, BlockPos,
@@ -131,64 +133,15 @@ impl<'a> TexturedChunkMeshInput<'a> {
         self.blocks[chunk_block_index(local_x, local_y, local_z)]
     }
 
-    fn has_light_data(&self) -> bool {
-        !self.light_sections.is_empty()
-    }
-
     fn packed_light_at_or_fullbright(&self, local_x: i32, y: i32, local_z: i32) -> u32 {
-        if !(0..CHUNK_WIDTH).contains(&local_x)
-            || !(self.min_y..self.min_y + self.height).contains(&y)
-            || !(0..CHUNK_WIDTH).contains(&local_z)
-        {
-            return FULL_BRIGHT;
-        }
-        if !self.has_light_data() {
-            return FULL_BRIGHT;
-        }
-
-        let index = chunk_section_index(local_x, local_section_block_coord(y), local_z);
-        let section_y = block_to_section_coord(y);
-        let sky = self.sky_light_at(section_y, index);
-        let block = self.block_light_at(section_y, index);
-        pack_light(block, sky)
-    }
-
-    fn block_light_at(&self, section_y: i32, index: usize) -> u8 {
-        self.light_sections
-            .iter()
-            .find(|section| section.section_y == section_y)
-            .and_then(|section| section.block.as_deref())
-            .map_or(0, |layer| data_layer_value(layer, index))
-    }
-
-    fn sky_light_at(&self, section_y: i32, index: usize) -> u8 {
-        let mut next_sky_layer = None;
-        for section in self.light_sections {
-            if section.section_y < section_y {
-                continue;
-            }
-            let Some(layer) = section.sky.as_deref() else {
-                continue;
-            };
-            if section.section_y == section_y {
-                return data_layer_value(layer, index);
-            }
-            if next_sky_layer.is_none_or(|(next_section_y, _)| section.section_y < next_section_y) {
-                next_sky_layer = Some((section.section_y, layer));
-            }
-        }
-
-        if self
-            .light_sections
-            .iter()
-            .any(|section| section.sky.is_some())
-        {
-            next_sky_layer
-                .map(|(_, layer)| data_layer_value(layer, index))
-                .unwrap_or(15)
-        } else {
-            0
-        }
+        packed_light_at_local_block_or_fullbright(
+            self.light_sections,
+            self.min_y,
+            self.height,
+            local_x,
+            y,
+            local_z,
+        )
     }
 }
 
@@ -1184,13 +1137,6 @@ impl TexturedAmbientOcclusionSampler<'_> {
     fn block_state_at_or_air(&self, pos: BlockPos) -> BlockStateId {
         block_state_at_world_or_air(self.area, pos.x, pos.y, pos.z)
     }
-}
-
-pub(crate) fn data_layer_value(layer: &[u8], index: usize) -> u8 {
-    debug_assert_eq!(layer.len(), mclone_light::DATA_LAYER_SIZE);
-    let byte = layer[index >> 1];
-    let shift = 4 * (index & 1);
-    (byte >> shift) & 15
 }
 
 fn direction_offset(direction: ModelFaceDirection) -> [i32; 3] {
