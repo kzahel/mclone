@@ -276,6 +276,210 @@ impl RenderSectionDirtyState {
         }
         completed.partition_by_revision(|key| self.section_revision(key))
     }
+
+    pub fn discard_stale_dirty_work(
+        &mut self,
+        stale_chunks: &BTreeSet<ChunkPos>,
+        stale_sections: &BTreeSet<RenderSectionKey>,
+    ) {
+        for pos in stale_chunks {
+            self.dirty_chunks.remove(pos);
+        }
+        for key in stale_sections {
+            self.dirty_sections.remove(key);
+        }
+    }
+
+    pub fn discard_removed_dirty_work(
+        &mut self,
+        removal_chunks: &BTreeSet<ChunkPos>,
+        removal_sections: &BTreeSet<RenderSectionKey>,
+    ) {
+        for pos in removal_chunks {
+            self.dirty_chunks.remove(pos);
+            self.dirty_sections
+                .retain(|key| render_section_chunk_pos(*key) != *pos);
+            self.inflight_sections
+                .retain(|key| render_section_chunk_pos(*key) != *pos);
+        }
+        for key in removal_sections {
+            self.dirty_sections.remove(key);
+            self.inflight_sections.remove(key);
+        }
+    }
+
+    pub fn apply_ready_plan(&mut self, plan: &RenderSectionReadyPlan) {
+        for pos in &plan.budgeted_loaded_chunks {
+            self.dirty_chunks.remove(pos);
+        }
+        for key in &plan.ready_section_keys {
+            self.dirty_sections.remove(key);
+        }
+        self.dirty_sections
+            .extend(plan.deferred_section_keys.iter().copied());
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RenderSectionDirtyWork {
+    pub stale_dirty_chunks: BTreeSet<ChunkPos>,
+    pub loaded_dirty_chunks: BTreeSet<ChunkPos>,
+    pub removal_dirty_chunks: BTreeSet<ChunkPos>,
+    pub stale_dirty_sections: BTreeSet<RenderSectionKey>,
+    pub loaded_dirty_sections_by_chunk: BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    pub removal_dirty_sections: BTreeSet<RenderSectionKey>,
+}
+
+impl RenderSectionDirtyWork {
+    pub fn has_removals(&self) -> bool {
+        !self.removal_dirty_chunks.is_empty() || !self.removal_dirty_sections.is_empty()
+    }
+}
+
+pub fn classify_render_section_dirty_work(
+    dirty: &RenderSectionDirtyState,
+    mut chunk_is_loaded: impl FnMut(ChunkPos) -> bool,
+    mut chunk_is_cached: impl FnMut(ChunkPos) -> bool,
+    mut section_is_loaded: impl FnMut(RenderSectionKey) -> bool,
+    mut section_is_cached: impl FnMut(RenderSectionKey) -> bool,
+) -> RenderSectionDirtyWork {
+    let mut work = RenderSectionDirtyWork::default();
+
+    for pos in dirty.dirty_chunks.iter().copied() {
+        if chunk_is_loaded(pos) {
+            work.loaded_dirty_chunks.insert(pos);
+        } else if chunk_is_cached(pos) {
+            work.removal_dirty_chunks.insert(pos);
+        } else {
+            work.stale_dirty_chunks.insert(pos);
+        }
+    }
+
+    for key in dirty.dirty_sections.iter().copied() {
+        if section_is_loaded(key) {
+            work.loaded_dirty_sections_by_chunk
+                .entry(render_section_chunk_pos(key))
+                .or_default()
+                .insert(key);
+        } else if section_is_cached(key) {
+            work.removal_dirty_sections.insert(key);
+        } else {
+            work.stale_dirty_sections.insert(key);
+        }
+    }
+
+    work
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RenderSectionNeighborReadiness {
+    ReadyWithNeighbors,
+    ReadyNearCamera,
+    DeferredMissingNeighbors,
+}
+
+impl RenderSectionNeighborReadiness {
+    pub const fn is_ready(self) -> bool {
+        matches!(self, Self::ReadyWithNeighbors | Self::ReadyNearCamera)
+    }
+
+    pub const fn is_near_exception(self) -> bool {
+        matches!(self, Self::ReadyNearCamera)
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RenderSectionReadyPlan {
+    pub budgeted_loaded_chunks: BTreeSet<ChunkPos>,
+    pub budgeted_dirty_section_chunks: BTreeSet<ChunkPos>,
+    pub ready_section_keys: BTreeSet<RenderSectionKey>,
+    pub deferred_section_keys: BTreeSet<RenderSectionKey>,
+    pub near_exception_section_count: usize,
+    pub deferred_section_count: usize,
+}
+
+pub fn plan_ready_render_sections(
+    sorted_loaded_dirty_chunks: impl IntoIterator<Item = ChunkPos>,
+    sorted_dirty_section_chunks: impl IntoIterator<Item = ChunkPos>,
+    loaded_dirty_sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    chunk_budget: usize,
+    mut section_keys_for_chunk: impl FnMut(ChunkPos) -> Vec<RenderSectionKey>,
+    inflight_sections: &BTreeSet<RenderSectionKey>,
+    mut section_readiness: impl FnMut(RenderSectionKey) -> RenderSectionNeighborReadiness,
+) -> RenderSectionReadyPlan {
+    let budgeted_loaded_chunks = sorted_loaded_dirty_chunks
+        .into_iter()
+        .take(chunk_budget)
+        .collect::<BTreeSet<_>>();
+    let remaining_chunk_budget = chunk_budget.saturating_sub(budgeted_loaded_chunks.len());
+    let budgeted_dirty_section_chunks = sorted_dirty_section_chunks
+        .into_iter()
+        .filter(|pos| !budgeted_loaded_chunks.contains(pos))
+        .take(remaining_chunk_budget)
+        .collect::<BTreeSet<_>>();
+    let mut plan = RenderSectionReadyPlan {
+        budgeted_loaded_chunks,
+        budgeted_dirty_section_chunks,
+        ..RenderSectionReadyPlan::default()
+    };
+
+    for pos in plan
+        .budgeted_loaded_chunks
+        .iter()
+        .copied()
+        .collect::<Vec<_>>()
+    {
+        for key in section_keys_for_chunk(pos) {
+            plan_ready_render_section_key(
+                &mut plan,
+                key,
+                inflight_sections,
+                &mut section_readiness,
+            );
+        }
+    }
+    for pos in plan
+        .budgeted_dirty_section_chunks
+        .iter()
+        .copied()
+        .collect::<Vec<_>>()
+    {
+        if let Some(keys) = loaded_dirty_sections_by_chunk.get(&pos) {
+            for key in keys {
+                plan_ready_render_section_key(
+                    &mut plan,
+                    *key,
+                    inflight_sections,
+                    &mut section_readiness,
+                );
+            }
+        }
+    }
+
+    plan
+}
+
+fn plan_ready_render_section_key(
+    plan: &mut RenderSectionReadyPlan,
+    key: RenderSectionKey,
+    inflight_sections: &BTreeSet<RenderSectionKey>,
+    section_readiness: &mut impl FnMut(RenderSectionKey) -> RenderSectionNeighborReadiness,
+) {
+    if inflight_sections.contains(&key) {
+        plan.deferred_section_keys.insert(key);
+        return;
+    }
+
+    let readiness = section_readiness(key);
+    if readiness.is_ready() {
+        if readiness.is_near_exception() {
+            plan.near_exception_section_count += 1;
+        }
+        plan.ready_section_keys.insert(key);
+    } else {
+        plan.deferred_section_count += 1;
+        plan.deferred_section_keys.insert(key);
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -948,6 +1152,132 @@ mod tests {
         assert_eq!(acceptance.accepted_sections, BTreeSet::from([first]));
         assert_eq!(acceptance.stale_sections, BTreeSet::from([second]));
         assert_eq!(dirty.dirty_sections, BTreeSet::from([second]));
+    }
+
+    #[test]
+    fn render_section_dirty_work_classifies_loaded_removal_and_stale_items() {
+        let loaded_chunk = ChunkPos::new(0, 0);
+        let removal_chunk = ChunkPos::new(1, 0);
+        let stale_chunk = ChunkPos::new(2, 0);
+        let loaded_section = RenderSectionKey::new(0, 4, 0);
+        let chunk_removal_section = RenderSectionKey::new(1, 4, 0);
+        let removal_section = RenderSectionKey::new(3, 4, 0);
+        let stale_section = RenderSectionKey::new(4, 4, 0);
+        let loaded_chunks = BTreeSet::from([loaded_chunk]);
+        let cached_chunks = BTreeSet::from([removal_chunk]);
+        let loaded_sections = BTreeSet::from([loaded_section]);
+        let cached_sections = BTreeSet::from([chunk_removal_section, removal_section]);
+        let mut dirty = RenderSectionDirtyState {
+            dirty_chunks: BTreeSet::from([loaded_chunk, removal_chunk, stale_chunk]),
+            dirty_sections: BTreeSet::from([
+                loaded_section,
+                chunk_removal_section,
+                removal_section,
+                stale_section,
+            ]),
+            inflight_sections: BTreeSet::from([chunk_removal_section, removal_section]),
+            ..RenderSectionDirtyState::default()
+        };
+
+        let work = classify_render_section_dirty_work(
+            &dirty,
+            |pos| loaded_chunks.contains(&pos),
+            |pos| cached_chunks.contains(&pos),
+            |key| loaded_sections.contains(&key),
+            |key| cached_sections.contains(&key),
+        );
+
+        assert_eq!(work.loaded_dirty_chunks, BTreeSet::from([loaded_chunk]));
+        assert_eq!(work.removal_dirty_chunks, BTreeSet::from([removal_chunk]));
+        assert_eq!(work.stale_dirty_chunks, BTreeSet::from([stale_chunk]));
+        assert_eq!(
+            work.loaded_dirty_sections_by_chunk,
+            BTreeMap::from([(loaded_chunk, BTreeSet::from([loaded_section]))])
+        );
+        assert_eq!(
+            work.removal_dirty_sections,
+            BTreeSet::from([chunk_removal_section, removal_section])
+        );
+        assert_eq!(work.stale_dirty_sections, BTreeSet::from([stale_section]));
+
+        dirty.discard_stale_dirty_work(&work.stale_dirty_chunks, &work.stale_dirty_sections);
+        dirty.discard_removed_dirty_work(&work.removal_dirty_chunks, &work.removal_dirty_sections);
+
+        assert_eq!(dirty.dirty_chunks, BTreeSet::from([loaded_chunk]));
+        assert_eq!(dirty.dirty_sections, BTreeSet::from([loaded_section]));
+        assert!(dirty.inflight_sections.is_empty());
+    }
+
+    #[test]
+    fn render_section_ready_plan_selects_budgeted_ready_and_deferred_sections() {
+        let loaded_chunk = ChunkPos::new(0, 0);
+        let dirty_section_chunk = ChunkPos::new(2, 0);
+        let skipped_section_chunk = ChunkPos::new(3, 0);
+        let ready_from_chunk = RenderSectionKey::new(0, 4, 0);
+        let deferred_from_chunk = RenderSectionKey::new(0, 5, 0);
+        let inflight_from_chunk = RenderSectionKey::new(0, 6, 0);
+        let near_dirty_section = RenderSectionKey::new(2, 4, 0);
+        let skipped_dirty_section = RenderSectionKey::new(3, 4, 0);
+        let sections_by_chunk = BTreeMap::from([
+            (dirty_section_chunk, BTreeSet::from([near_dirty_section])),
+            (
+                skipped_section_chunk,
+                BTreeSet::from([skipped_dirty_section]),
+            ),
+        ]);
+
+        let plan = plan_ready_render_sections(
+            [loaded_chunk],
+            [dirty_section_chunk, skipped_section_chunk],
+            &sections_by_chunk,
+            2,
+            |_| vec![ready_from_chunk, deferred_from_chunk, inflight_from_chunk],
+            &BTreeSet::from([inflight_from_chunk]),
+            |key| match key {
+                key if key == ready_from_chunk => {
+                    RenderSectionNeighborReadiness::ReadyWithNeighbors
+                }
+                key if key == deferred_from_chunk => {
+                    RenderSectionNeighborReadiness::DeferredMissingNeighbors
+                }
+                key if key == near_dirty_section => RenderSectionNeighborReadiness::ReadyNearCamera,
+                unexpected => panic!("unexpected readiness probe for {unexpected:?}"),
+            },
+        );
+
+        assert_eq!(plan.budgeted_loaded_chunks, BTreeSet::from([loaded_chunk]));
+        assert_eq!(
+            plan.budgeted_dirty_section_chunks,
+            BTreeSet::from([dirty_section_chunk])
+        );
+        assert_eq!(
+            plan.ready_section_keys,
+            BTreeSet::from([ready_from_chunk, near_dirty_section])
+        );
+        assert_eq!(
+            plan.deferred_section_keys,
+            BTreeSet::from([deferred_from_chunk, inflight_from_chunk])
+        );
+        assert_eq!(plan.near_exception_section_count, 1);
+        assert_eq!(plan.deferred_section_count, 1);
+
+        let mut dirty = RenderSectionDirtyState {
+            dirty_chunks: BTreeSet::from([loaded_chunk]),
+            dirty_sections: BTreeSet::from([
+                ready_from_chunk,
+                deferred_from_chunk,
+                inflight_from_chunk,
+                near_dirty_section,
+            ]),
+            ..RenderSectionDirtyState::default()
+        };
+        dirty.apply_ready_plan(&plan);
+
+        assert!(dirty.dirty_chunks.is_empty());
+        assert_eq!(
+            dirty.dirty_sections,
+            BTreeSet::from([deferred_from_chunk, inflight_from_chunk])
+        );
     }
 
     #[test]

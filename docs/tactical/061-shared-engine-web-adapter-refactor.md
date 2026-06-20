@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active shared render dirty state landed.
+Status: active shared render planner landed.
 
 ## Purpose
 
@@ -355,6 +355,20 @@ Browser worker payload result:
   partitioning to the shared dirty state.
 - Added shared dirty-state tests covering chunk-neighborhood invalidation,
   inflight compile tracking, and stale compile result detection.
+- Extracted shared dirty-work classification and ready/deferred compile-budget
+  planning into `mclone-render-session`:
+  - `RenderSectionDirtyWork`
+  - `RenderSectionNeighborReadiness`
+  - `RenderSectionReadyPlan`
+  - `classify_render_section_dirty_work`
+  - `plan_ready_render_sections`
+- Updated desktop `WindowSceneRuntime::sync_render_sections_with_budget` to
+  delegate stale/removal cleanup and ready/deferred section selection to those
+  shared planner primitives while keeping native camera-distance ordering and
+  neighbor snapshot probes in the desktop adapter.
+- Added shared planner tests covering loaded/removal/stale classification,
+  budgeted ready/deferred section selection, near-camera exceptions, inflight
+  deferral, and dirty-state updates after a ready plan.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
@@ -485,16 +499,20 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should feed worker-compiled section payloads into the browser
-render session instead of only asserting them beside the current inline build:
+The next slice should put `WebChunkRenderSession` on the same shared dirty-state
+and planner lifecycle that desktop now uses:
 
-1. Decode the packed worker payload on the main WASM instance into
-   `TexturedRenderSectionBuildReport`.
-2. Apply that report through `CachedTexturedRenderSections::apply_build_report`
-   for the first generated-chunk browser render.
-3. Keep WebGPU resource creation, upload, and presentation on the main browser
-   thread.
-4. Preserve the inline compiler only as an explicit fallback/smoke path behind
-   the same worker-shaped adapter.
-5. Extend `native:web:chunk-smoke` so worker-compiled payload counts and
-   uploaded/drawn section counts are the same source of truth.
+1. Give the browser render session a `RenderSectionDirtyState` and use
+   `RenderSectionViewSync` to mark dirty chunks and removals.
+2. Use `classify_render_section_dirty_work` and `plan_ready_render_sections`
+   for browser compile request selection, with browser/platform code providing
+   snapshot lookup, loaded/cached tests, camera-distance sorting, and readiness
+   probes.
+3. Submit browser worker compile requests from the shared ready plan and finish
+   them through the shared accepted/stale result path before applying section
+   updates.
+4. Keep WebGPU upload and presentation on the main browser thread, with
+   Playwright still asserting worker payload counts, accepted section counts,
+   uploaded section counts, screenshots, and zero pending jobs.
+5. Retire or narrow web-only target/ready helper use once it is no longer app
+   policy.
