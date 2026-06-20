@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active shared render-section sync/update helper landed.
+Status: active shared compile-finish update helper landed.
 
 ## Purpose
 
@@ -434,6 +434,20 @@ Browser worker payload result:
   submission, and deferred removal upload in the web adapter.
 - Added shared tests for native-style immediate removal application and
   web-style deferred removals for combined rebuild/remove GPU uploads.
+- Added `RenderSectionFinishedCompileUpdate`,
+  `RenderSectionSession::finish_compile_update`, and
+  `RenderSectionSession::drain_completed_compile_updates` so accepted/stale
+  compile-result handling, stale-section requeue, CPU cache mutation, deferred
+  removal application, and pending native-worker job reporting live behind the
+  shared session surface.
+- Updated desktop `WindowSceneRuntime` to drain the native compile worker and
+  hand the completed batch to the shared session instead of locally finishing,
+  requeueing, and applying each result.
+- Updated web `WebChunkRenderSession` to finish browser worker packed payloads
+  through the same shared helper before GPU upload/presentation, while keeping
+  JS/Rust request IDs and packed report decoding in the browser adapter.
+- Added shared session tests covering accepted-plus-stale compile results and
+  removal-only updates with no accepted sections.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
@@ -564,16 +578,16 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should move completed-compile draining and final update assembly
-behind the same shared session surface:
+The next slice should move loaded-view sync and dirty marking closer to the
+shared session boundary:
 
-1. Add a shared helper for drain-finish-merge of completed
-   `RenderSectionCompileResult`s, including stale requeue, accepted report
-   application, and pending-job count reporting.
-2. Keep completed-result sources platform-owned: desktop drains the native
-   worker, and web finishes browser worker packed payloads through its JS/Rust
-   request boundary.
-3. Reduce desktop/web code to compiler transport plus GPU upload/presentation
-   after the shared helper returns `RenderSectionCacheUpdate`.
-4. Preserve the Playwright worker/canvas smoke plus native movement/timedemo
-   screenshots as the compatibility gates.
+1. Add a shared helper that takes the previous/current loaded chunk set plus
+   adapter snapshot lookup and marks added, changed, removed, cached, dirty, and
+   inflight render-section keys consistently.
+2. Keep runtime ownership platform-specific: desktop still polls local/remote
+   transports and web still requests chunks through `WebRuntime`.
+3. Reduce desktop/web duplicated `RenderSectionViewSync` and
+   mark-render-sync-dirty code before extracting the larger
+   `EngineRenderSession`.
+4. Preserve Playwright worker/canvas screenshots plus native
+   movement/timedemo/headless screenshots as the compatibility gates.

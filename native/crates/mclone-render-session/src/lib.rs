@@ -544,6 +544,14 @@ pub struct RenderSectionCompileFinish {
     pub build_report: Option<TexturedRenderSectionBuildReport>,
 }
 
+#[derive(Debug)]
+pub struct RenderSectionFinishedCompileUpdate {
+    pub acceptance_report: RenderSectionCompileAcceptanceReport,
+    pub accepted_sections: BTreeSet<RenderSectionKey>,
+    pub stale_sections: BTreeSet<RenderSectionKey>,
+    pub cache_update: RenderSectionCacheUpdate,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RenderSectionCompileSubmission<T> {
     pub submitted_section_count: usize,
@@ -783,6 +791,66 @@ impl RenderSectionSession {
         request_id: u32,
     ) -> Result<RenderSectionCompileFinish> {
         finish_render_section_compile_result(&mut self.dirty, completed, request_id)
+    }
+
+    pub fn finish_compile_update(
+        &mut self,
+        completed: RenderSectionCompileResult,
+        request_id: u32,
+        removal_chunks: &BTreeSet<ChunkPos>,
+        removal_sections: &BTreeSet<RenderSectionKey>,
+        section_is_loaded: impl FnMut(RenderSectionKey) -> bool,
+    ) -> Result<RenderSectionFinishedCompileUpdate> {
+        let RenderSectionCompileFinish {
+            acceptance_report,
+            accepted_sections,
+            stale_sections,
+            build_report,
+        } = self.finish_compile_result(completed, request_id)?;
+        let mut cache_update = RenderSectionCacheUpdate::default();
+        if !stale_sections.is_empty() {
+            cache_update.stale_compile_section_count += stale_sections.len();
+            self.requeue_stale_sections(stale_sections.clone(), section_is_loaded);
+        }
+        if let Some(build_report) = build_report {
+            cache_update.merge(self.apply_finished_compile_report(
+                &accepted_sections,
+                build_report,
+                removal_chunks,
+                removal_sections,
+            ));
+        } else if !removal_chunks.is_empty() || !removal_sections.is_empty() {
+            cache_update.merge(self.apply_removals(removal_chunks, removal_sections));
+        }
+        Ok(RenderSectionFinishedCompileUpdate {
+            acceptance_report,
+            accepted_sections,
+            stale_sections,
+            cache_update,
+        })
+    }
+
+    pub fn drain_completed_compile_updates(
+        &mut self,
+        completed_results: impl IntoIterator<Item = RenderSectionCompileResult>,
+        mut request_id_for_result: impl FnMut(&RenderSectionCompileResult) -> u32,
+        pending_compile_jobs: usize,
+        mut section_is_loaded: impl FnMut(RenderSectionKey) -> bool,
+    ) -> Result<RenderSectionCacheUpdate> {
+        let mut update = RenderSectionCacheUpdate::default();
+        for completed in completed_results {
+            let request_id = request_id_for_result(&completed);
+            let finished = self.finish_compile_update(
+                completed,
+                request_id,
+                &BTreeSet::new(),
+                &BTreeSet::new(),
+                |key| section_is_loaded(key),
+            )?;
+            update.merge(finished.cache_update);
+        }
+        update.pending_compile_jobs = pending_compile_jobs;
+        Ok(update)
     }
 
     pub fn apply_finished_compile_report(
@@ -1470,6 +1538,22 @@ mod tests {
 
     use super::*;
 
+    fn test_build_report(
+        keys: impl IntoIterator<Item = RenderSectionKey>,
+    ) -> TexturedRenderSectionBuildReport {
+        TexturedRenderSectionBuildReport {
+            sections: keys
+                .into_iter()
+                .map(|key| TexturedRenderSectionMesh {
+                    key,
+                    mesh: TexturedVisibleChunkMesh::default(),
+                    visibility: VisibilitySet::all_visible(),
+                })
+                .collect(),
+            visibility_graph: VisibilityGraphBuildStats::default(),
+        }
+    }
+
     #[test]
     fn snapshot_mesh_block_state_ids_rehydrates_omitted_air_sections() {
         let mut block_state_ids = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME * 2];
@@ -2105,6 +2189,110 @@ mod tests {
         assert!(session.dirty().dirty_sections.contains(&cached));
         assert!(session.dirty().dirty_sections.contains(&loaded));
         assert!(!session.dirty().dirty_sections.contains(&stale_unloaded));
+    }
+
+    #[test]
+    fn render_section_session_finish_compile_update_applies_and_requeues_stale_sections() {
+        let accepted = RenderSectionKey::new(0, 4, 0);
+        let stale = RenderSectionKey::new(0, 5, 0);
+        let mut session = RenderSectionSession::default();
+        let ready_plan = RenderSectionReadyPlan {
+            ready_section_keys: BTreeSet::from([accepted, stale]),
+            ..RenderSectionReadyPlan::default()
+        };
+
+        session.mark_section_dirty(accepted);
+        session.mark_section_dirty(stale);
+        let request = session
+            .submit_ready_plan_compile_request(&ready_plan, Vec::new(), |request| {
+                Ok::<_, std::convert::Infallible>(request)
+            })
+            .expect("compile submission should not fail")
+            .expect("ready sections should build a compile request")
+            .output;
+        session.mark_section_dirty(stale);
+        let finished = session
+            .finish_compile_update(
+                RenderSectionCompileResult {
+                    target_sections: request.target_sections,
+                    section_revisions: request.section_revisions,
+                    result: Ok(test_build_report([accepted, stale])),
+                },
+                17,
+                &BTreeSet::new(),
+                &BTreeSet::new(),
+                |key| key == stale,
+            )
+            .expect("compile update should finish");
+
+        assert_eq!(
+            finished.acceptance_report,
+            RenderSectionCompileAcceptanceReport {
+                request_id: 17,
+                submitted_section_count: 2,
+                accepted_section_count: 1,
+                stale_section_count: 1,
+            }
+        );
+        assert_eq!(finished.accepted_sections, BTreeSet::from([accepted]));
+        assert_eq!(finished.stale_sections, BTreeSet::from([stale]));
+        assert_eq!(finished.cache_update.rebuilt_section_count(), 1);
+        assert_eq!(finished.cache_update.completed_compile_section_count, 1);
+        assert_eq!(finished.cache_update.stale_compile_section_count, 1);
+        assert!(session.contains_section(accepted));
+        assert!(!session.contains_section(stale));
+        assert!(!session.dirty().dirty_sections.contains(&accepted));
+        assert!(session.dirty().dirty_sections.contains(&stale));
+        assert!(session.dirty().inflight_sections.is_empty());
+    }
+
+    #[test]
+    fn render_section_session_finish_compile_update_applies_removals_without_accepted_sections() {
+        let key = RenderSectionKey::new(1, 4, 0);
+        let pos = ChunkPos::new(1, 0);
+        let mut session = RenderSectionSession::default();
+        session.apply_finished_compile_report(
+            &BTreeSet::from([key]),
+            test_build_report([key]),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
+        let ready_plan = RenderSectionReadyPlan {
+            ready_section_keys: BTreeSet::from([key]),
+            ..RenderSectionReadyPlan::default()
+        };
+
+        session.mark_section_dirty(key);
+        let request = session
+            .submit_ready_plan_compile_request(&ready_plan, Vec::new(), |request| {
+                Ok::<_, std::convert::Infallible>(request)
+            })
+            .expect("compile submission should not fail")
+            .expect("ready section should build a compile request")
+            .output;
+        session.mark_section_dirty(key);
+        let finished = session
+            .finish_compile_update(
+                RenderSectionCompileResult {
+                    target_sections: request.target_sections,
+                    section_revisions: request.section_revisions,
+                    result: Ok(TexturedRenderSectionBuildReport::default()),
+                },
+                18,
+                &BTreeSet::from([pos]),
+                &BTreeSet::new(),
+                |_| false,
+            )
+            .expect("removal-only compile update should finish");
+
+        assert!(finished.accepted_sections.is_empty());
+        assert_eq!(finished.stale_sections, BTreeSet::from([key]));
+        assert_eq!(finished.cache_update.rebuilt_section_count(), 0);
+        assert_eq!(finished.cache_update.removed_section_count(), 1);
+        assert_eq!(finished.cache_update.stale_compile_section_count, 1);
+        assert!(!session.contains_section(key));
+        assert!(!session.dirty().dirty_sections.contains(&key));
+        assert!(session.dirty().inflight_sections.is_empty());
     }
 
     #[test]

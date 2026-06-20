@@ -594,33 +594,20 @@ impl WindowSceneRuntime {
     }
 
     fn drain_completed_render_compile_jobs(&mut self) -> Result<RenderSectionCacheUpdate> {
-        let mut update = RenderSectionCacheUpdate::default();
-        for completed in self.render_compile_worker.try_recv_completed()? {
-            let finish = self.render_session.finish_compile_result(completed, 0)?;
-            if !finish.stale_sections.is_empty() {
-                update.stale_compile_section_count += finish.stale_sections.len();
-                let client = &self.client;
-                self.render_session
-                    .requeue_stale_sections(finish.stale_sections, |key| {
-                        let pos = render_section_chunk_pos(key);
-                        client
-                            .chunk_snapshot(pos)
-                            .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-                    });
-            }
-            let Some(build_report) = finish.build_report else {
-                continue;
-            };
-            let completed_update = self.render_session.apply_finished_compile_report(
-                &finish.accepted_sections,
-                build_report,
-                &BTreeSet::new(),
-                &BTreeSet::new(),
-            );
-            update.merge(completed_update);
-        }
-        update.pending_compile_jobs = self.render_compile_worker.pending_job_count();
-        Ok(update)
+        let completed_results = self.render_compile_worker.try_recv_completed()?;
+        let pending_compile_jobs = self.render_compile_worker.pending_job_count();
+        let client = &self.client;
+        self.render_session.drain_completed_compile_updates(
+            completed_results,
+            |_| 0,
+            pending_compile_jobs,
+            |key| {
+                let pos = render_section_chunk_pos(key);
+                client
+                    .chunk_snapshot(pos)
+                    .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+            },
+        )
     }
 
     fn submit_render_compile_plan(&mut self, ready_plan: &RenderSectionReadyPlan) -> Result<usize> {

@@ -739,41 +739,50 @@ impl WebChunkRenderSession {
         compile_report: WebSectionCompileReport,
         request_id: u32,
     ) -> Result<GeneratedChunkRenderReport, String> {
-        let finish = self
+        let current_section_keys = completed
+            .result
+            .as_ref()
+            .ok()
+            .map(|report| {
+                report
+                    .sections
+                    .iter()
+                    .map(|section| section.key)
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        let has_removals = !removal_chunks.is_empty() || !removal_sections.is_empty();
+        let runtime = &self.runtime;
+        let finished = self
             .render_session
-            .finish_compile_result(completed, request_id)
-            .map_err(|error| error.to_string())?;
-        if !finish.stale_sections.is_empty() {
-            let runtime = &self.runtime;
-            self.render_session
-                .requeue_stale_sections(finish.stale_sections.clone(), |key| {
+            .finish_compile_update(
+                completed,
+                request_id,
+                &removal_chunks,
+                &removal_sections,
+                |key| {
                     let pos = render_section_chunk_pos(key);
                     runtime
                         .client()
                         .chunk_snapshot(pos)
                         .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-                });
-        }
-        if finish.accepted_sections.is_empty()
-            && removal_chunks.is_empty()
-            && removal_sections.is_empty()
-        {
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        if finished.accepted_sections.is_empty() && !has_removals {
             return Err(format!(
                 "web render compile request {request_id} had no accepted sections ({} stale)",
-                finish.acceptance_report.stale_section_count
+                finished.acceptance_report.stale_section_count
             ));
         }
-        let build_report = finish.build_report.unwrap_or_default();
-        self.render_chunk_report_with_section_report(
+        self.render_chunk_report_with_cache_update(
             center,
             radius_chunks,
-            sync,
-            removal_chunks,
-            removal_sections,
-            finish.accepted_sections,
-            build_report,
+            sync.current_loaded_chunks,
+            current_section_keys,
+            finished.cache_update,
             compile_report,
-            finish.acceptance_report,
+            finished.acceptance_report,
         )
     }
 
@@ -883,31 +892,17 @@ impl WebChunkRenderSession {
         }
     }
 
-    fn render_chunk_report_with_section_report(
+    fn render_chunk_report_with_cache_update(
         &mut self,
         center: ChunkPos,
         radius_chunks: u32,
-        sync: RenderSectionViewSync,
-        removal_chunks: BTreeSet<ChunkPos>,
-        removal_sections: BTreeSet<RenderSectionKey>,
-        ready_section_keys: BTreeSet<RenderSectionKey>,
-        section_report: TexturedRenderSectionBuildReport,
+        current_loaded_chunks: BTreeSet<ChunkPos>,
+        current_section_keys: BTreeSet<RenderSectionKey>,
+        cache_update: RenderSectionCacheUpdate,
         compile_report: WebSectionCompileReport,
         acceptance_report: RenderSectionCompileAcceptanceReport,
     ) -> Result<GeneratedChunkRenderReport, String> {
-        let current_loaded_chunks = sync.current_loaded_chunks;
         self.mesh_build_count += 1;
-        let current_section_keys = section_report
-            .sections
-            .iter()
-            .map(|section| section.key)
-            .collect::<BTreeSet<_>>();
-        let cache_update = self.render_session.apply_finished_compile_report(
-            &ready_section_keys,
-            section_report,
-            &removal_chunks,
-            &removal_sections,
-        );
         let cached_sections = self.render_session.sections();
         if cached_sections.iter().all(|section| section.is_empty()) {
             return Err(format!(
