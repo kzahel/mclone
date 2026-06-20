@@ -1130,7 +1130,9 @@ version = "0.0.0"
 name = "mclone-web-client"
 version = "0.0.0"
 dependencies = [
+ "image",
  "js-sys",
+ "mclone-assets",
  "mclone-client",
  "mclone-core",
  "mclone-mesh",

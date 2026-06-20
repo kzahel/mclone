@@ -1,13 +1,24 @@
+use std::collections::BTreeSet;
+
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use super::{SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime};
+use mclone_assets::{
+    AssetSource, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry, PackedAssetSource,
+    ResourceLocation, TextureAtlasPlan, TextureMaterial,
+};
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkSnapshot,
-    chunk_section_index,
+    SECTION_HEIGHT, chunk_section_index,
 };
-use mclone_mesh::{ChunkMeshInput, VisibleChunkMesh, build_visible_chunk_mesh};
-use mclone_render::chunk::{ChunkCamera, ChunkDepthTarget, ChunkDrawResources, ChunkRenderTarget};
+use mclone_mesh::{
+    TexturedChunkMeshInput, TexturedMeshCatalog, TexturedVisibleChunkMesh,
+    build_textured_visible_chunk_mesh, quad_face_count_from_indices,
+};
+use mclone_render::chunk::{
+    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas, TexturedChunkDrawResources,
+};
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
 const CANVAS_RENDERED_BIT: u32 = 1 << 1;
@@ -43,9 +54,12 @@ pub fn mclone_web_render_canvas_report(canvas: HtmlCanvasElement) -> js_sys::Pro
 }
 
 #[wasm_bindgen]
-pub fn mclone_web_render_generated_chunk_report(canvas: HtmlCanvasElement) -> js_sys::Promise {
+pub fn mclone_web_render_generated_chunk_report(
+    canvas: HtmlCanvasElement,
+    asset_pack_bytes: js_sys::Uint8Array,
+) -> js_sys::Promise {
     wasm_bindgen_futures::future_to_promise(async move {
-        let report = render_generated_chunk(canvas)
+        let report = render_generated_chunk(canvas, asset_pack_bytes.to_vec())
             .await
             .map_err(JsValue::from)?;
         report.to_js_value().map_err(JsValue::from)
@@ -72,6 +86,10 @@ struct GeneratedChunkRenderReport {
     command_count: usize,
     update_count: usize,
     loaded_chunk_count: usize,
+    asset_pack_file_count: usize,
+    atlas_width: u32,
+    atlas_height: u32,
+    atlas_sprite_count: usize,
     vertex_count: u32,
     index_count: u32,
     face_count: u32,
@@ -95,11 +113,21 @@ impl GeneratedChunkRenderReport {
         set_bool(&object, "configured", true)?;
         set_bool(&object, "chunkLoaded", true)?;
         set_bool(&object, "meshBuilt", true)?;
+        set_bool(&object, "assetPackLoaded", true)?;
+        set_bool(&object, "textured", true)?;
         set_number(&object, "width", f64::from(self.width))?;
         set_number(&object, "height", f64::from(self.height))?;
         set_number(&object, "commandCount", self.command_count as f64)?;
         set_number(&object, "updateCount", self.update_count as f64)?;
         set_number(&object, "loadedChunkCount", self.loaded_chunk_count as f64)?;
+        set_number(
+            &object,
+            "assetPackFileCount",
+            self.asset_pack_file_count as f64,
+        )?;
+        set_number(&object, "atlasWidth", f64::from(self.atlas_width))?;
+        set_number(&object, "atlasHeight", f64::from(self.atlas_height))?;
+        set_number(&object, "atlasSpriteCount", self.atlas_sprite_count as f64)?;
         set_number(&object, "vertexCount", f64::from(self.vertex_count))?;
         set_number(&object, "indexCount", f64::from(self.index_count))?;
         set_number(&object, "faceCount", f64::from(self.face_count))?;
@@ -145,7 +173,9 @@ async fn render_canvas_clear(canvas: HtmlCanvasElement) -> Result<CanvasRenderRe
 
 async fn render_generated_chunk(
     canvas: HtmlCanvasElement,
+    asset_pack_bytes: Vec<u8>,
 ) -> Result<GeneratedChunkRenderReport, String> {
+    let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
     let mut runtime = WebRuntime::local_integrated(SMOKE_SEED);
     runtime
         .request_chunk_view(
@@ -158,9 +188,9 @@ async fn render_generated_chunk(
         .client()
         .chunk_snapshot(SMOKE_INITIAL_CENTER)
         .ok_or_else(|| "web runtime did not publish the generated smoke chunk".to_owned())?;
-    let mesh = build_flat_chunk_mesh(snapshot)?;
+    let mesh = build_textured_chunk_mesh(snapshot, &mesh_assets.catalog)?;
     if mesh.is_empty() {
-        return Err("generated smoke chunk built an empty flat mesh".to_owned());
+        return Err("generated smoke chunk built an empty textured mesh".to_owned());
     }
 
     let stats = mesh.stats();
@@ -171,12 +201,18 @@ async fn render_generated_chunk(
         .map_err(|error| format!("failed to acquire WebGPU canvas frame: {error}"))?;
     let view = frame.texture.create_view(&Default::default());
     let depth = ChunkDepthTarget::new(&context.device, context.width, context.height);
-    let draw = ChunkDrawResources::new(&context.device, context.format, &mesh)
-        .map_err(|error| format!("failed to upload generated chunk mesh: {error:#}"))?;
+    let draw = TexturedChunkDrawResources::new(
+        &context.device,
+        &context.queue,
+        context.format,
+        &mesh,
+        mesh_assets.atlas.as_upload(),
+    )
+    .map_err(|error| format!("failed to upload generated textured chunk mesh: {error:#}"))?;
     let mut encoder = context
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("mclone_web_generated_chunk_encoder"),
+            label: Some("mclone_web_generated_textured_chunk_encoder"),
         });
     draw.render(
         &context.queue,
@@ -200,9 +236,164 @@ async fn render_generated_chunk(
         command_count: runtime.command_count(),
         update_count: runtime.update_count(),
         loaded_chunk_count: runtime.client().loaded_chunk_count(),
+        asset_pack_file_count: mesh_assets.asset_pack_file_count,
+        atlas_width: mesh_assets.atlas.width,
+        atlas_height: mesh_assets.atlas.height,
+        atlas_sprite_count: mesh_assets.atlas_sprite_count,
         vertex_count: stats.vertex_count,
         index_count: stats.index_count,
-        face_count: stats.face_count(),
+        face_count: quad_face_count_from_indices(stats.index_count),
+    })
+}
+
+#[derive(Clone, Debug)]
+struct WebTexturedMeshAssets {
+    catalog: TexturedMeshCatalog,
+    atlas: WebTextureAtlasImage,
+    atlas_sprite_count: usize,
+    asset_pack_file_count: usize,
+}
+
+#[derive(Clone, Debug)]
+struct WebTextureAtlasImage {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+impl WebTextureAtlasImage {
+    fn as_upload(&self) -> ChunkTextureAtlas<'_> {
+        ChunkTextureAtlas {
+            width: self.width,
+            height: self.height,
+            rgba: &self.rgba,
+        }
+    }
+}
+
+fn load_textured_mesh_assets_from_pack(bytes: Vec<u8>) -> Result<WebTexturedMeshAssets, String> {
+    let source = PackedAssetSource::from_bytes(bytes)
+        .map_err(|error| format!("failed to parse packed Minecraft assets: {error}"))?;
+    let asset_pack_file_count = source.file_count();
+    let registry = BlockStateRegistry::terrain_mvp();
+    let blockstates = BlockStateAssetIndex::load_namespace(&source, "minecraft")
+        .map_err(|error| format!("failed to load vanilla blockstate assets from pack: {error}"))?;
+    registry
+        .validate_blockstate_assets(&blockstates)
+        .map_err(|error| format!("terrain MVP registry is not covered by pack: {error}"))?;
+    let selected_model_refs = selected_model_refs(&registry, &blockstates)?;
+    let models =
+        BlockModelLibrary::load_model_tree(&source, selected_model_refs.iter().cloned())
+            .map_err(|error| format!("failed to load packed vanilla block model tree: {error}"))?;
+    let mut materials = models
+        .collect_materials_for_models(selected_model_refs.iter().cloned())
+        .map_err(|error| format!("failed to collect selected block model materials: {error}"))?;
+    insert_fluid_materials(&mut materials);
+    let atlas_plan = TextureAtlasPlan::build(&source, materials)
+        .map_err(|error| format!("failed to plan packed texture atlas: {error}"))?;
+    let atlas_sprite_count = atlas_plan.len();
+    let atlas = stitch_texture_atlas(&source, &atlas_plan)?;
+    let catalog = TexturedMeshCatalog::from_assets(&registry, &blockstates, &models, &atlas_plan)
+        .map_err(|error| format!("failed to build web textured mesh catalog: {error}"))?;
+
+    Ok(WebTexturedMeshAssets {
+        catalog,
+        atlas,
+        atlas_sprite_count,
+        asset_pack_file_count,
+    })
+}
+
+fn selected_model_refs(
+    registry: &BlockStateRegistry,
+    blockstates: &BlockStateAssetIndex,
+) -> Result<BTreeSet<ResourceLocation>, String> {
+    let mut refs = BTreeSet::new();
+    for record in registry.records() {
+        let asset = blockstates
+            .get(&record.block)
+            .ok_or_else(|| format!("missing blockstate asset for {}", record.block))?;
+        if let Some(variant_key) = record.asset_variant_key(asset) {
+            let variants = asset.variants_for_key(&variant_key).ok_or_else(|| {
+                format!(
+                    "missing blockstate variant `{variant_key}` for {}",
+                    record.block
+                )
+            })?;
+            if let Some(variant) = variants.first() {
+                refs.insert(variant.model.clone());
+            }
+        } else if record.variant_key().is_empty() && !asset.model_refs.is_empty() {
+            refs.extend(asset.model_refs.iter().cloned());
+        } else {
+            return Err(format!(
+                "missing blockstate variant `{}` for {}",
+                record.variant_key(),
+                record.block
+            ));
+        }
+    }
+    Ok(refs)
+}
+
+fn insert_fluid_materials(materials: &mut BTreeSet<TextureMaterial>) {
+    for texture in [
+        "minecraft:block/water_still",
+        "minecraft:block/water_flow",
+        "minecraft:block/lava_still",
+        "minecraft:block/lava_flow",
+    ] {
+        materials.insert(TextureMaterial::blocks(
+            ResourceLocation::parse(texture).expect("fluid texture locations are valid"),
+        ));
+    }
+}
+
+fn stitch_texture_atlas(
+    source: &impl AssetSource,
+    plan: &TextureAtlasPlan,
+) -> Result<WebTextureAtlasImage, String> {
+    let width = plan.width();
+    let height = plan.height();
+    if width == 0 || height == 0 {
+        return Err("cannot stitch an empty texture atlas".to_owned());
+    }
+    let mut atlas = vec![0; width as usize * height as usize * 4];
+
+    for sprite in plan.sprites() {
+        let bytes = source
+            .read(&sprite.info.path)
+            .map_err(|error| format!("failed to read texture {}: {error}", sprite.info.path))?
+            .ok_or_else(|| format!("missing texture {}", sprite.info.path))?;
+        let image = image::load_from_memory(&bytes)
+            .map_err(|error| format!("failed to decode texture {}: {error}", sprite.info.path))?
+            .to_rgba8();
+        let (sprite_width, sprite_height) = image.dimensions();
+        if sprite_width != sprite.info.width || sprite_height != sprite.info.height {
+            return Err(format!(
+                "texture {} decoded as {}x{} but atlas plan expected {}x{}",
+                sprite.info.path,
+                sprite_width,
+                sprite_height,
+                sprite.info.width,
+                sprite.info.height
+            ));
+        }
+
+        let image = image.as_raw();
+        for row in 0..sprite.info.height {
+            let source_start = (row * sprite.info.width * 4) as usize;
+            let source_end = source_start + (sprite.info.width * 4) as usize;
+            let dest_start = (((sprite.y + row) * width + sprite.x) * 4) as usize;
+            let dest_end = dest_start + (sprite.info.width * 4) as usize;
+            atlas[dest_start..dest_end].copy_from_slice(&image[source_start..source_end]);
+        }
+    }
+
+    Ok(WebTextureAtlasImage {
+        width,
+        height,
+        rgba: atlas,
     })
 }
 
@@ -280,7 +471,99 @@ impl WebCanvasContext {
     }
 }
 
-fn build_flat_chunk_mesh(snapshot: &ChunkSnapshot) -> Result<VisibleChunkMesh, String> {
+fn build_textured_chunk_mesh(
+    snapshot: &ChunkSnapshot,
+    catalog: &TexturedMeshCatalog,
+) -> Result<TexturedVisibleChunkMesh, String> {
+    let blocks = snapshot_block_state_ids(snapshot)?;
+    build_textured_visible_chunk_mesh(
+        TexturedChunkMeshInput::new(
+            snapshot.pos.x,
+            snapshot.pos.z,
+            snapshot.min_y,
+            snapshot.height,
+            &blocks,
+        )
+        .with_light_sections(&snapshot.light_sections),
+        catalog,
+    )
+    .map_err(|error| format!("failed to build generated textured chunk mesh: {error}"))
+}
+
+fn snapshot_block_state_ids(snapshot: &ChunkSnapshot) -> Result<Vec<BlockStateId>, String> {
+    if snapshot.height <= 0 || snapshot.height % SECTION_HEIGHT != 0 {
+        return Err(format!(
+            "chunk snapshot {:?} has invalid height {}",
+            snapshot.pos, snapshot.height
+        ));
+    }
+    let expected_len = snapshot.height as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize;
+    let mut blocks = vec![AIR_BLOCK_STATE_ID; expected_len];
+    let min_section_y = snapshot.min_y / SECTION_HEIGHT;
+    let section_count = snapshot.height / SECTION_HEIGHT;
+
+    for section in &snapshot.sections {
+        let section_offset = section.section_y - min_section_y;
+        if !(0..section_count).contains(&section_offset) {
+            return Err(format!(
+                "chunk snapshot {:?} contains section {} outside {}..{}",
+                snapshot.pos,
+                section.section_y,
+                min_section_y,
+                min_section_y + section_count - 1
+            ));
+        }
+        let unpacked = section.unpack_block_state_ids();
+        if unpacked.len() != CHUNK_SECTION_VOLUME {
+            return Err(format!(
+                "chunk snapshot {:?} section {} unpacked to {} blocks",
+                snapshot.pos,
+                section.section_y,
+                unpacked.len()
+            ));
+        }
+        for local_y in 0..SECTION_HEIGHT {
+            for local_z in 0..CHUNK_WIDTH {
+                for local_x in 0..CHUNK_WIDTH {
+                    let section_index = chunk_section_index(local_x, local_y, local_z);
+                    let chunk_local_y = section_offset * SECTION_HEIGHT + local_y;
+                    let chunk_index = chunk_block_index(local_x, chunk_local_y, local_z);
+                    blocks[chunk_index] = unpacked[section_index];
+                }
+            }
+        }
+    }
+
+    Ok(blocks)
+}
+
+fn chunk_block_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
+    debug_assert!((0..CHUNK_WIDTH).contains(&local_x));
+    debug_assert!(local_y >= 0);
+    debug_assert!((0..CHUNK_WIDTH).contains(&local_z));
+    (local_y as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize)
+        + (local_z as usize * CHUNK_WIDTH as usize)
+        + local_x as usize
+}
+
+fn set_bool(object: &js_sys::Object, key: &str, value: bool) -> Result<(), String> {
+    js_sys::Reflect::set(object, &JsValue::from_str(key), &JsValue::from_bool(value))
+        .map(|_| ())
+        .map_err(|_| format!("failed to set generated chunk report key {key}"))
+}
+
+fn set_number(object: &js_sys::Object, key: &str, value: f64) -> Result<(), String> {
+    js_sys::Reflect::set(object, &JsValue::from_str(key), &JsValue::from_f64(value))
+        .map(|_| ())
+        .map_err(|_| format!("failed to set generated chunk report key {key}"))
+}
+
+#[cfg(test)]
+fn build_flat_chunk_mesh(
+    snapshot: &ChunkSnapshot,
+) -> Result<mclone_mesh::VisibleChunkMesh, String> {
+    use mclone_mesh::{ChunkMeshInput, build_visible_chunk_mesh};
+
     let blocks = snapshot_debug_mesh_blocks(snapshot)?;
     Ok(build_visible_chunk_mesh(ChunkMeshInput::new(
         snapshot.pos.x,
@@ -291,6 +574,7 @@ fn build_flat_chunk_mesh(snapshot: &ChunkSnapshot) -> Result<VisibleChunkMesh, S
     )))
 }
 
+#[cfg(test)]
 fn snapshot_debug_mesh_blocks(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, String> {
     if snapshot.height <= 0 || snapshot.height % mclone_core::SECTION_HEIGHT != 0 {
         return Err(format!(
@@ -338,33 +622,13 @@ fn snapshot_debug_mesh_blocks(snapshot: &ChunkSnapshot) -> Result<Vec<u8>, Strin
     Ok(blocks)
 }
 
+#[cfg(test)]
 fn debug_mesh_id_for_block_state(state_id: BlockStateId) -> u8 {
     if state_id == AIR_BLOCK_STATE_ID {
         0
     } else {
         u8::try_from(state_id.0).unwrap_or(1)
     }
-}
-
-fn chunk_block_index(local_x: i32, local_y: i32, local_z: i32) -> usize {
-    debug_assert!((0..CHUNK_WIDTH).contains(&local_x));
-    debug_assert!(local_y >= 0);
-    debug_assert!((0..CHUNK_WIDTH).contains(&local_z));
-    (local_y as usize * CHUNK_WIDTH as usize * CHUNK_WIDTH as usize)
-        + (local_z as usize * CHUNK_WIDTH as usize)
-        + local_x as usize
-}
-
-fn set_bool(object: &js_sys::Object, key: &str, value: bool) -> Result<(), String> {
-    js_sys::Reflect::set(object, &JsValue::from_str(key), &JsValue::from_bool(value))
-        .map(|_| ())
-        .map_err(|_| format!("failed to set generated chunk report key {key}"))
-}
-
-fn set_number(object: &js_sys::Object, key: &str, value: f64) -> Result<(), String> {
-    js_sys::Reflect::set(object, &JsValue::from_str(key), &JsValue::from_f64(value))
-        .map(|_| ())
-        .map_err(|_| format!("failed to set generated chunk report key {key}"))
 }
 
 fn preferred_surface_format(caps: &wgpu::SurfaceCapabilities) -> Option<wgpu::TextureFormat> {

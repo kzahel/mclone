@@ -11,6 +11,8 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(scriptDir, "..");
 const nativeRoot = resolve(appRoot, "../..");
 const wwwRoot = join(appRoot, "www");
+const repoRoot = resolve(nativeRoot, "..");
+const referenceAssetPackPath = join(repoRoot, "reference", "minecraft-1.17.1", "extracted.zip");
 const wasmBindgenVersion = "0.2.125";
 const wasmPath = join(
   nativeRoot,
@@ -202,6 +204,9 @@ function resolveRequestPath(pathname) {
   if (pathname === "/pkg/mclone_web_client_bg.wasm") {
     return join(bindgenOutDir, "mclone_web_client_bg.wasm");
   }
+  if (pathname === "/reference/minecraft-1.17.1/extracted.zip") {
+    return referenceAssetPackPath;
+  }
 
   const resolved = resolve(wwwRoot, `.${normalize(pathname)}`);
   if (resolved !== wwwRoot && !resolved.startsWith(`${wwwRoot}${sep}`)) {
@@ -214,6 +219,7 @@ function contentType(path) {
   if (path.endsWith(".html")) return "text/html; charset=utf-8";
   if (path.endsWith(".js")) return "text/javascript; charset=utf-8";
   if (path.endsWith(".wasm")) return "application/wasm";
+  if (path.endsWith(".zip")) return "application/zip";
   return "application/octet-stream";
 }
 
@@ -267,6 +273,12 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
 function assertChunkRenderResult(report, canvasPixels) {
   if (!report.chunkLoaded || !report.meshBuilt) {
     throw new Error(`generated chunk did not load/build:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (!report.assetPackLoaded || !report.textured) {
+    throw new Error(`generated chunk was not rendered from the packed textured asset path:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (report.assetPackFileCount < 1000 || report.atlasWidth <= 0 || report.atlasHeight <= 0 || report.atlasSpriteCount <= 0) {
+    throw new Error(`packed texture atlas did not load expected asset data:\n${JSON.stringify(report, null, 2)}`);
   }
   if (
     report.commandCount !== 1

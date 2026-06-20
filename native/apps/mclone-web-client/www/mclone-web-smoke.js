@@ -1,6 +1,7 @@
 const WASM_URL = new URL("./mclone_web_client.wasm", import.meta.url);
 const BINDGEN_JS_URL = new URL("./pkg/mclone_web_client.js", import.meta.url);
 const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.url);
+const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 
 const ready = boot();
@@ -181,9 +182,18 @@ async function renderCanvas() {
       };
     }
 
-    const report = await module.mclone_web_render_generated_chunk_report(canvas);
+    const assetPack = await fetchAssetPack();
+    const report = await module.mclone_web_render_generated_chunk_report(canvas, assetPack);
     return {
-      ok: Boolean(report.ok && report.rendered && report.configured && report.chunkLoaded && report.meshBuilt),
+      ok: Boolean(
+        report.ok
+        && report.rendered
+        && report.configured
+        && report.chunkLoaded
+        && report.meshBuilt
+        && report.assetPackLoaded
+        && report.textured
+      ),
       supported: true,
       status: report.ok ? "rendered" : "failed",
       report,
@@ -196,6 +206,14 @@ async function renderCanvas() {
       reason: stringifyError(error),
     };
   }
+}
+
+async function fetchAssetPack() {
+  const response = await fetch(ASSET_PACK_URL);
+  if (!response.ok) {
+    throw new Error(`failed to fetch ${ASSET_PACK_URL.pathname}: ${response.status} ${response.statusText}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 function decodeRuntimeReport(bits) {
