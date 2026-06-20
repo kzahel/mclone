@@ -365,6 +365,18 @@ function assertChunkRenderResult(report, canvasPixels, firstReport, renderCompil
   ) {
     throw new Error(`first section render did not upload the initial chunk view:\n${JSON.stringify(firstReport, null, 2)}`);
   }
+  const workerSummary = renderCompiler.summary;
+  if (
+    !firstReport.workerCompileUsed
+    || firstReport.workerPackedByteLength !== workerSummary.byteLength
+    || firstReport.workerSectionCount !== workerSummary.sectionCount
+    || firstReport.workerNonEmptySectionCount !== workerSummary.nonEmptySectionCount
+    || firstReport.workerVertexCount !== workerSummary.vertexCount
+    || firstReport.workerIndexCount !== workerSummary.indexCount
+    || firstReport.workerFaceCount !== workerSummary.faceCount
+  ) {
+    throw new Error(`first section render did not consume the worker-compiled packed payload:\n${JSON.stringify({ firstReport, renderCompiler }, null, 2)}`);
+  }
   if (
     report.assetPackParseCount !== 1
     || report.terrainAssetLoadCount !== 1
@@ -374,6 +386,16 @@ function assertChunkRenderResult(report, canvasPixels, firstReport, renderCompil
     || report.renderCount !== 2
   ) {
     throw new Error(`second cached render rebuilt non-mesh resources:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (
+    report.workerCompileUsed
+    || report.workerPackedByteLength !== 0
+    || report.workerSectionCount !== 0
+    || report.workerVertexCount !== 0
+    || report.workerIndexCount !== 0
+    || report.workerFaceCount !== 0
+  ) {
+    throw new Error(`second section render should still use the inline fallback compiler in this slice:\n${JSON.stringify(report, null, 2)}`);
   }
   if (
     report.residentSectionCount <= 1

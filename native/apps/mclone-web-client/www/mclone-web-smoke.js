@@ -314,13 +314,26 @@ async function renderCanvas() {
     }
 
     const assetPack = await fetchAssetPack();
-    const renderCompiler = await probeRenderCompilerWorker(assetPack);
+    const workerCompile = await compileRenderSectionsInWorker(assetPack);
+    const renderCompiler = workerCompile.report;
     const session = await module.mclone_web_create_chunk_render_session(canvas, assetPack);
-    const firstReport = session.renderChunkReport(0, 0, 1);
+    if (typeof session.renderChunkReportFromPackedSections !== "function") {
+      return {
+        ok: false,
+        supported: true,
+        status: "export-missing",
+        reason: "missing WebChunkRenderSession.renderChunkReportFromPackedSections export",
+      };
+    }
+    const firstReport = renderCompiler.ok
+      ? session.renderChunkReportFromPackedSections(0, 0, 1, workerCompile.packed)
+      : { ok: false, reason: "render compiler worker failed before first render" };
     const report = session.renderChunkReport(1, 0, 1);
     return {
       ok: Boolean(
         renderCompiler.ok
+        && firstReport.ok
+        && firstReport.workerCompileUsed
         && report.ok
         && report.rendered
         && report.configured
@@ -353,7 +366,7 @@ async function fetchAssetPack() {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-function probeRenderCompilerWorker(assetPack) {
+function compileRenderSectionsInWorker(assetPack) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(RENDER_COMPILER_WORKER_URL.href, {
       type: "module",
@@ -373,11 +386,15 @@ function probeRenderCompilerWorker(assetPack) {
       clearTimeout(timeout);
       worker.terminate();
       const data = event.data ?? {};
-      const packedByteLength = data.packed instanceof Uint8Array ? data.packed.byteLength : 0;
+      const packed = data.packed instanceof Uint8Array ? data.packed : new Uint8Array();
+      const packedByteLength = packed.byteLength;
       delete data.packed;
       resolve({
-        ...data,
-        packedByteLength,
+        report: {
+          ...data,
+          packedByteLength,
+        },
+        packed,
       });
     };
     worker.onerror = (event) => {

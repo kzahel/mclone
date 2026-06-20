@@ -12,16 +12,17 @@ use mclone_core::{
     SECTION_HEIGHT, chunk_section_index,
 };
 use mclone_mesh::{
-    RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, load_textured_terrain_assets,
+    RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
+    load_textured_terrain_assets,
 };
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
     TexturedSectionDrawResources, TexturedSectionUploadReport,
 };
 use mclone_render_session::{
-    CachedTexturedRenderSections, RenderSectionCacheUpdate, build_client_textured_sections,
-    decode_textured_render_section_build_report, encode_textured_render_section_build_report,
-    summarize_textured_render_section_build_report,
+    CachedTexturedRenderSections, PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
+    build_client_textured_sections, decode_textured_render_section_build_report,
+    encode_textured_render_section_build_report, summarize_textured_render_section_build_report,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -217,6 +218,13 @@ struct GeneratedChunkRenderReport {
     mesh_build_count: usize,
     mesh_upload_count: usize,
     render_count: usize,
+    worker_compile_used: bool,
+    worker_packed_byte_length: usize,
+    worker_section_count: usize,
+    worker_non_empty_section_count: usize,
+    worker_vertex_count: u32,
+    worker_index_count: u32,
+    worker_face_count: u32,
 }
 
 impl CanvasRenderReport {
@@ -239,6 +247,7 @@ impl GeneratedChunkRenderReport {
         set_bool(&object, "meshBuilt", true)?;
         set_bool(&object, "assetPackLoaded", true)?;
         set_bool(&object, "textured", true)?;
+        set_bool(&object, "workerCompileUsed", self.worker_compile_used)?;
         set_number(&object, "centerX", f64::from(self.center.x))?;
         set_number(&object, "centerZ", f64::from(self.center.z))?;
         set_number(&object, "radiusChunks", f64::from(self.radius_chunks))?;
@@ -323,8 +332,70 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "meshBuildCount", self.mesh_build_count as f64)?;
         set_number(&object, "meshUploadCount", self.mesh_upload_count as f64)?;
         set_number(&object, "renderCount", self.render_count as f64)?;
+        set_number(
+            &object,
+            "workerPackedByteLength",
+            self.worker_packed_byte_length as f64,
+        )?;
+        set_number(
+            &object,
+            "workerSectionCount",
+            self.worker_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "workerNonEmptySectionCount",
+            self.worker_non_empty_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "workerVertexCount",
+            f64::from(self.worker_vertex_count),
+        )?;
+        set_number(
+            &object,
+            "workerIndexCount",
+            f64::from(self.worker_index_count),
+        )?;
+        set_number(
+            &object,
+            "workerFaceCount",
+            f64::from(self.worker_face_count),
+        )?;
         Ok(object.into())
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct WebSectionCompileReport {
+    worker_compile_used: bool,
+    packed_byte_length: usize,
+    section_count: usize,
+    non_empty_section_count: usize,
+    vertex_count: u32,
+    index_count: u32,
+    face_count: u32,
+}
+
+impl WebSectionCompileReport {
+    fn worker(packed_byte_length: usize, summary: PackedRenderSectionBuildReportSummary) -> Self {
+        Self {
+            worker_compile_used: true,
+            packed_byte_length,
+            section_count: summary.section_count,
+            non_empty_section_count: summary.non_empty_section_count,
+            vertex_count: summary.vertex_count,
+            index_count: summary.index_count,
+            face_count: summary.face_count(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WebChunkViewSync {
+    current_loaded_chunks: BTreeSet<ChunkPos>,
+    dirty_chunks: BTreeSet<ChunkPos>,
+    removal_chunks: BTreeSet<ChunkPos>,
 }
 
 async fn render_canvas_clear(canvas: HtmlCanvasElement) -> Result<CanvasRenderReport, String> {
@@ -399,6 +470,26 @@ impl WebChunkRenderSession {
         .and_then(GeneratedChunkRenderReport::to_js_value)
         .map_err(JsValue::from)
     }
+
+    #[wasm_bindgen(js_name = renderChunkReportFromPackedSections)]
+    pub fn render_chunk_report_from_packed_sections(
+        &mut self,
+        center_x: i32,
+        center_z: i32,
+        radius_chunks: u32,
+        packed_report: js_sys::Uint8Array,
+    ) -> Result<JsValue, JsValue> {
+        self.render_chunk_report_for_center_from_packed_report(
+            ChunkPos {
+                x: center_x,
+                z: center_z,
+            },
+            radius_chunks,
+            packed_report.to_vec(),
+        )
+        .and_then(GeneratedChunkRenderReport::to_js_value)
+        .map_err(JsValue::from)
+    }
 }
 
 impl WebChunkRenderSession {
@@ -429,6 +520,46 @@ impl WebChunkRenderSession {
         center: ChunkPos,
         radius_chunks: u32,
     ) -> Result<GeneratedChunkRenderReport, String> {
+        let sync = self.prepare_chunk_view(center, radius_chunks)?;
+        let section_report =
+            build_client_textured_sections(self.runtime.client(), &self.mesh_assets.catalog)
+                .map_err(|error| {
+                    format!("failed to build generated textured render sections: {error:#}")
+                })?;
+        self.render_chunk_report_with_section_report(
+            center,
+            radius_chunks,
+            sync,
+            section_report,
+            WebSectionCompileReport::default(),
+        )
+    }
+
+    fn render_chunk_report_for_center_from_packed_report(
+        &mut self,
+        center: ChunkPos,
+        radius_chunks: u32,
+        packed_report: Vec<u8>,
+    ) -> Result<GeneratedChunkRenderReport, String> {
+        let packed_byte_length = packed_report.len();
+        let section_report = decode_textured_render_section_build_report(&packed_report)
+            .map_err(|error| format!("failed to decode packed render section report: {error:#}"))?;
+        let summary = summarize_textured_render_section_build_report(&section_report);
+        let sync = self.prepare_chunk_view(center, radius_chunks)?;
+        self.render_chunk_report_with_section_report(
+            center,
+            radius_chunks,
+            sync,
+            section_report,
+            WebSectionCompileReport::worker(packed_byte_length, summary),
+        )
+    }
+
+    fn prepare_chunk_view(
+        &mut self,
+        center: ChunkPos,
+        radius_chunks: u32,
+    ) -> Result<WebChunkViewSync, String> {
         let previous_loaded_chunks = self.loaded_chunk_positions.clone();
         self.runtime
             .request_chunk_view(center, radius_chunks, radius_chunks)
@@ -447,11 +578,29 @@ impl WebChunkRenderSession {
             .loaded_chunk_positions()
             .collect::<BTreeSet<_>>();
         let dirty_chunks = dirty_chunk_positions(&previous_loaded_chunks, &current_loaded_chunks);
-        let section_report =
-            build_client_textured_sections(self.runtime.client(), &self.mesh_assets.catalog)
-                .map_err(|error| {
-                    format!("failed to build generated textured render sections: {error:#}")
-                })?;
+        let removal_chunks = previous_loaded_chunks
+            .difference(&current_loaded_chunks)
+            .copied()
+            .collect::<BTreeSet<_>>();
+
+        Ok(WebChunkViewSync {
+            current_loaded_chunks,
+            dirty_chunks,
+            removal_chunks,
+        })
+    }
+
+    fn render_chunk_report_with_section_report(
+        &mut self,
+        center: ChunkPos,
+        radius_chunks: u32,
+        sync: WebChunkViewSync,
+        section_report: TexturedRenderSectionBuildReport,
+        compile_report: WebSectionCompileReport,
+    ) -> Result<GeneratedChunkRenderReport, String> {
+        let current_loaded_chunks = sync.current_loaded_chunks;
+        let dirty_chunks = sync.dirty_chunks;
+        let removal_chunks = sync.removal_chunks;
         self.mesh_build_count += 1;
         let current_section_keys = section_report
             .sections
@@ -462,10 +611,6 @@ impl WebChunkRenderSession {
             .iter()
             .copied()
             .filter(|key| dirty_chunks.contains(&chunk_pos_for_section(*key)))
-            .collect::<BTreeSet<_>>();
-        let removal_chunks = previous_loaded_chunks
-            .difference(&current_loaded_chunks)
-            .copied()
             .collect::<BTreeSet<_>>();
         let cache_update = self.render_sections.apply_build_report(
             &ready_section_keys,
@@ -549,6 +694,13 @@ impl WebChunkRenderSession {
             mesh_build_count: self.mesh_build_count,
             mesh_upload_count: self.mesh_upload_count,
             render_count: self.render_count,
+            worker_compile_used: compile_report.worker_compile_used,
+            worker_packed_byte_length: compile_report.packed_byte_length,
+            worker_section_count: compile_report.section_count,
+            worker_non_empty_section_count: compile_report.non_empty_section_count,
+            worker_vertex_count: compile_report.vertex_count,
+            worker_index_count: compile_report.index_count,
+            worker_face_count: compile_report.face_count,
         })
     }
 

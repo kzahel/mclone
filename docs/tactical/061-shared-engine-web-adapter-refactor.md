@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active browser worker payload landed.
+Status: active first browser worker render landed.
 
 ## Purpose
 
@@ -301,6 +301,21 @@ Compiler interface result:
   trait while keeping the existing `std::thread` / `mpsc` execution.
 - Updated `WindowSceneRuntime` to use the shared revision partitioning for
   stale compile results instead of carrying desktop-only logic.
+
+Browser worker payload result:
+
+- Added a browser render-compiler worker that compiles packed
+  `TexturedRenderSectionBuildReport` bytes off the main browser thread.
+- Added a `WebChunkRenderSession` packed-section render entrypoint that decodes
+  the worker payload on the main WASM instance, applies it through
+  `CachedTexturedRenderSections`, uploads GPU section resources, and presents
+  through the existing main-thread WebGPU path.
+- Kept the transferred packed bytes private to the smoke page so the DOM status
+  and Playwright result stay compact.
+- The Playwright chunk smoke now proves the first browser render consumes the
+  worker-built section payload. The second render still uses the inline
+  compiler fallback until the shared async submit/drain lifecycle is wired into
+  the browser session.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
