@@ -555,6 +555,163 @@ pub fn finish_render_section_compile_result(
     })
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RenderSectionSession {
+    cache: CachedTexturedRenderSections,
+    dirty: RenderSectionDirtyState,
+}
+
+impl RenderSectionSession {
+    pub fn cache_is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
+
+    pub fn dirty_is_empty(&self) -> bool {
+        self.dirty.is_empty()
+    }
+
+    pub fn dirty_work_is_empty(&self) -> bool {
+        self.dirty.dirty_work_is_empty()
+    }
+
+    pub fn dirty(&self) -> &RenderSectionDirtyState {
+        &self.dirty
+    }
+
+    pub fn dirty_mut(&mut self) -> &mut RenderSectionDirtyState {
+        &mut self.dirty
+    }
+
+    pub fn mark_chunk_dirty(
+        &mut self,
+        pos: ChunkPos,
+        known_section_keys: impl IntoIterator<Item = RenderSectionKey>,
+    ) {
+        self.dirty.mark_chunk_dirty(pos, known_section_keys);
+    }
+
+    pub fn mark_section_dirty(&mut self, key: RenderSectionKey) {
+        self.dirty.mark_section_dirty(key);
+    }
+
+    pub fn sections(&self) -> Vec<TexturedRenderSectionMesh> {
+        self.cache.sections()
+    }
+
+    pub fn section_keys(&self) -> impl Iterator<Item = RenderSectionKey> + '_ {
+        self.cache.section_keys()
+    }
+
+    pub fn contains_chunk(&self, pos: ChunkPos) -> bool {
+        self.cache.contains_chunk(pos)
+    }
+
+    pub fn contains_section(&self, key: RenderSectionKey) -> bool {
+        self.cache.contains_section(key)
+    }
+
+    pub fn classify_dirty_work(
+        &self,
+        chunk_is_loaded: impl FnMut(ChunkPos) -> bool,
+        chunk_is_cached: impl FnMut(ChunkPos) -> bool,
+        section_is_loaded: impl FnMut(RenderSectionKey) -> bool,
+        section_is_cached: impl FnMut(RenderSectionKey) -> bool,
+    ) -> RenderSectionDirtyWork {
+        classify_render_section_dirty_work(
+            &self.dirty,
+            chunk_is_loaded,
+            chunk_is_cached,
+            section_is_loaded,
+            section_is_cached,
+        )
+    }
+
+    pub fn prepare_sync_plan(
+        &mut self,
+        dirty_work: RenderSectionDirtyWork,
+        sorted_loaded_dirty_chunks: impl IntoIterator<Item = ChunkPos>,
+        sorted_dirty_section_chunks: impl IntoIterator<Item = ChunkPos>,
+        chunk_budget: usize,
+        section_keys_for_chunk: impl FnMut(ChunkPos) -> Vec<RenderSectionKey>,
+        section_readiness: impl FnMut(RenderSectionKey) -> RenderSectionNeighborReadiness,
+    ) -> RenderSectionSyncPlan {
+        prepare_render_section_sync_plan(
+            &mut self.dirty,
+            dirty_work,
+            sorted_loaded_dirty_chunks,
+            sorted_dirty_section_chunks,
+            chunk_budget,
+            section_keys_for_chunk,
+            section_readiness,
+        )
+    }
+
+    pub fn apply_ready_plan(&mut self, plan: &RenderSectionReadyPlan) {
+        self.dirty.apply_ready_plan(plan);
+    }
+
+    pub fn build_ready_plan_compile_request(
+        &self,
+        plan: &RenderSectionReadyPlan,
+        snapshots: Vec<ChunkSnapshot>,
+    ) -> Option<RenderSectionCompileRequest> {
+        self.dirty.build_ready_plan_compile_request(plan, snapshots)
+    }
+
+    pub fn accept_ready_plan_compile_submission(&mut self, plan: &RenderSectionReadyPlan) {
+        self.dirty.accept_ready_plan_compile_submission(plan);
+    }
+
+    pub fn finish_compile_result(
+        &mut self,
+        completed: RenderSectionCompileResult,
+        request_id: u32,
+    ) -> Result<RenderSectionCompileFinish> {
+        finish_render_section_compile_result(&mut self.dirty, completed, request_id)
+    }
+
+    pub fn apply_finished_compile_report(
+        &mut self,
+        accepted_sections: &BTreeSet<RenderSectionKey>,
+        build_report: TexturedRenderSectionBuildReport,
+        removal_chunks: &BTreeSet<ChunkPos>,
+        removal_sections: &BTreeSet<RenderSectionKey>,
+    ) -> RenderSectionCacheUpdate {
+        let update = self.cache.apply_build_report(
+            accepted_sections,
+            build_report,
+            removal_chunks,
+            removal_sections,
+        );
+        self.dirty
+            .discard_removed_dirty_work(removal_chunks, removal_sections);
+        update
+    }
+
+    pub fn apply_removals(
+        &mut self,
+        removal_chunks: &BTreeSet<ChunkPos>,
+        removal_sections: &BTreeSet<RenderSectionKey>,
+    ) -> RenderSectionCacheUpdate {
+        let update = self.cache.remove_sections(removal_chunks, removal_sections);
+        self.dirty
+            .discard_removed_dirty_work(removal_chunks, removal_sections);
+        update
+    }
+
+    pub fn requeue_stale_sections(
+        &mut self,
+        target_sections: BTreeSet<RenderSectionKey>,
+        mut should_requeue: impl FnMut(RenderSectionKey) -> bool,
+    ) {
+        for key in target_sections {
+            if should_requeue(key) {
+                self.dirty.dirty_sections.insert(key);
+            }
+        }
+    }
+}
+
 fn plan_ready_render_section_key(
     plan: &mut RenderSectionReadyPlan,
     key: RenderSectionKey,
@@ -1610,6 +1767,72 @@ mod tests {
         assert_eq!(removal.removed_section_count(), 1);
         assert!(!cache.contains_section(key));
         assert!(!cache.contains_chunk(ChunkPos::new(2, -1)));
+    }
+
+    #[test]
+    fn render_section_session_owns_dirty_compile_and_cache_updates() {
+        let mut session = RenderSectionSession::default();
+        let key = RenderSectionKey::new(2, 4, -1);
+        let pos = ChunkPos::new(2, -1);
+        let ready_plan = RenderSectionReadyPlan {
+            ready_section_keys: BTreeSet::from([key]),
+            ..RenderSectionReadyPlan::default()
+        };
+
+        session.mark_section_dirty(key);
+        let request = session
+            .build_ready_plan_compile_request(&ready_plan, Vec::new())
+            .expect("ready section should build a compile request");
+        session.accept_ready_plan_compile_submission(&ready_plan);
+        assert!(session.dirty().inflight_sections.contains(&key));
+
+        let finish = session
+            .finish_compile_result(
+                RenderSectionCompileResult {
+                    target_sections: request.target_sections,
+                    section_revisions: request.section_revisions,
+                    result: Ok(TexturedRenderSectionBuildReport {
+                        sections: vec![TexturedRenderSectionMesh {
+                            key,
+                            mesh: TexturedVisibleChunkMesh {
+                                vertices: vec![TexturedChunkVertex {
+                                    position: [0.0, 0.0, 0.0],
+                                    uv: [0.0, 0.0],
+                                    color: [1.0, 1.0, 1.0, 1.0],
+                                    packed_light: 0,
+                                }],
+                                indices: vec![0],
+                            },
+                            visibility: VisibilitySet::all_visible(),
+                        }],
+                        visibility_graph: VisibilityGraphBuildStats::default(),
+                    }),
+                },
+                9,
+            )
+            .expect("compile finish should be accepted");
+
+        assert_eq!(finish.accepted_sections, BTreeSet::from([key]));
+        assert!(finish.stale_sections.is_empty());
+        let update = session.apply_finished_compile_report(
+            &finish.accepted_sections,
+            finish.build_report.expect("accepted build report"),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
+
+        assert_eq!(update.rebuilt_section_count(), 1);
+        assert!(session.contains_section(key));
+        assert!(session.contains_chunk(pos));
+        assert!(session.dirty_is_empty());
+
+        session.mark_section_dirty(key);
+        let removal = session.apply_removals(&BTreeSet::from([pos]), &BTreeSet::new());
+
+        assert_eq!(removal.removed_section_count(), 1);
+        assert!(!session.contains_section(key));
+        assert!(!session.contains_chunk(pos));
+        assert!(session.dirty_is_empty());
     }
 
     #[test]

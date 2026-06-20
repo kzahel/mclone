@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active shared sync-plan orchestration landed.
+Status: active shared render-section session owner landed.
 
 ## Purpose
 
@@ -394,6 +394,18 @@ Browser worker payload result:
   readiness probes, compiler execution, and GPU upload/presentation.
 - Added shared tests for sync-plan stale cleanup/ready selection and
   compile-finish accepted/stale reporting.
+- Added `RenderSectionSession` to `mclone-render-session` as the first small
+  shared owner for CPU render-section cache plus dirty/inflight/revision state.
+- Updated desktop `WindowSceneRuntime` and web `WebChunkRenderSession` to route
+  dirty marking, dirty-work classification, sync-plan preparation, compile
+  request build/submission, compile-result finish, cache merge, stale requeue,
+  removal cleanup, and cached-section reads through `RenderSectionSession`.
+- Kept desktop native thread execution and browser worker/packed payload
+  execution in the platform adapters; this chunk only moved shared state
+  transitions behind one Rust owner.
+- Added a shared session test covering dirty mark, compile request submission,
+  accepted compile finish, cache update, removal cleanup, and dirty-state
+  clearing.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
@@ -524,17 +536,17 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should turn the shared sync-plan primitives into a small shared
-engine-session skeleton:
+The next slice should make the render-section session responsible for more of
+the compile/present handoff without hiding platform threading:
 
-1. Define a reusable session object or trait-backed helper that owns render
-   dirty state, CPU section cache, and the prepare/finish sequence while taking
-   platform callbacks for snapshot lookup, ordering, readiness, and compiler
-   submission.
-2. Move desktop `WindowSceneRuntime` and browser `WebChunkRenderSession` toward
-   that helper so their local code mostly becomes platform IO, worker
-   submission, and GPU upload/presentation.
-3. Keep desktop native threads and browser Web Workers as separate compiler
-   adapters behind the same submit/drain lifecycle.
+1. Add small callback/adapter helpers around `RenderSectionSession` for known
+   section keys, stale-section requeue, and ready-plan compile submission so
+   desktop and web stop duplicating those sequences.
+2. Keep compiler execution platform-owned: desktop drains the native
+   `std::thread` worker, while web continues to finish browser worker packed
+   payloads through the same session API.
+3. Expose a shared cache-update report shape that desktop and web can pass
+   directly to GPU upload code, leaving only `wgpu` resource ownership and
+   presentation in the adapters.
 4. Preserve the current Playwright worker/canvas smoke and native movement or
    timedemo smoke as the compatibility gates for each extraction.

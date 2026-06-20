@@ -26,10 +26,8 @@ use crate::render_cache::{
     load_textured_mesh_assets,
 };
 use mclone_render_session::{
-    CachedTexturedRenderSections, RenderSectionCacheUpdate, RenderSectionCompiler,
-    RenderSectionDirtyState, RenderSectionNeighborReadiness, RenderSectionReadyPlan,
-    build_client_textured_sections, classify_render_section_dirty_work,
-    finish_render_section_compile_result, prepare_render_section_sync_plan,
+    RenderSectionCacheUpdate, RenderSectionCompiler, RenderSectionNeighborReadiness,
+    RenderSectionReadyPlan, RenderSectionSession, build_client_textured_sections,
     render_dirty_chunk_neighborhood, render_section_chunk_pos, render_section_keys_for_snapshot,
     snapshot_contains_render_section,
 };
@@ -136,8 +134,7 @@ pub(crate) struct WindowSceneRuntime {
     pub(crate) interest_center: ChunkPos,
     pub(crate) mesh_assets: TexturedMeshAssets,
     pub(crate) actor_textures: ActorTextureAssets,
-    render_sections: CachedTexturedRenderSections,
-    render_dirty: RenderSectionDirtyState,
+    render_session: RenderSectionSession,
     render_compile_worker: RenderSectionCompileWorker,
     last_tick: u64,
     last_simulation_tick: u64,
@@ -276,8 +273,7 @@ impl WindowSceneRuntime {
             interest_center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
             mesh_assets,
             actor_textures,
-            render_sections: CachedTexturedRenderSections::default(),
-            render_dirty: RenderSectionDirtyState::default(),
+            render_session: RenderSectionSession::default(),
             render_compile_worker,
             last_tick: 0,
             last_simulation_tick: 0,
@@ -575,7 +571,7 @@ impl WindowSceneRuntime {
     fn mark_render_chunk_dirty(&mut self, pos: ChunkPos) {
         for dirty_pos in render_dirty_chunk_neighborhood(pos) {
             let known_keys = self.known_render_section_keys_for_chunk(dirty_pos);
-            self.render_dirty.mark_chunk_dirty(dirty_pos, known_keys);
+            self.render_session.mark_chunk_dirty(dirty_pos, known_keys);
         }
     }
 
@@ -587,7 +583,7 @@ impl WindowSceneRuntime {
     ) {
         for update in updates {
             for key in render_dirty_section_keys_for_block_update(pos, section_y, update) {
-                self.render_dirty.mark_section_dirty(key);
+                self.render_session.mark_section_dirty(key);
             }
         }
     }
@@ -598,19 +594,21 @@ impl WindowSceneRuntime {
             keys.extend(render_section_keys_for_snapshot(snapshot));
         }
         keys.extend(
-            self.render_sections
+            self.render_session
                 .section_keys()
                 .filter(|key| render_section_chunk_pos(*key) == pos),
         );
         keys.extend(
-            self.render_dirty
+            self.render_session
+                .dirty()
                 .dirty_sections
                 .iter()
                 .copied()
                 .filter(|key| render_section_chunk_pos(*key) == pos),
         );
         keys.extend(
-            self.render_dirty
+            self.render_session
+                .dirty()
                 .inflight_sections
                 .iter()
                 .copied()
@@ -622,8 +620,7 @@ impl WindowSceneRuntime {
     fn drain_completed_render_compile_jobs(&mut self) -> Result<RenderSectionCacheUpdate> {
         let mut update = RenderSectionCacheUpdate::default();
         for completed in self.render_compile_worker.try_recv_completed()? {
-            let finish =
-                finish_render_section_compile_result(&mut self.render_dirty, completed, 0)?;
+            let finish = self.render_session.finish_compile_result(completed, 0)?;
             if !finish.stale_sections.is_empty() {
                 update.stale_compile_section_count += finish.stale_sections.len();
                 self.requeue_stale_render_sections(finish.stale_sections);
@@ -631,7 +628,7 @@ impl WindowSceneRuntime {
             let Some(build_report) = finish.build_report else {
                 continue;
             };
-            let completed_update = self.render_sections.apply_build_report(
+            let completed_update = self.render_session.apply_finished_compile_report(
                 &finish.accepted_sections,
                 build_report,
                 &BTreeSet::new(),
@@ -650,8 +647,8 @@ impl WindowSceneRuntime {
                 .client
                 .chunk_snapshot(pos)
                 .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key));
-            if snapshot_contains || self.render_sections.contains_section(key) {
-                self.render_dirty.dirty_sections.insert(key);
+            if snapshot_contains || self.render_session.contains_section(key) {
+                self.render_session.dirty_mut().dirty_sections.insert(key);
             }
         }
     }
@@ -659,14 +656,14 @@ impl WindowSceneRuntime {
     fn submit_render_compile_plan(&mut self, ready_plan: &RenderSectionReadyPlan) -> Result<usize> {
         let snapshots = self.client.chunk_snapshots().cloned().collect();
         let Some(request) = self
-            .render_dirty
+            .render_session
             .build_ready_plan_compile_request(ready_plan, snapshots)
         else {
             return Ok(0);
         };
         let submitted_count = request.target_sections.len();
         self.render_compile_worker.submit(request)?;
-        self.render_dirty
+        self.render_session
             .accept_ready_plan_compile_submission(ready_plan);
         Ok(submitted_count)
     }
@@ -714,11 +711,9 @@ impl WindowSceneRuntime {
     ) -> Result<RenderSectionCacheUpdate> {
         let mut report = self.drain_completed_render_compile_jobs()?;
 
-        if self.render_sections.is_empty()
+        if self.render_session.cache_is_empty()
             && self.client.loaded_chunk_count() > 0
-            && self.render_dirty.dirty_chunks.is_empty()
-            && self.render_dirty.dirty_sections.is_empty()
-            && self.render_dirty.inflight_sections.is_empty()
+            && self.render_session.dirty_is_empty()
         {
             let loaded = self
                 .client
@@ -730,23 +725,21 @@ impl WindowSceneRuntime {
             }
         }
 
-        if self.render_dirty.dirty_chunks.is_empty() && self.render_dirty.dirty_sections.is_empty()
-        {
+        if self.render_session.dirty_work_is_empty() {
             report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
             return Ok(report);
         }
 
-        let dirty_work = classify_render_section_dirty_work(
-            &self.render_dirty,
+        let dirty_work = self.render_session.classify_dirty_work(
             |pos| self.client.chunk_snapshot(pos).is_some(),
-            |pos| self.render_sections.contains_chunk(pos),
+            |pos| self.render_session.contains_chunk(pos),
             |key| {
                 let pos = render_section_chunk_pos(key);
                 self.client
                     .chunk_snapshot(pos)
                     .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
             },
-            |key| self.render_sections.contains_section(key),
+            |key| self.render_session.contains_section(key),
         );
         let sorted_loaded_dirty_chunks = sort_chunk_positions_by_distance(
             dirty_work.loaded_dirty_chunks.iter().copied(),
@@ -756,8 +749,7 @@ impl WindowSceneRuntime {
             &dirty_work.loaded_dirty_sections_by_chunk,
             camera_position,
         );
-        let sync_plan = prepare_render_section_sync_plan(
-            &mut self.render_dirty,
+        let sync_plan = self.render_session.prepare_sync_plan(
             dirty_work,
             sorted_loaded_dirty_chunks,
             sorted_dirty_section_chunks,
@@ -772,15 +764,11 @@ impl WindowSceneRuntime {
         );
 
         if sync_plan.has_removals() {
-            let removal_update = self.render_sections.remove_sections(
+            let removal_update = self.render_session.apply_removals(
                 &sync_plan.dirty_work.removal_dirty_chunks,
                 &sync_plan.dirty_work.removal_dirty_sections,
             );
             report.merge(removal_update);
-            self.render_dirty.discard_removed_dirty_work(
-                &sync_plan.dirty_work.removal_dirty_chunks,
-                &sync_plan.dirty_work.removal_dirty_sections,
-            );
         }
 
         if chunk_budget == 0 || self.render_compile_worker.pending_job_count() > 0 {
@@ -789,7 +777,7 @@ impl WindowSceneRuntime {
         }
 
         if sync_plan.ready_plan.ready_section_keys.is_empty() {
-            self.render_dirty.apply_ready_plan(&sync_plan.ready_plan);
+            self.render_session.apply_ready_plan(&sync_plan.ready_plan);
             report.merge(sync_plan.ready_update(0));
             report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
             return Ok(report);
@@ -803,7 +791,7 @@ impl WindowSceneRuntime {
     }
 
     pub(crate) fn cached_sections(&self) -> Vec<TexturedRenderSectionMesh> {
-        self.render_sections.sections()
+        self.render_session.sections()
     }
 
     /// Sky clear color for the current day-time, driving the day/night gradient.
@@ -833,7 +821,7 @@ impl WindowSceneRuntime {
         &self,
         camera_position: Vec3,
     ) -> BTreeSet<RenderSectionKey> {
-        self.render_sections
+        self.render_session
             .section_keys()
             .filter(|key| {
                 self.render_section_within_render_distance(*key)
@@ -858,29 +846,32 @@ impl WindowSceneRuntime {
 
     pub(crate) fn pending_render_chunk_count(&self) -> usize {
         let mut pending = self
-            .render_dirty
+            .render_session
+            .dirty()
             .dirty_chunks
             .iter()
             .filter(|pos| {
                 self.client.chunk_snapshot(**pos).is_some()
-                    || self.render_sections.contains_chunk(**pos)
+                    || self.render_session.contains_chunk(**pos)
             })
             .copied()
             .collect::<BTreeSet<_>>();
         pending.extend(
-            self.render_dirty
+            self.render_session
+                .dirty()
                 .dirty_sections
                 .iter()
                 .copied()
                 .filter(|key| {
                     let pos = render_section_chunk_pos(*key);
                     self.client.chunk_snapshot(pos).is_some()
-                        || self.render_sections.contains_section(*key)
+                        || self.render_session.contains_section(*key)
                 })
                 .map(render_section_chunk_pos),
         );
         pending.extend(
-            self.render_dirty
+            self.render_session
+                .dirty()
                 .inflight_sections
                 .iter()
                 .copied()
@@ -890,38 +881,52 @@ impl WindowSceneRuntime {
     }
 
     fn has_ready_pending_render_work(&self, camera_position: Vec3) -> bool {
-        self.render_dirty.dirty_chunks.iter().copied().any(|pos| {
-            if self.render_sections.contains_chunk(pos) && self.client.chunk_snapshot(pos).is_none()
-            {
-                return true;
-            }
-            let Some(snapshot) = self.client.chunk_snapshot(pos) else {
-                return false;
-            };
-            render_section_keys_for_snapshot(snapshot)
-                .into_iter()
+        self.render_session
+            .dirty()
+            .dirty_chunks
+            .iter()
+            .copied()
+            .any(|pos| {
+                if self.render_session.contains_chunk(pos)
+                    && self.client.chunk_snapshot(pos).is_none()
+                {
+                    return true;
+                }
+                let Some(snapshot) = self.client.chunk_snapshot(pos) else {
+                    return false;
+                };
+                render_section_keys_for_snapshot(snapshot)
+                    .into_iter()
+                    .any(|key| {
+                        !self.render_session.dirty().inflight_sections.contains(&key)
+                            && render_section_neighbor_readiness(&self.client, key, camera_position)
+                                .is_ready()
+                    })
+            })
+            || self
+                .render_session
+                .dirty()
+                .dirty_sections
+                .iter()
+                .copied()
                 .any(|key| {
-                    !self.render_dirty.inflight_sections.contains(&key)
+                    if self.render_session.dirty().inflight_sections.contains(&key) {
+                        return false;
+                    }
+                    if self.render_session.contains_section(key)
+                        && self
+                            .client
+                            .chunk_snapshot(render_section_chunk_pos(key))
+                            .is_none()
+                    {
+                        return true;
+                    }
+                    self.client
+                        .chunk_snapshot(render_section_chunk_pos(key))
+                        .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
                         && render_section_neighbor_readiness(&self.client, key, camera_position)
                             .is_ready()
                 })
-        }) || self.render_dirty.dirty_sections.iter().copied().any(|key| {
-            if self.render_dirty.inflight_sections.contains(&key) {
-                return false;
-            }
-            if self.render_sections.contains_section(key)
-                && self
-                    .client
-                    .chunk_snapshot(render_section_chunk_pos(key))
-                    .is_none()
-            {
-                return true;
-            }
-            self.client
-                .chunk_snapshot(render_section_chunk_pos(key))
-                .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
-                && render_section_neighbor_readiness(&self.client, key, camera_position).is_ready()
-        })
     }
 
     fn pending_job_count(&self) -> usize {
@@ -1003,7 +1008,7 @@ impl WindowSceneRuntime {
             pending_publications: self.pending_publication_count(),
             pending_render_chunks: self.pending_render_chunk_count(),
             pending_render_compile_jobs: self.render_compile_worker.pending_job_count(),
-            inflight_render_sections: self.render_dirty.inflight_sections.len(),
+            inflight_render_sections: self.render_session.dirty().inflight_sections.len(),
             client_visible_chunks: scheduler_metrics
                 .map_or(self.client.loaded_chunk_count(), |metrics| {
                     metrics.client_visible_chunks
@@ -1530,7 +1535,8 @@ mod tests {
         assert!(runtime.cached_sections().is_empty());
 
         let deferred_key = *runtime
-            .render_dirty
+            .render_session
+            .dirty()
             .dirty_sections
             .iter()
             .next()
@@ -1539,7 +1545,13 @@ mod tests {
         assert!(runtime.has_pending_render_work(ready_position));
         let ready_update = runtime.sync_all_render_sections(ready_position).unwrap();
         assert!(ready_update.rebuilt_section_count() > 0);
-        assert!(!runtime.render_dirty.dirty_sections.contains(&deferred_key));
+        assert!(
+            !runtime
+                .render_session
+                .dirty()
+                .dirty_sections
+                .contains(&deferred_key)
+        );
     }
 
     #[test]
@@ -1549,8 +1561,8 @@ mod tests {
         }
 
         let mut runtime = WindowSceneRuntime::new(&SceneOptions::default()).unwrap();
-        runtime.render_dirty.dirty_chunks.clear();
-        runtime.render_dirty.dirty_sections.clear();
+        runtime.render_session.dirty_mut().dirty_chunks.clear();
+        runtime.render_session.dirty_mut().dirty_sections.clear();
 
         runtime.apply_server_updates(vec![ServerUpdate::SectionBlockUpdates {
             pos: ChunkPos::new(0, 0),
@@ -1563,9 +1575,9 @@ mod tests {
             }],
         }]);
 
-        assert!(runtime.render_dirty.dirty_chunks.is_empty());
+        assert!(runtime.render_session.dirty().dirty_chunks.is_empty());
         assert_eq!(
-            runtime.render_dirty.dirty_sections,
+            runtime.render_session.dirty().dirty_sections,
             BTreeSet::from([RenderSectionKey::new(0, 7, 0)])
         );
     }
@@ -1611,7 +1623,8 @@ mod tests {
         let changed_key = RenderSectionKey::new(0, 5, 0);
         assert!(
             runtime
-                .render_dirty
+                .render_session
+                .dirty()
                 .inflight_sections
                 .contains(&changed_key)
         );
@@ -2004,16 +2017,28 @@ mod tests {
             };
             let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
             assert!(runtime.client.chunk_snapshot(initial_center).is_some());
-            runtime.render_dirty.dirty_chunks.clear();
-            runtime.render_dirty.dirty_sections.clear();
+            runtime.render_session.dirty_mut().dirty_chunks.clear();
+            runtime.render_session.dirty_mut().dirty_sections.clear();
 
             assert!(runtime.set_interest_center(moved_center).unwrap());
 
             assert_eq!(runtime.client.loaded_chunk_count(), 1);
             assert!(runtime.client.chunk_snapshot(initial_center).is_none());
             assert!(runtime.client.chunk_snapshot(moved_center).is_some());
-            assert!(runtime.render_dirty.dirty_chunks.contains(&initial_center));
-            assert!(runtime.render_dirty.dirty_chunks.contains(&moved_center));
+            assert!(
+                runtime
+                    .render_session
+                    .dirty()
+                    .dirty_chunks
+                    .contains(&initial_center)
+            );
+            assert!(
+                runtime
+                    .render_session
+                    .dirty()
+                    .dirty_chunks
+                    .contains(&moved_center)
+            );
         }
         server.join().unwrap();
     }

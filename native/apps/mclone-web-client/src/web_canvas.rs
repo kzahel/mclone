@@ -19,13 +19,12 @@ use mclone_render::chunk::{
     TexturedSectionDrawResources, TexturedSectionUploadReport,
 };
 use mclone_render_session::{
-    CachedTexturedRenderSections, PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
+    PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
     RenderSectionCompileAcceptanceReport, RenderSectionCompileRequestInfo,
-    RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionDirtyState,
-    RenderSectionDirtyWork, RenderSectionNeighborReadiness, RenderSectionReadyPlan,
-    RenderSectionViewSync, build_client_textured_sections, classify_render_section_dirty_work,
+    RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionDirtyWork,
+    RenderSectionNeighborReadiness, RenderSectionReadyPlan, RenderSectionSession,
+    RenderSectionViewSync, build_client_textured_sections,
     decode_textured_render_section_build_report, encode_textured_render_section_build_report,
-    finish_render_section_compile_result, prepare_render_section_sync_plan,
     render_section_chunk_pos, render_section_keys_for_snapshot, snapshot_contains_render_section,
     summarize_textured_render_section_build_report,
 };
@@ -486,8 +485,7 @@ pub struct WebChunkRenderSession {
     runtime: WebRuntime,
     mesh_assets: WebTexturedMeshAssets,
     draw: Option<TexturedSectionDrawResources>,
-    render_sections: CachedTexturedRenderSections,
-    render_dirty: RenderSectionDirtyState,
+    render_session: RenderSectionSession,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
     asset_pack_parse_count: usize,
     terrain_asset_load_count: usize,
@@ -587,8 +585,7 @@ impl WebChunkRenderSession {
             runtime: WebRuntime::local_integrated(SMOKE_SEED),
             mesh_assets,
             draw: None,
-            render_sections: CachedTexturedRenderSections::default(),
-            render_dirty: RenderSectionDirtyState::default(),
+            render_session: RenderSectionSession::default(),
             loaded_chunk_positions: BTreeSet::new(),
             asset_pack_parse_count: 1,
             terrain_asset_load_count: 1,
@@ -619,7 +616,7 @@ impl WebChunkRenderSession {
             ));
         }
         let request = self
-            .render_dirty
+            .render_session
             .build_ready_plan_compile_request(&render_plan.ready_plan, Vec::new())
             .ok_or_else(|| {
                 format!(
@@ -637,7 +634,7 @@ impl WebChunkRenderSession {
         let info = self
             .compile_requests
             .begin_compile_request(context, request);
-        self.render_dirty
+        self.render_session
             .accept_ready_plan_compile_submission(&render_plan.ready_plan);
         self.compile_request_to_js_value(info, center, radius_chunks)
     }
@@ -703,7 +700,7 @@ impl WebChunkRenderSession {
             ));
         }
         let request = self
-            .render_dirty
+            .render_session
             .build_ready_plan_compile_request(&render_plan.ready_plan, Vec::new())
             .ok_or_else(|| {
                 format!(
@@ -711,7 +708,7 @@ impl WebChunkRenderSession {
                     center.x, center.z, radius_chunks
                 )
             })?;
-        self.render_dirty
+        self.render_session
             .accept_ready_plan_compile_submission(&render_plan.ready_plan);
         let completed = RenderSectionCompileResult {
             target_sections: request.target_sections,
@@ -741,9 +738,10 @@ impl WebChunkRenderSession {
         compile_report: WebSectionCompileReport,
         request_id: u32,
     ) -> Result<GeneratedChunkRenderReport, String> {
-        let finish =
-            finish_render_section_compile_result(&mut self.render_dirty, completed, request_id)
-                .map_err(|error| error.to_string())?;
+        let finish = self
+            .render_session
+            .finish_compile_result(completed, request_id)
+            .map_err(|error| error.to_string())?;
         if !finish.stale_sections.is_empty() {
             self.requeue_stale_render_sections(finish.stale_sections.clone());
         }
@@ -803,8 +801,7 @@ impl WebChunkRenderSession {
         let sorted_dirty_section_chunks =
             sort_dirty_section_chunks_by_coordinate(&dirty_work.loaded_dirty_sections_by_chunk);
         let client = self.runtime.client();
-        let sync_plan = prepare_render_section_sync_plan(
-            &mut self.render_dirty,
+        let sync_plan = self.render_session.prepare_sync_plan(
             dirty_work,
             sorted_loaded_dirty_chunks,
             sorted_dirty_section_chunks,
@@ -861,7 +858,7 @@ impl WebChunkRenderSession {
             .copied()
         {
             let known_keys = self.known_render_section_keys_for_chunk(pos);
-            self.render_dirty.mark_chunk_dirty(pos, known_keys);
+            self.render_session.mark_chunk_dirty(pos, known_keys);
         }
     }
 
@@ -871,19 +868,21 @@ impl WebChunkRenderSession {
             keys.extend(render_section_keys_for_snapshot(snapshot));
         }
         keys.extend(
-            self.render_sections
+            self.render_session
                 .section_keys()
                 .filter(|key| render_section_chunk_pos(*key) == pos),
         );
         keys.extend(
-            self.render_dirty
+            self.render_session
+                .dirty()
                 .dirty_sections
                 .iter()
                 .copied()
                 .filter(|key| render_section_chunk_pos(*key) == pos),
         );
         keys.extend(
-            self.render_dirty
+            self.render_session
+                .dirty()
                 .inflight_sections
                 .iter()
                 .copied()
@@ -893,10 +892,9 @@ impl WebChunkRenderSession {
     }
 
     fn classify_render_dirty_work(&self) -> RenderSectionDirtyWork {
-        classify_render_section_dirty_work(
-            &self.render_dirty,
+        self.render_session.classify_dirty_work(
             |pos| self.runtime.client().chunk_snapshot(pos).is_some(),
-            |pos| self.render_sections.contains_chunk(pos),
+            |pos| self.render_session.contains_chunk(pos),
             |key| {
                 let pos = render_section_chunk_pos(key);
                 self.runtime
@@ -904,7 +902,7 @@ impl WebChunkRenderSession {
                     .chunk_snapshot(pos)
                     .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
             },
-            |key| self.render_sections.contains_section(key),
+            |key| self.render_session.contains_section(key),
         )
     }
 
@@ -916,8 +914,8 @@ impl WebChunkRenderSession {
                 .client()
                 .chunk_snapshot(pos)
                 .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key));
-            if snapshot_contains || self.render_sections.contains_section(key) {
-                self.render_dirty.dirty_sections.insert(key);
+            if snapshot_contains || self.render_session.contains_section(key) {
+                self.render_session.dirty_mut().dirty_sections.insert(key);
             }
         }
     }
@@ -941,15 +939,13 @@ impl WebChunkRenderSession {
             .iter()
             .map(|section| section.key)
             .collect::<BTreeSet<_>>();
-        let cache_update = self.render_sections.apply_build_report(
+        let cache_update = self.render_session.apply_finished_compile_report(
             &ready_section_keys,
             section_report,
             &removal_chunks,
             &removal_sections,
         );
-        self.render_dirty
-            .discard_removed_dirty_work(&removal_chunks, &removal_sections);
-        let cached_sections = self.render_sections.sections();
+        let cached_sections = self.render_session.sections();
         if cached_sections.iter().all(|section| section.is_empty()) {
             return Err(format!(
                 "generated chunk view {},{} radius {} built no resident textured sections",
