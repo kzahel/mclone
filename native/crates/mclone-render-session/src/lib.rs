@@ -532,6 +532,12 @@ pub struct RenderSectionCompileFinish {
     pub build_report: Option<TexturedRenderSectionBuildReport>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderSectionCompileSubmission<T> {
+    pub submitted_section_count: usize,
+    pub output: T,
+}
+
 pub fn finish_render_section_compile_result(
     dirty: &mut RenderSectionDirtyState,
     completed: RenderSectionCompileResult,
@@ -590,6 +596,15 @@ impl RenderSectionSession {
         self.dirty.mark_chunk_dirty(pos, known_section_keys);
     }
 
+    pub fn mark_chunk_dirty_with_loaded_sections(
+        &mut self,
+        pos: ChunkPos,
+        loaded_section_keys: impl IntoIterator<Item = RenderSectionKey>,
+    ) {
+        let known_section_keys = self.known_section_keys_for_chunk(pos, loaded_section_keys);
+        self.mark_chunk_dirty(pos, known_section_keys);
+    }
+
     pub fn mark_section_dirty(&mut self, key: RenderSectionKey) {
         self.dirty.mark_section_dirty(key);
     }
@@ -608,6 +623,35 @@ impl RenderSectionSession {
 
     pub fn contains_section(&self, key: RenderSectionKey) -> bool {
         self.cache.contains_section(key)
+    }
+
+    pub fn known_section_keys_for_chunk(
+        &self,
+        pos: ChunkPos,
+        loaded_section_keys: impl IntoIterator<Item = RenderSectionKey>,
+    ) -> BTreeSet<RenderSectionKey> {
+        let mut keys = BTreeSet::new();
+        keys.extend(loaded_section_keys);
+        keys.extend(
+            self.cache
+                .section_keys()
+                .filter(|key| render_section_chunk_pos(*key) == pos),
+        );
+        keys.extend(
+            self.dirty
+                .dirty_sections
+                .iter()
+                .copied()
+                .filter(|key| render_section_chunk_pos(*key) == pos),
+        );
+        keys.extend(
+            self.dirty
+                .inflight_sections
+                .iter()
+                .copied()
+                .filter(|key| render_section_chunk_pos(*key) == pos),
+        );
+        keys
     }
 
     pub fn classify_dirty_work(
@@ -662,6 +706,24 @@ impl RenderSectionSession {
         self.dirty.accept_ready_plan_compile_submission(plan);
     }
 
+    pub fn submit_ready_plan_compile_request<T, E>(
+        &mut self,
+        plan: &RenderSectionReadyPlan,
+        snapshots: Vec<ChunkSnapshot>,
+        submit: impl FnOnce(RenderSectionCompileRequest) -> std::result::Result<T, E>,
+    ) -> std::result::Result<Option<RenderSectionCompileSubmission<T>>, E> {
+        let Some(request) = self.build_ready_plan_compile_request(plan, snapshots) else {
+            return Ok(None);
+        };
+        let submitted_section_count = request.target_sections.len();
+        let output = submit(request)?;
+        self.accept_ready_plan_compile_submission(plan);
+        Ok(Some(RenderSectionCompileSubmission {
+            submitted_section_count,
+            output,
+        }))
+    }
+
     pub fn finish_compile_result(
         &mut self,
         completed: RenderSectionCompileResult,
@@ -702,13 +764,16 @@ impl RenderSectionSession {
     pub fn requeue_stale_sections(
         &mut self,
         target_sections: BTreeSet<RenderSectionKey>,
-        mut should_requeue: impl FnMut(RenderSectionKey) -> bool,
-    ) {
+        mut section_is_loaded: impl FnMut(RenderSectionKey) -> bool,
+    ) -> usize {
+        let mut requeued = 0;
         for key in target_sections {
-            if should_requeue(key) {
+            if section_is_loaded(key) || self.cache.contains_section(key) {
                 self.dirty.dirty_sections.insert(key);
+                requeued += 1;
             }
         }
+        requeued
     }
 }
 
@@ -1780,10 +1845,14 @@ mod tests {
         };
 
         session.mark_section_dirty(key);
-        let request = session
-            .build_ready_plan_compile_request(&ready_plan, Vec::new())
+        let submission = session
+            .submit_ready_plan_compile_request(&ready_plan, Vec::new(), |request| {
+                Ok::<_, std::convert::Infallible>(request)
+            })
+            .expect("compile submission should not fail")
             .expect("ready section should build a compile request");
-        session.accept_ready_plan_compile_submission(&ready_plan);
+        assert_eq!(submission.submitted_section_count, 1);
+        let request = submission.output;
         assert!(session.dirty().inflight_sections.contains(&key));
 
         let finish = session
@@ -1833,6 +1902,78 @@ mod tests {
         assert!(!session.contains_section(key));
         assert!(!session.contains_chunk(pos));
         assert!(session.dirty_is_empty());
+    }
+
+    #[test]
+    fn render_section_session_collects_known_keys_and_requeues_stale_sections() {
+        let mut session = RenderSectionSession::default();
+        let pos = ChunkPos::new(2, -1);
+        let cached = RenderSectionKey::new(2, 4, -1);
+        let loaded = RenderSectionKey::new(2, 5, -1);
+        let dirty = RenderSectionKey::new(2, 6, -1);
+        let inflight = RenderSectionKey::new(2, 7, -1);
+        let stale_unloaded = RenderSectionKey::new(2, 8, -1);
+
+        session.apply_finished_compile_report(
+            &BTreeSet::from([cached]),
+            TexturedRenderSectionBuildReport {
+                sections: vec![TexturedRenderSectionMesh {
+                    key: cached,
+                    mesh: TexturedVisibleChunkMesh::default(),
+                    visibility: VisibilitySet::all_visible(),
+                }],
+                visibility_graph: VisibilityGraphBuildStats::default(),
+            },
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
+        session.mark_section_dirty(dirty);
+        session.mark_section_dirty(inflight);
+        let inflight_plan = RenderSectionReadyPlan {
+            ready_section_keys: BTreeSet::from([inflight]),
+            ..RenderSectionReadyPlan::default()
+        };
+        session
+            .submit_ready_plan_compile_request(&inflight_plan, Vec::new(), |request| {
+                Ok::<_, std::convert::Infallible>(request)
+            })
+            .expect("compile submission should not fail")
+            .expect("inflight section should build a compile request");
+
+        assert_eq!(
+            session.known_section_keys_for_chunk(pos, [loaded]),
+            BTreeSet::from([cached, loaded, dirty, inflight])
+        );
+
+        let requeued = session
+            .requeue_stale_sections(BTreeSet::from([cached, loaded, stale_unloaded]), |key| {
+                key == loaded
+            });
+
+        assert_eq!(requeued, 2);
+        assert!(session.dirty().dirty_sections.contains(&cached));
+        assert!(session.dirty().dirty_sections.contains(&loaded));
+        assert!(!session.dirty().dirty_sections.contains(&stale_unloaded));
+    }
+
+    #[test]
+    fn render_section_session_keeps_ready_work_dirty_when_submit_fails() {
+        let mut session = RenderSectionSession::default();
+        let key = RenderSectionKey::new(2, 4, -1);
+        let ready_plan = RenderSectionReadyPlan {
+            ready_section_keys: BTreeSet::from([key]),
+            ..RenderSectionReadyPlan::default()
+        };
+
+        session.mark_section_dirty(key);
+        let result: std::result::Result<Option<RenderSectionCompileSubmission<()>>, &str> = session
+            .submit_ready_plan_compile_request(&ready_plan, Vec::new(), |_request| {
+                Err("submit failed")
+            });
+
+        assert_eq!(result, Err("submit failed"));
+        assert!(session.dirty().dirty_sections.contains(&key));
+        assert!(session.dirty().inflight_sections.is_empty());
     }
 
     #[test]

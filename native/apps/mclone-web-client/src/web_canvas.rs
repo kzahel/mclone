@@ -615,15 +615,6 @@ impl WebChunkRenderSession {
                 center.x, center.z, radius_chunks
             ));
         }
-        let request = self
-            .render_session
-            .build_ready_plan_compile_request(&render_plan.ready_plan, Vec::new())
-            .ok_or_else(|| {
-                format!(
-                    "web render compile request for {},{} radius {} had no ready sections",
-                    center.x, center.z, radius_chunks
-                )
-            })?;
         let context = WebPendingCompileContext {
             center,
             radius_chunks,
@@ -631,11 +622,21 @@ impl WebChunkRenderSession {
             removal_chunks: render_plan.removal_chunks,
             removal_sections: render_plan.removal_sections,
         };
-        let info = self
-            .compile_requests
-            .begin_compile_request(context, request);
-        self.render_session
-            .accept_ready_plan_compile_submission(&render_plan.ready_plan);
+        let submission = self
+            .render_session
+            .submit_ready_plan_compile_request(&render_plan.ready_plan, Vec::new(), |request| {
+                Ok::<_, String>(
+                    self.compile_requests
+                        .begin_compile_request(context, request),
+                )
+            })?
+            .ok_or_else(|| {
+                format!(
+                    "web render compile request for {},{} radius {} had no ready sections",
+                    center.x, center.z, radius_chunks
+                )
+            })?;
+        let info = submission.output;
         self.compile_request_to_js_value(info, center, radius_chunks)
     }
 
@@ -699,22 +700,22 @@ impl WebChunkRenderSession {
                 center.x, center.z, radius_chunks
             ));
         }
-        let request = self
+        let submission = self
             .render_session
-            .build_ready_plan_compile_request(&render_plan.ready_plan, Vec::new())
+            .submit_ready_plan_compile_request(&render_plan.ready_plan, Vec::new(), |request| {
+                Ok::<_, String>(RenderSectionCompileResult {
+                    target_sections: request.target_sections,
+                    section_revisions: request.section_revisions,
+                    result: Ok(section_report),
+                })
+            })?
             .ok_or_else(|| {
                 format!(
                     "generated chunk view {},{} radius {} had no ready render sections",
                     center.x, center.z, radius_chunks
                 )
             })?;
-        self.render_session
-            .accept_ready_plan_compile_submission(&render_plan.ready_plan);
-        let completed = RenderSectionCompileResult {
-            target_sections: request.target_sections,
-            section_revisions: request.section_revisions,
-            result: Ok(section_report),
-        };
+        let completed = submission.output;
         self.finish_render_compile_result(
             center,
             radius_chunks,
@@ -743,7 +744,15 @@ impl WebChunkRenderSession {
             .finish_compile_result(completed, request_id)
             .map_err(|error| error.to_string())?;
         if !finish.stale_sections.is_empty() {
-            self.requeue_stale_render_sections(finish.stale_sections.clone());
+            let runtime = &self.runtime;
+            self.render_session
+                .requeue_stale_sections(finish.stale_sections.clone(), |key| {
+                    let pos = render_section_chunk_pos(key);
+                    runtime
+                        .client()
+                        .chunk_snapshot(pos)
+                        .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+                });
         }
         if finish.accepted_sections.is_empty()
             && removal_chunks.is_empty()
@@ -857,38 +866,15 @@ impl WebChunkRenderSession {
             .chain(sync.removal_chunks.iter())
             .copied()
         {
-            let known_keys = self.known_render_section_keys_for_chunk(pos);
-            self.render_session.mark_chunk_dirty(pos, known_keys);
+            let loaded_keys = self
+                .runtime
+                .client()
+                .chunk_snapshot(pos)
+                .map(render_section_keys_for_snapshot)
+                .unwrap_or_default();
+            self.render_session
+                .mark_chunk_dirty_with_loaded_sections(pos, loaded_keys);
         }
-    }
-
-    fn known_render_section_keys_for_chunk(&self, pos: ChunkPos) -> BTreeSet<RenderSectionKey> {
-        let mut keys = BTreeSet::new();
-        if let Some(snapshot) = self.runtime.client().chunk_snapshot(pos) {
-            keys.extend(render_section_keys_for_snapshot(snapshot));
-        }
-        keys.extend(
-            self.render_session
-                .section_keys()
-                .filter(|key| render_section_chunk_pos(*key) == pos),
-        );
-        keys.extend(
-            self.render_session
-                .dirty()
-                .dirty_sections
-                .iter()
-                .copied()
-                .filter(|key| render_section_chunk_pos(*key) == pos),
-        );
-        keys.extend(
-            self.render_session
-                .dirty()
-                .inflight_sections
-                .iter()
-                .copied()
-                .filter(|key| render_section_chunk_pos(*key) == pos),
-        );
-        keys
     }
 
     fn classify_render_dirty_work(&self) -> RenderSectionDirtyWork {
@@ -904,20 +890,6 @@ impl WebChunkRenderSession {
             },
             |key| self.render_session.contains_section(key),
         )
-    }
-
-    fn requeue_stale_render_sections(&mut self, target_sections: BTreeSet<RenderSectionKey>) {
-        for key in target_sections {
-            let pos = render_section_chunk_pos(key);
-            let snapshot_contains = self
-                .runtime
-                .client()
-                .chunk_snapshot(pos)
-                .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key));
-            if snapshot_contains || self.render_session.contains_section(key) {
-                self.render_session.dirty_mut().dirty_sections.insert(key);
-            }
-        }
     }
 
     fn render_chunk_report_with_section_report(

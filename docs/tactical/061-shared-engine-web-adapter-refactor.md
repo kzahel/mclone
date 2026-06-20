@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active shared render-section session owner landed.
+Status: active shared render-section helper APIs landed.
 
 ## Purpose
 
@@ -406,6 +406,22 @@ Browser worker payload result:
 - Added a shared session test covering dirty mark, compile request submission,
   accepted compile finish, cache update, removal cleanup, and dirty-state
   clearing.
+- Added session-level helper APIs for the repeated adapter sequences:
+  - `mark_chunk_dirty_with_loaded_sections`
+  - `known_section_keys_for_chunk`
+  - `submit_ready_plan_compile_request`
+  - cache-aware `requeue_stale_sections`
+- Updated desktop `WindowSceneRuntime` and web `WebChunkRenderSession` to use
+  those helpers instead of carrying local known-section-key collection,
+  stale-section requeue loops, or manual build/accept compile-submission
+  sequences.
+- Kept compiler execution platform-owned: desktop still submits to the native
+  `std::thread` worker, and web still routes browser worker packed payloads
+  through the Rust session API.
+- Added shared tests proving known-key collection includes loaded/cached/dirty
+  and inflight sections, stale requeue only keeps loaded/cached sections, and a
+  failed platform submit leaves ready work dirty rather than marking it
+  inflight.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
@@ -536,17 +552,16 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should make the render-section session responsible for more of
-the compile/present handoff without hiding platform threading:
+The next slice should extract a small shared render-section sync/update helper
+around `RenderSectionSession`:
 
-1. Add small callback/adapter helpers around `RenderSectionSession` for known
-   section keys, stale-section requeue, and ready-plan compile submission so
-   desktop and web stop duplicating those sequences.
-2. Keep compiler execution platform-owned: desktop drains the native
-   `std::thread` worker, while web continues to finish browser worker packed
-   payloads through the same session API.
-3. Expose a shared cache-update report shape that desktop and web can pass
-   directly to GPU upload code, leaving only `wgpu` resource ownership and
-   presentation in the adapters.
-4. Preserve the current Playwright worker/canvas smoke and native movement or
-   timedemo smoke as the compatibility gates for each extraction.
+1. Move the common classify -> order -> prepare-plan -> apply-removals ->
+   submit-ready-report sequence behind a shared helper that takes adapter
+   callbacks for loaded-section lookup, loaded/cached predicates, ordering,
+   readiness, pending-compiler gating, and platform submit.
+2. Keep desktop distance ordering and neighbor readiness as native callbacks;
+   keep web coordinate ordering and browser worker submission as web callbacks.
+3. Return a shared `RenderSectionCacheUpdate`/pending-job report that adapters
+   can pass directly to GPU upload/presentation code.
+4. Preserve the Playwright worker/canvas smoke plus native movement/timedemo
+   screenshots as the compatibility gates.

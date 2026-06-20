@@ -570,8 +570,13 @@ impl WindowSceneRuntime {
 
     fn mark_render_chunk_dirty(&mut self, pos: ChunkPos) {
         for dirty_pos in render_dirty_chunk_neighborhood(pos) {
-            let known_keys = self.known_render_section_keys_for_chunk(dirty_pos);
-            self.render_session.mark_chunk_dirty(dirty_pos, known_keys);
+            let loaded_keys = self
+                .client
+                .chunk_snapshot(dirty_pos)
+                .map(render_section_keys_for_snapshot)
+                .unwrap_or_default();
+            self.render_session
+                .mark_chunk_dirty_with_loaded_sections(dirty_pos, loaded_keys);
         }
     }
 
@@ -588,42 +593,20 @@ impl WindowSceneRuntime {
         }
     }
 
-    fn known_render_section_keys_for_chunk(&self, pos: ChunkPos) -> BTreeSet<RenderSectionKey> {
-        let mut keys = BTreeSet::new();
-        if let Some(snapshot) = self.client.chunk_snapshot(pos) {
-            keys.extend(render_section_keys_for_snapshot(snapshot));
-        }
-        keys.extend(
-            self.render_session
-                .section_keys()
-                .filter(|key| render_section_chunk_pos(*key) == pos),
-        );
-        keys.extend(
-            self.render_session
-                .dirty()
-                .dirty_sections
-                .iter()
-                .copied()
-                .filter(|key| render_section_chunk_pos(*key) == pos),
-        );
-        keys.extend(
-            self.render_session
-                .dirty()
-                .inflight_sections
-                .iter()
-                .copied()
-                .filter(|key| render_section_chunk_pos(*key) == pos),
-        );
-        keys
-    }
-
     fn drain_completed_render_compile_jobs(&mut self) -> Result<RenderSectionCacheUpdate> {
         let mut update = RenderSectionCacheUpdate::default();
         for completed in self.render_compile_worker.try_recv_completed()? {
             let finish = self.render_session.finish_compile_result(completed, 0)?;
             if !finish.stale_sections.is_empty() {
                 update.stale_compile_section_count += finish.stale_sections.len();
-                self.requeue_stale_render_sections(finish.stale_sections);
+                let client = &self.client;
+                self.render_session
+                    .requeue_stale_sections(finish.stale_sections, |key| {
+                        let pos = render_section_chunk_pos(key);
+                        client
+                            .chunk_snapshot(pos)
+                            .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key))
+                    });
             }
             let Some(build_report) = finish.build_report else {
                 continue;
@@ -640,32 +623,17 @@ impl WindowSceneRuntime {
         Ok(update)
     }
 
-    fn requeue_stale_render_sections(&mut self, target_sections: BTreeSet<RenderSectionKey>) {
-        for key in target_sections {
-            let pos = render_section_chunk_pos(key);
-            let snapshot_contains = self
-                .client
-                .chunk_snapshot(pos)
-                .is_some_and(|snapshot| snapshot_contains_render_section(snapshot, key));
-            if snapshot_contains || self.render_session.contains_section(key) {
-                self.render_session.dirty_mut().dirty_sections.insert(key);
-            }
-        }
-    }
-
     fn submit_render_compile_plan(&mut self, ready_plan: &RenderSectionReadyPlan) -> Result<usize> {
         let snapshots = self.client.chunk_snapshots().cloned().collect();
-        let Some(request) = self
-            .render_session
-            .build_ready_plan_compile_request(ready_plan, snapshots)
+        let Some(submission) = self.render_session.submit_ready_plan_compile_request(
+            ready_plan,
+            snapshots,
+            |request| self.render_compile_worker.submit(request),
+        )?
         else {
             return Ok(0);
         };
-        let submitted_count = request.target_sections.len();
-        self.render_compile_worker.submit(request)?;
-        self.render_session
-            .accept_ready_plan_compile_submission(ready_plan);
-        Ok(submitted_count)
+        Ok(submission.submitted_section_count)
     }
 
     pub(crate) fn sync_render_sections(
