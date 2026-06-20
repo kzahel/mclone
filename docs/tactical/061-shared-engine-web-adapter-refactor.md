@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active shared loaded-view dirty marking helper landed.
+Status: active shared prepared-sync submission helper landed.
 
 ## Purpose
 
@@ -461,6 +461,21 @@ Browser worker payload result:
   shared session helper, deleting the web-local `mark_render_sync_dirty` loop.
 - Added shared session tests for native-style neighborhood dirtying and
   web-style loaded-view sync dirtying with cached removal sections.
+- Added `RenderSectionReadyWorkSubmission` and
+  `RenderSectionSession::submit_prepared_sync_plan` so prepared sync plans now
+  share empty-ready-plan application, ready-update counter reporting, compile
+  request construction, submit-success dirty/inflight transitions, and
+  submitted-section reporting.
+- Updated desktop `WindowSceneRuntime::sync_render_sections_with_budget` to use
+  the shared prepared-plan submission helper while preserving the native
+  pending-worker gate, distance ordering, and threaded compiler submission.
+- Updated web `WebChunkRenderSession` to carry the full
+  `RenderSectionSyncPlan` through its browser request context and use the
+  shared helper for both persistent worker requests and inline packed-report
+  fallback requests.
+- Added shared tests proving empty/deferred prepared sync plans do not invoke a
+  platform submit and ready prepared sync plans become inflight only after the
+  platform submit succeeds.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
@@ -591,16 +606,16 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should collapse the remaining render-section work-preparation
-ceremony around the shared session:
+The next slice should introduce the first narrow `EngineRenderSession` shell:
 
-1. Add a shared helper for "prepare sync update, apply empty ready plans, and
-   report ready/update counters" so desktop and web stop spelling out the same
-   ready-plan accounting around `prepare_sync_update`.
-2. Keep compile execution platform-specific: desktop still submits to the
-   native worker, while web still records JS/Rust request IDs and routes packed
-   worker payloads through the browser boundary.
-3. Keep adapter-supplied policies explicit: desktop distance ordering and
-   neighbor readiness, web coordinate ordering and deferred removals.
+1. Move ownership of `ClientRuntime` plus `RenderSectionSession` into a shared
+   struct that exposes client snapshot/read-only access and render-session
+   helpers without owning any platform transport, worker, or GPU state.
+2. Keep desktop local/remote polling and web `WebRuntime` request orchestration
+   in their adapters, but route dirty marking, initial render-cache seeding,
+   and render-section sync calls through the shared shell.
+3. Preserve adapter-supplied policies explicitly: desktop camera-distance
+   ordering and neighbor readiness, web coordinate ordering and deferred
+   removals.
 4. Preserve Playwright worker/canvas screenshots plus native
    movement/timedemo/headless screenshots as the compatibility gates.

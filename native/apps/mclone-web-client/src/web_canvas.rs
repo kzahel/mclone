@@ -22,7 +22,7 @@ use mclone_render_session::{
     PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
     RenderSectionCompileAcceptanceReport, RenderSectionCompileRequestInfo,
     RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionNeighborReadiness,
-    RenderSectionReadyPlan, RenderSectionRemovalMode, RenderSectionSession, RenderSectionViewSync,
+    RenderSectionRemovalMode, RenderSectionSession, RenderSectionSyncPlan, RenderSectionViewSync,
     build_client_textured_sections, decode_textured_render_section_build_report,
     encode_textured_render_section_build_report, render_section_chunk_pos,
     render_section_keys_for_snapshot, snapshot_contains_render_section,
@@ -437,9 +437,7 @@ struct WebPendingCompileContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct WebChunkRenderPlan {
     sync: RenderSectionViewSync,
-    ready_plan: RenderSectionReadyPlan,
-    removal_chunks: BTreeSet<ChunkPos>,
-    removal_sections: BTreeSet<RenderSectionKey>,
+    sync_plan: RenderSectionSyncPlan,
 }
 
 async fn render_canvas_clear(canvas: HtmlCanvasElement) -> Result<CanvasRenderReport, String> {
@@ -609,33 +607,35 @@ impl WebChunkRenderSession {
             ));
         }
         let render_plan = self.prepare_chunk_render_plan(center, radius_chunks)?;
-        if render_plan.ready_plan.ready_section_keys.is_empty() {
-            return Err(format!(
-                "web render compile request for {},{} radius {} had no ready sections",
-                center.x, center.z, radius_chunks
-            ));
-        }
         let context = WebPendingCompileContext {
             center,
             radius_chunks,
             sync: render_plan.sync,
-            removal_chunks: render_plan.removal_chunks,
-            removal_sections: render_plan.removal_sections,
+            removal_chunks: render_plan
+                .sync_plan
+                .dirty_work
+                .removal_dirty_chunks
+                .clone(),
+            removal_sections: render_plan
+                .sync_plan
+                .dirty_work
+                .removal_dirty_sections
+                .clone(),
         };
-        let submission = self
-            .render_session
-            .submit_ready_plan_compile_request(&render_plan.ready_plan, Vec::new(), |request| {
-                Ok::<_, String>(
-                    self.compile_requests
-                        .begin_compile_request(context, request),
-                )
-            })?
-            .ok_or_else(|| {
-                format!(
-                    "web render compile request for {},{} radius {} had no ready sections",
-                    center.x, center.z, radius_chunks
-                )
-            })?;
+        let compile_requests = &mut self.compile_requests;
+        let submission = self.render_session.submit_prepared_sync_plan(
+            &render_plan.sync_plan,
+            Vec::new(),
+            |_sync_plan, request| {
+                Ok::<_, String>(compile_requests.begin_compile_request(context, request))
+            },
+        )?;
+        let Some(submission) = submission.submission else {
+            return Err(format!(
+                "web render compile request for {},{} radius {} had no ready sections",
+                center.x, center.z, radius_chunks
+            ));
+        };
         let info = submission.output;
         self.compile_request_to_js_value(info, center, radius_chunks)
     }
@@ -694,34 +694,40 @@ impl WebChunkRenderSession {
         section_report: TexturedRenderSectionBuildReport,
         compile_report: WebSectionCompileReport,
     ) -> Result<GeneratedChunkRenderReport, String> {
-        if render_plan.ready_plan.ready_section_keys.is_empty() {
-            return Err(format!(
-                "generated chunk view {},{} radius {} had no ready render sections",
-                center.x, center.z, radius_chunks
-            ));
-        }
-        let submission = self
-            .render_session
-            .submit_ready_plan_compile_request(&render_plan.ready_plan, Vec::new(), |request| {
+        let removal_chunks = render_plan
+            .sync_plan
+            .dirty_work
+            .removal_dirty_chunks
+            .clone();
+        let removal_sections = render_plan
+            .sync_plan
+            .dirty_work
+            .removal_dirty_sections
+            .clone();
+        let submission = self.render_session.submit_prepared_sync_plan(
+            &render_plan.sync_plan,
+            Vec::new(),
+            |_sync_plan, request| {
                 Ok::<_, String>(RenderSectionCompileResult {
                     target_sections: request.target_sections,
                     section_revisions: request.section_revisions,
                     result: Ok(section_report),
                 })
-            })?
-            .ok_or_else(|| {
-                format!(
-                    "generated chunk view {},{} radius {} had no ready render sections",
-                    center.x, center.z, radius_chunks
-                )
-            })?;
+            },
+        )?;
+        let Some(submission) = submission.submission else {
+            return Err(format!(
+                "generated chunk view {},{} radius {} had no ready render sections",
+                center.x, center.z, radius_chunks
+            ));
+        };
         let completed = submission.output;
         self.finish_render_compile_result(
             center,
             radius_chunks,
             render_plan.sync,
-            render_plan.removal_chunks,
-            render_plan.removal_sections,
+            removal_chunks,
+            removal_sections,
             completed,
             compile_report,
             0,
@@ -839,9 +845,7 @@ impl WebChunkRenderSession {
         );
         Ok(WebChunkRenderPlan {
             sync,
-            ready_plan: sync_update.sync_plan.ready_plan,
-            removal_chunks: sync_update.sync_plan.dirty_work.removal_dirty_chunks,
-            removal_sections: sync_update.sync_plan.dirty_work.removal_dirty_sections,
+            sync_plan: sync_update.sync_plan,
         })
     }
 

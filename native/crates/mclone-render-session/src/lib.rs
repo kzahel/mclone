@@ -558,6 +558,12 @@ pub struct RenderSectionCompileSubmission<T> {
     pub output: T,
 }
 
+#[derive(Clone, Debug)]
+pub struct RenderSectionReadyWorkSubmission<T> {
+    pub cache_update: RenderSectionCacheUpdate,
+    pub submission: Option<RenderSectionCompileSubmission<T>>,
+}
+
 pub fn finish_render_section_compile_result(
     dirty: &mut RenderSectionDirtyState,
     completed: RenderSectionCompileResult,
@@ -845,6 +851,38 @@ impl RenderSectionSession {
             submitted_section_count,
             output,
         }))
+    }
+
+    pub fn submit_prepared_sync_plan<T, E>(
+        &mut self,
+        sync_plan: &RenderSectionSyncPlan,
+        snapshots: Vec<ChunkSnapshot>,
+        submit: impl FnOnce(
+            &RenderSectionSyncPlan,
+            RenderSectionCompileRequest,
+        ) -> std::result::Result<T, E>,
+    ) -> std::result::Result<RenderSectionReadyWorkSubmission<T>, E> {
+        let mut cache_update = RenderSectionCacheUpdate::default();
+        let Some(request) = self.build_ready_plan_compile_request(&sync_plan.ready_plan, snapshots)
+        else {
+            self.apply_ready_plan(&sync_plan.ready_plan);
+            cache_update.merge(sync_plan.ready_update(0));
+            return Ok(RenderSectionReadyWorkSubmission {
+                cache_update,
+                submission: None,
+            });
+        };
+        let submitted_section_count = request.target_sections.len();
+        let output = submit(sync_plan, request)?;
+        self.accept_ready_plan_compile_submission(&sync_plan.ready_plan);
+        cache_update.merge(sync_plan.ready_update(submitted_section_count));
+        Ok(RenderSectionReadyWorkSubmission {
+            cache_update,
+            submission: Some(RenderSectionCompileSubmission {
+                submitted_section_count,
+                output,
+            }),
+        })
     }
 
     pub fn finish_compile_result(
@@ -2442,6 +2480,83 @@ mod tests {
         assert_eq!(result, Err("submit failed"));
         assert!(session.dirty().dirty_sections.contains(&key));
         assert!(session.dirty().inflight_sections.is_empty());
+    }
+
+    #[test]
+    fn render_section_session_submit_prepared_sync_plan_applies_empty_ready_work() {
+        let chunk = ChunkPos::new(0, 0);
+        let deferred = RenderSectionKey::new(0, 4, 0);
+        let mut session = RenderSectionSession::default();
+        session.mark_chunk_dirty(chunk, [deferred]);
+        let sync_update = session.prepare_sync_update(
+            |pos| pos == chunk,
+            |key| key == deferred,
+            |dirty_work| dirty_work.loaded_dirty_chunks.iter().copied().collect(),
+            |dirty_work| {
+                dirty_work
+                    .loaded_dirty_sections_by_chunk
+                    .keys()
+                    .copied()
+                    .collect()
+            },
+            1,
+            |_| vec![deferred],
+            |_| RenderSectionNeighborReadiness::DeferredMissingNeighbors,
+            RenderSectionRemovalMode::Defer,
+        );
+
+        let result: std::result::Result<RenderSectionReadyWorkSubmission<()>, &str> = session
+            .submit_prepared_sync_plan(
+                &sync_update.sync_plan,
+                Vec::new(),
+                |_sync_plan, _request| panic!("empty ready plans must not submit compile requests"),
+            );
+
+        let update = result.expect("empty ready plan should be applied");
+        assert!(update.submission.is_none());
+        assert_eq!(update.cache_update.submitted_compile_section_count, 0);
+        assert_eq!(update.cache_update.deferred_section_count, 1);
+        assert!(session.dirty().dirty_chunks.is_empty());
+        assert_eq!(session.dirty().dirty_sections, BTreeSet::from([deferred]));
+        assert!(session.dirty().inflight_sections.is_empty());
+    }
+
+    #[test]
+    fn render_section_session_submit_prepared_sync_plan_marks_ready_work_inflight() {
+        let key = RenderSectionKey::new(0, 4, 0);
+        let mut session = RenderSectionSession::default();
+        session.mark_section_dirty(key);
+        let sync_update = session.prepare_sync_update(
+            |_| true,
+            |candidate| candidate == key,
+            |dirty_work| dirty_work.loaded_dirty_chunks.iter().copied().collect(),
+            |dirty_work| {
+                dirty_work
+                    .loaded_dirty_sections_by_chunk
+                    .keys()
+                    .copied()
+                    .collect()
+            },
+            1,
+            |_| Vec::new(),
+            |_| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+            RenderSectionRemovalMode::Defer,
+        );
+
+        let update = session
+            .submit_prepared_sync_plan(&sync_update.sync_plan, Vec::new(), |_sync_plan, request| {
+                Ok::<_, std::convert::Infallible>(request)
+            })
+            .expect("ready plan should submit");
+        let submission = update
+            .submission
+            .expect("ready section should produce a compile request");
+
+        assert_eq!(submission.submitted_section_count, 1);
+        assert_eq!(submission.output.target_sections, BTreeSet::from([key]));
+        assert_eq!(update.cache_update.submitted_compile_section_count, 1);
+        assert!(session.dirty().dirty_sections.is_empty());
+        assert_eq!(session.dirty().inflight_sections, BTreeSet::from([key]));
     }
 
     #[test]

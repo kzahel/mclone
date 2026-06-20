@@ -27,9 +27,8 @@ use crate::render_cache::{
 };
 use mclone_render_session::{
     RenderSectionCacheUpdate, RenderSectionCompiler, RenderSectionNeighborReadiness,
-    RenderSectionReadyPlan, RenderSectionRemovalMode, RenderSectionSession,
-    build_client_textured_sections, render_section_chunk_pos, render_section_keys_for_snapshot,
-    snapshot_contains_render_section,
+    RenderSectionRemovalMode, RenderSectionSession, build_client_textured_sections,
+    render_section_chunk_pos, render_section_keys_for_snapshot, snapshot_contains_render_section,
 };
 
 const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
@@ -609,19 +608,6 @@ impl WindowSceneRuntime {
         )
     }
 
-    fn submit_render_compile_plan(&mut self, ready_plan: &RenderSectionReadyPlan) -> Result<usize> {
-        let snapshots = self.client.chunk_snapshots().cloned().collect();
-        let Some(submission) = self.render_session.submit_ready_plan_compile_request(
-            ready_plan,
-            snapshots,
-            |request| self.render_compile_worker.submit(request),
-        )?
-        else {
-            return Ok(0);
-        };
-        Ok(submission.submitted_section_count)
-    }
-
     pub(crate) fn sync_render_sections(
         &mut self,
         camera_position: Vec3,
@@ -723,16 +709,14 @@ impl WindowSceneRuntime {
         }
 
         let sync_plan = sync_update.sync_plan;
-        if sync_plan.ready_plan.ready_section_keys.is_empty() {
-            self.render_session.apply_ready_plan(&sync_plan.ready_plan);
-            report.merge(sync_plan.ready_update(0));
-            report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
-            return Ok(report);
-        }
-
-        let submitted_compile_section_count =
-            self.submit_render_compile_plan(&sync_plan.ready_plan)?;
-        report.merge(sync_plan.ready_update(submitted_compile_section_count));
+        let snapshots = self.client.chunk_snapshots().cloned().collect();
+        let render_compile_worker = &mut self.render_compile_worker;
+        let submission_update = self.render_session.submit_prepared_sync_plan(
+            &sync_plan,
+            snapshots,
+            |_sync_plan, request| render_compile_worker.submit(request),
+        )?;
+        report.merge(submission_update.cache_update);
         report.pending_compile_jobs = self.render_compile_worker.pending_job_count();
         Ok(report)
     }
