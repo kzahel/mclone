@@ -228,11 +228,19 @@ Landed:
      the gameplay stream
    - dedicated connection events report handshake failures as zero-command
      disconnect reasons before a server player is allocated
+8. Native remote clients can recover from a dropped dedicated TCP session:
+   - reconnect uses the same protocol handshake path
+   - the client clears stale chunk, correction, and remote-player replicas while
+     preserving the desired chunk view
+   - the current chunk view is resent after reconnect so the new server-side
+     player/session publishes fresh snapshots
+   - old and new chunk positions are marked dirty so cached render sections are
+     removed or rebuilt
 
 Next correctness steps, before more optimization work:
 
-1. Finish the dedicated protocol/connection edge with reconnect/resync behavior
-   when the client cache is stale.
+1. Broaden reconnect resync only when real gameplay state needs it, such as
+   forcing carried-item selection back across the wire after a reconnect.
 2. Split or rename scheduler-facing modules only where these correctness slices
    expose a real boundary. Likely candidates are `player_chunk_tracking.rs` and
    a future general entity/update fan-out module.

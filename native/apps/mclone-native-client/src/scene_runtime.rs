@@ -361,15 +361,54 @@ impl WindowSceneRuntime {
     }
 
     fn dispatch_client_command(&mut self, command: ClientCommand) -> Result<bool> {
-        if let Some(remote_session) = &mut self.remote_session {
-            let updates = remote_session.send_command(command)?;
-            let changed = !updates.is_empty();
-            self.apply_server_updates(updates);
-            return Ok(changed);
+        if self.remote_session.is_some() {
+            return self.dispatch_remote_client_command(command);
         }
 
         self.transport.send_client_command(command);
         self.flush_local_commands()
+    }
+
+    fn dispatch_remote_client_command(&mut self, command: ClientCommand) -> Result<bool> {
+        let remote_session = self
+            .remote_session
+            .as_mut()
+            .expect("remote dispatch requires a remote session");
+        match remote_session.send_command(command) {
+            Ok(updates) => {
+                let changed = !updates.is_empty();
+                self.apply_server_updates(updates);
+                Ok(changed)
+            }
+            Err(err) => self.reconnect_remote_session_and_resync(err),
+        }
+    }
+
+    fn reconnect_remote_session_and_resync(&mut self, err: anyhow::Error) -> Result<bool> {
+        let Some(view) = self.client.chunk_view().cloned() else {
+            bail!("remote server command failed before a chunk view was established: {err:#}");
+        };
+
+        log::warn!("remote server command failed; reconnecting and resyncing chunk view: {err:#}");
+        self.clear_remote_replica_for_resync();
+        let remote_session = self
+            .remote_session
+            .as_mut()
+            .expect("remote resync requires a remote session");
+        remote_session.reconnect()?;
+        let updates = remote_session
+            .send_command(ClientCommand::SetChunkView(view))
+            .context("failed to resync chunk view after reconnect")?;
+        self.apply_server_updates(updates);
+        Ok(true)
+    }
+
+    fn clear_remote_replica_for_resync(&mut self) {
+        let stale_chunks = self.client.loaded_chunk_positions().collect::<Vec<_>>();
+        self.client.clear_server_replica();
+        for pos in stale_chunks {
+            self.mark_render_chunk_dirty(pos);
+        }
     }
 
     pub(crate) fn poll(&mut self) -> Result<bool> {
@@ -2055,6 +2094,85 @@ mod tests {
             };
             let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
             assert!(runtime.set_interest_center(ChunkPos::new(1, 0)).unwrap());
+        }
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn window_runtime_reconnects_remote_session_and_resyncs_chunk_cache() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let initial_center = ChunkPos::new(0, 0);
+        let moved_center = ChunkPos::new(1, 0);
+        let server = std::thread::spawn(move || {
+            let (mut first_stream, _) = listener.accept().unwrap();
+            mclone_net::complete_server_handshake(&mut first_stream).unwrap();
+            assert_eq!(
+                mclone_net::read_client_command_frame(&mut first_stream).unwrap(),
+                ClientCommand::SetChunkView(ChunkView {
+                    center: initial_center,
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                })
+            );
+            mclone_net::write_server_update_batch(
+                &mut first_stream,
+                &[ServerUpdate::ChunkSnapshot(empty_test_snapshot(
+                    initial_center,
+                ))],
+            )
+            .unwrap();
+            assert_eq!(
+                mclone_net::read_client_command_frame(&mut first_stream).unwrap(),
+                ClientCommand::SetChunkView(ChunkView {
+                    center: moved_center,
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                })
+            );
+            drop(first_stream);
+
+            let (mut second_stream, _) = listener.accept().unwrap();
+            mclone_net::complete_server_handshake(&mut second_stream).unwrap();
+            assert_eq!(
+                mclone_net::read_client_command_frame(&mut second_stream).unwrap(),
+                ClientCommand::SetChunkView(ChunkView {
+                    center: moved_center,
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                })
+            );
+            mclone_net::write_server_update_batch(
+                &mut second_stream,
+                &[ServerUpdate::ChunkSnapshot(empty_test_snapshot(
+                    moved_center,
+                ))],
+            )
+            .unwrap();
+        });
+
+        {
+            let scene = SceneOptions {
+                render_distance: 0,
+                remote_addr: Some(addr.to_string()),
+                ..SceneOptions::default()
+            };
+            let mut runtime = WindowSceneRuntime::new(&scene).unwrap();
+            assert!(runtime.client.chunk_snapshot(initial_center).is_some());
+            runtime.dirty_render_chunks.clear();
+            runtime.dirty_render_sections.clear();
+
+            assert!(runtime.set_interest_center(moved_center).unwrap());
+
+            assert_eq!(runtime.client.loaded_chunk_count(), 1);
+            assert!(runtime.client.chunk_snapshot(initial_center).is_none());
+            assert!(runtime.client.chunk_snapshot(moved_center).is_some());
+            assert!(runtime.dirty_render_chunks.contains(&initial_center));
+            assert!(runtime.dirty_render_chunks.contains(&moved_center));
         }
         server.join().unwrap();
     }

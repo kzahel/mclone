@@ -115,8 +115,18 @@ impl ClientRuntime {
         self.chunks.values()
     }
 
+    pub fn loaded_chunk_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
+        self.chunks.keys().copied()
+    }
+
     pub fn loaded_chunk_count(&self) -> usize {
         self.chunks.len()
+    }
+
+    pub fn clear_server_replica(&mut self) {
+        self.chunks.clear();
+        self.player_position_updates.clear();
+        self.remote_players.clear();
     }
 
     pub fn remote_player(&self, id: RemotePlayerId) -> Option<&RemotePlayerUpdate> {
@@ -230,6 +240,54 @@ mod tests {
 
         assert_eq!(runtime.loaded_chunk_count(), 0);
         assert_eq!(runtime.chunk_snapshot(ChunkPos::new(0, 0)), None);
+    }
+
+    #[test]
+    fn client_runtime_clears_stale_server_replica_without_dropping_view() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let view = ChunkView {
+            center: ChunkPos::new(2, -3),
+            render_distance: 1,
+            chunk_tracking_radius: 1,
+        };
+        runtime.set_chunk_view(view.clone());
+        runtime.apply_update(ServerUpdate::ChunkSnapshot(
+            ChunkSnapshot::from_block_state_ids(
+                ChunkPos::new(2, -3),
+                ChunkStatus::Surface,
+                ChunkRevision(1),
+                0,
+                16,
+                &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+            ),
+        ));
+        runtime.apply_update(ServerUpdate::PlayerPosition(PlayerPositionUpdate {
+            position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: 10.0,
+            relative: mclone_protocol::PlayerPositionRelativeFlags::ABSOLUTE,
+            teleport_id: 7,
+            dismount_vehicle: false,
+        }));
+        runtime.apply_update(ServerUpdate::RemotePlayerAdd(RemotePlayerUpdate {
+            id: RemotePlayerId(42),
+            position: mclone_core::Vec3d::new(4.0, 64.0, 5.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+        }));
+
+        assert_eq!(
+            runtime.loaded_chunk_positions().collect::<Vec<_>>(),
+            vec![ChunkPos::new(2, -3)]
+        );
+        runtime.clear_server_replica();
+
+        assert_eq!(runtime.host(), ClientHost::RemoteDedicated);
+        assert_eq!(runtime.chunk_view(), Some(&view));
+        assert_eq!(runtime.loaded_chunk_count(), 0);
+        assert_eq!(runtime.remote_player_count(), 0);
+        assert_eq!(runtime.drain_player_position_updates().count(), 0);
     }
 
     #[test]

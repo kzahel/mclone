@@ -16,6 +16,12 @@ impl RemoteServerSession {
         Ok(Self { addr, session })
     }
 
+    pub(crate) fn reconnect(&mut self) -> Result<()> {
+        self.session = NativeClientSession::connect(self.addr.as_str())
+            .with_context(|| format!("failed to reconnect to remote server {}", self.addr))?;
+        Ok(())
+    }
+
     pub(crate) fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {
         self.session.send_command(&command).with_context(|| {
             format!(
@@ -86,6 +92,57 @@ mod tests {
             assert_eq!(
                 session.send_command(second_command).unwrap(),
                 vec![ServerUpdate::TimeUpdate { day_time: 20 }]
+            );
+        }
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn remote_server_session_reconnects_after_dropped_connection() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let first_command = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        });
+        let second_command = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(1, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        });
+        let first_server_command = first_command.clone();
+        let second_server_command = second_command.clone();
+
+        let server = std::thread::spawn(move || {
+            let (mut first_stream, _) = listener.accept().unwrap();
+            mclone_net::complete_server_handshake(&mut first_stream).unwrap();
+            assert_eq!(
+                mclone_net::read_client_command_frame(&mut first_stream).unwrap(),
+                first_server_command
+            );
+            drop(first_stream);
+
+            let (mut second_stream, _) = listener.accept().unwrap();
+            mclone_net::complete_server_handshake(&mut second_stream).unwrap();
+            assert_eq!(
+                mclone_net::read_client_command_frame(&mut second_stream).unwrap(),
+                second_server_command
+            );
+            mclone_net::write_server_update_batch(
+                &mut second_stream,
+                &[ServerUpdate::TimeUpdate { day_time: 30 }],
+            )
+            .unwrap();
+        });
+
+        {
+            let mut session = RemoteServerSession::connect(addr.to_string()).unwrap();
+            assert!(session.send_command(first_command).is_err());
+            session.reconnect().unwrap();
+            assert_eq!(
+                session.send_command(second_command).unwrap(),
+                vec![ServerUpdate::TimeUpdate { day_time: 30 }]
             );
         }
         server.join().unwrap();
