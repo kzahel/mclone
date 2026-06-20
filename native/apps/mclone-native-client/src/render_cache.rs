@@ -12,7 +12,8 @@ use mclone_mesh::{
 };
 use mclone_render::chunk::ChunkTextureAtlas;
 use mclone_render_session::{
-    RenderSectionCompileRequest, RenderSectionCompileResult, build_render_sections_from_snapshots,
+    RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompiler,
+    build_render_sections_from_snapshots,
 };
 
 const DEFAULT_REFERENCE_ASSET_VERSION: &str = "1.17.1";
@@ -119,8 +120,10 @@ impl RenderSectionCompileWorker {
             pending_jobs: 0,
         })
     }
+}
 
-    pub(crate) fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()> {
+impl RenderSectionCompiler for RenderSectionCompileWorker {
+    fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()> {
         self.sender
             .send(RenderSectionCompileCommand::Build(request))
             .context("failed to submit render section compile task")?;
@@ -128,7 +131,7 @@ impl RenderSectionCompileWorker {
         Ok(())
     }
 
-    pub(crate) fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>> {
+    fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>> {
         let mut completed = Vec::new();
         loop {
             match self.receiver.try_recv() {
@@ -144,7 +147,7 @@ impl RenderSectionCompileWorker {
         }
     }
 
-    pub(crate) fn pending_job_count(&self) -> usize {
+    fn pending_job_count(&self) -> usize {
         self.pending_jobs
     }
 }

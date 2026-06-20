@@ -27,7 +27,7 @@ use crate::render_cache::{
 };
 use mclone_render_session::{
     CachedTexturedRenderSections, RenderSectionCacheUpdate, RenderSectionCompileRequest,
-    build_client_textured_sections,
+    RenderSectionCompiler, build_client_textured_sections,
 };
 
 const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
@@ -646,32 +646,19 @@ impl WindowSceneRuntime {
                 self.inflight_render_sections.remove(key);
             }
 
-            let mut accepted_sections = BTreeSet::new();
-            let mut stale_sections = BTreeSet::new();
-            for key in &completed.target_sections {
-                let submitted_revision = completed
-                    .section_revisions
-                    .get(key)
-                    .copied()
-                    .unwrap_or_default();
-                if self.render_section_revision(*key) == submitted_revision {
-                    accepted_sections.insert(*key);
-                } else {
-                    stale_sections.insert(*key);
-                }
+            let acceptance =
+                completed.partition_by_revision(|key| self.render_section_revision(key));
+            if !acceptance.stale_sections.is_empty() {
+                update.stale_compile_section_count += acceptance.stale_section_count();
+                self.requeue_stale_render_sections(acceptance.stale_sections);
             }
-
-            if !stale_sections.is_empty() {
-                update.stale_compile_section_count += stale_sections.len();
-                self.requeue_stale_render_sections(stale_sections);
-            }
-            if accepted_sections.is_empty() {
+            if acceptance.accepted_sections.is_empty() {
                 continue;
             }
 
             let build_report = completed.result.map_err(anyhow::Error::msg)?;
             let completed_update = self.render_sections.apply_build_report(
-                &accepted_sections,
+                &acceptance.accepted_sections,
                 build_report,
                 &BTreeSet::new(),
                 &BTreeSet::new(),

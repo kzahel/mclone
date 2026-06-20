@@ -190,6 +190,53 @@ pub struct RenderSectionCompileResult {
     pub result: std::result::Result<TexturedRenderSectionBuildReport, String>,
 }
 
+pub trait RenderSectionCompiler {
+    fn submit(&mut self, request: RenderSectionCompileRequest) -> Result<()>;
+
+    fn try_recv_completed(&mut self) -> Result<Vec<RenderSectionCompileResult>>;
+
+    fn pending_job_count(&self) -> usize;
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RenderSectionCompileAcceptance {
+    pub accepted_sections: BTreeSet<RenderSectionKey>,
+    pub stale_sections: BTreeSet<RenderSectionKey>,
+}
+
+impl RenderSectionCompileAcceptance {
+    pub fn accepted_section_count(&self) -> usize {
+        self.accepted_sections.len()
+    }
+
+    pub fn stale_section_count(&self) -> usize {
+        self.stale_sections.len()
+    }
+}
+
+impl RenderSectionCompileResult {
+    pub fn partition_by_revision(
+        &self,
+        mut current_revision: impl FnMut(RenderSectionKey) -> u64,
+    ) -> RenderSectionCompileAcceptance {
+        let mut accepted_sections = BTreeSet::new();
+        let mut stale_sections = BTreeSet::new();
+        for key in &self.target_sections {
+            let submitted_revision = self.section_revisions.get(key).copied().unwrap_or_default();
+            if current_revision(*key) == submitted_revision {
+                accepted_sections.insert(*key);
+            } else {
+                stale_sections.insert(*key);
+            }
+        }
+
+        RenderSectionCompileAcceptance {
+            accepted_sections,
+            stale_sections,
+        }
+    }
+}
+
 impl CachedTexturedRenderSections {
     pub fn is_empty(&self) -> bool {
         self.sections.is_empty()
@@ -288,12 +335,12 @@ impl CachedTexturedRenderSections {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use mclone_core::{
         AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus,
     };
-    use mclone_mesh::{TexturedVisibleChunkMesh, VisibilitySet};
+    use mclone_mesh::{TexturedRenderSectionBuildReport, TexturedVisibleChunkMesh, VisibilitySet};
 
     use super::*;
 
@@ -347,5 +394,35 @@ mod tests {
         assert_eq!(removal.removed_section_count(), 1);
         assert!(!cache.contains_section(key));
         assert!(!cache.contains_chunk(ChunkPos::new(2, -1)));
+    }
+
+    #[test]
+    fn compile_result_partitions_accepted_and_stale_revisions() {
+        let unchanged = RenderSectionKey::new(0, 4, 0);
+        let changed = RenderSectionKey::new(0, 5, 0);
+        let default_revision = RenderSectionKey::new(0, 6, 0);
+        let result = RenderSectionCompileResult {
+            target_sections: BTreeSet::from([unchanged, changed, default_revision]),
+            section_revisions: BTreeMap::from([(unchanged, 7), (changed, 3)]),
+            result: Ok(TexturedRenderSectionBuildReport::default()),
+        };
+
+        let acceptance = result.partition_by_revision(|key| {
+            if key == changed {
+                4
+            } else if key == unchanged {
+                7
+            } else {
+                0
+            }
+        });
+
+        assert_eq!(acceptance.accepted_section_count(), 2);
+        assert_eq!(acceptance.stale_section_count(), 1);
+        assert_eq!(
+            acceptance.accepted_sections,
+            BTreeSet::from([unchanged, default_revision])
+        );
+        assert_eq!(acceptance.stale_sections, BTreeSet::from([changed]));
     }
 }

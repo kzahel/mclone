@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active web threading gate landed.
+Status: active compiler interface landed.
 
 ## Purpose
 
@@ -291,6 +291,17 @@ Acceptance:
 - stale-result and revision checks stay shared
 - tests cover both inline and worker-shaped paths where practical
 
+Compiler interface result:
+
+- Added `RenderSectionCompiler` to `mclone-render-session` with the shared
+  submit/drain/pending job lifecycle.
+- Moved render compile accepted/stale revision partitioning into
+  `RenderSectionCompileResult::partition_by_revision(...)`.
+- Updated the desktop `RenderSectionCompileWorker` to implement the shared
+  trait while keeping the existing `std::thread` / `mpsc` execution.
+- Updated `WindowSceneRuntime` to use the shared revision partitioning for
+  stale compile results instead of carrying desktop-only logic.
+
 ### 3. Extract Platform-Neutral Runtime Session
 
 Peel `WindowSceneRuntime` into:
@@ -405,20 +416,17 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The first extraction is landed. The next slice should split compile policy from
-cache policy:
+The next slice should make the browser render-section compiler a real worker
+consumer of the shared compile interface:
 
-1. Move the desktop `RenderSectionCompileWorker` shape behind a shared compiler
-   policy interface.
-2. Keep the current native `std::thread` worker as the desktop implementation.
-3. Build on the now-required browser threading gate: use the same submit/drain
-   compiler interface for the browser worker path instead of adding a
-   web-only synchronous cache policy.
-4. Add an inline synchronous WASM implementation only as a fallback/smoke path
-   behind the same interface.
-5. Make all implementations return the same `RenderSectionCompileResult`
-   shape and use the same stale-result/revision handling.
-6. Validate desktop tests plus `native:web:chunk-smoke`.
-
-This removes the next duplication point without requiring the full app-loop
-refactor in the same patch.
+1. Define the browser worker payload shape for `RenderSectionCompileRequest` and
+   `RenderSectionCompileResult`, including typed-array transfer boundaries for
+   section meshes and visibility facts.
+2. Add a browser compiler adapter with the same submit/drain/pending lifecycle
+   as `RenderSectionCompiler`; do not add a separate WASM-only cache policy.
+3. Keep GPU upload and presentation on the main browser thread.
+4. Keep an inline compiler only as an explicit fallback/smoke path behind the
+   same adapter, not as the default.
+5. Validate `cargo check --manifest-path native/Cargo.toml -p mclone-web-client
+   --target wasm32-unknown-unknown`, `native:web:thread-smoke`, and
+   `native:web:chunk-smoke`.
