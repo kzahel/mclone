@@ -8,7 +8,9 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use mclone_net::{try_read_client_command_frame, write_server_update_batch};
+use mclone_net::{
+    complete_server_handshake, try_read_client_command_frame, write_server_update_batch,
+};
 use mclone_protocol::{ClientCommand, ServerUpdate};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -160,6 +162,15 @@ fn connection_loop(
     if let Err(err) = stream.set_nodelay(true) {
         log::warn!("failed to set TCP_NODELAY for {id} {peer_addr}: {err}");
     }
+    if let Err(err) = complete_server_handshake(&mut stream) {
+        let _ = events.send(DedicatedNetworkEvent::Disconnected {
+            id,
+            peer_addr,
+            command_count: 0,
+            reason: Some(format!("failed dedicated protocol handshake: {err}")),
+        });
+        return;
+    }
     if events
         .send(DedicatedNetworkEvent::Connected { id, peer_addr })
         .is_err()
@@ -223,8 +234,10 @@ fn connection_loop(
 mod tests {
     use super::*;
     use mclone_core::ChunkPos;
-    use mclone_net::NativeClientSession;
-    use mclone_protocol::ChunkView;
+    use mclone_net::{
+        NativeClientSession, NativeTransportError, complete_client_handshake_with_version,
+    };
+    use mclone_protocol::{ChunkView, PROTOCOL_VERSION};
 
     #[test]
     fn dedicated_network_accepts_many_connections() {
@@ -281,5 +294,43 @@ mod tests {
                 .iter()
                 .all(|(_, command)| matches!(command, ClientCommand::SetChunkView(_)))
         );
+    }
+
+    #[test]
+    fn dedicated_network_rejects_protocol_mismatch_before_connecting_player() {
+        let _guard = crate::DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let network = DedicatedNetwork::start(listener).unwrap();
+        let mismatched_version = PROTOCOL_VERSION + 1;
+
+        let mut stream = TcpStream::connect(addr).unwrap();
+        let err =
+            complete_client_handshake_with_version(&mut stream, mismatched_version).unwrap_err();
+        assert!(matches!(
+            err,
+            NativeTransportError::ProtocolVersionMismatch {
+                expected: PROTOCOL_VERSION,
+                received
+            } if received == mismatched_version
+        ));
+
+        let event = network
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .expect("expected protocol mismatch disconnect event");
+        let DedicatedNetworkEvent::Disconnected {
+            command_count,
+            reason,
+            ..
+        } = event
+        else {
+            panic!("expected protocol mismatch disconnect event, got {event:?}");
+        };
+        assert_eq!(command_count, 0);
+        let reason = reason.expect("expected protocol mismatch reason");
+        assert!(reason.contains("protocol version mismatch"));
+        assert!(reason.contains(&format!("expected {PROTOCOL_VERSION}")));
+        assert!(reason.contains(&format!("received {mismatched_version}")));
     }
 }

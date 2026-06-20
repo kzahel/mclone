@@ -51,6 +51,7 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            mclone_net::complete_server_handshake(&mut stream).unwrap();
             assert_eq!(
                 mclone_net::read_client_command_frame(&mut stream).unwrap(),
                 first_server_command

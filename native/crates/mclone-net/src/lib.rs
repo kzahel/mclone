@@ -6,7 +6,8 @@ use mclone_protocol::{ClientCommand, ServerUpdate};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_tcp::{
-    NativeClientSession, NativeTransportError, NativeTransportResult, read_client_command_frame,
+    NativeClientSession, NativeTransportError, NativeTransportResult, complete_client_handshake,
+    complete_client_handshake_with_version, complete_server_handshake, read_client_command_frame,
     read_client_command_frames, read_server_update_batch, request_server_updates,
     try_read_client_command_frame, write_client_command_frame, write_server_update_batch,
 };
@@ -62,18 +63,23 @@ mod native_tcp {
     use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 
     use mclone_protocol::{
-        ClientCommand, ProtocolCodecError, ServerUpdate, decode_client_command,
+        ClientCommand, PROTOCOL_VERSION, ProtocolCodecError, ServerUpdate, decode_client_command,
         decode_server_update, encode_client_command, encode_server_update,
     };
 
     pub type NativeTransportResult<T> = Result<T, NativeTransportError>;
 
     const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+    const HANDSHAKE_MAGIC: &[u8] = b"MCLONE_NATIVE_TCP";
+    const SERVER_HANDSHAKE_ACCEPT: u8 = 1;
+    const SERVER_HANDSHAKE_REJECT: u8 = 2;
 
     #[derive(Debug)]
     pub enum NativeTransportError {
         Io(std::io::Error),
         Protocol(ProtocolCodecError),
+        InvalidHandshake(&'static str),
+        ProtocolVersionMismatch { expected: u32, received: u32 },
         FrameTooLarge { field: &'static str, len: usize },
     }
 
@@ -82,6 +88,13 @@ mod native_tcp {
             match self {
                 Self::Io(err) => write!(f, "native transport I/O failed: {err}"),
                 Self::Protocol(err) => write!(f, "native transport protocol failed: {err}"),
+                Self::InvalidHandshake(message) => {
+                    write!(f, "native transport handshake failed: {message}")
+                }
+                Self::ProtocolVersionMismatch { expected, received } => write!(
+                    f,
+                    "native transport protocol version mismatch: expected {expected}, received {received}"
+                ),
                 Self::FrameTooLarge { field, len } => {
                     write!(
                         f,
@@ -97,6 +110,7 @@ mod native_tcp {
             match self {
                 Self::Io(err) => Some(err),
                 Self::Protocol(err) => Some(err),
+                Self::InvalidHandshake(_) | Self::ProtocolVersionMismatch { .. } => None,
                 Self::FrameTooLarge { .. } => None,
             }
         }
@@ -121,9 +135,9 @@ mod native_tcp {
 
     impl NativeClientSession {
         pub fn connect(addr: impl ToSocketAddrs) -> NativeTransportResult<Self> {
-            Ok(Self {
-                stream: TcpStream::connect(addr)?,
-            })
+            let mut stream = TcpStream::connect(addr)?;
+            complete_client_handshake(&mut stream)?;
+            Ok(Self { stream })
         }
 
         pub fn send_command(
@@ -134,6 +148,32 @@ mod native_tcp {
             self.stream.flush()?;
             read_server_update_batch(&mut self.stream)
         }
+    }
+
+    pub fn complete_client_handshake<T: Read + Write>(stream: &mut T) -> NativeTransportResult<()> {
+        complete_client_handshake_with_version(stream, PROTOCOL_VERSION)
+    }
+
+    pub fn complete_client_handshake_with_version<T: Read + Write>(
+        stream: &mut T,
+        protocol_version: u32,
+    ) -> NativeTransportResult<()> {
+        write_client_handshake(stream, protocol_version)?;
+        stream.flush()?;
+        read_server_handshake(stream, protocol_version)
+    }
+
+    pub fn complete_server_handshake<T: Read + Write>(stream: &mut T) -> NativeTransportResult<()> {
+        let received = read_client_handshake(stream)?;
+        if received != PROTOCOL_VERSION {
+            write_server_handshake_reject(stream, PROTOCOL_VERSION, received)?;
+            return Err(NativeTransportError::ProtocolVersionMismatch {
+                expected: PROTOCOL_VERSION,
+                received,
+            });
+        }
+        write_server_handshake_accept(stream, PROTOCOL_VERSION)?;
+        Ok(())
     }
 
     pub fn write_client_command_frame(
@@ -206,6 +246,123 @@ mod native_tcp {
         let updates = session.send_command(command)?;
         session.stream.shutdown(Shutdown::Write)?;
         Ok(updates)
+    }
+
+    fn write_client_handshake(
+        writer: &mut impl Write,
+        protocol_version: u32,
+    ) -> NativeTransportResult<()> {
+        let mut payload = Vec::with_capacity(HANDSHAKE_MAGIC.len() + 4);
+        payload.extend_from_slice(HANDSHAKE_MAGIC);
+        payload.extend_from_slice(&protocol_version.to_le_bytes());
+        write_frame(writer, "client handshake", &payload)
+    }
+
+    fn read_client_handshake(reader: &mut impl Read) -> NativeTransportResult<u32> {
+        let payload = read_frame(reader, "client handshake")?;
+        if payload.len() != HANDSHAKE_MAGIC.len() + 4 {
+            return Err(NativeTransportError::InvalidHandshake(
+                "client handshake had invalid length",
+            ));
+        }
+        if !payload.starts_with(HANDSHAKE_MAGIC) {
+            return Err(NativeTransportError::InvalidHandshake(
+                "client handshake had invalid magic",
+            ));
+        }
+
+        let version_offset = HANDSHAKE_MAGIC.len();
+        Ok(u32::from_le_bytes(
+            payload[version_offset..version_offset + 4]
+                .try_into()
+                .expect("handshake version length checked"),
+        ))
+    }
+
+    fn write_server_handshake_accept(
+        writer: &mut impl Write,
+        protocol_version: u32,
+    ) -> NativeTransportResult<()> {
+        write_server_handshake(
+            writer,
+            SERVER_HANDSHAKE_ACCEPT,
+            protocol_version,
+            protocol_version,
+        )
+    }
+
+    fn write_server_handshake_reject(
+        writer: &mut impl Write,
+        expected: u32,
+        received: u32,
+    ) -> NativeTransportResult<()> {
+        write_server_handshake(writer, SERVER_HANDSHAKE_REJECT, expected, received)
+    }
+
+    fn write_server_handshake(
+        writer: &mut impl Write,
+        status: u8,
+        expected: u32,
+        received: u32,
+    ) -> NativeTransportResult<()> {
+        let mut payload = Vec::with_capacity(HANDSHAKE_MAGIC.len() + 9);
+        payload.extend_from_slice(HANDSHAKE_MAGIC);
+        payload.push(status);
+        payload.extend_from_slice(&expected.to_le_bytes());
+        payload.extend_from_slice(&received.to_le_bytes());
+        write_frame(writer, "server handshake", &payload)?;
+        writer.flush()?;
+        Ok(())
+    }
+
+    fn read_server_handshake(
+        reader: &mut impl Read,
+        client_version: u32,
+    ) -> NativeTransportResult<()> {
+        let payload = read_frame(reader, "server handshake")?;
+        if payload.len() != HANDSHAKE_MAGIC.len() + 9 {
+            return Err(NativeTransportError::InvalidHandshake(
+                "server handshake had invalid length",
+            ));
+        }
+        if !payload.starts_with(HANDSHAKE_MAGIC) {
+            return Err(NativeTransportError::InvalidHandshake(
+                "server handshake had invalid magic",
+            ));
+        }
+
+        let status_offset = HANDSHAKE_MAGIC.len();
+        let expected_offset = status_offset + 1;
+        let received_offset = expected_offset + 4;
+        let status = payload[status_offset];
+        let expected = u32::from_le_bytes(
+            payload[expected_offset..expected_offset + 4]
+                .try_into()
+                .expect("server handshake expected version length checked"),
+        );
+        let received = u32::from_le_bytes(
+            payload[received_offset..received_offset + 4]
+                .try_into()
+                .expect("server handshake received version length checked"),
+        );
+
+        match status {
+            SERVER_HANDSHAKE_ACCEPT => {
+                if expected != client_version || received != client_version {
+                    return Err(NativeTransportError::ProtocolVersionMismatch {
+                        expected,
+                        received: client_version,
+                    });
+                }
+                Ok(())
+            }
+            SERVER_HANDSHAKE_REJECT => {
+                Err(NativeTransportError::ProtocolVersionMismatch { expected, received })
+            }
+            _ => Err(NativeTransportError::InvalidHandshake(
+                "server handshake had unknown status",
+            )),
+        }
     }
 
     fn write_frame(
@@ -284,7 +441,7 @@ mod native_tcp {
 mod tests {
     use super::*;
     use mclone_core::ChunkPos;
-    use mclone_protocol::ChunkView;
+    use mclone_protocol::{ChunkView, PROTOCOL_VERSION};
 
     #[test]
     fn distinguishes_local_native_and_web_transports() {
@@ -419,6 +576,7 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            complete_server_handshake(&mut stream).unwrap();
             assert_eq!(
                 read_client_command_frame(&mut stream).unwrap(),
                 server_command
@@ -456,6 +614,7 @@ mod tests {
 
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            complete_server_handshake(&mut stream).unwrap();
             assert_eq!(
                 read_client_command_frame(&mut stream).unwrap(),
                 first_server_command
@@ -482,5 +641,39 @@ mod tests {
             );
         }
         server.join().unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_handshake_rejects_protocol_version_mismatch() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mismatched_version = PROTOCOL_VERSION + 1;
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let err = complete_server_handshake(&mut stream).unwrap_err();
+            assert!(matches!(
+                err,
+                NativeTransportError::ProtocolVersionMismatch {
+                    expected: PROTOCOL_VERSION,
+                    received
+                } if received == mismatched_version
+            ));
+        });
+
+        let mut stream = std::net::TcpStream::connect(addr).unwrap();
+        let err =
+            complete_client_handshake_with_version(&mut stream, mismatched_version).unwrap_err();
+        server.join().unwrap();
+
+        assert!(matches!(
+            err,
+            NativeTransportError::ProtocolVersionMismatch {
+                expected: PROTOCOL_VERSION,
+                received
+            } if received == mismatched_version
+        ));
+        assert!(err.to_string().contains("protocol version mismatch"));
     }
 }

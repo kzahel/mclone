@@ -220,13 +220,19 @@ Landed:
    - movement publishes position/rotation/on-ground updates to observers
    - leaving an observer's tracked chunks or disconnecting removes the remote
      player from that observer
+7. Dedicated TCP sessions now gate gameplay frames behind a native protocol
+   handshake:
+   - clients and servers exchange `PROTOCOL_VERSION` before command/update
+     frames
+   - mismatched clients receive a protocol-version rejection instead of sharing
+     the gameplay stream
+   - dedicated connection events report handshake failures as zero-command
+     disconnect reasons before a server player is allocated
 
 Next correctness steps, before more optimization work:
 
-1. Harden the dedicated protocol/connection edge:
-   - version mismatch behavior
-   - clearer disconnect/error reporting
-   - reconnect/resync behavior when the client cache is stale
+1. Finish the dedicated protocol/connection edge with reconnect/resync behavior
+   when the client cache is stale.
 2. Split or rename scheduler-facing modules only where these correctness slices
    expose a real boundary. Likely candidates are `player_chunk_tracking.rs` and
    a future general entity/update fan-out module.

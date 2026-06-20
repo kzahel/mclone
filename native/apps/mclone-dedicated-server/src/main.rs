@@ -190,7 +190,7 @@ fn run_server_loop(listener: TcpListener, seed: i64, mode: ServerRunMode) -> Res
                 if command_count > 0 {
                     completed_connections += 1;
                 }
-                if let Some(reason) = reason {
+                if let Some(reason) = reason.as_deref() {
                     log::warn!(
                         "dedicated client {id} {peer_addr} disconnected after {command_count} commands: {reason}"
                     );
@@ -203,6 +203,11 @@ fn run_server_loop(listener: TcpListener, seed: i64, mode: ServerRunMode) -> Res
                     ServerRunMode::Forever => {}
                     ServerRunMode::ServeOnce => {
                         if command_count == 0 {
+                            if let Some(reason) = reason.as_deref() {
+                                bail!(
+                                    "connection {id} {peer_addr} closed without client command: {reason}"
+                                );
+                            }
                             bail!("connection {id} {peer_addr} closed without client command");
                         }
                         return Ok(());

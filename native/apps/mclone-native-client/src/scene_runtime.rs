@@ -1978,6 +1978,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            mclone_net::complete_server_handshake(&mut stream).unwrap();
             let command = mclone_net::read_client_command_frame(&mut stream).unwrap();
             let mut server = IntegratedServer::new(DEFAULT_SEED);
             let mut updates = server.try_handle_command(command).unwrap();
@@ -2012,6 +2013,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            mclone_net::complete_server_handshake(&mut stream).unwrap();
             assert_eq!(
                 mclone_net::read_client_command_frame(&mut stream).unwrap(),
                 ClientCommand::SetChunkView(ChunkView {
