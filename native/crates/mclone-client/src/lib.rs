@@ -9,7 +9,10 @@ mod interaction;
 mod inventory;
 mod player;
 
-use mclone_core::{BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
+use mclone_core::{
+    BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, block_to_section_coord,
+    chunk_section_index, local_block_coord, local_section_block_coord,
+};
 use mclone_protocol::{
     ChunkView, ClientCommand, EntityId, EntitySnapshot, EntityUpdate, PlayerPositionUpdate,
     RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerUpdate,
@@ -132,6 +135,13 @@ impl ClientRuntime {
         self.chunks.values()
     }
 
+    pub fn packed_light_at_world_or_fullbright(&self, pos: BlockPos) -> u32 {
+        let Some(snapshot) = self.chunks.get(&pos.chunk_pos()) else {
+            return mclone_light::FULL_BRIGHT;
+        };
+        packed_light_from_snapshot_or_fullbright(snapshot, pos)
+    }
+
     pub fn loaded_chunk_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
         self.chunks.keys().copied()
     }
@@ -248,12 +258,76 @@ impl ClientRuntime {
     }
 }
 
+fn packed_light_from_snapshot_or_fullbright(snapshot: &ChunkSnapshot, pos: BlockPos) -> u32 {
+    if pos.y < snapshot.min_y || pos.y >= snapshot.min_y + snapshot.height {
+        return mclone_light::FULL_BRIGHT;
+    }
+    if snapshot.light_sections.is_empty() {
+        return mclone_light::FULL_BRIGHT;
+    }
+
+    let local_x = local_block_coord(pos.x);
+    let local_y = local_section_block_coord(pos.y);
+    let local_z = local_block_coord(pos.z);
+    let index = chunk_section_index(local_x, local_y, local_z);
+    let section_y = block_to_section_coord(pos.y);
+    mclone_light::pack_light(
+        block_light_at(snapshot, section_y, index),
+        sky_light_at(snapshot, section_y, index),
+    )
+}
+
+fn block_light_at(snapshot: &ChunkSnapshot, section_y: i32, index: usize) -> u8 {
+    snapshot
+        .light_sections
+        .iter()
+        .find(|section| section.section_y == section_y)
+        .and_then(|section| section.block.as_deref())
+        .map_or(0, |layer| data_layer_value(layer, index))
+}
+
+fn sky_light_at(snapshot: &ChunkSnapshot, section_y: i32, index: usize) -> u8 {
+    let mut next_sky_layer = None;
+    for section in &snapshot.light_sections {
+        if section.section_y < section_y {
+            continue;
+        }
+        let Some(layer) = section.sky.as_deref() else {
+            continue;
+        };
+        if section.section_y == section_y {
+            return data_layer_value(layer, index);
+        }
+        if next_sky_layer.is_none_or(|(next_section_y, _)| section.section_y < next_section_y) {
+            next_sky_layer = Some((section.section_y, layer));
+        }
+    }
+
+    if snapshot
+        .light_sections
+        .iter()
+        .any(|section| section.sky.is_some())
+    {
+        next_sky_layer
+            .map(|(_, layer)| data_layer_value(layer, index))
+            .unwrap_or(15)
+    } else {
+        0
+    }
+}
+
+fn data_layer_value(layer: &[u8], index: usize) -> u8 {
+    let byte = layer[index >> 1];
+    let shift = 4 * (index & 1);
+    (byte >> shift) & 15
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use mclone_core::{
         AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus,
-        chunk_section_index,
+        LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, chunk_section_index,
     };
 
     #[test]
@@ -300,6 +374,59 @@ mod tests {
 
         assert_eq!(runtime.loaded_chunk_count(), 0);
         assert_eq!(runtime.chunk_snapshot(ChunkPos::new(0, 0)), None);
+    }
+
+    #[test]
+    fn client_runtime_samples_packed_light_from_loaded_chunk() {
+        let mut runtime = ClientRuntime::local_integrated();
+        let local_index = chunk_section_index(2, 4, 3);
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Light,
+            ChunkRevision(1),
+            0,
+            16,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        )
+        .with_light_sections(
+            true,
+            vec![PackedLightSection::new(
+                0,
+                Some(light_layer_with_value(local_index, 12)),
+                Some(light_layer_with_value(local_index, 5)),
+            )],
+        );
+
+        runtime.apply_update(ServerUpdate::ChunkSnapshot(snapshot));
+
+        assert_eq!(
+            runtime.packed_light_at_world_or_fullbright(BlockPos::new(2, 4, 3)),
+            mclone_light::pack_light(5, 12)
+        );
+    }
+
+    #[test]
+    fn client_runtime_packed_light_falls_back_to_fullbright_without_light_payload() {
+        let mut runtime = ClientRuntime::local_integrated();
+        runtime.apply_update(ServerUpdate::ChunkSnapshot(
+            ChunkSnapshot::from_block_state_ids(
+                ChunkPos::new(0, 0),
+                ChunkStatus::Surface,
+                ChunkRevision(1),
+                0,
+                16,
+                &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+            ),
+        ));
+
+        assert_eq!(
+            runtime.packed_light_at_world_or_fullbright(BlockPos::new(2, 4, 3)),
+            mclone_light::FULL_BRIGHT
+        );
+        assert_eq!(
+            runtime.packed_light_at_world_or_fullbright(BlockPos::new(32, 4, 3)),
+            mclone_light::FULL_BRIGHT
+        );
     }
 
     #[test]
@@ -594,5 +721,13 @@ mod tests {
             }],
         ));
         assert_eq!(runtime.loaded_chunk_count(), 0);
+    }
+
+    fn light_layer_with_value(index: usize, value: u8) -> Vec<u8> {
+        let mut layer = vec![0; LIGHT_DATA_LAYER_BYTE_COUNT];
+        let byte_index = index >> 1;
+        let shift = 4 * (index & 1);
+        layer[byte_index] |= (value & 15) << shift;
+        layer
     }
 }

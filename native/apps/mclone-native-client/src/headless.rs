@@ -120,7 +120,8 @@ pub(crate) fn run_headless_screenshot(
     let runtime_stats = runtime.stats();
     let actor_interpolation =
         ActorInterpolationState::from_authoritative(runtime.client.actor_presentations());
-    let actor_instances = actor_instances_from_presentations(&actor_interpolation.presentations());
+    let actor_instances =
+        actor_instances_from_presentations(&actor_interpolation.presentations(), &runtime.client);
     let initial_upload = TexturedSectionUploadReport {
         uploaded_section_count: section_update.rebuilt_section_count(),
         removed_section_count: section_update.removed_section_count(),

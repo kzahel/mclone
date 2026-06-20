@@ -1017,6 +1017,7 @@ name = "mclone-client"
 version = "0.0.0"
 dependencies = [
  "mclone-core",
+ "mclone-light",
  "mclone-protocol",
 ]
 

@@ -2,13 +2,17 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
-use crate::chunk::{ChunkRenderView, DEPTH_FORMAT};
+use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions};
+use crate::light_texture::FULL_BRIGHT;
 use crate::target::RenderFrameTarget;
 
-const ACTOR_VERTEX_FLOAT_COUNT: usize = 9;
-const ACTOR_VERTEX_BYTE_LEN: usize = ACTOR_VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>();
+const ACTOR_VERTEX_BYTE_LEN: usize = 3 * std::mem::size_of::<f32>()
+    + 2 * std::mem::size_of::<f32>()
+    + 4 * std::mem::size_of::<f32>()
+    + std::mem::size_of::<u32>();
 const ACTOR_VERTEX_BYTE_SIZE: wgpu::BufferAddress = ACTOR_VERTEX_BYTE_LEN as wgpu::BufferAddress;
-const UNIFORM_BYTE_LEN: usize = 16 * std::mem::size_of::<f32>();
+const UNIFORM_FLOAT_COUNT: usize = 20;
+const UNIFORM_BYTE_LEN: usize = UNIFORM_FLOAT_COUNT * std::mem::size_of::<f32>();
 const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferAddress;
 const MODEL_PIXEL_SCALE: f32 = 1.0 / 16.0;
 const MODEL_FEET_Y_PIXELS: f32 = 24.0;
@@ -23,6 +27,7 @@ pub struct ActorInstance {
     pub height: f32,
     pub body_color: [f32; 4],
     pub accent_color: [f32; 4],
+    pub packed_light: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,6 +47,7 @@ impl ActorInstance {
             height: 1.8,
             body_color: [0.10, 0.58, 0.68, 1.0],
             accent_color: [0.95, 0.80, 0.24, 1.0],
+            packed_light: FULL_BRIGHT,
         }
     }
 
@@ -59,6 +65,7 @@ impl ActorInstance {
             height,
             body_color: [0.33, 0.19, 0.10, 1.0],
             accent_color: [0.92, 0.86, 0.74, 1.0],
+            packed_light: FULL_BRIGHT,
         }
     }
 
@@ -71,6 +78,7 @@ impl ActorInstance {
             height,
             body_color: [0.28, 0.17, 0.10, 1.0],
             accent_color: [0.90, 0.86, 0.72, 1.0],
+            packed_light: FULL_BRIGHT,
         }
     }
 
@@ -88,7 +96,13 @@ impl ActorInstance {
             height,
             body_color: [0.92, 0.90, 0.82, 1.0],
             accent_color: [0.92, 0.18, 0.12, 1.0],
+            packed_light: FULL_BRIGHT,
         }
+    }
+
+    pub fn with_packed_light(mut self, packed_light: u32) -> Self {
+        self.packed_light = packed_light;
+        self
     }
 }
 
@@ -154,6 +168,7 @@ impl ActorDrawResources {
         encoder: &mut wgpu::CommandEncoder,
         target: RenderFrameTarget<'_>,
         render_view: ChunkRenderView,
+        render_options: TexturedSectionRenderOptions,
         actors: &[ActorInstance],
     ) -> Result<ActorRenderStats> {
         if actors.is_empty() {
@@ -173,7 +188,7 @@ impl ActorDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(render_view.uniform_matrix()),
+            &uniform_bytes(render_view.uniform_matrix(), render_options),
         );
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mclone_actor_vertices"),
@@ -314,6 +329,11 @@ impl ActorRenderer {
                             offset: 20,
                             shader_location: 2,
                             format: wgpu::VertexFormat::Float32x4,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: 36,
+                            shader_location: 3,
+                            format: wgpu::VertexFormat::Uint32,
                         },
                     ],
                 }],
@@ -459,6 +479,7 @@ struct ActorVertex {
     position: [f32; 3],
     uv: [f32; 2],
     color: [f32; 4],
+    packed_light: u32,
 }
 
 fn actor_mesh(
@@ -748,6 +769,7 @@ fn append_model_cuboid(
         mesh,
         face_colors,
         cow_cuboid_face_uvs(*cuboid, texture_region, atlas_size),
+        actor.packed_light,
         |corner_index| {
             let model_position = transform_model_part_point(corners[corner_index], part);
             actor_world_position(actor, model_pixels_to_actor_local(model_position))
@@ -759,6 +781,7 @@ fn append_transformed_box(
     mesh: &mut ActorMesh,
     face_colors: [[f32; 4]; 6],
     face_uvs: [[[f32; 2]; 4]; 6],
+    packed_light: u32,
     mut world_corner: impl FnMut(usize) -> Vec3,
 ) {
     let faces = [
@@ -777,6 +800,7 @@ fn append_transformed_box(
                 position: world_corner(corner_index).to_array(),
                 uv: face_uvs[face_index][vertex_index],
                 color: face_colors[face_index],
+                packed_light,
             });
         }
         mesh.indices
@@ -962,9 +986,13 @@ fn append_box(
         Vec3::new(max.x, max.y, max.z),
         Vec3::new(min.x, max.y, max.z),
     ];
-    append_transformed_box(mesh, face_colors, [[uv; 4]; 6], |corner_index| {
-        actor_world_position(actor, corners[corner_index])
-    });
+    append_transformed_box(
+        mesh,
+        face_colors,
+        [[uv; 4]; 6],
+        actor.packed_light,
+        |corner_index| actor_world_position(actor, corners[corner_index]),
+    );
 }
 
 fn actor_world_position(actor: ActorInstance, local: Vec3) -> Vec3 {
@@ -997,6 +1025,7 @@ fn actor_vertex_bytes(vertices: &[ActorVertex]) -> Vec<u8> {
         {
             bytes.extend_from_slice(&value.to_ne_bytes());
         }
+        bytes.extend_from_slice(&vertex.packed_light.to_ne_bytes());
     }
     bytes
 }
@@ -1009,10 +1038,26 @@ fn index_bytes(indices: &[u32]) -> Vec<u8> {
     bytes
 }
 
-fn uniform_bytes(view_projection: [[f32; 4]; 4]) -> [u8; UNIFORM_BYTE_LEN] {
+fn uniform_bytes(
+    view_projection: [[f32; 4]; 4],
+    render_options: TexturedSectionRenderOptions,
+) -> [u8; UNIFORM_BYTE_LEN] {
     let mut bytes = [0_u8; UNIFORM_BYTE_LEN];
     let mut offset = 0;
     for value in view_projection.into_iter().flatten() {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+        offset += 4;
+    }
+    for value in [
+        if render_options.force_fullbright {
+            1.0
+        } else {
+            0.0
+        },
+        render_options.sky_darken,
+        0.0,
+        0.0,
+    ] {
         bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
         offset += 4;
     }

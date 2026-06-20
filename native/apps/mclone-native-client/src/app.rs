@@ -4,10 +4,11 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationKind,
-    ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LocalPlayerController,
-    LocalPlayerPose, NoClipMovementStep, PlayerInputKey, WalkingMovementStep,
+    ClientInteractionController, ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    LocalPlayerController, LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
+    WalkingMovementStep,
 };
-use mclone_core::Vec3d;
+use mclone_core::{BlockPos, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_protocol::EntityKind;
 use mclone_render::chunk::{
@@ -207,6 +208,7 @@ pub(crate) fn render_full_frame(
             frame.encoder,
             frame.target.with_depth(&depth.view),
             render_view,
+            render_options,
             actor_instances,
         )?;
     } else {
@@ -722,7 +724,10 @@ impl ChunkApp {
             (self.render_stats.last_frame_ms * 0.001).min(0.1),
             ActorInterpolationConfig::default(),
         );
-        actor_instances_from_presentations(&self.actor_interpolation.presentations())
+        actor_instances_from_presentations(
+            &self.actor_interpolation.presentations(),
+            &self.runtime.client,
+        )
     }
 
     fn sync_server_player_pose(&mut self) -> Result<bool> {
@@ -825,30 +830,54 @@ fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
 
 pub(crate) fn actor_instances_from_presentations(
     presentations: &[ActorPresentation],
+    client: &ClientRuntime,
 ) -> Vec<ActorInstance> {
     presentations
         .iter()
-        .map(|actor| match actor.kind {
-            ActorPresentationKind::RemotePlayer => ActorInstance::remote_player(
-                glam_vec3_from_vec3d(actor.feet_position),
-                actor.y_rot_degrees,
-            ),
-            ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_model(
-                glam_vec3_from_vec3d(actor.feet_position),
-                actor.y_rot_degrees,
-                actor.width,
-                actor.height,
-            ),
-            ActorPresentationKind::Entity(EntityKind::Chicken) => {
-                ActorInstance::chicken_placeholder(
+        .map(|actor| {
+            let packed_light =
+                client.packed_light_at_world_or_fullbright(actor_light_probe_block_pos(actor));
+            match actor.kind {
+                ActorPresentationKind::RemotePlayer => ActorInstance::remote_player(
+                    glam_vec3_from_vec3d(actor.feet_position),
+                    actor.y_rot_degrees,
+                )
+                .with_packed_light(packed_light),
+                ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_model(
                     glam_vec3_from_vec3d(actor.feet_position),
                     actor.y_rot_degrees,
                     actor.width,
                     actor.height,
                 )
+                .with_packed_light(packed_light),
+                ActorPresentationKind::Entity(EntityKind::Chicken) => {
+                    ActorInstance::chicken_placeholder(
+                        glam_vec3_from_vec3d(actor.feet_position),
+                        actor.y_rot_degrees,
+                        actor.width,
+                        actor.height,
+                    )
+                    .with_packed_light(packed_light)
+                }
             }
         })
         .collect()
+}
+
+fn actor_light_probe_block_pos(actor: &ActorPresentation) -> BlockPos {
+    BlockPos::containing(actor.feet_position.add(Vec3d::new(
+        0.0,
+        actor_light_probe_height(actor),
+        0.0,
+    )))
+}
+
+fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
+    match actor.kind {
+        ActorPresentationKind::RemotePlayer => LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        ActorPresentationKind::Entity(EntityKind::Cow) => 1.3,
+        ActorPresentationKind::Entity(EntityKind::Chicken) => f64::from(actor.height) * 0.92,
+    }
 }
 
 fn local_player_pose_from_spectator(spectator: &SpectatorCamera) -> LocalPlayerPose {
@@ -1441,7 +1470,10 @@ mod tests {
     fn actor_instances_follow_client_actor_presentations() {
         let integrated = mclone_client::ClientRuntime::local_integrated();
         assert!(integrated.actor_presentations().is_empty());
-        assert!(actor_instances_from_presentations(&integrated.actor_presentations()).is_empty());
+        assert!(
+            actor_instances_from_presentations(&integrated.actor_presentations(), &integrated)
+                .is_empty()
+        );
 
         let mut remote =
             mclone_client::ClientRuntime::new(mclone_client::ClientHost::RemoteDedicated);
@@ -1458,7 +1490,7 @@ mod tests {
         let mut interpolation =
             ActorInterpolationState::from_authoritative(remote.actor_presentations());
         interpolation.step(1.0, ActorInterpolationConfig::default());
-        let actors = actor_instances_from_presentations(&interpolation.presentations());
+        let actors = actor_instances_from_presentations(&interpolation.presentations(), &remote);
 
         assert_eq!(actors.len(), 1);
         assert_eq!(actors[0].feet_position, glam::Vec3::new(1.0, 64.0, 2.0));
@@ -1466,6 +1498,10 @@ mod tests {
         assert_eq!(
             actors[0].shape,
             mclone_render::entity::ActorInstanceShape::Humanoid
+        );
+        assert_eq!(
+            actors[0].packed_light,
+            mclone_render::light_texture::FULL_BRIGHT
         );
 
         let mut entity_client =
@@ -1483,8 +1519,10 @@ mod tests {
                 age_ticks: 0,
             },
         ));
-        let entity_actors =
-            actor_instances_from_presentations(&entity_client.actor_presentations());
+        let entity_actors = actor_instances_from_presentations(
+            &entity_client.actor_presentations(),
+            &entity_client,
+        );
 
         assert_eq!(entity_actors.len(), 1);
         assert_eq!(
@@ -1493,6 +1531,10 @@ mod tests {
         );
         assert_eq!(entity_actors[0].width, 0.9);
         assert_eq!(entity_actors[0].height, 1.4);
+        assert_eq!(
+            entity_actors[0].packed_light,
+            mclone_render::light_texture::FULL_BRIGHT
+        );
     }
 
     #[test]

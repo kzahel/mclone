@@ -1369,8 +1369,10 @@ pub(crate) fn run_frame_budget_probe(
                 (1.0 / probe_options.target_hz.max(1.0)) as f32,
                 ActorInterpolationConfig::default(),
             );
-            let actor_instances =
-                actor_instances_from_presentations(&state.actor_interpolation.presentations());
+            let actor_instances = actor_instances_from_presentations(
+                &state.actor_interpolation.presentations(),
+                &state.runtime.client,
+            );
             state.draw.set_traversal_ready_sections(
                 &state
                     .runtime
