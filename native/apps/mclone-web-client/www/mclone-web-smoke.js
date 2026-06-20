@@ -315,35 +315,47 @@ async function renderCanvas() {
 
     const assetPack = await fetchAssetPack();
     const session = await module.mclone_web_create_chunk_render_session(canvas, assetPack);
-    if (typeof session.renderChunkReportFromPackedSections !== "function") {
+    if (
+      typeof session.beginChunkRenderCompileRequest !== "function"
+      || typeof session.finishChunkRenderCompileRequest !== "function"
+      || typeof session.pendingChunkRenderCompileJobCount !== "function"
+    ) {
       return {
         ok: false,
         supported: true,
         status: "export-missing",
-        reason: "missing WebChunkRenderSession.renderChunkReportFromPackedSections export",
+        reason: "missing WebChunkRenderSession browser compile lifecycle export",
       };
     }
 
     const compiler = new RenderSectionWorkerCompiler(assetPack);
     try {
-      const firstCompile = await compiler.compile(0, 0, 1);
+      const firstCompileRequest = session.beginChunkRenderCompileRequest(0, 0, 1);
+      const firstCompile = await compiler.compile(firstCompileRequest);
       const renderCompiler = firstCompile.report;
       const firstReport = renderCompiler.ok
-        ? session.renderChunkReportFromPackedSections(0, 0, 1, firstCompile.packed)
+        ? session.finishChunkRenderCompileRequest(firstCompileRequest.requestId, firstCompile.packed)
         : { ok: false, reason: "render compiler worker failed before first render" };
-      const secondCompile = firstReport.ok
-        ? await compiler.compile(1, 0, 1)
+      const secondCompileRequest = firstReport.ok
+        ? session.beginChunkRenderCompileRequest(1, 0, 1)
+        : { ok: false, reason: "first worker render failed before second compile request" };
+      const secondCompile = secondCompileRequest.ok
+        ? await compiler.compile(secondCompileRequest)
         : { report: { ok: false, reason: "first worker render failed before second compile" }, packed: new Uint8Array() };
       const secondRenderCompiler = secondCompile.report;
       const report = secondRenderCompiler.ok
-        ? session.renderChunkReportFromPackedSections(1, 0, 1, secondCompile.packed)
+        ? session.finishChunkRenderCompileRequest(secondCompileRequest.requestId, secondCompile.packed)
         : { ok: false, reason: "render compiler worker failed before second render" };
       return {
         ok: Boolean(
-          renderCompiler.ok
+          firstCompileRequest.ok
+          && renderCompiler.ok
+          && renderCompiler.requestId === firstCompileRequest.requestId
           && firstReport.ok
           && firstReport.workerCompileUsed
+          && secondCompileRequest.ok
           && secondRenderCompiler.ok
+          && secondRenderCompiler.requestId === secondCompileRequest.requestId
           && report.ok
           && report.workerCompileUsed
           && report.rendered
@@ -355,9 +367,12 @@ async function renderCanvas() {
         ),
         supported: true,
         status: report.ok ? "rendered" : "failed",
+        firstCompileRequest,
         renderCompiler,
+        secondCompileRequest,
         secondRenderCompiler,
         renderCompilerPendingJobCount: compiler.pendingJobCount(),
+        sessionPendingCompileJobCount: session.pendingChunkRenderCompileJobCount(),
         firstReport,
         report,
       };
@@ -385,7 +400,6 @@ async function fetchAssetPack() {
 class RenderSectionWorkerCompiler {
   constructor(assetPack) {
     this.assetPack = assetPack;
-    this.nextRequestId = 1;
     this.pending = new Map();
     this.worker = new Worker(RENDER_COMPILER_WORKER_URL.href, {
       type: "module",
@@ -414,10 +428,13 @@ class RenderSectionWorkerCompiler {
     };
   }
 
-  compile(centerX, centerZ, radiusChunks) {
+  compile(request) {
     return new Promise((resolve, reject) => {
-      const requestId = this.nextRequestId;
-      this.nextRequestId += 1;
+      const requestId = Number(request.requestId) || 0;
+      if (requestId <= 0) {
+        reject(new Error(`invalid render compile request id ${String(request.requestId)}`));
+        return;
+      }
       const requestAssetPack = this.assetPack.slice();
       const timeout = setTimeout(() => {
         if (!this.pending.has(requestId)) return;
@@ -432,9 +449,9 @@ class RenderSectionWorkerCompiler {
           bindgenJsUrl: BINDGEN_JS_URL.href,
           bindgenWasmUrl: BINDGEN_WASM_URL.href,
           assetPack: requestAssetPack,
-          centerX,
-          centerZ,
-          radiusChunks,
+          centerX: request.centerX,
+          centerZ: request.centerZ,
+          radiusChunks: request.radiusChunks,
         },
         [requestAssetPack.buffer],
       );

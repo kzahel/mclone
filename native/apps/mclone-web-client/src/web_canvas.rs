@@ -1,16 +1,15 @@
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime};
 use mclone_assets::PackedAssetSource;
-use mclone_core::ChunkPos;
 #[cfg(test)]
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkSnapshot,
-    SECTION_HEIGHT, chunk_section_index,
+    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, chunk_section_index,
 };
+use mclone_core::{ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     load_textured_terrain_assets,
@@ -21,8 +20,9 @@ use mclone_render::chunk::{
 };
 use mclone_render_session::{
     CachedTexturedRenderSections, PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
-    build_client_textured_sections, decode_textured_render_section_build_report,
-    encode_textured_render_section_build_report, summarize_textured_render_section_build_report,
+    RenderSectionCompileResult, build_client_textured_sections,
+    decode_textured_render_section_build_report, encode_textured_render_section_build_report,
+    summarize_textured_render_section_build_report,
 };
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -218,6 +218,11 @@ struct GeneratedChunkRenderReport {
     mesh_build_count: usize,
     mesh_upload_count: usize,
     render_count: usize,
+    compile_request_id: u32,
+    pending_compile_job_count: usize,
+    submitted_compile_section_count: usize,
+    accepted_compile_section_count: usize,
+    stale_compile_section_count: usize,
     worker_compile_used: bool,
     worker_packed_byte_length: usize,
     worker_section_count: usize,
@@ -248,6 +253,11 @@ impl GeneratedChunkRenderReport {
         set_bool(&object, "assetPackLoaded", true)?;
         set_bool(&object, "textured", true)?;
         set_bool(&object, "workerCompileUsed", self.worker_compile_used)?;
+        set_number(
+            &object,
+            "compileRequestId",
+            f64::from(self.compile_request_id),
+        )?;
         set_number(&object, "centerX", f64::from(self.center.x))?;
         set_number(&object, "centerZ", f64::from(self.center.z))?;
         set_number(&object, "radiusChunks", f64::from(self.radius_chunks))?;
@@ -334,6 +344,26 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "renderCount", self.render_count as f64)?;
         set_number(
             &object,
+            "pendingCompileJobCount",
+            self.pending_compile_job_count as f64,
+        )?;
+        set_number(
+            &object,
+            "submittedCompileSectionCount",
+            self.submitted_compile_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "acceptedCompileSectionCount",
+            self.accepted_compile_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "staleCompileSectionCount",
+            self.stale_compile_section_count as f64,
+        )?;
+        set_number(
+            &object,
             "workerPackedByteLength",
             self.worker_packed_byte_length as f64,
         )?;
@@ -398,6 +428,23 @@ struct WebChunkViewSync {
     removal_chunks: BTreeSet<ChunkPos>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WebPendingCompileRequest {
+    center: ChunkPos,
+    radius_chunks: u32,
+    sync: WebChunkViewSync,
+    target_section_keys: BTreeSet<RenderSectionKey>,
+    section_revisions: BTreeMap<RenderSectionKey, u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WebCompileAcceptanceReport {
+    request_id: u32,
+    submitted_section_count: usize,
+    accepted_section_count: usize,
+    stale_section_count: usize,
+}
+
 async fn render_canvas_clear(canvas: HtmlCanvasElement) -> Result<CanvasRenderReport, String> {
     let context = WebCanvasContext::new(canvas).await?;
     let frame = context
@@ -449,6 +496,9 @@ pub struct WebChunkRenderSession {
     mesh_build_count: usize,
     mesh_upload_count: usize,
     render_count: usize,
+    next_compile_request_id: u32,
+    pending_compile_requests: BTreeMap<u32, WebPendingCompileRequest>,
+    render_section_revisions: BTreeMap<RenderSectionKey, u64>,
 }
 
 #[wasm_bindgen]
@@ -469,6 +519,42 @@ impl WebChunkRenderSession {
         )
         .and_then(GeneratedChunkRenderReport::to_js_value)
         .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = beginChunkRenderCompileRequest)]
+    pub fn begin_chunk_render_compile_request(
+        &mut self,
+        center_x: i32,
+        center_z: i32,
+        radius_chunks: u32,
+    ) -> Result<JsValue, JsValue> {
+        self.begin_chunk_render_compile_request_for_center(
+            ChunkPos {
+                x: center_x,
+                z: center_z,
+            },
+            radius_chunks,
+        )
+        .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = finishChunkRenderCompileRequest)]
+    pub fn finish_chunk_render_compile_request(
+        &mut self,
+        request_id: u32,
+        packed_report: js_sys::Uint8Array,
+    ) -> Result<JsValue, JsValue> {
+        self.finish_chunk_render_compile_request_with_packed_report(
+            request_id,
+            packed_report.to_vec(),
+        )
+        .and_then(GeneratedChunkRenderReport::to_js_value)
+        .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = pendingChunkRenderCompileJobCount)]
+    pub fn pending_chunk_render_compile_job_count(&self) -> usize {
+        self.pending_compile_requests.len()
     }
 
     #[wasm_bindgen(js_name = renderChunkReportFromPackedSections)]
@@ -512,7 +598,87 @@ impl WebChunkRenderSession {
             mesh_build_count: 0,
             mesh_upload_count: 0,
             render_count: 0,
+            next_compile_request_id: 1,
+            pending_compile_requests: BTreeMap::new(),
+            render_section_revisions: BTreeMap::new(),
         })
+    }
+
+    fn begin_chunk_render_compile_request_for_center(
+        &mut self,
+        center: ChunkPos,
+        radius_chunks: u32,
+    ) -> Result<JsValue, String> {
+        if !self.pending_compile_requests.is_empty() {
+            return Err(format!(
+                "web render compile request already pending ({} pending)",
+                self.pending_compile_requests.len()
+            ));
+        }
+        let sync = self.prepare_chunk_view(center, radius_chunks)?;
+        let target_section_keys = self.target_section_keys_for_dirty_chunks(&sync.dirty_chunks);
+        let request_id = self.take_next_compile_request_id();
+        self.bump_render_section_revisions(&target_section_keys);
+        let section_revisions = target_section_keys
+            .iter()
+            .map(|key| (*key, self.render_section_revision(*key)))
+            .collect::<BTreeMap<_, _>>();
+        let pending = WebPendingCompileRequest {
+            center,
+            radius_chunks,
+            sync,
+            target_section_keys,
+            section_revisions,
+        };
+        let submitted_section_count = pending.target_section_keys.len();
+        self.pending_compile_requests.insert(request_id, pending);
+        self.compile_request_to_js_value(request_id, center, radius_chunks, submitted_section_count)
+    }
+
+    fn finish_chunk_render_compile_request_with_packed_report(
+        &mut self,
+        request_id: u32,
+        packed_report: Vec<u8>,
+    ) -> Result<GeneratedChunkRenderReport, String> {
+        let pending = self
+            .pending_compile_requests
+            .remove(&request_id)
+            .ok_or_else(|| format!("unknown web render compile request id {request_id}"))?;
+        let packed_byte_length = packed_report.len();
+        let section_report = decode_textured_render_section_build_report(&packed_report)
+            .map_err(|error| format!("failed to decode packed render section report: {error:#}"))?;
+        let summary = summarize_textured_render_section_build_report(&section_report);
+        let completed = RenderSectionCompileResult {
+            target_sections: pending.target_section_keys,
+            section_revisions: pending.section_revisions,
+            result: Ok(section_report),
+        };
+        let acceptance = completed.partition_by_revision(|key| self.render_section_revision(key));
+        if acceptance.accepted_sections.is_empty() {
+            return Err(format!(
+                "web render compile request {request_id} had no accepted sections ({} stale)",
+                acceptance.stale_section_count()
+            ));
+        }
+        let build_report = completed
+            .result
+            .map_err(|error| format!("web render compile request {request_id} failed: {error}"))?;
+        let acceptance_report = WebCompileAcceptanceReport {
+            request_id,
+            submitted_section_count: acceptance.accepted_section_count()
+                + acceptance.stale_section_count(),
+            accepted_section_count: acceptance.accepted_section_count(),
+            stale_section_count: acceptance.stale_section_count(),
+        };
+        self.render_chunk_report_with_section_report(
+            pending.center,
+            pending.radius_chunks,
+            pending.sync,
+            acceptance.accepted_sections,
+            build_report,
+            WebSectionCompileReport::worker(packed_byte_length, summary),
+            acceptance_report,
+        )
     }
 
     fn render_chunk_report_for_center(
@@ -526,12 +692,15 @@ impl WebChunkRenderSession {
                 .map_err(|error| {
                     format!("failed to build generated textured render sections: {error:#}")
                 })?;
+        let ready_section_keys = ready_section_keys_for_report(&section_report, &sync.dirty_chunks);
         self.render_chunk_report_with_section_report(
             center,
             radius_chunks,
             sync,
+            ready_section_keys,
             section_report,
             WebSectionCompileReport::default(),
+            WebCompileAcceptanceReport::default(),
         )
     }
 
@@ -546,12 +715,15 @@ impl WebChunkRenderSession {
             .map_err(|error| format!("failed to decode packed render section report: {error:#}"))?;
         let summary = summarize_textured_render_section_build_report(&section_report);
         let sync = self.prepare_chunk_view(center, radius_chunks)?;
+        let ready_section_keys = ready_section_keys_for_report(&section_report, &sync.dirty_chunks);
         self.render_chunk_report_with_section_report(
             center,
             radius_chunks,
             sync,
+            ready_section_keys,
             section_report,
             WebSectionCompileReport::worker(packed_byte_length, summary),
+            WebCompileAcceptanceReport::default(),
         )
     }
 
@@ -595,22 +767,18 @@ impl WebChunkRenderSession {
         center: ChunkPos,
         radius_chunks: u32,
         sync: WebChunkViewSync,
+        ready_section_keys: BTreeSet<RenderSectionKey>,
         section_report: TexturedRenderSectionBuildReport,
         compile_report: WebSectionCompileReport,
+        acceptance_report: WebCompileAcceptanceReport,
     ) -> Result<GeneratedChunkRenderReport, String> {
         let current_loaded_chunks = sync.current_loaded_chunks;
-        let dirty_chunks = sync.dirty_chunks;
         let removal_chunks = sync.removal_chunks;
         self.mesh_build_count += 1;
         let current_section_keys = section_report
             .sections
             .iter()
             .map(|section| section.key)
-            .collect::<BTreeSet<_>>();
-        let ready_section_keys = current_section_keys
-            .iter()
-            .copied()
-            .filter(|key| dirty_chunks.contains(&chunk_pos_for_section(*key)))
             .collect::<BTreeSet<_>>();
         let cache_update = self.render_sections.apply_build_report(
             &ready_section_keys,
@@ -694,6 +862,11 @@ impl WebChunkRenderSession {
             mesh_build_count: self.mesh_build_count,
             mesh_upload_count: self.mesh_upload_count,
             render_count: self.render_count,
+            compile_request_id: acceptance_report.request_id,
+            pending_compile_job_count: self.pending_compile_requests.len(),
+            submitted_compile_section_count: acceptance_report.submitted_section_count,
+            accepted_compile_section_count: acceptance_report.accepted_section_count,
+            stale_compile_section_count: acceptance_report.stale_section_count,
             worker_compile_used: compile_report.worker_compile_used,
             worker_packed_byte_length: compile_report.packed_byte_length,
             worker_section_count: compile_report.section_count,
@@ -745,6 +918,75 @@ impl WebChunkRenderSession {
         }
         Ok(upload_report)
     }
+
+    fn take_next_compile_request_id(&mut self) -> u32 {
+        let request_id = self.next_compile_request_id;
+        self.next_compile_request_id = self.next_compile_request_id.wrapping_add(1).max(1);
+        request_id
+    }
+
+    fn target_section_keys_for_dirty_chunks(
+        &self,
+        dirty_chunks: &BTreeSet<ChunkPos>,
+    ) -> BTreeSet<RenderSectionKey> {
+        self.runtime
+            .client()
+            .chunk_snapshots()
+            .filter(|snapshot| dirty_chunks.contains(&snapshot.pos))
+            .flat_map(render_section_keys_for_snapshot)
+            .collect()
+    }
+
+    fn bump_render_section_revisions(&mut self, keys: &BTreeSet<RenderSectionKey>) {
+        for key in keys {
+            let revision = self.render_section_revisions.entry(*key).or_default();
+            *revision = revision.wrapping_add(1);
+        }
+    }
+
+    fn render_section_revision(&self, key: RenderSectionKey) -> u64 {
+        self.render_section_revisions
+            .get(&key)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    fn compile_request_to_js_value(
+        &self,
+        request_id: u32,
+        center: ChunkPos,
+        radius_chunks: u32,
+        submitted_section_count: usize,
+    ) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        set_bool(&object, "ok", true)?;
+        set_number(&object, "requestId", f64::from(request_id))?;
+        set_number(&object, "centerX", f64::from(center.x))?;
+        set_number(&object, "centerZ", f64::from(center.z))?;
+        set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
+        set_number(
+            &object,
+            "submittedCompileSectionCount",
+            submitted_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "pendingCompileJobCount",
+            self.pending_compile_requests.len() as f64,
+        )?;
+        Ok(object.into())
+    }
+}
+
+impl Default for WebCompileAcceptanceReport {
+    fn default() -> Self {
+        Self {
+            request_id: 0,
+            submitted_section_count: 0,
+            accepted_section_count: 0,
+            stale_section_count: 0,
+        }
+    }
 }
 
 fn chunk_pos_for_section(key: RenderSectionKey) -> ChunkPos {
@@ -752,6 +994,26 @@ fn chunk_pos_for_section(key: RenderSectionKey) -> ChunkPos {
         x: key.chunk_x,
         z: key.chunk_z,
     }
+}
+
+fn ready_section_keys_for_report(
+    report: &TexturedRenderSectionBuildReport,
+    dirty_chunks: &BTreeSet<ChunkPos>,
+) -> BTreeSet<RenderSectionKey> {
+    report
+        .sections
+        .iter()
+        .map(|section| section.key)
+        .filter(|key| dirty_chunks.contains(&chunk_pos_for_section(*key)))
+        .collect()
+}
+
+fn render_section_keys_for_snapshot(snapshot: &ChunkSnapshot) -> Vec<RenderSectionKey> {
+    let min_section_y = snapshot.min_y.div_euclid(SECTION_HEIGHT);
+    let section_count = snapshot.height / SECTION_HEIGHT;
+    (0..section_count)
+        .map(|offset| RenderSectionKey::new(snapshot.pos.x, min_section_y + offset, snapshot.pos.z))
+        .collect()
 }
 
 fn dirty_chunk_positions(

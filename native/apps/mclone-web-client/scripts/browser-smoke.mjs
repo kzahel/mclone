@@ -298,9 +298,12 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
       result.canvas.report,
       canvasPixels,
       result.canvas.firstReport,
+      result.canvas.firstCompileRequest,
       result.canvas.renderCompiler,
+      result.canvas.secondCompileRequest,
       result.canvas.secondRenderCompiler,
       result.canvas.renderCompilerPendingJobCount,
+      result.canvas.sessionPendingCompileJobCount,
     );
   } else if (canvasPixels.distinctColorCount < 1 || canvasPixels.clearColorPixelCount < 16) {
     throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
@@ -328,14 +331,30 @@ function assertChunkRenderResult(
   report,
   canvasPixels,
   firstReport,
+  firstCompileRequest,
   renderCompiler,
+  secondCompileRequest,
   secondRenderCompiler,
   renderCompilerPendingJobCount,
+  sessionPendingCompileJobCount,
 ) {
+  assertRenderCompileRequest(firstCompileRequest, 0, 0);
+  assertRenderCompileRequest(secondCompileRequest, 1, 0);
   assertRenderCompilerWorkerResult(renderCompiler, 0, 0);
   assertRenderCompilerWorkerResult(secondRenderCompiler, 1, 0);
+  if (
+    renderCompiler.requestId !== firstCompileRequest.requestId
+    || firstReport.compileRequestId !== firstCompileRequest.requestId
+    || secondRenderCompiler.requestId !== secondCompileRequest.requestId
+    || report.compileRequestId !== secondCompileRequest.requestId
+  ) {
+    throw new Error(`worker compile results did not match the Rust-owned request ids:\n${JSON.stringify({ firstCompileRequest, renderCompiler, firstReport, secondCompileRequest, secondRenderCompiler, report }, null, 2)}`);
+  }
   if (renderCompilerPendingJobCount !== 0) {
     throw new Error(`render compiler worker still had pending jobs after chunk smoke:\n${JSON.stringify({ renderCompilerPendingJobCount }, null, 2)}`);
+  }
+  if (sessionPendingCompileJobCount !== 0 || report.pendingCompileJobCount !== 0) {
+    throw new Error(`web render session still had pending compile jobs after chunk smoke:\n${JSON.stringify({ sessionPendingCompileJobCount, report }, null, 2)}`);
   }
   if (!report.chunkLoaded || !report.meshBuilt) {
     throw new Error(`generated chunk did not load/build:\n${JSON.stringify(report, null, 2)}`);
@@ -387,6 +406,9 @@ function assertChunkRenderResult(
     || firstReport.workerVertexCount !== workerSummary.vertexCount
     || firstReport.workerIndexCount !== workerSummary.indexCount
     || firstReport.workerFaceCount !== workerSummary.faceCount
+    || firstReport.submittedCompileSectionCount !== firstCompileRequest.submittedCompileSectionCount
+    || firstReport.acceptedCompileSectionCount !== firstCompileRequest.submittedCompileSectionCount
+    || firstReport.staleCompileSectionCount !== 0
   ) {
     throw new Error(`first section render did not consume the worker-compiled packed payload:\n${JSON.stringify({ firstReport, renderCompiler }, null, 2)}`);
   }
@@ -409,6 +431,9 @@ function assertChunkRenderResult(
     || report.workerVertexCount !== secondWorkerSummary.vertexCount
     || report.workerIndexCount !== secondWorkerSummary.indexCount
     || report.workerFaceCount !== secondWorkerSummary.faceCount
+    || report.submittedCompileSectionCount !== secondCompileRequest.submittedCompileSectionCount
+    || report.acceptedCompileSectionCount !== secondCompileRequest.submittedCompileSectionCount
+    || report.staleCompileSectionCount !== 0
   ) {
     throw new Error(`second section render did not consume the worker-compiled packed payload:\n${JSON.stringify({ report, secondRenderCompiler }, null, 2)}`);
   }
@@ -439,6 +464,20 @@ function assertChunkRenderResult(
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+function assertRenderCompileRequest(request, expectedCenterX, expectedCenterZ) {
+  if (
+    !request?.ok
+    || request.requestId <= 0
+    || request.centerX !== expectedCenterX
+    || request.centerZ !== expectedCenterZ
+    || request.radiusChunks !== 1
+    || request.submittedCompileSectionCount <= 0
+    || request.pendingCompileJobCount <= 0
+  ) {
+    throw new Error(`Rust render compile request was invalid:\n${JSON.stringify(request, null, 2)}`);
   }
 }
 

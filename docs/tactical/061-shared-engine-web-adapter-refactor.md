@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active persistent browser worker compiler landed.
+Status: active Rust-owned browser compile lifecycle landed.
 
 ## Purpose
 
@@ -322,6 +322,17 @@ Browser worker payload result:
   chunk render. The remaining architectural gap is moving this orchestration out
   of the JS smoke harness and into the shared Rust render-session/compiler
   lifecycle with revision/stale-result handling.
+- Added Rust-owned browser compile request lifecycle methods on
+  `WebChunkRenderSession`: begin request, finish request, and pending job count.
+  The browser page now asks the session for request IDs and target section
+  counts instead of inventing worker request identity in JS.
+- Finishing a browser worker payload now wraps the packed mesh report in
+  `RenderSectionCompileResult` and uses the shared
+  `partition_by_revision(...)` acceptance path before applying sections to
+  `CachedTexturedRenderSections`.
+- The Playwright chunk smoke now asserts request/result ID matching,
+  submitted/accepted/stale section counts, and zero pending jobs on both the JS
+  worker client and Rust web session after the two-step render.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
