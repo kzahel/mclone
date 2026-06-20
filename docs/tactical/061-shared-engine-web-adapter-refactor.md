@@ -162,12 +162,19 @@ trait RenderSectionCompiler {
 Implementations:
 
 - native threaded compiler using the current `std::thread` / `mpsc` worker
-- synchronous inline compiler for WASM first pass
-- later browser worker compiler if/when the web worker and `SharedArrayBuffer`
-  constraints are explicit
+- browser/WASM worker compiler using Web Workers with shared Wasm memory
+  (`SharedArrayBuffer`/atomics) once cross-origin isolation and packaging are in
+  place
+- synchronous inline compiler for WASM only as a smoke/fallback implementation
+  behind the same interface
 
 The shared session should be generic over this policy rather than containing
 desktop-only thread ownership.
+
+The web path must not become a reduced single-threaded engine. `wasm32-unknown-unknown`
+is still the browser target, but the runtime threading model should match the
+desktop job lifecycle: submit work off the frame path, drain completed results,
+preserve stale/revision handling, and keep frame presentation responsive.
 
 ### Engine Render Session
 
@@ -276,7 +283,11 @@ Move `RenderSectionCompileWorker` behind a compiler policy boundary.
 Acceptance:
 
 - desktop uses the existing native thread worker
-- WASM uses a synchronous compiler implementation
+- WASM has the same compiler interface and stale/revision lifecycle as desktop
+- WASM may use a synchronous compiler only as a temporary fallback/smoke path
+- the intended browser implementation is a worker-backed compiler using Web
+  Workers plus shared Wasm memory, with COOP/COEP requirements documented before
+  enabling it by default
 - stale-result and revision checks stay shared
 - tests cover both inline and worker-shaped paths where practical
 
@@ -316,16 +327,19 @@ Acceptance:
 - a manual browser page can move the camera and see streamed terrain update
 - counters come from the shared session, not web-only bookkeeping
 
-### 5. Add Web Worker/Thread Policy Later
+### 5. Add Web Worker/Thread Policy
 
-Do not introduce browser workers as part of the first refactor. First make the
-inline compiler use the same interface. Later, evaluate:
+Browser workers are part of the target architecture, not optional polish. The
+compiler/session interface may land before worker packaging, but any inline WASM
+compiler must remain an explicit fallback/smoke path. The worker slice should
+evaluate:
 
 - `wasm-bindgen` worker packaging
 - transferable payload shape
 - `SharedArrayBuffer` requirements
 - browser COOP/COEP headers
 - cancellation/stale result behavior
+- Playwright validation that CPU compile work does not block the frame path
 
 ## Non-Goals
 
@@ -384,10 +398,14 @@ cache policy:
 1. Move the desktop `RenderSectionCompileWorker` shape behind a shared compiler
    policy interface.
 2. Keep the current native `std::thread` worker as the desktop implementation.
-3. Add an inline synchronous implementation for WASM.
-4. Make both implementations return the same `RenderSectionCompileResult`
+3. Add a worker-backed browser/WASM implementation plan at the interface level,
+   including the `SharedArrayBuffer`/COOP/COEP requirements that must be met
+   before enabling it by default.
+4. Add an inline synchronous WASM implementation only as a fallback/smoke path
+   behind the same interface.
+5. Make all implementations return the same `RenderSectionCompileResult`
    shape and use the same stale-result/revision handling.
-5. Validate desktop tests plus `native:web:chunk-smoke`.
+6. Validate desktop tests plus `native:web:chunk-smoke`.
 
 This removes the next duplication point without requiring the full app-loop
 refactor in the same patch.
