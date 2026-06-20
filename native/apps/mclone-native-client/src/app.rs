@@ -993,7 +993,19 @@ impl ApplicationHandler for ChunkApp {
         );
         let upload_ms = elapsed_ms(upload_start.elapsed());
         let sky = SkyRenderer::new(&surface.device, surface.config.format);
-        let actors = ActorDrawResources::new(&surface.device, surface.config.format);
+        let actors = match ActorDrawResources::new(
+            &surface.device,
+            &surface.queue,
+            surface.config.format,
+            self.runtime.actor_textures.atlas.as_upload(),
+        ) {
+            Ok(actors) => actors,
+            Err(err) => {
+                log::error!("failed to initialize actor draw resources: {err:#}");
+                event_loop.exit();
+                return;
+            }
+        };
         let gui = GuiRenderer::new(&surface.device, surface.config.format);
         self.ui.set_scale(GuiScale::from_pixels(
             surface.config.width,

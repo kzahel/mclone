@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod actor_assets;
 mod app;
 mod camera;
 mod cli;

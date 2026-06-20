@@ -1,11 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT};
 use crate::target::RenderFrameTarget;
 
-const ACTOR_VERTEX_FLOAT_COUNT: usize = 7;
+const ACTOR_VERTEX_FLOAT_COUNT: usize = 9;
 const ACTOR_VERTEX_BYTE_LEN: usize = ACTOR_VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>();
 const ACTOR_VERTEX_BYTE_SIZE: wgpu::BufferAddress = ACTOR_VERTEX_BYTE_LEN as wgpu::BufferAddress;
 const UNIFORM_BYTE_LEN: usize = 16 * std::mem::size_of::<f32>();
@@ -100,15 +100,51 @@ pub struct ActorRenderStats {
     pub index_count: u32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ActorTextureAtlas<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: &'a [u8],
+    pub layout: ActorTextureLayout,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ActorTextureLayout {
+    pub white: ActorTextureRegion,
+    pub cow: ActorTextureRegion,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ActorTextureRegion {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
 pub struct ActorDrawResources {
     renderer: ActorRenderer,
+    atlas: GpuActorTextureAtlas,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
 }
 
 impl ActorDrawResources {
-    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
-        Self {
-            renderer: ActorRenderer::new(device, color_format),
-        }
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        atlas: ActorTextureAtlas<'_>,
+    ) -> Result<Self> {
+        let renderer = ActorRenderer::new(device, color_format);
+        let gpu_atlas =
+            GpuActorTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)?;
+        Ok(Self {
+            renderer,
+            atlas: gpu_atlas,
+            texture_layout: atlas.layout,
+            atlas_size: [atlas.width.max(1), atlas.height.max(1)],
+        })
     }
 
     pub fn render(
@@ -126,7 +162,7 @@ impl ActorDrawResources {
         let depth_view = target
             .depth_view
             .context("actor render pass requires a depth attachment")?;
-        let mesh = actor_mesh(actors);
+        let mesh = actor_mesh(actors, self.texture_layout, self.atlas_size);
         if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             return Ok(ActorRenderStats {
                 submitted_actor_count: actors.len(),
@@ -172,6 +208,7 @@ impl ActorDrawResources {
         });
         pass.set_pipeline(&self.renderer.pipeline);
         pass.set_bind_group(0, &self.renderer.bind_group, &[]);
+        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..mesh.indices.len() as u32, 0, 0..1);
@@ -189,6 +226,7 @@ struct ActorRenderer {
     pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl ActorRenderer {
@@ -224,9 +262,31 @@ impl ActorRenderer {
                 resource: uniform_buffer.as_entire_binding(),
             }],
         });
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_actor_texture_bind_group_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mclone_actor_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[&bind_group_layout, &texture_bind_group_layout],
             push_constant_ranges: &[],
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -248,6 +308,11 @@ impl ActorRenderer {
                         wgpu::VertexAttribute {
                             offset: 12,
                             shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: 20,
+                            shader_location: 2,
                             format: wgpu::VertexFormat::Float32x4,
                         },
                     ],
@@ -284,7 +349,102 @@ impl ActorRenderer {
             pipeline,
             uniform_buffer,
             bind_group,
+            texture_bind_group_layout,
         }
+    }
+}
+
+struct GpuActorTextureAtlas {
+    _texture: wgpu::Texture,
+    _view: wgpu::TextureView,
+    _sampler: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
+}
+
+impl GpuActorTextureAtlas {
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        atlas: ActorTextureAtlas<'_>,
+    ) -> Result<Self> {
+        let width = atlas.width.max(1);
+        let height = atlas.height.max(1);
+        let expected_len = width as usize * height as usize * 4;
+        if atlas.rgba.len() != expected_len {
+            bail!(
+                "actor texture atlas has {} bytes; expected {expected_len} for {}x{} RGBA",
+                atlas.rgba.len(),
+                width,
+                height
+            );
+        }
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_actor_texture_atlas"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: Default::default(),
+                aspect: Default::default(),
+            },
+            atlas.rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&Default::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mclone_actor_texture_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_actor_texture_bind_group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
+        Ok(Self {
+            _texture: texture,
+            _view: view,
+            _sampler: sampler,
+            bind_group,
+        })
     }
 }
 
@@ -297,26 +457,46 @@ struct ActorMesh {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ActorVertex {
     position: [f32; 3],
+    uv: [f32; 2],
     color: [f32; 4],
 }
 
-fn actor_mesh(actors: &[ActorInstance]) -> ActorMesh {
+fn actor_mesh(
+    actors: &[ActorInstance],
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) -> ActorMesh {
     let mut mesh = ActorMesh::default();
     for actor in actors {
-        append_actor(&mut mesh, *actor);
+        append_actor(&mut mesh, *actor, texture_layout, atlas_size);
     }
     mesh
 }
 
-fn append_actor(mesh: &mut ActorMesh, actor: ActorInstance) {
+fn append_actor(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) {
     match actor.shape {
-        ActorInstanceShape::Humanoid => append_humanoid_placeholder(mesh, actor),
-        ActorInstanceShape::QuadrupedPlaceholder => append_quadruped_placeholder(mesh, actor),
-        ActorInstanceShape::CowModel => append_cow_model(mesh, actor),
+        ActorInstanceShape::Humanoid => {
+            append_humanoid_placeholder(mesh, actor, texture_layout, atlas_size)
+        }
+        ActorInstanceShape::QuadrupedPlaceholder => {
+            append_quadruped_placeholder(mesh, actor, texture_layout, atlas_size)
+        }
+        ActorInstanceShape::CowModel => append_cow_model(mesh, actor, texture_layout, atlas_size),
     }
 }
 
-fn append_humanoid_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
+fn append_humanoid_placeholder(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) {
+    let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
     let dark = scale_color(actor.body_color, 0.58);
     let side = scale_color(actor.body_color, 0.78);
     let light = scale_color(actor.body_color, 1.12);
@@ -325,6 +505,7 @@ fn append_humanoid_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
         actor,
         Vec3::new(-0.22, 0.0, -0.13),
         Vec3::new(-0.04, 0.76, 0.13),
+        white_uv,
         [dark, side, side, side, side, actor.body_color],
     );
     append_box(
@@ -332,6 +513,7 @@ fn append_humanoid_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
         actor,
         Vec3::new(0.04, 0.0, -0.13),
         Vec3::new(0.22, 0.76, 0.13),
+        white_uv,
         [dark, side, side, side, side, actor.body_color],
     );
     append_box(
@@ -339,6 +521,7 @@ fn append_humanoid_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
         actor,
         Vec3::new(-0.30, 0.72, -0.16),
         Vec3::new(0.30, 1.36, 0.16),
+        white_uv,
         [dark, side, side, side, side, light],
     );
     append_box(
@@ -346,6 +529,7 @@ fn append_humanoid_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
         actor,
         Vec3::new(-0.24, 1.34, -0.24),
         Vec3::new(0.24, 1.80, 0.24),
+        white_uv,
         [
             scale_color(actor.accent_color, 0.70),
             scale_color(actor.accent_color, 0.86),
@@ -360,6 +544,7 @@ fn append_humanoid_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
         actor,
         Vec3::new(-0.11, 1.05, 0.15),
         Vec3::new(0.11, 1.22, 0.31),
+        white_uv,
         [
             actor.accent_color,
             actor.accent_color,
@@ -371,7 +556,13 @@ fn append_humanoid_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
     );
 }
 
-fn append_quadruped_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
+fn append_quadruped_placeholder(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) {
+    let white_uv = texture_region_center_uv(texture_layout.white, atlas_size);
     let width = actor.width.max(0.1);
     let height = actor.height.max(0.1);
     let half_width = width * 0.5;
@@ -394,6 +585,7 @@ fn append_quadruped_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
         actor,
         Vec3::new(-half_width, body_bottom, body_back),
         Vec3::new(half_width, body_top, body_front),
+        white_uv,
         [dark, side, side, side, side, light],
     );
     append_box(
@@ -401,6 +593,7 @@ fn append_quadruped_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
         actor,
         Vec3::new(-head_half, head_bottom, body_front),
         Vec3::new(head_half, head_top, head_front),
+        white_uv,
         [
             scale_color(actor.accent_color, 0.70),
             accent_side,
@@ -417,6 +610,7 @@ fn append_quadruped_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
                 actor,
                 Vec3::new(x - leg_half, 0.0, z - leg_half),
                 Vec3::new(x + leg_half, body_bottom, z + leg_half),
+                white_uv,
                 [dark, side, side, side, side, actor.body_color],
             );
         }
@@ -507,10 +701,23 @@ const COW_MODEL_PARTS: &[ActorModelPart] = &[
     },
 ];
 
-fn append_cow_model(mesh: &mut ActorMesh, actor: ActorInstance) {
+fn append_cow_model(
+    mesh: &mut ActorMesh,
+    actor: ActorInstance,
+    texture_layout: ActorTextureLayout,
+    atlas_size: [u32; 2],
+) {
     for part in COW_MODEL_PARTS {
         for cuboid in part.cuboids {
-            append_model_cuboid(mesh, actor, part, cuboid, cow_cuboid_face_colors(*cuboid));
+            append_model_cuboid(
+                mesh,
+                actor,
+                part,
+                cuboid,
+                cow_cuboid_face_colors(*cuboid),
+                texture_layout.cow,
+                atlas_size,
+            );
         }
     }
 }
@@ -521,6 +728,8 @@ fn append_model_cuboid(
     part: &ActorModelPart,
     cuboid: &ActorModelCuboid,
     face_colors: [[f32; 4]; 6],
+    texture_region: ActorTextureRegion,
+    atlas_size: [u32; 2],
 ) {
     let origin = Vec3::from_array(cuboid.origin_pixels);
     let size = Vec3::from_array(cuboid.size_pixels);
@@ -535,15 +744,21 @@ fn append_model_cuboid(
         Vec3::new(max.x, max.y, max.z),
         Vec3::new(origin.x, max.y, max.z),
     ];
-    append_transformed_box(mesh, face_colors, |corner_index| {
-        let model_position = transform_model_part_point(corners[corner_index], part);
-        actor_world_position(actor, model_pixels_to_actor_local(model_position))
-    });
+    append_transformed_box(
+        mesh,
+        face_colors,
+        cow_cuboid_face_uvs(*cuboid, texture_region, atlas_size),
+        |corner_index| {
+            let model_position = transform_model_part_point(corners[corner_index], part);
+            actor_world_position(actor, model_pixels_to_actor_local(model_position))
+        },
+    );
 }
 
 fn append_transformed_box(
     mesh: &mut ActorMesh,
     face_colors: [[f32; 4]; 6],
+    face_uvs: [[[f32; 2]; 4]; 6],
     mut world_corner: impl FnMut(usize) -> Vec3,
 ) {
     let faces = [
@@ -557,9 +772,10 @@ fn append_transformed_box(
 
     for (face_index, face) in faces.into_iter().enumerate() {
         let base = mesh.vertices.len() as u32;
-        for corner_index in face {
+        for (vertex_index, corner_index) in face.into_iter().enumerate() {
             mesh.vertices.push(ActorVertex {
                 position: world_corner(corner_index).to_array(),
+                uv: face_uvs[face_index][vertex_index],
                 color: face_colors[face_index],
             });
         }
@@ -612,27 +828,109 @@ fn model_pixels_to_actor_local(model_position: Vec3) -> Vec3 {
 
 fn cow_cuboid_face_colors(cuboid: ActorModelCuboid) -> [[f32; 4]; 6] {
     match cuboid.texture_offset {
-        [0, 0] => shaded_faces([0.74, 0.68, 0.54, 1.0]),
-        [18, 4] => [
-            [0.20, 0.12, 0.07, 1.0],
-            [0.70, 0.66, 0.54, 1.0],
-            [0.26, 0.15, 0.08, 1.0],
-            [0.78, 0.74, 0.62, 1.0],
-            [0.18, 0.10, 0.06, 1.0],
-            [0.48, 0.35, 0.23, 1.0],
-        ],
-        [22, 0] => shaded_faces([0.86, 0.82, 0.62, 1.0]),
-        [52, 0] => shaded_faces([0.88, 0.56, 0.58, 1.0]),
-        [0, 16] => [
-            [0.16, 0.09, 0.05, 1.0],
-            [0.28, 0.17, 0.10, 1.0],
-            [0.21, 0.12, 0.07, 1.0],
-            [0.74, 0.70, 0.60, 1.0],
-            [0.16, 0.09, 0.05, 1.0],
-            [0.36, 0.22, 0.13, 1.0],
-        ],
-        _ => shaded_faces([0.35, 0.25, 0.18, 1.0]),
+        [0, 0] | [18, 4] | [22, 0] | [52, 0] | [0, 16] => [[1.0, 1.0, 1.0, 1.0]; 6],
+        _ => shaded_faces([1.0, 1.0, 1.0, 1.0]),
     }
+}
+
+fn cow_cuboid_face_uvs(
+    cuboid: ActorModelCuboid,
+    texture_region: ActorTextureRegion,
+    atlas_size: [u32; 2],
+) -> [[[f32; 2]; 4]; 6] {
+    let [u, v] = [
+        cuboid.texture_offset[0] as f32,
+        cuboid.texture_offset[1] as f32,
+    ];
+    let [width, height, depth] = cuboid.size_pixels;
+    let west = face_uv_rect(
+        texture_region,
+        atlas_size,
+        u,
+        v + depth,
+        u + depth,
+        v + depth + height,
+    );
+    let north = face_uv_rect(
+        texture_region,
+        atlas_size,
+        u + depth,
+        v + depth,
+        u + depth + width,
+        v + depth + height,
+    );
+    let east = face_uv_rect(
+        texture_region,
+        atlas_size,
+        u + depth + width,
+        v + depth,
+        u + depth + width + depth,
+        v + depth + height,
+    );
+    let south = face_uv_rect(
+        texture_region,
+        atlas_size,
+        u + depth + width + depth,
+        v + depth,
+        u + depth + width + depth + width,
+        v + depth + height,
+    );
+    let down = face_uv_rect(
+        texture_region,
+        atlas_size,
+        u + depth,
+        v,
+        u + depth + width,
+        v + depth,
+    );
+    let up = face_uv_rect(
+        texture_region,
+        atlas_size,
+        u + depth + width,
+        v,
+        u + depth + width + width,
+        v + depth,
+    );
+
+    // append_transformed_box face order is minZ, maxZ, minX, maxX, minY, maxY.
+    [north, south, west, east, down, up]
+}
+
+fn face_uv_rect(
+    texture_region: ActorTextureRegion,
+    atlas_size: [u32; 2],
+    u0: f32,
+    v0: f32,
+    u1: f32,
+    v1: f32,
+) -> [[f32; 2]; 4] {
+    [
+        texture_region_uv(texture_region, atlas_size, u0, v0),
+        texture_region_uv(texture_region, atlas_size, u0, v1),
+        texture_region_uv(texture_region, atlas_size, u1, v1),
+        texture_region_uv(texture_region, atlas_size, u1, v0),
+    ]
+}
+
+fn texture_region_center_uv(region: ActorTextureRegion, atlas_size: [u32; 2]) -> [f32; 2] {
+    texture_region_uv(
+        region,
+        atlas_size,
+        0.5 * region.width as f32,
+        0.5 * region.height as f32,
+    )
+}
+
+fn texture_region_uv(
+    region: ActorTextureRegion,
+    atlas_size: [u32; 2],
+    texture_u: f32,
+    texture_v: f32,
+) -> [f32; 2] {
+    [
+        (region.x as f32 + texture_u) / atlas_size[0].max(1) as f32,
+        (region.y as f32 + texture_v) / atlas_size[1].max(1) as f32,
+    ]
 }
 
 fn shaded_faces(color: [f32; 4]) -> [[f32; 4]; 6] {
@@ -651,6 +949,7 @@ fn append_box(
     actor: ActorInstance,
     min: Vec3,
     max: Vec3,
+    uv: [f32; 2],
     face_colors: [[f32; 4]; 6],
 ) {
     let corners = [
@@ -663,7 +962,7 @@ fn append_box(
         Vec3::new(max.x, max.y, max.z),
         Vec3::new(min.x, max.y, max.z),
     ];
-    append_transformed_box(mesh, face_colors, |corner_index| {
+    append_transformed_box(mesh, face_colors, [[uv; 4]; 6], |corner_index| {
         actor_world_position(actor, corners[corner_index])
     });
 }
@@ -690,7 +989,12 @@ fn scale_color(color: [f32; 4], factor: f32) -> [f32; 4] {
 fn actor_vertex_bytes(vertices: &[ActorVertex]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(vertices.len() * ACTOR_VERTEX_BYTE_LEN);
     for vertex in vertices {
-        for value in vertex.position.into_iter().chain(vertex.color) {
+        for value in vertex
+            .position
+            .into_iter()
+            .chain(vertex.uv)
+            .chain(vertex.color)
+        {
             bytes.extend_from_slice(&value.to_ne_bytes());
         }
     }
@@ -719,22 +1023,56 @@ fn uniform_bytes(view_projection: [[f32; 4]; 4]) -> [u8; UNIFORM_BYTE_LEN] {
 mod tests {
     use super::*;
 
+    fn test_actor_texture_layout() -> ActorTextureLayout {
+        ActorTextureLayout {
+            white: ActorTextureRegion {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            cow: ActorTextureRegion {
+                x: 1,
+                y: 0,
+                width: 64,
+                height: 32,
+            },
+        }
+    }
+
+    fn test_actor_texture_atlas_size() -> [u32; 2] {
+        [65, 32]
+    }
+
     #[test]
     fn actor_mesh_emits_one_placeholder_per_actor() {
-        let mesh = actor_mesh(&[ActorInstance::remote_player(Vec3::new(1.0, 2.0, 3.0), 0.0)]);
+        let mesh = actor_mesh(
+            &[ActorInstance::remote_player(Vec3::new(1.0, 2.0, 3.0), 0.0)],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+        );
 
         assert_eq!(mesh.vertices.len(), 5 * 6 * 4);
         assert_eq!(mesh.indices.len(), 5 * 6 * 6);
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex.uv == [0.5 / 65.0, 0.5 / 32.0])
+        );
     }
 
     #[test]
     fn actor_mesh_emits_quadruped_placeholder() {
-        let mesh = actor_mesh(&[ActorInstance::cow_placeholder(
-            Vec3::new(1.0, 2.0, 3.0),
-            0.0,
-            0.9,
-            1.4,
-        )]);
+        let mesh = actor_mesh(
+            &[ActorInstance::cow_placeholder(
+                Vec3::new(1.0, 2.0, 3.0),
+                0.0,
+                0.9,
+                1.4,
+            )],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+        );
 
         assert_eq!(mesh.vertices.len(), 6 * 6 * 4);
         assert_eq!(mesh.indices.len(), 6 * 6 * 6);
@@ -757,7 +1095,11 @@ mod tests {
 
     #[test]
     fn actor_mesh_emits_cow_model_at_feet_position() {
-        let mesh = actor_mesh(&[ActorInstance::cow_model(Vec3::ZERO, 0.0, 0.9, 1.4)]);
+        let mesh = actor_mesh(
+            &[ActorInstance::cow_model(Vec3::ZERO, 0.0, 0.9, 1.4)],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+        );
 
         assert_eq!(mesh.vertices.len(), 9 * 6 * 4);
         assert_eq!(mesh.indices.len(), 9 * 6 * 6);
@@ -767,6 +1109,24 @@ mod tests {
         assert!((bounds.max.y - 25.0 / 16.0).abs() < 1.0e-6);
         assert!(bounds.max.z > 0.85);
         assert!(bounds.min.z < -0.60);
+    }
+
+    #[test]
+    fn cow_model_uses_cow_texture_region() {
+        let mesh = actor_mesh(
+            &[ActorInstance::cow_model(Vec3::ZERO, 0.0, 0.9, 1.4)],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+        );
+        let white_uv = [0.5 / 65.0, 0.5 / 32.0];
+
+        assert!(mesh.vertices.iter().any(|vertex| vertex.uv != white_uv));
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| vertex.uv[0] >= 1.0 / 65.0)
+        );
+        assert!(mesh.vertices.iter().all(|vertex| vertex.uv[0] <= 1.0));
     }
 
     #[test]

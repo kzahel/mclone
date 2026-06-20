@@ -17,6 +17,7 @@ use mclone_protocol::{
 use mclone_server::IntegratedServer;
 
 use crate::MIN_RENDER_DISTANCE;
+use crate::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
 use crate::cli::SceneOptions;
 use crate::frame_pacing::{elapsed_ms, micros_to_ms};
 use crate::remote_session::RemoteServerSession;
@@ -127,6 +128,7 @@ pub(crate) struct WindowSceneRuntime {
     pub(crate) chunk_tracking_radius: u32,
     pub(crate) interest_center: ChunkPos,
     pub(crate) mesh_assets: TexturedMeshAssets,
+    pub(crate) actor_textures: ActorTextureAssets,
     render_sections: CachedTexturedRenderSections,
     dirty_render_chunks: BTreeSet<ChunkPos>,
     dirty_render_sections: BTreeSet<RenderSectionKey>,
@@ -246,6 +248,7 @@ impl WindowSceneRuntime {
         let render_distance = scene_render_distance(scene)?;
         let chunk_tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
         let mesh_assets = load_textured_mesh_assets()?;
+        let actor_textures = load_actor_texture_assets()?;
         let render_compile_worker = RenderSectionCompileWorker::new(mesh_assets.catalog.clone())?;
         let remote_session = scene
             .remote_addr
@@ -268,6 +271,7 @@ impl WindowSceneRuntime {
             chunk_tracking_radius,
             interest_center: ChunkPos::new(scene.chunk_x, scene.chunk_z),
             mesh_assets,
+            actor_textures,
             render_sections: CachedTexturedRenderSections::default(),
             dirty_render_chunks: BTreeSet::new(),
             dirty_render_sections: BTreeSet::new(),

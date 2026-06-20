@@ -148,7 +148,12 @@ pub(crate) fn run_headless_screenshot(
                 &runtime.traversal_ready_render_section_keys(spectator.position),
             );
             let sky = SkyRenderer::new(frame.device, HEADLESS_FORMAT);
-            let mut actors = ActorDrawResources::new(frame.device, HEADLESS_FORMAT);
+            let mut actors = ActorDrawResources::new(
+                frame.device,
+                frame.queue,
+                HEADLESS_FORMAT,
+                runtime.actor_textures.atlas.as_upload(),
+            )?;
             let mut gui = GuiRenderer::new(frame.device, HEADLESS_FORMAT);
 
             render_stats.section_count = draw.section_count();

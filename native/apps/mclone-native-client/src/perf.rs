@@ -1270,7 +1270,12 @@ pub(crate) fn run_frame_budget_probe(
                 &runtime.traversal_ready_render_section_keys(initial_spectator.position),
             );
             let sky = SkyRenderer::new(device, format);
-            let actors = ActorDrawResources::new(device, format);
+            let actors = ActorDrawResources::new(
+                device,
+                queue,
+                format,
+                runtime.actor_textures.atlas.as_upload(),
+            )?;
             let gui = GuiRenderer::new(device, format);
             let mut render_stats = RenderStreamStats {
                 section_count: draw.section_count(),
