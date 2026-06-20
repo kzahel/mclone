@@ -1,20 +1,15 @@
-use std::collections::BTreeSet;
-
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use super::{SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime};
-use mclone_assets::{
-    AssetSource, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry, PackedAssetSource,
-    ResourceLocation, TextureAtlasPlan, TextureMaterial,
-};
+use mclone_assets::PackedAssetSource;
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkSnapshot,
     SECTION_HEIGHT, chunk_section_index,
 };
 use mclone_mesh::{
-    TexturedChunkMeshInput, TexturedMeshCatalog, TexturedVisibleChunkMesh,
-    build_textured_visible_chunk_mesh, quad_face_count_from_indices,
+    TextureAtlasImage, TexturedChunkMeshInput, TexturedMeshCatalog, TexturedVisibleChunkMesh,
+    build_textured_visible_chunk_mesh, load_textured_terrain_assets, quad_face_count_from_indices,
 };
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas, TexturedChunkDrawResources,
@@ -206,7 +201,7 @@ async fn render_generated_chunk(
         &context.queue,
         context.format,
         &mesh,
-        mesh_assets.atlas.as_upload(),
+        atlas_upload(&mesh_assets.atlas),
     )
     .map_err(|error| format!("failed to upload generated textured chunk mesh: {error:#}"))?;
     let mut encoder = context
@@ -249,25 +244,16 @@ async fn render_generated_chunk(
 #[derive(Clone, Debug)]
 struct WebTexturedMeshAssets {
     catalog: TexturedMeshCatalog,
-    atlas: WebTextureAtlasImage,
+    atlas: TextureAtlasImage,
     atlas_sprite_count: usize,
     asset_pack_file_count: usize,
 }
 
-#[derive(Clone, Debug)]
-struct WebTextureAtlasImage {
-    width: u32,
-    height: u32,
-    rgba: Vec<u8>,
-}
-
-impl WebTextureAtlasImage {
-    fn as_upload(&self) -> ChunkTextureAtlas<'_> {
-        ChunkTextureAtlas {
-            width: self.width,
-            height: self.height,
-            rgba: &self.rgba,
-        }
+fn atlas_upload(atlas: &TextureAtlasImage) -> ChunkTextureAtlas<'_> {
+    ChunkTextureAtlas {
+        width: atlas.width,
+        height: atlas.height,
+        rgba: atlas.rgba(),
     }
 }
 
@@ -275,125 +261,14 @@ fn load_textured_mesh_assets_from_pack(bytes: Vec<u8>) -> Result<WebTexturedMesh
     let source = PackedAssetSource::from_bytes(bytes)
         .map_err(|error| format!("failed to parse packed Minecraft assets: {error}"))?;
     let asset_pack_file_count = source.file_count();
-    let registry = BlockStateRegistry::terrain_mvp();
-    let blockstates = BlockStateAssetIndex::load_namespace(&source, "minecraft")
-        .map_err(|error| format!("failed to load vanilla blockstate assets from pack: {error}"))?;
-    registry
-        .validate_blockstate_assets(&blockstates)
-        .map_err(|error| format!("terrain MVP registry is not covered by pack: {error}"))?;
-    let selected_model_refs = selected_model_refs(&registry, &blockstates)?;
-    let models =
-        BlockModelLibrary::load_model_tree(&source, selected_model_refs.iter().cloned())
-            .map_err(|error| format!("failed to load packed vanilla block model tree: {error}"))?;
-    let mut materials = models
-        .collect_materials_for_models(selected_model_refs.iter().cloned())
-        .map_err(|error| format!("failed to collect selected block model materials: {error}"))?;
-    insert_fluid_materials(&mut materials);
-    let atlas_plan = TextureAtlasPlan::build(&source, materials)
-        .map_err(|error| format!("failed to plan packed texture atlas: {error}"))?;
-    let atlas_sprite_count = atlas_plan.len();
-    let atlas = stitch_texture_atlas(&source, &atlas_plan)?;
-    let catalog = TexturedMeshCatalog::from_assets(&registry, &blockstates, &models, &atlas_plan)
-        .map_err(|error| format!("failed to build web textured mesh catalog: {error}"))?;
+    let assets = load_textured_terrain_assets(&source)
+        .map_err(|error| format!("failed to load packed textured terrain assets: {error}"))?;
 
     Ok(WebTexturedMeshAssets {
-        catalog,
-        atlas,
-        atlas_sprite_count,
+        catalog: assets.catalog,
+        atlas: assets.atlas,
+        atlas_sprite_count: assets.atlas_sprite_count,
         asset_pack_file_count,
-    })
-}
-
-fn selected_model_refs(
-    registry: &BlockStateRegistry,
-    blockstates: &BlockStateAssetIndex,
-) -> Result<BTreeSet<ResourceLocation>, String> {
-    let mut refs = BTreeSet::new();
-    for record in registry.records() {
-        let asset = blockstates
-            .get(&record.block)
-            .ok_or_else(|| format!("missing blockstate asset for {}", record.block))?;
-        if let Some(variant_key) = record.asset_variant_key(asset) {
-            let variants = asset.variants_for_key(&variant_key).ok_or_else(|| {
-                format!(
-                    "missing blockstate variant `{variant_key}` for {}",
-                    record.block
-                )
-            })?;
-            if let Some(variant) = variants.first() {
-                refs.insert(variant.model.clone());
-            }
-        } else if record.variant_key().is_empty() && !asset.model_refs.is_empty() {
-            refs.extend(asset.model_refs.iter().cloned());
-        } else {
-            return Err(format!(
-                "missing blockstate variant `{}` for {}",
-                record.variant_key(),
-                record.block
-            ));
-        }
-    }
-    Ok(refs)
-}
-
-fn insert_fluid_materials(materials: &mut BTreeSet<TextureMaterial>) {
-    for texture in [
-        "minecraft:block/water_still",
-        "minecraft:block/water_flow",
-        "minecraft:block/lava_still",
-        "minecraft:block/lava_flow",
-    ] {
-        materials.insert(TextureMaterial::blocks(
-            ResourceLocation::parse(texture).expect("fluid texture locations are valid"),
-        ));
-    }
-}
-
-fn stitch_texture_atlas(
-    source: &impl AssetSource,
-    plan: &TextureAtlasPlan,
-) -> Result<WebTextureAtlasImage, String> {
-    let width = plan.width();
-    let height = plan.height();
-    if width == 0 || height == 0 {
-        return Err("cannot stitch an empty texture atlas".to_owned());
-    }
-    let mut atlas = vec![0; width as usize * height as usize * 4];
-
-    for sprite in plan.sprites() {
-        let bytes = source
-            .read(&sprite.info.path)
-            .map_err(|error| format!("failed to read texture {}: {error}", sprite.info.path))?
-            .ok_or_else(|| format!("missing texture {}", sprite.info.path))?;
-        let image = image::load_from_memory(&bytes)
-            .map_err(|error| format!("failed to decode texture {}: {error}", sprite.info.path))?
-            .to_rgba8();
-        let (sprite_width, sprite_height) = image.dimensions();
-        if sprite_width != sprite.info.width || sprite_height != sprite.info.height {
-            return Err(format!(
-                "texture {} decoded as {}x{} but atlas plan expected {}x{}",
-                sprite.info.path,
-                sprite_width,
-                sprite_height,
-                sprite.info.width,
-                sprite.info.height
-            ));
-        }
-
-        let image = image.as_raw();
-        for row in 0..sprite.info.height {
-            let source_start = (row * sprite.info.width * 4) as usize;
-            let source_end = source_start + (sprite.info.width * 4) as usize;
-            let dest_start = (((sprite.y + row) * width + sprite.x) * 4) as usize;
-            let dest_end = dest_start + (sprite.info.width * 4) as usize;
-            atlas[dest_start..dest_end].copy_from_slice(&image[source_start..source_end]);
-        }
-    }
-
-    Ok(WebTextureAtlasImage {
-        width,
-        height,
-        rgba: atlas,
     })
 }
 

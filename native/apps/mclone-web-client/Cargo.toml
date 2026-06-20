@@ -14,7 +14,6 @@ mclone-net.workspace = true
 mclone-protocol.workspace = true
 mclone-render.workspace = true
 mclone-server.workspace = true
-image.workspace = true
 js-sys.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true

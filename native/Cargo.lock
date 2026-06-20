@@ -1051,6 +1051,7 @@ dependencies = [
 name = "mclone-mesh"
 version = "0.0.0"
 dependencies = [
+ "image",
  "mclone-assets",
  "mclone-core",
  "mclone-light",
@@ -1130,7 +1131,6 @@ version = "0.0.0"
 name = "mclone-web-client"
 version = "0.0.0"
 dependencies = [
- "image",
  "js-sys",
  "mclone-assets",
  "mclone-client",

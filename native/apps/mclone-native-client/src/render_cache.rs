@@ -5,20 +5,18 @@ use std::sync::mpsc;
 use std::thread;
 
 use anyhow::{Context, Result, bail};
-use mclone_assets::{
-    AssetSource, AssetSourceChain, BlockModelLibrary, BlockStateAssetIndex, BlockStateRegistry,
-    FilesystemAssetSource, PackedAssetSource, ResourceLocation, TextureAtlasPlan, TextureMaterial,
-};
+use mclone_assets::{AssetSourceChain, FilesystemAssetSource, PackedAssetSource};
 use mclone_client::ClientRuntime;
 use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
     PackedLightSection, SECTION_HEIGHT,
 };
 use mclone_mesh::{
-    RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog,
-    TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, VisibilityGraphBuildStats,
-    build_textured_render_sections_for_section_set_with_stats,
-    build_textured_render_sections_with_stats, quad_face_count_from_indices,
+    RenderSectionKey, TextureAtlasImage as MeshTextureAtlasImage, TexturedChunkMeshInput,
+    TexturedMeshCatalog, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
+    VisibilityGraphBuildStats, build_textured_render_sections_for_section_set_with_stats,
+    build_textured_render_sections_with_stats, load_textured_terrain_assets,
+    quad_face_count_from_indices,
 };
 use mclone_render::chunk::ChunkTextureAtlas;
 
@@ -61,6 +59,16 @@ impl TextureAtlasImage {
             width: self.width,
             height: self.height,
             rgba: &self.rgba,
+        }
+    }
+}
+
+impl From<MeshTextureAtlasImage> for TextureAtlasImage {
+    fn from(value: MeshTextureAtlasImage) -> Self {
+        Self {
+            width: value.width,
+            height: value.height,
+            rgba: value.rgba,
         }
     }
 }
@@ -374,121 +382,12 @@ pub(crate) struct TexturedMeshAssets {
 
 pub(crate) fn load_textured_mesh_assets() -> Result<TexturedMeshAssets> {
     let source = load_asset_source()?;
-    load_textured_mesh_assets_from_source(&source)
-}
+    let assets =
+        load_textured_terrain_assets(&source).context("failed to load textured terrain assets")?;
 
-fn load_textured_mesh_assets_from_source(source: &impl AssetSource) -> Result<TexturedMeshAssets> {
-    let registry = BlockStateRegistry::terrain_mvp();
-    let blockstates = BlockStateAssetIndex::load_namespace(source, "minecraft")
-        .context("failed to load vanilla blockstate assets")?;
-    registry
-        .validate_blockstate_assets(&blockstates)
-        .context("terrain MVP registry is not covered by vanilla blockstates")?;
-    let selected_model_refs = selected_model_refs(&registry, &blockstates)?;
-    let models = BlockModelLibrary::load_model_tree(source, selected_model_refs.iter().cloned())
-        .context("failed to load vanilla block model tree")?;
-    let mut materials = models
-        .collect_materials_for_models(selected_model_refs.iter().cloned())
-        .context("failed to collect selected block model materials")?;
-    insert_fluid_materials(&mut materials);
-    let atlas_plan =
-        TextureAtlasPlan::build(source, materials).context("failed to plan block texture atlas")?;
-    let atlas = stitch_texture_atlas(source, &atlas_plan)?;
-    let catalog = TexturedMeshCatalog::from_assets(&registry, &blockstates, &models, &atlas_plan)
-        .context("failed to build textured mesh catalog")?;
-
-    Ok(TexturedMeshAssets { catalog, atlas })
-}
-
-fn insert_fluid_materials(materials: &mut BTreeSet<TextureMaterial>) {
-    for texture in [
-        "minecraft:block/water_still",
-        "minecraft:block/water_flow",
-        "minecraft:block/lava_still",
-        "minecraft:block/lava_flow",
-    ] {
-        materials.insert(TextureMaterial::blocks(
-            ResourceLocation::parse(texture).expect("fluid texture locations are valid"),
-        ));
-    }
-}
-
-fn selected_model_refs(
-    registry: &BlockStateRegistry,
-    blockstates: &BlockStateAssetIndex,
-) -> Result<BTreeSet<mclone_assets::ResourceLocation>> {
-    let mut refs = BTreeSet::new();
-    for record in registry.records() {
-        let asset = blockstates
-            .get(&record.block)
-            .with_context(|| format!("missing blockstate asset for {}", record.block))?;
-        if let Some(variant_key) = record.asset_variant_key(asset) {
-            let Some(variants) = asset.variants_for_key(&variant_key) else {
-                bail!(
-                    "missing blockstate variant `{variant_key}` for {}",
-                    record.block
-                );
-            };
-            if let Some(variant) = variants.first() {
-                refs.insert(variant.model.clone());
-            }
-        } else if record.variant_key().is_empty() && !asset.model_refs.is_empty() {
-            refs.extend(asset.model_refs.iter().cloned());
-        } else {
-            bail!(
-                "missing blockstate variant `{}` for {}",
-                record.variant_key(),
-                record.block
-            );
-        }
-    }
-    Ok(refs)
-}
-
-fn stitch_texture_atlas(
-    source: &impl AssetSource,
-    plan: &TextureAtlasPlan,
-) -> Result<TextureAtlasImage> {
-    let width = plan.width();
-    let height = plan.height();
-    if width == 0 || height == 0 {
-        bail!("cannot stitch an empty texture atlas");
-    }
-    let mut atlas = vec![0; width as usize * height as usize * 4];
-
-    for sprite in plan.sprites() {
-        let bytes = source
-            .read(&sprite.info.path)?
-            .with_context(|| format!("missing texture {}", sprite.info.path))?;
-        let image = image::load_from_memory(&bytes)
-            .with_context(|| format!("failed to decode texture {}", sprite.info.path))?
-            .to_rgba8();
-        let (sprite_width, sprite_height) = image.dimensions();
-        if sprite_width != sprite.info.width || sprite_height != sprite.info.height {
-            bail!(
-                "texture {} decoded as {}x{} but atlas plan expected {}x{}",
-                sprite.info.path,
-                sprite_width,
-                sprite_height,
-                sprite.info.width,
-                sprite.info.height
-            );
-        }
-
-        let image = image.as_raw();
-        for row in 0..sprite.info.height {
-            let source_start = (row * sprite.info.width * 4) as usize;
-            let source_end = source_start + (sprite.info.width * 4) as usize;
-            let dest_start = (((sprite.y + row) * width + sprite.x) * 4) as usize;
-            let dest_end = dest_start + (sprite.info.width * 4) as usize;
-            atlas[dest_start..dest_end].copy_from_slice(&image[source_start..source_end]);
-        }
-    }
-
-    Ok(TextureAtlasImage {
-        width,
-        height,
-        rgba: atlas,
+    Ok(TexturedMeshAssets {
+        catalog: assets.catalog,
+        atlas: assets.atlas.into(),
     })
 }
 

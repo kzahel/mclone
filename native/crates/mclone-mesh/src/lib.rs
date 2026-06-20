@@ -5,6 +5,7 @@ mod builder;
 mod catalog;
 mod data;
 mod render_facts;
+mod terrain_assets;
 mod visibility;
 
 use mclone_core::BlockStateId;
@@ -27,6 +28,10 @@ pub use data::{
     VisibilityGraphBuildStats, VisibleChunkMesh, quad_face_count_from_indices,
 };
 pub use mclone_core::{CHUNK_WIDTH, SECTION_HEIGHT as RENDER_SECTION_HEIGHT};
+pub use terrain_assets::{
+    TextureAtlasImage, TexturedTerrainAssetError, TexturedTerrainAssets,
+    load_textured_terrain_assets,
+};
 pub use visibility::{SectionFace, VisGraph, VisibilitySet};
 
 pub const QUAD_FACE_INDEX_COUNT: u32 = 6;
