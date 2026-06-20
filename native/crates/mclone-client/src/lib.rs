@@ -14,6 +14,28 @@ use mclone_protocol::{
     SectionBlockUpdate, ServerUpdate,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RemotePlayerPresentation {
+    pub id: RemotePlayerId,
+    /// Authoritative feet position in world coordinates.
+    pub feet_position: mclone_core::Vec3d,
+    pub y_rot_degrees: f32,
+    pub x_rot_degrees: f32,
+    pub on_ground: bool,
+}
+
+impl From<RemotePlayerUpdate> for RemotePlayerPresentation {
+    fn from(update: RemotePlayerUpdate) -> Self {
+        Self {
+            id: update.id,
+            feet_position: update.position,
+            y_rot_degrees: update.y_rot_degrees,
+            x_rot_degrees: update.x_rot_degrees,
+            on_ground: update.on_ground,
+        }
+    }
+}
+
 pub use interaction::{CREATIVE_PICK_RANGE, ClientInteractionController};
 pub use inventory::ClientInventory;
 pub use player::{
@@ -135,6 +157,14 @@ impl ClientRuntime {
 
     pub fn remote_player_count(&self) -> usize {
         self.remote_players.len()
+    }
+
+    pub fn remote_player_presentations(&self) -> Vec<RemotePlayerPresentation> {
+        self.remote_players
+            .values()
+            .copied()
+            .map(RemotePlayerPresentation::from)
+            .collect()
     }
 
     pub fn drain_player_position_updates(
@@ -357,6 +387,35 @@ mod tests {
         runtime.apply_update(ServerUpdate::RemotePlayerRemove { id });
         assert_eq!(runtime.remote_player_count(), 0);
         assert_eq!(runtime.remote_player(id), None);
+    }
+
+    #[test]
+    fn remote_player_presentations_expose_render_facing_snapshot() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let update = RemotePlayerUpdate {
+            id: RemotePlayerId(3),
+            position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
+            y_rot_degrees: -90.0,
+            x_rot_degrees: 15.0,
+            on_ground: true,
+        };
+
+        runtime.apply_update(ServerUpdate::RemotePlayerAdd(update));
+
+        assert_eq!(
+            runtime.remote_player_presentations(),
+            vec![RemotePlayerPresentation {
+                id: update.id,
+                feet_position: update.position,
+                y_rot_degrees: update.y_rot_degrees,
+                x_rot_degrees: update.x_rot_degrees,
+                on_ground: update.on_ground,
+            }]
+        );
+
+        runtime.apply_update(ServerUpdate::RemotePlayerRemove { id: update.id });
+
+        assert!(runtime.remote_player_presentations().is_empty());
     }
 
     #[test]

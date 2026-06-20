@@ -8,6 +8,7 @@ use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionUploadReport,
     textured_section_visibility_stats_with_options_and_ready_sections,
 };
+use mclone_render::entity::ActorDrawResources;
 use mclone_render::gui::GuiRenderer;
 use mclone_render::headless::{
     HeadlessFrameLoopOptions, HeadlessTimedemoOptions, run_headless_frame_loop,
@@ -17,7 +18,10 @@ use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_ui::GuiScale;
 
-use crate::app::{RenderStreamStats, record_render_section_update_stats, render_full_frame};
+use crate::app::{
+    RenderStreamStats, record_render_section_update_stats, remote_player_actor_instances,
+    render_full_frame,
+};
 use crate::camera::{
     SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED, SpectatorCamera,
 };
@@ -498,6 +502,7 @@ struct FrameBudgetProbeState {
     depth: ChunkDepthTarget,
     sky: SkyRenderer,
     draw: TexturedSectionDrawResources,
+    actors: ActorDrawResources,
     gui: GuiRenderer,
     ui: NativeUi,
     render_stats: RenderStreamStats,
@@ -1263,6 +1268,7 @@ pub(crate) fn run_frame_budget_probe(
                 &runtime.traversal_ready_render_section_keys(initial_spectator.position),
             );
             let sky = SkyRenderer::new(device, format);
+            let actors = ActorDrawResources::new(device, format);
             let gui = GuiRenderer::new(device, format);
             let mut render_stats = RenderStreamStats {
                 section_count: draw.section_count(),
@@ -1279,6 +1285,7 @@ pub(crate) fn run_frame_budget_probe(
                 depth,
                 sky,
                 draw,
+                actors,
                 gui,
                 ui,
                 render_stats,
@@ -1347,6 +1354,7 @@ pub(crate) fn run_frame_budget_probe(
             let sky_clear_color = state.runtime.sky_clear_color();
             let time_of_day = state.runtime.time_of_day();
             let sun_angle = state.runtime.sun_angle();
+            let remote_player_actors = remote_player_actor_instances(&state.runtime.client);
             state.draw.set_traversal_ready_sections(
                 &state
                     .runtime
@@ -1358,8 +1366,10 @@ pub(crate) fn run_frame_budget_probe(
                 &state.depth,
                 &state.sky,
                 &mut state.draw,
+                &mut state.actors,
                 &mut state.gui,
                 camera,
+                &remote_player_actors,
                 sky_clear_color,
                 time_of_day,
                 sun_angle,

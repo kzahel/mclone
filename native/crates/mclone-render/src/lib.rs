@@ -4,6 +4,7 @@
 mod gpu_util;
 
 pub mod chunk;
+pub mod entity;
 pub mod gui;
 pub mod light_texture;
 pub mod sky;

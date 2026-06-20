@@ -87,12 +87,7 @@ pub fn sunrise_color(time_of_day: f32) -> Option<[f32; 4]> {
     let t = cos_phase / 0.4 * 0.5 + 0.5;
     let mut alpha = 1.0 - (1.0 - (t * PI).sin()) * 0.99;
     alpha *= alpha;
-    Some([
-        t * 0.3 + 0.7,
-        t * t * 0.7 + 0.2,
-        t * t * 0.0 + 0.2,
-        alpha,
-    ])
+    Some([t * 0.3 + 0.7, t * t * 0.7 + 0.2, t * t * 0.0 + 0.2, alpha])
 }
 
 #[cfg(test)]
@@ -133,8 +128,17 @@ mod tests {
         let glow = sunrise_color(0.25).expect("dusk band should produce a glow color");
         // Center of the band: t = 0.5, so reddish-orange with mid alpha.
         assert!((glow[0] - 0.85).abs() < 1e-5, "r = {}", glow[0]);
-        assert!(glow[1] > glow[2], "green {} should exceed blue {}", glow[1], glow[2]);
-        assert!((0.0..=1.0).contains(&glow[3]), "alpha {} out of range", glow[3]);
+        assert!(
+            glow[1] > glow[2],
+            "green {} should exceed blue {}",
+            glow[1],
+            glow[2]
+        );
+        assert!(
+            (0.0..=1.0).contains(&glow[3]),
+            "alpha {} out of range",
+            glow[3]
+        );
     }
 
     #[test]

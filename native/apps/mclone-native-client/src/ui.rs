@@ -115,6 +115,12 @@ impl DebugPaneStats {
                 self.render.face_count
             ),
             format!(
+                "ACTOR R {}/{} I{}",
+                self.render.drawn_remote_actor_count,
+                self.render.remote_actor_count,
+                self.render.drawn_remote_actor_index_count
+            ),
+            format!(
                 "MESH R{} U{} D{} SQ{} CQ{} X{} F {:.1}MS",
                 self.render.last_rebuilt_section_count,
                 self.render.last_uploaded_section_count,
@@ -769,6 +775,9 @@ mod tests {
                 last_rebuilt_section_count: 2,
                 last_uploaded_section_count: 2,
                 last_frame_ms: 16.7,
+                remote_actor_count: 2,
+                drawn_remote_actor_count: 1,
+                drawn_remote_actor_index_count: 180,
                 ..RenderStreamStats::default()
             },
             frame: FrameTimingStats {
@@ -807,6 +816,7 @@ mod tests {
         assert_eq!(lines[4], "VIEW R2 T3");
         assert_eq!(lines[5], "OCC ON  LIGHT");
         assert!(lines.iter().any(|line| line == "TRACK P1 V8 A8 Q0"));
+        assert!(lines.iter().any(|line| line == "ACTOR R 1/2 I180"));
         assert!(lines.iter().any(|line| line == "BUDGET 8.3MS FRAME 16.7MS"));
         assert!(lines.iter().any(|line| line == "OVER 3/1/0 WORST 33.4"));
 

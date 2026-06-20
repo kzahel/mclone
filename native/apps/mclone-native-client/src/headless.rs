@@ -10,6 +10,7 @@ use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionDrawResources, TexturedSectionRenderOptions,
     TexturedSectionUploadReport,
 };
+use mclone_render::entity::ActorDrawResources;
 use mclone_render::gui::GuiRenderer;
 use mclone_render::headless::{
     HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessFrameOptions, write_headless_frame_png,
@@ -18,7 +19,10 @@ use mclone_render::headless::{
 use mclone_render::sky_render::SkyRenderer;
 use mclone_ui::GuiScale;
 
-use crate::app::{RenderStreamStats, record_render_section_update_stats, render_full_frame};
+use crate::app::{
+    RenderStreamStats, record_render_section_update_stats, remote_player_actor_instances,
+    render_full_frame,
+};
 use crate::camera::SpectatorCamera;
 use crate::cli::{HeadlessScreenshotOptions, SceneOptions};
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
@@ -38,6 +42,8 @@ pub(crate) struct HeadlessScreenshotReport {
     pub(crate) drawn_index_count: u32,
     pub(crate) gui_command_count: usize,
     pub(crate) remote_player_count: usize,
+    pub(crate) remote_actor_count: usize,
+    pub(crate) drawn_remote_actor_count: usize,
 }
 pub(crate) fn write_headless_chunk_scenarios(
     directory: &Path,
@@ -84,6 +90,7 @@ pub(crate) fn run_headless_screenshot(
     if options.scripted_interaction {
         apply_scripted_interaction(&mut runtime, &mut spectator, initial_player_position)?;
     }
+    frame_first_remote_player_for_screenshot(&runtime, &mut spectator);
     let section_update = runtime.sync_all_render_sections(spectator.position)?;
     let sections = runtime.cached_sections();
     if sections.is_empty() {
@@ -108,6 +115,7 @@ pub(crate) fn run_headless_screenshot(
     let time_of_day = runtime.time_of_day();
     let sun_angle = runtime.sun_angle();
     let runtime_stats = runtime.stats();
+    let remote_player_actors = remote_player_actor_instances(&runtime.client);
     let initial_upload = TexturedSectionUploadReport {
         uploaded_section_count: section_update.rebuilt_section_count(),
         removed_section_count: section_update.removed_section_count(),
@@ -135,6 +143,7 @@ pub(crate) fn run_headless_screenshot(
                 &runtime.traversal_ready_render_section_keys(spectator.position),
             );
             let sky = SkyRenderer::new(frame.device, HEADLESS_FORMAT);
+            let mut actors = ActorDrawResources::new(frame.device, HEADLESS_FORMAT);
             let mut gui = GuiRenderer::new(frame.device, HEADLESS_FORMAT);
 
             render_stats.section_count = draw.section_count();
@@ -160,8 +169,10 @@ pub(crate) fn run_headless_screenshot(
                 &depth,
                 &sky,
                 &mut draw,
+                &mut actors,
                 &mut gui,
                 camera,
+                &remote_player_actors,
                 sky_clear_color,
                 time_of_day,
                 sun_angle,
@@ -185,6 +196,8 @@ pub(crate) fn run_headless_screenshot(
         drawn_index_count: summary.drawn_index_count,
         gui_command_count: summary.gui_command_count,
         remote_player_count: runtime.client.remote_player_count(),
+        remote_actor_count: summary.remote_actor_count,
+        drawn_remote_actor_count: summary.drawn_remote_actor_count,
     })
 }
 
@@ -302,6 +315,37 @@ fn send_scripted_player_move(runtime: &mut WindowSceneRuntime, position: Vec3d) 
         }))
         .context("failed to sync scripted player position")?;
     Ok(())
+}
+
+fn frame_first_remote_player_for_screenshot(
+    runtime: &WindowSceneRuntime,
+    spectator: &mut SpectatorCamera,
+) {
+    let Some(remote) = runtime
+        .client
+        .remote_player_presentations()
+        .first()
+        .copied()
+    else {
+        return;
+    };
+    let target = glam::Vec3::new(
+        remote.feet_position.x as f32,
+        remote.feet_position.y as f32 + 1.0,
+        remote.feet_position.z as f32,
+    );
+    let eye = target + glam::Vec3::new(-2.2, 1.4, -4.8);
+    aim_spectator_at(spectator, eye, target);
+}
+
+fn aim_spectator_at(spectator: &mut SpectatorCamera, eye: glam::Vec3, target: glam::Vec3) {
+    let direction = target - eye;
+    let Some(direction) = direction.try_normalize() else {
+        return;
+    };
+    spectator.position = eye;
+    spectator.yaw = direction.x.atan2(direction.z);
+    spectator.pitch = direction.y.clamp(-1.0, 1.0).asin();
 }
 
 fn chunk_capture_scenarios(scene: &SceneOptions) -> [(&'static str, ChunkCamera); 3] {

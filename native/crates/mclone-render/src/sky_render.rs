@@ -358,7 +358,10 @@ mod tests {
         // Center is at y = +16, ring radius reaches 512.
         assert_eq!(vertices[0][1], DISC_HEIGHT);
         assert!((vertices[1][0].hypot(vertices[1][2]) - DISC_RADIUS).abs() < 1e-2);
-        assert_eq!(fan_indices(DISC_VERTEX_COUNT).len(), (DISC_RING_COUNT - 1) * 3);
+        assert_eq!(
+            fan_indices(DISC_VERTEX_COUNT).len(),
+            (DISC_RING_COUNT - 1) * 3
+        );
     }
 
     #[test]
@@ -370,7 +373,10 @@ mod tests {
         assert!(dawn[0][1].abs() < 1e-3, "center y = {}", dawn[0][1]);
         // Flipping the sun below the horizon mirrors the glow to the opposite side.
         let dusk = glow_vertices(color, -1.0);
-        assert!((dawn[0][0] + dusk[0][0]).abs() < 1e-3, "glow should mirror across origin");
+        assert!(
+            (dawn[0][0] + dusk[0][0]).abs() < 1e-3,
+            "glow should mirror across origin"
+        );
         // Center keeps full alpha; ring fades to zero.
         assert_eq!(dawn[0][6], color[3]);
         assert_eq!(dawn[1][6], 0.0);

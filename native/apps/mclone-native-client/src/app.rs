@@ -12,6 +12,7 @@ use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, TexturedSectionDrawResources,
     TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
+use mclone_render::entity::{ActorDrawResources, ActorInstance};
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_render::sky_render::SkyRenderer;
@@ -128,6 +129,9 @@ pub(crate) struct RenderStreamStats {
     pub(crate) last_remesh_ms: f64,
     pub(crate) last_upload_ms: f64,
     pub(crate) last_frame_ms: f32,
+    pub(crate) remote_actor_count: usize,
+    pub(crate) drawn_remote_actor_count: usize,
+    pub(crate) drawn_remote_actor_index_count: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -137,6 +141,8 @@ pub(crate) struct FullFrameRenderSummary {
     pub(crate) index_count: u32,
     pub(crate) drawn_index_count: u32,
     pub(crate) gui_command_count: usize,
+    pub(crate) remote_actor_count: usize,
+    pub(crate) drawn_remote_actor_count: usize,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -145,8 +151,10 @@ pub(crate) fn render_full_frame(
     depth: &ChunkDepthTarget,
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
+    actors: &mut ActorDrawResources,
     gui: &mut GuiRenderer,
     camera: ChunkCamera,
+    remote_player_actors: &[ActorInstance],
     sky_clear_color: wgpu::Color,
     time_of_day: f32,
     sun_angle: f32,
@@ -162,6 +170,7 @@ pub(crate) fn render_full_frame(
     let gui_active = ui_active || debug_stats.is_some();
     let render_options =
         render_options.with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day));
+    let mut actor_stats = mclone_render::entity::ActorRenderStats::default();
 
     if !ui_covers_world {
         let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
@@ -190,11 +199,22 @@ pub(crate) fn render_full_frame(
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
         render_stats.drawn_index_count = frame_stats.drawn_index_count;
+        actor_stats = actors.render(
+            frame.device,
+            frame.queue,
+            frame.encoder,
+            frame.target.with_depth(&depth.view),
+            render_view,
+            remote_player_actors,
+        )?;
     } else {
         render_stats.drawn_section_count = 0;
         render_stats.drawn_face_count = 0;
         render_stats.drawn_index_count = 0;
     }
+    render_stats.remote_actor_count = remote_player_actors.len();
+    render_stats.drawn_remote_actor_count = actor_stats.drawn_actor_count;
+    render_stats.drawn_remote_actor_index_count = actor_stats.index_count;
 
     let mut ui_draw = ui.render_draw_list(render_options, frame_pacing);
     if let Some(mut stats) = debug_stats {
@@ -225,6 +245,8 @@ pub(crate) fn render_full_frame(
         index_count: draw.index_count(),
         drawn_index_count: render_stats.drawn_index_count,
         gui_command_count,
+        remote_actor_count: remote_player_actors.len(),
+        drawn_remote_actor_count: actor_stats.drawn_actor_count,
     })
 }
 
@@ -242,6 +264,7 @@ struct ChunkApp {
     depth: Option<ChunkDepthTarget>,
     sky: Option<SkyRenderer>,
     draw: Option<TexturedSectionDrawResources>,
+    actors: Option<ActorDrawResources>,
     gui: Option<GuiRenderer>,
     mouse_locked: bool,
     mouse_lock_requested: bool,
@@ -276,6 +299,7 @@ impl ChunkApp {
             depth: None,
             sky: None,
             draw: None,
+            actors: None,
             gui: None,
             mouse_locked: false,
             mouse_lock_requested: false,
@@ -785,6 +809,21 @@ fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
     glam::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
 }
 
+pub(crate) fn remote_player_actor_instances(
+    client: &mclone_client::ClientRuntime,
+) -> Vec<ActorInstance> {
+    client
+        .remote_player_presentations()
+        .into_iter()
+        .map(|player| {
+            ActorInstance::remote_player(
+                glam_vec3_from_vec3d(player.feet_position),
+                player.y_rot_degrees,
+            )
+        })
+        .collect()
+}
+
 fn local_player_pose_from_spectator(spectator: &SpectatorCamera) -> LocalPlayerPose {
     LocalPlayerPose::from_eye_position(
         vec3d_from_glam(spectator.position),
@@ -927,6 +966,7 @@ impl ApplicationHandler for ChunkApp {
         );
         let upload_ms = elapsed_ms(upload_start.elapsed());
         let sky = SkyRenderer::new(&surface.device, surface.config.format);
+        let actors = ActorDrawResources::new(&surface.device, surface.config.format);
         let gui = GuiRenderer::new(&surface.device, surface.config.format);
         self.ui.set_scale(GuiScale::from_pixels(
             surface.config.width,
@@ -964,6 +1004,7 @@ impl ApplicationHandler for ChunkApp {
         self.depth = Some(depth);
         self.sky = Some(sky);
         self.draw = Some(draw);
+        self.actors = Some(actors);
         self.gui = Some(gui);
         self.surface = Some(surface);
         self.window = Some(window);
@@ -1200,6 +1241,7 @@ impl ApplicationHandler for ChunkApp {
                 let sun_angle = self.runtime.sun_angle();
                 let render_options = self.effective_render_options();
                 let frame_pacing = self.frame_pacing.ui_state();
+                let remote_player_actors = remote_player_actor_instances(&self.runtime.client);
                 let debug_stats = self
                     .debug_visible
                     .then(|| self.debug_pane_stats(render_options));
@@ -1209,13 +1251,22 @@ impl ApplicationHandler for ChunkApp {
                 let mut render_stats = self.render_stats;
                 let render_start = Instant::now();
                 let result = {
-                    let (Some(surface), Some(depth), Some(sky), Some(draw), Some(gui)) = (
+                    let (
+                        Some(surface),
+                        Some(depth),
+                        Some(sky),
+                        Some(draw),
+                        Some(actors),
+                        Some(gui),
+                    ) = (
                         &mut self.surface,
                         &self.depth,
                         &self.sky,
                         &mut self.draw,
+                        &mut self.actors,
                         &mut self.gui,
-                    ) else {
+                    )
+                    else {
                         return;
                     };
                     draw.set_traversal_ready_sections(&traversal_ready_sections);
@@ -1226,8 +1277,10 @@ impl ApplicationHandler for ChunkApp {
                             depth,
                             sky,
                             draw,
+                            actors,
                             gui,
                             camera,
+                            &remote_player_actors,
                             sky_clear_color,
                             time_of_day,
                             sun_angle,
@@ -1343,6 +1396,30 @@ mod tests {
         assert!(effective_render_options_for_camera(enabled, false).section_occlusion_culling);
         assert!(!effective_render_options_for_camera(enabled, true).section_occlusion_culling);
         assert!(!effective_render_options_for_camera(disabled, true).section_occlusion_culling);
+    }
+
+    #[test]
+    fn remote_player_actor_instances_follow_client_presentations() {
+        let integrated = mclone_client::ClientRuntime::local_integrated();
+        assert!(remote_player_actor_instances(&integrated).is_empty());
+
+        let mut remote =
+            mclone_client::ClientRuntime::new(mclone_client::ClientHost::RemoteDedicated);
+        remote.apply_update(mclone_protocol::ServerUpdate::RemotePlayerAdd(
+            mclone_protocol::RemotePlayerUpdate {
+                id: mclone_protocol::RemotePlayerId(9),
+                position: Vec3d::new(1.0, 64.0, 2.0),
+                y_rot_degrees: -90.0,
+                x_rot_degrees: 0.0,
+                on_ground: true,
+            },
+        ));
+
+        let actors = remote_player_actor_instances(&remote);
+
+        assert_eq!(actors.len(), 1);
+        assert_eq!(actors[0].feet_position, glam::Vec3::new(1.0, 64.0, 2.0));
+        assert!((actors[0].yaw_radians - 90.0_f32.to_radians()).abs() < 1.0e-6);
     }
 
     #[test]
