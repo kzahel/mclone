@@ -172,14 +172,15 @@ fn main() -> Result<()> {
         Cli::HeadlessScreenshot { options } => {
             let report = run_headless_screenshot(&options)?;
             println!(
-                "headless full-frame screenshot saved to {} ({}x{}, {} bytes, {} sections, {} drawn sections, {} GUI commands)",
+                "headless full-frame screenshot saved to {} ({}x{}, {} bytes, {} sections, {} drawn sections, {} GUI commands, {} remote players)",
                 report.path.display(),
                 report.width,
                 report.height,
                 report.byte_len,
                 report.section_count,
                 report.drawn_section_count,
-                report.gui_command_count
+                report.gui_command_count,
+                report.remote_player_count
             );
             Ok(())
         }
@@ -358,6 +359,8 @@ mod tests {
             "true".to_owned(),
             "--screenshot-scripted-interaction".to_owned(),
             "true".to_owned(),
+            "--screenshot-remote-settle-ms".to_owned(),
+            "750".to_owned(),
             "--force-fullbright".to_owned(),
             "--remote-addr".to_owned(),
             "127.0.0.1:25565".to_owned(),
@@ -382,6 +385,7 @@ mod tests {
                     ui: HeadlessScreenshotUi::Pause,
                     debug_pane: true,
                     scripted_interaction: true,
+                    remote_settle_ms: 750,
                 },
             }
         );

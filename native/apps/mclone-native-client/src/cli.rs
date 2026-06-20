@@ -12,6 +12,8 @@ use crate::{
     MAX_RENDER_DISTANCE, MAX_TIMEDEMO_FRAMES, MIN_RENDER_DISTANCE,
 };
 
+const MAX_SCREENSHOT_REMOTE_SETTLE_MS: u64 = 10_000;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SceneOptions {
     pub(crate) seed: i64,
@@ -95,6 +97,7 @@ pub(crate) struct HeadlessScreenshotOptions {
     pub(crate) ui: HeadlessScreenshotUi,
     pub(crate) debug_pane: bool,
     pub(crate) scripted_interaction: bool,
+    pub(crate) remote_settle_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -228,6 +231,7 @@ impl Cli {
         let mut screenshot_ui = HeadlessScreenshotUi::None;
         let mut screenshot_debug_pane = false;
         let mut screenshot_scripted_interaction = false;
+        let mut screenshot_remote_settle_ms = 0;
         let mut movement_perf = false;
         let mut timedemo = false;
         let mut frame_budget_probe = false;
@@ -348,6 +352,10 @@ impl Cli {
                 "--screenshot-scripted-interaction" => {
                     screenshot_scripted_interaction =
                         parse_bool_arg("--screenshot-scripted-interaction", args.next())?;
+                }
+                "--screenshot-remote-settle-ms" => {
+                    screenshot_remote_settle_ms =
+                        parse_screenshot_remote_settle_ms_arg(&arg, args.next())?;
                 }
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
                 "--height" => height = Some(parse_u32_arg("--height", args.next())?),
@@ -493,6 +501,7 @@ impl Cli {
                     ui: screenshot_ui,
                     debug_pane: screenshot_debug_pane,
                     scripted_interaction: screenshot_scripted_interaction,
+                    remote_settle_ms: screenshot_remote_settle_ms,
                 },
             }),
             None if movement_perf => Ok(Self::MovementPerf {
@@ -660,6 +669,14 @@ fn parse_bool_arg(flag: &str, value: Option<String>) -> Result<bool> {
     }
 }
 
+fn parse_screenshot_remote_settle_ms_arg(flag: &str, value: Option<String>) -> Result<u64> {
+    let parsed = parse_u64_arg(flag, value)?;
+    if parsed > MAX_SCREENSHOT_REMOTE_SETTLE_MS {
+        bail!("{flag} must be at most {MAX_SCREENSHOT_REMOTE_SETTLE_MS}");
+    }
+    Ok(parsed)
+}
+
 pub(crate) fn parse_screenshot_ui_arg(
     flag: &str,
     value: Option<String>,
@@ -686,7 +703,7 @@ fn print_help() {
            mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --headless-ui /tmp/mclone-ui-title.png [--width 960] [--height 540]\n\
-           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\

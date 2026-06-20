@@ -1,12 +1,15 @@
 import { spawn } from "node:child_process";
 import { mkdir, readFile, stat } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 
 const screenshotPath = process.env.MCLONE_NATIVE_REMOTE_SMOKE_SCREENSHOT
   ?? "/tmp/mclone-native-remote-client-smoke.png";
+const observerScreenshotPath = process.env.MCLONE_NATIVE_REMOTE_SMOKE_OBSERVER_SCREENSHOT
+  ?? siblingPath(screenshotPath, "observer");
 const width = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_WIDTH ?? "960", 10);
 const height = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_HEIGHT ?? "540", 10);
 const renderDistance = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_RENDER_DISTANCE ?? "2", 10);
+const remoteSettleMs = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_REMOTE_SETTLE_MS ?? "1500", 10);
 const timeoutMs = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_TIMEOUT_MS ?? "120000", 10);
 
 run().catch((error) => {
@@ -16,17 +19,12 @@ run().catch((error) => {
 
 async function run() {
   await mkdir(dirname(screenshotPath), { recursive: true });
+  await mkdir(dirname(observerScreenshotPath), { recursive: true });
+  await buildNativeBinaries();
 
-  const server = spawnCargo([
-    "run",
-    "--manifest-path",
-    "native/Cargo.toml",
-    "-p",
-    "mclone-dedicated-server",
-    "--",
+  const server = spawnNative("mclone-dedicated-server", [
     "--listen",
     "127.0.0.1:0",
-    "--serve-once",
   ]);
   const serverLog = captureProcessLog(server, "server");
   let serverExited = false;
@@ -35,65 +33,113 @@ async function run() {
     serverExited = true;
   });
 
+  const clients = [];
   try {
     const remoteAddr = await waitForServerAddress(server, serverLog, timeoutMs);
-    const client = spawnCargo([
-      "run",
-      "--manifest-path",
-      "native/Cargo.toml",
-      "-p",
-      "mclone-native-client",
-      "--",
-      "--screenshot",
-      screenshotPath,
-      "--width",
-      String(width),
-      "--height",
-      String(height),
-      "--render-distance",
-      String(renderDistance),
-      "--remote-addr",
-      remoteAddr,
-      "--disable-lighting",
-      "--screenshot-debug-pane",
-      "true",
-      "--screenshot-scripted-interaction",
-      "true",
-    ]);
-    const clientLog = captureProcessLog(client, "client");
-    await waitForExit(client, "native remote client", timeoutMs, clientLog);
-    const clientReport = parseClientScreenshotReport(clientLog.stdout);
-    await assertPngScreenshot(screenshotPath, width, height, clientReport);
-    const serverExitResult = await withTimeout(
-      serverExit,
-      timeoutMs,
-      "timed out waiting for dedicated smoke server to exit",
-      serverLog,
-    );
-    assertExitResult(serverExitResult, "dedicated smoke server", serverLog);
+    const configs = [
+      {
+        label: "actor",
+        screenshotPath,
+        scriptedInteraction: true,
+      },
+      {
+        label: "observer",
+        screenshotPath: observerScreenshotPath,
+        scriptedInteraction: false,
+      },
+    ];
+
+    for (const config of configs) {
+      const client = spawnNative("mclone-native-client", [
+        "--screenshot",
+        config.screenshotPath,
+        "--width",
+        String(width),
+        "--height",
+        String(height),
+        "--render-distance",
+        String(renderDistance),
+        "--remote-addr",
+        remoteAddr,
+        "--disable-lighting",
+        "--screenshot-debug-pane",
+        "true",
+        "--screenshot-scripted-interaction",
+        String(config.scriptedInteraction),
+        "--screenshot-remote-settle-ms",
+        String(remoteSettleMs),
+      ]);
+      const log = captureProcessLog(client, config.label);
+      clients.push({
+        config,
+        child: client,
+        log,
+        exit: waitForExit(client, `native remote ${config.label} client`, timeoutMs, log),
+      });
+    }
+
+    const clientReports = await Promise.all(clients.map(async ({ config, log, exit }) => {
+      await exit;
+      const clientReport = parseClientScreenshotReport(log.stdout);
+      await assertPngScreenshot(config.screenshotPath, width, height, clientReport);
+      if (clientReport.remotePlayerCount <= 0) {
+        throw new Error(
+          `remote ${config.label} client did not retain a remote player:\n${JSON.stringify(clientReport, null, 2)}`,
+        );
+      }
+      return {
+        label: config.label,
+        screenshotPath: config.screenshotPath,
+        scriptedInteraction: config.scriptedInteraction,
+        report: clientReport,
+      };
+    }));
 
     console.log(JSON.stringify({
-      smoke: "native_remote_dedicated_client",
+      smoke: "native_remote_dedicated_clients",
       remoteAddr,
-      screenshotPath,
       width,
       height,
       renderDistance,
-      clientReport,
+      remoteSettleMs,
+      clients: clientReports,
     }, null, 2));
   } finally {
+    for (const { child } of clients) {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+      }
+    }
     if (!serverExited) {
       server.kill("SIGTERM");
+      await withTimeout(
+        serverExit,
+        5000,
+        "timed out waiting for dedicated smoke server to exit after SIGTERM",
+        serverLog,
+      ).catch(() => {});
     }
   }
 }
 
-function observeExit(child) {
-  return new Promise((resolve) => {
-    child.once("exit", (code, signal) => {
-      resolve({ code, signal });
-    });
-  });
+async function buildNativeBinaries() {
+  const build = spawnCargo([
+    "build",
+    "--manifest-path",
+    "native/Cargo.toml",
+    "-p",
+    "mclone-dedicated-server",
+    "-p",
+    "mclone-native-client",
+  ]);
+  const buildLog = captureProcessLog(build, "build");
+  await waitForExit(build, "native remote smoke build", timeoutMs, buildLog);
+}
+
+function nativeBinaryPath(name) {
+  const extension = process.platform === "win32" ? ".exe" : "";
+  const targetDir = process.env.CARGO_TARGET_DIR ?? join("native", "target");
+  return join(targetDir, "debug", `${name}${extension}`);
 }
 
 function spawnCargo(args) {
@@ -101,6 +147,28 @@ function spawnCargo(args) {
     cwd: process.cwd(),
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function spawnNative(name, args) {
+  return spawn(nativeBinaryPath(name), args, {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function siblingPath(path, suffix) {
+  const extension = extname(path);
+  const base = basename(path, extension);
+  return join(dirname(path), `${base}-${suffix}${extension}`);
+}
+
+function observeExit(child) {
+  return new Promise((resolve) => {
+    child.once("exit", (code, signal) => {
+      resolve({ code, signal });
+    });
   });
 }
 
@@ -190,7 +258,7 @@ function withTimeout(promise, timeout, message, log) {
 }
 
 function parseClientScreenshotReport(stdout) {
-  const report = /headless full-frame screenshot saved to (.+) \((\d+)x(\d+), (\d+) bytes, (\d+) sections, (\d+) drawn sections, (\d+) GUI commands\)/.exec(stdout);
+  const report = /headless full-frame screenshot saved to (.+) \((\d+)x(\d+), (\d+) bytes, (\d+) sections, (\d+) drawn sections, (\d+) GUI commands, (\d+) remote players\)/.exec(stdout);
   if (!report) {
     throw new Error(`native client did not print screenshot report:\n${stdout}`);
   }
@@ -202,6 +270,7 @@ function parseClientScreenshotReport(stdout) {
     sectionCount: Number.parseInt(report[5], 10),
     drawnSectionCount: Number.parseInt(report[6], 10),
     guiCommandCount: Number.parseInt(report[7], 10),
+    remotePlayerCount: Number.parseInt(report[8], 10),
   };
   if (parsed.sectionCount <= 0 || parsed.drawnSectionCount <= 0) {
     throw new Error(`remote screenshot rendered no chunk sections:\n${JSON.stringify(parsed, null, 2)}`);

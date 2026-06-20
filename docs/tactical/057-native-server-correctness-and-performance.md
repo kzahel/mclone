@@ -238,17 +238,21 @@ Landed:
    - old and new chunk positions are marked dirty so cached render sections are
      removed or rebuilt
 9. A native remote dedicated-client smoke now exercises the real binary path:
-   - spawns `mclone-dedicated-server --serve-once` on an ephemeral loopback port
-   - runs `mclone-native-client --screenshot --remote-addr ...` against it
-   - performs spawn ACK, scripted movement, break/place interaction, chunk
-     hydration, render upload, and PNG screenshot validation
-   - writes the inspected screenshot to
-     `/tmp/mclone-native-remote-client-smoke.png`
+   - spawns `mclone-dedicated-server` on an ephemeral loopback port
+   - runs two concurrent `mclone-native-client --screenshot --remote-addr ...`
+     processes against it
+   - performs spawn ACK, remote-player observation, scripted movement,
+     break/place interaction, chunk hydration, render upload, and PNG screenshot
+     validation
+   - writes inspected screenshots to `/tmp/mclone-native-remote-client-smoke.png`
+     and `/tmp/mclone-native-remote-client-smoke-observer.png`
 
 Next correctness steps, before more optimization work:
 
-1. Extend the real remote-client smoke toward two simultaneous native clients
-   when the headless client can keep a session alive long enough for observation.
+1. Add rendered remote-player visuals or real observer-side block-delta
+   assertions to the binary smoke. The protocol smoke covers those semantics
+   today; the native binary smoke now proves concurrent sessions and
+   remote-player replication but does not render player entities yet.
 2. Broaden reconnect resync only when real gameplay state needs it, such as
    forcing carried-item selection back across the wire after a reconnect.
 3. Split or rename scheduler-facing modules only where these correctness slices

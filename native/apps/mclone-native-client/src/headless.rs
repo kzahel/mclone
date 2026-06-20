@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use mclone_client::{ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT};
@@ -36,6 +37,7 @@ pub(crate) struct HeadlessScreenshotReport {
     pub(crate) index_count: u32,
     pub(crate) drawn_index_count: u32,
     pub(crate) gui_command_count: usize,
+    pub(crate) remote_player_count: usize,
 }
 pub(crate) fn write_headless_chunk_scenarios(
     directory: &Path,
@@ -73,6 +75,7 @@ pub(crate) fn run_headless_screenshot(
     if let Some(day_time) = options.scene.day_time_override {
         runtime.force_day_time(day_time);
     }
+    settle_remote_screenshot_session(&mut runtime, options.remote_settle_ms)?;
     let mut spectator = SpectatorCamera::spawn_for_scene(&options.scene);
     let (world_x, world_z) = spectator.block_column();
     if let Some(surface_y) = runtime.highest_non_air_block_y_at_world(world_x, world_z) {
@@ -181,7 +184,26 @@ pub(crate) fn run_headless_screenshot(
         index_count: summary.index_count,
         drawn_index_count: summary.drawn_index_count,
         gui_command_count: summary.gui_command_count,
+        remote_player_count: runtime.client.remote_player_count(),
     })
+}
+
+fn settle_remote_screenshot_session(
+    runtime: &mut WindowSceneRuntime,
+    remote_settle_ms: u64,
+) -> Result<()> {
+    if remote_settle_ms == 0 || runtime.client.host() != mclone_client::ClientHost::RemoteDedicated
+    {
+        return Ok(());
+    }
+
+    std::thread::sleep(Duration::from_millis(remote_settle_ms));
+    runtime
+        .send_gameplay_command(ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly {
+            on_ground: false,
+        }))
+        .context("failed to poll remote screenshot session after settle delay")?;
+    Ok(())
 }
 
 fn ack_pending_player_position_updates(runtime: &mut WindowSceneRuntime) -> Result<Option<Vec3d>> {

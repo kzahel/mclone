@@ -1134,7 +1134,9 @@ impl WindowSceneRuntime {
                 .map_or(0, |metrics| metrics.active_ticket_chunks),
             tracked_players: chunk_tracking
                 .as_ref()
-                .map_or(0, |diagnostics| diagnostics.player_count),
+                .map_or(self.client.remote_player_count(), |diagnostics| {
+                    diagnostics.player_count
+                }),
             player_visible_chunks: chunk_tracking
                 .as_ref()
                 .map_or(self.client.loaded_chunk_count(), |diagnostics| {
