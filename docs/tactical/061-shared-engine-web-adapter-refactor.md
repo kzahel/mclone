@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active first browser worker render landed.
+Status: active persistent browser worker compiler landed.
 
 ## Purpose
 
@@ -313,9 +313,15 @@ Browser worker payload result:
 - Kept the transferred packed bytes private to the smoke page so the DOM status
   and Playwright result stay compact.
 - The Playwright chunk smoke now proves the first browser render consumes the
-  worker-built section payload. The second render still uses the inline
-  compiler fallback until the shared async submit/drain lifecycle is wired into
-  the browser session.
+  worker-built section payload.
+- Replaced the one-shot worker probe with a persistent browser worker compiler
+  client that tags compile jobs with request IDs, keeps pending-job state, and
+  feeds both the initial upload and the second incremental render update through
+  `renderChunkReportFromPackedSections`.
+- The browser smoke no longer accepts inline compile fallback for the two-step
+  chunk render. The remaining architectural gap is moving this orchestration out
+  of the JS smoke harness and into the shared Rust render-session/compiler
+  lifecycle with revision/stale-result handling.
 
 ### 3. Extract Platform-Neutral Runtime Session
 

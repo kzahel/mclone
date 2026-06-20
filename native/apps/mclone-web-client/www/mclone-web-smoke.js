@@ -314,8 +314,6 @@ async function renderCanvas() {
     }
 
     const assetPack = await fetchAssetPack();
-    const workerCompile = await compileRenderSectionsInWorker(assetPack);
-    const renderCompiler = workerCompile.report;
     const session = await module.mclone_web_create_chunk_render_session(canvas, assetPack);
     if (typeof session.renderChunkReportFromPackedSections !== "function") {
       return {
@@ -325,29 +323,47 @@ async function renderCanvas() {
         reason: "missing WebChunkRenderSession.renderChunkReportFromPackedSections export",
       };
     }
-    const firstReport = renderCompiler.ok
-      ? session.renderChunkReportFromPackedSections(0, 0, 1, workerCompile.packed)
-      : { ok: false, reason: "render compiler worker failed before first render" };
-    const report = session.renderChunkReport(1, 0, 1);
-    return {
-      ok: Boolean(
-        renderCompiler.ok
-        && firstReport.ok
-        && firstReport.workerCompileUsed
-        && report.ok
-        && report.rendered
-        && report.configured
-        && report.chunkLoaded
-        && report.meshBuilt
-        && report.assetPackLoaded
-        && report.textured
-      ),
-      supported: true,
-      status: report.ok ? "rendered" : "failed",
-      renderCompiler,
-      firstReport,
-      report,
-    };
+
+    const compiler = new RenderSectionWorkerCompiler(assetPack);
+    try {
+      const firstCompile = await compiler.compile(0, 0, 1);
+      const renderCompiler = firstCompile.report;
+      const firstReport = renderCompiler.ok
+        ? session.renderChunkReportFromPackedSections(0, 0, 1, firstCompile.packed)
+        : { ok: false, reason: "render compiler worker failed before first render" };
+      const secondCompile = firstReport.ok
+        ? await compiler.compile(1, 0, 1)
+        : { report: { ok: false, reason: "first worker render failed before second compile" }, packed: new Uint8Array() };
+      const secondRenderCompiler = secondCompile.report;
+      const report = secondRenderCompiler.ok
+        ? session.renderChunkReportFromPackedSections(1, 0, 1, secondCompile.packed)
+        : { ok: false, reason: "render compiler worker failed before second render" };
+      return {
+        ok: Boolean(
+          renderCompiler.ok
+          && firstReport.ok
+          && firstReport.workerCompileUsed
+          && secondRenderCompiler.ok
+          && report.ok
+          && report.workerCompileUsed
+          && report.rendered
+          && report.configured
+          && report.chunkLoaded
+          && report.meshBuilt
+          && report.assetPackLoaded
+          && report.textured
+        ),
+        supported: true,
+        status: report.ok ? "rendered" : "failed",
+        renderCompiler,
+        secondRenderCompiler,
+        renderCompilerPendingJobCount: compiler.pendingJobCount(),
+        firstReport,
+        report,
+      };
+    } finally {
+      compiler.terminate();
+    }
   } catch (error) {
     return {
       ok: false,
@@ -366,30 +382,26 @@ async function fetchAssetPack() {
   return new Uint8Array(await response.arrayBuffer());
 }
 
-function compileRenderSectionsInWorker(assetPack) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(RENDER_COMPILER_WORKER_URL.href, {
+class RenderSectionWorkerCompiler {
+  constructor(assetPack) {
+    this.assetPack = assetPack;
+    this.nextRequestId = 1;
+    this.pending = new Map();
+    this.worker = new Worker(RENDER_COMPILER_WORKER_URL.href, {
       type: "module",
       name: "mclone-render-compiler-smoke",
     });
-    let settled = false;
-    const timeout = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      worker.terminate();
-      reject(new Error("timed out waiting for render compiler worker"));
-    }, 20_000);
-
-    worker.onmessage = (event) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      worker.terminate();
+    this.worker.onmessage = (event) => {
       const data = event.data ?? {};
+      const requestId = Number(data.requestId) || 0;
+      const pending = this.pending.get(requestId);
+      if (!pending) return;
+      this.pending.delete(requestId);
+      clearTimeout(pending.timeout);
       const packed = data.packed instanceof Uint8Array ? data.packed : new Uint8Array();
       const packedByteLength = packed.byteLength;
       delete data.packed;
-      resolve({
+      pending.resolve({
         report: {
           ...data,
           packedByteLength,
@@ -397,23 +409,54 @@ function compileRenderSectionsInWorker(assetPack) {
         packed,
       });
     };
-    worker.onerror = (event) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      worker.terminate();
-      reject(new Error(event.message || "render compiler worker failed"));
+    this.worker.onerror = (event) => {
+      this.rejectAll(new Error(event.message || "render compiler worker failed"));
     };
-    worker.postMessage({
-      kind: "compile-render-sections",
-      bindgenJsUrl: BINDGEN_JS_URL.href,
-      bindgenWasmUrl: BINDGEN_WASM_URL.href,
-      assetPack: assetPack.slice(),
-      centerX: 0,
-      centerZ: 0,
-      radiusChunks: 1,
+  }
+
+  compile(centerX, centerZ, radiusChunks) {
+    return new Promise((resolve, reject) => {
+      const requestId = this.nextRequestId;
+      this.nextRequestId += 1;
+      const requestAssetPack = this.assetPack.slice();
+      const timeout = setTimeout(() => {
+        if (!this.pending.has(requestId)) return;
+        this.pending.delete(requestId);
+        reject(new Error(`timed out waiting for render compiler worker request ${requestId}`));
+      }, 20_000);
+      this.pending.set(requestId, { resolve, reject, timeout });
+      this.worker.postMessage(
+        {
+          kind: "compile-render-sections",
+          requestId,
+          bindgenJsUrl: BINDGEN_JS_URL.href,
+          bindgenWasmUrl: BINDGEN_WASM_URL.href,
+          assetPack: requestAssetPack,
+          centerX,
+          centerZ,
+          radiusChunks,
+        },
+        [requestAssetPack.buffer],
+      );
     });
-  });
+  }
+
+  pendingJobCount() {
+    return this.pending.size;
+  }
+
+  terminate() {
+    this.worker.terminate();
+    this.rejectAll(new Error("render compiler worker terminated"));
+  }
+
+  rejectAll(error) {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.pending.clear();
+  }
 }
 
 function decodeRuntimeReport(bits) {

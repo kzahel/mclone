@@ -5,6 +5,7 @@ self.onmessage = async (event) => {
   if (message.kind !== "compile-render-sections") {
     self.postMessage({
       ok: false,
+      requestId: message.requestId,
       reason: `unexpected render compiler message kind ${String(message.kind)}`,
     });
     return;
@@ -22,6 +23,7 @@ self.onmessage = async (event) => {
     self.postMessage(
       {
         ok: true,
+        requestId: message.requestId,
         centerX: Number(message.centerX) || 0,
         centerZ: Number(message.centerZ) || 0,
         radiusChunks: Number(message.radiusChunks) || 0,
@@ -33,6 +35,7 @@ self.onmessage = async (event) => {
   } catch (error) {
     self.postMessage({
       ok: false,
+      requestId: message.requestId,
       reason: stringifyError(error),
     });
   }

@@ -299,6 +299,8 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
       canvasPixels,
       result.canvas.firstReport,
       result.canvas.renderCompiler,
+      result.canvas.secondRenderCompiler,
+      result.canvas.renderCompilerPendingJobCount,
     );
   } else if (canvasPixels.distinctColorCount < 1 || canvasPixels.clearColorPixelCount < 16) {
     throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
@@ -322,8 +324,19 @@ function assertThreadingResult(threading) {
   }
 }
 
-function assertChunkRenderResult(report, canvasPixels, firstReport, renderCompiler) {
-  assertRenderCompilerWorkerResult(renderCompiler);
+function assertChunkRenderResult(
+  report,
+  canvasPixels,
+  firstReport,
+  renderCompiler,
+  secondRenderCompiler,
+  renderCompilerPendingJobCount,
+) {
+  assertRenderCompilerWorkerResult(renderCompiler, 0, 0);
+  assertRenderCompilerWorkerResult(secondRenderCompiler, 1, 0);
+  if (renderCompilerPendingJobCount !== 0) {
+    throw new Error(`render compiler worker still had pending jobs after chunk smoke:\n${JSON.stringify({ renderCompilerPendingJobCount }, null, 2)}`);
+  }
   if (!report.chunkLoaded || !report.meshBuilt) {
     throw new Error(`generated chunk did not load/build:\n${JSON.stringify(report, null, 2)}`);
   }
@@ -387,15 +400,17 @@ function assertChunkRenderResult(report, canvasPixels, firstReport, renderCompil
   ) {
     throw new Error(`second cached render rebuilt non-mesh resources:\n${JSON.stringify(report, null, 2)}`);
   }
+  const secondWorkerSummary = secondRenderCompiler.summary;
   if (
-    report.workerCompileUsed
-    || report.workerPackedByteLength !== 0
-    || report.workerSectionCount !== 0
-    || report.workerVertexCount !== 0
-    || report.workerIndexCount !== 0
-    || report.workerFaceCount !== 0
+    !report.workerCompileUsed
+    || report.workerPackedByteLength !== secondWorkerSummary.byteLength
+    || report.workerSectionCount !== secondWorkerSummary.sectionCount
+    || report.workerNonEmptySectionCount !== secondWorkerSummary.nonEmptySectionCount
+    || report.workerVertexCount !== secondWorkerSummary.vertexCount
+    || report.workerIndexCount !== secondWorkerSummary.indexCount
+    || report.workerFaceCount !== secondWorkerSummary.faceCount
   ) {
-    throw new Error(`second section render should still use the inline fallback compiler in this slice:\n${JSON.stringify(report, null, 2)}`);
+    throw new Error(`second section render did not consume the worker-compiled packed payload:\n${JSON.stringify({ report, secondRenderCompiler }, null, 2)}`);
   }
   if (
     report.residentSectionCount <= 1
@@ -427,14 +442,14 @@ function assertChunkRenderResult(report, canvasPixels, firstReport, renderCompil
   }
 }
 
-function assertRenderCompilerWorkerResult(renderCompiler) {
+function assertRenderCompilerWorkerResult(renderCompiler, expectedCenterX, expectedCenterZ) {
   if (!renderCompiler?.ok) {
     throw new Error(`render compiler worker failed:\n${JSON.stringify(renderCompiler, null, 2)}`);
   }
   const summary = renderCompiler.summary;
   if (
-    renderCompiler.centerX !== 0
-    || renderCompiler.centerZ !== 0
+    renderCompiler.centerX !== expectedCenterX
+    || renderCompiler.centerZ !== expectedCenterZ
     || renderCompiler.radiusChunks !== 1
     || !summary?.ok
     || summary.byteLength <= 0
