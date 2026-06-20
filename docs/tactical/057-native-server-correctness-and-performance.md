@@ -182,6 +182,7 @@ Use these lanes for every implementation slice in this parent:
 - `cargo test --manifest-path native/Cargo.toml -p mclone-server`
 - `cargo test --manifest-path native/Cargo.toml -p mclone-dedicated-server`
 - `cargo test --manifest-path native/Cargo.toml`
+- `pnpm --silent native:remote:smoke`
 - `pnpm --silent native:movement:smoke`
 - `pnpm --silent native:timedemo:smoke`
 - `pnpm --silent native:web:build`
@@ -236,17 +237,26 @@ Landed:
      player/session publishes fresh snapshots
    - old and new chunk positions are marked dirty so cached render sections are
      removed or rebuilt
+9. A native remote dedicated-client smoke now exercises the real binary path:
+   - spawns `mclone-dedicated-server --serve-once` on an ephemeral loopback port
+   - runs `mclone-native-client --screenshot --remote-addr ...` against it
+   - performs spawn ACK, scripted movement, break/place interaction, chunk
+     hydration, render upload, and PNG screenshot validation
+   - writes the inspected screenshot to
+     `/tmp/mclone-native-remote-client-smoke.png`
 
 Next correctness steps, before more optimization work:
 
-1. Broaden reconnect resync only when real gameplay state needs it, such as
+1. Extend the real remote-client smoke toward two simultaneous native clients
+   when the headless client can keep a session alive long enough for observation.
+2. Broaden reconnect resync only when real gameplay state needs it, such as
    forcing carried-item selection back across the wire after a reconnect.
-2. Split or rename scheduler-facing modules only where these correctness slices
+3. Split or rename scheduler-facing modules only where these correctness slices
    expose a real boundary. Likely candidates are `player_chunk_tracking.rs` and
    a future general entity/update fan-out module.
-3. Defer release-mode server movement/view-distance perf, publication clone
+4. Defer release-mode server movement/view-distance perf, publication clone
    reduction, and per-recipient publication budgets until the multi-player
    semantics above are protected by TCP smokes.
-4. Consider a Java-shaped `server_level.rs` / `server_chunk_cache.rs` split only
+5. Consider a Java-shaped `server_level.rs` / `server_chunk_cache.rs` split only
    after chunk tracking and update routing make the current `IntegratedServer`
    responsibilities clearly too broad.

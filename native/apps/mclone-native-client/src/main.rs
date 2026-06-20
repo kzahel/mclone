@@ -359,6 +359,8 @@ mod tests {
             "--screenshot-scripted-interaction".to_owned(),
             "true".to_owned(),
             "--force-fullbright".to_owned(),
+            "--remote-addr".to_owned(),
+            "127.0.0.1:25565".to_owned(),
         ])
         .unwrap();
 
@@ -369,7 +371,10 @@ mod tests {
                     path: PathBuf::from("/tmp/mclone-frame.png"),
                     width: 960,
                     height: 540,
-                    scene: SceneOptions::default(),
+                    scene: SceneOptions {
+                        remote_addr: Some("127.0.0.1:25565".to_owned()),
+                        ..SceneOptions::default()
+                    },
                     render_options: TexturedSectionRenderOptions {
                         force_fullbright: true,
                         ..TexturedSectionRenderOptions::default()
