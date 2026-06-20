@@ -1,16 +1,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::Vec3d;
-use mclone_protocol::{RemotePlayerId, RemotePlayerUpdate};
+use mclone_protocol::{EntityId, EntityKind, EntitySnapshot, RemotePlayerId, RemotePlayerUpdate};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ActorPresentationId {
     RemotePlayer(RemotePlayerId),
+    Entity(EntityId),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActorPresentationKind {
     RemotePlayer,
+    Entity(EntityKind),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -22,6 +24,8 @@ pub struct ActorPresentation {
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
     pub on_ground: bool,
+    pub width: f32,
+    pub height: f32,
 }
 
 impl ActorPresentation {
@@ -33,6 +37,21 @@ impl ActorPresentation {
             y_rot_degrees: update.y_rot_degrees,
             x_rot_degrees: update.x_rot_degrees,
             on_ground: update.on_ground,
+            width: 0.6,
+            height: 1.8,
+        }
+    }
+
+    pub fn entity(snapshot: EntitySnapshot) -> Self {
+        Self {
+            id: ActorPresentationId::Entity(snapshot.id),
+            kind: ActorPresentationKind::Entity(snapshot.kind),
+            feet_position: snapshot.position,
+            y_rot_degrees: snapshot.y_rot_degrees,
+            x_rot_degrees: snapshot.x_rot_degrees,
+            on_ground: snapshot.on_ground,
+            width: snapshot.width,
+            height: snapshot.height,
         }
     }
 }
@@ -116,6 +135,8 @@ impl ActorTrack {
         self.rendered.id = actor.id;
         self.rendered.kind = actor.kind;
         self.rendered.on_ground = actor.on_ground;
+        self.rendered.width = actor.width;
+        self.rendered.height = actor.height;
     }
 
     fn step(&mut self, factor: f32) {
@@ -180,6 +201,8 @@ mod tests {
             y_rot_degrees,
             x_rot_degrees: 0.0,
             on_ground: true,
+            width: 0.6,
+            height: 1.8,
         }
     }
 
@@ -202,6 +225,37 @@ mod tests {
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
                 on_ground: update.on_ground,
+                width: 0.6,
+                height: 1.8,
+            }
+        );
+    }
+
+    #[test]
+    fn actor_presentation_converts_entity_snapshot() {
+        let snapshot = EntitySnapshot {
+            id: EntityId(7),
+            kind: EntityKind::Cow,
+            position: Vec3d::new(10.0, 64.0, -4.0),
+            y_rot_degrees: -90.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+            width: 0.9,
+            height: 1.4,
+            age_ticks: 12,
+        };
+
+        assert_eq!(
+            ActorPresentation::entity(snapshot),
+            ActorPresentation {
+                id: ActorPresentationId::Entity(snapshot.id),
+                kind: ActorPresentationKind::Entity(snapshot.kind),
+                feet_position: snapshot.position,
+                y_rot_degrees: snapshot.y_rot_degrees,
+                x_rot_degrees: snapshot.x_rot_degrees,
+                on_ground: snapshot.on_ground,
+                width: snapshot.width,
+                height: snapshot.height,
             }
         );
     }

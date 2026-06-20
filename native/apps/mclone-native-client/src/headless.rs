@@ -44,6 +44,7 @@ pub(crate) struct HeadlessScreenshotReport {
     pub(crate) drawn_index_count: u32,
     pub(crate) gui_command_count: usize,
     pub(crate) remote_player_count: usize,
+    pub(crate) entity_count: usize,
     pub(crate) actor_count: usize,
     pub(crate) drawn_actor_count: usize,
 }
@@ -200,6 +201,7 @@ pub(crate) fn run_headless_screenshot(
         drawn_index_count: summary.drawn_index_count,
         gui_command_count: summary.gui_command_count,
         remote_player_count: runtime.client.remote_player_count(),
+        entity_count: runtime.client.entity_count(),
         actor_count: summary.actor_count,
         drawn_actor_count: summary.drawn_actor_count,
     })

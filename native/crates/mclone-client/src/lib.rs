@@ -9,10 +9,10 @@ mod interaction;
 mod inventory;
 mod player;
 
-use mclone_core::{CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
+use mclone_core::{BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, SECTION_HEIGHT};
 use mclone_protocol::{
-    ChunkView, ClientCommand, PlayerPositionUpdate, RemotePlayerId, RemotePlayerUpdate,
-    SectionBlockUpdate, ServerUpdate,
+    ChunkView, ClientCommand, EntityId, EntitySnapshot, EntityUpdate, PlayerPositionUpdate,
+    RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerUpdate,
 };
 
 pub use actor::{
@@ -45,6 +45,7 @@ pub struct ClientRuntime {
     day_time: u64,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
+    entities: BTreeMap<EntityId, EntitySnapshot>,
 }
 
 impl ClientRuntime {
@@ -56,6 +57,7 @@ impl ClientRuntime {
             day_time: 0,
             player_position_updates: VecDeque::new(),
             remote_players: BTreeMap::new(),
+            entities: BTreeMap::new(),
         }
     }
 
@@ -83,6 +85,7 @@ impl ClientRuntime {
             }
             ServerUpdate::ChunkUnload { pos } => {
                 self.chunks.remove(&pos);
+                self.remove_entities_in_chunk(pos);
             }
             ServerUpdate::SectionBlockUpdates {
                 pos,
@@ -102,6 +105,15 @@ impl ClientRuntime {
             }
             ServerUpdate::RemotePlayerRemove { id } => {
                 self.remote_players.remove(&id);
+            }
+            ServerUpdate::EntitySnapshot(snapshot) => {
+                self.entities.insert(snapshot.id, snapshot);
+            }
+            ServerUpdate::EntityUpdate(update) => {
+                self.apply_entity_update(update);
+            }
+            ServerUpdate::EntityRemove { id } => {
+                self.entities.remove(&id);
             }
         }
     }
@@ -132,6 +144,7 @@ impl ClientRuntime {
         self.chunks.clear();
         self.player_position_updates.clear();
         self.remote_players.clear();
+        self.entities.clear();
     }
 
     pub fn remote_player(&self, id: RemotePlayerId) -> Option<&RemotePlayerUpdate> {
@@ -142,11 +155,29 @@ impl ClientRuntime {
         self.remote_players.len()
     }
 
+    pub fn entity(&self, id: EntityId) -> Option<&EntitySnapshot> {
+        self.entities.get(&id)
+    }
+
+    pub fn entity_count(&self) -> usize {
+        self.entities.len()
+    }
+
+    pub fn entity_snapshots(&self) -> impl Iterator<Item = &EntitySnapshot> {
+        self.entities.values()
+    }
+
     pub fn actor_presentations(&self) -> Vec<ActorPresentation> {
         self.remote_players
             .values()
             .copied()
             .map(ActorPresentation::remote_player)
+            .chain(
+                self.entities
+                    .values()
+                    .copied()
+                    .map(ActorPresentation::entity),
+            )
             .collect()
     }
 
@@ -198,6 +229,22 @@ impl ClientRuntime {
             );
         }
         changed
+    }
+
+    fn apply_entity_update(&mut self, update: EntityUpdate) {
+        let Some(snapshot) = self.entities.get_mut(&update.id) else {
+            return;
+        };
+        snapshot.position = update.position;
+        snapshot.y_rot_degrees = update.y_rot_degrees;
+        snapshot.x_rot_degrees = update.x_rot_degrees;
+        snapshot.on_ground = update.on_ground;
+        snapshot.age_ticks = update.age_ticks;
+    }
+
+    fn remove_entities_in_chunk(&mut self, pos: ChunkPos) {
+        self.entities
+            .retain(|_, snapshot| BlockPos::containing(snapshot.position).chunk_pos() != pos);
     }
 }
 
@@ -289,6 +336,17 @@ mod tests {
             x_rot_degrees: 0.0,
             on_ground: true,
         }));
+        runtime.apply_update(ServerUpdate::EntitySnapshot(EntitySnapshot {
+            id: EntityId(7),
+            kind: mclone_protocol::EntityKind::Cow,
+            position: mclone_core::Vec3d::new(4.0, 64.0, 5.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+            width: 0.9,
+            height: 1.4,
+            age_ticks: 0,
+        }));
 
         assert_eq!(
             runtime.loaded_chunk_positions().collect::<Vec<_>>(),
@@ -300,6 +358,7 @@ mod tests {
         assert_eq!(runtime.chunk_view(), Some(&view));
         assert_eq!(runtime.loaded_chunk_count(), 0);
         assert_eq!(runtime.remote_player_count(), 0);
+        assert_eq!(runtime.entity_count(), 0);
         assert_eq!(runtime.drain_player_position_updates().count(), 0);
     }
 
@@ -373,6 +432,58 @@ mod tests {
     }
 
     #[test]
+    fn client_runtime_tracks_entity_lifecycle_and_unloads_by_chunk() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let id = EntityId(7);
+        let initial = EntitySnapshot {
+            id,
+            kind: mclone_protocol::EntityKind::Cow,
+            position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 45.0,
+            x_rot_degrees: 5.0,
+            on_ground: true,
+            width: 0.9,
+            height: 1.4,
+            age_ticks: 12,
+        };
+        let moved = EntityUpdate {
+            id,
+            position: mclone_core::Vec3d::new(3.0, 65.0, 4.0),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: -10.0,
+            on_ground: false,
+            age_ticks: 13,
+        };
+
+        runtime.apply_update(ServerUpdate::EntitySnapshot(initial));
+        assert_eq!(runtime.entity_count(), 1);
+        assert_eq!(runtime.entity(id), Some(&initial));
+
+        runtime.apply_update(ServerUpdate::EntityUpdate(moved));
+        assert_eq!(runtime.entity_count(), 1);
+        let updated = runtime.entity(id).copied().unwrap();
+        assert_eq!(updated.position, moved.position);
+        assert_eq!(updated.y_rot_degrees, moved.y_rot_degrees);
+        assert_eq!(updated.x_rot_degrees, moved.x_rot_degrees);
+        assert_eq!(updated.on_ground, moved.on_ground);
+        assert_eq!(updated.age_ticks, moved.age_ticks);
+        assert_eq!(updated.kind, initial.kind);
+        assert_eq!(updated.width, initial.width);
+        assert_eq!(updated.height, initial.height);
+
+        runtime.apply_update(ServerUpdate::ChunkUnload {
+            pos: ChunkPos::new(0, 0),
+        });
+        assert_eq!(runtime.entity_count(), 0);
+        assert_eq!(runtime.entity(id), None);
+
+        runtime.apply_update(ServerUpdate::EntitySnapshot(initial));
+        runtime.apply_update(ServerUpdate::EntityRemove { id });
+        assert_eq!(runtime.entity_count(), 0);
+        assert_eq!(runtime.entity(id), None);
+    }
+
+    #[test]
     fn actor_presentations_expose_remote_player_snapshot() {
         let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
         let update = RemotePlayerUpdate {
@@ -394,12 +505,46 @@ mod tests {
                 y_rot_degrees: update.y_rot_degrees,
                 x_rot_degrees: update.x_rot_degrees,
                 on_ground: update.on_ground,
+                width: 0.6,
+                height: 1.8,
             }]
         );
 
         runtime.apply_update(ServerUpdate::RemotePlayerRemove { id: update.id });
 
         assert!(runtime.actor_presentations().is_empty());
+    }
+
+    #[test]
+    fn actor_presentations_include_entity_snapshots() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let snapshot = EntitySnapshot {
+            id: EntityId(11),
+            kind: mclone_protocol::EntityKind::Cow,
+            position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
+            y_rot_degrees: -90.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+            width: 0.9,
+            height: 1.4,
+            age_ticks: 0,
+        };
+
+        runtime.apply_update(ServerUpdate::EntitySnapshot(snapshot));
+
+        assert_eq!(
+            runtime.actor_presentations(),
+            vec![ActorPresentation {
+                id: ActorPresentationId::Entity(snapshot.id),
+                kind: ActorPresentationKind::Entity(snapshot.kind),
+                feet_position: snapshot.position,
+                y_rot_degrees: snapshot.y_rot_degrees,
+                x_rot_degrees: snapshot.x_rot_degrees,
+                on_ground: snapshot.on_ground,
+                width: snapshot.width,
+                height: snapshot.height,
+            }]
+        );
     }
 
     #[test]

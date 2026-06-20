@@ -87,6 +87,11 @@ async function run() {
           `remote ${config.label} client did not retain a remote player:\n${JSON.stringify(clientReport, null, 2)}`,
         );
       }
+      if (clientReport.entityCount <= 0) {
+        throw new Error(
+          `remote ${config.label} client did not retain a server entity replica:\n${JSON.stringify(clientReport, null, 2)}`,
+        );
+      }
       if (clientReport.actorCount <= 0) {
         throw new Error(
           `remote ${config.label} client did not retain an actor presentation:\n${JSON.stringify(clientReport, null, 2)}`,
@@ -268,7 +273,7 @@ function withTimeout(promise, timeout, message, log) {
 }
 
 function parseClientScreenshotReport(stdout) {
-  const report = /headless full-frame screenshot saved to (.+) \((\d+)x(\d+), (\d+) bytes, (\d+) sections, (\d+) drawn sections, (\d+) GUI commands, (\d+) remote players, (\d+) actors, (\d+) drawn actors\)/.exec(stdout);
+  const report = /headless full-frame screenshot saved to (.+) \((\d+)x(\d+), (\d+) bytes, (\d+) sections, (\d+) drawn sections, (\d+) GUI commands, (\d+) remote players, (\d+) entities, (\d+) actors, (\d+) drawn actors\)/.exec(stdout);
   if (!report) {
     throw new Error(`native client did not print screenshot report:\n${stdout}`);
   }
@@ -281,8 +286,9 @@ function parseClientScreenshotReport(stdout) {
     drawnSectionCount: Number.parseInt(report[6], 10),
     guiCommandCount: Number.parseInt(report[7], 10),
     remotePlayerCount: Number.parseInt(report[8], 10),
-    actorCount: Number.parseInt(report[9], 10),
-    drawnActorCount: Number.parseInt(report[10], 10),
+    entityCount: Number.parseInt(report[9], 10),
+    actorCount: Number.parseInt(report[10], 10),
+    drawnActorCount: Number.parseInt(report[11], 10),
   };
   if (parsed.sectionCount <= 0 || parsed.drawnSectionCount <= 0) {
     throw new Error(`remote screenshot rendered no chunk sections:\n${JSON.stringify(parsed, null, 2)}`);

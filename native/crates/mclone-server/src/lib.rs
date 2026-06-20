@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod block_light_bridge;
 mod distance_manager;
+mod entities;
 mod fluid;
 mod game_mode;
 mod holder;
@@ -1348,7 +1349,20 @@ mod tests {
             }),
         );
 
-        assert_eq!(updates.len(), 9);
+        assert_eq!(
+            updates
+                .iter()
+                .filter(|update| matches!(update, ServerUpdate::ChunkSnapshot(_)))
+                .count(),
+            9
+        );
+        assert_eq!(
+            updates
+                .iter()
+                .filter(|update| matches!(update, ServerUpdate::EntitySnapshot(_)))
+                .count(),
+            1
+        );
         assert_eq!(server.loaded_chunk_count(), 25);
         assert_eq!(server.scheduler().client_visible_chunk_count(), 9);
         assert_eq!(server.scheduler().holder_count(), 29 * 29);
@@ -1518,11 +1532,12 @@ mod tests {
                 Some(job.id)
             );
         }
-        assert!(
-            updates
-                .iter()
-                .all(|update| matches!(update, ServerUpdate::ChunkSnapshot(_)))
-        );
+        assert!(updates.iter().all(|update| {
+            matches!(
+                update,
+                ServerUpdate::ChunkSnapshot(_) | ServerUpdate::EntitySnapshot(_)
+            )
+        }));
     }
 
     #[test]
@@ -2944,7 +2959,14 @@ mod tests {
             try_handle_command_and_poll(&mut reloaded, ClientCommand::SetChunkView(interest))
                 .unwrap();
 
-        assert_eq!(updates, vec![ServerUpdate::ChunkSnapshot(first_snapshot)]);
+        assert!(updates.contains(&ServerUpdate::ChunkSnapshot(first_snapshot)));
+        assert_eq!(
+            updates
+                .iter()
+                .filter(|update| matches!(update, ServerUpdate::EntitySnapshot(_)))
+                .count(),
+            1
+        );
         assert_eq!(reloaded.scheduler().job_count(), 0);
         let holder = reloaded.scheduler().holder(ChunkPos::new(0, 0)).unwrap();
         assert_eq!(holder.residency(), ChunkResidency::LoadedFromStore);
@@ -2975,7 +2997,6 @@ mod tests {
             }),
         );
 
-        assert_eq!(updates.len(), 2);
         assert!(
             updates
                 .iter()

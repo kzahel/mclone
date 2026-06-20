@@ -16,8 +16,17 @@ pub struct ActorInstance {
     pub feet_position: Vec3,
     /// Native world yaw in radians. Local actor +Z is the forward/front side.
     pub yaw_radians: f32,
+    pub shape: ActorInstanceShape,
+    pub width: f32,
+    pub height: f32,
     pub body_color: [f32; 4],
     pub accent_color: [f32; 4],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActorInstanceShape {
+    Humanoid,
+    QuadrupedPlaceholder,
 }
 
 impl ActorInstance {
@@ -25,8 +34,45 @@ impl ActorInstance {
         Self {
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
+            shape: ActorInstanceShape::Humanoid,
+            width: 0.6,
+            height: 1.8,
             body_color: [0.10, 0.58, 0.68, 1.0],
             accent_color: [0.95, 0.80, 0.24, 1.0],
+        }
+    }
+
+    pub fn cow_placeholder(
+        feet_position: Vec3,
+        y_rot_degrees: f32,
+        width: f32,
+        height: f32,
+    ) -> Self {
+        Self {
+            feet_position,
+            yaw_radians: -y_rot_degrees.to_radians(),
+            shape: ActorInstanceShape::QuadrupedPlaceholder,
+            width,
+            height,
+            body_color: [0.33, 0.19, 0.10, 1.0],
+            accent_color: [0.92, 0.86, 0.74, 1.0],
+        }
+    }
+
+    pub fn chicken_placeholder(
+        feet_position: Vec3,
+        y_rot_degrees: f32,
+        width: f32,
+        height: f32,
+    ) -> Self {
+        Self {
+            feet_position,
+            yaw_radians: -y_rot_degrees.to_radians(),
+            shape: ActorInstanceShape::QuadrupedPlaceholder,
+            width,
+            height,
+            body_color: [0.92, 0.90, 0.82, 1.0],
+            accent_color: [0.92, 0.18, 0.12, 1.0],
         }
     }
 }
@@ -248,6 +294,13 @@ fn actor_mesh(actors: &[ActorInstance]) -> ActorMesh {
 }
 
 fn append_actor(mesh: &mut ActorMesh, actor: ActorInstance) {
+    match actor.shape {
+        ActorInstanceShape::Humanoid => append_humanoid_placeholder(mesh, actor),
+        ActorInstanceShape::QuadrupedPlaceholder => append_quadruped_placeholder(mesh, actor),
+    }
+}
+
+fn append_humanoid_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
     let dark = scale_color(actor.body_color, 0.58);
     let side = scale_color(actor.body_color, 0.78);
     let light = scale_color(actor.body_color, 1.12);
@@ -300,6 +353,58 @@ fn append_actor(mesh: &mut ActorMesh, actor: ActorInstance) {
             [1.0, 0.98, 0.66, 1.0],
         ],
     );
+}
+
+fn append_quadruped_placeholder(mesh: &mut ActorMesh, actor: ActorInstance) {
+    let width = actor.width.max(0.1);
+    let height = actor.height.max(0.1);
+    let half_width = width * 0.5;
+    let leg_half = (width * 0.12).clamp(0.04, 0.16);
+    let body_bottom = height * 0.32;
+    let body_top = height * 0.82;
+    let body_back = -width * 0.62;
+    let body_front = width * 0.46;
+    let head_bottom = height * 0.54;
+    let head_top = height;
+    let head_half = width * 0.28;
+    let head_front = body_front + width * 0.38;
+
+    let dark = scale_color(actor.body_color, 0.58);
+    let side = scale_color(actor.body_color, 0.78);
+    let light = scale_color(actor.body_color, 1.12);
+    let accent_side = scale_color(actor.accent_color, 0.86);
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-half_width, body_bottom, body_back),
+        Vec3::new(half_width, body_top, body_front),
+        [dark, side, side, side, side, light],
+    );
+    append_box(
+        mesh,
+        actor,
+        Vec3::new(-head_half, head_bottom, body_front),
+        Vec3::new(head_half, head_top, head_front),
+        [
+            scale_color(actor.accent_color, 0.70),
+            accent_side,
+            accent_side,
+            scale_color(actor.accent_color, 0.92),
+            scale_color(actor.accent_color, 0.92),
+            actor.accent_color,
+        ],
+    );
+    for x in [-half_width + leg_half * 1.2, half_width - leg_half * 1.2] {
+        for z in [body_back + leg_half * 1.2, body_front - leg_half * 1.2] {
+            append_box(
+                mesh,
+                actor,
+                Vec3::new(x - leg_half, 0.0, z - leg_half),
+                Vec3::new(x + leg_half, body_bottom, z + leg_half),
+                [dark, side, side, side, side, actor.body_color],
+            );
+        }
+    }
 }
 
 fn append_box(
@@ -398,6 +503,19 @@ mod tests {
 
         assert_eq!(mesh.vertices.len(), 5 * 6 * 4);
         assert_eq!(mesh.indices.len(), 5 * 6 * 6);
+    }
+
+    #[test]
+    fn actor_mesh_emits_quadruped_placeholder() {
+        let mesh = actor_mesh(&[ActorInstance::cow_placeholder(
+            Vec3::new(1.0, 2.0, 3.0),
+            0.0,
+            0.9,
+            1.4,
+        )]);
+
+        assert_eq!(mesh.vertices.len(), 6 * 6 * 4);
+        assert_eq!(mesh.indices.len(), 6 * 6 * 6);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
@@ -26,6 +26,9 @@ const SERVER_UPDATE_PLAYER_POSITION: u8 = 5;
 const SERVER_UPDATE_REMOTE_PLAYER_ADD: u8 = 6;
 const SERVER_UPDATE_REMOTE_PLAYER_UPDATE: u8 = 7;
 const SERVER_UPDATE_REMOTE_PLAYER_REMOVE: u8 = 8;
+const SERVER_UPDATE_ENTITY_SNAPSHOT: u8 = 9;
+const SERVER_UPDATE_ENTITY_UPDATE: u8 = 10;
+const SERVER_UPDATE_ENTITY_REMOVE: u8 = 11;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkView {
@@ -165,6 +168,11 @@ pub enum ServerUpdate {
     RemotePlayerRemove {
         id: RemotePlayerId,
     },
+    EntitySnapshot(EntitySnapshot),
+    EntityUpdate(EntityUpdate),
+    EntityRemove {
+        id: EntityId,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -177,6 +185,38 @@ pub struct RemotePlayerUpdate {
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
     pub on_ground: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct EntityId(pub u64);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EntityKind {
+    Cow,
+    Chicken,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EntitySnapshot {
+    pub id: EntityId,
+    pub kind: EntityKind,
+    pub position: Vec3d,
+    pub y_rot_degrees: f32,
+    pub x_rot_degrees: f32,
+    pub on_ground: bool,
+    pub width: f32,
+    pub height: f32,
+    pub age_ticks: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EntityUpdate {
+    pub id: EntityId,
+    pub position: Vec3d,
+    pub y_rot_degrees: f32,
+    pub x_rot_degrees: f32,
+    pub on_ground: bool,
+    pub age_ticks: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -255,6 +295,7 @@ pub enum ProtocolCodecError {
     UnknownServerUpdateTag(u8),
     UnknownChunkStatus(u8),
     UnknownDirection(u8),
+    UnknownEntityKind(u8),
     UnknownInteractionHand(u8),
     UnknownPlayerActionKind(u8),
     LengthOverflow { field: &'static str, len: usize },
@@ -282,6 +323,9 @@ impl fmt::Display for ProtocolCodecError {
             }
             Self::UnknownDirection(direction) => {
                 write!(f, "unknown direction tag {direction}")
+            }
+            Self::UnknownEntityKind(kind) => {
+                write!(f, "unknown entity kind tag {kind}")
             }
             Self::UnknownInteractionHand(hand) => {
                 write!(f, "unknown interaction hand tag {hand}")
@@ -414,6 +458,20 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             writer.write_u8(SERVER_UPDATE_REMOTE_PLAYER_REMOVE);
             writer.write_remote_player_id(*id);
         }
+        ServerUpdate::EntitySnapshot(snapshot) => {
+            validate_entity_snapshot(snapshot)?;
+            writer.write_u8(SERVER_UPDATE_ENTITY_SNAPSHOT);
+            writer.write_entity_snapshot(snapshot);
+        }
+        ServerUpdate::EntityUpdate(update) => {
+            validate_entity_update(update)?;
+            writer.write_u8(SERVER_UPDATE_ENTITY_UPDATE);
+            writer.write_entity_update(update);
+        }
+        ServerUpdate::EntityRemove { id } => {
+            writer.write_u8(SERVER_UPDATE_ENTITY_REMOVE);
+            writer.write_entity_id(*id);
+        }
     }
     Ok(writer.into_inner())
 }
@@ -458,6 +516,13 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
         SERVER_UPDATE_REMOTE_PLAYER_REMOVE => ServerUpdate::RemotePlayerRemove {
             id: reader.read_remote_player_id()?,
         },
+        SERVER_UPDATE_ENTITY_SNAPSHOT => {
+            ServerUpdate::EntitySnapshot(reader.read_entity_snapshot()?)
+        }
+        SERVER_UPDATE_ENTITY_UPDATE => ServerUpdate::EntityUpdate(reader.read_entity_update()?),
+        SERVER_UPDATE_ENTITY_REMOVE => ServerUpdate::EntityRemove {
+            id: reader.read_entity_id()?,
+        },
         _ => return Err(ProtocolCodecError::UnknownServerUpdateTag(tag)),
     };
     reader.finish()?;
@@ -496,6 +561,39 @@ fn validate_remote_player_update(update: &RemotePlayerUpdate) -> ProtocolCodecRe
     {
         return Err(ProtocolCodecError::InvalidData(
             "remote player update contains non-finite value",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()> {
+    validate_entity_update(&EntityUpdate {
+        id: snapshot.id,
+        position: snapshot.position,
+        y_rot_degrees: snapshot.y_rot_degrees,
+        x_rot_degrees: snapshot.x_rot_degrees,
+        on_ground: snapshot.on_ground,
+        age_ticks: snapshot.age_ticks,
+    })?;
+    if !snapshot.width.is_finite()
+        || !snapshot.height.is_finite()
+        || snapshot.width <= 0.0
+        || snapshot.height <= 0.0
+    {
+        return Err(ProtocolCodecError::InvalidData(
+            "entity snapshot contains invalid dimensions",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_entity_update(update: &EntityUpdate) -> ProtocolCodecResult<()> {
+    if !update.position.is_finite()
+        || !update.y_rot_degrees.is_finite()
+        || !update.x_rot_degrees.is_finite()
+    {
+        return Err(ProtocolCodecError::InvalidData(
+            "entity update contains non-finite value",
         ));
     }
     Ok(())
@@ -562,6 +660,13 @@ impl ByteWriter {
 
     fn write_direction(&mut self, direction: Direction) {
         self.write_u8(direction.index());
+    }
+
+    fn write_entity_kind(&mut self, kind: EntityKind) {
+        self.write_u8(match kind {
+            EntityKind::Cow => 0,
+            EntityKind::Chicken => 1,
+        });
     }
 
     fn write_vec3d(&mut self, value: Vec3d) {
@@ -725,6 +830,31 @@ impl ByteWriter {
         self.write_bool(update.on_ground);
     }
 
+    fn write_entity_id(&mut self, id: EntityId) {
+        self.write_u64(id.0);
+    }
+
+    fn write_entity_snapshot(&mut self, snapshot: &EntitySnapshot) {
+        self.write_entity_id(snapshot.id);
+        self.write_entity_kind(snapshot.kind);
+        self.write_vec3d(snapshot.position);
+        self.write_f32(snapshot.y_rot_degrees);
+        self.write_f32(snapshot.x_rot_degrees);
+        self.write_bool(snapshot.on_ground);
+        self.write_f32(snapshot.width);
+        self.write_f32(snapshot.height);
+        self.write_u64(snapshot.age_ticks);
+    }
+
+    fn write_entity_update(&mut self, update: &EntityUpdate) {
+        self.write_entity_id(update.id);
+        self.write_vec3d(update.position);
+        self.write_f32(update.y_rot_degrees);
+        self.write_f32(update.x_rot_degrees);
+        self.write_bool(update.on_ground);
+        self.write_u64(update.age_ticks);
+    }
+
     fn write_optional_light_layer(
         &mut self,
         field: &'static str,
@@ -830,6 +960,15 @@ impl<'a> ByteReader<'a> {
     fn read_direction(&mut self) -> ProtocolCodecResult<Direction> {
         let direction = self.read_u8()?;
         Direction::from_index(direction).ok_or(ProtocolCodecError::UnknownDirection(direction))
+    }
+
+    fn read_entity_kind(&mut self) -> ProtocolCodecResult<EntityKind> {
+        let kind = self.read_u8()?;
+        match kind {
+            0 => Ok(EntityKind::Cow),
+            1 => Ok(EntityKind::Chicken),
+            kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
+        }
     }
 
     fn read_vec3d(&mut self) -> ProtocolCodecResult<Vec3d> {
@@ -1064,6 +1203,39 @@ impl<'a> ByteReader<'a> {
             x_rot_degrees,
             on_ground: self.read_bool()?,
         })
+    }
+
+    fn read_entity_id(&mut self) -> ProtocolCodecResult<EntityId> {
+        Ok(EntityId(self.read_u64()?))
+    }
+
+    fn read_entity_snapshot(&mut self) -> ProtocolCodecResult<EntitySnapshot> {
+        let snapshot = EntitySnapshot {
+            id: self.read_entity_id()?,
+            kind: self.read_entity_kind()?,
+            position: self.read_vec3d()?,
+            y_rot_degrees: self.read_f32()?,
+            x_rot_degrees: self.read_f32()?,
+            on_ground: self.read_bool()?,
+            width: self.read_f32()?,
+            height: self.read_f32()?,
+            age_ticks: self.read_u64()?,
+        };
+        validate_entity_snapshot(&snapshot)?;
+        Ok(snapshot)
+    }
+
+    fn read_entity_update(&mut self) -> ProtocolCodecResult<EntityUpdate> {
+        let update = EntityUpdate {
+            id: self.read_entity_id()?,
+            position: self.read_vec3d()?,
+            y_rot_degrees: self.read_f32()?,
+            x_rot_degrees: self.read_f32()?,
+            on_ground: self.read_bool()?,
+            age_ticks: self.read_u64()?,
+        };
+        validate_entity_update(&update)?;
+        Ok(update)
     }
 
     fn read_optional_light_layer(&mut self) -> ProtocolCodecResult<Option<Vec<u8>>> {
@@ -1314,6 +1486,39 @@ mod tests {
     }
 
     #[test]
+    fn server_update_codec_round_trips_entity_updates() {
+        let snapshot = EntitySnapshot {
+            id: EntityId(7),
+            kind: EntityKind::Cow,
+            position: Vec3d::new(12.5, 70.0, -3.25),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: -15.0,
+            on_ground: true,
+            width: 0.9,
+            height: 1.4,
+            age_ticks: 12,
+        };
+        let update = EntityUpdate {
+            id: snapshot.id,
+            position: Vec3d::new(13.5, 70.0, -3.25),
+            y_rot_degrees: 45.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+            age_ticks: 13,
+        };
+
+        for server_update in [
+            ServerUpdate::EntitySnapshot(snapshot),
+            ServerUpdate::EntityUpdate(update),
+            ServerUpdate::EntityRemove { id: snapshot.id },
+        ] {
+            let bytes = encode_server_update(&server_update).unwrap();
+
+            assert_eq!(decode_server_update(&bytes).unwrap(), server_update);
+        }
+    }
+
+    #[test]
     fn remote_player_update_codec_rejects_non_finite_values() {
         let update = ServerUpdate::RemotePlayerUpdate(RemotePlayerUpdate {
             id: RemotePlayerId(42),
@@ -1327,6 +1532,42 @@ mod tests {
             encode_server_update(&update),
             Err(ProtocolCodecError::InvalidData(
                 "remote player update contains non-finite value"
+            ))
+        );
+    }
+
+    #[test]
+    fn entity_update_codec_rejects_invalid_values() {
+        let non_finite = ServerUpdate::EntityUpdate(EntityUpdate {
+            id: EntityId(42),
+            position: Vec3d::new(f64::NAN, 70.0, -3.25),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: -15.0,
+            on_ground: true,
+            age_ticks: 1,
+        });
+        assert_eq!(
+            encode_server_update(&non_finite),
+            Err(ProtocolCodecError::InvalidData(
+                "entity update contains non-finite value"
+            ))
+        );
+
+        let invalid_dimensions = ServerUpdate::EntitySnapshot(EntitySnapshot {
+            id: EntityId(42),
+            kind: EntityKind::Chicken,
+            position: Vec3d::new(1.0, 70.0, -3.25),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: -15.0,
+            on_ground: true,
+            width: 0.0,
+            height: 0.7,
+            age_ticks: 1,
+        });
+        assert_eq!(
+            encode_server_update(&invalid_dimensions),
+            Err(ProtocolCodecError::InvalidData(
+                "entity snapshot contains invalid dimensions"
             ))
         );
     }

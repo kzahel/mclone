@@ -9,6 +9,7 @@ use mclone_client::{
 };
 use mclone_core::Vec3d;
 use mclone_mesh::quad_face_count_from_indices;
+use mclone_protocol::EntityKind;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, TexturedSectionDrawResources,
     TexturedSectionRenderOptions, TexturedSectionUploadReport,
@@ -832,6 +833,20 @@ pub(crate) fn actor_instances_from_presentations(
                 glam_vec3_from_vec3d(actor.feet_position),
                 actor.y_rot_degrees,
             ),
+            ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_placeholder(
+                glam_vec3_from_vec3d(actor.feet_position),
+                actor.y_rot_degrees,
+                actor.width,
+                actor.height,
+            ),
+            ActorPresentationKind::Entity(EntityKind::Chicken) => {
+                ActorInstance::chicken_placeholder(
+                    glam_vec3_from_vec3d(actor.feet_position),
+                    actor.y_rot_degrees,
+                    actor.width,
+                    actor.height,
+                )
+            }
         })
         .collect()
 }
@@ -1436,6 +1451,36 @@ mod tests {
         assert_eq!(actors.len(), 1);
         assert_eq!(actors[0].feet_position, glam::Vec3::new(1.0, 64.0, 2.0));
         assert!((actors[0].yaw_radians - 90.0_f32.to_radians()).abs() < 1.0e-6);
+        assert_eq!(
+            actors[0].shape,
+            mclone_render::entity::ActorInstanceShape::Humanoid
+        );
+
+        let mut entity_client =
+            mclone_client::ClientRuntime::new(mclone_client::ClientHost::RemoteDedicated);
+        entity_client.apply_update(mclone_protocol::ServerUpdate::EntitySnapshot(
+            mclone_protocol::EntitySnapshot {
+                id: mclone_protocol::EntityId(1),
+                kind: EntityKind::Cow,
+                position: Vec3d::new(3.0, 64.0, 4.0),
+                y_rot_degrees: 45.0,
+                x_rot_degrees: 0.0,
+                on_ground: true,
+                width: 0.9,
+                height: 1.4,
+                age_ticks: 0,
+            },
+        ));
+        let entity_actors =
+            actor_instances_from_presentations(&entity_client.actor_presentations());
+
+        assert_eq!(entity_actors.len(), 1);
+        assert_eq!(
+            entity_actors[0].shape,
+            mclone_render::entity::ActorInstanceShape::QuadrupedPlaceholder
+        );
+        assert_eq!(entity_actors[0].width, 0.9);
+        assert_eq!(entity_actors[0].height, 1.4);
     }
 
     #[test]

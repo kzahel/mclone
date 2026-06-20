@@ -14,6 +14,7 @@ use mclone_protocol::{
 };
 use mclone_worldgen::block::RawBlockId;
 
+use crate::entities::{EntityTracking, RoutedEntityUpdate, ServerEntityState, ServerEntityStore};
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
 use crate::placement::DebugBlockItem;
@@ -44,6 +45,8 @@ pub struct IntegratedServer {
     dedicated_players: ServerPlayerList,
     chunk_tracking: PlayerChunkTracking,
     remote_players: RemotePlayerTracking,
+    entities: ServerEntityStore,
+    entity_tracking: EntityTracking,
 }
 
 /// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
@@ -76,6 +79,8 @@ impl IntegratedServer {
             dedicated_players: ServerPlayerList::default(),
             chunk_tracking,
             remote_players: RemotePlayerTracking::default(),
+            entities: ServerEntityStore::default(),
+            entity_tracking: EntityTracking::default(),
         }
     }
 
@@ -133,6 +138,7 @@ impl IntegratedServer {
         }
         let routes = self.remote_players.remove_player(player_id);
         self.route_remote_player_updates(routes);
+        self.entity_tracking.remove_observer(player_id);
         self.remove_player_chunk_tracking(player_id);
         true
     }
@@ -320,6 +326,9 @@ impl IntegratedServer {
 
         let entity_tick_start = simulation_timing_start();
         let entity_tick_chunks = run_noop_simulation_phase(&tick_report.entity_ticking_chunks);
+        let entity_updates = self
+            .entities
+            .tick_stationary(&tick_report.entity_ticking_chunks);
         let entity_tick_us = simulation_timing_elapsed_us(entity_tick_start);
 
         let mut updates = tick_report.updates;
@@ -328,6 +337,7 @@ impl IntegratedServer {
         });
         let fluid_event_apply_start = simulation_timing_start();
         self.route_scheduler_events(fluid_events);
+        self.reconcile_entity_subjects(entity_updates, true);
         updates.extend(self.drain_chunk_updates_for_target(target)?);
         let fluid_event_apply_us = simulation_timing_elapsed_us(fluid_event_apply_start);
         let chunk_tracking = self.chunk_tracking_diagnostics();
@@ -563,8 +573,10 @@ impl IntegratedServer {
         self.ensure_target_exists(target)?;
         self.route_scheduler_events(events);
         self.reconcile_remote_players_for_target_observer(target);
+        let initial_spawn_update = self.initial_spawn_update_for_target(target)?;
+        self.reconcile_entities_for_target_observer(target);
         let mut updates = self.drain_chunk_updates_for_target(target)?;
-        if let Some(update) = self.initial_spawn_update_for_target(target)? {
+        if let Some(update) = initial_spawn_update {
             updates.push(ServerUpdate::PlayerPosition(update));
         }
         Ok(updates)
@@ -598,6 +610,13 @@ impl IntegratedServer {
     }
 
     fn route_remote_player_updates(&mut self, routes: Vec<RoutedRemotePlayerUpdate>) {
+        for route in routes {
+            self.chunk_tracking
+                .queue_update_for_player(route.recipient, route.update);
+        }
+    }
+
+    fn route_entity_updates(&mut self, routes: Vec<RoutedEntityUpdate>) {
         for route in routes {
             self.chunk_tracking
                 .queue_update_for_player(route.recipient, route.update);
@@ -666,6 +685,47 @@ impl IntegratedServer {
         })
     }
 
+    fn reconcile_entities_for_target_observer(&mut self, target: CommandTarget) {
+        let observer = target.player_id();
+        let states = self.entities.states();
+        let chunk_tracking = &self.chunk_tracking;
+        let routes =
+            self.entity_tracking
+                .reconcile_observer(observer, &states, |player_id, pos| {
+                    chunk_tracking.player_tracks_chunk(player_id, pos)
+                });
+        self.route_entity_updates(routes);
+    }
+
+    fn reconcile_entity_subjects(
+        &mut self,
+        subjects: impl IntoIterator<Item = ServerEntityState>,
+        emit_existing_updates: bool,
+    ) {
+        let observers = self.player_observers();
+        let chunk_tracking = &self.chunk_tracking;
+        let mut routes = Vec::new();
+        for subject in subjects {
+            routes.extend(self.entity_tracking.reconcile_subject(
+                subject,
+                observers.iter().copied(),
+                |player_id, pos| chunk_tracking.player_tracks_chunk(player_id, pos),
+                emit_existing_updates,
+            ));
+        }
+        self.route_entity_updates(routes);
+    }
+
+    fn player_observers(&self) -> Vec<ServerPlayerId> {
+        std::iter::once(ServerPlayerId::LOCAL)
+            .chain(
+                self.dedicated_players
+                    .iter()
+                    .map(|(player_id, _)| player_id),
+            )
+            .collect()
+    }
+
     fn drain_chunk_updates_for_target(
         &mut self,
         target: CommandTarget,
@@ -690,6 +750,7 @@ impl IntegratedServer {
         else {
             return Ok(None);
         };
+        self.entities.ensure_starter_passive_near_spawn(position);
         let simulation_tick = self.simulation_tick;
         Ok(Some(
             self.player_mut_for_target(target)?.initial_position_update(
@@ -859,8 +920,8 @@ mod tests {
     use crate::ChunkHolder;
     use mclone_core::{BlockHitResult, BlockStateId, Direction, Vec3d};
     use mclone_protocol::{
-        AcceptTeleportCommand, PlayerPositionRelativeFlags, RemotePlayerId, RemotePlayerUpdate,
-        ServerUpdate,
+        AcceptTeleportCommand, EntityId, EntityKind, EntitySnapshot, EntityUpdate,
+        PlayerPositionRelativeFlags, RemotePlayerId, RemotePlayerUpdate, ServerUpdate,
     };
     use mclone_worldgen::block::{DIRT, GRASS, SNOW, STONE, has_fluid, material_blocks_motion};
 
@@ -1023,6 +1084,26 @@ mod tests {
                     if *id == RemotePlayerId(player_id.as_u64())
             )
         })
+    }
+
+    fn first_entity_snapshot(updates: &[ServerUpdate]) -> Option<EntitySnapshot> {
+        updates.iter().find_map(|update| match update {
+            ServerUpdate::EntitySnapshot(snapshot) => Some(*snapshot),
+            _ => None,
+        })
+    }
+
+    fn first_entity_update(updates: &[ServerUpdate], id: EntityId) -> Option<EntityUpdate> {
+        updates.iter().find_map(|update| match update {
+            ServerUpdate::EntityUpdate(update) if update.id == id => Some(*update),
+            _ => None,
+        })
+    }
+
+    fn has_entity_remove(updates: &[ServerUpdate], id: EntityId) -> bool {
+        updates.iter().any(
+            |update| matches!(update, ServerUpdate::EntityRemove { id: removed } if *removed == id),
+        )
     }
 
     #[test]
@@ -1235,6 +1316,59 @@ mod tests {
         let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
 
         assert!(has_remote_player_remove(&updates_b, player_a));
+    }
+
+    #[test]
+    fn dedicated_player_receives_starter_passive_entity_when_visible() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player = server.add_dedicated_player();
+
+        let updates =
+            set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
+
+        let snapshot = first_entity_snapshot(&updates)
+            .expect("dedicated player should receive starter passive entity snapshot");
+        assert_eq!(snapshot.kind, EntityKind::Cow);
+        assert_eq!(snapshot.width, 0.9);
+        assert_eq!(snapshot.height, 1.4);
+        let chunk = BlockPos::containing(snapshot.position).chunk_pos();
+        assert!(chunk.x.abs() <= 2);
+        assert!(chunk.z.abs() <= 2);
+    }
+
+    #[test]
+    fn starter_passive_entity_updates_age_on_simulation_tick() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player = server.add_dedicated_player();
+        let updates =
+            set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
+        let snapshot = first_entity_snapshot(&updates).expect("entity snapshot");
+
+        let report = server
+            .try_simulation_tick_report_for_player(player)
+            .expect("tick dedicated player");
+        let update = first_entity_update(&report.updates, snapshot.id).expect("entity age update");
+
+        assert_eq!(update.id, snapshot.id);
+        assert_eq!(update.position, snapshot.position);
+        assert!(update.age_ticks > snapshot.age_ticks);
+    }
+
+    #[test]
+    fn starter_passive_entity_is_removed_when_observer_view_stops_tracking_it() {
+        let mut server = IntegratedServer::new(12_345);
+        server.set_lighting_enabled(false);
+        let player = server.add_dedicated_player();
+        let updates =
+            set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
+        let snapshot = first_entity_snapshot(&updates).expect("entity snapshot");
+
+        let updates =
+            set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(8, 0), 0);
+
+        assert!(has_entity_remove(&updates, snapshot.id));
     }
 
     #[test]

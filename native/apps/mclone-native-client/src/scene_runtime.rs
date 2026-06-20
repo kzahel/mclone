@@ -513,6 +513,9 @@ impl WindowSceneRuntime {
                     | ServerUpdate::RemotePlayerAdd(_)
                     | ServerUpdate::RemotePlayerUpdate(_)
                     | ServerUpdate::RemotePlayerRemove { .. }
+                    | ServerUpdate::EntitySnapshot(_)
+                    | ServerUpdate::EntityUpdate(_)
+                    | ServerUpdate::EntityRemove { .. }
             )
         });
         let update_count = updates.len();
@@ -542,7 +545,10 @@ impl WindowSceneRuntime {
                 ServerUpdate::PlayerPosition(_) => {}
                 ServerUpdate::RemotePlayerAdd(_)
                 | ServerUpdate::RemotePlayerUpdate(_)
-                | ServerUpdate::RemotePlayerRemove { .. } => {}
+                | ServerUpdate::RemotePlayerRemove { .. }
+                | ServerUpdate::EntitySnapshot(_)
+                | ServerUpdate::EntityUpdate(_)
+                | ServerUpdate::EntityRemove { .. } => {}
             }
         }
         let dirty_mark_ms = elapsed_ms(dirty_mark_start.elapsed());
