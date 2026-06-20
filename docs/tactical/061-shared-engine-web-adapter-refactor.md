@@ -1,6 +1,6 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active shared render planner landed.
+Status: active web session uses shared render planner.
 
 ## Purpose
 
@@ -369,6 +369,21 @@ Browser worker payload result:
 - Added shared planner tests covering loaded/removal/stale classification,
   budgeted ready/deferred section selection, near-camera exceptions, inflight
   deferral, and dirty-state updates after a ready plan.
+- Updated `WebChunkRenderSession` to use `RenderSectionDirtyState` plus the
+  shared dirty-work classifier and ready planner for browser worker compile
+  request selection.
+- Kept the browser JS worker protocol stable while moving request target
+  revisions to the shared dirty state; `RenderSectionCompileRequestState` now
+  accepts a prepared compile request so it can remain the request-ID/pending
+  queue without becoming a second revision authority.
+- Browser worker results now finish through
+  `RenderSectionDirtyState::accept_completed_compile_result`, requeue stale
+  sections when needed, and discard removal dirty work only after the CPU cache
+  update is applied for GPU upload.
+- The Playwright chunk smoke still validates the same incremental behavior:
+  first worker request builds 144 sections, the second streamed request targets
+  96 sections, uploads only changed sections, removes stale resident sections,
+  and leaves both JS and Rust pending job counts at zero.
 
 ### 3. Extract Platform-Neutral Runtime Session
 
@@ -499,20 +514,17 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should put `WebChunkRenderSession` on the same shared dirty-state
-and planner lifecycle that desktop now uses:
+The next slice should extract the next layer up from duplicated desktop/web
+session orchestration into a shared engine-session skeleton:
 
-1. Give the browser render session a `RenderSectionDirtyState` and use
-   `RenderSectionViewSync` to mark dirty chunks and removals.
-2. Use `classify_render_section_dirty_work` and `plan_ready_render_sections`
-   for browser compile request selection, with browser/platform code providing
-   snapshot lookup, loaded/cached tests, camera-distance sorting, and readiness
-   probes.
-3. Submit browser worker compile requests from the shared ready plan and finish
-   them through the shared accepted/stale result path before applying section
-   updates.
-4. Keep WebGPU upload and presentation on the main browser thread, with
-   Playwright still asserting worker payload counts, accepted section counts,
-   uploaded section counts, screenshots, and zero pending jobs.
-5. Retire or narrow web-only target/ready helper use once it is no longer app
-   policy.
+1. Define a shared render-session sync method that owns the sequence
+   `mark dirty -> classify -> plan ready -> submit request -> finish accepted
+   result -> apply cache update`, while platform adapters provide compiler
+   submission, snapshot lookup, ordering, and readiness probes.
+2. Move the desktop `sync_render_sections_with_budget` and browser
+   `begin/finishChunkRenderCompileRequest` paths toward that shared method
+   instead of each spelling the sequence locally.
+3. Keep desktop native threads and browser Web Workers as separate compiler
+   adapters behind the same submit/drain lifecycle.
+4. Preserve the current Playwright worker/canvas smoke and native movement or
+   timedemo smoke as the compatibility gates for each extraction.

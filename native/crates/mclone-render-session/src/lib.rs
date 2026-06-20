@@ -589,20 +589,35 @@ impl<C> RenderSectionCompileRequestState<C> {
         context: C,
         target_sections: BTreeSet<RenderSectionKey>,
     ) -> RenderSectionCompileRequestInfo {
-        let request_id = self.take_next_request_id();
         self.bump_section_revisions(&target_sections);
         let section_revisions = target_sections
             .iter()
             .map(|key| (*key, self.section_revision(*key)))
             .collect::<BTreeMap<_, _>>();
-        let submitted_section_count = target_sections.len();
+        self.begin_compile_request(
+            context,
+            RenderSectionCompileRequest {
+                target_sections,
+                section_revisions,
+                snapshots: Vec::new(),
+            },
+        )
+    }
+
+    pub fn begin_compile_request(
+        &mut self,
+        context: C,
+        request: RenderSectionCompileRequest,
+    ) -> RenderSectionCompileRequestInfo {
+        let request_id = self.take_next_request_id();
+        let submitted_section_count = request.target_sections.len();
         self.pending_requests.insert(
             request_id,
             RenderSectionPendingCompileRequest {
                 request_id,
                 context,
-                target_sections,
-                section_revisions,
+                target_sections: request.target_sections,
+                section_revisions: request.section_revisions,
             },
         );
         RenderSectionCompileRequestInfo {
@@ -1327,6 +1342,34 @@ mod tests {
         let stale = completed.partition_by_revision(|key| state.section_revision(key));
         assert!(stale.accepted_sections.is_empty());
         assert_eq!(stale.stale_sections, BTreeSet::from([key]));
+    }
+
+    #[test]
+    fn render_section_compile_request_state_accepts_prepared_dirty_request() {
+        let key = RenderSectionKey::new(0, 4, 0);
+        let mut dirty = RenderSectionDirtyState::default();
+        dirty.mark_section_dirty(key);
+        let request = dirty.build_compile_request(BTreeSet::from([key]), Vec::new());
+        let mut state = RenderSectionCompileRequestState::default();
+
+        let info = state.begin_compile_request("prepared", request);
+
+        assert_eq!(
+            info,
+            RenderSectionCompileRequestInfo {
+                request_id: 1,
+                submitted_section_count: 1,
+                pending_compile_jobs: 1,
+            }
+        );
+        let pending = state.remove_pending_request(info.request_id).unwrap();
+        assert_eq!(pending.context, "prepared");
+        let (_, completed) =
+            pending.into_compile_result(Ok(TexturedRenderSectionBuildReport::default()));
+        let accepted = dirty.accept_completed_compile_result(&completed);
+
+        assert_eq!(accepted.accepted_sections, BTreeSet::from([key]));
+        assert!(accepted.stale_sections.is_empty());
     }
 
     #[test]
