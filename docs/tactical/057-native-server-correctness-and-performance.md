@@ -249,10 +249,11 @@ Landed:
 
 Next correctness steps, before more optimization work:
 
-1. Add rendered remote-player visuals or real observer-side block-delta
-   assertions to the binary smoke. The protocol smoke covers those semantics
-   today; the native binary smoke now proves concurrent sessions and
-   remote-player replication but does not render player entities yet.
+1. Add rendered remote-player visuals through
+   [`058-native-remote-player-and-passive-entity-rendering.md`](058-native-remote-player-and-passive-entity-rendering.md).
+   The protocol smoke covers observer-side block-delta semantics today; the
+   native binary smoke now proves concurrent sessions and remote-player
+   replication but does not render player entities yet.
 2. Broaden reconnect resync only when real gameplay state needs it, such as
    forcing carried-item selection back across the wire after a reconnect.
 3. Split or rename scheduler-facing modules only where these correctness slices
