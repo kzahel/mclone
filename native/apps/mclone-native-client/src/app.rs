@@ -37,34 +37,14 @@ use crate::frame_pacing::{
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, NativeUi, NativeUiAction};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
-use mclone_render_session::{EngineCameraController, RenderSectionCacheUpdate};
+use mclone_render_session::{
+    EngineCameraController, EngineCameraFrameState, EngineCameraMovementMode,
+    RenderSectionCacheUpdate,
+};
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const PLAYER_SURFACE_FEET_OFFSET: f64 = 1.0;
 const GROUND_PROBE_DISTANCE: f64 = 0.01;
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum PlayerMovementMode {
-    #[default]
-    Walking,
-    NoClip,
-}
-
-impl PlayerMovementMode {
-    const fn toggled(self) -> Self {
-        match self {
-            Self::Walking => Self::NoClip,
-            Self::NoClip => Self::Walking,
-        }
-    }
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Walking => "WALK",
-            Self::NoClip => "NOCLIP",
-        }
-    }
-}
 
 pub(crate) fn run_window(
     scene: SceneOptions,
@@ -257,7 +237,7 @@ struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
     player: LocalPlayerController,
-    movement_mode: PlayerMovementMode,
+    movement_mode: EngineCameraMovementMode,
     actor_interpolation: ActorInterpolationState,
     interaction: ClientInteractionController,
     render_options: TexturedSectionRenderOptions,
@@ -293,7 +273,7 @@ impl ChunkApp {
             runtime,
             spectator,
             player,
-            movement_mode: PlayerMovementMode::default(),
+            movement_mode: EngineCameraMovementMode::default(),
             actor_interpolation: ActorInterpolationState::new(),
             interaction: ClientInteractionController::new(),
             render_options,
@@ -367,7 +347,7 @@ impl ChunkApp {
         }
 
         match self.movement_mode {
-            PlayerMovementMode::Walking => {
+            EngineCameraMovementMode::Walking => {
                 let pose = self.player.pose();
                 if self
                     .player
@@ -385,7 +365,7 @@ impl ChunkApp {
                     self.update_interest_from_spectator()?;
                 }
             }
-            PlayerMovementMode::NoClip => {
+            EngineCameraMovementMode::NoClip => {
                 if EngineCameraController::tick_player_no_clip(
                     &mut self.player,
                     f64::from(self.spectator.speed),
@@ -537,7 +517,7 @@ impl ChunkApp {
             -(self.spectator.pitch as f64).to_degrees(),
             LOCAL_PLAYER_STANDING_EYE_HEIGHT,
         ));
-        if self.movement_mode == PlayerMovementMode::Walking {
+        if self.movement_mode == EngineCameraMovementMode::Walking {
             self.player.move_colliding(
                 self.runtime.client(),
                 Vec3d::new(0.0, -GROUND_PROBE_DISTANCE, 0.0),
@@ -696,11 +676,12 @@ impl ChunkApp {
     }
 
     fn debug_pane_stats(&self, render_options: TexturedSectionRenderOptions) -> DebugPaneStats {
+        let camera_state = self.camera_frame_state();
         DebugPaneStats {
             position: self.spectator.position,
             speed: self.spectator.speed,
-            movement_mode: self.movement_mode.label(),
-            on_ground: self.player.on_ground(),
+            movement_mode: camera_state.movement_mode_label(),
+            on_ground: camera_state.on_ground,
             runtime: self.runtime.stats(),
             render: self.render_stats,
             frame: self.frame_timing,
@@ -708,6 +689,15 @@ impl ChunkApp {
             section_occlusion: render_options.section_occlusion_culling,
             force_fullbright: render_options.force_fullbright,
         }
+    }
+
+    fn camera_frame_state(&self) -> EngineCameraFrameState {
+        EngineCameraFrameState::from_player(
+            &self.player,
+            self.movement_mode,
+            f64::from(self.spectator.speed),
+            self.interaction.selected_hotbar_slot(),
+        )
     }
 
     fn interpolated_actor_instances(&mut self) -> Vec<ActorInstance> {
@@ -1582,14 +1572,14 @@ mod tests {
     #[test]
     fn player_movement_mode_toggles_between_walking_and_no_clip() {
         assert_eq!(
-            PlayerMovementMode::Walking.toggled(),
-            PlayerMovementMode::NoClip
+            EngineCameraMovementMode::Walking.toggled(),
+            EngineCameraMovementMode::NoClip
         );
         assert_eq!(
-            PlayerMovementMode::NoClip.toggled(),
-            PlayerMovementMode::Walking
+            EngineCameraMovementMode::NoClip.toggled(),
+            EngineCameraMovementMode::Walking
         );
-        assert_eq!(PlayerMovementMode::Walking.label(), "WALK");
-        assert_eq!(PlayerMovementMode::NoClip.label(), "NOCLIP");
+        assert_eq!(EngineCameraMovementMode::Walking.label(), "WALK");
+        assert_eq!(EngineCameraMovementMode::NoClip.label(), "NOCLIP");
     }
 }

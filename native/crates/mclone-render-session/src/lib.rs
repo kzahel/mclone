@@ -666,6 +666,69 @@ pub struct EngineCameraSnapshot {
     pub chunk_pos: ChunkPos,
 }
 
+impl EngineCameraSnapshot {
+    pub fn from_eye_pose(
+        eye: Vec3d,
+        yaw_radians: f64,
+        pitch_radians: f64,
+        speed_blocks_per_second: f64,
+    ) -> Self {
+        Self {
+            eye,
+            yaw_radians,
+            pitch_radians,
+            speed_blocks_per_second,
+            chunk_pos: ChunkPos::new(
+                block_to_chunk_coord(eye.x.floor() as i32),
+                block_to_chunk_coord(eye.z.floor() as i32),
+            ),
+        }
+    }
+
+    pub fn from_player(player: &LocalPlayerController, speed_blocks_per_second: f64) -> Self {
+        let pose = player.pose();
+        Self {
+            eye: pose.eye_position(),
+            yaw_radians: pose.native_yaw_radians(),
+            pitch_radians: pose.native_pitch_radians(),
+            speed_blocks_per_second,
+            chunk_pos: pose.chunk_pos(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineCameraFrameState {
+    pub camera: EngineCameraSnapshot,
+    pub movement_mode: EngineCameraMovementMode,
+    pub on_ground: bool,
+    pub horizontal_collision: bool,
+    pub vertical_collision: bool,
+    pub selected_hotbar_slot: u8,
+}
+
+impl EngineCameraFrameState {
+    pub fn from_player(
+        player: &LocalPlayerController,
+        movement_mode: EngineCameraMovementMode,
+        speed_blocks_per_second: f64,
+        selected_hotbar_slot: u8,
+    ) -> Self {
+        Self {
+            camera: EngineCameraSnapshot::from_player(player, speed_blocks_per_second),
+            movement_mode,
+            on_ground: player.on_ground(),
+            horizontal_collision: player.horizontal_collision(),
+            vertical_collision: player.vertical_collision(),
+            selected_hotbar_slot,
+        }
+    }
+
+    pub const fn movement_mode_label(&self) -> &'static str {
+        self.movement_mode.label()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EngineRenderCamera {
     pub eye: [f32; 3],
@@ -792,14 +855,16 @@ impl EngineCameraController {
     }
 
     pub fn snapshot(&self) -> EngineCameraSnapshot {
-        let pose = self.player.pose();
-        EngineCameraSnapshot {
-            eye: pose.eye_position(),
-            yaw_radians: pose.native_yaw_radians(),
-            pitch_radians: pose.native_pitch_radians(),
-            speed_blocks_per_second: self.speed_blocks_per_second,
-            chunk_pos: pose.chunk_pos(),
-        }
+        EngineCameraSnapshot::from_player(&self.player, self.speed_blocks_per_second)
+    }
+
+    pub fn frame_state(&self, interaction: &ClientInteractionController) -> EngineCameraFrameState {
+        EngineCameraFrameState::from_player(
+            &self.player,
+            self.movement_mode,
+            self.speed_blocks_per_second,
+            interaction.selected_hotbar_slot(),
+        )
     }
 
     pub fn pick_block(
@@ -2577,6 +2642,36 @@ mod tests {
             camera.toggle_movement_mode(),
             EngineCameraMovementMode::Walking
         );
+    }
+
+    #[test]
+    fn engine_camera_snapshot_from_eye_pose_floors_negative_chunks() {
+        let snapshot =
+            EngineCameraSnapshot::from_eye_pose(Vec3d::new(-16.01, 91.0, -0.01), 0.2, -0.1, 24.0);
+
+        assert_eq!(snapshot.eye, Vec3d::new(-16.01, 91.0, -0.01));
+        assert_eq!(snapshot.yaw_radians, 0.2);
+        assert_eq!(snapshot.pitch_radians, -0.1);
+        assert_eq!(snapshot.speed_blocks_per_second, 24.0);
+        assert_eq!(snapshot.chunk_pos, ChunkPos::new(-2, -1));
+    }
+
+    #[test]
+    fn engine_camera_frame_state_reports_controller_and_interaction_state() {
+        let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
+        let mut interaction = ClientInteractionController::new();
+        camera.toggle_movement_mode();
+        assert!(interaction.select_hotbar_slot(4));
+
+        let state = camera.frame_state(&interaction);
+
+        assert_eq!(state.camera, camera.snapshot());
+        assert_eq!(state.movement_mode, EngineCameraMovementMode::NoClip);
+        assert_eq!(state.movement_mode_label(), "NOCLIP");
+        assert_eq!(state.on_ground, camera.on_ground());
+        assert_eq!(state.horizontal_collision, camera.horizontal_collision());
+        assert_eq!(state.vertical_collision, camera.vertical_collision());
+        assert_eq!(state.selected_hotbar_slot, 4);
     }
 
     #[test]

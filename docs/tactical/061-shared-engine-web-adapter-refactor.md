@@ -4,7 +4,7 @@ Status: active; shared update dirtying, browser app loop, first-person web
 camera/input, resize, browser no-clip pose sync, and browser sky/actor drawing
 landed; browser walking/collision mode, block interaction, and hotbar selection
 landed; browser target preview landed; desktop no-clip/mouse-look helpers
-converged.
+converged; shared camera frame-state/reporting helpers landed.
 
 ## Purpose
 
@@ -711,6 +711,31 @@ Desktop camera convergence result:
   app smoke still proved target preview plus selected-slot break/place with zero
   pending compile jobs after the shared helper extraction.
 
+Camera state/reporting convergence result:
+
+- `EngineCameraSnapshot` now has shared constructors for raw eye poses and
+  `LocalPlayerController` poses, so desktop spectator snapshots and controller
+  snapshots use the same chunk-position derivation.
+- `EngineCameraFrameState` now centralizes the shared camera report fields:
+  snapshot, movement mode, collision flags, ground flag, and selected hotbar
+  slot. `EngineCameraController::frame_state` exposes that state for web.
+- The native desktop app now uses `EngineCameraMovementMode` directly instead
+  of its own duplicate movement-mode enum, and its debug pane state is sourced
+  through `EngineCameraFrameState`.
+- The web adapter now writes both `cameraFrameState` and render-report camera
+  fields from the shared frame-state object. The exported JS field names remain
+  unchanged for the app and Playwright smoke.
+- Desktop should not hold a full `EngineCameraController` facade yet. The
+  remaining native walking path still couples movement ticks to server pose
+  sync, initial surface probing, correction handling, and chunk-interest
+  updates. The next useful convergence point is to extract that "moved player
+  pose" commit sequence before moving desktop player ownership.
+- Validation covered native unit tests, movement smoke, timedemo smoke, a native
+  rendered screenshot, WASM target check, and the browser app smoke. The browser
+  app smoke still proved walk/no-clip state reporting, selected-slot
+  break/place, worker compile availability, sky/actors, and zero pending compile
+  jobs.
+
 ### 5. Add Web Worker/Thread Policy
 
 Browser workers are part of the target architecture, not optional polish. The
@@ -807,21 +832,23 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should reduce desktop/web ownership drift now that desktop
-no-clip and browser movement/targeting/interaction use shared controller
-primitives:
+The next slice should make the desktop player-move commit sequence explicit so
+desktop can move closer to an `EngineCameraController` facade without changing
+walking behavior:
 
-1. Move duplicated desktop/web movement-mode reporting and camera-state
-   serialization behind shared render-session/controller helpers where the
-   ownership boundary is already clear.
-2. Evaluate whether desktop can hold an `EngineCameraController` facade around
-   the existing local player without disrupting walking/collision corrections,
-   or whether the current helper-level convergence is the right intermediate
-   shape for one more slice.
-3. Keep `native:web:app-smoke` proving walk + no-clip movement, target preview,
+1. Extract the desktop "player pose changed" sequence into one helper that
+   updates the spectator mirror, syncs server player pose, and moves chunk
+   interest.
+2. Use that helper from both desktop walking and no-clip paths, then compare it
+   against the web controller's post-movement sync path for the next shared
+   boundary.
+3. Re-evaluate moving desktop local-player ownership into
+   `EngineCameraController` after the sync/correction/interest side effects are
+   explicit and test-covered.
+4. Keep `native:web:app-smoke` proving walk + no-clip movement, target preview,
    selected-slot break/place, section dirty/update publication, worker compiles,
    sky/actors, resize, screenshots, and zero pending compile jobs.
-4. Keep browser worker compile submission, shared dirty/session policy, sky,
+5. Keep browser worker compile submission, shared dirty/session policy, sky,
    actors, resize, pose sync, movement modes, and WebGPU presentation unchanged;
    leave pause/options/inventory and multiplayer/server selection as later UI
    slices.

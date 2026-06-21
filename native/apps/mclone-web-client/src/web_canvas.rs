@@ -28,8 +28,8 @@ use mclone_render::entity::{ActorDrawResources, ActorInstance};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
-    EngineCameraController, EngineCameraInput, EngineCameraMovementMode, EngineCameraSnapshot,
-    EngineRenderCamera, PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
+    EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineRenderCamera,
+    PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
     RenderSectionCompileAcceptanceReport, RenderSectionCompileRequestInfo,
     RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionNeighborReadiness,
     RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync,
@@ -202,14 +202,9 @@ struct CanvasRenderReport {
 struct GeneratedChunkRenderReport {
     center: ChunkPos,
     radius_chunks: u32,
-    camera: EngineCameraSnapshot,
+    camera_state: EngineCameraFrameState,
     width: u32,
     height: u32,
-    movement_mode: EngineCameraMovementMode,
-    on_ground: bool,
-    horizontal_collision: bool,
-    vertical_collision: bool,
-    selected_hotbar_slot: u8,
     day_time: u64,
     time_of_day: f32,
     sun_angle: f32,
@@ -283,15 +278,7 @@ impl GeneratedChunkRenderReport {
         set_bool(&object, "workerCompileUsed", self.worker_compile_used)?;
         set_bool(&object, "skyRendered", self.sky_rendered)?;
         set_bool(&object, "actorRendered", self.drawn_actor_count > 0)?;
-        set_bool(&object, "onGround", self.on_ground)?;
-        set_bool(&object, "horizontalCollision", self.horizontal_collision)?;
-        set_bool(&object, "verticalCollision", self.vertical_collision)?;
-        set_string(&object, "movementMode", self.movement_mode.label())?;
-        set_number(
-            &object,
-            "selectedHotbarSlot",
-            f64::from(self.selected_hotbar_slot),
-        )?;
+        write_camera_frame_state_to_js(&object, self.camera_state)?;
         set_number(
             &object,
             "compileRequestId",
@@ -300,16 +287,6 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "centerX", f64::from(self.center.x))?;
         set_number(&object, "centerZ", f64::from(self.center.z))?;
         set_number(&object, "radiusChunks", f64::from(self.radius_chunks))?;
-        set_number(&object, "cameraX", self.camera.eye.x)?;
-        set_number(&object, "cameraY", self.camera.eye.y)?;
-        set_number(&object, "cameraZ", self.camera.eye.z)?;
-        set_number(&object, "cameraYawRadians", self.camera.yaw_radians)?;
-        set_number(&object, "cameraPitchRadians", self.camera.pitch_radians)?;
-        set_number(
-            &object,
-            "cameraSpeedBlocksPerSecond",
-            self.camera.speed_blocks_per_second,
-        )?;
         set_number(&object, "width", f64::from(self.width))?;
         set_number(&object, "height", f64::from(self.height))?;
         set_number(&object, "dayTime", self.day_time as f64)?;
@@ -1496,14 +1473,9 @@ impl WebChunkRenderSession {
         Ok(GeneratedChunkRenderReport {
             center,
             radius_chunks,
-            camera: self.camera.snapshot(),
+            camera_state: self.camera.frame_state(&self.interaction),
             width: self.context.width,
             height: self.context.height,
-            movement_mode: self.camera.movement_mode(),
-            on_ground: self.camera.on_ground(),
-            horizontal_collision: self.camera.horizontal_collision(),
-            vertical_collision: self.camera.vertical_collision(),
-            selected_hotbar_slot: self.interaction.selected_hotbar_slot(),
             day_time,
             time_of_day,
             sun_angle,
@@ -1728,35 +1700,39 @@ fn camera_state_to_js_value(
     camera: &EngineCameraController,
     interaction: &ClientInteractionController,
 ) -> Result<JsValue, String> {
-    let snapshot = camera.snapshot();
     let object = js_sys::Object::new();
     set_bool(&object, "ok", true)?;
-    set_bool(&object, "onGround", camera.on_ground())?;
-    set_bool(
-        &object,
-        "horizontalCollision",
-        camera.horizontal_collision(),
-    )?;
-    set_bool(&object, "verticalCollision", camera.vertical_collision())?;
-    set_string(&object, "movementMode", camera.movement_mode().label())?;
+    write_camera_frame_state_to_js(&object, camera.frame_state(interaction))?;
+    Ok(object.into())
+}
+
+fn write_camera_frame_state_to_js(
+    object: &js_sys::Object,
+    state: EngineCameraFrameState,
+) -> Result<(), String> {
+    let snapshot = state.camera;
+    set_bool(object, "onGround", state.on_ground)?;
+    set_bool(object, "horizontalCollision", state.horizontal_collision)?;
+    set_bool(object, "verticalCollision", state.vertical_collision)?;
+    set_string(object, "movementMode", state.movement_mode_label())?;
     set_number(
-        &object,
+        object,
         "selectedHotbarSlot",
-        f64::from(interaction.selected_hotbar_slot()),
+        f64::from(state.selected_hotbar_slot),
     )?;
-    set_number(&object, "cameraX", snapshot.eye.x)?;
-    set_number(&object, "cameraY", snapshot.eye.y)?;
-    set_number(&object, "cameraZ", snapshot.eye.z)?;
-    set_number(&object, "cameraYawRadians", snapshot.yaw_radians)?;
-    set_number(&object, "cameraPitchRadians", snapshot.pitch_radians)?;
+    set_number(object, "cameraX", snapshot.eye.x)?;
+    set_number(object, "cameraY", snapshot.eye.y)?;
+    set_number(object, "cameraZ", snapshot.eye.z)?;
+    set_number(object, "cameraYawRadians", snapshot.yaw_radians)?;
+    set_number(object, "cameraPitchRadians", snapshot.pitch_radians)?;
     set_number(
-        &object,
+        object,
         "cameraSpeedBlocksPerSecond",
         snapshot.speed_blocks_per_second,
     )?;
-    set_number(&object, "centerX", f64::from(snapshot.chunk_pos.x))?;
-    set_number(&object, "centerZ", f64::from(snapshot.chunk_pos.z))?;
-    Ok(object.into())
+    set_number(object, "centerX", f64::from(snapshot.chunk_pos.x))?;
+    set_number(object, "centerZ", f64::from(snapshot.chunk_pos.z))?;
+    Ok(())
 }
 
 fn hotbar_state_to_js_value(interaction: &ClientInteractionController) -> Result<JsValue, String> {

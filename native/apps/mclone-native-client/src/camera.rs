@@ -1,5 +1,5 @@
 use glam::Vec3;
-use mclone_core::{ChunkPos, Vec3d, block_to_chunk_coord, chunk_middle_block_coord};
+use mclone_core::{ChunkPos, Vec3d, chunk_middle_block_coord};
 use mclone_render::chunk::ChunkCamera;
 use mclone_render_session::{
     ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND,
@@ -44,24 +44,20 @@ impl SpectatorCamera {
     }
 
     pub(crate) fn engine_snapshot(&self) -> EngineCameraSnapshot {
-        EngineCameraSnapshot {
-            eye: Vec3d::new(
+        EngineCameraSnapshot::from_eye_pose(
+            Vec3d::new(
                 f64::from(self.position.x),
                 f64::from(self.position.y),
                 f64::from(self.position.z),
             ),
-            yaw_radians: f64::from(self.yaw),
-            pitch_radians: f64::from(self.pitch),
-            speed_blocks_per_second: f64::from(self.speed),
-            chunk_pos: self.chunk_pos(),
-        }
+            f64::from(self.yaw),
+            f64::from(self.pitch),
+            f64::from(self.speed),
+        )
     }
 
     pub(crate) fn chunk_pos(&self) -> ChunkPos {
-        ChunkPos::new(
-            world_coord_to_chunk_coord(self.position.x),
-            world_coord_to_chunk_coord(self.position.z),
-        )
+        self.engine_snapshot().chunk_pos
     }
 
     pub(crate) fn block_column(&self) -> (i32, i32) {
@@ -104,22 +100,22 @@ fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
     }
 }
 
-fn world_coord_to_chunk_coord(value: f32) -> i32 {
-    block_to_chunk_coord(value.floor() as i32)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn world_coord_to_chunk_coord_floors_negative_positions() {
-        assert_eq!(world_coord_to_chunk_coord(0.0), 0);
-        assert_eq!(world_coord_to_chunk_coord(15.99), 0);
-        assert_eq!(world_coord_to_chunk_coord(16.0), 1);
-        assert_eq!(world_coord_to_chunk_coord(-0.01), -1);
-        assert_eq!(world_coord_to_chunk_coord(-16.0), -1);
-        assert_eq!(world_coord_to_chunk_coord(-16.01), -2);
+        let mut camera = SpectatorCamera::spawn_for_scene(&SceneOptions::default());
+        camera.position.x = 0.0;
+        camera.position.z = 15.99;
+        assert_eq!(camera.chunk_pos(), ChunkPos::new(0, 0));
+        camera.position.x = 16.0;
+        camera.position.z = -0.01;
+        assert_eq!(camera.chunk_pos(), ChunkPos::new(1, -1));
+        camera.position.x = -16.01;
+        camera.position.z = -16.0;
+        assert_eq!(camera.chunk_pos(), ChunkPos::new(-2, -1));
     }
 
     #[test]
