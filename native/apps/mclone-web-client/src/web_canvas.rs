@@ -5,19 +5,28 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime};
 use mclone_assets::PackedAssetSource;
-use mclone_core::ChunkPos;
+use mclone_client::{
+    ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationKind,
+    ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+};
 #[cfg(test)]
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, chunk_section_index,
 };
+use mclone_core::{BlockPos, ChunkPos, Vec3d};
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     load_textured_terrain_assets,
 };
+use mclone_protocol::EntityKind;
+use mclone_render::actor_assets::{ActorTextureImage, load_actor_texture_assets};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
-    TexturedSectionDrawResources, TexturedSectionUploadReport,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
+use mclone_render::entity::{ActorDrawResources, ActorInstance};
+use mclone_render::sky_render::SkyRenderer;
+use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
     EngineCameraController, EngineCameraInput, EngineCameraSnapshot, EngineRenderCamera,
     PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
@@ -195,6 +204,10 @@ struct GeneratedChunkRenderReport {
     camera: EngineCameraSnapshot,
     width: u32,
     height: u32,
+    day_time: u64,
+    time_of_day: f32,
+    sun_angle: f32,
+    sky_rendered: bool,
     command_count: usize,
     update_count: usize,
     loaded_chunk_count: usize,
@@ -234,6 +247,11 @@ struct GeneratedChunkRenderReport {
     worker_vertex_count: u32,
     worker_index_count: u32,
     worker_face_count: u32,
+    actor_count: usize,
+    drawn_actor_count: usize,
+    drawn_actor_index_count: u32,
+    actor_atlas_width: u32,
+    actor_atlas_height: u32,
 }
 
 impl CanvasRenderReport {
@@ -257,6 +275,8 @@ impl GeneratedChunkRenderReport {
         set_bool(&object, "assetPackLoaded", true)?;
         set_bool(&object, "textured", true)?;
         set_bool(&object, "workerCompileUsed", self.worker_compile_used)?;
+        set_bool(&object, "skyRendered", self.sky_rendered)?;
+        set_bool(&object, "actorRendered", self.drawn_actor_count > 0)?;
         set_number(
             &object,
             "compileRequestId",
@@ -277,6 +297,9 @@ impl GeneratedChunkRenderReport {
         )?;
         set_number(&object, "width", f64::from(self.width))?;
         set_number(&object, "height", f64::from(self.height))?;
+        set_number(&object, "dayTime", self.day_time as f64)?;
+        set_number(&object, "timeOfDay", f64::from(self.time_of_day))?;
+        set_number(&object, "sunAngle", f64::from(self.sun_angle))?;
         set_number(&object, "commandCount", self.command_count as f64)?;
         set_number(&object, "updateCount", self.update_count as f64)?;
         set_number(&object, "loadedChunkCount", self.loaded_chunk_count as f64)?;
@@ -406,6 +429,23 @@ impl GeneratedChunkRenderReport {
             "workerFaceCount",
             f64::from(self.worker_face_count),
         )?;
+        set_number(&object, "actorCount", self.actor_count as f64)?;
+        set_number(&object, "drawnActorCount", self.drawn_actor_count as f64)?;
+        set_number(
+            &object,
+            "drawnActorIndexCount",
+            f64::from(self.drawn_actor_index_count),
+        )?;
+        set_number(
+            &object,
+            "actorAtlasWidth",
+            f64::from(self.actor_atlas_width),
+        )?;
+        set_number(
+            &object,
+            "actorAtlasHeight",
+            f64::from(self.actor_atlas_height),
+        )?;
         Ok(object.into())
     }
 }
@@ -490,10 +530,13 @@ async fn render_canvas_clear(canvas: HtmlCanvasElement) -> Result<CanvasRenderRe
 pub struct WebChunkRenderSession {
     context: WebCanvasContext,
     depth: ChunkDepthTarget,
+    sky: SkyRenderer,
     runtime: WebRuntime,
     camera: EngineCameraController,
+    actor_interpolation: ActorInterpolationState,
     mesh_assets: WebTexturedMeshAssets,
     draw: Option<TexturedSectionDrawResources>,
+    actors: ActorDrawResources,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
     asset_pack_parse_count: usize,
     terrain_asset_load_count: usize,
@@ -672,14 +715,25 @@ impl WebChunkRenderSession {
         let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
         let context = WebCanvasContext::new(canvas).await?;
         let depth = ChunkDepthTarget::new(&context.device, context.width, context.height);
+        let sky = SkyRenderer::new(&context.device, context.format);
+        let actors = ActorDrawResources::new(
+            &context.device,
+            &context.queue,
+            context.format,
+            mesh_assets.actor_atlas.as_upload(),
+        )
+        .map_err(|error| format!("failed to upload packed actor textures: {error:#}"))?;
 
         Ok(Self {
             context,
             depth,
+            sky,
             runtime: WebRuntime::local_integrated(SMOKE_SEED),
             camera: EngineCameraController::spawn_for_chunk(SMOKE_INITIAL_CENTER),
+            actor_interpolation: ActorInterpolationState::new(),
             mesh_assets,
             draw: None,
+            actors,
             loaded_chunk_positions: BTreeSet::new(),
             asset_pack_parse_count: 1,
             terrain_asset_load_count: 1,
@@ -1071,6 +1125,15 @@ impl WebChunkRenderSession {
             ));
         }
         let upload_report = self.upload_sections(&cache_update, &cached_sections)?;
+        let frame_camera = chunk_camera_for_frame(frame_camera, &self.camera, radius_chunks);
+        let render_view = frame_camera.render_view(self.context.width, self.context.height);
+        let day_time = self.runtime.client().day_time();
+        let time_of_day = self.runtime.client().time_of_day();
+        let sun_angle = self.runtime.client().sun_angle();
+        let sky_clear_color = mclone_render::sky::overworld_clear_color(time_of_day);
+        let render_options = TexturedSectionRenderOptions::default()
+            .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day));
+        let actor_instances = self.interpolated_actor_instances();
 
         let frame = self
             .context
@@ -1088,20 +1151,46 @@ impl WebChunkRenderSession {
             .draw
             .as_ref()
             .ok_or_else(|| "textured draw resources were not initialized".to_owned())?;
+        self.sky.render(
+            &self.context.queue,
+            &mut encoder,
+            &view,
+            sky_clear_color,
+            render_view.sky_view_projection(),
+            time_of_day,
+            sun_angle,
+        );
+        let render_target = ChunkRenderTarget::new(
+            &view,
+            &self.depth.view,
+            [self.context.width, self.context.height],
+            sky_clear_color,
+        )
+        .with_loaded_color();
         let render_stats = draw
-            .render(
+            .render_with_options(
                 &self.context.queue,
                 &mut encoder,
-                ChunkRenderTarget::new(
-                    &view,
-                    &self.depth.view,
-                    [self.context.width, self.context.height],
-                    mclone_render::default_clear_color(),
-                ),
-                chunk_camera_for_frame(frame_camera, &self.camera, radius_chunks)
-                    .render_view(self.context.width, self.context.height),
+                render_target,
+                render_view,
+                render_options,
             )
             .map_err(|error| format!("failed to render generated section meshes: {error:#}"))?;
+        let frame_target =
+            RenderFrameTarget::color(&view, [self.context.width, self.context.height])
+                .with_depth(&self.depth.view);
+        let actor_stats = self
+            .actors
+            .render(
+                &self.context.device,
+                &self.context.queue,
+                &mut encoder,
+                frame_target,
+                render_view,
+                render_options,
+                &actor_instances,
+            )
+            .map_err(|error| format!("failed to render browser actor meshes: {error:#}"))?;
         self.context.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         self.render_count += 1;
@@ -1113,6 +1202,10 @@ impl WebChunkRenderSession {
             camera: self.camera.snapshot(),
             width: self.context.width,
             height: self.context.height,
+            day_time,
+            time_of_day,
+            sun_angle,
+            sky_rendered: true,
             command_count: self.runtime.command_count(),
             update_count: self.runtime.update_count(),
             loaded_chunk_count: self.runtime.client().loaded_chunk_count(),
@@ -1152,6 +1245,11 @@ impl WebChunkRenderSession {
             worker_vertex_count: compile_report.vertex_count,
             worker_index_count: compile_report.index_count,
             worker_face_count: compile_report.face_count,
+            actor_count: actor_instances.len(),
+            drawn_actor_count: actor_stats.drawn_actor_count,
+            drawn_actor_index_count: actor_stats.index_count,
+            actor_atlas_width: self.mesh_assets.actor_atlas.width,
+            actor_atlas_height: self.mesh_assets.actor_atlas.height,
         })
     }
 
@@ -1195,6 +1293,17 @@ impl WebChunkRenderSession {
             self.mesh_upload_count += 1;
         }
         Ok(upload_report)
+    }
+
+    fn interpolated_actor_instances(&mut self) -> Vec<ActorInstance> {
+        self.actor_interpolation
+            .reconcile_authoritative(self.runtime.client().actor_presentations());
+        self.actor_interpolation
+            .step(0.05, ActorInterpolationConfig::default());
+        actor_instances_from_presentations(
+            &self.actor_interpolation.presentations(),
+            self.runtime.client(),
+        )
     }
 
     fn compile_request_to_js_value(
@@ -1254,6 +1363,62 @@ fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
         fov_y_radians: camera.fov_y_radians,
         z_near: camera.z_near,
         z_far: camera.z_far,
+    }
+}
+
+fn actor_instances_from_presentations(
+    presentations: &[ActorPresentation],
+    client: &ClientRuntime,
+) -> Vec<ActorInstance> {
+    presentations
+        .iter()
+        .map(|actor| {
+            let packed_light =
+                client.packed_light_at_world_or_fullbright(actor_light_probe_block_pos(actor));
+            match actor.kind {
+                ActorPresentationKind::RemotePlayer => ActorInstance::remote_player(
+                    glam_vec3_from_vec3d(actor.feet_position),
+                    actor.y_rot_degrees,
+                )
+                .with_packed_light(packed_light),
+                ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_model(
+                    glam_vec3_from_vec3d(actor.feet_position),
+                    actor.y_rot_degrees,
+                    actor.width,
+                    actor.height,
+                )
+                .with_packed_light(packed_light),
+                ActorPresentationKind::Entity(EntityKind::Chicken) => {
+                    ActorInstance::chicken_placeholder(
+                        glam_vec3_from_vec3d(actor.feet_position),
+                        actor.y_rot_degrees,
+                        actor.width,
+                        actor.height,
+                    )
+                    .with_packed_light(packed_light)
+                }
+            }
+        })
+        .collect()
+}
+
+fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
+    glam::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
+}
+
+fn actor_light_probe_block_pos(actor: &ActorPresentation) -> BlockPos {
+    BlockPos::containing(actor.feet_position.add(Vec3d::new(
+        0.0,
+        actor_light_probe_height(actor),
+        0.0,
+    )))
+}
+
+fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
+    match actor.kind {
+        ActorPresentationKind::RemotePlayer => LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        ActorPresentationKind::Entity(EntityKind::Cow) => 1.3,
+        ActorPresentationKind::Entity(EntityKind::Chicken) => f64::from(actor.height) * 0.92,
     }
 }
 
@@ -1326,6 +1491,7 @@ fn section_vertex_count(sections: &[mclone_mesh::TexturedRenderSectionMesh]) -> 
 struct WebTexturedMeshAssets {
     catalog: TexturedMeshCatalog,
     atlas: TextureAtlasImage,
+    actor_atlas: ActorTextureImage,
     atlas_sprite_count: usize,
     asset_pack_file_count: usize,
 }
@@ -1344,10 +1510,13 @@ fn load_textured_mesh_assets_from_pack(bytes: Vec<u8>) -> Result<WebTexturedMesh
     let asset_pack_file_count = source.file_count();
     let assets = load_textured_terrain_assets(&source)
         .map_err(|error| format!("failed to load packed textured terrain assets: {error}"))?;
+    let actor_assets = load_actor_texture_assets(&source)
+        .map_err(|error| format!("failed to load packed actor texture assets: {error}"))?;
 
     Ok(WebTexturedMeshAssets {
         catalog: assets.catalog,
         atlas: assets.atlas,
+        actor_atlas: actor_assets.atlas,
         atlas_sprite_count: assets.atlas_sprite_count,
         asset_pack_file_count,
     })

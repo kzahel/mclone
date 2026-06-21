@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 glam.workspace = true
+image.workspace = true
 mclone-assets.workspace = true
 mclone-core.workspace = true
 mclone-mesh.workspace = true
@@ -15,7 +16,6 @@ mclone-ui.workspace = true
 wgpu.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-image.workspace = true
 log.workspace = true
 pollster.workspace = true
 winit.workspace = true

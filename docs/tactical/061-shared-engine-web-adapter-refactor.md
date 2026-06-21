@@ -1,7 +1,8 @@
 # 061: Shared Engine / Web Adapter Refactor
 
 Status: active; shared update dirtying, browser app loop, first-person web
-camera/input, resize, and browser no-clip pose sync landed.
+camera/input, resize, browser no-clip pose sync, and browser sky/actor drawing
+landed.
 
 ## Purpose
 
@@ -593,8 +594,8 @@ First-person web camera/input result:
   chunk, waits for the streamed loaded center to match the camera center with
   zero pending compile jobs, asserts the last streamed compile came from the
   browser worker, and captures page/canvas screenshots.
-- The current web app still has no walking collision mode, sky/actor passes,
-  pause/options menus, inventory UI, or multiplayer/server selection UI.
+- The current web app still has no walking collision mode, pause/options menus,
+  inventory UI, or multiplayer/server selection UI.
 
 Resize and browser pose-sync result:
 
@@ -615,6 +616,28 @@ Resize and browser pose-sync result:
   store, WebGPU surface, and depth target resize together.
 - `native:web:app-smoke` now also asserts explicit resized canvas dimensions
   and gameplay command counts greater than the two chunk-view commands.
+
+Sky and actor browser result:
+
+- Actor texture atlas loading moved into `mclone-render::actor_assets`, so
+  desktop and browser build the same cow/white actor atlas from whichever
+  `AssetSource` their platform adapter owns.
+- `WebChunkRenderSession` now owns a `SkyRenderer`, `ActorDrawResources`, and
+  `ActorInterpolationState` alongside the textured section resources.
+- Browser frames now render in the same pass order as desktop for the world:
+  sky/time-of-day clear and dome, textured chunks with loaded color, then actors
+  using the shared client actor presentations and packed-light probes.
+- Local integrated desktop and web clients now seed their replica with the
+  integrated server's initial day-time before the first frame, so both start
+  from the same authoritative `dayTime=1000` morning clock.
+- Web render reports expose day-time, celestial phase, sky-rendered state,
+  actor counts, drawn actor index counts, and actor atlas dimensions.
+- The browser HUD displays time and actor counters, and `native:web:app-smoke`
+  now asserts visible sky-colored pixels plus `actors 1/1` from the starter cow
+  path after browser pose sync.
+- The two-shot chunk smoke also verifies the packed actor atlas and sky render
+  state while keeping actor count diagnostic-only, since that path does not
+  drive the full camera/spawn correction loop.
 
 ### 5. Add Web Worker/Thread Policy
 
@@ -712,18 +735,20 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should make the browser frame loop less terrain-smoke-shaped and
-continue desktop/web gameplay convergence:
+The next slice should make browser gameplay movement converge with desktop now
+that the browser frame is visually closer to desktop:
 
-1. Add web sky rendering and time-of-day use so browser frames are no longer
-   clear-color terrain renders.
-2. Add browser actor rendering from the shared client presentations, starting
-   with cows/entities and then remote-player placeholders.
-3. Continue reducing desktop/web camera drift by wrapping desktop no-clip
+1. Add a browser walking/collision mode behind the same `LocalPlayerController`
+   / `WalkingMovementStep` path desktop uses, keeping no-clip as a toggle or
+   smoke fallback.
+2. Continue reducing desktop/web camera drift by wrapping desktop no-clip
    stepping around shared `EngineCameraController` primitives where that does
    not disrupt walking/collision behavior.
-4. Keep browser worker compile submission, shared dirty/session policy, and
-   WebGPU presentation unchanged.
-5. Extend validation to cover sky/actor pixels plus continued movement,
-   streaming, resize, pose sync, and screenshots; leave menus/options/inventory
-   and full walking collision as later UI/gameplay slices.
+3. Thread block raycast/break/place input through the web app only after the
+   walking/collision pose path is stable.
+4. Keep browser worker compile submission, shared dirty/session policy, sky,
+   actors, resize, pose sync, and WebGPU presentation unchanged.
+5. Extend validation to cover walking/collision movement, continued streaming,
+   pose corrections, sky/actors, resize, screenshots, and no pending compile
+   jobs; leave pause/options/inventory and multiplayer/server selection as
+   later UI slices.

@@ -3,6 +3,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod gpu_util;
 
+pub mod actor_assets;
 pub mod chunk;
 pub mod entity;
 pub mod gui;

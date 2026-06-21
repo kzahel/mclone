@@ -285,6 +285,9 @@ impl WindowSceneRuntime {
             scheduled_fluid_ticks: 0,
             last_poll_diagnostics: RuntimePollDiagnostics::default(),
         };
+        if let Some(day_time) = runtime.server.as_ref().map(|server| server.day_time()) {
+            runtime.force_day_time(day_time);
+        }
         runtime.set_chunk_view(
             runtime.interest_center,
             runtime.render_distance,

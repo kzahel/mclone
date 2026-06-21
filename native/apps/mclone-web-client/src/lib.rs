@@ -90,9 +90,14 @@ pub struct WebRuntime {
 
 impl WebRuntime {
     pub fn local_integrated(seed: i64) -> Self {
+        let host = WebLoopbackHost::new(seed);
+        let mut engine = EngineRenderSession::new(ClientRuntime::local_integrated());
+        engine.client_mut().apply_update(ServerUpdate::TimeUpdate {
+            day_time: host.day_time(),
+        });
         Self {
-            engine: EngineRenderSession::new(ClientRuntime::local_integrated()),
-            host: WebLoopbackHost::new(seed),
+            engine,
+            host,
             command_count: 0,
             update_count: 0,
             protocol_codec_roundtrip: true,
@@ -198,6 +203,10 @@ impl WebLoopbackHost {
             server: IntegratedServer::new(seed),
             transport: LocalTransport::new(),
         }
+    }
+
+    fn day_time(&self) -> u64 {
+        self.server.day_time()
     }
 
     fn exchange(&mut self, command: ClientCommand) -> ProtocolCodecResult<WebExchange> {
@@ -465,6 +474,13 @@ mod tests {
         assert!(report.protocol_codec_roundtrip);
         assert!(report.transport_drained);
         assert!(runtime.command_count() >= 2);
+    }
+
+    #[test]
+    fn web_runtime_seeds_initial_day_time_from_integrated_server() {
+        let runtime = WebRuntime::local_integrated(SMOKE_SEED);
+
+        assert_eq!(runtime.client().day_time(), 1000);
     }
 
     #[test]

@@ -25,6 +25,11 @@ const runtime = {
     cameraSpeedBlocksPerSecond: 0,
     width: 0,
     height: 0,
+    dayTime: 0,
+    timeOfDay: 0,
+    skyRendered: false,
+    actorCount: 0,
+    drawnActorCount: 0,
     loadedChunkCount: 0,
     residentSectionCount: 0,
     pendingCompileJobCount: 0,
@@ -276,6 +281,11 @@ class WebChunkApp {
     runtime.state.radiusChunks = report.radiusChunks;
     runtime.state.width = report.width;
     runtime.state.height = report.height;
+    runtime.state.dayTime = report.dayTime;
+    runtime.state.timeOfDay = report.timeOfDay;
+    runtime.state.skyRendered = Boolean(report.skyRendered);
+    runtime.state.actorCount = report.actorCount;
+    runtime.state.drawnActorCount = report.drawnActorCount;
     runtime.state.loadedChunkCount = report.loadedChunkCount;
     runtime.state.residentSectionCount = report.residentSectionCount;
     runtime.state.pendingCompileJobCount = report.pendingCompileJobCount;
@@ -520,6 +530,8 @@ function updateDom() {
   setText("camera", `${state.cameraX.toFixed(1)}, ${state.cameraY.toFixed(1)}, ${state.cameraZ.toFixed(1)}`);
   setText("chunks", String(state.loadedChunkCount));
   setText("sections", String(state.residentSectionCount));
+  setText("time", `${Number(state.dayTime || 0).toFixed(0)} / ${Number(state.timeOfDay || 0).toFixed(3)}`);
+  setText("actors", `${state.drawnActorCount}/${state.actorCount}`);
   setText("pending", String(state.pendingCompileJobCount));
   setText("frames", String(state.frameCount));
   setText("lock", state.pointerLocked ? "on" : state.pointerLockFallback ? "fallback" : "off");

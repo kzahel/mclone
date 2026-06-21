@@ -1143,6 +1143,7 @@ version = "0.0.0"
 name = "mclone-web-client"
 version = "0.0.0"
 dependencies = [
+ "glam",
  "js-sys",
  "mclone-assets",
  "mclone-client",

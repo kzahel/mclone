@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+glam.workspace = true
 mclone-assets.workspace = true
 mclone-client.workspace = true
 mclone-core.workspace = true

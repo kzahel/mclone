@@ -426,11 +426,32 @@ function assertAppLoopResult(result, pageErrors, canvasPixels) {
   if (!result.lastReport?.commandCount || result.lastReport.commandCount <= 2) {
     throw new Error(`native web app did not sync browser camera pose through gameplay commands:\n${JSON.stringify(result, null, 2)}`);
   }
+  if (
+    !result.lastReport?.skyRendered
+    || !Number.isFinite(result.timeOfDay)
+    || !Number.isFinite(result.lastReport.sunAngle)
+    || !Number.isFinite(result.lastReport.dayTime)
+    || result.lastReport.dayTime < 0
+  ) {
+    throw new Error(`native web app did not render from server time-of-day sky state:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (
+    result.actorCount <= 0
+    || result.drawnActorCount <= 0
+    || result.lastReport.drawnActorIndexCount <= 0
+    || result.lastReport.actorAtlasWidth <= 1
+    || result.lastReport.actorAtlasHeight <= 1
+  ) {
+    throw new Error(`native web app did not render shared actor presentations:\n${JSON.stringify(result, null, 2)}`);
+  }
   if (!Number.isFinite(result.cameraX) || !Number.isFinite(result.cameraY) || !Number.isFinite(result.cameraZ)) {
     throw new Error(`native web app did not report a finite camera pose:\n${JSON.stringify(result, null, 2)}`);
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`app canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+  if (canvasPixels.skyLikePixelCount < 64) {
+    throw new Error(`app canvas screenshot did not contain visible sky pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 
@@ -486,8 +507,14 @@ function assertChunkRenderResult(
   if (!report.assetPackLoaded || !report.textured) {
     throw new Error(`generated chunk was not rendered from the packed textured asset path:\n${JSON.stringify(report, null, 2)}`);
   }
+  if (!report.skyRendered || !Number.isFinite(report.timeOfDay) || !Number.isFinite(report.sunAngle) || !Number.isFinite(report.dayTime) || report.dayTime < 0) {
+    throw new Error(`generated chunk render did not use server time-of-day sky state:\n${JSON.stringify(report, null, 2)}`);
+  }
   if (report.assetPackFileCount < 1000 || report.atlasWidth <= 0 || report.atlasHeight <= 0 || report.atlasSpriteCount <= 0) {
     throw new Error(`packed texture atlas did not load expected asset data:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (report.actorAtlasWidth <= 1 || report.actorAtlasHeight <= 1) {
+    throw new Error(`packed actor texture atlas did not load expected asset data:\n${JSON.stringify(report, null, 2)}`);
   }
   if (!firstReport?.ok) {
     throw new Error(`cached chunk session did not produce the first render report:\n${JSON.stringify(firstReport, null, 2)}`);
@@ -641,6 +668,7 @@ function analyzePng(bytes) {
   const interiorColors = new Set();
   let clearColorPixelCount = 0;
   let nonClearInteriorPixelCount = 0;
+  let skyLikePixelCount = 0;
   const inset = 4;
   for (let y = 0; y < png.height; y += 1) {
     for (let x = 0; x < png.width; x += 1) {
@@ -655,6 +683,9 @@ function analyzePng(bytes) {
         && Math.abs(b - expected.b) <= 3;
       if (isClear) {
         clearColorPixelCount += 1;
+      }
+      if (b >= 96 && b > r + 24 && b >= g + 12) {
+        skyLikePixelCount += 1;
       }
       if (x >= inset && x < png.width - inset && y >= inset && y < png.height - inset) {
         interiorColors.add(`${r},${g},${b}`);
@@ -671,6 +702,7 @@ function analyzePng(bytes) {
     distinctInteriorColorCount: interiorColors.size,
     clearColorPixelCount,
     nonClearInteriorPixelCount,
+    skyLikePixelCount,
     expectedClearColor: expected,
   };
 }
