@@ -3,8 +3,8 @@ use mclone_core::{ChunkPos, Vec3d, block_to_chunk_coord, chunk_middle_block_coor
 use mclone_render::chunk::ChunkCamera;
 use mclone_render_session::{
     ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND,
-    ENGINE_CAMERA_MIN_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MOUSE_SENSITIVITY,
-    ENGINE_CAMERA_SPAWN_PITCH_RADIANS, ENGINE_CAMERA_SPAWN_YAW_RADIANS, EngineCameraSnapshot,
+    ENGINE_CAMERA_MIN_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_SPAWN_PITCH_RADIANS,
+    ENGINE_CAMERA_SPAWN_YAW_RADIANS, EngineCameraController, EngineCameraSnapshot,
     EngineRenderCamera, render_camera_from_snapshot,
 };
 
@@ -13,7 +13,6 @@ use crate::cli::SceneOptions;
 pub(crate) const SPECTATOR_BASE_SPEED: f32 = ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND as f32;
 pub(crate) const SPECTATOR_MIN_SPEED: f32 = ENGINE_CAMERA_MIN_SPEED_BLOCKS_PER_SECOND as f32;
 pub(crate) const SPECTATOR_MAX_SPEED: f32 = ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND as f32;
-pub(crate) const SPECTATOR_MOUSE_SENSITIVITY: f32 = ENGINE_CAMERA_MOUSE_SENSITIVITY as f32;
 pub(crate) const SPECTATOR_SURFACE_CLEARANCE: f32 = 8.0;
 pub(crate) const SPECTATOR_SURFACE_PITCH: f32 = -0.45;
 
@@ -81,8 +80,10 @@ impl SpectatorCamera {
         if !wheel_amount.is_finite() {
             return;
         }
-        let multiplier = (1.0 + wheel_amount * 0.18).clamp(0.5, 1.8);
-        self.speed = (self.speed * multiplier).clamp(SPECTATOR_MIN_SPEED, SPECTATOR_MAX_SPEED);
+        self.speed = EngineCameraController::adjusted_speed_blocks_per_second(
+            f64::from(self.speed),
+            f64::from(wheel_amount),
+        ) as f32;
     }
 
     #[cfg(test)]

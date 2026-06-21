@@ -774,8 +774,21 @@ impl EngineCameraController {
         if !wheel_amount.is_finite() {
             return;
         }
+        self.set_speed_blocks_per_second(Self::adjusted_speed_blocks_per_second(
+            self.speed_blocks_per_second,
+            wheel_amount,
+        ));
+    }
+
+    pub fn adjusted_speed_blocks_per_second(
+        speed_blocks_per_second: f64,
+        wheel_amount: f64,
+    ) -> f64 {
+        if !wheel_amount.is_finite() {
+            return clamp_camera_speed(speed_blocks_per_second);
+        }
         let multiplier = (1.0 + wheel_amount * 0.18).clamp(0.5, 1.8);
-        self.set_speed_blocks_per_second(self.speed_blocks_per_second * multiplier);
+        clamp_camera_speed(speed_blocks_per_second * multiplier)
     }
 
     pub fn snapshot(&self) -> EngineCameraSnapshot {
@@ -807,10 +820,18 @@ impl EngineCameraController {
     }
 
     pub fn turn_mouse_delta(&mut self, mouse_delta_x: f64, mouse_delta_y: f64) {
+        Self::turn_player_mouse_delta(&mut self.player, mouse_delta_x, mouse_delta_y);
+    }
+
+    pub fn turn_player_mouse_delta(
+        player: &mut LocalPlayerController,
+        mouse_delta_x: f64,
+        mouse_delta_y: f64,
+    ) {
         if !mouse_delta_x.is_finite() || !mouse_delta_y.is_finite() {
             return;
         }
-        self.player.turn_native_radians(
+        player.turn_native_radians(
             -mouse_delta_x * ENGINE_CAMERA_MOUSE_SENSITIVITY,
             -mouse_delta_y * ENGINE_CAMERA_MOUSE_SENSITIVITY,
         );
@@ -863,16 +884,24 @@ impl EngineCameraController {
     }
 
     fn tick_no_clip(&mut self, input: EngineCameraInput) {
-        let pose = self.player.pose();
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
-        self.player.tick_no_clip_movement(NoClipMovementStep {
+        Self::tick_player_no_clip(&mut self.player, self.speed_blocks_per_second, dt_seconds);
+    }
+
+    pub fn tick_player_no_clip(
+        player: &mut LocalPlayerController,
+        speed_blocks_per_second: f64,
+        dt_seconds: f64,
+    ) -> Option<Vec3d> {
+        let pose = player.pose();
+        player.tick_no_clip_movement(NoClipMovementStep {
             yaw_radians: pose.native_yaw_radians(),
             pitch_radians: pose.native_pitch_radians(),
-            speed_blocks_per_second: self.speed_blocks_per_second,
+            speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
             dt_seconds,
             descending: false,
             sprinting: false,
-        });
+        })
     }
 
     fn tick_walking(&mut self, client: &ClientRuntime, input: EngineCameraInput) {

@@ -3,7 +3,8 @@
 Status: active; shared update dirtying, browser app loop, first-person web
 camera/input, resize, browser no-clip pose sync, and browser sky/actor drawing
 landed; browser walking/collision mode, block interaction, and hotbar selection
-landed; browser target preview landed.
+landed; browser target preview landed; desktop no-clip/mouse-look helpers
+converged.
 
 ## Purpose
 
@@ -693,6 +694,23 @@ Block interaction browser result:
   result block state `5` (dirt), accepted two recompiled render sections for
   each interaction, and ended with zero pending compile jobs.
 
+Desktop camera convergence result:
+
+- `EngineCameraController` now exposes shared primitives for no-clip stepping,
+  mouse-delta turning, and scroll-wheel speed adjustment.
+- The web controller continues to use those primitives internally, while the
+  native desktop app now calls them from its no-clip movement path, cursor
+  fallback look path, raw mouse-motion look path, and spectator speed
+  adjustment.
+- The desktop walking path still owns its existing `LocalPlayerController`
+  tick, collision, correction, and interest-update behavior. This slice does
+  not replace the native app's player owner; it removes duplicated behavior
+  around the desktop no-clip path first.
+- Validation covered native unit tests, movement smoke, timedemo smoke, a native
+  rendered screenshot, WASM target check, and the browser app smoke. The browser
+  app smoke still proved target preview plus selected-slot break/place with zero
+  pending compile jobs after the shared helper extraction.
+
 ### 5. Add Web Worker/Thread Policy
 
 Browser workers are part of the target architecture, not optional polish. The
@@ -789,15 +807,17 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should reduce desktop/web input and camera drift now that browser
-movement, targeting, interaction, and carried-item selection use shared
-controllers:
+The next slice should reduce desktop/web ownership drift now that desktop
+no-clip and browser movement/targeting/interaction use shared controller
+primitives:
 
-1. Wrap desktop no-clip stepping around shared `EngineCameraController`
-   primitives where that does not disrupt the existing desktop walking path.
-2. Move duplicated desktop/web mouse-look, speed adjustment, and movement-mode
-   reporting details behind shared render-session/controller helpers where the
+1. Move duplicated desktop/web movement-mode reporting and camera-state
+   serialization behind shared render-session/controller helpers where the
    ownership boundary is already clear.
+2. Evaluate whether desktop can hold an `EngineCameraController` facade around
+   the existing local player without disrupting walking/collision corrections,
+   or whether the current helper-level convergence is the right intermediate
+   shape for one more slice.
 3. Keep `native:web:app-smoke` proving walk + no-clip movement, target preview,
    selected-slot break/place, section dirty/update publication, worker compiles,
    sky/actors, resize, screenshots, and zero pending compile jobs.

@@ -5,8 +5,7 @@ use anyhow::{Context, Result};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationKind,
     ClientInteractionController, ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-    LocalPlayerController, LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
-    WalkingMovementStep,
+    LocalPlayerController, LocalPlayerPose, PlayerInputKey, WalkingMovementStep,
 };
 use mclone_core::{BlockPos, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
@@ -29,7 +28,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
-use crate::camera::{SPECTATOR_MOUSE_SENSITIVITY, SpectatorCamera};
+use crate::camera::SpectatorCamera;
 use crate::cli::SceneOptions;
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FramePacingUiState, FrameTimingStats, RedrawSchedule, elapsed_ms,
@@ -38,7 +37,7 @@ use crate::frame_pacing::{
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, NativeUi, NativeUiAction};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
-use mclone_render_session::RenderSectionCacheUpdate;
+use mclone_render_session::{EngineCameraController, RenderSectionCacheUpdate};
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const PLAYER_SURFACE_FEET_OFFSET: f64 = 1.0;
@@ -387,18 +386,12 @@ impl ChunkApp {
                 }
             }
             PlayerMovementMode::NoClip => {
-                let pose = self.player.pose();
-                if self
-                    .player
-                    .tick_no_clip_movement(NoClipMovementStep {
-                        yaw_radians: pose.native_yaw_radians(),
-                        pitch_radians: pose.native_pitch_radians(),
-                        speed_blocks_per_second: self.spectator.speed as f64,
-                        dt_seconds: movement_dt as f64,
-                        descending: false,
-                        sprinting: false,
-                    })
-                    .is_some()
+                if EngineCameraController::tick_player_no_clip(
+                    &mut self.player,
+                    f64::from(self.spectator.speed),
+                    f64::from(movement_dt),
+                )
+                .is_some()
                 {
                     sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
                     self.sync_server_player_pose()?;
@@ -1252,9 +1245,10 @@ impl ApplicationHandler for ChunkApp {
                     if let Some(previous) = self.last_cursor {
                         let dx = (cursor.0 - previous.0) as f32;
                         let dy = (cursor.1 - previous.1) as f32;
-                        self.player.turn_native_radians(
-                            (-dx * SPECTATOR_MOUSE_SENSITIVITY) as f64,
-                            (-dy * SPECTATOR_MOUSE_SENSITIVITY) as f64,
+                        EngineCameraController::turn_player_mouse_delta(
+                            &mut self.player,
+                            f64::from(dx),
+                            f64::from(dy),
                         );
                         sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
                         self.schedule_next_redraw(event_loop);
@@ -1403,9 +1397,10 @@ impl ApplicationHandler for ChunkApp {
         if let DeviceEvent::MouseMotion { delta } = event {
             let dx = delta.0 as f32;
             let dy = delta.1 as f32;
-            self.player.turn_native_radians(
-                (-dx * SPECTATOR_MOUSE_SENSITIVITY) as f64,
-                (-dy * SPECTATOR_MOUSE_SENSITIVITY) as f64,
+            EngineCameraController::turn_player_mouse_delta(
+                &mut self.player,
+                f64::from(dx),
+                f64::from(dy),
             );
             sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
             self.schedule_next_redraw(event_loop);
