@@ -4,6 +4,7 @@ const RENDER_COMPILER_WORKER_URL = new URL("./mclone-render-compiler-worker.js",
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 
 const RADIUS_CHUNKS = 1;
+const MAX_FRAME_DT_SECONDS = 0.05;
 
 const runtime = {
   ready: false,
@@ -13,12 +14,24 @@ const runtime = {
     failed: false,
     centerX: 0,
     centerZ: 0,
+    loadedCenterX: null,
+    loadedCenterZ: null,
     radiusChunks: RADIUS_CHUNKS,
+    cameraX: 0,
+    cameraY: 0,
+    cameraZ: 0,
+    cameraYawRadians: 0,
+    cameraPitchRadians: 0,
+    cameraSpeedBlocksPerSecond: 0,
     loadedChunkCount: 0,
     residentSectionCount: 0,
     pendingCompileJobCount: 0,
     renderCount: 0,
     frameCount: 0,
+    pointerLockSupported: false,
+    pointerLockAttempted: false,
+    pointerLocked: false,
+    pointerLockFallback: false,
     status: "booting",
   },
 };
@@ -27,6 +40,8 @@ globalThis.__mcloneWebApp = runtime;
 
 async function boot() {
   const app = new WebChunkApp();
+  runtime.queueMouseDelta = (dx, dy) => app.queueMouseDelta(dx, dy);
+  runtime.setInputKey = (name, down) => app.setInputKey(name, down);
   try {
     await app.init();
     runtime.ready = true;
@@ -52,23 +67,41 @@ class WebChunkApp {
     this.status = document.getElementById("status");
     this.session = null;
     this.compiler = null;
-    this.pending = false;
-    this.queuedCenter = null;
+    this.keys = {
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+      jump: false,
+      descend: false,
+      sprint: false,
+    };
+    this.mouseDeltaX = 0;
+    this.mouseDeltaY = 0;
+    this.pendingCompile = false;
+    this.renderFrameBusy = false;
+    this.hasRendered = false;
+    this.loadedCenter = null;
+    this.pointerDragging = false;
     this.animationFrame = 0;
+    this.lastFrameTime = 0;
   }
 
   async init() {
     if (!(this.canvas instanceof HTMLCanvasElement)) {
       throw new Error("missing canvas#mclone-canvas");
     }
+    runtime.state.pointerLockSupported = typeof this.canvas.requestPointerLock === "function";
     this.canvas.focus();
 
     runtime.state.status = "loading wasm";
     updateDom();
     const module = await import(BINDGEN_JS_URL.href);
     await module.default(BINDGEN_WASM_URL.href);
-    if (typeof module.mclone_web_create_chunk_render_session !== "function") {
-      throw new Error("missing mclone_web_create_chunk_render_session export");
+    for (const name of ["mclone_web_create_chunk_render_session"]) {
+      if (typeof module[name] !== "function") {
+        throw new Error(`missing ${name} export`);
+      }
     }
 
     runtime.state.status = "loading assets";
@@ -77,63 +110,93 @@ class WebChunkApp {
     runtime.state.status = "initializing webgpu";
     updateDom();
     this.session = await module.mclone_web_create_chunk_render_session(this.canvas, assetPack);
+    for (const name of [
+      "advanceCameraFrame",
+      "beginCameraRenderCompileRequest",
+      "finishCameraRenderCompileRequest",
+      "renderCameraFrame",
+      "cameraFrameState",
+    ]) {
+      if (typeof this.session[name] !== "function") {
+        throw new Error(`missing WebChunkRenderSession.${name} export`);
+      }
+    }
     this.compiler = new RenderSectionWorkerCompiler(assetPack);
     bindInput(this);
-    runtime.state.status = "rendering 0, 0";
+    this.applyCameraState(this.session.cameraFrameState());
+
+    runtime.state.status = "rendering";
     updateDom();
-    await this.renderCenter(0, 0);
+    await this.compileCameraView();
   }
 
   start() {
-    const frame = () => {
-      runtime.state.frameCount += 1;
-      updateDom();
+    this.lastFrameTime = performance.now();
+    const frame = (now) => {
+      void this.tickFrame(now);
       this.animationFrame = requestAnimationFrame(frame);
     };
     this.animationFrame = requestAnimationFrame(frame);
   }
 
-  moveBy(dx, dz) {
-    this.queueCenter(runtime.state.centerX + dx, runtime.state.centerZ + dz);
-  }
-
-  queueCenter(centerX, centerZ) {
-    if (centerX === runtime.state.centerX && centerZ === runtime.state.centerZ) {
+  async tickFrame(now) {
+    if (!this.session) {
       return;
     }
-    this.queuedCenter = { centerX, centerZ };
-    void this.drainQueue();
+    const rawDt = (now - this.lastFrameTime) / 1000;
+    this.lastFrameTime = now;
+    const dtSeconds = Number.isFinite(rawDt)
+      ? Math.max(0, Math.min(rawDt, MAX_FRAME_DT_SECONDS))
+      : 0;
+    const mouseDeltaX = this.mouseDeltaX;
+    const mouseDeltaY = this.mouseDeltaY;
+    this.mouseDeltaX = 0;
+    this.mouseDeltaY = 0;
+
+    runtime.state.frameCount += 1;
+    const camera = this.session.advanceCameraFrame(
+      dtSeconds,
+      mouseDeltaX,
+      mouseDeltaY,
+      this.keys.forward,
+      this.keys.backward,
+      this.keys.left,
+      this.keys.right,
+      this.keys.jump,
+      this.keys.descend,
+      this.keys.sprint,
+    );
+    this.applyCameraState(camera);
+
+    if (this.hasRendered && this.loadedCenter && !this.pendingCompile) {
+      if (
+        camera.centerX !== this.loadedCenter.centerX
+        || camera.centerZ !== this.loadedCenter.centerZ
+      ) {
+        void this.compileCameraView();
+      }
+    }
+
+    if (this.hasRendered && !this.renderFrameBusy) {
+      this.renderCameraFrame();
+    } else {
+      updateDom();
+    }
   }
 
-  async drainQueue() {
-    if (this.pending || !this.queuedCenter) {
+  async compileCameraView() {
+    if (!this.session || !this.compiler || this.pendingCompile) {
       return;
     }
-    const next = this.queuedCenter;
-    this.queuedCenter = null;
-    try {
-      await this.renderCenter(next.centerX, next.centerZ);
-    } catch (error) {
-      console.error(error);
-    }
-    if (this.queuedCenter) {
-      void this.drainQueue();
-    }
-  }
-
-  async renderCenter(centerX, centerZ) {
-    if (!this.session || !this.compiler) {
-      throw new Error("web chunk app is not initialized");
-    }
-    this.pending = true;
-    runtime.state.status = `loading ${centerX}, ${centerZ}`;
+    this.pendingCompile = true;
+    runtime.state.status = "compiling";
     runtime.state.pendingCompileJobCount = this.session.pendingChunkRenderCompileJobCount();
     updateDom();
 
     try {
-      const request = this.session.beginChunkRenderCompileRequest(centerX, centerZ, RADIUS_CHUNKS);
+      const request = this.session.beginCameraRenderCompileRequest(RADIUS_CHUNKS);
       if (!request?.ok) {
-        throw new Error(request?.reason ?? "failed to begin render compile request");
+        throw new Error(request?.reason ?? "failed to begin camera render compile request");
       }
       runtime.state.pendingCompileJobCount = request.pendingCompileJobCount ?? 1;
       updateDom();
@@ -143,69 +206,202 @@ class WebChunkApp {
         throw new Error(compiled.report?.reason ?? "render compiler worker failed");
       }
 
-      const report = this.session.finishChunkRenderCompileRequest(request.requestId, compiled.packed);
+      const report = this.session.finishCameraRenderCompileRequest(
+        request.requestId,
+        compiled.packed,
+      );
       if (!report?.ok) {
-        throw new Error(report?.reason ?? "failed to render compiled chunk sections");
+        throw new Error(report?.reason ?? "failed to finish camera render compile request");
       }
-      runtime.state.ok = true;
-      runtime.state.centerX = report.centerX;
-      runtime.state.centerZ = report.centerZ;
-      runtime.state.radiusChunks = report.radiusChunks;
-      runtime.state.loadedChunkCount = report.loadedChunkCount;
-      runtime.state.residentSectionCount = report.residentSectionCount;
-      runtime.state.pendingCompileJobCount = report.pendingCompileJobCount;
-      runtime.state.renderCount = report.renderCount;
-      runtime.state.status = "ready";
-      runtime.state.lastReport = report;
+      this.hasRendered = true;
+      this.loadedCenter = { centerX: report.centerX, centerZ: report.centerZ };
+      runtime.state.loadedCenterX = report.centerX;
+      runtime.state.loadedCenterZ = report.centerZ;
+      runtime.state.lastCompileReport = report;
+      this.applyReport(report);
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
       throw error;
     } finally {
-      this.pending = false;
+      this.pendingCompile = false;
+      runtime.state.pendingCompileJobCount = this.session?.pendingChunkRenderCompileJobCount?.() ?? 0;
       updateDom();
     }
+  }
+
+  renderCameraFrame() {
+    if (!this.session || !this.hasRendered) {
+      return;
+    }
+    this.renderFrameBusy = true;
+    try {
+      const report = this.session.renderCameraFrame(RADIUS_CHUNKS);
+      if (!report?.ok) {
+        throw new Error(report?.reason ?? "failed to render camera frame");
+      }
+      this.applyReport(report);
+    } catch (error) {
+      runtime.state.ok = false;
+      runtime.state.status = stringifyError(error);
+      console.error(error);
+    } finally {
+      this.renderFrameBusy = false;
+      updateDom();
+    }
+  }
+
+  applyCameraState(camera) {
+    if (!camera?.ok) {
+      return;
+    }
+    runtime.state.centerX = Number(camera.centerX) || 0;
+    runtime.state.centerZ = Number(camera.centerZ) || 0;
+    runtime.state.cameraX = Number(camera.cameraX) || 0;
+    runtime.state.cameraY = Number(camera.cameraY) || 0;
+    runtime.state.cameraZ = Number(camera.cameraZ) || 0;
+    runtime.state.cameraYawRadians = Number(camera.cameraYawRadians) || 0;
+    runtime.state.cameraPitchRadians = Number(camera.cameraPitchRadians) || 0;
+    runtime.state.cameraSpeedBlocksPerSecond = Number(camera.cameraSpeedBlocksPerSecond) || 0;
+  }
+
+  applyReport(report) {
+    this.applyCameraState(report);
+    runtime.state.ok = true;
+    runtime.state.radiusChunks = report.radiusChunks;
+    runtime.state.loadedChunkCount = report.loadedChunkCount;
+    runtime.state.residentSectionCount = report.residentSectionCount;
+    runtime.state.pendingCompileJobCount = report.pendingCompileJobCount;
+    runtime.state.renderCount = report.renderCount;
+    runtime.state.status = "ready";
+    runtime.state.lastReport = report;
+  }
+
+  setInputKey(name, down) {
+    if (!(name in this.keys)) {
+      return false;
+    }
+    this.keys[name] = Boolean(down);
+    return true;
+  }
+
+  queueMouseDelta(dx, dy) {
+    const x = Number(dx);
+    const y = Number(dy);
+    if (Number.isFinite(x)) {
+      this.mouseDeltaX += x;
+    }
+    if (Number.isFinite(y)) {
+      this.mouseDeltaY += y;
+    }
+  }
+
+  requestPointerLock() {
+    runtime.state.pointerLockAttempted = true;
+    if (typeof this.canvas.requestPointerLock === "function") {
+      const result = this.canvas.requestPointerLock();
+      if (result && typeof result.catch === "function") {
+        result.catch(() => {
+          runtime.state.pointerLockFallback = true;
+          updateDom();
+        });
+      }
+    } else {
+      runtime.state.pointerLockFallback = true;
+    }
+    updateDom();
+  }
+
+  updatePointerLockState() {
+    runtime.state.pointerLocked = document.pointerLockElement === this.canvas;
+    runtime.state.pointerLockFallback =
+      runtime.state.pointerLockAttempted && !runtime.state.pointerLocked;
+    updateDom();
   }
 }
 
 function bindInput(app) {
   window.addEventListener("keydown", (event) => {
-    const move = keyMove(event.key);
-    if (!move) return;
+    const key = inputNameForKey(event.key);
+    if (!key) return;
     event.preventDefault();
-    if (event.repeat) return;
-    app.moveBy(move.dx, move.dz);
+    app.setInputKey(key, true);
   });
 
-  for (const button of document.querySelectorAll("button[data-dx][data-dz]")) {
-    button.addEventListener("click", () => {
-      app.moveBy(
-        Number.parseInt(button.dataset.dx ?? "0", 10),
-        Number.parseInt(button.dataset.dz ?? "0", 10),
-      );
-      app.canvas?.focus();
-    });
-  }
+  window.addEventListener("keyup", (event) => {
+    const key = inputNameForKey(event.key);
+    if (!key) return;
+    event.preventDefault();
+    app.setInputKey(key, false);
+  });
+
+  app.canvas.addEventListener("click", () => {
+    app.canvas.focus();
+    app.requestPointerLock();
+  });
+
+  app.canvas.addEventListener("mousedown", () => {
+    app.pointerDragging = true;
+    app.canvas.focus();
+  });
+
+  window.addEventListener("mouseup", () => {
+    app.pointerDragging = false;
+  });
+
+  window.addEventListener("mousemove", (event) => {
+    if (document.pointerLockElement === app.canvas) {
+      app.queueMouseDelta(event.movementX, event.movementY);
+    } else if (app.pointerDragging) {
+      app.queueMouseDelta(event.movementX, event.movementY);
+    }
+  });
+
+  app.canvas.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    const amount = event.deltaMode === WheelEvent.DOM_DELTA_PIXEL
+      ? -event.deltaY * 0.001
+      : -event.deltaY * 0.12;
+    const camera = app.session?.adjustCameraSpeed?.(amount);
+    if (camera) app.applyCameraState(camera);
+    updateDom();
+  }, { passive: false });
+
+  document.addEventListener("pointerlockchange", () => app.updatePointerLockState());
+  document.addEventListener("pointerlockerror", () => {
+    runtime.state.pointerLockFallback = true;
+    updateDom();
+  });
 }
 
-function keyMove(key) {
+function inputNameForKey(key) {
   switch (key) {
     case "ArrowUp":
     case "w":
     case "W":
-      return { dx: 0, dz: -1 };
+      return "forward";
     case "ArrowDown":
     case "s":
     case "S":
-      return { dx: 0, dz: 1 };
+      return "backward";
     case "ArrowLeft":
     case "a":
     case "A":
-      return { dx: -1, dz: 0 };
+      return "left";
     case "ArrowRight":
     case "d":
     case "D":
-      return { dx: 1, dz: 0 };
+      return "right";
+    case " ":
+    case "Spacebar":
+      return "jump";
+    case "x":
+    case "X":
+    case "q":
+    case "Q":
+      return "descend";
+    case "Control":
+      return "sprint";
     default:
       return null;
   }
@@ -292,10 +488,12 @@ class RenderSectionWorkerCompiler {
 function updateDom() {
   const state = runtime.state;
   setText("center", `${state.centerX}, ${state.centerZ}`);
+  setText("camera", `${state.cameraX.toFixed(1)}, ${state.cameraY.toFixed(1)}, ${state.cameraZ.toFixed(1)}`);
   setText("chunks", String(state.loadedChunkCount));
   setText("sections", String(state.residentSectionCount));
   setText("pending", String(state.pendingCompileJobCount));
   setText("frames", String(state.frameCount));
+  setText("lock", state.pointerLocked ? "on" : state.pointerLockFallback ? "fallback" : "off");
   const status = document.getElementById("status");
   if (status) {
     status.textContent = state.status;

@@ -79,48 +79,36 @@
         text-align: right;
       }
 
-      .controls {
-        display: grid;
-        grid-template-columns: repeat(3, 40px);
-        grid-template-rows: repeat(2, 32px);
-        gap: 6px;
-        align-items: center;
+      .crosshair {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 18px;
+        height: 18px;
+        transform: translate(-50%, -50%);
+        opacity: 0.72;
+        pointer-events: none;
       }
 
-      button {
-        width: 40px;
-        height: 32px;
-        border: 1px solid #354151;
-        border-radius: 6px;
-        background: #151c25;
-        color: #e7edf3;
-        font-size: 16px;
-        line-height: 1;
+      .crosshair::before,
+      .crosshair::after {
+        content: "";
+        position: absolute;
+        background: rgba(238, 244, 250, 0.86);
       }
 
-      button:hover,
-      button:focus-visible {
-        border-color: #6f8fbd;
-        outline: none;
+      .crosshair::before {
+        left: 8px;
+        top: 1px;
+        width: 2px;
+        height: 16px;
       }
 
-      .north {
-        grid-column: 2;
-      }
-
-      .west {
-        grid-column: 1;
-        grid-row: 2;
-      }
-
-      .south {
-        grid-column: 2;
-        grid-row: 2;
-      }
-
-      .east {
-        grid-column: 3;
-        grid-row: 2;
+      .crosshair::after {
+        left: 1px;
+        top: 8px;
+        width: 16px;
+        height: 2px;
       }
 
       .status {
@@ -158,21 +146,18 @@
     <main>
       <section class="viewport">
         <canvas id="mclone-canvas" width="960" height="540" tabindex="0"></canvas>
+        <div class="crosshair" aria-hidden="true"></div>
         <aside class="hud" aria-label="Runtime status">
           <h1>mclone native web</h1>
           <dl class="stats">
             <dt>center</dt><dd id="center">0, 0</dd>
+            <dt>camera</dt><dd id="camera">0, 0, 0</dd>
             <dt>chunks</dt><dd id="chunks">0</dd>
             <dt>sections</dt><dd id="sections">0</dd>
             <dt>pending</dt><dd id="pending">0</dd>
             <dt>frames</dt><dd id="frames">0</dd>
+            <dt>lock</dt><dd id="lock">off</dd>
           </dl>
-          <div class="controls" aria-label="Chunk navigation">
-            <button class="north" type="button" data-dx="0" data-dz="-1" aria-label="Move north">^</button>
-            <button class="west" type="button" data-dx="-1" data-dz="0" aria-label="Move west">&lt;</button>
-            <button class="south" type="button" data-dx="0" data-dz="1" aria-label="Move south">v</button>
-            <button class="east" type="button" data-dx="1" data-dz="0" aria-label="Move east">&gt;</button>
-          </div>
         </aside>
       </section>
       <div id="status" class="status" data-ok="true">booting</div>

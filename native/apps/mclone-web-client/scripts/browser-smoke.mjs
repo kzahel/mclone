@@ -100,14 +100,30 @@ async function run() {
       if (!bootState?.ready || !bootState?.ok) {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
-      await page.keyboard.press("ArrowRight");
+      const canvas = page.locator("#mclone-canvas");
+      await canvas.click({ position: { x: 640, y: 360 } });
+      await page.mouse.down();
+      await page.mouse.move(700, 330);
+      await page.mouse.up();
+      await page.keyboard.down("w");
       await page.waitForFunction(
         () => {
           const state = globalThis.__mcloneWebApp?.state;
           return state?.ok === true
-            && state.centerX === 1
-            && state.centerZ === 0
-            && state.renderCount >= 2
+            && (state.centerX !== 0 || state.centerZ !== 0)
+            && state.renderCount >= 3
+            && state.frameCount > 0;
+        },
+        undefined,
+        { timeout: 60_000 },
+      );
+      await page.keyboard.up("w");
+      await page.waitForFunction(
+        () => {
+          const state = globalThis.__mcloneWebApp?.state;
+          return state?.ok === true
+            && state.loadedCenterX === state.centerX
+            && state.loadedCenterZ === state.centerZ
             && state.pendingCompileJobCount === 0;
         },
         undefined,
@@ -121,7 +137,6 @@ async function run() {
       } catch (error) {
         console.warn(`page screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
       }
-      const canvas = page.locator("#mclone-canvas");
       const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
       const canvasPixels = analyzePng(canvasPng);
 
@@ -385,18 +400,28 @@ function assertAppLoopResult(result, pageErrors, canvasPixels) {
     throw new Error(`native web app loop failed:\n${JSON.stringify(result, null, 2)}`);
   }
   if (
-    result.centerX !== 1
-    || result.centerZ !== 0
+    (result.centerX === 0 && result.centerZ === 0)
+    || result.loadedCenterX !== result.centerX
+    || result.loadedCenterZ !== result.centerZ
     || result.radiusChunks !== 1
-    || result.renderCount < 2
+    || result.renderCount < 3
     || result.loadedChunkCount !== 9
     || result.residentSectionCount <= 1
     || result.pendingCompileJobCount !== 0
   ) {
-    throw new Error(`native web app loop did not move and render the expected chunk view:\n${JSON.stringify(result, null, 2)}`);
+    throw new Error(`native web app loop did not move and stream the expected camera chunk view:\n${JSON.stringify(result, null, 2)}`);
   }
   if (result.frameCount <= 0) {
     throw new Error(`native web app requestAnimationFrame loop did not advance:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (!result.pointerLockAttempted || (!result.pointerLocked && !result.pointerLockFallback)) {
+    throw new Error(`native web app did not exercise pointer-lock or fallback state:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (!result.lastCompileReport?.workerCompileUsed) {
+    throw new Error(`native web app did not stream through the browser worker compiler:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (!Number.isFinite(result.cameraX) || !Number.isFinite(result.cameraY) || !Number.isFinite(result.cameraZ)) {
+    throw new Error(`native web app did not report a finite camera pose:\n${JSON.stringify(result, null, 2)}`);
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`app canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);

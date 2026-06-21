@@ -3,11 +3,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail};
-use mclone_client::ClientRuntime;
+use mclone_client::{
+    ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LocalPlayerController, LocalPlayerPose,
+    NoClipMovementStep, PlayerInputKey,
+};
 use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
-    PackedLightSection, SECTION_HEIGHT, block_to_chunk_coord, block_to_section_coord,
-    chunk_block_coord,
+    PackedLightSection, SECTION_HEIGHT, Vec3d, block_to_chunk_coord, block_to_section_coord,
+    chunk_block_coord, chunk_middle_block_coord,
 };
 use mclone_mesh::{
     RenderSectionKey, TexturedChunkMeshInput, TexturedChunkVertex, TexturedMeshCatalog,
@@ -587,6 +590,220 @@ pub fn finish_render_section_compile_result(
         stale_sections,
         build_report,
     })
+}
+
+pub const ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND: f64 = 32.0;
+pub const ENGINE_CAMERA_MIN_SPEED_BLOCKS_PER_SECOND: f64 = 2.0;
+pub const ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND: f64 = 256.0;
+pub const ENGINE_CAMERA_MOUSE_SENSITIVITY: f64 = 0.0035;
+pub const ENGINE_CAMERA_SPAWN_Y: f64 = 104.0;
+pub const ENGINE_CAMERA_SPAWN_YAW_RADIANS: f64 = 0.55;
+pub const ENGINE_CAMERA_SPAWN_PITCH_RADIANS: f64 = -0.35;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineCameraInput {
+    pub dt_seconds: f64,
+    pub mouse_delta_x: f64,
+    pub mouse_delta_y: f64,
+    pub forward: bool,
+    pub backward: bool,
+    pub left: bool,
+    pub right: bool,
+    pub jump: bool,
+    pub descend: bool,
+    pub sprint: bool,
+}
+
+impl Default for EngineCameraInput {
+    fn default() -> Self {
+        Self {
+            dt_seconds: 0.0,
+            mouse_delta_x: 0.0,
+            mouse_delta_y: 0.0,
+            forward: false,
+            backward: false,
+            left: false,
+            right: false,
+            jump: false,
+            descend: false,
+            sprint: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineCameraSnapshot {
+    pub eye: Vec3d,
+    pub yaw_radians: f64,
+    pub pitch_radians: f64,
+    pub speed_blocks_per_second: f64,
+    pub chunk_pos: ChunkPos,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineRenderCamera {
+    pub eye: [f32; 3],
+    pub target: [f32; 3],
+    pub up: [f32; 3],
+    pub fov_y_radians: f32,
+    pub z_near: f32,
+    pub z_far: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EngineCameraController {
+    player: LocalPlayerController,
+    speed_blocks_per_second: f64,
+}
+
+impl EngineCameraController {
+    pub fn spawn_for_chunk(center: ChunkPos) -> Self {
+        let eye = Vec3d::new(
+            f64::from(chunk_middle_block_coord(center.x)),
+            ENGINE_CAMERA_SPAWN_Y,
+            f64::from(chunk_middle_block_coord(center.z)),
+        );
+        Self::from_eye_pose(
+            eye,
+            ENGINE_CAMERA_SPAWN_YAW_RADIANS,
+            ENGINE_CAMERA_SPAWN_PITCH_RADIANS,
+            ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
+        )
+    }
+
+    pub fn from_eye_pose(
+        eye: Vec3d,
+        yaw_radians: f64,
+        pitch_radians: f64,
+        speed_blocks_per_second: f64,
+    ) -> Self {
+        let mut player = LocalPlayerController::new();
+        player.set_pose(LocalPlayerPose::from_eye_position(
+            eye,
+            -yaw_radians.to_degrees(),
+            -pitch_radians.to_degrees(),
+            LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        ));
+        Self {
+            player,
+            speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
+        }
+    }
+
+    pub const fn player(&self) -> &LocalPlayerController {
+        &self.player
+    }
+
+    pub const fn speed_blocks_per_second(&self) -> f64 {
+        self.speed_blocks_per_second
+    }
+
+    pub fn set_speed_blocks_per_second(&mut self, speed_blocks_per_second: f64) {
+        self.speed_blocks_per_second = clamp_camera_speed(speed_blocks_per_second);
+    }
+
+    pub fn adjust_speed(&mut self, wheel_amount: f64) {
+        if !wheel_amount.is_finite() {
+            return;
+        }
+        let multiplier = (1.0 + wheel_amount * 0.18).clamp(0.5, 1.8);
+        self.set_speed_blocks_per_second(self.speed_blocks_per_second * multiplier);
+    }
+
+    pub fn snapshot(&self) -> EngineCameraSnapshot {
+        let pose = self.player.pose();
+        EngineCameraSnapshot {
+            eye: pose.eye_position(),
+            yaw_radians: pose.native_yaw_radians(),
+            pitch_radians: pose.native_pitch_radians(),
+            speed_blocks_per_second: self.speed_blocks_per_second,
+            chunk_pos: pose.chunk_pos(),
+        }
+    }
+
+    pub fn set_key(&mut self, key: PlayerInputKey, down: bool) {
+        self.player.set_key(key, down);
+    }
+
+    pub fn clear_keys(&mut self) {
+        self.player.clear_keys();
+    }
+
+    pub fn turn_mouse_delta(&mut self, mouse_delta_x: f64, mouse_delta_y: f64) {
+        if !mouse_delta_x.is_finite() || !mouse_delta_y.is_finite() {
+            return;
+        }
+        self.player.turn_native_radians(
+            -mouse_delta_x * ENGINE_CAMERA_MOUSE_SENSITIVITY,
+            -mouse_delta_y * ENGINE_CAMERA_MOUSE_SENSITIVITY,
+        );
+    }
+
+    pub fn apply_input(&mut self, input: EngineCameraInput) -> EngineCameraSnapshot {
+        self.set_key(PlayerInputKey::Forward, input.forward);
+        self.set_key(PlayerInputKey::Backward, input.backward);
+        self.set_key(PlayerInputKey::Left, input.left);
+        self.set_key(PlayerInputKey::Right, input.right);
+        self.set_key(PlayerInputKey::Jump, input.jump);
+        self.set_key(PlayerInputKey::Descend, input.descend);
+        self.set_key(PlayerInputKey::Sprint, input.sprint);
+        self.turn_mouse_delta(input.mouse_delta_x, input.mouse_delta_y);
+
+        let pose = self.player.pose();
+        let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
+        self.player.tick_no_clip_movement(NoClipMovementStep {
+            yaw_radians: pose.native_yaw_radians(),
+            pitch_radians: pose.native_pitch_radians(),
+            speed_blocks_per_second: self.speed_blocks_per_second,
+            dt_seconds,
+            descending: false,
+            sprinting: false,
+        });
+        self.snapshot()
+    }
+
+    pub fn render_camera(&self, render_distance: u32) -> EngineRenderCamera {
+        render_camera_from_snapshot(self.snapshot(), render_distance)
+    }
+}
+
+pub fn render_camera_from_snapshot(
+    snapshot: EngineCameraSnapshot,
+    render_distance: u32,
+) -> EngineRenderCamera {
+    let forward = view_forward(snapshot.yaw_radians, snapshot.pitch_radians);
+    let target = snapshot.eye.add(forward);
+    EngineRenderCamera {
+        eye: vec3d_to_f32_array(snapshot.eye),
+        target: vec3d_to_f32_array(target),
+        up: [0.0, 1.0, 0.0],
+        fov_y_radians: 64.0_f32.to_radians(),
+        z_near: 0.05,
+        z_far: 700.0 + render_distance as f32 * 128.0,
+    }
+}
+
+fn clamp_camera_speed(speed_blocks_per_second: f64) -> f64 {
+    if speed_blocks_per_second.is_finite() {
+        speed_blocks_per_second.clamp(
+            ENGINE_CAMERA_MIN_SPEED_BLOCKS_PER_SECOND,
+            ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND,
+        )
+    } else {
+        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND
+    }
+}
+
+fn view_forward(yaw_radians: f64, pitch_radians: f64) -> Vec3d {
+    let yaw_sin = yaw_radians.sin();
+    let yaw_cos = yaw_radians.cos();
+    let pitch_sin = pitch_radians.sin();
+    let pitch_cos = pitch_radians.cos();
+    Vec3d::new(yaw_sin * pitch_cos, pitch_sin, yaw_cos * pitch_cos)
+}
+
+fn vec3d_to_f32_array(value: Vec3d) -> [f32; 3] {
+    [value.x as f32, value.y as f32, value.z as f32]
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -2130,6 +2347,60 @@ mod tests {
                 RenderSectionKey::new(0, 0, 1),
             ])
         );
+    }
+
+    #[test]
+    fn engine_camera_controller_moves_no_clip_and_crosses_chunk_boundary() {
+        let mut camera = EngineCameraController::from_eye_pose(
+            Vec3d::new(15.5, 96.0, 8.0),
+            std::f64::consts::FRAC_PI_2,
+            0.0,
+            32.0,
+        );
+
+        let snapshot = camera.apply_input(EngineCameraInput {
+            dt_seconds: 0.1,
+            forward: true,
+            ..EngineCameraInput::default()
+        });
+
+        assert!(snapshot.eye.x > 16.0);
+        assert_eq!(snapshot.chunk_pos, ChunkPos::new(1, 0));
+    }
+
+    #[test]
+    fn engine_camera_controller_applies_mouse_look_and_sprint_boost() {
+        let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
+        let before = camera.snapshot();
+
+        let after = camera.apply_input(EngineCameraInput {
+            dt_seconds: 0.1,
+            mouse_delta_x: 20.0,
+            mouse_delta_y: -10.0,
+            forward: true,
+            sprint: true,
+            ..EngineCameraInput::default()
+        });
+
+        assert!((after.yaw_radians - before.yaw_radians).abs() > 1.0e-6);
+        assert!((after.pitch_radians - before.pitch_radians).abs() > 1.0e-6);
+        assert!(
+            after.eye.subtract(before.eye).length_sqr()
+                > (ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND * 0.1).powi(2)
+        );
+    }
+
+    #[test]
+    fn engine_camera_render_camera_targets_forward_direction() {
+        let camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(1.0, 2.0, 3.0), 0.0, 0.0, 32.0);
+
+        let render_camera = camera.render_camera(2);
+
+        assert_eq!(render_camera.eye, [1.0, 2.0, 3.0]);
+        assert_eq!(render_camera.target, [1.0, 2.0, 4.0]);
+        assert_eq!(render_camera.up, [0.0, 1.0, 0.0]);
+        assert!(render_camera.z_far > 700.0);
     }
 
     #[test]

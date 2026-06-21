@@ -19,6 +19,7 @@ use mclone_render::chunk::{
     TexturedSectionDrawResources, TexturedSectionUploadReport,
 };
 use mclone_render_session::{
+    EngineCameraController, EngineCameraInput, EngineCameraSnapshot, EngineRenderCamera,
     PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
     RenderSectionCompileAcceptanceReport, RenderSectionCompileRequestInfo,
     RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionNeighborReadiness,
@@ -187,10 +188,11 @@ struct CanvasRenderReport {
     height: u32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct GeneratedChunkRenderReport {
     center: ChunkPos,
     radius_chunks: u32,
+    camera: EngineCameraSnapshot,
     width: u32,
     height: u32,
     command_count: usize,
@@ -263,6 +265,16 @@ impl GeneratedChunkRenderReport {
         set_number(&object, "centerX", f64::from(self.center.x))?;
         set_number(&object, "centerZ", f64::from(self.center.z))?;
         set_number(&object, "radiusChunks", f64::from(self.radius_chunks))?;
+        set_number(&object, "cameraX", self.camera.eye.x)?;
+        set_number(&object, "cameraY", self.camera.eye.y)?;
+        set_number(&object, "cameraZ", self.camera.eye.z)?;
+        set_number(&object, "cameraYawRadians", self.camera.yaw_radians)?;
+        set_number(&object, "cameraPitchRadians", self.camera.pitch_radians)?;
+        set_number(
+            &object,
+            "cameraSpeedBlocksPerSecond",
+            self.camera.speed_blocks_per_second,
+        )?;
         set_number(&object, "width", f64::from(self.width))?;
         set_number(&object, "height", f64::from(self.height))?;
         set_number(&object, "commandCount", self.command_count as f64)?;
@@ -479,6 +491,7 @@ pub struct WebChunkRenderSession {
     context: WebCanvasContext,
     depth: ChunkDepthTarget,
     runtime: WebRuntime,
+    camera: EngineCameraController,
     mesh_assets: WebTexturedMeshAssets,
     draw: Option<TexturedSectionDrawResources>,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
@@ -547,6 +560,77 @@ impl WebChunkRenderSession {
         self.compile_requests.pending_request_count()
     }
 
+    #[wasm_bindgen(js_name = cameraFrameState)]
+    pub fn camera_frame_state(&self) -> Result<JsValue, JsValue> {
+        camera_snapshot_to_js_value(self.camera.snapshot()).map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = advanceCameraFrame)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn advance_camera_frame(
+        &mut self,
+        dt_seconds: f64,
+        mouse_delta_x: f64,
+        mouse_delta_y: f64,
+        forward: bool,
+        backward: bool,
+        left: bool,
+        right: bool,
+        jump: bool,
+        descend: bool,
+        sprint: bool,
+    ) -> Result<JsValue, JsValue> {
+        let snapshot = self.camera.apply_input(EngineCameraInput {
+            dt_seconds,
+            mouse_delta_x,
+            mouse_delta_y,
+            forward,
+            backward,
+            left,
+            right,
+            jump,
+            descend,
+            sprint,
+        });
+        camera_snapshot_to_js_value(snapshot).map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = adjustCameraSpeed)]
+    pub fn adjust_camera_speed(&mut self, wheel_amount: f64) -> Result<JsValue, JsValue> {
+        self.camera.adjust_speed(wheel_amount);
+        camera_snapshot_to_js_value(self.camera.snapshot()).map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = beginCameraRenderCompileRequest)]
+    pub fn begin_camera_render_compile_request(
+        &mut self,
+        radius_chunks: u32,
+    ) -> Result<JsValue, JsValue> {
+        self.begin_camera_render_compile_request_for_radius(radius_chunks)
+            .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = finishCameraRenderCompileRequest)]
+    pub fn finish_camera_render_compile_request(
+        &mut self,
+        request_id: u32,
+        packed_report: js_sys::Uint8Array,
+    ) -> Result<JsValue, JsValue> {
+        self.finish_camera_render_compile_request_with_packed_report(
+            request_id,
+            packed_report.to_vec(),
+        )
+        .and_then(GeneratedChunkRenderReport::to_js_value)
+        .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = renderCameraFrame)]
+    pub fn render_camera_frame(&mut self, radius_chunks: u32) -> Result<JsValue, JsValue> {
+        self.render_camera_frame_for_radius(radius_chunks)
+            .and_then(GeneratedChunkRenderReport::to_js_value)
+            .map_err(JsValue::from)
+    }
+
     #[wasm_bindgen(js_name = renderChunkReportFromPackedSections)]
     pub fn render_chunk_report_from_packed_sections(
         &mut self,
@@ -578,6 +662,7 @@ impl WebChunkRenderSession {
             context,
             depth,
             runtime: WebRuntime::local_integrated(SMOKE_SEED),
+            camera: EngineCameraController::spawn_for_chunk(SMOKE_INITIAL_CENTER),
             mesh_assets,
             draw: None,
             loaded_chunk_positions: BTreeSet::new(),
@@ -659,6 +744,76 @@ impl WebChunkRenderSession {
             completed,
             WebSectionCompileReport::worker(packed_byte_length, summary),
             request_id,
+            WebFrameCamera::Overview {
+                center: context.center,
+                radius_chunks: context.radius_chunks,
+            },
+        )
+    }
+
+    fn begin_camera_render_compile_request_for_radius(
+        &mut self,
+        radius_chunks: u32,
+    ) -> Result<JsValue, String> {
+        let center = self.camera.snapshot().chunk_pos;
+        self.begin_chunk_render_compile_request_for_center(center, radius_chunks)
+    }
+
+    fn finish_camera_render_compile_request_with_packed_report(
+        &mut self,
+        request_id: u32,
+        packed_report: Vec<u8>,
+    ) -> Result<GeneratedChunkRenderReport, String> {
+        let pending = self
+            .compile_requests
+            .remove_pending_request(request_id)
+            .ok_or_else(|| format!("unknown web render compile request id {request_id}"))?;
+        let packed_byte_length = packed_report.len();
+        let section_report = decode_textured_render_section_build_report(&packed_report)
+            .map_err(|error| format!("failed to decode packed render section report: {error:#}"))?;
+        let summary = summarize_textured_render_section_build_report(&section_report);
+        let (context, completed) = pending.into_compile_result(Ok(section_report));
+        self.finish_render_compile_result(
+            context.center,
+            context.radius_chunks,
+            context.sync,
+            context.removal_chunks,
+            context.removal_sections,
+            completed,
+            WebSectionCompileReport::worker(packed_byte_length, summary),
+            request_id,
+            WebFrameCamera::Camera,
+        )
+    }
+
+    fn render_camera_frame_for_radius(
+        &mut self,
+        radius_chunks: u32,
+    ) -> Result<GeneratedChunkRenderReport, String> {
+        if self.draw.is_none() {
+            return Err(
+                "camera frame requested before initial render sections were uploaded".into(),
+            );
+        }
+        let center = self.camera.snapshot().chunk_pos;
+        let cached_sections = self.runtime.engine().sections();
+        let current_section_keys = cached_sections
+            .iter()
+            .map(|section| section.key)
+            .collect::<BTreeSet<_>>();
+        if cached_sections.iter().all(|section| section.is_empty()) {
+            return Err("camera frame has no resident textured sections".into());
+        }
+        self.render_chunk_report_with_cache_update(
+            center,
+            radius_chunks,
+            self.loaded_chunk_positions.clone(),
+            current_section_keys,
+            RenderSectionCacheUpdate::default(),
+            WebSectionCompileReport::default(),
+            RenderSectionCompileAcceptanceReport::default(),
+            WebFrameCamera::Camera,
+            false,
         )
     }
 
@@ -727,6 +882,10 @@ impl WebChunkRenderSession {
             completed,
             compile_report,
             0,
+            WebFrameCamera::Overview {
+                center,
+                radius_chunks,
+            },
         )
     }
 
@@ -740,6 +899,7 @@ impl WebChunkRenderSession {
         completed: RenderSectionCompileResult,
         compile_report: WebSectionCompileReport,
         request_id: u32,
+        frame_camera: WebFrameCamera,
     ) -> Result<GeneratedChunkRenderReport, String> {
         let current_section_keys = completed
             .result
@@ -773,6 +933,8 @@ impl WebChunkRenderSession {
             finished.cache_update,
             compile_report,
             finished.acceptance_report,
+            frame_camera,
+            true,
         )
     }
 
@@ -851,8 +1013,12 @@ impl WebChunkRenderSession {
         cache_update: RenderSectionCacheUpdate,
         compile_report: WebSectionCompileReport,
         acceptance_report: RenderSectionCompileAcceptanceReport,
+        frame_camera: WebFrameCamera,
+        count_mesh_build: bool,
     ) -> Result<GeneratedChunkRenderReport, String> {
-        self.mesh_build_count += 1;
+        if count_mesh_build {
+            self.mesh_build_count += 1;
+        }
         let cached_sections = self.runtime.engine().sections();
         if cached_sections.iter().all(|section| section.is_empty()) {
             return Err(format!(
@@ -888,7 +1054,7 @@ impl WebChunkRenderSession {
                     [self.context.width, self.context.height],
                     mclone_render::default_clear_color(),
                 ),
-                ChunkCamera::overview_for_chunk_area(center.x, center.z, radius_chunks as i32)
+                chunk_camera_for_frame(frame_camera, &self.camera, radius_chunks)
                     .render_view(self.context.width, self.context.height),
             )
             .map_err(|error| format!("failed to render generated section meshes: {error:#}"))?;
@@ -900,6 +1066,7 @@ impl WebChunkRenderSession {
         Ok(GeneratedChunkRenderReport {
             center,
             radius_chunks,
+            camera: self.camera.snapshot(),
             width: self.context.width,
             height: self.context.height,
             command_count: self.runtime.command_count(),
@@ -1010,6 +1177,58 @@ impl WebChunkRenderSession {
         )?;
         Ok(object.into())
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WebFrameCamera {
+    Overview {
+        center: ChunkPos,
+        radius_chunks: u32,
+    },
+    Camera,
+}
+
+fn chunk_camera_for_frame(
+    frame_camera: WebFrameCamera,
+    camera: &EngineCameraController,
+    radius_chunks: u32,
+) -> ChunkCamera {
+    match frame_camera {
+        WebFrameCamera::Overview {
+            center,
+            radius_chunks,
+        } => ChunkCamera::overview_for_chunk_area(center.x, center.z, radius_chunks as i32),
+        WebFrameCamera::Camera => chunk_camera_from_engine(camera.render_camera(radius_chunks)),
+    }
+}
+
+fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
+    ChunkCamera {
+        eye: camera.eye,
+        target: camera.target,
+        up: camera.up,
+        fov_y_radians: camera.fov_y_radians,
+        z_near: camera.z_near,
+        z_far: camera.z_far,
+    }
+}
+
+fn camera_snapshot_to_js_value(snapshot: EngineCameraSnapshot) -> Result<JsValue, String> {
+    let object = js_sys::Object::new();
+    set_bool(&object, "ok", true)?;
+    set_number(&object, "cameraX", snapshot.eye.x)?;
+    set_number(&object, "cameraY", snapshot.eye.y)?;
+    set_number(&object, "cameraZ", snapshot.eye.z)?;
+    set_number(&object, "cameraYawRadians", snapshot.yaw_radians)?;
+    set_number(&object, "cameraPitchRadians", snapshot.pitch_radians)?;
+    set_number(
+        &object,
+        "cameraSpeedBlocksPerSecond",
+        snapshot.speed_blocks_per_second,
+    )?;
+    set_number(&object, "centerX", f64::from(snapshot.chunk_pos.x))?;
+    set_number(&object, "centerZ", f64::from(snapshot.chunk_pos.z))?;
+    Ok(object.into())
 }
 
 fn upload_report_for_sections(

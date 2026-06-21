@@ -1,6 +1,7 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active; shared update dirtying and the first browser app loop landed.
+Status: active; shared update dirtying, browser app loop, and first-person web
+camera/input landed.
 
 ## Purpose
 
@@ -546,7 +547,7 @@ a minimal browser runtime loop:
 
 - `requestAnimationFrame`
 - persistent session
-- camera position/orbit controls
+- camera position/input controls
 - chunk-view updates from camera movement
 - shared render-section sync/update
 - WebGPU present each frame
@@ -565,14 +566,36 @@ First browser app-loop result:
 - The page owns a persistent `WebChunkRenderSession`, fetches the packed
   vanilla asset zip, submits browser worker compile jobs, uploads through
   WebGPU, and keeps presenting through `requestAnimationFrame`.
-- Keyboard arrows/WASD and on-page buttons move the chunk center one chunk at a
-  time; this is a chunk-overview navigation loop, not first-person input yet.
-- Added `native:web:app-smoke`, which uses Playwright to boot `app.html`, press
-  `ArrowRight`, wait for center `(1, 0)` with zero pending compile jobs, assert
-  generated pixels in the canvas screenshot, and save page/canvas screenshots
-  under `/tmp`.
-- The current web app still has no pointer lock, mouse-look, player movement,
-  pause/options menus, inventory UI, or multiplayer/server selection UI.
+- The first landing used keyboard/buttons to move the chunk center one chunk at
+  a time; it was useful as a persistent-session proof but was not first-person
+  input.
+- Added `native:web:app-smoke` for the persistent page, with Playwright
+  screenshots saved under `/tmp`.
+
+First-person web camera/input result:
+
+- Added shared `EngineCameraController`, `EngineCameraInput`,
+  `EngineCameraSnapshot`, and `EngineRenderCamera` primitives to
+  `mclone-render-session`.
+- The shared controller owns no-clip key state, mouse-look deltas, camera pose,
+  speed clamping, render-camera generation, and chunk-center derivation.
+- `WebChunkRenderSession` now exposes camera state, camera advancement,
+  camera-derived worker compile requests, camera compile finish, and camera
+  frame rendering as WASM methods.
+- The browser app now runs a real RAF input/render loop: DOM events feed
+  keyboard and mouse deltas to Rust, Rust advances the camera, the app keeps
+  rendering from the current camera, and worker compiles are submitted only when
+  the camera crosses into a new chunk view.
+- The page requests pointer lock on canvas click and falls back to drag-based
+  mouse deltas when lock is unavailable.
+- `native:web:app-smoke` now clicks the canvas, exercises pointer-lock/fallback
+  state, holds forward movement until the Rust camera crosses from the origin
+  chunk, waits for the streamed loaded center to match the camera center with
+  zero pending compile jobs, asserts the last streamed compile came from the
+  browser worker, and captures page/canvas screenshots.
+- The current web app still has no walking collision mode, server player-pose
+  sync, sky/actor passes, pause/options menus, inventory UI, or
+  multiplayer/server selection UI.
 
 ### 5. Add Web Worker/Thread Policy
 
@@ -670,19 +693,18 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should replace chunk-step browser navigation with real
-platform-neutral browser view/input plumbing while keeping runtime and render
-policy shared:
+The next slice should remove the remaining desktop/web camera-input drift and
+make the browser frame target less smoke-shaped:
 
-1. Add a small shared frame/input boundary for camera pose, movement intent,
-   target size, and render-view updates that desktop and web can both feed.
-2. Move the web app from chunk-center stepping to first-person/no-clip movement
-   using keyboard input and pointer-lock mouse look in the browser adapter.
-3. Keep browser worker compile submission, shared dirty/session policy, and
-   WebGPU presentation unchanged; this is input/view integration, not a new web
-   renderer.
-4. Extend `native:web:app-smoke` to validate keyboard movement, pointer-lock
-   fallback behavior where headless browsers cannot grant lock, RAF progress,
-   zero pending compile jobs, and screenshots after movement.
-5. Leave menus/options/inventory as a later UI slice once browser movement and
-   camera parity are in place.
+1. Refactor desktop `SpectatorCamera`/mouse sensitivity/no-clip helpers to feed
+   or wrap the shared `EngineCameraController` primitives where that does not
+   disrupt the existing walking/collision path.
+2. Add dynamic canvas resize handling to the web session so target dimensions
+   are explicit frame inputs instead of fixed canvas attributes.
+3. Start syncing the browser camera/player pose through the same gameplay
+   command path desktop uses, initially for no-clip position/rotation only.
+4. Keep browser worker compile submission, shared dirty/session policy, and
+   WebGPU presentation unchanged.
+5. Extend validation to cover resize plus continued movement/streaming with
+   screenshots; leave menus/options/inventory and full walking collision as
+   later UI/gameplay slices.
