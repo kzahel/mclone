@@ -2,7 +2,8 @@
 
 Status: active; shared update dirtying, browser app loop, first-person web
 camera/input, resize, browser no-clip pose sync, and browser sky/actor drawing
-landed; browser walking/collision mode and block interaction landed.
+landed; browser walking/collision mode, block interaction, and hotbar selection
+landed.
 
 ## Purpose
 
@@ -672,11 +673,17 @@ Block interaction browser result:
 - Interaction reports expose the action, block hit/miss, hit block position,
   hit/result block state IDs, direct command/update counts, and pending compile
   job count. The HUD displays the most recent target and action result.
+- Browser number keys now select hotbar slots through
+  `ClientInteractionController::select_hotbar_slot`, matching desktop's
+  zero-based `Digit1` through `Digit9` slot mapping. Camera and interaction
+  reports expose `selectedHotbarSlot`, and the HUD displays the selected slot as
+  a one-based player-facing value.
 - `native:web:app-smoke` now proves the browser can break and place through
-  this path before toggling to no-clip. The captured report broke
-  `(-1, 93, 1)` to air, placed after hitting `(-1, 93, 3)`, accepted two
-  recompiled render sections for each interaction, and ended with zero pending
-  compile jobs.
+  this path before toggling to no-clip, then selects slot `2` before placing.
+  The captured report broke `(-1, 93, 1)` to air, selected zero-based slot `1`,
+  synced the carried item, placed after hitting `(-1, 93, 3)` with result block
+  state `5` (dirt), accepted two recompiled render sections for each
+  interaction, and ended with zero pending compile jobs.
 
 ### 5. Add Web Worker/Thread Policy
 
@@ -774,21 +781,20 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should close the remaining carried-item gap in browser
-interaction and continue reducing desktop/web drift:
+The next slice should reduce desktop/web input and camera drift now that browser
+movement, interaction, and carried-item selection use the shared controllers:
 
-1. Add browser number-key hotbar selection through
-   `ClientInteractionController::select_hotbar_slot`, matching desktop's
-   `Digit1` through `Digit9` handling and `SetCarriedItem` sync behavior.
-2. Expose selected slot/carried-item state in the web interaction report or HUD
-   so placement validation can prove the selected block changed, not only that a
-   placement command mutated the world.
-3. Extend `native:web:app-smoke` to select a non-default hotbar slot, place with
-   it, and assert the resulting section-block update/visible recompile reflects
-   that selected slot.
-4. Continue reducing desktop/web camera drift by wrapping desktop no-clip
-   stepping around shared `EngineCameraController` primitives where that does
-   not disrupt walking/collision behavior.
+1. Wrap desktop no-clip stepping around shared `EngineCameraController`
+   primitives where that does not disrupt the existing desktop walking path.
+2. Move duplicated desktop/web mouse-look, speed adjustment, and movement-mode
+   reporting details behind shared render-session/controller helpers where the
+   ownership boundary is already clear.
+3. Add browser target preview/reporting for the current raycast without sending
+   a command, so interaction feedback can update every frame without mutating
+   the world.
+4. Keep `native:web:app-smoke` proving walk + no-clip movement, selected-slot
+   break/place, section dirty/update publication, worker compiles, sky/actors,
+   resize, screenshots, and zero pending compile jobs.
 5. Keep browser worker compile submission, shared dirty/session policy, sky,
    actors, resize, pose sync, movement modes, and WebGPU presentation unchanged;
    leave pause/options/inventory and multiplayer/server selection as later UI

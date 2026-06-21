@@ -209,6 +209,7 @@ struct GeneratedChunkRenderReport {
     on_ground: bool,
     horizontal_collision: bool,
     vertical_collision: bool,
+    selected_hotbar_slot: u8,
     day_time: u64,
     time_of_day: f32,
     sun_angle: f32,
@@ -286,6 +287,11 @@ impl GeneratedChunkRenderReport {
         set_bool(&object, "horizontalCollision", self.horizontal_collision)?;
         set_bool(&object, "verticalCollision", self.vertical_collision)?;
         set_string(&object, "movementMode", self.movement_mode.label())?;
+        set_number(
+            &object,
+            "selectedHotbarSlot",
+            f64::from(self.selected_hotbar_slot),
+        )?;
         set_number(
             &object,
             "compileRequestId",
@@ -530,6 +536,7 @@ struct WebBlockInteractionReport {
     hit: BlockHitResult,
     hit_block_state: Option<BlockStateId>,
     result_block_state: Option<BlockStateId>,
+    selected_hotbar_slot: u8,
     carried_item_synced: bool,
     command_sent: bool,
     changed: bool,
@@ -554,6 +561,11 @@ impl WebBlockInteractionReport {
         set_bool(&object, "carriedItemSynced", self.carried_item_synced)?;
         set_bool(&object, "commandSent", self.command_sent)?;
         set_bool(&object, "changed", self.changed)?;
+        set_number(
+            &object,
+            "selectedHotbarSlot",
+            f64::from(self.selected_hotbar_slot),
+        )?;
         set_string(&object, "direction", direction_label(self.hit.direction))?;
         set_number(&object, "blockX", f64::from(self.hit.block_pos.x))?;
         set_number(&object, "blockY", f64::from(self.hit.block_pos.y))?;
@@ -714,7 +726,7 @@ impl WebChunkRenderSession {
 
     #[wasm_bindgen(js_name = cameraFrameState)]
     pub fn camera_frame_state(&self) -> Result<JsValue, JsValue> {
-        camera_state_to_js_value(&self.camera).map_err(JsValue::from)
+        camera_state_to_js_value(&self.camera, &self.interaction).map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = advanceCameraFrame)]
@@ -749,19 +761,25 @@ impl WebChunkRenderSession {
         self.camera
             .apply_movement_input(self.runtime.client(), input);
         self.sync_camera_pose_to_server().map_err(JsValue::from)?;
-        camera_state_to_js_value(&self.camera).map_err(JsValue::from)
+        camera_state_to_js_value(&self.camera, &self.interaction).map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = adjustCameraSpeed)]
     pub fn adjust_camera_speed(&mut self, wheel_amount: f64) -> Result<JsValue, JsValue> {
         self.camera.adjust_speed(wheel_amount);
-        camera_state_to_js_value(&self.camera).map_err(JsValue::from)
+        camera_state_to_js_value(&self.camera, &self.interaction).map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = toggleMovementMode)]
     pub fn toggle_movement_mode(&mut self) -> Result<JsValue, JsValue> {
         self.camera.toggle_movement_mode();
-        camera_state_to_js_value(&self.camera).map_err(JsValue::from)
+        camera_state_to_js_value(&self.camera, &self.interaction).map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = selectHotbarSlot)]
+    pub fn select_hotbar_slot(&mut self, slot: u8) -> Result<JsValue, JsValue> {
+        self.interaction.select_hotbar_slot(slot);
+        hotbar_state_to_js_value(&self.interaction).map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = interactBlock)]
@@ -1043,6 +1061,7 @@ impl WebChunkRenderSession {
                 hit,
                 hit_block_state,
                 result_block_state: hit_block_state,
+                selected_hotbar_slot: self.interaction.selected_hotbar_slot(),
                 carried_item_synced,
                 command_sent: false,
                 changed: false,
@@ -1071,6 +1090,7 @@ impl WebChunkRenderSession {
             hit,
             hit_block_state,
             result_block_state,
+            selected_hotbar_slot: self.interaction.selected_hotbar_slot(),
             carried_item_synced,
             command_sent: true,
             changed: step.update_count > 0,
@@ -1416,6 +1436,7 @@ impl WebChunkRenderSession {
             on_ground: self.camera.on_ground(),
             horizontal_collision: self.camera.horizontal_collision(),
             vertical_collision: self.camera.vertical_collision(),
+            selected_hotbar_slot: self.interaction.selected_hotbar_slot(),
             day_time,
             time_of_day,
             sun_angle,
@@ -1636,7 +1657,10 @@ fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
     }
 }
 
-fn camera_state_to_js_value(camera: &EngineCameraController) -> Result<JsValue, String> {
+fn camera_state_to_js_value(
+    camera: &EngineCameraController,
+    interaction: &ClientInteractionController,
+) -> Result<JsValue, String> {
     let snapshot = camera.snapshot();
     let object = js_sys::Object::new();
     set_bool(&object, "ok", true)?;
@@ -1648,6 +1672,11 @@ fn camera_state_to_js_value(camera: &EngineCameraController) -> Result<JsValue, 
     )?;
     set_bool(&object, "verticalCollision", camera.vertical_collision())?;
     set_string(&object, "movementMode", camera.movement_mode().label())?;
+    set_number(
+        &object,
+        "selectedHotbarSlot",
+        f64::from(interaction.selected_hotbar_slot()),
+    )?;
     set_number(&object, "cameraX", snapshot.eye.x)?;
     set_number(&object, "cameraY", snapshot.eye.y)?;
     set_number(&object, "cameraZ", snapshot.eye.z)?;
@@ -1660,6 +1689,17 @@ fn camera_state_to_js_value(camera: &EngineCameraController) -> Result<JsValue, 
     )?;
     set_number(&object, "centerX", f64::from(snapshot.chunk_pos.x))?;
     set_number(&object, "centerZ", f64::from(snapshot.chunk_pos.z))?;
+    Ok(object.into())
+}
+
+fn hotbar_state_to_js_value(interaction: &ClientInteractionController) -> Result<JsValue, String> {
+    let object = js_sys::Object::new();
+    set_bool(&object, "ok", true)?;
+    set_number(
+        &object,
+        "selectedHotbarSlot",
+        f64::from(interaction.selected_hotbar_slot()),
+    )?;
     Ok(object.into())
 }
 

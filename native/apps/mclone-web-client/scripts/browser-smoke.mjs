@@ -44,6 +44,7 @@ const requireCanvas = requireChunk
 const requireThreading = process.argv.includes("--require-threading")
   || (!process.argv.includes("--skip-threading")
     && process.env.MCLONE_NATIVE_WEB_REQUIRE_THREADING !== "0");
+const DIRT_BLOCK_STATE_ID = 5;
 
 run().catch((error) => {
   console.error(error instanceof Error ? error.stack ?? error.message : String(error));
@@ -260,15 +261,29 @@ async function run() {
 
 async function exerciseBlockInteraction(page, canvas) {
   const breakProbe = await clickBlockInteraction(page, canvas, "left", "break");
-  const placeProbe = await clickBlockInteraction(page, canvas, "right", "place");
+  await page.keyboard.press("2");
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 1,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const selectedSlotProbe = await page.evaluate(() => ({
+    selectedHotbarSlot: globalThis.__mcloneWebApp.state.selectedHotbarSlot,
+  }));
+  const placeProbe = await clickBlockInteraction(page, canvas, "right", "place", {
+    expectedSelectedHotbarSlot: 1,
+    expectedResultBlockStateId: DIRT_BLOCK_STATE_ID,
+    expectedCarriedItemSynced: true,
+  });
   return {
-    ok: breakProbe.ok && placeProbe.ok,
+    ok: breakProbe.ok && selectedSlotProbe.selectedHotbarSlot === 1 && placeProbe.ok,
     break: breakProbe,
+    selectedSlot: selectedSlotProbe,
     place: placeProbe,
   };
 }
 
-async function clickBlockInteraction(page, canvas, button, action) {
+async function clickBlockInteraction(page, canvas, button, action, options = {}) {
   const start = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
     return {
@@ -279,7 +294,7 @@ async function clickBlockInteraction(page, canvas, button, action) {
   });
   await canvas.click({ position: { x: 640, y: 360 }, button });
   await page.waitForFunction(
-    ({ start, action }) => {
+    ({ start, action, expectedSelectedHotbarSlot, expectedResultBlockStateId, expectedCarriedItemSynced }) => {
       const state = globalThis.__mcloneWebApp?.state;
       const interaction = state?.lastInteraction;
       const compileReport = state?.lastCompileReport;
@@ -293,15 +308,24 @@ async function clickBlockInteraction(page, canvas, button, action) {
         && interaction.changed === true
         && (interaction.interactionUpdateCount ?? 0) > 0
         && (interaction.commandCount ?? 0) > start.commandCount
+        && (expectedSelectedHotbarSlot === null || interaction.selectedHotbarSlot === expectedSelectedHotbarSlot)
+        && (expectedResultBlockStateId === null || interaction.resultBlockStateId === expectedResultBlockStateId)
+        && (expectedCarriedItemSynced === null || interaction.carriedItemSynced === expectedCarriedItemSynced)
         && compileReport?.commandCount >= interaction.commandCount
         && compileReport?.acceptedCompileSectionCount > 0
         && compileReport?.meshBuildCount > start.meshBuildCount;
     },
-    { start, action },
+    {
+      start,
+      action,
+      expectedSelectedHotbarSlot: options.expectedSelectedHotbarSlot ?? null,
+      expectedResultBlockStateId: options.expectedResultBlockStateId ?? null,
+      expectedCarriedItemSynced: options.expectedCarriedItemSynced ?? null,
+    },
     { timeout: 60_000 },
   );
   return page.evaluate(
-    ({ start, action }) => {
+    ({ start, action, expectedSelectedHotbarSlot, expectedResultBlockStateId, expectedCarriedItemSynced }) => {
       const state = globalThis.__mcloneWebApp.state;
       const interaction = state.lastInteraction;
       const compileReport = state.lastCompileReport;
@@ -314,6 +338,9 @@ async function clickBlockInteraction(page, canvas, button, action) {
           && interaction?.hit === true
           && interaction?.commandSent === true
           && interaction?.changed === true
+          && (expectedSelectedHotbarSlot === null || interaction?.selectedHotbarSlot === expectedSelectedHotbarSlot)
+          && (expectedResultBlockStateId === null || interaction?.resultBlockStateId === expectedResultBlockStateId)
+          && (expectedCarriedItemSynced === null || interaction?.carriedItemSynced === expectedCarriedItemSynced)
           && recompiled,
         start,
         interaction,
@@ -325,7 +352,13 @@ async function clickBlockInteraction(page, canvas, button, action) {
         },
       };
     },
-    { start, action },
+    {
+      start,
+      action,
+      expectedSelectedHotbarSlot: options.expectedSelectedHotbarSlot ?? null,
+      expectedResultBlockStateId: options.expectedResultBlockStateId ?? null,
+      expectedCarriedItemSynced: options.expectedCarriedItemSynced ?? null,
+    },
   );
 }
 

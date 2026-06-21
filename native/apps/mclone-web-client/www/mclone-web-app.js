@@ -27,6 +27,7 @@ const runtime = {
     onGround: false,
     horizontalCollision: false,
     verticalCollision: false,
+    selectedHotbarSlot: 0,
     interactionCount: 0,
     interactionStatus: "idle",
     lastInteraction: null,
@@ -134,6 +135,7 @@ class WebChunkApp {
       "cameraFrameState",
       "resizeCanvas",
       "toggleMovementMode",
+      "selectHotbarSlot",
       "interactBlock",
     ]) {
       if (typeof this.session[name] !== "function") {
@@ -289,6 +291,7 @@ class WebChunkApp {
     runtime.state.onGround = Boolean(camera.onGround);
     runtime.state.horizontalCollision = Boolean(camera.horizontalCollision);
     runtime.state.verticalCollision = Boolean(camera.verticalCollision);
+    applyHotbarState(camera);
   }
 
   applyReport(report) {
@@ -322,6 +325,7 @@ class WebChunkApp {
       runtime.state.interactionCount += 1;
       runtime.state.lastInteraction = interaction;
       runtime.state.interactionStatus = formatInteractionStatus(interaction);
+      applyHotbarState(interaction);
       if (interaction.changed && this.hasRendered && !this.pendingCompile) {
         void this.compileCameraView();
       }
@@ -334,6 +338,19 @@ class WebChunkApp {
       updateDom();
       return null;
     }
+  }
+
+  selectHotbarSlot(slot) {
+    if (!this.session) {
+      return false;
+    }
+    const hotbar = this.session.selectHotbarSlot(slot);
+    if (!hotbar?.ok) {
+      return false;
+    }
+    applyHotbarState(hotbar);
+    updateDom();
+    return true;
   }
 
   setInputKey(name, down) {
@@ -408,6 +425,14 @@ function bindInput(app) {
       const camera = app.session?.toggleMovementMode?.();
       if (camera) app.applyCameraState(camera);
       updateDom();
+      return;
+    }
+    const hotbarSlot = hotbarSlotForKey(event.key);
+    if (hotbarSlot !== null) {
+      event.preventDefault();
+      if (!event.repeat) {
+        app.selectHotbarSlot(hotbarSlot);
+      }
       return;
     }
     const key = inputNameForKey(event.key);
@@ -608,6 +633,7 @@ function updateDom() {
   setText("center", `${state.centerX}, ${state.centerZ}`);
   setText("camera", `${state.cameraX.toFixed(1)}, ${state.cameraY.toFixed(1)}, ${state.cameraZ.toFixed(1)}`);
   setText("mode", state.movementMode);
+  setText("slot", String(Number(state.selectedHotbarSlot || 0) + 1));
   setText("ground", state.onGround ? "ground" : state.verticalCollision ? "blocked" : state.horizontalCollision ? "wall" : "air");
   setText("target", formatTarget(state.lastInteraction));
   setText("action", state.interactionStatus);
@@ -638,6 +664,27 @@ function formatInteractionStatus(interaction) {
     return `${interaction.action}: miss`;
   }
   return `${interaction.action}: ${interaction.changed ? "changed" : "same"}`;
+}
+
+function applyHotbarState(value) {
+  if (!value || typeof value.selectedHotbarSlot === "undefined") {
+    return;
+  }
+  const slot = Number(value.selectedHotbarSlot);
+  if (Number.isInteger(slot) && slot >= 0 && slot < 9) {
+    runtime.state.selectedHotbarSlot = slot;
+  }
+}
+
+function hotbarSlotForKey(key) {
+  if (key.length !== 1) {
+    return null;
+  }
+  const digit = Number(key);
+  if (Number.isInteger(digit) && digit >= 1 && digit <= 9) {
+    return digit - 1;
+  }
+  return null;
 }
 
 function formatTarget(interaction) {
