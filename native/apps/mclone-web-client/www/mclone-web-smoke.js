@@ -3,6 +3,7 @@ const BINDGEN_JS_URL = new URL("./pkg/mclone_web_client.js", import.meta.url);
 const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.url);
 const THREAD_WORKER_URL = new URL("./mclone-thread-smoke-worker.js", import.meta.url);
 const RENDER_COMPILER_WORKER_URL = new URL("./mclone-render-compiler-worker.js", import.meta.url);
+const SERVER_WORKER_URL = new URL("./mclone-integrated-server-worker.js", import.meta.url);
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 
@@ -303,41 +304,48 @@ async function renderCanvas() {
   try {
     const module = await import(BINDGEN_JS_URL.href);
     await module.default(BINDGEN_WASM_URL.href);
-    if (typeof module.mclone_web_create_chunk_render_session !== "function") {
+    if (typeof module.mclone_web_create_worker_chunk_render_session !== "function") {
       return {
         ok: false,
         supported: true,
         status: "export-missing",
-        reason: "missing mclone_web_create_chunk_render_session export",
+        reason: "missing mclone_web_create_worker_chunk_render_session export",
         exports: Object.keys(module),
       };
     }
 
     const assetPack = await fetchAssetPack();
-    const session = await module.mclone_web_create_chunk_render_session(canvas, assetPack);
+    const session = await module.mclone_web_create_worker_chunk_render_session(
+      canvas,
+      assetPack,
+      SERVER_WORKER_URL.href,
+      BINDGEN_JS_URL.href,
+      BINDGEN_WASM_URL.href,
+    );
     if (
       typeof session.beginChunkRenderCompileRequest !== "function"
       || typeof session.finishChunkRenderCompileRequest !== "function"
       || typeof session.pendingChunkRenderCompileJobCount !== "function"
+      || typeof session.shutdown !== "function"
     ) {
       return {
         ok: false,
         supported: true,
         status: "export-missing",
-        reason: "missing WebChunkRenderSession browser compile lifecycle export",
+        reason: "missing WebChunkRenderSession browser compile lifecycle/shutdown export",
       };
     }
 
     const compiler = new RenderSectionWorkerCompiler(assetPack);
     try {
-      const firstCompileRequest = session.beginChunkRenderCompileRequest(0, 0, 1);
+      const firstCompileRequest = await session.beginChunkRenderCompileRequest(0, 0, 1);
       const firstCompile = await compiler.compile(firstCompileRequest);
       const renderCompiler = firstCompile.report;
       const firstReport = renderCompiler.ok
         ? session.finishChunkRenderCompileRequest(firstCompileRequest.requestId, firstCompile.packed)
         : { ok: false, reason: "render compiler worker failed before first render" };
       const secondCompileRequest = firstReport.ok
-        ? session.beginChunkRenderCompileRequest(1, 0, 1)
+        ? await session.beginChunkRenderCompileRequest(1, 0, 1)
         : { ok: false, reason: "first worker render failed before second compile request" };
       const secondCompile = secondCompileRequest.ok
         ? await compiler.compile(secondCompileRequest)
@@ -346,6 +354,7 @@ async function renderCanvas() {
       const report = secondRenderCompiler.ok
         ? session.finishChunkRenderCompileRequest(secondCompileRequest.requestId, secondCompile.packed)
         : { ok: false, reason: "render compiler worker failed before second render" };
+      const shutdownReport = session.shutdown();
       return {
         ok: Boolean(
           firstCompileRequest.ok
@@ -364,6 +373,7 @@ async function renderCanvas() {
           && report.meshBuilt
           && report.assetPackLoaded
           && report.textured
+          && shutdownReport.ok
         ),
         supported: true,
         status: report.ok ? "rendered" : "failed",
@@ -375,6 +385,7 @@ async function renderCanvas() {
         sessionPendingCompileJobCount: session.pendingChunkRenderCompileJobCount(),
         firstReport,
         report,
+        shutdownReport,
       };
     } finally {
       compiler.terminate();

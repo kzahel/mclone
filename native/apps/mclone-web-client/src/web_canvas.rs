@@ -3,7 +3,10 @@ use web_sys::HtmlCanvasElement;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime};
+use super::{
+    SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebIntegratedServerRunnerConfig,
+    WebRuntime,
+};
 use mclone_assets::PackedAssetSource;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationKind,
@@ -36,6 +39,7 @@ use mclone_render_session::{
     build_client_textured_sections, decode_textured_render_section_build_report,
     encode_textured_render_section_build_report, summarize_textured_render_section_build_report,
 };
+use mclone_server::ServerRunnerKind;
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
 const CANVAS_RENDERED_BIT: u32 = 1 << 1;
@@ -82,6 +86,7 @@ pub fn mclone_web_render_generated_chunk_report(
             .map_err(JsValue::from)?;
         let report = session
             .render_chunk_report_for_center(SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS)
+            .await
             .map_err(JsValue::from)?;
         report.to_js_value().map_err(JsValue::from)
     })
@@ -95,6 +100,28 @@ pub async fn mclone_web_create_chunk_render_session(
     WebChunkRenderSession::new(canvas, asset_pack_bytes.to_vec())
         .await
         .map_err(JsValue::from)
+}
+
+#[wasm_bindgen]
+pub async fn mclone_web_create_worker_chunk_render_session(
+    canvas: HtmlCanvasElement,
+    asset_pack_bytes: js_sys::Uint8Array,
+    server_worker_url: String,
+    bindgen_js_url: String,
+    bindgen_wasm_url: String,
+) -> Result<WebChunkRenderSession, JsValue> {
+    WebChunkRenderSession::new_with_worker(
+        canvas,
+        asset_pack_bytes.to_vec(),
+        WebIntegratedServerRunnerConfig::new(
+            SMOKE_SEED,
+            server_worker_url,
+            bindgen_js_url,
+            bindgen_wasm_url,
+        ),
+    )
+    .await
+    .map_err(JsValue::from)
 }
 
 #[wasm_bindgen]
@@ -253,6 +280,13 @@ struct GeneratedChunkRenderReport {
     drawn_actor_index_count: u32,
     actor_atlas_width: u32,
     actor_atlas_height: u32,
+    runner_kind: ServerRunnerKind,
+    runner_running: bool,
+    runner_command_queue_depth: usize,
+    runner_update_queue_depth: usize,
+    runner_pending_jobs: usize,
+    runner_pending_publications: usize,
+    runner_last_simulation_tick: u64,
 }
 
 impl CanvasRenderReport {
@@ -278,6 +312,8 @@ impl GeneratedChunkRenderReport {
         set_bool(&object, "workerCompileUsed", self.worker_compile_used)?;
         set_bool(&object, "skyRendered", self.sky_rendered)?;
         set_bool(&object, "actorRendered", self.drawn_actor_count > 0)?;
+        set_string(&object, "runnerKind", self.runner_kind.label())?;
+        set_bool(&object, "runnerRunning", self.runner_running)?;
         write_camera_frame_state_to_js(&object, self.camera_state)?;
         set_number(
             &object,
@@ -437,6 +473,31 @@ impl GeneratedChunkRenderReport {
             &object,
             "actorAtlasHeight",
             f64::from(self.actor_atlas_height),
+        )?;
+        set_number(
+            &object,
+            "runnerCommandQueueDepth",
+            self.runner_command_queue_depth as f64,
+        )?;
+        set_number(
+            &object,
+            "runnerUpdateQueueDepth",
+            self.runner_update_queue_depth as f64,
+        )?;
+        set_number(
+            &object,
+            "runnerPendingJobs",
+            self.runner_pending_jobs as f64,
+        )?;
+        set_number(
+            &object,
+            "runnerPendingPublications",
+            self.runner_pending_publications as f64,
+        )?;
+        set_number(
+            &object,
+            "runnerLastSimulationTick",
+            self.runner_last_simulation_tick as f64,
         )?;
         Ok(object.into())
     }
@@ -694,7 +755,7 @@ pub struct WebChunkRenderSession {
 #[wasm_bindgen]
 impl WebChunkRenderSession {
     #[wasm_bindgen(js_name = renderChunkReport)]
-    pub fn render_chunk_report(
+    pub async fn render_chunk_report(
         &mut self,
         center_x: i32,
         center_z: i32,
@@ -707,12 +768,13 @@ impl WebChunkRenderSession {
             },
             radius_chunks,
         )
+        .await
         .and_then(GeneratedChunkRenderReport::to_js_value)
         .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = beginChunkRenderCompileRequest)]
-    pub fn begin_chunk_render_compile_request(
+    pub async fn begin_chunk_render_compile_request(
         &mut self,
         center_x: i32,
         center_z: i32,
@@ -725,6 +787,7 @@ impl WebChunkRenderSession {
             },
             radius_chunks,
         )
+        .await
         .map_err(JsValue::from)
     }
 
@@ -754,7 +817,7 @@ impl WebChunkRenderSession {
 
     #[wasm_bindgen(js_name = advanceCameraFrame)]
     #[allow(clippy::too_many_arguments)]
-    pub fn advance_camera_frame(
+    pub async fn advance_camera_frame(
         &mut self,
         dt_seconds: f64,
         mouse_delta_x: f64,
@@ -783,7 +846,9 @@ impl WebChunkRenderSession {
         };
         self.camera
             .apply_movement_input(self.runtime.client(), input);
-        self.sync_camera_pose_to_server().map_err(JsValue::from)?;
+        self.sync_camera_pose_to_server()
+            .await
+            .map_err(JsValue::from)?;
         camera_state_to_js_value(&self.camera, &self.interaction).map_err(JsValue::from)
     }
 
@@ -813,9 +878,10 @@ impl WebChunkRenderSession {
     }
 
     #[wasm_bindgen(js_name = interactBlock)]
-    pub fn interact_block(&mut self, kind: &str) -> Result<JsValue, JsValue> {
+    pub async fn interact_block(&mut self, kind: &str) -> Result<JsValue, JsValue> {
         let kind = WebBlockInteractionKind::from_label(kind).map_err(JsValue::from)?;
         self.interact_block_with_kind(kind)
+            .await
             .and_then(WebBlockInteractionReport::to_js_value)
             .map_err(JsValue::from)
     }
@@ -835,11 +901,12 @@ impl WebChunkRenderSession {
     }
 
     #[wasm_bindgen(js_name = beginCameraRenderCompileRequest)]
-    pub fn begin_camera_render_compile_request(
+    pub async fn begin_camera_render_compile_request(
         &mut self,
         radius_chunks: u32,
     ) -> Result<JsValue, JsValue> {
         self.begin_camera_render_compile_request_for_radius(radius_chunks)
+            .await
             .map_err(JsValue::from)
     }
 
@@ -864,8 +931,18 @@ impl WebChunkRenderSession {
             .map_err(JsValue::from)
     }
 
+    #[wasm_bindgen(js_name = shutdown)]
+    pub fn shutdown(&mut self) -> Result<JsValue, JsValue> {
+        self.runtime.request_shutdown();
+        let object = js_sys::Object::new();
+        set_bool(&object, "ok", true).map_err(JsValue::from)?;
+        set_string(&object, "runnerKind", self.runtime.runner_kind().label())
+            .map_err(JsValue::from)?;
+        Ok(object.into())
+    }
+
     #[wasm_bindgen(js_name = renderChunkReportFromPackedSections)]
-    pub fn render_chunk_report_from_packed_sections(
+    pub async fn render_chunk_report_from_packed_sections(
         &mut self,
         center_x: i32,
         center_z: i32,
@@ -880,6 +957,7 @@ impl WebChunkRenderSession {
             radius_chunks,
             packed_report.to_vec(),
         )
+        .await
         .and_then(GeneratedChunkRenderReport::to_js_value)
         .map_err(JsValue::from)
     }
@@ -887,6 +965,28 @@ impl WebChunkRenderSession {
 
 impl WebChunkRenderSession {
     async fn new(canvas: HtmlCanvasElement, asset_pack_bytes: Vec<u8>) -> Result<Self, String> {
+        Self::new_with_runtime(
+            canvas,
+            asset_pack_bytes,
+            WebRuntime::local_integrated(SMOKE_SEED),
+        )
+        .await
+    }
+
+    async fn new_with_worker(
+        canvas: HtmlCanvasElement,
+        asset_pack_bytes: Vec<u8>,
+        config: WebIntegratedServerRunnerConfig,
+    ) -> Result<Self, String> {
+        let runtime = WebRuntime::web_worker_integrated(config).await?;
+        Self::new_with_runtime(canvas, asset_pack_bytes, runtime).await
+    }
+
+    async fn new_with_runtime(
+        canvas: HtmlCanvasElement,
+        asset_pack_bytes: Vec<u8>,
+        runtime: WebRuntime,
+    ) -> Result<Self, String> {
         let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
         let context = WebCanvasContext::new(canvas).await?;
         let depth = ChunkDepthTarget::new(&context.device, context.width, context.height);
@@ -903,7 +1003,7 @@ impl WebChunkRenderSession {
             context,
             depth,
             sky,
-            runtime: WebRuntime::local_integrated(SMOKE_SEED),
+            runtime,
             camera: EngineCameraController::spawn_for_chunk(SMOKE_INITIAL_CENTER),
             interaction: ClientInteractionController::new(),
             actor_interpolation: ActorInterpolationState::new(),
@@ -921,7 +1021,7 @@ impl WebChunkRenderSession {
         })
     }
 
-    fn begin_chunk_render_compile_request_for_center(
+    async fn begin_chunk_render_compile_request_for_center(
         &mut self,
         center: ChunkPos,
         radius_chunks: u32,
@@ -932,7 +1032,9 @@ impl WebChunkRenderSession {
                 self.compile_requests.pending_request_count()
             ));
         }
-        let render_plan = self.prepare_chunk_render_plan(center, radius_chunks)?;
+        let render_plan = self
+            .prepare_chunk_render_plan(center, radius_chunks)
+            .await?;
         let context = WebPendingCompileContext {
             center,
             radius_chunks,
@@ -996,12 +1098,13 @@ impl WebChunkRenderSession {
         )
     }
 
-    fn begin_camera_render_compile_request_for_radius(
+    async fn begin_camera_render_compile_request_for_radius(
         &mut self,
         radius_chunks: u32,
     ) -> Result<JsValue, String> {
         let center = self.camera.snapshot().chunk_pos;
         self.begin_chunk_render_compile_request_for_center(center, radius_chunks)
+            .await
     }
 
     fn finish_camera_render_compile_request_with_packed_report(
@@ -1062,14 +1165,14 @@ impl WebChunkRenderSession {
         )
     }
 
-    fn interact_block_with_kind(
+    async fn interact_block_with_kind(
         &mut self,
         kind: WebBlockInteractionKind,
     ) -> Result<WebBlockInteractionReport, String> {
         let command_count_before = self.runtime.command_count();
         let update_count_before = self.runtime.update_count();
-        self.sync_camera_pose_to_server()?;
-        let carried_item_synced = self.sync_carried_item()?;
+        self.sync_camera_pose_to_server().await?;
+        let carried_item_synced = self.sync_carried_item().await?;
 
         let hit = self
             .camera
@@ -1104,7 +1207,8 @@ impl WebChunkRenderSession {
 
         let step = self
             .runtime
-            .send_gameplay_command(command)
+            .send_gameplay_command_async(command)
+            .await
             .map_err(|error| {
                 format!("failed to send browser block interaction command: {error}")
             })?;
@@ -1148,28 +1252,30 @@ impl WebChunkRenderSession {
         }
     }
 
-    fn sync_carried_item(&mut self) -> Result<bool, String> {
+    async fn sync_carried_item(&mut self) -> Result<bool, String> {
         let Some(command) = self.interaction.ensure_has_sent_carried_item() else {
             return Ok(false);
         };
         self.runtime
-            .send_gameplay_command(command)
+            .send_gameplay_command_async(command)
+            .await
             .map_err(|error| format!("failed to sync browser carried item: {error}"))?;
         Ok(true)
     }
 
-    fn sync_camera_pose_to_server(&mut self) -> Result<(), String> {
-        self.apply_pending_camera_position_updates()?;
+    async fn sync_camera_pose_to_server(&mut self) -> Result<(), String> {
+        self.apply_pending_camera_position_updates().await?;
         if let Some(report) = self.camera.next_pose_sync_command() {
             self.runtime
-                .send_gameplay_command(report.command)
+                .send_gameplay_command_async(report.command)
+                .await
                 .map_err(|error| format!("failed to sync browser camera pose: {error}"))?;
-            self.apply_pending_camera_position_updates()?;
+            self.apply_pending_camera_position_updates().await?;
         }
         Ok(())
     }
 
-    fn apply_pending_camera_position_updates(&mut self) -> Result<(), String> {
+    async fn apply_pending_camera_position_updates(&mut self) -> Result<(), String> {
         let updates = self
             .runtime
             .drain_player_position_updates()
@@ -1179,11 +1285,13 @@ impl WebChunkRenderSession {
             self.camera
                 .probe_ground(self.runtime.client(), WEB_GROUND_PROBE_DISTANCE);
             self.runtime
-                .send_gameplay_command(accepted.accept_command)
+                .send_gameplay_command_async(accepted.accept_command)
+                .await
                 .map_err(|error| format!("failed to accept browser camera correction: {error}"))?;
             let resync = self.camera.corrected_pose_sync_command();
             self.runtime
-                .send_gameplay_command(resync.command)
+                .send_gameplay_command_async(resync.command)
+                .await
                 .map_err(|error| {
                     format!("failed to resync corrected browser camera pose: {error}")
                 })?;
@@ -1191,12 +1299,14 @@ impl WebChunkRenderSession {
         Ok(())
     }
 
-    fn render_chunk_report_for_center(
+    async fn render_chunk_report_for_center(
         &mut self,
         center: ChunkPos,
         radius_chunks: u32,
     ) -> Result<GeneratedChunkRenderReport, String> {
-        let render_plan = self.prepare_chunk_render_plan(center, radius_chunks)?;
+        let render_plan = self
+            .prepare_chunk_render_plan(center, radius_chunks)
+            .await?;
         let section_report =
             build_client_textured_sections(self.runtime.client(), &self.mesh_assets.catalog)
                 .map_err(|error| {
@@ -1312,7 +1422,7 @@ impl WebChunkRenderSession {
         )
     }
 
-    fn render_chunk_report_for_center_from_packed_report(
+    async fn render_chunk_report_for_center_from_packed_report(
         &mut self,
         center: ChunkPos,
         radius_chunks: u32,
@@ -1322,7 +1432,9 @@ impl WebChunkRenderSession {
         let section_report = decode_textured_render_section_build_report(&packed_report)
             .map_err(|error| format!("failed to decode packed render section report: {error:#}"))?;
         let summary = summarize_textured_render_section_build_report(&section_report);
-        let render_plan = self.prepare_chunk_render_plan(center, radius_chunks)?;
+        let render_plan = self
+            .prepare_chunk_render_plan(center, radius_chunks)
+            .await?;
         self.render_prepared_section_report(
             center,
             radius_chunks,
@@ -1332,12 +1444,12 @@ impl WebChunkRenderSession {
         )
     }
 
-    fn prepare_chunk_render_plan(
+    async fn prepare_chunk_render_plan(
         &mut self,
         center: ChunkPos,
         radius_chunks: u32,
     ) -> Result<WebChunkRenderPlan, String> {
-        let sync = self.prepare_chunk_view(center, radius_chunks)?;
+        let sync = self.prepare_chunk_view(center, radius_chunks).await?;
         let sync_update = self.runtime.engine_mut().prepare_sync_update(
             |dirty_work| {
                 sort_chunk_positions_by_coordinate(dirty_work.loaded_dirty_chunks.iter().copied())
@@ -1355,14 +1467,15 @@ impl WebChunkRenderSession {
         })
     }
 
-    fn prepare_chunk_view(
+    async fn prepare_chunk_view(
         &mut self,
         center: ChunkPos,
         radius_chunks: u32,
     ) -> Result<RenderSectionViewSync, String> {
         let previous_loaded_chunks = self.loaded_chunk_positions.clone();
         self.runtime
-            .request_chunk_view(center, radius_chunks, radius_chunks)
+            .request_chunk_view_async(center, radius_chunks, radius_chunks)
+            .await
             .map_err(|error| {
                 format!("failed to load generated chunk through web runtime: {error}")
             })?;
@@ -1393,6 +1506,9 @@ impl WebChunkRenderSession {
         if count_mesh_build {
             self.mesh_build_count += 1;
         }
+        self.runtime
+            .drain_pending_runner_updates()
+            .map_err(|error| format!("failed to drain web server worker updates: {error}"))?;
         let cached_sections = self.runtime.engine().sections();
         if cached_sections.iter().all(|section| section.is_empty()) {
             return Err(format!(
@@ -1406,6 +1522,7 @@ impl WebChunkRenderSession {
         let day_time = self.runtime.client().day_time();
         let time_of_day = self.runtime.client().time_of_day();
         let sun_angle = self.runtime.client().sun_angle();
+        let runner_diagnostics = self.runtime.runner_diagnostics();
         let sky_clear_color = mclone_render::sky::overworld_clear_color(time_of_day);
         let render_options = TexturedSectionRenderOptions::default()
             .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day));
@@ -1526,6 +1643,13 @@ impl WebChunkRenderSession {
             drawn_actor_index_count: actor_stats.index_count,
             actor_atlas_width: self.mesh_assets.actor_atlas.width,
             actor_atlas_height: self.mesh_assets.actor_atlas.height,
+            runner_kind: runner_diagnostics.kind,
+            runner_running: runner_diagnostics.running,
+            runner_command_queue_depth: runner_diagnostics.command_queue_depth,
+            runner_update_queue_depth: runner_diagnostics.update_queue_depth,
+            runner_pending_jobs: runner_diagnostics.pending_jobs,
+            runner_pending_publications: runner_diagnostics.pending_publications,
+            runner_last_simulation_tick: runner_diagnostics.last_tick.simulation_tick,
         })
     }
 

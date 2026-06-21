@@ -13,12 +13,12 @@ use mclone_protocol::{
     decode_client_command, decode_server_update, encode_client_command, encode_server_update,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::IntegratedServer;
 use crate::{
     ChunkSchedulerMetrics, ChunkStoreError, PlayerChunkTrackingDiagnostics,
-    ServerSimulationTickTiming,
+    ServerSimulationTickReport, ServerSimulationTickTiming,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use crate::{IntegratedServer, ServerSimulationTickReport};
 
 pub type ServerRunnerResult<T> = Result<T, ServerRunnerError>;
 
@@ -59,8 +59,7 @@ pub struct ServerRunnerTickDiagnostics {
 }
 
 impl ServerRunnerTickDiagnostics {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn from_report(report: &ServerSimulationTickReport, wall_us: u128) -> Self {
+    pub fn from_report(report: &ServerSimulationTickReport, wall_us: u128) -> Self {
         Self {
             simulation_tick: report.simulation_tick,
             chunk_tick: report.chunk_tick,
@@ -99,8 +98,7 @@ pub struct ServerRunnerDiagnostics {
 }
 
 impl ServerRunnerDiagnostics {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn initial(kind: ServerRunnerKind, seed: i64, day_time: u64) -> Self {
+    pub fn initial(kind: ServerRunnerKind, seed: i64, day_time: u64) -> Self {
         Self {
             kind,
             running: false,

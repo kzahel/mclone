@@ -24,7 +24,12 @@ wgpu.workspace = true
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { workspace = true, features = [
   "console",
+  "ErrorEvent",
   "HtmlCanvasElement",
+  "MessageEvent",
+  "Worker",
+  "WorkerOptions",
+  "WorkerType",
 ] }
 
 [lib]

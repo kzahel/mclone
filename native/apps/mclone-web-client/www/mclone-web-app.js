@@ -1,6 +1,7 @@
 const BINDGEN_JS_URL = new URL("./pkg/mclone_web_client.js", import.meta.url);
 const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.url);
 const RENDER_COMPILER_WORKER_URL = new URL("./mclone-render-compiler-worker.js", import.meta.url);
+const SERVER_WORKER_URL = new URL("./mclone-integrated-server-worker.js", import.meta.url);
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 
 const RADIUS_CHUNKS = 1;
@@ -48,6 +49,13 @@ const runtime = {
     pointerLockAttempted: false,
     pointerLocked: false,
     pointerLockFallback: false,
+    tickFrameBusy: false,
+    tickPhase: "idle",
+    runnerKind: "unknown",
+    runnerCommandQueueDepth: 0,
+    runnerUpdateQueueDepth: 0,
+    runnerPendingJobs: 0,
+    runnerPendingPublications: 0,
     status: "booting",
   },
 };
@@ -58,7 +66,7 @@ async function boot() {
   const app = new WebChunkApp();
   runtime.queueMouseDelta = (dx, dy) => app.queueMouseDelta(dx, dy);
   runtime.setInputKey = (name, down) => app.setInputKey(name, down);
-  runtime.previewBlockTarget = () => app.session?.previewBlockTarget?.() ?? null;
+  runtime.previewBlockTarget = () => runtime.state.currentTarget;
   try {
     await app.init();
     runtime.ready = true;
@@ -104,6 +112,8 @@ class WebChunkApp {
     this.pointerDown = null;
     this.animationFrame = 0;
     this.lastFrameTime = 0;
+    this.tickFrameBusy = false;
+    this.sessionBusy = false;
   }
 
   async init() {
@@ -117,7 +127,7 @@ class WebChunkApp {
     updateDom();
     const module = await import(BINDGEN_JS_URL.href);
     await module.default(BINDGEN_WASM_URL.href);
-    for (const name of ["mclone_web_create_chunk_render_session"]) {
+    for (const name of ["mclone_web_create_worker_chunk_render_session"]) {
       if (typeof module[name] !== "function") {
         throw new Error(`missing ${name} export`);
       }
@@ -128,7 +138,13 @@ class WebChunkApp {
     const assetPack = await fetchAssetPack();
     runtime.state.status = "initializing webgpu";
     updateDom();
-    this.session = await module.mclone_web_create_chunk_render_session(this.canvas, assetPack);
+    this.session = await module.mclone_web_create_worker_chunk_render_session(
+      this.canvas,
+      assetPack,
+      SERVER_WORKER_URL.href,
+      BINDGEN_JS_URL.href,
+      BINDGEN_WASM_URL.href,
+    );
     for (const name of [
       "advanceCameraFrame",
       "beginCameraRenderCompileRequest",
@@ -159,7 +175,15 @@ class WebChunkApp {
   start() {
     this.lastFrameTime = performance.now();
     const frame = (now) => {
-      void this.tickFrame(now);
+      if (!this.tickFrameBusy) {
+        this.tickFrameBusy = true;
+        runtime.state.tickFrameBusy = true;
+        void this.tickFrame(now).finally(() => {
+          this.tickFrameBusy = false;
+          runtime.state.tickFrameBusy = false;
+          runtime.state.tickPhase = "idle";
+        });
+      }
       this.animationFrame = requestAnimationFrame(frame);
     };
     this.animationFrame = requestAnimationFrame(frame);
@@ -181,7 +205,8 @@ class WebChunkApp {
     this.syncCanvasSize();
 
     runtime.state.frameCount += 1;
-    const camera = this.session.advanceCameraFrame(
+    runtime.state.tickPhase = "advance";
+    const camera = await this.withSessionAsync(() => this.session.advanceCameraFrame(
       dtSeconds,
       mouseDeltaX,
       mouseDeltaY,
@@ -193,7 +218,8 @@ class WebChunkApp {
       this.keys.descend,
       this.keys.shift,
       this.keys.sprint,
-    );
+    ));
+    runtime.state.tickPhase = "post-advance";
     this.applyCameraState(camera);
     this.applyTargetState(this.session.previewBlockTarget());
 
@@ -202,11 +228,13 @@ class WebChunkApp {
         camera.centerX !== this.loadedCenter.centerX
         || camera.centerZ !== this.loadedCenter.centerZ
       ) {
-        void this.compileCameraView();
+        runtime.state.tickPhase = "compile-requested";
+        await this.compileCameraView();
       }
     }
 
     if (this.hasRendered && !this.renderFrameBusy) {
+      runtime.state.tickPhase = "render";
       this.renderCameraFrame();
     } else {
       updateDom();
@@ -223,7 +251,9 @@ class WebChunkApp {
     updateDom();
 
     try {
-      const request = this.session.beginCameraRenderCompileRequest(RADIUS_CHUNKS);
+      const request = await this.withSessionAsync(() => (
+        this.session.beginCameraRenderCompileRequest(RADIUS_CHUNKS)
+      ));
       if (!request?.ok) {
         throw new Error(request?.reason ?? "failed to begin camera render compile request");
       }
@@ -313,6 +343,11 @@ class WebChunkApp {
     runtime.state.loadedChunkCount = report.loadedChunkCount;
     runtime.state.residentSectionCount = report.residentSectionCount;
     runtime.state.pendingCompileJobCount = report.pendingCompileJobCount;
+    runtime.state.runnerKind = report.runnerKind;
+    runtime.state.runnerCommandQueueDepth = report.runnerCommandQueueDepth;
+    runtime.state.runnerUpdateQueueDepth = report.runnerUpdateQueueDepth;
+    runtime.state.runnerPendingJobs = report.runnerPendingJobs;
+    runtime.state.runnerPendingPublications = report.runnerPendingPublications;
     runtime.state.renderCount = report.renderCount;
     runtime.state.status = "ready";
     runtime.state.lastReport = report;
@@ -326,12 +361,13 @@ class WebChunkApp {
     applyHotbarState(target);
   }
 
-  interactBlock(action) {
+  async interactBlock(action) {
     if (!this.session) {
       return null;
     }
     try {
-      const interaction = this.session.interactBlock(action);
+      await this.waitForSessionIdle();
+      const interaction = await this.withSessionAsync(() => this.session.interactBlock(action));
       if (!interaction?.ok) {
         return null;
       }
@@ -340,7 +376,7 @@ class WebChunkApp {
       runtime.state.interactionStatus = formatInteractionStatus(interaction);
       applyHotbarState(interaction);
       if (interaction.changed && this.hasRendered && !this.pendingCompile) {
-        void this.compileCameraView();
+        await this.compileCameraView();
       }
       updateDom();
       return interaction;
@@ -357,6 +393,10 @@ class WebChunkApp {
     if (!this.session) {
       return false;
     }
+    if (this.sessionBusy) {
+      setTimeout(() => this.selectHotbarSlot(slot), 0);
+      return true;
+    }
     const hotbar = this.session.selectHotbarSlot(slot);
     if (!hotbar?.ok) {
       return false;
@@ -364,6 +404,25 @@ class WebChunkApp {
     applyHotbarState(hotbar);
     updateDom();
     return true;
+  }
+
+  async withSessionAsync(operation) {
+    await this.waitForSessionIdle();
+    this.sessionBusy = true;
+    try {
+      return await operation();
+    } finally {
+      this.sessionBusy = false;
+    }
+  }
+
+  async waitForSessionIdle() {
+    for (let attempt = 0; this.sessionBusy && attempt < 10_000; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    if (this.sessionBusy) {
+      throw new Error("timed out waiting for WebChunkRenderSession async operation");
+    }
   }
 
   setInputKey(name, down) {

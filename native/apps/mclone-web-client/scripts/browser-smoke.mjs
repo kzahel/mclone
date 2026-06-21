@@ -124,21 +124,26 @@ async function run() {
         };
       });
       await page.keyboard.down("w");
-      await page.waitForFunction(
-        (start) => {
-          const state = globalThis.__mcloneWebApp?.state;
-          const dx = Number(state?.cameraX) - start.cameraX;
-          const dz = Number(state?.cameraZ) - start.cameraZ;
-          return state?.ok === true
-            && state.movementMode === "WALK"
-            && state.lastReport?.movementMode === "WALK"
-            && state.lastReport?.onGround === true
-            && Math.hypot(dx, dz) > 0.2
-            && (state.lastReport?.commandCount ?? 0) > start.commandCount;
-        },
-        walkingStart,
-        { timeout: 60_000 },
-      );
+      try {
+        await page.waitForFunction(
+          (start) => {
+            const state = globalThis.__mcloneWebApp?.state;
+            const dx = Number(state?.cameraX) - start.cameraX;
+            const dz = Number(state?.cameraZ) - start.cameraZ;
+            return state?.ok === true
+              && state.movementMode === "WALK"
+              && state.lastReport?.movementMode === "WALK"
+              && state.lastReport?.onGround === true
+              && Math.hypot(dx, dz) > 0.2
+              && (state.lastReport?.commandCount ?? 0) > start.commandCount;
+          },
+          walkingStart,
+          { timeout: 60_000 },
+        );
+      } catch (error) {
+        const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+        throw new Error(`native web app did not advance walking movement after W key: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}\nlogs=${pageLogs.join("\n")}`);
+      }
       await page.keyboard.up("w");
       const walkingProbe = await page.evaluate((start) => {
         const state = globalThis.__mcloneWebApp.state;
@@ -506,6 +511,9 @@ function resolveRequestPath(pathname) {
   if (pathname === "/mclone-render-compiler-worker.js") {
     return join(wwwRoot, "mclone-render-compiler-worker.js");
   }
+  if (pathname === "/mclone-integrated-server-worker.js") {
+    return join(wwwRoot, "mclone-integrated-server-worker.js");
+  }
   if (pathname === "/mclone-thread-smoke-worker.js") {
     return join(wwwRoot, "mclone-thread-smoke-worker.js");
   }
@@ -599,6 +607,7 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
       result.canvas.secondRenderCompiler,
       result.canvas.renderCompilerPendingJobCount,
       result.canvas.sessionPendingCompileJobCount,
+      result.canvas.shutdownReport,
     );
   } else if (canvasPixels.distinctColorCount < 1 || canvasPixels.clearColorPixelCount < 16) {
     throw new Error(`canvas screenshot did not contain the rendered clear color:\n${JSON.stringify(canvasPixels, null, 2)}`);
@@ -651,6 +660,21 @@ function assertAppLoopResult(
   }
   if (!result.lastCompileReport?.workerCompileUsed) {
     throw new Error(`native web app did not stream through the browser worker compiler:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (result.runnerKind !== "web-worker" || result.lastReport?.runnerKind !== "web-worker") {
+    throw new Error(`native web app did not use the integrated server Web Worker runner:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (
+    result.runnerCommandQueueDepth !== 0
+    || result.runnerUpdateQueueDepth !== 0
+    || result.runnerPendingJobs !== 0
+    || result.runnerPendingPublications !== 0
+    || result.lastReport?.runnerCommandQueueDepth !== 0
+    || result.lastReport?.runnerUpdateQueueDepth !== 0
+    || result.lastReport?.runnerPendingJobs !== 0
+    || result.lastReport?.runnerPendingPublications !== 0
+  ) {
+    throw new Error(`native web app integrated server worker did not settle queues/jobs:\n${JSON.stringify(result, null, 2)}`);
   }
   if (!Number.isFinite(result.width) || !Number.isFinite(result.height) || result.width < 960 || result.height < 540) {
     throw new Error(`native web app did not resize the WebGPU canvas from explicit display dimensions:\n${JSON.stringify(result, null, 2)}`);
@@ -714,6 +738,7 @@ function assertChunkRenderResult(
   secondRenderCompiler,
   renderCompilerPendingJobCount,
   sessionPendingCompileJobCount,
+  shutdownReport,
 ) {
   assertRenderCompileRequest(firstCompileRequest, 0, 0);
   assertRenderCompileRequest(secondCompileRequest, 1, 0);
@@ -735,6 +760,20 @@ function assertChunkRenderResult(
   }
   if (!report.chunkLoaded || !report.meshBuilt) {
     throw new Error(`generated chunk did not load/build:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (!shutdownReport?.ok || shutdownReport.runnerKind !== "web-worker") {
+    throw new Error(`generated chunk render did not shut down the integrated server worker cleanly:\n${JSON.stringify({ shutdownReport, report }, null, 2)}`);
+  }
+  if (report.runnerKind !== "web-worker") {
+    throw new Error(`generated chunk render did not use the integrated server Web Worker runner:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (
+    report.runnerCommandQueueDepth !== 0
+    || report.runnerUpdateQueueDepth !== 0
+    || report.runnerPendingJobs !== 0
+    || report.runnerPendingPublications !== 0
+  ) {
+    throw new Error(`generated chunk render left integrated server worker queues/jobs pending:\n${JSON.stringify(report, null, 2)}`);
   }
   if (!report.assetPackLoaded || !report.textured) {
     throw new Error(`generated chunk was not rendered from the packed textured asset path:\n${JSON.stringify(report, null, 2)}`);

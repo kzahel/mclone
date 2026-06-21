@@ -1,6 +1,6 @@
 # 062: Shared Threading Topology
 
-Status: in progress - native desktop runner landed
+Status: in progress - native desktop and browser server runners landed
 
 ## Purpose
 
@@ -292,8 +292,8 @@ Acceptance:
 
 Move browser local integrated mode behind a Web Worker runner.
 
-Next step: port the same runner boundary to browser/WASM with a Web Worker
-backend, keeping the `IntegratedServerRunner` client-facing shape and encoded
+Port the same runner boundary to browser/WASM with a Web Worker backend,
+keeping the `IntegratedServerRunner` client-facing shape and encoded
 command/update frames. The web slice should also assert `WebWorker` runner kind
 in `native:web:app-smoke` before adding WebSocket/WebRTC transport work.
 
@@ -312,9 +312,37 @@ Acceptance:
   actors, worker render compiles, and zero pending jobs after settle.
 - Playwright screenshots remain part of validation.
 
+Landed in the browser worker slice:
+
+- The browser app now constructs `WebRuntime` with a `WebIntegratedServerRunner`
+  instead of the inline loopback host. The raw wasm runtime smoke keeps the
+  explicit inline fallback so it can still run through a direct wasm export
+  without browser `Worker` plumbing.
+- `mclone-integrated-server-worker.js` loads the bindgen module inside a module
+  worker, owns `IntegratedServer`, posts readiness, runs a 20 TPS tick timer,
+  receives encoded `ClientCommand` frames, and transfers encoded
+  `ServerUpdate` frames back to the main wasm instance.
+- The wasm app session exposes async command-crossing methods for chunk view,
+  movement/correction sync, and block interaction. JS app code serializes
+  session access so async worker exchanges do not overlap unsafe mutable
+  wasm-bindgen borrows.
+- Web render reports now include runner kind, command/update queue depths,
+  pending server jobs, pending publications, and last server simulation tick.
+  `native:web:smoke` and `native:web:app-smoke` assert `web-worker` runner kind
+  and settled queues/jobs. The standard web smoke also calls explicit session
+  shutdown and verifies the worker shutdown report.
+- Existing browser render-section compilation remains worker-backed. The
+  existing raw wasm runtime smoke and render compiler smoke fallback are kept
+  as temporary compatibility paths until worker-backed worldgen/light mailboxes
+  replace WASM inline server job execution.
+
 ### 4. WASM Server Job Workers For Lighting And Worldgen
 
 Replace WASM inline server mailboxes with Web Worker-backed job mailboxes.
+
+Next step: move the WASM worldgen feature and light-status mailboxes behind
+worker-backed `ServerJobMailbox` implementations so server-worker ticks do not
+run those heavy jobs inline inside the integrated server worker.
 
 Acceptance:
 
@@ -397,18 +425,20 @@ New validation should include:
   topology is in place.
 - No direct WebGPU work from server workers.
 
-## First Implementation Slice
+## Completed Implementation Slices
 
-Start with the native desktop integrated server runner:
+1. Native desktop integrated server runner:
+   shared runner interface, native OS-thread runner, `WindowSceneRuntime`
+   routing, diagnostics, shutdown tests, native smokes, and screenshot
+   validation.
+2. Browser/WASM integrated server worker:
+   module-worker runner, encoded command/update frame crossing, async web app
+   session routing, runner diagnostics in web reports, worker-kind and settled
+   queue assertions, explicit browser worker shutdown smoke, and Playwright
+   screenshot validation.
 
-1. Introduce the shared runner interface and diagnostics.
-2. Implement `NativeIntegratedServerRunner` as an OS thread owning
-   `IntegratedServer`.
-3. Update `WindowSceneRuntime` local integrated mode to use the runner instead
-   of owning `IntegratedServer`.
-4. Preserve remote TCP behavior and existing native worker mailboxes.
-5. Add tests for command/update crossing, diagnostics, and shutdown.
-6. Validate with native tests, movement/timedemo smoke, and a native screenshot.
+## Next Implementation Slice
 
-Once that lands, repeat the same boundary in browser/WASM with a Web Worker
-runner instead of inventing a separate web-only runtime shape.
+Move WASM worldgen feature jobs and light-status jobs out of inline execution
+and behind worker-backed job mailboxes, preserving the same mailbox counters and
+diagnostics shape across native and web.
