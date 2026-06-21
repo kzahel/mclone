@@ -23,6 +23,8 @@ const runtime = {
     cameraYawRadians: 0,
     cameraPitchRadians: 0,
     cameraSpeedBlocksPerSecond: 0,
+    width: 0,
+    height: 0,
     loadedChunkCount: 0,
     residentSectionCount: 0,
     pendingCompileJobCount: 0,
@@ -116,6 +118,7 @@ class WebChunkApp {
       "finishCameraRenderCompileRequest",
       "renderCameraFrame",
       "cameraFrameState",
+      "resizeCanvas",
     ]) {
       if (typeof this.session[name] !== "function") {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
@@ -123,6 +126,7 @@ class WebChunkApp {
     }
     this.compiler = new RenderSectionWorkerCompiler(assetPack);
     bindInput(this);
+    this.syncCanvasSize();
     this.applyCameraState(this.session.cameraFrameState());
 
     runtime.state.status = "rendering";
@@ -152,6 +156,7 @@ class WebChunkApp {
     const mouseDeltaY = this.mouseDeltaY;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
+    this.syncCanvasSize();
 
     runtime.state.frameCount += 1;
     const camera = this.session.advanceCameraFrame(
@@ -269,6 +274,8 @@ class WebChunkApp {
     this.applyCameraState(report);
     runtime.state.ok = true;
     runtime.state.radiusChunks = report.radiusChunks;
+    runtime.state.width = report.width;
+    runtime.state.height = report.height;
     runtime.state.loadedChunkCount = report.loadedChunkCount;
     runtime.state.residentSectionCount = report.residentSectionCount;
     runtime.state.pendingCompileJobCount = report.pendingCompileJobCount;
@@ -317,6 +324,24 @@ class WebChunkApp {
     runtime.state.pointerLockFallback =
       runtime.state.pointerLockAttempted && !runtime.state.pointerLocked;
     updateDom();
+  }
+
+  syncCanvasSize() {
+    if (!this.session) {
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    const scale = Number.isFinite(window.devicePixelRatio) ? window.devicePixelRatio : 1;
+    const width = Math.max(1, Math.round(rect.width * scale));
+    const height = Math.max(1, Math.round(rect.height * scale));
+    if (width === runtime.state.width && height === runtime.state.height) {
+      return;
+    }
+    const report = this.session.resizeCanvas(width, height);
+    if (report?.ok) {
+      runtime.state.width = Number(report.width) || width;
+      runtime.state.height = Number(report.height) || height;
+    }
   }
 }
 
@@ -370,6 +395,10 @@ function bindInput(app) {
   document.addEventListener("pointerlockchange", () => app.updatePointerLockState());
   document.addEventListener("pointerlockerror", () => {
     runtime.state.pointerLockFallback = true;
+    updateDom();
+  });
+  window.addEventListener("resize", () => {
+    app.syncCanvasSize();
     updateDom();
   });
 }

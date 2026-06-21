@@ -420,6 +420,12 @@ function assertAppLoopResult(result, pageErrors, canvasPixels) {
   if (!result.lastCompileReport?.workerCompileUsed) {
     throw new Error(`native web app did not stream through the browser worker compiler:\n${JSON.stringify(result, null, 2)}`);
   }
+  if (!Number.isFinite(result.width) || !Number.isFinite(result.height) || result.width < 960 || result.height < 540) {
+    throw new Error(`native web app did not resize the WebGPU canvas from explicit display dimensions:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (!result.lastReport?.commandCount || result.lastReport.commandCount <= 2) {
+    throw new Error(`native web app did not sync browser camera pose through gameplay commands:\n${JSON.stringify(result, null, 2)}`);
+  }
   if (!Number.isFinite(result.cameraX) || !Number.isFinite(result.cameraY) || !Number.isFinite(result.cameraZ)) {
     throw new Error(`native web app did not report a finite camera pose:\n${JSON.stringify(result, null, 2)}`);
   }

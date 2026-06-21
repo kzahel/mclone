@@ -1,13 +1,19 @@
 use glam::Vec3;
-use mclone_core::{ChunkPos, block_to_chunk_coord, chunk_middle_block_coord};
+use mclone_core::{ChunkPos, Vec3d, block_to_chunk_coord, chunk_middle_block_coord};
 use mclone_render::chunk::ChunkCamera;
+use mclone_render_session::{
+    ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND,
+    ENGINE_CAMERA_MIN_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MOUSE_SENSITIVITY,
+    ENGINE_CAMERA_SPAWN_PITCH_RADIANS, ENGINE_CAMERA_SPAWN_YAW_RADIANS, EngineCameraSnapshot,
+    EngineRenderCamera, render_camera_from_snapshot,
+};
 
 use crate::cli::SceneOptions;
 
-pub(crate) const SPECTATOR_BASE_SPEED: f32 = 32.0;
-pub(crate) const SPECTATOR_MIN_SPEED: f32 = 2.0;
-pub(crate) const SPECTATOR_MAX_SPEED: f32 = 256.0;
-pub(crate) const SPECTATOR_MOUSE_SENSITIVITY: f32 = 0.0035;
+pub(crate) const SPECTATOR_BASE_SPEED: f32 = ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND as f32;
+pub(crate) const SPECTATOR_MIN_SPEED: f32 = ENGINE_CAMERA_MIN_SPEED_BLOCKS_PER_SECOND as f32;
+pub(crate) const SPECTATOR_MAX_SPEED: f32 = ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND as f32;
+pub(crate) const SPECTATOR_MOUSE_SENSITIVITY: f32 = ENGINE_CAMERA_MOUSE_SENSITIVITY as f32;
 pub(crate) const SPECTATOR_SURFACE_CLEARANCE: f32 = 8.0;
 pub(crate) const SPECTATOR_SURFACE_PITCH: f32 = -0.45;
 
@@ -25,21 +31,30 @@ impl SpectatorCamera {
         let center_z = chunk_middle_block_coord(scene.chunk_z) as f32;
         Self {
             position: Vec3::new(center_x, 88.0, center_z),
-            yaw: 0.55,
-            pitch: -0.35,
+            yaw: ENGINE_CAMERA_SPAWN_YAW_RADIANS as f32,
+            pitch: ENGINE_CAMERA_SPAWN_PITCH_RADIANS as f32,
             speed: SPECTATOR_BASE_SPEED,
         }
     }
 
     pub(crate) fn camera(&self, render_distance: u32) -> ChunkCamera {
-        let forward = self.forward();
-        ChunkCamera {
-            eye: self.position.to_array(),
-            target: (self.position + forward).to_array(),
-            up: [0.0, 1.0, 0.0],
-            fov_y_radians: 64.0_f32.to_radians(),
-            z_near: 0.05,
-            z_far: 700.0 + render_distance as f32 * 128.0,
+        chunk_camera_from_engine(render_camera_from_snapshot(
+            self.engine_snapshot(),
+            render_distance,
+        ))
+    }
+
+    pub(crate) fn engine_snapshot(&self) -> EngineCameraSnapshot {
+        EngineCameraSnapshot {
+            eye: Vec3d::new(
+                f64::from(self.position.x),
+                f64::from(self.position.y),
+                f64::from(self.position.z),
+            ),
+            yaw_radians: f64::from(self.yaw),
+            pitch_radians: f64::from(self.pitch),
+            speed_blocks_per_second: f64::from(self.speed),
+            chunk_pos: self.chunk_pos(),
         }
     }
 
@@ -70,10 +85,21 @@ impl SpectatorCamera {
         self.speed = (self.speed * multiplier).clamp(SPECTATOR_MIN_SPEED, SPECTATOR_MAX_SPEED);
     }
 
+    #[cfg(test)]
     pub(crate) fn forward(&self) -> Vec3 {
-        let (yaw_sin, yaw_cos) = self.yaw.sin_cos();
-        let (pitch_sin, pitch_cos) = self.pitch.sin_cos();
-        Vec3::new(yaw_sin * pitch_cos, pitch_sin, yaw_cos * pitch_cos).normalize()
+        let camera = self.camera(0);
+        (Vec3::from_array(camera.target) - Vec3::from_array(camera.eye)).normalize()
+    }
+}
+
+fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
+    ChunkCamera {
+        eye: camera.eye,
+        target: camera.target,
+        up: camera.up,
+        fov_y_radians: camera.fov_y_radians,
+        z_near: camera.z_near,
+        z_far: camera.z_far,
     }
 }
 

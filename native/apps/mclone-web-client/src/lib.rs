@@ -112,7 +112,18 @@ impl WebRuntime {
             chunk_tracking_radius,
         });
         let exchange = self.host.exchange(command)?;
+        Ok(self.apply_exchange(exchange))
+    }
 
+    pub fn send_gameplay_command(
+        &mut self,
+        command: ClientCommand,
+    ) -> ProtocolCodecResult<WebRuntimeStepReport> {
+        let exchange = self.host.exchange(command)?;
+        Ok(self.apply_exchange(exchange))
+    }
+
+    fn apply_exchange(&mut self, exchange: WebExchange) -> WebRuntimeStepReport {
         self.command_count += exchange.command_count;
         self.update_count += exchange.update_count;
         self.protocol_codec_roundtrip &= exchange.protocol_codec_roundtrip;
@@ -122,13 +133,13 @@ impl WebRuntime {
             EngineServerUpdateDirtyPolicy::SECTION_BLOCK_UPDATES_ONLY,
         );
 
-        Ok(WebRuntimeStepReport {
+        WebRuntimeStepReport {
             command_count: exchange.command_count,
             update_count: update_report.updates,
             loaded_chunk_count: self.engine.client().loaded_chunk_count(),
             protocol_codec_roundtrip: exchange.protocol_codec_roundtrip,
             transport_drained: exchange.transport_drained,
-        })
+        }
     }
 
     pub const fn client(&self) -> &ClientRuntime {
@@ -157,6 +168,12 @@ impl WebRuntime {
 
     pub const fn transport_drained(&self) -> bool {
         self.transport_drained
+    }
+
+    pub fn drain_player_position_updates(
+        &mut self,
+    ) -> impl Iterator<Item = mclone_protocol::PlayerPositionUpdate> + '_ {
+        self.engine.client_mut().drain_player_position_updates()
     }
 }
 
@@ -420,6 +437,34 @@ mod tests {
                 .chunk_snapshot(SMOKE_INITIAL_CENTER)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn web_runtime_roundtrips_gameplay_movement_commands() {
+        let mut runtime = WebRuntime::local_integrated(SMOKE_SEED);
+        runtime
+            .request_chunk_view(
+                SMOKE_INITIAL_CENTER,
+                SMOKE_RADIUS_CHUNKS,
+                SMOKE_RADIUS_CHUNKS,
+            )
+            .unwrap();
+
+        let report = runtime
+            .send_gameplay_command(ClientCommand::MovePlayer(
+                mclone_protocol::MovePlayerCommand::PosRot {
+                    position: mclone_core::Vec3d::new(8.0, 104.0, 8.0),
+                    y_rot_degrees: 0.0,
+                    x_rot_degrees: 0.0,
+                    on_ground: false,
+                },
+            ))
+            .unwrap();
+
+        assert_eq!(report.command_count, 1);
+        assert!(report.protocol_codec_roundtrip);
+        assert!(report.transport_drained);
+        assert!(runtime.command_count() >= 2);
     }
 
     #[test]

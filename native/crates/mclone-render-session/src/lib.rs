@@ -19,7 +19,7 @@ use mclone_mesh::{
     build_textured_render_sections_for_section_set_with_stats,
     build_textured_render_sections_with_stats, quad_face_count_from_indices,
 };
-use mclone_protocol::{SectionBlockUpdate, ServerUpdate};
+use mclone_protocol::{ClientCommand, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate};
 
 const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR1\0";
 
@@ -692,6 +692,18 @@ impl EngineCameraController {
 
     pub const fn player(&self) -> &LocalPlayerController {
         &self.player
+    }
+
+    pub fn next_move_player_command(&mut self) -> Option<ClientCommand> {
+        self.player.next_move_player_command()
+    }
+
+    pub fn pos_rot_move_player_command(&mut self) -> ClientCommand {
+        self.player.pos_rot_move_player_command()
+    }
+
+    pub fn apply_player_position_update(&mut self, update: PlayerPositionUpdate) -> ClientCommand {
+        self.player.apply_player_position_update(update)
     }
 
     pub const fn speed_blocks_per_second(&self) -> f64 {

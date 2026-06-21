@@ -1,7 +1,7 @@
 # 061: Shared Engine / Web Adapter Refactor
 
-Status: active; shared update dirtying, browser app loop, and first-person web
-camera/input landed.
+Status: active; shared update dirtying, browser app loop, first-person web
+camera/input, resize, and browser no-clip pose sync landed.
 
 ## Purpose
 
@@ -593,9 +593,28 @@ First-person web camera/input result:
   chunk, waits for the streamed loaded center to match the camera center with
   zero pending compile jobs, asserts the last streamed compile came from the
   browser worker, and captures page/canvas screenshots.
-- The current web app still has no walking collision mode, server player-pose
-  sync, sky/actor passes, pause/options menus, inventory UI, or
-  multiplayer/server selection UI.
+- The current web app still has no walking collision mode, sky/actor passes,
+  pause/options menus, inventory UI, or multiplayer/server selection UI.
+
+Resize and browser pose-sync result:
+
+- Desktop `SpectatorCamera` now reuses shared render-session camera constants
+  and `render_camera_from_snapshot(...)` for render-camera construction while
+  preserving the existing native walking/collision path.
+- `EngineCameraController` now exposes the same move-command and teleport
+  correction hooks used by desktop `LocalPlayerController`, without moving
+  transport ownership into the shared crate.
+- `WebRuntime` now has a general `send_gameplay_command(...)` path that uses
+  the same protocol encode/decode loopback and shared server-update application
+  as chunk-view requests.
+- `WebChunkRenderSession` applies pending player-position corrections to the
+  browser camera, sends accept-teleport acknowledgements, and syncs no-clip
+  camera position/rotation through gameplay commands.
+- The web session exposes `resizeCanvas(width, height)`, and the browser app
+  passes explicit display pixel dimensions into Rust so the canvas backing
+  store, WebGPU surface, and depth target resize together.
+- `native:web:app-smoke` now also asserts explicit resized canvas dimensions
+  and gameplay command counts greater than the two chunk-view commands.
 
 ### 5. Add Web Worker/Thread Policy
 
@@ -693,18 +712,18 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should remove the remaining desktop/web camera-input drift and
-make the browser frame target less smoke-shaped:
+The next slice should make the browser frame loop less terrain-smoke-shaped and
+continue desktop/web gameplay convergence:
 
-1. Refactor desktop `SpectatorCamera`/mouse sensitivity/no-clip helpers to feed
-   or wrap the shared `EngineCameraController` primitives where that does not
-   disrupt the existing walking/collision path.
-2. Add dynamic canvas resize handling to the web session so target dimensions
-   are explicit frame inputs instead of fixed canvas attributes.
-3. Start syncing the browser camera/player pose through the same gameplay
-   command path desktop uses, initially for no-clip position/rotation only.
+1. Add web sky rendering and time-of-day use so browser frames are no longer
+   clear-color terrain renders.
+2. Add browser actor rendering from the shared client presentations, starting
+   with cows/entities and then remote-player placeholders.
+3. Continue reducing desktop/web camera drift by wrapping desktop no-clip
+   stepping around shared `EngineCameraController` primitives where that does
+   not disrupt walking/collision behavior.
 4. Keep browser worker compile submission, shared dirty/session policy, and
    WebGPU presentation unchanged.
-5. Extend validation to cover resize plus continued movement/streaming with
-   screenshots; leave menus/options/inventory and full walking collision as
-   later UI/gameplay slices.
+5. Extend validation to cover sky/actor pixels plus continued movement,
+   streaming, resize, pose sync, and screenshots; leave menus/options/inventory
+   and full walking collision as later UI/gameplay slices.

@@ -580,7 +580,7 @@ impl WebChunkRenderSession {
         descend: bool,
         sprint: bool,
     ) -> Result<JsValue, JsValue> {
-        let snapshot = self.camera.apply_input(EngineCameraInput {
+        self.camera.apply_input(EngineCameraInput {
             dt_seconds,
             mouse_delta_x,
             mouse_delta_y,
@@ -592,13 +592,28 @@ impl WebChunkRenderSession {
             descend,
             sprint,
         });
-        camera_snapshot_to_js_value(snapshot).map_err(JsValue::from)
+        self.sync_camera_pose_to_server().map_err(JsValue::from)?;
+        camera_snapshot_to_js_value(self.camera.snapshot()).map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = adjustCameraSpeed)]
     pub fn adjust_camera_speed(&mut self, wheel_amount: f64) -> Result<JsValue, JsValue> {
         self.camera.adjust_speed(wheel_amount);
         camera_snapshot_to_js_value(self.camera.snapshot()).map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = resizeCanvas)]
+    pub fn resize_canvas(&mut self, width: u32, height: u32) -> Result<JsValue, JsValue> {
+        let changed = self.context.resize(width, height);
+        if changed {
+            self.depth.resize(
+                &self.context.device,
+                self.context.width,
+                self.context.height,
+            );
+        }
+        canvas_size_to_js_value(self.context.width, self.context.height, changed)
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = beginCameraRenderCompileRequest)]
@@ -815,6 +830,35 @@ impl WebChunkRenderSession {
             WebFrameCamera::Camera,
             false,
         )
+    }
+
+    fn sync_camera_pose_to_server(&mut self) -> Result<(), String> {
+        self.apply_pending_camera_position_updates()?;
+        if let Some(command) = self.camera.next_move_player_command() {
+            self.runtime
+                .send_gameplay_command(command)
+                .map_err(|error| format!("failed to sync browser camera pose: {error}"))?;
+            self.apply_pending_camera_position_updates()?;
+        }
+        Ok(())
+    }
+
+    fn apply_pending_camera_position_updates(&mut self) -> Result<(), String> {
+        let updates = self
+            .runtime
+            .drain_player_position_updates()
+            .collect::<Vec<_>>();
+        for update in updates {
+            let ack = self.camera.apply_player_position_update(update);
+            self.runtime
+                .send_gameplay_command(ack)
+                .map_err(|error| format!("failed to accept browser camera correction: {error}"))?;
+            let sync = self.camera.pos_rot_move_player_command();
+            self.runtime.send_gameplay_command(sync).map_err(|error| {
+                format!("failed to resync corrected browser camera pose: {error}")
+            })?;
+        }
+        Ok(())
     }
 
     fn render_chunk_report_for_center(
@@ -1231,6 +1275,15 @@ fn camera_snapshot_to_js_value(snapshot: EngineCameraSnapshot) -> Result<JsValue
     Ok(object.into())
 }
 
+fn canvas_size_to_js_value(width: u32, height: u32, changed: bool) -> Result<JsValue, String> {
+    let object = js_sys::Object::new();
+    set_bool(&object, "ok", true)?;
+    set_bool(&object, "changed", changed)?;
+    set_number(&object, "width", f64::from(width))?;
+    set_number(&object, "height", f64::from(height))?;
+    Ok(object.into())
+}
+
 fn upload_report_for_sections(
     sections: &[mclone_mesh::TexturedRenderSectionMesh],
 ) -> TexturedSectionUploadReport {
@@ -1301,10 +1354,13 @@ fn load_textured_mesh_assets_from_pack(bytes: Vec<u8>) -> Result<WebTexturedMesh
 }
 
 struct WebCanvasContext {
+    canvas: HtmlCanvasElement,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     format: wgpu::TextureFormat,
+    present_mode: wgpu::PresentMode,
+    alpha_mode: wgpu::CompositeAlphaMode,
     width: u32,
     height: u32,
 }
@@ -1318,7 +1374,7 @@ impl WebCanvasContext {
             ..Default::default()
         });
         let surface = instance
-            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
             .map_err(|error| format!("failed to create WebGPU canvas surface: {error}"))?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -1364,13 +1420,42 @@ impl WebCanvasContext {
         );
 
         Ok(Self {
+            canvas,
             surface,
             device,
             queue,
             format,
+            present_mode,
+            alpha_mode,
             width,
             height,
         })
+    }
+
+    fn resize(&mut self, width: u32, height: u32) -> bool {
+        let width = width.max(1);
+        let height = height.max(1);
+        self.canvas.set_width(width);
+        self.canvas.set_height(height);
+        if self.width == width && self.height == height {
+            return false;
+        }
+        self.width = width;
+        self.height = height;
+        self.surface.configure(
+            &self.device,
+            &wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: self.format,
+                width,
+                height,
+                present_mode: self.present_mode,
+                alpha_mode: self.alpha_mode,
+                view_formats: vec![],
+                desired_maximum_frame_latency: 2,
+            },
+        );
+        true
     }
 }
 
