@@ -610,6 +610,52 @@ impl WebBlockInteractionReport {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct WebBlockTargetReport {
+    hit: BlockHitResult,
+    hit_block_state: Option<BlockStateId>,
+    selected_hotbar_slot: u8,
+    total_command_count: usize,
+    total_update_count: usize,
+    pending_compile_job_count: usize,
+}
+
+impl WebBlockTargetReport {
+    fn to_js_value(self) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        let block_hit = self.hit.hit_type() == HitResultType::Block;
+        set_bool(&object, "ok", true)?;
+        set_bool(&object, "hit", block_hit)?;
+        set_string(&object, "hitType", if block_hit { "block" } else { "miss" })?;
+        set_bool(&object, "inside", self.hit.inside)?;
+        set_number(
+            &object,
+            "selectedHotbarSlot",
+            f64::from(self.selected_hotbar_slot),
+        )?;
+        set_string(&object, "direction", direction_label(self.hit.direction))?;
+        set_number(&object, "blockX", f64::from(self.hit.block_pos.x))?;
+        set_number(&object, "blockY", f64::from(self.hit.block_pos.y))?;
+        set_number(&object, "blockZ", f64::from(self.hit.block_pos.z))?;
+        set_number(&object, "hitX", self.hit.location.x)?;
+        set_number(&object, "hitY", self.hit.location.y)?;
+        set_number(&object, "hitZ", self.hit.location.z)?;
+        set_number(
+            &object,
+            "hitBlockStateId",
+            optional_block_state_id(self.hit_block_state),
+        )?;
+        set_number(&object, "commandCount", self.total_command_count as f64)?;
+        set_number(&object, "updateCount", self.total_update_count as f64)?;
+        set_number(
+            &object,
+            "pendingCompileJobCount",
+            self.pending_compile_job_count as f64,
+        )?;
+        Ok(object.into())
+    }
+}
+
 async fn render_canvas_clear(canvas: HtmlCanvasElement) -> Result<CanvasRenderReport, String> {
     let context = WebCanvasContext::new(canvas).await?;
     let frame = context
@@ -780,6 +826,13 @@ impl WebChunkRenderSession {
     pub fn select_hotbar_slot(&mut self, slot: u8) -> Result<JsValue, JsValue> {
         self.interaction.select_hotbar_slot(slot);
         hotbar_state_to_js_value(&self.interaction).map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = previewBlockTarget)]
+    pub fn preview_block_target(&self) -> Result<JsValue, JsValue> {
+        self.preview_block_target_report()
+            .to_js_value()
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = interactBlock)]
@@ -1041,12 +1094,9 @@ impl WebChunkRenderSession {
         self.sync_camera_pose_to_server()?;
         let carried_item_synced = self.sync_carried_item()?;
 
-        let snapshot = self.camera.snapshot();
-        let hit = self.interaction.pick_block(
-            self.runtime.client(),
-            snapshot.eye,
-            self.camera.player().pose().view_vector(),
-        );
+        let hit = self
+            .camera
+            .pick_block(self.runtime.client(), &self.interaction);
         let hit_block_state = self
             .runtime
             .client()
@@ -1102,6 +1152,23 @@ impl WebChunkRenderSession {
             total_update_count: self.runtime.update_count(),
             pending_compile_job_count: self.compile_requests.pending_request_count(),
         })
+    }
+
+    fn preview_block_target_report(&self) -> WebBlockTargetReport {
+        let hit = self
+            .camera
+            .pick_block(self.runtime.client(), &self.interaction);
+        WebBlockTargetReport {
+            hit,
+            hit_block_state: self
+                .runtime
+                .client()
+                .block_state_at_block_pos(hit.block_pos),
+            selected_hotbar_slot: self.interaction.selected_hotbar_slot(),
+            total_command_count: self.runtime.command_count(),
+            total_update_count: self.runtime.update_count(),
+            pending_compile_job_count: self.compile_requests.pending_request_count(),
+        }
     }
 
     fn sync_carried_item(&mut self) -> Result<bool, String> {

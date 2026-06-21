@@ -4,11 +4,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, bail};
 use mclone_client::{
-    ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LocalPlayerController, LocalPlayerPose,
-    NoClipMovementStep, PlayerInputKey, WalkingMovementStep,
+    ClientInteractionController, ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    LocalPlayerController, LocalPlayerPose, NoClipMovementStep, PlayerInputKey,
+    WalkingMovementStep,
 };
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
+    AIR_BLOCK_STATE_ID, BlockHitResult, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
     PackedLightSection, SECTION_HEIGHT, Vec3d, block_to_chunk_coord, block_to_section_coord,
     chunk_block_coord, chunk_middle_block_coord,
 };
@@ -786,6 +787,15 @@ impl EngineCameraController {
             speed_blocks_per_second: self.speed_blocks_per_second,
             chunk_pos: pose.chunk_pos(),
         }
+    }
+
+    pub fn pick_block(
+        &self,
+        client: &ClientRuntime,
+        interaction: &ClientInteractionController,
+    ) -> BlockHitResult {
+        let pose = self.player.pose();
+        interaction.pick_block(client, pose.eye_position(), pose.view_vector())
     }
 
     pub fn set_key(&mut self, key: PlayerInputKey, down: bool) {
@@ -2327,7 +2337,8 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use mclone_core::{
-        AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus,
+        AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision,
+        ChunkStatus, HitResultType, chunk_section_index,
     };
     use mclone_mesh::{
         TexturedChunkVertex, TexturedRenderSectionBuildReport, TexturedVisibleChunkMesh,
@@ -2363,6 +2374,25 @@ mod tests {
             ChunkRevision(1),
             min_y,
             height,
+            &block_state_ids,
+        )
+    }
+
+    fn test_snapshot_with_block(
+        pos: ChunkPos,
+        block: BlockPos,
+        state: BlockStateId,
+    ) -> ChunkSnapshot {
+        assert_eq!(block.chunk_pos(), pos);
+        assert!((0..SECTION_HEIGHT).contains(&block.y));
+        let mut block_state_ids = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        block_state_ids[chunk_section_index(block.x, block.y, block.z)] = state;
+        ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            SECTION_HEIGHT,
             &block_state_ids,
         )
     }
@@ -2539,6 +2569,25 @@ mod tests {
         assert_eq!(camera.movement_mode(), EngineCameraMovementMode::Walking);
         assert!(after.eye.z > before.eye.z);
         assert!(camera.player().delta_movement().y < 0.0);
+    }
+
+    #[test]
+    fn engine_camera_controller_picks_block_from_player_view() {
+        let target = BlockPos::new(1, 2, 4);
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::ChunkSnapshot(test_snapshot_with_block(
+            ChunkPos::new(0, 0),
+            target,
+            BlockStateId(1),
+        )));
+        let interaction = ClientInteractionController::new();
+        let camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(1.5, 2.5, 1.5), 0.0, 0.0, 32.0);
+
+        let hit = camera.pick_block(&client, &interaction);
+
+        assert_eq!(hit.hit_type(), HitResultType::Block);
+        assert_eq!(hit.block_pos, target);
     }
 
     #[test]

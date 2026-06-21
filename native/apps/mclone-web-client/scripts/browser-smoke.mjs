@@ -160,6 +160,7 @@ async function run() {
           distance: Math.hypot(dx, dz),
         };
       }, walkingStart);
+      const targetPreviewProbe = await captureTargetPreviewProbe(page);
       const blockInteractionProbe = await exerciseBlockInteraction(page, canvas);
       await page.keyboard.press("n");
       await page.waitForFunction(
@@ -208,7 +209,14 @@ async function run() {
       const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
       const canvasPixels = analyzePng(canvasPng);
 
-      assertAppLoopResult(result, pageErrors, canvasPixels, walkingProbe, blockInteractionProbe);
+      assertAppLoopResult(
+        result,
+        pageErrors,
+        canvasPixels,
+        walkingProbe,
+        targetPreviewProbe,
+        blockInteractionProbe,
+      );
       console.log(JSON.stringify({
         url: `${baseUrl}/app.html`,
         screenshotPath,
@@ -217,6 +225,7 @@ async function run() {
         appLoop,
         canvasPixels,
         walkingProbe,
+        targetPreviewProbe,
         blockInteractionProbe,
         result,
       }, null, 2));
@@ -257,6 +266,37 @@ async function run() {
     await browser?.close();
     await new Promise((resolveClose) => server.close(resolveClose));
   }
+}
+
+async function captureTargetPreviewProbe(page) {
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.ok === true
+        && state.currentTarget?.ok === true
+        && state.currentTarget.hit === true
+        && state.currentTarget.hitBlockStateId >= 0
+        && state.pendingCompileJobCount === 0;
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
+  return page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    const first = globalThis.__mcloneWebApp.previewBlockTarget();
+    const second = globalThis.__mcloneWebApp.previewBlockTarget();
+    return {
+      ok: first?.ok === true
+        && second?.ok === true
+        && first.hit === true
+        && second.hit === true
+        && first.commandCount === second.commandCount
+        && first.updateCount === second.updateCount,
+      stateTarget: state.currentTarget,
+      first,
+      second,
+    };
+  });
 }
 
 async function exerciseBlockInteraction(page, canvas) {
@@ -565,7 +605,14 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
   }
 }
 
-function assertAppLoopResult(result, pageErrors, canvasPixels, walkingProbe, blockInteractionProbe) {
+function assertAppLoopResult(
+  result,
+  pageErrors,
+  canvasPixels,
+  walkingProbe,
+  targetPreviewProbe,
+  blockInteractionProbe,
+) {
   if (pageErrors.length > 0) {
     throw new Error(`browser app page errors:\n${pageErrors.join("\n")}`);
   }
@@ -589,6 +636,9 @@ function assertAppLoopResult(result, pageErrors, canvasPixels, walkingProbe, blo
   }
   if (!walkingProbe?.ok || walkingProbe.distance <= 0.2) {
     throw new Error(`native web app did not move through the walking/collision path before no-clip streaming:\n${JSON.stringify({ walkingProbe, result }, null, 2)}`);
+  }
+  if (!targetPreviewProbe?.ok) {
+    throw new Error(`native web app did not maintain a non-mutating current block target preview:\n${JSON.stringify({ targetPreviewProbe, result }, null, 2)}`);
   }
   if (!blockInteractionProbe?.ok) {
     throw new Error(`native web app did not break/place through the shared interaction path and recompile dirty sections:\n${JSON.stringify({ blockInteractionProbe, result }, null, 2)}`);

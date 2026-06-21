@@ -3,7 +3,7 @@
 Status: active; shared update dirtying, browser app loop, first-person web
 camera/input, resize, browser no-clip pose sync, and browser sky/actor drawing
 landed; browser walking/collision mode, block interaction, and hotbar selection
-landed.
+landed; browser target preview landed.
 
 ## Purpose
 
@@ -678,12 +678,20 @@ Block interaction browser result:
   zero-based `Digit1` through `Digit9` slot mapping. Camera and interaction
   reports expose `selectedHotbarSlot`, and the HUD displays the selected slot as
   a one-based player-facing value.
+- `EngineCameraController::pick_block` now owns the camera-facing pick primitive
+  for shared consumers. Browser target preview and browser interaction both use
+  that helper so the eye/view ray stays tied to the same player pose.
+- The browser app calls `previewBlockTarget` every frame and displays the
+  current non-mutating raycast target separately from the last action result.
+  The preview report includes hit/miss, block position, hit block state,
+  selected slot, command/update counters, and pending compile jobs.
 - `native:web:app-smoke` now proves the browser can break and place through
   this path before toggling to no-clip, then selects slot `2` before placing.
-  The captured report broke `(-1, 93, 1)` to air, selected zero-based slot `1`,
-  synced the carried item, placed after hitting `(-1, 93, 3)` with result block
-  state `5` (dirt), accepted two recompiled render sections for each
-  interaction, and ended with zero pending compile jobs.
+  The captured report first previewed `(-1, 93, 1)` twice without changing
+  command/update counters, then broke that block to air, selected zero-based
+  slot `1`, synced the carried item, placed after hitting `(-1, 93, 3)` with
+  result block state `5` (dirt), accepted two recompiled render sections for
+  each interaction, and ended with zero pending compile jobs.
 
 ### 5. Add Web Worker/Thread Policy
 
@@ -782,20 +790,18 @@ This parent plan is complete when:
 ## Next Tactical Slice
 
 The next slice should reduce desktop/web input and camera drift now that browser
-movement, interaction, and carried-item selection use the shared controllers:
+movement, targeting, interaction, and carried-item selection use shared
+controllers:
 
 1. Wrap desktop no-clip stepping around shared `EngineCameraController`
    primitives where that does not disrupt the existing desktop walking path.
 2. Move duplicated desktop/web mouse-look, speed adjustment, and movement-mode
    reporting details behind shared render-session/controller helpers where the
    ownership boundary is already clear.
-3. Add browser target preview/reporting for the current raycast without sending
-   a command, so interaction feedback can update every frame without mutating
-   the world.
-4. Keep `native:web:app-smoke` proving walk + no-clip movement, selected-slot
-   break/place, section dirty/update publication, worker compiles, sky/actors,
-   resize, screenshots, and zero pending compile jobs.
-5. Keep browser worker compile submission, shared dirty/session policy, sky,
+3. Keep `native:web:app-smoke` proving walk + no-clip movement, target preview,
+   selected-slot break/place, section dirty/update publication, worker compiles,
+   sky/actors, resize, screenshots, and zero pending compile jobs.
+4. Keep browser worker compile submission, shared dirty/session policy, sky,
    actors, resize, pose sync, movement modes, and WebGPU presentation unchanged;
    leave pause/options/inventory and multiplayer/server selection as later UI
    slices.

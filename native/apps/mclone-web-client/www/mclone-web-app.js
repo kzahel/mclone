@@ -28,6 +28,7 @@ const runtime = {
     horizontalCollision: false,
     verticalCollision: false,
     selectedHotbarSlot: 0,
+    currentTarget: null,
     interactionCount: 0,
     interactionStatus: "idle",
     lastInteraction: null,
@@ -57,6 +58,7 @@ async function boot() {
   const app = new WebChunkApp();
   runtime.queueMouseDelta = (dx, dy) => app.queueMouseDelta(dx, dy);
   runtime.setInputKey = (name, down) => app.setInputKey(name, down);
+  runtime.previewBlockTarget = () => app.session?.previewBlockTarget?.() ?? null;
   try {
     await app.init();
     runtime.ready = true;
@@ -136,6 +138,7 @@ class WebChunkApp {
       "resizeCanvas",
       "toggleMovementMode",
       "selectHotbarSlot",
+      "previewBlockTarget",
       "interactBlock",
     ]) {
       if (typeof this.session[name] !== "function") {
@@ -146,6 +149,7 @@ class WebChunkApp {
     bindInput(this);
     this.syncCanvasSize();
     this.applyCameraState(this.session.cameraFrameState());
+    this.applyTargetState(this.session.previewBlockTarget());
 
     runtime.state.status = "rendering";
     updateDom();
@@ -191,6 +195,7 @@ class WebChunkApp {
       this.keys.sprint,
     );
     this.applyCameraState(camera);
+    this.applyTargetState(this.session.previewBlockTarget());
 
     if (this.hasRendered && this.loadedCenter && !this.pendingCompile) {
       if (
@@ -311,6 +316,14 @@ class WebChunkApp {
     runtime.state.renderCount = report.renderCount;
     runtime.state.status = "ready";
     runtime.state.lastReport = report;
+  }
+
+  applyTargetState(target) {
+    if (!target?.ok) {
+      return;
+    }
+    runtime.state.currentTarget = target;
+    applyHotbarState(target);
   }
 
   interactBlock(action) {
@@ -635,7 +648,7 @@ function updateDom() {
   setText("mode", state.movementMode);
   setText("slot", String(Number(state.selectedHotbarSlot || 0) + 1));
   setText("ground", state.onGround ? "ground" : state.verticalCollision ? "blocked" : state.horizontalCollision ? "wall" : "air");
-  setText("target", formatTarget(state.lastInteraction));
+  setText("target", formatTarget(state.currentTarget));
   setText("action", state.interactionStatus);
   setText("chunks", String(state.loadedChunkCount));
   setText("sections", String(state.residentSectionCount));
