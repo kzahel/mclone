@@ -20,6 +20,7 @@ mod player;
 mod player_chunk_tracking;
 mod players;
 mod remote_players;
+mod runner;
 mod scheduler;
 #[cfg(test)]
 mod sky_light_bridge;
@@ -36,7 +37,7 @@ use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::levelgen::MutableChunkBlockBuffer;
 
 pub use holder::{ChunkHolder, ChunkStatusSlot};
-pub use integrated::IntegratedServer;
+pub use integrated::{INITIAL_DAY_TIME, IntegratedServer};
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
 };
@@ -44,6 +45,10 @@ pub use player_chunk_tracking::{
     PlayerChunkTrackingDiagnostics, PlayerChunkTrackingPlayerDiagnostics,
 };
 pub use players::ServerPlayerId;
+pub use runner::{
+    IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind,
+    ServerRunnerResult, ServerRunnerTickDiagnostics,
+};
 pub(crate) use scheduler::FluidTickList;
 pub use scheduler::{
     ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics, ChunkStatusJob,
@@ -84,6 +89,8 @@ use scheduler::{DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET, DEFAULT_PENDING_UNLOAD_B
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use persistence::FilesystemChunkSnapshotStore;
+#[cfg(not(target_arch = "wasm32"))]
+pub use runner::{NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig};
 
 pub(crate) fn mutable_buffer_from_snapshot(snapshot: &ChunkSnapshot) -> MutableChunkBlockBuffer {
     let mut buffer = MutableChunkBlockBuffer::new(

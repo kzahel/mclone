@@ -1,6 +1,6 @@
 # 062: Shared Threading Topology
 
-Status: proposed high-priority parent
+Status: in progress - native desktop runner landed
 
 ## Purpose
 
@@ -255,6 +255,26 @@ Acceptance:
 - Movement smoke, timedemo smoke, native screenshot validation, and relevant
   unit tests stay green.
 
+Landed in the first native slice:
+
+- `mclone-server` now exposes `IntegratedServerRunner`,
+  `ServerRunnerKind`, runner diagnostics, and a native
+  `NativeIntegratedServerRunner`.
+- The native runner owns `IntegratedServer` on an OS thread, receives encoded
+  `ClientCommand` frames, publishes encoded `ServerUpdate` frames, runs the
+  server tick loop on the runner thread, and joins cleanly on shutdown.
+- `WindowSceneRuntime` local integrated mode no longer stores or ticks
+  `IntegratedServer`; it sends commands to the runner and drains runner updates
+  during client polling. Remote TCP still uses `RemoteServerSession`.
+- Existing native worldgen, light-status, and render-section compile workers
+  remain worker-backed; the runner only moves server ownership and tick pacing.
+- Desktop runtime/debug stats now expose runner kind, command queue depth,
+  update queue depth, server tick timing, pending server jobs, and pending
+  publications.
+- Tests cover command/update crossing over runner frames, native-thread
+  diagnostics, clean shutdown, and a default desktop local-mode regression
+  against inline fallback.
+
 ### 2. Shared Runner Diagnostics And Tests
 
 Make runner topology visible and testable before adding the web runner.
@@ -271,6 +291,11 @@ Acceptance:
 ### 3. WASM Integrated Server Worker
 
 Move browser local integrated mode behind a Web Worker runner.
+
+Next step: port the same runner boundary to browser/WASM with a Web Worker
+backend, keeping the `IntegratedServerRunner` client-facing shape and encoded
+command/update frames. The web slice should also assert `WebWorker` runner kind
+in `native:web:app-smoke` before adding WebSocket/WebRTC transport work.
 
 Acceptance:
 

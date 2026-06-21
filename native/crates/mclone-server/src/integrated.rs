@@ -50,7 +50,7 @@ pub struct IntegratedServer {
 }
 
 /// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
-const INITIAL_DAY_TIME: u64 = 1000;
+pub const INITIAL_DAY_TIME: u64 = 1000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CommandTarget {

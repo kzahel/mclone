@@ -9,9 +9,13 @@ use mclone_core::{
     chunk_middle_block_coord, local_block_coord, local_section_block_coord,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh};
-use mclone_net::LocalTransport;
 use mclone_protocol::{ChunkView, ClientCommand, PlayerPositionUpdate, ServerUpdate};
+#[cfg(test)]
 use mclone_server::IntegratedServer;
+use mclone_server::{
+    IntegratedServerRunner, NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
+    ServerRunnerDiagnostics, ServerRunnerKind,
+};
 
 use crate::MIN_RENDER_DISTANCE;
 use crate::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
@@ -102,29 +106,25 @@ fn build_scene_client_runtime(scene: &SceneOptions) -> Result<ClientRuntime> {
         let updates = session.send_command(command)?;
         client.apply_updates(updates);
     } else {
-        let mut server = IntegratedServer::new(scene.seed);
-        server.set_lighting_enabled(scene.lighting_enabled);
-        let mut transport = LocalTransport::new();
-        transport.send_client_command(command);
-
-        for command in transport.drain_client_commands() {
-            for update in server.handle_command(command) {
-                transport.send_server_update(update);
-            }
-        }
-        for update in poll_integrated_server_until_idle(&mut server)? {
-            transport.send_server_update(update);
-        }
-        client.apply_updates(transport.drain_server_updates());
+        let mut runner = NativeIntegratedServerRunner::new(native_runner_config(scene))?;
+        runner.send_command(command)?;
+        client.apply_updates(drain_integrated_server_runner_until_idle(&mut runner)?);
+        runner.join_shutdown()?;
     }
     Ok(client)
+}
+
+fn native_runner_config(scene: &SceneOptions) -> NativeIntegratedServerRunnerConfig {
+    NativeIntegratedServerRunnerConfig::new(scene.seed)
+        .with_lighting_enabled(scene.lighting_enabled)
+        .with_day_time(scene.day_time_override)
+        .with_day_time_frozen(scene.freeze_time)
 }
 
 #[derive(Debug)]
 pub(crate) struct WindowSceneRuntime {
     engine: EngineRenderSession,
-    server: Option<IntegratedServer>,
-    transport: LocalTransport,
+    server_runner: Option<NativeIntegratedServerRunner>,
     remote_session: Option<RemoteServerSession>,
     pub(crate) render_distance: u32,
     pub(crate) chunk_tracking_radius: u32,
@@ -150,6 +150,9 @@ pub(crate) struct WindowSceneRuntime {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct RuntimePollDiagnostics {
+    pub(crate) server_runner_kind: Option<ServerRunnerKind>,
+    pub(crate) server_command_queue_depth: usize,
+    pub(crate) server_update_queue_depth: usize,
     pub(crate) flush_commands_ms: f64,
     pub(crate) server_tick_ms: f64,
     pub(crate) server_reported_total_ms: f64,
@@ -200,6 +203,9 @@ struct RuntimeUpdateApplyReport {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct WindowRuntimeStats {
+    pub(crate) server_runner_kind: Option<ServerRunnerKind>,
+    pub(crate) server_command_queue_depth: usize,
+    pub(crate) server_update_queue_depth: usize,
     pub(crate) interest_center: ChunkPos,
     pub(crate) render_distance: u32,
     pub(crate) chunk_tracking_radius: u32,
@@ -252,17 +258,16 @@ impl WindowSceneRuntime {
             .as_deref()
             .map(RemoteServerSession::connect)
             .transpose()?;
-        let server = if remote_session.is_none() {
-            let mut server = IntegratedServer::new(scene.seed);
-            server.set_lighting_enabled(scene.lighting_enabled);
-            Some(server)
+        let server_runner = if remote_session.is_none() {
+            Some(NativeIntegratedServerRunner::new(native_runner_config(
+                scene,
+            ))?)
         } else {
             None
         };
         let mut runtime = Self {
             engine: EngineRenderSession::new(client),
-            server,
-            transport: LocalTransport::new(),
+            server_runner,
             remote_session,
             render_distance,
             chunk_tracking_radius,
@@ -285,7 +290,16 @@ impl WindowSceneRuntime {
             scheduled_fluid_ticks: 0,
             last_poll_diagnostics: RuntimePollDiagnostics::default(),
         };
-        if let Some(day_time) = runtime.server.as_ref().map(|server| server.day_time()) {
+        if let Some(day_time) = runtime
+            .server_runner
+            .as_ref()
+            .map(|runner| {
+                runner
+                    .poll_diagnostics()
+                    .map(|diagnostics| diagnostics.day_time)
+            })
+            .transpose()?
+        {
             runtime.force_day_time(day_time);
         }
         runtime.set_chunk_view(
@@ -293,18 +307,9 @@ impl WindowSceneRuntime {
             runtime.render_distance,
             runtime.chunk_tracking_radius,
         )?;
-        // Debug day/night controls. `--freeze-time` stops the integrated server
-        // from advancing the clock; `--day-time` forces a starting tick (and seeds
-        // the client so the first frame is correct before the first server tick).
-        if scene.freeze_time {
-            if let Some(server) = runtime.server.as_mut() {
-                server.set_day_time_frozen(true);
-            }
-        }
+        // Debug day/night controls are applied before the runner starts ticking;
+        // seed the client so the first frame is correct before server updates.
         if let Some(day_time) = scene.day_time_override {
-            if let Some(server) = runtime.server.as_mut() {
-                server.set_day_time(day_time);
-            }
             runtime.force_day_time(day_time);
         }
         Ok(runtime)
@@ -381,8 +386,14 @@ impl WindowSceneRuntime {
             return self.dispatch_remote_client_command(command);
         }
 
-        self.transport.send_client_command(command);
-        self.flush_local_commands()
+        let Some(runner) = &mut self.server_runner else {
+            return Ok(false);
+        };
+        runner
+            .send_command(command)
+            .context("failed to send command to integrated server runner")?;
+        let _ = self.drain_local_runner_updates_report()?;
+        Ok(true)
     }
 
     fn dispatch_remote_client_command(&mut self, command: ClientCommand) -> Result<bool> {
@@ -426,84 +437,91 @@ impl WindowSceneRuntime {
     pub(crate) fn poll(&mut self) -> Result<bool> {
         let mut diagnostics = RuntimePollDiagnostics::default();
         let flush_start = Instant::now();
-        let mut changed = self.flush_local_commands()?;
+        let apply_report = self.drain_local_runner_updates_report()?;
+        let changed = apply_report.changed;
         diagnostics.flush_commands_ms = elapsed_ms(flush_start.elapsed());
-        if let Some(server) = &mut self.server {
-            let server_tick_start = Instant::now();
-            let report = server
-                .try_simulation_tick_report()
-                .context("failed to tick integrated server")?;
-            diagnostics.server_tick_ms = elapsed_ms(server_tick_start.elapsed());
-            diagnostics.server_reported_total_ms = micros_to_ms(report.timing.total_us);
-            diagnostics.scheduler_tick_ms = micros_to_ms(report.timing.scheduler_tick_us);
-            diagnostics.scheduler_report_ms = micros_to_ms(report.timing.scheduler_report_us);
-            diagnostics.scheduler_purge_stale_tickets_ms =
-                micros_to_ms(report.timing.scheduler_purge_stale_tickets_us);
-            diagnostics.scheduler_reconcile_holders_ms =
-                micros_to_ms(report.timing.scheduler_reconcile_holders_us);
-            diagnostics.scheduler_publish_completed_ms =
-                micros_to_ms(report.timing.scheduler_publish_completed_us);
-            diagnostics.scheduler_pending_unload_ms =
-                micros_to_ms(report.timing.scheduler_pending_unload_us);
-            diagnostics.scheduler_apply_events_ms =
-                micros_to_ms(report.timing.scheduler_apply_events_us);
-            diagnostics.block_tick_ms = micros_to_ms(report.timing.block_tick_us);
-            diagnostics.fluid_tick_ms = micros_to_ms(report.timing.fluid_tick_us);
-            diagnostics.fluid_event_apply_ms = micros_to_ms(report.timing.fluid_event_apply_us);
-            diagnostics.fluid_due_scan_ms = micros_to_ms(report.timing.fluid_due_scan_us);
-            diagnostics.fluid_remove_due_ms = micros_to_ms(report.timing.fluid_remove_due_us);
-            diagnostics.fluid_tick_fluid_ms = micros_to_ms(report.timing.fluid_tick_fluid_us);
-            diagnostics.fluid_set_block_ms = micros_to_ms(report.timing.fluid_set_block_us);
-            diagnostics.entity_tick_ms = micros_to_ms(report.timing.entity_tick_us);
-            diagnostics.scheduler_events = report.scheduler_event_count;
-            diagnostics.pending_unloads_processed = report.pending_unloads_processed;
-            diagnostics.fluid_due_ticks = report.fluid_due_ticks;
-            diagnostics.fluid_executed_ticks = report.fluid_ticks_executed;
-            diagnostics.fluid_deferred_ticks = report.deferred_fluid_ticks;
-            diagnostics.fluid_mutated_blocks = report.fluid_mutated_blocks;
-            diagnostics.fluid_snapshot_events = report.fluid_snapshot_events;
-            diagnostics.fluid_event_count = report.fluid_event_count;
-            diagnostics.scheduled_fluid_ticks = report.scheduled_fluid_ticks;
-            self.last_tick = report.chunk_tick;
-            self.last_simulation_tick = report.simulation_tick;
-            self.last_tick_unloads_processed = report.pending_unloads_processed;
-            self.last_simulation_block_tick_chunks = report.block_tick_chunks;
-            self.last_simulation_entity_tick_chunks = report.entity_tick_chunks;
-            self.last_simulation_scheduler_tick_ms = micros_to_ms(report.timing.scheduler_tick_us);
-            self.last_simulation_block_tick_ms = micros_to_ms(report.timing.block_tick_us);
-            self.last_simulation_fluid_tick_ms = micros_to_ms(report.timing.fluid_tick_us);
-            self.last_simulation_entity_tick_ms = micros_to_ms(report.timing.entity_tick_us);
-            self.last_simulation_fluid_ticks_executed = report.fluid_ticks_executed;
-            self.last_simulation_deferred_fluid_ticks = report.deferred_fluid_ticks;
-            self.last_simulation_fluid_mutated_blocks = report.fluid_mutated_blocks;
-            self.scheduled_fluid_ticks = report.scheduled_fluid_ticks;
-            let apply_report = self.apply_server_updates_report(report.updates);
-            diagnostics.apply_updates_ms = apply_report.total_ms;
-            diagnostics.dirty_mark_ms = apply_report.dirty_mark_ms;
-            diagnostics.client_apply_updates_ms = apply_report.client_apply_updates_ms;
-            diagnostics.updates = apply_report.updates;
-            diagnostics.snapshot_updates = apply_report.snapshot_updates;
-            diagnostics.section_block_updates = apply_report.section_block_updates;
-            diagnostics.unload_updates = apply_report.unload_updates;
-            changed |= apply_report.changed;
+        diagnostics.apply_updates_ms = apply_report.total_ms;
+        diagnostics.dirty_mark_ms = apply_report.dirty_mark_ms;
+        diagnostics.client_apply_updates_ms = apply_report.client_apply_updates_ms;
+        diagnostics.updates = apply_report.updates;
+        diagnostics.snapshot_updates = apply_report.snapshot_updates;
+        diagnostics.section_block_updates = apply_report.section_block_updates;
+        diagnostics.unload_updates = apply_report.unload_updates;
+        if let Some(runner) = &self.server_runner {
+            let runner_diagnostics = runner
+                .poll_diagnostics()
+                .context("failed to poll integrated server runner diagnostics")?;
+            self.apply_runner_diagnostics(&runner_diagnostics, &mut diagnostics);
         }
         self.last_poll_diagnostics = diagnostics;
         Ok(changed)
     }
 
-    fn flush_local_commands(&mut self) -> Result<bool> {
-        let Some(server) = &mut self.server else {
-            return Ok(false);
+    fn drain_local_runner_updates_report(&mut self) -> Result<RuntimeUpdateApplyReport> {
+        let Some(runner) = &mut self.server_runner else {
+            return Ok(RuntimeUpdateApplyReport::default());
         };
-        let mut changed = false;
-        for command in self.transport.drain_client_commands() {
-            for update in server.handle_command(command) {
-                self.transport.send_server_update(update);
-            }
+        let updates = runner
+            .drain_updates()
+            .context("failed to drain integrated server runner updates")?;
+        if updates.is_empty() {
+            return Ok(RuntimeUpdateApplyReport::default());
         }
-        let updates = self.transport.drain_server_updates();
-        changed |= self.apply_server_updates(updates);
-        Ok(changed)
+        Ok(self.apply_server_updates_report(updates))
+    }
+
+    fn apply_runner_diagnostics(
+        &mut self,
+        runner_diagnostics: &ServerRunnerDiagnostics,
+        diagnostics: &mut RuntimePollDiagnostics,
+    ) {
+        let tick = runner_diagnostics.last_tick;
+        diagnostics.server_runner_kind = Some(runner_diagnostics.kind);
+        diagnostics.server_command_queue_depth = runner_diagnostics.command_queue_depth;
+        diagnostics.server_update_queue_depth = runner_diagnostics.update_queue_depth;
+        diagnostics.server_tick_ms = micros_to_ms(tick.wall_us);
+        diagnostics.server_reported_total_ms = micros_to_ms(tick.timing.total_us);
+        diagnostics.scheduler_tick_ms = micros_to_ms(tick.timing.scheduler_tick_us);
+        diagnostics.scheduler_report_ms = micros_to_ms(tick.timing.scheduler_report_us);
+        diagnostics.scheduler_purge_stale_tickets_ms =
+            micros_to_ms(tick.timing.scheduler_purge_stale_tickets_us);
+        diagnostics.scheduler_reconcile_holders_ms =
+            micros_to_ms(tick.timing.scheduler_reconcile_holders_us);
+        diagnostics.scheduler_publish_completed_ms =
+            micros_to_ms(tick.timing.scheduler_publish_completed_us);
+        diagnostics.scheduler_pending_unload_ms =
+            micros_to_ms(tick.timing.scheduler_pending_unload_us);
+        diagnostics.scheduler_apply_events_ms = micros_to_ms(tick.timing.scheduler_apply_events_us);
+        diagnostics.block_tick_ms = micros_to_ms(tick.timing.block_tick_us);
+        diagnostics.fluid_tick_ms = micros_to_ms(tick.timing.fluid_tick_us);
+        diagnostics.fluid_event_apply_ms = micros_to_ms(tick.timing.fluid_event_apply_us);
+        diagnostics.fluid_due_scan_ms = micros_to_ms(tick.timing.fluid_due_scan_us);
+        diagnostics.fluid_remove_due_ms = micros_to_ms(tick.timing.fluid_remove_due_us);
+        diagnostics.fluid_tick_fluid_ms = micros_to_ms(tick.timing.fluid_tick_fluid_us);
+        diagnostics.fluid_set_block_ms = micros_to_ms(tick.timing.fluid_set_block_us);
+        diagnostics.entity_tick_ms = micros_to_ms(tick.timing.entity_tick_us);
+        diagnostics.scheduler_events = tick.scheduler_event_count;
+        diagnostics.pending_unloads_processed = tick.pending_unloads_processed;
+        diagnostics.fluid_due_ticks = tick.fluid_due_ticks;
+        diagnostics.fluid_executed_ticks = tick.fluid_ticks_executed;
+        diagnostics.fluid_deferred_ticks = tick.deferred_fluid_ticks;
+        diagnostics.fluid_mutated_blocks = tick.fluid_mutated_blocks;
+        diagnostics.fluid_snapshot_events = tick.fluid_snapshot_events;
+        diagnostics.fluid_event_count = tick.fluid_event_count;
+        diagnostics.scheduled_fluid_ticks = tick.scheduled_fluid_ticks;
+        self.last_tick = tick.chunk_tick;
+        self.last_simulation_tick = tick.simulation_tick;
+        self.last_tick_unloads_processed = tick.pending_unloads_processed;
+        self.last_simulation_block_tick_chunks = tick.block_tick_chunks;
+        self.last_simulation_entity_tick_chunks = tick.entity_tick_chunks;
+        self.last_simulation_scheduler_tick_ms = micros_to_ms(tick.timing.scheduler_tick_us);
+        self.last_simulation_block_tick_ms = micros_to_ms(tick.timing.block_tick_us);
+        self.last_simulation_fluid_tick_ms = micros_to_ms(tick.timing.fluid_tick_us);
+        self.last_simulation_entity_tick_ms = micros_to_ms(tick.timing.entity_tick_us);
+        self.last_simulation_fluid_ticks_executed = tick.fluid_ticks_executed;
+        self.last_simulation_deferred_fluid_ticks = tick.deferred_fluid_ticks;
+        self.last_simulation_fluid_mutated_blocks = tick.fluid_mutated_blocks;
+        self.scheduled_fluid_ticks = tick.scheduled_fluid_ticks;
     }
 
     fn apply_server_updates(&mut self, updates: Vec<ServerUpdate>) -> bool {
@@ -766,15 +784,29 @@ impl WindowSceneRuntime {
     }
 
     fn pending_job_count(&self) -> usize {
-        self.server
-            .as_ref()
-            .map_or(0, IntegratedServer::pending_job_count)
+        self.server_runner_diagnostics()
+            .map_or(0, |diagnostics| diagnostics.pending_jobs)
     }
 
     fn pending_publication_count(&self) -> usize {
-        self.server
+        self.server_runner_diagnostics()
+            .map_or(0, |diagnostics| diagnostics.pending_publications)
+    }
+
+    fn server_runner_diagnostics(&self) -> Option<ServerRunnerDiagnostics> {
+        self.server_runner
             .as_ref()
-            .map_or(0, IntegratedServer::pending_publication_count)
+            .and_then(|runner| runner.poll_diagnostics().ok())
+    }
+
+    fn local_server_idle(&self) -> bool {
+        self.server_runner_diagnostics().is_none_or(|diagnostics| {
+            diagnostics.command_queue_depth == 0
+                && diagnostics.update_queue_depth == 0
+                && !diagnostics.awaiting_tick
+                && diagnostics.pending_jobs == 0
+                && diagnostics.pending_publications == 0
+        })
     }
 
     pub(crate) fn last_poll_diagnostics(&self) -> RuntimePollDiagnostics {
@@ -827,15 +859,23 @@ impl WindowSceneRuntime {
     }
 
     pub(crate) fn stats(&self) -> WindowRuntimeStats {
-        let scheduler_metrics = self
-            .server
+        let runner_diagnostics = self.server_runner_diagnostics();
+        let scheduler_metrics = runner_diagnostics
             .as_ref()
-            .map(|server| server.scheduler().metrics());
-        let chunk_tracking = self
-            .server
+            .map(|diagnostics| diagnostics.scheduler_metrics);
+        let chunk_tracking = runner_diagnostics
             .as_ref()
-            .map(|server| server.chunk_tracking_diagnostics());
+            .map(|diagnostics| &diagnostics.chunk_tracking);
         WindowRuntimeStats {
+            server_runner_kind: runner_diagnostics
+                .as_ref()
+                .map(|diagnostics| diagnostics.kind),
+            server_command_queue_depth: runner_diagnostics
+                .as_ref()
+                .map_or(0, |diagnostics| diagnostics.command_queue_depth),
+            server_update_queue_depth: runner_diagnostics
+                .as_ref()
+                .map_or(0, |diagnostics| diagnostics.update_queue_depth),
             interest_center: self.interest_center,
             render_distance: self.render_distance,
             chunk_tracking_radius: self.chunk_tracking_radius,
@@ -898,6 +938,7 @@ impl WindowSceneRuntime {
     }
 }
 
+#[cfg(test)]
 fn poll_integrated_server_until_idle(server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut updates = Vec::new();
@@ -920,6 +961,38 @@ fn poll_integrated_server_until_idle(server: &mut IntegratedServer) -> Result<Ve
     }
 }
 
+fn drain_integrated_server_runner_until_idle(
+    runner: &mut NativeIntegratedServerRunner,
+) -> Result<Vec<ServerUpdate>> {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let mut updates = Vec::new();
+
+    loop {
+        updates.extend(
+            runner
+                .drain_updates()
+                .context("failed to drain integrated server runner updates")?,
+        );
+        let diagnostics = runner
+            .poll_diagnostics()
+            .context("failed to poll integrated server runner diagnostics")?;
+        if diagnostics.command_queue_depth == 0
+            && diagnostics.update_queue_depth == 0
+            && !diagnostics.awaiting_tick
+            && diagnostics.pending_jobs == 0
+            && diagnostics.pending_publications == 0
+        {
+            return Ok(updates);
+        }
+        if Instant::now() >= deadline {
+            bail!("timed out waiting for integrated server runner jobs");
+        }
+        if diagnostics.update_queue_depth == 0 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
 pub(crate) fn poll_window_runtime_until_idle(
     runtime: &mut WindowSceneRuntime,
 ) -> Result<(usize, f64)> {
@@ -931,13 +1004,16 @@ pub(crate) fn poll_window_runtime_until_idle(
         runtime.poll()?;
         poll_ms += elapsed_ms(poll_start.elapsed());
         polls += 1;
-        if runtime.pending_job_count() == 0 {
+        if runtime.local_server_idle() {
             return Ok((polls, poll_ms));
         }
         if Instant::now() >= deadline {
             bail!("timed out waiting for window runtime worldgen jobs");
         }
-        if runtime.pending_publication_count() == 0 {
+        if runtime
+            .server_runner_diagnostics()
+            .is_none_or(|diagnostics| diagnostics.update_queue_depth == 0)
+        {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
@@ -1186,6 +1262,29 @@ mod tests {
     }
 
     #[test]
+    fn window_runtime_local_integrated_defaults_to_native_thread_runner() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let scene = SceneOptions {
+            render_distance: 0,
+            ..SceneOptions::default()
+        };
+        let runtime = WindowSceneRuntime::new(&scene).unwrap();
+        let stats = runtime.stats();
+
+        assert_eq!(
+            stats.server_runner_kind,
+            Some(ServerRunnerKind::NativeThread)
+        );
+        assert_ne!(
+            stats.server_runner_kind,
+            Some(ServerRunnerKind::InlineFallback)
+        );
+    }
+
+    #[test]
     fn render_section_keys_cover_snapshot_height() {
         let snapshot = ChunkSnapshot::from_block_state_ids(
             ChunkPos::new(-1, 4),
@@ -1265,6 +1364,10 @@ mod tests {
         let initial_center = ChunkPos::new(0, 0);
         let initial_stats = runtime.stats();
         assert_eq!(initial_stats.interest_center, initial_center);
+        assert_eq!(
+            initial_stats.server_runner_kind,
+            Some(ServerRunnerKind::NativeThread)
+        );
         assert_eq!(initial_stats.loaded_chunks, 1);
         assert_eq!(initial_stats.pending_jobs, 0);
         assert!(runtime.client().chunk_snapshot(initial_center).is_some());
@@ -1299,7 +1402,6 @@ mod tests {
         assert_eq!(next_center, ChunkPos::new(1, 0));
         assert!(runtime.set_interest_center(next_center).unwrap());
         assert_eq!(runtime.stats().interest_center, next_center);
-        assert!(runtime.client().chunk_snapshot(initial_center).is_none());
 
         poll_window_runtime_until_idle(&mut runtime).unwrap();
 
@@ -1912,7 +2014,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(120);
         loop {
             runtime.poll()?;
-            if runtime.pending_job_count() == 0 {
+            if runtime.local_server_idle() {
                 return Ok(());
             }
             if Instant::now() >= deadline {

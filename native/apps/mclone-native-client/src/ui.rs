@@ -50,6 +50,11 @@ impl DebugPaneStats {
             .monitor_refresh_hz
             .map(|hz| format!("{hz:.1}HZ"))
             .unwrap_or_else(|| "UNKNOWN".to_owned());
+        let runner = self
+            .runtime
+            .server_runner_kind
+            .map(|kind| kind.label().to_ascii_uppercase())
+            .unwrap_or_else(|| "REMOTE".to_owned());
         let pacing_target = match self.pacing.mode {
             FramePacingMode::Capped => format!("{}FPS", self.pacing.fps_cap),
             FramePacingMode::Vsync | FramePacingMode::Uncapped => refresh,
@@ -72,6 +77,12 @@ impl DebugPaneStats {
             format!(
                 "VIEW R{} T{}",
                 self.runtime.render_distance, self.runtime.chunk_tracking_radius
+            ),
+            format!(
+                "RUN {} CQ{} UQ{}",
+                runner,
+                self.runtime.server_command_queue_depth,
+                self.runtime.server_update_queue_depth
             ),
             format!("OCC {}  {}", occlusion, lighting),
             format!(
@@ -733,6 +744,9 @@ mod tests {
             movement_mode: "WALK",
             on_ground: true,
             runtime: WindowRuntimeStats {
+                server_runner_kind: Some(mclone_server::ServerRunnerKind::NativeThread),
+                server_command_queue_depth: 1,
+                server_update_queue_depth: 2,
                 interest_center: ChunkPos::new(3, -4),
                 render_distance: 2,
                 chunk_tracking_radius: 3,
@@ -814,7 +828,8 @@ mod tests {
         assert_eq!(lines[2], "CHUNK 3 -4 SPEED 32.0");
         assert_eq!(lines[3], "MODE WALK GROUND Y");
         assert_eq!(lines[4], "VIEW R2 T3");
-        assert_eq!(lines[5], "OCC ON  LIGHT");
+        assert_eq!(lines[5], "RUN NATIVE-THREAD CQ1 UQ2");
+        assert_eq!(lines[6], "OCC ON  LIGHT");
         assert!(lines.iter().any(|line| line == "TRACK P1 V8 A8 Q0"));
         assert!(lines.iter().any(|line| line == "ACTOR R 1/2 I180"));
         assert!(lines.iter().any(|line| line == "BUDGET 8.3MS FRAME 16.7MS"));
