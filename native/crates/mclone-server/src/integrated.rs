@@ -14,6 +14,8 @@ use mclone_protocol::{
 };
 use mclone_worldgen::block::RawBlockId;
 
+#[cfg(target_arch = "wasm32")]
+use crate::WasmServerJobWorkerConfig;
 use crate::entities::{EntityTracking, RoutedEntityUpdate, ServerEntityState, ServerEntityStore};
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
@@ -64,11 +66,27 @@ impl IntegratedServer {
     }
 
     pub fn with_chunk_store(seed: i64, store: Box<dyn ChunkSnapshotStore>) -> Self {
+        Self::with_scheduler(seed, ChunkScheduler::with_store(seed, store))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn with_wasm_job_workers(seed: i64, config: WasmServerJobWorkerConfig) -> Self {
+        Self::with_scheduler(
+            seed,
+            ChunkScheduler::with_wasm_job_workers(
+                seed,
+                Box::<NullChunkSnapshotStore>::default(),
+                config,
+            ),
+        )
+    }
+
+    fn with_scheduler(seed: i64, scheduler: ChunkScheduler) -> Self {
         let mut chunk_tracking = PlayerChunkTracking::new(PlayerChunkTrackingPolicy::default());
         chunk_tracking.add_player(ServerPlayerId::LOCAL);
         Self {
             seed,
-            scheduler: ChunkScheduler::with_store(seed, store),
+            scheduler,
             liquid_ticks: FluidTickList::new(),
             simulation_tick: 0,
             day_time: INITIAL_DAY_TIME,

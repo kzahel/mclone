@@ -26,6 +26,8 @@ use mclone_worldgen::levelgen::{
     OverworldFeatureDependencyCacheReport, ScheduledTick,
 };
 
+#[cfg(target_arch = "wasm32")]
+use crate::WasmServerJobWorkerConfig;
 use crate::distance_manager::ChunkDistanceManager;
 use crate::fluid::{
     ALL_FLUID_DIRECTIONS, FluidDirection, HORIZONTAL_FLUID_DIRECTIONS,
@@ -48,8 +50,9 @@ use crate::timing::{
 use crate::worldgen_mailbox::{PendingWorldgenPublication, WorldgenMailbox};
 use crate::{
     CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState, ChunkResidency, ChunkStatusStep, ChunkTicketKey,
-    ChunkTicketType, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, MAX_CHUNK_DISTANCE,
-    UNLOADED_CHUNK_LEVEL, WorldBlockPos, WorldgenMailboxKind, full_chunk_status_for_ticket_level,
+    ChunkTicketType, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, LightStatusMailboxKind,
+    MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL, WorldBlockPos, WorldgenMailboxKind,
+    full_chunk_status_for_ticket_level,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -379,6 +382,38 @@ impl ChunkScheduler {
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn with_wasm_job_workers(
+        seed: i64,
+        store: Box<dyn ChunkSnapshotStore>,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        Self {
+            seed,
+            lighting_enabled: true,
+            holders: BTreeMap::new(),
+            pending_unloads: BTreeSet::new(),
+            distance_manager: ChunkDistanceManager::new(),
+            jobs: BTreeMap::new(),
+            job_timings: BTreeMap::new(),
+            worldgen_mailbox: WorldgenMailbox::with_wasm_job_worker(config.clone()),
+            pending_worldgen_publications: VecDeque::new(),
+            light_mailbox: LightStatusMailbox::with_wasm_job_worker(config),
+            pending_light_status_batches: BTreeMap::new(),
+            pending_light_publications: VecDeque::new(),
+            completed_light_statuses: 0,
+            completed_light_batches: 0,
+            total_light_status_compute_us: 0,
+            max_light_status_compute_us: 0,
+            light_status_timing: LevelLightComputationTiming::default(),
+            pending_block_deltas: BTreeMap::new(),
+            dirty_chunks: BTreeSet::new(),
+            next_job_id: 1,
+            next_revision: 1,
+            store,
+        }
+    }
+
     pub const fn seed(&self) -> i64 {
         self.seed
     }
@@ -673,6 +708,18 @@ impl ChunkScheduler {
 
     pub fn worldgen_mailbox_kind(&self) -> WorldgenMailboxKind {
         self.worldgen_mailbox.kind()
+    }
+
+    pub fn light_status_mailbox_kind(&self) -> LightStatusMailboxKind {
+        self.light_mailbox.kind()
+    }
+
+    pub fn worldgen_mailbox_pending_count(&self) -> usize {
+        self.worldgen_mailbox.pending_count()
+    }
+
+    pub fn light_status_mailbox_pending_count(&self) -> usize {
+        self.light_mailbox.pending_count()
     }
 
     pub fn metrics(&self) -> ChunkSchedulerMetrics {

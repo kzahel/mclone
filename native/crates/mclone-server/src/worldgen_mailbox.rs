@@ -19,6 +19,12 @@ use mclone_worldgen::levelgen::{
     OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport,
 };
 
+#[cfg(target_arch = "wasm32")]
+use crate::WasmServerJobWorkerConfig;
+#[cfg(target_arch = "wasm32")]
+use crate::job_codec::{decode_worldgen_response, encode_worldgen_request};
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_job_worker::WasmJobWorker;
 use crate::{ChunkJobId, WorldgenMailboxKind};
 
 #[derive(Debug)]
@@ -47,12 +53,22 @@ impl PendingWorldgenPublication {
 
 pub(crate) struct WorldgenMailbox {
     backend: WorldgenMailboxBackend,
+    pending_count: usize,
 }
 
 impl WorldgenMailbox {
     pub(crate) fn new() -> Self {
         Self {
-            backend: WorldgenMailboxBackend::new(),
+            backend: WorldgenMailboxBackend::new(None),
+            pending_count: 0,
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn with_wasm_job_worker(config: WasmServerJobWorkerConfig) -> Self {
+        Self {
+            backend: WorldgenMailboxBackend::new(Some(config)),
+            pending_count: 0,
         }
     }
 
@@ -63,12 +79,15 @@ impl WorldgenMailbox {
         targets: &[ChunkPos],
         dependencies: Vec<MutableChunkBlockBuffer>,
     ) {
+        self.pending_count = self.pending_count.saturating_add(1);
         self.backend
             .enqueue_features(job_id, seed, targets, dependencies);
     }
 
     pub(crate) fn drain_completed(&mut self) -> Vec<WorldgenCompletedJob> {
-        self.backend.drain_completed()
+        let completed = self.backend.drain_completed();
+        self.pending_count = self.pending_count.saturating_sub(completed.len());
+        completed
     }
 
     pub(crate) fn wait_for_completed(&mut self, timeout: Duration) -> bool {
@@ -77,6 +96,10 @@ impl WorldgenMailbox {
 
     pub(crate) fn kind(&self) -> WorldgenMailboxKind {
         self.backend.kind()
+    }
+
+    pub(crate) const fn pending_count(&self) -> usize {
+        self.pending_count
     }
 }
 
@@ -91,19 +114,29 @@ impl fmt::Debug for WorldgenMailbox {
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
 struct WorldgenMailboxBackend {
+    worker: Option<WasmJobWorker>,
     completed: VecDeque<WorldgenCompletedJob>,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl WorldgenMailboxBackend {
-    fn new() -> Self {
+    fn new(config: Option<WasmServerJobWorkerConfig>) -> Self {
+        let worker = config.map(|config| {
+            WasmJobWorker::new("mclone-worldgen", "worldgen", &config)
+                .expect("failed to spawn wasm worldgen worker")
+        });
         Self {
+            worker,
             completed: VecDeque::new(),
         }
     }
 
     fn kind(&self) -> WorldgenMailboxKind {
-        WorldgenMailboxKind::Inline
+        if self.worker.is_some() {
+            WorldgenMailboxKind::WebWorker
+        } else {
+            WorldgenMailboxKind::Inline
+        }
     }
 
     fn enqueue_features(
@@ -113,6 +146,15 @@ impl WorldgenMailboxBackend {
         targets: &[ChunkPos],
         dependencies: Vec<MutableChunkBlockBuffer>,
     ) {
+        if let Some(worker) = &mut self.worker {
+            let frame = encode_worldgen_request(job_id, seed, targets, dependencies)
+                .expect("failed to encode wasm worldgen worker request");
+            worker
+                .post_frame(frame)
+                .expect("wasm worldgen worker stopped before receiving job");
+            return;
+        }
+
         let mut dependency_cache = OverworldFeatureDependencyCache::new();
         let result = dependency_cache.generate_features_chunks_with_dependencies(
             seed,
@@ -129,11 +171,31 @@ impl WorldgenMailboxBackend {
     }
 
     fn drain_completed(&mut self) -> Vec<WorldgenCompletedJob> {
+        if let Some(worker) = &mut self.worker {
+            for frame in worker
+                .drain_frames()
+                .expect("wasm worldgen worker failed while draining jobs")
+            {
+                let decoded =
+                    decode_worldgen_response(&frame).expect("failed to decode wasm worldgen job");
+                self.completed.push_back(WorldgenCompletedJob {
+                    job_id: decoded.job_id,
+                    generated_chunks: decoded.generated_chunks,
+                    retained_dependencies: decoded.retained_dependencies,
+                    cache_report: decoded.cache_report,
+                    timing: decoded.timing,
+                });
+            }
+        }
         self.completed.drain(..).collect()
     }
 
     fn wait_for_completed(&mut self, _timeout: Duration) -> bool {
         !self.completed.is_empty()
+            || self
+                .worker
+                .as_ref()
+                .is_some_and(WasmJobWorker::has_completed_frame)
     }
 }
 
@@ -157,7 +219,7 @@ impl fmt::Debug for WorldgenMailboxBackend {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl WorldgenMailboxBackend {
-    fn new() -> Self {
+    fn new(_config: Option<()>) -> Self {
         let (sender, receiver) = mpsc::channel::<WorldgenRequest>();
         let (completion_sender, completion_receiver) = mpsc::channel::<WorldgenCompletedJob>();
         let worker = thread::Builder::new()

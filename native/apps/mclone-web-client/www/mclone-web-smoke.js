@@ -4,6 +4,7 @@ const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.
 const THREAD_WORKER_URL = new URL("./mclone-thread-smoke-worker.js", import.meta.url);
 const RENDER_COMPILER_WORKER_URL = new URL("./mclone-render-compiler-worker.js", import.meta.url);
 const SERVER_WORKER_URL = new URL("./mclone-integrated-server-worker.js", import.meta.url);
+const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.meta.url);
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 
@@ -319,6 +320,7 @@ async function renderCanvas() {
       canvas,
       assetPack,
       SERVER_WORKER_URL.href,
+      SERVER_JOB_WORKER_URL.href,
       BINDGEN_JS_URL.href,
       BINDGEN_WASM_URL.href,
     );
@@ -367,6 +369,10 @@ async function renderCanvas() {
           && secondRenderCompiler.requestId === secondCompileRequest.requestId
           && report.ok
           && report.workerCompileUsed
+          && report.worldgenMailboxKind === "web-worker"
+          && report.lightStatusMailboxKind === "web-worker"
+          && Number(report.worldgenMailboxPendingJobs) === 0
+          && Number(report.lightStatusMailboxPendingStatuses) === 0
           && report.rendered
           && report.configured
           && report.chunkLoaded

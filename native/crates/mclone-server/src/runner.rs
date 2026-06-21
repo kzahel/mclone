@@ -16,8 +16,8 @@ use mclone_protocol::{
 #[cfg(not(target_arch = "wasm32"))]
 use crate::IntegratedServer;
 use crate::{
-    ChunkSchedulerMetrics, ChunkStoreError, PlayerChunkTrackingDiagnostics,
-    ServerSimulationTickReport, ServerSimulationTickTiming,
+    ChunkSchedulerMetrics, ChunkStoreError, LightStatusMailboxKind, PlayerChunkTrackingDiagnostics,
+    ServerSimulationTickReport, ServerSimulationTickTiming, WorldgenMailboxKind,
 };
 
 pub type ServerRunnerResult<T> = Result<T, ServerRunnerError>;
@@ -91,6 +91,10 @@ pub struct ServerRunnerDiagnostics {
     pub update_queue_depth: usize,
     pub pending_jobs: usize,
     pub pending_publications: usize,
+    pub worldgen_mailbox_kind: WorldgenMailboxKind,
+    pub light_status_mailbox_kind: LightStatusMailboxKind,
+    pub worldgen_mailbox_pending_jobs: usize,
+    pub light_status_mailbox_pending_statuses: usize,
     pub scheduler_metrics: ChunkSchedulerMetrics,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
     pub last_tick: ServerRunnerTickDiagnostics,
@@ -109,6 +113,10 @@ impl ServerRunnerDiagnostics {
             update_queue_depth: 0,
             pending_jobs: 0,
             pending_publications: 0,
+            worldgen_mailbox_kind: WorldgenMailboxKind::Inline,
+            light_status_mailbox_kind: LightStatusMailboxKind::Inline,
+            worldgen_mailbox_pending_jobs: 0,
+            light_status_mailbox_pending_statuses: 0,
             scheduler_metrics: ChunkSchedulerMetrics::default(),
             chunk_tracking: PlayerChunkTrackingDiagnostics::default(),
             last_tick: ServerRunnerTickDiagnostics::default(),
@@ -641,6 +649,12 @@ mod native {
         diagnostics.update_queue_depth = update_queue_depth.load(Ordering::SeqCst);
         diagnostics.pending_jobs = server.pending_job_count();
         diagnostics.pending_publications = server.pending_publication_count();
+        diagnostics.worldgen_mailbox_kind = server.scheduler().worldgen_mailbox_kind();
+        diagnostics.light_status_mailbox_kind = server.scheduler().light_status_mailbox_kind();
+        diagnostics.worldgen_mailbox_pending_jobs =
+            server.scheduler().worldgen_mailbox_pending_count();
+        diagnostics.light_status_mailbox_pending_statuses =
+            server.scheduler().light_status_mailbox_pending_count();
         diagnostics.scheduler_metrics = server.scheduler().metrics();
         diagnostics.chunk_tracking = server.chunk_tracking_diagnostics();
         if let Some(awaiting_tick) = awaiting_tick {

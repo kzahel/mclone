@@ -11,6 +11,17 @@ mclone-light.workspace = true
 mclone-protocol.workspace = true
 mclone-worldgen.workspace = true
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = [
+  "ErrorEvent",
+  "MessageEvent",
+  "Worker",
+  "WorkerOptions",
+  "WorkerType",
+] }
+
 [dev-dependencies]
 serde_json.workspace = true
 

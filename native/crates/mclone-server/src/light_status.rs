@@ -27,6 +27,20 @@ pub(crate) struct PendingLightStatus {
 }
 
 impl PendingLightStatus {
+    pub(crate) fn from_parts(
+        pos: ChunkPos,
+        feature_snapshot: ChunkSnapshot,
+        raw_blocks: Vec<RawBlockId>,
+        neighbor_blocks: Vec<(ChunkPos, Vec<RawBlockId>)>,
+    ) -> Self {
+        Self {
+            pos,
+            feature_snapshot,
+            raw_blocks,
+            neighbor_blocks,
+        }
+    }
+
     pub(crate) fn from_feature_publication<'a>(
         pos: ChunkPos,
         feature_snapshot: ChunkSnapshot,

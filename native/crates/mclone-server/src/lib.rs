@@ -9,6 +9,7 @@ mod game_mode;
 mod holder;
 mod integrated;
 mod inventory;
+mod job_codec;
 mod level_light_bridge;
 mod light_mailbox;
 mod light_status;
@@ -27,6 +28,8 @@ mod sky_light_bridge;
 mod spawn;
 mod timing;
 mod types;
+#[cfg(target_arch = "wasm32")]
+mod wasm_job_worker;
 mod worldgen_mailbox;
 
 use mclone_core::{
@@ -38,6 +41,7 @@ use mclone_worldgen::levelgen::MutableChunkBlockBuffer;
 
 pub use holder::{ChunkHolder, ChunkStatusSlot};
 pub use integrated::{INITIAL_DAY_TIME, IntegratedServer};
+pub use job_codec::{compute_light_status_job_frame, compute_worldgen_job_frame};
 pub use persistence::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, NullChunkSnapshotStore,
 };
@@ -58,11 +62,13 @@ pub use timing::{
     ChunkSchedulerTickReport, ChunkSchedulerTickTiming, ServerSimulationTickReport,
     ServerSimulationTickTiming, ServerTickReport, ServerTickTiming,
 };
+#[cfg(target_arch = "wasm32")]
+pub use types::WasmServerJobWorkerConfig;
 pub use types::{
     CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState, ChunkResidency, ChunkStatusStep, ChunkTicket,
     ChunkTicketKey, ChunkTicketType, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus,
-    MAX_CHUNK_DISTANCE, PLAYER_TICKET_LEVEL, ServerMode, UNLOADED_CHUNK_LEVEL, WorldBlockPos,
-    WorldgenMailboxKind,
+    LightStatusMailboxKind, MAX_CHUNK_DISTANCE, PLAYER_TICKET_LEVEL, ServerMode,
+    UNLOADED_CHUNK_LEVEL, WorldBlockPos, WorldgenMailboxKind,
 };
 
 #[cfg(test)]
@@ -1332,15 +1338,27 @@ mod tests {
         let scheduler = ChunkScheduler::new(12_345);
 
         #[cfg(not(target_arch = "wasm32"))]
-        assert_eq!(
-            scheduler.worldgen_mailbox_kind(),
-            WorldgenMailboxKind::NativeThread
-        );
+        {
+            assert_eq!(
+                scheduler.worldgen_mailbox_kind(),
+                WorldgenMailboxKind::NativeThread
+            );
+            assert_eq!(
+                scheduler.light_status_mailbox_kind(),
+                LightStatusMailboxKind::NativeThread
+            );
+        }
         #[cfg(target_arch = "wasm32")]
-        assert_eq!(
-            scheduler.worldgen_mailbox_kind(),
-            WorldgenMailboxKind::Inline
-        );
+        {
+            assert_eq!(
+                scheduler.worldgen_mailbox_kind(),
+                WorldgenMailboxKind::Inline
+            );
+            assert_eq!(
+                scheduler.light_status_mailbox_kind(),
+                LightStatusMailboxKind::Inline
+            );
+        }
     }
 
     #[test]

@@ -181,6 +181,57 @@ impl Ord for ChunkTicket {
 pub enum WorldgenMailboxKind {
     Inline,
     NativeThread,
+    WebWorker,
+}
+
+impl WorldgenMailboxKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Inline => "inline",
+            Self::NativeThread => "native-thread",
+            Self::WebWorker => "web-worker",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LightStatusMailboxKind {
+    Inline,
+    NativeThread,
+    WebWorker,
+}
+
+impl LightStatusMailboxKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Inline => "inline",
+            Self::NativeThread => "native-thread",
+            Self::WebWorker => "web-worker",
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WasmServerJobWorkerConfig {
+    pub worker_url: String,
+    pub bindgen_js_url: String,
+    pub bindgen_wasm_url: String,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl WasmServerJobWorkerConfig {
+    pub fn new(
+        worker_url: impl Into<String>,
+        bindgen_js_url: impl Into<String>,
+        bindgen_wasm_url: impl Into<String>,
+    ) -> Self {
+        Self {
+            worker_url: worker_url.into(),
+            bindgen_js_url: bindgen_js_url.into(),
+            bindgen_wasm_url: bindgen_wasm_url.into(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]

@@ -2,6 +2,7 @@ const BINDGEN_JS_URL = new URL("./pkg/mclone_web_client.js", import.meta.url);
 const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.url);
 const RENDER_COMPILER_WORKER_URL = new URL("./mclone-render-compiler-worker.js", import.meta.url);
 const SERVER_WORKER_URL = new URL("./mclone-integrated-server-worker.js", import.meta.url);
+const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.meta.url);
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 
 const RADIUS_CHUNKS = 1;
@@ -56,6 +57,10 @@ const runtime = {
     runnerUpdateQueueDepth: 0,
     runnerPendingJobs: 0,
     runnerPendingPublications: 0,
+    worldgenMailboxKind: "unknown",
+    lightStatusMailboxKind: "unknown",
+    worldgenMailboxPendingJobs: 0,
+    lightStatusMailboxPendingStatuses: 0,
     status: "booting",
   },
 };
@@ -142,6 +147,7 @@ class WebChunkApp {
       this.canvas,
       assetPack,
       SERVER_WORKER_URL.href,
+      SERVER_JOB_WORKER_URL.href,
       BINDGEN_JS_URL.href,
       BINDGEN_WASM_URL.href,
     );
@@ -348,6 +354,10 @@ class WebChunkApp {
     runtime.state.runnerUpdateQueueDepth = report.runnerUpdateQueueDepth;
     runtime.state.runnerPendingJobs = report.runnerPendingJobs;
     runtime.state.runnerPendingPublications = report.runnerPendingPublications;
+    runtime.state.worldgenMailboxKind = report.worldgenMailboxKind;
+    runtime.state.lightStatusMailboxKind = report.lightStatusMailboxKind;
+    runtime.state.worldgenMailboxPendingJobs = report.worldgenMailboxPendingJobs;
+    runtime.state.lightStatusMailboxPendingStatuses = report.lightStatusMailboxPendingStatuses;
     runtime.state.renderCount = report.renderCount;
     runtime.state.status = "ready";
     runtime.state.lastReport = report;

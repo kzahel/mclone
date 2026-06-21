@@ -1,6 +1,7 @@
 # 062: Shared Threading Topology
 
-Status: in progress - native desktop and browser server runners landed
+Status: in progress - native desktop/browser server runners and browser server
+job workers landed
 
 ## Purpose
 
@@ -340,10 +341,6 @@ Landed in the browser worker slice:
 
 Replace WASM inline server mailboxes with Web Worker-backed job mailboxes.
 
-Next step: move the WASM worldgen feature and light-status mailboxes behind
-worker-backed `ServerJobMailbox` implementations so server-worker ticks do not
-run those heavy jobs inline inside the integrated server worker.
-
 Acceptance:
 
 - WASM worldgen feature jobs run behind a worker mailbox or worker pool.
@@ -355,6 +352,26 @@ Acceptance:
   client frame path.
 - Lighting remains authoritative server data; render mesh workers consume
   published light facts rather than recomputing lighting locally.
+
+Landed in the browser server-job worker slice:
+
+- `mclone-server` now has a binary job-frame boundary for worldgen feature jobs
+  and light-status batches. The frame tests cover request/response crossing for
+  generated chunks, retained dependency buffers, light inputs, completed light
+  sections, and timing/cache diagnostics.
+- WASM `WorldgenMailbox` and `LightStatusMailbox` keep the explicit inline
+  fallback but use browser `Worker` backends when the web integrated server
+  supplies a `WasmServerJobWorkerConfig`. Native desktop still uses the existing
+  `mclone-worldgen` and `mclone-light-status` OS threads.
+- `mclone-integrated-server-worker.js` now starts the Rust integrated server
+  with job-worker URLs, posts server job frames to `mclone-server-job-worker.js`,
+  and waits asynchronously for pending server jobs/publications to drain instead
+  of spinning inside the Rust server worker.
+- Web render reports and smokes now expose/assert `worldgenMailboxKind` and
+  `lightStatusMailboxKind` as `web-worker`, with settled worldgen/light pending
+  counts. Existing render-section compilation remains worker-backed.
+- The worker transport is still message/transfer based. Shared
+  `SharedArrayBuffer`/Atomics job queues remain a follow-up optimization.
 
 ### 5. Worker Queue Upgrade To Shared Memory
 
@@ -436,9 +453,16 @@ New validation should include:
    session routing, runner diagnostics in web reports, worker-kind and settled
    queue assertions, explicit browser worker shutdown smoke, and Playwright
    screenshot validation.
+3. Browser/WASM server job workers:
+   worker-backed worldgen and light-status mailboxes for the browser integrated
+   server, binary job-frame codecs, mailbox-kind diagnostics in web reports,
+   native/web tests and smokes, and screenshot validation.
 
 ## Next Implementation Slice
 
-Move WASM worldgen feature jobs and light-status jobs out of inline execution
-and behind worker-backed job mailboxes, preserving the same mailbox counters and
-diagnostics shape across native and web.
+Upgrade the browser server-runner and server-job worker transport from
+per-message transferred `Uint8Array` frames to shared-memory queues where it
+matters most. Start with measurement and queue counters around command/update
+frames and worldgen/light job frames, then move the hot path to
+`SharedArrayBuffer`/Atomics while keeping the current message transport as an
+explicit fallback.

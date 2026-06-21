@@ -9,8 +9,10 @@ use mclone_protocol::{
     encode_client_command, encode_server_update,
 };
 use mclone_server::{
-    INITIAL_DAY_TIME, IntegratedServer, IntegratedServerRunner, ServerRunnerDiagnostics,
-    ServerRunnerError, ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics,
+    INITIAL_DAY_TIME, IntegratedServer, IntegratedServerRunner, LightStatusMailboxKind,
+    ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind, ServerRunnerResult,
+    ServerRunnerTickDiagnostics, WasmServerJobWorkerConfig, WorldgenMailboxKind,
+    compute_light_status_job_frame, compute_worldgen_job_frame,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -18,13 +20,13 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
-const WEB_WORKER_POLL_LIMIT: usize = 60_000;
 const WEB_WORKER_TICK_INTERVAL_MS: u32 = 50;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WebIntegratedServerRunnerConfig {
     pub seed: i64,
     pub worker_url: String,
+    pub job_worker_url: String,
     pub bindgen_js_url: String,
     pub bindgen_wasm_url: String,
 }
@@ -33,12 +35,14 @@ impl WebIntegratedServerRunnerConfig {
     pub fn new(
         seed: i64,
         worker_url: impl Into<String>,
+        job_worker_url: impl Into<String>,
         bindgen_js_url: impl Into<String>,
         bindgen_wasm_url: impl Into<String>,
     ) -> Self {
         Self {
             seed,
             worker_url: worker_url.into(),
+            job_worker_url: job_worker_url.into(),
             bindgen_js_url: bindgen_js_url.into(),
             bindgen_wasm_url: bindgen_wasm_url.into(),
         }
@@ -203,6 +207,7 @@ impl WebIntegratedServerRunner {
         set_number(&message, "seed", config.seed as f64)?;
         set_string(&message, "bindgenJsUrl", &config.bindgen_js_url)?;
         set_string(&message, "bindgenWasmUrl", &config.bindgen_wasm_url)?;
+        set_string(&message, "jobWorkerUrl", &config.job_worker_url)?;
         set_number(
             &message,
             "tickIntervalMs",
@@ -334,6 +339,18 @@ impl IntegratedServerRunner for WebIntegratedServerRunner {
     }
 }
 
+#[wasm_bindgen]
+pub fn mclone_web_compute_worldgen_job_frame(frame: Uint8Array) -> Result<Uint8Array, JsValue> {
+    let response = compute_worldgen_job_frame(&frame.to_vec()).map_err(JsValue::from)?;
+    Ok(Uint8Array::from(response.as_slice()))
+}
+
+#[wasm_bindgen]
+pub fn mclone_web_compute_light_status_job_frame(frame: Uint8Array) -> Result<Uint8Array, JsValue> {
+    let response = compute_light_status_job_frame(&frame.to_vec()).map_err(JsValue::from)?;
+    Ok(Uint8Array::from(response.as_slice()))
+}
+
 #[derive(Clone)]
 struct PendingRequest {
     resolve: Function,
@@ -405,6 +422,20 @@ fn parse_diagnostics(
     diagnostics.pending_jobs = number_prop(value, "pendingJobs").unwrap_or(0.0) as usize;
     diagnostics.pending_publications =
         number_prop(value, "pendingPublications").unwrap_or(0.0) as usize;
+    diagnostics.worldgen_mailbox_kind = worldgen_mailbox_kind_prop(
+        value,
+        "worldgenMailboxKind",
+        diagnostics.worldgen_mailbox_kind,
+    );
+    diagnostics.light_status_mailbox_kind = light_status_mailbox_kind_prop(
+        value,
+        "lightStatusMailboxKind",
+        diagnostics.light_status_mailbox_kind,
+    );
+    diagnostics.worldgen_mailbox_pending_jobs =
+        number_prop(value, "worldgenMailboxPendingJobs").unwrap_or(0.0) as usize;
+    diagnostics.light_status_mailbox_pending_statuses =
+        number_prop(value, "lightStatusMailboxPendingStatuses").unwrap_or(0.0) as usize;
     diagnostics.last_tick.simulation_tick =
         number_prop(value, "lastSimulationTick").unwrap_or(0.0) as u64;
     diagnostics.last_tick.chunk_tick = number_prop(value, "lastChunkTick").unwrap_or(0.0) as u64;
@@ -445,17 +476,21 @@ impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: i64) -> Self {
         let server = IntegratedServer::new(seed);
-        let mut diagnostics =
-            ServerRunnerDiagnostics::initial(ServerRunnerKind::WebWorker, seed, server.day_time());
-        diagnostics.running = true;
-        let mut worker = Self {
-            server,
-            diagnostics,
-            command_queue_depth: 0,
-            running: true,
-        };
-        worker.refresh_diagnostics(None, false, None);
-        worker
+        Self::from_server(seed, server)
+    }
+
+    #[wasm_bindgen(js_name = withJobWorkers)]
+    pub fn with_job_workers(
+        seed: i64,
+        job_worker_url: String,
+        bindgen_js_url: String,
+        bindgen_wasm_url: String,
+    ) -> Self {
+        let server = IntegratedServer::with_wasm_job_workers(
+            seed,
+            WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
+        );
+        Self::from_server(seed, server)
     }
 
     #[wasm_bindgen(js_name = handleCommandFrame)]
@@ -465,19 +500,11 @@ impl McloneWebIntegratedServerWorker {
         let result = decode_client_command(&frame.to_vec())
             .map_err(|error| error.to_string())
             .and_then(|command| {
-                let wait_for_idle = matches!(command, ClientCommand::SetChunkView(_));
                 let mut updates = self
                     .server
                     .try_handle_command(command)
                     .map_err(|error| error.to_string())?;
-                if wait_for_idle {
-                    updates.extend(
-                        self.poll_until_idle()
-                            .map_err(|error| format!("failed to poll server worker: {error}"))?,
-                    );
-                } else {
-                    updates.extend(self.server.try_poll().map_err(|error| error.to_string())?);
-                }
+                updates.extend(self.server.try_poll().map_err(|error| error.to_string())?);
                 Ok(updates)
             });
         self.command_queue_depth = self.command_queue_depth.saturating_sub(1);
@@ -487,6 +514,21 @@ impl McloneWebIntegratedServerWorker {
                 worker_response(updates, &self.diagnostics).map_err(JsValue::from)
             }
             Err(error) => {
+                self.refresh_diagnostics(None, false, Some(error.clone()));
+                Err(JsValue::from_str(&error))
+            }
+        }
+    }
+
+    #[wasm_bindgen(js_name = poll)]
+    pub fn poll(&mut self) -> Result<JsValue, JsValue> {
+        match self.server.try_poll() {
+            Ok(updates) => {
+                self.refresh_diagnostics(None, false, None);
+                worker_response(updates, &self.diagnostics).map_err(JsValue::from)
+            }
+            Err(error) => {
+                let error = error.to_string();
                 self.refresh_diagnostics(None, false, Some(error.clone()));
                 Err(JsValue::from_str(&error))
             }
@@ -532,19 +574,18 @@ impl McloneWebIntegratedServerWorker {
 }
 
 impl McloneWebIntegratedServerWorker {
-    fn poll_until_idle(&mut self) -> Result<Vec<ServerUpdate>, String> {
-        let mut updates = Vec::new();
-        for _ in 0..WEB_WORKER_POLL_LIMIT {
-            updates.extend(self.server.try_poll().map_err(|error| error.to_string())?);
-            if self.server.pending_job_count() == 0 {
-                self.refresh_diagnostics(None, false, None);
-                return Ok(updates);
-            }
-            if self.server.pending_publication_count() == 0 {
-                std::hint::spin_loop();
-            }
-        }
-        Err("timed out waiting for web integrated server jobs".to_owned())
+    fn from_server(seed: i64, server: IntegratedServer) -> Self {
+        let mut diagnostics =
+            ServerRunnerDiagnostics::initial(ServerRunnerKind::WebWorker, seed, server.day_time());
+        diagnostics.running = true;
+        let mut worker = Self {
+            server,
+            diagnostics,
+            command_queue_depth: 0,
+            running: true,
+        };
+        worker.refresh_diagnostics(None, false, None);
+        worker
     }
 
     fn refresh_diagnostics(
@@ -559,6 +600,13 @@ impl McloneWebIntegratedServerWorker {
         self.diagnostics.update_queue_depth = 0;
         self.diagnostics.pending_jobs = self.server.pending_job_count();
         self.diagnostics.pending_publications = self.server.pending_publication_count();
+        self.diagnostics.worldgen_mailbox_kind = self.server.scheduler().worldgen_mailbox_kind();
+        self.diagnostics.light_status_mailbox_kind =
+            self.server.scheduler().light_status_mailbox_kind();
+        self.diagnostics.worldgen_mailbox_pending_jobs =
+            self.server.scheduler().worldgen_mailbox_pending_count();
+        self.diagnostics.light_status_mailbox_pending_statuses =
+            self.server.scheduler().light_status_mailbox_pending_count();
         self.diagnostics.scheduler_metrics = self.server.scheduler().metrics();
         self.diagnostics.chunk_tracking = self.server.chunk_tracking_diagnostics();
         self.diagnostics.awaiting_tick = awaiting_tick;
@@ -617,6 +665,26 @@ fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, S
         "pendingPublications",
         diagnostics.pending_publications as f64,
     )?;
+    set_string(
+        &object,
+        "worldgenMailboxKind",
+        diagnostics.worldgen_mailbox_kind.label(),
+    )?;
+    set_string(
+        &object,
+        "lightStatusMailboxKind",
+        diagnostics.light_status_mailbox_kind.label(),
+    )?;
+    set_number(
+        &object,
+        "worldgenMailboxPendingJobs",
+        diagnostics.worldgen_mailbox_pending_jobs as f64,
+    )?;
+    set_number(
+        &object,
+        "lightStatusMailboxPendingStatuses",
+        diagnostics.light_status_mailbox_pending_statuses as f64,
+    )?;
     set_number(
         &object,
         "lastSimulationTick",
@@ -656,6 +724,32 @@ fn number_prop(value: &JsValue, name: &str) -> Option<f64> {
 
 fn string_prop(value: &JsValue, name: &str) -> Option<String> {
     reflect_get(value, name).and_then(|value| value.as_string())
+}
+
+fn worldgen_mailbox_kind_prop(
+    value: &JsValue,
+    name: &str,
+    fallback: WorldgenMailboxKind,
+) -> WorldgenMailboxKind {
+    match string_prop(value, name).as_deref() {
+        Some("inline") => WorldgenMailboxKind::Inline,
+        Some("native-thread") => WorldgenMailboxKind::NativeThread,
+        Some("web-worker") => WorldgenMailboxKind::WebWorker,
+        _ => fallback,
+    }
+}
+
+fn light_status_mailbox_kind_prop(
+    value: &JsValue,
+    name: &str,
+    fallback: LightStatusMailboxKind,
+) -> LightStatusMailboxKind {
+    match string_prop(value, name).as_deref() {
+        Some("inline") => LightStatusMailboxKind::Inline,
+        Some("native-thread") => LightStatusMailboxKind::NativeThread,
+        Some("web-worker") => LightStatusMailboxKind::WebWorker,
+        _ => fallback,
+    }
 }
 
 fn set_bool(object: &Object, name: &str, value: bool) -> Result<(), String> {

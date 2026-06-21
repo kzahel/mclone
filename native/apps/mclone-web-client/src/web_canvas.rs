@@ -107,6 +107,7 @@ pub async fn mclone_web_create_worker_chunk_render_session(
     canvas: HtmlCanvasElement,
     asset_pack_bytes: js_sys::Uint8Array,
     server_worker_url: String,
+    server_job_worker_url: String,
     bindgen_js_url: String,
     bindgen_wasm_url: String,
 ) -> Result<WebChunkRenderSession, JsValue> {
@@ -116,6 +117,7 @@ pub async fn mclone_web_create_worker_chunk_render_session(
         WebIntegratedServerRunnerConfig::new(
             SMOKE_SEED,
             server_worker_url,
+            server_job_worker_url,
             bindgen_js_url,
             bindgen_wasm_url,
         ),
@@ -286,6 +288,10 @@ struct GeneratedChunkRenderReport {
     runner_update_queue_depth: usize,
     runner_pending_jobs: usize,
     runner_pending_publications: usize,
+    worldgen_mailbox_kind: mclone_server::WorldgenMailboxKind,
+    light_status_mailbox_kind: mclone_server::LightStatusMailboxKind,
+    worldgen_mailbox_pending_jobs: usize,
+    light_status_mailbox_pending_statuses: usize,
     runner_last_simulation_tick: u64,
 }
 
@@ -493,6 +499,26 @@ impl GeneratedChunkRenderReport {
             &object,
             "runnerPendingPublications",
             self.runner_pending_publications as f64,
+        )?;
+        set_string(
+            &object,
+            "worldgenMailboxKind",
+            self.worldgen_mailbox_kind.label(),
+        )?;
+        set_string(
+            &object,
+            "lightStatusMailboxKind",
+            self.light_status_mailbox_kind.label(),
+        )?;
+        set_number(
+            &object,
+            "worldgenMailboxPendingJobs",
+            self.worldgen_mailbox_pending_jobs as f64,
+        )?;
+        set_number(
+            &object,
+            "lightStatusMailboxPendingStatuses",
+            self.light_status_mailbox_pending_statuses as f64,
         )?;
         set_number(
             &object,
@@ -1649,6 +1675,11 @@ impl WebChunkRenderSession {
             runner_update_queue_depth: runner_diagnostics.update_queue_depth,
             runner_pending_jobs: runner_diagnostics.pending_jobs,
             runner_pending_publications: runner_diagnostics.pending_publications,
+            worldgen_mailbox_kind: runner_diagnostics.worldgen_mailbox_kind,
+            light_status_mailbox_kind: runner_diagnostics.light_status_mailbox_kind,
+            worldgen_mailbox_pending_jobs: runner_diagnostics.worldgen_mailbox_pending_jobs,
+            light_status_mailbox_pending_statuses: runner_diagnostics
+                .light_status_mailbox_pending_statuses,
             runner_last_simulation_tick: runner_diagnostics.last_tick.simulation_tick,
         })
     }

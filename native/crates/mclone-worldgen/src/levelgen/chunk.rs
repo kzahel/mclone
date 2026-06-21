@@ -102,6 +102,35 @@ impl MutableChunkBlockBuffer {
         }
     }
 
+    pub fn from_raw_parts_with_metadata(
+        chunk_x: i32,
+        chunk_z: i32,
+        min_y: i32,
+        height: i32,
+        blocks: Vec<RawBlockId>,
+        glow_lichen_faces: BTreeMap<usize, u8>,
+        block_ticks: Vec<ScheduledTick>,
+        liquid_ticks: Vec<ScheduledTick>,
+        prime_worldgen_heightmaps: bool,
+    ) -> Self {
+        validate_generated_chunk_shape(height, blocks.len());
+        let mut chunk = Self {
+            chunk_x,
+            chunk_z,
+            min_y,
+            height,
+            blocks,
+            worldgen_heightmaps: None,
+            glow_lichen_faces,
+            block_ticks,
+            liquid_ticks,
+        };
+        if prime_worldgen_heightmaps {
+            chunk.prime_worldgen_heightmaps();
+        }
+        chunk
+    }
+
     pub fn get_block(&self, local_x: i32, local_y: i32, local_z: i32) -> u8 {
         self.blocks[chunk_block_index(local_x, local_y, local_z)]
     }
@@ -197,6 +226,16 @@ impl MutableChunkBlockBuffer {
     pub fn liquid_ticks(&self) -> &[ScheduledTick] {
         &self.liquid_ticks
     }
+
+    pub fn glow_lichen_faces(&self) -> impl Iterator<Item = (usize, u8)> + '_ {
+        self.glow_lichen_faces
+            .iter()
+            .map(|(index, faces)| (*index, *faces))
+    }
+
+    pub fn has_primed_worldgen_heightmaps(&self) -> bool {
+        self.worldgen_heightmaps.is_some()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -231,7 +270,7 @@ impl GeneratedChunk {
         )
     }
 
-    fn from_raw_parts_with_ticks(
+    pub fn from_raw_parts_with_ticks(
         chunk_x: i32,
         chunk_z: i32,
         min_y: i32,

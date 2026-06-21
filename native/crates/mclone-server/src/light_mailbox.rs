@@ -14,10 +14,17 @@ use std::{sync::mpsc, thread};
 
 use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
 
+use crate::LightStatusMailboxKind;
+#[cfg(target_arch = "wasm32")]
+use crate::WasmServerJobWorkerConfig;
+#[cfg(target_arch = "wasm32")]
+use crate::job_codec::{decode_light_status_response, encode_light_status_request};
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_status::PendingLightStatusBatch;
 use crate::light_world::RetainedInitialLightState;
 use crate::timing::{timing_elapsed_us, timing_start};
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_job_worker::WasmJobWorker;
 
 #[derive(Debug)]
 pub(crate) struct CompletedLightStatus {
@@ -30,7 +37,7 @@ pub(crate) struct CompletedLightStatus {
 }
 
 impl CompletedLightStatus {
-    fn from_batch(
+    pub(crate) fn from_batch(
         light_state: &mut RetainedInitialLightState,
         batch: PendingLightStatusBatch,
     ) -> Vec<Self> {
@@ -63,7 +70,15 @@ pub(crate) struct LightStatusMailbox {
 impl LightStatusMailbox {
     pub(crate) fn new() -> Self {
         Self {
-            backend: LightStatusMailboxBackend::new(),
+            backend: LightStatusMailboxBackend::new(None),
+            pending_count: 0,
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn with_wasm_job_worker(config: WasmServerJobWorkerConfig) -> Self {
+        Self {
+            backend: LightStatusMailboxBackend::new(Some(config)),
             pending_count: 0,
         }
     }
@@ -89,6 +104,10 @@ impl LightStatusMailbox {
     pub(crate) fn wait_for_completed(&mut self, timeout: Duration) -> bool {
         self.backend.wait_for_completed(timeout)
     }
+
+    pub(crate) fn kind(&self) -> LightStatusMailboxKind {
+        self.backend.kind()
+    }
 }
 
 impl fmt::Debug for LightStatusMailbox {
@@ -103,20 +122,43 @@ impl fmt::Debug for LightStatusMailbox {
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug)]
 struct LightStatusMailboxBackend {
+    worker: Option<WasmJobWorker>,
     light_state: RetainedInitialLightState,
     completed: VecDeque<CompletedLightStatus>,
 }
 
 #[cfg(target_arch = "wasm32")]
 impl LightStatusMailboxBackend {
-    fn new() -> Self {
+    fn new(config: Option<WasmServerJobWorkerConfig>) -> Self {
+        let worker = config.map(|config| {
+            WasmJobWorker::new("mclone-light-status", "light-status", &config)
+                .expect("failed to spawn wasm light-status worker")
+        });
         Self {
+            worker,
             light_state: RetainedInitialLightState::new(),
             completed: VecDeque::new(),
         }
     }
 
+    fn kind(&self) -> LightStatusMailboxKind {
+        if self.worker.is_some() {
+            LightStatusMailboxKind::WebWorker
+        } else {
+            LightStatusMailboxKind::Inline
+        }
+    }
+
     fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {
+        if let Some(worker) = &mut self.worker {
+            let frame = encode_light_status_request(batch)
+                .expect("failed to encode wasm light-status worker request");
+            worker
+                .post_frame(frame)
+                .expect("wasm light-status worker stopped before receiving job");
+            return;
+        }
+
         self.completed.extend(CompletedLightStatus::from_batch(
             &mut self.light_state,
             batch,
@@ -124,11 +166,26 @@ impl LightStatusMailboxBackend {
     }
 
     fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
+        if let Some(worker) = &mut self.worker {
+            for frame in worker
+                .drain_frames()
+                .expect("wasm light-status worker failed while draining jobs")
+            {
+                self.completed.extend(
+                    decode_light_status_response(&frame)
+                        .expect("failed to decode wasm light-status job"),
+                );
+            }
+        }
         self.completed.drain(..).collect()
     }
 
     fn wait_for_completed(&mut self, _timeout: Duration) -> bool {
         !self.completed.is_empty()
+            || self
+                .worker
+                .as_ref()
+                .is_some_and(WasmJobWorker::has_completed_frame)
     }
 }
 
@@ -152,7 +209,7 @@ impl fmt::Debug for LightStatusMailboxBackend {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl LightStatusMailboxBackend {
-    fn new() -> Self {
+    fn new(_config: Option<()>) -> Self {
         let (sender, receiver) = mpsc::channel::<LightStatusRequest>();
         let (completion_sender, completion_receiver) = mpsc::channel::<CompletedLightStatus>();
         let worker = thread::Builder::new()
@@ -182,6 +239,10 @@ impl LightStatusMailboxBackend {
             completed: VecDeque::new(),
             worker: Some(worker),
         }
+    }
+
+    fn kind(&self) -> LightStatusMailboxKind {
+        LightStatusMailboxKind::NativeThread
     }
 
     fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {

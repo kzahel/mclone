@@ -10,7 +10,7 @@ self.onmessage = async (event) => {
         await startServer(message);
         break;
       case "command":
-        handleCommand(message);
+        await handleCommand(message);
         break;
       case "shutdown":
         shutdown(message);
@@ -34,7 +34,14 @@ async function startServer(message) {
   }
 
   const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
-  server = new module.McloneWebIntegratedServerWorker(toBigIntSeed(message.seed));
+  server = message.jobWorkerUrl && typeof module.McloneWebIntegratedServerWorker.withJobWorkers === "function"
+    ? module.McloneWebIntegratedServerWorker.withJobWorkers(
+      toBigIntSeed(message.seed),
+      String(message.jobWorkerUrl),
+      String(message.bindgenJsUrl),
+      String(message.bindgenWasmUrl),
+    )
+    : new module.McloneWebIntegratedServerWorker(toBigIntSeed(message.seed));
   const intervalMs = Math.max(1, Number(message.tickIntervalMs) || 50);
   tickTimer = setInterval(tickServer, intervalMs);
   const diagnostics = server.diagnostics();
@@ -47,19 +54,33 @@ async function startServer(message) {
   });
 }
 
-function handleCommand(message) {
+async function handleCommand(message) {
   if (!server) {
     postFailure(message.requestId, "integrated server worker is not started");
     return;
   }
   const frame = message.frame instanceof Uint8Array ? message.frame : new Uint8Array();
   const result = server.handleCommandFrame(frame);
+  const updates = Array.isArray(result.updates) ? [...result.updates] : [];
+  let diagnostics = result.diagnostics;
+  for (let attempt = 0; hasPendingServerJobs(diagnostics) && attempt < 60000; attempt += 1) {
+    await waitForJobTurn();
+    const poll = server.poll();
+    if (Array.isArray(poll.updates)) {
+      updates.push(...poll.updates);
+    }
+    diagnostics = poll.diagnostics;
+  }
+  if (hasPendingServerJobs(diagnostics)) {
+    postFailure(message.requestId, "timed out waiting for web integrated server jobs");
+    return;
+  }
   postUpdates({
     ok: true,
     kind: "command-result",
     requestId: Number(message.requestId) || 0,
-    updates: result.updates,
-    diagnostics: result.diagnostics,
+    updates,
+    diagnostics,
   });
 }
 
@@ -130,6 +151,20 @@ function loadWasmModule(bindgenJsUrl, bindgenWasmUrl) {
     return module;
   });
   return wasmModulePromise;
+}
+
+function hasPendingServerJobs(diagnostics) {
+  if (!diagnostics) return false;
+  return (
+    Number(diagnostics.pendingJobs) > 0
+    || Number(diagnostics.pendingPublications) > 0
+    || Number(diagnostics.worldgenMailboxPendingJobs) > 0
+    || Number(diagnostics.lightStatusMailboxPendingStatuses) > 0
+  );
+}
+
+function waitForJobTurn() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function toBigIntSeed(seed) {

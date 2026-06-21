@@ -1128,11 +1128,14 @@ dependencies = [
 name = "mclone-server"
 version = "0.0.0"
 dependencies = [
+ "js-sys",
  "mclone-core",
  "mclone-light",
  "mclone-protocol",
  "mclone-worldgen",
  "serde_json",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
