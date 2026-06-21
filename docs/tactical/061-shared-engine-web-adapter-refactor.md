@@ -4,7 +4,8 @@ Status: active; shared update dirtying, browser app loop, first-person web
 camera/input, resize, browser no-clip pose sync, and browser sky/actor drawing
 landed; browser walking/collision mode, block interaction, and hotbar selection
 landed; browser target preview landed; desktop no-clip/mouse-look helpers
-converged; shared camera frame-state/reporting helpers landed.
+converged; shared camera frame-state/reporting helpers landed; desktop
+player-pose commit sequence isolated.
 
 ## Purpose
 
@@ -736,6 +737,26 @@ Camera state/reporting convergence result:
   break/place, worker compile availability, sky/actors, and zero pending compile
   jobs.
 
+Desktop player-pose commit result:
+
+- The native desktop app now has a single `commit_player_pose_change` helper for
+  the post-move side effects that were duplicated in walking and no-clip:
+  spectator mirror update, server player-pose sync, pending correction handling,
+  and chunk-interest movement.
+- Desktop walking and no-clip paths both call that helper after movement changes
+  the local player pose. Initial surface placement also uses it for the same
+  pose/sync path.
+- The helper is intentionally still native-app-owned because it coordinates
+  `WindowSceneRuntime` side effects. This keeps the shared controller boundary
+  clean while making the remaining desktop ownership work explicit.
+- A native app regression test moves the local player across a chunk boundary
+  and asserts the spectator mirror, shared camera frame-state chunk, and runtime
+  interest center move together.
+- Validation covered native unit tests, movement smoke, timedemo smoke, a native
+  rendered screenshot, WASM target check, and the browser app smoke. Browser
+  smoke still proved walk/no-clip state reporting, selected-slot break/place,
+  worker compile availability, sky/actors, and zero pending compile jobs.
+
 ### 5. Add Web Worker/Thread Policy
 
 Browser workers are part of the target architecture, not optional polish. The
@@ -832,19 +853,19 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should make the desktop player-move commit sequence explicit so
-desktop can move closer to an `EngineCameraController` facade without changing
-walking behavior:
+The next slice should try the desktop `EngineCameraController` facade now that
+the native side-effect commit path is isolated:
 
-1. Extract the desktop "player pose changed" sequence into one helper that
-   updates the spectator mirror, syncs server player pose, and moves chunk
-   interest.
-2. Use that helper from both desktop walking and no-clip paths, then compare it
-   against the web controller's post-movement sync path for the next shared
-   boundary.
-3. Re-evaluate moving desktop local-player ownership into
-   `EngineCameraController` after the sync/correction/interest side effects are
-   explicit and test-covered.
+1. Replace the desktop app's separate `LocalPlayerController` and movement-mode
+   fields with an `EngineCameraController` owner, while keeping
+   `commit_player_pose_change` as the native app boundary for server sync,
+   corrections, spectator mirroring, and chunk interest.
+2. Preserve desktop walking behavior by continuing to use the same
+   `WalkingMovementStep`/collision path and the same post-move commit helper;
+   do not change correction acknowledgment ordering.
+3. Route desktop mouse look, key state, speed adjustment, frame-state reporting,
+   and no-clip movement through the controller instance instead of static helper
+   calls where ownership is clear.
 4. Keep `native:web:app-smoke` proving walk + no-clip movement, target preview,
    selected-slot break/place, section dirty/update publication, worker compiles,
    sky/actors, resize, screenshots, and zero pending compile jobs.

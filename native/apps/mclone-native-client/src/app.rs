@@ -360,9 +360,7 @@ impl ChunkApp {
                     )
                     .is_some()
                 {
-                    sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
-                    self.sync_server_player_pose()?;
-                    self.update_interest_from_spectator()?;
+                    self.commit_player_pose_change()?;
                 }
             }
             EngineCameraMovementMode::NoClip => {
@@ -373,9 +371,7 @@ impl ChunkApp {
                 )
                 .is_some()
                 {
-                    sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
-                    self.sync_server_player_pose()?;
-                    self.update_interest_from_spectator()?;
+                    self.commit_player_pose_change()?;
                 }
             }
         }
@@ -523,9 +519,8 @@ impl ChunkApp {
                 Vec3d::new(0.0, -GROUND_PROBE_DISTANCE, 0.0),
             );
         }
-        sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
-        if let Err(err) = self.sync_server_player_pose() {
-            log::warn!("failed to sync initial player pose to server: {err:#}");
+        if let Err(err) = self.commit_player_pose_change() {
+            log::warn!("failed to commit initial player pose: {err:#}");
         }
         log::info!(
             "placed player above loaded surface column ({world_x}, {world_z}) y={} -> feet_y={:.1} eye_y={:.1}",
@@ -698,6 +693,13 @@ impl ChunkApp {
             f64::from(self.spectator.speed),
             self.interaction.selected_hotbar_slot(),
         )
+    }
+
+    fn commit_player_pose_change(&mut self) -> Result<bool> {
+        sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+        let server_changed = self.sync_server_player_pose()?;
+        let interest_changed = self.update_interest_from_spectator()?;
+        Ok(server_changed || interest_changed)
     }
 
     fn interpolated_actor_instances(&mut self) -> Vec<ActorInstance> {
@@ -1519,6 +1521,48 @@ mod tests {
         assert_eq!(
             entity_actors[0].packed_light,
             mclone_render::light_texture::FULL_BRIGHT
+        );
+    }
+
+    #[test]
+    fn commit_player_pose_change_syncs_spectator_and_interest_center() {
+        let scene = SceneOptions {
+            render_distance: 1,
+            ..SceneOptions::default()
+        };
+        let runtime = WindowSceneRuntime::new(&scene).unwrap();
+        let spectator = SpectatorCamera::spawn_for_scene(&scene);
+        let mut app = ChunkApp::new(
+            runtime,
+            spectator,
+            TexturedSectionRenderOptions::default(),
+            scene.render_distance,
+        );
+        let target_eye = Vec3d::new(16.25, 96.0, 8.0);
+        app.player.set_pose(LocalPlayerPose::from_eye_position(
+            target_eye,
+            0.0,
+            0.0,
+            LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        ));
+
+        assert!(app.commit_player_pose_change().unwrap());
+
+        assert_eq!(
+            app.spectator.position,
+            glam::Vec3::new(
+                target_eye.x as f32,
+                target_eye.y as f32,
+                target_eye.z as f32
+            )
+        );
+        assert_eq!(
+            app.camera_frame_state().camera.chunk_pos,
+            mclone_core::ChunkPos::new(1, 0)
+        );
+        assert_eq!(
+            app.runtime.stats().interest_center,
+            mclone_core::ChunkPos::new(1, 0)
         );
     }
 
