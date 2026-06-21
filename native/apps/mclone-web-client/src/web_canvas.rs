@@ -28,8 +28,8 @@ use mclone_render::entity::{ActorDrawResources, ActorInstance};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
-    EngineCameraController, EngineCameraInput, EngineCameraSnapshot, EngineRenderCamera,
-    PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
+    EngineCameraController, EngineCameraInput, EngineCameraMovementMode, EngineCameraSnapshot,
+    EngineRenderCamera, PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
     RenderSectionCompileAcceptanceReport, RenderSectionCompileRequestInfo,
     RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionNeighborReadiness,
     RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync,
@@ -42,6 +42,7 @@ const CANVAS_RENDERED_BIT: u32 = 1 << 1;
 const CANVAS_CONFIGURED_BIT: u32 = 1 << 2;
 const CANVAS_WIDTH_SHIFT: u32 = 8;
 const CANVAS_HEIGHT_SHIFT: u32 = 20;
+const WEB_GROUND_PROBE_DISTANCE: f64 = 0.01;
 
 #[wasm_bindgen]
 pub fn mclone_web_canvas_clear_bits(width: u32, height: u32) -> u32 {
@@ -204,6 +205,10 @@ struct GeneratedChunkRenderReport {
     camera: EngineCameraSnapshot,
     width: u32,
     height: u32,
+    movement_mode: EngineCameraMovementMode,
+    on_ground: bool,
+    horizontal_collision: bool,
+    vertical_collision: bool,
     day_time: u64,
     time_of_day: f32,
     sun_angle: f32,
@@ -277,6 +282,10 @@ impl GeneratedChunkRenderReport {
         set_bool(&object, "workerCompileUsed", self.worker_compile_used)?;
         set_bool(&object, "skyRendered", self.sky_rendered)?;
         set_bool(&object, "actorRendered", self.drawn_actor_count > 0)?;
+        set_bool(&object, "onGround", self.on_ground)?;
+        set_bool(&object, "horizontalCollision", self.horizontal_collision)?;
+        set_bool(&object, "verticalCollision", self.vertical_collision)?;
+        set_string(&object, "movementMode", self.movement_mode.label())?;
         set_number(
             &object,
             "compileRequestId",
@@ -605,7 +614,7 @@ impl WebChunkRenderSession {
 
     #[wasm_bindgen(js_name = cameraFrameState)]
     pub fn camera_frame_state(&self) -> Result<JsValue, JsValue> {
-        camera_snapshot_to_js_value(self.camera.snapshot()).map_err(JsValue::from)
+        camera_state_to_js_value(&self.camera).map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = advanceCameraFrame)]
@@ -621,9 +630,10 @@ impl WebChunkRenderSession {
         right: bool,
         jump: bool,
         descend: bool,
+        shift: bool,
         sprint: bool,
     ) -> Result<JsValue, JsValue> {
-        self.camera.apply_input(EngineCameraInput {
+        let input = EngineCameraInput {
             dt_seconds,
             mouse_delta_x,
             mouse_delta_y,
@@ -633,16 +643,25 @@ impl WebChunkRenderSession {
             right,
             jump,
             descend,
+            shift,
             sprint,
-        });
+        };
+        self.camera
+            .apply_movement_input(self.runtime.client(), input);
         self.sync_camera_pose_to_server().map_err(JsValue::from)?;
-        camera_snapshot_to_js_value(self.camera.snapshot()).map_err(JsValue::from)
+        camera_state_to_js_value(&self.camera).map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = adjustCameraSpeed)]
     pub fn adjust_camera_speed(&mut self, wheel_amount: f64) -> Result<JsValue, JsValue> {
         self.camera.adjust_speed(wheel_amount);
-        camera_snapshot_to_js_value(self.camera.snapshot()).map_err(JsValue::from)
+        camera_state_to_js_value(&self.camera).map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = toggleMovementMode)]
+    pub fn toggle_movement_mode(&mut self) -> Result<JsValue, JsValue> {
+        self.camera.toggle_movement_mode();
+        camera_state_to_js_value(&self.camera).map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = resizeCanvas)]
@@ -904,6 +923,8 @@ impl WebChunkRenderSession {
             .collect::<Vec<_>>();
         for update in updates {
             let ack = self.camera.apply_player_position_update(update);
+            self.camera
+                .probe_ground(self.runtime.client(), WEB_GROUND_PROBE_DISTANCE);
             self.runtime
                 .send_gameplay_command(ack)
                 .map_err(|error| format!("failed to accept browser camera correction: {error}"))?;
@@ -1202,6 +1223,10 @@ impl WebChunkRenderSession {
             camera: self.camera.snapshot(),
             width: self.context.width,
             height: self.context.height,
+            movement_mode: self.camera.movement_mode(),
+            on_ground: self.camera.on_ground(),
+            horizontal_collision: self.camera.horizontal_collision(),
+            vertical_collision: self.camera.vertical_collision(),
             day_time,
             time_of_day,
             sun_angle,
@@ -1422,9 +1447,18 @@ fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
     }
 }
 
-fn camera_snapshot_to_js_value(snapshot: EngineCameraSnapshot) -> Result<JsValue, String> {
+fn camera_state_to_js_value(camera: &EngineCameraController) -> Result<JsValue, String> {
+    let snapshot = camera.snapshot();
     let object = js_sys::Object::new();
     set_bool(&object, "ok", true)?;
+    set_bool(&object, "onGround", camera.on_ground())?;
+    set_bool(
+        &object,
+        "horizontalCollision",
+        camera.horizontal_collision(),
+    )?;
+    set_bool(&object, "verticalCollision", camera.vertical_collision())?;
+    set_string(&object, "movementMode", camera.movement_mode().label())?;
     set_number(&object, "cameraX", snapshot.eye.x)?;
     set_number(&object, "cameraY", snapshot.eye.y)?;
     set_number(&object, "cameraZ", snapshot.eye.z)?;
@@ -1646,6 +1680,12 @@ fn set_bool(object: &js_sys::Object, key: &str, value: bool) -> Result<(), Strin
 
 fn set_number(object: &js_sys::Object, key: &str, value: f64) -> Result<(), String> {
     js_sys::Reflect::set(object, &JsValue::from_str(key), &JsValue::from_f64(value))
+        .map(|_| ())
+        .map_err(|_| format!("failed to set generated chunk report key {key}"))
+}
+
+fn set_string(object: &js_sys::Object, key: &str, value: &str) -> Result<(), String> {
+    js_sys::Reflect::set(object, &JsValue::from_str(key), &JsValue::from_str(value))
         .map(|_| ())
         .map_err(|_| format!("failed to set generated chunk report key {key}"))
 }

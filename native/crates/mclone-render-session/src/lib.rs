@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Context, Result, bail};
 use mclone_client::{
     ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LocalPlayerController, LocalPlayerPose,
-    NoClipMovementStep, PlayerInputKey,
+    NoClipMovementStep, PlayerInputKey, WalkingMovementStep,
 };
 use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot,
@@ -611,6 +611,7 @@ pub struct EngineCameraInput {
     pub right: bool,
     pub jump: bool,
     pub descend: bool,
+    pub shift: bool,
     pub sprint: bool,
 }
 
@@ -626,7 +627,31 @@ impl Default for EngineCameraInput {
             right: false,
             jump: false,
             descend: false,
+            shift: false,
             sprint: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EngineCameraMovementMode {
+    #[default]
+    Walking,
+    NoClip,
+}
+
+impl EngineCameraMovementMode {
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::Walking => Self::NoClip,
+            Self::NoClip => Self::Walking,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Walking => "WALK",
+            Self::NoClip => "NOCLIP",
         }
     }
 }
@@ -653,6 +678,7 @@ pub struct EngineRenderCamera {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EngineCameraController {
     player: LocalPlayerController,
+    movement_mode: EngineCameraMovementMode,
     speed_blocks_per_second: f64,
 }
 
@@ -686,12 +712,41 @@ impl EngineCameraController {
         ));
         Self {
             player,
+            movement_mode: EngineCameraMovementMode::Walking,
             speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
         }
     }
 
     pub const fn player(&self) -> &LocalPlayerController {
         &self.player
+    }
+
+    pub const fn movement_mode(&self) -> EngineCameraMovementMode {
+        self.movement_mode
+    }
+
+    pub fn set_movement_mode(&mut self, movement_mode: EngineCameraMovementMode) {
+        if self.movement_mode != movement_mode {
+            self.player.clear_delta_movement();
+        }
+        self.movement_mode = movement_mode;
+    }
+
+    pub fn toggle_movement_mode(&mut self) -> EngineCameraMovementMode {
+        self.set_movement_mode(self.movement_mode.toggled());
+        self.movement_mode
+    }
+
+    pub const fn on_ground(&self) -> bool {
+        self.player.on_ground()
+    }
+
+    pub const fn horizontal_collision(&self) -> bool {
+        self.player.horizontal_collision()
+    }
+
+    pub const fn vertical_collision(&self) -> bool {
+        self.player.vertical_collision()
     }
 
     pub fn next_move_player_command(&mut self) -> Option<ClientCommand> {
@@ -752,15 +807,52 @@ impl EngineCameraController {
     }
 
     pub fn apply_input(&mut self, input: EngineCameraInput) -> EngineCameraSnapshot {
+        self.apply_key_input(input);
+        self.tick_no_clip(input);
+        self.snapshot()
+    }
+
+    pub fn apply_movement_input(
+        &mut self,
+        client: &ClientRuntime,
+        input: EngineCameraInput,
+    ) -> EngineCameraSnapshot {
+        self.apply_key_input(input);
+        match self.movement_mode {
+            EngineCameraMovementMode::Walking => {
+                self.tick_walking(client, input);
+            }
+            EngineCameraMovementMode::NoClip => {
+                self.tick_no_clip(input);
+            }
+        }
+        self.snapshot()
+    }
+
+    pub fn probe_ground(&mut self, client: &ClientRuntime, distance: f64) {
+        if self.movement_mode != EngineCameraMovementMode::Walking
+            || !distance.is_finite()
+            || distance <= 0.0
+        {
+            return;
+        }
+        self.player
+            .move_colliding(client, Vec3d::new(0.0, -distance, 0.0));
+    }
+
+    fn apply_key_input(&mut self, input: EngineCameraInput) {
         self.set_key(PlayerInputKey::Forward, input.forward);
         self.set_key(PlayerInputKey::Backward, input.backward);
         self.set_key(PlayerInputKey::Left, input.left);
         self.set_key(PlayerInputKey::Right, input.right);
         self.set_key(PlayerInputKey::Jump, input.jump);
         self.set_key(PlayerInputKey::Descend, input.descend);
+        self.set_key(PlayerInputKey::Shift, input.shift);
         self.set_key(PlayerInputKey::Sprint, input.sprint);
         self.turn_mouse_delta(input.mouse_delta_x, input.mouse_delta_y);
+    }
 
+    fn tick_no_clip(&mut self, input: EngineCameraInput) {
         let pose = self.player.pose();
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
         self.player.tick_no_clip_movement(NoClipMovementStep {
@@ -771,7 +863,18 @@ impl EngineCameraController {
             descending: false,
             sprinting: false,
         });
-        self.snapshot()
+    }
+
+    fn tick_walking(&mut self, client: &ClientRuntime, input: EngineCameraInput) {
+        let pose = self.player.pose();
+        let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
+        self.player.tick_walking_movement(
+            client,
+            WalkingMovementStep {
+                y_rot_degrees: pose.y_rot_degrees,
+                dt_seconds,
+            },
+        );
     }
 
     pub fn render_camera(&self, render_distance: u32) -> EngineRenderCamera {
@@ -2400,6 +2503,42 @@ mod tests {
             after.eye.subtract(before.eye).length_sqr()
                 > (ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND * 0.1).powi(2)
         );
+    }
+
+    #[test]
+    fn engine_camera_controller_toggles_movement_mode() {
+        let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
+
+        assert_eq!(camera.movement_mode(), EngineCameraMovementMode::Walking);
+        assert_eq!(
+            camera.toggle_movement_mode(),
+            EngineCameraMovementMode::NoClip
+        );
+        assert_eq!(
+            camera.toggle_movement_mode(),
+            EngineCameraMovementMode::Walking
+        );
+    }
+
+    #[test]
+    fn engine_camera_controller_can_tick_walking_path() {
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.0, 0.0, 32.0);
+        let client = ClientRuntime::local_integrated();
+        let before = camera.snapshot();
+
+        let after = camera.apply_movement_input(
+            &client,
+            EngineCameraInput {
+                dt_seconds: 0.05,
+                forward: true,
+                ..EngineCameraInput::default()
+            },
+        );
+
+        assert_eq!(camera.movement_mode(), EngineCameraMovementMode::Walking);
+        assert!(after.eye.z > before.eye.z);
+        assert!(camera.player().delta_movement().y < 0.0);
     }
 
     #[test]

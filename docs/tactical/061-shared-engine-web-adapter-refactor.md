@@ -2,7 +2,7 @@
 
 Status: active; shared update dirtying, browser app loop, first-person web
 camera/input, resize, browser no-clip pose sync, and browser sky/actor drawing
-landed.
+landed; browser walking/collision mode landed.
 
 ## Purpose
 
@@ -639,6 +639,24 @@ Sky and actor browser result:
   state while keeping actor count diagnostic-only, since that path does not
   drive the full camera/spawn correction loop.
 
+Walking/no-clip browser movement result:
+
+- `EngineCameraController` now owns an explicit `WALK`/`NOCLIP` movement mode.
+  The old no-clip `apply_input(...)` path remains for existing smokes, while
+  the browser app uses the new mode-aware path.
+- `WALK` mode calls the same `LocalPlayerController::tick_walking_movement`
+  and `WalkingMovementStep` path desktop uses, against the web client replica
+  for collision queries.
+- Server player-position corrections now perform the same small ground probe in
+  browser walking mode before acknowledging and resyncing the corrected pose.
+- The browser app exposes `N` as the movement-mode toggle, maps Shift into the
+  shared player input, and displays mode plus ground/collision state in the HUD.
+- `native:web:app-smoke` now verifies a deterministic walking probe in `WALK`
+  mode before toggling to `NOCLIP` for the existing chunk-streaming movement
+  check. The captured app report showed a walking displacement of about `0.22`
+  blocks, then `NOCLIP` streaming to chunk `(-1, -1)` with zero pending compile
+  jobs.
+
 ### 5. Add Web Worker/Thread Policy
 
 Browser workers are part of the target architecture, not optional polish. The
@@ -735,20 +753,20 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should make browser gameplay movement converge with desktop now
-that the browser frame is visually closer to desktop:
+The next slice should make browser interaction converge with desktop now that
+movement and world presentation are closer:
 
-1. Add a browser walking/collision mode behind the same `LocalPlayerController`
-   / `WalkingMovementStep` path desktop uses, keeping no-clip as a toggle or
-   smoke fallback.
-2. Continue reducing desktop/web camera drift by wrapping desktop no-clip
+1. Thread block raycast/break/place input through the browser app using the same
+   `ClientInteractionController` and gameplay command path desktop uses.
+2. Keep `WALK` as the default browser movement mode and `NOCLIP` as a debug
+   toggle/fallback while continuing to report mode, ground, and collision state.
+3. Continue reducing desktop/web camera drift by wrapping desktop no-clip
    stepping around shared `EngineCameraController` primitives where that does
    not disrupt walking/collision behavior.
-3. Thread block raycast/break/place input through the web app only after the
-   walking/collision pose path is stable.
 4. Keep browser worker compile submission, shared dirty/session policy, sky,
    actors, resize, pose sync, and WebGPU presentation unchanged.
-5. Extend validation to cover walking/collision movement, continued streaming,
-   pose corrections, sky/actors, resize, screenshots, and no pending compile
-   jobs; leave pause/options/inventory and multiplayer/server selection as
-   later UI slices.
+5. Extend validation to cover walk + no-clip movement, block interaction
+   command round trips, resulting section dirty/update publication, continued
+   streaming, sky/actors, resize, screenshots, and zero pending compile jobs;
+   leave pause/options/inventory and multiplayer/server selection as later UI
+   slices.

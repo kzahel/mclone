@@ -23,6 +23,10 @@ const runtime = {
     cameraYawRadians: 0,
     cameraPitchRadians: 0,
     cameraSpeedBlocksPerSecond: 0,
+    movementMode: "WALK",
+    onGround: false,
+    horizontalCollision: false,
+    verticalCollision: false,
     width: 0,
     height: 0,
     dayTime: 0,
@@ -81,6 +85,7 @@ class WebChunkApp {
       right: false,
       jump: false,
       descend: false,
+      shift: false,
       sprint: false,
     };
     this.mouseDeltaX = 0;
@@ -124,6 +129,7 @@ class WebChunkApp {
       "renderCameraFrame",
       "cameraFrameState",
       "resizeCanvas",
+      "toggleMovementMode",
     ]) {
       if (typeof this.session[name] !== "function") {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
@@ -174,6 +180,7 @@ class WebChunkApp {
       this.keys.right,
       this.keys.jump,
       this.keys.descend,
+      this.keys.shift,
       this.keys.sprint,
     );
     this.applyCameraState(camera);
@@ -273,6 +280,10 @@ class WebChunkApp {
     runtime.state.cameraYawRadians = Number(camera.cameraYawRadians) || 0;
     runtime.state.cameraPitchRadians = Number(camera.cameraPitchRadians) || 0;
     runtime.state.cameraSpeedBlocksPerSecond = Number(camera.cameraSpeedBlocksPerSecond) || 0;
+    runtime.state.movementMode = String(camera.movementMode || runtime.state.movementMode || "WALK");
+    runtime.state.onGround = Boolean(camera.onGround);
+    runtime.state.horizontalCollision = Boolean(camera.horizontalCollision);
+    runtime.state.verticalCollision = Boolean(camera.verticalCollision);
   }
 
   applyReport(report) {
@@ -357,6 +368,13 @@ class WebChunkApp {
 
 function bindInput(app) {
   window.addEventListener("keydown", (event) => {
+    if ((event.key === "n" || event.key === "N") && !event.repeat) {
+      event.preventDefault();
+      const camera = app.session?.toggleMovementMode?.();
+      if (camera) app.applyCameraState(camera);
+      updateDom();
+      return;
+    }
     const key = inputNameForKey(event.key);
     if (!key) return;
     event.preventDefault();
@@ -439,6 +457,8 @@ function inputNameForKey(key) {
     case "q":
     case "Q":
       return "descend";
+    case "Shift":
+      return "shift";
     case "Control":
       return "sprint";
     default:
@@ -528,6 +548,8 @@ function updateDom() {
   const state = runtime.state;
   setText("center", `${state.centerX}, ${state.centerZ}`);
   setText("camera", `${state.cameraX.toFixed(1)}, ${state.cameraY.toFixed(1)}, ${state.cameraZ.toFixed(1)}`);
+  setText("mode", state.movementMode);
+  setText("ground", state.onGround ? "ground" : state.verticalCollision ? "blocked" : state.horizontalCollision ? "wall" : "air");
   setText("chunks", String(state.loadedChunkCount));
   setText("sections", String(state.residentSectionCount));
   setText("time", `${Number(state.dayTime || 0).toFixed(0)} / ${Number(state.timeOfDay || 0).toFixed(3)}`);

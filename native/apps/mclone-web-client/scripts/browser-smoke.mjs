@@ -102,6 +102,72 @@ async function run() {
       }
       const canvas = page.locator("#mclone-canvas");
       await canvas.click({ position: { x: 640, y: 360 } });
+      await page.waitForFunction(
+        () => {
+          const state = globalThis.__mcloneWebApp?.state;
+          return state?.ok === true
+            && state.movementMode === "WALK"
+            && state.lastReport?.movementMode === "WALK"
+            && state.onGround === true
+            && state.pendingCompileJobCount === 0;
+        },
+        undefined,
+        { timeout: 60_000 },
+      );
+      const walkingStart = await page.evaluate(() => {
+        const state = globalThis.__mcloneWebApp.state;
+        return {
+          cameraX: state.cameraX,
+          cameraZ: state.cameraZ,
+          commandCount: state.lastReport?.commandCount ?? 0,
+        };
+      });
+      await page.keyboard.down("w");
+      await page.waitForFunction(
+        (start) => {
+          const state = globalThis.__mcloneWebApp?.state;
+          const dx = Number(state?.cameraX) - start.cameraX;
+          const dz = Number(state?.cameraZ) - start.cameraZ;
+          return state?.ok === true
+            && state.movementMode === "WALK"
+            && state.lastReport?.movementMode === "WALK"
+            && state.lastReport?.onGround === true
+            && Math.hypot(dx, dz) > 0.2
+            && (state.lastReport?.commandCount ?? 0) > start.commandCount;
+        },
+        walkingStart,
+        { timeout: 60_000 },
+      );
+      await page.keyboard.up("w");
+      const walkingProbe = await page.evaluate((start) => {
+        const state = globalThis.__mcloneWebApp.state;
+        const dx = Number(state.cameraX) - start.cameraX;
+        const dz = Number(state.cameraZ) - start.cameraZ;
+        return {
+          ok: state.movementMode === "WALK"
+            && state.lastReport?.movementMode === "WALK"
+            && state.lastReport?.onGround === true
+            && Math.hypot(dx, dz) > 0.2,
+          start,
+          end: {
+            cameraX: state.cameraX,
+            cameraZ: state.cameraZ,
+            movementMode: state.movementMode,
+            onGround: state.onGround,
+            commandCount: state.lastReport?.commandCount ?? 0,
+          },
+          distance: Math.hypot(dx, dz),
+        };
+      }, walkingStart);
+      await page.keyboard.press("n");
+      await page.waitForFunction(
+        () => {
+          const state = globalThis.__mcloneWebApp?.state;
+          return state?.ok === true && state.movementMode === "NOCLIP";
+        },
+        undefined,
+        { timeout: 10_000 },
+      );
       await page.mouse.down();
       await page.mouse.move(700, 330);
       await page.mouse.up();
@@ -140,7 +206,7 @@ async function run() {
       const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
       const canvasPixels = analyzePng(canvasPng);
 
-      assertAppLoopResult(result, pageErrors, canvasPixels);
+      assertAppLoopResult(result, pageErrors, canvasPixels, walkingProbe);
       console.log(JSON.stringify({
         url: `${baseUrl}/app.html`,
         screenshotPath,
@@ -148,6 +214,7 @@ async function run() {
         canvasScreenshotPath,
         appLoop,
         canvasPixels,
+        walkingProbe,
         result,
       }, null, 2));
       return;
@@ -392,7 +459,7 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
   }
 }
 
-function assertAppLoopResult(result, pageErrors, canvasPixels) {
+function assertAppLoopResult(result, pageErrors, canvasPixels, walkingProbe) {
   if (pageErrors.length > 0) {
     throw new Error(`browser app page errors:\n${pageErrors.join("\n")}`);
   }
@@ -413,6 +480,12 @@ function assertAppLoopResult(result, pageErrors, canvasPixels) {
   }
   if (result.frameCount <= 0) {
     throw new Error(`native web app requestAnimationFrame loop did not advance:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (!walkingProbe?.ok || walkingProbe.distance <= 0.2) {
+    throw new Error(`native web app did not move through the walking/collision path before no-clip streaming:\n${JSON.stringify({ walkingProbe, result }, null, 2)}`);
+  }
+  if (result.movementMode !== "NOCLIP" || result.lastReport?.movementMode !== "NOCLIP") {
+    throw new Error(`native web app did not keep no-clip as a toggleable streaming fallback:\n${JSON.stringify(result, null, 2)}`);
   }
   if (!result.pointerLockAttempted || (!result.pointerLocked && !result.pointerLockFallback)) {
     throw new Error(`native web app did not exercise pointer-lock or fallback state:\n${JSON.stringify(result, null, 2)}`);
