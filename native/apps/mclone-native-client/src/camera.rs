@@ -79,7 +79,7 @@ impl SpectatorCamera {
     }
 }
 
-fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
+pub(crate) fn chunk_camera_from_engine(camera: EngineRenderCamera) -> ChunkCamera {
     ChunkCamera {
         eye: camera.eye,
         target: camera.target,

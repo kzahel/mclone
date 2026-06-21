@@ -6,7 +6,7 @@ landed; browser walking/collision mode, block interaction, and hotbar selection
 landed; browser target preview landed; desktop no-clip/mouse-look helpers
 converged; shared camera frame-state/reporting helpers landed; desktop
 player-pose commit sequence isolated; desktop `EngineCameraController` facade
-landed.
+landed; desktop window camera view uses controller snapshots.
 
 ## Purpose
 
@@ -783,6 +783,25 @@ Desktop controller facade result:
   smoke still proved walk/no-clip state reporting, selected-slot break/place,
   worker compile availability, sky/actors, and zero pending compile jobs.
 
+Desktop window camera view result:
+
+- The native desktop window app now derives a `WindowCameraView` from
+  `EngineCameraController::snapshot()` for windowed render/runtime boundaries.
+- Render-camera construction, initial render-section sync, incremental
+  render-section sync, pending-render-work checks, occlusion probes, traversal
+  readiness, chunk-interest movement, debug-pane position, and initial surface
+  placement now read from the controller snapshot/view instead of mirrored
+  `SpectatorCamera` fields.
+- `SpectatorCamera` remains as a compatibility mirror for window UI/debug
+  plumbing and remains the owner for perf/headless paths. It is no longer the
+  windowed desktop source of truth for runtime/render decisions.
+- A native app regression test proves `WindowCameraView` follows the controller
+  snapshot even when the spectator mirror is stale.
+- Validation covered native unit tests, movement smoke, timedemo smoke, a native
+  rendered screenshot, WASM target check, and the browser app smoke. Browser
+  smoke still proved walk/no-clip state reporting, selected-slot break/place,
+  worker compile availability, sky/actors, and zero pending compile jobs.
+
 ### 5. Add Web Worker/Thread Policy
 
 Browser workers are part of the target architecture, not optional polish. The
@@ -879,17 +898,20 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should reduce the remaining desktop spectator mirror so windowed
-desktop and web both consume explicit engine camera snapshots/views:
+The next slice should converge desktop and web pose-sync/correction reporting
+now that both platforms consume controller snapshots at their runtime/render
+boundaries:
 
-1. Derive desktop render-camera construction, chunk-interest checks, render
-   section sync positions, occlusion probes, and traversal readiness from the
-   controller snapshot or a small app-local view helper instead of reading
-   mirrored `SpectatorCamera` fields throughout `ChunkApp`.
-2. Keep `SpectatorCamera` for perf/headless paths, but stop treating it as
-   windowed desktop's camera state owner.
-3. Revisit whether desktop and web can share a small pose-sync/correction helper
-   after both platforms consume controller snapshots at the boundary.
+1. Compare desktop `sync_server_player_pose` /
+   `apply_pending_player_position_updates` with web
+   `sync_camera_pose_to_server` / `apply_pending_camera_position_updates` and
+   identify the common command/correction sequence.
+2. Extract the common command/correction result shape into shared
+   render-session/client-facing helpers where it does not hide platform-owned
+   runtime dispatch.
+3. Keep platform adapters responsible for dispatching commands and moving
+   interest/render work, but make the ordering and reporting of pose sync,
+   correction acknowledgment, and corrected pose resync explicit and reusable.
 4. Keep `native:web:app-smoke` proving walk + no-clip movement, target preview,
    selected-slot break/place, section dirty/update publication, worker compiles,
    sky/actors, resize, screenshots, and zero pending compile jobs.

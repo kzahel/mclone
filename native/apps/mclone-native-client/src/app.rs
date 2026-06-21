@@ -27,7 +27,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
-use crate::camera::SpectatorCamera;
+use crate::camera::{SpectatorCamera, chunk_camera_from_engine};
 use crate::cli::SceneOptions;
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FramePacingUiState, FrameTimingStats, RedrawSchedule, elapsed_ms,
@@ -37,8 +37,8 @@ use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, NativeUi, NativeUiAction};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
 use mclone_render_session::{
-    EngineCameraController, EngineCameraFrameState, EngineCameraMovementMode,
-    RenderSectionCacheUpdate,
+    EngineCameraController, EngineCameraFrameState, EngineCameraMovementMode, EngineCameraSnapshot,
+    RenderSectionCacheUpdate, render_camera_from_snapshot,
 };
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
@@ -232,6 +232,32 @@ pub(crate) fn render_full_frame(
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct WindowCameraView {
+    snapshot: EngineCameraSnapshot,
+    eye: glam::Vec3,
+}
+
+impl WindowCameraView {
+    fn from_snapshot(snapshot: EngineCameraSnapshot) -> Self {
+        Self {
+            snapshot,
+            eye: glam_vec3_from_vec3d(snapshot.eye),
+        }
+    }
+
+    fn block_column(self) -> (i32, i32) {
+        (
+            self.snapshot.eye.x.floor() as i32,
+            self.snapshot.eye.z.floor() as i32,
+        )
+    }
+
+    fn chunk_camera(self, render_distance: u32) -> ChunkCamera {
+        chunk_camera_from_engine(render_camera_from_snapshot(self.snapshot, render_distance))
+    }
+}
+
 struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
@@ -326,6 +352,10 @@ impl ChunkApp {
             self.next_redraw_at = None;
         }
         self.schedule_next_redraw(event_loop);
+    }
+
+    fn window_camera_view(&self) -> WindowCameraView {
+        WindowCameraView::from_snapshot(self.camera.snapshot())
     }
 
     fn update_camera_from_keys(&mut self, now: Instant) -> Result<()> {
@@ -463,7 +493,8 @@ impl ChunkApp {
     }
 
     fn place_spectator_above_loaded_surface(&mut self) {
-        let (world_x, world_z) = self.spectator.block_column();
+        let view = self.window_camera_view();
+        let (world_x, world_z) = view.block_column();
         let Some(surface_y) = self
             .runtime
             .highest_non_air_block_y_at_world(world_x, world_z)
@@ -473,16 +504,15 @@ impl ChunkApp {
             );
             return;
         };
-        self.spectator.pitch = crate::camera::SPECTATOR_SURFACE_PITCH;
         let eye_position = Vec3d::new(
-            self.spectator.position.x as f64,
+            view.snapshot.eye.x,
             surface_y as f64 + PLAYER_SURFACE_FEET_OFFSET + LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-            self.spectator.position.z as f64,
+            view.snapshot.eye.z,
         );
         self.camera.set_eye_pose(
             eye_position,
-            f64::from(self.spectator.yaw),
-            f64::from(self.spectator.pitch),
+            view.snapshot.yaw_radians,
+            f64::from(crate::camera::SPECTATOR_SURFACE_PITCH),
         );
         if self.camera.movement_mode() == EngineCameraMovementMode::Walking {
             self.camera
@@ -495,7 +525,7 @@ impl ChunkApp {
             "placed player above loaded surface column ({world_x}, {world_z}) y={} -> feet_y={:.1} eye_y={:.1}",
             surface_y,
             self.camera.player().pose().position.y,
-            self.spectator.position.y
+            self.window_camera_view().eye.y
         );
     }
 
@@ -540,16 +570,17 @@ impl ChunkApp {
         }
     }
 
-    fn update_interest_from_spectator(&mut self) -> Result<bool> {
-        let center = self.spectator.chunk_pos();
+    fn update_interest_from_camera(&mut self) -> Result<bool> {
+        let view = self.window_camera_view();
+        let center = view.snapshot.chunk_pos;
         if self.runtime.set_interest_center(center)? {
             log::info!(
-                "chunk interest moved to ({}, {}) at spectator position ({:.1}, {:.1}, {:.1})",
+                "chunk interest moved to ({}, {}) at camera position ({:.1}, {:.1}, {:.1})",
                 center.x,
                 center.z,
-                self.spectator.position.x,
-                self.spectator.position.y,
-                self.spectator.position.z
+                view.eye.x,
+                view.eye.y,
+                view.eye.z
             );
             return Ok(true);
         }
@@ -565,7 +596,7 @@ impl ChunkApp {
         if !changed
             && !self
                 .runtime
-                .has_pending_render_work(self.spectator.position)
+                .has_pending_render_work(self.window_camera_view().eye)
         {
             return Ok(());
         }
@@ -574,11 +605,12 @@ impl ChunkApp {
     }
 
     fn upload_runtime_sections(&mut self) -> Result<()> {
+        let camera_view = self.window_camera_view();
         let (Some(surface), Some(draw)) = (&self.surface, &mut self.draw) else {
             return Ok(());
         };
         let remesh_start = Instant::now();
-        let section_update = self.runtime.sync_render_sections(self.spectator.position)?;
+        let section_update = self.runtime.sync_render_sections(camera_view.eye)?;
         let remesh_ms = elapsed_ms(remesh_start.elapsed());
         let upload_start = Instant::now();
         let upload_report = draw
@@ -635,14 +667,14 @@ impl ChunkApp {
         effective_render_options_for_camera(
             self.render_options,
             self.runtime
-                .camera_inside_occluding_block(self.spectator.position),
+                .camera_inside_occluding_block(self.window_camera_view().eye),
         )
     }
 
     fn debug_pane_stats(&self, render_options: TexturedSectionRenderOptions) -> DebugPaneStats {
         let camera_state = self.camera_frame_state();
         DebugPaneStats {
-            position: self.spectator.position,
+            position: self.window_camera_view().eye,
             speed: camera_state.camera.speed_blocks_per_second as f32,
             movement_mode: camera_state.movement_mode_label(),
             on_ground: camera_state.on_ground,
@@ -662,7 +694,7 @@ impl ChunkApp {
     fn commit_player_pose_change(&mut self) -> Result<bool> {
         sync_spectator_from_camera(&mut self.spectator, &self.camera);
         let server_changed = self.sync_server_player_pose()?;
-        let interest_changed = self.update_interest_from_spectator()?;
+        let interest_changed = self.update_interest_from_camera()?;
         Ok(server_changed || interest_changed)
     }
 
@@ -712,7 +744,7 @@ impl ChunkApp {
             changed = true;
         }
         if changed {
-            changed |= self.update_interest_from_spectator()?;
+            changed |= self.update_interest_from_camera()?;
         }
         Ok(changed)
     }
@@ -928,10 +960,8 @@ impl ApplicationHandler for ChunkApp {
         self.frame_pacing.update_monitor(&window);
         self.frame_pacing.apply_to_surface(&mut surface);
         let remesh_start = Instant::now();
-        let section_update = match self
-            .runtime
-            .sync_all_render_sections(self.spectator.position)
-        {
+        let initial_camera = self.window_camera_view();
+        let section_update = match self.runtime.sync_all_render_sections(initial_camera.eye) {
             Ok(update) => update,
             Err(err) => {
                 log::error!("failed to build initial chunk sections: {err:#}");
@@ -967,7 +997,7 @@ impl ApplicationHandler for ChunkApp {
         draw.set_traversal_ready_sections(
             &self
                 .runtime
-                .traversal_ready_render_section_keys(self.spectator.position),
+                .traversal_ready_render_section_keys(initial_camera.eye),
         );
         let upload_ms = elapsed_ms(upload_start.elapsed());
         let sky = SkyRenderer::new(&surface.device, surface.config.format);
@@ -1218,7 +1248,10 @@ impl ApplicationHandler for ChunkApp {
                 };
                 self.camera.adjust_speed(f64::from(amount));
                 sync_spectator_from_camera(&mut self.spectator, &self.camera);
-                log::info!("no-clip speed {:.1} blocks/s", self.spectator.speed);
+                log::info!(
+                    "no-clip speed {:.1} blocks/s",
+                    self.camera.snapshot().speed_blocks_per_second
+                );
                 self.schedule_next_redraw(event_loop);
             }
             WindowEvent::Focused(false) => {
@@ -1250,7 +1283,8 @@ impl ApplicationHandler for ChunkApp {
                     return;
                 };
                 self.ui.set_scale(gui_scale);
-                let camera = self.spectator.camera(self.runtime.render_distance);
+                let camera_view = self.window_camera_view();
+                let camera = camera_view.chunk_camera(self.runtime.render_distance);
                 let sky_clear_color = self.runtime.sky_clear_color();
                 let time_of_day = self.runtime.time_of_day();
                 let sun_angle = self.runtime.sun_angle();
@@ -1262,7 +1296,7 @@ impl ApplicationHandler for ChunkApp {
                     .then(|| self.debug_pane_stats(render_options));
                 let traversal_ready_sections = self
                     .runtime
-                    .traversal_ready_render_section_keys(self.spectator.position);
+                    .traversal_ready_render_section_keys(camera_view.eye);
                 let mut render_stats = self.render_stats;
                 let render_start = Instant::now();
                 let result = {
@@ -1516,6 +1550,34 @@ mod tests {
             app.runtime.stats().interest_center,
             mclone_core::ChunkPos::new(1, 0)
         );
+    }
+
+    #[test]
+    fn window_camera_view_uses_controller_snapshot_not_spectator_mirror() {
+        let scene = SceneOptions::default();
+        let runtime = WindowSceneRuntime::new(&scene).unwrap();
+        let spectator = SpectatorCamera::spawn_for_scene(&scene);
+        let mut app = ChunkApp::new(
+            runtime,
+            spectator,
+            TexturedSectionRenderOptions::default(),
+            scene.render_distance,
+        );
+        let target_eye = Vec3d::new(32.25, 80.0, -0.25);
+
+        app.camera.set_eye_pose(target_eye, 0.25, -0.125);
+        let view = app.window_camera_view();
+
+        assert_eq!(
+            view.eye,
+            glam::Vec3::new(
+                target_eye.x as f32,
+                target_eye.y as f32,
+                target_eye.z as f32
+            )
+        );
+        assert_eq!(view.snapshot.chunk_pos, mclone_core::ChunkPos::new(2, -1));
+        assert_ne!(app.spectator.position, view.eye);
     }
 
     #[test]
