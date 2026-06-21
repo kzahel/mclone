@@ -5,7 +5,8 @@ camera/input, resize, browser no-clip pose sync, and browser sky/actor drawing
 landed; browser walking/collision mode, block interaction, and hotbar selection
 landed; browser target preview landed; desktop no-clip/mouse-look helpers
 converged; shared camera frame-state/reporting helpers landed; desktop
-player-pose commit sequence isolated.
+player-pose commit sequence isolated; desktop `EngineCameraController` facade
+landed.
 
 ## Purpose
 
@@ -757,6 +758,31 @@ Desktop player-pose commit result:
   smoke still proved walk/no-clip state reporting, selected-slot break/place,
   worker compile availability, sky/actors, and zero pending compile jobs.
 
+Desktop controller facade result:
+
+- `EngineCameraController` now exposes explicit eye-pose placement and a
+  `tick_movement` method that ticks the currently selected movement mode and
+  returns whether the pose changed.
+- The native desktop window app now stores an `EngineCameraController` instead
+  of separate `LocalPlayerController` and movement-mode fields. Key state, mouse
+  look, scroll speed, walking/no-clip movement, frame-state reporting,
+  movement-mode toggling, block picking, move-player command emission, and
+  correction acknowledgment all route through that controller instance.
+- `commit_player_pose_change` remains the native app boundary for side effects:
+  it mirrors the controller pose/speed into the desktop spectator view, syncs
+  server pose, applies pending corrections through the existing ordering, and
+  moves chunk interest.
+- The desktop `SpectatorCamera` is now a window render/runtime mirror instead
+  of the owner of player camera state. Perf/headless paths still use spectator
+  camera directly.
+- Render-session tests cover explicit eye placement and current-key movement
+  ticking. Native app tests still cover the commit helper's spectator/frame
+  state/interest-center alignment.
+- Validation covered native unit tests, movement smoke, timedemo smoke, a native
+  rendered screenshot, WASM target check, and the browser app smoke. Browser
+  smoke still proved walk/no-clip state reporting, selected-slot break/place,
+  worker compile availability, sky/actors, and zero pending compile jobs.
+
 ### 5. Add Web Worker/Thread Policy
 
 Browser workers are part of the target architecture, not optional polish. The
@@ -853,19 +879,17 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should try the desktop `EngineCameraController` facade now that
-the native side-effect commit path is isolated:
+The next slice should reduce the remaining desktop spectator mirror so windowed
+desktop and web both consume explicit engine camera snapshots/views:
 
-1. Replace the desktop app's separate `LocalPlayerController` and movement-mode
-   fields with an `EngineCameraController` owner, while keeping
-   `commit_player_pose_change` as the native app boundary for server sync,
-   corrections, spectator mirroring, and chunk interest.
-2. Preserve desktop walking behavior by continuing to use the same
-   `WalkingMovementStep`/collision path and the same post-move commit helper;
-   do not change correction acknowledgment ordering.
-3. Route desktop mouse look, key state, speed adjustment, frame-state reporting,
-   and no-clip movement through the controller instance instead of static helper
-   calls where ownership is clear.
+1. Derive desktop render-camera construction, chunk-interest checks, render
+   section sync positions, occlusion probes, and traversal readiness from the
+   controller snapshot or a small app-local view helper instead of reading
+   mirrored `SpectatorCamera` fields throughout `ChunkApp`.
+2. Keep `SpectatorCamera` for perf/headless paths, but stop treating it as
+   windowed desktop's camera state owner.
+3. Revisit whether desktop and web can share a small pose-sync/correction helper
+   after both platforms consume controller snapshots at the boundary.
 4. Keep `native:web:app-smoke` proving walk + no-clip movement, target preview,
    selected-slot break/place, section dirty/update publication, worker compiles,
    sky/actors, resize, screenshots, and zero pending compile jobs.

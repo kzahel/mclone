@@ -785,6 +785,15 @@ impl EngineCameraController {
         &self.player
     }
 
+    pub fn set_eye_pose(&mut self, eye: Vec3d, yaw_radians: f64, pitch_radians: f64) {
+        self.player.set_pose(LocalPlayerPose::from_eye_position(
+            eye,
+            -yaw_radians.to_degrees(),
+            -pitch_radians.to_degrees(),
+            LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        ));
+    }
+
     pub const fn movement_mode(&self) -> EngineCameraMovementMode {
         self.movement_mode
     }
@@ -904,7 +913,7 @@ impl EngineCameraController {
 
     pub fn apply_input(&mut self, input: EngineCameraInput) -> EngineCameraSnapshot {
         self.apply_key_input(input);
-        self.tick_no_clip(input);
+        let _ = self.tick_no_clip(input);
         self.snapshot()
     }
 
@@ -916,13 +925,24 @@ impl EngineCameraController {
         self.apply_key_input(input);
         match self.movement_mode {
             EngineCameraMovementMode::Walking => {
-                self.tick_walking(client, input);
+                let _ = self.tick_walking(client, input);
             }
             EngineCameraMovementMode::NoClip => {
-                self.tick_no_clip(input);
+                let _ = self.tick_no_clip(input);
             }
         }
         self.snapshot()
+    }
+
+    pub fn tick_movement(&mut self, client: &ClientRuntime, dt_seconds: f64) -> bool {
+        let input = EngineCameraInput {
+            dt_seconds,
+            ..EngineCameraInput::default()
+        };
+        match self.movement_mode {
+            EngineCameraMovementMode::Walking => self.tick_walking(client, input),
+            EngineCameraMovementMode::NoClip => self.tick_no_clip(input),
+        }
     }
 
     pub fn probe_ground(&mut self, client: &ClientRuntime, distance: f64) {
@@ -948,9 +968,10 @@ impl EngineCameraController {
         self.turn_mouse_delta(input.mouse_delta_x, input.mouse_delta_y);
     }
 
-    fn tick_no_clip(&mut self, input: EngineCameraInput) {
+    fn tick_no_clip(&mut self, input: EngineCameraInput) -> bool {
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
-        Self::tick_player_no_clip(&mut self.player, self.speed_blocks_per_second, dt_seconds);
+        Self::tick_player_no_clip(&mut self.player, self.speed_blocks_per_second, dt_seconds)
+            .is_some()
     }
 
     pub fn tick_player_no_clip(
@@ -969,16 +990,18 @@ impl EngineCameraController {
         })
     }
 
-    fn tick_walking(&mut self, client: &ClientRuntime, input: EngineCameraInput) {
+    fn tick_walking(&mut self, client: &ClientRuntime, input: EngineCameraInput) -> bool {
         let pose = self.player.pose();
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
-        self.player.tick_walking_movement(
-            client,
-            WalkingMovementStep {
-                y_rot_degrees: pose.y_rot_degrees,
-                dt_seconds,
-            },
-        );
+        self.player
+            .tick_walking_movement(
+                client,
+                WalkingMovementStep {
+                    y_rot_degrees: pose.y_rot_degrees,
+                    dt_seconds,
+                },
+            )
+            .is_some()
     }
 
     pub fn render_camera(&self, render_distance: u32) -> EngineRenderCamera {
@@ -2672,6 +2695,34 @@ mod tests {
         assert_eq!(state.horizontal_collision, camera.horizontal_collision());
         assert_eq!(state.vertical_collision, camera.vertical_collision());
         assert_eq!(state.selected_hotbar_slot, 4);
+    }
+
+    #[test]
+    fn engine_camera_controller_sets_explicit_eye_pose() {
+        let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
+        let eye = Vec3d::new(16.25, 72.0, -0.5);
+
+        camera.set_eye_pose(eye, 0.25, -0.125);
+        let snapshot = camera.snapshot();
+
+        assert_eq!(snapshot.eye, eye);
+        assert_eq!(snapshot.chunk_pos, ChunkPos::new(1, -1));
+        assert!((snapshot.yaw_radians - 0.25).abs() < 1.0e-12);
+        assert!((snapshot.pitch_radians + 0.125).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn engine_camera_controller_ticks_current_no_clip_keys() {
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(15.5, 96.0, 8.0), 0.0, 0.0, 32.0);
+        let client = ClientRuntime::local_integrated();
+        camera.set_movement_mode(EngineCameraMovementMode::NoClip);
+        camera.set_key(PlayerInputKey::Forward, true);
+
+        let moved = camera.tick_movement(&client, 0.1);
+
+        assert!(moved);
+        assert!(camera.snapshot().eye.z > 8.0);
     }
 
     #[test]

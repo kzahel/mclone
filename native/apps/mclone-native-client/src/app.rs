@@ -4,8 +4,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationKind,
-    ClientInteractionController, ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-    LocalPlayerController, LocalPlayerPose, PlayerInputKey, WalkingMovementStep,
+    ClientInteractionController, ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT, PlayerInputKey,
 };
 use mclone_core::{BlockPos, Vec3d};
 use mclone_mesh::quad_face_count_from_indices;
@@ -236,8 +235,7 @@ pub(crate) fn render_full_frame(
 struct ChunkApp {
     runtime: WindowSceneRuntime,
     spectator: SpectatorCamera,
-    player: LocalPlayerController,
-    movement_mode: EngineCameraMovementMode,
+    camera: EngineCameraController,
     actor_interpolation: ActorInterpolationState,
     interaction: ClientInteractionController,
     render_options: TexturedSectionRenderOptions,
@@ -267,13 +265,11 @@ impl ChunkApp {
         render_options: TexturedSectionRenderOptions,
         render_distance: i32,
     ) -> Self {
-        let mut player = LocalPlayerController::new();
-        player.set_pose(local_player_pose_from_spectator(&spectator));
+        let camera = engine_camera_controller_from_spectator(&spectator);
         Self {
             runtime,
             spectator,
-            player,
-            movement_mode: EngineCameraMovementMode::default(),
+            camera,
             actor_interpolation: ActorInterpolationState::new(),
             interaction: ClientInteractionController::new(),
             render_options,
@@ -346,34 +342,11 @@ impl ChunkApp {
             return Ok(());
         }
 
-        match self.movement_mode {
-            EngineCameraMovementMode::Walking => {
-                let pose = self.player.pose();
-                if self
-                    .player
-                    .tick_walking_movement(
-                        self.runtime.client(),
-                        WalkingMovementStep {
-                            y_rot_degrees: pose.y_rot_degrees,
-                            dt_seconds: movement_dt as f64,
-                        },
-                    )
-                    .is_some()
-                {
-                    self.commit_player_pose_change()?;
-                }
-            }
-            EngineCameraMovementMode::NoClip => {
-                if EngineCameraController::tick_player_no_clip(
-                    &mut self.player,
-                    f64::from(self.spectator.speed),
-                    f64::from(movement_dt),
-                )
-                .is_some()
-                {
-                    self.commit_player_pose_change()?;
-                }
-            }
+        if self
+            .camera
+            .tick_movement(self.runtime.client(), f64::from(movement_dt))
+        {
+            self.commit_player_pose_change()?;
         }
         Ok(())
     }
@@ -472,7 +445,7 @@ impl ChunkApp {
         if should_arm_mouse_lock {
             self.mouse_lock_requested = true;
         }
-        self.player.clear_keys();
+        self.camera.clear_keys();
         if !preserve_pointer_state {
             self.last_cursor = None;
         }
@@ -485,9 +458,8 @@ impl ChunkApp {
     }
 
     fn toggle_movement_mode(&mut self) {
-        self.movement_mode = self.movement_mode.toggled();
-        self.player.clear_delta_movement();
-        log::info!("player movement mode {}", self.movement_mode.label());
+        let movement_mode = self.camera.toggle_movement_mode();
+        log::info!("player movement mode {}", movement_mode.label());
     }
 
     fn place_spectator_above_loaded_surface(&mut self) {
@@ -507,17 +479,14 @@ impl ChunkApp {
             surface_y as f64 + PLAYER_SURFACE_FEET_OFFSET + LOCAL_PLAYER_STANDING_EYE_HEIGHT,
             self.spectator.position.z as f64,
         );
-        self.player.set_pose(LocalPlayerPose::from_eye_position(
+        self.camera.set_eye_pose(
             eye_position,
-            -(self.spectator.yaw as f64).to_degrees(),
-            -(self.spectator.pitch as f64).to_degrees(),
-            LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-        ));
-        if self.movement_mode == EngineCameraMovementMode::Walking {
-            self.player.move_colliding(
-                self.runtime.client(),
-                Vec3d::new(0.0, -GROUND_PROBE_DISTANCE, 0.0),
-            );
+            f64::from(self.spectator.yaw),
+            f64::from(self.spectator.pitch),
+        );
+        if self.camera.movement_mode() == EngineCameraMovementMode::Walking {
+            self.camera
+                .probe_ground(self.runtime.client(), GROUND_PROBE_DISTANCE);
         }
         if let Err(err) = self.commit_player_pose_change() {
             log::warn!("failed to commit initial player pose: {err:#}");
@@ -525,7 +494,7 @@ impl ChunkApp {
         log::info!(
             "placed player above loaded surface column ({world_x}, {world_z}) y={} -> feet_y={:.1} eye_y={:.1}",
             surface_y,
-            self.player.pose().position.y,
+            self.camera.player().pose().position.y,
             self.spectator.position.y
         );
     }
@@ -674,7 +643,7 @@ impl ChunkApp {
         let camera_state = self.camera_frame_state();
         DebugPaneStats {
             position: self.spectator.position,
-            speed: self.spectator.speed,
+            speed: camera_state.camera.speed_blocks_per_second as f32,
             movement_mode: camera_state.movement_mode_label(),
             on_ground: camera_state.on_ground,
             runtime: self.runtime.stats(),
@@ -687,16 +656,11 @@ impl ChunkApp {
     }
 
     fn camera_frame_state(&self) -> EngineCameraFrameState {
-        EngineCameraFrameState::from_player(
-            &self.player,
-            self.movement_mode,
-            f64::from(self.spectator.speed),
-            self.interaction.selected_hotbar_slot(),
-        )
+        self.camera.frame_state(&self.interaction)
     }
 
     fn commit_player_pose_change(&mut self) -> Result<bool> {
-        sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+        sync_spectator_from_camera(&mut self.spectator, &self.camera);
         let server_changed = self.sync_server_player_pose()?;
         let interest_changed = self.update_interest_from_spectator()?;
         Ok(server_changed || interest_changed)
@@ -716,7 +680,7 @@ impl ChunkApp {
     }
 
     fn sync_server_player_pose(&mut self) -> Result<bool> {
-        let changed = if let Some(command) = self.player.next_move_player_command() {
+        let changed = if let Some(command) = self.camera.next_move_player_command() {
             self.runtime
                 .send_gameplay_command(command)
                 .context("failed to sync player pose to server")?
@@ -729,20 +693,21 @@ impl ChunkApp {
     fn apply_pending_player_position_updates(&mut self) -> Result<bool> {
         let mut changed = false;
         for update in self.runtime.drain_player_position_updates() {
-            let ack = self.player.apply_player_position_update(update);
-            sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+            let ack = self.camera.apply_player_position_update(update);
+            sync_spectator_from_camera(&mut self.spectator, &self.camera);
             self.runtime
                 .send_gameplay_command(ack)
                 .context("failed to acknowledge player position correction")?;
             self.runtime
-                .send_gameplay_command(self.player.pos_rot_move_player_command())
+                .send_gameplay_command(self.camera.pos_rot_move_player_command())
                 .context("failed to sync corrected player pose to server")?;
+            let pose = self.camera.player().pose();
             log::warn!(
                 "accepted server player position correction id={} feet=({:.2}, {:.2}, {:.2})",
                 update.teleport_id,
-                self.player.pose().position.x,
-                self.player.pose().position.y,
-                self.player.pose().position.z
+                pose.position.x,
+                pose.position.y,
+                pose.position.z
             );
             changed = true;
         }
@@ -764,12 +729,9 @@ impl ChunkApp {
     fn handle_world_mouse_pressed(&mut self, button: MouseButton) -> Result<()> {
         self.sync_server_player_pose()?;
         self.sync_carried_item()?;
-        let pose = self.player.pose();
-        let hit = self.interaction.pick_block(
-            self.runtime.client(),
-            pose.eye_position(),
-            pose.view_vector(),
-        );
+        let hit = self
+            .camera
+            .pick_block(self.runtime.client(), &self.interaction);
         let command = match button {
             MouseButton::Left => self.interaction.debug_instant_break_command(hit),
             MouseButton::Right => self.interaction.use_item_on_command(hit),
@@ -865,19 +827,21 @@ fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
     }
 }
 
-fn local_player_pose_from_spectator(spectator: &SpectatorCamera) -> LocalPlayerPose {
-    LocalPlayerPose::from_eye_position(
+fn engine_camera_controller_from_spectator(spectator: &SpectatorCamera) -> EngineCameraController {
+    EngineCameraController::from_eye_pose(
         vec3d_from_glam(spectator.position),
-        -(spectator.yaw as f64).to_degrees(),
-        -(spectator.pitch as f64).to_degrees(),
-        LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+        f64::from(spectator.yaw),
+        f64::from(spectator.pitch),
+        f64::from(spectator.speed),
     )
 }
 
-fn sync_spectator_from_player_pose(spectator: &mut SpectatorCamera, pose: LocalPlayerPose) {
-    spectator.position = glam_vec3_from_vec3d(pose.eye_position());
-    spectator.yaw = pose.native_yaw_radians() as f32;
-    spectator.pitch = pose.native_pitch_radians() as f32;
+fn sync_spectator_from_camera(spectator: &mut SpectatorCamera, camera: &EngineCameraController) {
+    let snapshot = camera.snapshot();
+    spectator.position = glam_vec3_from_vec3d(snapshot.eye);
+    spectator.yaw = snapshot.yaw_radians as f32;
+    spectator.pitch = snapshot.pitch_radians as f32;
+    spectator.speed = snapshot.speed_blocks_per_second as f32;
 }
 
 pub(crate) fn record_render_section_update_stats(
@@ -1113,7 +1077,7 @@ impl ApplicationHandler for ChunkApp {
                     {
                         self.mouse_lock_requested = false;
                         self.ui.open_pause();
-                        self.player.clear_keys();
+                        self.camera.clear_keys();
                         self.last_cursor = None;
                         self.sync_mouse_lock();
                         self.schedule_next_redraw(event_loop);
@@ -1172,7 +1136,7 @@ impl ApplicationHandler for ChunkApp {
                         return;
                     }
                     if let Some(input_key) = player_input_key_from_key_code(key_code) {
-                        self.player
+                        self.camera
                             .set_key(input_key, event.state == ElementState::Pressed);
                     }
                     self.schedule_next_redraw(event_loop);
@@ -1237,12 +1201,8 @@ impl ApplicationHandler for ChunkApp {
                     if let Some(previous) = self.last_cursor {
                         let dx = (cursor.0 - previous.0) as f32;
                         let dy = (cursor.1 - previous.1) as f32;
-                        EngineCameraController::turn_player_mouse_delta(
-                            &mut self.player,
-                            f64::from(dx),
-                            f64::from(dy),
-                        );
-                        sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+                        self.camera.turn_mouse_delta(f64::from(dx), f64::from(dy));
+                        sync_spectator_from_camera(&mut self.spectator, &self.camera);
                         self.schedule_next_redraw(event_loop);
                     }
                 }
@@ -1256,13 +1216,14 @@ impl ApplicationHandler for ChunkApp {
                     MouseScrollDelta::LineDelta(_, y) => y * 0.12,
                     MouseScrollDelta::PixelDelta(position) => position.y as f32 * 0.001,
                 };
-                self.spectator.adjust_speed(amount);
+                self.camera.adjust_speed(f64::from(amount));
+                sync_spectator_from_camera(&mut self.spectator, &self.camera);
                 log::info!("no-clip speed {:.1} blocks/s", self.spectator.speed);
                 self.schedule_next_redraw(event_loop);
             }
             WindowEvent::Focused(false) => {
                 self.mouse_lock_requested = false;
-                self.player.clear_keys();
+                self.camera.clear_keys();
                 self.last_cursor = None;
                 self.ui.clear_input();
                 self.set_mouse_lock(false);
@@ -1389,12 +1350,8 @@ impl ApplicationHandler for ChunkApp {
         if let DeviceEvent::MouseMotion { delta } = event {
             let dx = delta.0 as f32;
             let dy = delta.1 as f32;
-            EngineCameraController::turn_player_mouse_delta(
-                &mut self.player,
-                f64::from(dx),
-                f64::from(dy),
-            );
-            sync_spectator_from_player_pose(&mut self.spectator, self.player.pose());
+            self.camera.turn_mouse_delta(f64::from(dx), f64::from(dy));
+            sync_spectator_from_camera(&mut self.spectator, &self.camera);
             self.schedule_next_redraw(event_loop);
         }
     }
@@ -1539,12 +1496,7 @@ mod tests {
             scene.render_distance,
         );
         let target_eye = Vec3d::new(16.25, 96.0, 8.0);
-        app.player.set_pose(LocalPlayerPose::from_eye_position(
-            target_eye,
-            0.0,
-            0.0,
-            LOCAL_PLAYER_STANDING_EYE_HEIGHT,
-        ));
+        app.camera.set_eye_pose(target_eye, 0.0, 0.0);
 
         assert!(app.commit_player_pose_change().unwrap());
 

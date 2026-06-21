@@ -4,8 +4,8 @@ use mclone_render::chunk::ChunkCamera;
 use mclone_render_session::{
     ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MAX_SPEED_BLOCKS_PER_SECOND,
     ENGINE_CAMERA_MIN_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_SPAWN_PITCH_RADIANS,
-    ENGINE_CAMERA_SPAWN_YAW_RADIANS, EngineCameraController, EngineCameraSnapshot,
-    EngineRenderCamera, render_camera_from_snapshot,
+    ENGINE_CAMERA_SPAWN_YAW_RADIANS, EngineCameraSnapshot, EngineRenderCamera,
+    render_camera_from_snapshot,
 };
 
 use crate::cli::SceneOptions;
@@ -70,16 +70,6 @@ impl SpectatorCamera {
     pub(crate) fn place_above_surface(&mut self, surface_y: i32) {
         self.position.y = surface_y as f32 + SPECTATOR_SURFACE_CLEARANCE;
         self.pitch = SPECTATOR_SURFACE_PITCH;
-    }
-
-    pub(crate) fn adjust_speed(&mut self, wheel_amount: f32) {
-        if !wheel_amount.is_finite() {
-            return;
-        }
-        self.speed = EngineCameraController::adjusted_speed_blocks_per_second(
-            f64::from(self.speed),
-            f64::from(wheel_amount),
-        ) as f32;
     }
 
     #[cfg(test)]
