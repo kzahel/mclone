@@ -1160,9 +1160,9 @@ impl WebChunkRenderSession {
 
     fn sync_camera_pose_to_server(&mut self) -> Result<(), String> {
         self.apply_pending_camera_position_updates()?;
-        if let Some(command) = self.camera.next_move_player_command() {
+        if let Some(report) = self.camera.next_pose_sync_command() {
             self.runtime
-                .send_gameplay_command(command)
+                .send_gameplay_command(report.command)
                 .map_err(|error| format!("failed to sync browser camera pose: {error}"))?;
             self.apply_pending_camera_position_updates()?;
         }
@@ -1175,16 +1175,18 @@ impl WebChunkRenderSession {
             .drain_player_position_updates()
             .collect::<Vec<_>>();
         for update in updates {
-            let ack = self.camera.apply_player_position_update(update);
+            let accepted = self.camera.accept_position_update(update);
             self.camera
                 .probe_ground(self.runtime.client(), WEB_GROUND_PROBE_DISTANCE);
             self.runtime
-                .send_gameplay_command(ack)
+                .send_gameplay_command(accepted.accept_command)
                 .map_err(|error| format!("failed to accept browser camera correction: {error}"))?;
-            let sync = self.camera.pos_rot_move_player_command();
-            self.runtime.send_gameplay_command(sync).map_err(|error| {
-                format!("failed to resync corrected browser camera pose: {error}")
-            })?;
+            let resync = self.camera.corrected_pose_sync_command();
+            self.runtime
+                .send_gameplay_command(resync.command)
+                .map_err(|error| {
+                    format!("failed to resync corrected browser camera pose: {error}")
+                })?;
         }
         Ok(())
     }

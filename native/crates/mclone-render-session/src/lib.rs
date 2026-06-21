@@ -729,6 +729,27 @@ impl EngineCameraFrameState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EnginePoseSyncCommandKind {
+    Movement,
+    CorrectionResync,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnginePoseSyncCommand {
+    pub kind: EnginePoseSyncCommandKind,
+    pub command: ClientCommand,
+    pub camera: EngineCameraSnapshot,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnginePoseCorrectionAcceptance {
+    pub update: PlayerPositionUpdate,
+    pub accept_command: ClientCommand,
+    pub feet_position: Vec3d,
+    pub camera: EngineCameraSnapshot,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EngineRenderCamera {
     pub eye: [f32; 3],
@@ -832,6 +853,38 @@ impl EngineCameraController {
 
     pub fn apply_player_position_update(&mut self, update: PlayerPositionUpdate) -> ClientCommand {
         self.player.apply_player_position_update(update)
+    }
+
+    pub fn next_pose_sync_command(&mut self) -> Option<EnginePoseSyncCommand> {
+        let command = self.next_move_player_command()?;
+        Some(EnginePoseSyncCommand {
+            kind: EnginePoseSyncCommandKind::Movement,
+            command,
+            camera: self.snapshot(),
+        })
+    }
+
+    pub fn accept_position_update(
+        &mut self,
+        update: PlayerPositionUpdate,
+    ) -> EnginePoseCorrectionAcceptance {
+        let accept_command = self.apply_player_position_update(update);
+        let feet_position = self.player.pose().position;
+        EnginePoseCorrectionAcceptance {
+            update,
+            accept_command,
+            feet_position,
+            camera: self.snapshot(),
+        }
+    }
+
+    pub fn corrected_pose_sync_command(&mut self) -> EnginePoseSyncCommand {
+        let command = self.pos_rot_move_player_command();
+        EnginePoseSyncCommand {
+            kind: EnginePoseSyncCommandKind::CorrectionResync,
+            command,
+            camera: self.snapshot(),
+        }
     }
 
     pub const fn speed_blocks_per_second(&self) -> f64 {
@@ -2723,6 +2776,53 @@ mod tests {
 
         assert!(moved);
         assert!(camera.snapshot().eye.z > 8.0);
+    }
+
+    #[test]
+    fn engine_camera_controller_reports_pose_sync_command() {
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.0, 0.0, 32.0);
+        camera.turn_mouse_delta(5.0, 0.0);
+
+        let report = camera
+            .next_pose_sync_command()
+            .expect("rotation should produce pose sync");
+
+        assert_eq!(report.kind, EnginePoseSyncCommandKind::Movement);
+        assert!(matches!(report.command, ClientCommand::MovePlayer(_)));
+        assert_eq!(report.camera, camera.snapshot());
+        assert!(camera.next_pose_sync_command().is_none());
+    }
+
+    #[test]
+    fn engine_camera_controller_reports_correction_acceptance_and_resync() {
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.0, 0.0, 32.0);
+        let update = PlayerPositionUpdate {
+            position: Vec3d::new(4.0, 70.0, -3.0),
+            y_rot_degrees: 90.0,
+            x_rot_degrees: 30.0,
+            relative: mclone_protocol::PlayerPositionRelativeFlags::ABSOLUTE,
+            teleport_id: 42,
+            dismount_vehicle: false,
+        };
+
+        let accepted = camera.accept_position_update(update);
+
+        assert_eq!(accepted.update, update);
+        assert_eq!(accepted.feet_position, update.position);
+        assert_eq!(accepted.camera, camera.snapshot());
+        assert!(matches!(
+            accepted.accept_command,
+            ClientCommand::AcceptTeleport(mclone_protocol::AcceptTeleportCommand { id: 42 })
+        ));
+
+        let resync = camera.corrected_pose_sync_command();
+
+        assert_eq!(resync.kind, EnginePoseSyncCommandKind::CorrectionResync);
+        assert!(matches!(resync.command, ClientCommand::MovePlayer(_)));
+        assert_eq!(resync.camera, camera.snapshot());
+        assert!(camera.next_pose_sync_command().is_none());
     }
 
     #[test]

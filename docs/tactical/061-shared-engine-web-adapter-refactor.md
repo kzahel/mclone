@@ -6,7 +6,8 @@ landed; browser walking/collision mode, block interaction, and hotbar selection
 landed; browser target preview landed; desktop no-clip/mouse-look helpers
 converged; shared camera frame-state/reporting helpers landed; desktop
 player-pose commit sequence isolated; desktop `EngineCameraController` facade
-landed; desktop window camera view uses controller snapshots.
+landed; desktop window camera view uses controller snapshots; shared
+pose-sync/correction reports landed.
 
 ## Purpose
 
@@ -802,6 +803,30 @@ Desktop window camera view result:
   smoke still proved walk/no-clip state reporting, selected-slot break/place,
   worker compile availability, sky/actors, and zero pending compile jobs.
 
+Pose sync/correction report result:
+
+- `EngineCameraController` now exposes `EnginePoseSyncCommand`,
+  `EnginePoseSyncCommandKind`, and `EnginePoseCorrectionAcceptance` so desktop
+  and web can consume the same movement-sync, correction-ack, and corrected
+  resync report shapes without moving runtime dispatch into the shared crate.
+- Desktop and web now both route through `next_pose_sync_command`,
+  `accept_position_update`, and `corrected_pose_sync_command` instead of
+  reaching directly into the lower-level player command hooks from adapter
+  code.
+- Desktop still owns its native dispatch ordering: movement sync, pending
+  correction drain, spectator mirror update, correction acknowledgement,
+  corrected pose resync, and chunk-interest movement.
+- Web still owns its browser-specific dispatch ordering: pending correction
+  drain around movement sync, browser ground probing after corrections, and
+  WebGPU/worker presentation unchanged.
+- Shared tests cover movement-sync reporting and correction
+  acknowledgement/resync reporting.
+- Validation covered native unit tests, movement smoke, timedemo smoke, a native
+  rendered screenshot, WASM target check, native web build, and the Playwright
+  browser app smoke. Inspected `/tmp/mclone-native-debug.png`,
+  `/tmp/mclone-native-web-app.png`, and
+  `/tmp/mclone-native-web-app-canvas.png`.
+
 ### 5. Add Web Worker/Thread Policy
 
 Browser workers are part of the target architecture, not optional polish. The
@@ -898,24 +923,18 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should converge desktop and web pose-sync/correction reporting
-now that both platforms consume controller snapshots at their runtime/render
-boundaries:
+The next slice should make pose-sync/correction observability consistent across
+desktop and web now that both adapters use the shared report shapes:
 
-1. Compare desktop `sync_server_player_pose` /
-   `apply_pending_player_position_updates` with web
-   `sync_camera_pose_to_server` / `apply_pending_camera_position_updates` and
-   identify the common command/correction sequence.
-2. Extract the common command/correction result shape into shared
-   render-session/client-facing helpers where it does not hide platform-owned
-   runtime dispatch.
-3. Keep platform adapters responsible for dispatching commands and moving
-   interest/render work, but make the ordering and reporting of pose sync,
-   correction acknowledgment, and corrected pose resync explicit and reusable.
+1. Add small adapter-owned counters or last-frame stats for movement syncs,
+   correction accepts, and corrected pose resyncs without moving command
+   dispatch ownership out of the adapters.
+2. Surface those counters in the desktop debug/runtime stats and browser smoke
+   reports so both paths can prove the same command lifecycle.
+3. Add focused tests around the stats update points, especially correction
+   acceptance plus corrected resync ordering.
 4. Keep `native:web:app-smoke` proving walk + no-clip movement, target preview,
    selected-slot break/place, section dirty/update publication, worker compiles,
    sky/actors, resize, screenshots, and zero pending compile jobs.
-5. Keep browser worker compile submission, shared dirty/session policy, sky,
-   actors, resize, pose sync, movement modes, and WebGPU presentation unchanged;
-   leave pause/options/inventory and multiplayer/server selection as later UI
-   slices.
+5. Leave pause/options/inventory and multiplayer/server selection as later UI
+   slices; this chunk should stay on engine-adapter parity and diagnostics.

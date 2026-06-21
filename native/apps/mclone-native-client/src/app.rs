@@ -712,9 +712,9 @@ impl ChunkApp {
     }
 
     fn sync_server_player_pose(&mut self) -> Result<bool> {
-        let changed = if let Some(command) = self.camera.next_move_player_command() {
+        let changed = if let Some(report) = self.camera.next_pose_sync_command() {
             self.runtime
-                .send_gameplay_command(command)
+                .send_gameplay_command(report.command)
                 .context("failed to sync player pose to server")?
         } else {
             false
@@ -725,21 +725,21 @@ impl ChunkApp {
     fn apply_pending_player_position_updates(&mut self) -> Result<bool> {
         let mut changed = false;
         for update in self.runtime.drain_player_position_updates() {
-            let ack = self.camera.apply_player_position_update(update);
+            let accepted = self.camera.accept_position_update(update);
             sync_spectator_from_camera(&mut self.spectator, &self.camera);
             self.runtime
-                .send_gameplay_command(ack)
+                .send_gameplay_command(accepted.accept_command)
                 .context("failed to acknowledge player position correction")?;
+            let resync = self.camera.corrected_pose_sync_command();
             self.runtime
-                .send_gameplay_command(self.camera.pos_rot_move_player_command())
+                .send_gameplay_command(resync.command)
                 .context("failed to sync corrected player pose to server")?;
-            let pose = self.camera.player().pose();
             log::warn!(
                 "accepted server player position correction id={} feet=({:.2}, {:.2}, {:.2})",
-                update.teleport_id,
-                pose.position.x,
-                pose.position.y,
-                pose.position.z
+                accepted.update.teleport_id,
+                accepted.feet_position.x,
+                accepted.feet_position.y,
+                accepted.feet_position.z
             );
             changed = true;
         }
