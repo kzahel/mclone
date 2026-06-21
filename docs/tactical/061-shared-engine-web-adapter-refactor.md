@@ -923,18 +923,10 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should make pose-sync/correction observability consistent across
-desktop and web now that both adapters use the shared report shapes:
-
-1. Add small adapter-owned counters or last-frame stats for movement syncs,
-   correction accepts, and corrected pose resyncs without moving command
-   dispatch ownership out of the adapters.
-2. Surface those counters in the desktop debug/runtime stats and browser smoke
-   reports so both paths can prove the same command lifecycle.
-3. Add focused tests around the stats update points, especially correction
-   acceptance plus corrected resync ordering.
-4. Keep `native:web:app-smoke` proving walk + no-clip movement, target preview,
-   selected-slot break/place, section dirty/update publication, worker compiles,
-   sky/actors, resize, screenshots, and zero pending compile jobs.
-5. Leave pause/options/inventory and multiplayer/server selection as later UI
-   slices; this chunk should stay on engine-adapter parity and diagnostics.
+Threading topology now takes priority over the smaller pose-sync observability
+slice. Continue with
+[`062-shared-threading-topology.md`](062-shared-threading-topology.md), starting
+with the native integrated server runner thread, then repeat the same boundary
+for the browser/WASM Web Worker runner. After that topology lands, return here
+to add pose-sync/correction counters to desktop debug stats and browser smoke
+reports.
