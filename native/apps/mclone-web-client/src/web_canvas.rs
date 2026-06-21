@@ -7,13 +7,13 @@ use super::{SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime};
 use mclone_assets::PackedAssetSource;
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, ActorPresentationKind,
-    ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+    ClientInteractionController, ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
 #[cfg(test)]
+use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, chunk_section_index};
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, chunk_section_index,
+    BlockHitResult, BlockPos, BlockStateId, ChunkPos, Direction, HitResultType, Vec3d,
 };
-use mclone_core::{BlockPos, ChunkPos, Vec3d};
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     load_textured_terrain_assets,
@@ -499,6 +499,105 @@ struct WebChunkRenderPlan {
     sync_plan: RenderSectionSyncPlan,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WebBlockInteractionKind {
+    Break,
+    Place,
+}
+
+impl WebBlockInteractionKind {
+    fn from_label(label: &str) -> Result<Self, String> {
+        match label {
+            "break" => Ok(Self::Break),
+            "place" => Ok(Self::Place),
+            _ => Err(format!(
+                "unknown browser block interaction {label:?}; expected \"break\" or \"place\""
+            )),
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Break => "break",
+            Self::Place => "place",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct WebBlockInteractionReport {
+    kind: WebBlockInteractionKind,
+    hit: BlockHitResult,
+    hit_block_state: Option<BlockStateId>,
+    result_block_state: Option<BlockStateId>,
+    carried_item_synced: bool,
+    command_sent: bool,
+    changed: bool,
+    command_count_delta: usize,
+    update_count_delta: usize,
+    interaction_command_count: usize,
+    interaction_update_count: usize,
+    total_command_count: usize,
+    total_update_count: usize,
+    pending_compile_job_count: usize,
+}
+
+impl WebBlockInteractionReport {
+    fn to_js_value(self) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        let block_hit = self.hit.hit_type() == HitResultType::Block;
+        set_bool(&object, "ok", true)?;
+        set_string(&object, "action", self.kind.label())?;
+        set_bool(&object, "hit", block_hit)?;
+        set_string(&object, "hitType", if block_hit { "block" } else { "miss" })?;
+        set_bool(&object, "inside", self.hit.inside)?;
+        set_bool(&object, "carriedItemSynced", self.carried_item_synced)?;
+        set_bool(&object, "commandSent", self.command_sent)?;
+        set_bool(&object, "changed", self.changed)?;
+        set_string(&object, "direction", direction_label(self.hit.direction))?;
+        set_number(&object, "blockX", f64::from(self.hit.block_pos.x))?;
+        set_number(&object, "blockY", f64::from(self.hit.block_pos.y))?;
+        set_number(&object, "blockZ", f64::from(self.hit.block_pos.z))?;
+        set_number(&object, "hitX", self.hit.location.x)?;
+        set_number(&object, "hitY", self.hit.location.y)?;
+        set_number(&object, "hitZ", self.hit.location.z)?;
+        set_number(
+            &object,
+            "hitBlockStateId",
+            optional_block_state_id(self.hit_block_state),
+        )?;
+        set_number(
+            &object,
+            "resultBlockStateId",
+            optional_block_state_id(self.result_block_state),
+        )?;
+        set_number(
+            &object,
+            "commandCountDelta",
+            self.command_count_delta as f64,
+        )?;
+        set_number(&object, "updateCountDelta", self.update_count_delta as f64)?;
+        set_number(
+            &object,
+            "interactionCommandCount",
+            self.interaction_command_count as f64,
+        )?;
+        set_number(
+            &object,
+            "interactionUpdateCount",
+            self.interaction_update_count as f64,
+        )?;
+        set_number(&object, "commandCount", self.total_command_count as f64)?;
+        set_number(&object, "updateCount", self.total_update_count as f64)?;
+        set_number(
+            &object,
+            "pendingCompileJobCount",
+            self.pending_compile_job_count as f64,
+        )?;
+        Ok(object.into())
+    }
+}
+
 async fn render_canvas_clear(canvas: HtmlCanvasElement) -> Result<CanvasRenderReport, String> {
     let context = WebCanvasContext::new(canvas).await?;
     let frame = context
@@ -542,6 +641,7 @@ pub struct WebChunkRenderSession {
     sky: SkyRenderer,
     runtime: WebRuntime,
     camera: EngineCameraController,
+    interaction: ClientInteractionController,
     actor_interpolation: ActorInterpolationState,
     mesh_assets: WebTexturedMeshAssets,
     draw: Option<TexturedSectionDrawResources>,
@@ -664,6 +764,14 @@ impl WebChunkRenderSession {
         camera_state_to_js_value(&self.camera).map_err(JsValue::from)
     }
 
+    #[wasm_bindgen(js_name = interactBlock)]
+    pub fn interact_block(&mut self, kind: &str) -> Result<JsValue, JsValue> {
+        let kind = WebBlockInteractionKind::from_label(kind).map_err(JsValue::from)?;
+        self.interact_block_with_kind(kind)
+            .and_then(WebBlockInteractionReport::to_js_value)
+            .map_err(JsValue::from)
+    }
+
     #[wasm_bindgen(js_name = resizeCanvas)]
     pub fn resize_canvas(&mut self, width: u32, height: u32) -> Result<JsValue, JsValue> {
         let changed = self.context.resize(width, height);
@@ -749,6 +857,7 @@ impl WebChunkRenderSession {
             sky,
             runtime: WebRuntime::local_integrated(SMOKE_SEED),
             camera: EngineCameraController::spawn_for_chunk(SMOKE_INITIAL_CENTER),
+            interaction: ClientInteractionController::new(),
             actor_interpolation: ActorInterpolationState::new(),
             mesh_assets,
             draw: None,
@@ -903,6 +1012,86 @@ impl WebChunkRenderSession {
             WebFrameCamera::Camera,
             false,
         )
+    }
+
+    fn interact_block_with_kind(
+        &mut self,
+        kind: WebBlockInteractionKind,
+    ) -> Result<WebBlockInteractionReport, String> {
+        let command_count_before = self.runtime.command_count();
+        let update_count_before = self.runtime.update_count();
+        self.sync_camera_pose_to_server()?;
+        let carried_item_synced = self.sync_carried_item()?;
+
+        let snapshot = self.camera.snapshot();
+        let hit = self.interaction.pick_block(
+            self.runtime.client(),
+            snapshot.eye,
+            self.camera.player().pose().view_vector(),
+        );
+        let hit_block_state = self
+            .runtime
+            .client()
+            .block_state_at_block_pos(hit.block_pos);
+        let command = match kind {
+            WebBlockInteractionKind::Break => self.interaction.debug_instant_break_command(hit),
+            WebBlockInteractionKind::Place => self.interaction.use_item_on_command(hit),
+        };
+        let Some(command) = command else {
+            return Ok(WebBlockInteractionReport {
+                kind,
+                hit,
+                hit_block_state,
+                result_block_state: hit_block_state,
+                carried_item_synced,
+                command_sent: false,
+                changed: false,
+                command_count_delta: self.runtime.command_count() - command_count_before,
+                update_count_delta: self.runtime.update_count() - update_count_before,
+                interaction_command_count: 0,
+                interaction_update_count: 0,
+                total_command_count: self.runtime.command_count(),
+                total_update_count: self.runtime.update_count(),
+                pending_compile_job_count: self.compile_requests.pending_request_count(),
+            });
+        };
+
+        let step = self
+            .runtime
+            .send_gameplay_command(command)
+            .map_err(|error| {
+                format!("failed to send browser block interaction command: {error}")
+            })?;
+        let result_block_state = self
+            .runtime
+            .client()
+            .block_state_at_block_pos(hit.block_pos);
+        Ok(WebBlockInteractionReport {
+            kind,
+            hit,
+            hit_block_state,
+            result_block_state,
+            carried_item_synced,
+            command_sent: true,
+            changed: step.update_count > 0,
+            command_count_delta: self.runtime.command_count() - command_count_before,
+            update_count_delta: self.runtime.update_count() - update_count_before,
+            interaction_command_count: step.command_count,
+            interaction_update_count: step.update_count,
+            total_command_count: self.runtime.command_count(),
+            total_update_count: self.runtime.update_count(),
+            pending_compile_job_count: self.compile_requests.pending_request_count(),
+        })
+    }
+
+    fn sync_carried_item(&mut self) -> Result<bool, String> {
+        let Some(command) = self.interaction.ensure_has_sent_carried_item() else {
+            return Ok(false);
+        };
+        self.runtime
+            .send_gameplay_command(command)
+            .map_err(|error| format!("failed to sync browser carried item: {error}"))?;
+        Ok(true)
     }
 
     fn sync_camera_pose_to_server(&mut self) -> Result<(), String> {
@@ -1688,6 +1877,21 @@ fn set_string(object: &js_sys::Object, key: &str, value: &str) -> Result<(), Str
     js_sys::Reflect::set(object, &JsValue::from_str(key), &JsValue::from_str(value))
         .map(|_| ())
         .map_err(|_| format!("failed to set generated chunk report key {key}"))
+}
+
+fn direction_label(direction: Direction) -> &'static str {
+    match direction {
+        Direction::Down => "down",
+        Direction::Up => "up",
+        Direction::North => "north",
+        Direction::South => "south",
+        Direction::West => "west",
+        Direction::East => "east",
+    }
+}
+
+fn optional_block_state_id(block_state: Option<BlockStateId>) -> f64 {
+    block_state.map(|state| state.0 as f64).unwrap_or(-1.0)
 }
 
 #[cfg(test)]

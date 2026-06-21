@@ -159,6 +159,7 @@ async function run() {
           distance: Math.hypot(dx, dz),
         };
       }, walkingStart);
+      const blockInteractionProbe = await exerciseBlockInteraction(page, canvas);
       await page.keyboard.press("n");
       await page.waitForFunction(
         () => {
@@ -206,7 +207,7 @@ async function run() {
       const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
       const canvasPixels = analyzePng(canvasPng);
 
-      assertAppLoopResult(result, pageErrors, canvasPixels, walkingProbe);
+      assertAppLoopResult(result, pageErrors, canvasPixels, walkingProbe, blockInteractionProbe);
       console.log(JSON.stringify({
         url: `${baseUrl}/app.html`,
         screenshotPath,
@@ -215,6 +216,7 @@ async function run() {
         appLoop,
         canvasPixels,
         walkingProbe,
+        blockInteractionProbe,
         result,
       }, null, 2));
       return;
@@ -254,6 +256,77 @@ async function run() {
     await browser?.close();
     await new Promise((resolveClose) => server.close(resolveClose));
   }
+}
+
+async function exerciseBlockInteraction(page, canvas) {
+  const breakProbe = await clickBlockInteraction(page, canvas, "left", "break");
+  const placeProbe = await clickBlockInteraction(page, canvas, "right", "place");
+  return {
+    ok: breakProbe.ok && placeProbe.ok,
+    break: breakProbe,
+    place: placeProbe,
+  };
+}
+
+async function clickBlockInteraction(page, canvas, button, action) {
+  const start = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      commandCount: state.lastReport?.commandCount ?? 0,
+      interactionCount: state.interactionCount ?? 0,
+      meshBuildCount: state.lastCompileReport?.meshBuildCount ?? state.lastReport?.meshBuildCount ?? 0,
+    };
+  });
+  await canvas.click({ position: { x: 640, y: 360 }, button });
+  await page.waitForFunction(
+    ({ start, action }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      const interaction = state?.lastInteraction;
+      const compileReport = state?.lastCompileReport;
+      return state?.ok === true
+        && state.pendingCompileJobCount === 0
+        && (state.interactionCount ?? 0) > start.interactionCount
+        && interaction?.ok === true
+        && interaction.action === action
+        && interaction.hit === true
+        && interaction.commandSent === true
+        && interaction.changed === true
+        && (interaction.interactionUpdateCount ?? 0) > 0
+        && (interaction.commandCount ?? 0) > start.commandCount
+        && compileReport?.commandCount >= interaction.commandCount
+        && compileReport?.acceptedCompileSectionCount > 0
+        && compileReport?.meshBuildCount > start.meshBuildCount;
+    },
+    { start, action },
+    { timeout: 60_000 },
+  );
+  return page.evaluate(
+    ({ start, action }) => {
+      const state = globalThis.__mcloneWebApp.state;
+      const interaction = state.lastInteraction;
+      const compileReport = state.lastCompileReport;
+      const recompiled = compileReport?.commandCount >= interaction?.commandCount
+        && compileReport?.acceptedCompileSectionCount > 0
+        && compileReport?.meshBuildCount > start.meshBuildCount;
+      return {
+        ok: state.ok === true
+          && interaction?.action === action
+          && interaction?.hit === true
+          && interaction?.commandSent === true
+          && interaction?.changed === true
+          && recompiled,
+        start,
+        interaction,
+        compileReport: {
+          commandCount: compileReport?.commandCount ?? 0,
+          acceptedCompileSectionCount: compileReport?.acceptedCompileSectionCount ?? 0,
+          meshBuildCount: compileReport?.meshBuildCount ?? 0,
+          pendingCompileJobCount: compileReport?.pendingCompileJobCount ?? -1,
+        },
+      };
+    },
+    { start, action },
+  );
 }
 
 function buildWasm() {
@@ -459,7 +532,7 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
   }
 }
 
-function assertAppLoopResult(result, pageErrors, canvasPixels, walkingProbe) {
+function assertAppLoopResult(result, pageErrors, canvasPixels, walkingProbe, blockInteractionProbe) {
   if (pageErrors.length > 0) {
     throw new Error(`browser app page errors:\n${pageErrors.join("\n")}`);
   }
@@ -483,6 +556,9 @@ function assertAppLoopResult(result, pageErrors, canvasPixels, walkingProbe) {
   }
   if (!walkingProbe?.ok || walkingProbe.distance <= 0.2) {
     throw new Error(`native web app did not move through the walking/collision path before no-clip streaming:\n${JSON.stringify({ walkingProbe, result }, null, 2)}`);
+  }
+  if (!blockInteractionProbe?.ok) {
+    throw new Error(`native web app did not break/place through the shared interaction path and recompile dirty sections:\n${JSON.stringify({ blockInteractionProbe, result }, null, 2)}`);
   }
   if (result.movementMode !== "NOCLIP" || result.lastReport?.movementMode !== "NOCLIP") {
     throw new Error(`native web app did not keep no-clip as a toggleable streaming fallback:\n${JSON.stringify(result, null, 2)}`);

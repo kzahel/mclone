@@ -27,6 +27,9 @@ const runtime = {
     onGround: false,
     horizontalCollision: false,
     verticalCollision: false,
+    interactionCount: 0,
+    interactionStatus: "idle",
+    lastInteraction: null,
     width: 0,
     height: 0,
     dayTime: 0,
@@ -95,6 +98,7 @@ class WebChunkApp {
     this.hasRendered = false;
     this.loadedCenter = null;
     this.pointerDragging = false;
+    this.pointerDown = null;
     this.animationFrame = 0;
     this.lastFrameTime = 0;
   }
@@ -130,6 +134,7 @@ class WebChunkApp {
       "cameraFrameState",
       "resizeCanvas",
       "toggleMovementMode",
+      "interactBlock",
     ]) {
       if (typeof this.session[name] !== "function") {
         throw new Error(`missing WebChunkRenderSession.${name} export`);
@@ -305,6 +310,32 @@ class WebChunkApp {
     runtime.state.lastReport = report;
   }
 
+  interactBlock(action) {
+    if (!this.session) {
+      return null;
+    }
+    try {
+      const interaction = this.session.interactBlock(action);
+      if (!interaction?.ok) {
+        return null;
+      }
+      runtime.state.interactionCount += 1;
+      runtime.state.lastInteraction = interaction;
+      runtime.state.interactionStatus = formatInteractionStatus(interaction);
+      if (interaction.changed && this.hasRendered && !this.pendingCompile) {
+        void this.compileCameraView();
+      }
+      updateDom();
+      return interaction;
+    } catch (error) {
+      runtime.state.ok = false;
+      runtime.state.status = stringifyError(error);
+      console.error(error);
+      updateDom();
+      return null;
+    }
+  }
+
   setInputKey(name, down) {
     if (!(name in this.keys)) {
       return false;
@@ -321,6 +352,10 @@ class WebChunkApp {
     }
     if (Number.isFinite(y)) {
       this.mouseDeltaY += y;
+    }
+    if (this.pointerDown) {
+      this.pointerDown.movement += Math.abs(Number.isFinite(x) ? x : 0)
+        + Math.abs(Number.isFinite(y) ? y : 0);
     }
   }
 
@@ -393,13 +428,37 @@ function bindInput(app) {
     app.requestPointerLock();
   });
 
-  app.canvas.addEventListener("mousedown", () => {
+  app.canvas.addEventListener("mousedown", (event) => {
     app.pointerDragging = true;
+    app.pointerDown = {
+      button: event.button,
+      enabled: runtime.state.pointerLockAttempted,
+      movement: 0,
+    };
     app.canvas.focus();
+    if (event.button === 2) {
+      event.preventDefault();
+    }
   });
 
-  window.addEventListener("mouseup", () => {
+  window.addEventListener("mouseup", (event) => {
+    const pointerDown = app.pointerDown;
     app.pointerDragging = false;
+    app.pointerDown = null;
+    if (!pointerDown?.enabled || pointerDown.button !== event.button || pointerDown.movement > 4) {
+      return;
+    }
+    if (event.button === 0) {
+      event.preventDefault();
+      app.interactBlock("break");
+    } else if (event.button === 2) {
+      event.preventDefault();
+      app.interactBlock("place");
+    }
+  });
+
+  app.canvas.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
   });
 
   window.addEventListener("mousemove", (event) => {
@@ -550,6 +609,8 @@ function updateDom() {
   setText("camera", `${state.cameraX.toFixed(1)}, ${state.cameraY.toFixed(1)}, ${state.cameraZ.toFixed(1)}`);
   setText("mode", state.movementMode);
   setText("ground", state.onGround ? "ground" : state.verticalCollision ? "blocked" : state.horizontalCollision ? "wall" : "air");
+  setText("target", formatTarget(state.lastInteraction));
+  setText("action", state.interactionStatus);
   setText("chunks", String(state.loadedChunkCount));
   setText("sections", String(state.residentSectionCount));
   setText("time", `${Number(state.dayTime || 0).toFixed(0)} / ${Number(state.timeOfDay || 0).toFixed(3)}`);
@@ -567,6 +628,26 @@ function updateDom() {
 function setText(id, value) {
   const element = document.getElementById(id);
   if (element) element.textContent = value;
+}
+
+function formatInteractionStatus(interaction) {
+  if (!interaction?.ok) {
+    return "idle";
+  }
+  if (!interaction.hit) {
+    return `${interaction.action}: miss`;
+  }
+  return `${interaction.action}: ${interaction.changed ? "changed" : "same"}`;
+}
+
+function formatTarget(interaction) {
+  if (!interaction?.ok) {
+    return "-";
+  }
+  if (!interaction.hit) {
+    return "miss";
+  }
+  return `${interaction.blockX}, ${interaction.blockY}, ${interaction.blockZ}`;
 }
 
 function snapshotState() {

@@ -2,7 +2,7 @@
 
 Status: active; shared update dirtying, browser app loop, first-person web
 camera/input, resize, browser no-clip pose sync, and browser sky/actor drawing
-landed; browser walking/collision mode landed.
+landed; browser walking/collision mode and block interaction landed.
 
 ## Purpose
 
@@ -657,6 +657,27 @@ Walking/no-clip browser movement result:
   blocks, then `NOCLIP` streaming to chunk `(-1, -1)` with zero pending compile
   jobs.
 
+Block interaction browser result:
+
+- `WebChunkRenderSession` now owns a `ClientInteractionController` next to the
+  shared camera controller.
+- The browser `interactBlock("break" | "place")` export follows the desktop
+  mouse-handler sequence: sync player pose, sync carried item if needed, raycast
+  from the player eye/view through the client replica, build the
+  `DebugInstantBreak` or `UseItemOn` command, and send it through the same
+  gameplay command path.
+- Browser mouse handling maps short left-clicks to break and short right-clicks
+  to place after the initial pointer-lock/focus click. Dragging still drives
+  camera look and does not accidentally interact.
+- Interaction reports expose the action, block hit/miss, hit block position,
+  hit/result block state IDs, direct command/update counts, and pending compile
+  job count. The HUD displays the most recent target and action result.
+- `native:web:app-smoke` now proves the browser can break and place through
+  this path before toggling to no-clip. The captured report broke
+  `(-1, 93, 1)` to air, placed after hitting `(-1, 93, 3)`, accepted two
+  recompiled render sections for each interaction, and ended with zero pending
+  compile jobs.
+
 ### 5. Add Web Worker/Thread Policy
 
 Browser workers are part of the target architecture, not optional polish. The
@@ -753,20 +774,22 @@ This parent plan is complete when:
 
 ## Next Tactical Slice
 
-The next slice should make browser interaction converge with desktop now that
-movement and world presentation are closer:
+The next slice should close the remaining carried-item gap in browser
+interaction and continue reducing desktop/web drift:
 
-1. Thread block raycast/break/place input through the browser app using the same
-   `ClientInteractionController` and gameplay command path desktop uses.
-2. Keep `WALK` as the default browser movement mode and `NOCLIP` as a debug
-   toggle/fallback while continuing to report mode, ground, and collision state.
-3. Continue reducing desktop/web camera drift by wrapping desktop no-clip
+1. Add browser number-key hotbar selection through
+   `ClientInteractionController::select_hotbar_slot`, matching desktop's
+   `Digit1` through `Digit9` handling and `SetCarriedItem` sync behavior.
+2. Expose selected slot/carried-item state in the web interaction report or HUD
+   so placement validation can prove the selected block changed, not only that a
+   placement command mutated the world.
+3. Extend `native:web:app-smoke` to select a non-default hotbar slot, place with
+   it, and assert the resulting section-block update/visible recompile reflects
+   that selected slot.
+4. Continue reducing desktop/web camera drift by wrapping desktop no-clip
    stepping around shared `EngineCameraController` primitives where that does
    not disrupt walking/collision behavior.
-4. Keep browser worker compile submission, shared dirty/session policy, sky,
-   actors, resize, pose sync, and WebGPU presentation unchanged.
-5. Extend validation to cover walk + no-clip movement, block interaction
-   command round trips, resulting section dirty/update publication, continued
-   streaming, sky/actors, resize, screenshots, and zero pending compile jobs;
+5. Keep browser worker compile submission, shared dirty/session policy, sky,
+   actors, resize, pose sync, movement modes, and WebGPU presentation unchanged;
    leave pause/options/inventory and multiplayer/server selection as later UI
    slices.
