@@ -1,6 +1,9 @@
 # 066: Web Shared-Memory Worker Architecture
 
-Status: active high-priority architecture; render-section compiler transport
+Status: Superseded by [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md).
+The render-worker `SharedArrayBuffer` ABI and JS-shrink boundary are carried
+forward into 067; this doc is retained for its landed history. Historical
+status: high-priority architecture; render-section compiler transport
 diagnostics, persistent worker asset/catalog state, and shared result arena
 prototype landed; request-scoped shared input snapshots landed. Final resident
 shared arenas/rings and the Rust-owned worker lifecycle are next.

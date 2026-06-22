@@ -1,0 +1,361 @@
+# 067: Shared Render-Worker Architecture
+
+Status: active high-priority architecture parent. Supersedes
+[`065-native-web-mobile-streaming-performance.md`](065-native-web-mobile-streaming-performance.md)
+and [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
+folding their streaming-perf goals and the render-worker `SharedArrayBuffer`
+ABI into one direction. The shared render-session boundary stays owned by
+[`061-shared-engine-web-adapter-refactor.md`](061-shared-engine-web-adapter-refactor.md);
+the parent native-thread/Web-Worker topology and the server-runner / worldgen /
+light / transport lanes stay owned by
+[`062-shared-threading-topology.md`](062-shared-threading-topology.md). This
+doc owns only the render-compile worker.
+
+## Purpose
+
+Make the desktop native app and the native web/WASM app run the **same render
+compile topology** with close performance characteristics, without:
+
+- making desktop code convoluted because web needs `SharedArrayBuffer`,
+- growing duplicate JavaScript orchestration, or
+- paying web-specific serialization costs on the desktop hot path just for
+  architectural symmetry.
+
+The render-session policy is already shared in Rust. The remaining divergence is
+in *who drives the compile loop* and *at what granularity*, not just in the
+worker transport. This tactical defines the target so the next implementation
+slices have one direction instead of three render-worker docs.
+
+## What Is Already Unified (do not re-do)
+
+Both platforms already share the policy core in `mclone-render-session`:
+
+- dirty state, ready planning, chunk budgeting, and removal classification
+  (`RenderSectionDirtyState`, `plan_ready_render_sections`,
+  `prepare_render_section_sync_plan`),
+- request identity, submitted revisions, and stale acceptance
+  (`RenderSectionCompileRequest`, `RenderSectionCompileResult`,
+  `partition_by_revision`),
+- cache merge after a completed compile (`apply_finished_compile_report`,
+  `drain_completed_compile_updates`).
+
+The web worker output is already routed back through that same acceptance path
+via `compile_result_from_worker_report` in
+`native/apps/mclone-web-client/src/web_canvas.rs`. So **request identity,
+revisions, stale acceptance, and cache merge are Rust-owned on both sides
+today.** JavaScript does not own staleness or coalescing policy. Implementers
+should not rebuild any of that; this tactical changes the loop and the
+transport around it.
+
+## Current State
+
+### Desktop render compile (the reference shape)
+
+`native/apps/mclone-native-client/src/scene_runtime.rs` and
+`render_cache.rs`:
+
+- `RenderSectionCompileWorker` runs on an OS thread and implements
+  `mclone_render_session::RenderSectionCompiler`
+  (`submit` / `try_recv_completed` / `pending_job_count`)
+  (`render_cache.rs:125`).
+- The request is a `RenderSectionCompileRequest { target_sections,
+  section_revisions, snapshots: Vec<ChunkSnapshot> }` moved over `mpsc` with
+  **zero serialization**; the result is a `TexturedRenderSectionBuildReport`
+  moved back over `mpsc`.
+- The frame loop is continuous **incremental streaming**:
+  `sync_render_sections_with_budget(camera, DEFAULT_RENDER_CHUNK_MESH_BUDGET)`
+  with the budget set to `1` chunk per frame (`scene_runtime.rs:39, 600`),
+  distance-sorted, `RenderSectionRemovalMode::ApplyImmediately`. Each frame
+  drains completed jobs, merges the cache, uploads bounded GPU work, and renders
+  the current cache. One job is in flight at a time but jobs are tiny.
+
+### Native-web render compile (the divergent shape)
+
+`native/apps/mclone-web-client/src/web_canvas.rs` and `www/*.js`:
+
+- Web does **not** implement `RenderSectionCompiler`. It drives the worker
+  round-trip from JavaScript through bespoke wasm-bindgen exports
+  (`beginChunkRenderCompileRequest` / `finishChunkRenderCompileRequest` /
+  `requestCameraRenderCompile` / `takeQueuedCameraRenderCompile`).
+- The loop is a one-shot **whole-view transaction**. `prepare_chunk_render_plan`
+  builds the entire ready plan in a single request with `chunk_budget =
+  usize::MAX` (`web_canvas.rs:2291`), `ReadyWithNeighbors` for every section,
+  and `RenderSectionRemovalMode::Defer`. `mclone-web-app.js::compileCameraView`
+  owns the `begin -> worker promise -> finish` sequence and the `pendingCompile`
+  busy flag (`mclone-web-app.js:378-429`).
+- Coalescing uses `RenderViewCompileQueue<String>` + `loaded_center`, which are
+  **web-only** constructs (desktop is purely dirty-driven and references
+  neither).
+- Transport is the full request-scoped encode/copy/decode chain: every request
+  re-encodes *all* loaded snapshots
+  (`client().chunk_snapshots().cloned().collect()` ->
+  `encode_web_render_compile_input`, `web_canvas.rs:1728-1735`), copies into a
+  per-request `SharedArrayBuffer` input arena, the worker copies the SAB view
+  into worker wasm memory and decodes, builds a packed report, writes it into a
+  per-request SAB result arena, and main wasm `to_vec()`s + decodes it back.
+
+### Why this is the real problem
+
+Because web compiles the **entire ready plan as one job** (`usize::MAX`) instead
+of a per-frame increment, every boundary crossing submits 96-144 sections and
+produces an up-to-11.6 MB result. This is a scheduling-granularity divergence,
+not a transport bug: even with perfect zero-copy SAB, a whole-view job is still
+a whole-view job. The transport chain makes it worse; the budget is the root
+cause.
+
+Measured after the latest landed slice (066, request-scoped shared input
+arena):
+
+- snapshot input ~206-215 KB per radius-1 request,
+- packed/shared result still up to ~11.6 MB,
+- worker round trips ~34-66 ms (down from ~0.87-0.89 s once the worker stopped
+  regenerating a local view),
+- total movement compile windows still ~262-474 ms,
+- dirty planning still submits 96-144 sections for movement, often only 44-68
+  non-empty.
+
+### Two secondary issues
+
+1. **Request-scoped input is the whole world.** The worker holds a resident
+   mesh catalog (`WebRenderCompilerSession`) but no resident snapshot mirror, so
+   movement re-ships chunks it shipped last frame.
+2. **SAB arenas are allocated per request.** `createRenderCompilerSharedInputBuffer`
+   / `createRenderCompilerSharedResultBuffer` (`mclone-web-app.js:1538-1578`)
+   `new SharedArrayBuffer(...)` on every compile, with realloc-on-overflow.
+   Nothing is a resident ring.
+
+### JavaScript duplication
+
+`www/` has **zero ES-module structure** (no `import`/`export` anywhere).
+`mclone-web-app.js` (2327 lines) and `mclone-web-smoke.js` (1103 lines)
+copy-paste ~35 shared symbols: the entire render-compiler worker protocol
+constants, the `RenderSectionWorkerCompiler` class, SAB buffer creation,
+shared-memory support detection, metrics helpers, and worker URLs. The ABI
+constants are hand-duplicated a third time in
+`mclone-render-compiler-worker.js`.
+
+## Target Architecture
+
+**One shared logical `RenderSectionCompiler` contract; platform-specific memory
+mechanics behind it. Web adopts desktop's streaming loop.**
+
+1. **Web implements `RenderSectionCompiler`** over a resident SAB ring, exactly
+   the seam desktop uses over `mpsc`. `submit` serializes the request into the
+   input arena and rings a doorbell; `try_recv_completed` polls the result
+   control word via `Atomics.load` **from main wasm** and decodes — no
+   JavaScript in the data path, no `await`.
+2. **Web drives the same `sync_render_sections_with_budget` loop as desktop**,
+   with budget ~1 (tunable; could be a small worker pool). The 96-144-section
+   mega-job is replaced by per-frame increments that fill progressively while
+   the current cache stays visible.
+3. **JavaScript shrinks to a doorbell + lifecycle shim**: construct the Worker,
+   hand it bindgen URLs + the resident shared buffers at init, post tiny wakeup
+   messages, surface errors/diagnostics. It owns no scheduling, no busy flag, no
+   payload, no promise chain.
+4. **The worker holds resident snapshot state**, so request-scoped input is the
+   *delta* (target keys + revisions + the few changed columns).
+
+**Desktop transport does not change.** Desktop keeps `Vec<ChunkSnapshot>` +
+channels by move. The symmetry lives in the *trait*, not in a shared byte ABI.
+Forcing desktop through a serialized arena ABI for symmetry would tax the
+desktop hot path for zero benefit. We choose a shared logical trait, **not** a
+common arena ABI across both platforms.
+
+### Interface boundaries
+
+```text
+shared Rust render-session policy  (mclone-render-session)
+  dirty state · ready plan · revisions · stale acceptance · cache merge
+  sync_render_sections_with_budget(...)  <- lift here; both platforms call it
+  trait RenderSectionCompiler { submit; try_recv_completed; pending_job_count }
+
+platform worker backend  (Rust, behind the trait)
+  desktop: RenderSectionCompileWorker   -> thread + mpsc, request by move
+  web:     WebRenderSectionCompiler      -> resident SAB ring, Atomics doorbell
+
+JS worker glue  (web only — thin)
+  Worker construction · init buffers · wakeup postMessage · error/diagnostics
+
+wasm-bindgen exports  (web only — shrinks)
+  advance_frame(input,dt) · sync_render() -> small status/diagnostics struct
+  (NO packed bytes cross this boundary; result lives in the SAB ring)
+
+GPU upload / presentation  (platform render adapter, unchanged)
+  read accepted sections from shared cache · bounded per-frame upload
+```
+
+### Resident vs request-scoped state
+
+- **Resident, worker-readable:** mesh catalog/atlas (already resident), the SAB
+  control + input + output ring (allocate once at init; today per-request), and
+  a worker-side snapshot mirror.
+- **Request-scoped:** only the per-frame delta — target `RenderSectionKey`s,
+  their submitted revisions, and the columns that changed since the last
+  compile.
+
+## Render Shared ABI (carried forward from 066)
+
+The first render ABI can stay small. It does not need to solve general Rust
+object sharing. It uses the explicit shared-buffer job shape already proven by
+the runner / worldgen / light lanes in 062, not a shared Wasm linear-memory
+thread runtime (that remains a later, separate option and must not block this).
+
+- **Initialization (once):** bindgen URLs; asset bytes once; shared control
+  buffer; shared input arena; shared output arena; ABI version + capacities.
+  The worker must not parse the asset pack per request.
+- **Job header:** request id; compile generation id; target section count;
+  input offset/length; output offset/capacity; flags; status (empty, pending,
+  running, complete, stale, failed, overflow); per-section revision table
+  offset. Atomics own status/byte publication. Header layout lives in Rust
+  constants, mirrored in JS only where the worker glue must touch it.
+- **Input payload:** target key list; submitted revisions; compact block-state
+  ids for target sections; neighbor section facts needed for culling/AO/light;
+  light payloads if read; catalog version. The worker does not request a fresh
+  center/radius view.
+- **Output payload:** section-addressed, not a whole-view transaction — section
+  key; revision; per-section status; visibility bits; vertex/index counts and
+  offsets; build stats. Main wasm applies the existing shared stale/revision
+  acceptance before mutating the CPU cache. GPU upload stays main-thread.
+- **Overflow/backpressure:** split jobs when the output arena is tight; mark a
+  job `overflow` with the required byte count; keep any transferred fallback as
+  a hard-diagnostic, labeled path; expose pool hits/misses/drops, overflow
+  retries, max live capacity, and pending high-water.
+
+## What To Extract / Delete
+
+**Extract / add:**
+
+- Lift the desktop `sync_render_sections_with_budget` streaming loop into a
+  shared `EngineRenderSession` method both platforms call (parametrized by
+  compiler, budget, ordering, readiness, removal mode).
+- Add `WebRenderSectionCompiler: RenderSectionCompiler` in the web client crate,
+  over a resident SAB ring.
+- One ES module for the residual JS glue; emit the ABI constants from Rust so
+  there is one source instead of three hand-synced copies.
+
+**Delete as later stages land (not up front):**
+
+- Web `begin/finish/take` wasm-bindgen exports; the JS `compileCameraView`
+  begin->worker->finish chain; the `RenderSectionWorkerCompiler` class.
+- Per-request SAB allocation (`createRenderCompiler*Buffer`) -> resident ring.
+- `encode_web_render_compile_input` over *all* snapshots -> delta-only against
+  the worker's resident mirror.
+- `RenderViewCompileQueue<String>` + `loaded_center` — these exist only to
+  coalesce JS-driven whole-view requests; under per-frame streaming, coalescing
+  is implicit in dirty state and they collapse away. They are the current
+  correctness guard against stale-center swaps, so retire them only once the
+  streaming loop subsumes that guard.
+- The ~35 duplicated symbols across `mclone-web-app.js` / `mclone-web-smoke.js`.
+
+## Risks And Tradeoffs
+
+- **Bounded ring backpressure.** `mpsc` is unbounded; a SAB ring is not. With
+  budget ~1 and single-in-flight, pressure is low, but the overflow policy above
+  is required.
+- **Still not zero-copy.** One SAB->worker-wasm copy in and one out remains (the
+  worker reads SAB views, not shared wasm linear memory). That is far cheaper
+  than today's encode-all/decode-all. Full zero-copy is the deferred shared Wasm
+  thread runtime — out of scope here.
+- **Budget tuning on web.** At ~34-66 ms round trips, budget=1 single-in-flight
+  catches up a ~12-chunk burst over ~0.5-1 s, but progressively, non-blocking,
+  with the cache visible (the goal) versus today's ~262-474 ms semi-blocking
+  window. If catch-up feels slow, raise the budget or add a 2-3 worker pool; the
+  trait makes that a backend detail.
+- **Removal-mode / readiness convergence.** Web currently uses `Defer` +
+  `ReadyWithNeighbors`-for-all + coordinate sort; desktop uses
+  `ApplyImmediately` + distance readiness + distance sort. Converging the loop
+  forces choosing one (desktop's is more mature). This is a behavior change to
+  validate, not a mechanical one.
+- **Sequencing risk.** The keystone (per-frame streaming, Stage 3) is the
+  riskiest change, so it must not be first.
+
+## Implementation Sequence
+
+### Stage 0 — Lock baselines
+
+Capture current movement metrics (submitted sections, packed bytes, window ms,
+frame gaps) as a regression fence using the existing instrumentation. No engine
+change.
+
+### Stage 1 — First safe next step: resident SAB arenas
+
+Allocate input / result / control buffers once at session init and reuse them;
+keep the existing begin/finish flow otherwise untouched. Isolated, mechanical,
+reversible, and a prerequisite for the ring. Removes per-request SAB churn
+immediately.
+
+### Stage 2 — Web `RenderSectionCompiler` over the resident ring
+
+`submit` fills the input arena + doorbell; `try_recv_completed` polls the result
+control word from main wasm. JavaScript becomes doorbell-only. Keep the
+whole-view budget here to isolate the transport change from the scheduling
+change.
+
+### Stage 3 — Keystone: web drives `sync_render_sections_with_budget` (budget ~1)
+
+Delete the begin/finish/take exports, the JS promise chain,
+`RenderSectionWorkerCompiler`, and (carefully) the view-center queue. This kills
+the 96-144-section jobs and is where the movement window stops being one large
+block.
+
+### Stage 4 — Resident snapshot mirror; request input becomes delta-only
+
+The biggest payload win; aligns input with the ABI input spec above.
+
+### Stage 5 — JS dedup + single-source ABI constants
+
+Collapse the ~35 shared symbols into one module; emit the ABI from Rust.
+
+**Least-convoluted path to "close to desktop":** Stages 1->3 alone get web onto
+desktop's topology and kill the mega-job, mostly by deleting JavaScript rather
+than adding abstraction. Stage 4 is the payload optimization. Do not reach for
+shared Wasm linear memory.
+
+## Validation
+
+- `cargo test --manifest-path native/Cargo.toml` after each stage (shared policy
+  has dense unit coverage).
+- `cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target
+  wasm32-unknown-unknown`.
+- `node --check` on `mclone-web-app.js`, `mclone-web-smoke.js`,
+  `mclone-render-compiler-worker.js`, and `scripts/browser-smoke.mjs`.
+- `pnpm native:web:build`, `pnpm native:web:app-smoke`,
+  `pnpm native:web:mobile-smoke`, `pnpm native:web:movement-perf`.
+- `pnpm native:movement:smoke` and `pnpm native:timedemo:smoke` for the
+  streaming/camera paths.
+- Per stage, assert against the Stage-0 baselines: submitted-section count,
+  packed/shared bytes, worker round-trip ms, total movement window ms, max frame
+  gap. Stage 3 should show submitted sections drop from ~96-144 to single digits
+  per frame and the window stop being a single large block.
+- Rendered-output check: headless/Playwright capture to `/tmp` and **look at
+  it** at the first drawable milestone of Stage 3, then again after Stage 4.
+- Keep a deterministic smoke entry that pumps frames to idle (the web analog of
+  desktop `sync_all_render_sections`) so begin/finish removal does not lose
+  coverage.
+
+## Non-Goals
+
+- No legacy TypeScript engine edits.
+- No new multi-megabyte `postMessage` transfer path unless explicitly labeled
+  fallback/debug with metrics.
+- No desktop transport rewrite; desktop must not pay web serialization costs for
+  symmetry.
+- No shared Wasm linear-memory thread runtime in this tactical; the explicit
+  worker interface remains the contract even if that lands later.
+- No change to worldgen correctness, chunk publication, or the server-runner /
+  worldgen / light / transport lanes owned by 062.
+- `wasm32-unknown-unknown` remains the browser target.
+
+## Relationship To Other Tacticals
+
+- `061-shared-engine-web-adapter-refactor.md` owns the shared Rust
+  render-session boundary this builds on.
+- `062-shared-threading-topology.md` owns the parent native-thread/Web-Worker
+  topology and the runner / worldgen / light / transport shared-memory lanes.
+  This tactical's render-compile backend is the render lane of that topology.
+- `065-native-web-mobile-streaming-performance.md` (superseded) — its movement
+  perf goal is met here by the per-frame streaming change.
+- `066-web-shared-memory-worker-architecture.md` (superseded) — its render
+  worker SAB ABI and JS-shrink boundary are carried forward above.
+</content>
+</invoke>

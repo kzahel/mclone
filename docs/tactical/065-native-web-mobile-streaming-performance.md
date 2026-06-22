@@ -1,6 +1,8 @@
 # 065: Native Web Mobile Streaming Performance
 
-Status: active; diagnostics, movement perf harness, background compile,
+Status: Superseded by [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md).
+The render-worker streaming direction now lives in 067; this doc is retained for
+its landed history. Historical status: diagnostics, movement perf harness, background compile,
 deferred browser commands, budgeted worker-update drains, and stale-result
 tolerance landed; shared Rust compile-queue/coalescing decision landed;
 compile-scope diagnostics, all-air section mesh fast path, and
