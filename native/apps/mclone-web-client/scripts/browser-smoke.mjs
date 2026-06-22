@@ -1548,6 +1548,17 @@ function assertCompileTimingDiagnostics(timing, label) {
     || !Number.isFinite(Number(timing.decodeFinishApplyMs))
     || !Number.isFinite(Number(timing.maxFrameGapMs))
     || Number(timing.packedByteLength) <= 0
+    || timing.renderCompilerTransportKind !== "message-transfer"
+    || timing.renderCompilerMetrics?.transportKind !== "message-transfer"
+    || Number(timing.renderCompilerWorkerInitCount) <= 0
+    || Number(timing.renderCompilerWorkerWasmInitCount) <= 0
+    || Number(timing.renderCompilerCompileCount) <= 0
+    || Number(timing.renderCompilerWorkerCompileCount) <= 0
+    || Number(timing.renderCompilerAssetPackSendCount) <= 0
+    || Number(timing.renderCompilerRequestAssetPackByteLength) <= 0
+    || Number(timing.renderCompilerRequestByteLength) <= 0
+    || Number(timing.renderCompilerTransferredRequestByteLength) <= 0
+    || Number(timing.renderCompilerTransferredResponseByteLength) !== Number(timing.packedByteLength)
     || Number(timing.submittedCompileSectionCount) <= 0
     || Number(timing.acceptedCompileSectionCount) < 0
     || Number(timing.staleCompileSectionCount) < 0
@@ -1571,6 +1582,36 @@ function summarizeCompileTimings(timings) {
     decodeFinishApplyMs: summarizeNumbers(apply),
     maxFrameGapMs: summarizeNumbers(frameGaps),
     packedByteLengthMax: Math.max(0, ...values.map((timing) => Number(timing.packedByteLength) || 0)),
+    renderCompilerTransportKinds: [...new Set(values.map((timing) => (
+      timing.renderCompilerTransportKind || "unknown"
+    )))],
+    renderCompilerRequestAssetPackByteLengthMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerRequestAssetPackByteLength) || 0
+    ))),
+    renderCompilerTransferredRequestByteLengthMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerTransferredRequestByteLength) || 0
+    ))),
+    renderCompilerTransferredResponseByteLengthMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerTransferredResponseByteLength) || 0
+    ))),
+    renderCompilerTransferredRequestByteCountMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerTransferredRequestByteCount) || 0
+    ))),
+    renderCompilerTransferredResponseByteCountMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerTransferredResponseByteCount) || 0
+    ))),
+    renderCompilerAssetPackSendCountMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerAssetPackSendCount) || 0
+    ))),
+    renderCompilerWorkerInitCountMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerWorkerInitCount) || 0
+    ))),
+    renderCompilerWorkerWasmInitCountMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerWorkerWasmInitCount) || 0
+    ))),
+    renderCompilerWorkerCompileCountMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerWorkerCompileCount) || 0
+    ))),
     viewDirtyChunkCountMax: Math.max(0, ...values.map((timing) => Number(timing.viewDirtyChunkCount) || 0)),
     viewRemovalChunkCountMax: Math.max(0, ...values.map((timing) => Number(timing.viewRemovalChunkCount) || 0)),
     loadedDirtyChunkCountMax: Math.max(0, ...values.map((timing) => Number(timing.loadedDirtyChunkCount) || 0)),
@@ -1798,6 +1839,16 @@ function assertRenderCompilerWorkerResult(renderCompiler, request, expectedCente
     || renderCompiler.radiusChunks !== 1
     || !renderCompiler.targetedCompileUsed
     || renderCompiler.targetSectionCount !== expectedSectionCount
+    || renderCompiler.transportKind !== "message-transfer"
+    || renderCompiler.renderCompilerMetrics?.transportKind !== "message-transfer"
+    || Number(renderCompiler.workerInitCount) <= 0
+    || Number(renderCompiler.workerWasmInitCount) <= 0
+    || Number(renderCompiler.compileCount) <= 0
+    || Number(renderCompiler.workerCompileCount) <= 0
+    || Number(renderCompiler.assetPackSendCount) <= 0
+    || Number(renderCompiler.requestAssetPackByteLength) <= 0
+    || Number(renderCompiler.requestByteLength) <= 0
+    || Number(renderCompiler.transferredRequestByteLength) <= 0
     || !summary?.ok
     || summary.byteLength <= 0
     || summary.sectionCount !== expectedSectionCount
@@ -1811,6 +1862,9 @@ function assertRenderCompilerWorkerResult(renderCompiler, request, expectedCente
   }
   if (renderCompiler.packedByteLength !== summary.byteLength) {
     throw new Error(`render compiler worker did not transfer the packed payload:\n${JSON.stringify(renderCompiler, null, 2)}`);
+  }
+  if (renderCompiler.transferredResponseByteLength !== renderCompiler.packedByteLength) {
+    throw new Error(`render compiler worker did not report transferred response bytes:\n${JSON.stringify(renderCompiler, null, 2)}`);
   }
 }
 

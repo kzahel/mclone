@@ -7,6 +7,8 @@ compile-scope diagnostics, all-air section mesh fast path, and
 target-section-aware browser render-worker requests landed; shared-memory
 render-worker architecture is tracked in
 [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md).
+First render-compiler transport diagnostics landed there; persistent worker
+asset/catalog state is next.
 
 ## Purpose
 
@@ -534,9 +536,58 @@ Observed local movement perf after this chunk:
 
 Current next likely step: implement the shared-memory render-worker plan from
 [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
-starting with render compiler transport diagnostics and persistent worker
-asset/catalog state, then reduce the remaining full dirty plans by splitting
-chunk-level view dirtying from section-level neighbor dirtying.
+starting with persistent worker asset/catalog state, then move the render
+worker result path toward a shared result arena and reduce the remaining full
+dirty plans by splitting chunk-level view dirtying from section-level neighbor
+dirtying.
+
+## Render Compiler Transport Diagnostics Landed
+
+Implemented on 2026-06-22:
+
+- render compiler worker responses now report their transport kind as
+  `message-transfer`, shared-memory availability, worker wasm init count,
+  worker compile count, request asset-pack bytes, target-section bytes, and
+  transferred packed response bytes.
+- the app and smoke render-worker clients now track worker construction count,
+  compile count, asset-pack send count, per-request transfer byte lengths, and
+  cumulative transferred request/response byte totals.
+- app compile timings and movement perf JSON now expose both quick fields such
+  as `renderCompilerTransportKind`,
+  `renderCompilerRequestAssetPackByteLength`, and
+  `renderCompilerTransferredResponseByteLength`, plus a nested
+  `renderCompilerMetrics` object.
+- browser smoke assertions now fail if accepted app compile timings or direct
+  render-worker smoke results do not expose the temporary transfer path.
+
+Validation run:
+
+```text
+node --check native/apps/mclone-web-client/www/mclone-render-compiler-worker.js
+node --check native/apps/mclone-web-client/www/mclone-web-app.js
+node --check native/apps/mclone-web-client/www/mclone-web-smoke.js
+node --check native/apps/mclone-web-client/scripts/browser-smoke.mjs
+pnpm native:web:build
+pnpm native:web:smoke
+pnpm native:web:app-smoke
+pnpm native:web:mobile-smoke
+pnpm native:web:movement-perf
+```
+
+Observed local movement perf after this chunk:
+
+- movement compile transport kind was `message-transfer`
+- worker round trips stayed high: `894.4-908.3ms`
+- movement compile max frame gaps stayed low: `11.6-15.3ms`
+- each render compile still resent the packed asset zip:
+  `5,828,345` transferred request bytes per compile
+- a small targeted compile still transferred the full asset pack for only `2`
+  target sections and a `195,876` byte response
+- the full movement compile transferred an `11,623,508` byte packed response
+- cumulative render compiler transfer after four worker compiles reached
+  `23,313,380` request bytes and `28,900,904` response bytes
+- runner, worldgen, and light-status metrics stayed on `shared-memory`, making
+  the render compiler transport divergence explicit
 
 ## Deployment Check
 

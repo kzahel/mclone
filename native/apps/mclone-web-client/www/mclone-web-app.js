@@ -5,6 +5,7 @@ const RENDER_COMPILER_WORKER_URL = versionedUrl("./mclone-render-compiler-worker
 const SERVER_WORKER_URL = versionedUrl("./mclone-integrated-server-worker.js");
 const SERVER_JOB_WORKER_URL = versionedUrl("./mclone-server-job-worker.js");
 const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip");
+const RENDER_COMPILER_TRANSPORT_KIND = "message-transfer";
 
 const RADIUS_CHUNKS = 1;
 const MAX_FRAME_DT_SECONDS = 0.05;
@@ -1296,6 +1297,16 @@ class RenderSectionWorkerCompiler {
   constructor(assetPack) {
     this.assetPack = assetPack;
     this.pending = new Map();
+    this.metrics = {
+      transportKind: RENDER_COMPILER_TRANSPORT_KIND,
+      sharedMemorySupported: renderCompilerSharedMemorySupported(),
+      workerInitCount: 1,
+      workerWasmInitCount: 0,
+      compileCount: 0,
+      assetPackSendCount: 0,
+      transferredRequestByteCount: 0,
+      transferredResponseByteCount: 0,
+    };
     this.worker = new Worker(RENDER_COMPILER_WORKER_URL.href, {
       type: "module",
       name: "mclone-render-compiler-app",
@@ -1309,11 +1320,33 @@ class RenderSectionWorkerCompiler {
       clearTimeout(pending.timeout);
       const packed = data.packed instanceof Uint8Array ? data.packed : new Uint8Array();
       const packedByteLength = packed.byteLength;
+      this.metrics.transferredResponseByteCount += packedByteLength;
+      this.metrics.workerWasmInitCount = Number(data.workerWasmInitCount)
+        || this.metrics.workerWasmInitCount;
+      const renderCompilerMetrics = renderCompilerMetricsForResponse(
+        this.metrics,
+        pending.requestMetrics,
+        data,
+        packedByteLength,
+      );
       delete data.packed;
       pending.resolve({
         report: {
           ...data,
           packedByteLength,
+          renderCompilerMetrics,
+          transportKind: renderCompilerMetrics.transportKind,
+          sharedMemorySupported: renderCompilerMetrics.sharedMemorySupported,
+          workerInitCount: renderCompilerMetrics.workerInitCount,
+          workerWasmInitCount: renderCompilerMetrics.workerWasmInitCount,
+          compileCount: renderCompilerMetrics.compileCount,
+          workerCompileCount: renderCompilerMetrics.workerCompileCount,
+          assetPackSendCount: renderCompilerMetrics.assetPackSendCount,
+          requestAssetPackByteLength: renderCompilerMetrics.requestAssetPackByteLength,
+          requestTargetSectionsByteLength: renderCompilerMetrics.requestTargetSectionsByteLength,
+          requestByteLength: renderCompilerMetrics.requestByteLength,
+          transferredRequestByteLength: renderCompilerMetrics.transferredRequestByteLength,
+          transferredResponseByteLength: renderCompilerMetrics.transferredResponseByteLength,
         },
         packed,
       });
@@ -1331,12 +1364,16 @@ class RenderSectionWorkerCompiler {
         return;
       }
       const requestAssetPack = this.assetPack.slice();
+      const requestMetrics = renderCompilerRequestMetrics(requestAssetPack, request.targetSections);
+      this.metrics.compileCount += 1;
+      this.metrics.assetPackSendCount += 1;
+      this.metrics.transferredRequestByteCount += requestMetrics.transferredRequestByteLength;
       const timeout = setTimeout(() => {
         if (!this.pending.has(requestId)) return;
         this.pending.delete(requestId);
         reject(new Error(`timed out waiting for render compiler worker request ${requestId}`));
       }, 20_000);
-      this.pending.set(requestId, { resolve, reject, timeout });
+      this.pending.set(requestId, { resolve, reject, timeout, requestMetrics });
       this.worker.postMessage(
         {
           kind: "compile-render-sections",
@@ -1361,6 +1398,70 @@ class RenderSectionWorkerCompiler {
     }
     this.pending.clear();
   }
+}
+
+function renderCompilerRequestMetrics(assetPack, targetSections) {
+  const requestAssetPackByteLength = byteLengthOf(assetPack);
+  const requestTargetSectionsByteLength = byteLengthOfTargetSections(targetSections);
+  return {
+    requestAssetPackByteLength,
+    requestTargetSectionsByteLength,
+    requestByteLength: requestAssetPackByteLength + requestTargetSectionsByteLength,
+    transferredRequestByteLength: requestAssetPackByteLength,
+  };
+}
+
+function renderCompilerMetricsForResponse(cumulativeMetrics, requestMetrics, workerReport, packedByteLength) {
+  return {
+    transportKind: String(workerReport.transportKind || cumulativeMetrics.transportKind || RENDER_COMPILER_TRANSPORT_KIND),
+    sharedMemorySupported: Boolean(workerReport.sharedMemorySupported ?? cumulativeMetrics.sharedMemorySupported),
+    workerInitCount: Number(cumulativeMetrics.workerInitCount) || 0,
+    workerWasmInitCount: Number(workerReport.workerWasmInitCount)
+      || Number(cumulativeMetrics.workerWasmInitCount)
+      || 0,
+    compileCount: Number(cumulativeMetrics.compileCount) || 0,
+    workerCompileCount: Number(workerReport.workerCompileCount) || 0,
+    assetPackSendCount: Number(cumulativeMetrics.assetPackSendCount) || 0,
+    requestAssetPackByteLength: Number(requestMetrics.requestAssetPackByteLength)
+      || Number(workerReport.requestAssetPackByteLength)
+      || 0,
+    requestTargetSectionsByteLength: Number(requestMetrics.requestTargetSectionsByteLength)
+      || Number(workerReport.requestTargetSectionsByteLength)
+      || 0,
+    requestByteLength: Number(requestMetrics.requestByteLength)
+      || Number(workerReport.requestByteLength)
+      || 0,
+    transferredRequestByteLength: Number(requestMetrics.transferredRequestByteLength)
+      || Number(workerReport.transferredRequestByteLength)
+      || 0,
+    transferredResponseByteLength: Number(workerReport.transferredResponseByteLength)
+      || Number(packedByteLength)
+      || 0,
+    transferredRequestByteCount: Number(cumulativeMetrics.transferredRequestByteCount) || 0,
+    transferredResponseByteCount: Number(cumulativeMetrics.transferredResponseByteCount) || 0,
+  };
+}
+
+function renderCompilerSharedMemorySupported() {
+  return typeof SharedArrayBuffer === "function"
+    && typeof Atomics === "object"
+    && typeof Atomics.load === "function"
+    && typeof Atomics.store === "function"
+    && typeof Atomics.notify === "function";
+}
+
+function byteLengthOf(value) {
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+    return value.byteLength;
+  }
+  return 0;
+}
+
+function byteLengthOfTargetSections(value) {
+  if (Array.isArray(value)) {
+    return value.length * 4;
+  }
+  return byteLengthOf(value);
 }
 
 function centersEqual(left, right) {
@@ -1403,6 +1504,21 @@ function createCompileTiming({
     beginRequestMs: 0,
     workerRoundTripMs: 0,
     packedByteLength: 0,
+    renderCompilerTransportKind: "unknown",
+    renderCompilerSharedMemorySupported: false,
+    renderCompilerWorkerInitCount: 0,
+    renderCompilerWorkerWasmInitCount: 0,
+    renderCompilerCompileCount: 0,
+    renderCompilerWorkerCompileCount: 0,
+    renderCompilerAssetPackSendCount: 0,
+    renderCompilerRequestAssetPackByteLength: 0,
+    renderCompilerRequestTargetSectionsByteLength: 0,
+    renderCompilerRequestByteLength: 0,
+    renderCompilerTransferredRequestByteLength: 0,
+    renderCompilerTransferredResponseByteLength: 0,
+    renderCompilerTransferredRequestByteCount: 0,
+    renderCompilerTransferredResponseByteCount: 0,
+    renderCompilerMetrics: null,
     decodeFinishApplyMs: 0,
     chunkViewUpdateCount: 0,
     centerLoaded: false,
@@ -1469,6 +1585,23 @@ function updateCompileTimingFromWait(timing, request, beginStart) {
 
 function updateCompileTimingFromWorker(timing, report) {
   const summary = report?.summary ?? {};
+  const metrics = normalizeRenderCompilerMetrics(report?.renderCompilerMetrics ?? report);
+  timing.renderCompilerMetrics = metrics;
+  timing.renderCompilerTransportKind = metrics.transportKind;
+  timing.renderCompilerSharedMemorySupported = metrics.sharedMemorySupported;
+  timing.renderCompilerWorkerInitCount = metrics.workerInitCount;
+  timing.renderCompilerWorkerWasmInitCount = metrics.workerWasmInitCount;
+  timing.renderCompilerCompileCount = metrics.compileCount;
+  timing.renderCompilerWorkerCompileCount = metrics.workerCompileCount;
+  timing.renderCompilerAssetPackSendCount = metrics.assetPackSendCount;
+  timing.renderCompilerRequestAssetPackByteLength = metrics.requestAssetPackByteLength;
+  timing.renderCompilerRequestTargetSectionsByteLength = metrics.requestTargetSectionsByteLength;
+  timing.renderCompilerRequestByteLength = metrics.requestByteLength;
+  timing.renderCompilerTransferredRequestByteLength = metrics.transferredRequestByteLength;
+  timing.renderCompilerTransferredResponseByteLength = metrics.transferredResponseByteLength;
+  timing.renderCompilerTransferredRequestByteCount = metrics.transferredRequestByteCount;
+  timing.renderCompilerTransferredResponseByteCount = metrics.transferredResponseByteCount;
+  timing.packedByteLength = metrics.transferredResponseByteLength || timing.packedByteLength;
   timing.workerSectionCount = Number(summary.sectionCount) || 0;
   timing.workerNonEmptySectionCount = Number(summary.nonEmptySectionCount) || 0;
   timing.workerVisibilityGraphBuildCount = Number(summary.visibilityGraphBuildCount) || 0;
@@ -1477,6 +1610,27 @@ function updateCompileTimingFromWorker(timing, report) {
   timing.workerVertexCount = Number(summary.vertexCount) || 0;
   timing.workerIndexCount = Number(summary.indexCount) || 0;
   timing.workerFaceCount = Number(summary.faceCount) || 0;
+}
+
+function normalizeRenderCompilerMetrics(source) {
+  return {
+    transportKind: String(source?.transportKind || "unknown"),
+    sharedMemorySupported: Boolean(source?.sharedMemorySupported),
+    workerInitCount: Number(source?.workerInitCount) || 0,
+    workerWasmInitCount: Number(source?.workerWasmInitCount) || 0,
+    compileCount: Number(source?.compileCount) || 0,
+    workerCompileCount: Number(source?.workerCompileCount) || 0,
+    assetPackSendCount: Number(source?.assetPackSendCount) || 0,
+    requestAssetPackByteLength: Number(source?.requestAssetPackByteLength) || 0,
+    requestTargetSectionsByteLength: Number(source?.requestTargetSectionsByteLength) || 0,
+    requestByteLength: Number(source?.requestByteLength) || 0,
+    transferredRequestByteLength: Number(source?.transferredRequestByteLength) || 0,
+    transferredResponseByteLength: Number(source?.transferredResponseByteLength)
+      || Number(source?.packedByteLength)
+      || 0,
+    transferredRequestByteCount: Number(source?.transferredRequestByteCount) || 0,
+    transferredResponseByteCount: Number(source?.transferredResponseByteCount) || 0,
+  };
 }
 
 function updateCompileTimingFromReport(timing, report) {
@@ -1557,6 +1711,21 @@ function publicCompileTiming(timing) {
     beginRequestMs: roundTiming(timing.beginRequestMs),
     workerRoundTripMs: roundTiming(timing.workerRoundTripMs),
     packedByteLength: timing.packedByteLength,
+    renderCompilerTransportKind: timing.renderCompilerTransportKind,
+    renderCompilerSharedMemorySupported: timing.renderCompilerSharedMemorySupported,
+    renderCompilerWorkerInitCount: timing.renderCompilerWorkerInitCount,
+    renderCompilerWorkerWasmInitCount: timing.renderCompilerWorkerWasmInitCount,
+    renderCompilerCompileCount: timing.renderCompilerCompileCount,
+    renderCompilerWorkerCompileCount: timing.renderCompilerWorkerCompileCount,
+    renderCompilerAssetPackSendCount: timing.renderCompilerAssetPackSendCount,
+    renderCompilerRequestAssetPackByteLength: timing.renderCompilerRequestAssetPackByteLength,
+    renderCompilerRequestTargetSectionsByteLength: timing.renderCompilerRequestTargetSectionsByteLength,
+    renderCompilerRequestByteLength: timing.renderCompilerRequestByteLength,
+    renderCompilerTransferredRequestByteLength: timing.renderCompilerTransferredRequestByteLength,
+    renderCompilerTransferredResponseByteLength: timing.renderCompilerTransferredResponseByteLength,
+    renderCompilerTransferredRequestByteCount: timing.renderCompilerTransferredRequestByteCount,
+    renderCompilerTransferredResponseByteCount: timing.renderCompilerTransferredResponseByteCount,
+    renderCompilerMetrics: timing.renderCompilerMetrics,
     decodeFinishApplyMs: roundTiming(timing.decodeFinishApplyMs),
     chunkViewUpdateCount: timing.chunkViewUpdateCount,
     centerLoaded: timing.centerLoaded,

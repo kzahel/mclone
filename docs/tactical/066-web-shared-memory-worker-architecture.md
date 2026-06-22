@@ -1,7 +1,7 @@
 # 066: Web Shared-Memory Worker Architecture
 
-Status: proposed high-priority architecture; render-section compiler is the
-first target.
+Status: proposed high-priority architecture; render-section compiler transport
+diagnostics landed, persistent worker asset/catalog state is next.
 
 ## Purpose
 
@@ -336,6 +336,8 @@ behavior instead of silently falling back to a giant transfer:
 
 ### 1. Render Worker Transport Diagnostics
 
+Status: completed first pass.
+
 Add render-compiler frame metrics equivalent to runner/job metrics:
 
 - transport kind
@@ -353,7 +355,40 @@ Acceptance:
 - normal shared runner/job paths remain unchanged
 - current transferred render compiler is visibly labeled as temporary
 
+Landed on 2026-06-22:
+
+- `mclone-render-compiler-worker.js` now labels render compile responses as
+  `message-transfer`, reports shared-memory availability, worker wasm init
+  count, worker compile count, request asset-pack bytes, target-section bytes,
+  and transferred response bytes.
+- `mclone-web-app.js` and `mclone-web-smoke.js` now track app-side render
+  compiler metrics: worker construction count, compile count, asset-pack send
+  count, per-request transfer byte lengths, and cumulative transferred
+  request/response byte totals.
+- Public web compile timings now include both quick top-level fields such as
+  `renderCompilerTransportKind`, `renderCompilerRequestAssetPackByteLength`,
+  `renderCompilerTransferredRequestByteLength`, and
+  `renderCompilerTransferredResponseByteLength`, plus a nested
+  `renderCompilerMetrics` object.
+- Browser smoke assertions now require accepted compile timings and direct
+  render-worker results to expose the temporary `message-transfer` path and
+  nonzero asset/result transfer bytes.
+
+Observed local movement perf after this slice:
+
+- movement compile transport kind was `message-transfer`
+- each render compile still transferred the packed asset zip:
+  `5,828,345` request bytes per compile
+- the final full movement compile transferred an `11,623,508` byte packed
+  response
+- cumulative render compiler request transfer reached `23,313,380` bytes after
+  four worker compiles in the movement perf run
+- runner, worldgen, and light-status lanes remained `shared-memory`, confirming
+  the divergence is render-compiler-specific
+
 ### 2. Persistent Render Worker Assets
+
+Status: next implementation slice.
 
 Before changing result transport, remove the worst lifecycle mistake:
 
