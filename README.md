@@ -43,15 +43,14 @@ pnpm native:web:bundle
 
 # Build, upload the native web bundle and asset pack to the mclone R2 bucket,
 # deploy the Cloudflare Worker, and make it available at mclone.kzahel.com.
-pnpm native:web:deploy
+pnpm deploy
 ```
 
 The deploy path packages `native/apps/mclone-web-client/www`, wasm-bindgen
 output under `/pkg/`, and `reference/minecraft-1.17.1/extracted.zip`, then
 serves them through `worker/index.js` with COOP/COEP/CORP headers. Wrangler
-must be authenticated for the Cloudflare account before deploy. The root
-`pnpm deploy` script is the older Vite/TypeScript deploy path; prefer
-`pnpm native:web:deploy` for the current native Rust/WASM app.
+must be authenticated for the Cloudflare account before deploy. `pnpm deploy`
+is an alias for `pnpm native:web:deploy`.
 
 ## Worldgen strategy
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build the browser app, upload dist/ plus the zipped reference asset pack, and deploy the worker.
+# Legacy Vite/TypeScript deployment path.
+# Use `pnpm deploy` for the current native Rust/WASM web app.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -39,7 +40,7 @@ upload_file() {
   $WRANGLER r2 object put "$BUCKET/$key" --file="$file" --content-type="$ct" --remote >/dev/null
 }
 
-echo "==> Building (vite)"
+echo "==> Building legacy Vite/TypeScript app"
 cd "$PROJECT_DIR"
 pnpm assets:pack
 pnpm build
@@ -64,4 +65,4 @@ cd "$PROJECT_DIR/worker"
 $WRANGLER deploy
 
 echo ""
-echo "Deployed to https://mclone.kzahel.com/"
+echo "Legacy Vite/TypeScript deploy finished for https://mclone.kzahel.com/"
