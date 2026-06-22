@@ -14,6 +14,7 @@ use mclone_render::chunk::{
     TexturedSectionRenderOptions, TexturedSectionUploadReport,
 };
 use mclone_render::entity::{ActorDrawResources, ActorInstance};
+use mclone_render::fog::RenderFog;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
@@ -153,25 +154,36 @@ pub(crate) fn render_full_frame(
     let ui_covers_world = ui.covers_world();
     let debug_stats = (!ui_active).then_some(debug_stats).flatten();
     let gui_active = ui_active || debug_stats.is_some();
-    let render_options =
-        render_options.with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day));
+    let fog = underwater_overlay
+        .is_some()
+        .then(RenderFog::underwater)
+        .unwrap_or_default();
+    let render_options = render_options
+        .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day))
+        .with_fog(fog);
     let mut actor_stats = mclone_render::entity::ActorRenderStats::default();
 
     if !ui_covers_world {
         let render_view = camera.render_view(frame.target.size[0], frame.target.size[1]);
-        sky.render(
-            frame.queue,
-            frame.encoder,
-            frame.target.color_view,
-            sky_clear_color,
-            render_view.sky_view_projection(),
-            time_of_day,
-            sun_angle,
-        );
-        // The sky pass cleared and drew the background; the chunk pass loads it.
+        let background_clear_color = if fog.enabled {
+            clear_frame_color(frame.encoder, frame.target.color_view, fog.clear_color());
+            fog.clear_color()
+        } else {
+            sky.render(
+                frame.queue,
+                frame.encoder,
+                frame.target.color_view,
+                sky_clear_color,
+                render_view.sky_view_projection(),
+                time_of_day,
+                sun_angle,
+            );
+            sky_clear_color
+        };
+        // The sky/clear pass prepared the background; the chunk pass loads it.
         let render_target = ChunkRenderTarget::from_frame_target(
             frame.target.with_depth(&depth.view),
-            sky_clear_color,
+            background_clear_color,
         )?
         .with_loaded_color();
         let frame_stats = draw.render_with_options(
@@ -243,6 +255,26 @@ pub(crate) fn render_full_frame(
         actor_count: actor_instances.len(),
         drawn_actor_count: actor_stats.drawn_actor_count,
     })
+}
+
+fn clear_frame_color(
+    encoder: &mut wgpu::CommandEncoder,
+    color_view: &wgpu::TextureView,
+    color: wgpu::Color,
+) {
+    let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("mclone_world_background_clear_pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: color_view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(color),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        ..Default::default()
+    });
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

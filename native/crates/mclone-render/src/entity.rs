@@ -11,7 +11,7 @@ const ACTOR_VERTEX_BYTE_LEN: usize = 3 * std::mem::size_of::<f32>()
     + 4 * std::mem::size_of::<f32>()
     + std::mem::size_of::<u32>();
 const ACTOR_VERTEX_BYTE_SIZE: wgpu::BufferAddress = ACTOR_VERTEX_BYTE_LEN as wgpu::BufferAddress;
-const UNIFORM_FLOAT_COUNT: usize = 20;
+const UNIFORM_FLOAT_COUNT: usize = 32;
 const UNIFORM_BYTE_LEN: usize = UNIFORM_FLOAT_COUNT * std::mem::size_of::<f32>();
 const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferAddress;
 const MODEL_PIXEL_SCALE: f32 = 1.0 / 16.0;
@@ -188,7 +188,7 @@ impl ActorDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(render_view.uniform_matrix(), render_options),
+            &uniform_bytes(render_view, render_options),
         );
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("mclone_actor_vertices"),
@@ -260,7 +260,7 @@ impl ActorRenderer {
             label: Some("mclone_actor_bind_group_layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -1039,12 +1039,12 @@ fn index_bytes(indices: &[u32]) -> Vec<u8> {
 }
 
 fn uniform_bytes(
-    view_projection: [[f32; 4]; 4],
+    render_view: ChunkRenderView,
     render_options: TexturedSectionRenderOptions,
 ) -> [u8; UNIFORM_BYTE_LEN] {
     let mut bytes = [0_u8; UNIFORM_BYTE_LEN];
     let mut offset = 0;
-    for value in view_projection.into_iter().flatten() {
+    for value in render_view.uniform_matrix().into_iter().flatten() {
         bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
         offset += 4;
     }
@@ -1054,10 +1054,33 @@ fn uniform_bytes(
         } else {
             0.0
         },
-        render_options.sky_darken,
-        0.0,
+        render_options.sky_darken.clamp(0.0, 1.0),
+        if render_options.fog.enabled { 1.0 } else { 0.0 },
         0.0,
     ] {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+        offset += 4;
+    }
+    let camera_position = render_view.camera_position.to_array();
+    for value in [
+        camera_position[0],
+        camera_position[1],
+        camera_position[2],
+        0.0,
+    ] {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+        offset += 4;
+    }
+    for value in [
+        render_options.fog.color[0],
+        render_options.fog.color[1],
+        render_options.fog.color[2],
+        1.0,
+    ] {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+        offset += 4;
+    }
+    for value in [render_options.fog.start, render_options.fog.end, 0.0, 0.0] {
         bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
         offset += 4;
     }
@@ -1121,6 +1144,41 @@ mod tests {
 
         assert_eq!(mesh.vertices.len(), 6 * 6 * 4);
         assert_eq!(mesh.indices.len(), 6 * 6 * 6);
+    }
+
+    #[test]
+    fn actor_uniform_serializes_underwater_fog() {
+        let render_view = crate::chunk::ChunkCamera {
+            eye: [4.0, 5.0, 6.0],
+            target: [4.0, 5.0, 5.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 70.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 256.0,
+        }
+        .render_view(640, 480);
+        let bytes = uniform_bytes(
+            render_view,
+            TexturedSectionRenderOptions::default().with_fog(crate::fog::RenderFog::underwater()),
+        );
+
+        assert_eq!(bytes.len(), UNIFORM_BYTE_LEN);
+        assert_eq!(f32::from_ne_bytes(bytes[72..76].try_into().unwrap()), 1.0);
+        assert_eq!(f32::from_ne_bytes(bytes[80..84].try_into().unwrap()), 4.0);
+        assert_eq!(f32::from_ne_bytes(bytes[84..88].try_into().unwrap()), 5.0);
+        assert_eq!(f32::from_ne_bytes(bytes[88..92].try_into().unwrap()), 6.0);
+        assert_eq!(
+            f32::from_ne_bytes(bytes[96..100].try_into().unwrap()),
+            5.0 / 255.0
+        );
+        assert_eq!(
+            f32::from_ne_bytes(bytes[112..116].try_into().unwrap()),
+            -8.0
+        );
+        assert_eq!(
+            f32::from_ne_bytes(bytes[116..120].try_into().unwrap()),
+            96.0
+        );
     }
 
     #[test]

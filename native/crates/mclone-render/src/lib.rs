@@ -6,6 +6,7 @@ mod gpu_util;
 pub mod actor_assets;
 pub mod chunk;
 pub mod entity;
+pub mod fog;
 pub mod gui;
 pub mod light_texture;
 pub mod screen_effect;

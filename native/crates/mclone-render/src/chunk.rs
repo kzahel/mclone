@@ -14,6 +14,7 @@ use mclone_mesh::{
 };
 use wgpu::util::DeviceExt;
 
+use crate::fog::RenderFog;
 use crate::target::RenderFrameTarget;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
@@ -22,7 +23,8 @@ const VERTEX_FLOAT_COUNT: usize = 7;
 const VERTEX_BYTE_SIZE: wgpu::BufferAddress =
     (VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
 const TEXTURED_VERTEX_BYTE_SIZE: wgpu::BufferAddress = 40;
-const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = 80;
+const UNIFORM_BYTE_LEN: usize = 128;
+const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferAddress;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChunkCamera {
@@ -263,6 +265,7 @@ pub struct TexturedSectionRenderOptions {
     pub section_occlusion_culling: bool,
     pub force_fullbright: bool,
     pub sky_darken: f32,
+    pub fog: RenderFog,
 }
 
 impl Default for TexturedSectionRenderOptions {
@@ -271,6 +274,7 @@ impl Default for TexturedSectionRenderOptions {
             section_occlusion_culling: true,
             force_fullbright: false,
             sky_darken: 1.0,
+            fog: RenderFog::none(),
         }
     }
 }
@@ -278,6 +282,11 @@ impl Default for TexturedSectionRenderOptions {
 impl TexturedSectionRenderOptions {
     pub fn with_sky_darken(mut self, sky_darken: f32) -> Self {
         self.sky_darken = sky_darken.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn with_fog(mut self, fog: RenderFog) -> Self {
+        self.fog = fog;
         self
     }
 }
@@ -972,7 +981,7 @@ impl ChunkRenderer {
             label: Some("mclone_chunk_bind_group_layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -1077,7 +1086,7 @@ impl TexturedChunkRenderer {
                 label: Some("mclone_textured_chunk_uniform_bind_group_layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -1266,10 +1275,7 @@ impl ChunkDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(
-                render_view.uniform_matrix(),
-                TexturedSectionRenderOptions::default(),
-            ),
+            &uniform_bytes(render_view, TexturedSectionRenderOptions::default()),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1351,10 +1357,7 @@ impl TexturedChunkDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(
-                render_view.uniform_matrix(),
-                TexturedSectionRenderOptions::default(),
-            ),
+            &uniform_bytes(render_view, TexturedSectionRenderOptions::default()),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1537,7 +1540,7 @@ impl TexturedSectionDrawResources {
         queue.write_buffer(
             &self.renderer.uniform_buffer,
             0,
-            &uniform_bytes(render_view.uniform_matrix(), options),
+            &uniform_bytes(render_view, options),
         );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1652,9 +1655,9 @@ fn matrix_bytes(matrix: [[f32; 4]; 4]) -> [u8; 64] {
     bytes
 }
 
-fn uniform_bytes(matrix: [[f32; 4]; 4], options: TexturedSectionRenderOptions) -> [u8; 80] {
-    let mut bytes = [0; 80];
-    bytes[..64].copy_from_slice(&matrix_bytes(matrix));
+fn uniform_bytes(render_view: ChunkRenderView, options: TexturedSectionRenderOptions) -> [u8; 128] {
+    let mut bytes = [0; UNIFORM_BYTE_LEN];
+    bytes[..64].copy_from_slice(&matrix_bytes(render_view.uniform_matrix()));
     let render_options = [
         if options.force_fullbright {
             1.0_f32
@@ -1662,11 +1665,43 @@ fn uniform_bytes(matrix: [[f32; 4]; 4], options: TexturedSectionRenderOptions) -
             0.0
         },
         options.sky_darken.clamp(0.0, 1.0),
-        0.0,
+        if options.fog.enabled { 1.0 } else { 0.0 },
         0.0,
     ];
     for (index, value) in render_options.into_iter().enumerate() {
         let start = 64 + index * 4;
+        bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    let camera_position = render_view.camera_position.to_array();
+    for (index, value) in [
+        camera_position[0],
+        camera_position[1],
+        camera_position[2],
+        0.0,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let start = 80 + index * 4;
+        bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    for (index, value) in [
+        options.fog.color[0],
+        options.fog.color[1],
+        options.fog.color[2],
+        1.0,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let start = 96 + index * 4;
+        bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    for (index, value) in [options.fog.start, options.fog.end, 0.0, 0.0]
+        .into_iter()
+        .enumerate()
+    {
+        let start = 112 + index * 4;
         bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
     }
     bytes
@@ -1684,7 +1719,7 @@ mod tests {
         let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
         let matrix = render_view.uniform_matrix();
         assert_eq!(
-            uniform_bytes(matrix, TexturedSectionRenderOptions::default()).len()
+            uniform_bytes(render_view, TexturedSectionRenderOptions::default()).len()
                 as wgpu::BufferAddress,
             UNIFORM_BYTE_SIZE
         );
@@ -1694,8 +1729,9 @@ mod tests {
 
     #[test]
     fn textured_render_options_serialize_fullbright_and_sky_darken() {
+        let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
         let bytes = uniform_bytes(
-            [[0.0; 4]; 4],
+            render_view,
             TexturedSectionRenderOptions {
                 force_fullbright: true,
                 sky_darken: 0.25,
@@ -1705,6 +1741,44 @@ mod tests {
 
         assert_eq!(f32::from_ne_bytes(bytes[64..68].try_into().unwrap()), 1.0);
         assert_eq!(f32::from_ne_bytes(bytes[68..72].try_into().unwrap()), 0.25);
+    }
+
+    #[test]
+    fn textured_render_options_serialize_underwater_fog() {
+        let render_view = ChunkCamera {
+            eye: [1.0, 2.0, 3.0],
+            target: [1.0, 2.0, 2.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 70.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 256.0,
+        }
+        .render_view(640, 480);
+        let bytes = uniform_bytes(
+            render_view,
+            TexturedSectionRenderOptions::default().with_fog(RenderFog::underwater()),
+        );
+
+        assert_eq!(f32::from_ne_bytes(bytes[72..76].try_into().unwrap()), 1.0);
+        assert_eq!(f32::from_ne_bytes(bytes[80..84].try_into().unwrap()), 1.0);
+        assert_eq!(f32::from_ne_bytes(bytes[84..88].try_into().unwrap()), 2.0);
+        assert_eq!(f32::from_ne_bytes(bytes[88..92].try_into().unwrap()), 3.0);
+        assert_eq!(
+            f32::from_ne_bytes(bytes[96..100].try_into().unwrap()),
+            5.0 / 255.0
+        );
+        assert_eq!(
+            f32::from_ne_bytes(bytes[104..108].try_into().unwrap()),
+            51.0 / 255.0
+        );
+        assert_eq!(
+            f32::from_ne_bytes(bytes[112..116].try_into().unwrap()),
+            -8.0
+        );
+        assert_eq!(
+            f32::from_ne_bytes(bytes[116..120].try_into().unwrap()),
+            96.0
+        );
     }
 
     #[test]

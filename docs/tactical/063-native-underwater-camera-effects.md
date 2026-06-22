@@ -1,6 +1,6 @@
 # 063: Native Underwater Camera Effects
 
-Status: completed first slice.
+Status: completed fog slice.
 
 ## Purpose
 
@@ -145,24 +145,25 @@ Original plan:
 
 ## Follow-Up Fog Slice
 
-Add Java-shaped underwater fog once the screen overlay proves the camera
-environment path.
+Landed in the fog slice:
 
-- Add explicit fog state to textured section and actor render options:
-  `enabled`, `color`, `start`, `end`, and camera position or equivalent view
-  distance data.
-- Extend chunk and actor WGSL to fog world geometry toward the water fog color.
-  Passing world position to the fragment shader is the straightforward first
-  path; computing a vertex fog factor is acceptable only if visual artifacts are
-  checked in screenshots.
-- When underwater, clear/sky background should converge to the water fog color
-  rather than the normal overworld sky color. The simplest first pass can skip
-  sky dome drawing or fog it fully while the camera is underwater.
-- Use fixed fallback water fog color `0x050533` until client biome water fog
-  colors are available. Later, sample biome water fog color and add Java's
-  `5000 ms` transition.
-- Use fog start `-8.0` and fog end `96.0` before water-vision/swamp modifiers.
-- Track water-vision ramp, swamp distance multiplier, night vision, conduit
+- Added `mclone_render::fog::RenderFog` with Java-shaped fallback water fog
+  constants: color `0x050533`, start `-8.0`, and end `96.0`.
+- Added explicit fog state to textured section and actor render options.
+- Extended textured chunk and actor uniforms with camera position, fog color,
+  and fog distances.
+- Extended chunk and actor WGSL to pass world position to the fragment shader
+  and fog world geometry toward the water fog color by view distance.
+- When underwater, the full-frame path clears the background to the water fog
+  color instead of drawing the overworld sky dome, then draws chunks, actors,
+  the vanilla underwater texture overlay, and GUI/debug as before.
+
+Remaining follow-ups:
+
+- Sample biome water fog colors and add Java's `5000 ms` fog-color transition.
+- Replace terrain-MVP full-height fluid checks with Java `FluidState.getHeight`
+  parity once exact fluid states are represented in native client block facts.
+- Add water-vision ramp, swamp distance multiplier, night vision, conduit
   power, lava fog, powder snow fog, fire overlay, and view-blocking block
   overlay outside this slice.
 
@@ -189,14 +190,28 @@ Both captures were inspected. The first-pass Java overlay is deliberately
 subtle; the stronger "blue-ish underwater" read should come from the fog
 follow-up below, not from increasing the overlay alpha beyond Java constants.
 
-Required for the fog follow-up:
+Completed for the fog slice:
 
-- Repeat the above-water/underwater screenshots with fog enabled.
-- Add a distance-facing screenshot where far terrain fades toward the water fog
-  color while nearby terrain remains readable.
-- Verify actors are fogged consistently with chunks.
-- Re-run native web build/smoke because the render uniforms and shaders are
-  shared with the WASM path.
+```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-client -p mclone-render -p mclone-native-client
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-fog-above.png --width 960 --height 540 --seed 12345 --chunk-x -129 --chunk-z -256 --render-distance 2 --screenshot-ui none --screenshot-eye -2049.5,64.5,-4084.5 --fullbright true
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-fog-under.png --width 960 --height 540 --seed 12345 --chunk-x -129 --chunk-z -256 --render-distance 2 --screenshot-ui none --screenshot-eye -2049.5,62.5,-4084.5 --fullbright true
+cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client -- --screenshot /tmp/mclone-fog-distance.png --width 960 --height 540 --seed 12345 --chunk-x -129 --chunk-z -256 --render-distance 2 --screenshot-ui none --screenshot-eye -2049.5,58.5,-4084.5 --fullbright true
+pnpm native:timedemo:smoke
+pnpm native:web:build
+pnpm native:web:smoke
+git diff --check
+```
+
+The fog validation captures reported:
+
+- `/tmp/mclone-fog-above.png`: `underwater=false`
+- `/tmp/mclone-fog-under.png`: `underwater=true`
+- `/tmp/mclone-fog-distance.png`: `underwater=true`
+
+All three captures were inspected. Above-water rendering keeps the normal sky.
+Underwater rendering clears to the water fog color, applies distance fog to
+chunks and actors, and keeps the vanilla underwater screen texture overlay.
 
 ## Out Of Scope
 

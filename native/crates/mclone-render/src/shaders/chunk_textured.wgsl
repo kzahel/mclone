@@ -1,6 +1,9 @@
 struct Uniforms {
     view_projection: mat4x4<f32>,
     render_options: vec4<f32>,
+    camera_position: vec4<f32>,
+    fog_color: vec4<f32>,
+    fog_distances: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -24,6 +27,7 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) light: vec3<f32>,
+    @location(3) world_position: vec3<f32>,
 };
 
 fn dimension_brightness(light_level: f32) -> f32 {
@@ -58,11 +62,23 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.position = uniforms.view_projection * vec4<f32>(input.position, 1.0);
     output.uv = input.uv;
     output.color = input.color;
+    output.world_position = input.position;
     let block_light = f32((input.packed_light >> 4u) & 15u);
     let sky_light = f32((input.packed_light >> 20u) & 15u);
     let light = lightmap_color(block_light, sky_light, uniforms.render_options.y);
     output.light = select(light, vec3<f32>(1.0), uniforms.render_options.x > 0.5);
     return output;
+}
+
+fn apply_fog(color: vec4<f32>, world_position: vec3<f32>) -> vec4<f32> {
+    if (uniforms.render_options.z <= 0.5) {
+        return color;
+    }
+    let fog_distance = distance(world_position, uniforms.camera_position.xyz);
+    let fog_start = uniforms.fog_distances.x;
+    let fog_end = max(uniforms.fog_distances.y, fog_start + 0.001);
+    let fog_factor = clamp((fog_distance - fog_start) / (fog_end - fog_start), 0.0, 1.0);
+    return vec4<f32>(lerp_vec3(color.rgb, uniforms.fog_color.rgb, fog_factor), color.a);
 }
 
 @fragment
@@ -71,5 +87,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if (texel.a < 0.1) {
         discard;
     }
-    return vec4<f32>(texel.rgb * input.color.rgb * input.light, texel.a * input.color.a);
+    let color = vec4<f32>(texel.rgb * input.color.rgb * input.light, texel.a * input.color.a);
+    return apply_fog(color, input.world_position);
 }
