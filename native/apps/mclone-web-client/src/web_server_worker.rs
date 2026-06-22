@@ -6,8 +6,9 @@ use std::rc::Rc;
 use js_sys::{
     Array, Atomics, Function, Int32Array, Object, Promise, Reflect, SharedArrayBuffer, Uint8Array,
 };
+use mclone_core::ChunkPos;
 use mclone_protocol::{
-    ClientCommand, ServerUpdate, decode_client_command, decode_server_update,
+    ChunkView, ClientCommand, ServerUpdate, decode_client_command, decode_server_update,
     encode_client_command, encode_server_update,
 };
 use mclone_server::{
@@ -42,6 +43,8 @@ pub struct WebIntegratedServerRunnerConfig {
     pub job_worker_url: String,
     pub bindgen_js_url: String,
     pub bindgen_wasm_url: String,
+    pub runner_transport_kind: Option<WorkerFrameTransportKind>,
+    pub runner_initial_response_bytes: u32,
 }
 
 impl WebIntegratedServerRunnerConfig {
@@ -58,7 +61,25 @@ impl WebIntegratedServerRunnerConfig {
             job_worker_url: job_worker_url.into(),
             bindgen_js_url: bindgen_js_url.into(),
             bindgen_wasm_url: bindgen_wasm_url.into(),
+            runner_transport_kind: None,
+            runner_initial_response_bytes: DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
         }
+    }
+
+    pub const fn with_runner_transport_kind(
+        mut self,
+        runner_transport_kind: WorkerFrameTransportKind,
+    ) -> Self {
+        self.runner_transport_kind = Some(runner_transport_kind);
+        self
+    }
+
+    pub const fn with_runner_initial_response_bytes(
+        mut self,
+        runner_initial_response_bytes: u32,
+    ) -> Self {
+        self.runner_initial_response_bytes = runner_initial_response_bytes;
+        self
     }
 }
 
@@ -78,6 +99,7 @@ pub struct WebIntegratedServerRunner {
     runner_frame_metrics: Rc<RefCell<WorkerFrameMetrics>>,
     shared_pool: Rc<RefCell<Vec<RunnerSharedSlot>>>,
     shared_inflight: Rc<RefCell<BTreeMap<u32, RunnerSharedSlot>>>,
+    runner_initial_response_bytes: u32,
     update_frames: Rc<RefCell<Vec<Vec<u8>>>>,
     diagnostics: Rc<RefCell<ServerRunnerDiagnostics>>,
     message_closure: Closure<dyn FnMut(MessageEvent)>,
@@ -132,11 +154,21 @@ impl WebIntegratedServerRunner {
         let worker = Worker::new_with_options(&config.worker_url, &options)
             .map_err(|error| format!("failed to spawn integrated server worker: {error:?}"))?;
 
-        let transport_kind = if runner_shared_memory_transport_available() {
-            WorkerFrameTransportKind::SharedMemory
-        } else {
-            WorkerFrameTransportKind::MessageTransfer
+        let shared_transport_available = runner_shared_memory_transport_available();
+        let transport_kind = match config.runner_transport_kind {
+            Some(WorkerFrameTransportKind::SharedMemory) if shared_transport_available => {
+                WorkerFrameTransportKind::SharedMemory
+            }
+            Some(WorkerFrameTransportKind::MessageTransfer) => {
+                WorkerFrameTransportKind::MessageTransfer
+            }
+            Some(WorkerFrameTransportKind::None) => WorkerFrameTransportKind::MessageTransfer,
+            None if shared_transport_available => WorkerFrameTransportKind::SharedMemory,
+            _ => WorkerFrameTransportKind::MessageTransfer,
         };
+        let runner_initial_response_bytes = config
+            .runner_initial_response_bytes
+            .max(RUNNER_SHARED_CONTROL_BYTES);
         let pending = Rc::new(RefCell::new(BTreeMap::new()));
         let request_start_ms_by_id: Rc<RefCell<BTreeMap<u32, f64>>> =
             Rc::new(RefCell::new(BTreeMap::new()));
@@ -202,6 +234,7 @@ impl WebIntegratedServerRunner {
             runner_frame_metrics,
             shared_pool,
             shared_inflight,
+            runner_initial_response_bytes,
             update_frames,
             diagnostics,
             message_closure,
@@ -508,7 +541,10 @@ impl WebIntegratedServerRunner {
                 .record_shared_buffer_pool_miss();
             let slot = RunnerSharedSlot::new(
                 runner_shared_capacity_for_len(request_bytes, MIN_RUNNER_SHARED_REQUEST_BYTES),
-                DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
+                runner_shared_capacity_for_len(
+                    self.runner_initial_response_bytes,
+                    RUNNER_SHARED_CONTROL_BYTES,
+                ),
             );
             self.runner_frame_metrics
                 .borrow_mut()
@@ -627,6 +663,319 @@ pub fn mclone_web_compute_worldgen_job_frame(frame: Uint8Array) -> Result<Uint8A
 pub fn mclone_web_compute_light_status_job_frame(frame: Uint8Array) -> Result<Uint8Array, JsValue> {
     let response = compute_light_status_job_frame(&frame.to_vec()).map_err(JsValue::from)?;
     Ok(Uint8Array::from(response.as_slice()))
+}
+
+#[wasm_bindgen]
+pub fn mclone_web_shared_topology_stress_report(
+    server_worker_url: String,
+    server_job_worker_url: String,
+    bindgen_js_url: String,
+    bindgen_wasm_url: String,
+) -> Promise {
+    wasm_bindgen_futures::future_to_promise(async move {
+        let report = shared_topology_stress_report(
+            server_worker_url,
+            server_job_worker_url,
+            bindgen_js_url,
+            bindgen_wasm_url,
+        )
+        .await
+        .map_err(JsValue::from)?;
+        Ok(report)
+    })
+}
+
+async fn shared_topology_stress_report(
+    server_worker_url: String,
+    server_job_worker_url: String,
+    bindgen_js_url: String,
+    bindgen_wasm_url: String,
+) -> Result<JsValue, String> {
+    let shared_runner = run_shared_runner_stress(
+        WebIntegratedServerRunnerConfig::new(
+            424242,
+            server_worker_url.clone(),
+            server_job_worker_url.clone(),
+            bindgen_js_url.clone(),
+            bindgen_wasm_url.clone(),
+        )
+        .with_runner_transport_kind(WorkerFrameTransportKind::SharedMemory)
+        .with_runner_initial_response_bytes(4 * 1024),
+    )
+    .await?;
+    let fallback_runner = run_message_transfer_runner_probe(
+        WebIntegratedServerRunnerConfig::new(
+            424243,
+            server_worker_url,
+            server_job_worker_url,
+            bindgen_js_url,
+            bindgen_wasm_url,
+        )
+        .with_runner_transport_kind(WorkerFrameTransportKind::MessageTransfer),
+    )
+    .await?;
+
+    let object = Object::new();
+    set_bool(&object, "ok", shared_runner.ok && fallback_runner.ok)?;
+    Reflect::set(
+        &object,
+        &JsValue::from_str("sharedRunner"),
+        &shared_runner.to_js_value()?,
+    )
+    .map_err(|error| format!("failed to attach shared runner stress report: {error:?}"))?;
+    Reflect::set(
+        &object,
+        &JsValue::from_str("fallbackRunner"),
+        &fallback_runner.to_js_value()?,
+    )
+    .map_err(|error| format!("failed to attach fallback runner stress report: {error:?}"))?;
+    Ok(object.into())
+}
+
+struct RunnerStressReport {
+    ok: bool,
+    command_count: usize,
+    update_count: usize,
+    poll_count: usize,
+    diagnostics: ServerRunnerDiagnostics,
+    shutdown: ServerRunnerDiagnostics,
+}
+
+impl RunnerStressReport {
+    fn to_js_value(&self) -> Result<JsValue, String> {
+        let object = Object::new();
+        set_bool(&object, "ok", self.ok)?;
+        set_number(&object, "commandCount", self.command_count as f64)?;
+        set_number(&object, "updateCount", self.update_count as f64)?;
+        set_number(&object, "pollCount", self.poll_count as f64)?;
+        Reflect::set(
+            &object,
+            &JsValue::from_str("diagnostics"),
+            &diagnostics_to_js(&self.diagnostics)?,
+        )
+        .map_err(|error| format!("failed to attach runner diagnostics: {error:?}"))?;
+        Reflect::set(
+            &object,
+            &JsValue::from_str("shutdown"),
+            &diagnostics_to_js(&self.shutdown)?,
+        )
+        .map_err(|error| format!("failed to attach runner shutdown diagnostics: {error:?}"))?;
+        Reflect::set(
+            &object,
+            &JsValue::from_str("runnerFrameMetrics"),
+            &frame_metrics_to_js(self.diagnostics.runner_frame_metrics)?,
+        )
+        .map_err(|error| format!("failed to attach runner frame metrics: {error:?}"))?;
+        Reflect::set(
+            &object,
+            &JsValue::from_str("worldgenJobFrameMetrics"),
+            &frame_metrics_to_js(self.diagnostics.worldgen_job_frame_metrics)?,
+        )
+        .map_err(|error| format!("failed to attach worldgen job frame metrics: {error:?}"))?;
+        Reflect::set(
+            &object,
+            &JsValue::from_str("lightStatusJobFrameMetrics"),
+            &frame_metrics_to_js(self.diagnostics.light_status_job_frame_metrics)?,
+        )
+        .map_err(|error| format!("failed to attach light-status job frame metrics: {error:?}"))?;
+        Ok(object.into())
+    }
+}
+
+async fn run_shared_runner_stress(
+    config: WebIntegratedServerRunnerConfig,
+) -> Result<RunnerStressReport, String> {
+    const FIRE_AND_FORGET_COMMANDS: i32 = 4;
+    const REUSE_COMMANDS: i32 = 2;
+
+    let mut runner = WebIntegratedServerRunner::new(config).await?;
+    let mut command_count = 0usize;
+    let mut update_count = 0usize;
+    let mut poll_count = 0usize;
+
+    for x in 0..FIRE_AND_FORGET_COMMANDS {
+        runner
+            .send_command(chunk_view_command(x, 0))
+            .map_err(|error| error.to_string())?;
+        command_count += 1;
+    }
+    wait_for_runner_condition(
+        &mut runner,
+        &mut update_count,
+        &mut poll_count,
+        |diagnostics| {
+            let metrics = diagnostics.runner_frame_metrics;
+            metrics.request_frames >= FIRE_AND_FORGET_COMMANDS as usize
+                && metrics.shared_buffer_pool_misses >= FIRE_AND_FORGET_COMMANDS as usize
+                && metrics.shared_buffer_pool_drops > 0
+                && metrics.shared_buffer_fallback_response_frames > 0
+                && runner_diagnostics_settled(diagnostics)
+        },
+        "shared runner pool overflow and fallback",
+    )
+    .await?;
+
+    for x in FIRE_AND_FORGET_COMMANDS..(FIRE_AND_FORGET_COMMANDS + REUSE_COMMANDS) {
+        let exchange = runner.exchange_command(chunk_view_command(x, 0)).await?;
+        command_count += 1;
+        update_count = update_count.saturating_add(exchange.updates.len());
+        update_count = update_count.saturating_add(runner.drain_decoded_updates()?.len());
+    }
+    let diagnostics = wait_for_runner_condition(
+        &mut runner,
+        &mut update_count,
+        &mut poll_count,
+        |diagnostics| {
+            let metrics = diagnostics.runner_frame_metrics;
+            metrics.request_frames >= (FIRE_AND_FORGET_COMMANDS + REUSE_COMMANDS) as usize
+                && metrics.shared_buffer_pool_hits >= REUSE_COMMANDS as usize
+                && metrics.shared_buffer_pooled_response_frames > 0
+                && frame_metrics_shared_worker_active(metrics)
+                && frame_metrics_shared_worker_active(diagnostics.worldgen_job_frame_metrics)
+                && frame_metrics_shared_worker_active(diagnostics.light_status_job_frame_metrics)
+                && runner_diagnostics_settled(diagnostics)
+        },
+        "shared runner reuse after overflow",
+    )
+    .await?;
+    let ok = diagnostics.runner_frame_metrics.transport_kind
+        == WorkerFrameTransportKind::SharedMemory
+        && diagnostics.runner_frame_metrics.shared_buffer_pool_misses
+            >= FIRE_AND_FORGET_COMMANDS as usize
+        && diagnostics.runner_frame_metrics.shared_buffer_pool_drops > 0
+        && diagnostics.runner_frame_metrics.shared_buffer_pool_hits >= REUSE_COMMANDS as usize
+        && diagnostics
+            .runner_frame_metrics
+            .shared_buffer_fallback_response_frames
+            > 0
+        && diagnostics
+            .runner_frame_metrics
+            .shared_buffer_pooled_response_frames
+            > 0
+        && update_count > 0
+        && runner_diagnostics_settled(&diagnostics);
+    runner.request_shutdown();
+    let shutdown = runner.diagnostics();
+    Ok(RunnerStressReport {
+        ok,
+        command_count,
+        update_count,
+        poll_count,
+        diagnostics,
+        shutdown,
+    })
+}
+
+async fn run_message_transfer_runner_probe(
+    config: WebIntegratedServerRunnerConfig,
+) -> Result<RunnerStressReport, String> {
+    let mut runner = WebIntegratedServerRunner::new(config).await?;
+    let exchange = runner.exchange_command(chunk_view_command(0, 0)).await?;
+    let mut update_count = exchange.updates.len();
+    let mut poll_count = 0usize;
+    let diagnostics = wait_for_runner_condition(
+        &mut runner,
+        &mut update_count,
+        &mut poll_count,
+        |diagnostics| {
+            let metrics = diagnostics.runner_frame_metrics;
+            frame_metrics_transfer_worker_active(metrics) && runner_diagnostics_settled(diagnostics)
+        },
+        "message-transfer runner fallback",
+    )
+    .await?;
+    let ok = diagnostics.runner_frame_metrics.transport_kind
+        == WorkerFrameTransportKind::MessageTransfer
+        && diagnostics.runner_frame_metrics.request_frames > 0
+        && diagnostics.runner_frame_metrics.response_frames > 0
+        && diagnostics.runner_frame_metrics.shared_buffer_pool_hits == 0
+        && diagnostics.runner_frame_metrics.shared_buffer_pool_misses == 0
+        && diagnostics.runner_frame_metrics.shared_buffer_pool_drops == 0
+        && update_count > 0
+        && runner_diagnostics_settled(&diagnostics);
+    runner.request_shutdown();
+    let shutdown = runner.diagnostics();
+    Ok(RunnerStressReport {
+        ok,
+        command_count: 1,
+        update_count,
+        poll_count,
+        diagnostics,
+        shutdown,
+    })
+}
+
+async fn wait_for_runner_condition(
+    runner: &mut WebIntegratedServerRunner,
+    update_count: &mut usize,
+    poll_count: &mut usize,
+    condition: impl Fn(&ServerRunnerDiagnostics) -> bool,
+    label: &str,
+) -> Result<ServerRunnerDiagnostics, String> {
+    for _ in 0..2400 {
+        *update_count = update_count.saturating_add(runner.drain_decoded_updates()?.len());
+        let diagnostics = runner.diagnostics();
+        if condition(&diagnostics) {
+            return Ok(diagnostics);
+        }
+        *poll_count = poll_count.saturating_add(1);
+        wait_for_browser_turn().await?;
+    }
+    Err(format!("timed out waiting for {label}"))
+}
+
+async fn wait_for_browser_turn() -> Result<(), String> {
+    let promise = Promise::new(&mut |resolve: Function, reject: Function| {
+        let Some(window) = web_sys::window() else {
+            let _ = reject.call1(&JsValue::NULL, &JsValue::from_str("window is unavailable"));
+            return;
+        };
+        let callback = Closure::once_into_js(move || {
+            let _ = resolve.call0(&JsValue::NULL);
+        });
+        if let Err(error) = window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(callback.unchecked_ref(), 0)
+        {
+            let _ = reject.call1(&JsValue::NULL, &error);
+        }
+    });
+    JsFuture::from(promise)
+        .await
+        .map(|_| ())
+        .map_err(|error| js_error_string(&error))
+}
+
+fn chunk_view_command(x: i32, z: i32) -> ClientCommand {
+    ClientCommand::SetChunkView(ChunkView {
+        center: ChunkPos { x, z },
+        render_distance: 0,
+        chunk_tracking_radius: 0,
+    })
+}
+
+fn runner_diagnostics_settled(diagnostics: &ServerRunnerDiagnostics) -> bool {
+    diagnostics.command_queue_depth == 0
+        && diagnostics.update_queue_depth == 0
+        && diagnostics.pending_jobs == 0
+        && diagnostics.pending_publications == 0
+        && diagnostics.worldgen_mailbox_pending_jobs == 0
+        && diagnostics.light_status_mailbox_pending_statuses == 0
+}
+
+fn frame_metrics_shared_worker_active(metrics: WorkerFrameMetrics) -> bool {
+    metrics.transport_kind == WorkerFrameTransportKind::SharedMemory
+        && metrics.request_frames > 0
+        && metrics.request_bytes > 0
+        && metrics.response_frames > 0
+        && metrics.response_bytes > 0
+}
+
+fn frame_metrics_transfer_worker_active(metrics: WorkerFrameMetrics) -> bool {
+    metrics.transport_kind == WorkerFrameTransportKind::MessageTransfer
+        && metrics.request_frames > 0
+        && metrics.request_bytes > 0
+        && metrics.response_frames > 0
+        && metrics.response_bytes > 0
 }
 
 #[derive(Clone)]

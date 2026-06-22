@@ -357,6 +357,7 @@ async function renderCanvas() {
         ? session.finishChunkRenderCompileRequest(secondCompileRequest.requestId, secondCompile.packed)
         : { ok: false, reason: "render compiler worker failed before second render" };
       const shutdownReport = session.shutdown();
+      const sharedTopologyStress = await runSharedTopologyStress(module);
       return {
         ok: Boolean(
           firstCompileRequest.ok
@@ -386,6 +387,7 @@ async function renderCanvas() {
           && report.assetPackLoaded
           && report.textured
           && shutdownReport.ok
+          && sharedTopologyStressActive(sharedTopologyStress)
         ),
         supported: true,
         status: report.ok ? "rendered" : "failed",
@@ -398,6 +400,7 @@ async function renderCanvas() {
         firstReport,
         report,
         shutdownReport,
+        sharedTopologyStress,
       };
     } finally {
       compiler.terminate();
@@ -407,6 +410,30 @@ async function renderCanvas() {
       ok: false,
       supported: true,
       status: "render-failed",
+      reason: stringifyError(error),
+    };
+  }
+}
+
+async function runSharedTopologyStress(module) {
+  if (typeof module.mclone_web_shared_topology_stress_report !== "function") {
+    return {
+      ok: false,
+      status: "export-missing",
+      reason: "missing mclone_web_shared_topology_stress_report export",
+    };
+  }
+  try {
+    return await module.mclone_web_shared_topology_stress_report(
+      SERVER_WORKER_URL.href,
+      SERVER_JOB_WORKER_URL.href,
+      BINDGEN_JS_URL.href,
+      BINDGEN_WASM_URL.href,
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      status: "stress-failed",
       reason: stringifyError(error),
     };
   }
@@ -537,6 +564,55 @@ function sharedBufferPoolActive(metrics) {
     && Number(metrics.maxSharedBufferCapacityBytes) >= Number(metrics.sharedBufferCapacityBytes)
     && Number(metrics.sharedBufferPooledResponseFrames) > 0
     && Number(metrics.sharedBufferFallbackResponseFrames) === 0
+  );
+}
+
+function sharedTopologyStressActive(report) {
+  return Boolean(
+    report
+    && report.ok
+    && sharedRunnerStressActive(report.sharedRunner)
+    && fallbackRunnerStressActive(report.fallbackRunner)
+  );
+}
+
+function sharedRunnerStressActive(report) {
+  const metrics = report?.runnerFrameMetrics;
+  return Boolean(
+    report
+    && report.ok
+    && Number(report.commandCount) >= 6
+    && Number(report.updateCount) > 0
+    && frameMetricsActive(metrics, "shared-memory")
+    && Number(metrics.sharedBufferPoolMisses) >= 4
+    && Number(metrics.sharedBufferPoolHits) >= 2
+    && Number(metrics.sharedBufferPoolDrops) > 0
+    && Number(metrics.sharedBufferCapacityBytes) > 0
+    && Number(metrics.maxSharedBufferCapacityBytes) >= Number(metrics.sharedBufferCapacityBytes)
+    && Number(metrics.sharedBufferPooledResponseFrames) > 0
+    && Number(metrics.sharedBufferFallbackResponseFrames) > 0
+    && frameMetricsActive(report.worldgenJobFrameMetrics, "shared-memory")
+    && frameMetricsActive(report.lightStatusJobFrameMetrics, "shared-memory")
+    && report.shutdown
+    && report.shutdown.running === false
+  );
+}
+
+function fallbackRunnerStressActive(report) {
+  const metrics = report?.runnerFrameMetrics;
+  return Boolean(
+    report
+    && report.ok
+    && Number(report.commandCount) === 1
+    && Number(report.updateCount) > 0
+    && frameMetricsActive(metrics, "message-transfer")
+    && Number(metrics.sharedBufferPoolHits) === 0
+    && Number(metrics.sharedBufferPoolMisses) === 0
+    && Number(metrics.sharedBufferPoolDrops) === 0
+    && Number(metrics.sharedBufferPooledResponseFrames) === 0
+    && Number(metrics.sharedBufferFallbackResponseFrames) === 0
+    && report.shutdown
+    && report.shutdown.running === false
   );
 }
 

@@ -1,8 +1,8 @@
 # 062: Shared Threading Topology
 
 Status: in progress - native desktop/browser server runners, browser server
-job workers, shared-memory runner frames, and shared-memory server-job frames
-landed
+job workers, shared-memory runner/job frames, bounded shared-buffer pools, and
+web shared-lane stress coverage landed
 
 ## Purpose
 
@@ -455,11 +455,30 @@ Landed in the shared runner frame slice:
   standard web smoke asserts the runner, worldgen, and light-status lanes are
   all shared-memory-backed with pooled responses on the normal path.
 
+Landed in the shared-lane stress slice:
+
+- The web smoke now runs an explicit shared-topology stress export after the
+  normal render/session shutdown path. The stress path starts a fresh
+  integrated-server worker with shared runner transport forced on and a small
+  initial response buffer so oversized update responses exercise the fallback
+  buffer path and grow the reusable slot before it re-enters the pool.
+- The stress path posts multiple chunk-view commands before yielding to the
+  browser event loop, proving multiple in-flight runner frames, runner pool
+  misses, bounded-pool drops, and max-pending-frame diagnostics. A reuse phase
+  then asserts pooled shared slots are hit after overflow.
+- The same stress report includes worldgen and light-status job metrics from
+  the stressed runner, so the browser smoke continues to prove those server-job
+  lanes stay shared-memory-backed while the runner is under contention.
+- A second forced `message-transfer` runner probe keeps the fallback transport
+  observable and asserts it has command/update frame activity without shared
+  pool counters.
+
 Next implementation slice:
 
-- Add contention/backpressure coverage for shared-memory worker lanes: stress
-  multiple in-flight runner/job frames, exercise pool overflow/growth paths, and
-  keep the message-transfer fallback observable.
+- Add first-class browser remote transport by introducing a WebSocket client
+  adapter to a native hosted server, while keeping the same client runtime and
+  command/update application path as local integrated mode. Do not add WebRTC
+  until the WebSocket adapter proves the transport boundary.
 
 ### 6. Browser Remote Transport
 
@@ -539,13 +558,17 @@ New validation should include:
    shared request/response buffers for worldgen and light-status job workers,
    atomic status/byte-count headers, transferred-message fallback, web smoke
    assertions for shared-memory job metrics, and screenshot validation.
+6. Browser/WASM shared-buffer pools and runner frames:
+   bounded shared-buffer pools for server-job and integrated-runner frames,
+   shared runner command/update payloads, pooled/fallback response counters,
+   normal-path smoke assertions, contention/backpressure stress coverage,
+   forced transfer fallback coverage, and Playwright screenshot validation.
 
 ## Next Implementation Slice
 
-Turn the shared-memory server-job frame slots into a reusable bounded queue or
-buffer pool. The next chunk should avoid allocating fresh shared buffers for
-every large worldgen/light response, add queue-capacity/backpressure metrics,
-and keep the transferred-message fallback. After that, the same measured
-transport boundary can be applied to integrated runner command/update frames or
-render-section compile worker payloads. WebSocket/WebRTC remains a later
-transport slice.
+Start browser remote transport with a WebSocket client adapter to the native
+hosted server. The good next chunk is to define the browser-side transport
+adapter behind the existing command/update runtime boundary, add a native
+hosted server smoke path that a browser can connect to, and assert runner kind /
+transport diagnostics without changing local integrated mode. WebRTC remains a
+later transport slice after WebSocket proves the shape.
