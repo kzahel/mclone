@@ -2,6 +2,7 @@
 target/
 build/
 dist/
+dist-native-web/
 oracle/classes/
 node_modules/
 *.wasm

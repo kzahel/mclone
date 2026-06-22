@@ -8,12 +8,15 @@ export default {
 
     const object = await env.BUCKET.get(key);
     if (!object) {
-      return new Response("Not Found", { status: 404 });
+      const headers = new Headers({ "Content-Type": "text/plain; charset=utf-8" });
+      setCrossOriginIsolationHeaders(headers);
+      return new Response("Not Found", { status: 404, headers });
     }
 
     const headers = new Headers();
     object.writeHttpMetadata(headers);
     headers.set("etag", object.httpEtag);
+    setCrossOriginIsolationHeaders(headers);
 
     if (key.endsWith(".html") || key.endsWith(".zip.json")) {
       headers.set("Cache-Control", "no-cache");
@@ -29,3 +32,9 @@ export default {
     return new Response(object.body, { headers });
   },
 };
+
+function setCrossOriginIsolationHeaders(headers) {
+  headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+  headers.set("Cross-Origin-Resource-Policy", "same-origin");
+}
