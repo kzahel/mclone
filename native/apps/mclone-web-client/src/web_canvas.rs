@@ -388,6 +388,18 @@ struct GeneratedChunkRenderReport {
     render_count: usize,
     compile_request_id: u32,
     pending_compile_job_count: usize,
+    view_dirty_chunk_count: usize,
+    view_removal_chunk_count: usize,
+    loaded_dirty_chunk_count: usize,
+    removal_dirty_chunk_count: usize,
+    stale_dirty_chunk_count: usize,
+    loaded_dirty_section_count: usize,
+    removal_dirty_section_count: usize,
+    stale_dirty_section_count: usize,
+    ready_compile_section_count: usize,
+    deferred_compile_section_count: usize,
+    budgeted_loaded_chunk_count: usize,
+    budgeted_dirty_section_chunk_count: usize,
     submitted_compile_section_count: usize,
     accepted_compile_section_count: usize,
     stale_compile_section_count: usize,
@@ -395,6 +407,9 @@ struct GeneratedChunkRenderReport {
     worker_packed_byte_length: usize,
     worker_section_count: usize,
     worker_non_empty_section_count: usize,
+    worker_visibility_graph_build_count: usize,
+    worker_visibility_graph_total_ms: f64,
+    worker_visibility_graph_worst_ms: f64,
     worker_vertex_count: u32,
     worker_index_count: u32,
     worker_face_count: u32,
@@ -544,6 +559,66 @@ impl GeneratedChunkRenderReport {
         )?;
         set_number(
             &object,
+            "viewDirtyChunkCount",
+            self.view_dirty_chunk_count as f64,
+        )?;
+        set_number(
+            &object,
+            "viewRemovalChunkCount",
+            self.view_removal_chunk_count as f64,
+        )?;
+        set_number(
+            &object,
+            "loadedDirtyChunkCount",
+            self.loaded_dirty_chunk_count as f64,
+        )?;
+        set_number(
+            &object,
+            "removalDirtyChunkCount",
+            self.removal_dirty_chunk_count as f64,
+        )?;
+        set_number(
+            &object,
+            "staleDirtyChunkCount",
+            self.stale_dirty_chunk_count as f64,
+        )?;
+        set_number(
+            &object,
+            "loadedDirtySectionCount",
+            self.loaded_dirty_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "removalDirtySectionCount",
+            self.removal_dirty_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "staleDirtySectionCount",
+            self.stale_dirty_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "readyCompileSectionCount",
+            self.ready_compile_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "deferredCompileSectionCount",
+            self.deferred_compile_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "budgetedLoadedChunkCount",
+            self.budgeted_loaded_chunk_count as f64,
+        )?;
+        set_number(
+            &object,
+            "budgetedDirtySectionChunkCount",
+            self.budgeted_dirty_section_chunk_count as f64,
+        )?;
+        set_number(
+            &object,
             "submittedCompileSectionCount",
             self.submitted_compile_section_count as f64,
         )?;
@@ -571,6 +646,21 @@ impl GeneratedChunkRenderReport {
             &object,
             "workerNonEmptySectionCount",
             self.worker_non_empty_section_count as f64,
+        )?;
+        set_number(
+            &object,
+            "workerVisibilityGraphBuildCount",
+            self.worker_visibility_graph_build_count as f64,
+        )?;
+        set_number(
+            &object,
+            "workerVisibilityGraphTotalMs",
+            self.worker_visibility_graph_total_ms,
+        )?;
+        set_number(
+            &object,
+            "workerVisibilityGraphWorstMs",
+            self.worker_visibility_graph_worst_ms,
         )?;
         set_number(
             &object,
@@ -664,12 +754,15 @@ impl GeneratedChunkRenderReport {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct WebSectionCompileReport {
     worker_compile_used: bool,
     packed_byte_length: usize,
     section_count: usize,
     non_empty_section_count: usize,
+    visibility_graph_build_count: usize,
+    visibility_graph_total_ms: f64,
+    visibility_graph_worst_ms: f64,
     vertex_count: u32,
     index_count: u32,
     face_count: u32,
@@ -682,9 +775,55 @@ impl WebSectionCompileReport {
             packed_byte_length,
             section_count: summary.section_count,
             non_empty_section_count: summary.non_empty_section_count,
+            visibility_graph_build_count: summary.visibility_graph_stats.build_count,
+            visibility_graph_total_ms: summary.visibility_graph_stats.total_ms,
+            visibility_graph_worst_ms: summary.visibility_graph_stats.worst_ms,
             vertex_count: summary.vertex_count,
             index_count: summary.index_count,
             face_count: summary.face_count(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct WebCompileScopeReport {
+    view_dirty_chunk_count: usize,
+    view_removal_chunk_count: usize,
+    loaded_dirty_chunk_count: usize,
+    removal_dirty_chunk_count: usize,
+    stale_dirty_chunk_count: usize,
+    loaded_dirty_section_count: usize,
+    removal_dirty_section_count: usize,
+    stale_dirty_section_count: usize,
+    ready_compile_section_count: usize,
+    deferred_compile_section_count: usize,
+    budgeted_loaded_chunk_count: usize,
+    budgeted_dirty_section_chunk_count: usize,
+}
+
+impl WebCompileScopeReport {
+    fn from_plan(sync: &RenderSectionViewSync, sync_plan: &RenderSectionSyncPlan) -> Self {
+        Self {
+            view_dirty_chunk_count: sync.dirty_chunks.len(),
+            view_removal_chunk_count: sync.removal_chunks.len(),
+            loaded_dirty_chunk_count: sync_plan.dirty_work.loaded_dirty_chunks.len(),
+            removal_dirty_chunk_count: sync_plan.dirty_work.removal_dirty_chunks.len(),
+            stale_dirty_chunk_count: sync_plan.dirty_work.stale_dirty_chunks.len(),
+            loaded_dirty_section_count: sync_plan
+                .dirty_work
+                .loaded_dirty_sections_by_chunk
+                .values()
+                .map(BTreeSet::len)
+                .sum(),
+            removal_dirty_section_count: sync_plan.dirty_work.removal_dirty_sections.len(),
+            stale_dirty_section_count: sync_plan.dirty_work.stale_dirty_sections.len(),
+            ready_compile_section_count: sync_plan.ready_plan.ready_section_keys.len(),
+            deferred_compile_section_count: sync_plan.ready_plan.deferred_section_keys.len(),
+            budgeted_loaded_chunk_count: sync_plan.ready_plan.budgeted_loaded_chunks.len(),
+            budgeted_dirty_section_chunk_count: sync_plan
+                .ready_plan
+                .budgeted_dirty_section_chunks
+                .len(),
         }
     }
 }
@@ -696,12 +835,14 @@ struct WebPendingCompileContext {
     sync: RenderSectionViewSync,
     removal_chunks: BTreeSet<ChunkPos>,
     removal_sections: BTreeSet<RenderSectionKey>,
+    scope: WebCompileScopeReport,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct WebChunkRenderPlan {
     sync: RenderSectionViewSync,
     sync_plan: RenderSectionSyncPlan,
+    scope: WebCompileScopeReport,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1268,6 +1409,7 @@ impl WebChunkRenderSession {
                 .dirty_work
                 .removal_dirty_sections
                 .clone(),
+            scope: render_plan.scope,
         };
         let compile_requests = &mut self.compile_requests;
         let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
@@ -1284,7 +1426,7 @@ impl WebChunkRenderSession {
             ));
         };
         let info = submission.output;
-        self.compile_request_to_js_value(info, center, radius_chunks)
+        self.compile_request_to_js_value(info, center, radius_chunks, render_plan.scope)
     }
 
     fn finish_chunk_render_compile_request_with_packed_report(
@@ -1307,6 +1449,7 @@ impl WebChunkRenderSession {
             context.sync,
             context.removal_chunks,
             context.removal_sections,
+            context.scope,
             completed,
             WebSectionCompileReport::worker(packed_byte_length, summary),
             request_id,
@@ -1412,6 +1555,7 @@ impl WebChunkRenderSession {
             context.sync,
             context.removal_chunks,
             context.removal_sections,
+            context.scope,
             completed,
             WebSectionCompileReport::worker(packed_byte_length, summary),
             request_id,
@@ -1444,6 +1588,7 @@ impl WebChunkRenderSession {
             current_section_keys,
             RenderSectionCacheUpdate::default(),
             WebSectionCompileReport::default(),
+            WebCompileScopeReport::default(),
             RenderSectionCompileAcceptanceReport::default(),
             WebFrameCamera::Camera,
             false,
@@ -1687,6 +1832,7 @@ impl WebChunkRenderSession {
             render_plan.sync,
             removal_chunks,
             removal_sections,
+            render_plan.scope,
             completed,
             compile_report,
             0,
@@ -1704,6 +1850,7 @@ impl WebChunkRenderSession {
         sync: RenderSectionViewSync,
         removal_chunks: BTreeSet<ChunkPos>,
         removal_sections: BTreeSet<RenderSectionKey>,
+        compile_scope: WebCompileScopeReport,
         completed: RenderSectionCompileResult,
         compile_report: WebSectionCompileReport,
         request_id: u32,
@@ -1743,6 +1890,7 @@ impl WebChunkRenderSession {
             current_section_keys,
             finished.cache_update,
             compile_report,
+            compile_scope,
             finished.acceptance_report,
             frame_camera,
             true,
@@ -1813,6 +1961,7 @@ impl WebChunkRenderSession {
             RenderSectionRemovalMode::Defer,
         );
         Ok(WebChunkRenderPlan {
+            scope: WebCompileScopeReport::from_plan(&sync, &sync_update.sync_plan),
             sync,
             sync_plan: sync_update.sync_plan,
         })
@@ -1861,6 +2010,7 @@ impl WebChunkRenderSession {
                 .dirty_work
                 .removal_dirty_sections
                 .clone(),
+            scope: render_plan.scope,
         };
         let compile_requests = &mut self.compile_requests;
         let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
@@ -1877,7 +2027,7 @@ impl WebChunkRenderSession {
             ));
         };
         let info = submission.output;
-        self.compile_request_to_js_value(info, center, radius_chunks)
+        self.compile_request_to_js_value(info, center, radius_chunks, render_plan.scope)
     }
 
     async fn prepare_chunk_view(
@@ -1912,6 +2062,7 @@ impl WebChunkRenderSession {
         current_section_keys: BTreeSet<RenderSectionKey>,
         cache_update: RenderSectionCacheUpdate,
         compile_report: WebSectionCompileReport,
+        compile_scope: WebCompileScopeReport,
         acceptance_report: RenderSectionCompileAcceptanceReport,
         frame_camera: WebFrameCamera,
         count_mesh_build: bool,
@@ -2049,6 +2200,18 @@ impl WebChunkRenderSession {
             render_count: self.render_count,
             compile_request_id: acceptance_report.request_id,
             pending_compile_job_count: self.compile_requests.pending_request_count(),
+            view_dirty_chunk_count: compile_scope.view_dirty_chunk_count,
+            view_removal_chunk_count: compile_scope.view_removal_chunk_count,
+            loaded_dirty_chunk_count: compile_scope.loaded_dirty_chunk_count,
+            removal_dirty_chunk_count: compile_scope.removal_dirty_chunk_count,
+            stale_dirty_chunk_count: compile_scope.stale_dirty_chunk_count,
+            loaded_dirty_section_count: compile_scope.loaded_dirty_section_count,
+            removal_dirty_section_count: compile_scope.removal_dirty_section_count,
+            stale_dirty_section_count: compile_scope.stale_dirty_section_count,
+            ready_compile_section_count: compile_scope.ready_compile_section_count,
+            deferred_compile_section_count: compile_scope.deferred_compile_section_count,
+            budgeted_loaded_chunk_count: compile_scope.budgeted_loaded_chunk_count,
+            budgeted_dirty_section_chunk_count: compile_scope.budgeted_dirty_section_chunk_count,
             submitted_compile_section_count: acceptance_report.submitted_section_count,
             accepted_compile_section_count: acceptance_report.accepted_section_count,
             stale_compile_section_count: acceptance_report.stale_section_count,
@@ -2056,6 +2219,9 @@ impl WebChunkRenderSession {
             worker_packed_byte_length: compile_report.packed_byte_length,
             worker_section_count: compile_report.section_count,
             worker_non_empty_section_count: compile_report.non_empty_section_count,
+            worker_visibility_graph_build_count: compile_report.visibility_graph_build_count,
+            worker_visibility_graph_total_ms: compile_report.visibility_graph_total_ms,
+            worker_visibility_graph_worst_ms: compile_report.visibility_graph_worst_ms,
             worker_vertex_count: compile_report.vertex_count,
             worker_index_count: compile_report.index_count,
             worker_face_count: compile_report.face_count,
@@ -2140,6 +2306,7 @@ impl WebChunkRenderSession {
         info: RenderSectionCompileRequestInfo,
         center: ChunkPos,
         radius_chunks: u32,
+        scope: WebCompileScopeReport,
     ) -> Result<JsValue, String> {
         let object = js_sys::Object::new();
         set_bool(&object, "ok", true)?;
@@ -2147,6 +2314,7 @@ impl WebChunkRenderSession {
         set_number(&object, "centerX", f64::from(center.x))?;
         set_number(&object, "centerZ", f64::from(center.z))?;
         set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
+        write_compile_scope_report(&object, scope)?;
         set_number(
             &object,
             "submittedCompileSectionCount",
@@ -2278,6 +2446,73 @@ fn write_compile_queue_request(
     set_bool(object, "force", request.force)?;
     set_number(object, "centerX", f64::from(request.center.x))?;
     set_number(object, "centerZ", f64::from(request.center.z))?;
+    Ok(())
+}
+
+fn write_compile_scope_report(
+    object: &js_sys::Object,
+    scope: WebCompileScopeReport,
+) -> Result<(), String> {
+    set_number(
+        object,
+        "viewDirtyChunkCount",
+        scope.view_dirty_chunk_count as f64,
+    )?;
+    set_number(
+        object,
+        "viewRemovalChunkCount",
+        scope.view_removal_chunk_count as f64,
+    )?;
+    set_number(
+        object,
+        "loadedDirtyChunkCount",
+        scope.loaded_dirty_chunk_count as f64,
+    )?;
+    set_number(
+        object,
+        "removalDirtyChunkCount",
+        scope.removal_dirty_chunk_count as f64,
+    )?;
+    set_number(
+        object,
+        "staleDirtyChunkCount",
+        scope.stale_dirty_chunk_count as f64,
+    )?;
+    set_number(
+        object,
+        "loadedDirtySectionCount",
+        scope.loaded_dirty_section_count as f64,
+    )?;
+    set_number(
+        object,
+        "removalDirtySectionCount",
+        scope.removal_dirty_section_count as f64,
+    )?;
+    set_number(
+        object,
+        "staleDirtySectionCount",
+        scope.stale_dirty_section_count as f64,
+    )?;
+    set_number(
+        object,
+        "readyCompileSectionCount",
+        scope.ready_compile_section_count as f64,
+    )?;
+    set_number(
+        object,
+        "deferredCompileSectionCount",
+        scope.deferred_compile_section_count as f64,
+    )?;
+    set_number(
+        object,
+        "budgetedLoadedChunkCount",
+        scope.budgeted_loaded_chunk_count as f64,
+    )?;
+    set_number(
+        object,
+        "budgetedDirtySectionChunkCount",
+        scope.budgeted_dirty_section_chunk_count as f64,
+    )?;
     Ok(())
 }
 

@@ -226,6 +226,15 @@ fn build_textured_render_sections_for_chunks(
             if target_sections.is_some_and(|targets| !targets.contains(&key)) {
                 continue;
             }
+            if textured_section_is_air_like(*input, local_y_start, local_y_end) {
+                visibility_graph.record_ms(0.0);
+                sections.push(TexturedRenderSectionMesh {
+                    key,
+                    mesh: TexturedVisibleChunkMesh::default(),
+                    visibility: VisibilitySet::all_visible(),
+                });
+                continue;
+            }
             let mut mesh = TexturedVisibleChunkMesh::default();
             let visibility_start = VisibilityGraphTimer::start();
             let visibility =
@@ -1059,6 +1068,23 @@ fn is_air_like_block_id(block_id: u8) -> bool {
     matches!(block_id, AIR_BLOCK_ID | CAVE_AIR_BLOCK_ID)
 }
 
+fn textured_section_is_air_like(
+    input: TexturedChunkMeshInput<'_>,
+    local_y_start: i32,
+    local_y_end: i32,
+) -> bool {
+    for local_y in local_y_start..local_y_end {
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                if !is_air_like_block_state(input.block_at_or_air(local_x, local_y, local_z)) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 fn is_air_like_block_state(state_id: BlockStateId) -> bool {
     matches!(state_id, AIR_BLOCK_STATE_ID | CAVE_AIR_BLOCK_STATE_ID)
 }
@@ -1169,5 +1195,26 @@ fn direction_offset(direction: ModelFaceDirection) -> [i32; 3] {
         ModelFaceDirection::South => [0, 0, 1],
         ModelFaceDirection::West => [-1, 0, 0],
         ModelFaceDirection::East => [1, 0, 0],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_air_textured_sections_keep_visibility_without_mesh_work() {
+        let blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_WIDTH as usize * CHUNK_WIDTH as usize * 16];
+        let input = TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks);
+        let report =
+            build_textured_render_sections_with_stats(&[input], &TexturedMeshCatalog::default())
+                .expect("all-air section should build");
+
+        assert_eq!(report.sections.len(), 1);
+        assert_eq!(report.sections[0].key, RenderSectionKey::new(0, 0, 0));
+        assert!(report.sections[0].is_empty());
+        assert_eq!(report.sections[0].visibility, VisibilitySet::all_visible());
+        assert_eq!(report.visibility_graph.build_count, 1);
+        assert_eq!(report.visibility_graph.total_ms, 0.0);
     }
 }

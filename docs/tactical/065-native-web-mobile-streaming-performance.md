@@ -2,7 +2,8 @@
 
 Status: active; diagnostics, movement perf harness, background compile,
 deferred browser commands, budgeted worker-update drains, and stale-result
-tolerance landed; shared Rust compile-queue/coalescing decision landed.
+tolerance landed; shared Rust compile-queue/coalescing decision landed;
+compile-scope diagnostics and all-air section mesh fast path landed.
 
 ## Purpose
 
@@ -23,8 +24,8 @@ legacy TypeScript browser engine.
 
 ## Current Evidence
 
-The web app currently compiles the next camera-centered render view inside the
-main animation-frame tick:
+The original stalling path compiled the next camera-centered render view inside
+the main animation-frame tick:
 
 ```text
 requestAnimationFrame tick
@@ -74,20 +75,33 @@ start/queued/skipped result. Local movement perf still shows roughly
 large time is in chunk-view/request preparation and full-view mesh work, not in
 the old JS queue object.
 
+Compile-scope diagnostics added on 2026-06-22 show why this can still look like
+a full-view compile even after queue convergence. `RenderSectionViewSync` marks
+newly added chunks dirty, plus current chunks adjacent to removed chunks. A
+camera-centered move can therefore dirty `8-9` loaded chunks; because the ready
+plan currently expands each loaded dirty chunk to all section keys, the Rust
+scheduler can legitimately submit `128-144` ready sections for a radius-1 view.
+The browser worker result still reports a full set of `144` logical section
+records and an `~11.6 MB` packed payload on these runs, even though only about
+`66-68` sections contain geometry. That leaves a transport/result-size problem
+after the main-thread scheduling fix.
+
 ## Diagnosis
 
-The CPU mesh build already runs in a Web Worker, but the app loop still waits
-for the entire compile/apply path before it can continue the frame:
+The CPU mesh build already runs in a Web Worker. The first scheduler fixes
+removed the main animation-frame await for post-initial movement compiles, so
+normal input/render frames can continue while the worker runs. The remaining
+cost is the size and shape of each compile transaction:
 
 1. Build a Rust-owned compile request for the new camera center.
 2. Send all requested section inputs to the render compiler worker.
 3. Wait for the worker to return a packed section report.
 4. Decode the packed report in WASM.
 5. Finish the render compile result and upload changed sections to WebGPU.
-6. Only then resume normal frame flow.
+6. Apply the new cache once the background compile completes.
 
-This is correctness-first streaming. It avoids rendering from a missing view,
-but it makes movement depend on render-section rebuild latency.
+This is now responsive background streaming after first presentation, but it
+still pays full-view worker and packed-result costs during movement.
 
 ## Target UX
 
@@ -258,24 +272,31 @@ shared Rust engine/render-session coordinator tracked by tactical 061.
 
 ### 5. Reduce Per-Move Compile Scope
 
-Status: next likely step after the Rust compile-queue extraction.
+Status: partially complete; diagnostics and a safe all-air mesh fast path
+landed, but target-section-aware worker transport and finer dirty planning are
+still pending.
 
-Investigate why one chunk-center move submits around `96` sections for radius
-`1`. Some of that may be legitimate neighbor-boundary rebuild pressure, but it
-needs measurement.
+Investigate why one chunk-center move submits around `128-144` sections for
+radius `1`. The first measurement shows this is not only JavaScript queue
+divergence: view-diff dirtying can mark `8-9` loaded chunks, and loaded dirty
+chunks currently expand to every section in those chunks.
 
 Candidate reductions:
 
-1. avoid submitting sections whose mesh input revision is unchanged
-2. preserve and reuse worker-packed mesh outputs when only camera center changes
-3. make render-section dirty reasons visible in diagnostics
-4. verify loaded-neighbor boundary invalidation is no broader than needed
+1. make the browser worker request/result protocol target-section-aware, so
+   `submittedCompileSectionCount` bounds worker build and packed result size
+2. avoid submitting sections whose mesh input revision is unchanged
+3. preserve and reuse worker-packed mesh outputs when only camera center changes
+4. split chunk-level view dirtying from section-level face-neighbor dirtying,
+   so removed-neighbor pressure does not always expand to every Y section
 5. prioritize near/in-frustum sections before hidden or low-value sections
 
 Acceptance:
 
 - one-chunk moves submit materially fewer sections when terrain is already
   loaded and unchanged
+- worker `sectionCount` and packed byte length scale with requested target
+  sections instead of always returning the full radius-1 section set
 - stale/duplicate compile work remains near zero during normal walking
 - desktop/native render-section correctness tests remain green
 
@@ -405,9 +426,52 @@ Observed local movement perf after this chunk:
 - some movement compiles still submit a full `144` sections after crossing
   farther chunk boundaries
 
-Current next likely step: reduce per-move compile scope and make dirty reasons
-visible enough to explain why unchanged loaded terrain can still submit a full
-view.
+That next step is refined by the compile-scope diagnostics below.
+
+## Compile Scope Diagnostics Landed
+
+Implemented on 2026-06-22:
+
+- `WebCompileScopeReport` now carries view dirty/removal chunk counts,
+  loaded/removal/stale dirty counts, ready/deferred section counts, and budgeted
+  chunk counts from the Rust sync planner into compile requests, final render
+  reports, runtime diagnostics, and browser smoke summaries.
+- Worker mesh summary diagnostics now expose visibility-graph build count and
+  timing in the same compile timing object.
+- `mclone-mesh` now fast-paths all-air textured render sections by emitting an
+  empty all-visible section record without running face emission or visibility
+  graph scanning for that section. This preserves renderer occlusion data while
+  avoiding pointless work for empty vertical bands.
+
+Validation run:
+
+```text
+node --check native/apps/mclone-web-client/www/mclone-web-app.js
+node --check native/apps/mclone-web-client/scripts/browser-smoke.mjs
+cargo fmt --manifest-path native/Cargo.toml --all -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-mesh
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+pnpm native:web:build
+pnpm native:web:app-smoke
+pnpm native:web:mobile-smoke
+pnpm native:web:movement-perf
+```
+
+Observed local movement perf after this chunk:
+
+- movement compile frame gaps stayed low: `15.3-19.8ms`
+- worker round trip stayed high: `913.5-930.3ms`
+- decode/finish/apply stayed small: `10.5-14.1ms`
+- view dirty chunks were `8` and `9`
+- ready/submitted compile sections were `128` and `144`
+- worker reports still contained `144` section records, `66-68` non-empty
+  sections, and a max packed payload of `11,623,508` bytes
+
+Current next likely step: make the browser render-compiler worker protocol
+target-section-aware, then revisit dirty planning. The Rust scheduler can now
+explain what it asked for, but the worker/result path still pays for full
+radius-1 reports during movement.
 
 ## Deployment Check
 

@@ -1406,6 +1406,18 @@ function createCompileTiming({
     chunkViewUpdateCount: 0,
     centerLoaded: false,
     runnerSettled: false,
+    viewDirtyChunkCount: 0,
+    viewRemovalChunkCount: 0,
+    loadedDirtyChunkCount: 0,
+    removalDirtyChunkCount: 0,
+    staleDirtyChunkCount: 0,
+    loadedDirtySectionCount: 0,
+    removalDirtySectionCount: 0,
+    staleDirtySectionCount: 0,
+    readyCompileSectionCount: 0,
+    deferredCompileSectionCount: 0,
+    budgetedLoadedChunkCount: 0,
+    budgetedDirtySectionChunkCount: 0,
     submittedCompileSectionCount: 0,
     uploadedSectionCount: 0,
     removedSectionCount: 0,
@@ -1413,6 +1425,9 @@ function createCompileTiming({
     staleCompileSectionCount: 0,
     workerSectionCount: 0,
     workerNonEmptySectionCount: 0,
+    workerVisibilityGraphBuildCount: 0,
+    workerVisibilityGraphTotalMs: 0,
+    workerVisibilityGraphWorstMs: 0,
     workerVertexCount: 0,
     workerIndexCount: 0,
     workerFaceCount: 0,
@@ -1430,6 +1445,7 @@ function updateCompileTimingFromRequest(timing, request) {
   timing.targetCenterX = Number(request.centerX) || 0;
   timing.targetCenterZ = Number(request.centerZ) || 0;
   timing.submittedCompileSectionCount = Number(request.submittedCompileSectionCount) || 0;
+  updateCompileScopeTiming(timing, request);
 }
 
 function updateCompileTimingFromWait(timing, request, beginStart) {
@@ -1454,6 +1470,9 @@ function updateCompileTimingFromWorker(timing, report) {
   const summary = report?.summary ?? {};
   timing.workerSectionCount = Number(summary.sectionCount) || 0;
   timing.workerNonEmptySectionCount = Number(summary.nonEmptySectionCount) || 0;
+  timing.workerVisibilityGraphBuildCount = Number(summary.visibilityGraphBuildCount) || 0;
+  timing.workerVisibilityGraphTotalMs = Number(summary.visibilityGraphTotalMs) || 0;
+  timing.workerVisibilityGraphWorstMs = Number(summary.visibilityGraphWorstMs) || 0;
   timing.workerVertexCount = Number(summary.vertexCount) || 0;
   timing.workerIndexCount = Number(summary.indexCount) || 0;
   timing.workerFaceCount = Number(summary.faceCount) || 0;
@@ -1471,6 +1490,28 @@ function updateCompileTimingFromReport(timing, report) {
   timing.submittedCompileSectionCount = Number(report.submittedCompileSectionCount)
     || timing.submittedCompileSectionCount;
   timing.packedByteLength = Number(report.workerPackedByteLength) || timing.packedByteLength;
+  timing.workerVisibilityGraphBuildCount = Number(report.workerVisibilityGraphBuildCount)
+    || timing.workerVisibilityGraphBuildCount;
+  timing.workerVisibilityGraphTotalMs = Number(report.workerVisibilityGraphTotalMs)
+    || timing.workerVisibilityGraphTotalMs;
+  timing.workerVisibilityGraphWorstMs = Number(report.workerVisibilityGraphWorstMs)
+    || timing.workerVisibilityGraphWorstMs;
+  updateCompileScopeTiming(timing, report);
+}
+
+function updateCompileScopeTiming(timing, source) {
+  timing.viewDirtyChunkCount = Number(source.viewDirtyChunkCount) || 0;
+  timing.viewRemovalChunkCount = Number(source.viewRemovalChunkCount) || 0;
+  timing.loadedDirtyChunkCount = Number(source.loadedDirtyChunkCount) || 0;
+  timing.removalDirtyChunkCount = Number(source.removalDirtyChunkCount) || 0;
+  timing.staleDirtyChunkCount = Number(source.staleDirtyChunkCount) || 0;
+  timing.loadedDirtySectionCount = Number(source.loadedDirtySectionCount) || 0;
+  timing.removalDirtySectionCount = Number(source.removalDirtySectionCount) || 0;
+  timing.staleDirtySectionCount = Number(source.staleDirtySectionCount) || 0;
+  timing.readyCompileSectionCount = Number(source.readyCompileSectionCount) || 0;
+  timing.deferredCompileSectionCount = Number(source.deferredCompileSectionCount) || 0;
+  timing.budgetedLoadedChunkCount = Number(source.budgetedLoadedChunkCount) || 0;
+  timing.budgetedDirtySectionChunkCount = Number(source.budgetedDirtySectionChunkCount) || 0;
 }
 
 function finishCompileTiming(timing, status, reason = null) {
@@ -1519,6 +1560,18 @@ function publicCompileTiming(timing) {
     chunkViewUpdateCount: timing.chunkViewUpdateCount,
     centerLoaded: timing.centerLoaded,
     runnerSettled: timing.runnerSettled,
+    viewDirtyChunkCount: timing.viewDirtyChunkCount,
+    viewRemovalChunkCount: timing.viewRemovalChunkCount,
+    loadedDirtyChunkCount: timing.loadedDirtyChunkCount,
+    removalDirtyChunkCount: timing.removalDirtyChunkCount,
+    staleDirtyChunkCount: timing.staleDirtyChunkCount,
+    loadedDirtySectionCount: timing.loadedDirtySectionCount,
+    removalDirtySectionCount: timing.removalDirtySectionCount,
+    staleDirtySectionCount: timing.staleDirtySectionCount,
+    readyCompileSectionCount: timing.readyCompileSectionCount,
+    deferredCompileSectionCount: timing.deferredCompileSectionCount,
+    budgetedLoadedChunkCount: timing.budgetedLoadedChunkCount,
+    budgetedDirtySectionChunkCount: timing.budgetedDirtySectionChunkCount,
     submittedCompileSectionCount: timing.submittedCompileSectionCount,
     uploadedSectionCount: timing.uploadedSectionCount,
     removedSectionCount: timing.removedSectionCount,
@@ -1526,6 +1579,9 @@ function publicCompileTiming(timing) {
     staleCompileSectionCount: timing.staleCompileSectionCount,
     workerSectionCount: timing.workerSectionCount,
     workerNonEmptySectionCount: timing.workerNonEmptySectionCount,
+    workerVisibilityGraphBuildCount: timing.workerVisibilityGraphBuildCount,
+    workerVisibilityGraphTotalMs: roundTiming(timing.workerVisibilityGraphTotalMs),
+    workerVisibilityGraphWorstMs: roundTiming(timing.workerVisibilityGraphWorstMs),
     workerVertexCount: timing.workerVertexCount,
     workerIndexCount: timing.workerIndexCount,
     workerFaceCount: timing.workerFaceCount,
