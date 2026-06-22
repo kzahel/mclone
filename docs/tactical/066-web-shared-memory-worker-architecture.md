@@ -1,7 +1,8 @@
 # 066: Web Shared-Memory Worker Architecture
 
 Status: proposed high-priority architecture; render-section compiler transport
-diagnostics landed, persistent worker asset/catalog state is next.
+diagnostics and persistent worker asset/catalog state landed, shared result
+arena is next.
 
 ## Purpose
 
@@ -69,17 +70,14 @@ The current browser render compiler still has a proof-path transport:
 
 - `mclone-web-app.js::RenderSectionWorkerCompiler` owns a browser worker and a
   JS `pending` promise map.
-- Each compile copies the packed vanilla asset zip with `this.assetPack.slice()`
-  and transfers that buffer to the worker.
-- The worker caches only the wasm-bindgen module import. It does not keep a
-  resident mesh catalog, runtime, loaded view, or shared result arena.
-- `mclone-render-compiler-worker.js` calls a wasm export with
-  `assetPack`, `centerX`, `centerZ`, `radiusChunks`, and optional
-  `targetSections`.
-- `web_canvas.rs::compile_generated_chunk_sections_from_pack(...)` parses the
-  asset pack, creates a fresh `WebRuntime::local_integrated(SMOKE_SEED)`,
-  requests a fresh generated chunk view, and compiles against that worker-local
-  view.
+- The worker has an `init-render-compiler` handshake and a resident
+  `WebRenderCompilerSession`; the packed vanilla asset zip is transferred and
+  parsed once at worker init.
+- Normal compile requests now carry center/radius and `targetSections`, not
+  the asset pack.
+- The worker still creates a fresh `WebRuntime::local_integrated(SMOKE_SEED)`
+  for each compile, requests a fresh generated chunk view, and compiles against
+  that worker-local view instead of the main session's actual snapshots.
 - The worker returns a packed `TexturedRenderSectionBuildReport` as a
   transferred `Uint8Array`.
 - The main wasm instance copies that typed array with `to_vec()`, decodes the
@@ -111,20 +109,17 @@ The render compiler gaps are concrete:
 1. Worker request ownership is still partly JavaScript-owned.
    Rust decides target sections, but JS still owns promise orchestration,
    worker request lifetimes, and bulk payload transfer.
-2. Asset state is not resident in the render worker.
-   The asset pack is copied and transferred per compile, then parsed per
-   compile.
+2. Output is one packed transferred report.
+   Main wasm copies and decodes the whole report before cache/GPU work can be
+   applied.
 3. Worker input is not the main session's actual snapshot set.
    The worker creates a fresh local integrated runtime for the requested
    center/radius instead of consuming explicit target-section and neighbor
    section inputs from the main client replica.
-4. Output is one packed transferred report.
-   Main wasm copies and decodes the whole report before cache/GPU work can be
-   applied.
-5. Shared-memory metrics do not cover render compilation.
-   Runner/worldgen/light lanes can prove their transport kind; render compile
-   currently cannot fail a perf lane for falling back to transfer.
-6. Dirty planning is still too coarse for some movement cases.
+4. Render compile still uses `message-transfer`.
+   Runner/worldgen/light lanes are `shared-memory`; render compile now exposes
+   the divergence explicitly but has not moved to a shared result arena.
+5. Dirty planning is still too coarse for some movement cases.
    A move can dirty `8-9` chunks and expand loaded dirty chunks to `128-144`
    vertical section keys. The shared-memory worker ABI will reduce transport
    cost, but it does not replace section-level dirty planning.
@@ -388,7 +383,7 @@ Observed local movement perf after this slice:
 
 ### 2. Persistent Render Worker Assets
 
-Status: next implementation slice.
+Status: completed first pass.
 
 Before changing result transport, remove the worst lifecycle mistake:
 
@@ -403,7 +398,38 @@ Acceptance:
 - diagnostics prove asset load count stays at `1` per worker
 - transferred result fallback still works while the SAB ABI is built
 
+Landed on 2026-06-22:
+
+- Added `WebRenderCompilerSession` in `mclone-web-client` as a worker-callable
+  wasm-bindgen class that owns loaded terrain mesh assets and compiles generated
+  render sections through the resident catalog.
+- `mclone-render-compiler-worker.js` now has an explicit
+  `init-render-compiler` handshake. The asset pack is transferred once during
+  worker init, parsed once, and retained in the worker session.
+- `mclone-web-app.js` and `mclone-web-smoke.js` now wait for worker readiness
+  before compile submission and no longer send `assetPack.slice()` in normal
+  compile requests.
+- Browser smoke assertions now require `persistentAssetCatalog: true`,
+  `assetPackSendCount: 1`, nonzero `workerAssetPackInitByteLength`, nonzero
+  `workerAssetLoadCount`, and zero per-compile
+  `requestAssetPackByteLength`.
+
+Observed local movement perf after this slice:
+
+- movement compile transport kind is still `message-transfer`
+- worker asset load count stayed at `1`
+- asset pack send count stayed at `1` across four worker compiles
+- per-compile asset request bytes dropped from `5,828,345` to `0`
+- one-time worker asset init transfer was `5,828,345` bytes
+- the final full movement compile still transferred an `11,623,508` byte
+  packed response
+- worker round trips still stayed high, `858.1-883.9ms` for movement compiles,
+  which points to fresh worker-side runtime/view generation and packed response
+  transfer rather than per-compile asset parsing
+
 ### 3. Shared Result Arena Prototype
+
+Status: next implementation slice.
 
 Move worker output from transferred packed reports to a shared result slot:
 

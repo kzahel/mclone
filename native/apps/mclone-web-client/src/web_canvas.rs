@@ -185,6 +185,97 @@ pub fn mclone_web_compile_generated_chunk_sections_for_targets(
     Ok(js_sys::Uint8Array::from(packed.as_slice()))
 }
 
+#[wasm_bindgen]
+pub struct WebRenderCompilerSession {
+    mesh_assets: WebTexturedMeshAssets,
+    asset_pack_byte_length: usize,
+    asset_load_count: usize,
+    compile_count: usize,
+}
+
+#[wasm_bindgen]
+impl WebRenderCompilerSession {
+    #[wasm_bindgen(constructor)]
+    pub fn new(asset_pack_bytes: js_sys::Uint8Array) -> Result<WebRenderCompilerSession, JsValue> {
+        let asset_pack_byte_length = asset_pack_bytes.length() as usize;
+        let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes.to_vec())
+            .map_err(JsValue::from)?;
+        Ok(Self {
+            mesh_assets,
+            asset_pack_byte_length,
+            asset_load_count: 1,
+            compile_count: 0,
+        })
+    }
+
+    #[wasm_bindgen(js_name = assetPackByteLength)]
+    pub fn asset_pack_byte_length(&self) -> usize {
+        self.asset_pack_byte_length
+    }
+
+    #[wasm_bindgen(js_name = assetPackFileCount)]
+    pub fn asset_pack_file_count(&self) -> usize {
+        self.mesh_assets.asset_pack_file_count
+    }
+
+    #[wasm_bindgen(js_name = assetLoadCount)]
+    pub fn asset_load_count(&self) -> usize {
+        self.asset_load_count
+    }
+
+    #[wasm_bindgen(js_name = compileCount)]
+    pub fn compile_count(&self) -> usize {
+        self.compile_count
+    }
+
+    #[wasm_bindgen(js_name = compileGeneratedChunkSections)]
+    pub fn compile_generated_chunk_sections(
+        &mut self,
+        center_x: i32,
+        center_z: i32,
+        radius_chunks: u32,
+    ) -> Result<js_sys::Uint8Array, JsValue> {
+        self.compile_count += 1;
+        let report = compile_generated_chunk_sections_with_catalog(
+            &self.mesh_assets.catalog,
+            ChunkPos {
+                x: center_x,
+                z: center_z,
+            },
+            radius_chunks,
+            None,
+        )
+        .map_err(JsValue::from)?;
+        let packed = encode_textured_render_section_build_report(&report);
+        Ok(js_sys::Uint8Array::from(packed.as_slice()))
+    }
+
+    #[wasm_bindgen(js_name = compileGeneratedChunkSectionsForTargets)]
+    pub fn compile_generated_chunk_sections_for_targets(
+        &mut self,
+        center_x: i32,
+        center_z: i32,
+        radius_chunks: u32,
+        target_sections: js_sys::Int32Array,
+    ) -> Result<js_sys::Uint8Array, JsValue> {
+        self.compile_count += 1;
+        let target_sections = render_section_keys_from_int32_array(&target_sections)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let report = compile_generated_chunk_sections_with_catalog(
+            &self.mesh_assets.catalog,
+            ChunkPos {
+                x: center_x,
+                z: center_z,
+            },
+            radius_chunks,
+            Some(&target_sections),
+        )
+        .map_err(JsValue::from)?;
+        let packed = encode_textured_render_section_build_report(&report);
+        Ok(js_sys::Uint8Array::from(packed.as_slice()))
+    }
+}
+
 async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue, String> {
     let mut runtime = WebRuntime::websocket_remote(websocket_url.clone()).await?;
     let first = runtime
@@ -317,6 +408,20 @@ fn compile_generated_chunk_sections_from_pack(
     target_sections: Option<&BTreeSet<RenderSectionKey>>,
 ) -> Result<mclone_mesh::TexturedRenderSectionBuildReport, String> {
     let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
+    compile_generated_chunk_sections_with_catalog(
+        &mesh_assets.catalog,
+        center,
+        radius_chunks,
+        target_sections,
+    )
+}
+
+fn compile_generated_chunk_sections_with_catalog(
+    catalog: &TexturedMeshCatalog,
+    center: ChunkPos,
+    radius_chunks: u32,
+    target_sections: Option<&BTreeSet<RenderSectionKey>>,
+) -> Result<mclone_mesh::TexturedRenderSectionBuildReport, String> {
     let mut runtime = WebRuntime::local_integrated(SMOKE_SEED);
     runtime
         .request_chunk_view(center, radius_chunks, radius_chunks)
@@ -336,12 +441,11 @@ fn compile_generated_chunk_sections_from_pack(
             .chunk_snapshots()
             .cloned()
             .collect::<Vec<_>>();
-        build_render_sections_from_snapshots(&snapshots, &mesh_assets.catalog, target_sections)
-            .map_err(|error| {
-                format!("failed to compile targeted generated render sections: {error:#}")
-            })
+        build_render_sections_from_snapshots(&snapshots, catalog, target_sections).map_err(
+            |error| format!("failed to compile targeted generated render sections: {error:#}"),
+        )
     } else {
-        build_client_textured_sections(runtime.client(), &mesh_assets.catalog).map_err(|error| {
+        build_client_textured_sections(runtime.client(), catalog).map_err(|error| {
             format!("failed to compile generated textured render sections: {error:#}")
         })
     }

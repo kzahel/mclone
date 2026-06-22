@@ -498,24 +498,38 @@ async function fetchAssetPack() {
 
 class RenderSectionWorkerCompiler {
   constructor(assetPack) {
-    this.assetPack = assetPack;
     this.pending = new Map();
     this.metrics = {
       transportKind: RENDER_COMPILER_TRANSPORT_KIND,
       sharedMemorySupported: renderCompilerSharedMemorySupported(),
       workerInitCount: 1,
       workerWasmInitCount: 0,
+      workerAssetLoadCount: 0,
+      workerAssetPackInitByteLength: 0,
+      workerAssetPackFileCount: 0,
+      persistentAssetCatalog: false,
       compileCount: 0,
       assetPackSendCount: 0,
       transferredRequestByteCount: 0,
       transferredResponseByteCount: 0,
     };
+    this.ready = new Promise((resolve, reject) => {
+      this.resolveReady = resolve;
+      this.rejectReady = reject;
+    });
+    this.initTimeout = setTimeout(() => {
+      this.rejectReady(new Error("timed out initializing render compiler worker"));
+    }, 20_000);
     this.worker = new Worker(RENDER_COMPILER_WORKER_URL.href, {
       type: "module",
       name: "mclone-render-compiler-smoke",
     });
     this.worker.onmessage = (event) => {
       const data = event.data ?? {};
+      if (data.kind === "render-compiler-ready") {
+        this.handleReady(data);
+        return;
+      }
       const requestId = Number(data.requestId) || 0;
       const pending = this.pending.get(requestId);
       if (!pending) return;
@@ -526,6 +540,13 @@ class RenderSectionWorkerCompiler {
       this.metrics.transferredResponseByteCount += packedByteLength;
       this.metrics.workerWasmInitCount = Number(data.workerWasmInitCount)
         || this.metrics.workerWasmInitCount;
+      this.metrics.workerAssetLoadCount = Number(data.workerAssetLoadCount)
+        || this.metrics.workerAssetLoadCount;
+      this.metrics.workerAssetPackInitByteLength = Number(data.workerAssetPackInitByteLength)
+        || this.metrics.workerAssetPackInitByteLength;
+      this.metrics.workerAssetPackFileCount = Number(data.workerAssetPackFileCount)
+        || this.metrics.workerAssetPackFileCount;
+      this.metrics.persistentAssetCatalog = Boolean(data.persistentAssetCatalog);
       const renderCompilerMetrics = renderCompilerMetricsForResponse(
         this.metrics,
         pending.requestMetrics,
@@ -542,6 +563,10 @@ class RenderSectionWorkerCompiler {
           sharedMemorySupported: renderCompilerMetrics.sharedMemorySupported,
           workerInitCount: renderCompilerMetrics.workerInitCount,
           workerWasmInitCount: renderCompilerMetrics.workerWasmInitCount,
+          workerAssetLoadCount: renderCompilerMetrics.workerAssetLoadCount,
+          workerAssetPackInitByteLength: renderCompilerMetrics.workerAssetPackInitByteLength,
+          workerAssetPackFileCount: renderCompilerMetrics.workerAssetPackFileCount,
+          persistentAssetCatalog: renderCompilerMetrics.persistentAssetCatalog,
           compileCount: renderCompilerMetrics.compileCount,
           workerCompileCount: renderCompilerMetrics.workerCompileCount,
           assetPackSendCount: renderCompilerMetrics.assetPackSendCount,
@@ -555,21 +580,58 @@ class RenderSectionWorkerCompiler {
       });
     };
     this.worker.onerror = (event) => {
+      clearTimeout(this.initTimeout);
+      this.rejectReady(new Error(event.message || "render compiler worker failed"));
       this.rejectAll(new Error(event.message || "render compiler worker failed"));
     };
+    this.initialize(assetPack);
   }
 
-  compile(request) {
+  initialize(assetPack) {
+    const initAssetPack = assetPack.slice();
+    this.metrics.assetPackSendCount += 1;
+    this.metrics.workerAssetPackInitByteLength = initAssetPack.byteLength;
+    this.metrics.transferredRequestByteCount += initAssetPack.byteLength;
+    this.worker.postMessage(
+      {
+        kind: "init-render-compiler",
+        requestId: 0,
+        bindgenJsUrl: BINDGEN_JS_URL.href,
+        bindgenWasmUrl: BINDGEN_WASM_URL.href,
+        assetPack: initAssetPack,
+      },
+      [initAssetPack.buffer],
+    );
+  }
+
+  handleReady(data) {
+    clearTimeout(this.initTimeout);
+    this.metrics.workerWasmInitCount = Number(data.workerWasmInitCount)
+      || this.metrics.workerWasmInitCount;
+    this.metrics.workerAssetLoadCount = Number(data.workerAssetLoadCount)
+      || this.metrics.workerAssetLoadCount;
+    this.metrics.workerAssetPackInitByteLength = Number(data.workerAssetPackInitByteLength)
+      || this.metrics.workerAssetPackInitByteLength;
+    this.metrics.workerAssetPackFileCount = Number(data.workerAssetPackFileCount)
+      || this.metrics.workerAssetPackFileCount;
+    this.metrics.persistentAssetCatalog = Boolean(data.persistentAssetCatalog);
+    if (data.ok) {
+      this.resolveReady(data);
+    } else {
+      this.rejectReady(new Error(data.reason || "render compiler worker initialization failed"));
+    }
+  }
+
+  async compile(request) {
+    await this.ready;
     return new Promise((resolve, reject) => {
       const requestId = Number(request.requestId) || 0;
       if (requestId <= 0) {
         reject(new Error(`invalid render compile request id ${String(request.requestId)}`));
         return;
       }
-      const requestAssetPack = this.assetPack.slice();
-      const requestMetrics = renderCompilerRequestMetrics(requestAssetPack, request.targetSections);
+      const requestMetrics = renderCompilerRequestMetrics(request.targetSections);
       this.metrics.compileCount += 1;
-      this.metrics.assetPackSendCount += 1;
       this.metrics.transferredRequestByteCount += requestMetrics.transferredRequestByteLength;
       const timeout = setTimeout(() => {
         if (!this.pending.has(requestId)) return;
@@ -583,13 +645,11 @@ class RenderSectionWorkerCompiler {
           requestId,
           bindgenJsUrl: BINDGEN_JS_URL.href,
           bindgenWasmUrl: BINDGEN_WASM_URL.href,
-          assetPack: requestAssetPack,
           centerX: request.centerX,
           centerZ: request.centerZ,
           radiusChunks: request.radiusChunks,
           targetSections: request.targetSections,
         },
-        [requestAssetPack.buffer],
       );
     });
   }
@@ -612,14 +672,14 @@ class RenderSectionWorkerCompiler {
   }
 }
 
-function renderCompilerRequestMetrics(assetPack, targetSections) {
-  const requestAssetPackByteLength = byteLengthOf(assetPack);
+function renderCompilerRequestMetrics(targetSections) {
+  const requestAssetPackByteLength = 0;
   const requestTargetSectionsByteLength = byteLengthOfTargetSections(targetSections);
   return {
     requestAssetPackByteLength,
     requestTargetSectionsByteLength,
     requestByteLength: requestAssetPackByteLength + requestTargetSectionsByteLength,
-    transferredRequestByteLength: requestAssetPackByteLength,
+    transferredRequestByteLength: 0,
   };
 }
 
@@ -631,6 +691,16 @@ function renderCompilerMetricsForResponse(cumulativeMetrics, requestMetrics, wor
     workerWasmInitCount: Number(workerReport.workerWasmInitCount)
       || Number(cumulativeMetrics.workerWasmInitCount)
       || 0,
+    workerAssetLoadCount: Number(workerReport.workerAssetLoadCount)
+      || Number(cumulativeMetrics.workerAssetLoadCount)
+      || 0,
+    workerAssetPackInitByteLength: Number(workerReport.workerAssetPackInitByteLength)
+      || Number(cumulativeMetrics.workerAssetPackInitByteLength)
+      || 0,
+    workerAssetPackFileCount: Number(workerReport.workerAssetPackFileCount)
+      || Number(cumulativeMetrics.workerAssetPackFileCount)
+      || 0,
+    persistentAssetCatalog: Boolean(workerReport.persistentAssetCatalog ?? cumulativeMetrics.persistentAssetCatalog),
     compileCount: Number(cumulativeMetrics.compileCount) || 0,
     workerCompileCount: Number(workerReport.workerCompileCount) || 0,
     assetPackSendCount: Number(cumulativeMetrics.assetPackSendCount) || 0,

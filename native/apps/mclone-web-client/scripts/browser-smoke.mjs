@@ -1552,12 +1552,18 @@ function assertCompileTimingDiagnostics(timing, label) {
     || timing.renderCompilerMetrics?.transportKind !== "message-transfer"
     || Number(timing.renderCompilerWorkerInitCount) <= 0
     || Number(timing.renderCompilerWorkerWasmInitCount) <= 0
+    || Number(timing.renderCompilerWorkerAssetLoadCount) <= 0
+    || Number(timing.renderCompilerWorkerAssetPackInitByteLength) <= 0
+    || Number(timing.renderCompilerWorkerAssetPackFileCount) <= 0
+    || timing.renderCompilerPersistentAssetCatalog !== true
     || Number(timing.renderCompilerCompileCount) <= 0
     || Number(timing.renderCompilerWorkerCompileCount) <= 0
-    || Number(timing.renderCompilerAssetPackSendCount) <= 0
-    || Number(timing.renderCompilerRequestAssetPackByteLength) <= 0
+    || Number(timing.renderCompilerAssetPackSendCount) !== 1
+    || Number(timing.renderCompilerRequestAssetPackByteLength) !== 0
     || Number(timing.renderCompilerRequestByteLength) <= 0
-    || Number(timing.renderCompilerTransferredRequestByteLength) <= 0
+    || Number(timing.renderCompilerTransferredRequestByteLength) !== 0
+    || Number(timing.renderCompilerTransferredRequestByteCount)
+      < Number(timing.renderCompilerWorkerAssetPackInitByteLength)
     || Number(timing.renderCompilerTransferredResponseByteLength) !== Number(timing.packedByteLength)
     || Number(timing.submittedCompileSectionCount) <= 0
     || Number(timing.acceptedCompileSectionCount) < 0
@@ -1588,6 +1594,9 @@ function summarizeCompileTimings(timings) {
     renderCompilerRequestAssetPackByteLengthMax: Math.max(0, ...values.map((timing) => (
       Number(timing.renderCompilerRequestAssetPackByteLength) || 0
     ))),
+    renderCompilerWorkerAssetPackInitByteLengthMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerWorkerAssetPackInitByteLength) || 0
+    ))),
     renderCompilerTransferredRequestByteLengthMax: Math.max(0, ...values.map((timing) => (
       Number(timing.renderCompilerTransferredRequestByteLength) || 0
     ))),
@@ -1608,6 +1617,9 @@ function summarizeCompileTimings(timings) {
     ))),
     renderCompilerWorkerWasmInitCountMax: Math.max(0, ...values.map((timing) => (
       Number(timing.renderCompilerWorkerWasmInitCount) || 0
+    ))),
+    renderCompilerWorkerAssetLoadCountMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerWorkerAssetLoadCount) || 0
     ))),
     renderCompilerWorkerCompileCountMax: Math.max(0, ...values.map((timing) => (
       Number(timing.renderCompilerWorkerCompileCount) || 0
@@ -1843,12 +1855,18 @@ function assertRenderCompilerWorkerResult(renderCompiler, request, expectedCente
     || renderCompiler.renderCompilerMetrics?.transportKind !== "message-transfer"
     || Number(renderCompiler.workerInitCount) <= 0
     || Number(renderCompiler.workerWasmInitCount) <= 0
+    || Number(renderCompiler.workerAssetLoadCount) <= 0
+    || Number(renderCompiler.workerAssetPackInitByteLength) <= 0
+    || Number(renderCompiler.workerAssetPackFileCount) <= 0
+    || renderCompiler.persistentAssetCatalog !== true
     || Number(renderCompiler.compileCount) <= 0
     || Number(renderCompiler.workerCompileCount) <= 0
-    || Number(renderCompiler.assetPackSendCount) <= 0
-    || Number(renderCompiler.requestAssetPackByteLength) <= 0
+    || Number(renderCompiler.assetPackSendCount) !== 1
+    || Number(renderCompiler.requestAssetPackByteLength) !== 0
     || Number(renderCompiler.requestByteLength) <= 0
-    || Number(renderCompiler.transferredRequestByteLength) <= 0
+    || Number(renderCompiler.transferredRequestByteLength) !== 0
+    || Number(renderCompiler.renderCompilerMetrics?.transferredRequestByteCount)
+      < Number(renderCompiler.workerAssetPackInitByteLength)
     || !summary?.ok
     || summary.byteLength <= 0
     || summary.sectionCount !== expectedSectionCount

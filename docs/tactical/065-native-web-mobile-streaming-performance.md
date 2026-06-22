@@ -7,8 +7,8 @@ compile-scope diagnostics, all-air section mesh fast path, and
 target-section-aware browser render-worker requests landed; shared-memory
 render-worker architecture is tracked in
 [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md).
-First render-compiler transport diagnostics landed there; persistent worker
-asset/catalog state is next.
+Render-compiler transport diagnostics and persistent worker asset/catalog state
+landed there; shared result arena is next.
 
 ## Purpose
 
@@ -536,10 +536,10 @@ Observed local movement perf after this chunk:
 
 Current next likely step: implement the shared-memory render-worker plan from
 [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
-starting with persistent worker asset/catalog state, then move the render
-worker result path toward a shared result arena and reduce the remaining full
-dirty plans by splitting chunk-level view dirtying from section-level neighbor
-dirtying.
+starting with the shared result arena, then pass actual target section snapshots
+instead of generating a fresh worker-side runtime view, and reduce the remaining
+full dirty plans by splitting chunk-level view dirtying from section-level
+neighbor dirtying.
 
 ## Render Compiler Transport Diagnostics Landed
 
@@ -588,6 +588,56 @@ Observed local movement perf after this chunk:
   `23,313,380` request bytes and `28,900,904` response bytes
 - runner, worldgen, and light-status metrics stayed on `shared-memory`, making
   the render compiler transport divergence explicit
+
+## Persistent Render Worker Assets Landed
+
+Implemented on 2026-06-22:
+
+- added `WebRenderCompilerSession` as a worker-callable wasm-bindgen class that
+  owns loaded terrain mesh assets and compiles generated render sections through
+  a resident mesh catalog.
+- `mclone-render-compiler-worker.js` now has an explicit
+  `init-render-compiler` handshake. The asset pack is transferred once during
+  worker init, parsed once, and retained in the worker session.
+- app and smoke render-worker clients now wait for worker readiness before
+  compile submission and no longer send `assetPack.slice()` in normal compile
+  requests.
+- browser smoke assertions now require `persistentAssetCatalog: true`,
+  `assetPackSendCount: 1`, nonzero `workerAssetPackInitByteLength`, nonzero
+  `workerAssetLoadCount`, and zero per-compile
+  `requestAssetPackByteLength`.
+
+Validation run:
+
+```text
+node --check native/apps/mclone-web-client/www/mclone-render-compiler-worker.js
+node --check native/apps/mclone-web-client/www/mclone-web-app.js
+node --check native/apps/mclone-web-client/www/mclone-web-smoke.js
+node --check native/apps/mclone-web-client/scripts/browser-smoke.mjs
+cargo fmt --manifest-path native/Cargo.toml --all -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+pnpm native:web:build
+pnpm native:web:smoke
+pnpm native:web:app-smoke
+pnpm native:web:mobile-smoke
+pnpm native:web:movement-perf
+```
+
+Observed local movement perf after this chunk:
+
+- movement compile transport kind remained `message-transfer`
+- worker asset load count stayed at `1`
+- asset pack send count stayed at `1` across four worker compiles
+- per-compile asset request bytes dropped from `5,828,345` to `0`
+- one-time worker asset init transfer was `5,828,345` bytes
+- worker round trips improved slightly but remained high:
+  `858.1-883.9ms` for movement compiles
+- movement compile max frame gaps stayed low: `9.3-17.0ms`
+- the full movement compile still transferred an `11,623,508` byte packed
+  response
+- cumulative render compiler response transfer after four worker compiles was
+  `28,900,904` bytes, so the remaining transport target is the packed result
+  path, not the asset-pack request path
 
 ## Deployment Check
 

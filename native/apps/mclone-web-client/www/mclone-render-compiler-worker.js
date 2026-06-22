@@ -1,20 +1,73 @@
 const RENDER_COMPILER_TRANSPORT_KIND = "message-transfer";
 
 let wasmModulePromise = null;
+let compilerSession = null;
 let workerWasmInitCount = 0;
 let workerCompileCount = 0;
+let workerAssetLoadCount = 0;
+let workerAssetPackInitByteLength = 0;
+let workerAssetPackFileCount = 0;
 
 self.onmessage = async (event) => {
   const message = event.data ?? {};
-  if (message.kind !== "compile-render-sections") {
-    self.postMessage({
-      ok: false,
-      requestId: message.requestId,
-      reason: `unexpected render compiler message kind ${String(message.kind)}`,
-    });
+  if (message.kind === "init-render-compiler") {
+    await handleInit(message);
+    return;
+  }
+  if (message.kind === "compile-render-sections") {
+    await handleCompile(message);
     return;
   }
 
+  self.postMessage({
+    ok: false,
+    requestId: message.requestId,
+    kind: "render-compiler-error",
+    reason: `unexpected render compiler message kind ${String(message.kind)}`,
+  });
+};
+
+async function handleInit(message) {
+  try {
+    const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
+    const assetPackByteLength = byteLengthOf(message.assetPack);
+    compilerSession = new module.WebRenderCompilerSession(message.assetPack);
+    workerAssetLoadCount = Number(compilerSession.assetLoadCount?.()) || 1;
+    workerAssetPackInitByteLength = Number(compilerSession.assetPackByteLength?.())
+      || assetPackByteLength;
+    workerAssetPackFileCount = Number(compilerSession.assetPackFileCount?.()) || 0;
+    self.postMessage({
+      ok: true,
+      kind: "render-compiler-ready",
+      requestId: message.requestId,
+      transportKind: RENDER_COMPILER_TRANSPORT_KIND,
+      sharedMemorySupported: renderCompilerSharedMemorySupported(),
+      workerWasmInitCount,
+      workerCompileCount,
+      workerAssetLoadCount,
+      workerAssetPackInitByteLength,
+      workerAssetPackFileCount,
+      persistentAssetCatalog: true,
+    });
+  } catch (error) {
+    self.postMessage({
+      ok: false,
+      kind: "render-compiler-ready",
+      requestId: message.requestId,
+      transportKind: RENDER_COMPILER_TRANSPORT_KIND,
+      sharedMemorySupported: renderCompilerSharedMemorySupported(),
+      workerWasmInitCount,
+      workerCompileCount,
+      workerAssetLoadCount,
+      workerAssetPackInitByteLength,
+      workerAssetPackFileCount,
+      persistentAssetCatalog: false,
+      reason: stringifyError(error),
+    });
+  }
+}
+
+async function handleCompile(message) {
   try {
     workerCompileCount += 1;
     const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
@@ -24,23 +77,42 @@ self.onmessage = async (event) => {
     const radiusChunks = Number(message.radiusChunks) || 0;
     const requestAssetPackByteLength = byteLengthOf(message.assetPack);
     const requestTargetSectionsByteLength = targetSections.byteLength;
+    const hasPersistentCompiler =
+      compilerSession !== null
+      && targetSections.length > 0
+      && typeof compilerSession.compileGeneratedChunkSectionsForTargets === "function";
+    const hasPersistentFullCompiler =
+      compilerSession !== null
+      && typeof compilerSession.compileGeneratedChunkSections === "function";
     const hasTargetedCompiler =
       targetSections.length > 0
-      && typeof module.mclone_web_compile_generated_chunk_sections_for_targets === "function";
-    const packed = hasTargetedCompiler
-      ? module.mclone_web_compile_generated_chunk_sections_for_targets(
-          message.assetPack,
+      && (
+        hasPersistentCompiler
+        || typeof module.mclone_web_compile_generated_chunk_sections_for_targets === "function"
+      );
+    const packed = hasPersistentCompiler
+      ? compilerSession.compileGeneratedChunkSectionsForTargets(
           centerX,
           centerZ,
           radiusChunks,
           targetSections,
         )
-      : module.mclone_web_compile_generated_chunk_sections(
-          message.assetPack,
-          centerX,
-          centerZ,
-          radiusChunks,
-        );
+      : hasPersistentFullCompiler
+        ? compilerSession.compileGeneratedChunkSections(centerX, centerZ, radiusChunks)
+        : hasTargetedCompiler
+          ? module.mclone_web_compile_generated_chunk_sections_for_targets(
+              message.assetPack,
+              centerX,
+              centerZ,
+              radiusChunks,
+              targetSections,
+            )
+          : module.mclone_web_compile_generated_chunk_sections(
+              message.assetPack,
+              centerX,
+              centerZ,
+              radiusChunks,
+            );
     const summary = module.mclone_web_packed_compile_report_summary(packed);
     self.postMessage(
       {
@@ -50,6 +122,10 @@ self.onmessage = async (event) => {
         sharedMemorySupported: renderCompilerSharedMemorySupported(),
         workerWasmInitCount,
         workerCompileCount,
+        workerAssetLoadCount,
+        workerAssetPackInitByteLength,
+        workerAssetPackFileCount,
+        persistentAssetCatalog: compilerSession !== null,
         requestAssetPackByteLength,
         requestTargetSectionsByteLength,
         requestByteLength: requestAssetPackByteLength + requestTargetSectionsByteLength,
@@ -73,10 +149,14 @@ self.onmessage = async (event) => {
       sharedMemorySupported: renderCompilerSharedMemorySupported(),
       workerWasmInitCount,
       workerCompileCount,
+      workerAssetLoadCount,
+      workerAssetPackInitByteLength,
+      workerAssetPackFileCount,
+      persistentAssetCatalog: compilerSession !== null,
       reason: stringifyError(error),
     });
   }
-};
+}
 
 function loadWasmModule(bindgenJsUrl, bindgenWasmUrl) {
   wasmModulePromise ??= import(bindgenJsUrl).then(async (module) => {
