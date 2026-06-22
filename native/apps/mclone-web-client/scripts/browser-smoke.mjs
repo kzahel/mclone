@@ -1,7 +1,7 @@
 import { chromium } from "@playwright/test";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, normalize, resolve, sep } from "node:path";
@@ -30,21 +30,35 @@ const bindgenOutDir = join(
   "debug",
   "mclone-web-client-bindgen",
 );
-const appLoop = process.argv.includes("--app-loop")
+const movementPerf = process.argv.includes("--movement-perf")
+  || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
+const appLoop = movementPerf
+  || process.argv.includes("--app-loop")
   || process.argv.includes("--mobile-app-loop")
   || process.env.MCLONE_NATIVE_WEB_APP_LOOP === "1";
 const mobileAppLoop = process.argv.includes("--mobile-app-loop")
   || process.env.MCLONE_NATIVE_WEB_MOBILE_APP_LOOP === "1";
+const mobileViewport = mobileAppLoop || movementPerf;
 const serveOnly = process.argv.includes("--serve")
   || process.env.MCLONE_NATIVE_WEB_SERVE === "1";
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
-  ?? (mobileAppLoop
+  ?? (movementPerf
+    ? "/tmp/mclone-native-web-movement-perf.png"
+    : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app.png"
     : appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
 const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
-  ?? (mobileAppLoop
+  ?? (movementPerf
+    ? "/tmp/mclone-native-web-movement-perf-canvas.png"
+    : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app-canvas.png"
     : appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
+const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPORT
+  ?? "/tmp/mclone-native-web-movement-perf.json";
+const movementPerfChunkBoundaries = Math.max(
+  1,
+  Number.parseInt(process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_CHUNKS ?? "3", 10) || 3,
+);
 const requireChunk = process.argv.includes("--require-chunk")
   || process.env.MCLONE_NATIVE_WEB_REQUIRE_CHUNK === "1";
 const requireCanvas = requireChunk
@@ -83,7 +97,7 @@ async function run() {
         ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
       ],
     });
-    const page = await browser.newPage(mobileAppLoop
+    const page = await browser.newPage(mobileViewport
       ? {
           viewport: { width: 390, height: 844 },
           deviceScaleFactor: 2,
@@ -125,6 +139,40 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (movementPerf) {
+        const movementPerfProbe = await runMovementPerfProbe(page, canvas);
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        let pageScreenshotCaptured = false;
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: false, timeout: 5_000 });
+          pageScreenshotCaptured = true;
+        } catch (error) {
+          console.warn(`page screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
+        const canvasPixels = analyzePng(canvasPng);
+        const report = {
+          url: `${baseUrl}/app.html`,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          movementPerfReportPath,
+          appLoop,
+          mobileViewport,
+          movementPerf,
+          movementPerfChunkBoundaries,
+          canvasPixels,
+          movementPerfProbe,
+          result,
+        };
+        report.movementPerfProbe.summary = summarizeCompileTimings(
+          movementPerfProbe.movementCompileTimings,
+        );
+        await writeFile(movementPerfReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        assertMovementPerfResult(report, pageErrors, canvasPixels);
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (mobileAppLoop) {
         await page.waitForFunction(
           () => {
@@ -137,7 +185,9 @@ async function run() {
           undefined,
           { timeout: 60_000 },
         );
+        await waitForWebAppStreamingSettled(page);
         const mobileTouchProbe = await exerciseMobileTouchControls(page, canvas);
+        await waitForWebAppStreamingSettled(page);
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
         let pageScreenshotCaptured = false;
         try {
@@ -377,6 +427,152 @@ function waitForStopSignal() {
       process.once(signal, stop);
     }
   });
+}
+
+async function runMovementPerfProbe(page, canvas) {
+  await canvas.evaluate((element) => element.focus());
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.ok === true
+        && state.ready === true
+        && state.pendingCompileJobCount === 0
+        && state.compileInFlight === false
+        && state.loadedCenterX === state.centerX
+        && state.loadedCenterZ === state.centerZ
+        && state.lastCompileTiming?.status === "accepted";
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
+  const start = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    const compileTimings = state.compileTimings ?? [];
+    return {
+      centerX: state.centerX,
+      centerZ: state.centerZ,
+      cameraX: state.cameraX,
+      cameraY: state.cameraY,
+      cameraZ: state.cameraZ,
+      frameCount: state.frameCount,
+      renderCount: state.renderCount,
+      compileTimingCount: state.compileTimingCount,
+      lastCompileSequence: state.lastCompileTiming?.sequence ?? 0,
+      initialCompileTiming: compileTimings.find((timing) => timing.trigger === "initial") ?? null,
+      preMovementCompileTimings: compileTimings,
+    };
+  });
+
+  await page.keyboard.press("n");
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.movementMode === "NOCLIP",
+    undefined,
+    { timeout: 10_000 },
+  );
+  await page.evaluate(() => {
+    for (let i = 0; i < 4; i += 1) {
+      globalThis.__mcloneWebApp.adjustCameraSpeed?.(4);
+    }
+    globalThis.__mcloneWebApp.setInputKey("forward", true);
+  });
+  try {
+    await page.waitForFunction(
+      ({ start, movementPerfChunkBoundaries }) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        if (!state?.ok) return false;
+        const movedChunks = Math.max(
+          Math.abs(Number(state.centerX) - start.centerX),
+          Math.abs(Number(state.centerZ) - start.centerZ),
+        );
+        return movedChunks >= movementPerfChunkBoundaries;
+      },
+      { start, movementPerfChunkBoundaries },
+      { timeout: 90_000 },
+    );
+  } finally {
+    await page.evaluate(() => {
+      globalThis.__mcloneWebApp.setInputKey("forward", false);
+    });
+  }
+
+  await waitForWebAppStreamingSettled(page, 120_000);
+
+  const end = await page.evaluate((start) => {
+    const state = globalThis.__mcloneWebApp.state;
+    const compileTimings = state.compileTimings ?? [];
+    const movementCompileTimings = compileTimings.filter((timing) => (
+      Number(timing.sequence) > start.lastCompileSequence
+    ));
+    return {
+      ok: state.ok === true,
+      centerX: state.centerX,
+      centerZ: state.centerZ,
+      loadedCenterX: state.loadedCenterX,
+      loadedCenterZ: state.loadedCenterZ,
+      cameraX: state.cameraX,
+      cameraY: state.cameraY,
+      cameraZ: state.cameraZ,
+      movementMode: state.movementMode,
+      frameCount: state.frameCount,
+      renderCount: state.renderCount,
+      compileTimingCount: state.compileTimingCount,
+      lastFrameGapMs: state.lastFrameGapMs,
+      maxFrameGapMs: state.maxFrameGapMs,
+      lastCompileTiming: state.lastCompileTiming,
+      compileTimings,
+      movementCompileTimings,
+    };
+  }, start);
+  const movedChunks = Math.max(
+    Math.abs(Number(end.centerX) - start.centerX),
+    Math.abs(Number(end.centerZ) - start.centerZ),
+  );
+  return {
+    ok: end.ok
+      && movedChunks >= movementPerfChunkBoundaries
+      && end.loadedCenterX === end.centerX
+      && end.loadedCenterZ === end.centerZ
+      && end.movementCompileTimings.length > 0,
+    start,
+    end: {
+      centerX: end.centerX,
+      centerZ: end.centerZ,
+      loadedCenterX: end.loadedCenterX,
+      loadedCenterZ: end.loadedCenterZ,
+      cameraX: end.cameraX,
+      cameraY: end.cameraY,
+      cameraZ: end.cameraZ,
+      movementMode: end.movementMode,
+      frameCount: end.frameCount,
+      renderCount: end.renderCount,
+      compileTimingCount: end.compileTimingCount,
+      lastFrameGapMs: end.lastFrameGapMs,
+      maxFrameGapMs: end.maxFrameGapMs,
+      lastCompileTiming: end.lastCompileTiming,
+    },
+    movedChunks,
+    frameCountDelta: end.frameCount - start.frameCount,
+    renderCountDelta: end.renderCount - start.renderCount,
+    initialCompileTiming: start.initialCompileTiming,
+    preMovementCompileTimings: start.preMovementCompileTimings,
+    movementCompileTimings: end.movementCompileTimings,
+    compileTimings: end.compileTimings,
+  };
+}
+
+async function waitForWebAppStreamingSettled(page, timeout = 60_000) {
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.ok === true
+        && state.pendingCompileJobCount === 0
+        && state.compileInFlight === false
+        && state.loadedCenterX === state.centerX
+        && state.loadedCenterZ === state.centerZ;
+    },
+    undefined,
+    { timeout },
+  );
 }
 
 async function exerciseMobileTouchControls(page, canvas) {
@@ -1151,6 +1347,14 @@ function assertAppLoopResult(
   if (!result.lastCompileReport?.workerCompileUsed) {
     throw new Error(`native web app did not stream through the browser worker compiler:\n${JSON.stringify(result, null, 2)}`);
   }
+  if (
+    result.compileTimingCount < 2
+    || !result.lastCompileTiming
+    || !result.compileTimings?.some((timing) => timing.trigger === "movement")
+  ) {
+    throw new Error(`native web app did not report initial and movement compile timings:\n${JSON.stringify(result, null, 2)}`);
+  }
+  assertCompileTimingDiagnostics(result.lastCompileTiming, "app last compile timing");
   if (result.runnerKind !== "web-worker" || result.lastReport?.runnerKind !== "web-worker") {
     throw new Error(`native web app did not use the integrated server Web Worker runner:\n${JSON.stringify(result, null, 2)}`);
   }
@@ -1220,6 +1424,10 @@ function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouch
   if (!mobileTouchProbe?.ok) {
     throw new Error(`native web mobile controls did not satisfy movement/look/HUD probes:\n${JSON.stringify({ mobileTouchProbe, result }, null, 2)}`);
   }
+  if (result.compileTimingCount < 1 || !result.lastCompileTiming) {
+    throw new Error(`native web mobile app did not expose compile timing diagnostics:\n${JSON.stringify(result, null, 2)}`);
+  }
+  assertCompileTimingDiagnostics(result.lastCompileTiming, "mobile last compile timing");
   if (result.touchControlsVisible !== true || result.hudOpen !== false) {
     throw new Error(`native web mobile HUD/touch state ended in an unexpected state:\n${JSON.stringify(result, null, 2)}`);
   }
@@ -1229,6 +1437,95 @@ function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouch
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
     throw new Error(`mobile app canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
+}
+
+function assertMovementPerfResult(report, pageErrors, canvasPixels) {
+  if (pageErrors.length > 0) {
+    throw new Error(`browser movement perf page errors:\n${pageErrors.join("\n")}`);
+  }
+  const probe = report.movementPerfProbe;
+  const result = report.result;
+  if (!probe?.ok || !result?.ok || !result.ready) {
+    throw new Error(`native web movement perf did not complete:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (probe.movedChunks < report.movementPerfChunkBoundaries) {
+    throw new Error(`native web movement perf did not cross enough chunk boundaries:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (probe.frameCountDelta <= 0 || probe.renderCountDelta <= 0) {
+    throw new Error(`native web movement perf did not keep frames/renders advancing:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (!probe.initialCompileTiming) {
+    throw new Error(`native web movement perf did not capture initial compile timing:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  assertCompileTimingDiagnostics(probe.initialCompileTiming, "movement perf initial compile timing");
+  if (!Array.isArray(probe.movementCompileTimings) || probe.movementCompileTimings.length < 1) {
+    throw new Error(`native web movement perf did not capture movement compile timings:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  for (const timing of probe.movementCompileTimings) {
+    assertCompileTimingDiagnostics(timing, "movement perf compile timing");
+  }
+  if (!probe.movementCompileTimings.some((timing) => (
+    Number(timing.frameCountAfter) > Number(timing.frameCountBefore)
+    && Number(timing.renderCountAfter) > Number(timing.renderCountBefore)
+  ))) {
+    throw new Error(`native web movement perf did not observe frame/render progress during a background compile:\n${JSON.stringify(probe.movementCompileTimings, null, 2)}`);
+  }
+  if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
+    throw new Error(`movement perf canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+function assertCompileTimingDiagnostics(timing, label) {
+  if (
+    !timing
+    || timing.status !== "accepted"
+    || !Number.isFinite(Number(timing.totalMs))
+    || Number(timing.totalMs) <= 0
+    || !Number.isFinite(Number(timing.beginRequestMs))
+    || !Number.isFinite(Number(timing.workerRoundTripMs))
+    || Number(timing.workerRoundTripMs) <= 0
+    || !Number.isFinite(Number(timing.decodeFinishApplyMs))
+    || !Number.isFinite(Number(timing.maxFrameGapMs))
+    || Number(timing.packedByteLength) <= 0
+    || Number(timing.submittedCompileSectionCount) <= 0
+    || Number(timing.acceptedCompileSectionCount) < 0
+    || Number(timing.staleCompileSectionCount) < 0
+    || Number(timing.uploadedSectionCount) < 0
+    || Number(timing.removedSectionCount) < 0
+  ) {
+    throw new Error(`${label} was missing required diagnostics:\n${JSON.stringify(timing, null, 2)}`);
+  }
+}
+
+function summarizeCompileTimings(timings) {
+  const values = Array.isArray(timings) ? timings : [];
+  const totals = values.map((timing) => Number(timing.totalMs) || 0);
+  const worker = values.map((timing) => Number(timing.workerRoundTripMs) || 0);
+  const apply = values.map((timing) => Number(timing.decodeFinishApplyMs) || 0);
+  const frameGaps = values.map((timing) => Number(timing.maxFrameGapMs) || 0);
+  return {
+    count: values.length,
+    totalMs: summarizeNumbers(totals),
+    workerRoundTripMs: summarizeNumbers(worker),
+    decodeFinishApplyMs: summarizeNumbers(apply),
+    maxFrameGapMs: summarizeNumbers(frameGaps),
+    packedByteLengthMax: Math.max(0, ...values.map((timing) => Number(timing.packedByteLength) || 0)),
+    submittedCompileSectionCountMax: Math.max(0, ...values.map((timing) => Number(timing.submittedCompileSectionCount) || 0)),
+    uploadedSectionCountMax: Math.max(0, ...values.map((timing) => Number(timing.uploadedSectionCount) || 0)),
+    removedSectionCountMax: Math.max(0, ...values.map((timing) => Number(timing.removedSectionCount) || 0)),
+  };
+}
+
+function summarizeNumbers(values) {
+  if (values.length === 0) {
+    return { min: 0, max: 0, avg: 0 };
+  }
+  const sum = values.reduce((total, value) => total + value, 0);
+  return {
+    min: Math.min(...values),
+    max: Math.max(...values),
+    avg: Math.round((sum / values.length) * 10) / 10,
+  };
 }
 
 function assertThreadingResult(threading) {

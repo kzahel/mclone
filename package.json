@@ -59,6 +59,7 @@
     "native:web:chunk-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-canvas --require-chunk",
     "native:web:app-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --app-loop",
     "native:web:mobile-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --mobile-app-loop",
+    "native:web:movement-perf": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --movement-perf",
     "build": "vite build",
     "deploy": "pnpm native:web:deploy",
     "legacy-deploy": "bash ./scripts/deploy-legacy.sh",

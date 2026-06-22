@@ -49,8 +49,20 @@ const runtime = {
     loadedChunkCount: 0,
     residentSectionCount: 0,
     pendingCompileJobCount: 0,
+    compileInFlight: false,
+    compileQueued: false,
+    compileTargetX: null,
+    compileTargetZ: null,
+    queuedCompileTargetX: null,
+    queuedCompileTargetZ: null,
+    activeCompileTiming: null,
+    lastCompileTiming: null,
+    compileTimings: [],
+    compileTimingCount: 0,
     renderCount: 0,
     frameCount: 0,
+    lastFrameGapMs: 0,
+    maxFrameGapMs: 0,
     pointerLockSupported: false,
     pointerLockAttempted: false,
     pointerLocked: false,
@@ -86,6 +98,7 @@ async function boot() {
   const app = new WebChunkApp();
   runtime.queueMouseDelta = (dx, dy) => app.queueMouseDelta(dx, dy);
   runtime.setInputKey = (name, down) => app.setInputKey(name, down);
+  runtime.adjustCameraSpeed = (amount) => app.adjustCameraSpeed(amount);
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
   runtime.setHudOpen = (open) => setHudOpen(Boolean(open));
@@ -123,6 +136,11 @@ class WebChunkApp {
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
     this.pendingCompile = false;
+    this.currentCompilePromise = null;
+    this.queuedCompile = null;
+    this.compileSequence = 0;
+    this.activeCompileTiming = null;
+    this.compileInFlightTarget = null;
     this.renderFrameBusy = false;
     this.hasRendered = false;
     this.loadedCenter = null;
@@ -190,7 +208,7 @@ class WebChunkApp {
 
     runtime.state.status = "rendering";
     updateDom();
-    await this.compileCameraView();
+    await this.compileCameraView({ trigger: "initial", waitForCompletion: true });
   }
 
   start() {
@@ -214,7 +232,11 @@ class WebChunkApp {
     if (!this.session) {
       return;
     }
-    const rawDt = (now - this.lastFrameTime) / 1000;
+    const frameGapMs = Number.isFinite(now - this.lastFrameTime)
+      ? Math.max(0, now - this.lastFrameTime)
+      : 0;
+    this.recordFrameGap(frameGapMs);
+    const rawDt = frameGapMs / 1000;
     this.lastFrameTime = now;
     const dtSeconds = Number.isFinite(rawDt)
       ? Math.max(0, Math.min(rawDt, MAX_FRAME_DT_SECONDS))
@@ -249,13 +271,13 @@ class WebChunkApp {
     this.applyCameraState(camera);
     this.applyTargetState(this.session.previewBlockTarget());
 
-    if (this.hasRendered && this.loadedCenter && !this.pendingCompile) {
+    if (this.hasRendered && this.loadedCenter) {
       if (
         camera.centerX !== this.loadedCenter.centerX
         || camera.centerZ !== this.loadedCenter.centerZ
       ) {
         runtime.state.tickPhase = "compile-requested";
-        await this.compileCameraView();
+        this.requestCameraViewCompile("movement");
       }
     }
 
@@ -267,52 +289,158 @@ class WebChunkApp {
     }
   }
 
-  async compileCameraView() {
-    if (!this.session || !this.compiler || this.pendingCompile) {
-      return;
+  requestCameraViewCompile(trigger = "movement", options = {}) {
+    if (!this.session || !this.compiler) {
+      return null;
     }
+    const force = Boolean(options.force);
+    const center = this.currentCameraCenter();
+    if (!force && this.loadedCenter && centersEqual(center, this.loadedCenter)) {
+      return this.currentCompilePromise;
+    }
+    if (this.pendingCompile) {
+      this.queuedCompile = mergeQueuedCompile(this.queuedCompile, {
+        trigger,
+        force,
+        center,
+      });
+      runtime.state.compileQueued = true;
+      runtime.state.queuedCompileTargetX = center.centerX;
+      runtime.state.queuedCompileTargetZ = center.centerZ;
+      updateDom();
+      return this.currentCompilePromise;
+    }
+    void this.compileCameraView({ trigger, force, waitForCompletion: false });
+    return this.currentCompilePromise;
+  }
+
+  async compileCameraView(options = {}) {
+    const trigger = options.trigger ?? "manual";
+    const force = Boolean(options.force);
+    const waitForCompletion = options.waitForCompletion !== false;
+    if (!this.session || !this.compiler) {
+      return null;
+    }
+    if (!force && this.hasRendered && this.loadedCenter && centersEqual(this.currentCameraCenter(), this.loadedCenter)) {
+      return null;
+    }
+    if (this.pendingCompile) {
+      const pending = this.requestCameraViewCompile(trigger, { force });
+      return waitForCompletion ? await pending : pending;
+    }
+
+    const sequence = this.compileSequence + 1;
+    this.compileSequence = sequence;
+    const timing = createCompileTiming({
+      sequence,
+      trigger,
+      targetCenter: this.currentCameraCenter(),
+      loadedCenterBefore: this.loadedCenter,
+      frameCountBefore: runtime.state.frameCount,
+      renderCountBefore: runtime.state.renderCount,
+    });
     this.pendingCompile = true;
-    runtime.state.status = "compiling";
+    this.activeCompileTiming = timing;
+    this.compileInFlightTarget = {
+      centerX: timing.targetCenterX,
+      centerZ: timing.targetCenterZ,
+    };
+    runtime.state.compileInFlight = true;
+    runtime.state.compileQueued = false;
+    runtime.state.compileTargetX = timing.targetCenterX;
+    runtime.state.compileTargetZ = timing.targetCenterZ;
+    runtime.state.queuedCompileTargetX = null;
+    runtime.state.queuedCompileTargetZ = null;
+    runtime.state.status = this.hasRendered ? "ready" : "compiling";
     runtime.state.pendingCompileJobCount = this.session.pendingChunkRenderCompileJobCount();
+    publishActiveCompileTiming(timing);
     updateDom();
 
-    try {
-      const request = await this.withSessionAsync(() => (
-        this.session.beginCameraRenderCompileRequest(RADIUS_CHUNKS)
-      ));
-      if (!request?.ok) {
-        throw new Error(request?.reason ?? "failed to begin camera render compile request");
-      }
-      runtime.state.pendingCompileJobCount = request.pendingCompileJobCount ?? 1;
-      updateDom();
+    this.currentCompilePromise = (async () => {
+      try {
+        const beginStart = performance.now();
+        const request = await this.withSessionAsync(() => (
+          this.session.beginCameraRenderCompileRequest(RADIUS_CHUNKS)
+        ));
+        const beginEnd = performance.now();
+        timing.beginRequestMs = beginEnd - beginStart;
+        if (!request?.ok) {
+          throw new Error(request?.reason ?? "failed to begin camera render compile request");
+        }
+        updateCompileTimingFromRequest(timing, request);
+        this.compileInFlightTarget = {
+          centerX: timing.targetCenterX,
+          centerZ: timing.targetCenterZ,
+        };
+        runtime.state.compileTargetX = timing.targetCenterX;
+        runtime.state.compileTargetZ = timing.targetCenterZ;
+        runtime.state.pendingCompileJobCount = request.pendingCompileJobCount ?? 1;
+        publishActiveCompileTiming(timing);
+        updateDom();
 
-      const compiled = await this.compiler.compile(request);
-      if (!compiled.report?.ok) {
-        throw new Error(compiled.report?.reason ?? "render compiler worker failed");
-      }
+        const workerStart = performance.now();
+        const compiled = await this.compiler.compile(request);
+        const workerEnd = performance.now();
+        timing.workerRoundTripMs = workerEnd - workerStart;
+        timing.packedByteLength = compiled.report?.packedByteLength ?? compiled.packed?.byteLength ?? 0;
+        updateCompileTimingFromWorker(timing, compiled.report);
+        publishActiveCompileTiming(timing);
+        if (!compiled.report?.ok) {
+          throw new Error(compiled.report?.reason ?? "render compiler worker failed");
+        }
 
-      const report = this.session.finishCameraRenderCompileRequest(
-        request.requestId,
-        compiled.packed,
-      );
-      if (!report?.ok) {
-        throw new Error(report?.reason ?? "failed to finish camera render compile request");
+        const finishStart = performance.now();
+        const report = await this.withSessionAsync(() => (
+          this.session.finishCameraRenderCompileRequest(
+            request.requestId,
+            compiled.packed,
+          )
+        ));
+        const finishEnd = performance.now();
+        timing.decodeFinishApplyMs = finishEnd - finishStart;
+        if (this.lastFrameTime > 0) {
+          timing.maxFrameGapMs = Math.max(timing.maxFrameGapMs, performance.now() - this.lastFrameTime);
+        }
+        timing.maxFrameGapMs = Math.max(timing.maxFrameGapMs, timing.decodeFinishApplyMs);
+        if (!report?.ok) {
+          throw new Error(report?.reason ?? "failed to finish camera render compile request");
+        }
+        updateCompileTimingFromReport(timing, report);
+        this.hasRendered = true;
+        this.loadedCenter = { centerX: report.centerX, centerZ: report.centerZ };
+        runtime.state.loadedCenterX = report.centerX;
+        runtime.state.loadedCenterZ = report.centerZ;
+        runtime.state.lastCompileReport = report;
+        this.applyReport(report);
+        finishCompileTiming(timing, "accepted");
+        recordCompileTiming(timing);
+        return report;
+      } catch (error) {
+        finishCompileTiming(timing, "failed", stringifyError(error));
+        recordCompileTiming(timing);
+        runtime.state.ok = false;
+        runtime.state.status = stringifyError(error);
+        throw error;
+      } finally {
+        this.pendingCompile = false;
+        this.currentCompilePromise = null;
+        this.activeCompileTiming = null;
+        this.compileInFlightTarget = null;
+        runtime.state.compileInFlight = false;
+        runtime.state.activeCompileTiming = null;
+        runtime.state.compileTargetX = null;
+        runtime.state.compileTargetZ = null;
+        runtime.state.pendingCompileJobCount = this.session?.pendingChunkRenderCompileJobCount?.() ?? 0;
+        updateDom();
+        this.startQueuedCompileIfNeeded();
       }
-      this.hasRendered = true;
-      this.loadedCenter = { centerX: report.centerX, centerZ: report.centerZ };
-      runtime.state.loadedCenterX = report.centerX;
-      runtime.state.loadedCenterZ = report.centerZ;
-      runtime.state.lastCompileReport = report;
-      this.applyReport(report);
-    } catch (error) {
-      runtime.state.ok = false;
-      runtime.state.status = stringifyError(error);
-      throw error;
-    } finally {
-      this.pendingCompile = false;
-      runtime.state.pendingCompileJobCount = this.session?.pendingChunkRenderCompileJobCount?.() ?? 0;
-      updateDom();
+    })();
+
+    if (!waitForCompletion) {
+      this.currentCompilePromise.catch((error) => console.error(error));
+      return this.currentCompilePromise;
     }
+    return await this.currentCompilePromise;
   }
 
   renderCameraFrame() {
@@ -408,8 +536,8 @@ class WebChunkApp {
       runtime.state.lastInteraction = interaction;
       runtime.state.interactionStatus = formatInteractionStatus(interaction);
       applyHotbarState(interaction);
-      if (interaction.changed && this.hasRendered && !this.pendingCompile) {
-        await this.compileCameraView();
+      if (interaction.changed && this.hasRendered) {
+        this.requestCameraViewCompile("interaction", { force: true });
       }
       updateDom();
       return interaction;
@@ -437,6 +565,23 @@ class WebChunkApp {
     applyHotbarState(hotbar);
     updateDom();
     return true;
+  }
+
+  adjustCameraSpeed(amount) {
+    if (!this.session) {
+      return null;
+    }
+    if (this.sessionBusy) {
+      setTimeout(() => this.adjustCameraSpeed(amount), 0);
+      return null;
+    }
+    const camera = this.session.adjustCameraSpeed(amount);
+    if (!camera?.ok) {
+      return null;
+    }
+    this.applyCameraState(camera);
+    updateDom();
+    return camera;
   }
 
   async withSessionAsync(operation) {
@@ -519,6 +664,54 @@ class WebChunkApp {
       this.pointerDown.movement += Math.abs(Number.isFinite(x) ? x : 0)
         + Math.abs(Number.isFinite(y) ? y : 0);
     }
+  }
+
+  currentCameraCenter() {
+    return {
+      centerX: Number(runtime.state.centerX) || 0,
+      centerZ: Number(runtime.state.centerZ) || 0,
+    };
+  }
+
+  recordFrameGap(frameGapMs) {
+    if (!Number.isFinite(frameGapMs)) {
+      return;
+    }
+    runtime.state.lastFrameGapMs = frameGapMs;
+    runtime.state.maxFrameGapMs = Math.max(runtime.state.maxFrameGapMs, frameGapMs);
+    if (this.activeCompileTiming) {
+      this.activeCompileTiming.maxFrameGapMs = Math.max(
+        this.activeCompileTiming.maxFrameGapMs,
+        frameGapMs,
+      );
+      publishActiveCompileTiming(this.activeCompileTiming);
+    }
+  }
+
+  startQueuedCompileIfNeeded() {
+    if (!this.session || !this.compiler || this.pendingCompile || !runtime.state.ok) {
+      return;
+    }
+    const queued = this.queuedCompile;
+    this.queuedCompile = null;
+    runtime.state.compileQueued = false;
+    runtime.state.queuedCompileTargetX = null;
+    runtime.state.queuedCompileTargetZ = null;
+    if (!this.hasRendered) {
+      updateDom();
+      return;
+    }
+    const currentCenter = this.currentCameraCenter();
+    const needsCenterCompile = !this.loadedCenter || !centersEqual(currentCenter, this.loadedCenter);
+    if (!queued?.force && !needsCenterCompile) {
+      updateDom();
+      return;
+    }
+    setTimeout(() => {
+      this.requestCameraViewCompile(queued?.trigger ?? "follow-up", {
+        force: Boolean(queued?.force && !needsCenterCompile),
+      });
+    }, 0);
   }
 
   requestPointerLock() {
@@ -1102,6 +1295,162 @@ class RenderSectionWorkerCompiler {
   }
 }
 
+function centersEqual(left, right) {
+  return Number(left?.centerX) === Number(right?.centerX)
+    && Number(left?.centerZ) === Number(right?.centerZ);
+}
+
+function mergeQueuedCompile(previous, next) {
+  if (!previous) {
+    return next;
+  }
+  return {
+    trigger: next.trigger ?? previous.trigger,
+    force: Boolean(previous.force || next.force),
+    center: next.center ?? previous.center,
+  };
+}
+
+function createCompileTiming({
+  sequence,
+  trigger,
+  targetCenter,
+  loadedCenterBefore,
+  frameCountBefore,
+  renderCountBefore,
+}) {
+  const now = performance.now();
+  return {
+    sequence,
+    trigger,
+    status: "running",
+    requestId: null,
+    targetCenterX: targetCenter?.centerX ?? null,
+    targetCenterZ: targetCenter?.centerZ ?? null,
+    loadedCenterBeforeX: loadedCenterBefore?.centerX ?? null,
+    loadedCenterBeforeZ: loadedCenterBefore?.centerZ ?? null,
+    loadedCenterAfterX: null,
+    loadedCenterAfterZ: null,
+    startedAtMs: now,
+    finishedAtMs: null,
+    totalMs: 0,
+    beginRequestMs: 0,
+    workerRoundTripMs: 0,
+    packedByteLength: 0,
+    decodeFinishApplyMs: 0,
+    submittedCompileSectionCount: 0,
+    uploadedSectionCount: 0,
+    removedSectionCount: 0,
+    acceptedCompileSectionCount: 0,
+    staleCompileSectionCount: 0,
+    workerSectionCount: 0,
+    workerNonEmptySectionCount: 0,
+    workerVertexCount: 0,
+    workerIndexCount: 0,
+    workerFaceCount: 0,
+    maxFrameGapMs: 0,
+    frameCountBefore,
+    frameCountAfter: null,
+    renderCountBefore,
+    renderCountAfter: null,
+    reason: null,
+  };
+}
+
+function updateCompileTimingFromRequest(timing, request) {
+  timing.requestId = Number(request.requestId) || null;
+  timing.targetCenterX = Number(request.centerX) || 0;
+  timing.targetCenterZ = Number(request.centerZ) || 0;
+  timing.submittedCompileSectionCount = Number(request.submittedCompileSectionCount) || 0;
+}
+
+function updateCompileTimingFromWorker(timing, report) {
+  const summary = report?.summary ?? {};
+  timing.workerSectionCount = Number(summary.sectionCount) || 0;
+  timing.workerNonEmptySectionCount = Number(summary.nonEmptySectionCount) || 0;
+  timing.workerVertexCount = Number(summary.vertexCount) || 0;
+  timing.workerIndexCount = Number(summary.indexCount) || 0;
+  timing.workerFaceCount = Number(summary.faceCount) || 0;
+}
+
+function updateCompileTimingFromReport(timing, report) {
+  timing.loadedCenterAfterX = Number(report.centerX) || 0;
+  timing.loadedCenterAfterZ = Number(report.centerZ) || 0;
+  timing.uploadedSectionCount = Number(report.uploadedSectionCount) || 0;
+  timing.removedSectionCount = Number(report.removedSectionCount) || 0;
+  timing.acceptedCompileSectionCount = Number(report.acceptedCompileSectionCount) || 0;
+  timing.staleCompileSectionCount = Number(report.staleCompileSectionCount) || 0;
+  timing.submittedCompileSectionCount = Number(report.submittedCompileSectionCount)
+    || timing.submittedCompileSectionCount;
+  timing.packedByteLength = Number(report.workerPackedByteLength) || timing.packedByteLength;
+}
+
+function finishCompileTiming(timing, status, reason = null) {
+  timing.status = status;
+  timing.reason = reason;
+  timing.finishedAtMs = performance.now();
+  timing.totalMs = timing.finishedAtMs - timing.startedAtMs;
+  timing.frameCountAfter = runtime.state.frameCount;
+  timing.renderCountAfter = runtime.state.renderCount;
+  timing.maxFrameGapMs = Math.max(timing.maxFrameGapMs, runtime.state.lastFrameGapMs || 0);
+  publishActiveCompileTiming(timing);
+}
+
+function publishActiveCompileTiming(timing) {
+  runtime.state.activeCompileTiming = publicCompileTiming(timing);
+}
+
+function recordCompileTiming(timing) {
+  const snapshot = publicCompileTiming(timing);
+  runtime.state.lastCompileTiming = snapshot;
+  runtime.state.compileTimings = [...runtime.state.compileTimings, snapshot].slice(-16);
+  runtime.state.compileTimingCount += 1;
+  runtime.state.activeCompileTiming = null;
+}
+
+function publicCompileTiming(timing) {
+  const totalMs = timing.finishedAtMs === null
+    ? performance.now() - timing.startedAtMs
+    : timing.totalMs;
+  return {
+    sequence: timing.sequence,
+    trigger: timing.trigger,
+    status: timing.status,
+    requestId: timing.requestId,
+    targetCenterX: timing.targetCenterX,
+    targetCenterZ: timing.targetCenterZ,
+    loadedCenterBeforeX: timing.loadedCenterBeforeX,
+    loadedCenterBeforeZ: timing.loadedCenterBeforeZ,
+    loadedCenterAfterX: timing.loadedCenterAfterX,
+    loadedCenterAfterZ: timing.loadedCenterAfterZ,
+    totalMs: roundTiming(totalMs),
+    beginRequestMs: roundTiming(timing.beginRequestMs),
+    workerRoundTripMs: roundTiming(timing.workerRoundTripMs),
+    packedByteLength: timing.packedByteLength,
+    decodeFinishApplyMs: roundTiming(timing.decodeFinishApplyMs),
+    submittedCompileSectionCount: timing.submittedCompileSectionCount,
+    uploadedSectionCount: timing.uploadedSectionCount,
+    removedSectionCount: timing.removedSectionCount,
+    acceptedCompileSectionCount: timing.acceptedCompileSectionCount,
+    staleCompileSectionCount: timing.staleCompileSectionCount,
+    workerSectionCount: timing.workerSectionCount,
+    workerNonEmptySectionCount: timing.workerNonEmptySectionCount,
+    workerVertexCount: timing.workerVertexCount,
+    workerIndexCount: timing.workerIndexCount,
+    workerFaceCount: timing.workerFaceCount,
+    maxFrameGapMs: roundTiming(timing.maxFrameGapMs),
+    frameCountBefore: timing.frameCountBefore,
+    frameCountAfter: timing.frameCountAfter,
+    renderCountBefore: timing.renderCountBefore,
+    renderCountAfter: timing.renderCountAfter,
+    reason: timing.reason,
+  };
+}
+
+function roundTiming(value) {
+  return Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
+}
+
 function updateDom() {
   const state = runtime.state;
   if (state.failed || (state.ready && !state.ok)) {
@@ -1119,6 +1468,7 @@ function updateDom() {
   setText("time", `${Number(state.dayTime || 0).toFixed(0)} / ${Number(state.timeOfDay || 0).toFixed(3)}`);
   setText("actors", `${state.drawnActorCount}/${state.actorCount}`);
   setText("pending", String(state.pendingCompileJobCount));
+  setText("compile", formatCompileTiming(state));
   setText("frames", String(state.frameCount));
   setText("lock", state.pointerLocked ? "on" : state.pointerLockFallback ? "fallback" : "off");
   const status = document.getElementById("status");
@@ -1127,6 +1477,16 @@ function updateDom() {
     status.dataset.ok = state.ok ? "true" : "false";
     status.dataset.ready = state.ready && state.status === "ready" ? "true" : "false";
   }
+}
+
+function formatCompileTiming(state) {
+  const timing = state.activeCompileTiming ?? state.lastCompileTiming;
+  if (!timing) {
+    return "-";
+  }
+  const label = state.activeCompileTiming ? "active" : timing.status;
+  const target = `${timing.targetCenterX},${timing.targetCenterZ}`;
+  return `${label} ${target} ${Number(timing.totalMs || 0).toFixed(0)}ms gap ${Number(timing.maxFrameGapMs || 0).toFixed(0)}ms`;
 }
 
 function setText(id, value) {
