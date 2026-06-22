@@ -44,10 +44,19 @@ function handleSharedMemoryJob(module, message) {
   const control = sharedControlView(message.controlBuffer);
   const requestBytes = Atomics.load(control, SHARED_REQUEST_BYTES_INDEX);
   const requestBuffer = sharedBuffer(message.requestBuffer, "requestBuffer");
+  if (!Number.isInteger(requestBytes) || requestBytes < 0 || requestBytes > requestBuffer.byteLength) {
+    throw new Error(
+      `shared server job request byte count ${requestBytes} exceeds request buffer capacity ${requestBuffer.byteLength}`,
+    );
+  }
   const request = new Uint8Array(requestBuffer, 0, requestBytes);
   const response = computeJobFrame(module, message.kind, request);
-  const responseBuffer = new SharedArrayBuffer(response.byteLength);
-  new Uint8Array(responseBuffer).set(response);
+  const pooledResponseBuffer = sharedBuffer(message.responseBuffer, "responseBuffer");
+  const pooledResponse = response.byteLength <= pooledResponseBuffer.byteLength;
+  const responseBuffer = pooledResponse
+    ? pooledResponseBuffer
+    : new SharedArrayBuffer(response.byteLength);
+  new Uint8Array(responseBuffer, 0, response.byteLength).set(response);
   Atomics.store(control, SHARED_RESPONSE_BYTES_INDEX, response.byteLength);
   Atomics.store(control, SHARED_STATUS_INDEX, SHARED_STATUS_COMPLETE);
   Atomics.notify(control, SHARED_STATUS_INDEX, 1);
@@ -59,6 +68,8 @@ function handleSharedMemoryJob(module, message) {
     controlBuffer: message.controlBuffer,
     frameBuffer: responseBuffer,
     frameBytes: response.byteLength,
+    pooledResponse,
+    responseCapacity: pooledResponseBuffer.byteLength,
   });
 }
 

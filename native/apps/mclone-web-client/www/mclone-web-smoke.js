@@ -376,6 +376,8 @@ async function renderCanvas() {
           && frameMetricsActive(report.runnerFrameMetrics, "message-transfer")
           && frameMetricsActive(report.worldgenJobFrameMetrics, "shared-memory")
           && frameMetricsActive(report.lightStatusJobFrameMetrics, "shared-memory")
+          && sharedBufferPoolActive(report.worldgenJobFrameMetrics)
+          && sharedBufferPoolActive(report.lightStatusJobFrameMetrics)
           && report.rendered
           && report.configured
           && report.chunkLoaded
@@ -521,6 +523,19 @@ function frameMetricsActive(metrics, transportKind) {
     && Number(metrics.requestBytes) > 0
     && Number(metrics.responseFrames) > 0
     && Number(metrics.responseBytes) > 0
+  );
+}
+
+function sharedBufferPoolActive(metrics) {
+  return Boolean(
+    metrics
+    && Number(metrics.sharedBufferPoolMisses) > 0
+    && Number(metrics.sharedBufferPoolHits) > 0
+    && Number(metrics.sharedBufferPoolDrops) === 0
+    && Number(metrics.sharedBufferCapacityBytes) > 0
+    && Number(metrics.maxSharedBufferCapacityBytes) >= Number(metrics.sharedBufferCapacityBytes)
+    && Number(metrics.sharedBufferPooledResponseFrames) > 0
+    && Number(metrics.sharedBufferFallbackResponseFrames) === 0
   );
 }
 

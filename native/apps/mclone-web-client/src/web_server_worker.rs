@@ -836,6 +836,33 @@ fn frame_metrics_prop(
             .unwrap_or(fallback.total_request_us as f64) as u128,
         max_request_us: number_prop(&value, "maxRequestUs")
             .unwrap_or(fallback.max_request_us as f64) as u128,
+        shared_buffer_pool_hits: number_prop(&value, "sharedBufferPoolHits")
+            .unwrap_or(fallback.shared_buffer_pool_hits as f64)
+            as usize,
+        shared_buffer_pool_misses: number_prop(&value, "sharedBufferPoolMisses")
+            .unwrap_or(fallback.shared_buffer_pool_misses as f64)
+            as usize,
+        shared_buffer_pool_drops: number_prop(&value, "sharedBufferPoolDrops")
+            .unwrap_or(fallback.shared_buffer_pool_drops as f64)
+            as usize,
+        shared_buffer_capacity_bytes: number_prop(&value, "sharedBufferCapacityBytes")
+            .unwrap_or(fallback.shared_buffer_capacity_bytes as f64)
+            as usize,
+        max_shared_buffer_capacity_bytes: number_prop(&value, "maxSharedBufferCapacityBytes")
+            .unwrap_or(fallback.max_shared_buffer_capacity_bytes as f64)
+            as usize,
+        shared_buffer_pooled_response_frames: number_prop(
+            &value,
+            "sharedBufferPooledResponseFrames",
+        )
+        .unwrap_or(fallback.shared_buffer_pooled_response_frames as f64)
+            as usize,
+        shared_buffer_fallback_response_frames: number_prop(
+            &value,
+            "sharedBufferFallbackResponseFrames",
+        )
+        .unwrap_or(fallback.shared_buffer_fallback_response_frames as f64)
+            as usize,
     }
 }
 
@@ -867,6 +894,41 @@ fn frame_metrics_to_js(metrics: WorkerFrameMetrics) -> Result<JsValue, String> {
     set_number(&object, "lastRequestUs", metrics.last_request_us as f64)?;
     set_number(&object, "totalRequestUs", metrics.total_request_us as f64)?;
     set_number(&object, "maxRequestUs", metrics.max_request_us as f64)?;
+    set_number(
+        &object,
+        "sharedBufferPoolHits",
+        metrics.shared_buffer_pool_hits as f64,
+    )?;
+    set_number(
+        &object,
+        "sharedBufferPoolMisses",
+        metrics.shared_buffer_pool_misses as f64,
+    )?;
+    set_number(
+        &object,
+        "sharedBufferPoolDrops",
+        metrics.shared_buffer_pool_drops as f64,
+    )?;
+    set_number(
+        &object,
+        "sharedBufferCapacityBytes",
+        metrics.shared_buffer_capacity_bytes as f64,
+    )?;
+    set_number(
+        &object,
+        "maxSharedBufferCapacityBytes",
+        metrics.max_shared_buffer_capacity_bytes as f64,
+    )?;
+    set_number(
+        &object,
+        "sharedBufferPooledResponseFrames",
+        metrics.shared_buffer_pooled_response_frames as f64,
+    )?;
+    set_number(
+        &object,
+        "sharedBufferFallbackResponseFrames",
+        metrics.shared_buffer_fallback_response_frames as f64,
+    )?;
     Ok(object.into())
 }
 

@@ -73,6 +73,13 @@ pub struct WorkerFrameMetrics {
     pub last_request_us: u128,
     pub total_request_us: u128,
     pub max_request_us: u128,
+    pub shared_buffer_pool_hits: usize,
+    pub shared_buffer_pool_misses: usize,
+    pub shared_buffer_pool_drops: usize,
+    pub shared_buffer_capacity_bytes: usize,
+    pub max_shared_buffer_capacity_bytes: usize,
+    pub shared_buffer_pooled_response_frames: usize,
+    pub shared_buffer_fallback_response_frames: usize,
 }
 
 impl WorkerFrameMetrics {
@@ -87,6 +94,13 @@ impl WorkerFrameMetrics {
             last_request_us: 0,
             total_request_us: 0,
             max_request_us: 0,
+            shared_buffer_pool_hits: 0,
+            shared_buffer_pool_misses: 0,
+            shared_buffer_pool_drops: 0,
+            shared_buffer_capacity_bytes: 0,
+            max_shared_buffer_capacity_bytes: 0,
+            shared_buffer_pooled_response_frames: 0,
+            shared_buffer_fallback_response_frames: 0,
         }
     }
 
@@ -101,6 +115,13 @@ impl WorkerFrameMetrics {
             last_request_us: 0,
             total_request_us: 0,
             max_request_us: 0,
+            shared_buffer_pool_hits: 0,
+            shared_buffer_pool_misses: 0,
+            shared_buffer_pool_drops: 0,
+            shared_buffer_capacity_bytes: 0,
+            max_shared_buffer_capacity_bytes: 0,
+            shared_buffer_pooled_response_frames: 0,
+            shared_buffer_fallback_response_frames: 0,
         }
     }
 
@@ -122,6 +143,39 @@ impl WorkerFrameMetrics {
         self.last_request_us = request_us;
         self.total_request_us = self.total_request_us.saturating_add(request_us);
         self.max_request_us = self.max_request_us.max(request_us);
+    }
+
+    pub fn record_shared_buffer_pool_hit(&mut self) {
+        self.shared_buffer_pool_hits = self.shared_buffer_pool_hits.saturating_add(1);
+    }
+
+    pub fn record_shared_buffer_pool_miss(&mut self) {
+        self.shared_buffer_pool_misses = self.shared_buffer_pool_misses.saturating_add(1);
+    }
+
+    pub fn record_shared_buffer_pool_drop(&mut self, released_bytes: usize) {
+        self.shared_buffer_pool_drops = self.shared_buffer_pool_drops.saturating_add(1);
+        self.shared_buffer_capacity_bytes = self
+            .shared_buffer_capacity_bytes
+            .saturating_sub(released_bytes);
+    }
+
+    pub fn record_shared_buffer_capacity_delta(&mut self, bytes: usize) {
+        self.shared_buffer_capacity_bytes = self.shared_buffer_capacity_bytes.saturating_add(bytes);
+        self.max_shared_buffer_capacity_bytes = self
+            .max_shared_buffer_capacity_bytes
+            .max(self.shared_buffer_capacity_bytes);
+    }
+
+    pub fn record_shared_buffer_pooled_response(&mut self) {
+        self.shared_buffer_pooled_response_frames =
+            self.shared_buffer_pooled_response_frames.saturating_add(1);
+    }
+
+    pub fn record_shared_buffer_fallback_response(&mut self) {
+        self.shared_buffer_fallback_response_frames = self
+            .shared_buffer_fallback_response_frames
+            .saturating_add(1);
     }
 }
 
@@ -822,6 +876,13 @@ mod native {
             metrics.observe_pending_frames(2);
             metrics.record_request_time_us(5);
             metrics.record_request_time_us(2);
+            metrics.record_shared_buffer_pool_hit();
+            metrics.record_shared_buffer_pool_miss();
+            metrics.record_shared_buffer_capacity_delta(64);
+            metrics.record_shared_buffer_capacity_delta(32);
+            metrics.record_shared_buffer_pooled_response();
+            metrics.record_shared_buffer_fallback_response();
+            metrics.record_shared_buffer_pool_drop(16);
 
             assert_eq!(metrics.request_frames, 2);
             assert_eq!(metrics.request_bytes, 18);
@@ -831,6 +892,13 @@ mod native {
             assert_eq!(metrics.last_request_us, 2);
             assert_eq!(metrics.total_request_us, 7);
             assert_eq!(metrics.max_request_us, 5);
+            assert_eq!(metrics.shared_buffer_pool_hits, 1);
+            assert_eq!(metrics.shared_buffer_pool_misses, 1);
+            assert_eq!(metrics.shared_buffer_pool_drops, 1);
+            assert_eq!(metrics.shared_buffer_capacity_bytes, 80);
+            assert_eq!(metrics.max_shared_buffer_capacity_bytes, 96);
+            assert_eq!(metrics.shared_buffer_pooled_response_frames, 1);
+            assert_eq!(metrics.shared_buffer_fallback_response_frames, 1);
 
             let shared = WorkerFrameMetrics::shared_memory();
             assert_eq!(

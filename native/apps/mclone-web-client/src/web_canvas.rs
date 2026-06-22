@@ -2187,6 +2187,41 @@ fn set_worker_frame_metrics(
         "maxRequestUs",
         metrics.max_request_us as f64,
     )?;
+    set_number(
+        &metrics_object,
+        "sharedBufferPoolHits",
+        metrics.shared_buffer_pool_hits as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "sharedBufferPoolMisses",
+        metrics.shared_buffer_pool_misses as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "sharedBufferPoolDrops",
+        metrics.shared_buffer_pool_drops as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "sharedBufferCapacityBytes",
+        metrics.shared_buffer_capacity_bytes as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "maxSharedBufferCapacityBytes",
+        metrics.max_shared_buffer_capacity_bytes as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "sharedBufferPooledResponseFrames",
+        metrics.shared_buffer_pooled_response_frames as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "sharedBufferFallbackResponseFrames",
+        metrics.shared_buffer_fallback_response_frames as f64,
+    )?;
     js_sys::Reflect::set(object, &JsValue::from_str(key), &metrics_object)
         .map(|_| ())
         .map_err(|_| format!("failed to set generated chunk report key {key}"))

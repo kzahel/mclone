@@ -17,6 +17,11 @@ const SHARED_REQUEST_BYTES_INDEX: u32 = 1;
 const SHARED_RESPONSE_BYTES_INDEX: u32 = 2;
 const SHARED_STATUS_PENDING: i32 = 1;
 const SHARED_STATUS_COMPLETE: i32 = 2;
+const MAX_SHARED_POOL_SLOTS: usize = 2;
+const MIN_SHARED_REQUEST_BYTES: u32 = 4 * 1024;
+const DEFAULT_SHARED_RESPONSE_BYTES: u32 = 8 * 1024 * 1024;
+const WORLDGEN_SHARED_RESPONSE_BYTES: u32 = 64 * 1024 * 1024;
+const LIGHT_STATUS_SHARED_RESPONSE_BYTES: u32 = 2 * 1024 * 1024;
 
 pub(crate) struct WasmJobWorker {
     worker: Worker,
@@ -28,10 +33,38 @@ pub(crate) struct WasmJobWorker {
     pending_count: Rc<Cell<usize>>,
     request_start_ms_by_id: Rc<RefCell<BTreeMap<u32, f64>>>,
     frame_metrics: Rc<RefCell<WorkerFrameMetrics>>,
+    shared_pool: Rc<RefCell<Vec<SharedJobSlot>>>,
+    shared_inflight: Rc<RefCell<BTreeMap<u32, SharedJobSlot>>>,
     completed_frames: Rc<RefCell<VecDeque<Vec<u8>>>>,
     last_error: Rc<RefCell<Option<String>>>,
     message_closure: Closure<dyn FnMut(MessageEvent)>,
     error_closure: Closure<dyn FnMut(ErrorEvent)>,
+}
+
+struct SharedJobSlot {
+    control_buffer: SharedArrayBuffer,
+    request_buffer: SharedArrayBuffer,
+    response_buffer: SharedArrayBuffer,
+    request_capacity: u32,
+    response_capacity: u32,
+}
+
+impl SharedJobSlot {
+    fn new(request_capacity: u32, response_capacity: u32) -> Self {
+        Self {
+            control_buffer: SharedArrayBuffer::new(SHARED_CONTROL_BYTES),
+            request_buffer: SharedArrayBuffer::new(request_capacity),
+            response_buffer: SharedArrayBuffer::new(response_capacity),
+            request_capacity,
+            response_capacity,
+        }
+    }
+
+    fn capacity_bytes(&self) -> usize {
+        (SHARED_CONTROL_BYTES as usize)
+            .saturating_add(self.request_capacity as usize)
+            .saturating_add(self.response_capacity as usize)
+    }
 }
 
 impl WasmJobWorker {
@@ -58,6 +91,8 @@ impl WasmJobWorker {
             WorkerFrameTransportKind::SharedMemory => WorkerFrameMetrics::shared_memory(),
             _ => WorkerFrameMetrics::message_transfer(),
         }));
+        let shared_pool = Rc::new(RefCell::new(Vec::new()));
+        let shared_inflight = Rc::new(RefCell::new(BTreeMap::new()));
         let completed_frames = Rc::new(RefCell::new(VecDeque::new()));
         let last_error = Rc::new(RefCell::new(None));
 
@@ -65,6 +100,8 @@ impl WasmJobWorker {
             let pending_count = Rc::clone(&pending_count);
             let request_start_ms_by_id = Rc::clone(&request_start_ms_by_id);
             let frame_metrics = Rc::clone(&frame_metrics);
+            let shared_pool = Rc::clone(&shared_pool);
+            let shared_inflight = Rc::clone(&shared_inflight);
             let completed_frames = Rc::clone(&completed_frames);
             let last_error = Rc::clone(&last_error);
             Closure::wrap(Box::new(move |event: MessageEvent| {
@@ -81,6 +118,9 @@ impl WasmJobWorker {
                         .record_request_time_us(request_us);
                 }
                 if bool_prop(&data, "ok") == Some(false) {
+                    if let Some(slot) = shared_inflight.borrow_mut().remove(&request_id) {
+                        release_shared_slot(slot, &shared_pool, &frame_metrics);
+                    }
                     let reason = string_prop(&data, "reason")
                         .unwrap_or_else(|| "server job worker returned an error".to_owned());
                     *last_error.borrow_mut() = Some(reason);
@@ -88,7 +128,22 @@ impl WasmJobWorker {
                 }
                 let frame_result =
                     if string_prop(&data, "transportKind").as_deref() == Some("shared-memory") {
-                        shared_response_frame(&data)
+                        let mut slot = shared_inflight.borrow_mut().remove(&request_id);
+                        let response = shared_response_frame(&data);
+                        if let Some(mut slot) = slot.take() {
+                            if let Ok(response) = &response {
+                                record_shared_response_metrics(&frame_metrics, response);
+                                if !response.pooled_response {
+                                    grow_slot_response_buffer(
+                                        &mut slot,
+                                        response.frame.len(),
+                                        &frame_metrics,
+                                    );
+                                }
+                            }
+                            release_shared_slot(slot, &shared_pool, &frame_metrics);
+                        }
+                        response.map(|response| response.frame)
                     } else {
                         transferred_response_frame(&data)
                     };
@@ -128,6 +183,8 @@ impl WasmJobWorker {
             pending_count,
             request_start_ms_by_id,
             frame_metrics,
+            shared_pool,
+            shared_inflight,
             completed_frames,
             last_error,
             message_closure,
@@ -172,22 +229,28 @@ impl WasmJobWorker {
             .map_err(|error| format!("failed to post server job frame: {error:?}"))
     }
 
-    fn post_shared_frame(&self, request_id: u32, frame: &[u8]) -> Result<(), String> {
+    fn post_shared_frame(&mut self, request_id: u32, frame: &[u8]) -> Result<(), String> {
         let request_bytes = u32::try_from(frame.len()).map_err(|_| {
             format!(
                 "server job frame is too large for shared transport: {} bytes",
                 frame.len()
             )
         })?;
-        let control_buffer = SharedArrayBuffer::new(SHARED_CONTROL_BYTES);
-        let control = Int32Array::new(control_buffer.as_ref());
+        let request_bytes_i32 = i32::try_from(request_bytes).map_err(|_| {
+            format!(
+                "server job frame is too large for shared byte counters: {} bytes",
+                frame.len()
+            )
+        })?;
+        let slot = self.acquire_shared_slot(request_bytes);
+        let control = Int32Array::new(slot.control_buffer.as_ref());
         Atomics::store(&control, SHARED_STATUS_INDEX, SHARED_STATUS_PENDING).map_err(|error| {
             format!(
                 "failed to initialize shared server job status: {}",
                 js_error_string(&error)
             )
         })?;
-        Atomics::store(&control, SHARED_REQUEST_BYTES_INDEX, request_bytes as i32).map_err(
+        Atomics::store(&control, SHARED_REQUEST_BYTES_INDEX, request_bytes_i32).map_err(
             |error| {
                 format!(
                     "failed to initialize shared server job byte count: {}",
@@ -195,9 +258,18 @@ impl WasmJobWorker {
                 )
             },
         )?;
+        Atomics::store(&control, SHARED_RESPONSE_BYTES_INDEX, 0).map_err(|error| {
+            format!(
+                "failed to clear shared server job response byte count: {}",
+                js_error_string(&error)
+            )
+        })?;
 
-        let request_buffer = SharedArrayBuffer::new(request_bytes);
-        let request_view = Uint8Array::new(request_buffer.as_ref());
+        let request_view = Uint8Array::new_with_byte_offset_and_length(
+            slot.request_buffer.as_ref(),
+            0,
+            request_bytes,
+        );
         request_view.copy_from(frame);
 
         let message = Object::new();
@@ -211,21 +283,36 @@ impl WasmJobWorker {
         set_string(&message, "bindgenJsUrl", &self.bindgen_js_url)?;
         set_string(&message, "bindgenWasmUrl", &self.bindgen_wasm_url)?;
         set_number(&message, "requestBytes", f64::from(request_bytes))?;
+        set_number(
+            &message,
+            "responseCapacity",
+            f64::from(slot.response_capacity),
+        )?;
         Reflect::set(
             &message,
             &JsValue::from_str("controlBuffer"),
-            control_buffer.as_ref(),
+            slot.control_buffer.as_ref(),
         )
         .map_err(|error| format!("failed to attach shared server job control buffer: {error:?}"))?;
         Reflect::set(
             &message,
             &JsValue::from_str("requestBuffer"),
-            request_buffer.as_ref(),
+            slot.request_buffer.as_ref(),
         )
         .map_err(|error| format!("failed to attach shared server job request buffer: {error:?}"))?;
-        self.worker
-            .post_message(&message)
-            .map_err(|error| format!("failed to post shared server job frame: {error:?}"))?;
+        Reflect::set(
+            &message,
+            &JsValue::from_str("responseBuffer"),
+            slot.response_buffer.as_ref(),
+        )
+        .map_err(|error| {
+            format!("failed to attach shared server job response buffer: {error:?}")
+        })?;
+        if let Err(error) = self.worker.post_message(&message) {
+            release_shared_slot(slot, &self.shared_pool, &self.frame_metrics);
+            return Err(format!("failed to post shared server job frame: {error:?}"));
+        }
+        self.shared_inflight.borrow_mut().insert(request_id, slot);
         Ok(())
     }
 
@@ -252,6 +339,29 @@ impl WasmJobWorker {
         } else {
             Ok(())
         }
+    }
+
+    fn acquire_shared_slot(&mut self, request_bytes: u32) -> SharedJobSlot {
+        let mut slot = if let Some(slot) = self.shared_pool.borrow_mut().pop() {
+            self.frame_metrics
+                .borrow_mut()
+                .record_shared_buffer_pool_hit();
+            slot
+        } else {
+            self.frame_metrics
+                .borrow_mut()
+                .record_shared_buffer_pool_miss();
+            let slot = SharedJobSlot::new(
+                shared_capacity_for_len(request_bytes, MIN_SHARED_REQUEST_BYTES),
+                initial_shared_response_capacity(self.job_kind),
+            );
+            self.frame_metrics
+                .borrow_mut()
+                .record_shared_buffer_capacity_delta(slot.capacity_bytes());
+            slot
+        };
+        ensure_slot_request_capacity(&mut slot, request_bytes, &self.frame_metrics);
+        slot
     }
 }
 
@@ -303,7 +413,12 @@ fn transferred_response_frame(value: &JsValue) -> Result<Vec<u8>, String> {
     Ok(Uint8Array::new(&frame).to_vec())
 }
 
-fn shared_response_frame(value: &JsValue) -> Result<Vec<u8>, String> {
+struct SharedResponseFrame {
+    frame: Vec<u8>,
+    pooled_response: bool,
+}
+
+fn shared_response_frame(value: &JsValue) -> Result<SharedResponseFrame, String> {
     let Some(control_buffer) = reflect_get(value, "controlBuffer") else {
         return Err("shared server job worker returned no control buffer".to_owned());
     };
@@ -338,7 +453,90 @@ fn shared_response_frame(value: &JsValue) -> Result<Vec<u8>, String> {
     }
     let frame =
         Uint8Array::new_with_byte_offset_and_length(&frame_buffer, 0, response_bytes as u32);
-    Ok(frame.to_vec())
+    Ok(SharedResponseFrame {
+        frame: frame.to_vec(),
+        pooled_response: bool_prop(value, "pooledResponse").unwrap_or(false),
+    })
+}
+
+fn initial_shared_response_capacity(job_kind: &str) -> u32 {
+    match job_kind {
+        "worldgen" => WORLDGEN_SHARED_RESPONSE_BYTES,
+        "light-status" => LIGHT_STATUS_SHARED_RESPONSE_BYTES,
+        _ => DEFAULT_SHARED_RESPONSE_BYTES,
+    }
+}
+
+fn shared_capacity_for_len(len: u32, minimum: u32) -> u32 {
+    let wanted = len.max(minimum);
+    wanted.checked_next_power_of_two().unwrap_or(wanted)
+}
+
+fn ensure_slot_request_capacity(
+    slot: &mut SharedJobSlot,
+    request_bytes: u32,
+    frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+) {
+    if request_bytes <= slot.request_capacity {
+        return;
+    }
+    let previous_capacity = slot.request_capacity;
+    let request_capacity = shared_capacity_for_len(request_bytes, MIN_SHARED_REQUEST_BYTES);
+    slot.request_buffer = SharedArrayBuffer::new(request_capacity);
+    slot.request_capacity = request_capacity;
+    frame_metrics
+        .borrow_mut()
+        .record_shared_buffer_capacity_delta((request_capacity - previous_capacity) as usize);
+}
+
+fn grow_slot_response_buffer(
+    slot: &mut SharedJobSlot,
+    response_bytes: usize,
+    frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+) {
+    let Ok(response_bytes) = u32::try_from(response_bytes) else {
+        return;
+    };
+    if response_bytes <= slot.response_capacity {
+        return;
+    }
+    let previous_capacity = slot.response_capacity;
+    let response_capacity = shared_capacity_for_len(response_bytes, DEFAULT_SHARED_RESPONSE_BYTES);
+    slot.response_buffer = SharedArrayBuffer::new(response_capacity);
+    slot.response_capacity = response_capacity;
+    frame_metrics
+        .borrow_mut()
+        .record_shared_buffer_capacity_delta((response_capacity - previous_capacity) as usize);
+}
+
+fn release_shared_slot(
+    slot: SharedJobSlot,
+    shared_pool: &Rc<RefCell<Vec<SharedJobSlot>>>,
+    frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+) {
+    let mut shared_pool = shared_pool.borrow_mut();
+    if shared_pool.len() < MAX_SHARED_POOL_SLOTS {
+        shared_pool.push(slot);
+    } else {
+        frame_metrics
+            .borrow_mut()
+            .record_shared_buffer_pool_drop(slot.capacity_bytes());
+    }
+}
+
+fn record_shared_response_metrics(
+    frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+    response: &SharedResponseFrame,
+) {
+    if response.pooled_response {
+        frame_metrics
+            .borrow_mut()
+            .record_shared_buffer_pooled_response();
+    } else {
+        frame_metrics
+            .borrow_mut()
+            .record_shared_buffer_fallback_response();
+    }
 }
 
 fn shared_memory_transport_available() -> bool {

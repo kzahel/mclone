@@ -423,6 +423,29 @@ Landed in the first shared-memory server-job slice:
   job-frame metrics report `shared-memory` with nonzero request/response
   counts and byte totals.
 
+Landed in the shared-buffer pool slice:
+
+- WASM server-job workers now reuse bounded shared-buffer slots for
+  worldgen/light-status requests and responses instead of allocating fresh
+  `SharedArrayBuffer`s for every frame.
+- Each slot carries a reusable atomic control header, request buffer, and
+  response buffer. Slots are owned by the Rust-side worker wrapper while
+  inflight, then returned to a small pool when the browser worker replies.
+- Oversized responses keep an explicit fallback path: the browser worker
+  allocates a one-off shared response buffer, reports the fallback, and the
+  Rust-side slot grows before re-entering the pool.
+- `WorkerFrameMetrics` now reports pool hits, misses, drops, live/max shared
+  capacity, and pooled/fallback response counts. Web render reports and smoke
+  tests assert pooled shared responses with no fallback on the standard
+  worldgen/light-status path.
+
+Next implementation slice:
+
+- Move the browser integrated-server runner command/update frames from
+  `message-transfer` diagnostics to the same style of bounded shared-memory
+  frame boundary. Keep the existing message-transfer path as the fallback and
+  preserve the native desktop OS-thread runner shape.
+
 ### 6. Browser Remote Transport
 
 Add browser remote-client transport after local integrated threading is not
