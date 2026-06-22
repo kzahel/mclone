@@ -18,6 +18,8 @@ WASM_BINDGEN_BIN="$WASM_BINDGEN_ROOT/bin/wasm-bindgen"
 BINDGEN_OUT_DIR="$NATIVE_ROOT/target/wasm32-unknown-unknown/debug/mclone-web-client-bindgen"
 WRANGLER="npx --prefix $PROJECT_DIR wrangler"
 BUNDLE_ONLY=0
+GIT_REV="$(git -C "$PROJECT_DIR" rev-parse --short=12 HEAD 2>/dev/null || true)"
+DEPLOY_VERSION="${MCLONE_NATIVE_WEB_ASSET_VERSION:-${GIT_REV:-nogit}-$(date -u +%Y%m%d%H%M%S)}"
 
 usage() {
   cat <<EOF
@@ -106,6 +108,9 @@ mkdir -p "$DEPLOY_DIR/pkg"
 cp -R "$WWW_DIR"/. "$DEPLOY_DIR"/
 cp "$WWW_DIR/index.html" "$DEPLOY_DIR/smoke.html"
 cp "$WWW_DIR/app.html" "$DEPLOY_DIR/index.html"
+perl -0pi -e "s/__MCLONE_NATIVE_WEB_ASSET_VERSION__/$DEPLOY_VERSION/g" \
+  "$DEPLOY_DIR/app.html" \
+  "$DEPLOY_DIR/index.html"
 cp "$BINDGEN_OUT_DIR/mclone_web_client.js" "$DEPLOY_DIR/pkg/mclone_web_client.js"
 cp "$BINDGEN_OUT_DIR/mclone_web_client_bg.wasm" "$DEPLOY_DIR/pkg/mclone_web_client_bg.wasm"
 mkdir -p "$DEPLOY_DIR/reference/minecraft-1.17.1"
@@ -113,6 +118,7 @@ cp "$ASSET_PACK_ZIP" "$DEPLOY_DIR/reference/minecraft-1.17.1/extracted.zip"
 cp "$ASSET_PACK_MANIFEST" "$DEPLOY_DIR/reference/minecraft-1.17.1/extracted.zip.json"
 
 echo "==> Native web bundle ready: $DEPLOY_DIR"
+echo "  asset version: $DEPLOY_VERSION"
 find "$DEPLOY_DIR" -type f | sed "s#^$DEPLOY_DIR/#  #"
 
 if [ "$BUNDLE_ONLY" -eq 1 ]; then

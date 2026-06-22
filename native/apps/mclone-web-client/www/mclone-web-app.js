@@ -1,9 +1,10 @@
-const BINDGEN_JS_URL = new URL("./pkg/mclone_web_client.js", import.meta.url);
-const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.url);
-const RENDER_COMPILER_WORKER_URL = new URL("./mclone-render-compiler-worker.js", import.meta.url);
-const SERVER_WORKER_URL = new URL("./mclone-integrated-server-worker.js", import.meta.url);
-const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.meta.url);
-const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
+const DEPLOY_ASSET_VERSION = normalizedDeployAssetVersion();
+const BINDGEN_JS_URL = versionedUrl("./pkg/mclone_web_client.js");
+const BINDGEN_WASM_URL = versionedUrl("./pkg/mclone_web_client_bg.wasm");
+const RENDER_COMPILER_WORKER_URL = versionedUrl("./mclone-render-compiler-worker.js");
+const SERVER_WORKER_URL = versionedUrl("./mclone-integrated-server-worker.js");
+const SERVER_JOB_WORKER_URL = versionedUrl("./mclone-server-job-worker.js");
+const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip");
 
 const RADIUS_CHUNKS = 1;
 const MAX_FRAME_DT_SECONDS = 0.05;
@@ -1135,6 +1136,26 @@ function setText(id, value) {
 
 function defaultInputKeys() {
   return Object.fromEntries(INPUT_KEY_NAMES.map((name) => [name, false]));
+}
+
+function normalizedDeployAssetVersion() {
+  const version = globalThis.__MCLONE_NATIVE_WEB_ASSET_VERSION__;
+  if (
+    typeof version === "string"
+    && version.length > 0
+    && version !== "__MCLONE_NATIVE_WEB_ASSET_VERSION__"
+  ) {
+    return version;
+  }
+  return null;
+}
+
+function versionedUrl(path) {
+  const url = new URL(path, import.meta.url);
+  if (DEPLOY_ASSET_VERSION !== null) {
+    url.searchParams.set("v", DEPLOY_ASSET_VERSION);
+  }
+  return url;
 }
 
 function defaultMovementImpulse() {

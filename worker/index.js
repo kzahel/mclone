@@ -18,8 +18,13 @@ export default {
     headers.set("etag", object.httpEtag);
     setCrossOriginIsolationHeaders(headers);
 
-    if (key.endsWith(".html") || key.endsWith(".zip.json")) {
-      headers.set("Cache-Control", "no-cache");
+    const versioned = url.searchParams.has("v");
+    if (key.endsWith(".html")) {
+      headers.set("Cache-Control", "no-cache, max-age=0, must-revalidate");
+    } else if (versioned && isVersionedRuntimeAsset(key)) {
+      headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    } else if (key.endsWith(".js") || key.endsWith(".wasm") || key.endsWith(".zip.json")) {
+      headers.set("Cache-Control", "no-cache, max-age=0, must-revalidate");
     } else if (key.startsWith("assets/")) {
       // Vite hashes these filenames; safe to cache forever.
       headers.set("Cache-Control", "public, max-age=31536000, immutable");
@@ -37,4 +42,8 @@ function setCrossOriginIsolationHeaders(headers) {
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
   headers.set("Cross-Origin-Embedder-Policy", "require-corp");
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
+}
+
+function isVersionedRuntimeAsset(key) {
+  return key.endsWith(".js") || key.endsWith(".wasm") || key.endsWith(".zip");
 }

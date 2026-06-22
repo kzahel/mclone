@@ -364,10 +364,10 @@
       <section class="viewport">
         <canvas id="mclone-canvas" width="960" height="540" tabindex="0"></canvas>
         <div class="crosshair" aria-hidden="true"></div>
-        <button id="hud-toggle" class="hud-toggle" type="button" aria-label="Toggle debug panel" aria-controls="runtime-hud" aria-expanded="true">
+        <button id="hud-toggle" class="hud-toggle" type="button" aria-label="Toggle debug panel" aria-controls="runtime-hud" aria-expanded="false">
           <span class="hud-toggle-lines" aria-hidden="true"><span></span><span></span><span></span></span>
         </button>
-        <aside id="runtime-hud" class="hud" aria-label="Runtime status">
+        <aside id="runtime-hud" class="hud" aria-label="Runtime status" hidden>
           <h1>mclone native web</h1>
           <dl class="stats">
             <dt>center</dt><dd id="center">0, 0</dd>
@@ -405,6 +405,9 @@
         <div id="status" class="status" data-ok="true" data-ready="false">booting</div>
       </section>
     </main>
-    <script type="module" src="./mclone-web-app.js"></script>
+    <script>
+      globalThis.__MCLONE_NATIVE_WEB_ASSET_VERSION__ = "__MCLONE_NATIVE_WEB_ASSET_VERSION__";
+    </script>
+    <script type="module" src="./mclone-web-app.js?v=__MCLONE_NATIVE_WEB_ASSET_VERSION__"></script>
   </body>
 </html>
