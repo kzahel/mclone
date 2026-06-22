@@ -20,6 +20,39 @@ Runtime/host arc status: `R0` through `R8` are landed: browser singleplayer, ded
 - **Sibling reference engine:** `~/code/playbox` is the local Rust `winit`/`wgpu`/headless/Android/OpenXR pattern library. For platform or XR work, start with its `Cargo.toml`, `docs/architecture/rendering.md`, `docs/architecture/platforms.md`, `android/README.md`, and `android-xr/README.md`.
 - **Legacy implementation:** TypeScript remains available as a working/reference implementation and browser experiment, not the main path for new engine systems.
 
+## Native Web
+
+The Rust/WASM web app is served from:
+
+```text
+https://mclone.kzahel.com/
+```
+
+Use the native web scripts for this path:
+
+```bash
+# Build and serve the Rust/WASM app locally with the headers required for
+# SharedArrayBuffer/Web Workers. The command prints the local app URL.
+pnpm native:web:serve
+
+# Validate the interactive browser app with Playwright screenshots in /tmp.
+pnpm native:web:app-smoke
+
+# Build the exact deploy bundle into dist-native-web/ without uploading.
+pnpm native:web:bundle
+
+# Build, upload the native web bundle and asset pack to the mclone R2 bucket,
+# deploy the Cloudflare Worker, and make it available at mclone.kzahel.com.
+pnpm native:web:deploy
+```
+
+The deploy path packages `native/apps/mclone-web-client/www`, wasm-bindgen
+output under `/pkg/`, and `reference/minecraft-1.17.1/extracted.zip`, then
+serves them through `worker/index.js` with COOP/COEP/CORP headers. Wrangler
+must be authenticated for the Cloudflare account before deploy. The root
+`pnpm deploy` script is the older Vite/TypeScript deploy path; prefer
+`pnpm native:web:deploy` for the current native Rust/WASM app.
+
 ## Worldgen strategy
 
 **Directly translate** 1.17.1's full worldgen pipeline from the decomp into Rust: PRNG → noise → biome source → `NoiseSampler` → `NoiseBasedChunkGenerator` → carvers (`CaveWorldCarver`, `CanyonWorldCarver`) → surface rules → features → structures. Oracle-test each layer against real MC output (see strategy doc). Preserve the vanilla status scheduling and finality gates in [`docs/worldgen-deterministic-order.md`](docs/worldgen-deterministic-order.md). 1.17 specifically because it's pre-Caves-and-Cliffs — no density functions or splines to port.
