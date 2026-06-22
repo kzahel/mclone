@@ -1,8 +1,9 @@
 # 066: Web Shared-Memory Worker Architecture
 
-Status: proposed high-priority architecture; render-section compiler transport
-diagnostics and persistent worker asset/catalog state landed, shared result
-arena is next.
+Status: active high-priority architecture; render-section compiler transport
+diagnostics, persistent worker asset/catalog state, and shared result arena
+prototype landed. Shared input snapshots and final Rust-owned worker lifecycle
+are next.
 
 ## Purpose
 
@@ -78,14 +79,17 @@ The current browser render compiler still has a proof-path transport:
 - The worker still creates a fresh `WebRuntime::local_integrated(SMOKE_SEED)`
   for each compile, requests a fresh generated chunk view, and compiles against
   that worker-local view instead of the main session's actual snapshots.
-- The worker returns a packed `TexturedRenderSectionBuildReport` as a
-  transferred `Uint8Array`.
-- The main wasm instance copies that typed array with `to_vec()`, decodes the
-  packed report, applies shared acceptance/cache logic, then uploads GPU data.
+- The worker writes the packed `TexturedRenderSectionBuildReport` into a
+  `SharedArrayBuffer` result arena on the normal path; transferred
+  `Uint8Array` results remain only as explicit fallback.
+- The main wasm instance still copies the shared typed-array view with
+  `to_vec()`, decodes the packed report, applies shared acceptance/cache logic,
+  then uploads GPU data.
 
 Target-section-aware requests now bound the result section keys, which fixed
-the worst "worker returns the whole radius view" behavior. The transport and
-worker lifecycle are still not the target architecture.
+the worst "worker returns the whole radius view" behavior. The result payload
+no longer travels as a multi-megabyte `postMessage` transfer, but the input
+shape and worker lifecycle are still not the target architecture.
 
 ## Why The Proof Path Exists
 
@@ -107,18 +111,19 @@ shared-buffer transports.
 The render compiler gaps are concrete:
 
 1. Worker request ownership is still partly JavaScript-owned.
-   Rust decides target sections, but JS still owns promise orchestration,
-   worker request lifetimes, and bulk payload transfer.
-2. Output is one packed transferred report.
-   Main wasm copies and decodes the whole report before cache/GPU work can be
-   applied.
+   Rust decides target sections, but JS still owns promise orchestration and
+   browser worker request lifetimes.
+2. Output is still one packed report.
+   The normal path now stores it in a shared result buffer, but main wasm still
+   copies and decodes the whole report before cache/GPU work can be applied.
 3. Worker input is not the main session's actual snapshot set.
    The worker creates a fresh local integrated runtime for the requested
    center/radius instead of consuming explicit target-section and neighbor
    section inputs from the main client replica.
-4. Render compile still uses `message-transfer`.
-   Runner/worldgen/light lanes are `shared-memory`; render compile now exposes
-   the divergence explicitly but has not moved to a shared result arena.
+4. Render compile uses only a partial shared-memory ABI.
+   Result bytes use a shared arena, but target-section input still crosses as
+   JS message data and the worker still builds from generated center/radius
+   state instead of explicit main-session snapshots.
 5. Dirty planning is still too coarse for some movement cases.
    A move can dirty `8-9` chunks and expand loaded dirty chunks to `128-144`
    vertical section keys. The shared-memory worker ABI will reduce transport
@@ -429,7 +434,7 @@ Observed local movement perf after this slice:
 
 ### 3. Shared Result Arena Prototype
 
-Status: next implementation slice.
+Status: completed first pass.
 
 Move worker output from transferred packed reports to a shared result slot:
 
@@ -441,10 +446,47 @@ Move worker output from transferred packed reports to a shared result slot:
 
 Acceptance:
 
-- render compiler reports `shared-memory` on cross-origin-isolated browsers
+- render compiler reports `shared-result-buffer` on cross-origin-isolated
+  browsers
 - movement perf fails if it unexpectedly uses `message-transfer` on the normal
   path
 - decode/apply behavior remains unchanged initially
+
+Landed on 2026-06-22:
+
+- `RenderSectionWorkerCompiler` in both the app and web smoke page now allocates
+  a per-compile shared control header and 16 MiB shared response arena, sends
+  those buffers to `mclone-render-compiler-worker.js`, and reads the packed
+  result from a shared typed-array view.
+- The worker writes packed report bytes into the shared result arena, publishes
+  byte count/capacity/status with `Atomics`, and posts only metadata plus the
+  shared-buffer reference. If the arena is too small, the worker allocates an
+  overflow `SharedArrayBuffer` and reports the overflow instead of transferring
+  the packed bytes.
+- Browser diagnostics now separate packed byte length, transferred response
+  bytes, shared result bytes, shared result capacity, response count, and
+  overflow count.
+- Browser smoke assertions now require `shared-result-buffer`,
+  `sharedResultBufferUsed: true`, and zero transferred render-compiler response
+  bytes on the normal path.
+
+Observed local movement perf after this slice:
+
+- initial compile: `144` submitted sections, `11,310,892` packed/shared result
+  bytes, `0` transferred response bytes, `887.7ms` worker round trip
+- movement compile: `129` submitted sections, `9,740,708` packed/shared result
+  bytes, `0` transferred response bytes, `866.0ms` worker round trip
+- tiny stale movement compile: `2` submitted sections, `36` packed/shared
+  result bytes, `0` transferred response bytes, `830.1ms` worker round trip
+- later full movement compile: `144` submitted sections, `11,623,508`
+  packed/shared result bytes, `0` transferred response bytes, `890.1ms`
+  worker round trip
+- no shared result overflow occurred with the 16 MiB arena
+
+This confirms the remaining web/desktop divergence is no longer large
+`postMessage` response transfer. The remaining cost is worker-side compile and
+generated-view setup, plus coarse dirty planning that still asks for
+`128-144` sections in full movement cases.
 
 ### 4. Shared Input Arena With Actual Snapshots
 
@@ -502,6 +544,7 @@ The render-worker shared-memory slices should keep the existing gates:
 
 ```text
 node --check native/apps/mclone-web-client/www/mclone-web-app.js
+node --check native/apps/mclone-web-client/www/mclone-web-smoke.js
 node --check native/apps/mclone-web-client/www/mclone-render-compiler-worker.js
 node --check native/apps/mclone-web-client/scripts/browser-smoke.mjs
 cargo fmt --manifest-path native/Cargo.toml --all -- --check
@@ -516,8 +559,8 @@ pnpm native:web:movement-perf
 
 Rendered browser slices still need screenshot inspection under `/tmp`.
 
-New perf assertions should be added only after the first shared render transport
-lands, but the harness should immediately record:
+Perf assertions now require the normal render-compiler path to use
+`shared-result-buffer`. The harness should keep recording:
 
 - render compiler transport kind
 - asset load count

@@ -8,7 +8,9 @@ target-section-aware browser render-worker requests landed; shared-memory
 render-worker architecture is tracked in
 [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md).
 Render-compiler transport diagnostics and persistent worker asset/catalog state
-landed there; shared result arena is next.
+landed there; the shared result arena prototype also landed. The next
+performance target is shared input snapshots / worker-side compile setup, then
+section-level dirty planning.
 
 ## Purpose
 
@@ -99,6 +101,15 @@ Full dirty-chunk movement plans still legitimately submit `128-144` sections
 and still produce `5.8-11.6 MB` packed payloads, so the remaining large cases
 are now attributable to dirty planning and worker-side compile/runtime cost
 rather than the worker blindly returning a full view for every request.
+
+After the shared result arena landed on 2026-06-22, the browser render compiler
+normal path no longer transfers packed report bytes through `postMessage`.
+Movement perf now reports `shared-result-buffer`, `0` transferred response
+bytes, and shared result byte lengths matching the packed report sizes. The
+same full movement cases still produce `~9.7-11.6 MB` packed/shared results and
+`~0.87-0.89s` worker round trips, confirming that the remaining divergence is
+worker-side compile/input setup and coarse dirty planning, not response
+transport.
 
 ## Diagnosis
 
@@ -638,6 +649,66 @@ Observed local movement perf after this chunk:
 - cumulative render compiler response transfer after four worker compiles was
   `28,900,904` bytes, so the remaining transport target is the packed result
   path, not the asset-pack request path
+
+## Shared Result Arena Landed
+
+Implemented on 2026-06-22:
+
+- app and smoke render-worker clients now allocate a per-compile shared control
+  header plus a 16 MiB shared response arena and pass those buffers to
+  `mclone-render-compiler-worker.js`.
+- the worker writes packed compile-report bytes into the shared arena, publishes
+  byte count/capacity/status with `Atomics`, and posts only completion metadata
+  plus the shared-buffer reference. If the arena is too small, the worker
+  reports an overflow `SharedArrayBuffer` instead of falling back to a large
+  transferred result.
+- runtime compile timing diagnostics now separate packed byte length,
+  transferred response byte length, shared result byte length, shared result
+  capacity, shared response count, and overflow count.
+- browser smoke assertions now require `shared-result-buffer`,
+  `sharedResultBufferUsed: true`, and `0` transferred render-compiler response
+  bytes on the normal path.
+
+Validation run:
+
+```text
+node --check native/apps/mclone-web-client/www/mclone-render-compiler-worker.js
+node --check native/apps/mclone-web-client/www/mclone-web-app.js
+node --check native/apps/mclone-web-client/www/mclone-web-smoke.js
+node --check native/apps/mclone-web-client/scripts/browser-smoke.mjs
+cargo fmt --manifest-path native/Cargo.toml --all -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-mesh
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+pnpm native:web:build
+pnpm native:web:smoke
+pnpm native:web:app-smoke
+pnpm native:web:mobile-smoke
+pnpm native:web:movement-perf
+```
+
+Observed local movement perf after this chunk:
+
+- initial compile submitted `144` sections, produced `11,310,892`
+  packed/shared result bytes, transferred `0` response bytes, and had an
+  `887.7ms` worker round trip
+- first full movement compile submitted `129` sections, produced `9,740,708`
+  packed/shared result bytes, transferred `0` response bytes, and had an
+  `866.0ms` worker round trip
+- a tiny stale movement compile submitted `2` sections, produced a `36` byte
+  empty packed/shared report, transferred `0` response bytes, and still had an
+  `830.1ms` worker round trip
+- later full movement compile submitted `144` sections, produced `11,623,508`
+  packed/shared result bytes, transferred `0` response bytes, and had an
+  `890.1ms` worker round trip
+- max movement compile frame gaps stayed low locally, around `10.3-22.0ms`
+- no shared result overflow occurred with the 16 MiB arena
+
+Current next likely step: stop treating the render worker as a generated-view
+transaction. Pass the main session's actual target/neighbor section snapshots
+through a shared input arena, compile from those inputs, and then reduce the
+remaining full `128-144` section dirty plans by splitting chunk-level view
+dirtying from section-level neighbor-boundary dirtying.
 
 ## Deployment Check
 

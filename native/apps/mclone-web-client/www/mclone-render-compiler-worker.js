@@ -1,4 +1,12 @@
-const RENDER_COMPILER_TRANSPORT_KIND = "message-transfer";
+const RENDER_COMPILER_TRANSPORT_KIND = "shared-result-buffer";
+const RENDER_COMPILER_MESSAGE_TRANSFER_KIND = "message-transfer";
+const RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS = 4;
+const RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX = 0;
+const RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX = 1;
+const RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX = 2;
+const RENDER_COMPILER_SHARED_RESULT_COMPLETE = 2;
+const RENDER_COMPILER_SHARED_RESULT_OVERFLOW = 3;
+const RENDER_COMPILER_SHARED_RESULT_FAILED = 4;
 
 let wasmModulePromise = null;
 let compilerSession = null;
@@ -114,34 +122,43 @@ async function handleCompile(message) {
               radiusChunks,
             );
     const summary = module.mclone_web_packed_compile_report_summary(packed);
-    self.postMessage(
-      {
-        ok: true,
-        requestId: message.requestId,
-        transportKind: RENDER_COMPILER_TRANSPORT_KIND,
-        sharedMemorySupported: renderCompilerSharedMemorySupported(),
-        workerWasmInitCount,
-        workerCompileCount,
-        workerAssetLoadCount,
-        workerAssetPackInitByteLength,
-        workerAssetPackFileCount,
-        persistentAssetCatalog: compilerSession !== null,
-        requestAssetPackByteLength,
-        requestTargetSectionsByteLength,
-        requestByteLength: requestAssetPackByteLength + requestTargetSectionsByteLength,
-        transferredRequestByteLength: requestAssetPackByteLength,
-        transferredResponseByteLength: packed.byteLength,
-        centerX,
-        centerZ,
-        radiusChunks,
-        targetSectionCount: Math.floor(targetSections.length / 3),
-        targetedCompileUsed: hasTargetedCompiler,
-        summary,
-        packed,
-      },
-      [packed.buffer],
-    );
+    const response = writeSharedCompileResult(message, packed);
+    const report = {
+      ok: true,
+      requestId: message.requestId,
+      transportKind: response.transportKind,
+      sharedMemorySupported: renderCompilerSharedMemorySupported(),
+      workerWasmInitCount,
+      workerCompileCount,
+      workerAssetLoadCount,
+      workerAssetPackInitByteLength,
+      workerAssetPackFileCount,
+      persistentAssetCatalog: compilerSession !== null,
+      requestAssetPackByteLength,
+      requestTargetSectionsByteLength,
+      requestByteLength: requestAssetPackByteLength + requestTargetSectionsByteLength,
+      transferredRequestByteLength: requestAssetPackByteLength,
+      transferredResponseByteLength: response.transferredResponseByteLength,
+      sharedResultBufferUsed: response.sharedResultBufferUsed,
+      sharedResultByteLength: response.sharedResultByteLength,
+      sharedResultBufferCapacityBytes: response.sharedResultBufferCapacityBytes,
+      sharedResultOverflow: response.sharedResultOverflow,
+      centerX,
+      centerZ,
+      radiusChunks,
+      targetSectionCount: Math.floor(targetSections.length / 3),
+      targetedCompileUsed: hasTargetedCompiler,
+      summary,
+    };
+    if (response.sharedResultBufferUsed) {
+      report.sharedResultBuffer = response.sharedResultBuffer;
+      self.postMessage(report);
+    } else {
+      report.packed = packed;
+      self.postMessage(report, [packed.buffer]);
+    }
   } catch (error) {
+    markSharedCompileResultFailed(message);
     self.postMessage({
       ok: false,
       requestId: message.requestId,
@@ -183,8 +200,75 @@ function normalizeTargetSections(value) {
   return new Int32Array();
 }
 
+function writeSharedCompileResult(message, packed) {
+  const packedByteLength = byteLengthOf(packed);
+  const requestedResponseBuffer = message.sharedResultResponseBuffer;
+  if (!renderCompilerSharedMemorySupported() || !isSharedArrayBuffer(requestedResponseBuffer)) {
+    return {
+      transportKind: RENDER_COMPILER_MESSAGE_TRANSFER_KIND,
+      transferredResponseByteLength: packedByteLength,
+      sharedResultBufferUsed: false,
+      sharedResultByteLength: 0,
+      sharedResultBufferCapacityBytes: 0,
+      sharedResultOverflow: false,
+      sharedResultBuffer: null,
+    };
+  }
+
+  let sharedResultBuffer = requestedResponseBuffer;
+  let sharedResultOverflow = false;
+  if (sharedResultBuffer.byteLength < packedByteLength) {
+    sharedResultBuffer = new SharedArrayBuffer(packedByteLength);
+    sharedResultOverflow = true;
+  }
+  new Uint8Array(sharedResultBuffer, 0, packedByteLength).set(packed);
+  const control = sharedResultControl(message);
+  if (control !== null) {
+    Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX, packedByteLength);
+    Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX, sharedResultBuffer.byteLength);
+    Atomics.store(
+      control,
+      RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX,
+      sharedResultOverflow
+        ? RENDER_COMPILER_SHARED_RESULT_OVERFLOW
+        : RENDER_COMPILER_SHARED_RESULT_COMPLETE,
+    );
+    Atomics.notify(control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX, 1);
+  }
+  return {
+    transportKind: RENDER_COMPILER_TRANSPORT_KIND,
+    transferredResponseByteLength: 0,
+    sharedResultBufferUsed: true,
+    sharedResultByteLength: packedByteLength,
+    sharedResultBufferCapacityBytes: sharedResultBuffer.byteLength,
+    sharedResultOverflow,
+    sharedResultBuffer,
+  };
+}
+
+function markSharedCompileResultFailed(message) {
+  const control = sharedResultControl(message);
+  if (control === null) {
+    return;
+  }
+  Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX, RENDER_COMPILER_SHARED_RESULT_FAILED);
+  Atomics.notify(control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX, 1);
+}
+
+function sharedResultControl(message) {
+  const buffer = message.sharedResultControlBuffer;
+  if (
+    !renderCompilerSharedMemorySupported()
+    || !isSharedArrayBuffer(buffer)
+    || buffer.byteLength < RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS * Int32Array.BYTES_PER_ELEMENT
+  ) {
+    return null;
+  }
+  return new Int32Array(buffer);
+}
+
 function byteLengthOf(value) {
-  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || isSharedArrayBuffer(value)) {
     return value.byteLength;
   }
   return 0;
@@ -196,6 +280,10 @@ function renderCompilerSharedMemorySupported() {
     && typeof Atomics.load === "function"
     && typeof Atomics.store === "function"
     && typeof Atomics.notify === "function";
+}
+
+function isSharedArrayBuffer(value) {
+  return typeof SharedArrayBuffer === "function" && value instanceof SharedArrayBuffer;
 }
 
 function stringifyError(error) {

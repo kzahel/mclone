@@ -8,7 +8,16 @@ const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.me
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 const REMOTE_WS_URL = new URL(globalThis.location.href).searchParams.get("remoteWsUrl") ?? "";
-const RENDER_COMPILER_TRANSPORT_KIND = "message-transfer";
+const RENDER_COMPILER_TRANSPORT_KIND = "shared-result-buffer";
+const RENDER_COMPILER_MESSAGE_TRANSFER_KIND = "message-transfer";
+const RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS = 4;
+const RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX = 0;
+const RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX = 1;
+const RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX = 2;
+const RENDER_COMPILER_SHARED_RESULT_PENDING = 1;
+const RENDER_COMPILER_SHARED_RESULT_COMPLETE = 2;
+const RENDER_COMPILER_SHARED_RESULT_OVERFLOW = 3;
+const RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY = 16 * 1024 * 1024;
 
 const ready = boot();
 globalThis.__mcloneNativeReady = ready;
@@ -512,6 +521,12 @@ class RenderSectionWorkerCompiler {
       assetPackSendCount: 0,
       transferredRequestByteCount: 0,
       transferredResponseByteCount: 0,
+      sharedResultResponseCount: 0,
+      sharedResultByteCount: 0,
+      sharedResultOverflowCount: 0,
+      sharedResultBufferCapacityBytes: renderCompilerSharedMemorySupported()
+        ? RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY
+        : 0,
     };
     this.ready = new Promise((resolve, reject) => {
       this.resolveReady = resolve;
@@ -535,9 +550,19 @@ class RenderSectionWorkerCompiler {
       if (!pending) return;
       this.pending.delete(requestId);
       clearTimeout(pending.timeout);
-      const packed = data.packed instanceof Uint8Array ? data.packed : new Uint8Array();
-      const packedByteLength = packed.byteLength;
-      this.metrics.transferredResponseByteCount += packedByteLength;
+      const response = renderCompilerPackedResponse(data, pending);
+      const packed = response.packed;
+      const packedByteLength = response.packedByteLength;
+      if (response.sharedResultBufferUsed) {
+        this.metrics.sharedResultResponseCount += 1;
+        this.metrics.sharedResultByteCount += response.sharedResultByteLength;
+        this.metrics.sharedResultBufferCapacityBytes = response.sharedResultBufferCapacityBytes;
+        if (response.sharedResultOverflow) {
+          this.metrics.sharedResultOverflowCount += 1;
+        }
+      } else {
+        this.metrics.transferredResponseByteCount += response.transferredResponseByteLength;
+      }
       this.metrics.workerWasmInitCount = Number(data.workerWasmInitCount)
         || this.metrics.workerWasmInitCount;
       this.metrics.workerAssetLoadCount = Number(data.workerAssetLoadCount)
@@ -547,6 +572,11 @@ class RenderSectionWorkerCompiler {
       this.metrics.workerAssetPackFileCount = Number(data.workerAssetPackFileCount)
         || this.metrics.workerAssetPackFileCount;
       this.metrics.persistentAssetCatalog = Boolean(data.persistentAssetCatalog);
+      data.sharedResultBufferUsed = response.sharedResultBufferUsed;
+      data.sharedResultByteLength = response.sharedResultByteLength;
+      data.sharedResultBufferCapacityBytes = response.sharedResultBufferCapacityBytes;
+      data.sharedResultOverflow = response.sharedResultOverflow;
+      data.transferredResponseByteLength = response.transferredResponseByteLength;
       const renderCompilerMetrics = renderCompilerMetricsForResponse(
         this.metrics,
         pending.requestMetrics,
@@ -554,6 +584,7 @@ class RenderSectionWorkerCompiler {
         packedByteLength,
       );
       delete data.packed;
+      delete data.sharedResultBuffer;
       pending.resolve({
         report: {
           ...data,
@@ -575,6 +606,13 @@ class RenderSectionWorkerCompiler {
           requestByteLength: renderCompilerMetrics.requestByteLength,
           transferredRequestByteLength: renderCompilerMetrics.transferredRequestByteLength,
           transferredResponseByteLength: renderCompilerMetrics.transferredResponseByteLength,
+          sharedResultBufferUsed: renderCompilerMetrics.sharedResultBufferUsed,
+          sharedResultByteLength: renderCompilerMetrics.sharedResultByteLength,
+          sharedResultBufferCapacityBytes: renderCompilerMetrics.sharedResultBufferCapacityBytes,
+          sharedResultOverflow: renderCompilerMetrics.sharedResultOverflow,
+          sharedResultResponseCount: renderCompilerMetrics.sharedResultResponseCount,
+          sharedResultByteCount: renderCompilerMetrics.sharedResultByteCount,
+          sharedResultOverflowCount: renderCompilerMetrics.sharedResultOverflowCount,
         },
         packed,
       });
@@ -630,7 +668,8 @@ class RenderSectionWorkerCompiler {
         reject(new Error(`invalid render compile request id ${String(request.requestId)}`));
         return;
       }
-      const requestMetrics = renderCompilerRequestMetrics(request.targetSections);
+      const sharedResult = createRenderCompilerSharedResultBuffer();
+      const requestMetrics = renderCompilerRequestMetrics(request.targetSections, sharedResult);
       this.metrics.compileCount += 1;
       this.metrics.transferredRequestByteCount += requestMetrics.transferredRequestByteLength;
       const timeout = setTimeout(() => {
@@ -638,19 +677,23 @@ class RenderSectionWorkerCompiler {
         this.pending.delete(requestId);
         reject(new Error(`timed out waiting for render compiler worker request ${requestId}`));
       }, 20_000);
-      this.pending.set(requestId, { resolve, reject, timeout, requestMetrics });
-      this.worker.postMessage(
-        {
-          kind: "compile-render-sections",
-          requestId,
-          bindgenJsUrl: BINDGEN_JS_URL.href,
-          bindgenWasmUrl: BINDGEN_WASM_URL.href,
-          centerX: request.centerX,
-          centerZ: request.centerZ,
-          radiusChunks: request.radiusChunks,
-          targetSections: request.targetSections,
-        },
-      );
+      this.pending.set(requestId, { resolve, reject, timeout, requestMetrics, sharedResult });
+      const message = {
+        kind: "compile-render-sections",
+        requestId,
+        bindgenJsUrl: BINDGEN_JS_URL.href,
+        bindgenWasmUrl: BINDGEN_WASM_URL.href,
+        centerX: request.centerX,
+        centerZ: request.centerZ,
+        radiusChunks: request.radiusChunks,
+        targetSections: request.targetSections,
+      };
+      if (sharedResult !== null) {
+        message.sharedResultControlBuffer = sharedResult.controlBuffer;
+        message.sharedResultResponseBuffer = sharedResult.responseBuffer;
+        message.sharedResultBufferCapacityBytes = sharedResult.responseCapacity;
+      }
+      this.worker.postMessage(message);
     });
   }
 
@@ -672,7 +715,65 @@ class RenderSectionWorkerCompiler {
   }
 }
 
-function renderCompilerRequestMetrics(targetSections) {
+function createRenderCompilerSharedResultBuffer() {
+  if (!renderCompilerSharedMemorySupported()) {
+    return null;
+  }
+  const controlBuffer = new SharedArrayBuffer(
+    RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS * Int32Array.BYTES_PER_ELEMENT,
+  );
+  const control = new Int32Array(controlBuffer);
+  const responseCapacity = RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY;
+  const responseBuffer = new SharedArrayBuffer(responseCapacity);
+  Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX, RENDER_COMPILER_SHARED_RESULT_PENDING);
+  Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX, 0);
+  Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX, responseCapacity);
+  return { controlBuffer, control, responseBuffer, responseCapacity };
+}
+
+function renderCompilerPackedResponse(workerReport, pending) {
+  const sharedResult = pending?.sharedResult ?? null;
+  const sharedResultBuffer = isSharedArrayBuffer(workerReport.sharedResultBuffer)
+    ? workerReport.sharedResultBuffer
+    : sharedResult?.responseBuffer;
+  const control = sharedResult?.control;
+  const controlByteLength = control instanceof Int32Array
+    ? Atomics.load(control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX)
+    : 0;
+  const sharedResultByteLength = Number(workerReport.sharedResultByteLength)
+    || controlByteLength
+    || 0;
+  const sharedResultBufferUsed = Boolean(workerReport.sharedResultBufferUsed)
+    && isSharedArrayBuffer(sharedResultBuffer)
+    && sharedResultByteLength >= 0
+    && sharedResultByteLength <= sharedResultBuffer.byteLength;
+  if (sharedResultBufferUsed) {
+    return {
+      packed: new Uint8Array(sharedResultBuffer, 0, sharedResultByteLength),
+      packedByteLength: sharedResultByteLength,
+      sharedResultBufferUsed: true,
+      sharedResultByteLength,
+      sharedResultBufferCapacityBytes: Number(workerReport.sharedResultBufferCapacityBytes)
+        || sharedResultBuffer.byteLength,
+      sharedResultOverflow: Boolean(workerReport.sharedResultOverflow),
+      transferredResponseByteLength: Number(workerReport.transferredResponseByteLength) || 0,
+    };
+  }
+
+  const packed = workerReport.packed instanceof Uint8Array ? workerReport.packed : new Uint8Array();
+  return {
+    packed,
+    packedByteLength: packed.byteLength,
+    sharedResultBufferUsed: false,
+    sharedResultByteLength: 0,
+    sharedResultBufferCapacityBytes: sharedResult?.responseCapacity ?? 0,
+    sharedResultOverflow: false,
+    transferredResponseByteLength: Number(workerReport.transferredResponseByteLength)
+      || packed.byteLength,
+  };
+}
+
+function renderCompilerRequestMetrics(targetSections, sharedResult) {
   const requestAssetPackByteLength = 0;
   const requestTargetSectionsByteLength = byteLengthOfTargetSections(targetSections);
   return {
@@ -680,10 +781,20 @@ function renderCompilerRequestMetrics(targetSections) {
     requestTargetSectionsByteLength,
     requestByteLength: requestAssetPackByteLength + requestTargetSectionsByteLength,
     transferredRequestByteLength: 0,
+    sharedResultBufferUsed: sharedResult !== null,
+    sharedResultBufferCapacityBytes: sharedResult?.responseCapacity ?? 0,
   };
 }
 
 function renderCompilerMetricsForResponse(cumulativeMetrics, requestMetrics, workerReport, packedByteLength) {
+  const sharedResultBufferUsed = Boolean(workerReport.sharedResultBufferUsed)
+    || Boolean(requestMetrics.sharedResultBufferUsed && Number(workerReport.sharedResultByteLength) > 0);
+  const sharedResultByteLength = sharedResultBufferUsed
+    ? Number(workerReport.sharedResultByteLength) || Number(packedByteLength) || 0
+    : 0;
+  const transferredResponseByteLength = Number(workerReport.transferredResponseByteLength)
+    || (sharedResultBufferUsed ? 0 : Number(packedByteLength))
+    || 0;
   return {
     transportKind: String(workerReport.transportKind || cumulativeMetrics.transportKind || RENDER_COMPILER_TRANSPORT_KIND),
     sharedMemorySupported: Boolean(workerReport.sharedMemorySupported ?? cumulativeMetrics.sharedMemorySupported),
@@ -716,11 +827,19 @@ function renderCompilerMetricsForResponse(cumulativeMetrics, requestMetrics, wor
     transferredRequestByteLength: Number(requestMetrics.transferredRequestByteLength)
       || Number(workerReport.transferredRequestByteLength)
       || 0,
-    transferredResponseByteLength: Number(workerReport.transferredResponseByteLength)
-      || Number(packedByteLength)
-      || 0,
+    transferredResponseByteLength,
     transferredRequestByteCount: Number(cumulativeMetrics.transferredRequestByteCount) || 0,
     transferredResponseByteCount: Number(cumulativeMetrics.transferredResponseByteCount) || 0,
+    sharedResultBufferUsed,
+    sharedResultByteLength,
+    sharedResultBufferCapacityBytes: Number(workerReport.sharedResultBufferCapacityBytes)
+      || Number(requestMetrics.sharedResultBufferCapacityBytes)
+      || Number(cumulativeMetrics.sharedResultBufferCapacityBytes)
+      || 0,
+    sharedResultOverflow: Boolean(workerReport.sharedResultOverflow),
+    sharedResultResponseCount: Number(cumulativeMetrics.sharedResultResponseCount) || 0,
+    sharedResultByteCount: Number(cumulativeMetrics.sharedResultByteCount) || 0,
+    sharedResultOverflowCount: Number(cumulativeMetrics.sharedResultOverflowCount) || 0,
   };
 }
 
@@ -732,8 +851,12 @@ function renderCompilerSharedMemorySupported() {
     && typeof Atomics.notify === "function";
 }
 
+function isSharedArrayBuffer(value) {
+  return typeof SharedArrayBuffer === "function" && value instanceof SharedArrayBuffer;
+}
+
 function byteLengthOf(value) {
-  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer || isSharedArrayBuffer(value)) {
     return value.byteLength;
   }
   return 0;

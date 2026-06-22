@@ -1548,8 +1548,8 @@ function assertCompileTimingDiagnostics(timing, label) {
     || !Number.isFinite(Number(timing.decodeFinishApplyMs))
     || !Number.isFinite(Number(timing.maxFrameGapMs))
     || Number(timing.packedByteLength) <= 0
-    || timing.renderCompilerTransportKind !== "message-transfer"
-    || timing.renderCompilerMetrics?.transportKind !== "message-transfer"
+    || timing.renderCompilerTransportKind !== "shared-result-buffer"
+    || timing.renderCompilerMetrics?.transportKind !== "shared-result-buffer"
     || Number(timing.renderCompilerWorkerInitCount) <= 0
     || Number(timing.renderCompilerWorkerWasmInitCount) <= 0
     || Number(timing.renderCompilerWorkerAssetLoadCount) <= 0
@@ -1564,7 +1564,12 @@ function assertCompileTimingDiagnostics(timing, label) {
     || Number(timing.renderCompilerTransferredRequestByteLength) !== 0
     || Number(timing.renderCompilerTransferredRequestByteCount)
       < Number(timing.renderCompilerWorkerAssetPackInitByteLength)
-    || Number(timing.renderCompilerTransferredResponseByteLength) !== Number(timing.packedByteLength)
+    || Number(timing.renderCompilerTransferredResponseByteLength) !== 0
+    || timing.renderCompilerSharedResultBufferUsed !== true
+    || Number(timing.renderCompilerSharedResultByteLength) !== Number(timing.packedByteLength)
+    || Number(timing.renderCompilerSharedResultBufferCapacityBytes) < Number(timing.packedByteLength)
+    || Number(timing.renderCompilerSharedResultResponseCount) <= 0
+    || Number(timing.renderCompilerSharedResultByteCount) < Number(timing.packedByteLength)
     || Number(timing.submittedCompileSectionCount) <= 0
     || Number(timing.acceptedCompileSectionCount) < 0
     || Number(timing.staleCompileSectionCount) < 0
@@ -1608,6 +1613,18 @@ function summarizeCompileTimings(timings) {
     ))),
     renderCompilerTransferredResponseByteCountMax: Math.max(0, ...values.map((timing) => (
       Number(timing.renderCompilerTransferredResponseByteCount) || 0
+    ))),
+    renderCompilerSharedResultByteLengthMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerSharedResultByteLength) || 0
+    ))),
+    renderCompilerSharedResultBufferCapacityBytesMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerSharedResultBufferCapacityBytes) || 0
+    ))),
+    renderCompilerSharedResultByteCountMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerSharedResultByteCount) || 0
+    ))),
+    renderCompilerSharedResultOverflowCountMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerSharedResultOverflowCount) || 0
     ))),
     renderCompilerAssetPackSendCountMax: Math.max(0, ...values.map((timing) => (
       Number(timing.renderCompilerAssetPackSendCount) || 0
@@ -1851,8 +1868,8 @@ function assertRenderCompilerWorkerResult(renderCompiler, request, expectedCente
     || renderCompiler.radiusChunks !== 1
     || !renderCompiler.targetedCompileUsed
     || renderCompiler.targetSectionCount !== expectedSectionCount
-    || renderCompiler.transportKind !== "message-transfer"
-    || renderCompiler.renderCompilerMetrics?.transportKind !== "message-transfer"
+    || renderCompiler.transportKind !== "shared-result-buffer"
+    || renderCompiler.renderCompilerMetrics?.transportKind !== "shared-result-buffer"
     || Number(renderCompiler.workerInitCount) <= 0
     || Number(renderCompiler.workerWasmInitCount) <= 0
     || Number(renderCompiler.workerAssetLoadCount) <= 0
@@ -1867,6 +1884,12 @@ function assertRenderCompilerWorkerResult(renderCompiler, request, expectedCente
     || Number(renderCompiler.transferredRequestByteLength) !== 0
     || Number(renderCompiler.renderCompilerMetrics?.transferredRequestByteCount)
       < Number(renderCompiler.workerAssetPackInitByteLength)
+    || Number(renderCompiler.transferredResponseByteLength) !== 0
+    || renderCompiler.sharedResultBufferUsed !== true
+    || Number(renderCompiler.sharedResultByteLength) <= 0
+    || Number(renderCompiler.sharedResultBufferCapacityBytes) < Number(renderCompiler.sharedResultByteLength)
+    || Number(renderCompiler.renderCompilerMetrics?.sharedResultResponseCount) <= 0
+    || Number(renderCompiler.renderCompilerMetrics?.sharedResultByteCount) < Number(renderCompiler.sharedResultByteLength)
     || !summary?.ok
     || summary.byteLength <= 0
     || summary.sectionCount !== expectedSectionCount
@@ -1879,10 +1902,10 @@ function assertRenderCompilerWorkerResult(renderCompiler, request, expectedCente
     throw new Error(`render compiler worker did not return the expected targeted section payload:\n${JSON.stringify({ request, renderCompiler }, null, 2)}`);
   }
   if (renderCompiler.packedByteLength !== summary.byteLength) {
-    throw new Error(`render compiler worker did not transfer the packed payload:\n${JSON.stringify(renderCompiler, null, 2)}`);
+    throw new Error(`render compiler worker did not expose the packed payload length:\n${JSON.stringify(renderCompiler, null, 2)}`);
   }
-  if (renderCompiler.transferredResponseByteLength !== renderCompiler.packedByteLength) {
-    throw new Error(`render compiler worker did not report transferred response bytes:\n${JSON.stringify(renderCompiler, null, 2)}`);
+  if (renderCompiler.sharedResultByteLength !== renderCompiler.packedByteLength) {
+    throw new Error(`render compiler worker did not report shared result bytes:\n${JSON.stringify(renderCompiler, null, 2)}`);
   }
 }
 
