@@ -7,6 +7,10 @@ const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", impo
 
 const RADIUS_CHUNKS = 1;
 const MAX_FRAME_DT_SECONDS = 0.05;
+const INPUT_KEY_NAMES = ["forward", "backward", "left", "right", "jump", "descend", "shift", "sprint"];
+const TOUCH_JOYSTICK_MAX_DISTANCE = 50;
+const TOUCH_JOYSTICK_DEAD_ZONE = 10;
+const TOUCH_AXIS_THRESHOLD = TOUCH_JOYSTICK_DEAD_ZONE / TOUCH_JOYSTICK_MAX_DISTANCE;
 
 const runtime = {
   ready: false,
@@ -64,6 +68,11 @@ const runtime = {
     runnerFrameMetrics: null,
     worldgenJobFrameMetrics: null,
     lightStatusJobFrameMetrics: null,
+    hudOpen: true,
+    touchControlsVisible: false,
+    touchJoystickActive: false,
+    touchLookActive: false,
+    touchButtonActiveCount: 0,
     status: "booting",
   },
 };
@@ -75,6 +84,8 @@ async function boot() {
   runtime.queueMouseDelta = (dx, dy) => app.queueMouseDelta(dx, dy);
   runtime.setInputKey = (name, down) => app.setInputKey(name, down);
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
+  runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
+  runtime.setHudOpen = (open) => setHudOpen(Boolean(open));
   try {
     await app.init();
     runtime.ready = true;
@@ -98,18 +109,13 @@ class WebChunkApp {
   constructor() {
     this.canvas = document.getElementById("mclone-canvas");
     this.status = document.getElementById("status");
+    this.hud = document.getElementById("runtime-hud");
+    this.hudToggle = document.getElementById("hud-toggle");
     this.session = null;
     this.compiler = null;
-    this.keys = {
-      forward: false,
-      backward: false,
-      left: false,
-      right: false,
-      jump: false,
-      descend: false,
-      shift: false,
-      sprint: false,
-    };
+    this.keys = defaultInputKeys();
+    this.touchKeys = defaultInputKeys();
+    this.touchControls = null;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
     this.pendingCompile = false;
@@ -171,7 +177,9 @@ class WebChunkApp {
       }
     }
     this.compiler = new RenderSectionWorkerCompiler(assetPack);
+    bindHud(this);
     bindInput(this);
+    this.touchControls = new TouchControls(this);
     this.syncCanvasSize();
     this.applyCameraState(this.session.cameraFrameState());
     this.applyTargetState(this.session.previewBlockTarget());
@@ -212,6 +220,7 @@ class WebChunkApp {
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
     this.syncCanvasSize();
+    const keys = this.currentInputKeys();
 
     runtime.state.frameCount += 1;
     runtime.state.tickPhase = "advance";
@@ -219,14 +228,14 @@ class WebChunkApp {
       dtSeconds,
       mouseDeltaX,
       mouseDeltaY,
-      this.keys.forward,
-      this.keys.backward,
-      this.keys.left,
-      this.keys.right,
-      this.keys.jump,
-      this.keys.descend,
-      this.keys.shift,
-      this.keys.sprint,
+      keys.forward,
+      keys.backward,
+      keys.left,
+      keys.right,
+      keys.jump,
+      keys.descend,
+      keys.shift,
+      keys.sprint,
     ));
     runtime.state.tickPhase = "post-advance";
     this.applyCameraState(camera);
@@ -449,6 +458,34 @@ class WebChunkApp {
     return true;
   }
 
+  setTouchKey(name, down) {
+    if (!(name in this.touchKeys)) {
+      return false;
+    }
+    this.touchKeys[name] = Boolean(down);
+    return true;
+  }
+
+  setTouchKeys(keys) {
+    for (const [name, down] of Object.entries(keys)) {
+      this.setTouchKey(name, down);
+    }
+  }
+
+  currentInputKeys() {
+    const keys = defaultInputKeys();
+    for (const name of INPUT_KEY_NAMES) {
+      keys[name] = Boolean(this.keys[name] || this.touchKeys[name]);
+    }
+    return keys;
+  }
+
+  clearTouchKeys(names = INPUT_KEY_NAMES) {
+    for (const name of names) {
+      this.setTouchKey(name, false);
+    }
+  }
+
   queueMouseDelta(dx, dy) {
     const x = Number(dx);
     const y = Number(dy);
@@ -536,12 +573,20 @@ function bindInput(app) {
     app.setInputKey(key, false);
   });
 
-  app.canvas.addEventListener("click", () => {
+  app.canvas.addEventListener("click", (event) => {
+    if (app.touchControls?.shouldIgnoreMouseEvent()) {
+      event.preventDefault();
+      return;
+    }
     app.canvas.focus();
     app.requestPointerLock();
   });
 
   app.canvas.addEventListener("mousedown", (event) => {
+    if (app.touchControls?.shouldIgnoreMouseEvent()) {
+      event.preventDefault();
+      return;
+    }
     app.pointerDragging = true;
     app.pointerDown = {
       button: event.button,
@@ -575,6 +620,9 @@ function bindInput(app) {
   });
 
   window.addEventListener("mousemove", (event) => {
+    if (app.touchControls?.shouldIgnoreMouseEvent()) {
+      return;
+    }
     if (document.pointerLockElement === app.canvas) {
       app.queueMouseDelta(event.movementX, event.movementY);
     } else if (app.pointerDragging) {
@@ -601,6 +649,265 @@ function bindInput(app) {
     app.syncCanvasSize();
     updateDom();
   });
+}
+
+function bindHud(app) {
+  setHudOpen(defaultHudOpen());
+  app.hudToggle?.addEventListener("click", () => setHudOpen(!isHudOpen()));
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && isHudOpen() && document.pointerLockElement !== app.canvas) {
+      setHudOpen(false);
+    }
+  });
+}
+
+class TouchControls {
+  constructor(app) {
+    this.app = app;
+    this.canvas = app.canvas;
+    this.root = document.getElementById("touch-controls");
+    this.joystick = document.getElementById("touch-joystick");
+    this.thumb = document.getElementById("touch-joystick-thumb");
+    this.buttons = Array.from(document.querySelectorAll("[data-touch-key]"));
+    this.movementPointerId = null;
+    this.lookPointerId = null;
+    this.movementBaseX = 0;
+    this.movementBaseY = 0;
+    this.movementThumbX = 0;
+    this.movementThumbY = 0;
+    this.lookLastX = 0;
+    this.lookLastY = 0;
+    this.buttonPointers = new Map();
+    this.lastTouchAt = 0;
+
+    this.setVisible(hasTouchInput());
+    this.bindCanvas();
+    this.bindButtons();
+    window.addEventListener("blur", () => this.clearAll());
+  }
+
+  bindCanvas() {
+    this.canvas.addEventListener("pointerdown", (event) => this.onCanvasPointerDown(event), { passive: false });
+    this.canvas.addEventListener("pointermove", (event) => this.onCanvasPointerMove(event), { passive: false });
+    this.canvas.addEventListener("pointerup", (event) => this.onCanvasPointerEnd(event), { passive: false });
+    this.canvas.addEventListener("pointercancel", (event) => this.onCanvasPointerEnd(event), { passive: false });
+    this.canvas.addEventListener("lostpointercapture", (event) => this.onCanvasPointerEnd(event), { passive: false });
+  }
+
+  bindButtons() {
+    for (const button of this.buttons) {
+      button.addEventListener("pointerdown", (event) => this.onButtonPointerDown(event), { passive: false });
+      button.addEventListener("pointerup", (event) => this.onButtonPointerEnd(event), { passive: false });
+      button.addEventListener("pointercancel", (event) => this.onButtonPointerEnd(event), { passive: false });
+      button.addEventListener("lostpointercapture", (event) => this.onButtonPointerEnd(event), { passive: false });
+    }
+  }
+
+  onCanvasPointerDown(event) {
+    if (!isTouchPointer(event)) {
+      return;
+    }
+    this.markTouchEvent();
+    event.preventDefault();
+    this.setVisible(true);
+    this.canvas.focus();
+    const rect = this.canvas.getBoundingClientRect();
+    const onLeft = event.clientX < rect.left + rect.width * 0.5;
+    if (onLeft && this.movementPointerId === null) {
+      this.startMovement(event);
+    } else if (this.lookPointerId === null) {
+      this.startLook(event);
+    }
+  }
+
+  onCanvasPointerMove(event) {
+    if (event.pointerId === this.movementPointerId) {
+      this.markTouchEvent();
+      event.preventDefault();
+      this.updateMovement(event.clientX, event.clientY);
+    } else if (event.pointerId === this.lookPointerId) {
+      this.markTouchEvent();
+      event.preventDefault();
+      this.updateLook(event.clientX, event.clientY);
+    }
+  }
+
+  onCanvasPointerEnd(event) {
+    if (event.pointerId === this.movementPointerId) {
+      this.markTouchEvent();
+      event.preventDefault();
+      this.clearMovement();
+    } else if (event.pointerId === this.lookPointerId) {
+      this.markTouchEvent();
+      event.preventDefault();
+      this.clearLook();
+    }
+  }
+
+  onButtonPointerDown(event) {
+    const key = event.currentTarget?.dataset?.touchKey;
+    if (!key) {
+      return;
+    }
+    this.markTouchEvent();
+    event.preventDefault();
+    event.stopPropagation();
+    this.setVisible(true);
+    trySetPointerCapture(event.currentTarget, event.pointerId);
+    this.buttonPointers.set(event.pointerId, key);
+    event.currentTarget.dataset.active = "true";
+    this.app.setTouchKey(key, true);
+    this.updateRuntimeState();
+  }
+
+  onButtonPointerEnd(event) {
+    const key = this.buttonPointers.get(event.pointerId);
+    if (!key) {
+      return;
+    }
+    this.markTouchEvent();
+    event.preventDefault();
+    event.stopPropagation();
+    this.buttonPointers.delete(event.pointerId);
+    const button = this.buttons.find((candidate) => candidate.dataset.touchKey === key);
+    if (button) {
+      button.dataset.active = "false";
+    }
+    this.app.setTouchKey(key, false);
+    this.updateRuntimeState();
+  }
+
+  startMovement(event) {
+    this.movementPointerId = event.pointerId;
+    this.movementBaseX = event.clientX;
+    this.movementBaseY = event.clientY;
+    this.movementThumbX = event.clientX;
+    this.movementThumbY = event.clientY;
+    trySetPointerCapture(this.canvas, event.pointerId);
+    this.updateJoystickVisual();
+    this.updateMovement(event.clientX, event.clientY);
+    this.updateRuntimeState();
+  }
+
+  updateMovement(clientX, clientY) {
+    const dx = clientX - this.movementBaseX;
+    const dy = clientY - this.movementBaseY;
+    const distance = Math.hypot(dx, dy);
+    const scale = distance > TOUCH_JOYSTICK_MAX_DISTANCE
+      ? TOUCH_JOYSTICK_MAX_DISTANCE / distance
+      : 1;
+    const clampedX = dx * scale;
+    const clampedY = dy * scale;
+    this.movementThumbX = this.movementBaseX + clampedX;
+    this.movementThumbY = this.movementBaseY + clampedY;
+    const axisX = clampedX / TOUCH_JOYSTICK_MAX_DISTANCE;
+    const axisY = -clampedY / TOUCH_JOYSTICK_MAX_DISTANCE;
+    const magnitude = Math.hypot(axisX, axisY);
+    const active = magnitude >= TOUCH_AXIS_THRESHOLD;
+    this.app.setTouchKeys({
+      forward: active && axisY > TOUCH_AXIS_THRESHOLD,
+      backward: active && axisY < -TOUCH_AXIS_THRESHOLD,
+      left: active && axisX < -TOUCH_AXIS_THRESHOLD,
+      right: active && axisX > TOUCH_AXIS_THRESHOLD,
+    });
+    this.updateJoystickVisual();
+    this.updateRuntimeState();
+  }
+
+  clearMovement() {
+    this.movementPointerId = null;
+    this.app.setTouchKeys({
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+    });
+    if (this.joystick) {
+      this.joystick.dataset.active = "false";
+    }
+    this.updateRuntimeState();
+  }
+
+  startLook(event) {
+    this.lookPointerId = event.pointerId;
+    this.lookLastX = event.clientX;
+    this.lookLastY = event.clientY;
+    trySetPointerCapture(this.canvas, event.pointerId);
+    this.updateRuntimeState();
+  }
+
+  updateLook(clientX, clientY) {
+    this.app.queueMouseDelta(clientX - this.lookLastX, clientY - this.lookLastY);
+    this.lookLastX = clientX;
+    this.lookLastY = clientY;
+    this.updateRuntimeState();
+  }
+
+  clearLook() {
+    this.lookPointerId = null;
+    this.updateRuntimeState();
+  }
+
+  clearAll() {
+    this.clearMovement();
+    this.clearLook();
+    for (const pointerId of Array.from(this.buttonPointers.keys())) {
+      const key = this.buttonPointers.get(pointerId);
+      if (key) {
+        this.app.setTouchKey(key, false);
+      }
+      this.buttonPointers.delete(pointerId);
+    }
+    for (const button of this.buttons) {
+      button.dataset.active = "false";
+    }
+    this.updateRuntimeState();
+  }
+
+  updateJoystickVisual() {
+    if (!this.joystick || !this.thumb) {
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    this.joystick.style.left = `${this.movementBaseX - rect.left}px`;
+    this.joystick.style.top = `${this.movementBaseY - rect.top}px`;
+    this.joystick.dataset.active = this.movementPointerId === null ? "false" : "true";
+    this.thumb.style.left = `${50 + (this.movementThumbX - this.movementBaseX)}px`;
+    this.thumb.style.top = `${50 + (this.movementThumbY - this.movementBaseY)}px`;
+  }
+
+  setVisible(visible) {
+    if (this.root) {
+      this.root.dataset.visible = visible ? "true" : "false";
+      this.root.setAttribute("aria-hidden", visible ? "false" : "true");
+    }
+    runtime.state.touchControlsVisible = Boolean(visible);
+  }
+
+  markTouchEvent() {
+    this.lastTouchAt = performance.now();
+  }
+
+  shouldIgnoreMouseEvent() {
+    return performance.now() - this.lastTouchAt < 800;
+  }
+
+  updateRuntimeState() {
+    runtime.state.touchControlsVisible = this.root?.dataset.visible === "true";
+    runtime.state.touchJoystickActive = this.movementPointerId !== null;
+    runtime.state.touchLookActive = this.lookPointerId !== null;
+    runtime.state.touchButtonActiveCount = this.buttonPointers.size;
+  }
+
+  snapshot() {
+    return {
+      visible: this.root?.dataset.visible === "true",
+      joystickActive: this.movementPointerId !== null,
+      lookActive: this.lookPointerId !== null,
+      buttonActiveCount: this.buttonPointers.size,
+      keys: { ...this.app.touchKeys },
+    };
+  }
 }
 
 function inputNameForEvent(event) {
@@ -764,6 +1071,9 @@ class RenderSectionWorkerCompiler {
 
 function updateDom() {
   const state = runtime.state;
+  if (state.failed || (state.ready && !state.ok)) {
+    setHudOpen(true);
+  }
   setText("center", `${state.centerX}, ${state.centerZ}`);
   setText("camera", `${state.cameraX.toFixed(1)}, ${state.cameraY.toFixed(1)}, ${state.cameraZ.toFixed(1)}`);
   setText("mode", state.movementMode);
@@ -782,12 +1092,57 @@ function updateDom() {
   if (status) {
     status.textContent = state.status;
     status.dataset.ok = state.ok ? "true" : "false";
+    status.dataset.ready = state.ready && state.status === "ready" ? "true" : "false";
   }
 }
 
 function setText(id, value) {
   const element = document.getElementById(id);
   if (element) element.textContent = value;
+}
+
+function defaultInputKeys() {
+  return Object.fromEntries(INPUT_KEY_NAMES.map((name) => [name, false]));
+}
+
+function isHudOpen() {
+  return document.getElementById("runtime-hud")?.hidden === false;
+}
+
+function setHudOpen(open) {
+  const hud = document.getElementById("runtime-hud");
+  const toggle = document.getElementById("hud-toggle");
+  if (hud) {
+    hud.hidden = !open;
+  }
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  runtime.state.hudOpen = Boolean(open);
+}
+
+function defaultHudOpen() {
+  return !hasTouchInput() && window.matchMedia("(min-width: 681px)").matches;
+}
+
+function hasTouchInput() {
+  return (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0)
+    || window.matchMedia("(pointer: coarse)").matches;
+}
+
+function isTouchPointer(event) {
+  return event.pointerType === "touch" || event.pointerType === "pen";
+}
+
+function trySetPointerCapture(target, pointerId) {
+  if (!target || typeof target.setPointerCapture !== "function") {
+    return;
+  }
+  try {
+    target.setPointerCapture(pointerId);
+  } catch (_error) {
+    // Some synthetic or browser-generated pointer streams cannot be captured.
+  }
 }
 
 function formatInteractionStatus(interaction) {

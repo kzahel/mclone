@@ -31,13 +31,20 @@ const bindgenOutDir = join(
   "mclone-web-client-bindgen",
 );
 const appLoop = process.argv.includes("--app-loop")
+  || process.argv.includes("--mobile-app-loop")
   || process.env.MCLONE_NATIVE_WEB_APP_LOOP === "1";
+const mobileAppLoop = process.argv.includes("--mobile-app-loop")
+  || process.env.MCLONE_NATIVE_WEB_MOBILE_APP_LOOP === "1";
 const serveOnly = process.argv.includes("--serve")
   || process.env.MCLONE_NATIVE_WEB_SERVE === "1";
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
-  ?? (appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
+  ?? (mobileAppLoop
+    ? "/tmp/mclone-native-web-mobile-app.png"
+    : appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
 const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
-  ?? (appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
+  ?? (mobileAppLoop
+    ? "/tmp/mclone-native-web-mobile-app-canvas.png"
+    : appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
 const requireChunk = process.argv.includes("--require-chunk")
   || process.env.MCLONE_NATIVE_WEB_REQUIRE_CHUNK === "1";
 const requireCanvas = requireChunk
@@ -76,7 +83,14 @@ async function run() {
         ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
       ],
     });
-    const page = await browser.newPage();
+    const page = await browser.newPage(mobileAppLoop
+      ? {
+          viewport: { width: 390, height: 844 },
+          deviceScaleFactor: 2,
+          isMobile: true,
+          hasTouch: true,
+        }
+      : undefined);
     const pageErrors = [];
     const pageLogs = [];
     page.on("pageerror", (error) => pageErrors.push(String(error)));
@@ -111,6 +125,44 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (mobileAppLoop) {
+        await page.waitForFunction(
+          () => {
+            const state = globalThis.__mcloneWebApp?.state;
+            return state?.ok === true
+              && state.movementMode === "WALK"
+              && state.lastReport?.movementMode === "WALK"
+              && state.pendingCompileJobCount === 0;
+          },
+          undefined,
+          { timeout: 60_000 },
+        );
+        const mobileTouchProbe = await exerciseMobileTouchControls(page, canvas);
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        let pageScreenshotCaptured = false;
+        try {
+          await page.screenshot({ path: screenshotPath, fullPage: false, timeout: 5_000 });
+          pageScreenshotCaptured = true;
+        } catch (error) {
+          console.warn(`page screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
+        const canvasPixels = analyzePng(canvasPng);
+
+        assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouchProbe);
+        console.log(JSON.stringify({
+          url: `${baseUrl}/app.html`,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          appLoop,
+          mobileAppLoop,
+          canvasPixels,
+          mobileTouchProbe,
+          result,
+        }, null, 2));
+        return;
+      }
       await canvas.click({ position: { x: 640, y: 360 } });
       await page.waitForFunction(
         () => {
@@ -327,6 +379,233 @@ function waitForStopSignal() {
   });
 }
 
+async function exerciseMobileTouchControls(page, canvas) {
+  const initial = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    const toggle = document.getElementById("hud-toggle");
+    return {
+      hudOpen: state.hudOpen,
+      touchControlsVisible: state.touchControlsVisible,
+      ariaExpanded: toggle?.getAttribute("aria-expanded") ?? null,
+    };
+  });
+
+  const movementStart = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      cameraX: state.cameraX,
+      cameraZ: state.cameraZ,
+      commandCount: state.lastReport?.commandCount ?? 0,
+    };
+  });
+  await dispatchCanvasPointerEvent(page, "pointerdown", {
+    pointerId: 31,
+    xFraction: 0.24,
+    yFraction: 0.72,
+    buttons: 1,
+  });
+  await dispatchCanvasPointerEvent(page, "pointermove", {
+    pointerId: 31,
+    xFraction: 0.24,
+    yFraction: 0.54,
+    buttons: 1,
+  });
+  try {
+    await page.waitForFunction(
+      (start) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        const dx = Number(state?.cameraX) - start.cameraX;
+        const dz = Number(state?.cameraZ) - start.cameraZ;
+        return state?.ok === true
+          && state.touchJoystickActive === true
+          && state.movementMode === "WALK"
+          && Math.hypot(dx, dz) > 0.15
+          && (state.lastReport?.commandCount ?? 0) > start.commandCount;
+      },
+      movementStart,
+      { timeout: 60_000 },
+    );
+  } finally {
+    await dispatchCanvasPointerEvent(page, "pointerup", {
+      pointerId: 31,
+      xFraction: 0.24,
+      yFraction: 0.54,
+      buttons: 0,
+    });
+  }
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.touchJoystickActive === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const movementProbe = await page.evaluate((start) => {
+    const state = globalThis.__mcloneWebApp.state;
+    const dx = Number(state.cameraX) - start.cameraX;
+    const dz = Number(state.cameraZ) - start.cameraZ;
+    return {
+      ok: Math.hypot(dx, dz) > 0.15
+        && state.touchJoystickActive === false
+        && globalThis.__mcloneWebApp.touchControlState()?.keys?.forward === false,
+      distance: Math.hypot(dx, dz),
+      start,
+      end: {
+        cameraX: state.cameraX,
+        cameraZ: state.cameraZ,
+        commandCount: state.lastReport?.commandCount ?? 0,
+      },
+      touch: globalThis.__mcloneWebApp.touchControlState(),
+    };
+  }, movementStart);
+
+  const lookStart = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      yaw: state.cameraYawRadians,
+      pitch: state.cameraPitchRadians,
+    };
+  });
+  await dispatchCanvasPointerEvent(page, "pointerdown", {
+    pointerId: 32,
+    xFraction: 0.72,
+    yFraction: 0.44,
+    buttons: 1,
+  });
+  await dispatchCanvasPointerEvent(page, "pointermove", {
+    pointerId: 32,
+    xFraction: 0.92,
+    yFraction: 0.50,
+    buttons: 1,
+  });
+  try {
+    await page.waitForFunction(
+      (start) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.ok === true
+          && state.touchLookActive === true
+          && (
+            Math.abs(Number(state.cameraYawRadians) - start.yaw) > 0.05
+            || Math.abs(Number(state.cameraPitchRadians) - start.pitch) > 0.03
+          );
+      },
+      lookStart,
+      { timeout: 10_000 },
+    );
+  } finally {
+    await dispatchCanvasPointerEvent(page, "pointerup", {
+      pointerId: 32,
+      xFraction: 0.92,
+      yFraction: 0.50,
+      buttons: 0,
+    });
+  }
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.touchLookActive === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const lookProbe = await page.evaluate((start) => {
+    const state = globalThis.__mcloneWebApp.state;
+    const yawDelta = Math.abs(Number(state.cameraYawRadians) - start.yaw);
+    const pitchDelta = Math.abs(Number(state.cameraPitchRadians) - start.pitch);
+    return {
+      ok: (yawDelta > 0.05 || pitchDelta > 0.03) && state.touchLookActive === false,
+      yawDelta,
+      pitchDelta,
+      start,
+      end: {
+        yaw: state.cameraYawRadians,
+        pitch: state.cameraPitchRadians,
+      },
+    };
+  }, lookStart);
+
+  const buttonProbe = await exerciseTouchButton(page, "jump", 41);
+  await canvas.evaluate((element) => element.focus());
+  await page.locator("#hud-toggle").click();
+  await page.waitForFunction(
+    () => document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "true",
+    undefined,
+    { timeout: 10_000 },
+  );
+  const openedHud = await readHudState(page);
+  await page.locator("#hud-toggle").click();
+  await page.waitForFunction(
+    () => document.getElementById("hud-toggle")?.getAttribute("aria-expanded") === "false",
+    undefined,
+    { timeout: 10_000 },
+  );
+  const closedHud = await readHudState(page);
+
+  return {
+    ok: initial.hudOpen === false
+      && initial.touchControlsVisible === true
+      && movementProbe.ok
+      && lookProbe.ok
+      && buttonProbe.ok
+      && openedHud.hudOpen === true
+      && closedHud.hudOpen === false,
+    initial,
+    movement: movementProbe,
+    look: lookProbe,
+    button: buttonProbe,
+    hud: {
+      opened: openedHud,
+      closed: closedHud,
+    },
+  };
+}
+
+async function exerciseTouchButton(page, key, pointerId) {
+  const selector = `[data-touch-key="${key}"]`;
+  await dispatchPointerEventOnSelector(page, selector, "pointerdown", { pointerId, buttons: 1 });
+  await page.waitForFunction(
+    (key) => globalThis.__mcloneWebApp?.touchControlState?.()?.keys?.[key] === true
+      && globalThis.__mcloneWebApp?.state?.touchButtonActiveCount > 0,
+    key,
+    { timeout: 10_000 },
+  );
+  const down = await page.evaluate((key) => ({
+    keyDown: globalThis.__mcloneWebApp.touchControlState().keys[key],
+    activeCount: globalThis.__mcloneWebApp.state.touchButtonActiveCount,
+    activeAttribute: document.querySelector(`[data-touch-key="${key}"]`)?.dataset.active ?? null,
+  }), key);
+  await dispatchPointerEventOnSelector(page, selector, "pointerup", { pointerId, buttons: 0 });
+  await page.waitForFunction(
+    (key) => globalThis.__mcloneWebApp?.touchControlState?.()?.keys?.[key] === false
+      && globalThis.__mcloneWebApp?.state?.touchButtonActiveCount === 0,
+    key,
+    { timeout: 10_000 },
+  );
+  const up = await page.evaluate((key) => ({
+    keyDown: globalThis.__mcloneWebApp.touchControlState().keys[key],
+    activeCount: globalThis.__mcloneWebApp.state.touchButtonActiveCount,
+    activeAttribute: document.querySelector(`[data-touch-key="${key}"]`)?.dataset.active ?? null,
+  }), key);
+  return {
+    ok: down.keyDown === true
+      && down.activeCount > 0
+      && down.activeAttribute === "true"
+      && up.keyDown === false
+      && up.activeCount === 0
+      && up.activeAttribute === "false",
+    down,
+    up,
+  };
+}
+
+async function readHudState(page) {
+  return page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    const hud = document.getElementById("runtime-hud");
+    const toggle = document.getElementById("hud-toggle");
+    return {
+      hudOpen: state.hudOpen,
+      hidden: hud?.hidden ?? null,
+      ariaExpanded: toggle?.getAttribute("aria-expanded") ?? null,
+    };
+  });
+}
+
 async function dispatchKeyboardEvent(page, type, { code, key }) {
   await page.evaluate(
     ({ type, code, key }) => {
@@ -338,6 +617,50 @@ async function dispatchKeyboardEvent(page, type, { code, key }) {
       }));
     },
     { type, code, key },
+  );
+}
+
+async function dispatchCanvasPointerEvent(page, type, options) {
+  await page.evaluate(
+    ({ type, options }) => {
+      const canvas = document.getElementById("mclone-canvas");
+      const rect = canvas.getBoundingClientRect();
+      const clientX = rect.left + rect.width * options.xFraction;
+      const clientY = rect.top + rect.height * options.yFraction;
+      canvas.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: options.pointerId,
+        pointerType: "touch",
+        isPrimary: true,
+        clientX,
+        clientY,
+        button: 0,
+        buttons: options.buttons,
+      }));
+    },
+    { type, options },
+  );
+}
+
+async function dispatchPointerEventOnSelector(page, selector, type, options) {
+  await page.evaluate(
+    ({ selector, type, options }) => {
+      const target = document.querySelector(selector);
+      const rect = target.getBoundingClientRect();
+      target.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: options.pointerId,
+        pointerType: "touch",
+        isPrimary: true,
+        clientX: rect.left + rect.width * 0.5,
+        clientY: rect.top + rect.height * 0.5,
+        button: 0,
+        buttons: options.buttons,
+      }));
+    },
+    { selector, type, options },
   );
 }
 
@@ -850,6 +1173,36 @@ function assertAppLoopResult(
   }
   if (canvasPixels.skyLikePixelCount < 64) {
     throw new Error(`app canvas screenshot did not contain visible sky pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+  }
+}
+
+function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouchProbe) {
+  if (pageErrors.length > 0) {
+    throw new Error(`browser mobile app page errors:\n${pageErrors.join("\n")}`);
+  }
+  if (!result?.ok || !result.ready) {
+    throw new Error(`native web mobile app loop failed:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (
+    result.radiusChunks !== 1
+    || result.renderCount < 2
+    || result.loadedChunkCount !== 9
+    || result.residentSectionCount <= 1
+    || result.pendingCompileJobCount !== 0
+  ) {
+    throw new Error(`native web mobile app did not maintain the expected rendered world:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (!mobileTouchProbe?.ok) {
+    throw new Error(`native web mobile controls did not satisfy movement/look/HUD probes:\n${JSON.stringify({ mobileTouchProbe, result }, null, 2)}`);
+  }
+  if (result.touchControlsVisible !== true || result.hudOpen !== false) {
+    throw new Error(`native web mobile HUD/touch state ended in an unexpected state:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (!Number.isFinite(result.cameraX) || !Number.isFinite(result.cameraY) || !Number.isFinite(result.cameraZ)) {
+    throw new Error(`native web mobile app did not report a finite camera pose:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
+    throw new Error(`mobile app canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
   }
 }
 
