@@ -205,6 +205,10 @@ class WebChunkApp {
       "requestCameraChunkView",
       "tryBeginCameraRenderCompileRequest",
       "finishCameraRenderCompileRequest",
+      "renderCompilerSharedSupported",
+      "submitCameraRenderCompile",
+      "submitDeferredCameraRenderCompile",
+      "pollCameraRenderCompile",
       "renderCameraFrame",
       "cameraFrameState",
       "resizeCanvas",
@@ -377,13 +381,25 @@ class WebChunkApp {
     updateDom();
 
     this.currentCompilePromise = (async () => {
+      // 067 Stage 2: when the Rust-owned shared ring is available, submit fills the
+      // input arena + arms the result control word (main wasm), JS relays the doorbell
+      // to the worker, and the result is read back via Atomics in pollCameraRenderCompile
+      // — JS never touches the packed bytes. Otherwise fall back to the legacy
+      // begin/finish message path. Budget is unchanged either way (whole-view).
+      const useShared = this.sharedCompileSupported();
       try {
         const beginStart = performance.now();
-        const request = this.hasRendered
-          ? await this.beginDeferredCameraRenderCompileRequest(timing, beginStart)
-          : await this.withSessionAsync(() => (
-              this.session.beginCameraRenderCompileRequest(RADIUS_CHUNKS)
-            ));
+        const request = useShared
+          ? (this.hasRendered
+              ? await this.submitDeferredSharedCompile(timing, beginStart)
+              : await this.withSessionAsync(() => (
+                  this.session.submitCameraRenderCompile(RADIUS_CHUNKS)
+                )))
+          : (this.hasRendered
+              ? await this.beginDeferredCameraRenderCompileRequest(timing, beginStart)
+              : await this.withSessionAsync(() => (
+                  this.session.beginCameraRenderCompileRequest(RADIUS_CHUNKS)
+                )));
         const beginEnd = performance.now();
         timing.beginRequestMs = beginEnd - beginStart;
         if (!request?.ok) {
@@ -401,7 +417,9 @@ class WebChunkApp {
         updateDom();
 
         const workerStart = performance.now();
-        const compiled = await this.compiler.compile(request);
+        const compiled = useShared
+          ? await this.compiler.compileWithDoorbell(request)
+          : await this.compiler.compile(request);
         const workerEnd = performance.now();
         timing.workerRoundTripMs = workerEnd - workerStart;
         timing.packedByteLength = compiled.report?.packedByteLength ?? compiled.packed?.byteLength ?? 0;
@@ -412,12 +430,14 @@ class WebChunkApp {
         }
 
         const finishStart = performance.now();
-        const report = await this.withSessionAsync(() => (
-          this.session.finishCameraRenderCompileRequest(
-            request.requestId,
-            compiled.packed,
-          )
-        ));
+        const report = useShared
+          ? await this.pollSharedCompileToCompletion()
+          : await this.withSessionAsync(() => (
+              this.session.finishCameraRenderCompileRequest(
+                request.requestId,
+                compiled.packed,
+              )
+            ));
         const finishEnd = performance.now();
         timing.decodeFinishApplyMs = finishEnd - finishStart;
         if (this.lastFrameTime > 0) {
@@ -531,6 +551,81 @@ class WebChunkApp {
     throw new Error(
       `timed out waiting for camera chunk view ${timing.targetCenterX},${timing.targetCenterZ}; last=${JSON.stringify(lastProbe)}`,
     );
+  }
+
+  sharedCompileSupported() {
+    return Boolean(this.session?.renderCompilerSharedSupported?.());
+  }
+
+  // 067 Stage 2 deferred (movement) submit. Mirrors the legacy deferred wait loop but
+  // resolves to a shared doorbell descriptor: poll submitDeferredCameraRenderCompile
+  // (which drains runner updates and returns {waiting:true} until the target center is
+  // loaded) until main wasm has filled the input arena and handed back the doorbell.
+  async submitDeferredSharedCompile(timing, beginStart) {
+    const viewRequest = await this.withSessionAsync(() => (
+      this.session.requestCameraChunkView(RADIUS_CHUNKS)
+    ));
+    if (!viewRequest?.ok) {
+      throw new Error(viewRequest?.reason ?? "failed to request camera chunk view");
+    }
+    const viewCenterX = Number(viewRequest.centerX);
+    const viewCenterZ = Number(viewRequest.centerZ);
+    if (Number.isFinite(viewCenterX)) {
+      timing.targetCenterX = viewCenterX;
+    }
+    if (Number.isFinite(viewCenterZ)) {
+      timing.targetCenterZ = viewCenterZ;
+    }
+    updateCompileTimingFromWait(timing, viewRequest, beginStart);
+    publishActiveCompileTiming(timing);
+    updateDom();
+
+    const deadline = performance.now() + 20_000;
+    let lastProbe = viewRequest;
+    while (performance.now() < deadline) {
+      await nextAnimationFrame();
+      const probe = await this.withSessionAsync(() => (
+        this.session.submitDeferredCameraRenderCompile(
+          RADIUS_CHUNKS,
+          timing.targetCenterX,
+          timing.targetCenterZ,
+        )
+      ));
+      if (!probe?.ok) {
+        throw new Error(probe?.reason ?? "failed to submit deferred camera render compile");
+      }
+      lastProbe = probe;
+      runtime.state.pendingCompileJobCount = probe.pendingCompileJobCount ?? 0;
+      updateCompileTimingFromWait(timing, probe, beginStart);
+      publishActiveCompileTiming(timing);
+      updateDom();
+      if (!probe.waiting) {
+        return probe;
+      }
+    }
+    throw new Error(
+      `timed out submitting deferred shared compile ${timing.targetCenterX},${timing.targetCenterZ}; last=${JSON.stringify(lastProbe)}`,
+    );
+  }
+
+  // 067 Stage 2: pump pollCameraRenderCompile until main wasm reports the worker's
+  // result control word flipped to COMPLETE (read via Atomics) and the frame is
+  // applied + rendered. The worker round-trip already completed in compileWithDoorbell,
+  // so this usually resolves on the first poll; the loop yields a frame so the app
+  // keeps presenting if a poll ever lands before the control word is visible.
+  async pollSharedCompileToCompletion() {
+    const deadline = performance.now() + 20_000;
+    while (performance.now() < deadline) {
+      const result = await this.withSessionAsync(() => this.session.pollCameraRenderCompile());
+      if (!result?.ok) {
+        throw new Error(result?.reason ?? "failed to poll shared camera render compile");
+      }
+      if (!result.pending) {
+        return result;
+      }
+      await nextAnimationFrame();
+    }
+    throw new Error("timed out polling shared camera render compile");
   }
 
   applyCameraState(camera) {
@@ -1476,21 +1571,76 @@ class RenderSectionWorkerCompiler {
     }
   }
 
+  // Legacy begin/finish path (067 fallback): JS arms its own resident arenas, posts
+  // the compile, and resolves with the packed report. Used when the Rust-owned shared
+  // ring is unavailable, and by the deterministic overview begin/finish smoke.
   async compile(request) {
     await this.ready;
+    const requestId = Number(request.requestId) || 0;
+    if (requestId <= 0) {
+      throw new Error(`invalid render compile request id ${String(request.requestId)}`);
+    }
+    const sharedResult = this.armSharedResultArena();
+    const sharedInput = this.armSharedInputArena(request.snapshotInputBytes);
+    return this.dispatchCompile({
+      requestId,
+      centerX: request.centerX,
+      centerZ: request.centerZ,
+      radiusChunks: request.radiusChunks,
+      targetSections: request.targetSections,
+      snapshotInputChunkCount: Number(request.snapshotInputChunkCount) || 0,
+      sharedResult,
+      sharedInput,
+      requestSource: request,
+    });
+  }
+
+  // 067 Stage 2: post a compile against the Rust-owned resident shared ring. Main
+  // wasm has already filled the input arena and armed both control words; JS only
+  // relays the doorbell (the worker writes the result into the same buffers main wasm
+  // polls). Resolves with the worker metrics report; the section data path stays in
+  // Rust via pollCameraRenderCompile, so JS never decodes the packed bytes.
+  async compileWithDoorbell(doorbell) {
+    await this.ready;
+    const requestId = Number(doorbell.requestId) || 0;
+    if (requestId <= 0) {
+      throw new Error(`invalid render compile doorbell id ${String(doorbell.requestId)}`);
+    }
+    const sharedResult = sharedResultArenaFromDoorbell(doorbell);
+    const sharedInput = sharedInputArenaFromDoorbell(doorbell);
+    return this.dispatchCompile({
+      requestId,
+      centerX: doorbell.centerX,
+      centerZ: doorbell.centerZ,
+      radiusChunks: doorbell.radiusChunks,
+      targetSections: doorbell.targetSections,
+      snapshotInputChunkCount: Number(doorbell.snapshotInputChunkCount) || 0,
+      sharedResult,
+      sharedInput,
+      requestSource: {
+        snapshotInputByteLength: Number(doorbell.sharedInputByteLength) || 0,
+        snapshotInputChunkCount: Number(doorbell.snapshotInputChunkCount) || 0,
+      },
+    });
+  }
+
+  dispatchCompile({
+    requestId,
+    centerX,
+    centerZ,
+    radiusChunks,
+    targetSections,
+    snapshotInputChunkCount,
+    sharedResult,
+    sharedInput,
+    requestSource,
+  }) {
     return new Promise((resolve, reject) => {
-      const requestId = Number(request.requestId) || 0;
-      if (requestId <= 0) {
-        reject(new Error(`invalid render compile request id ${String(request.requestId)}`));
-        return;
-      }
-      const sharedResult = this.armSharedResultArena();
-      const sharedInput = this.armSharedInputArena(request.snapshotInputBytes);
       const requestMetrics = renderCompilerRequestMetrics(
-        request.targetSections,
+        targetSections,
         sharedResult,
         sharedInput,
-        request,
+        requestSource,
       );
       this.metrics.compileCount += 1;
       this.metrics.transferredRequestByteCount += requestMetrics.transferredRequestByteLength;
@@ -1512,11 +1662,11 @@ class RenderSectionWorkerCompiler {
         requestId,
         bindgenJsUrl: BINDGEN_JS_URL.href,
         bindgenWasmUrl: BINDGEN_WASM_URL.href,
-        centerX: request.centerX,
-        centerZ: request.centerZ,
-        radiusChunks: request.radiusChunks,
-        targetSections: request.targetSections,
-        snapshotInputChunkCount: Number(request.snapshotInputChunkCount) || 0,
+        centerX,
+        centerZ,
+        radiusChunks,
+        targetSections,
+        snapshotInputChunkCount,
       };
       if (sharedInput !== null) {
         message.sharedInputControlBuffer = sharedInput.controlBuffer;
@@ -1624,6 +1774,39 @@ function createResidentRenderCompilerSharedInputBuffer() {
     inputBuffer,
     inputByteLength: 0,
     inputCapacity,
+  };
+}
+
+// 067 Stage 2: wrap the Rust-owned resident result buffers (handed over on the
+// submit doorbell) in the same arena shape the worker protocol + metrics expect.
+// JS does not arm these — main wasm already filled/armed them — it only reads byte
+// counts back for diagnostics.
+function sharedResultArenaFromDoorbell(doorbell) {
+  const controlBuffer = doorbell.sharedResultControlBuffer;
+  const responseBuffer = doorbell.sharedResultResponseBuffer;
+  if (!isSharedArrayBuffer(controlBuffer) || !isSharedArrayBuffer(responseBuffer)) {
+    return null;
+  }
+  return {
+    controlBuffer,
+    control: new Int32Array(controlBuffer),
+    responseBuffer,
+    responseCapacity: Number(doorbell.sharedResultBufferCapacityBytes) || responseBuffer.byteLength,
+  };
+}
+
+function sharedInputArenaFromDoorbell(doorbell) {
+  const controlBuffer = doorbell.sharedInputControlBuffer;
+  const inputBuffer = doorbell.sharedInputBuffer;
+  if (!isSharedArrayBuffer(controlBuffer) || !isSharedArrayBuffer(inputBuffer)) {
+    return null;
+  }
+  return {
+    controlBuffer,
+    control: new Int32Array(controlBuffer),
+    inputBuffer,
+    inputByteLength: Number(doorbell.sharedInputByteLength) || 0,
+    inputCapacity: Number(doorbell.sharedInputBufferCapacityBytes) || inputBuffer.byteLength,
   };
 }
 

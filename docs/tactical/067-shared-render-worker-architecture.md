@@ -1,8 +1,9 @@
 # 067: Shared Render-Worker Architecture
 
-Status: active high-priority architecture parent. Stage 0 (baselines) and
-Stage 1 (resident SAB arenas) landed; Stage 2 (web `RenderSectionCompiler` over
-the resident ring) is next and not yet started. Supersedes
+Status: active high-priority architecture parent. Stage 0 (baselines), Stage 1
+(resident SAB arenas), and Stage 2 (web `RenderSectionCompiler` over the
+resident ring) are landed; Stage 3 (per-frame `sync_render_sections_with_budget`
+streaming — the keystone) is next and **gated on explicit sign-off**. Supersedes
 [`065-native-web-mobile-streaming-performance.md`](065-native-web-mobile-streaming-performance.md)
 and [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
 folding their streaming-perf goals and the render-worker `SharedArrayBuffer`
@@ -336,6 +337,53 @@ files, `native:web:build`, `native:web:app-smoke`, `native:web:movement-perf`.
 control word from main wasm. JavaScript becomes doorbell-only. Keep the
 whole-view budget here to isolate the transport change from the scheduling
 change.
+
+**Landed.** `WebRenderSectionCompiler` in `web_canvas.rs` now implements
+`mclone_render_session::RenderSectionCompiler` over a **Rust-owned** resident SAB
+ring (input control+data and result control+data buffers allocated once via
+`SharedArrayBuffer::new`, mirroring the 062 `RunnerSharedSlot` pattern). `submit`
+encodes the request snapshots straight into the resident input arena and arms the
+input + result control words via `js_sys::Atomics`. `try_recv_completed` polls the
+result control word from main wasm with `Atomics::load`, reads the packed bytes
+back through a `Uint8Array` view of the resident result buffer, and decodes them
+in place into a `RenderSectionCompileResult` — **no JavaScript in the result data
+path**. The decode of unreported sections reuses the same missing-key→stale rule
+as the legacy worker path (`render_section_compile_result_from_report`).
+
+New wasm-bindgen exports drive it: `renderCompilerSharedSupported`,
+`submitCameraRenderCompile` (initial), `submitDeferredCameraRenderCompile`
+(movement, preserving the runner-settle/center-loaded wait), and
+`pollCameraRenderCompile` (poll → finish → render). Per 067's target,
+**JavaScript posts the tiny doorbell**: the submit export returns a descriptor
+carrying the request id, target sections, and the resident shared buffers; the JS
+`RenderSectionWorkerCompiler.compileWithDoorbell` relays it to the worker (which
+writes the result into the same buffers main wasm polls) and resolves only the
+worker **metrics** report. The app's `compileCameraView` branches on
+`sharedCompileSupported()`: submit → post doorbell → `pollSharedCompileToCompletion`
+loop (yields a frame per poll so presentation continues during the compile).
+
+The budget stays `usize::MAX` (whole-view), so this is a pure transport swap. The
+result on `pnpm native:web:movement-perf` is **byte-identical** to the Stage-0
+baseline: per-compile 96/144 submitted = accepted sections, 7.87 MB / 11.62 MB
+packed = shared-result bytes, ~215 KB shared input, zero overflow,
+`shared-result-buffer` transport, snapshot-input compile (no generated-view
+fallback). Frames and renders advance during each compile (frameΔ 92 / renderΔ
+94 over a 3-boundary traverse). `native:web:app-smoke` is green with the same
+shared-result-buffer diagnostics and terrain capture.
+
+Fallbacks stay labeled. The legacy begin/finish exports + JS `compile()` path are
+retained for non-cross-origin-isolated browsers without `SharedArrayBuffer`
+(`message-transfer`) and also still back the deterministic overview begin/finish
+smoke. A worker result that overflows the resident 16 MB buffer is a labeled
+hard-diagnostic: `try_recv_completed` records `sharedResultOverflowCount`, grows
+the resident buffer for the retry, and fails that compile so the sections
+requeue (dormant at the ~11.6 MB worst case). Known asymmetry to reconcile in
+Stage 5: only `mclone-web-app.js` gained `compileWithDoorbell`; the duplicated
+`mclone-web-smoke.js` class keeps the legacy `compile()` only, since the standard
+smoke exercises the overview path.
+
+Green: `cargo test` (no failures), `cargo check` wasm, `node --check` on the four
+JS files, `native:web:build`, `native:web:app-smoke`, `native:web:movement-perf`.
 
 ### Stage 3 — Keystone: web drives `sync_render_sections_with_budget` (budget ~1)
 

@@ -37,9 +37,10 @@ use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
     EngineRenderCamera, PackedRenderSectionBuildReportSummary, QueuedRenderViewCompile,
-    RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport,
+    RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport, RenderSectionCompileRequest,
     RenderSectionCompileRequestInfo, RenderSectionCompileRequestState, RenderSectionCompileResult,
-    RenderSectionNeighborReadiness, RenderSectionPendingCompileRequest, RenderSectionRemovalMode,
+    RenderSectionCompiler, RenderSectionNeighborReadiness, RenderSectionPendingCompileRequest,
+    RenderSectionRemovalMode,
     RenderSectionSyncPlan, RenderSectionViewSync, RenderViewCompileQueue,
     RenderViewCompileQueueDecision, build_client_textured_sections,
     build_render_sections_from_snapshots, decode_textured_render_section_build_report,
@@ -56,6 +57,27 @@ const WEB_GROUND_PROBE_DISTANCE: f64 = 0.01;
 const WEB_FRAME_UPDATE_DRAIN_BUDGET: usize = 1;
 const WEB_COMPILE_WAIT_UPDATE_DRAIN_BUDGET: usize = 1;
 const WEB_RENDER_COMPILE_INPUT_MAGIC: &[u8; 8] = b"MCWRCI1\0";
+
+// 067 Stage 2: resident render-compiler shared ring ABI. These mirror the
+// constants in `mclone-render-compiler-worker.js` (the producer) and the JS app /
+// smoke glue; the worker writes the result control word + payload and main wasm
+// reads them back here via `js_sys::Atomics`. Keep all three copies in lockstep
+// until Stage 5 emits them from a single Rust source.
+const RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS: u32 = 4;
+const RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX: u32 = 0;
+const RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX: u32 = 1;
+const RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX: u32 = 2;
+const RENDER_COMPILER_SHARED_RESULT_PENDING: i32 = 1;
+const RENDER_COMPILER_SHARED_RESULT_COMPLETE: i32 = 2;
+const RENDER_COMPILER_SHARED_RESULT_OVERFLOW: i32 = 3;
+const RENDER_COMPILER_SHARED_RESULT_FAILED: i32 = 4;
+const RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS: u32 = 4;
+const RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX: u32 = 0;
+const RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX: u32 = 1;
+const RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX: u32 = 2;
+const RENDER_COMPILER_SHARED_INPUT_READY: i32 = 2;
+const RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY: u32 = 16 * 1024 * 1024;
+const RENDER_COMPILER_DEFAULT_SHARED_INPUT_CAPACITY: u32 = 1024 * 1024;
 
 #[wasm_bindgen]
 pub fn mclone_web_canvas_clear_bits(width: u32, height: u32) -> u32 {
@@ -1118,6 +1140,21 @@ struct WebPendingCompileContext {
     scope: WebCompileScopeReport,
 }
 
+/// Per-compile context for the 067 Stage 2 shared-ring path, held by main wasm while
+/// the worker compiles. `submit*` stores it keyed by the compiler's request id; the
+/// matching `pollCameraRenderCompile` consumes it once the result control word flips
+/// to COMPLETE/FAILED. Single compile in flight, so exactly one is live at a time.
+struct WebSharedCompileContext {
+    request_id: u32,
+    center: ChunkPos,
+    radius_chunks: u32,
+    sync: RenderSectionViewSync,
+    removal_chunks: BTreeSet<ChunkPos>,
+    removal_sections: BTreeSet<RenderSectionKey>,
+    scope: WebCompileScopeReport,
+    frame_camera: WebFrameCamera,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct WebChunkRenderPlan {
     sync: RenderSectionViewSync,
@@ -1129,18 +1166,35 @@ fn compile_result_from_worker_report(
     pending: RenderSectionPendingCompileRequest<WebPendingCompileContext>,
     section_report: TexturedRenderSectionBuildReport,
 ) -> (WebPendingCompileContext, RenderSectionCompileResult) {
+    let RenderSectionPendingCompileRequest {
+        context,
+        target_sections,
+        section_revisions,
+        ..
+    } = pending;
+    let completed =
+        render_section_compile_result_from_report(target_sections, section_revisions, section_report);
+    (context, completed)
+}
+
+/// Build a [`RenderSectionCompileResult`] from a worker-produced section report.
+///
+/// The worker only emits sections it actually built, so any submitted target the
+/// report omits (e.g. an all-air section) is marked with a revision one behind the
+/// submitted revision. The shared render-session acceptance path then classifies it
+/// as stale and drops it instead of resurrecting a section that was never compiled.
+/// Shared by the legacy begin/finish worker path and the Stage-2
+/// [`WebRenderSectionCompiler`] resident-ring transport.
+fn render_section_compile_result_from_report(
+    target_sections: BTreeSet<RenderSectionKey>,
+    mut section_revisions: BTreeMap<RenderSectionKey, u64>,
+    section_report: TexturedRenderSectionBuildReport,
+) -> RenderSectionCompileResult {
     let reported_sections = section_report
         .sections
         .iter()
         .map(|section| section.key)
         .collect::<BTreeSet<_>>();
-    let RenderSectionPendingCompileRequest {
-        context,
-        target_sections,
-        mut section_revisions,
-        ..
-    } = pending;
-
     for missing_key in target_sections.difference(&reported_sections) {
         let submitted_revision = section_revisions
             .get(missing_key)
@@ -1148,15 +1202,472 @@ fn compile_result_from_worker_report(
             .unwrap_or_default();
         section_revisions.insert(*missing_key, submitted_revision.wrapping_sub(1));
     }
+    RenderSectionCompileResult {
+        target_sections,
+        section_revisions,
+        result: Ok(section_report),
+    }
+}
 
-    (
-        context,
-        RenderSectionCompileResult {
-            target_sections,
-            section_revisions,
-            result: Ok(section_report),
-        },
-    )
+fn render_compiler_atomic_store(
+    control: &js_sys::Int32Array,
+    index: u32,
+    value: i32,
+) -> Result<(), String> {
+    js_sys::Atomics::store(control, index, value)
+        .map(|_| ())
+        .map_err(|error| format!("failed to store render-compile control word {index}: {error:?}"))
+}
+
+fn render_compiler_atomic_load(control: &js_sys::Int32Array, index: u32) -> Result<i32, String> {
+    js_sys::Atomics::load(control, index)
+        .map_err(|error| format!("failed to load render-compile control word {index}: {error:?}"))
+}
+
+fn render_compiler_shared_memory_supported() -> bool {
+    let global = js_sys::global();
+    js_global_is_function(&global, "SharedArrayBuffer")
+        && js_global_method_is_function(&global, "Atomics", "load")
+        && js_global_method_is_function(&global, "Atomics", "store")
+        && js_global_method_is_function(&global, "Atomics", "notify")
+}
+
+fn js_global_is_function(global: &JsValue, name: &str) -> bool {
+    js_sys::Reflect::get(global, &JsValue::from_str(name))
+        .ok()
+        .is_some_and(|value| value.is_function())
+}
+
+fn js_global_method_is_function(global: &JsValue, object_name: &str, method_name: &str) -> bool {
+    js_sys::Reflect::get(global, &JsValue::from_str(object_name))
+        .ok()
+        .and_then(|object| js_sys::Reflect::get(&object, &JsValue::from_str(method_name)).ok())
+        .is_some_and(|value| value.is_function())
+}
+
+/// Resident render-compiler shared ring (067 Stage 2), owned by main wasm.
+///
+/// The control buffers carry the atomic status / byte-count / capacity words; the
+/// data buffers carry the encoded snapshot input and the packed section report.
+/// Allocated once per session and re-armed per compile, so there is no per-request
+/// `SharedArrayBuffer` churn. The worker reads the input + writes the result through
+/// the same buffers handed to it on the JS doorbell.
+struct WebRenderCompilerSharedArena {
+    result_control_buffer: js_sys::SharedArrayBuffer,
+    result_control: js_sys::Int32Array,
+    result_buffer: js_sys::SharedArrayBuffer,
+    result_capacity: u32,
+    input_control_buffer: js_sys::SharedArrayBuffer,
+    input_control: js_sys::Int32Array,
+    input_buffer: js_sys::SharedArrayBuffer,
+    input_capacity: u32,
+    input_byte_length: u32,
+}
+
+impl WebRenderCompilerSharedArena {
+    fn new() -> Result<Self, String> {
+        let result_control_buffer =
+            js_sys::SharedArrayBuffer::new(RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS * 4);
+        let result_control = js_sys::Int32Array::new(result_control_buffer.as_ref());
+        let result_capacity = RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY;
+        let result_buffer = js_sys::SharedArrayBuffer::new(result_capacity);
+        let input_control_buffer =
+            js_sys::SharedArrayBuffer::new(RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS * 4);
+        let input_control = js_sys::Int32Array::new(input_control_buffer.as_ref());
+        let input_capacity = RENDER_COMPILER_DEFAULT_SHARED_INPUT_CAPACITY;
+        let input_buffer = js_sys::SharedArrayBuffer::new(input_capacity);
+        let arena = Self {
+            result_control_buffer,
+            result_control,
+            result_buffer,
+            result_capacity,
+            input_control_buffer,
+            input_control,
+            input_buffer,
+            input_capacity,
+            input_byte_length: 0,
+        };
+        render_compiler_atomic_store(
+            &arena.result_control,
+            RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX,
+            RENDER_COMPILER_SHARED_RESULT_PENDING,
+        )?;
+        render_compiler_atomic_store(
+            &arena.result_control,
+            RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX,
+            0,
+        )?;
+        render_compiler_atomic_store(
+            &arena.result_control,
+            RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX,
+            arena.result_capacity as i32,
+        )?;
+        render_compiler_atomic_store(
+            &arena.input_control,
+            RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX,
+            RENDER_COMPILER_SHARED_INPUT_READY,
+        )?;
+        render_compiler_atomic_store(
+            &arena.input_control,
+            RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX,
+            0,
+        )?;
+        render_compiler_atomic_store(
+            &arena.input_control,
+            RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX,
+            arena.input_capacity as i32,
+        )?;
+        Ok(arena)
+    }
+
+    /// Fill the input arena with `input_bytes` and arm both control words for a fresh
+    /// compile. Returns `true` when the resident input buffer had to grow in place.
+    fn arm_for_submit(&mut self, input_bytes: &[u8]) -> Result<bool, String> {
+        let byte_length = u32::try_from(input_bytes.len()).map_err(|_| {
+            format!(
+                "render compile input of {} bytes exceeded u32",
+                input_bytes.len()
+            )
+        })?;
+        let mut grew = false;
+        if byte_length > self.input_capacity {
+            self.input_buffer = js_sys::SharedArrayBuffer::new(byte_length);
+            self.input_capacity = byte_length;
+            grew = true;
+        }
+        if byte_length > 0 {
+            let view = js_sys::Uint8Array::new_with_byte_offset_and_length(
+                self.input_buffer.as_ref(),
+                0,
+                byte_length,
+            );
+            view.copy_from(input_bytes);
+        }
+        self.input_byte_length = byte_length;
+        render_compiler_atomic_store(
+            &self.input_control,
+            RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX,
+            byte_length as i32,
+        )?;
+        render_compiler_atomic_store(
+            &self.input_control,
+            RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX,
+            self.input_capacity as i32,
+        )?;
+        render_compiler_atomic_store(
+            &self.input_control,
+            RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX,
+            RENDER_COMPILER_SHARED_INPUT_READY,
+        )?;
+        // Arm the result control word last so the worker only observes PENDING after
+        // the input payload is fully published into shared memory.
+        render_compiler_atomic_store(
+            &self.result_control,
+            RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX,
+            0,
+        )?;
+        render_compiler_atomic_store(
+            &self.result_control,
+            RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX,
+            self.result_capacity as i32,
+        )?;
+        render_compiler_atomic_store(
+            &self.result_control,
+            RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX,
+            RENDER_COMPILER_SHARED_RESULT_PENDING,
+        )?;
+        Ok(grew)
+    }
+
+    fn poll_result_status(&self) -> Result<i32, String> {
+        render_compiler_atomic_load(&self.result_control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX)
+    }
+
+    fn result_byte_length(&self) -> Result<u32, String> {
+        let bytes =
+            render_compiler_atomic_load(&self.result_control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX)?;
+        u32::try_from(bytes)
+            .map_err(|_| format!("render compile result reported a negative byte count {bytes}"))
+    }
+
+    fn result_capacity_word(&self) -> Result<u32, String> {
+        let capacity = render_compiler_atomic_load(
+            &self.result_control,
+            RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX,
+        )?;
+        u32::try_from(capacity)
+            .map_err(|_| format!("render compile result reported a negative capacity {capacity}"))
+    }
+
+    fn read_result_bytes(&self) -> Result<Vec<u8>, String> {
+        let byte_length = self.result_byte_length()?;
+        if byte_length > self.result_buffer.byte_length() {
+            return Err(format!(
+                "render compile result byte length {byte_length} exceeds resident buffer {}",
+                self.result_buffer.byte_length()
+            ));
+        }
+        if byte_length == 0 {
+            return Ok(Vec::new());
+        }
+        let view = js_sys::Uint8Array::new_with_byte_offset_and_length(
+            self.result_buffer.as_ref(),
+            0,
+            byte_length,
+        );
+        Ok(view.to_vec())
+    }
+
+    /// Grow the resident result buffer so a future compile of `byte_length` fits.
+    /// Used after a worker overflow (its one-off larger buffer is not reachable by
+    /// main wasm), so the retry lands back in the resident ring.
+    fn grow_result(&mut self, byte_length: u32) {
+        if byte_length > self.result_capacity {
+            self.result_buffer = js_sys::SharedArrayBuffer::new(byte_length);
+            self.result_capacity = byte_length;
+        }
+    }
+}
+
+struct WebSharedCompileInFlight {
+    request_id: u32,
+    target_sections: BTreeSet<RenderSectionKey>,
+    section_revisions: BTreeMap<RenderSectionKey, u64>,
+}
+
+/// Web `RenderSectionCompiler` over the resident `SharedArrayBuffer` ring (067 Stage 2).
+///
+/// `submit` serializes the request into the resident input arena and arms the result
+/// control word; JavaScript posts a tiny doorbell to the worker (JS still owns the
+/// Worker lifecycle and diagnostics). `try_recv_completed` polls the result control
+/// word from main wasm via `js_sys::Atomics` and decodes the packed report in place —
+/// no JavaScript in the result data path. A single compile is in flight at a time,
+/// matching the existing busy-flag streaming model; the whole-view budget is unchanged
+/// at this stage so the transport swap is isolated from scheduling.
+struct WebRenderSectionCompiler {
+    shared: Option<WebRenderCompilerSharedArena>,
+    in_flight: Option<WebSharedCompileInFlight>,
+    next_request_id: u32,
+    pending_jobs: usize,
+    compile_count: usize,
+    shared_result_response_count: usize,
+    shared_result_byte_count: usize,
+    shared_result_overflow_count: usize,
+    shared_input_grow_count: usize,
+    last_packed_byte_length: usize,
+    last_result_capacity_bytes: usize,
+    last_result_overflow: bool,
+}
+
+impl WebRenderSectionCompiler {
+    fn new() -> Self {
+        let shared = if render_compiler_shared_memory_supported() {
+            WebRenderCompilerSharedArena::new().ok()
+        } else {
+            None
+        };
+        Self {
+            last_result_capacity_bytes: shared
+                .as_ref()
+                .map(|arena| arena.result_capacity as usize)
+                .unwrap_or(0),
+            shared,
+            in_flight: None,
+            next_request_id: 1,
+            pending_jobs: 0,
+            compile_count: 0,
+            shared_result_response_count: 0,
+            shared_result_byte_count: 0,
+            shared_result_overflow_count: 0,
+            shared_input_grow_count: 0,
+            last_packed_byte_length: 0,
+            last_result_overflow: false,
+        }
+    }
+
+    fn shared_supported(&self) -> bool {
+        self.shared.is_some()
+    }
+
+    fn in_flight_request_id(&self) -> Option<u32> {
+        self.in_flight.as_ref().map(|in_flight| in_flight.request_id)
+    }
+
+    fn allocate_request_id(&mut self) -> u32 {
+        let request_id = self.next_request_id;
+        self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
+        request_id
+    }
+
+    fn take_in_flight(&mut self) -> Option<WebSharedCompileInFlight> {
+        self.pending_jobs = 0;
+        self.in_flight.take()
+    }
+
+    /// Attach the resident shared buffers + byte counts to a worker doorbell message.
+    /// JavaScript adds the message kind / bindgen URLs and posts it; the worker reads
+    /// the input and writes the packed result into the same buffers this compiler polls.
+    fn write_doorbell_arenas(&self, object: &js_sys::Object) -> Result<(), String> {
+        let Some(arena) = self.shared.as_ref() else {
+            return Ok(());
+        };
+        render_compiler_set_value(object, "sharedInputControlBuffer", arena.input_control_buffer.as_ref())?;
+        render_compiler_set_value(object, "sharedInputBuffer", arena.input_buffer.as_ref())?;
+        set_number(object, "sharedInputByteLength", f64::from(arena.input_byte_length))?;
+        set_number(
+            object,
+            "sharedInputBufferCapacityBytes",
+            f64::from(arena.input_capacity),
+        )?;
+        render_compiler_set_value(
+            object,
+            "sharedResultControlBuffer",
+            arena.result_control_buffer.as_ref(),
+        )?;
+        render_compiler_set_value(
+            object,
+            "sharedResultResponseBuffer",
+            arena.result_buffer.as_ref(),
+        )?;
+        set_number(
+            object,
+            "sharedResultBufferCapacityBytes",
+            f64::from(arena.result_capacity),
+        )?;
+        Ok(())
+    }
+}
+
+fn render_compiler_set_value(
+    object: &js_sys::Object,
+    name: &str,
+    value: &JsValue,
+) -> Result<(), String> {
+    js_sys::Reflect::set(object, &JsValue::from_str(name), value)
+        .map(|_| ())
+        .map_err(|error| format!("failed to set render compile doorbell field {name}: {error:?}"))
+}
+
+impl RenderSectionCompiler for WebRenderSectionCompiler {
+    fn submit(&mut self, request: RenderSectionCompileRequest) -> anyhow::Result<()> {
+        if self.shared.is_none() {
+            return Err(anyhow::anyhow!(
+                "web render compiler has no shared arena (SharedArrayBuffer unavailable)"
+            ));
+        }
+        if self.in_flight.is_some() {
+            return Err(anyhow::anyhow!(
+                "web render compiler already has a compile in flight"
+            ));
+        }
+        let request_id = self.allocate_request_id();
+        let input_bytes = encode_web_render_compile_input(&request.snapshots)
+            .map_err(|error| anyhow::anyhow!(error))?;
+        let arena = self
+            .shared
+            .as_mut()
+            .expect("shared arena present after is_none check");
+        let grew = arena
+            .arm_for_submit(&input_bytes)
+            .map_err(|error| anyhow::anyhow!(error))?;
+        if grew {
+            self.shared_input_grow_count += 1;
+        }
+        self.in_flight = Some(WebSharedCompileInFlight {
+            request_id,
+            target_sections: request.target_sections,
+            section_revisions: request.section_revisions,
+        });
+        self.pending_jobs = 1;
+        self.compile_count += 1;
+        Ok(())
+    }
+
+    fn try_recv_completed(&mut self) -> anyhow::Result<Vec<RenderSectionCompileResult>> {
+        if self.in_flight.is_none() {
+            return Ok(Vec::new());
+        }
+        let Some(arena) = self.shared.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let status = arena
+            .poll_result_status()
+            .map_err(|error| anyhow::anyhow!(error))?;
+        match status {
+            RENDER_COMPILER_SHARED_RESULT_COMPLETE => {
+                let packed = self
+                    .shared
+                    .as_ref()
+                    .expect("shared arena present")
+                    .read_result_bytes()
+                    .map_err(|error| anyhow::anyhow!(error))?;
+                let in_flight = self
+                    .take_in_flight()
+                    .expect("in-flight compile present after status check");
+                let section_report = decode_textured_render_section_build_report(&packed)
+                    .map_err(|error| {
+                        anyhow::anyhow!("failed to decode packed render section report: {error:#}")
+                    })?;
+                self.last_packed_byte_length = packed.len();
+                self.last_result_overflow = false;
+                self.shared_result_response_count += 1;
+                self.shared_result_byte_count += packed.len();
+                if let Some(arena) = self.shared.as_ref() {
+                    self.last_result_capacity_bytes = arena.result_capacity as usize;
+                }
+                Ok(vec![render_section_compile_result_from_report(
+                    in_flight.target_sections,
+                    in_flight.section_revisions,
+                    section_report,
+                )])
+            }
+            RENDER_COMPILER_SHARED_RESULT_OVERFLOW => {
+                // Labeled hard-diagnostic fallback: the worker had to allocate a
+                // one-off larger buffer (only reachable through its postMessage), so
+                // main wasm cannot read it from the resident ring. Record it, grow the
+                // resident buffer so the retry fits, and fail this compile so the
+                // sections requeue. With a 16 MB resident buffer vs ~11.6 MB worst case
+                // this path stays dormant in the validated lanes.
+                let required = self
+                    .shared
+                    .as_ref()
+                    .expect("shared arena present")
+                    .result_capacity_word()
+                    .map_err(|error| anyhow::anyhow!(error))?;
+                if let Some(arena) = self.shared.as_mut() {
+                    arena.grow_result(required);
+                    self.last_result_capacity_bytes = arena.result_capacity as usize;
+                }
+                self.shared_result_overflow_count += 1;
+                self.last_result_overflow = true;
+                let in_flight = self.take_in_flight().expect("in-flight compile present");
+                Ok(vec![RenderSectionCompileResult {
+                    target_sections: in_flight.target_sections,
+                    section_revisions: in_flight.section_revisions,
+                    result: Err(format!(
+                        "render compile result overflowed the resident shared buffer ({required} bytes required)"
+                    )),
+                }])
+            }
+            RENDER_COMPILER_SHARED_RESULT_FAILED => {
+                self.last_result_overflow = false;
+                let in_flight = self.take_in_flight().expect("in-flight compile present");
+                Ok(vec![RenderSectionCompileResult {
+                    target_sections: in_flight.target_sections,
+                    section_revisions: in_flight.section_revisions,
+                    result: Err("render compiler worker reported a failed compile".to_string()),
+                }])
+            }
+            RENDER_COMPILER_SHARED_RESULT_PENDING | 0 => Ok(Vec::new()),
+            other => Err(anyhow::anyhow!(
+                "render compile result control word had unexpected status {other}"
+            )),
+        }
+    }
+
+    fn pending_job_count(&self) -> usize {
+        self.pending_jobs
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1368,6 +1879,8 @@ pub struct WebChunkRenderSession {
     mesh_upload_count: usize,
     render_count: usize,
     compile_requests: RenderSectionCompileRequestState<WebPendingCompileContext>,
+    render_compiler: WebRenderSectionCompiler,
+    shared_compile: Option<WebSharedCompileContext>,
 }
 
 #[wasm_bindgen]
@@ -1425,7 +1938,60 @@ impl WebChunkRenderSession {
 
     #[wasm_bindgen(js_name = pendingChunkRenderCompileJobCount)]
     pub fn pending_chunk_render_compile_job_count(&self) -> usize {
-        self.compile_requests.pending_request_count()
+        self.compile_requests.pending_request_count() + self.render_compiler.pending_job_count()
+    }
+
+    /// Whether the resident shared-ring render-compile transport (067 Stage 2) is
+    /// available. False on non-cross-origin-isolated browsers without
+    /// `SharedArrayBuffer`/`Atomics`, where JS falls back to the labeled
+    /// message-transfer begin/finish path.
+    #[wasm_bindgen(js_name = renderCompilerSharedSupported)]
+    pub fn render_compiler_shared_supported(&self) -> bool {
+        self.render_compiler.shared_supported()
+    }
+
+    /// 067 Stage 2: submit the initial camera render compile through the resident
+    /// shared ring. Loads the camera-centered view, fills the input arena, arms the
+    /// result control word, and returns a doorbell descriptor (request id + the
+    /// resident shared buffers) for JavaScript to post to the worker.
+    #[wasm_bindgen(js_name = submitCameraRenderCompile)]
+    pub async fn submit_camera_render_compile(
+        &mut self,
+        radius_chunks: u32,
+    ) -> Result<JsValue, JsValue> {
+        self.submit_camera_render_compile_for_radius(radius_chunks)
+            .await
+            .map_err(JsValue::from)
+    }
+
+    /// 067 Stage 2: submit the deferred (movement) camera render compile through the
+    /// resident shared ring. Drains pending runner updates and returns a waiting
+    /// descriptor until the target center is loaded and the runner has settled, then
+    /// submits and returns a doorbell descriptor.
+    #[wasm_bindgen(js_name = submitDeferredCameraRenderCompile)]
+    pub fn submit_deferred_camera_render_compile(
+        &mut self,
+        radius_chunks: u32,
+        center_x: i32,
+        center_z: i32,
+    ) -> Result<JsValue, JsValue> {
+        self.submit_deferred_camera_render_compile_for_center(
+            radius_chunks,
+            ChunkPos {
+                x: center_x,
+                z: center_z,
+            },
+        )
+        .map_err(JsValue::from)
+    }
+
+    /// 067 Stage 2: poll the resident shared ring for a completed compile. Reads the
+    /// result control word via `Atomics` from main wasm; returns `{pending:true}`
+    /// while the worker is still compiling, or applies + renders the completed report
+    /// and returns the frame report once COMPLETE.
+    #[wasm_bindgen(js_name = pollCameraRenderCompile)]
+    pub fn poll_camera_render_compile(&mut self) -> Result<JsValue, JsValue> {
+        self.poll_camera_render_compile_result().map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = requestCameraRenderCompile)]
@@ -1692,6 +2258,8 @@ impl WebChunkRenderSession {
             mesh_upload_count: 0,
             render_count: 0,
             compile_requests: RenderSectionCompileRequestState::default(),
+            render_compiler: WebRenderSectionCompiler::new(),
+            shared_compile: None,
         })
     }
 
@@ -2378,6 +2946,228 @@ impl WebChunkRenderSession {
             &snapshot_input_bytes,
             snapshot_input_chunk_count,
         )
+    }
+
+    // ---- 067 Stage 2: shared-ring camera render compile (submit + poll) ----
+
+    async fn submit_camera_render_compile_for_radius(
+        &mut self,
+        radius_chunks: u32,
+    ) -> Result<JsValue, String> {
+        self.ensure_shared_compile_ready()?;
+        let center = self.camera.snapshot().chunk_pos;
+        let render_plan = self.prepare_chunk_render_plan(center, radius_chunks).await?;
+        self.submit_shared_render_compile(render_plan, center, radius_chunks, WebFrameCamera::Camera)
+    }
+
+    fn submit_deferred_camera_render_compile_for_center(
+        &mut self,
+        radius_chunks: u32,
+        center: ChunkPos,
+    ) -> Result<JsValue, String> {
+        self.ensure_shared_compile_ready()?;
+        let step = self
+            .runtime
+            .drain_pending_runner_updates_budgeted(WEB_COMPILE_WAIT_UPDATE_DRAIN_BUDGET)?;
+        let diagnostics = self.runtime.runner_diagnostics();
+        let center_loaded = self.runtime.client().chunk_snapshot(center).is_some();
+        if !center_loaded || !web_runner_diagnostics_settled(&diagnostics) {
+            return self.waiting_compile_request_to_js_value(
+                center,
+                radius_chunks,
+                center_loaded,
+                step,
+                diagnostics,
+            );
+        }
+        let sync = self.prepare_loaded_chunk_render_plan(center)?;
+        let render_plan = self.prepare_render_plan_from_sync(sync)?;
+        if render_plan
+            .sync_plan
+            .ready_plan
+            .ready_section_keys
+            .is_empty()
+        {
+            return self.waiting_compile_request_to_js_value(
+                center,
+                radius_chunks,
+                true,
+                step,
+                diagnostics,
+            );
+        }
+        self.submit_shared_render_compile(render_plan, center, radius_chunks, WebFrameCamera::Camera)
+    }
+
+    fn ensure_shared_compile_ready(&self) -> Result<(), String> {
+        if !self.render_compiler.shared_supported() {
+            return Err(
+                "shared render compile transport unavailable (no SharedArrayBuffer/Atomics)".into(),
+            );
+        }
+        if self.shared_compile.is_some() {
+            return Err("web shared render compile already in flight".into());
+        }
+        Ok(())
+    }
+
+    fn submit_shared_render_compile(
+        &mut self,
+        render_plan: WebChunkRenderPlan,
+        center: ChunkPos,
+        radius_chunks: u32,
+        frame_camera: WebFrameCamera,
+    ) -> Result<JsValue, String> {
+        let WebChunkRenderPlan {
+            sync,
+            sync_plan,
+            scope,
+        } = render_plan;
+        let removal_chunks = sync_plan.dirty_work.removal_dirty_chunks.clone();
+        let removal_sections = sync_plan.dirty_work.removal_dirty_sections.clone();
+        let snapshots = self
+            .runtime
+            .client()
+            .chunk_snapshots()
+            .cloned()
+            .collect::<Vec<_>>();
+        let snapshot_input_chunk_count = snapshots.len();
+        let render_compiler = &mut self.render_compiler;
+        let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
+            &sync_plan,
+            snapshots,
+            |_sync_plan, request| {
+                let target_sections = request.target_sections.clone();
+                render_compiler
+                    .submit(request)
+                    .map_err(|error| format!("{error:#}"))?;
+                Ok::<_, String>(target_sections)
+            },
+        )?;
+        let Some(submission) = submission.submission else {
+            return Err(format!(
+                "web render compile request for {},{} radius {} had no ready sections",
+                center.x, center.z, radius_chunks
+            ));
+        };
+        let target_sections = submission.output;
+        let request_id = self
+            .render_compiler
+            .in_flight_request_id()
+            .ok_or_else(|| "shared render compile submit recorded no in-flight request".to_string())?;
+        self.shared_compile = Some(WebSharedCompileContext {
+            request_id,
+            center,
+            radius_chunks,
+            sync,
+            removal_chunks,
+            removal_sections,
+            scope,
+            frame_camera,
+        });
+        self.shared_compile_request_to_js_value(
+            request_id,
+            center,
+            radius_chunks,
+            scope,
+            &target_sections,
+            snapshot_input_chunk_count,
+        )
+    }
+
+    fn shared_compile_request_to_js_value(
+        &self,
+        request_id: u32,
+        center: ChunkPos,
+        radius_chunks: u32,
+        scope: WebCompileScopeReport,
+        target_sections: &BTreeSet<RenderSectionKey>,
+        snapshot_input_chunk_count: usize,
+    ) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        set_bool(&object, "ok", true)?;
+        set_bool(&object, "waiting", false)?;
+        set_bool(&object, "shared", true)?;
+        set_number(&object, "requestId", f64::from(request_id))?;
+        set_number(&object, "centerX", f64::from(center.x))?;
+        set_number(&object, "centerZ", f64::from(center.z))?;
+        set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
+        write_compile_scope_report(&object, scope)?;
+        write_target_sections(&object, target_sections)?;
+        set_number(
+            &object,
+            "snapshotInputChunkCount",
+            snapshot_input_chunk_count as f64,
+        )?;
+        set_number(
+            &object,
+            "submittedCompileSectionCount",
+            target_sections.len() as f64,
+        )?;
+        set_number(
+            &object,
+            "pendingCompileJobCount",
+            self.render_compiler.pending_job_count() as f64,
+        )?;
+        // Resident shared buffers + byte counts for the worker doorbell. JavaScript
+        // relays this message verbatim (plus kind + bindgen URLs); the result data
+        // path stays in main wasm.
+        self.render_compiler.write_doorbell_arenas(&object)?;
+        Ok(object.into())
+    }
+
+    fn poll_camera_render_compile_result(&mut self) -> Result<JsValue, String> {
+        let mut completed = self
+            .render_compiler
+            .try_recv_completed()
+            .map_err(|error| format!("{error:#}"))?;
+        let Some(result) = completed.pop() else {
+            return self.pending_shared_compile_to_js_value();
+        };
+        let Some(context) = self.shared_compile.take() else {
+            return Err(
+                "shared render compile poll received a result with no in-flight context".into(),
+            );
+        };
+        let compile_report = match &result.result {
+            Ok(report) => WebSectionCompileReport::worker(
+                self.render_compiler.last_packed_byte_length,
+                summarize_textured_render_section_build_report(report),
+            ),
+            Err(_) => WebSectionCompileReport::default(),
+        };
+        self.finish_render_compile_result(
+            context.center,
+            context.radius_chunks,
+            context.sync,
+            context.removal_chunks,
+            context.removal_sections,
+            context.scope,
+            result,
+            compile_report,
+            context.request_id,
+            context.frame_camera,
+        )
+        .and_then(GeneratedChunkRenderReport::to_js_value)
+    }
+
+    fn pending_shared_compile_to_js_value(&self) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        let in_flight = self.shared_compile.is_some();
+        set_bool(&object, "ok", true)?;
+        set_bool(&object, "pending", in_flight)?;
+        set_bool(&object, "idle", !in_flight)?;
+        if let Some(context) = self.shared_compile.as_ref() {
+            set_number(&object, "requestId", f64::from(context.request_id))?;
+            set_number(&object, "centerX", f64::from(context.center.x))?;
+            set_number(&object, "centerZ", f64::from(context.center.z))?;
+        }
+        set_number(
+            &object,
+            "pendingCompileJobCount",
+            self.render_compiler.pending_job_count() as f64,
+        )?;
+        Ok(object.into())
     }
 
     async fn prepare_chunk_view(
