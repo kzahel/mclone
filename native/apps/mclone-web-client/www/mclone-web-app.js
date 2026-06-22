@@ -20,6 +20,7 @@ const RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX = 0;
 const RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX = 1;
 const RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX = 2;
 const RENDER_COMPILER_SHARED_INPUT_READY = 2;
+const RENDER_COMPILER_DEFAULT_SHARED_INPUT_CAPACITY = 1 * 1024 * 1024;
 
 const RADIUS_CHUNKS = 1;
 const MAX_FRAME_DT_SECONDS = 0.05;
@@ -1329,7 +1330,13 @@ class RenderSectionWorkerCompiler {
       sharedResultBufferCapacityBytes: renderCompilerSharedMemorySupported()
         ? RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY
         : 0,
+      sharedInputGrowCount: 0,
     };
+    // Resident render-compiler SAB arenas (067 Stage 1): allocate the input,
+    // result, and control buffers once per session and re-arm them on every
+    // compile instead of allocating a fresh SharedArrayBuffer per request.
+    this.sharedResultArena = createResidentRenderCompilerSharedResultBuffer();
+    this.sharedInputArena = createResidentRenderCompilerSharedInputBuffer();
     this.ready = new Promise((resolve, reject) => {
       this.resolveReady = resolve;
       this.rejectReady = reject;
@@ -1477,8 +1484,8 @@ class RenderSectionWorkerCompiler {
         reject(new Error(`invalid render compile request id ${String(request.requestId)}`));
         return;
       }
-      const sharedResult = createRenderCompilerSharedResultBuffer();
-      const sharedInput = createRenderCompilerSharedInputBuffer(request.snapshotInputBytes);
+      const sharedResult = this.armSharedResultArena();
+      const sharedInput = this.armSharedInputArena(request.snapshotInputBytes);
       const requestMetrics = renderCompilerRequestMetrics(
         request.targetSections,
         sharedResult,
@@ -1526,6 +1533,53 @@ class RenderSectionWorkerCompiler {
     });
   }
 
+  armSharedResultArena() {
+    const arena = this.sharedResultArena;
+    if (arena === null) {
+      return null;
+    }
+    Atomics.store(arena.control, RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX, RENDER_COMPILER_SHARED_RESULT_PENDING);
+    Atomics.store(arena.control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX, 0);
+    Atomics.store(arena.control, RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX, arena.responseCapacity);
+    return arena;
+  }
+
+  armSharedInputArena(snapshotInputBytes) {
+    const arena = this.sharedInputArena;
+    if (arena === null) {
+      return null;
+    }
+    const source = snapshotInputBytes instanceof Uint8Array
+      ? snapshotInputBytes
+      : ArrayBuffer.isView(snapshotInputBytes)
+        ? new Uint8Array(
+            snapshotInputBytes.buffer,
+            snapshotInputBytes.byteOffset,
+            snapshotInputBytes.byteLength,
+          )
+        : null;
+    if (source === null || source.byteLength <= 0) {
+      return null;
+    }
+    if (source.byteLength > arena.inputCapacity) {
+      // Oversized delta: grow the resident input arena (realloc) and keep a
+      // diagnostic. Safe because compiles are single-in-flight, so no other
+      // compile is reading the old buffer when we replace it.
+      arena.inputBuffer = new SharedArrayBuffer(source.byteLength);
+      arena.inputCapacity = source.byteLength;
+      this.metrics.sharedInputGrowCount += 1;
+      console.warn(
+        `render compiler shared input arena grew to ${source.byteLength} bytes`,
+      );
+    }
+    new Uint8Array(arena.inputBuffer, 0, source.byteLength).set(source);
+    Atomics.store(arena.control, RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX, RENDER_COMPILER_SHARED_INPUT_READY);
+    Atomics.store(arena.control, RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX, source.byteLength);
+    Atomics.store(arena.control, RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX, arena.inputCapacity);
+    arena.inputByteLength = source.byteLength;
+    return arena;
+  }
+
   rejectAll(error) {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
@@ -1535,7 +1589,7 @@ class RenderSectionWorkerCompiler {
   }
 }
 
-function createRenderCompilerSharedResultBuffer() {
+function createResidentRenderCompilerSharedResultBuffer() {
   if (!renderCompilerSharedMemorySupported()) {
     return null;
   }
@@ -1551,37 +1605,25 @@ function createRenderCompilerSharedResultBuffer() {
   return { controlBuffer, control, responseBuffer, responseCapacity };
 }
 
-function createRenderCompilerSharedInputBuffer(snapshotInputBytes) {
+function createResidentRenderCompilerSharedInputBuffer() {
   if (!renderCompilerSharedMemorySupported()) {
-    return null;
-  }
-  const source = snapshotInputBytes instanceof Uint8Array
-    ? snapshotInputBytes
-    : ArrayBuffer.isView(snapshotInputBytes)
-      ? new Uint8Array(
-          snapshotInputBytes.buffer,
-          snapshotInputBytes.byteOffset,
-          snapshotInputBytes.byteLength,
-        )
-      : null;
-  if (source === null || source.byteLength <= 0) {
     return null;
   }
   const controlBuffer = new SharedArrayBuffer(
     RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS * Int32Array.BYTES_PER_ELEMENT,
   );
   const control = new Int32Array(controlBuffer);
-  const inputBuffer = new SharedArrayBuffer(source.byteLength);
-  new Uint8Array(inputBuffer).set(source);
+  const inputCapacity = RENDER_COMPILER_DEFAULT_SHARED_INPUT_CAPACITY;
+  const inputBuffer = new SharedArrayBuffer(inputCapacity);
   Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX, RENDER_COMPILER_SHARED_INPUT_READY);
-  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX, source.byteLength);
-  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX, inputBuffer.byteLength);
+  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX, 0);
+  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX, inputCapacity);
   return {
     controlBuffer,
     control,
     inputBuffer,
-    inputByteLength: source.byteLength,
-    inputCapacity: inputBuffer.byteLength,
+    inputByteLength: 0,
+    inputCapacity,
   };
 }
 

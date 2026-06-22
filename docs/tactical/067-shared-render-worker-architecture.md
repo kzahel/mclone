@@ -1,6 +1,8 @@
 # 067: Shared Render-Worker Architecture
 
-Status: active high-priority architecture parent. Supersedes
+Status: active high-priority architecture parent. Stage 0 (baselines) and
+Stage 1 (resident SAB arenas) landed; Stage 2 (web `RenderSectionCompiler` over
+the resident ring) is next and not yet started. Supersedes
 [`065-native-web-mobile-streaming-performance.md`](065-native-web-mobile-streaming-performance.md)
 and [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
 folding their streaming-perf goals and the render-worker `SharedArrayBuffer`
@@ -277,12 +279,56 @@ Capture current movement metrics (submitted sections, packed bytes, window ms,
 frame gaps) as a regression fence using the existing instrumentation. No engine
 change.
 
+**Captured.** `pnpm native:web:movement-perf` on HEAD `efef4b7` (mobile
+viewport, no-clip traverse across 3 chunk boundaries, 2 movement compiles):
+
+| Metric | Baseline |
+|---|---|
+| submitted sections / compile | 96 and 144 |
+| accepted sections / compile | 96 and 144 |
+| packed = shared result bytes | 7.69 MB and 11.35 MB |
+| shared input bytes / compile | ~210 KB |
+| input SAB capacity | exact-fit (~210 KB, realloc per compile) |
+| worker round-trip | 34.4–55.1 ms |
+| total compile window | 263.7–491.9 ms |
+| max frame gap | 12.3–21.1 ms |
+| frames / renders advanced during traverse | 91 / 93 |
+
+These match the figures quoted in Current State above. Artifacts saved to
+`/tmp/stage0-baseline-movement-perf.json` plus canvas/page PNGs as the
+regression fence for later stages (never committed).
+
 ### Stage 1 — First safe next step: resident SAB arenas
 
 Allocate input / result / control buffers once at session init and reuse them;
 keep the existing begin/finish flow otherwise untouched. Isolated, mechanical,
 reversible, and a prerequisite for the ring. Removes per-request SAB churn
 immediately.
+
+**Landed.** `RenderSectionWorkerCompiler` in both `mclone-web-app.js` and
+`mclone-web-smoke.js` now allocates the render-compiler input, result, and
+control `SharedArrayBuffer`s **once** in its constructor
+(`createResidentRenderCompilerShared{Input,Result}Buffer`) and re-arms them on
+every compile (`armShared{Input,Result}Arena`) instead of
+`new SharedArrayBuffer(...)` per request. Re-arm resets the control word
+(status/bytes/capacity) and, for input, copies that compile's snapshot bytes
+into the resident buffer. The result arena stays a resident 16 MB; the worker's
+one-off allocation remains the oversized-result overflow path (unchanged). The
+input arena is a resident 1 MB; oversized snapshots grow it in place (realloc +
+`console.warn` + `sharedInputGrowCount`). Single-in-flight — the `pendingCompile`
+busy flag in the app, sequential `await compiler.compile(...)` in the smoke —
+makes reuse race-free. The begin/finish flow, worker protocol
+(`mclone-render-compiler-worker.js`), and ABI constants are otherwise untouched.
+
+Validated against the Stage-0 baseline: submitted/accepted sections, packed
+bytes, and shared input/result bytes are **byte-identical**; the only metric
+delta is input SAB capacity moving from per-request exact-fit (~210 KB,
+reallocated every compile) to a stable resident 1 MB, and the movement run
+logged **zero** input-arena grows. Worker round-trip / window / frame-gap
+unchanged within jitter. Render output identical (movement-perf canvas
+pixel-identical to baseline; app-smoke terrain verified). Green:
+`cargo test` (668 passed), `cargo check` wasm, `node --check` on all four JS
+files, `native:web:build`, `native:web:app-smoke`, `native:web:movement-perf`.
 
 ### Stage 2 — Web `RenderSectionCompiler` over the resident ring
 
