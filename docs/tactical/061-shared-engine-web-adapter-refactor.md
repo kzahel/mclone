@@ -9,10 +9,11 @@ player-pose commit sequence isolated; desktop `EngineCameraController` facade
 landed; desktop window camera view uses controller snapshots; shared
 pose-sync/correction reports landed; browser frame scheduling now has a first
 deferred-command / budgeted-drain pass; Rust-owned web compile
-queue/coalescing decisions landed, but the remaining browser worker transport
-and chunk-view scheduling policy still need to move into the shared Rust
-session shape; compile-scope diagnostics now identify full-view movement
-compiles and the next worker/result-size reduction target.
+queue/coalescing decisions landed; browser render-worker transport is now
+target-section-aware, but the remaining browser worker lifecycle, payload
+ownership, and chunk-view scheduling policy still need to move into the shared
+Rust session shape; compile-scope diagnostics now identify full-view movement
+compiles, small targeted compiles, and the next worker/runtime-cost target.
 
 ## Purpose
 
@@ -101,13 +102,18 @@ The first native web fix split that path:
 - compile-scope diagnostics now flow from the Rust sync planner to browser
   timing reports, so movement compiles can be attributed to view-diff dirty
   chunks, ready section expansion, worker result size, and packed payload size
+- browser render-worker requests now carry the exact Rust-selected
+  `RenderSectionKey` target list, and the Rust finish path treats missing
+  worker result keys as stale instead of accepting an empty or partial packed
+  report
 
 This is still partly adapter-owned policy. The next high-priority refactor is
 to move the remaining "submit, poll, drain with budget, ignore stale results,
-reduce compile scope, and keep worker requests/results target-section-aware"
-policy into a shared Rust engine/render-session coordinator consumed by both
-desktop and web. JavaScript should become input/event glue and worker transport
-plumbing, not the owner of render-streaming scheduling.
+reduce compile scope, keep target-section payloads tied to the actual section
+snapshots, and reuse worker-side runtime/assets" policy into a shared Rust
+engine/render-session coordinator consumed by both desktop and web. JavaScript
+should become input/event glue and worker transport plumbing, not the owner of
+render-streaming scheduling.
 
 ## Target Shape
 

@@ -3,7 +3,8 @@
 Status: active; diagnostics, movement perf harness, background compile,
 deferred browser commands, budgeted worker-update drains, and stale-result
 tolerance landed; shared Rust compile-queue/coalescing decision landed;
-compile-scope diagnostics and all-air section mesh fast path landed.
+compile-scope diagnostics, all-air section mesh fast path, and
+target-section-aware browser render-worker requests landed.
 
 ## Purpose
 
@@ -85,6 +86,15 @@ The browser worker result still reports a full set of `144` logical section
 records and an `~11.6 MB` packed payload on these runs, even though only about
 `66-68` sections contain geometry. That leaves a transport/result-size problem
 after the main-thread scheduling fix.
+
+After the target-section-aware worker protocol landed on 2026-06-22, worker
+reports are bounded by the Rust-submitted target section list instead of always
+rebuilding the full worker view. Small dirty-section compiles now return tiny
+reports, for example `2` section records and a `195,876` byte packed payload.
+Full dirty-chunk movement plans still legitimately submit `128-144` sections
+and still produce `5.8-11.6 MB` packed payloads, so the remaining large cases
+are now attributable to dirty planning and worker-side compile/runtime cost
+rather than the worker blindly returning a full view for every request.
 
 ## Diagnosis
 
@@ -272,9 +282,9 @@ shared Rust engine/render-session coordinator tracked by tactical 061.
 
 ### 5. Reduce Per-Move Compile Scope
 
-Status: partially complete; diagnostics and a safe all-air mesh fast path
-landed, but target-section-aware worker transport and finer dirty planning are
-still pending.
+Status: partially complete; diagnostics, a safe all-air mesh fast path, and
+target-section-aware worker request/result transport landed. Finer dirty
+planning and worker-side runtime/cache reuse are still pending.
 
 Investigate why one chunk-center move submits around `128-144` sections for
 radius `1`. The first measurement shows this is not only JavaScript queue
@@ -283,13 +293,15 @@ chunks currently expand to every section in those chunks.
 
 Candidate reductions:
 
-1. make the browser worker request/result protocol target-section-aware, so
-   `submittedCompileSectionCount` bounds worker build and packed result size
-2. avoid submitting sections whose mesh input revision is unchanged
-3. preserve and reuse worker-packed mesh outputs when only camera center changes
-4. split chunk-level view dirtying from section-level face-neighbor dirtying,
+1. avoid submitting sections whose mesh input revision is unchanged
+2. preserve and reuse worker-packed mesh outputs when only camera center changes
+3. split chunk-level view dirtying from section-level face-neighbor dirtying,
    so removed-neighbor pressure does not always expand to every Y section
-5. prioritize near/in-frustum sections before hidden or low-value sections
+4. prioritize near/in-frustum sections before hidden or low-value sections
+5. stop recreating the worker-side asset/runtime view for every compile request;
+   the target-aware protocol makes payload size scale down, but worker
+   round-trip time still stays around `0.85-0.93s` even for tiny targeted
+   compiles
 
 Acceptance:
 
@@ -453,6 +465,7 @@ cargo test --manifest-path native/Cargo.toml -p mclone-mesh
 cargo test --manifest-path native/Cargo.toml -p mclone-render-session
 cargo test --manifest-path native/Cargo.toml -p mclone-web-client
 pnpm native:web:build
+pnpm native:web:smoke
 pnpm native:web:app-smoke
 pnpm native:web:mobile-smoke
 pnpm native:web:movement-perf
@@ -468,10 +481,59 @@ Observed local movement perf after this chunk:
 - worker reports still contained `144` section records, `66-68` non-empty
   sections, and a max packed payload of `11,623,508` bytes
 
-Current next likely step: make the browser render-compiler worker protocol
-target-section-aware, then revisit dirty planning. The Rust scheduler can now
-explain what it asked for, but the worker/result path still pays for full
-radius-1 reports during movement.
+## Target-Section-Aware Worker Protocol Landed
+
+Implemented on 2026-06-22:
+
+- `WebChunkRenderSession` now includes a flat `targetSections` `Int32Array` in
+  browser compile requests, using the exact `RenderSectionKey` set selected by
+  the Rust ready plan.
+- `mclone-render-compiler-worker.js` forwards those target keys to a new
+  `mclone_web_compile_generated_chunk_sections_for_targets(...)` WASM export.
+  The old full-view export remains as fallback.
+- The worker result path now treats target keys missing from the packed worker
+  report as stale instead of silently accepting them, so dirty work is not
+  cleared by an empty or partial result.
+- Browser smoke assertions now require worker section counts to match the
+  submitted target count for the chunk-smoke worker protocol instead of
+  hard-coding `144`.
+
+Validation run:
+
+```text
+node --check native/apps/mclone-web-client/www/mclone-render-compiler-worker.js
+node --check native/apps/mclone-web-client/www/mclone-web-app.js
+node --check native/apps/mclone-web-client/www/mclone-web-smoke.js
+node --check native/apps/mclone-web-client/scripts/browser-smoke.mjs
+cargo fmt --manifest-path native/Cargo.toml --all -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-mesh
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+pnpm native:web:build
+pnpm native:web:app-smoke
+pnpm native:web:mobile-smoke
+pnpm native:web:movement-perf
+```
+
+Observed local movement perf after this chunk:
+
+- frame progress stayed responsive: movement compile max frame gaps were about
+  `14.4-16.1ms`
+- a tiny dirty-section compile submitted `2` sections, returned `2` worker
+  section records, and packed `195,876` bytes
+- a partial dirty-chunk movement compile submitted `128` sections, returned
+  `80` worker section records, packed `5,770,628` bytes, and requeued `51`
+  missing target sections as stale
+- a full dirty-chunk movement compile still submitted/returned `144` section
+  records and packed `11,623,508` bytes
+- worker round trips still stayed high, around `854-918ms`, even for tiny
+  targeted compiles, which points to worker-side asset/runtime setup and fresh
+  worker-view generation as the next bottleneck
+
+Current next likely step: reduce the remaining full dirty plans by splitting
+chunk-level view dirtying from section-level neighbor dirtying, and investigate
+worker-side session/asset reuse or passing actual target section snapshots so
+small targeted compiles also become fast, not just small.
 
 ## Deployment Check
 

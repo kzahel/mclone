@@ -35,9 +35,10 @@ use mclone_render_session::{
     EngineRenderCamera, PackedRenderSectionBuildReportSummary, QueuedRenderViewCompile,
     RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport,
     RenderSectionCompileRequestInfo, RenderSectionCompileRequestState, RenderSectionCompileResult,
-    RenderSectionNeighborReadiness, RenderSectionRemovalMode, RenderSectionSyncPlan,
-    RenderSectionViewSync, RenderViewCompileQueue, RenderViewCompileQueueDecision,
-    build_client_textured_sections, decode_textured_render_section_build_report,
+    RenderSectionNeighborReadiness, RenderSectionPendingCompileRequest, RenderSectionRemovalMode,
+    RenderSectionSyncPlan, RenderSectionViewSync, RenderViewCompileQueue,
+    RenderViewCompileQueueDecision, build_client_textured_sections,
+    build_render_sections_from_snapshots, decode_textured_render_section_build_report,
     encode_textured_render_section_build_report, summarize_textured_render_section_build_report,
 };
 use mclone_server::ServerRunnerKind;
@@ -153,6 +154,31 @@ pub fn mclone_web_compile_generated_chunk_sections(
             z: center_z,
         },
         radius_chunks,
+        None,
+    )
+    .map_err(JsValue::from)?;
+    let packed = encode_textured_render_section_build_report(&report);
+    Ok(js_sys::Uint8Array::from(packed.as_slice()))
+}
+
+#[wasm_bindgen]
+pub fn mclone_web_compile_generated_chunk_sections_for_targets(
+    asset_pack_bytes: js_sys::Uint8Array,
+    center_x: i32,
+    center_z: i32,
+    radius_chunks: u32,
+    target_sections: js_sys::Int32Array,
+) -> Result<js_sys::Uint8Array, JsValue> {
+    let target_sections = render_section_keys_from_int32_array(&target_sections)
+        .map_err(|error| JsValue::from_str(&error))?;
+    let report = compile_generated_chunk_sections_from_pack(
+        asset_pack_bytes.to_vec(),
+        ChunkPos {
+            x: center_x,
+            z: center_z,
+        },
+        radius_chunks,
+        Some(&target_sections),
     )
     .map_err(JsValue::from)?;
     let packed = encode_textured_render_section_build_report(&report);
@@ -288,6 +314,7 @@ fn compile_generated_chunk_sections_from_pack(
     asset_pack_bytes: Vec<u8>,
     center: ChunkPos,
     radius_chunks: u32,
+    target_sections: Option<&BTreeSet<RenderSectionKey>>,
 ) -> Result<mclone_mesh::TexturedRenderSectionBuildReport, String> {
     let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes)?;
     let mut runtime = WebRuntime::local_integrated(SMOKE_SEED);
@@ -303,8 +330,21 @@ fn compile_generated_chunk_sections_from_pack(
         ));
     }
 
-    build_client_textured_sections(runtime.client(), &mesh_assets.catalog)
-        .map_err(|error| format!("failed to compile generated textured render sections: {error:#}"))
+    if let Some(target_sections) = target_sections {
+        let snapshots = runtime
+            .client()
+            .chunk_snapshots()
+            .cloned()
+            .collect::<Vec<_>>();
+        build_render_sections_from_snapshots(&snapshots, &mesh_assets.catalog, target_sections)
+            .map_err(|error| {
+                format!("failed to compile targeted generated render sections: {error:#}")
+            })
+    } else {
+        build_client_textured_sections(runtime.client(), &mesh_assets.catalog).map_err(|error| {
+            format!("failed to compile generated textured render sections: {error:#}")
+        })
+    }
 }
 
 fn packed_compile_report_summary_to_js(
@@ -843,6 +883,40 @@ struct WebChunkRenderPlan {
     sync: RenderSectionViewSync,
     sync_plan: RenderSectionSyncPlan,
     scope: WebCompileScopeReport,
+}
+
+fn compile_result_from_worker_report(
+    pending: RenderSectionPendingCompileRequest<WebPendingCompileContext>,
+    section_report: TexturedRenderSectionBuildReport,
+) -> (WebPendingCompileContext, RenderSectionCompileResult) {
+    let reported_sections = section_report
+        .sections
+        .iter()
+        .map(|section| section.key)
+        .collect::<BTreeSet<_>>();
+    let RenderSectionPendingCompileRequest {
+        context,
+        target_sections,
+        mut section_revisions,
+        ..
+    } = pending;
+
+    for missing_key in target_sections.difference(&reported_sections) {
+        let submitted_revision = section_revisions
+            .get(missing_key)
+            .copied()
+            .unwrap_or_default();
+        section_revisions.insert(*missing_key, submitted_revision.wrapping_sub(1));
+    }
+
+    (
+        context,
+        RenderSectionCompileResult {
+            target_sections,
+            section_revisions,
+            result: Ok(section_report),
+        },
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1416,7 +1490,9 @@ impl WebChunkRenderSession {
             &render_plan.sync_plan,
             Vec::new(),
             |_sync_plan, request| {
-                Ok::<_, String>(compile_requests.begin_compile_request(context, request))
+                let target_sections = request.target_sections.clone();
+                let info = compile_requests.begin_compile_request(context, request);
+                Ok::<_, String>((info, target_sections))
             },
         )?;
         let Some(submission) = submission.submission else {
@@ -1425,8 +1501,14 @@ impl WebChunkRenderSession {
                 center.x, center.z, radius_chunks
             ));
         };
-        let info = submission.output;
-        self.compile_request_to_js_value(info, center, radius_chunks, render_plan.scope)
+        let (info, target_sections) = submission.output;
+        self.compile_request_to_js_value(
+            info,
+            center,
+            radius_chunks,
+            render_plan.scope,
+            &target_sections,
+        )
     }
 
     fn finish_chunk_render_compile_request_with_packed_report(
@@ -1442,7 +1524,7 @@ impl WebChunkRenderSession {
         let section_report = decode_textured_render_section_build_report(&packed_report)
             .map_err(|error| format!("failed to decode packed render section report: {error:#}"))?;
         let summary = summarize_textured_render_section_build_report(&section_report);
-        let (context, completed) = pending.into_compile_result(Ok(section_report));
+        let (context, completed) = compile_result_from_worker_report(pending, section_report);
         self.finish_render_compile_result(
             context.center,
             context.radius_chunks,
@@ -1548,7 +1630,7 @@ impl WebChunkRenderSession {
         let section_report = decode_textured_render_section_build_report(&packed_report)
             .map_err(|error| format!("failed to decode packed render section report: {error:#}"))?;
         let summary = summarize_textured_render_section_build_report(&section_report);
-        let (context, completed) = pending.into_compile_result(Ok(section_report));
+        let (context, completed) = compile_result_from_worker_report(pending, section_report);
         self.finish_render_compile_result(
             context.center,
             context.radius_chunks,
@@ -2017,7 +2099,9 @@ impl WebChunkRenderSession {
             &render_plan.sync_plan,
             Vec::new(),
             |_sync_plan, request| {
-                Ok::<_, String>(compile_requests.begin_compile_request(context, request))
+                let target_sections = request.target_sections.clone();
+                let info = compile_requests.begin_compile_request(context, request);
+                Ok::<_, String>((info, target_sections))
             },
         )?;
         let Some(submission) = submission.submission else {
@@ -2026,8 +2110,14 @@ impl WebChunkRenderSession {
                 center.x, center.z, radius_chunks
             ));
         };
-        let info = submission.output;
-        self.compile_request_to_js_value(info, center, radius_chunks, render_plan.scope)
+        let (info, target_sections) = submission.output;
+        self.compile_request_to_js_value(
+            info,
+            center,
+            radius_chunks,
+            render_plan.scope,
+            &target_sections,
+        )
     }
 
     async fn prepare_chunk_view(
@@ -2307,6 +2397,7 @@ impl WebChunkRenderSession {
         center: ChunkPos,
         radius_chunks: u32,
         scope: WebCompileScopeReport,
+        target_sections: &BTreeSet<RenderSectionKey>,
     ) -> Result<JsValue, String> {
         let object = js_sys::Object::new();
         set_bool(&object, "ok", true)?;
@@ -2315,6 +2406,7 @@ impl WebChunkRenderSession {
         set_number(&object, "centerZ", f64::from(center.z))?;
         set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
         write_compile_scope_report(&object, scope)?;
+        write_target_sections(&object, target_sections)?;
         set_number(
             &object,
             "submittedCompileSectionCount",
@@ -2513,6 +2605,20 @@ fn write_compile_scope_report(
         "budgetedDirtySectionChunkCount",
         scope.budgeted_dirty_section_chunk_count as f64,
     )?;
+    Ok(())
+}
+
+fn write_target_sections(
+    object: &js_sys::Object,
+    target_sections: &BTreeSet<RenderSectionKey>,
+) -> Result<(), String> {
+    let flat = target_sections
+        .iter()
+        .flat_map(|key| [key.chunk_x, key.section_y, key.chunk_z])
+        .collect::<Vec<_>>();
+    let array = js_sys::Int32Array::from(flat.as_slice());
+    js_sys::Reflect::set(object, &JsValue::from_str("targetSections"), array.as_ref())
+        .map_err(|error| format!("failed to set targetSections: {error:?}"))?;
     Ok(())
 }
 
@@ -2732,6 +2838,22 @@ fn sort_dirty_section_chunks_by_coordinate(
     sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
 ) -> Vec<ChunkPos> {
     sort_chunk_positions_by_coordinate(sections_by_chunk.keys().copied())
+}
+
+fn render_section_keys_from_int32_array(
+    target_sections: &js_sys::Int32Array,
+) -> Result<BTreeSet<RenderSectionKey>, String> {
+    let values = target_sections.to_vec();
+    if values.len() % 3 != 0 {
+        return Err(format!(
+            "targetSections length {} is not a multiple of 3",
+            values.len()
+        ));
+    }
+    Ok(values
+        .chunks_exact(3)
+        .map(|chunk| RenderSectionKey::new(chunk[0], chunk[1], chunk[2]))
+        .collect())
 }
 
 fn section_vertex_count(sections: &[mclone_mesh::TexturedRenderSectionMesh]) -> u32 {

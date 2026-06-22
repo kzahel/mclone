@@ -360,6 +360,8 @@ async function renderCanvas() {
       const shutdownReport = session.shutdown();
       const sharedTopologyStress = await runSharedTopologyStress(module);
       const remoteWebSocket = await runRemoteWebSocketSmoke(module);
+      const publicFirstCompileRequest = publicCompileRequest(firstCompileRequest);
+      const publicSecondCompileRequest = publicCompileRequest(secondCompileRequest);
       return {
         ok: Boolean(
           firstCompileRequest.ok
@@ -394,9 +396,9 @@ async function renderCanvas() {
         ),
         supported: true,
         status: report.ok ? "rendered" : "failed",
-        firstCompileRequest,
+        firstCompileRequest: publicFirstCompileRequest,
         renderCompiler,
-        secondCompileRequest,
+        secondCompileRequest: publicSecondCompileRequest,
         secondRenderCompiler,
         renderCompilerPendingJobCount: compiler.pendingJobCount(),
         sessionPendingCompileJobCount: session.pendingChunkRenderCompileJobCount(),
@@ -417,6 +419,16 @@ async function renderCanvas() {
       reason: stringifyError(error),
     };
   }
+}
+
+function publicCompileRequest(request) {
+  const copy = { ...(request ?? {}) };
+  const targetSections = request?.targetSections;
+  if (targetSections) {
+    copy.targetSectionCount = Math.floor(Number(targetSections.length) / 3) || 0;
+    delete copy.targetSections;
+  }
+  return copy;
 }
 
 async function runRemoteWebSocketSmoke(module) {
@@ -538,6 +550,7 @@ class RenderSectionWorkerCompiler {
           centerX: request.centerX,
           centerZ: request.centerZ,
           radiusChunks: request.radiusChunks,
+          targetSections: request.targetSections,
         },
         [requestAssetPack.buffer],
       );

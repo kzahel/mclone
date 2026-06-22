@@ -1625,8 +1625,8 @@ function assertChunkRenderResult(
 ) {
   assertRenderCompileRequest(firstCompileRequest, 0, 0);
   assertRenderCompileRequest(secondCompileRequest, 1, 0);
-  assertRenderCompilerWorkerResult(renderCompiler, 0, 0);
-  assertRenderCompilerWorkerResult(secondRenderCompiler, 1, 0);
+  assertRenderCompilerWorkerResult(renderCompiler, firstCompileRequest, 0, 0);
+  assertRenderCompilerWorkerResult(secondRenderCompiler, secondCompileRequest, 1, 0);
   if (
     renderCompiler.requestId !== firstCompileRequest.requestId
     || firstReport.compileRequestId !== firstCompileRequest.requestId
@@ -1786,25 +1786,28 @@ function assertRenderCompileRequest(request, expectedCenterX, expectedCenterZ) {
   }
 }
 
-function assertRenderCompilerWorkerResult(renderCompiler, expectedCenterX, expectedCenterZ) {
+function assertRenderCompilerWorkerResult(renderCompiler, request, expectedCenterX, expectedCenterZ) {
   if (!renderCompiler?.ok) {
     throw new Error(`render compiler worker failed:\n${JSON.stringify(renderCompiler, null, 2)}`);
   }
   const summary = renderCompiler.summary;
+  const expectedSectionCount = Number(request?.submittedCompileSectionCount) || 0;
   if (
     renderCompiler.centerX !== expectedCenterX
     || renderCompiler.centerZ !== expectedCenterZ
     || renderCompiler.radiusChunks !== 1
+    || !renderCompiler.targetedCompileUsed
+    || renderCompiler.targetSectionCount !== expectedSectionCount
     || !summary?.ok
     || summary.byteLength <= 0
-    || summary.sectionCount !== 144
+    || summary.sectionCount !== expectedSectionCount
     || summary.nonEmptySectionCount <= 1
     || summary.vertexCount <= 0
     || summary.indexCount <= 0
     || summary.faceCount <= 0
-    || summary.visibilityGraphBuildCount !== 144
+    || summary.visibilityGraphBuildCount !== expectedSectionCount
   ) {
-    throw new Error(`render compiler worker did not return the expected section payload:\n${JSON.stringify(renderCompiler, null, 2)}`);
+    throw new Error(`render compiler worker did not return the expected targeted section payload:\n${JSON.stringify({ request, renderCompiler }, null, 2)}`);
   }
   if (renderCompiler.packedByteLength !== summary.byteLength) {
     throw new Error(`render compiler worker did not transfer the packed payload:\n${JSON.stringify(renderCompiler, null, 2)}`);

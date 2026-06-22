@@ -1347,6 +1347,7 @@ class RenderSectionWorkerCompiler {
           centerX: request.centerX,
           centerZ: request.centerZ,
           radiusChunks: request.radiusChunks,
+          targetSections: request.targetSections,
         },
         [requestAssetPack.buffer],
       );
