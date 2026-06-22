@@ -32,10 +32,11 @@ use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
     EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
-    EngineRenderCamera, PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
-    RenderSectionCompileAcceptanceReport, RenderSectionCompileRequestInfo,
-    RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionNeighborReadiness,
-    RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync,
+    EngineRenderCamera, PackedRenderSectionBuildReportSummary, QueuedRenderViewCompile,
+    RenderSectionCacheUpdate, RenderSectionCompileAcceptanceReport,
+    RenderSectionCompileRequestInfo, RenderSectionCompileRequestState, RenderSectionCompileResult,
+    RenderSectionNeighborReadiness, RenderSectionRemovalMode, RenderSectionSyncPlan,
+    RenderSectionViewSync, RenderViewCompileQueue, RenderViewCompileQueueDecision,
     build_client_textured_sections, decode_textured_render_section_build_report,
     encode_textured_render_section_build_report, summarize_textured_render_section_build_report,
 };
@@ -903,6 +904,8 @@ pub struct WebChunkRenderSession {
     draw: Option<TexturedSectionDrawResources>,
     actors: ActorDrawResources,
     loaded_chunk_positions: BTreeSet<ChunkPos>,
+    loaded_center: Option<ChunkPos>,
+    compile_queue: RenderViewCompileQueue<String>,
     asset_pack_parse_count: usize,
     terrain_asset_load_count: usize,
     atlas_upload_count: usize,
@@ -968,6 +971,26 @@ impl WebChunkRenderSession {
     #[wasm_bindgen(js_name = pendingChunkRenderCompileJobCount)]
     pub fn pending_chunk_render_compile_job_count(&self) -> usize {
         self.compile_requests.pending_request_count()
+    }
+
+    #[wasm_bindgen(js_name = requestCameraRenderCompile)]
+    pub fn request_camera_render_compile(
+        &mut self,
+        trigger: &str,
+        force: bool,
+        compile_busy: bool,
+    ) -> Result<JsValue, JsValue> {
+        self.request_camera_render_compile_decision(trigger, force, compile_busy)
+            .map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = takeQueuedCameraRenderCompile)]
+    pub fn take_queued_camera_render_compile(
+        &mut self,
+        compile_busy: bool,
+    ) -> Result<JsValue, JsValue> {
+        self.take_queued_camera_render_compile_decision(compile_busy)
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = cameraFrameState)]
@@ -1205,6 +1228,8 @@ impl WebChunkRenderSession {
             draw: None,
             actors,
             loaded_chunk_positions: BTreeSet::new(),
+            loaded_center: None,
+            compile_queue: RenderViewCompileQueue::default(),
             asset_pack_parse_count: 1,
             terrain_asset_load_count: 1,
             atlas_upload_count: 0,
@@ -1299,6 +1324,34 @@ impl WebChunkRenderSession {
         let center = self.camera.snapshot().chunk_pos;
         self.begin_chunk_render_compile_request_for_center(center, radius_chunks)
             .await
+    }
+
+    fn request_camera_render_compile_decision(
+        &mut self,
+        trigger: &str,
+        force: bool,
+        compile_busy: bool,
+    ) -> Result<JsValue, String> {
+        let center = self.camera.snapshot().chunk_pos;
+        let request = QueuedRenderViewCompile::new(center, force, trigger.to_owned());
+        let busy = self.compile_queue_busy(compile_busy);
+        let decision = self
+            .compile_queue
+            .request(request, self.loaded_center, busy);
+        self.compile_queue_decision_to_js_value(decision)
+    }
+
+    fn take_queued_camera_render_compile_decision(
+        &mut self,
+        compile_busy: bool,
+    ) -> Result<JsValue, String> {
+        let busy = self.compile_queue_busy(compile_busy);
+        let decision = self.compile_queue.take_next(self.loaded_center, busy);
+        self.compile_queue_decision_to_js_value(decision)
+    }
+
+    fn compile_queue_busy(&self, compile_busy: bool) -> bool {
+        compile_busy || self.compile_requests.has_pending_requests()
     }
 
     fn request_camera_chunk_view_for_radius(
@@ -1953,6 +2006,9 @@ impl WebChunkRenderSession {
         frame.present();
         self.render_count += 1;
         self.loaded_chunk_positions = current_loaded_chunks;
+        if count_mesh_build {
+            self.loaded_center = Some(center);
+        }
 
         Ok(GeneratedChunkRenderReport {
             center,
@@ -2104,6 +2160,42 @@ impl WebChunkRenderSession {
         Ok(object.into())
     }
 
+    fn compile_queue_decision_to_js_value(
+        &self,
+        decision: RenderViewCompileQueueDecision<String>,
+    ) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        set_bool(&object, "ok", true)?;
+        set_number(
+            &object,
+            "pendingCompileJobCount",
+            self.compile_requests.pending_request_count() as f64,
+        )?;
+        match decision {
+            RenderViewCompileQueueDecision::Start(request) => {
+                write_compile_queue_request(&object, "start", true, request)?;
+            }
+            RenderViewCompileQueueDecision::Queued(request) => {
+                write_compile_queue_request(&object, "queued", false, request)?;
+            }
+            RenderViewCompileQueueDecision::Skipped => {
+                set_bool(&object, "startNow", false)?;
+                set_bool(&object, "queued", false)?;
+                set_bool(&object, "skipped", true)?;
+            }
+            RenderViewCompileQueueDecision::Idle => {
+                set_bool(&object, "startNow", false)?;
+                set_bool(&object, "queued", false)?;
+                set_bool(&object, "skipped", false)?;
+            }
+        }
+        if let Some(center) = self.loaded_center {
+            set_number(&object, "loadedCenterX", f64::from(center.x))?;
+            set_number(&object, "loadedCenterZ", f64::from(center.z))?;
+        }
+        Ok(object.into())
+    }
+
     fn chunk_view_request_to_js_value(
         &self,
         center: ChunkPos,
@@ -2170,6 +2262,23 @@ fn web_runner_diagnostics_settled(diagnostics: &mclone_server::ServerRunnerDiagn
         && diagnostics.pending_publications == 0
         && diagnostics.worldgen_mailbox_pending_jobs == 0
         && diagnostics.light_status_mailbox_pending_statuses == 0
+}
+
+fn write_compile_queue_request(
+    object: &js_sys::Object,
+    status: &str,
+    start_now: bool,
+    request: QueuedRenderViewCompile<String>,
+) -> Result<(), String> {
+    set_bool(object, "startNow", start_now)?;
+    set_bool(object, "queued", !start_now)?;
+    set_bool(object, "skipped", false)?;
+    set_string(object, "status", status)?;
+    set_string(object, "trigger", &request.metadata)?;
+    set_bool(object, "force", request.force)?;
+    set_number(object, "centerX", f64::from(request.center.x))?;
+    set_number(object, "centerZ", f64::from(request.center.z))?;
+    Ok(())
 }
 
 fn write_runner_wait_diagnostics(

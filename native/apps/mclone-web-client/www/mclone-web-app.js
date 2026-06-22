@@ -137,7 +137,6 @@ class WebChunkApp {
     this.mouseDeltaY = 0;
     this.pendingCompile = false;
     this.currentCompilePromise = null;
-    this.queuedCompile = null;
     this.compileSequence = 0;
     this.activeCompileTiming = null;
     this.compileInFlightTarget = null;
@@ -185,6 +184,8 @@ class WebChunkApp {
     for (const name of [
       "advanceCameraFrame",
       "beginCameraRenderCompileRequest",
+      "requestCameraRenderCompile",
+      "takeQueuedCameraRenderCompile",
       "requestCameraChunkView",
       "tryBeginCameraRenderCompileRequest",
       "finishCameraRenderCompileRequest",
@@ -297,23 +298,22 @@ class WebChunkApp {
       return null;
     }
     const force = Boolean(options.force);
-    const center = this.currentCameraCenter();
-    if (!force && this.loadedCenter && centersEqual(center, this.loadedCenter)) {
-      return this.currentCompilePromise;
-    }
-    if (this.pendingCompile) {
-      this.queuedCompile = mergeQueuedCompile(this.queuedCompile, {
-        trigger,
-        force,
-        center,
-      });
-      runtime.state.compileQueued = true;
-      runtime.state.queuedCompileTargetX = center.centerX;
-      runtime.state.queuedCompileTargetZ = center.centerZ;
+    const decision = this.session.requestCameraRenderCompile(
+      trigger,
+      force,
+      this.pendingCompile,
+    );
+    this.applyCompileQueueDecision(decision);
+    if (!decision?.startNow) {
       updateDom();
       return this.currentCompilePromise;
     }
-    void this.compileCameraView({ trigger, force, waitForCompletion: false });
+    void this.compileCameraView({
+      trigger: decision.trigger ?? trigger,
+      force: Boolean(decision.force),
+      targetCenter: decisionCenter(decision),
+      waitForCompletion: false,
+    });
     return this.currentCompilePromise;
   }
 
@@ -324,7 +324,8 @@ class WebChunkApp {
     if (!this.session || !this.compiler) {
       return null;
     }
-    if (!force && this.hasRendered && this.loadedCenter && centersEqual(this.currentCameraCenter(), this.loadedCenter)) {
+    const targetCenter = options.targetCenter ?? this.currentCameraCenter();
+    if (!force && this.hasRendered && this.loadedCenter && centersEqual(targetCenter, this.loadedCenter)) {
       return null;
     }
     if (this.pendingCompile) {
@@ -337,7 +338,7 @@ class WebChunkApp {
     const timing = createCompileTiming({
       sequence,
       trigger,
-      targetCenter: this.currentCameraCenter(),
+      targetCenter,
       loadedCenterBefore: this.loadedCenter,
       frameCountBefore: runtime.state.frameCount,
       renderCountBefore: runtime.state.renderCount,
@@ -574,6 +575,22 @@ class WebChunkApp {
     applyHotbarState(target);
   }
 
+  applyCompileQueueDecision(decision) {
+    if (!decision?.ok) {
+      return;
+    }
+    runtime.state.pendingCompileJobCount = decision.pendingCompileJobCount ?? runtime.state.pendingCompileJobCount;
+    runtime.state.compileQueued = Boolean(decision.queued);
+    if (decision.queued) {
+      const center = decisionCenter(decision);
+      runtime.state.queuedCompileTargetX = center.centerX;
+      runtime.state.queuedCompileTargetZ = center.centerZ;
+    } else {
+      runtime.state.queuedCompileTargetX = null;
+      runtime.state.queuedCompileTargetZ = null;
+    }
+  }
+
   async interactBlock(action) {
     if (!this.session) {
       return null;
@@ -744,24 +761,22 @@ class WebChunkApp {
     if (!this.session || !this.compiler || this.pendingCompile || !runtime.state.ok) {
       return;
     }
-    const queued = this.queuedCompile;
-    this.queuedCompile = null;
-    runtime.state.compileQueued = false;
-    runtime.state.queuedCompileTargetX = null;
-    runtime.state.queuedCompileTargetZ = null;
+    const decision = this.session.takeQueuedCameraRenderCompile(this.pendingCompile);
+    this.applyCompileQueueDecision(decision);
     if (!this.hasRendered) {
       updateDom();
       return;
     }
-    const currentCenter = this.currentCameraCenter();
-    const needsCenterCompile = !this.loadedCenter || !centersEqual(currentCenter, this.loadedCenter);
-    if (!queued?.force && !needsCenterCompile) {
+    if (!decision?.startNow) {
       updateDom();
       return;
     }
     setTimeout(() => {
-      this.requestCameraViewCompile(queued?.trigger ?? "follow-up", {
-        force: Boolean(queued?.force && !needsCenterCompile),
+      void this.compileCameraView({
+        trigger: decision.trigger ?? "follow-up",
+        force: Boolean(decision.force),
+        targetCenter: decisionCenter(decision),
+        waitForCompletion: false,
       });
     }, 0);
   }
@@ -1352,14 +1367,12 @@ function centersEqual(left, right) {
     && Number(left?.centerZ) === Number(right?.centerZ);
 }
 
-function mergeQueuedCompile(previous, next) {
-  if (!previous) {
-    return next;
-  }
+function decisionCenter(decision) {
+  const centerX = Number(decision?.centerX);
+  const centerZ = Number(decision?.centerZ);
   return {
-    trigger: next.trigger ?? previous.trigger,
-    force: Boolean(previous.force || next.force),
-    center: next.center ?? previous.center,
+    centerX: Number.isFinite(centerX) ? centerX : 0,
+    centerZ: Number.isFinite(centerZ) ? centerZ : 0,
   };
 }
 

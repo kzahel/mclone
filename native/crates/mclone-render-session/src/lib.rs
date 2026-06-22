@@ -514,6 +514,102 @@ pub struct RenderSectionSyncUpdate {
     pub cache_update: RenderSectionCacheUpdate,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedRenderViewCompile<T> {
+    pub center: ChunkPos,
+    pub force: bool,
+    pub metadata: T,
+}
+
+impl<T> QueuedRenderViewCompile<T> {
+    pub fn new(center: ChunkPos, force: bool, metadata: T) -> Self {
+        Self {
+            center,
+            force,
+            metadata,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RenderViewCompileQueueDecision<T> {
+    Start(QueuedRenderViewCompile<T>),
+    Queued(QueuedRenderViewCompile<T>),
+    Skipped,
+    Idle,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RenderViewCompileQueue<T> {
+    queued: Option<QueuedRenderViewCompile<T>>,
+}
+
+impl<T: Clone> RenderViewCompileQueue<T> {
+    pub fn request(
+        &mut self,
+        request: QueuedRenderViewCompile<T>,
+        loaded_center: Option<ChunkPos>,
+        compile_busy: bool,
+    ) -> RenderViewCompileQueueDecision<T> {
+        if !request.force && Some(request.center) == loaded_center {
+            self.queued = None;
+            return RenderViewCompileQueueDecision::Skipped;
+        }
+        if compile_busy {
+            self.merge(request);
+            return self
+                .queued
+                .clone()
+                .map(RenderViewCompileQueueDecision::Queued)
+                .unwrap_or(RenderViewCompileQueueDecision::Idle);
+        }
+        self.queued = None;
+        RenderViewCompileQueueDecision::Start(request)
+    }
+
+    pub fn take_next(
+        &mut self,
+        loaded_center: Option<ChunkPos>,
+        compile_busy: bool,
+    ) -> RenderViewCompileQueueDecision<T> {
+        if compile_busy {
+            return self
+                .queued
+                .clone()
+                .map(RenderViewCompileQueueDecision::Queued)
+                .unwrap_or(RenderViewCompileQueueDecision::Idle);
+        }
+        let Some(request) = self.queued.take() else {
+            return RenderViewCompileQueueDecision::Idle;
+        };
+        if !request.force && Some(request.center) == loaded_center {
+            RenderViewCompileQueueDecision::Skipped
+        } else {
+            RenderViewCompileQueueDecision::Start(request)
+        }
+    }
+
+    pub fn queued(&self) -> Option<&QueuedRenderViewCompile<T>> {
+        self.queued.as_ref()
+    }
+
+    pub fn has_queued(&self) -> bool {
+        self.queued.is_some()
+    }
+
+    fn merge(&mut self, request: QueuedRenderViewCompile<T>) {
+        let Some(previous) = self.queued.take() else {
+            self.queued = Some(request);
+            return;
+        };
+        self.queued = Some(QueuedRenderViewCompile {
+            center: request.center,
+            force: previous.force || request.force,
+            metadata: request.metadata,
+        });
+    }
+}
+
 pub fn prepare_render_section_sync_plan(
     dirty: &mut RenderSectionDirtyState,
     dirty_work: RenderSectionDirtyWork,
@@ -3286,6 +3382,118 @@ mod tests {
         assert_eq!(plan.ready_plan.ready_section_keys, BTreeSet::from([ready]));
         assert!(!plan.has_removals());
         assert_eq!(plan.ready_update(1).submitted_compile_section_count, 1);
+    }
+
+    #[test]
+    fn render_view_compile_queue_starts_when_idle_and_skips_loaded_center() {
+        let mut queue = RenderViewCompileQueue::default();
+        let center = ChunkPos::new(2, -3);
+
+        assert_eq!(
+            queue.request(
+                QueuedRenderViewCompile::new(center, false, "movement"),
+                None,
+                false
+            ),
+            RenderViewCompileQueueDecision::Start(QueuedRenderViewCompile::new(
+                center, false, "movement"
+            ))
+        );
+        assert_eq!(
+            queue.request(
+                QueuedRenderViewCompile::new(center, false, "movement"),
+                Some(center),
+                false
+            ),
+            RenderViewCompileQueueDecision::Skipped
+        );
+    }
+
+    #[test]
+    fn render_view_compile_queue_coalesces_while_busy_and_preserves_force() {
+        let mut queue = RenderViewCompileQueue::default();
+        let first = ChunkPos::new(0, 0);
+        let second = ChunkPos::new(1, 0);
+
+        assert_eq!(
+            queue.request(
+                QueuedRenderViewCompile::new(first, true, "interaction"),
+                None,
+                true
+            ),
+            RenderViewCompileQueueDecision::Queued(QueuedRenderViewCompile::new(
+                first,
+                true,
+                "interaction"
+            ))
+        );
+        assert_eq!(
+            queue.request(
+                QueuedRenderViewCompile::new(second, false, "movement"),
+                None,
+                true
+            ),
+            RenderViewCompileQueueDecision::Queued(QueuedRenderViewCompile::new(
+                second, true, "movement"
+            ))
+        );
+        assert_eq!(
+            queue.take_next(None, false),
+            RenderViewCompileQueueDecision::Start(QueuedRenderViewCompile::new(
+                second, true, "movement"
+            ))
+        );
+        assert_eq!(
+            queue.take_next(None, false),
+            RenderViewCompileQueueDecision::Idle
+        );
+    }
+
+    #[test]
+    fn render_view_compile_queue_latest_idle_or_loaded_request_discards_stale_queue() {
+        let mut queue = RenderViewCompileQueue::default();
+        let loaded = ChunkPos::new(0, 0);
+        let stale = ChunkPos::new(1, 0);
+        let fresh = ChunkPos::new(2, 0);
+
+        assert!(matches!(
+            queue.request(
+                QueuedRenderViewCompile::new(stale, false, "movement"),
+                Some(loaded),
+                true
+            ),
+            RenderViewCompileQueueDecision::Queued(_)
+        ));
+        assert!(queue.has_queued());
+        assert_eq!(
+            queue.request(
+                QueuedRenderViewCompile::new(loaded, false, "movement"),
+                Some(loaded),
+                true
+            ),
+            RenderViewCompileQueueDecision::Skipped
+        );
+        assert!(!queue.has_queued());
+
+        assert!(matches!(
+            queue.request(
+                QueuedRenderViewCompile::new(stale, false, "movement"),
+                Some(loaded),
+                true
+            ),
+            RenderViewCompileQueueDecision::Queued(_)
+        ));
+        assert_eq!(
+            queue.request(
+                QueuedRenderViewCompile::new(fresh, false, "movement"),
+                Some(loaded),
+                false
+            ),
+            RenderViewCompileQueueDecision::Start(QueuedRenderViewCompile::new(
+                fresh, false, "movement"
+            ))
+        );
+        assert!(!queue.has_queued());
     }
 
     #[test]

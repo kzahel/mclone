@@ -8,8 +8,10 @@ converged; shared camera frame-state/reporting helpers landed; desktop
 player-pose commit sequence isolated; desktop `EngineCameraController` facade
 landed; desktop window camera view uses controller snapshots; shared
 pose-sync/correction reports landed; browser frame scheduling now has a first
-deferred-command / budgeted-drain pass, but the scheduler policy still needs to
-move into the shared Rust session shape.
+deferred-command / budgeted-drain pass; Rust-owned web compile
+queue/coalescing decisions landed, but the remaining browser worker transport
+and chunk-view scheduling policy still need to move into the shared Rust
+session shape.
 
 ## Purpose
 
@@ -92,12 +94,16 @@ The first native web fix split that path:
 - stale web render compile completions are tolerated as no-op results
 - queued compile work gets an idle RAF kick instead of relying only on the
   previous compile promise finishing
+- compile start/skip/queue/coalescing decisions now flow through
+  `RenderViewCompileQueue` in `mclone-render-session`, with browser JS applying
+  the Rust decision instead of owning a parallel queue object
 
-This is still adapter-owned policy. The next high-priority refactor is to move
-the "submit, poll, drain with budget, coalesce queued compiles, ignore stale
-results" policy into a shared Rust engine/render-session coordinator consumed by
-both desktop and web. JavaScript should become input/event glue and worker
-transport plumbing, not the owner of render-streaming scheduling.
+This is still partly adapter-owned policy. The next high-priority refactor is
+to move the remaining "submit, poll, drain with budget, ignore stale results,
+and reduce compile scope" policy into a shared Rust engine/render-session
+coordinator consumed by both desktop and web. JavaScript should become
+input/event glue and worker transport plumbing, not the owner of
+render-streaming scheduling.
 
 ## Target Shape
 

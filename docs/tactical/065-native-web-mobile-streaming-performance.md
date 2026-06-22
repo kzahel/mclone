@@ -2,7 +2,7 @@
 
 Status: active; diagnostics, movement perf harness, background compile,
 deferred browser commands, budgeted worker-update drains, and stale-result
-tolerance landed.
+tolerance landed; shared Rust compile-queue/coalescing decision landed.
 
 ## Purpose
 
@@ -65,6 +65,14 @@ progress continues while the worker runs. Movement compile windows now report
 main-loop frame gaps around `10-22ms` locally instead of the previous
 `190-460ms` gaps. The worker payload is still large, so this is a scheduling fix
 rather than a mesh-cost fix.
+
+After the first shared queue extraction on 2026-06-22, the JavaScript app no
+longer owns compile request coalescing. `mclone-render-session` owns the
+`RenderViewCompileQueue` decision, and the browser app applies the returned
+start/queued/skipped result. Local movement perf still shows roughly
+`0.9s` worker round trips and `11-17ms` movement compile frame gaps; remaining
+large time is in chunk-view/request preparation and full-view mesh work, not in
+the old JS queue object.
 
 ## Diagnosis
 
@@ -205,7 +213,8 @@ Acceptance:
 
 ### 4. Match Desktop Scheduling Shape On Web
 
-Status: completed first pass; shared extraction still pending.
+Status: completed first pass; Rust compile-queue extraction landed, broader
+shared coordinator extraction still pending.
 
 The first fix keeps the JavaScript app loop responsive by matching the desktop
 submit/drain shape more closely:
@@ -233,6 +242,9 @@ Implemented pieces:
    submitted sections are obsolete
 7. idle RAF kicks for queued compile work so interaction-triggered compiles do
    not get stuck behind older movement compiles
+8. `RenderViewCompileQueue` in `mclone-render-session` owns web compile
+   start/skip/queue/coalescing decisions, including preserving forced requests
+   while busy
 
 Acceptance:
 
@@ -240,12 +252,13 @@ Acceptance:
 - mobile movement compile gaps are around one frame locally
 - app/mobile smokes still pass block interaction, touch controls, and screenshots
 
-Remaining architectural work: move this policy from browser app glue into the
+Remaining architectural work: move the rest of the browser chunk-view
+request/poll and browser-worker transport coordination from app glue toward the
 shared Rust engine/render-session coordinator tracked by tactical 061.
 
 ### 5. Reduce Per-Move Compile Scope
 
-Status: next likely step after scheduler-shape convergence.
+Status: next likely step after the Rust compile-queue extraction.
 
 Investigate why one chunk-center move submits around `96` sections for radius
 `1`. Some of that may be legitimate neighbor-boundary rebuild pressure, but it
@@ -354,10 +367,47 @@ Observed local movement perf after the first pass:
   creates visible `~200-500ms` gaps because the async chunk-view request holds
   the WASM session before the worker compile begins
 
-Next likely step: split or restructure the browser chunk-view request so it
-does not hold the render session across the async server exchange. Once
-begin-request gaps are small, move to slice 4 and reduce per-move compile
-scope.
+Next likely step from that first pass was the scheduler-shape split and shared
+queue extraction recorded below. The current next step is now reducing per-move
+compile scope and making dirty reasons visible enough to explain full-view
+submissions.
+
+## Shared Queue Extraction Landed
+
+Implemented on 2026-06-22:
+
+- Added `RenderViewCompileQueue` to `mclone-render-session` so start/queue/skip
+  compile decisions are Rust-owned and unit-tested.
+- Added `WebChunkRenderSession::requestCameraRenderCompile(...)` and
+  `takeQueuedCameraRenderCompile(...)` so browser JS asks the WASM session for
+  scheduling decisions instead of storing a parallel queued compile object.
+- Kept JS responsible for DOM input, promise wiring, browser worker transport,
+  and WebGPU presentation only.
+
+Validation run:
+
+```text
+cargo test --manifest-path native/Cargo.toml -p mclone-render-session
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+cargo fmt --manifest-path native/Cargo.toml --all -- --check
+node --check native/apps/mclone-web-client/www/mclone-web-app.js
+pnpm native:web:build
+pnpm native:web:app-smoke
+pnpm native:web:mobile-smoke
+pnpm native:web:movement-perf
+```
+
+Observed local movement perf after this chunk:
+
+- movement compile frame gaps stayed around `11-17ms`
+- worker round trip remained about `0.9s`
+- decode/finish/apply stayed small, about `7-15ms`
+- some movement compiles still submit a full `144` sections after crossing
+  farther chunk boundaries
+
+Current next likely step: reduce per-move compile scope and make dirty reasons
+visible enough to explain why unchanged loaded terrain can still submit a full
+view.
 
 ## Deployment Check
 
