@@ -508,14 +508,14 @@ class WebChunkApp {
 
 function bindInput(app) {
   window.addEventListener("keydown", (event) => {
-    if ((event.key === "n" || event.key === "N") && !event.repeat) {
+    if (isPhysicalKey(event, "KeyN", "n") && !event.repeat) {
       event.preventDefault();
       const camera = app.session?.toggleMovementMode?.();
       if (camera) app.applyCameraState(camera);
       updateDom();
       return;
     }
-    const hotbarSlot = hotbarSlotForKey(event.key);
+    const hotbarSlot = hotbarSlotForEvent(event);
     if (hotbarSlot !== null) {
       event.preventDefault();
       if (!event.repeat) {
@@ -523,14 +523,14 @@ function bindInput(app) {
       }
       return;
     }
-    const key = inputNameForKey(event.key);
+    const key = inputNameForEvent(event);
     if (!key) return;
     event.preventDefault();
     app.setInputKey(key, true);
   });
 
   window.addEventListener("keyup", (event) => {
-    const key = inputNameForKey(event.key);
+    const key = inputNameForEvent(event);
     if (!key) return;
     event.preventDefault();
     app.setInputKey(key, false);
@@ -603,7 +603,38 @@ function bindInput(app) {
   });
 }
 
-function inputNameForKey(key) {
+function inputNameForEvent(event) {
+  const code = keyboardCode(event);
+  switch (code) {
+    case "ArrowUp":
+    case "KeyW":
+      return "forward";
+    case "ArrowDown":
+    case "KeyS":
+      return "backward";
+    case "ArrowLeft":
+    case "KeyA":
+      return "left";
+    case "ArrowRight":
+    case "KeyD":
+      return "right";
+    case "Space":
+      return "jump";
+    case "KeyX":
+    case "KeyQ":
+      return "descend";
+    case "ShiftLeft":
+    case "ShiftRight":
+      return "shift";
+    case "ControlLeft":
+    case "ControlRight":
+      return "sprint";
+    default:
+      return code === null ? inputNameForLegacyKey(event.key) : null;
+  }
+}
+
+function inputNameForLegacyKey(key) {
   switch (key) {
     case "ArrowUp":
     case "w":
@@ -636,6 +667,21 @@ function inputNameForKey(key) {
     default:
       return null;
   }
+}
+
+function isPhysicalKey(event, code, legacyKey) {
+  if (keyboardCode(event) === code) {
+    return true;
+  }
+  return keyboardCode(event) === null && (
+    event.key === legacyKey || event.key === legacyKey.toUpperCase()
+  );
+}
+
+function keyboardCode(event) {
+  return typeof event.code === "string" && event.code.length > 0 && event.code !== "Unidentified"
+    ? event.code
+    : null;
 }
 
 async function fetchAssetPack() {
@@ -764,7 +810,19 @@ function applyHotbarState(value) {
   }
 }
 
-function hotbarSlotForKey(key) {
+function hotbarSlotForEvent(event) {
+  const code = keyboardCode(event);
+  if (code?.startsWith("Digit") || code?.startsWith("Numpad")) {
+    const digit = Number(code.slice(-1));
+    if (Number.isInteger(digit) && digit >= 1 && digit <= 9) {
+      return digit - 1;
+    }
+    return null;
+  }
+  return code === null ? hotbarSlotForLegacyKey(event.key) : null;
+}
+
+function hotbarSlotForLegacyKey(key) {
   if (key.length !== 1) {
     return null;
   }

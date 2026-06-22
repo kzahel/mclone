@@ -132,7 +132,10 @@ async function run() {
           commandCount: state.lastReport?.commandCount ?? 0,
         };
       });
-      await page.keyboard.down("w");
+      await dispatchKeyboardEvent(page, "keydown", {
+        code: "KeyW",
+        key: ",",
+      });
       try {
         await page.waitForFunction(
           (start) => {
@@ -151,9 +154,13 @@ async function run() {
         );
       } catch (error) {
         const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
-        throw new Error(`native web app did not advance walking movement after W key: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}\nlogs=${pageLogs.join("\n")}`);
+        throw new Error(`native web app did not advance walking movement after physical KeyW with Dvorak key value: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}\nlogs=${pageLogs.join("\n")}`);
+      } finally {
+        await dispatchKeyboardEvent(page, "keyup", {
+          code: "KeyW",
+          key: ",",
+        });
       }
-      await page.keyboard.up("w");
       const walkingProbe = await page.evaluate((start) => {
         const state = globalThis.__mcloneWebApp.state;
         const dx = Number(state.cameraX) - start.cameraX;
@@ -318,6 +325,20 @@ function waitForStopSignal() {
       process.once(signal, stop);
     }
   });
+}
+
+async function dispatchKeyboardEvent(page, type, { code, key }) {
+  await page.evaluate(
+    ({ type, code, key }) => {
+      window.dispatchEvent(new KeyboardEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        code,
+        key,
+      }));
+    },
+    { type, code, key },
+  );
 }
 
 async function captureTargetPreviewProbe(page) {
