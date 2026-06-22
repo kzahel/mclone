@@ -1,6 +1,6 @@
 # 064: Native Web Mobile Controls and HUD
 
-Status: active; first mobile controls/HUD slice landed.
+Status: active; mobile controls/HUD and analog movement slices landed.
 
 ## Purpose
 
@@ -192,7 +192,7 @@ Acceptance:
 
 ### 4. Analog Movement Input
 
-Status: next likely implementation step.
+Status: landed.
 
 Scope:
 
@@ -280,8 +280,8 @@ pnpm native:web:app-smoke
   configurable after a real phone test?
 - Should break/place become mobile buttons in this tactical or wait until basic
   movement/look is proven?
-- Should analog axes be added before or after touch buttons, depending on how
-  the first digital joystick feels on a phone?
+- Does the current dead-zone and response curve feel right on actual mobile
+  Safari/Chrome, or should the curve become configurable?
 
 ## First Slice Landed - 2026-06-22
 
@@ -326,7 +326,28 @@ Screenshots inspected:
 - `/tmp/mclone-native-web-mobile-app.png`
 - `/tmp/mclone-native-web-mobile-app-canvas.png`
 
-Next likely step: add analog movement axes to `EngineCameraInput` and
-`web_canvas.rs`, then feed raw joystick axes instead of thresholded booleans.
-That should make phone movement feel less like virtual WASD and more like a
-real joypad.
+## Analog Slice Landed - 2026-06-22
+
+Implemented smooth joystick axes through the native movement boundary:
+
+- `mclone-client::PlayerInput`
+  - added an explicit movement-impulse override path
+  - keyboard-derived impulses remain the default path
+  - jump, shift, descend, and sprint gating continue to use key state
+- `mclone-render-session::EngineCameraInput`
+  - added optional `EngineCameraMovementImpulse`
+  - walking and no-clip movement both consume the same impulse override
+- `web_canvas.rs`
+  - extended `advanceCameraFrame(...)` with active/left/forward impulse args
+- `mclone-web-app.js`
+  - touch joystick now feeds dead-zone-adjusted analog axes
+  - thresholded touch-key booleans remain available for diagnostics and
+    compatibility state
+- `browser-smoke.mjs`
+  - mobile smoke now asserts fractional diagonal joystick axes while a touch is
+    active and verifies axes clear after release
+
+Next likely step: real-phone feel validation and interaction tuning. In
+particular, check whether sprint should remain hold-only, whether the joystick
+response curve/dead zone feels right, and whether break/place need explicit
+mobile buttons before more mobile UI work.

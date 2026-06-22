@@ -614,6 +614,23 @@ pub struct EngineCameraInput {
     pub descend: bool,
     pub shift: bool,
     pub sprint: bool,
+    pub movement_impulse: Option<EngineCameraMovementImpulse>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineCameraMovementImpulse {
+    pub left: f32,
+    pub forward: f32,
+}
+
+impl EngineCameraMovementImpulse {
+    pub fn new(left: f32, forward: f32) -> Self {
+        Self { left, forward }
+    }
+
+    fn as_player_impulse(self) -> (f32, f32) {
+        (self.left, self.forward)
+    }
 }
 
 impl Default for EngineCameraInput {
@@ -630,6 +647,7 @@ impl Default for EngineCameraInput {
             descend: false,
             shift: false,
             sprint: false,
+            movement_impulse: None,
         }
     }
 }
@@ -1023,36 +1041,50 @@ impl EngineCameraController {
 
     fn tick_no_clip(&mut self, input: EngineCameraInput) -> bool {
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
-        Self::tick_player_no_clip(&mut self.player, self.speed_blocks_per_second, dt_seconds)
-            .is_some()
+        Self::tick_player_no_clip(
+            &mut self.player,
+            self.speed_blocks_per_second,
+            dt_seconds,
+            input
+                .movement_impulse
+                .map(EngineCameraMovementImpulse::as_player_impulse),
+        )
+        .is_some()
     }
 
     pub fn tick_player_no_clip(
         player: &mut LocalPlayerController,
         speed_blocks_per_second: f64,
         dt_seconds: f64,
+        movement_impulse: Option<(f32, f32)>,
     ) -> Option<Vec3d> {
         let pose = player.pose();
-        player.tick_no_clip_movement(NoClipMovementStep {
-            yaw_radians: pose.native_yaw_radians(),
-            pitch_radians: pose.native_pitch_radians(),
-            speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
-            dt_seconds,
-            descending: false,
-            sprinting: false,
-        })
+        player.tick_no_clip_movement_with_impulse(
+            NoClipMovementStep {
+                yaw_radians: pose.native_yaw_radians(),
+                pitch_radians: pose.native_pitch_radians(),
+                speed_blocks_per_second: clamp_camera_speed(speed_blocks_per_second),
+                dt_seconds,
+                descending: false,
+                sprinting: false,
+            },
+            movement_impulse,
+        )
     }
 
     fn tick_walking(&mut self, client: &ClientRuntime, input: EngineCameraInput) -> bool {
         let pose = self.player.pose();
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
         self.player
-            .tick_walking_movement(
+            .tick_walking_movement_with_impulse(
                 client,
                 WalkingMovementStep {
                     y_rot_degrees: pose.y_rot_degrees,
                     dt_seconds,
                 },
+                input
+                    .movement_impulse
+                    .map(EngineCameraMovementImpulse::as_player_impulse),
             )
             .is_some()
     }
@@ -2687,6 +2719,22 @@ mod tests {
 
         assert!(snapshot.eye.x > 16.0);
         assert_eq!(snapshot.chunk_pos, ChunkPos::new(1, 0));
+    }
+
+    #[test]
+    fn engine_camera_controller_accepts_analog_movement_impulse() {
+        let mut camera =
+            EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.0, 0.0, 32.0);
+        let before = camera.snapshot();
+
+        let after = camera.apply_input(EngineCameraInput {
+            dt_seconds: 0.1,
+            movement_impulse: Some(EngineCameraMovementImpulse::new(0.0, 0.5)),
+            ..EngineCameraInput::default()
+        });
+
+        assert!(after.eye.z > before.eye.z);
+        assert!((after.eye.z - before.eye.z) < ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND * 0.1);
     }
 
     #[test]

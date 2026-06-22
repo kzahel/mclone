@@ -406,18 +406,23 @@ async function exerciseMobileTouchControls(page, canvas) {
   });
   await dispatchCanvasPointerEvent(page, "pointermove", {
     pointerId: 31,
-    xFraction: 0.24,
+    xFraction: 0.31,
     yFraction: 0.54,
     buttons: 1,
   });
+  let activeMovementProbe = null;
   try {
     await page.waitForFunction(
       (start) => {
         const state = globalThis.__mcloneWebApp?.state;
+        const impulse = globalThis.__mcloneWebApp?.touchControlState?.()?.movementImpulse;
         const dx = Number(state?.cameraX) - start.cameraX;
         const dz = Number(state?.cameraZ) - start.cameraZ;
         return state?.ok === true
           && state.touchJoystickActive === true
+          && impulse?.active === true
+          && impulse.left < -0.05
+          && impulse.forward > 0.05
           && state.movementMode === "WALK"
           && Math.hypot(dx, dz) > 0.15
           && (state.lastReport?.commandCount ?? 0) > start.commandCount;
@@ -425,10 +430,26 @@ async function exerciseMobileTouchControls(page, canvas) {
       movementStart,
       { timeout: 60_000 },
     );
+    activeMovementProbe = await page.evaluate((start) => {
+      const state = globalThis.__mcloneWebApp.state;
+      const impulse = globalThis.__mcloneWebApp.touchControlState()?.movementImpulse;
+      const dx = Number(state.cameraX) - start.cameraX;
+      const dz = Number(state.cameraZ) - start.cameraZ;
+      return {
+        ok: impulse?.active === true
+          && impulse.left < -0.05
+          && impulse.forward > 0.05
+          && Math.abs(impulse.left) < 1
+          && impulse.forward < 1
+          && Math.hypot(dx, dz) > 0.15,
+        impulse,
+        distance: Math.hypot(dx, dz),
+      };
+    }, movementStart);
   } finally {
     await dispatchCanvasPointerEvent(page, "pointerup", {
       pointerId: 31,
-      xFraction: 0.24,
+      xFraction: 0.31,
       yFraction: 0.54,
       buttons: 0,
     });
@@ -438,15 +459,18 @@ async function exerciseMobileTouchControls(page, canvas) {
     undefined,
     { timeout: 10_000 },
   );
-  const movementProbe = await page.evaluate((start) => {
+  const movementProbe = await page.evaluate(({ start, activeMovementProbe }) => {
     const state = globalThis.__mcloneWebApp.state;
     const dx = Number(state.cameraX) - start.cameraX;
     const dz = Number(state.cameraZ) - start.cameraZ;
     return {
       ok: Math.hypot(dx, dz) > 0.15
         && state.touchJoystickActive === false
+        && state.touchMovementLeftImpulse === 0
+        && state.touchMovementForwardImpulse === 0
         && globalThis.__mcloneWebApp.touchControlState()?.keys?.forward === false,
       distance: Math.hypot(dx, dz),
+      active: activeMovementProbe,
       start,
       end: {
         cameraX: state.cameraX,
@@ -455,7 +479,7 @@ async function exerciseMobileTouchControls(page, canvas) {
       },
       touch: globalThis.__mcloneWebApp.touchControlState(),
     };
-  }, movementStart);
+  }, { start: movementStart, activeMovementProbe });
 
   const lookStart = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
@@ -539,6 +563,7 @@ async function exerciseMobileTouchControls(page, canvas) {
   return {
     ok: initial.hudOpen === false
       && initial.touchControlsVisible === true
+      && activeMovementProbe?.ok === true
       && movementProbe.ok
       && lookProbe.ok
       && buttonProbe.ok

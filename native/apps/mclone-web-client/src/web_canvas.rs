@@ -31,8 +31,8 @@ use mclone_render::entity::{ActorDrawResources, ActorInstance};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameTarget;
 use mclone_render_session::{
-    EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineRenderCamera,
-    PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
+    EngineCameraController, EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
+    EngineRenderCamera, PackedRenderSectionBuildReportSummary, RenderSectionCacheUpdate,
     RenderSectionCompileAcceptanceReport, RenderSectionCompileRequestInfo,
     RenderSectionCompileRequestState, RenderSectionCompileResult, RenderSectionNeighborReadiness,
     RenderSectionRemovalMode, RenderSectionSyncPlan, RenderSectionViewSync,
@@ -988,7 +988,18 @@ impl WebChunkRenderSession {
         descend: bool,
         shift: bool,
         sprint: bool,
+        movement_impulse_active: bool,
+        movement_left_impulse: f64,
+        movement_forward_impulse: f64,
     ) -> Result<JsValue, JsValue> {
+        let movement_impulse = if movement_impulse_active {
+            Some(EngineCameraMovementImpulse::new(
+                movement_left_impulse as f32,
+                movement_forward_impulse as f32,
+            ))
+        } else {
+            None
+        };
         let input = EngineCameraInput {
             dt_seconds,
             mouse_delta_x,
@@ -1001,6 +1012,7 @@ impl WebChunkRenderSession {
             descend,
             shift,
             sprint,
+            movement_impulse,
         };
         self.camera
             .apply_movement_input(self.runtime.client(), input);

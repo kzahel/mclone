@@ -71,6 +71,8 @@ const runtime = {
     hudOpen: true,
     touchControlsVisible: false,
     touchJoystickActive: false,
+    touchMovementLeftImpulse: 0,
+    touchMovementForwardImpulse: 0,
     touchLookActive: false,
     touchButtonActiveCount: 0,
     status: "booting",
@@ -115,6 +117,7 @@ class WebChunkApp {
     this.compiler = null;
     this.keys = defaultInputKeys();
     this.touchKeys = defaultInputKeys();
+    this.touchMovementImpulse = defaultMovementImpulse();
     this.touchControls = null;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
@@ -221,6 +224,7 @@ class WebChunkApp {
     this.mouseDeltaY = 0;
     this.syncCanvasSize();
     const keys = this.currentInputKeys();
+    const movementImpulse = this.currentMovementImpulse();
 
     runtime.state.frameCount += 1;
     runtime.state.tickPhase = "advance";
@@ -236,6 +240,9 @@ class WebChunkApp {
       keys.descend,
       keys.shift,
       keys.sprint,
+      movementImpulse.active,
+      movementImpulse.left,
+      movementImpulse.forward,
     ));
     runtime.state.tickPhase = "post-advance";
     this.applyCameraState(camera);
@@ -472,12 +479,24 @@ class WebChunkApp {
     }
   }
 
+  setTouchMovementImpulse(left, forward, active) {
+    this.touchMovementImpulse = {
+      active: Boolean(active),
+      left: sanitizeInputImpulse(left),
+      forward: sanitizeInputImpulse(forward),
+    };
+  }
+
   currentInputKeys() {
     const keys = defaultInputKeys();
     for (const name of INPUT_KEY_NAMES) {
       keys[name] = Boolean(this.keys[name] || this.touchKeys[name]);
     }
     return keys;
+  }
+
+  currentMovementImpulse() {
+    return { ...this.touchMovementImpulse };
   }
 
   clearTouchKeys(names = INPUT_KEY_NAMES) {
@@ -804,6 +823,15 @@ class TouchControls {
     const axisY = -clampedY / TOUCH_JOYSTICK_MAX_DISTANCE;
     const magnitude = Math.hypot(axisX, axisY);
     const active = magnitude >= TOUCH_AXIS_THRESHOLD;
+    let leftImpulse = 0;
+    let forwardImpulse = 0;
+    if (active) {
+      const adjustedMagnitude = (magnitude - TOUCH_AXIS_THRESHOLD) / (1 - TOUCH_AXIS_THRESHOLD);
+      const impulseScale = adjustedMagnitude / magnitude;
+      leftImpulse = -axisX * impulseScale;
+      forwardImpulse = axisY * impulseScale;
+    }
+    this.app.setTouchMovementImpulse(leftImpulse, forwardImpulse, true);
     this.app.setTouchKeys({
       forward: active && axisY > TOUCH_AXIS_THRESHOLD,
       backward: active && axisY < -TOUCH_AXIS_THRESHOLD,
@@ -816,6 +844,7 @@ class TouchControls {
 
   clearMovement() {
     this.movementPointerId = null;
+    this.app.setTouchMovementImpulse(0, 0, false);
     this.app.setTouchKeys({
       forward: false,
       backward: false,
@@ -895,6 +924,8 @@ class TouchControls {
   updateRuntimeState() {
     runtime.state.touchControlsVisible = this.root?.dataset.visible === "true";
     runtime.state.touchJoystickActive = this.movementPointerId !== null;
+    runtime.state.touchMovementLeftImpulse = this.app.touchMovementImpulse.left;
+    runtime.state.touchMovementForwardImpulse = this.app.touchMovementImpulse.forward;
     runtime.state.touchLookActive = this.lookPointerId !== null;
     runtime.state.touchButtonActiveCount = this.buttonPointers.size;
   }
@@ -906,6 +937,7 @@ class TouchControls {
       lookActive: this.lookPointerId !== null,
       buttonActiveCount: this.buttonPointers.size,
       keys: { ...this.app.touchKeys },
+      movementImpulse: this.app.currentMovementImpulse(),
     };
   }
 }
@@ -1103,6 +1135,22 @@ function setText(id, value) {
 
 function defaultInputKeys() {
   return Object.fromEntries(INPUT_KEY_NAMES.map((name) => [name, false]));
+}
+
+function defaultMovementImpulse() {
+  return {
+    active: false,
+    left: 0,
+    forward: 0,
+  };
+}
+
+function sanitizeInputImpulse(value) {
+  const impulse = Number(value);
+  if (!Number.isFinite(impulse)) {
+    return 0;
+  }
+  return Math.max(-1, Math.min(1, impulse));
 }
 
 function isHudOpen() {

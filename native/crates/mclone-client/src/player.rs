@@ -97,6 +97,15 @@ pub struct PlayerInput {
 
 impl PlayerInput {
     pub fn tick(&mut self, keys: PlayerInputKeys, moving_slowly: bool) {
+        self.tick_with_movement_impulse(keys, moving_slowly, None);
+    }
+
+    pub fn tick_with_movement_impulse(
+        &mut self,
+        keys: PlayerInputKeys,
+        moving_slowly: bool,
+        movement_impulse: Option<(f32, f32)>,
+    ) {
         self.up = keys.forward;
         self.down = keys.backward;
         self.left = keys.left;
@@ -108,6 +117,18 @@ impl PlayerInput {
         if moving_slowly {
             self.left_impulse *= MOVING_SLOW_FACTOR;
             self.forward_impulse *= MOVING_SLOW_FACTOR;
+        }
+        if let Some((left_impulse, forward_impulse)) = movement_impulse {
+            self.left_impulse = sanitize_movement_impulse(left_impulse);
+            self.forward_impulse = sanitize_movement_impulse(forward_impulse);
+            if moving_slowly {
+                self.left_impulse *= MOVING_SLOW_FACTOR;
+                self.forward_impulse *= MOVING_SLOW_FACTOR;
+            }
+            self.up = self.forward_impulse > 1.0e-5;
+            self.down = self.forward_impulse < -1.0e-5;
+            self.left = self.left_impulse > 1.0e-5;
+            self.right = self.left_impulse < -1.0e-5;
         }
     }
 
@@ -482,12 +503,29 @@ impl LocalPlayerController {
     }
 
     pub fn tick_input(&mut self, moving_slowly: bool) -> PlayerInput {
-        self.input.tick(self.keys, moving_slowly);
+        self.tick_input_with_movement_impulse(moving_slowly, None)
+    }
+
+    pub fn tick_input_with_movement_impulse(
+        &mut self,
+        moving_slowly: bool,
+        movement_impulse: Option<(f32, f32)>,
+    ) -> PlayerInput {
+        self.input
+            .tick_with_movement_impulse(self.keys, moving_slowly, movement_impulse);
         self.input
     }
 
     pub fn tick_no_clip_movement(&mut self, step: NoClipMovementStep) -> Option<Vec3d> {
-        let input = self.tick_input(false);
+        self.tick_no_clip_movement_with_impulse(step, None)
+    }
+
+    pub fn tick_no_clip_movement_with_impulse(
+        &mut self,
+        step: NoClipMovementStep,
+        movement_impulse: Option<(f32, f32)>,
+    ) -> Option<Vec3d> {
+        let input = self.tick_input_with_movement_impulse(false, movement_impulse);
         let step = NoClipMovementStep {
             descending: self.keys.descend,
             sprinting: self.keys.sprint,
@@ -507,6 +545,15 @@ impl LocalPlayerController {
         client: &ClientRuntime,
         step: WalkingMovementStep,
     ) -> Option<WalkingMovementResult> {
+        self.tick_walking_movement_with_impulse(client, step, None)
+    }
+
+    pub fn tick_walking_movement_with_impulse(
+        &mut self,
+        client: &ClientRuntime,
+        step: WalkingMovementStep,
+        movement_impulse: Option<(f32, f32)>,
+    ) -> Option<WalkingMovementResult> {
         if !step.y_rot_degrees.is_finite() || !step.dt_seconds.is_finite() || step.dt_seconds <= 0.0
         {
             return None;
@@ -517,7 +564,7 @@ impl LocalPlayerController {
             return None;
         }
 
-        let input = self.tick_input(self.keys.shift);
+        let input = self.tick_input_with_movement_impulse(self.keys.shift, movement_impulse);
         let sprinting = self.keys.sprint && input.has_forward_impulse() && !input.shift_key_down;
         if input.jumping && self.on_ground {
             self.delta_movement.y = LOCAL_PLAYER_JUMP_POWER;
@@ -873,6 +920,14 @@ fn axis(positive: bool, negative: bool) -> f32 {
     (positive - negative) as f32
 }
 
+fn sanitize_movement_impulse(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
 fn cross(a: Vec3d, b: Vec3d) -> Vec3d {
     Vec3d::new(
         a.y * b.z - a.z * b.y,
@@ -979,6 +1034,24 @@ mod tests {
         assert_eq!(input.forward_impulse, MOVING_SLOW_FACTOR);
         assert!(input.jumping);
         assert!(input.shift_key_down);
+    }
+
+    #[test]
+    fn analog_movement_impulse_overrides_keyboard_axes() {
+        let mut keys = PlayerInputKeys::default();
+        keys.set(PlayerInputKey::Forward, true);
+        keys.set(PlayerInputKey::Left, true);
+        let mut input = PlayerInput::default();
+
+        input.tick_with_movement_impulse(keys, false, Some((-0.25, 0.5)));
+
+        assert_eq!(input.forward_impulse, 0.5);
+        assert_eq!(input.left_impulse, -0.25);
+        assert!(input.up);
+        assert!(!input.down);
+        assert!(!input.left);
+        assert!(input.right);
+        assert!(input.has_forward_impulse());
     }
 
     #[test]
