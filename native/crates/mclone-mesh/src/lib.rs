@@ -669,6 +669,8 @@ mod tests {
 
         assert_eq!(mesh.stats().vertex_count, 24);
         assert_eq!(mesh.stats().index_count, 36);
+        assert_eq!(mesh.opaque_index_count(), mesh.stats().index_count);
+        assert_eq!(mesh.translucent_index_count(), 0);
         assert!(catalog.occludes(BlockStateId(1)));
         assert!(!catalog.occludes(AIR_BLOCK_STATE_ID));
         assert!(mesh.vertices.iter().all(
@@ -720,6 +722,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(mesh.stats().face_count(), 6);
+        assert_eq!(mesh.opaque_index_count(), 0);
+        assert_eq!(mesh.translucent_index_count(), mesh.stats().index_count);
         assert!(mesh.vertices.iter().any(|vertex| vertex.color[3] < 1.0));
         assert!(mesh.vertices.iter().all(
             |vertex| (0.0..=1.0).contains(&vertex.uv[0]) && (0.0..=1.0).contains(&vertex.uv[1])
@@ -740,6 +744,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(mesh.stats().face_count(), 10);
+        assert_eq!(mesh.opaque_index_count(), 0);
+        assert_eq!(mesh.translucent_index_count(), mesh.stats().index_count);
     }
 
     #[test]

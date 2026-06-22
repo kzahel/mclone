@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use mclone_core::SECTION_HEIGHT as RENDER_SECTION_HEIGHT;
 
 use crate::QUAD_FACE_INDEX_COUNT;
@@ -61,6 +63,7 @@ pub struct TexturedChunkVertex {
 pub struct TexturedVisibleChunkMesh {
     pub vertices: Vec<TexturedChunkVertex>,
     pub indices: Vec<u32>,
+    pub opaque_index_count: u32,
 }
 
 impl TexturedVisibleChunkMesh {
@@ -73,6 +76,26 @@ impl TexturedVisibleChunkMesh {
             vertex_count: self.vertices.len() as u32,
             index_count: self.indices.len() as u32,
         }
+    }
+
+    pub fn mark_all_indices_opaque(&mut self) {
+        self.opaque_index_count = self.indices.len() as u32;
+    }
+
+    pub fn opaque_index_range(&self) -> Range<u32> {
+        0..self.opaque_index_count.min(self.indices.len() as u32)
+    }
+
+    pub fn translucent_index_range(&self) -> Range<u32> {
+        self.opaque_index_count.min(self.indices.len() as u32)..self.indices.len() as u32
+    }
+
+    pub fn opaque_index_count(&self) -> u32 {
+        self.opaque_index_range().len() as u32
+    }
+
+    pub fn translucent_index_count(&self) -> u32 {
+        self.translucent_index_range().len() as u32
     }
 }
 
@@ -141,4 +164,35 @@ impl VisibilityGraphBuildStats {
 pub struct TexturedRenderSectionBuildReport {
     pub sections: Vec<TexturedRenderSectionMesh>,
     pub visibility_graph: VisibilityGraphBuildStats,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn textured_mesh_layer_ranges_split_opaque_and_translucent_indices() {
+        let mesh = TexturedVisibleChunkMesh {
+            vertices: Vec::new(),
+            indices: vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7],
+            opaque_index_count: 6,
+        };
+
+        assert_eq!(mesh.opaque_index_range(), 0..6);
+        assert_eq!(mesh.translucent_index_range(), 6..12);
+        assert_eq!(mesh.opaque_index_count(), 6);
+        assert_eq!(mesh.translucent_index_count(), 6);
+    }
+
+    #[test]
+    fn textured_mesh_layer_ranges_clamp_invalid_opaque_count() {
+        let mesh = TexturedVisibleChunkMesh {
+            vertices: Vec::new(),
+            indices: vec![0, 1, 2],
+            opaque_index_count: 99,
+        };
+
+        assert_eq!(mesh.opaque_index_range(), 0..3);
+        assert_eq!(mesh.translucent_index_range(), 3..3);
+    }
 }

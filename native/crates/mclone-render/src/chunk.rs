@@ -1,4 +1,6 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::ops::Range;
 
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Vec3, Vec4};
@@ -741,6 +743,7 @@ pub struct GpuTexturedChunkMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    opaque_index_count: u32,
     visibility: VisibilitySet,
 }
 
@@ -771,6 +774,7 @@ impl GpuTexturedChunkMesh {
             vertex_buffer,
             index_buffer,
             index_count: mesh.indices.len() as u32,
+            opaque_index_count: mesh.opaque_index_count().min(mesh.indices.len() as u32),
             visibility,
         })
     }
@@ -779,9 +783,30 @@ impl GpuTexturedChunkMesh {
         self.index_count
     }
 
+    pub fn opaque_index_range(&self) -> Range<u32> {
+        0..self.opaque_index_count.min(self.index_count)
+    }
+
+    pub fn translucent_index_range(&self) -> Range<u32> {
+        self.opaque_index_count.min(self.index_count)..self.index_count
+    }
+
     pub fn visibility(&self) -> VisibilitySet {
         self.visibility
     }
+}
+
+fn draw_textured_mesh_range(
+    pass: &mut wgpu::RenderPass<'_>,
+    mesh: &GpuTexturedChunkMesh,
+    index_range: Range<u32>,
+) {
+    if index_range.is_empty() {
+        return;
+    }
+    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+    pass.draw_indexed(index_range, 0, 0..1);
 }
 
 pub struct ChunkTextureAtlas<'a> {
@@ -1028,7 +1053,8 @@ impl ChunkRenderer {
 }
 
 pub struct TexturedChunkRenderer {
-    pipeline: wgpu::RenderPipeline,
+    opaque_pipeline: wgpu::RenderPipeline,
+    translucent_pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     texture_bind_group_layout: wgpu::BindGroupLayout,
@@ -1095,83 +1121,117 @@ impl TexturedChunkRenderer {
             bind_group_layouts: &[&uniform_bind_group_layout, &texture_bind_group_layout],
             push_constant_ranges: &[],
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mclone_textured_chunk_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: TEXTURED_VERTEX_BYTE_SIZE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            offset: 0,
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x3,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 12,
-                            shader_location: 1,
-                            format: wgpu::VertexFormat::Float32x2,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 20,
-                            shader_location: 2,
-                            format: wgpu::VertexFormat::Float32x4,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 36,
-                            shader_location: 3,
-                            format: wgpu::VertexFormat::Uint32,
-                        },
-                    ],
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::SrcAlpha,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::One,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: Some(wgpu::Face::Back),
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            multiview: None,
-            cache: None,
-        });
+        let opaque_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_textured_chunk_opaque_pipeline",
+            None,
+            true,
+        );
+        let translucent_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_textured_chunk_translucent_pipeline",
+            Some(translucent_blend_state()),
+            false,
+        );
         Self {
-            pipeline,
+            opaque_pipeline,
+            translucent_pipeline,
             uniform_buffer,
             bind_group,
             texture_bind_group_layout,
         }
+    }
+}
+
+fn create_textured_chunk_pipeline(
+    device: &wgpu::Device,
+    pipeline_layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    color_format: wgpu::TextureFormat,
+    label: &'static str,
+    blend: Option<wgpu::BlendState>,
+    depth_write_enabled: bool,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: TEXTURED_VERTEX_BYTE_SIZE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x3,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 12,
+                        shader_location: 1,
+                        format: wgpu::VertexFormat::Float32x2,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 20,
+                        shader_location: 2,
+                        format: wgpu::VertexFormat::Float32x4,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 36,
+                        shader_location: 3,
+                        format: wgpu::VertexFormat::Uint32,
+                    },
+                ],
+            }],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: Some(wgpu::Face::Back),
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: Default::default(),
+        multiview: None,
+        cache: None,
+    })
+}
+
+fn translucent_blend_state() -> wgpu::BlendState {
+    wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::SrcAlpha,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+            operation: wgpu::BlendOperation::Add,
+        },
     }
 }
 
@@ -1317,12 +1377,12 @@ impl TexturedChunkDrawResources {
             }),
             ..Default::default()
         });
-        pass.set_pipeline(&self.renderer.pipeline);
         pass.set_bind_group(0, &self.renderer.bind_group, &[]);
         pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-        pass.set_vertex_buffer(0, self.mesh.vertex_buffer.slice(..));
-        pass.set_index_buffer(self.mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..self.mesh.index_count, 0, 0..1);
+        pass.set_pipeline(&self.renderer.opaque_pipeline);
+        draw_textured_mesh_range(&mut pass, &self.mesh, self.mesh.opaque_index_range());
+        pass.set_pipeline(&self.renderer.translucent_pipeline);
+        draw_textured_mesh_range(&mut pass, &self.mesh, self.mesh.translucent_index_range());
         Ok(())
     }
 }
@@ -1500,19 +1560,53 @@ impl TexturedSectionDrawResources {
             }),
             ..Default::default()
         });
-        pass.set_pipeline(&self.renderer.pipeline);
         pass.set_bind_group(0, &self.renderer.bind_group, &[]);
         pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_pipeline(&self.renderer.opaque_pipeline);
         for (key, mesh) in &self.sections {
             if !culling.drawn_keys.contains(key) {
                 continue;
             }
-            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+            draw_textured_mesh_range(&mut pass, mesh, mesh.opaque_index_range());
+        }
+        pass.set_pipeline(&self.renderer.translucent_pipeline);
+        let mut translucent_sections = self
+            .sections
+            .iter()
+            .filter(|(key, mesh)| {
+                culling.drawn_keys.contains(key) && !mesh.translucent_index_range().is_empty()
+            })
+            .collect::<Vec<_>>();
+        translucent_sections.sort_by(|(left_key, _), (right_key, _)| {
+            compare_translucent_sections(**left_key, **right_key, render_view)
+        });
+        for (_, mesh) in translucent_sections {
+            draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
         }
         Ok(culling.stats)
     }
+}
+
+fn compare_translucent_sections(
+    left: RenderSectionKey,
+    right: RenderSectionKey,
+    render_view: ChunkRenderView,
+) -> Ordering {
+    let left_depth = section_depth_along_view(left, render_view);
+    let right_depth = section_depth_along_view(right, render_view);
+    right_depth
+        .partial_cmp(&left_depth)
+        .unwrap_or(Ordering::Equal)
+        .then_with(|| right.cmp(&left))
+}
+
+fn section_depth_along_view(key: RenderSectionKey, render_view: ChunkRenderView) -> f32 {
+    let center = Vec3::new(
+        chunk_min_block_coord(key.chunk_x) as f32 + MESH_CHUNK_WIDTH as f32 * 0.5,
+        key.min_y() as f32 + RENDER_SECTION_HEIGHT as f32 * 0.5,
+        chunk_min_block_coord(key.chunk_z) as f32 + MESH_CHUNK_WIDTH as f32 * 0.5,
+    );
+    (center - render_view.camera_position).dot(render_view.camera_forward)
 }
 
 fn vertex_bytes(mesh: &VisibleChunkMesh) -> Vec<u8> {
@@ -1694,6 +1788,7 @@ mod tests {
             mesh: TexturedVisibleChunkMesh {
                 vertices: Vec::new(),
                 indices: vec![0; index_count],
+                opaque_index_count: index_count as u32,
             },
             visibility,
         }
@@ -1947,6 +2042,7 @@ mod tests {
                 packed_light: 15_728_880,
             }],
             indices: vec![0],
+            opaque_index_count: 1,
         };
 
         assert_eq!(

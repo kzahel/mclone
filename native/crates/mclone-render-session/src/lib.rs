@@ -2123,6 +2123,7 @@ pub fn encode_textured_render_section_build_report(
         write_u64(&mut out, section.visibility.bits());
         write_u32(&mut out, section.mesh.vertices.len() as u32);
         write_u32(&mut out, section.mesh.indices.len() as u32);
+        write_u32(&mut out, section.mesh.opaque_index_count());
         for vertex in &section.mesh.vertices {
             for value in vertex.position {
                 write_f32(&mut out, value);
@@ -2157,6 +2158,7 @@ pub fn decode_textured_render_section_build_report(
         let visibility = VisibilitySet::from_bits(reader.read_u64()?);
         let vertex_count = reader.read_u32()? as usize;
         let index_count = reader.read_u32()? as usize;
+        let opaque_index_count = reader.read_u32()?;
         let mut vertices = Vec::with_capacity(vertex_count);
         for _ in 0..vertex_count {
             let position = [reader.read_f32()?, reader.read_f32()?, reader.read_f32()?];
@@ -2181,7 +2183,11 @@ pub fn decode_textured_render_section_build_report(
         }
         sections.push(TexturedRenderSectionMesh {
             key,
-            mesh: TexturedVisibleChunkMesh { vertices, indices },
+            mesh: TexturedVisibleChunkMesh {
+                vertices,
+                indices,
+                opaque_index_count,
+            },
             visibility,
         });
     }
@@ -3555,6 +3561,7 @@ mod tests {
                                     packed_light: 0,
                                 }],
                                 indices: vec![0],
+                                opaque_index_count: 1,
                             },
                             visibility: VisibilitySet::all_visible(),
                         }],
@@ -3894,6 +3901,7 @@ mod tests {
                         },
                     ],
                     indices: vec![0, 1, 0],
+                    opaque_index_count: 1,
                 },
                 visibility,
             }],

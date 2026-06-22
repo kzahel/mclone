@@ -322,6 +322,7 @@ fn add_textured_chunk_range_to_mesh(
     let world_origin_x = chunk_min_block_coord(input.chunk_x);
     let world_origin_z = chunk_min_block_coord(input.chunk_z);
     let ao_sampler = TexturedAmbientOcclusionSampler { area, catalog };
+    let mut translucent_mesh = TexturedVisibleChunkMesh::default();
 
     for local_y in local_y_start..local_y_end {
         for local_z in 0..CHUNK_WIDTH {
@@ -340,7 +341,13 @@ fn add_textured_chunk_range_to_mesh(
 
                 if let Some(fluid) = block_model.fluid {
                     add_textured_liquid_block_to_mesh(
-                        mesh, area, catalog, world_x, world_y, world_z, fluid,
+                        &mut translucent_mesh,
+                        area,
+                        catalog,
+                        world_x,
+                        world_y,
+                        world_z,
+                        fluid,
                     );
                     continue;
                 }
@@ -388,14 +395,29 @@ fn add_textured_chunk_range_to_mesh(
         }
     }
 
+    mesh.mark_all_indices_opaque();
+    append_textured_mesh(mesh, &translucent_mesh);
+
     Ok(())
 }
 
 fn append_textured_mesh(mesh: &mut TexturedVisibleChunkMesh, source: &TexturedVisibleChunkMesh) {
     let base_index = mesh.vertices.len() as u32;
+    let target_opaque_end = mesh.opaque_index_range().end as usize;
+    let source_opaque_end = source.opaque_index_range().end as usize;
     mesh.vertices.extend_from_slice(&source.vertices);
-    mesh.indices
-        .extend(source.indices.iter().map(|index| base_index + *index));
+    mesh.indices.splice(
+        target_opaque_end..target_opaque_end,
+        source.indices[..source_opaque_end]
+            .iter()
+            .map(|index| base_index + *index),
+    );
+    mesh.opaque_index_count = (target_opaque_end + source_opaque_end) as u32;
+    mesh.indices.extend(
+        source.indices[source_opaque_end..]
+            .iter()
+            .map(|index| base_index + *index),
+    );
 }
 
 #[derive(Clone, Copy, Debug)]
