@@ -13,6 +13,7 @@ mclone-core.workspace = true
 mclone-net.workspace = true
 mclone-protocol.workspace = true
 mclone-server.workspace = true
+tungstenite.workspace = true
 
 [[bin]]
 name = "mclone-dedicated-server"

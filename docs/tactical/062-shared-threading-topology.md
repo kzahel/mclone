@@ -1,8 +1,9 @@
 # 062: Shared Threading Topology
 
 Status: in progress - native desktop/browser server runners, browser server
-job workers, shared-memory runner/job frames, bounded shared-buffer pools, and
-web shared-lane stress coverage landed
+job workers, shared-memory runner/job frames, bounded shared-buffer pools, web
+shared-lane stress coverage, and first browser WebSocket remote transport
+landed
 
 ## Purpose
 
@@ -500,6 +501,39 @@ Acceptance:
 - Remote players and entity snapshots continue to flow through protocol
   updates, not special browser-only state.
 
+Landed in the first browser WebSocket remote slice:
+
+- `mclone-net` now has a small browser WebSocket binary message layout for the
+  existing protocol command/update payloads: app-level protocol-version
+  handshake, encoded `ClientCommand` messages, and encoded
+  `ServerUpdate` batches.
+- `mclone-dedicated-server --listen-ws HOST:PORT` starts a native WebSocket
+  bridge for browser clients while preserving the existing native TCP listener.
+  The first bridge implementation proxies each WebSocket connection into the
+  existing native TCP session path, so the dedicated session/player handling and
+  native TCP behavior stay unchanged.
+- The wasm client now has a `WebSocketServerSession` host behind
+  `WebRuntime::websocket_remote(...)`. It uses the same async
+  command/update application path as the integrated Web Worker host, but reports
+  runner kind `remote-websocket` and frame transport `websocket`.
+- `mclone_web_remote_websocket_smoke_report(...)` connects to the native
+  WebSocket bridge, requests two chunk views, verifies the remote-dedicated
+  client replica loads/moves/unloads chunks through protocol updates, and
+  exposes WebSocket frame metrics.
+- `pnpm native:web:remote-smoke` starts a native dedicated server with
+  `--listen-ws 127.0.0.1:0 --serve-once`, passes the announced `ws://` URL into
+  the Playwright smoke page, and asserts the browser remote report alongside
+  the existing local integrated worker render smoke.
+
+Next implementation slice:
+
+- Promote browser WebSocket remote from a protocol/runtime smoke to a usable web
+  app/render mode: expose a remote URL option in the browser app bootstrap,
+  drive the normal render loop from `WebRuntime::websocket_remote(...)`, and add
+  an app-level Playwright smoke against a native hosted server. After that,
+  replace the bridge proxy with a first-class WebSocket acceptor feeding the
+  dedicated server event loop directly if the proxy boundary gets in the way.
+
 ## Validation
 
 Threading slices should keep the existing native and web validation lanes:
@@ -563,12 +597,17 @@ New validation should include:
    shared runner command/update payloads, pooled/fallback response counters,
    normal-path smoke assertions, contention/backpressure stress coverage,
    forced transfer fallback coverage, and Playwright screenshot validation.
+7. Browser WebSocket remote transport:
+   shared WebSocket command/update frame helpers, native dedicated WebSocket
+   bridge, wasm `WebRuntime::websocket_remote(...)` host, remote-websocket
+   diagnostics, browser remote protocol smoke, and screenshot validation.
 
 ## Next Implementation Slice
 
-Start browser remote transport with a WebSocket client adapter to the native
-hosted server. The good next chunk is to define the browser-side transport
-adapter behind the existing command/update runtime boundary, add a native
-hosted server smoke path that a browser can connect to, and assert runner kind /
-transport diagnostics without changing local integrated mode. WebRTC remains a
-later transport slice after WebSocket proves the shape.
+Promote browser WebSocket remote into the normal web app/render experience. The
+good next chunk is to add a remote URL option to the browser app, construct
+`WebRuntime::websocket_remote(...)` for that mode, and validate movement,
+interaction, chunk streaming, render compilation, and screenshots against a
+native hosted server. Keep WebRTC as a later transport slice, and only replace
+the current WebSocket-to-native-TCP bridge with a direct dedicated event-loop
+acceptor once the app path proves the browser transport shape.

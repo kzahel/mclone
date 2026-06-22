@@ -14,8 +14,12 @@ use mclone_server::{IntegratedServer, ServerRunnerDiagnostics, ServerRunnerKind}
 #[cfg(target_arch = "wasm32")]
 mod web_canvas;
 #[cfg(target_arch = "wasm32")]
+mod web_remote_session;
+#[cfg(target_arch = "wasm32")]
 mod web_server_worker;
 
+#[cfg(target_arch = "wasm32")]
+use web_remote_session::WebSocketServerSession;
 #[cfg(target_arch = "wasm32")]
 pub use web_server_worker::{WebIntegratedServerRunner, WebIntegratedServerRunnerConfig};
 
@@ -123,6 +127,19 @@ impl WebRuntime {
         Ok(Self {
             engine,
             host: WebRuntimeHost::Worker(runner),
+            command_count: 0,
+            update_count: 0,
+            protocol_codec_roundtrip: true,
+            transport_drained: true,
+        })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn websocket_remote(url: impl Into<String>) -> Result<Self, String> {
+        let session = WebSocketServerSession::connect(url).await?;
+        Ok(Self {
+            engine: EngineRenderSession::new(ClientRuntime::new(ClientHost::RemoteDedicated)),
+            host: WebRuntimeHost::RemoteWebSocket(session),
             command_count: 0,
             update_count: 0,
             protocol_codec_roundtrip: true,
@@ -261,6 +278,8 @@ enum WebRuntimeHost {
     Inline(WebLoopbackHost),
     #[cfg(target_arch = "wasm32")]
     Worker(WebIntegratedServerRunner),
+    #[cfg(target_arch = "wasm32")]
+    RemoteWebSocket(WebSocketServerSession),
 }
 
 impl WebRuntimeHost {
@@ -268,8 +287,8 @@ impl WebRuntimeHost {
         match self {
             Self::Inline(host) => host.exchange(command),
             #[cfg(target_arch = "wasm32")]
-            Self::Worker(_) => Err(ProtocolCodecError::InvalidData(
-                "web worker runtime requires async exchange",
+            Self::Worker(_) | Self::RemoteWebSocket(_) => Err(ProtocolCodecError::InvalidData(
+                "browser transport runtime requires async exchange",
             )),
         }
     }
@@ -279,6 +298,17 @@ impl WebRuntimeHost {
             Self::Inline(host) => host.exchange(command).map_err(|error| error.to_string()),
             #[cfg(target_arch = "wasm32")]
             Self::Worker(host) => {
+                let exchange = host.exchange_command(command).await?;
+                Ok(WebExchange {
+                    update_count: exchange.updates.len(),
+                    updates: exchange.updates,
+                    command_count: 1,
+                    protocol_codec_roundtrip: exchange.protocol_codec_roundtrip,
+                    transport_drained: exchange.transport_drained,
+                })
+            }
+            #[cfg(target_arch = "wasm32")]
+            Self::RemoteWebSocket(host) => {
                 let exchange = host.exchange_command(command).await?;
                 Ok(WebExchange {
                     update_count: exchange.updates.len(),
@@ -313,6 +343,18 @@ impl WebRuntimeHost {
                         && diagnostics.update_queue_depth == 0,
                 })
             }
+            #[cfg(target_arch = "wasm32")]
+            Self::RemoteWebSocket(host) => {
+                let diagnostics = host.diagnostics();
+                Ok(WebExchange {
+                    updates: Vec::new(),
+                    command_count: 0,
+                    update_count: 0,
+                    protocol_codec_roundtrip: true,
+                    transport_drained: diagnostics.command_queue_depth == 0
+                        && diagnostics.update_queue_depth == 0,
+                })
+            }
         }
     }
 
@@ -321,6 +363,8 @@ impl WebRuntimeHost {
             Self::Inline(_) => ServerRunnerKind::InlineFallback,
             #[cfg(target_arch = "wasm32")]
             Self::Worker(host) => host.kind(),
+            #[cfg(target_arch = "wasm32")]
+            Self::RemoteWebSocket(_) => ServerRunnerKind::RemoteWebSocket,
         }
     }
 
@@ -333,6 +377,8 @@ impl WebRuntimeHost {
             ),
             #[cfg(target_arch = "wasm32")]
             Self::Worker(host) => host.diagnostics(),
+            #[cfg(target_arch = "wasm32")]
+            Self::RemoteWebSocket(host) => host.diagnostics(),
         }
     }
 
@@ -341,6 +387,8 @@ impl WebRuntimeHost {
             Self::Inline(_) => {}
             #[cfg(target_arch = "wasm32")]
             Self::Worker(host) => host.request_shutdown(),
+            #[cfg(target_arch = "wasm32")]
+            Self::RemoteWebSocket(host) => host.request_shutdown(),
         }
     }
 }

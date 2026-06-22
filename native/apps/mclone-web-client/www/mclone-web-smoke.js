@@ -7,6 +7,7 @@ const SERVER_WORKER_URL = new URL("./mclone-integrated-server-worker.js", import
 const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.meta.url);
 const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
+const REMOTE_WS_URL = new URL(globalThis.location.href).searchParams.get("remoteWsUrl") ?? "";
 
 const ready = boot();
 globalThis.__mcloneNativeReady = ready;
@@ -358,6 +359,7 @@ async function renderCanvas() {
         : { ok: false, reason: "render compiler worker failed before second render" };
       const shutdownReport = session.shutdown();
       const sharedTopologyStress = await runSharedTopologyStress(module);
+      const remoteWebSocket = await runRemoteWebSocketSmoke(module);
       return {
         ok: Boolean(
           firstCompileRequest.ok
@@ -388,6 +390,7 @@ async function renderCanvas() {
           && report.textured
           && shutdownReport.ok
           && sharedTopologyStressActive(sharedTopologyStress)
+          && remoteWebSocketActive(remoteWebSocket)
         ),
         supported: true,
         status: report.ok ? "rendered" : "failed",
@@ -401,6 +404,7 @@ async function renderCanvas() {
         report,
         shutdownReport,
         sharedTopologyStress,
+        remoteWebSocket,
       };
     } finally {
       compiler.terminate();
@@ -410,6 +414,38 @@ async function renderCanvas() {
       ok: false,
       supported: true,
       status: "render-failed",
+      reason: stringifyError(error),
+    };
+  }
+}
+
+async function runRemoteWebSocketSmoke(module) {
+  if (!REMOTE_WS_URL) {
+    return {
+      ok: true,
+      supported: false,
+      status: "not-requested",
+    };
+  }
+  if (typeof module.mclone_web_remote_websocket_smoke_report !== "function") {
+    return {
+      ok: false,
+      supported: true,
+      status: "export-missing",
+      reason: "missing mclone_web_remote_websocket_smoke_report export",
+    };
+  }
+  try {
+    return {
+      supported: true,
+      status: "connected",
+      ...(await module.mclone_web_remote_websocket_smoke_report(REMOTE_WS_URL)),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      supported: true,
+      status: "remote-failed",
       reason: stringifyError(error),
     };
   }
@@ -613,6 +649,33 @@ function fallbackRunnerStressActive(report) {
     && Number(metrics.sharedBufferFallbackResponseFrames) === 0
     && report.shutdown
     && report.shutdown.running === false
+  );
+}
+
+function remoteWebSocketActive(report) {
+  if (!REMOTE_WS_URL) {
+    return Boolean(report?.ok && report.supported === false);
+  }
+  const metrics = report?.runnerFrameMetrics;
+  return Boolean(
+    report
+    && report.ok
+    && report.supported === true
+    && report.runnerKind === "remote-websocket"
+    && report.clientHost === "remote-dedicated"
+    && report.centerChunkLoaded
+    && report.movedChunkLoaded
+    && report.previousChunkUnloaded
+    && report.transportDrained
+    && report.protocolCodecRoundtrip
+    && Number(report.commandCount) === 2
+    && Number(report.updateCount) > 0
+    && Number(report.loadedChunkCount) === 1
+    && Number(report.runnerCommandQueueDepth) === 0
+    && Number(report.runnerUpdateQueueDepth) === 0
+    && frameMetricsActive(metrics, "websocket")
+    && Number(metrics.requestFrames) >= 3
+    && Number(metrics.responseFrames) >= 3
   );
 }
 

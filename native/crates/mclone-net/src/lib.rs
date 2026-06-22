@@ -1,8 +1,13 @@
 #![forbid(unsafe_code)]
 
 use std::collections::VecDeque;
+use std::error::Error;
+use std::fmt;
 
-use mclone_protocol::{ClientCommand, ServerUpdate};
+use mclone_protocol::{
+    ClientCommand, PROTOCOL_VERSION, ProtocolCodecError, ServerUpdate, decode_client_command,
+    decode_server_update, encode_client_command, encode_server_update,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_tcp::{
@@ -17,6 +22,288 @@ pub enum TransportKind {
     Local,
     NativeSocket,
     WebSocket,
+}
+
+const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+const WEBSOCKET_HANDSHAKE_MAGIC: &[u8] = b"MCLONE_WS";
+const WEBSOCKET_HANDSHAKE_ACCEPT: u8 = 1;
+const WEBSOCKET_HANDSHAKE_REJECT: u8 = 2;
+
+#[derive(Debug)]
+pub enum WebSocketTransportError {
+    Protocol(ProtocolCodecError),
+    InvalidHandshake(&'static str),
+    ProtocolVersionMismatch { expected: u32, received: u32 },
+    MessageTooLarge { field: &'static str, len: usize },
+    UnexpectedEof(&'static str),
+    TrailingBytes { field: &'static str, bytes: usize },
+}
+
+impl fmt::Display for WebSocketTransportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Protocol(err) => write!(f, "websocket transport protocol failed: {err}"),
+            Self::InvalidHandshake(message) => {
+                write!(f, "websocket transport handshake failed: {message}")
+            }
+            Self::ProtocolVersionMismatch { expected, received } => write!(
+                f,
+                "websocket transport protocol version mismatch: expected {expected}, received {received}"
+            ),
+            Self::MessageTooLarge { field, len } => write!(
+                f,
+                "{field} websocket message length {len} exceeds {MAX_WEBSOCKET_MESSAGE_BYTES} bytes"
+            ),
+            Self::UnexpectedEof(field) => {
+                write!(f, "{field} websocket message ended before expected data")
+            }
+            Self::TrailingBytes { field, bytes } => {
+                write!(f, "{field} websocket message had {bytes} trailing bytes")
+            }
+        }
+    }
+}
+
+impl Error for WebSocketTransportError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Protocol(err) => Some(err),
+            Self::InvalidHandshake(_)
+            | Self::ProtocolVersionMismatch { .. }
+            | Self::MessageTooLarge { .. }
+            | Self::UnexpectedEof(_)
+            | Self::TrailingBytes { .. } => None,
+        }
+    }
+}
+
+impl From<ProtocolCodecError> for WebSocketTransportError {
+    fn from(value: ProtocolCodecError) -> Self {
+        Self::Protocol(value)
+    }
+}
+
+pub type WebSocketTransportResult<T> = Result<T, WebSocketTransportError>;
+
+pub fn encode_websocket_client_handshake(
+    protocol_version: u32,
+) -> WebSocketTransportResult<Vec<u8>> {
+    let mut payload = Vec::with_capacity(WEBSOCKET_HANDSHAKE_MAGIC.len() + 4);
+    payload.extend_from_slice(WEBSOCKET_HANDSHAKE_MAGIC);
+    payload.extend_from_slice(&protocol_version.to_le_bytes());
+    checked_websocket_message_len("client handshake", payload.len())?;
+    Ok(payload)
+}
+
+pub fn encode_current_websocket_client_handshake() -> WebSocketTransportResult<Vec<u8>> {
+    encode_websocket_client_handshake(PROTOCOL_VERSION)
+}
+
+pub fn decode_websocket_client_handshake(payload: &[u8]) -> WebSocketTransportResult<u32> {
+    checked_websocket_message_len("client handshake", payload.len())?;
+    if payload.len() != WEBSOCKET_HANDSHAKE_MAGIC.len() + 4 {
+        return Err(WebSocketTransportError::InvalidHandshake(
+            "client handshake had invalid length",
+        ));
+    }
+    if !payload.starts_with(WEBSOCKET_HANDSHAKE_MAGIC) {
+        return Err(WebSocketTransportError::InvalidHandshake(
+            "client handshake had invalid magic",
+        ));
+    }
+    let version_offset = WEBSOCKET_HANDSHAKE_MAGIC.len();
+    Ok(u32::from_le_bytes(
+        payload[version_offset..version_offset + 4]
+            .try_into()
+            .expect("websocket handshake version length checked"),
+    ))
+}
+
+pub fn encode_websocket_server_handshake_accept(
+    protocol_version: u32,
+) -> WebSocketTransportResult<Vec<u8>> {
+    encode_websocket_server_handshake(
+        WEBSOCKET_HANDSHAKE_ACCEPT,
+        protocol_version,
+        protocol_version,
+    )
+}
+
+pub fn encode_websocket_server_handshake_reject(
+    expected: u32,
+    received: u32,
+) -> WebSocketTransportResult<Vec<u8>> {
+    encode_websocket_server_handshake(WEBSOCKET_HANDSHAKE_REJECT, expected, received)
+}
+
+pub fn decode_websocket_server_handshake(
+    payload: &[u8],
+    client_version: u32,
+) -> WebSocketTransportResult<()> {
+    checked_websocket_message_len("server handshake", payload.len())?;
+    if payload.len() != WEBSOCKET_HANDSHAKE_MAGIC.len() + 9 {
+        return Err(WebSocketTransportError::InvalidHandshake(
+            "server handshake had invalid length",
+        ));
+    }
+    if !payload.starts_with(WEBSOCKET_HANDSHAKE_MAGIC) {
+        return Err(WebSocketTransportError::InvalidHandshake(
+            "server handshake had invalid magic",
+        ));
+    }
+
+    let status_offset = WEBSOCKET_HANDSHAKE_MAGIC.len();
+    let expected_offset = status_offset + 1;
+    let received_offset = expected_offset + 4;
+    let status = payload[status_offset];
+    let expected = u32::from_le_bytes(
+        payload[expected_offset..expected_offset + 4]
+            .try_into()
+            .expect("server handshake expected version length checked"),
+    );
+    let received = u32::from_le_bytes(
+        payload[received_offset..received_offset + 4]
+            .try_into()
+            .expect("server handshake received version length checked"),
+    );
+
+    match status {
+        WEBSOCKET_HANDSHAKE_ACCEPT => {
+            if expected != client_version || received != client_version {
+                return Err(WebSocketTransportError::ProtocolVersionMismatch {
+                    expected,
+                    received: client_version,
+                });
+            }
+            Ok(())
+        }
+        WEBSOCKET_HANDSHAKE_REJECT => {
+            Err(WebSocketTransportError::ProtocolVersionMismatch { expected, received })
+        }
+        _ => Err(WebSocketTransportError::InvalidHandshake(
+            "server handshake had unknown status",
+        )),
+    }
+}
+
+pub fn encode_websocket_client_command(
+    command: &ClientCommand,
+) -> WebSocketTransportResult<Vec<u8>> {
+    let payload = encode_client_command(command)?;
+    checked_websocket_message_len("client command", payload.len())?;
+    Ok(payload)
+}
+
+pub fn decode_websocket_client_command(payload: &[u8]) -> WebSocketTransportResult<ClientCommand> {
+    checked_websocket_message_len("client command", payload.len())?;
+    Ok(decode_client_command(payload)?)
+}
+
+pub fn encode_websocket_server_update_batch(
+    updates: &[ServerUpdate],
+) -> WebSocketTransportResult<Vec<u8>> {
+    let mut payload = Vec::new();
+    write_websocket_u32(
+        &mut payload,
+        checked_websocket_u32_len("server update batch", updates.len())?,
+    );
+    for update in updates {
+        let frame = encode_server_update(update)?;
+        checked_websocket_message_len("server update", frame.len())?;
+        write_websocket_u32(
+            &mut payload,
+            checked_websocket_u32_len("server update", frame.len())?,
+        );
+        payload.extend_from_slice(&frame);
+    }
+    checked_websocket_message_len("server update batch", payload.len())?;
+    Ok(payload)
+}
+
+pub fn decode_websocket_server_update_batch(
+    payload: &[u8],
+) -> WebSocketTransportResult<Vec<ServerUpdate>> {
+    checked_websocket_message_len("server update batch", payload.len())?;
+    let mut cursor = 0usize;
+    let update_count = read_websocket_u32(payload, &mut cursor, "server update batch")? as usize;
+    let mut updates = Vec::with_capacity(update_count);
+    for _ in 0..update_count {
+        let frame_len = read_websocket_u32(payload, &mut cursor, "server update")? as usize;
+        if frame_len > MAX_WEBSOCKET_MESSAGE_BYTES {
+            return Err(WebSocketTransportError::MessageTooLarge {
+                field: "server update",
+                len: frame_len,
+            });
+        }
+        let end =
+            cursor
+                .checked_add(frame_len)
+                .ok_or(WebSocketTransportError::MessageTooLarge {
+                    field: "server update",
+                    len: frame_len,
+                })?;
+        let Some(frame) = payload.get(cursor..end) else {
+            return Err(WebSocketTransportError::UnexpectedEof("server update"));
+        };
+        updates.push(decode_server_update(frame)?);
+        cursor = end;
+    }
+    if cursor != payload.len() {
+        return Err(WebSocketTransportError::TrailingBytes {
+            field: "server update batch",
+            bytes: payload.len() - cursor,
+        });
+    }
+    Ok(updates)
+}
+
+fn encode_websocket_server_handshake(
+    status: u8,
+    expected: u32,
+    received: u32,
+) -> WebSocketTransportResult<Vec<u8>> {
+    let mut payload = Vec::with_capacity(WEBSOCKET_HANDSHAKE_MAGIC.len() + 9);
+    payload.extend_from_slice(WEBSOCKET_HANDSHAKE_MAGIC);
+    payload.push(status);
+    payload.extend_from_slice(&expected.to_le_bytes());
+    payload.extend_from_slice(&received.to_le_bytes());
+    checked_websocket_message_len("server handshake", payload.len())?;
+    Ok(payload)
+}
+
+fn checked_websocket_u32_len(field: &'static str, len: usize) -> WebSocketTransportResult<u32> {
+    checked_websocket_message_len(field, len)?;
+    u32::try_from(len).map_err(|_| WebSocketTransportError::MessageTooLarge { field, len })
+}
+
+fn checked_websocket_message_len(field: &'static str, len: usize) -> WebSocketTransportResult<()> {
+    if len > MAX_WEBSOCKET_MESSAGE_BYTES {
+        return Err(WebSocketTransportError::MessageTooLarge { field, len });
+    }
+    Ok(())
+}
+
+fn write_websocket_u32(payload: &mut Vec<u8>, value: u32) {
+    payload.extend_from_slice(&value.to_le_bytes());
+}
+
+fn read_websocket_u32(
+    payload: &[u8],
+    cursor: &mut usize,
+    field: &'static str,
+) -> WebSocketTransportResult<u32> {
+    let end = cursor
+        .checked_add(4)
+        .ok_or(WebSocketTransportError::UnexpectedEof(field))?;
+    let Some(bytes) = payload.get(*cursor..end) else {
+        return Err(WebSocketTransportError::UnexpectedEof(field));
+    };
+    *cursor = end;
+    Ok(u32::from_le_bytes(
+        bytes
+            .try_into()
+            .expect("websocket u32 field length checked"),
+    ))
 }
 
 #[derive(Debug, Default)]
@@ -467,6 +754,59 @@ mod tests {
         assert_eq!(transport.drain_server_updates().len(), 1);
         assert_eq!(transport.pending_client_command_count(), 0);
         assert_eq!(transport.pending_server_update_count(), 0);
+    }
+
+    #[test]
+    fn websocket_handshake_accepts_current_protocol_version() {
+        let client = encode_current_websocket_client_handshake().unwrap();
+        assert_eq!(
+            decode_websocket_client_handshake(&client).unwrap(),
+            PROTOCOL_VERSION
+        );
+
+        let server = encode_websocket_server_handshake_accept(PROTOCOL_VERSION).unwrap();
+        decode_websocket_server_handshake(&server, PROTOCOL_VERSION).unwrap();
+    }
+
+    #[test]
+    fn websocket_handshake_reports_protocol_mismatch() {
+        let mismatched = PROTOCOL_VERSION + 1;
+        let server =
+            encode_websocket_server_handshake_reject(PROTOCOL_VERSION, mismatched).unwrap();
+
+        assert!(matches!(
+            decode_websocket_server_handshake(&server, mismatched),
+            Err(WebSocketTransportError::ProtocolVersionMismatch {
+                expected: PROTOCOL_VERSION,
+                received
+            }) if received == mismatched
+        ));
+    }
+
+    #[test]
+    fn websocket_command_and_update_batch_round_trip_protocol_payloads() {
+        let command = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(-2, 4),
+            render_distance: 2,
+            chunk_tracking_radius: 2,
+        });
+        let command_payload = encode_websocket_client_command(&command).unwrap();
+        assert_eq!(
+            decode_websocket_client_command(&command_payload).unwrap(),
+            command
+        );
+
+        let updates = vec![
+            ServerUpdate::TimeUpdate { day_time: 99 },
+            ServerUpdate::ChunkUnload {
+                pos: ChunkPos::new(5, -7),
+            },
+        ];
+        let update_payload = encode_websocket_server_update_batch(&updates).unwrap();
+        assert_eq!(
+            decode_websocket_server_update_batch(&update_payload).unwrap(),
+            updates
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]

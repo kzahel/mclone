@@ -1696,6 +1696,7 @@ fn frame_transport_kind_prop(
         Some("none") => WorkerFrameTransportKind::None,
         Some("message-transfer") => WorkerFrameTransportKind::MessageTransfer,
         Some("shared-memory") => WorkerFrameTransportKind::SharedMemory,
+        Some("websocket") => WorkerFrameTransportKind::WebSocket,
         _ => fallback,
     }
 }

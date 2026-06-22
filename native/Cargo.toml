@@ -47,6 +47,7 @@ mclone-worldgen = { path = "crates/mclone-worldgen" }
 pollster = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+tungstenite = "0.28"
 wasm-bindgen = "0.2.125"
 wasm-bindgen-futures = "0.4.75"
 web-sys = "0.3.102"

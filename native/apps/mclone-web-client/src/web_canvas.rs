@@ -4,8 +4,8 @@ use web_sys::HtmlCanvasElement;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    SMOKE_INITIAL_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebIntegratedServerRunnerConfig,
-    WebRuntime,
+    SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED,
+    WebIntegratedServerRunnerConfig, WebRuntime,
 };
 use mclone_assets::PackedAssetSource;
 use mclone_client::{
@@ -127,6 +127,16 @@ pub async fn mclone_web_create_worker_chunk_render_session(
 }
 
 #[wasm_bindgen]
+pub fn mclone_web_remote_websocket_smoke_report(websocket_url: String) -> js_sys::Promise {
+    wasm_bindgen_futures::future_to_promise(async move {
+        let report = remote_websocket_smoke_report(websocket_url)
+            .await
+            .map_err(JsValue::from)?;
+        Ok(report)
+    })
+}
+
+#[wasm_bindgen]
 pub fn mclone_web_compile_generated_chunk_sections(
     asset_pack_bytes: js_sys::Uint8Array,
     center_x: i32,
@@ -144,6 +154,114 @@ pub fn mclone_web_compile_generated_chunk_sections(
     .map_err(JsValue::from)?;
     let packed = encode_textured_render_section_build_report(&report);
     Ok(js_sys::Uint8Array::from(packed.as_slice()))
+}
+
+async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue, String> {
+    let mut runtime = WebRuntime::websocket_remote(websocket_url.clone()).await?;
+    let first = runtime
+        .request_chunk_view_async(
+            SMOKE_INITIAL_CENTER,
+            SMOKE_RADIUS_CHUNKS,
+            SMOKE_RADIUS_CHUNKS,
+        )
+        .await?;
+    let center_chunk_loaded = runtime
+        .client()
+        .chunk_snapshot(SMOKE_INITIAL_CENTER)
+        .is_some();
+    let second = runtime
+        .request_chunk_view_async(SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_RADIUS_CHUNKS)
+        .await?;
+    let moved_chunk_loaded = runtime
+        .client()
+        .chunk_snapshot(SMOKE_MOVED_CENTER)
+        .is_some();
+    let previous_chunk_unloaded = runtime
+        .client()
+        .chunk_snapshot(SMOKE_INITIAL_CENTER)
+        .is_none();
+    let diagnostics = runtime.runner_diagnostics();
+    let metrics = diagnostics.runner_frame_metrics;
+    let ok = runtime.client().host() == mclone_client::ClientHost::RemoteDedicated
+        && diagnostics.kind == ServerRunnerKind::RemoteWebSocket
+        && metrics.transport_kind == mclone_server::WorkerFrameTransportKind::WebSocket
+        && metrics.request_frames >= 3
+        && metrics.response_frames >= 3
+        && center_chunk_loaded
+        && moved_chunk_loaded
+        && previous_chunk_unloaded
+        && runtime.transport_drained()
+        && runtime.protocol_codec_roundtrip()
+        && diagnostics.command_queue_depth == 0
+        && diagnostics.update_queue_depth == 0
+        && runtime.command_count() == 2
+        && runtime.update_count() > 0;
+    runtime.request_shutdown();
+
+    let object = js_sys::Object::new();
+    set_bool(&object, "ok", ok)?;
+    set_string(&object, "url", &websocket_url)?;
+    set_string(&object, "clientHost", "remote-dedicated")?;
+    set_string(&object, "runnerKind", diagnostics.kind.label())?;
+    set_bool(&object, "runnerRunning", diagnostics.running)?;
+    set_bool(&object, "centerChunkLoaded", center_chunk_loaded)?;
+    set_bool(&object, "movedChunkLoaded", moved_chunk_loaded)?;
+    set_bool(&object, "previousChunkUnloaded", previous_chunk_unloaded)?;
+    set_bool(&object, "transportDrained", runtime.transport_drained())?;
+    set_bool(
+        &object,
+        "protocolCodecRoundtrip",
+        runtime.protocol_codec_roundtrip(),
+    )?;
+    set_number(&object, "commandCount", runtime.command_count() as f64)?;
+    set_number(&object, "updateCount", runtime.update_count() as f64)?;
+    set_number(
+        &object,
+        "loadedChunkCount",
+        runtime.client().loaded_chunk_count() as f64,
+    )?;
+    set_number(
+        &object,
+        "runnerCommandQueueDepth",
+        diagnostics.command_queue_depth as f64,
+    )?;
+    set_number(
+        &object,
+        "runnerUpdateQueueDepth",
+        diagnostics.update_queue_depth as f64,
+    )?;
+    set_worker_frame_metrics(&object, "runnerFrameMetrics", metrics)?;
+    js_sys::Reflect::set(
+        &object,
+        &JsValue::from_str("first"),
+        &web_runtime_step_report_to_js(first)?,
+    )
+    .map_err(|error| format!("failed to attach first remote websocket report: {error:?}"))?;
+    js_sys::Reflect::set(
+        &object,
+        &JsValue::from_str("second"),
+        &web_runtime_step_report_to_js(second)?,
+    )
+    .map_err(|error| format!("failed to attach second remote websocket report: {error:?}"))?;
+    Ok(object.into())
+}
+
+fn web_runtime_step_report_to_js(report: super::WebRuntimeStepReport) -> Result<JsValue, String> {
+    let object = js_sys::Object::new();
+    set_number(&object, "commandCount", report.command_count as f64)?;
+    set_number(&object, "updateCount", report.update_count as f64)?;
+    set_number(
+        &object,
+        "loadedChunkCount",
+        report.loaded_chunk_count as f64,
+    )?;
+    set_bool(
+        &object,
+        "protocolCodecRoundtrip",
+        report.protocol_codec_roundtrip,
+    )?;
+    set_bool(&object, "transportDrained", report.transport_drained)?;
+    Ok(object.into())
 }
 
 #[wasm_bindgen]

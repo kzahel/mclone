@@ -27,6 +27,7 @@ pub enum ServerRunnerKind {
     InlineFallback,
     NativeThread,
     WebWorker,
+    RemoteWebSocket,
 }
 
 impl ServerRunnerKind {
@@ -35,6 +36,7 @@ impl ServerRunnerKind {
             Self::InlineFallback => "inline-fallback",
             Self::NativeThread => "native-thread",
             Self::WebWorker => "web-worker",
+            Self::RemoteWebSocket => "remote-websocket",
         }
     }
 }
@@ -44,6 +46,7 @@ pub enum WorkerFrameTransportKind {
     None,
     MessageTransfer,
     SharedMemory,
+    WebSocket,
 }
 
 impl Default for WorkerFrameTransportKind {
@@ -58,6 +61,7 @@ impl WorkerFrameTransportKind {
             Self::None => "none",
             Self::MessageTransfer => "message-transfer",
             Self::SharedMemory => "shared-memory",
+            Self::WebSocket => "websocket",
         }
     }
 }
@@ -107,6 +111,27 @@ impl WorkerFrameMetrics {
     pub const fn shared_memory() -> Self {
         Self {
             transport_kind: WorkerFrameTransportKind::SharedMemory,
+            request_frames: 0,
+            request_bytes: 0,
+            response_frames: 0,
+            response_bytes: 0,
+            max_pending_frames: 0,
+            last_request_us: 0,
+            total_request_us: 0,
+            max_request_us: 0,
+            shared_buffer_pool_hits: 0,
+            shared_buffer_pool_misses: 0,
+            shared_buffer_pool_drops: 0,
+            shared_buffer_capacity_bytes: 0,
+            max_shared_buffer_capacity_bytes: 0,
+            shared_buffer_pooled_response_frames: 0,
+            shared_buffer_fallback_response_frames: 0,
+        }
+    }
+
+    pub const fn websocket() -> Self {
+        Self {
+            transport_kind: WorkerFrameTransportKind::WebSocket,
             request_frames: 0,
             request_bytes: 0,
             response_frames: 0,

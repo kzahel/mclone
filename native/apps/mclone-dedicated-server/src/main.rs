@@ -1,9 +1,11 @@
 mod connection;
 mod dedicated_smoke;
 mod session;
+mod websocket_bridge;
 
 use std::collections::BTreeMap;
 use std::net::TcpListener;
+use std::thread;
 
 use anyhow::{Context, Result, bail};
 use mclone_protocol::PROTOCOL_VERSION;
@@ -11,6 +13,7 @@ use mclone_server::IntegratedServer;
 
 use crate::connection::{DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent};
 use crate::session::DedicatedSession;
+use crate::websocket_bridge::{WebSocketBridgeMode, run_websocket_bridge};
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:25565";
 const DEFAULT_SEED: i64 = 12345;
@@ -26,6 +29,7 @@ fn main() -> Result<()> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Cli {
     listen: String,
+    listen_ws: Option<String>,
     seed: i64,
     serve_once: bool,
     multi_client_smoke: bool,
@@ -35,6 +39,7 @@ impl Default for Cli {
     fn default() -> Self {
         Self {
             listen: DEFAULT_LISTEN_ADDR.to_owned(),
+            listen_ws: None,
             seed: DEFAULT_SEED,
             serve_once: false,
             multi_client_smoke: false,
@@ -51,6 +56,9 @@ impl Cli {
             match arg.as_str() {
                 "--listen" => {
                     cli.listen = args.next().context("--listen requires HOST:PORT")?;
+                }
+                "--listen-ws" => {
+                    cli.listen_ws = Some(args.next().context("--listen-ws requires HOST:PORT")?);
                 }
                 "--seed" => {
                     cli.seed = parse_i64_arg("--seed", args.next())?;
@@ -85,8 +93,9 @@ fn print_help() {
         "mclone-dedicated-server\n\n\
          Usage:\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--serve-once]\n\
+           mclone-dedicated-server [--listen 127.0.0.1:25565] [--listen-ws 127.0.0.1:25566] [--seed 12345]\n\
            mclone-dedicated-server --multi-client-smoke [--seed 12345]\n\n\
-         The server accepts persistent native TCP command streams from multiple clients. --serve-once is intended for loopback smokes and exits after the first connection closes."
+         The server accepts persistent native TCP command streams from multiple clients. --listen-ws enables a WebSocket bridge for browser clients. --serve-once is intended for loopback smokes and exits after the first connection closes."
     );
 }
 
@@ -94,6 +103,9 @@ fn run_server(cli: Cli) -> Result<()> {
     if cli.multi_client_smoke {
         if cli.serve_once {
             bail!("--multi-client-smoke cannot be combined with --serve-once");
+        }
+        if cli.listen_ws.is_some() {
+            bail!("--multi-client-smoke cannot be combined with --listen-ws");
         }
         if cli.listen != DEFAULT_LISTEN_ADDR {
             bail!("--multi-client-smoke binds its own ephemeral loopback listener");
@@ -116,7 +128,43 @@ fn run_server(cli: Cli) -> Result<()> {
     } else {
         ServerRunMode::Forever
     };
+    if let Some(listen_ws) = cli.listen_ws.as_deref() {
+        return run_server_with_websocket_bridge(listener, local_addr, listen_ws, cli.seed, mode);
+    }
     run_server_loop(listener, cli.seed, mode)
+}
+
+fn run_server_with_websocket_bridge(
+    listener: TcpListener,
+    upstream_addr: std::net::SocketAddr,
+    listen_ws: &str,
+    seed: i64,
+    mode: ServerRunMode,
+) -> Result<()> {
+    let ws_listener = TcpListener::bind(listen_ws)
+        .with_context(|| format!("failed to bind dedicated websocket bridge to {listen_ws}"))?;
+    let ws_addr = ws_listener
+        .local_addr()
+        .context("failed to read websocket listen addr")?;
+    println!("mclone dedicated websocket listening on ws://{ws_addr} upstream={upstream_addr}");
+
+    let server_thread = thread::Builder::new()
+        .name("mclone-dedicated-server-loop".to_owned())
+        .spawn(move || run_server_loop(listener, seed, mode))
+        .context("failed to spawn dedicated server loop for websocket bridge")?;
+    let bridge_mode = match mode {
+        ServerRunMode::Forever => WebSocketBridgeMode::Forever,
+        ServerRunMode::ServeOnce => WebSocketBridgeMode::ServeOnce,
+        #[cfg(test)]
+        ServerRunMode::UntilDisconnects(_) => WebSocketBridgeMode::ServeOnce,
+    };
+    let bridge_result = run_websocket_bridge(ws_listener, upstream_addr, bridge_mode);
+    if bridge_result.is_ok() && mode == ServerRunMode::ServeOnce {
+        server_thread
+            .join()
+            .map_err(|_| anyhow::anyhow!("dedicated server loop thread panicked"))??;
+    }
+    bridge_result
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -266,8 +314,31 @@ mod tests {
             .unwrap(),
             Cli {
                 listen: "127.0.0.1:0".to_owned(),
+                listen_ws: None,
                 seed: -7,
                 serve_once: true,
+                multi_client_smoke: false,
+            }
+        );
+    }
+
+    #[test]
+    fn cli_parses_websocket_listener() {
+        assert_eq!(
+            Cli::parse([
+                "--listen".to_owned(),
+                "127.0.0.1:0".to_owned(),
+                "--listen-ws".to_owned(),
+                "127.0.0.1:0".to_owned(),
+                "--seed".to_owned(),
+                "17".to_owned(),
+            ])
+            .unwrap(),
+            Cli {
+                listen: "127.0.0.1:0".to_owned(),
+                listen_ws: Some("127.0.0.1:0".to_owned()),
+                seed: 17,
+                serve_once: false,
                 multi_client_smoke: false,
             }
         );
@@ -284,6 +355,7 @@ mod tests {
             .unwrap(),
             Cli {
                 listen: DEFAULT_LISTEN_ADDR.to_owned(),
+                listen_ws: None,
                 seed: 99,
                 serve_once: false,
                 multi_client_smoke: true,

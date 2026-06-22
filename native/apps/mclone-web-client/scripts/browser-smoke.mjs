@@ -1,5 +1,5 @@
 import { chromium } from "@playwright/test";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
@@ -44,6 +44,8 @@ const requireCanvas = requireChunk
 const requireThreading = process.argv.includes("--require-threading")
   || (!process.argv.includes("--skip-threading")
     && process.env.MCLONE_NATIVE_WEB_REQUIRE_THREADING !== "0");
+const remoteWebSocket = process.argv.includes("--remote-websocket")
+  || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
 const DIRT_BLOCK_STATE_ID = 5;
 
 run().catch((error) => {
@@ -55,6 +57,7 @@ async function run() {
   buildWasm();
   buildBindgenBundle();
   const server = await startServer();
+  const remoteServer = remoteWebSocket ? await startNativeWebSocketServer() : null;
   let browser;
   try {
     const port = server.address().port;
@@ -237,7 +240,10 @@ async function run() {
       return;
     }
 
-    await page.goto(baseUrl, { waitUntil: "load" });
+    const smokeUrl = remoteServer
+      ? `${baseUrl}/?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
+      : baseUrl;
+    await page.goto(smokeUrl, { waitUntil: "load" });
     await page.waitForFunction(
       () => typeof globalThis.__mcloneNativeReady !== "undefined",
       undefined,
@@ -264,11 +270,14 @@ async function run() {
       requireCanvas,
       requireChunk,
       requireThreading,
+      remoteWebSocket,
+      remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
       canvasPixels,
       result,
     }, null, 2));
   } finally {
     await browser?.close();
+    await remoteServer?.stop();
     await new Promise((resolveClose) => server.close(resolveClose));
   }
 }
@@ -499,6 +508,80 @@ async function startServer() {
     server.listen(Number.isFinite(requestedPort) ? requestedPort : 0, "127.0.0.1", resolveListen);
   });
   return server;
+}
+
+function startNativeWebSocketServer() {
+  return new Promise((resolveStart, rejectStart) => {
+    const args = [
+      "run",
+      "--manifest-path",
+      "native/Cargo.toml",
+      "-p",
+      "mclone-dedicated-server",
+      "--",
+      "--listen",
+      "127.0.0.1:0",
+      "--listen-ws",
+      "127.0.0.1:0",
+      "--serve-once",
+      "--seed",
+      "12345",
+    ];
+    const child = spawn("cargo", args, {
+      cwd: repoRoot,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGTERM");
+      rejectStart(new Error(`timed out waiting for native websocket server\nstdout=${stdout}\nstderr=${stderr}`));
+    }, 60_000);
+
+    const tryResolveFromOutput = () => {
+      if (settled) return;
+      const match = stdout.match(/mclone dedicated websocket listening on (ws:\/\/\S+)/);
+      if (!match) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolveStart({
+        websocketUrl: match[1],
+        async stop() {
+          if (child.exitCode !== null || child.signalCode !== null) return;
+          child.kill("SIGTERM");
+          await new Promise((resolveExit) => child.once("exit", resolveExit));
+        },
+      });
+    };
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      tryResolveFromOutput();
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      rejectStart(error);
+    });
+    child.on("exit", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      rejectStart(new Error(
+        `native websocket server exited before announcing listener: code=${code} signal=${signal}\nstdout=${stdout}\nstderr=${stderr}`,
+      ));
+    });
+  });
 }
 
 function resolveRequestPath(pathname) {
