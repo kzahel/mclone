@@ -13,7 +13,9 @@ queue/coalescing decisions landed; browser render-worker transport is now
 target-section-aware, but the remaining browser worker lifecycle, payload
 ownership, and chunk-view scheduling policy still need to move into the shared
 Rust session shape; compile-scope diagnostics now identify full-view movement
-compiles, small targeted compiles, and the next worker/runtime-cost target.
+compiles, small targeted compiles, and the next worker/runtime-cost target;
+shared-memory render-worker ABI details are tracked in
+[`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md).
 
 ## Purpose
 
@@ -114,6 +116,12 @@ snapshots, and reuse worker-side runtime/assets" policy into a shared Rust
 engine/render-session coordinator consumed by both desktop and web. JavaScript
 should become input/event glue and worker transport plumbing, not the owner of
 render-streaming scheduling.
+
+The transport side of that same problem is now tracked explicitly in
+[`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md):
+browser render compilation should converge on a `SharedArrayBuffer`/`Atomics`
+job ABI behind the same Rust `RenderSectionCompiler` lifecycle, with transferred
+packed reports kept only as fallback/debug paths.
 
 ## Target Shape
 

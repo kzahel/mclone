@@ -148,6 +148,12 @@ helpers.
 - Browser workers are part of the target architecture. `wasm32-unknown-unknown`
   remains the browser target, but it is not permission to remove worker
   topology.
+- Hot browser worker lanes that move bulk engine data should define an explicit
+  `SharedArrayBuffer`/`Atomics` interface before becoming default app paths.
+  Transferred-message protocols are allowed as smoke/debug/fallback lanes only
+  when the tactical records the fallback and exposes transport metrics. The
+  detailed render-compiler ABI follow-up is tracked in
+  [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md).
 - Lighting jobs must remain off the client/render frame path. Native currently
   has a light-status worker; web needs an equivalent worker-backed mailbox.
 - GPU upload and presentation stay client/render-adapter owned. Workers produce

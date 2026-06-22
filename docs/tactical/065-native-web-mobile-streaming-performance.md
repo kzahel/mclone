@@ -4,7 +4,9 @@ Status: active; diagnostics, movement perf harness, background compile,
 deferred browser commands, budgeted worker-update drains, and stale-result
 tolerance landed; shared Rust compile-queue/coalescing decision landed;
 compile-scope diagnostics, all-air section mesh fast path, and
-target-section-aware browser render-worker requests landed.
+target-section-aware browser render-worker requests landed; shared-memory
+render-worker architecture is tracked in
+[`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md).
 
 ## Purpose
 
@@ -530,10 +532,11 @@ Observed local movement perf after this chunk:
   targeted compiles, which points to worker-side asset/runtime setup and fresh
   worker-view generation as the next bottleneck
 
-Current next likely step: reduce the remaining full dirty plans by splitting
-chunk-level view dirtying from section-level neighbor dirtying, and investigate
-worker-side session/asset reuse or passing actual target section snapshots so
-small targeted compiles also become fast, not just small.
+Current next likely step: implement the shared-memory render-worker plan from
+[`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
+starting with render compiler transport diagnostics and persistent worker
+asset/catalog state, then reduce the remaining full dirty plans by splitting
+chunk-level view dirtying from section-level neighbor dirtying.
 
 ## Deployment Check
 
