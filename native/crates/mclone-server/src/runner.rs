@@ -90,6 +90,20 @@ impl WorkerFrameMetrics {
         }
     }
 
+    pub const fn shared_memory() -> Self {
+        Self {
+            transport_kind: WorkerFrameTransportKind::SharedMemory,
+            request_frames: 0,
+            request_bytes: 0,
+            response_frames: 0,
+            response_bytes: 0,
+            max_pending_frames: 0,
+            last_request_us: 0,
+            total_request_us: 0,
+            max_request_us: 0,
+        }
+    }
+
     pub fn record_request(&mut self, bytes: usize) {
         self.request_frames = self.request_frames.saturating_add(1);
         self.request_bytes = self.request_bytes.saturating_add(bytes);
@@ -817,6 +831,13 @@ mod native {
             assert_eq!(metrics.last_request_us, 2);
             assert_eq!(metrics.total_request_us, 7);
             assert_eq!(metrics.max_request_us, 5);
+
+            let shared = WorkerFrameMetrics::shared_memory();
+            assert_eq!(
+                shared.transport_kind,
+                WorkerFrameTransportKind::SharedMemory
+            );
+            assert_eq!(shared.transport_kind.label(), "shared-memory");
         }
 
         #[test]

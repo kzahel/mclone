@@ -2,19 +2,28 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
-use js_sys::{Array, Object, Reflect, Uint8Array};
+use js_sys::{Array, Atomics, Int32Array, Object, Reflect, SharedArrayBuffer, Uint8Array};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
-use crate::{WasmServerJobWorkerConfig, WorkerFrameMetrics};
+use crate::{WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind};
+
+const SHARED_CONTROL_SLOTS: u32 = 4;
+const SHARED_CONTROL_BYTES: u32 = SHARED_CONTROL_SLOTS * 4;
+const SHARED_STATUS_INDEX: u32 = 0;
+const SHARED_REQUEST_BYTES_INDEX: u32 = 1;
+const SHARED_RESPONSE_BYTES_INDEX: u32 = 2;
+const SHARED_STATUS_PENDING: i32 = 1;
+const SHARED_STATUS_COMPLETE: i32 = 2;
 
 pub(crate) struct WasmJobWorker {
     worker: Worker,
     job_kind: &'static str,
     bindgen_js_url: String,
     bindgen_wasm_url: String,
+    transport_kind: WorkerFrameTransportKind,
     next_request_id: u32,
     pending_count: Rc<Cell<usize>>,
     request_start_ms_by_id: Rc<RefCell<BTreeMap<u32, f64>>>,
@@ -37,10 +46,18 @@ impl WasmJobWorker {
         let worker = Worker::new_with_options(&config.worker_url, &options)
             .map_err(|error| format!("failed to spawn {name}: {error:?}"))?;
 
+        let transport_kind = if shared_memory_transport_available() {
+            WorkerFrameTransportKind::SharedMemory
+        } else {
+            WorkerFrameTransportKind::MessageTransfer
+        };
         let pending_count = Rc::new(Cell::new(0usize));
         let request_start_ms_by_id: Rc<RefCell<BTreeMap<u32, f64>>> =
             Rc::new(RefCell::new(BTreeMap::new()));
-        let frame_metrics = Rc::new(RefCell::new(WorkerFrameMetrics::message_transfer()));
+        let frame_metrics = Rc::new(RefCell::new(match transport_kind {
+            WorkerFrameTransportKind::SharedMemory => WorkerFrameMetrics::shared_memory(),
+            _ => WorkerFrameMetrics::message_transfer(),
+        }));
         let completed_frames = Rc::new(RefCell::new(VecDeque::new()));
         let last_error = Rc::new(RefCell::new(None));
 
@@ -69,21 +86,21 @@ impl WasmJobWorker {
                     *last_error.borrow_mut() = Some(reason);
                     return;
                 }
-                let Some(frame) = reflect_get(&data, "frame") else {
-                    *last_error.borrow_mut() =
-                        Some("server job worker returned no frame".to_owned());
-                    return;
-                };
-                if !frame.is_instance_of::<Uint8Array>() {
-                    *last_error.borrow_mut() =
-                        Some("server job worker frame was not a Uint8Array".to_owned());
-                    return;
+                let frame_result =
+                    if string_prop(&data, "transportKind").as_deref() == Some("shared-memory") {
+                        shared_response_frame(&data)
+                    } else {
+                        transferred_response_frame(&data)
+                    };
+                match frame_result {
+                    Ok(frame) => {
+                        frame_metrics.borrow_mut().record_response(frame.len());
+                        completed_frames.borrow_mut().push_back(frame);
+                    }
+                    Err(error) => {
+                        *last_error.borrow_mut() = Some(error);
+                    }
                 }
-                let frame = Uint8Array::new(&frame);
-                frame_metrics
-                    .borrow_mut()
-                    .record_response(frame.byte_length() as usize);
-                completed_frames.borrow_mut().push_back(frame.to_vec());
             }) as Box<dyn FnMut(_)>)
         };
         worker.set_onmessage(Some(message_closure.as_ref().unchecked_ref()));
@@ -106,6 +123,7 @@ impl WasmJobWorker {
             job_kind,
             bindgen_js_url: config.bindgen_js_url.clone(),
             bindgen_wasm_url: config.bindgen_wasm_url.clone(),
+            transport_kind,
             next_request_id: 1,
             pending_count,
             request_start_ms_by_id,
@@ -122,8 +140,24 @@ impl WasmJobWorker {
         let request_id = self.next_request_id;
         self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
 
-        let request_bytes = frame.len();
-        let bytes = Uint8Array::from(frame.as_slice());
+        match self.transport_kind {
+            WorkerFrameTransportKind::SharedMemory => self.post_shared_frame(request_id, &frame)?,
+            _ => self.post_transferred_frame(request_id, &frame)?,
+        }
+        self.request_start_ms_by_id
+            .borrow_mut()
+            .insert(request_id, js_sys::Date::now());
+        self.pending_count
+            .set(self.pending_count.get().saturating_add(1));
+        let pending_count = self.pending_count.get();
+        let mut frame_metrics = self.frame_metrics.borrow_mut();
+        frame_metrics.record_request(frame.len());
+        frame_metrics.observe_pending_frames(pending_count);
+        Ok(())
+    }
+
+    fn post_transferred_frame(&self, request_id: u32, frame: &[u8]) -> Result<(), String> {
+        let bytes = Uint8Array::from(frame);
         let transfer = Array::new();
         transfer.push(&bytes.buffer());
         let message = Object::new();
@@ -135,16 +169,63 @@ impl WasmJobWorker {
             .map_err(|error| format!("failed to attach server job frame: {error:?}"))?;
         self.worker
             .post_message_with_transfer(&message, &transfer)
-            .map_err(|error| format!("failed to post server job frame: {error:?}"))?;
-        self.request_start_ms_by_id
-            .borrow_mut()
-            .insert(request_id, js_sys::Date::now());
-        self.pending_count
-            .set(self.pending_count.get().saturating_add(1));
-        let pending_count = self.pending_count.get();
-        let mut frame_metrics = self.frame_metrics.borrow_mut();
-        frame_metrics.record_request(request_bytes);
-        frame_metrics.observe_pending_frames(pending_count);
+            .map_err(|error| format!("failed to post server job frame: {error:?}"))
+    }
+
+    fn post_shared_frame(&self, request_id: u32, frame: &[u8]) -> Result<(), String> {
+        let request_bytes = u32::try_from(frame.len()).map_err(|_| {
+            format!(
+                "server job frame is too large for shared transport: {} bytes",
+                frame.len()
+            )
+        })?;
+        let control_buffer = SharedArrayBuffer::new(SHARED_CONTROL_BYTES);
+        let control = Int32Array::new(control_buffer.as_ref());
+        Atomics::store(&control, SHARED_STATUS_INDEX, SHARED_STATUS_PENDING).map_err(|error| {
+            format!(
+                "failed to initialize shared server job status: {}",
+                js_error_string(&error)
+            )
+        })?;
+        Atomics::store(&control, SHARED_REQUEST_BYTES_INDEX, request_bytes as i32).map_err(
+            |error| {
+                format!(
+                    "failed to initialize shared server job byte count: {}",
+                    js_error_string(&error)
+                )
+            },
+        )?;
+
+        let request_buffer = SharedArrayBuffer::new(request_bytes);
+        let request_view = Uint8Array::new(request_buffer.as_ref());
+        request_view.copy_from(frame);
+
+        let message = Object::new();
+        set_string(&message, "kind", self.job_kind)?;
+        set_string(
+            &message,
+            "transportKind",
+            WorkerFrameTransportKind::SharedMemory.label(),
+        )?;
+        set_number(&message, "requestId", f64::from(request_id))?;
+        set_string(&message, "bindgenJsUrl", &self.bindgen_js_url)?;
+        set_string(&message, "bindgenWasmUrl", &self.bindgen_wasm_url)?;
+        set_number(&message, "requestBytes", f64::from(request_bytes))?;
+        Reflect::set(
+            &message,
+            &JsValue::from_str("controlBuffer"),
+            control_buffer.as_ref(),
+        )
+        .map_err(|error| format!("failed to attach shared server job control buffer: {error:?}"))?;
+        Reflect::set(
+            &message,
+            &JsValue::from_str("requestBuffer"),
+            request_buffer.as_ref(),
+        )
+        .map_err(|error| format!("failed to attach shared server job request buffer: {error:?}"))?;
+        self.worker
+            .post_message(&message)
+            .map_err(|error| format!("failed to post shared server job frame: {error:?}"))?;
         Ok(())
     }
 
@@ -178,6 +259,7 @@ impl std::fmt::Debug for WasmJobWorker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WasmJobWorker")
             .field("job_kind", &self.job_kind)
+            .field("transport_kind", &self.transport_kind)
             .field("pending_count", &self.pending_count())
             .field("frame_metrics", &self.frame_metrics())
             .field("completed_frames", &self.completed_frames.borrow().len())
@@ -211,6 +293,75 @@ fn string_prop(value: &JsValue, name: &str) -> Option<String> {
     reflect_get(value, name).and_then(|value| value.as_string())
 }
 
+fn transferred_response_frame(value: &JsValue) -> Result<Vec<u8>, String> {
+    let Some(frame) = reflect_get(value, "frame") else {
+        return Err("server job worker returned no frame".to_owned());
+    };
+    if !frame.is_instance_of::<Uint8Array>() {
+        return Err("server job worker frame was not a Uint8Array".to_owned());
+    }
+    Ok(Uint8Array::new(&frame).to_vec())
+}
+
+fn shared_response_frame(value: &JsValue) -> Result<Vec<u8>, String> {
+    let Some(control_buffer) = reflect_get(value, "controlBuffer") else {
+        return Err("shared server job worker returned no control buffer".to_owned());
+    };
+    let control = Int32Array::new(&control_buffer);
+    let status = Atomics::load(&control, SHARED_STATUS_INDEX).map_err(|error| {
+        format!(
+            "failed to read shared server job status: {}",
+            js_error_string(&error)
+        )
+    })?;
+    if status != SHARED_STATUS_COMPLETE {
+        return Err(format!(
+            "shared server job worker completed with unexpected status {status}"
+        ));
+    }
+    let response_bytes = Atomics::load(&control, SHARED_RESPONSE_BYTES_INDEX).map_err(|error| {
+        format!(
+            "failed to read shared server job byte count: {}",
+            js_error_string(&error)
+        )
+    })?;
+    if response_bytes < 0 {
+        return Err(format!(
+            "shared server job worker returned negative byte count {response_bytes}"
+        ));
+    }
+    let Some(frame_buffer) = reflect_get(value, "frameBuffer") else {
+        return Err("shared server job worker returned no frame buffer".to_owned());
+    };
+    if !frame_buffer.is_instance_of::<SharedArrayBuffer>() {
+        return Err("shared server job worker frame buffer was not a SharedArrayBuffer".to_owned());
+    }
+    let frame =
+        Uint8Array::new_with_byte_offset_and_length(&frame_buffer, 0, response_bytes as u32);
+    Ok(frame.to_vec())
+}
+
+fn shared_memory_transport_available() -> bool {
+    let global = js_sys::global();
+    global_function_available(&global, "SharedArrayBuffer")
+        && global_object_method_available(&global, "Atomics", "load")
+        && global_object_method_available(&global, "Atomics", "store")
+        && global_object_method_available(&global, "Atomics", "notify")
+}
+
+fn global_function_available(global: &JsValue, name: &str) -> bool {
+    Reflect::get(global, &JsValue::from_str(name))
+        .ok()
+        .is_some_and(|value| value.is_function())
+}
+
+fn global_object_method_available(global: &JsValue, object_name: &str, method_name: &str) -> bool {
+    Reflect::get(global, &JsValue::from_str(object_name))
+        .ok()
+        .and_then(|object| Reflect::get(&object, &JsValue::from_str(method_name)).ok())
+        .is_some_and(|value| value.is_function())
+}
+
 fn set_number(object: &Object, name: &str, value: f64) -> Result<(), String> {
     Reflect::set(object, &JsValue::from_str(name), &JsValue::from_f64(value))
         .map_err(|error| format!("failed to set {name}: {error:?}"))?;
@@ -221,4 +372,14 @@ fn set_string(object: &Object, name: &str, value: &str) -> Result<(), String> {
     Reflect::set(object, &JsValue::from_str(name), &JsValue::from_str(value))
         .map_err(|error| format!("failed to set {name}: {error:?}"))?;
     Ok(())
+}
+
+fn js_error_string(value: &JsValue) -> String {
+    if let Some(message) = value.as_string() {
+        return message;
+    }
+    if let Some(message) = reflect_get(value, "message").and_then(|value| value.as_string()) {
+        return message;
+    }
+    format!("{value:?}")
 }

@@ -1,7 +1,8 @@
 # 062: Shared Threading Topology
 
 Status: in progress - native desktop/browser server runners, browser server
-job workers, and message-transfer frame metrics landed
+job workers, message-transfer frame metrics, and shared-memory server-job
+frames landed
 
 ## Purpose
 
@@ -370,8 +371,9 @@ Landed in the browser server-job worker slice:
 - Web render reports and smokes now expose/assert `worldgenMailboxKind` and
   `lightStatusMailboxKind` as `web-worker`, with settled worldgen/light pending
   counts. Existing render-section compilation remains worker-backed.
-- The worker transport is still message/transfer based. Shared
-  `SharedArrayBuffer`/Atomics job queues remain a follow-up optimization.
+- That slice originally used message/transfer transport. The follow-up shared
+  server-job frame slice below moves the worldgen/light job payloads onto
+  `SharedArrayBuffer` while keeping message transfer as the fallback.
 
 ### 5. Worker Queue Upgrade To Shared Memory
 
@@ -403,6 +405,23 @@ Landed in the queue-measurement slice:
 - Native tests cover metric accumulation and preserve native-thread diagnostics
   as non-message-transfer paths. This gives the next slice a regression guard
   when one path moves to shared memory and the fallback remains available.
+
+Landed in the first shared-memory server-job slice:
+
+- Browser worldgen and light-status server-job workers now prefer
+  `SharedArrayBuffer` request and response frames when `SharedArrayBuffer` and
+  the required `Atomics` operations are available in the integrated-server
+  worker.
+- The existing transferred-`Uint8Array` server-job transport remains as the
+  explicit fallback for non-isolated browsers or runtimes without shared memory.
+- `mclone-server-job-worker.js` accepts both frame shapes. The shared-memory
+  path uses an atomic control header for status and byte counts, then returns
+  the large response payload through a shared response buffer instead of a
+  transferred array buffer.
+- Web render reports and smokes now keep integrated runner command/update
+  frames labeled `message-transfer`, while asserting worldgen and light-status
+  job-frame metrics report `shared-memory` with nonzero request/response
+  counts and byte totals.
 
 ### 6. Browser Remote Transport
 
@@ -478,13 +497,17 @@ New validation should include:
    shared frame metric diagnostics, browser runner/job-worker transferred-byte
    and frame counters, web report/app exposure, web smoke assertions for active
    message-transfer paths, native metric tests, and screenshot validation.
+5. Browser/WASM shared-memory server-job frames:
+   shared request/response buffers for worldgen and light-status job workers,
+   atomic status/byte-count headers, transferred-message fallback, web smoke
+   assertions for shared-memory job metrics, and screenshot validation.
 
 ## Next Implementation Slice
 
-Implement the first shared-memory queue backend behind the measured browser
-worker frame boundary. Start with the hottest and most self-contained path:
-worldgen/light server-job request and response frames between
-`mclone-integrated-server-worker.js` and `mclone-server-job-worker.js`. Keep the
-current transferred-`Uint8Array` transport as the explicit fallback, update the
-metrics to report `shared-memory` for the upgraded path, and leave WebSocket /
-WebRTC transport for a later slice.
+Turn the shared-memory server-job frame slots into a reusable bounded queue or
+buffer pool. The next chunk should avoid allocating fresh shared buffers for
+every large worldgen/light response, add queue-capacity/backpressure metrics,
+and keep the transferred-message fallback. After that, the same measured
+transport boundary can be applied to integrated runner command/update frames or
+render-section compile worker payloads. WebSocket/WebRTC remains a later
+transport slice.
