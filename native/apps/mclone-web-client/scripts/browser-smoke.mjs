@@ -1560,11 +1560,20 @@ function assertCompileTimingDiagnostics(timing, label) {
     || Number(timing.renderCompilerWorkerCompileCount) <= 0
     || Number(timing.renderCompilerAssetPackSendCount) !== 1
     || Number(timing.renderCompilerRequestAssetPackByteLength) !== 0
+    || Number(timing.renderCompilerRequestSnapshotInputByteLength) <= 0
     || Number(timing.renderCompilerRequestByteLength) <= 0
     || Number(timing.renderCompilerTransferredRequestByteLength) !== 0
     || Number(timing.renderCompilerTransferredRequestByteCount)
       < Number(timing.renderCompilerWorkerAssetPackInitByteLength)
     || Number(timing.renderCompilerTransferredResponseByteLength) !== 0
+    || timing.renderCompilerSharedInputBufferUsed !== true
+    || Number(timing.renderCompilerSharedInputByteLength)
+      !== Number(timing.renderCompilerRequestSnapshotInputByteLength)
+    || Number(timing.renderCompilerSharedInputBufferCapacityBytes)
+      < Number(timing.renderCompilerSharedInputByteLength)
+    || Number(timing.renderCompilerSnapshotInputChunkCount) <= 0
+    || timing.renderCompilerSnapshotInputCompileUsed !== true
+    || timing.renderCompilerGeneratedViewFallbackUsed !== false
     || timing.renderCompilerSharedResultBufferUsed !== true
     || Number(timing.renderCompilerSharedResultByteLength) !== Number(timing.packedByteLength)
     || Number(timing.renderCompilerSharedResultBufferCapacityBytes) < Number(timing.packedByteLength)
@@ -1599,6 +1608,9 @@ function summarizeCompileTimings(timings) {
     renderCompilerRequestAssetPackByteLengthMax: Math.max(0, ...values.map((timing) => (
       Number(timing.renderCompilerRequestAssetPackByteLength) || 0
     ))),
+    renderCompilerRequestSnapshotInputByteLengthMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerRequestSnapshotInputByteLength) || 0
+    ))),
     renderCompilerWorkerAssetPackInitByteLengthMax: Math.max(0, ...values.map((timing) => (
       Number(timing.renderCompilerWorkerAssetPackInitByteLength) || 0
     ))),
@@ -1614,6 +1626,21 @@ function summarizeCompileTimings(timings) {
     renderCompilerTransferredResponseByteCountMax: Math.max(0, ...values.map((timing) => (
       Number(timing.renderCompilerTransferredResponseByteCount) || 0
     ))),
+    renderCompilerSharedInputByteLengthMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerSharedInputByteLength) || 0
+    ))),
+    renderCompilerSharedInputBufferCapacityBytesMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerSharedInputBufferCapacityBytes) || 0
+    ))),
+    renderCompilerSnapshotInputChunkCountMax: Math.max(0, ...values.map((timing) => (
+      Number(timing.renderCompilerSnapshotInputChunkCount) || 0
+    ))),
+    renderCompilerSnapshotInputCompileUsed: values.every((timing) => (
+      timing.renderCompilerSnapshotInputCompileUsed === true
+    )),
+    renderCompilerGeneratedViewFallbackUsed: values.some((timing) => (
+      timing.renderCompilerGeneratedViewFallbackUsed === true
+    )),
     renderCompilerSharedResultByteLengthMax: Math.max(0, ...values.map((timing) => (
       Number(timing.renderCompilerSharedResultByteLength) || 0
     ))),
@@ -1848,12 +1875,15 @@ function assertRenderCompileRequest(request, expectedCenterX, expectedCenterZ) {
     || request.requestId <= 0
     || request.centerX !== expectedCenterX
     || request.centerZ !== expectedCenterZ
-    || request.radiusChunks !== 1
-    || request.submittedCompileSectionCount <= 0
-    || request.pendingCompileJobCount <= 0
-  ) {
-    throw new Error(`Rust render compile request was invalid:\n${JSON.stringify(request, null, 2)}`);
-  }
+	    || request.radiusChunks !== 1
+	    || request.submittedCompileSectionCount <= 0
+	    || request.targetSectionCount !== request.submittedCompileSectionCount
+	    || Number(request.snapshotInputByteLength) <= 0
+	    || Number(request.snapshotInputChunkCount) <= 0
+	    || request.pendingCompileJobCount <= 0
+	  ) {
+	    throw new Error(`Rust render compile request was invalid:\n${JSON.stringify(request, null, 2)}`);
+	  }
 }
 
 function assertRenderCompilerWorkerResult(renderCompiler, request, expectedCenterX, expectedCenterZ) {
@@ -1878,14 +1908,24 @@ function assertRenderCompilerWorkerResult(renderCompiler, request, expectedCente
     || renderCompiler.persistentAssetCatalog !== true
     || Number(renderCompiler.compileCount) <= 0
     || Number(renderCompiler.workerCompileCount) <= 0
-    || Number(renderCompiler.assetPackSendCount) !== 1
-    || Number(renderCompiler.requestAssetPackByteLength) !== 0
-    || Number(renderCompiler.requestByteLength) <= 0
-    || Number(renderCompiler.transferredRequestByteLength) !== 0
-    || Number(renderCompiler.renderCompilerMetrics?.transferredRequestByteCount)
-      < Number(renderCompiler.workerAssetPackInitByteLength)
-    || Number(renderCompiler.transferredResponseByteLength) !== 0
-    || renderCompiler.sharedResultBufferUsed !== true
+	    || Number(renderCompiler.assetPackSendCount) !== 1
+	    || Number(renderCompiler.requestAssetPackByteLength) !== 0
+	    || Number(renderCompiler.requestSnapshotInputByteLength) !== Number(request.snapshotInputByteLength)
+	    || Number(renderCompiler.requestByteLength) <= 0
+	    || Number(renderCompiler.transferredRequestByteLength) !== 0
+	    || Number(renderCompiler.renderCompilerMetrics?.transferredRequestByteCount)
+	      < Number(renderCompiler.workerAssetPackInitByteLength)
+	    || Number(renderCompiler.transferredResponseByteLength) !== 0
+	    || renderCompiler.sharedInputBufferUsed !== true
+	    || Number(renderCompiler.sharedInputByteLength) !== Number(renderCompiler.requestSnapshotInputByteLength)
+	    || Number(renderCompiler.sharedInputBufferCapacityBytes) < Number(renderCompiler.sharedInputByteLength)
+	    || Number(renderCompiler.snapshotInputChunkCount) !== Number(request.snapshotInputChunkCount)
+	    || renderCompiler.snapshotInputCompileUsed !== true
+	    || renderCompiler.generatedViewFallbackUsed !== false
+	    || renderCompiler.renderCompilerMetrics?.sharedInputBufferUsed !== true
+	    || renderCompiler.renderCompilerMetrics?.snapshotInputCompileUsed !== true
+	    || renderCompiler.renderCompilerMetrics?.generatedViewFallbackUsed !== false
+	    || renderCompiler.sharedResultBufferUsed !== true
     || Number(renderCompiler.sharedResultByteLength) <= 0
     || Number(renderCompiler.sharedResultBufferCapacityBytes) < Number(renderCompiler.sharedResultByteLength)
     || Number(renderCompiler.renderCompilerMetrics?.sharedResultResponseCount) <= 0

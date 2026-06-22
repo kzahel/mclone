@@ -10,11 +10,12 @@ landed; desktop window camera view uses controller snapshots; shared
 pose-sync/correction reports landed; browser frame scheduling now has a first
 deferred-command / budgeted-drain pass; Rust-owned web compile
 queue/coalescing decisions landed; browser render-worker transport is now
-target-section-aware, but the remaining browser worker lifecycle, payload
-ownership, and chunk-view scheduling policy still need to move into the shared
-Rust session shape; compile-scope diagnostics now identify full-view movement
-compiles, small targeted compiles, and the next worker/runtime-cost target;
-shared-memory render-worker ABI details are tracked in
+target-section-aware and compiles from main-session snapshots through a
+request-scoped shared input arena, but the remaining browser worker lifecycle,
+payload ownership, and chunk-view scheduling policy still need to move into the
+shared Rust session shape; compile-scope diagnostics now identify full-view
+movement compiles, small targeted compiles, and the next dirty-planning/runtime
+cost target; shared-memory render-worker ABI details are tracked in
 [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md).
 
 ## Purpose
@@ -108,14 +109,18 @@ The first native web fix split that path:
   `RenderSectionKey` target list, and the Rust finish path treats missing
   worker result keys as stale instead of accepting an empty or partial packed
   report
+- browser render-worker requests now also carry the main Rust session's actual
+  `ChunkSnapshot` input through a request-scoped `SharedArrayBuffer`, so the
+  worker normal path compiles from submitted snapshots instead of regenerating a
+  fresh worker-local generated view
 
 This is still partly adapter-owned policy. The next high-priority refactor is
 to move the remaining "submit, poll, drain with budget, ignore stale results,
-reduce compile scope, keep target-section payloads tied to the actual section
-snapshots, and reuse worker-side runtime/assets" policy into a shared Rust
-engine/render-session coordinator consumed by both desktop and web. JavaScript
-should become input/event glue and worker transport plumbing, not the owner of
-render-streaming scheduling.
+reduce compile scope, keep target-section payloads tied to resident section
+snapshots, and reuse worker-side compiler state/assets" policy into a shared
+Rust engine/render-session coordinator consumed by both desktop and web.
+JavaScript should become input/event glue and worker transport plumbing, not
+the owner of render-streaming scheduling.
 
 The transport side of that same problem is now tracked explicitly in
 [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md):
@@ -543,6 +548,13 @@ Browser worker payload result:
 - Added shared tests proving empty/deferred prepared sync plans do not invoke a
   platform submit and ready prepared sync plans become inflight only after the
   platform submit succeeds.
+- Updated web render-worker requests to submit the same actual client
+  `ChunkSnapshot` payload shape as desktop, encode those snapshots into a
+  request-scoped shared input buffer for the browser worker, and require the
+  worker normal path to compile through
+  `compileSnapshotSectionsForTargets(...)` instead of a generated worker-local
+  view. JS still owns the worker promise lifecycle and SAB handoff, so the final
+  shared `RenderSectionCompiler` browser backend remains open.
 
 ### 3. Extract Platform-Neutral Runtime Session
 

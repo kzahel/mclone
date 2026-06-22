@@ -7,6 +7,11 @@ const RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX = 2;
 const RENDER_COMPILER_SHARED_RESULT_COMPLETE = 2;
 const RENDER_COMPILER_SHARED_RESULT_OVERFLOW = 3;
 const RENDER_COMPILER_SHARED_RESULT_FAILED = 4;
+const RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS = 4;
+const RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX = 0;
+const RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX = 1;
+const RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX = 2;
+const RENDER_COMPILER_SHARED_INPUT_READY = 2;
 
 let wasmModulePromise = null;
 let compilerSession = null;
@@ -85,29 +90,44 @@ async function handleCompile(message) {
     const radiusChunks = Number(message.radiusChunks) || 0;
     const requestAssetPackByteLength = byteLengthOf(message.assetPack);
     const requestTargetSectionsByteLength = targetSections.byteLength;
-    const hasPersistentCompiler =
+    const snapshotInput = sharedInputBytes(message);
+    const requestSnapshotInputByteLength = snapshotInput?.byteLength ?? 0;
+    const sharedInputBufferCapacityBytes = isSharedArrayBuffer(message.sharedInputBuffer)
+      ? message.sharedInputBuffer.byteLength
+      : 0;
+    const hasPersistentSnapshotCompiler =
+      compilerSession !== null
+      && snapshotInput !== null
+      && targetSections.length > 0
+      && typeof compilerSession.compileSnapshotSectionsForTargets === "function";
+    const hasPersistentGeneratedCompiler =
       compilerSession !== null
       && targetSections.length > 0
       && typeof compilerSession.compileGeneratedChunkSectionsForTargets === "function";
     const hasPersistentFullCompiler =
       compilerSession !== null
       && typeof compilerSession.compileGeneratedChunkSections === "function";
-    const hasTargetedCompiler =
+    const hasGeneratedTargetedCompiler =
       targetSections.length > 0
       && (
-        hasPersistentCompiler
+        hasPersistentGeneratedCompiler
         || typeof module.mclone_web_compile_generated_chunk_sections_for_targets === "function"
       );
-    const packed = hasPersistentCompiler
-      ? compilerSession.compileGeneratedChunkSectionsForTargets(
-          centerX,
-          centerZ,
-          radiusChunks,
+    const packed = hasPersistentSnapshotCompiler
+      ? compilerSession.compileSnapshotSectionsForTargets(
+          snapshotInput,
           targetSections,
         )
-      : hasPersistentFullCompiler
-        ? compilerSession.compileGeneratedChunkSections(centerX, centerZ, radiusChunks)
-        : hasTargetedCompiler
+      : hasPersistentGeneratedCompiler
+        ? compilerSession.compileGeneratedChunkSectionsForTargets(
+            centerX,
+            centerZ,
+            radiusChunks,
+            targetSections,
+          )
+        : hasPersistentFullCompiler
+          ? compilerSession.compileGeneratedChunkSections(centerX, centerZ, radiusChunks)
+          : hasGeneratedTargetedCompiler
           ? module.mclone_web_compile_generated_chunk_sections_for_targets(
               message.assetPack,
               centerX,
@@ -115,12 +135,12 @@ async function handleCompile(message) {
               radiusChunks,
               targetSections,
             )
-          : module.mclone_web_compile_generated_chunk_sections(
-              message.assetPack,
-              centerX,
-              centerZ,
-              radiusChunks,
-            );
+            : module.mclone_web_compile_generated_chunk_sections(
+                message.assetPack,
+                centerX,
+                centerZ,
+                radiusChunks,
+              );
     const summary = module.mclone_web_packed_compile_report_summary(packed);
     const response = writeSharedCompileResult(message, packed);
     const report = {
@@ -136,9 +156,18 @@ async function handleCompile(message) {
       persistentAssetCatalog: compilerSession !== null,
       requestAssetPackByteLength,
       requestTargetSectionsByteLength,
-      requestByteLength: requestAssetPackByteLength + requestTargetSectionsByteLength,
+      requestSnapshotInputByteLength,
+      requestByteLength: requestAssetPackByteLength
+        + requestTargetSectionsByteLength
+        + requestSnapshotInputByteLength,
       transferredRequestByteLength: requestAssetPackByteLength,
       transferredResponseByteLength: response.transferredResponseByteLength,
+      sharedInputBufferUsed: snapshotInput !== null,
+      sharedInputByteLength: requestSnapshotInputByteLength,
+      sharedInputBufferCapacityBytes,
+      snapshotInputChunkCount: Number(message.snapshotInputChunkCount) || 0,
+      snapshotInputCompileUsed: hasPersistentSnapshotCompiler,
+      generatedViewFallbackUsed: !hasPersistentSnapshotCompiler,
       sharedResultBufferUsed: response.sharedResultBufferUsed,
       sharedResultByteLength: response.sharedResultByteLength,
       sharedResultBufferCapacityBytes: response.sharedResultBufferCapacityBytes,
@@ -147,7 +176,7 @@ async function handleCompile(message) {
       centerZ,
       radiusChunks,
       targetSectionCount: Math.floor(targetSections.length / 3),
-      targetedCompileUsed: hasTargetedCompiler,
+      targetedCompileUsed: hasPersistentSnapshotCompiler || hasGeneratedTargetedCompiler,
       summary,
     };
     if (response.sharedResultBufferUsed) {
@@ -198,6 +227,41 @@ function normalizeTargetSections(value) {
     return new Int32Array(value);
   }
   return new Int32Array();
+}
+
+function sharedInputBytes(message) {
+  const buffer = message.sharedInputBuffer;
+  if (!renderCompilerSharedMemorySupported() || !isSharedArrayBuffer(buffer)) {
+    return null;
+  }
+  const control = sharedInputControl(message);
+  const controlByteLength = control instanceof Int32Array
+    ? Atomics.load(control, RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX)
+    : 0;
+  const controlStatus = control instanceof Int32Array
+    ? Atomics.load(control, RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX)
+    : RENDER_COMPILER_SHARED_INPUT_READY;
+  const byteLength = Number(message.sharedInputByteLength) || controlByteLength || 0;
+  if (
+    controlStatus !== RENDER_COMPILER_SHARED_INPUT_READY
+    || byteLength <= 0
+    || byteLength > buffer.byteLength
+  ) {
+    return null;
+  }
+  return new Uint8Array(buffer, 0, byteLength);
+}
+
+function sharedInputControl(message) {
+  const buffer = message.sharedInputControlBuffer;
+  if (
+    !renderCompilerSharedMemorySupported()
+    || !isSharedArrayBuffer(buffer)
+    || buffer.byteLength < RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS * Int32Array.BYTES_PER_ELEMENT
+  ) {
+    return null;
+  }
+  return new Int32Array(buffer);
 }
 
 function writeSharedCompileResult(message, packed) {

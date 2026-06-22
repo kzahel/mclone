@@ -18,6 +18,11 @@ const RENDER_COMPILER_SHARED_RESULT_PENDING = 1;
 const RENDER_COMPILER_SHARED_RESULT_COMPLETE = 2;
 const RENDER_COMPILER_SHARED_RESULT_OVERFLOW = 3;
 const RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY = 16 * 1024 * 1024;
+const RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS = 4;
+const RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX = 0;
+const RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX = 1;
+const RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX = 2;
+const RENDER_COMPILER_SHARED_INPUT_READY = 2;
 
 const ready = boot();
 globalThis.__mcloneNativeReady = ready;
@@ -438,6 +443,12 @@ function publicCompileRequest(request) {
     copy.targetSectionCount = Math.floor(Number(targetSections.length) / 3) || 0;
     delete copy.targetSections;
   }
+  const snapshotInputBytes = request?.snapshotInputBytes;
+  if (snapshotInputBytes) {
+    copy.snapshotInputByteLength = Number(copy.snapshotInputByteLength)
+      || byteLengthOf(snapshotInputBytes);
+    delete copy.snapshotInputBytes;
+  }
   return copy;
 }
 
@@ -603,9 +614,16 @@ class RenderSectionWorkerCompiler {
           assetPackSendCount: renderCompilerMetrics.assetPackSendCount,
           requestAssetPackByteLength: renderCompilerMetrics.requestAssetPackByteLength,
           requestTargetSectionsByteLength: renderCompilerMetrics.requestTargetSectionsByteLength,
+          requestSnapshotInputByteLength: renderCompilerMetrics.requestSnapshotInputByteLength,
           requestByteLength: renderCompilerMetrics.requestByteLength,
           transferredRequestByteLength: renderCompilerMetrics.transferredRequestByteLength,
           transferredResponseByteLength: renderCompilerMetrics.transferredResponseByteLength,
+          sharedInputBufferUsed: renderCompilerMetrics.sharedInputBufferUsed,
+          sharedInputByteLength: renderCompilerMetrics.sharedInputByteLength,
+          sharedInputBufferCapacityBytes: renderCompilerMetrics.sharedInputBufferCapacityBytes,
+          snapshotInputChunkCount: renderCompilerMetrics.snapshotInputChunkCount,
+          snapshotInputCompileUsed: renderCompilerMetrics.snapshotInputCompileUsed,
+          generatedViewFallbackUsed: renderCompilerMetrics.generatedViewFallbackUsed,
           sharedResultBufferUsed: renderCompilerMetrics.sharedResultBufferUsed,
           sharedResultByteLength: renderCompilerMetrics.sharedResultByteLength,
           sharedResultBufferCapacityBytes: renderCompilerMetrics.sharedResultBufferCapacityBytes,
@@ -669,7 +687,13 @@ class RenderSectionWorkerCompiler {
         return;
       }
       const sharedResult = createRenderCompilerSharedResultBuffer();
-      const requestMetrics = renderCompilerRequestMetrics(request.targetSections, sharedResult);
+      const sharedInput = createRenderCompilerSharedInputBuffer(request.snapshotInputBytes);
+      const requestMetrics = renderCompilerRequestMetrics(
+        request.targetSections,
+        sharedResult,
+        sharedInput,
+        request,
+      );
       this.metrics.compileCount += 1;
       this.metrics.transferredRequestByteCount += requestMetrics.transferredRequestByteLength;
       const timeout = setTimeout(() => {
@@ -677,7 +701,14 @@ class RenderSectionWorkerCompiler {
         this.pending.delete(requestId);
         reject(new Error(`timed out waiting for render compiler worker request ${requestId}`));
       }, 20_000);
-      this.pending.set(requestId, { resolve, reject, timeout, requestMetrics, sharedResult });
+      this.pending.set(requestId, {
+        resolve,
+        reject,
+        timeout,
+        requestMetrics,
+        sharedResult,
+        sharedInput,
+      });
       const message = {
         kind: "compile-render-sections",
         requestId,
@@ -687,7 +718,14 @@ class RenderSectionWorkerCompiler {
         centerZ: request.centerZ,
         radiusChunks: request.radiusChunks,
         targetSections: request.targetSections,
+        snapshotInputChunkCount: Number(request.snapshotInputChunkCount) || 0,
       };
+      if (sharedInput !== null) {
+        message.sharedInputControlBuffer = sharedInput.controlBuffer;
+        message.sharedInputBuffer = sharedInput.inputBuffer;
+        message.sharedInputByteLength = sharedInput.inputByteLength;
+        message.sharedInputBufferCapacityBytes = sharedInput.inputCapacity;
+      }
       if (sharedResult !== null) {
         message.sharedResultControlBuffer = sharedResult.controlBuffer;
         message.sharedResultResponseBuffer = sharedResult.responseBuffer;
@@ -729,6 +767,40 @@ function createRenderCompilerSharedResultBuffer() {
   Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX, 0);
   Atomics.store(control, RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX, responseCapacity);
   return { controlBuffer, control, responseBuffer, responseCapacity };
+}
+
+function createRenderCompilerSharedInputBuffer(snapshotInputBytes) {
+  if (!renderCompilerSharedMemorySupported()) {
+    return null;
+  }
+  const source = snapshotInputBytes instanceof Uint8Array
+    ? snapshotInputBytes
+    : ArrayBuffer.isView(snapshotInputBytes)
+      ? new Uint8Array(
+          snapshotInputBytes.buffer,
+          snapshotInputBytes.byteOffset,
+          snapshotInputBytes.byteLength,
+        )
+      : null;
+  if (source === null || source.byteLength <= 0) {
+    return null;
+  }
+  const controlBuffer = new SharedArrayBuffer(
+    RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS * Int32Array.BYTES_PER_ELEMENT,
+  );
+  const control = new Int32Array(controlBuffer);
+  const inputBuffer = new SharedArrayBuffer(source.byteLength);
+  new Uint8Array(inputBuffer).set(source);
+  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX, RENDER_COMPILER_SHARED_INPUT_READY);
+  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX, source.byteLength);
+  Atomics.store(control, RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX, inputBuffer.byteLength);
+  return {
+    controlBuffer,
+    control,
+    inputBuffer,
+    inputByteLength: source.byteLength,
+    inputCapacity: inputBuffer.byteLength,
+  };
 }
 
 function renderCompilerPackedResponse(workerReport, pending) {
@@ -773,14 +845,25 @@ function renderCompilerPackedResponse(workerReport, pending) {
   };
 }
 
-function renderCompilerRequestMetrics(targetSections, sharedResult) {
+function renderCompilerRequestMetrics(targetSections, sharedResult, sharedInput, request) {
   const requestAssetPackByteLength = 0;
   const requestTargetSectionsByteLength = byteLengthOfTargetSections(targetSections);
+  const requestSnapshotInputByteLength = Number(request?.snapshotInputByteLength)
+    || byteLengthOf(request?.snapshotInputBytes)
+    || sharedInput?.inputByteLength
+    || 0;
   return {
     requestAssetPackByteLength,
     requestTargetSectionsByteLength,
-    requestByteLength: requestAssetPackByteLength + requestTargetSectionsByteLength,
+    requestSnapshotInputByteLength,
+    requestByteLength: requestAssetPackByteLength
+      + requestTargetSectionsByteLength
+      + requestSnapshotInputByteLength,
     transferredRequestByteLength: 0,
+    sharedInputBufferUsed: sharedInput !== null,
+    sharedInputByteLength: sharedInput?.inputByteLength ?? 0,
+    sharedInputBufferCapacityBytes: sharedInput?.inputCapacity ?? 0,
+    snapshotInputChunkCount: Number(request?.snapshotInputChunkCount) || 0,
     sharedResultBufferUsed: sharedResult !== null,
     sharedResultBufferCapacityBytes: sharedResult?.responseCapacity ?? 0,
   };
@@ -789,6 +872,14 @@ function renderCompilerRequestMetrics(targetSections, sharedResult) {
 function renderCompilerMetricsForResponse(cumulativeMetrics, requestMetrics, workerReport, packedByteLength) {
   const sharedResultBufferUsed = Boolean(workerReport.sharedResultBufferUsed)
     || Boolean(requestMetrics.sharedResultBufferUsed && Number(workerReport.sharedResultByteLength) > 0);
+  const requestSnapshotInputByteLength = Number(requestMetrics.requestSnapshotInputByteLength)
+    || Number(workerReport.requestSnapshotInputByteLength)
+    || 0;
+  const sharedInputBufferUsed = Boolean(workerReport.sharedInputBufferUsed)
+    || Boolean(requestMetrics.sharedInputBufferUsed && requestSnapshotInputByteLength > 0);
+  const sharedInputByteLength = Number(workerReport.sharedInputByteLength)
+    || Number(requestMetrics.sharedInputByteLength)
+    || (sharedInputBufferUsed ? requestSnapshotInputByteLength : 0);
   const sharedResultByteLength = sharedResultBufferUsed
     ? Number(workerReport.sharedResultByteLength) || Number(packedByteLength) || 0
     : 0;
@@ -821,6 +912,7 @@ function renderCompilerMetricsForResponse(cumulativeMetrics, requestMetrics, wor
     requestTargetSectionsByteLength: Number(requestMetrics.requestTargetSectionsByteLength)
       || Number(workerReport.requestTargetSectionsByteLength)
       || 0,
+    requestSnapshotInputByteLength,
     requestByteLength: Number(requestMetrics.requestByteLength)
       || Number(workerReport.requestByteLength)
       || 0,
@@ -830,6 +922,16 @@ function renderCompilerMetricsForResponse(cumulativeMetrics, requestMetrics, wor
     transferredResponseByteLength,
     transferredRequestByteCount: Number(cumulativeMetrics.transferredRequestByteCount) || 0,
     transferredResponseByteCount: Number(cumulativeMetrics.transferredResponseByteCount) || 0,
+    sharedInputBufferUsed,
+    sharedInputByteLength,
+    sharedInputBufferCapacityBytes: Number(workerReport.sharedInputBufferCapacityBytes)
+      || Number(requestMetrics.sharedInputBufferCapacityBytes)
+      || 0,
+    snapshotInputChunkCount: Number(workerReport.snapshotInputChunkCount)
+      || Number(requestMetrics.snapshotInputChunkCount)
+      || 0,
+    snapshotInputCompileUsed: Boolean(workerReport.snapshotInputCompileUsed),
+    generatedViewFallbackUsed: Boolean(workerReport.generatedViewFallbackUsed),
     sharedResultBufferUsed,
     sharedResultByteLength,
     sharedResultBufferCapacityBytes: Number(workerReport.sharedResultBufferCapacityBytes)

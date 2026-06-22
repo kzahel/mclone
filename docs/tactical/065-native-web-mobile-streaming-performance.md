@@ -8,9 +8,9 @@ target-section-aware browser render-worker requests landed; shared-memory
 render-worker architecture is tracked in
 [`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md).
 Render-compiler transport diagnostics and persistent worker asset/catalog state
-landed there; the shared result arena prototype also landed. The next
-performance target is shared input snapshots / worker-side compile setup, then
-section-level dirty planning.
+landed there; the shared result arena prototype and request-scoped shared input
+snapshots also landed. The next performance target is section-level dirty
+planning and the final resident shared-worker compile lifecycle.
 
 ## Purpose
 
@@ -111,6 +111,17 @@ same full movement cases still produce `~9.7-11.6 MB` packed/shared results and
 worker-side compile/input setup and coarse dirty planning, not response
 transport.
 
+After the shared input snapshot path landed on 2026-06-22, web compile
+requests now pack the main Rust session's actual `ChunkSnapshot`s, copy them
+into a request-scoped `SharedArrayBuffer` input arena, and the persistent worker
+calls `WebRenderCompilerSession::compileSnapshotSectionsForTargets(...)`.
+Browser diagnostics now expose snapshot input byte length, input chunk count,
+shared input capacity, `snapshotInputCompileUsed`, and
+`generatedViewFallbackUsed`. This removes the normal hot-path behavior where the
+worker built a fresh `WebRuntime::local_integrated(SMOKE_SEED)` view for each
+compile. It does not yet eliminate the main-side snapshot serialization/copy,
+the worker-side wasm copy, or the packed result decode/apply path.
+
 ## Diagnosis
 
 The CPU mesh build already runs in a Web Worker. The first scheduler fixes
@@ -119,7 +130,8 @@ normal input/render frames can continue while the worker runs. The remaining
 cost is the size and shape of each compile transaction:
 
 1. Build a Rust-owned compile request for the new camera center.
-2. Send all requested section inputs to the render compiler worker.
+2. Send all requested section inputs to the render compiler worker through a
+   shared input buffer.
 3. Wait for the worker to return a packed section report.
 4. Decode the packed report in WASM.
 5. Finish the render compile result and upload changed sections to WebGPU.
@@ -545,12 +557,10 @@ Observed local movement perf after this chunk:
   targeted compiles, which points to worker-side asset/runtime setup and fresh
   worker-view generation as the next bottleneck
 
-Current next likely step: implement the shared-memory render-worker plan from
-[`066-web-shared-memory-worker-architecture.md`](066-web-shared-memory-worker-architecture.md),
-starting with the shared result arena, then pass actual target section snapshots
-instead of generating a fresh worker-side runtime view, and reduce the remaining
-full dirty plans by splitting chunk-level view dirtying from section-level
-neighbor dirtying.
+Subsequent slices moved the render compiler toward that shared-memory plan:
+persistent worker assets, shared result buffers, and shared input snapshots
+landed. The remaining follow-up is dirty-scope reduction and the final resident
+shared worker lifecycle.
 
 ## Render Compiler Transport Diagnostics Landed
 
@@ -704,11 +714,60 @@ Observed local movement perf after this chunk:
 - max movement compile frame gaps stayed low locally, around `10.3-22.0ms`
 - no shared result overflow occurred with the 16 MiB arena
 
-Current next likely step: stop treating the render worker as a generated-view
-transaction. Pass the main session's actual target/neighbor section snapshots
-through a shared input arena, compile from those inputs, and then reduce the
-remaining full `128-144` section dirty plans by splitting chunk-level view
-dirtying from section-level neighbor-boundary dirtying.
+## Shared Input Snapshot Arena Landed
+
+Implemented on 2026-06-22:
+
+- `WebChunkRenderSession` now collects the main session's actual client
+  `ChunkSnapshot`s for the compile request and passes them into
+  `mclone-render-session::submit_prepared_sync_plan(...)`, matching the desktop
+  request shape more closely.
+- The JS-facing compile request includes encoded snapshot input bytes,
+  `snapshotInputByteLength`, and `snapshotInputChunkCount`. The smoke report
+  strips the raw byte array and keeps only diagnostics.
+- `RenderSectionWorkerCompiler` in both the app and web smoke page copies those
+  bytes into a request-scoped shared input arena, publishes ready/byte/capacity
+  control words with `Atomics`, and posts only SAB handles plus target-section
+  metadata to the worker.
+- `mclone-render-compiler-worker.js` reads the shared input bytes and prefers
+  `WebRenderCompilerSession::compileSnapshotSectionsForTargets(...)` over the
+  generated-view fallback.
+- Browser smoke assertions now require `sharedInputBufferUsed: true`,
+  `snapshotInputCompileUsed: true`, `generatedViewFallbackUsed: false`, and
+  zero transferred render-compiler request/response bytes on the normal path.
+
+What this proves:
+
+- The normal browser render compiler no longer compiles from a worker-local
+  generated view; it compiles the target section list from the main session's
+  explicit snapshot set.
+- Worker request size is now visible as snapshot input bytes instead of hidden
+  inside generated worker runtime setup.
+- The remaining large movement cases are now about dirty-section scope,
+  snapshot/input serialization cost, worker mesh cost, packed result size, and
+  decode/apply/upload work.
+
+Observed local movement perf after this chunk:
+
+- all accepted compile timings used `snapshotInputCompileUsed: true` and
+  `generatedViewFallbackUsed: false`
+- snapshot input bytes were about `206-215 KB` for the radius-1 view, copied
+  through the request-scoped shared input arena with `0` transferred request
+  bytes
+- initial compile still submitted `144` sections and produced `11,310,892`
+  packed/shared result bytes, but worker round trip dropped to about `65.9ms`
+- movement compiles submitted `96` and `144` sections, produced `7,874,812`
+  and `11,623,508` packed/shared result bytes, and reported worker round trips
+  around `34.1-54.2ms`
+- total movement compile windows still spent `261.7-473.7ms`, mostly before or
+  after worker execution, so dirty planning, request preparation, packed result
+  size, decode/apply, and upload remain the next targets
+- movement compile max frame gaps stayed low locally, around `12.1-19.2ms`
+
+Current next likely step: reduce the remaining full `128-144` section dirty
+plans by splitting chunk-level view dirtying from section-level
+neighbor-boundary dirtying, then replace this request-scoped snapshot copy with
+the final resident shared worker lifecycle from tactical 066.
 
 ## Deployment Check
 

@@ -13,15 +13,19 @@ use mclone_client::{
     ClientInteractionController, ClientRuntime, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
 #[cfg(test)]
-use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, chunk_section_index};
 use mclone_core::{
-    BlockHitResult, BlockPos, BlockStateId, ChunkPos, Direction, HitResultType, Vec3d,
+    AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkRevision, ChunkStatus,
+    chunk_section_index,
+};
+use mclone_core::{
+    BlockHitResult, BlockPos, BlockStateId, ChunkPos, ChunkSnapshot, Direction, HitResultType,
+    Vec3d,
 };
 use mclone_mesh::{
     RenderSectionKey, TextureAtlasImage, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     load_textured_terrain_assets,
 };
-use mclone_protocol::EntityKind;
+use mclone_protocol::{EntityKind, ServerUpdate, decode_server_update, encode_server_update};
 use mclone_render::actor_assets::{ActorTextureImage, load_actor_texture_assets};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
@@ -51,6 +55,7 @@ const CANVAS_HEIGHT_SHIFT: u32 = 20;
 const WEB_GROUND_PROBE_DISTANCE: f64 = 0.01;
 const WEB_FRAME_UPDATE_DRAIN_BUDGET: usize = 1;
 const WEB_COMPILE_WAIT_UPDATE_DRAIN_BUDGET: usize = 1;
+const WEB_RENDER_COMPILE_INPUT_MAGIC: &[u8; 8] = b"MCWRCI1\0";
 
 #[wasm_bindgen]
 pub fn mclone_web_canvas_clear_bits(width: u32, height: u32) -> u32 {
@@ -274,6 +279,27 @@ impl WebRenderCompilerSession {
         let packed = encode_textured_render_section_build_report(&report);
         Ok(js_sys::Uint8Array::from(packed.as_slice()))
     }
+
+    #[wasm_bindgen(js_name = compileSnapshotSectionsForTargets)]
+    pub fn compile_snapshot_sections_for_targets(
+        &mut self,
+        snapshot_input_bytes: js_sys::Uint8Array,
+        target_sections: js_sys::Int32Array,
+    ) -> Result<js_sys::Uint8Array, JsValue> {
+        self.compile_count += 1;
+        let snapshots = decode_web_render_compile_input(&snapshot_input_bytes.to_vec())
+            .map_err(|error| JsValue::from_str(&error))?;
+        let target_sections = render_section_keys_from_int32_array(&target_sections)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let report = compile_snapshot_chunk_sections_with_catalog(
+            &self.mesh_assets.catalog,
+            &snapshots,
+            &target_sections,
+        )
+        .map_err(JsValue::from)?;
+        let packed = encode_textured_render_section_build_report(&report);
+        Ok(js_sys::Uint8Array::from(packed.as_slice()))
+    }
 }
 
 async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue, String> {
@@ -448,6 +474,116 @@ fn compile_generated_chunk_sections_with_catalog(
         build_client_textured_sections(runtime.client(), catalog).map_err(|error| {
             format!("failed to compile generated textured render sections: {error:#}")
         })
+    }
+}
+
+fn compile_snapshot_chunk_sections_with_catalog(
+    catalog: &TexturedMeshCatalog,
+    snapshots: &[ChunkSnapshot],
+    target_sections: &BTreeSet<RenderSectionKey>,
+) -> Result<mclone_mesh::TexturedRenderSectionBuildReport, String> {
+    build_render_sections_from_snapshots(snapshots, catalog, target_sections)
+        .map_err(|error| format!("failed to compile snapshot render sections: {error:#}"))
+}
+
+fn encode_web_render_compile_input(snapshots: &[ChunkSnapshot]) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(WEB_RENDER_COMPILE_INPUT_MAGIC);
+    write_web_compile_input_u32(&mut bytes, snapshots.len(), "snapshot count")?;
+    for snapshot in snapshots {
+        let frame = encode_server_update(&ServerUpdate::ChunkSnapshot(snapshot.clone())).map_err(
+            |error| {
+                format!(
+                    "failed to encode compile snapshot {:?}: {error}",
+                    snapshot.pos
+                )
+            },
+        )?;
+        write_web_compile_input_u32(&mut bytes, frame.len(), "snapshot frame length")?;
+        bytes.extend_from_slice(&frame);
+    }
+    Ok(bytes)
+}
+
+fn decode_web_render_compile_input(bytes: &[u8]) -> Result<Vec<ChunkSnapshot>, String> {
+    let mut reader = WebRenderCompileInputReader::new(bytes);
+    let magic = reader.read_bytes(WEB_RENDER_COMPILE_INPUT_MAGIC.len(), "magic")?;
+    if magic != WEB_RENDER_COMPILE_INPUT_MAGIC {
+        return Err("web render compile input had an invalid magic header".to_string());
+    }
+    let snapshot_count = reader.read_u32("snapshot count")? as usize;
+    let mut snapshots = Vec::with_capacity(snapshot_count);
+    for index in 0..snapshot_count {
+        let frame_len = reader.read_u32("snapshot frame length")? as usize;
+        let frame = reader.read_bytes(frame_len, "snapshot frame")?;
+        let update = decode_server_update(frame)
+            .map_err(|error| format!("failed to decode compile snapshot frame {index}: {error}"))?;
+        match update {
+            ServerUpdate::ChunkSnapshot(snapshot) => snapshots.push(snapshot),
+            _ => {
+                return Err(format!(
+                    "compile snapshot frame {index} did not contain a chunk snapshot"
+                ));
+            }
+        }
+    }
+    reader.finish()?;
+    Ok(snapshots)
+}
+
+fn write_web_compile_input_u32(
+    bytes: &mut Vec<u8>,
+    value: usize,
+    label: &str,
+) -> Result<(), String> {
+    let value = u32::try_from(value)
+        .map_err(|_| format!("web render compile input {label} {value} exceeded u32"))?;
+    bytes.extend_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+struct WebRenderCompileInputReader<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> WebRenderCompileInputReader<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    fn read_u32(&mut self, label: &str) -> Result<u32, String> {
+        let bytes = self.read_bytes(4, label)?;
+        Ok(u32::from_le_bytes(bytes.try_into().map_err(|_| {
+            format!("web render compile input {label} was not 4 bytes")
+        })?))
+    }
+
+    fn read_bytes(&mut self, len: usize, label: &str) -> Result<&'a [u8], String> {
+        let end = self
+            .offset
+            .checked_add(len)
+            .ok_or_else(|| format!("web render compile input {label} length overflowed"))?;
+        let bytes = self.bytes.get(self.offset..end).ok_or_else(|| {
+            format!(
+                "web render compile input truncated while reading {label}: need {len} bytes at offset {} from {} bytes",
+                self.offset,
+                self.bytes.len()
+            )
+        })?;
+        self.offset = end;
+        Ok(bytes)
+    }
+
+    fn finish(&self) -> Result<(), String> {
+        if self.offset == self.bytes.len() {
+            Ok(())
+        } else {
+            Err(format!(
+                "web render compile input had {} trailing bytes",
+                self.bytes.len() - self.offset
+            ))
+        }
     }
 }
 
@@ -1589,10 +1725,18 @@ impl WebChunkRenderSession {
                 .clone(),
             scope: render_plan.scope,
         };
+        let snapshots = self
+            .runtime
+            .client()
+            .chunk_snapshots()
+            .cloned()
+            .collect::<Vec<_>>();
+        let snapshot_input_chunk_count = snapshots.len();
+        let snapshot_input_bytes = encode_web_render_compile_input(&snapshots)?;
         let compile_requests = &mut self.compile_requests;
         let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
             &render_plan.sync_plan,
-            Vec::new(),
+            snapshots,
             |_sync_plan, request| {
                 let target_sections = request.target_sections.clone();
                 let info = compile_requests.begin_compile_request(context, request);
@@ -1612,6 +1756,8 @@ impl WebChunkRenderSession {
             radius_chunks,
             render_plan.scope,
             &target_sections,
+            &snapshot_input_bytes,
+            snapshot_input_chunk_count,
         )
     }
 
@@ -2198,10 +2344,18 @@ impl WebChunkRenderSession {
                 .clone(),
             scope: render_plan.scope,
         };
+        let snapshots = self
+            .runtime
+            .client()
+            .chunk_snapshots()
+            .cloned()
+            .collect::<Vec<_>>();
+        let snapshot_input_chunk_count = snapshots.len();
+        let snapshot_input_bytes = encode_web_render_compile_input(&snapshots)?;
         let compile_requests = &mut self.compile_requests;
         let submission = self.runtime.engine_mut().submit_prepared_sync_plan(
             &render_plan.sync_plan,
-            Vec::new(),
+            snapshots,
             |_sync_plan, request| {
                 let target_sections = request.target_sections.clone();
                 let info = compile_requests.begin_compile_request(context, request);
@@ -2221,6 +2375,8 @@ impl WebChunkRenderSession {
             radius_chunks,
             render_plan.scope,
             &target_sections,
+            &snapshot_input_bytes,
+            snapshot_input_chunk_count,
         )
     }
 
@@ -2502,6 +2658,8 @@ impl WebChunkRenderSession {
         radius_chunks: u32,
         scope: WebCompileScopeReport,
         target_sections: &BTreeSet<RenderSectionKey>,
+        snapshot_input_bytes: &[u8],
+        snapshot_input_chunk_count: usize,
     ) -> Result<JsValue, String> {
         let object = js_sys::Object::new();
         set_bool(&object, "ok", true)?;
@@ -2511,6 +2669,24 @@ impl WebChunkRenderSession {
         set_number(&object, "radiusChunks", f64::from(radius_chunks))?;
         write_compile_scope_report(&object, scope)?;
         write_target_sections(&object, target_sections)?;
+        let snapshot_input = js_sys::Uint8Array::from(snapshot_input_bytes);
+        js_sys::Reflect::set(
+            &object,
+            &JsValue::from_str("snapshotInputBytes"),
+            &snapshot_input,
+        )
+        .map(|_| ())
+        .map_err(|_| "failed to set render compile request snapshot input bytes".to_string())?;
+        set_number(
+            &object,
+            "snapshotInputByteLength",
+            snapshot_input_bytes.len() as f64,
+        )?;
+        set_number(
+            &object,
+            "snapshotInputChunkCount",
+            snapshot_input_chunk_count as f64,
+        )?;
         set_number(
             &object,
             "submittedCompileSectionCount",
@@ -3313,6 +3489,46 @@ fn debug_mesh_id_for_block_state(state_id: BlockStateId) -> u8 {
         0
     } else {
         u8::try_from(state_id.0).unwrap_or(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn web_render_compile_input_roundtrips_snapshots() {
+        let mut first_blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        first_blocks[chunk_section_index(1, 2, 3)] = BlockStateId(42);
+        let mut second_blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        second_blocks[chunk_section_index(4, 5, 6)] = BlockStateId(7);
+        let snapshots = vec![
+            ChunkSnapshot::from_block_state_ids(
+                ChunkPos::new(0, 0),
+                ChunkStatus::Full,
+                ChunkRevision(1),
+                0,
+                16,
+                &first_blocks,
+            ),
+            ChunkSnapshot::from_block_state_ids(
+                ChunkPos::new(1, 0),
+                ChunkStatus::Light,
+                ChunkRevision(2),
+                0,
+                16,
+                &second_blocks,
+            ),
+        ];
+
+        let bytes = encode_web_render_compile_input(&snapshots).unwrap();
+        assert!(bytes.len() > WEB_RENDER_COMPILE_INPUT_MAGIC.len());
+        let decoded = decode_web_render_compile_input(&bytes).unwrap();
+        assert_eq!(decoded, snapshots);
+
+        let mut trailing = bytes;
+        trailing.push(0);
+        assert!(decode_web_render_compile_input(&trailing).is_err());
     }
 }
 

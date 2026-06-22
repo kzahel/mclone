@@ -2,8 +2,8 @@
 
 Status: active high-priority architecture; render-section compiler transport
 diagnostics, persistent worker asset/catalog state, and shared result arena
-prototype landed. Shared input snapshots and final Rust-owned worker lifecycle
-are next.
+prototype landed; request-scoped shared input snapshots landed. Final resident
+shared arenas/rings and the Rust-owned worker lifecycle are next.
 
 ## Purpose
 
@@ -76,9 +76,14 @@ The current browser render compiler still has a proof-path transport:
   parsed once at worker init.
 - Normal compile requests now carry center/radius and `targetSections`, not
   the asset pack.
-- The worker still creates a fresh `WebRuntime::local_integrated(SMOKE_SEED)`
-  for each compile, requests a fresh generated chunk view, and compiles against
-  that worker-local view instead of the main session's actual snapshots.
+- Normal compile requests now include encoded main-session `ChunkSnapshot`
+  input bytes. The page copies those bytes into a request-scoped
+  `SharedArrayBuffer` input arena, publishes ready/byte/capacity control words,
+  and the worker compiles through
+  `WebRenderCompilerSession::compileSnapshotSectionsForTargets(...)`.
+- The generated `WebRuntime::local_integrated(SMOKE_SEED)` compiler path still
+  exists as a fallback/smoke helper, but browser smokes now fail if the normal
+  app hot path uses that generated-view fallback.
 - The worker writes the packed `TexturedRenderSectionBuildReport` into a
   `SharedArrayBuffer` result arena on the normal path; transferred
   `Uint8Array` results remain only as explicit fallback.
@@ -86,10 +91,12 @@ The current browser render compiler still has a proof-path transport:
   `to_vec()`, decodes the packed report, applies shared acceptance/cache logic,
   then uploads GPU data.
 
-Target-section-aware requests now bound the result section keys, which fixed
-the worst "worker returns the whole radius view" behavior. The result payload
-no longer travels as a multi-megabyte `postMessage` transfer, but the input
-shape and worker lifecycle are still not the target architecture.
+Target-section-aware requests now bound the result section keys, and shared
+input snapshots stop the worker from regenerating a fake view for normal
+compiles. The result payload no longer travels as a multi-megabyte
+`postMessage` transfer. The remaining gap is that both input and output are
+still request-scoped packed byte transactions with wasm copies and a JS promise
+owner, not the final Rust-owned shared worker ring/lifecycle.
 
 ## Why The Proof Path Exists
 
@@ -116,14 +123,14 @@ The render compiler gaps are concrete:
 2. Output is still one packed report.
    The normal path now stores it in a shared result buffer, but main wasm still
    copies and decodes the whole report before cache/GPU work can be applied.
-3. Worker input is not the main session's actual snapshot set.
-   The worker creates a fresh local integrated runtime for the requested
-   center/radius instead of consuming explicit target-section and neighbor
-   section inputs from the main client replica.
+3. Worker input is now the main session's actual snapshot set, but it is still
+   packed per request and copied into a request-scoped shared arena. The target
+   architecture should keep resident shared input/state where practical and
+   make section/neighbor readiness explicit.
 4. Render compile uses only a partial shared-memory ABI.
-   Result bytes use a shared arena, but target-section input still crosses as
-   JS message data and the worker still builds from generated center/radius
-   state instead of explicit main-session snapshots.
+   Result bytes and snapshot input bytes use shared arenas, but target-section
+   data still crosses as JS message data, the JS promise map still owns request
+   lifetimes, and the main wasm instance still copies/decodes packed reports.
 5. Dirty planning is still too coarse for some movement cases.
    A move can dirty `8-9` chunks and expand loaded dirty chunks to `128-144`
    vertical section keys. The shared-memory worker ABI will reduce transport
@@ -484,11 +491,14 @@ Observed local movement perf after this slice:
 - no shared result overflow occurred with the 16 MiB arena
 
 This confirms the remaining web/desktop divergence is no longer large
-`postMessage` response transfer. The remaining cost is worker-side compile and
-generated-view setup, plus coarse dirty planning that still asks for
-`128-144` sections in full movement cases.
+`postMessage` response transfer. At this point the remaining cost was
+worker-side compile and generated-view setup, plus coarse dirty planning that
+still asked for `128-144` sections in full movement cases. The next slice below
+removed generated-view setup from the normal worker path.
 
 ### 4. Shared Input Arena With Actual Snapshots
+
+Status: completed first pass.
 
 Replace worker-local view regeneration:
 
@@ -505,6 +515,52 @@ Acceptance:
 - worker cannot publish data for sections the main session did not request
 - stale/revision tests still pass
 - movement perf separates worker mesh cost from server/chunk-view generation
+
+Landed on 2026-06-22:
+
+- `WebChunkRenderSession` now collects the main session's current
+  `ChunkSnapshot`s for each compile request and submits them through the shared
+  `RenderSectionCompileRequest` path instead of passing an empty snapshot list.
+- The web compile request exposes encoded snapshot input bytes,
+  `snapshotInputByteLength`, and `snapshotInputChunkCount`.
+- App and smoke worker clients copy that snapshot input into a request-scoped
+  `SharedArrayBuffer` input arena, publish ready/byte/capacity control words
+  with `Atomics`, and send only SAB handles plus section metadata to
+  `mclone-render-compiler-worker.js`.
+- The worker reads the shared input and calls
+  `WebRenderCompilerSession::compileSnapshotSectionsForTargets(...)`. Generated
+  center/radius compilation remains available only as fallback/smoke behavior.
+- Diagnostics now include request snapshot input bytes, shared input bytes,
+  shared input capacity, snapshot input chunk count,
+  `snapshotInputCompileUsed`, and `generatedViewFallbackUsed`. Browser smokes
+  require the normal path to use shared input snapshots and reject generated
+  fallback use.
+
+Remaining gaps after this first pass:
+
+- the main wasm instance still serializes `ChunkSnapshot`s into a packed input
+  frame and JS copies that frame into the request SAB;
+- the worker wasm instance still copies the SAB-backed `Uint8Array` into wasm
+  memory before decoding;
+- target-section data is still a JS `Int32Array` message field;
+- output is still a packed build report in a request-scoped shared result
+  buffer, not section-addressed resident mesh output;
+- JS still owns the worker promise map instead of a Rust `RenderSectionCompiler`
+  backend.
+
+Observed local movement perf after this slice:
+
+- normal accepted compile timings all reported `snapshotInputCompileUsed: true`
+  and `generatedViewFallbackUsed: false`;
+- radius-1 snapshot input frames were about `206-215 KB`, used the shared input
+  arena, and transferred `0` request bytes per compile;
+- worker round trips dropped from the earlier `~0.87-0.89s` generated-view path
+  to roughly `34-66ms`;
+- large movement cases still submitted `96-144` sections and produced
+  `7.9-11.6 MB` packed/shared result buffers;
+- total movement compile windows were still roughly `262-474ms`, so the next
+  work is dirty-scope reduction plus replacing request-scoped packed input and
+  packed output with the final resident shared compiler backend.
 
 ### 5. Section-Level Dirty Planning
 
@@ -560,11 +616,15 @@ pnpm native:web:movement-perf
 Rendered browser slices still need screenshot inspection under `/tmp`.
 
 Perf assertions now require the normal render-compiler path to use
-`shared-result-buffer`. The harness should keep recording:
+`shared-result-buffer`, shared input snapshots, and no generated-view fallback.
+The harness should keep recording:
 
 - render compiler transport kind
 - asset load count
 - request/response bytes by transport
+- snapshot input byte count and input chunk count
+- shared input/result arena capacities
+- whether snapshot input compile or generated-view fallback ran
 - worker init count
 - per-section compile counts
 - overflow/fallback counts
