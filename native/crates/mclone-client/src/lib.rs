@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 mod actor;
 mod block_clip;
+pub mod block_facts;
 mod block_shapes;
 mod interaction;
 mod inventory;

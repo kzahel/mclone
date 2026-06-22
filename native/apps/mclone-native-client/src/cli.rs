@@ -98,6 +98,7 @@ pub(crate) struct HeadlessScreenshotOptions {
     pub(crate) debug_pane: bool,
     pub(crate) scripted_interaction: bool,
     pub(crate) remote_settle_ms: u64,
+    pub(crate) eye: Option<[f32; 3]>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -232,6 +233,7 @@ impl Cli {
         let mut screenshot_debug_pane = false;
         let mut screenshot_scripted_interaction = false;
         let mut screenshot_remote_settle_ms = 0;
+        let mut screenshot_eye = None;
         let mut movement_perf = false;
         let mut timedemo = false;
         let mut frame_budget_probe = false;
@@ -356,6 +358,9 @@ impl Cli {
                 "--screenshot-remote-settle-ms" => {
                     screenshot_remote_settle_ms =
                         parse_screenshot_remote_settle_ms_arg(&arg, args.next())?;
+                }
+                "--screenshot-eye" => {
+                    screenshot_eye = Some(parse_f32_vec3_arg("--screenshot-eye", args.next())?);
                 }
                 "--width" => width = Some(parse_u32_arg("--width", args.next())?),
                 "--height" => height = Some(parse_u32_arg("--height", args.next())?),
@@ -502,6 +507,7 @@ impl Cli {
                     debug_pane: screenshot_debug_pane,
                     scripted_interaction: screenshot_scripted_interaction,
                     remote_settle_ms: screenshot_remote_settle_ms,
+                    eye: screenshot_eye,
                 },
             }),
             None if movement_perf => Ok(Self::MovementPerf {
@@ -677,6 +683,29 @@ fn parse_screenshot_remote_settle_ms_arg(flag: &str, value: Option<String>) -> R
     Ok(parsed)
 }
 
+fn parse_f32_vec3_arg(flag: &str, value: Option<String>) -> Result<[f32; 3]> {
+    let raw = value.with_context(|| format!("{flag} requires x,y,z"))?;
+    let parts = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() != 3 {
+        bail!("{flag} expects x,y,z");
+    }
+    let mut values = [0.0; 3];
+    for (index, part) in parts.into_iter().enumerate() {
+        let value: f32 = part
+            .parse()
+            .with_context(|| format!("invalid {flag} component `{part}`"))?;
+        if !value.is_finite() {
+            bail!("{flag} component `{part}` must be finite");
+        }
+        values[index] = value;
+    }
+    Ok(values)
+}
+
 pub(crate) fn parse_screenshot_ui_arg(
     flag: &str,
     value: Option<String>,
@@ -703,7 +732,7 @@ fn print_help() {
            mclone-native-client [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --headless-ui /tmp/mclone-ui-title.png [--width 960] [--height 540]\n\
-           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+           mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--screenshot-ui none|title|pause|options-title|options-pause] [--screenshot-debug-pane true|false] [--screenshot-scripted-interaction true|false] [--screenshot-remote-settle-ms 0] [--screenshot-eye x,y,z] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk /tmp/mclone-native-chunk.png [--width 640] [--height 480] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --headless-chunk-scenarios /tmp/mclone-native-camera [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --movement-perf [--width 1280] [--height 720] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 2] [--movement-steps 12] [--path-radius 4] [--section-occlusion true|false] [--fullbright true|false]\n\n\

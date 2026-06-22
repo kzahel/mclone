@@ -16,6 +16,7 @@ use mclone_render::chunk::{
 use mclone_render::entity::{ActorDrawResources, ActorInstance};
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer};
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
+use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_ui::{GuiScale, Point};
@@ -33,6 +34,7 @@ use crate::frame_pacing::{
     FramePacing, FramePacingMode, FramePacingUiState, FrameTimingStats, RedrawSchedule, elapsed_ms,
     next_capped_redraw_deadline, redraw_schedule,
 };
+use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, NativeUi, NativeUiAction};
 use crate::{MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE};
@@ -133,9 +135,11 @@ pub(crate) fn render_full_frame(
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
     actors: &mut ActorDrawResources,
+    screen_effects: &mut ScreenEffectsRenderer,
     gui: &mut GuiRenderer,
     camera: ChunkCamera,
     actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
     sky_clear_color: wgpu::Color,
     time_of_day: f32,
     sun_angle: f32,
@@ -189,6 +193,15 @@ pub(crate) fn render_full_frame(
             render_options,
             actor_instances,
         )?;
+        if let Some(overlay) = underwater_overlay {
+            screen_effects.render_underwater(
+                frame.device,
+                frame.queue,
+                frame.encoder,
+                frame.target,
+                overlay,
+            );
+        }
     } else {
         render_stats.drawn_section_count = 0;
         render_stats.drawn_face_count = 0;
@@ -273,6 +286,7 @@ struct ChunkApp {
     sky: Option<SkyRenderer>,
     draw: Option<TexturedSectionDrawResources>,
     actors: Option<ActorDrawResources>,
+    screen_effects: Option<ScreenEffectsRenderer>,
     gui: Option<GuiRenderer>,
     mouse_locked: bool,
     mouse_lock_requested: bool,
@@ -307,6 +321,7 @@ impl ChunkApp {
             sky: None,
             draw: None,
             actors: None,
+            screen_effects: None,
             gui: None,
             mouse_locked: false,
             mouse_lock_requested: false,
@@ -691,6 +706,15 @@ impl ChunkApp {
         self.camera.frame_state(&self.interaction)
     }
 
+    fn underwater_overlay(&self, camera_view: WindowCameraView) -> Option<UnderwaterOverlay> {
+        self.runtime.camera_inside_water(camera_view.eye).then(|| {
+            UnderwaterOverlay::vanilla_from_native_camera(
+                camera_view.snapshot.yaw_radians as f32,
+                camera_view.snapshot.pitch_radians as f32,
+            )
+        })
+    }
+
     fn commit_player_pose_change(&mut self) -> Result<bool> {
         sync_spectator_from_camera(&mut self.spectator, &self.camera);
         let server_changed = self.sync_server_player_pose()?;
@@ -1015,6 +1039,27 @@ impl ApplicationHandler for ChunkApp {
             }
         };
         let gui = GuiRenderer::new(&surface.device, surface.config.format);
+        let asset_source = match load_asset_source() {
+            Ok(source) => source,
+            Err(err) => {
+                log::error!("failed to load assets for screen effects: {err:#}");
+                event_loop.exit();
+                return;
+            }
+        };
+        let screen_effects = match ScreenEffectsRenderer::new(
+            &surface.device,
+            &surface.queue,
+            surface.config.format,
+            &asset_source,
+        ) {
+            Ok(screen_effects) => screen_effects,
+            Err(err) => {
+                log::error!("failed to initialize screen effects renderer: {err:#}");
+                event_loop.exit();
+                return;
+            }
+        };
         self.ui.set_scale(GuiScale::from_pixels(
             surface.config.width,
             surface.config.height,
@@ -1052,6 +1097,7 @@ impl ApplicationHandler for ChunkApp {
         self.sky = Some(sky);
         self.draw = Some(draw);
         self.actors = Some(actors);
+        self.screen_effects = Some(screen_effects);
         self.gui = Some(gui);
         self.surface = Some(surface);
         self.window = Some(window);
@@ -1289,6 +1335,7 @@ impl ApplicationHandler for ChunkApp {
                 let time_of_day = self.runtime.time_of_day();
                 let sun_angle = self.runtime.sun_angle();
                 let render_options = self.effective_render_options();
+                let underwater_overlay = self.underwater_overlay(camera_view);
                 let frame_pacing = self.frame_pacing.ui_state();
                 let actor_instances = self.interpolated_actor_instances();
                 let debug_stats = self
@@ -1306,6 +1353,7 @@ impl ApplicationHandler for ChunkApp {
                         Some(sky),
                         Some(draw),
                         Some(actors),
+                        Some(screen_effects),
                         Some(gui),
                     ) = (
                         &mut self.surface,
@@ -1313,6 +1361,7 @@ impl ApplicationHandler for ChunkApp {
                         &self.sky,
                         &mut self.draw,
                         &mut self.actors,
+                        &mut self.screen_effects,
                         &mut self.gui,
                     )
                     else {
@@ -1327,9 +1376,11 @@ impl ApplicationHandler for ChunkApp {
                             sky,
                             draw,
                             actors,
+                            screen_effects,
                             gui,
                             camera,
                             &actor_instances,
+                            underwater_overlay,
                             sky_clear_color,
                             time_of_day,
                             sun_angle,

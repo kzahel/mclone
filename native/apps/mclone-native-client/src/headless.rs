@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use glam::Vec3;
 use mclone_client::{
     ActorInterpolationState, ClientInteractionController, LOCAL_PLAYER_STANDING_EYE_HEIGHT,
 };
@@ -18,6 +19,7 @@ use mclone_render::headless::{
     HEADLESS_FORMAT, HeadlessChunkOptions, HeadlessFrameOptions, write_headless_frame_png,
     write_headless_textured_sections_png_with_options,
 };
+use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_ui::GuiScale;
 
@@ -28,7 +30,7 @@ use crate::app::{
 use crate::camera::SpectatorCamera;
 use crate::cli::{HeadlessScreenshotOptions, SceneOptions};
 use crate::frame_pacing::{FramePacingDebugStats, FramePacingUiState, FrameTimingStats};
-use crate::render_cache::SceneTexturedSections;
+use crate::render_cache::{SceneTexturedSections, load_asset_source};
 use crate::scene_runtime::{WindowSceneRuntime, poll_window_runtime_until_idle};
 use crate::ui::{DebugPaneStats, NativeUi};
 
@@ -47,6 +49,7 @@ pub(crate) struct HeadlessScreenshotReport {
     pub(crate) entity_count: usize,
     pub(crate) actor_count: usize,
     pub(crate) drawn_actor_count: usize,
+    pub(crate) underwater: bool,
 }
 pub(crate) fn write_headless_chunk_scenarios(
     directory: &Path,
@@ -94,6 +97,9 @@ pub(crate) fn run_headless_screenshot(
         apply_scripted_interaction(&mut runtime, &mut spectator, initial_player_position)?;
     }
     frame_first_actor_for_screenshot(&runtime, &mut spectator);
+    if let Some(eye) = options.eye {
+        spectator.position = Vec3::from_array(eye);
+    }
     let section_update = runtime.sync_all_render_sections(spectator.position)?;
     let sections = runtime.cached_sections();
     if sections.is_empty() {
@@ -114,6 +120,10 @@ pub(crate) fn run_headless_screenshot(
     let debug_pane = options.debug_pane;
     let render_options = options.render_options;
     let camera = spectator.camera(runtime.render_distance);
+    let underwater_overlay = runtime
+        .camera_inside_water(spectator.position)
+        .then(|| UnderwaterOverlay::vanilla_from_native_camera(spectator.yaw, spectator.pitch));
+    let underwater = underwater_overlay.is_some();
     let sky_clear_color = runtime.sky_clear_color();
     let time_of_day = runtime.time_of_day();
     let sun_angle = runtime.sun_angle();
@@ -155,6 +165,13 @@ pub(crate) fn run_headless_screenshot(
                 HEADLESS_FORMAT,
                 runtime.actor_textures.atlas.as_upload(),
             )?;
+            let asset_source = load_asset_source()?;
+            let mut screen_effects = ScreenEffectsRenderer::new(
+                frame.device,
+                frame.queue,
+                HEADLESS_FORMAT,
+                &asset_source,
+            )?;
             let mut gui = GuiRenderer::new(frame.device, HEADLESS_FORMAT);
 
             render_stats.section_count = draw.section_count();
@@ -181,9 +198,11 @@ pub(crate) fn run_headless_screenshot(
                 &sky,
                 &mut draw,
                 &mut actors,
+                &mut screen_effects,
                 &mut gui,
                 camera,
                 &actor_instances,
+                underwater_overlay,
                 sky_clear_color,
                 time_of_day,
                 sun_angle,
@@ -210,6 +229,7 @@ pub(crate) fn run_headless_screenshot(
         entity_count: runtime.client().entity_count(),
         actor_count: summary.actor_count,
         drawn_actor_count: summary.drawn_actor_count,
+        underwater,
     })
 }
 

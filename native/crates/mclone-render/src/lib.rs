@@ -8,6 +8,7 @@ pub mod chunk;
 pub mod entity;
 pub mod gui;
 pub mod light_texture;
+pub mod screen_effect;
 pub mod sky;
 pub mod sky_render;
 pub mod target;

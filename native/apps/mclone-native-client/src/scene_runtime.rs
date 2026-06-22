@@ -3,7 +3,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
-use mclone_client::{ClientHost, ClientRuntime};
+use mclone_client::{
+    ClientHost, ClientRuntime,
+    block_facts::{BlockFluidKind, block_fluid_height, block_fluid_kind},
+};
 use mclone_core::{
     AIR_BLOCK_STATE_ID, ChunkPos, ChunkSnapshot, SECTION_HEIGHT, block_to_section_coord,
     chunk_middle_block_coord, local_block_coord, local_section_block_coord,
@@ -820,6 +823,13 @@ impl WindowSceneRuntime {
         self.mesh_assets.catalog.occludes(state_id)
     }
 
+    pub(crate) fn camera_inside_water(&self, position: Vec3) -> bool {
+        let Some(state_id) = self.block_state_at_position(position) else {
+            return false;
+        };
+        camera_position_inside_water_block(position.y, position.y.floor() as i32, state_id)
+    }
+
     pub(crate) fn highest_non_air_block_y_at_world(
         &self,
         world_x: i32,
@@ -1168,6 +1178,20 @@ fn has_horizontal_neighbor_snapshots(client: &ClientRuntime, pos: ChunkPos) -> b
     .all(|neighbor| client.chunk_snapshot(neighbor).is_some())
 }
 
+fn camera_position_inside_water_block(
+    position_y: f32,
+    block_y: i32,
+    state_id: mclone_core::BlockStateId,
+) -> bool {
+    if !position_y.is_finite() || block_fluid_kind(state_id) != BlockFluidKind::Water {
+        return false;
+    }
+    let Some(fluid_height) = block_fluid_height(state_id) else {
+        return false;
+    };
+    position_y < block_y as f32 + fluid_height
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1181,6 +1205,19 @@ mod tests {
         textured_section_visibility_stats_with_options_and_ready_sections,
     };
     use mclone_render_session::render_dirty_section_keys_for_block_update;
+
+    #[test]
+    fn camera_water_detection_uses_fluid_height_boundary() {
+        let water = mclone_client::block_facts::WATER_BLOCK_STATE_ID;
+        let lava = mclone_client::block_facts::LAVA_BLOCK_STATE_ID;
+        let air = AIR_BLOCK_STATE_ID;
+
+        assert!(camera_position_inside_water_block(62.999, 62, water));
+        assert!(!camera_position_inside_water_block(63.0, 62, water));
+        assert!(!camera_position_inside_water_block(62.5, 62, lava));
+        assert!(!camera_position_inside_water_block(62.5, 62, air));
+        assert!(!camera_position_inside_water_block(f32::NAN, 62, water));
+    }
 
     #[test]
     fn snapshot_block_state_lookup_reads_loaded_sections_and_omitted_air() {

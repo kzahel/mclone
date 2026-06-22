@@ -173,7 +173,7 @@ fn main() -> Result<()> {
         Cli::HeadlessScreenshot { options } => {
             let report = run_headless_screenshot(&options)?;
             println!(
-                "headless full-frame screenshot saved to {} ({}x{}, {} bytes, {} sections, {} drawn sections, {} GUI commands, {} remote players, {} entities, {} actors, {} drawn actors)",
+                "headless full-frame screenshot saved to {} ({}x{}, {} bytes, {} sections, {} drawn sections, {} GUI commands, {} remote players, {} entities, {} actors, {} drawn actors, underwater={})",
                 report.path.display(),
                 report.width,
                 report.height,
@@ -184,7 +184,8 @@ fn main() -> Result<()> {
                 report.remote_player_count,
                 report.entity_count,
                 report.actor_count,
-                report.drawn_actor_count
+                report.drawn_actor_count,
+                report.underwater
             );
             Ok(())
         }
@@ -365,6 +366,8 @@ mod tests {
             "true".to_owned(),
             "--screenshot-remote-settle-ms".to_owned(),
             "750".to_owned(),
+            "--screenshot-eye".to_owned(),
+            "1.5,62.25,-3".to_owned(),
             "--force-fullbright".to_owned(),
             "--remote-addr".to_owned(),
             "127.0.0.1:25565".to_owned(),
@@ -390,6 +393,7 @@ mod tests {
                     debug_pane: true,
                     scripted_interaction: true,
                     remote_settle_ms: 750,
+                    eye: Some([1.5, 62.25, -3.0]),
                 },
             }
         );

@@ -15,6 +15,7 @@ use mclone_render::headless::{
     HeadlessFrameLoopOptions, HeadlessTimedemoOptions, run_headless_frame_loop,
     run_headless_textured_sections_timedemo,
 };
+use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::RenderFrameContext;
 use mclone_ui::GuiScale;
@@ -31,6 +32,7 @@ use crate::cli::{
     TimedemoOptions,
 };
 use crate::frame_pacing::{FramePacingUiState, elapsed_ms};
+use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{
     WindowSceneRuntime, build_scene_textured_sections, chunk_tracking_radius_for_render_distance,
     poll_window_runtime_until_idle, square_count,
@@ -505,6 +507,7 @@ struct FrameBudgetProbeState {
     sky: SkyRenderer,
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
+    screen_effects: ScreenEffectsRenderer,
     gui: GuiRenderer,
     ui: NativeUi,
     render_stats: RenderStreamStats,
@@ -1276,6 +1279,8 @@ pub(crate) fn run_frame_budget_probe(
                 format,
                 runtime.actor_textures.atlas.as_upload(),
             )?;
+            let asset_source = load_asset_source()?;
+            let screen_effects = ScreenEffectsRenderer::new(device, queue, format, &asset_source)?;
             let gui = GuiRenderer::new(device, format);
             let mut render_stats = RenderStreamStats {
                 section_count: draw.section_count(),
@@ -1294,6 +1299,7 @@ pub(crate) fn run_frame_budget_probe(
                 sky,
                 draw,
                 actors,
+                screen_effects,
                 gui,
                 ui,
                 render_stats,
@@ -1359,6 +1365,16 @@ pub(crate) fn run_frame_budget_probe(
             }
 
             let camera = spectator.camera(state.runtime.render_distance);
+            let underwater_overlay =
+                state
+                    .runtime
+                    .camera_inside_water(spectator.position)
+                    .then(|| {
+                        UnderwaterOverlay::vanilla_from_native_camera(
+                            spectator.yaw,
+                            spectator.pitch,
+                        )
+                    });
             let sky_clear_color = state.runtime.sky_clear_color();
             let time_of_day = state.runtime.time_of_day();
             let sun_angle = state.runtime.sun_angle();
@@ -1385,9 +1401,11 @@ pub(crate) fn run_frame_budget_probe(
                 &state.sky,
                 &mut state.draw,
                 &mut state.actors,
+                &mut state.screen_effects,
                 &mut state.gui,
                 camera,
                 &actor_instances,
+                underwater_overlay,
                 sky_clear_color,
                 time_of_day,
                 sun_angle,

@@ -1,6 +1,7 @@
 use mclone_core::{Aabb, BlockHitResult, BlockPos, BlockStateId, Vec3d};
 
 use crate::block_clip::clip_aabb;
+use crate::block_facts::{is_fluid, terrain_id};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ShapeUse {
@@ -18,29 +19,6 @@ enum OffsetKind {
 struct LocalShape {
     bounds: Aabb,
     offset: OffsetKind,
-}
-
-/// Current generated terrain ids are identity-mapped to `BlockStateId`.
-/// Keep this table narrow until client gameplay consumes the full block-state
-/// registry instead of the terrain-MVP raw id lane.
-mod terrain_id {
-    pub(super) const AIR: u32 = 0;
-    pub(super) const WATER: u32 = 2;
-    pub(super) const SNOW: u32 = 8;
-    pub(super) const LAVA: u32 = 9;
-    pub(super) const GRASS: u32 = 43;
-    pub(super) const DANDELION: u32 = 44;
-    pub(super) const POPPY: u32 = 45;
-    pub(super) const FERN: u32 = 50;
-    pub(super) const DEAD_BUSH: u32 = 51;
-    pub(super) const LARGE_FERN_LOWER: u32 = 68;
-    pub(super) const LARGE_FERN_UPPER: u32 = 69;
-    pub(super) const GLOW_LICHEN: u32 = 70;
-    pub(super) const CAVE_AIR: u32 = 71;
-    pub(super) const WATER_LEVEL_1: u32 = 72;
-    pub(super) const WATER_LEVEL_8: u32 = 79;
-    pub(super) const LAVA_LEVEL_1: u32 = 80;
-    pub(super) const LAVA_LEVEL_8: u32 = 87;
 }
 
 pub(crate) fn block_collision_aabb(state: BlockStateId, pos: BlockPos) -> Option<Aabb> {
@@ -67,7 +45,7 @@ fn shape_for(state: BlockStateId, use_case: ShapeUse) -> Option<LocalShape> {
 fn outline_shape(state: BlockStateId) -> Option<LocalShape> {
     match state.0 {
         terrain_id::AIR | terrain_id::CAVE_AIR => None,
-        id if is_fluid(id) => None,
+        id if is_fluid(BlockStateId(id)) => None,
         terrain_id::SNOW => Some(local_box(0.0, 0.0, 0.0, 1.0, 2.0 / 16.0, 1.0)),
         terrain_id::GRASS | terrain_id::FERN | terrain_id::DEAD_BUSH => Some(local_box(
             2.0 / 16.0,
@@ -106,7 +84,7 @@ fn collision_shape(state: BlockStateId) -> Option<LocalShape> {
         | terrain_id::LARGE_FERN_LOWER
         | terrain_id::LARGE_FERN_UPPER
         | terrain_id::GLOW_LICHEN => None,
-        id if is_fluid(id) => None,
+        id if is_fluid(BlockStateId(id)) => None,
         _ => Some(full_block()),
     }
 }
@@ -120,13 +98,6 @@ fn local_box(min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: 
 
 fn full_block() -> LocalShape {
     local_box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
-}
-
-fn is_fluid(id: u32) -> bool {
-    id == terrain_id::WATER
-        || id == terrain_id::LAVA
-        || (terrain_id::WATER_LEVEL_1..=terrain_id::WATER_LEVEL_8).contains(&id)
-        || (terrain_id::LAVA_LEVEL_1..=terrain_id::LAVA_LEVEL_8).contains(&id)
 }
 
 impl LocalShape {
