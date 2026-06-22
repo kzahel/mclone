@@ -49,6 +49,7 @@
     "native:movement-frame:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client -- --movement-frame-probe --frame-budget-frames 240 --target-hz 120",
     "native:perf:smoke": "pnpm native:worldgen:smoke && pnpm native:movement:smoke && pnpm native:timedemo:smoke",
     "native:web:build": "cargo build --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown",
+    "native:web:serve": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --serve --app-loop",
     "native:web:smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs",
     "native:web:thread-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --require-threading",
     "native:web:remote-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --remote-websocket",

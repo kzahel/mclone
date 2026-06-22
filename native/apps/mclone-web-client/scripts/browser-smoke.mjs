@@ -32,6 +32,8 @@ const bindgenOutDir = join(
 );
 const appLoop = process.argv.includes("--app-loop")
   || process.env.MCLONE_NATIVE_WEB_APP_LOOP === "1";
+const serveOnly = process.argv.includes("--serve")
+  || process.env.MCLONE_NATIVE_WEB_SERVE === "1";
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
   ?? (appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
 const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
@@ -62,6 +64,10 @@ async function run() {
   try {
     const port = server.address().port;
     const baseUrl = `http://127.0.0.1:${port}`;
+    if (serveOnly) {
+      await serveUntilStopped(baseUrl, remoteServer);
+      return;
+    }
     browser = await chromium.launch({
       channel: process.env.PLAYWRIGHT_CHROME_CHANNEL ?? "chrome",
       headless: process.env.HEADED === "1" ? false : true,
@@ -280,6 +286,38 @@ async function run() {
     await remoteServer?.stop();
     await new Promise((resolveClose) => server.close(resolveClose));
   }
+}
+
+async function serveUntilStopped(baseUrl, remoteServer) {
+  const appUrl = `${baseUrl}/app.html`;
+  const smokeUrl = remoteServer
+    ? `${baseUrl}/?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
+    : baseUrl;
+
+  console.log("mclone native web serving");
+  console.log(`  app:   ${appUrl}`);
+  console.log(`  smoke: ${smokeUrl}`);
+  if (remoteServer) {
+    console.log(`  remote websocket: ${remoteServer.websocketUrl}`);
+  }
+  console.log("Press Ctrl-C to stop.");
+
+  await waitForStopSignal();
+}
+
+function waitForStopSignal() {
+  return new Promise((resolveSignal) => {
+    const signals = ["SIGINT", "SIGTERM"];
+    const stop = (signal) => {
+      for (const registeredSignal of signals) {
+        process.off(registeredSignal, stop);
+      }
+      resolveSignal(signal);
+    };
+    for (const signal of signals) {
+      process.once(signal, stop);
+    }
+  });
 }
 
 async function captureTargetPreviewProbe(page) {
