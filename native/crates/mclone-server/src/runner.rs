@@ -39,6 +39,78 @@ impl ServerRunnerKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkerFrameTransportKind {
+    None,
+    MessageTransfer,
+    SharedMemory,
+}
+
+impl Default for WorkerFrameTransportKind {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+impl WorkerFrameTransportKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::MessageTransfer => "message-transfer",
+            Self::SharedMemory => "shared-memory",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WorkerFrameMetrics {
+    pub transport_kind: WorkerFrameTransportKind,
+    pub request_frames: usize,
+    pub request_bytes: usize,
+    pub response_frames: usize,
+    pub response_bytes: usize,
+    pub max_pending_frames: usize,
+    pub last_request_us: u128,
+    pub total_request_us: u128,
+    pub max_request_us: u128,
+}
+
+impl WorkerFrameMetrics {
+    pub const fn message_transfer() -> Self {
+        Self {
+            transport_kind: WorkerFrameTransportKind::MessageTransfer,
+            request_frames: 0,
+            request_bytes: 0,
+            response_frames: 0,
+            response_bytes: 0,
+            max_pending_frames: 0,
+            last_request_us: 0,
+            total_request_us: 0,
+            max_request_us: 0,
+        }
+    }
+
+    pub fn record_request(&mut self, bytes: usize) {
+        self.request_frames = self.request_frames.saturating_add(1);
+        self.request_bytes = self.request_bytes.saturating_add(bytes);
+    }
+
+    pub fn record_response(&mut self, bytes: usize) {
+        self.response_frames = self.response_frames.saturating_add(1);
+        self.response_bytes = self.response_bytes.saturating_add(bytes);
+    }
+
+    pub fn observe_pending_frames(&mut self, pending_frames: usize) {
+        self.max_pending_frames = self.max_pending_frames.max(pending_frames);
+    }
+
+    pub fn record_request_time_us(&mut self, request_us: u128) {
+        self.last_request_us = request_us;
+        self.total_request_us = self.total_request_us.saturating_add(request_us);
+        self.max_request_us = self.max_request_us.max(request_us);
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ServerRunnerTickDiagnostics {
     pub simulation_tick: u64,
@@ -95,6 +167,9 @@ pub struct ServerRunnerDiagnostics {
     pub light_status_mailbox_kind: LightStatusMailboxKind,
     pub worldgen_mailbox_pending_jobs: usize,
     pub light_status_mailbox_pending_statuses: usize,
+    pub runner_frame_metrics: WorkerFrameMetrics,
+    pub worldgen_job_frame_metrics: WorkerFrameMetrics,
+    pub light_status_job_frame_metrics: WorkerFrameMetrics,
     pub scheduler_metrics: ChunkSchedulerMetrics,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
     pub last_tick: ServerRunnerTickDiagnostics,
@@ -117,6 +192,9 @@ impl ServerRunnerDiagnostics {
             light_status_mailbox_kind: LightStatusMailboxKind::Inline,
             worldgen_mailbox_pending_jobs: 0,
             light_status_mailbox_pending_statuses: 0,
+            runner_frame_metrics: WorkerFrameMetrics::default(),
+            worldgen_job_frame_metrics: WorkerFrameMetrics::default(),
+            light_status_job_frame_metrics: WorkerFrameMetrics::default(),
             scheduler_metrics: ChunkSchedulerMetrics::default(),
             chunk_tracking: PlayerChunkTrackingDiagnostics::default(),
             last_tick: ServerRunnerTickDiagnostics::default(),
@@ -655,6 +733,10 @@ mod native {
             server.scheduler().worldgen_mailbox_pending_count();
         diagnostics.light_status_mailbox_pending_statuses =
             server.scheduler().light_status_mailbox_pending_count();
+        diagnostics.worldgen_job_frame_metrics =
+            server.scheduler().worldgen_mailbox_frame_metrics();
+        diagnostics.light_status_job_frame_metrics =
+            server.scheduler().light_status_mailbox_frame_metrics();
         diagnostics.scheduler_metrics = server.scheduler().metrics();
         diagnostics.chunk_tracking = server.chunk_tracking_diagnostics();
         if let Some(awaiting_tick) = awaiting_tick {
@@ -693,8 +775,48 @@ mod native {
             assert!(diagnostics.running);
             assert_eq!(diagnostics.command_queue_depth, 0);
             assert_eq!(diagnostics.update_queue_depth, 0);
+            assert_eq!(
+                diagnostics.runner_frame_metrics.transport_kind,
+                WorkerFrameTransportKind::None
+            );
+            assert_eq!(
+                diagnostics.worldgen_job_frame_metrics.transport_kind,
+                WorkerFrameTransportKind::None
+            );
+            assert_eq!(
+                diagnostics.light_status_job_frame_metrics.transport_kind,
+                WorkerFrameTransportKind::None
+            );
 
             runner.join_shutdown().unwrap();
+        }
+
+        #[test]
+        fn worker_frame_metrics_accumulate_message_transfer_frames() {
+            let mut metrics = WorkerFrameMetrics::message_transfer();
+            assert_eq!(
+                metrics.transport_kind,
+                WorkerFrameTransportKind::MessageTransfer
+            );
+            assert_eq!(metrics.transport_kind.label(), "message-transfer");
+
+            metrics.record_request(7);
+            metrics.record_request(11);
+            metrics.record_response(13);
+            metrics.observe_pending_frames(1);
+            metrics.observe_pending_frames(3);
+            metrics.observe_pending_frames(2);
+            metrics.record_request_time_us(5);
+            metrics.record_request_time_us(2);
+
+            assert_eq!(metrics.request_frames, 2);
+            assert_eq!(metrics.request_bytes, 18);
+            assert_eq!(metrics.response_frames, 1);
+            assert_eq!(metrics.response_bytes, 13);
+            assert_eq!(metrics.max_pending_frames, 3);
+            assert_eq!(metrics.last_request_us, 2);
+            assert_eq!(metrics.total_request_us, 7);
+            assert_eq!(metrics.max_request_us, 5);
         }
 
         #[test]

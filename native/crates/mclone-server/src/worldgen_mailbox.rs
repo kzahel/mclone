@@ -25,7 +25,7 @@ use crate::WasmServerJobWorkerConfig;
 use crate::job_codec::{decode_worldgen_response, encode_worldgen_request};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_job_worker::WasmJobWorker;
-use crate::{ChunkJobId, WorldgenMailboxKind};
+use crate::{ChunkJobId, WorkerFrameMetrics, WorldgenMailboxKind};
 
 #[derive(Debug)]
 pub(crate) struct WorldgenCompletedJob {
@@ -101,6 +101,10 @@ impl WorldgenMailbox {
     pub(crate) const fn pending_count(&self) -> usize {
         self.pending_count
     }
+
+    pub(crate) fn frame_metrics(&self) -> WorkerFrameMetrics {
+        self.backend.frame_metrics()
+    }
 }
 
 impl fmt::Debug for WorldgenMailbox {
@@ -137,6 +141,12 @@ impl WorldgenMailboxBackend {
         } else {
             WorldgenMailboxKind::Inline
         }
+    }
+
+    fn frame_metrics(&self) -> WorkerFrameMetrics {
+        self.worker
+            .as_ref()
+            .map_or_else(WorkerFrameMetrics::default, WasmJobWorker::frame_metrics)
     }
 
     fn enqueue_features(
@@ -269,6 +279,10 @@ impl WorldgenMailboxBackend {
 
     fn kind(&self) -> WorldgenMailboxKind {
         WorldgenMailboxKind::NativeThread
+    }
+
+    fn frame_metrics(&self) -> WorkerFrameMetrics {
+        WorkerFrameMetrics::default()
     }
 
     fn enqueue_features(

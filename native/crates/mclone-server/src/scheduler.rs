@@ -51,8 +51,8 @@ use crate::worldgen_mailbox::{PendingWorldgenPublication, WorldgenMailbox};
 use crate::{
     CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState, ChunkResidency, ChunkStatusStep, ChunkTicketKey,
     ChunkTicketType, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, LightStatusMailboxKind,
-    MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL, WorldBlockPos, WorldgenMailboxKind,
-    full_chunk_status_for_ticket_level,
+    MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics, WorldBlockPos,
+    WorldgenMailboxKind, full_chunk_status_for_ticket_level,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -720,6 +720,14 @@ impl ChunkScheduler {
 
     pub fn light_status_mailbox_pending_count(&self) -> usize {
         self.light_mailbox.pending_count()
+    }
+
+    pub fn worldgen_mailbox_frame_metrics(&self) -> WorkerFrameMetrics {
+        self.worldgen_mailbox.frame_metrics()
+    }
+
+    pub fn light_status_mailbox_frame_metrics(&self) -> WorkerFrameMetrics {
+        self.light_mailbox.frame_metrics()
     }
 
     pub fn metrics(&self) -> ChunkSchedulerMetrics {

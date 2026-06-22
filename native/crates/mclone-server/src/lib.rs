@@ -51,7 +51,7 @@ pub use player_chunk_tracking::{
 pub use players::ServerPlayerId;
 pub use runner::{
     IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind,
-    ServerRunnerResult, ServerRunnerTickDiagnostics,
+    ServerRunnerResult, ServerRunnerTickDiagnostics, WorkerFrameMetrics, WorkerFrameTransportKind,
 };
 pub(crate) use scheduler::FluidTickList;
 pub use scheduler::{

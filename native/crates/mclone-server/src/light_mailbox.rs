@@ -14,7 +14,6 @@ use std::{sync::mpsc, thread};
 
 use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
 
-use crate::LightStatusMailboxKind;
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
 #[cfg(target_arch = "wasm32")]
@@ -25,6 +24,7 @@ use crate::light_world::RetainedInitialLightState;
 use crate::timing::{timing_elapsed_us, timing_start};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_job_worker::WasmJobWorker;
+use crate::{LightStatusMailboxKind, WorkerFrameMetrics};
 
 #[derive(Debug)]
 pub(crate) struct CompletedLightStatus {
@@ -108,6 +108,10 @@ impl LightStatusMailbox {
     pub(crate) fn kind(&self) -> LightStatusMailboxKind {
         self.backend.kind()
     }
+
+    pub(crate) fn frame_metrics(&self) -> WorkerFrameMetrics {
+        self.backend.frame_metrics()
+    }
 }
 
 impl fmt::Debug for LightStatusMailbox {
@@ -147,6 +151,12 @@ impl LightStatusMailboxBackend {
         } else {
             LightStatusMailboxKind::Inline
         }
+    }
+
+    fn frame_metrics(&self) -> WorkerFrameMetrics {
+        self.worker
+            .as_ref()
+            .map_or_else(WorkerFrameMetrics::default, WasmJobWorker::frame_metrics)
     }
 
     fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {
@@ -243,6 +253,10 @@ impl LightStatusMailboxBackend {
 
     fn kind(&self) -> LightStatusMailboxKind {
         LightStatusMailboxKind::NativeThread
+    }
+
+    fn frame_metrics(&self) -> WorkerFrameMetrics {
+        WorkerFrameMetrics::default()
     }
 
     fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {

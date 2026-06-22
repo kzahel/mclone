@@ -373,6 +373,9 @@ async function renderCanvas() {
           && report.lightStatusMailboxKind === "web-worker"
           && Number(report.worldgenMailboxPendingJobs) === 0
           && Number(report.lightStatusMailboxPendingStatuses) === 0
+          && messageTransferMetricsActive(report.runnerFrameMetrics)
+          && messageTransferMetricsActive(report.worldgenJobFrameMetrics)
+          && messageTransferMetricsActive(report.lightStatusJobFrameMetrics)
           && report.rendered
           && report.configured
           && report.chunkLoaded
@@ -508,6 +511,17 @@ function decodeRuntimeReport(bits) {
     updateCount: (bits >>> 16) & 0xff,
     loadedChunkCount: (bits >>> 24) & 0xff,
   };
+}
+
+function messageTransferMetricsActive(metrics) {
+  return Boolean(
+    metrics
+    && metrics.transportKind === "message-transfer"
+    && Number(metrics.requestFrames) > 0
+    && Number(metrics.requestBytes) > 0
+    && Number(metrics.responseFrames) > 0
+    && Number(metrics.responseBytes) > 0
+  );
 }
 
 function renderStatus(result) {

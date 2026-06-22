@@ -61,6 +61,9 @@ const runtime = {
     lightStatusMailboxKind: "unknown",
     worldgenMailboxPendingJobs: 0,
     lightStatusMailboxPendingStatuses: 0,
+    runnerFrameMetrics: null,
+    worldgenJobFrameMetrics: null,
+    lightStatusJobFrameMetrics: null,
     status: "booting",
   },
 };
@@ -358,6 +361,9 @@ class WebChunkApp {
     runtime.state.lightStatusMailboxKind = report.lightStatusMailboxKind;
     runtime.state.worldgenMailboxPendingJobs = report.worldgenMailboxPendingJobs;
     runtime.state.lightStatusMailboxPendingStatuses = report.lightStatusMailboxPendingStatuses;
+    runtime.state.runnerFrameMetrics = report.runnerFrameMetrics ?? null;
+    runtime.state.worldgenJobFrameMetrics = report.worldgenJobFrameMetrics ?? null;
+    runtime.state.lightStatusJobFrameMetrics = report.lightStatusJobFrameMetrics ?? null;
     runtime.state.renderCount = report.renderCount;
     runtime.state.status = "ready";
     runtime.state.lastReport = report;

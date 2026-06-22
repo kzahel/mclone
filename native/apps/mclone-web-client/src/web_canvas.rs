@@ -292,6 +292,9 @@ struct GeneratedChunkRenderReport {
     light_status_mailbox_kind: mclone_server::LightStatusMailboxKind,
     worldgen_mailbox_pending_jobs: usize,
     light_status_mailbox_pending_statuses: usize,
+    runner_frame_metrics: mclone_server::WorkerFrameMetrics,
+    worldgen_job_frame_metrics: mclone_server::WorkerFrameMetrics,
+    light_status_job_frame_metrics: mclone_server::WorkerFrameMetrics,
     runner_last_simulation_tick: u64,
 }
 
@@ -519,6 +522,17 @@ impl GeneratedChunkRenderReport {
             &object,
             "lightStatusMailboxPendingStatuses",
             self.light_status_mailbox_pending_statuses as f64,
+        )?;
+        set_worker_frame_metrics(&object, "runnerFrameMetrics", self.runner_frame_metrics)?;
+        set_worker_frame_metrics(
+            &object,
+            "worldgenJobFrameMetrics",
+            self.worldgen_job_frame_metrics,
+        )?;
+        set_worker_frame_metrics(
+            &object,
+            "lightStatusJobFrameMetrics",
+            self.light_status_job_frame_metrics,
         )?;
         set_number(
             &object,
@@ -1680,6 +1694,9 @@ impl WebChunkRenderSession {
             worldgen_mailbox_pending_jobs: runner_diagnostics.worldgen_mailbox_pending_jobs,
             light_status_mailbox_pending_statuses: runner_diagnostics
                 .light_status_mailbox_pending_statuses,
+            runner_frame_metrics: runner_diagnostics.runner_frame_metrics,
+            worldgen_job_frame_metrics: runner_diagnostics.worldgen_job_frame_metrics,
+            light_status_job_frame_metrics: runner_diagnostics.light_status_job_frame_metrics,
             runner_last_simulation_tick: runner_diagnostics.last_tick.simulation_tick,
         })
     }
@@ -2115,6 +2132,62 @@ fn set_number(object: &js_sys::Object, key: &str, value: f64) -> Result<(), Stri
 
 fn set_string(object: &js_sys::Object, key: &str, value: &str) -> Result<(), String> {
     js_sys::Reflect::set(object, &JsValue::from_str(key), &JsValue::from_str(value))
+        .map(|_| ())
+        .map_err(|_| format!("failed to set generated chunk report key {key}"))
+}
+
+fn set_worker_frame_metrics(
+    object: &js_sys::Object,
+    key: &str,
+    metrics: mclone_server::WorkerFrameMetrics,
+) -> Result<(), String> {
+    let metrics_object = js_sys::Object::new();
+    set_string(
+        &metrics_object,
+        "transportKind",
+        metrics.transport_kind.label(),
+    )?;
+    set_number(
+        &metrics_object,
+        "requestFrames",
+        metrics.request_frames as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "requestBytes",
+        metrics.request_bytes as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "responseFrames",
+        metrics.response_frames as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "responseBytes",
+        metrics.response_bytes as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "maxPendingFrames",
+        metrics.max_pending_frames as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "lastRequestUs",
+        metrics.last_request_us as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "totalRequestUs",
+        metrics.total_request_us as f64,
+    )?;
+    set_number(
+        &metrics_object,
+        "maxRequestUs",
+        metrics.max_request_us as f64,
+    )?;
+    js_sys::Reflect::set(object, &JsValue::from_str(key), &metrics_object)
         .map(|_| ())
         .map_err(|_| format!("failed to set generated chunk report key {key}"))
 }

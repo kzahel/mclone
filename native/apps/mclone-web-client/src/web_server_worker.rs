@@ -11,8 +11,9 @@ use mclone_protocol::{
 use mclone_server::{
     INITIAL_DAY_TIME, IntegratedServer, IntegratedServerRunner, LightStatusMailboxKind,
     ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind, ServerRunnerResult,
-    ServerRunnerTickDiagnostics, WasmServerJobWorkerConfig, WorldgenMailboxKind,
-    compute_light_status_job_frame, compute_worldgen_job_frame,
+    ServerRunnerTickDiagnostics, WasmServerJobWorkerConfig, WorkerFrameMetrics,
+    WorkerFrameTransportKind, WorldgenMailboxKind, compute_light_status_job_frame,
+    compute_worldgen_job_frame,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -141,6 +142,9 @@ impl WebIntegratedServerRunner {
     pub fn diagnostics(&self) -> ServerRunnerDiagnostics {
         let mut diagnostics = self.diagnostics.borrow().clone();
         diagnostics.update_queue_depth = self.update_frames.borrow().len();
+        diagnostics
+            .runner_frame_metrics
+            .observe_pending_frames(diagnostics.update_queue_depth);
         diagnostics
     }
 
@@ -436,6 +440,21 @@ fn parse_diagnostics(
         number_prop(value, "worldgenMailboxPendingJobs").unwrap_or(0.0) as usize;
     diagnostics.light_status_mailbox_pending_statuses =
         number_prop(value, "lightStatusMailboxPendingStatuses").unwrap_or(0.0) as usize;
+    diagnostics.runner_frame_metrics = frame_metrics_prop(
+        value,
+        "runnerFrameMetrics",
+        diagnostics.runner_frame_metrics,
+    );
+    diagnostics.worldgen_job_frame_metrics = frame_metrics_prop(
+        value,
+        "worldgenJobFrameMetrics",
+        diagnostics.worldgen_job_frame_metrics,
+    );
+    diagnostics.light_status_job_frame_metrics = frame_metrics_prop(
+        value,
+        "lightStatusJobFrameMetrics",
+        diagnostics.light_status_job_frame_metrics,
+    );
     diagnostics.last_tick.simulation_tick =
         number_prop(value, "lastSimulationTick").unwrap_or(0.0) as u64;
     diagnostics.last_tick.chunk_tick = number_prop(value, "lastChunkTick").unwrap_or(0.0) as u64;
@@ -495,7 +514,14 @@ impl McloneWebIntegratedServerWorker {
 
     #[wasm_bindgen(js_name = handleCommandFrame)]
     pub fn handle_command_frame(&mut self, frame: Uint8Array) -> Result<JsValue, JsValue> {
+        let request_start = js_sys::Date::now();
+        self.diagnostics
+            .runner_frame_metrics
+            .record_request(frame.byte_length() as usize);
         self.command_queue_depth = self.command_queue_depth.saturating_add(1);
+        self.diagnostics
+            .runner_frame_metrics
+            .observe_pending_frames(self.command_queue_depth);
         self.refresh_diagnostics(None, true, None);
         let result = decode_client_command(&frame.to_vec())
             .map_err(|error| error.to_string())
@@ -511,9 +537,15 @@ impl McloneWebIntegratedServerWorker {
         match result {
             Ok(updates) => {
                 self.refresh_diagnostics(None, false, None);
-                worker_response(updates, &self.diagnostics).map_err(JsValue::from)
+                self.diagnostics
+                    .runner_frame_metrics
+                    .record_request_time_us(elapsed_us_since(request_start));
+                worker_response(updates, &mut self.diagnostics).map_err(JsValue::from)
             }
             Err(error) => {
+                self.diagnostics
+                    .runner_frame_metrics
+                    .record_request_time_us(elapsed_us_since(request_start));
                 self.refresh_diagnostics(None, false, Some(error.clone()));
                 Err(JsValue::from_str(&error))
             }
@@ -525,7 +557,7 @@ impl McloneWebIntegratedServerWorker {
         match self.server.try_poll() {
             Ok(updates) => {
                 self.refresh_diagnostics(None, false, None);
-                worker_response(updates, &self.diagnostics).map_err(JsValue::from)
+                worker_response(updates, &mut self.diagnostics).map_err(JsValue::from)
             }
             Err(error) => {
                 let error = error.to_string();
@@ -538,7 +570,7 @@ impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(js_name = tick)]
     pub fn tick(&mut self) -> Result<JsValue, JsValue> {
         if !self.running {
-            return worker_response(Vec::new(), &self.diagnostics).map_err(JsValue::from);
+            return worker_response(Vec::new(), &mut self.diagnostics).map_err(JsValue::from);
         }
         let wall_start = js_sys::Date::now();
         match self.server.try_simulation_tick_report() {
@@ -550,7 +582,7 @@ impl McloneWebIntegratedServerWorker {
                     false,
                     None,
                 );
-                worker_response(updates, &self.diagnostics).map_err(JsValue::from)
+                worker_response(updates, &mut self.diagnostics).map_err(JsValue::from)
             }
             Err(error) => {
                 let error = error.to_string();
@@ -569,7 +601,7 @@ impl McloneWebIntegratedServerWorker {
     pub fn shutdown(&mut self) -> Result<JsValue, JsValue> {
         self.running = false;
         self.refresh_diagnostics(None, false, None);
-        worker_response(Vec::new(), &self.diagnostics).map_err(JsValue::from)
+        worker_response(Vec::new(), &mut self.diagnostics).map_err(JsValue::from)
     }
 }
 
@@ -578,6 +610,7 @@ impl McloneWebIntegratedServerWorker {
         let mut diagnostics =
             ServerRunnerDiagnostics::initial(ServerRunnerKind::WebWorker, seed, server.day_time());
         diagnostics.running = true;
+        diagnostics.runner_frame_metrics = WorkerFrameMetrics::message_transfer();
         let mut worker = Self {
             server,
             diagnostics,
@@ -607,6 +640,10 @@ impl McloneWebIntegratedServerWorker {
             self.server.scheduler().worldgen_mailbox_pending_count();
         self.diagnostics.light_status_mailbox_pending_statuses =
             self.server.scheduler().light_status_mailbox_pending_count();
+        self.diagnostics.worldgen_job_frame_metrics =
+            self.server.scheduler().worldgen_mailbox_frame_metrics();
+        self.diagnostics.light_status_job_frame_metrics =
+            self.server.scheduler().light_status_mailbox_frame_metrics();
         self.diagnostics.scheduler_metrics = self.server.scheduler().metrics();
         self.diagnostics.chunk_tracking = self.server.chunk_tracking_diagnostics();
         self.diagnostics.awaiting_tick = awaiting_tick;
@@ -621,12 +658,15 @@ impl McloneWebIntegratedServerWorker {
 
 fn worker_response(
     updates: Vec<ServerUpdate>,
-    diagnostics: &ServerRunnerDiagnostics,
+    diagnostics: &mut ServerRunnerDiagnostics,
 ) -> Result<JsValue, String> {
     let object = Object::new();
     let packed_updates = Array::new();
     for update in updates {
         let frame = encode_server_update(&update).map_err(|error| error.to_string())?;
+        diagnostics
+            .runner_frame_metrics
+            .record_response(frame.len());
         packed_updates.push(&Uint8Array::from(frame.as_slice()));
     }
     set_bool(&object, "ok", true)?;
@@ -685,6 +725,24 @@ fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, S
         "lightStatusMailboxPendingStatuses",
         diagnostics.light_status_mailbox_pending_statuses as f64,
     )?;
+    Reflect::set(
+        &object,
+        &JsValue::from_str("runnerFrameMetrics"),
+        &frame_metrics_to_js(diagnostics.runner_frame_metrics)?,
+    )
+    .map_err(|error| format!("failed to attach runner frame metrics: {error:?}"))?;
+    Reflect::set(
+        &object,
+        &JsValue::from_str("worldgenJobFrameMetrics"),
+        &frame_metrics_to_js(diagnostics.worldgen_job_frame_metrics)?,
+    )
+    .map_err(|error| format!("failed to attach worldgen job frame metrics: {error:?}"))?;
+    Reflect::set(
+        &object,
+        &JsValue::from_str("lightStatusJobFrameMetrics"),
+        &frame_metrics_to_js(diagnostics.light_status_job_frame_metrics)?,
+    )
+    .map_err(|error| format!("failed to attach light-status job frame metrics: {error:?}"))?;
     set_number(
         &object,
         "lastSimulationTick",
@@ -752,6 +810,66 @@ fn light_status_mailbox_kind_prop(
     }
 }
 
+fn frame_metrics_prop(
+    value: &JsValue,
+    name: &str,
+    fallback: WorkerFrameMetrics,
+) -> WorkerFrameMetrics {
+    let Some(value) = reflect_get(value, name) else {
+        return fallback;
+    };
+    WorkerFrameMetrics {
+        transport_kind: frame_transport_kind_prop(&value, "transportKind", fallback.transport_kind),
+        request_frames: number_prop(&value, "requestFrames")
+            .unwrap_or(fallback.request_frames as f64) as usize,
+        request_bytes: number_prop(&value, "requestBytes").unwrap_or(fallback.request_bytes as f64)
+            as usize,
+        response_frames: number_prop(&value, "responseFrames")
+            .unwrap_or(fallback.response_frames as f64) as usize,
+        response_bytes: number_prop(&value, "responseBytes")
+            .unwrap_or(fallback.response_bytes as f64) as usize,
+        max_pending_frames: number_prop(&value, "maxPendingFrames")
+            .unwrap_or(fallback.max_pending_frames as f64) as usize,
+        last_request_us: number_prop(&value, "lastRequestUs")
+            .unwrap_or(fallback.last_request_us as f64) as u128,
+        total_request_us: number_prop(&value, "totalRequestUs")
+            .unwrap_or(fallback.total_request_us as f64) as u128,
+        max_request_us: number_prop(&value, "maxRequestUs")
+            .unwrap_or(fallback.max_request_us as f64) as u128,
+    }
+}
+
+fn frame_transport_kind_prop(
+    value: &JsValue,
+    name: &str,
+    fallback: WorkerFrameTransportKind,
+) -> WorkerFrameTransportKind {
+    match string_prop(value, name).as_deref() {
+        Some("none") => WorkerFrameTransportKind::None,
+        Some("message-transfer") => WorkerFrameTransportKind::MessageTransfer,
+        Some("shared-memory") => WorkerFrameTransportKind::SharedMemory,
+        _ => fallback,
+    }
+}
+
+fn frame_metrics_to_js(metrics: WorkerFrameMetrics) -> Result<JsValue, String> {
+    let object = Object::new();
+    set_string(&object, "transportKind", metrics.transport_kind.label())?;
+    set_number(&object, "requestFrames", metrics.request_frames as f64)?;
+    set_number(&object, "requestBytes", metrics.request_bytes as f64)?;
+    set_number(&object, "responseFrames", metrics.response_frames as f64)?;
+    set_number(&object, "responseBytes", metrics.response_bytes as f64)?;
+    set_number(
+        &object,
+        "maxPendingFrames",
+        metrics.max_pending_frames as f64,
+    )?;
+    set_number(&object, "lastRequestUs", metrics.last_request_us as f64)?;
+    set_number(&object, "totalRequestUs", metrics.total_request_us as f64)?;
+    set_number(&object, "maxRequestUs", metrics.max_request_us as f64)?;
+    Ok(object.into())
+}
+
 fn set_bool(object: &Object, name: &str, value: bool) -> Result<(), String> {
     Reflect::set(object, &JsValue::from_str(name), &JsValue::from_bool(value))
         .map_err(|error| format!("failed to set {name}: {error:?}"))?;
@@ -778,4 +896,8 @@ fn js_error_string(value: &JsValue) -> String {
         return message;
     }
     format!("{value:?}")
+}
+
+fn elapsed_us_since(start_ms: f64) -> u128 {
+    ((js_sys::Date::now() - start_ms).max(0.0) * 1000.0) as u128
 }
