@@ -373,9 +373,10 @@ async function renderCanvas() {
           && report.lightStatusMailboxKind === "web-worker"
           && Number(report.worldgenMailboxPendingJobs) === 0
           && Number(report.lightStatusMailboxPendingStatuses) === 0
-          && frameMetricsActive(report.runnerFrameMetrics, "message-transfer")
+          && frameMetricsActive(report.runnerFrameMetrics, "shared-memory")
           && frameMetricsActive(report.worldgenJobFrameMetrics, "shared-memory")
           && frameMetricsActive(report.lightStatusJobFrameMetrics, "shared-memory")
+          && sharedBufferPoolActive(report.runnerFrameMetrics)
           && sharedBufferPoolActive(report.worldgenJobFrameMetrics)
           && sharedBufferPoolActive(report.lightStatusJobFrameMetrics)
           && report.rendered

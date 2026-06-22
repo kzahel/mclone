@@ -1,6 +1,19 @@
 let wasmModulePromise = null;
 let server = null;
 let tickTimer = 0;
+let runnerTransportKind = "message-transfer";
+let nextRunnerSharedBufferId = 1;
+const runnerSharedPool = [];
+const runnerSharedInflight = new Map();
+
+const RUNNER_SHARED_STATUS_INDEX = 0;
+const RUNNER_SHARED_REQUEST_BYTES_INDEX = 1;
+const RUNNER_SHARED_RESPONSE_BYTES_INDEX = 2;
+const RUNNER_SHARED_CONTROL_BYTES = 16;
+const RUNNER_SHARED_STATUS_COMPLETE = 2;
+const RUNNER_SHARED_STATUS_FAILED = -1;
+const MAX_RUNNER_SHARED_POOL_SLOTS = 2;
+const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 self.onmessage = async (event) => {
   const message = event.data ?? {};
@@ -11,6 +24,9 @@ self.onmessage = async (event) => {
         break;
       case "command":
         await handleCommand(message);
+        break;
+      case "release-shared-buffer":
+        releaseRunnerSharedBuffer(message);
         break;
       case "shutdown":
         shutdown(message);
@@ -23,6 +39,7 @@ self.onmessage = async (event) => {
         break;
     }
   } catch (error) {
+    markRunnerSharedFailure(message);
     postFailure(message.requestId, stringifyError(error));
   }
 };
@@ -42,6 +59,9 @@ async function startServer(message) {
       String(message.bindgenWasmUrl),
     )
     : new module.McloneWebIntegratedServerWorker(toBigIntSeed(message.seed));
+  runnerTransportKind = message.runnerTransportKind === "shared-memory" && sharedTransportAvailable()
+    ? "shared-memory"
+    : "message-transfer";
   const intervalMs = Math.max(1, Number(message.tickIntervalMs) || 50);
   tickTimer = setInterval(tickServer, intervalMs);
   const diagnostics = server.diagnostics();
@@ -59,7 +79,7 @@ async function handleCommand(message) {
     postFailure(message.requestId, "integrated server worker is not started");
     return;
   }
-  const frame = message.frame instanceof Uint8Array ? message.frame : new Uint8Array();
+  const frame = commandFrame(message);
   const result = server.handleCommandFrame(frame);
   const updates = Array.isArray(result.updates) ? [...result.updates] : [];
   let diagnostics = result.diagnostics;
@@ -81,7 +101,7 @@ async function handleCommand(message) {
     requestId: Number(message.requestId) || 0,
     updates,
     diagnostics,
-  });
+  }, message);
 }
 
 function tickServer() {
@@ -95,7 +115,7 @@ function tickServer() {
         requestId: 0,
         updates: result.updates,
         diagnostics: result.diagnostics,
-      });
+      }, null);
     }
   } catch (error) {
     postFailure(0, stringifyError(error));
@@ -118,8 +138,12 @@ function shutdown(message) {
   });
 }
 
-function postUpdates(message) {
+function postUpdates(message, requestMessage = null) {
   const updates = Array.isArray(message.updates) ? message.updates : [];
+  if (runnerTransportKind === "shared-memory" && sharedTransportAvailable()) {
+    postSharedUpdates(message, requestMessage, updates);
+    return;
+  }
   const transfers = [];
   for (const update of updates) {
     if (update instanceof Uint8Array) {
@@ -134,6 +158,156 @@ function postUpdates(message) {
     },
     transfers,
   );
+}
+
+function postSharedUpdates(message, requestMessage, updates) {
+  const packedBytes = packedUpdateByteLength(updates);
+  const shared = sharedRunnerResponseTarget(requestMessage, packedBytes);
+  writePackedUpdates(shared.updateBuffer, updates, packedBytes);
+  Atomics.store(shared.control, RUNNER_SHARED_RESPONSE_BYTES_INDEX, packedBytes);
+  Atomics.store(shared.control, RUNNER_SHARED_STATUS_INDEX, RUNNER_SHARED_STATUS_COMPLETE);
+  Atomics.notify(shared.control, RUNNER_SHARED_STATUS_INDEX, 1);
+  const { updates: _updates, ...rest } = message;
+  const response = {
+    ...rest,
+    transportKind: "shared-memory",
+    updateCount: updates.length,
+    controlBuffer: shared.controlBuffer,
+    updateBuffer: shared.updateBuffer,
+    packedUpdateBytes: packedBytes,
+    pooledResponse: shared.pooledResponse,
+    responseCapacity: shared.updateBuffer.byteLength,
+  };
+  if (shared.runnerSharedBufferId > 0) {
+    response.runnerSharedBufferId = shared.runnerSharedBufferId;
+  }
+  self.postMessage(response);
+}
+
+function commandFrame(message) {
+  if (message.transportKind !== "shared-memory") {
+    return message.frame instanceof Uint8Array ? message.frame : new Uint8Array();
+  }
+  const control = sharedControlView(message.controlBuffer);
+  const requestBytes = Atomics.load(control, RUNNER_SHARED_REQUEST_BYTES_INDEX);
+  const requestBuffer = sharedBuffer(message.requestBuffer, "requestBuffer");
+  if (!Number.isInteger(requestBytes) || requestBytes < 0 || requestBytes > requestBuffer.byteLength) {
+    throw new Error(
+      `shared runner command byte count ${requestBytes} exceeds request buffer capacity ${requestBuffer.byteLength}`,
+    );
+  }
+  return new Uint8Array(requestBuffer, 0, requestBytes);
+}
+
+function sharedRunnerResponseTarget(requestMessage, packedBytes) {
+  if (requestMessage?.transportKind === "shared-memory") {
+    const control = sharedControlView(requestMessage.controlBuffer);
+    const responseBuffer = sharedBuffer(requestMessage.responseBuffer, "responseBuffer");
+    const pooledResponse = packedBytes <= responseBuffer.byteLength;
+    return {
+      control,
+      controlBuffer: requestMessage.controlBuffer,
+      updateBuffer: pooledResponse ? responseBuffer : new SharedArrayBuffer(sharedCapacityFor(packedBytes)),
+      pooledResponse,
+      runnerSharedBufferId: 0,
+    };
+  }
+
+  const slot = acquireRunnerSharedResponseSlot(packedBytes);
+  return {
+    control: new Int32Array(slot.controlBuffer),
+    controlBuffer: slot.controlBuffer,
+    updateBuffer: slot.updateBuffer,
+    pooledResponse: true,
+    runnerSharedBufferId: slot.id,
+  };
+}
+
+function acquireRunnerSharedResponseSlot(packedBytes) {
+  const capacity = sharedCapacityFor(packedBytes);
+  let slot = null;
+  for (let index = runnerSharedPool.length - 1; index >= 0; index -= 1) {
+    if (runnerSharedPool[index].updateBuffer.byteLength >= packedBytes) {
+      slot = runnerSharedPool.splice(index, 1)[0];
+      break;
+    }
+  }
+  slot ??= {
+    id: nextRunnerSharedBufferId++,
+    controlBuffer: new SharedArrayBuffer(RUNNER_SHARED_CONTROL_BYTES),
+    updateBuffer: new SharedArrayBuffer(capacity),
+  };
+  if (slot.updateBuffer.byteLength < packedBytes) {
+    slot.updateBuffer = new SharedArrayBuffer(capacity);
+  }
+  const control = new Int32Array(slot.controlBuffer);
+  Atomics.store(control, RUNNER_SHARED_STATUS_INDEX, 0);
+  Atomics.store(control, RUNNER_SHARED_REQUEST_BYTES_INDEX, 0);
+  Atomics.store(control, RUNNER_SHARED_RESPONSE_BYTES_INDEX, 0);
+  runnerSharedInflight.set(slot.id, slot);
+  return slot;
+}
+
+function releaseRunnerSharedBuffer(message) {
+  const bufferId = Number(message.runnerSharedBufferId) || 0;
+  if (bufferId <= 0) return;
+  const slot = runnerSharedInflight.get(bufferId);
+  if (!slot) return;
+  runnerSharedInflight.delete(bufferId);
+  if (runnerSharedPool.length < MAX_RUNNER_SHARED_POOL_SLOTS) {
+    runnerSharedPool.push(slot);
+  }
+}
+
+function packedUpdateByteLength(updates) {
+  let byteLength = 4;
+  for (const update of updates) {
+    const frame = update instanceof Uint8Array ? update : new Uint8Array();
+    byteLength += 4 + frame.byteLength;
+  }
+  return byteLength;
+}
+
+function writePackedUpdates(buffer, updates, packedBytes) {
+  if (packedBytes > buffer.byteLength) {
+    throw new Error(
+      `packed shared runner updates need ${packedBytes} bytes but buffer has ${buffer.byteLength}`,
+    );
+  }
+  const bytes = new Uint8Array(buffer, 0, packedBytes);
+  let offset = 0;
+  offset = writeU32Le(bytes, offset, updates.length);
+  for (const update of updates) {
+    const frame = update instanceof Uint8Array ? update : new Uint8Array();
+    offset = writeU32Le(bytes, offset, frame.byteLength);
+    bytes.set(frame, offset);
+    offset += frame.byteLength;
+  }
+}
+
+function writeU32Le(bytes, offset, value) {
+  bytes[offset] = value & 0xff;
+  bytes[offset + 1] = (value >>> 8) & 0xff;
+  bytes[offset + 2] = (value >>> 16) & 0xff;
+  bytes[offset + 3] = (value >>> 24) & 0xff;
+  return offset + 4;
+}
+
+function sharedCapacityFor(byteLength) {
+  let capacity = DEFAULT_RUNNER_SHARED_RESPONSE_BYTES;
+  while (capacity < byteLength) {
+    capacity *= 2;
+  }
+  return capacity;
+}
+
+function markRunnerSharedFailure(message) {
+  if (message?.transportKind !== "shared-memory") return;
+  try {
+    const control = sharedControlView(message.controlBuffer);
+    Atomics.store(control, RUNNER_SHARED_STATUS_INDEX, RUNNER_SHARED_STATUS_FAILED);
+    Atomics.notify(control, RUNNER_SHARED_STATUS_INDEX, 1);
+  } catch {}
 }
 
 function postFailure(requestId, reason) {
@@ -165,6 +339,28 @@ function hasPendingServerJobs(diagnostics) {
 
 function waitForJobTurn() {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function sharedControlView(buffer) {
+  const shared = sharedBuffer(buffer, "controlBuffer");
+  return new Int32Array(shared);
+}
+
+function sharedBuffer(buffer, name) {
+  if (typeof SharedArrayBuffer !== "function" || !(buffer instanceof SharedArrayBuffer)) {
+    throw new Error(`shared runner ${name} was not a SharedArrayBuffer`);
+  }
+  return buffer;
+}
+
+function sharedTransportAvailable() {
+  return (
+    typeof SharedArrayBuffer === "function"
+    && typeof Atomics === "object"
+    && typeof Atomics.load === "function"
+    && typeof Atomics.store === "function"
+    && typeof Atomics.notify === "function"
+  );
 }
 
 function toBigIntSeed(seed) {

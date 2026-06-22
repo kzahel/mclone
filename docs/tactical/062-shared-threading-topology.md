@@ -1,8 +1,8 @@
 # 062: Shared Threading Topology
 
 Status: in progress - native desktop/browser server runners, browser server
-job workers, message-transfer frame metrics, and shared-memory server-job
-frames landed
+job workers, shared-memory runner frames, and shared-memory server-job frames
+landed
 
 ## Purpose
 
@@ -439,12 +439,27 @@ Landed in the shared-buffer pool slice:
   tests assert pooled shared responses with no fallback on the standard
   worldgen/light-status path.
 
+Landed in the shared runner frame slice:
+
+- The browser integrated-server runner now prefers `SharedArrayBuffer` command
+  frames and packed update-response frames when shared memory and the required
+  `Atomics` operations are available.
+- The existing transferred-`Uint8Array` command/update path remains the
+  fallback for non-isolated browsers or runtimes without shared memory.
+- Main-thread Rust owns a bounded runner shared-slot pool for command/result
+  exchanges; the integrated-server worker can also publish tick updates through
+  worker-owned shared response buffers and releases them after the main thread
+  copies the packed frames.
+- Web runner diagnostics now report `shared-memory` transport with pool
+  hit/miss/drop, capacity, pooled response, and fallback response counters. The
+  standard web smoke asserts the runner, worldgen, and light-status lanes are
+  all shared-memory-backed with pooled responses on the normal path.
+
 Next implementation slice:
 
-- Move the browser integrated-server runner command/update frames from
-  `message-transfer` diagnostics to the same style of bounded shared-memory
-  frame boundary. Keep the existing message-transfer path as the fallback and
-  preserve the native desktop OS-thread runner shape.
+- Add contention/backpressure coverage for shared-memory worker lanes: stress
+  multiple in-flight runner/job frames, exercise pool overflow/growth paths, and
+  keep the message-transfer fallback observable.
 
 ### 6. Browser Remote Transport
 

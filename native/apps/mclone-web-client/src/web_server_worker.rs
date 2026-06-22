@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
 
-use js_sys::{Array, Function, Object, Promise, Reflect, Uint8Array};
+use js_sys::{
+    Array, Atomics, Function, Int32Array, Object, Promise, Reflect, SharedArrayBuffer, Uint8Array,
+};
 use mclone_protocol::{
     ClientCommand, ServerUpdate, decode_client_command, decode_server_update,
     encode_client_command, encode_server_update,
@@ -22,6 +24,16 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
 const WEB_WORKER_TICK_INTERVAL_MS: u32 = 50;
+const RUNNER_SHARED_CONTROL_SLOTS: u32 = 4;
+const RUNNER_SHARED_CONTROL_BYTES: u32 = RUNNER_SHARED_CONTROL_SLOTS * 4;
+const RUNNER_SHARED_STATUS_INDEX: u32 = 0;
+const RUNNER_SHARED_REQUEST_BYTES_INDEX: u32 = 1;
+const RUNNER_SHARED_RESPONSE_BYTES_INDEX: u32 = 2;
+const RUNNER_SHARED_STATUS_PENDING: i32 = 1;
+const RUNNER_SHARED_STATUS_COMPLETE: i32 = 2;
+const MAX_RUNNER_SHARED_POOL_SLOTS: usize = 2;
+const MIN_RUNNER_SHARED_REQUEST_BYTES: u32 = 4 * 1024;
+const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES: u32 = 2 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WebIntegratedServerRunnerConfig {
@@ -59,8 +71,13 @@ pub struct WebWorkerExchange {
 
 pub struct WebIntegratedServerRunner {
     worker: Worker,
+    transport_kind: WorkerFrameTransportKind,
     next_request_id: u32,
     pending: Rc<RefCell<BTreeMap<u32, PendingRequest>>>,
+    request_start_ms_by_id: Rc<RefCell<BTreeMap<u32, f64>>>,
+    runner_frame_metrics: Rc<RefCell<WorkerFrameMetrics>>,
+    shared_pool: Rc<RefCell<Vec<RunnerSharedSlot>>>,
+    shared_inflight: Rc<RefCell<BTreeMap<u32, RunnerSharedSlot>>>,
     update_frames: Rc<RefCell<Vec<Vec<u8>>>>,
     diagnostics: Rc<RefCell<ServerRunnerDiagnostics>>,
     message_closure: Closure<dyn FnMut(MessageEvent)>,
@@ -72,11 +89,38 @@ impl fmt::Debug for WebIntegratedServerRunner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WebIntegratedServerRunner")
             .field("next_request_id", &self.next_request_id)
+            .field("transport_kind", &self.transport_kind)
             .field("pending_requests", &self.pending.borrow().len())
             .field("update_frames", &self.update_frames.borrow().len())
             .field("diagnostics", &self.diagnostics.borrow())
             .field("shutdown_requested", &self.shutdown_requested)
             .finish_non_exhaustive()
+    }
+}
+
+struct RunnerSharedSlot {
+    control_buffer: SharedArrayBuffer,
+    request_buffer: SharedArrayBuffer,
+    response_buffer: SharedArrayBuffer,
+    request_capacity: u32,
+    response_capacity: u32,
+}
+
+impl RunnerSharedSlot {
+    fn new(request_capacity: u32, response_capacity: u32) -> Self {
+        Self {
+            control_buffer: SharedArrayBuffer::new(RUNNER_SHARED_CONTROL_BYTES),
+            request_buffer: SharedArrayBuffer::new(request_capacity),
+            response_buffer: SharedArrayBuffer::new(response_capacity),
+            request_capacity,
+            response_capacity,
+        }
+    }
+
+    fn capacity_bytes(&self) -> usize {
+        (RUNNER_SHARED_CONTROL_BYTES as usize)
+            .saturating_add(self.request_capacity as usize)
+            .saturating_add(self.response_capacity as usize)
     }
 }
 
@@ -88,7 +132,20 @@ impl WebIntegratedServerRunner {
         let worker = Worker::new_with_options(&config.worker_url, &options)
             .map_err(|error| format!("failed to spawn integrated server worker: {error:?}"))?;
 
+        let transport_kind = if runner_shared_memory_transport_available() {
+            WorkerFrameTransportKind::SharedMemory
+        } else {
+            WorkerFrameTransportKind::MessageTransfer
+        };
         let pending = Rc::new(RefCell::new(BTreeMap::new()));
+        let request_start_ms_by_id: Rc<RefCell<BTreeMap<u32, f64>>> =
+            Rc::new(RefCell::new(BTreeMap::new()));
+        let runner_frame_metrics = Rc::new(RefCell::new(match transport_kind {
+            WorkerFrameTransportKind::SharedMemory => WorkerFrameMetrics::shared_memory(),
+            _ => WorkerFrameMetrics::message_transfer(),
+        }));
+        let shared_pool = Rc::new(RefCell::new(Vec::new()));
+        let shared_inflight = Rc::new(RefCell::new(BTreeMap::new()));
         let update_frames = Rc::new(RefCell::new(Vec::new()));
         let diagnostics = Rc::new(RefCell::new(ServerRunnerDiagnostics::initial(
             ServerRunnerKind::WebWorker,
@@ -97,11 +154,26 @@ impl WebIntegratedServerRunner {
         )));
 
         let message_closure = {
+            let worker = worker.clone();
             let pending = Rc::clone(&pending);
+            let request_start_ms_by_id = Rc::clone(&request_start_ms_by_id);
+            let runner_frame_metrics = Rc::clone(&runner_frame_metrics);
+            let shared_pool = Rc::clone(&shared_pool);
+            let shared_inflight = Rc::clone(&shared_inflight);
             let update_frames = Rc::clone(&update_frames);
             let diagnostics = Rc::clone(&diagnostics);
             Closure::wrap(Box::new(move |event: MessageEvent| {
-                handle_runner_message(event.data(), &pending, &update_frames, &diagnostics);
+                handle_runner_message(
+                    event.data(),
+                    &worker,
+                    &pending,
+                    &request_start_ms_by_id,
+                    &runner_frame_metrics,
+                    &shared_pool,
+                    &shared_inflight,
+                    &update_frames,
+                    &diagnostics,
+                );
             }) as Box<dyn FnMut(_)>)
         };
         worker.set_onmessage(Some(message_closure.as_ref().unchecked_ref()));
@@ -123,8 +195,13 @@ impl WebIntegratedServerRunner {
 
         let mut runner = Self {
             worker,
+            transport_kind,
             next_request_id: 1,
             pending,
+            request_start_ms_by_id,
+            runner_frame_metrics,
+            shared_pool,
+            shared_inflight,
             update_frames,
             diagnostics,
             message_closure,
@@ -142,6 +219,7 @@ impl WebIntegratedServerRunner {
     pub fn diagnostics(&self) -> ServerRunnerDiagnostics {
         let mut diagnostics = self.diagnostics.borrow().clone();
         diagnostics.update_queue_depth = self.update_frames.borrow().len();
+        diagnostics.runner_frame_metrics = *self.runner_frame_metrics.borrow();
         diagnostics
             .runner_frame_metrics
             .observe_pending_frames(diagnostics.update_queue_depth);
@@ -212,6 +290,7 @@ impl WebIntegratedServerRunner {
         set_string(&message, "bindgenJsUrl", &config.bindgen_js_url)?;
         set_string(&message, "bindgenWasmUrl", &config.bindgen_wasm_url)?;
         set_string(&message, "jobWorkerUrl", &config.job_worker_url)?;
+        set_string(&message, "runnerTransportKind", self.transport_kind.label())?;
         set_number(
             &message,
             "tickIntervalMs",
@@ -222,6 +301,13 @@ impl WebIntegratedServerRunner {
     }
 
     async fn post_command_frame(&mut self, frame: Vec<u8>) -> Result<(), String> {
+        match self.transport_kind {
+            WorkerFrameTransportKind::SharedMemory => self.post_shared_command_frame(frame).await,
+            _ => self.post_transferred_command_frame(frame).await,
+        }
+    }
+
+    async fn post_transferred_command_frame(&mut self, frame: Vec<u8>) -> Result<(), String> {
         let request_id = self.next_request_id();
         let bytes = Uint8Array::from(frame.as_slice());
         let transfer = Array::new();
@@ -231,13 +317,47 @@ impl WebIntegratedServerRunner {
         set_number(&message, "requestId", f64::from(request_id))?;
         Reflect::set(&message, &JsValue::from_str("frame"), &bytes)
             .map_err(|error| format!("failed to attach command frame: {error:?}"))?;
-        let response = self
-            .post_request(request_id, &message, Some(&transfer))
-            .await?;
+        let promise = self.register_pending(request_id);
+        if let Err(error) = self.worker.post_message_with_transfer(&message, &transfer) {
+            self.pending.borrow_mut().remove(&request_id);
+            return Err(format!("failed to post to server worker: {error:?}"));
+        }
+        self.record_runner_request(request_id, frame.len());
+        let response = JsFuture::from(promise).await.map_err(|error| {
+            format!("server worker request failed: {}", js_error_string(&error))
+        })?;
+        ensure_worker_response_ok(&response)
+    }
+
+    async fn post_shared_command_frame(&mut self, frame: Vec<u8>) -> Result<(), String> {
+        let request_id = self.next_request_id();
+        let message = self.shared_command_message(request_id, &frame)?;
+        let promise = self.register_pending(request_id);
+        if let Err(error) = self.worker.post_message(&message) {
+            self.pending.borrow_mut().remove(&request_id);
+            self.release_shared_inflight(request_id);
+            return Err(format!("failed to post to server worker: {error:?}"));
+        }
+        self.record_runner_request(request_id, frame.len());
+        let response = JsFuture::from(promise).await.map_err(|error| {
+            format!("server worker request failed: {}", js_error_string(&error))
+        })?;
         ensure_worker_response_ok(&response)
     }
 
     fn post_command_frame_fire_and_forget(&mut self, frame: Vec<u8>) -> Result<(), String> {
+        match self.transport_kind {
+            WorkerFrameTransportKind::SharedMemory => {
+                self.post_shared_command_frame_fire_and_forget(frame)
+            }
+            _ => self.post_transferred_command_frame_fire_and_forget(frame),
+        }
+    }
+
+    fn post_transferred_command_frame_fire_and_forget(
+        &mut self,
+        frame: Vec<u8>,
+    ) -> Result<(), String> {
         let request_id = self.next_request_id();
         let bytes = Uint8Array::from(frame.as_slice());
         let transfer = Array::new();
@@ -249,7 +369,22 @@ impl WebIntegratedServerRunner {
             .map_err(|error| format!("failed to attach command frame: {error:?}"))?;
         self.worker
             .post_message_with_transfer(&message, &transfer)
-            .map_err(|error| format!("failed to post command to server worker: {error:?}"))
+            .map_err(|error| format!("failed to post command to server worker: {error:?}"))?;
+        self.record_runner_request(request_id, frame.len());
+        Ok(())
+    }
+
+    fn post_shared_command_frame_fire_and_forget(&mut self, frame: Vec<u8>) -> Result<(), String> {
+        let request_id = self.next_request_id();
+        let message = self.shared_command_message(request_id, &frame)?;
+        if let Err(error) = self.worker.post_message(&message) {
+            self.release_shared_inflight(request_id);
+            return Err(format!(
+                "failed to post command to server worker: {error:?}"
+            ));
+        }
+        self.record_runner_request(request_id, frame.len());
+        Ok(())
     }
 
     fn post_shutdown(&mut self) -> Result<(), String> {
@@ -259,6 +394,145 @@ impl WebIntegratedServerRunner {
         self.worker
             .post_message(&message)
             .map_err(|error| format!("failed to post shutdown to server worker: {error:?}"))
+    }
+
+    fn shared_command_message(&mut self, request_id: u32, frame: &[u8]) -> Result<Object, String> {
+        let request_bytes = u32::try_from(frame.len()).map_err(|_| {
+            format!(
+                "runner command frame is too large for shared transport: {} bytes",
+                frame.len()
+            )
+        })?;
+        let request_bytes_i32 = i32::try_from(request_bytes).map_err(|_| {
+            format!(
+                "runner command frame is too large for shared byte counters: {} bytes",
+                frame.len()
+            )
+        })?;
+        let slot = self.acquire_runner_shared_slot(request_bytes);
+        let build_result = (|| {
+            let control = Int32Array::new(slot.control_buffer.as_ref());
+            Atomics::store(
+                &control,
+                RUNNER_SHARED_STATUS_INDEX,
+                RUNNER_SHARED_STATUS_PENDING,
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to initialize shared runner status: {}",
+                    js_error_string(&error)
+                )
+            })?;
+            Atomics::store(
+                &control,
+                RUNNER_SHARED_REQUEST_BYTES_INDEX,
+                request_bytes_i32,
+            )
+            .map_err(|error| {
+                format!(
+                    "failed to initialize shared runner request byte count: {}",
+                    js_error_string(&error)
+                )
+            })?;
+            Atomics::store(&control, RUNNER_SHARED_RESPONSE_BYTES_INDEX, 0).map_err(|error| {
+                format!(
+                    "failed to clear shared runner response byte count: {}",
+                    js_error_string(&error)
+                )
+            })?;
+
+            let request_view = Uint8Array::new_with_byte_offset_and_length(
+                slot.request_buffer.as_ref(),
+                0,
+                request_bytes,
+            );
+            request_view.copy_from(frame);
+
+            let message = Object::new();
+            set_string(&message, "kind", "command")?;
+            set_string(
+                &message,
+                "transportKind",
+                WorkerFrameTransportKind::SharedMemory.label(),
+            )?;
+            set_number(&message, "requestId", f64::from(request_id))?;
+            set_number(&message, "requestBytes", f64::from(request_bytes))?;
+            set_number(
+                &message,
+                "responseCapacity",
+                f64::from(slot.response_capacity),
+            )?;
+            Reflect::set(
+                &message,
+                &JsValue::from_str("controlBuffer"),
+                slot.control_buffer.as_ref(),
+            )
+            .map_err(|error| format!("failed to attach shared runner control buffer: {error:?}"))?;
+            Reflect::set(
+                &message,
+                &JsValue::from_str("requestBuffer"),
+                slot.request_buffer.as_ref(),
+            )
+            .map_err(|error| format!("failed to attach shared runner request buffer: {error:?}"))?;
+            Reflect::set(
+                &message,
+                &JsValue::from_str("responseBuffer"),
+                slot.response_buffer.as_ref(),
+            )
+            .map_err(|error| {
+                format!("failed to attach shared runner response buffer: {error:?}")
+            })?;
+            Ok(message)
+        })();
+        match build_result {
+            Ok(message) => {
+                self.shared_inflight.borrow_mut().insert(request_id, slot);
+                Ok(message)
+            }
+            Err(error) => {
+                release_runner_shared_slot(slot, &self.shared_pool, &self.runner_frame_metrics);
+                Err(error)
+            }
+        }
+    }
+
+    fn acquire_runner_shared_slot(&mut self, request_bytes: u32) -> RunnerSharedSlot {
+        let mut slot = if let Some(slot) = self.shared_pool.borrow_mut().pop() {
+            self.runner_frame_metrics
+                .borrow_mut()
+                .record_shared_buffer_pool_hit();
+            slot
+        } else {
+            self.runner_frame_metrics
+                .borrow_mut()
+                .record_shared_buffer_pool_miss();
+            let slot = RunnerSharedSlot::new(
+                runner_shared_capacity_for_len(request_bytes, MIN_RUNNER_SHARED_REQUEST_BYTES),
+                DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
+            );
+            self.runner_frame_metrics
+                .borrow_mut()
+                .record_shared_buffer_capacity_delta(slot.capacity_bytes());
+            slot
+        };
+        ensure_runner_slot_request_capacity(&mut slot, request_bytes, &self.runner_frame_metrics);
+        slot
+    }
+
+    fn release_shared_inflight(&mut self, request_id: u32) {
+        if let Some(slot) = self.shared_inflight.borrow_mut().remove(&request_id) {
+            release_runner_shared_slot(slot, &self.shared_pool, &self.runner_frame_metrics);
+        }
+    }
+
+    fn record_runner_request(&self, request_id: u32, bytes: usize) {
+        self.request_start_ms_by_id
+            .borrow_mut()
+            .insert(request_id, js_sys::Date::now());
+        let pending_frames = self.request_start_ms_by_id.borrow().len();
+        let mut metrics = self.runner_frame_metrics.borrow_mut();
+        metrics.record_request(bytes);
+        metrics.observe_pending_frames(pending_frames);
     }
 
     async fn post_request(
@@ -363,43 +637,144 @@ struct PendingRequest {
 
 fn handle_runner_message(
     data: JsValue,
+    worker: &Worker,
     pending: &Rc<RefCell<BTreeMap<u32, PendingRequest>>>,
+    request_start_ms_by_id: &Rc<RefCell<BTreeMap<u32, f64>>>,
+    runner_frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+    shared_pool: &Rc<RefCell<Vec<RunnerSharedSlot>>>,
+    shared_inflight: &Rc<RefCell<BTreeMap<u32, RunnerSharedSlot>>>,
     update_frames: &Rc<RefCell<Vec<Vec<u8>>>>,
     diagnostics: &Rc<RefCell<ServerRunnerDiagnostics>>,
 ) {
+    let request_id = number_prop(&data, "requestId")
+        .map(|value| value as u32)
+        .unwrap_or(0);
     if let Some(diagnostic_value) = reflect_get(&data, "diagnostics") {
         let fallback = diagnostics.borrow().clone();
         if let Some(parsed) = parse_diagnostics(&diagnostic_value, &fallback) {
             *diagnostics.borrow_mut() = parsed;
         }
     }
-    if let Some(updates_value) = reflect_get(&data, "updates") {
-        let frames = frames_from_js(&updates_value);
-        if !frames.is_empty() {
-            let mut queued = update_frames.borrow_mut();
-            queued.extend(frames);
-            diagnostics.borrow_mut().update_queue_depth = queued.len();
+
+    if bool_prop(&data, "ok") == Some(false) {
+        if request_id != 0 {
+            if let Some(slot) = shared_inflight.borrow_mut().remove(&request_id) {
+                release_runner_shared_slot(slot, shared_pool, runner_frame_metrics);
+            }
+            request_start_ms_by_id.borrow_mut().remove(&request_id);
+        }
+        diagnostics.borrow_mut().runner_frame_metrics = *runner_frame_metrics.borrow();
+        reject_pending_failure(&data, pending, request_id);
+        return;
+    }
+
+    let frames_result = if string_prop(&data, "transportKind").as_deref() == Some("shared-memory") {
+        let mut slot = if request_id != 0 {
+            shared_inflight.borrow_mut().remove(&request_id)
+        } else {
+            None
+        };
+        match shared_runner_response_frames(&data) {
+            Ok(response) => {
+                if let Some(mut slot) = slot.take() {
+                    record_runner_shared_response_metrics(runner_frame_metrics, &response);
+                    if !response.pooled_response {
+                        grow_runner_slot_response_buffer(
+                            &mut slot,
+                            response.packed_bytes,
+                            runner_frame_metrics,
+                        );
+                    }
+                    release_runner_shared_slot(slot, shared_pool, runner_frame_metrics);
+                } else if response.pooled_response {
+                    runner_frame_metrics
+                        .borrow_mut()
+                        .record_shared_buffer_pooled_response();
+                } else {
+                    runner_frame_metrics
+                        .borrow_mut()
+                        .record_shared_buffer_fallback_response();
+                }
+                if let Some(buffer_id) = number_prop(&data, "runnerSharedBufferId") {
+                    let _ = post_runner_shared_buffer_release(worker, buffer_id as u32);
+                }
+                Ok(response.frames)
+            }
+            Err(error) => {
+                if let Some(slot) = slot {
+                    release_runner_shared_slot(slot, shared_pool, runner_frame_metrics);
+                }
+                Err(error)
+            }
+        }
+    } else if let Some(updates_value) = reflect_get(&data, "updates") {
+        Ok(frames_from_js(&updates_value))
+    } else {
+        Ok(Vec::new())
+    };
+
+    match frames_result {
+        Ok(frames) => {
+            if !frames.is_empty() {
+                let mut metrics = runner_frame_metrics.borrow_mut();
+                for frame in &frames {
+                    metrics.record_response(frame.len());
+                }
+                drop(metrics);
+                let mut queued = update_frames.borrow_mut();
+                queued.extend(frames);
+                diagnostics.borrow_mut().update_queue_depth = queued.len();
+            }
+        }
+        Err(error) => {
+            diagnostics.borrow_mut().last_error = Some(error.clone());
+            if request_id != 0 {
+                if let Some(pending_request) = pending.borrow_mut().remove(&request_id) {
+                    let _ = pending_request
+                        .reject
+                        .call1(&JsValue::NULL, &JsValue::from_str(&error));
+                }
+            }
+            diagnostics.borrow_mut().runner_frame_metrics = *runner_frame_metrics.borrow();
+            return;
         }
     }
 
-    let request_id = number_prop(&data, "requestId")
-        .map(|value| value as u32)
-        .unwrap_or(0);
+    if request_id != 0 {
+        if let Some(start_ms) = request_start_ms_by_id.borrow_mut().remove(&request_id) {
+            let request_us = ((js_sys::Date::now() - start_ms).max(0.0_f64) * 1000.0) as u128;
+            runner_frame_metrics
+                .borrow_mut()
+                .record_request_time_us(request_us);
+        }
+    }
+    diagnostics.borrow_mut().runner_frame_metrics = *runner_frame_metrics.borrow();
+
     if request_id == 0 {
         return;
     }
     let Some(pending_request) = pending.borrow_mut().remove(&request_id) else {
         return;
     };
-    if bool_prop(&data, "ok") == Some(false) {
-        let reason = string_prop(&data, "reason")
-            .unwrap_or_else(|| "integrated server worker returned an unknown failure".to_owned());
-        let _ = pending_request
-            .reject
-            .call1(&JsValue::NULL, &JsValue::from_str(&reason));
-    } else {
-        let _ = pending_request.resolve.call1(&JsValue::NULL, &data);
+    let _ = pending_request.resolve.call1(&JsValue::NULL, &data);
+}
+
+fn reject_pending_failure(
+    data: &JsValue,
+    pending: &Rc<RefCell<BTreeMap<u32, PendingRequest>>>,
+    request_id: u32,
+) {
+    if request_id == 0 {
+        return;
     }
+    let Some(pending_request) = pending.borrow_mut().remove(&request_id) else {
+        return;
+    };
+    let reason = string_prop(data, "reason")
+        .unwrap_or_else(|| "integrated server worker returned an unknown failure".to_owned());
+    let _ = pending_request
+        .reject
+        .call1(&JsValue::NULL, &JsValue::from_str(&reason));
 }
 
 fn reject_all_pending(pending: &Rc<RefCell<BTreeMap<u32, PendingRequest>>>, message: &str) {
@@ -472,6 +847,103 @@ fn frames_from_js(value: &JsValue) -> Vec<Vec<u8>> {
         .filter(|value| value.is_instance_of::<Uint8Array>())
         .map(|value| Uint8Array::new(&value).to_vec())
         .collect()
+}
+
+struct SharedRunnerResponse {
+    frames: Vec<Vec<u8>>,
+    packed_bytes: usize,
+    pooled_response: bool,
+}
+
+fn shared_runner_response_frames(value: &JsValue) -> Result<SharedRunnerResponse, String> {
+    let Some(control_buffer) = reflect_get(value, "controlBuffer") else {
+        return Err("shared runner response returned no control buffer".to_owned());
+    };
+    let control = Int32Array::new(&control_buffer);
+    let status = Atomics::load(&control, RUNNER_SHARED_STATUS_INDEX).map_err(|error| {
+        format!(
+            "failed to read shared runner status: {}",
+            js_error_string(&error)
+        )
+    })?;
+    if status != RUNNER_SHARED_STATUS_COMPLETE {
+        return Err(format!(
+            "shared runner response completed with unexpected status {status}"
+        ));
+    }
+    let response_bytes =
+        Atomics::load(&control, RUNNER_SHARED_RESPONSE_BYTES_INDEX).map_err(|error| {
+            format!(
+                "failed to read shared runner response byte count: {}",
+                js_error_string(&error)
+            )
+        })?;
+    if response_bytes < 0 {
+        return Err(format!(
+            "shared runner response returned negative byte count {response_bytes}"
+        ));
+    }
+    let Some(update_buffer) = reflect_get(value, "updateBuffer") else {
+        return Err("shared runner response returned no update buffer".to_owned());
+    };
+    if !update_buffer.is_instance_of::<SharedArrayBuffer>() {
+        return Err("shared runner update buffer was not a SharedArrayBuffer".to_owned());
+    }
+    let response_bytes = response_bytes as u32;
+    let packed = Uint8Array::new_with_byte_offset_and_length(&update_buffer, 0, response_bytes);
+    Ok(SharedRunnerResponse {
+        frames: unpack_runner_update_frames(&packed.to_vec())?,
+        packed_bytes: response_bytes as usize,
+        pooled_response: bool_prop(value, "pooledResponse").unwrap_or(false),
+    })
+}
+
+fn unpack_runner_update_frames(packed: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    let mut cursor = 0usize;
+    let frame_count = read_le_u32(packed, &mut cursor)? as usize;
+    let mut frames = Vec::with_capacity(frame_count);
+    for _ in 0..frame_count {
+        let frame_len = read_le_u32(packed, &mut cursor)? as usize;
+        let end = cursor
+            .checked_add(frame_len)
+            .ok_or_else(|| "packed runner update frame length overflowed".to_owned())?;
+        if end > packed.len() {
+            return Err(format!(
+                "packed runner update frame length {frame_len} exceeds remaining {} bytes",
+                packed.len().saturating_sub(cursor)
+            ));
+        }
+        frames.push(packed[cursor..end].to_vec());
+        cursor = end;
+    }
+    if cursor != packed.len() {
+        return Err(format!(
+            "packed runner updates had {} trailing bytes",
+            packed.len() - cursor
+        ));
+    }
+    Ok(frames)
+}
+
+fn read_le_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, String> {
+    let end = cursor
+        .checked_add(4)
+        .ok_or_else(|| "packed runner update cursor overflowed".to_owned())?;
+    let Some(word) = bytes.get(*cursor..end) else {
+        return Err("packed runner updates ended before u32 field".to_owned());
+    };
+    *cursor = end;
+    Ok(u32::from_le_bytes([word[0], word[1], word[2], word[3]]))
+}
+
+fn post_runner_shared_buffer_release(worker: &Worker, buffer_id: u32) -> Result<(), String> {
+    let message = Object::new();
+    set_string(&message, "kind", "release-shared-buffer")?;
+    set_number(&message, "requestId", 0.0)?;
+    set_number(&message, "runnerSharedBufferId", f64::from(buffer_id))?;
+    worker
+        .post_message(&message)
+        .map_err(|error| format!("failed to release shared runner buffer: {error:?}"))
 }
 
 fn ensure_worker_response_ok(value: &JsValue) -> Result<(), String> {
@@ -930,6 +1402,101 @@ fn frame_metrics_to_js(metrics: WorkerFrameMetrics) -> Result<JsValue, String> {
         metrics.shared_buffer_fallback_response_frames as f64,
     )?;
     Ok(object.into())
+}
+
+fn runner_shared_capacity_for_len(len: u32, minimum: u32) -> u32 {
+    let wanted = len.max(minimum);
+    wanted.checked_next_power_of_two().unwrap_or(wanted)
+}
+
+fn ensure_runner_slot_request_capacity(
+    slot: &mut RunnerSharedSlot,
+    request_bytes: u32,
+    frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+) {
+    if request_bytes <= slot.request_capacity {
+        return;
+    }
+    let previous_capacity = slot.request_capacity;
+    let request_capacity =
+        runner_shared_capacity_for_len(request_bytes, MIN_RUNNER_SHARED_REQUEST_BYTES);
+    slot.request_buffer = SharedArrayBuffer::new(request_capacity);
+    slot.request_capacity = request_capacity;
+    frame_metrics
+        .borrow_mut()
+        .record_shared_buffer_capacity_delta((request_capacity - previous_capacity) as usize);
+}
+
+fn grow_runner_slot_response_buffer(
+    slot: &mut RunnerSharedSlot,
+    response_bytes: usize,
+    frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+) {
+    let Ok(response_bytes) = u32::try_from(response_bytes) else {
+        return;
+    };
+    if response_bytes <= slot.response_capacity {
+        return;
+    }
+    let previous_capacity = slot.response_capacity;
+    let response_capacity =
+        runner_shared_capacity_for_len(response_bytes, DEFAULT_RUNNER_SHARED_RESPONSE_BYTES);
+    slot.response_buffer = SharedArrayBuffer::new(response_capacity);
+    slot.response_capacity = response_capacity;
+    frame_metrics
+        .borrow_mut()
+        .record_shared_buffer_capacity_delta((response_capacity - previous_capacity) as usize);
+}
+
+fn release_runner_shared_slot(
+    slot: RunnerSharedSlot,
+    shared_pool: &Rc<RefCell<Vec<RunnerSharedSlot>>>,
+    frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+) {
+    let mut shared_pool = shared_pool.borrow_mut();
+    if shared_pool.len() < MAX_RUNNER_SHARED_POOL_SLOTS {
+        shared_pool.push(slot);
+    } else {
+        frame_metrics
+            .borrow_mut()
+            .record_shared_buffer_pool_drop(slot.capacity_bytes());
+    }
+}
+
+fn record_runner_shared_response_metrics(
+    frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+    response: &SharedRunnerResponse,
+) {
+    if response.pooled_response {
+        frame_metrics
+            .borrow_mut()
+            .record_shared_buffer_pooled_response();
+    } else {
+        frame_metrics
+            .borrow_mut()
+            .record_shared_buffer_fallback_response();
+    }
+}
+
+fn runner_shared_memory_transport_available() -> bool {
+    let global = js_sys::global();
+    global_function_available(&global, "SharedArrayBuffer")
+        && global_object_method_available(&global, "Atomics", "load")
+        && global_object_method_available(&global, "Atomics", "store")
+        && global_object_method_available(&global, "Atomics", "notify")
+}
+
+fn global_function_available(global: &JsValue, name: &str) -> bool {
+    Reflect::get(global, &JsValue::from_str(name))
+        .ok()
+        .is_some_and(|value| value.is_function())
+}
+
+fn global_object_method_available(global: &JsValue, object_name: &str, method_name: &str) -> bool {
+    Reflect::get(global, &JsValue::from_str(object_name))
+        .ok()
+        .and_then(|object| Reflect::get(&object, &JsValue::from_str(method_name)).ok())
+        .is_some_and(|value| value.is_function())
 }
 
 fn set_bool(object: &Object, name: &str, value: bool) -> Result<(), String> {
